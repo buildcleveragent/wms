@@ -1,0 +1,28 @@
+{% extends "outbound/base.html" %}
+{% block title %}新建波次{% endblock %}
+{% block content %}
+<div class="bg-white shadow rounded-lg p-5 space-y-4">
+  <h2 class="text-lg font-semibold">新建波次</h2>
+  <form method="post">
+    {% csrf_token %}
+    <div class="mb-3">
+      <label class="block text-sm text-gray-600 mb-1">策略</label>
+      <select name="strategy" class="border rounded px-2 py-1">
+        <option value="BY_ORDER">按订单</option>
+        <option value="BY_ZONE">按库区</option>
+        <option value="BY_PRODUCT">按商品聚合</option>
+        <option value="FIFO_LOT">批次FIFO</option>
+      </select>
+    </div>
+    <div class="mb-3">
+      <label class="block text-sm text-gray-600 mb-1">选择出库单（可多选）</label>
+      <div class="max-h-72 overflow-y-auto border rounded p-2 space-y-1">
+        {% for s in shipments %}
+        <label class="block"><input type="checkbox" name="shipment_ids" value="{{ s.id }}"> {{ s.shipment_no }}（{{ s.owner }}→{{ s.customer }}）</label>
+        {% endfor %}
+      </div>
+    </div>
+    <button class="px-3 py-1 rounded bg-blue-600 text-white">生成拣货计划</button>
+  </form>
+</div>
+{% endblock %}

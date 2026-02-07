@@ -1,0 +1,137 @@
+{# templates/console/_user_dropdown.html #}
+{% if request.user.is_authenticated %}
+  {% with uname=request.user.get_username init=request.user.get_username|slice:":1"|upper %}
+  <span id="ud-root" class="ud-root">
+    <button id="ud-btn" class="ud-btn" aria-haspopup="menu" aria-expanded="false" title="{{ uname }}">
+      <span class="ud-avatar" aria-hidden="true">{{ init }}</span>
+      <svg class="ud-caret" viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="M5 7l5 6 5-6" fill="currentColor"/></svg>
+    </button>
+    <div id="ud-menu" class="ud-menu" role="menu" aria-labelledby="ud-btn" hidden>
+
+      <a role="menuitem" tabindex="-1" class="ud-item" href="/console/op/lines/">操作台</a>
+      <a role="menuitem" tabindex="-1" class="ud-item" href="{% url 'admin:index' %}">管理首页</a>
+      <a role="menuitem" tabindex="-1" class="ud-item" href="{% url 'admin:password_change' %}">修改密码</a>
+      <form method="post" action="{% url 'admin:logout' %}" style="margin:0;">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="/admin/login/">
+        <button type="submit" role="menuitem" tabindex="-1" class="ud-item danger ud-as-link">退出登录</button>
+      </form>
+    </div>
+  </span>
+  {% endwith %}
+{% else %}
+  <a class="ud-login" href="/admin/login/?next={{ request.path|urlencode }}">登录</a>
+{% endif %}
+
+<style>
+/* 融入 Admin 顶栏（非悬浮） */
+
+
+/* 触发按钮（头像+箭头） */
+.ud-root { position:relative; display:inline-block; }
+.ud-btn{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; background:transparent; border:0; padding:0; color:inherit; }
+.ud-avatar{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:28px; height:28px; border-radius:9999px; font-weight:700;
+  background:#6b7280;   /* 灰色头像 */
+  color:#fff; user-select:none;
+}
+.ud-avatar.lg{ width:40px; height:40px; font-size:16px; background:#6b7280; }
+.ud-caret{ opacity:.6; }
+
+/* 菜单（更窄、更紧凑） */
+.ud-menu{
+  position:absolute; right:0; top:calc(100% + 8px);
+  width:80px;  /* 固定宽度 180px */
+  background:var(--body-bg, #fff); color:var(--body-fg, #111);
+  border:1px solid rgba(0,0,0,.08); border-radius:12px;
+  box-shadow:0 10px 30px rgba(0,0,0,.15); overflow:hidden; z-index:1000;
+}
+@media (prefers-color-scheme: dark){
+  .ud-avatar{ background:#9ca3af; color:#111; } /* 深色模式用更浅的灰 */
+  .ud-menu{ background:#1f2937; color:#f9fafb; border-color:rgba(255,255,255,.08); }
+}
+
+.ud-hd{ display:flex; gap:10px; align-items:center; padding:8px 10px; border-bottom:1px solid rgba(0,0,0,.06); }
+.ud-meta .ud-name{ font-weight:600; font-size:13px; }
+.ud-meta .ud-role{ font-size:12px; opacity:.75; }
+
+.ud-item{
+  display:block; padding:8px 10px; text-decoration:none; color:inherit;
+  border-top:1px solid rgba(0,0,0,.04);
+  font-size:13px; line-height:1.15;
+}
+.ud-item:hover{ background:rgba(0,0,0,.04); }
+.ud-item.danger{ color:#b91c1c; font-weight:600; }
+
+/* 让 POST 按钮看起来像链接 */
+.ud-as-link{
+  appearance:none; -webkit-appearance:none; background:none; border:0;
+  width:100%; text-align:left; font:inherit; color:inherit; padding:8px 10px; cursor:pointer;
+}
+.ud-as-link:hover{ background:rgba(0,0,0,.04); }
+
+/* 未登录时的按钮 */
+.ud-login{
+  display:inline-block; padding:4px 10px; border-radius:9999px;
+  background:#111; color:#fff; text-decoration:none;
+}
+#header #user-tools .ud-menu { text-align: left !important; }
+#header #user-tools .ud-menu .ud-item,
+#header #user-tools .ud-menu .ud-as-link {
+  text-align: left !important;
+  display: flex;               /* 让内容天然靠左 */
+  align-items: center;
+  justify-content: flex-start;
+}
+/* 避免主题把链接颜色改得和背景一样，强制菜单项可读颜色 */
+#ud-root .ud-menu .ud-item:link,
+#ud-root .ud-menu .ud-item:visited,
+#ud-root .ud-menu .ud-as-link{
+  color:#374151 !important;   /* 深灰，亮色背景可读 */
+}
+@media (prefers-color-scheme: dark){
+  #ud-root .ud-menu .ud-item:link,
+  #ud-root .ud-menu .ud-item:visited,
+  #ud-root .ud-menu .ud-as-link{
+    color:#e5e7eb !important; /* 浅灰，深色背景可读 */
+  }
+}
+#ud-root .ud-menu .ud-item:hover,
+#ud-root .ud-menu .ud-as-link:hover{
+  background:rgba(0,0,0,.05);
+}
+/* 头像：商业浅灰底，深灰字；加轻微内描边更利落 */
+#ud-root .ud-avatar,
+#ud-root .ud-avatar.lg{
+  background: #d1d5db !important;   /* Gray 300：商务浅灰 */
+  color: #111827 !important;         /* Gray 900：深灰字母 */
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
+}
+
+/* 若系统是深色模式，也保持偏浅的灰，仍用深色字母保证可读 */
+@media (prefers-color-scheme: dark){
+  #ud-root .ud-avatar,
+  #ud-root .ud-avatar.lg{
+    background: #9ca3af !important; /* Gray 400（深色环境下略深一点） */
+    color: #111827 !important;
+  }
+}
+</style>
+
+
+
+<script>
+(function(){
+  const root = document.getElementById('ud-root');
+  const btn  = document.getElementById('ud-btn');
+  const menu = document.getElementById('ud-menu');
+  if (!btn || !menu) return;
+  function open(){ menu.hidden = false; btn.setAttribute('aria-expanded','true'); }
+  function close(){ menu.hidden = true; btn.setAttribute('aria-expanded','false'); }
+  function toggle(e){ e.preventDefault(); e.stopPropagation(); menu.hidden ? open() : close(); }
+  btn.addEventListener('click', toggle);
+  document.addEventListener('click', (e)=>{ if (!menu.hidden && !root.contains(e.target)) close(); });
+  document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') close(); });
+})();
+</script>

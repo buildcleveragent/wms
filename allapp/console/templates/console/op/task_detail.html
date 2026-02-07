@@ -1,0 +1,46 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>任务 #{{ object.task_no }}（{{ object.task_type }}）</h1>
+
+<div style="display:grid;grid-template-columns: 380px 1fr; gap:16px; align-items:start;">
+  <div class="card" style="padding:12px;">
+    <h3>扫码 / 键盘粘贴</h3>
+    <form hx-post="{% url 'op:scan' object.id %}" hx-target="#session" hx-swap="outerHTML">
+      {% csrf_token %}
+      <input type="text" name="payload" placeholder="{{ parse_hint }}" autofocus style="width:100%">
+      <button type="submit" class="button" style="margin-top:8px;">加入暂存（扫码/粘贴）</button>
+    </form>
+
+    <hr>
+
+    <details open>
+      <summary>手工录入</summary>
+      <form hx-post="{% url 'op:manual' object.id %}" hx-target="#session" hx-swap="outerHTML">
+        {% csrf_token %}
+        <label>行ID
+          <!-- 仅此处新增 value 绑定 -->
+          <input list="line_ids" name="line_id" required value="{{ focus_line_id }}">
+          <datalist id="line_ids">
+            {% for ln in lines %}<option value="{{ ln.id }}">{% endfor %}
+          </datalist>
+        </label>
+        <label>数量 <input type="number" step="0.001" name="qty" required></label>
+        <label>批次 <input type="text" name="lot_no"></label>
+        <label>效期 <input type="text" name="expiry_date" placeholder="YYYY-MM-DD 或 YYYYMMDD"></label>
+        <label>序列 <input type="text" name="serial_no"></label>
+        <label>库位ID <input type="number" name="location_id"></label>
+        <label>目标库位ID <input type="number" name="to_location_id"></label>
+        <button class="button" style="margin-top:8px;">加入暂存（手工）</button>
+      </form>
+    </details>
+
+    {% if handler and handler.panel_tpl %}
+      {% include handler.panel_tpl %}
+    {% endif %}
+  </div>
+
+  <div id="session">
+    {% include "console/op/_session_items.html" with task=object session_items=session_items %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "outbound/base.html" %}
+{% block title %}新建出库单{% endblock %}
+{% block content %}
+<div class="bg-white shadow rounded-lg p-5 space-y-4">
+  <h2 class="text-lg font-semibold">新建出库单</h2>
+  <form method="post" class="space-y-3">
+    {% csrf_token %}
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">单号</label>
+        {{ form.shipment_no }}
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">货主</label>
+        {{ form.owner }}
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">客户</label>
+        {{ form.customer }}
+      </div>
+    </div>
+    <button class="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700">保存并添加行</button>
+  </form>
+</div>
+{% endblock %}

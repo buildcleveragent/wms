@@ -1,0 +1,143 @@
+{% extends "console/base_console.html" %}
+{% block title %}首页仪表盘{% endblock %}
+
+{% block content %}
+<h1 style="margin:0 0 12px 0;">首页 · 仓运营仪表盘</h1>
+
+<!-- KPI 卡片 -->
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:12px;">
+  <div style="border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff;">
+    <div style="font-weight:600;margin-bottom:6px;">上架任务</div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img alt="" src="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/1f69a.svg" style="width:44px;height:44px;opacity:.9;">
+      <div>
+        <div>任务数：<b id="k_put_total">0</b></div>
+        <div>完成数：<b id="k_put_done">0</b></div>
+      </div>
+    </div>
+    <div style="height:6px;background:#f3f4f6;border-radius:9999px;margin-top:8px;">
+      <div id="k_put_bar" style="height:6px;background:var(--brand);border-radius:9999px;width:0;"></div>
+    </div>
+  </div>
+
+  <div style="border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff;">
+    <div style="font-weight:600;margin-bottom:6px;">拣货任务</div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img alt="" src="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/1f69b.svg" style="width:44px;height:44px;opacity:.9;">
+      <div>
+        <div>任务数：<b id="k_pick_total">0</b></div>
+        <div>完成数：<b id="k_pick_done">0</b></div>
+      </div>
+    </div>
+    <div style="height:6px;background:#f3f4f6;border-radius:9999px;margin-top:8px;">
+      <div id="k_pick_bar" style="height:6px;background:var(--brand);border-radius:9999px;width:0;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 图表区：响应式两列 -->
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">
+  <div class="card"><div class="card-title">入库订单完成量</div><div id="chart_in_ts" class="chart"></div></div>
+  <div class="card"><div class="card-title">未完成入库单状态</div><div id="chart_in_backlog" class="chart"></div></div>
+  <div class="card"><div class="card-title">出库订单完成量</div><div id="chart_out_ts" class="chart"></div></div>
+  <div class="card"><div class="card-title">未完成出库单状态</div><div id="chart_out_backlog" class="chart"></div></div>
+</div>
+
+<!-- 人效排名（可选） -->
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px;">
+  <div class="card"><div class="card-title">当日人效排名 · 上架</div><div id="eff_put" class="chart"></div></div>
+  <div class="card"><div class="card-title">当日人效排名 · 拣选</div><div id="eff_pick" class="chart"></div></div>
+  <div class="card"><div class="card-title">当日人效排名 · 打包</div><div id="eff_pack" class="chart"></div></div>
+</div>
+
+<style>
+.card{ border:1px solid var(--line);border-radius:12px;background:#fff;}
+.card-title{ padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600;}
+.chart{ width:100%; height:300px; }
+@media (max-width:1200px){ .chart{ height:260px; } }
+@media (max-width:768px){
+  .chart{ height:220px; }
+  /* 小屏下改为一列 */
+  .card{ margin-bottom:10px; }
+}
+</style>
+
+<!-- ECharts CDN -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+(async function(){
+  const r = await fetch("{% url 'console:dashboard_summary' %}");
+  const {ok, data} = await r.json();
+  if(!ok){ console.warn("dashboard api failed"); return; }
+
+  // KPI
+  const k = data.kpi || {};
+  const put = k.putaway || {total:0, done:0};
+  const pick = k.pick || {total:0, done:0};
+  document.getElementById('k_put_total').textContent = put.total;
+  document.getElementById('k_put_done').textContent = put.done;
+  document.getElementById('k_pick_total').textContent = pick.total;
+  document.getElementById('k_pick_done').textContent = pick.done;
+  const pct = (a,b)=> !a ? 0 : Math.min(100, Math.round((b/a)*100));
+  document.getElementById('k_put_bar').style.width = pct(put.total, put.done)+'%';
+  document.getElementById('k_pick_bar').style.width = pct(pick.total, pick.done)+'%';
+
+  // 工具
+  function renderLine(domId, title, dates, total, finished){
+    const chart = echarts.init(document.getElementById(domId));
+    chart.setOption({
+      tooltip:{ trigger:'axis' },
+      legend:{ data:['单数','完成单数'], top:6 },
+      grid:{ left:40, right:20, top:40, bottom:30 },
+      xAxis:{ type:'category', data:dates },
+      yAxis:{ type:'value', name:'单数' },
+      series:[
+        { name:'单数', type:'bar', data:total, barMaxWidth:18 },
+        { name:'完成单数', type:'line', data:finished, smooth:true }
+      ]
+    });
+    return chart;
+  }
+  function renderBar(domId, labels, values, name){
+    const chart = echarts.init(document.getElementById(domId));
+    chart.setOption({
+      tooltip:{ trigger:'axis' },
+      grid:{ left:50, right:20, top:20, bottom:30 },
+      xAxis:{ type:'category', data:labels },
+      yAxis:{ type:'value', name:name || '单数' },
+      series:[{ type:'bar', data:values, barMaxWidth:22 }]
+    });
+    return chart;
+  }
+  function renderRank(domId, labels, values){
+    const chart = echarts.init(document.getElementById(domId));
+    if(!labels.length){
+      chart.setOption({ title:{text:'暂无数据', left:'center', top:'middle', textStyle:{color:'#94a3b8', fontSize:14}} });
+      return chart;
+    }
+    chart.setOption({
+      grid:{ left:80, right:20, top:10, bottom:10 },
+      xAxis:{ type:'value' },
+      yAxis:{ type:'category', data:labels, inverse:true },
+      series:[{ type:'bar', data:values, label:{show:true, position:'right'} }]
+    });
+    return chart;
+  }
+
+  // 图表渲染
+  const in_ts = data.inbound_ts || {dates:[], total:[], finished:[]};
+  const out_ts = data.outbound_ts || {dates:[], total:[], finished:[]};
+  renderLine('chart_in_ts', '入库订单完成量', in_ts.dates, in_ts.total, in_ts.finished);
+  renderLine('chart_out_ts', '出库订单完成量', out_ts.dates, out_ts.total, out_ts.finished);
+
+  const in_back = data.inbound_backlog || {labels:[], values:[]};
+  const out_back = data.outbound_backlog || {labels:[], values:[]};
+  renderBar('chart_in_backlog', in_back.labels, in_back.values, '单数');
+  renderBar('chart_out_backlog', out_back.labels, out_back.values, '单数');
+
+  renderRank('eff_put', (data.eff_putaway||{}).labels||[], (data.eff_putaway||{}).values||[]);
+  renderRank('eff_pick', (data.eff_pick||{}).labels||[], (data.eff_pick||{}).values||[]);
+  renderRank('eff_pack', (data.eff_pack||{}).labels||[], (data.eff_pack||{}).values||[]);
+})();
+</script>
+{% endblock %}

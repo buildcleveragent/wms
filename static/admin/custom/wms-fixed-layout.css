@@ -1,0 +1,86 @@
+/* ===== 可按需微调 ===== */
+:root{
+  --wms-h1: 48px;          /* 顶栏高度：欢迎, ADMIN… */
+  --wms-h2: 40px;          /* 面包屑高度 */
+  --wms-left: 260px;       /* 左侧菜单宽度（你的侧栏宽） */
+  --wms-right: 300px;      /* 右侧筛选栏宽度 */
+
+  --wms-h-toolbar: 52px;   /* 搜索/日期工具条大致高度 */
+  --wms-h-actions: 40px;   /* 批量动作条高度 */
+}
+
+/* ===== 顶部两条固定 ===== */
+#header{
+  position: fixed; top:0; left:0; right:0; z-index:3000;
+}
+.breadcrumbs{
+  position: fixed; top:var(--wms-h1); left:0; right:0; z-index:2990;
+}
+body{
+  padding-top: calc(var(--wms-h1) + var(--wms-h2));          /* 给正文让位 */
+}
+
+/* ===== 左侧菜单固定（确保你的左栏根节点有 id="wms-sidenav"） ===== */
+#wms-sidenav{
+  position: fixed !important;
+  top: calc(var(--wms-h1) + var(--wms-h2));
+  left: 0;
+  width: var(--wms-left);
+  height: calc(100vh - (var(--wms-h1) + var(--wms-h2)));
+  overflow: auto;
+  z-index: 2800;
+  background: var(--body-bg, #f6f7f8);
+  border-right: 1px solid rgba(0,0,0,.06);
+}
+
+/* ===== 右侧筛选固定 ===== */
+#changelist-filter{
+  position: fixed !important;
+  top: calc(var(--wms-h1) + var(--wms-h2));
+  right: 0;
+  width: var(--wms-right);
+  height: calc(100vh - (var(--wms-h1) + var(--wms-h2)));
+  overflow: auto;
+  z-index: 2800;
+  background: #fff;
+  border-left: 1px solid rgba(0,0,0,.06);
+}
+
+/* ===== 中间内容：唯一滚动容器（关键） ===== */
+/*（注意：Django 默认结构是 #content -> #content-main + #content-related）
+ * 我们把“唯一滚动”放在 #content-main，这样右侧筛选固定不受影响 */
+#container{ overflow: visible !important; }  /* 避免 sticky/fixed 失效边界 */
+
+#content{
+  overflow: visible !important;             /* 不让 #content 滚动 */
+}
+
+#content-main{
+  position: relative;
+  height: calc(100vh - (var(--wms-h1) + var(--wms-h2)));
+  overflow: auto;                           /* 只让这里滚动（表格行滚动） */
+  margin-left: var(--wms-left) !important;  /* 为两侧预留空间 —— 关键 */
+  margin-right: var(--wms-right) !important;
+  z-index: 1;                               /* 层级低于两侧，避免覆盖 */
+  background: transparent;
+  min-width: 980px;                         /* 可选：防止窄屏抖动 */
+}
+
+/* ===== 工具条 / 动作条 / 表头，在内容容器内吸顶 ===== */
+#changelist #toolbar{
+  position: sticky; top: 0; z-index: 50;
+  background: var(--body-bg, #f6f7f8);
+}
+#changelist .actions{
+  position: sticky; top: var(--wms-h-toolbar); z-index: 49;
+  background: #fff;
+}
+#result_list thead th{
+  position: sticky;
+  top: calc(var(--wms-h-toolbar) + var(--wms-h-actions));
+  z-index: 48;
+  background: #fff;      /* 不透明，避免滚动时透到后面 */
+}
+
+/* 细节：禁止子元素把滚动“外溢”到页面 */
+#wms-sidenav *, #changelist-filter *{ overscroll-behavior: contain; }

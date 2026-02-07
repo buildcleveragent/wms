@@ -1,0 +1,13 @@
+-r requirements.in
+
+# 生产专用 WSGI/ASGI 服务器（按需选一个）
+gunicorn>=22.0; sys_platform != "win32"
+# uvicorn[standard]>=0.30   # 如果要用 ASGI
+
+# 错误追踪
+sentry-sdk>=2.0
+
+# 性能优化（可选）
+# gevent>=24.0
+# uvloop>=0.20
+

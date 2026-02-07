@@ -1,0 +1,96 @@
+/* 紧凑表单：统一输入框/下拉的边框、圆角与高度 */
+.form-control,
+.form-select,
+input[type="text"],
+input[type="date"],
+input[type="datetime-local"],
+input[type="number"],
+select,
+textarea {
+  display: block;
+  width: 100%;
+  height: 36px;                 /* 紧凑高度 */
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;    /* 灰色边框 */
+  border-radius: 6px;
+  background: #fff;
+  line-height: 1.4;
+}
+
+textarea.form-control,
+textarea {
+  height: auto;                 /* 备注多行 */
+  min-height: 35px;
+  resize: vertical;
+}
+
+.form-control:focus,
+.form-select:focus,
+input[type="text"]:focus,
+input[type="date"]:focus,
+input[type="datetime-local"]:focus,
+input[type="number"]:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: #2563eb;        /* 聚焦高亮 */
+  box-shadow: 0 0 0 3px rgba(37,99,235,.15);
+}
+
+/* 紧凑布局：更小的网格间距与标签样式 */
+.form-dense .grid { gap: 0.75rem; }       /* 原来 gap-4 ≈ 1rem，这里更紧凑 */
+.form-dense label.block { margin-bottom: 0; }
+.form-dense label.block > span {
+  display:block;
+  font-size: 12px;
+  color:#4b5563;
+  margin-bottom: 4px;
+}
+
+/* 卡片也紧凑一些 */
+.card.p-4 { padding: 12px !important; border:1px solid #e5e7eb; border-radius: 10px; }
+.card-title { font-weight: 600; margin-bottom: 8px; }
+
+/* 放到 forms.css */
+.field-xs :is(input,select,textarea){ max-width:10rem; }  /* ~160px */
+.field-sm :is(input,select,textarea){ max-width:16rem; }  /* ~256px */
+.field-md :is(input,select,textarea){ max-width:24rem; }  /* ~384px */
+.field-auto :is(input,select,textarea){ width:auto; }     /* 不占满 */
+
+/* 横排表单：label 左、控件右 */
+.form-hz label.block{
+  display: grid;
+  grid-template-columns: var(--label-w, 7rem) minmax(0, 1fr); /* 左列固定、右列自适应 */
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  /*font-size: 16px;*/
+}
+
+/* label 文本更紧凑并右对齐 */
+.form-hz label.block > span{
+  margin: 0;                 /* 覆盖之前给 span 的 margin-bottom */
+  text-align: right;
+  font-size: 14px;
+  color: #4b5563;
+}
+
+/* 小屏改回竖排，避免挤压 */
+@media (max-width: 767.98px){
+  .form-hz label.block{
+    grid-template-columns: 1fr;
+  }
+  .form-hz label.block > span{
+    text-align: left;
+    margin-bottom: 4px;
+  }
+}
+
+/* Fallback utilities: 防止 Tailwind 未产出这些类 */
+.min-w-0{ min-width:0 !important; }
+.overflow-x-hidden{ overflow-x:hidden !important; }
+.overflow-x-auto{ overflow-x:auto !important; }
+.shrink-0{ flex-shrink:0 !important; }
+
+/* 可选：整个 flex 布局下，所有直接子项允许收缩 */
+.layout-shell > *{ min-width:0 !important; }

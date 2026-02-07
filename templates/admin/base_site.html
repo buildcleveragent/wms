@@ -1,0 +1,23 @@
+{# 文件：templates/admin/base_site.html #}
+{% extends "admin/base.html" %}
+{% load static %}
+
+{% block extrastyle %}{{ block.super }}
+   <link rel="stylesheet" href="{% static 'admin/custom/collapse-apps.css' %}">
+<link rel="stylesheet" href="{% static 'admin/custom/topbar-theme.css' %}">
+{% endblock %}
+
+{% block extrahead %}{{ block.super }}
+
+  <script src="{% static 'admin/custom/collapse-apps.js' %}"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+{% endblock %}
+
+
+{# 覆盖 userlinks：不再显示“欢迎/查看站点/修改密码”，改成你的下拉菜单 #}
+{% block userlinks %}
+  {% include "console/_user_dropdown.html" %}
+{% endblock %}
+
+
+

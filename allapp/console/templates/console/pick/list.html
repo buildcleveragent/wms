@@ -1,0 +1,28 @@
+{# templates/console/pick/list.html #}
+{% extends "console/base.html" %}
+{% block content %}
+  <form id="filters"
+        hx-get="{% url 'console_pick_list' %}"
+        hx-target="#table"
+        hx-push-url="true"
+        hx-trigger="change delay:200ms">
+    <select name="warehouse">
+      <option value="">全部仓</option>
+      {% for w in warehouses %}<option value="{{w.id}}">{{w.name}}</option>{% endfor %}
+    </select>
+    <select name="status">
+      <option value="">全部状态</option>
+      <option value="READY">READY</option>
+      <option value="IN_PROGRESS">IN_PROGRESS</option>
+    </select>
+  </form>
+
+  <div id="table"
+       hx-get="{% url 'console_pick_list' %}"
+       hx-trigger="load"
+       hx-target="#table">
+    <!-- 初次加载时，HTMX 会把 _table.html 填进来 -->
+  </div>
+
+  <div id="toast"></div> <!-- OOB 提示容器 -->
+{% endblock %}

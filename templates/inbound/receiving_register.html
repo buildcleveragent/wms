@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}收货登记{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <nav class="text-sm text-gray-500" aria-label="breadcrumb">
+      <ol class="flex gap-1">
+        <li><a href="/" class="hover:text-gray-800">首页</a> /</li>
+        <li><a href="{% url 'inbound:order_list' %}" class="hover:text-gray-800">入库订单</a> /</li>
+        <li class="text-gray-800">收货登记</li>
+      </ol>
+    </nav>
+    <h2 class="text-xl font-semibold mt-1">收货登记 - {{ rcv.task_no }}</h2>
+  </div>
+</div>
+
+<form method="post" class="space-y-4">
+  {% csrf_token %}
+  {{ formset.management_form }}
+  <div class="card p-4">
+    <div class="table-wrap">
+      <table class="min-w-full text-sm">
+        <thead class="sticky-header"><tr class="bg-gray-50">
+          <th class="px-3 py-2">物料</th>
+          <th class="px-3 py-2 w-28">计划</th>
+          <th class="px-3 py-2 w-28">已收</th>
+          <th class="px-3 py-2 w-36">本次收货</th>
+          <th class="px-3 py-2 w-40">批次</th>
+          <th class="px-3 py-2 w-56">生产/失效</th>
+          <th class="px-3 py-2 w-56">库位</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-200 bg-white">
+          {% for f in formset.forms %}
+          <tr>
+            <td class="px-3 py-2">{{ f.product }}</td>
+            <td class="px-3 py-2">{{ f.planned_qty }}</td>
+            <td class="px-3 py-2">{{ f.received_qty }}</td>
+            <td class="px-3 py-2">{{ f.receive_qty }}</td>
+            <td class="px-3 py-2">{{ f.lot_no }}</td>
+            <td class="px-3 py-2"><div class="flex gap-2">{{ f.mfg_date }} {{ f.exp_date }}</div></td>
+            <td class="px-3 py-2">{{ f.location }}</td>
+            {{ f.receiving_line_id }}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="flex justify-end gap-2 mt-3">
+      <a class="btn btn-outline" href="{% url 'inbound:order_detail' rcv.order.pk %}">取消</a>
+      <button class="btn btn-primary" type="submit">提交登记</button>
+    </div>
+  </div>
+</form>
+{% endblock %}

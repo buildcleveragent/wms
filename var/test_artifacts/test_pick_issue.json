@@ -1,0 +1,65 @@
+{
+  "test": "test_pick_issue",
+  "steps": [
+    {
+      "title": "STEP-1 创建任务与行",
+      "info": {
+        "task_no": "PK-1757737265682-d0df",
+        "from": "BIN-A1",
+        "plan_qty": "4",
+        "product": "SKU-1"
+      }
+    },
+    {
+      "title": "STEP-2 扫码",
+      "info": {
+        "qty": 4,
+        "from": "BIN-A1"
+      }
+    },
+    {
+      "title": "扫描明细",
+      "info": [
+        {
+          "id": 2,
+          "product_id": 37,
+          "product": "SKU-1",
+          "qty_base": "",
+          "qty_base_delta": "4.000",
+          "location_id": 88,
+          "location": "BIN-A1",
+          "client_seq": "",
+          "label_key": null
+        }
+      ]
+    },
+    {
+      "title": "台账分录明细",
+      "info": [
+        {
+          "id": 2,
+          "tx_type": "ISSUE",
+          "loc_id": 88,
+          "loc": "BIN-A1",
+          "product_id": 37,
+          "product": "SKU-1",
+          "qty": "-4.0000",
+          "src_id": 2
+        }
+      ]
+    },
+    {
+      "title": "PICK 发出与现存（期望 vs 实际）",
+      "expected": {
+        "tx_count": 1,
+        "issue_qty": "-4",
+        "onhand_bin1": "3"
+      },
+      "actual": {
+        "tx_count": 1,
+        "issue_qty": "-4.0000",
+        "onhand_bin1": "3.0000"
+      }
+    }
+  ]
+}

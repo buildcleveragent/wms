@@ -1,0 +1,82 @@
+{% extends "outbound/base.html" %}
+{% block title %}维护订单行 {{ order.order_no }}{% endblock %}
+{% block content %}
+<div class="space-y-4">
+  <div class="bg-white shadow rounded-lg p-5">
+    <div class="flex items-center justify-between">
+      <div>
+        <h2 class="text-lg font-semibold">出库订单：{{ order.order_no }}</h2>
+        <p class="text-sm text-gray-500">货主：{{ order.owner }}　客户：{{ order.customer }}</p>
+      </div>
+      <div class="space-x-2">
+        <a href="{% url 'outbound:orders_list' %}" class="text-blue-600 hover:underline">返回订单列表</a>
+        <a href="{% url 'outbound:shipments_list' %}" class="text-blue-600 hover:underline">出库单列表</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white shadow rounded-lg p-5">
+    <h3 class="font-semibold mb-3">添加订单行</h3>
+    <form method="post" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+      {% csrf_token %}
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">商品</label>
+        {{ form.product }}
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">计量单位</label>
+        {{ form.uom }}
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">数量</label>
+        {{ form.qty }}
+      </div>
+      <div>
+        <label class="block text-sm text-gray-600 mb-1">单价</label>
+        {{ form.price }}
+      </div>
+      <div class="md:col-span-4">
+        <button class="px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700">添加</button>
+        <form method="post" action="{% url 'outbound:order_create_shipment' order.id %}" class="inline">
+          {% csrf_token %}
+          <button class="ml-2 px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">
+            生成出库单
+          </button>
+        </form>
+      </div>
+    </form>
+  </div>
+
+  <div class="bg-white shadow rounded-lg p-5">
+    <h3 class="font-semibold mb-3">已添加行</h3>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead>
+          <tr class="text-left border-b">
+            <th class="py-2 pr-4">ID</th>
+            <th class="py-2 pr-4">商品</th>
+            <th class="py-2 pr-4">单位</th>
+            <th class="py-2 pr-4">数量</th>
+            <th class="py-2 pr-4">单价</th>
+            <th class="py-2 pr-4">金额</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ln in lines %}
+          <tr class="border-b">
+            <td class="py-2 pr-4">{{ ln.id }}</td>
+            <td class="py-2 pr-4">{{ ln.product }}</td>
+            <td class="py-2 pr-4">{{ ln.uom }}</td>
+            <td class="py-2 pr-4">{{ ln.qty }}</td>
+            <td class="py-2 pr-4">{{ ln.price }}</td>
+            <td class="py-2 pr-4">{{ ln.amount }}</td>
+          </tr>
+          {% empty %}
+          <tr><td class="py-4 text-gray-500" colspan="6">暂无行</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

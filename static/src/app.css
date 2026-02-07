@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .btn { @apply inline-flex items-center rounded-xl px-3 py-2 text-sm font-medium shadow-sm; }
+  .btn-primary { @apply bg-sky-500 text-white hover:bg-sky-600; }
+  .btn-outline { @apply border border-gray-300 text-gray-700 hover:bg-gray-50; }
+  .btn-danger { @apply bg-rose-500 text-white hover:bg-rose-600; }
+  .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium; }
+  .badge-success{@apply bg-green-100 text-green-700;}
+  .badge-info{@apply bg-sky-100 text-sky-700;}
+  .badge-warn{@apply bg-amber-100 text-amber-700;}
+  .badge-dark{@apply bg-gray-800 text-white;}
+  .badge-muted{@apply bg-gray-100 text-gray-600;}
+  .card { @apply bg-white rounded-2xl shadow-sm border border-gray-200; }
+  .card-title { @apply text-sm text-gray-500 mb-2; }
+  .table-wrap { @apply overflow-auto border border-gray-200 rounded-2xl; }
+  .sticky-header th { position: sticky; top: 0; background: white; z-index: 2; }
+  .sticky-col { position: sticky; left: 0; background: white; z-index: 3; }
+  .nav-group > summary { @apply flex items-center justify-between px-3 py-2 cursor-pointer rounded-lg hover:bg-gray-50 text-gray-700 font-medium; }
+  .nav-item { @apply block px-3 py-2 rounded-lg text-sm text-gray-700 hover:bg-gray-50; }
+  .nav-item.active { @apply bg-sky-50 text-sky-700; }
+  .tabs a { @apply whitespace-nowrap rounded-xl px-3 py-1.5 text-sm border border-transparent hover:border-gray-300; }
+  .tabs a.active { @apply bg-white shadow-sm border-gray-200; }
+}

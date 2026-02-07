@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block title %}入库订单 - 列表{% endblock %}
+
+{% block page_module %}入库管理{% endblock %}
+{% block page_title %}入库订单{% endblock %}
+
+{% block sidebar %}
+  <details class="nav-group" open>
+    <summary>入库管理</summary>
+    <div class="pl-3 space-y-1">
+      {% if perms.inbound.view_inboundorder %}
+      <a href="{% url 'inbound:order_list' %}" class="nav-item active">入库订单</a>
+      {% endif %}
+      {% if perms.inbound.view_inboundreceiving %}
+      <a href="#" class="nav-item">收货任务</a>
+      {% endif %}
+      {% if perms.inbound.view_inboundreceipt %}
+      <a href="#" class="nav-item">收货记录</a>
+      {% endif %}
+      {% if perms.inbound.view_inboundputaway %}
+      <a href="#" class="nav-item">上架任务</a>
+      {% endif %}
+    </div>
+  </details>
+  <details class="nav-group">
+    <summary>库存管理</summary>
+    <div class="pl-3 space-y-1">
+      {% if perms.inventory.view_inventory %}<a href="#" class="nav-item">库存查询</a>{% endif %}
+      {% if perms.inventory.view_inventorytransaction %}<a href="#" class="nav-item">事务明细</a>{% endif %}
+    </div>
+  </details>
+  <details class="nav-group">
+    <summary>任务管理</summary>
+    <div class="pl-3 space-y-1"><a href="#" class="nav-item">任务看板</a></div>
+  </details>
+{% endblock %}
+
+{% block page_actions %}
+  <a href="{% url 'inbound:order_create' %}" class="btn btn-primary">新建订单</a>
+
+  <button id="btnDensity" class="btn btn-outline">表格密度</button>
+
+  <details class="relative">
+    <summary class="btn btn-outline cursor-pointer">列设置</summary>
+    <div class="absolute right-0 mt-2 w-56 card p-2 text-sm space-y-1" id="colPanel">
+      {% comment %} 复选控制可见列 {% endcomment %}
+      <label class="flex items-center gap-2"><input type="checkbox" data-col="owner" checked> 货主</label>
+      <label class="flex items-center gap-2"><input type="checkbox" data-col="supplier" checked> 供应商</label>
+      <label class="flex items-center gap-2"><input type="checkbox" data-col="biz_date" checked> 业务日期</label>
+      <label class="flex items-center gap-2"><input type="checkbox" data-col="status" checked> 状态</label>
+      <label class="flex items-center gap-2"><input type="checkbox" data-col="sku_count" checked> 种类数</label>
+      <label class="flex items-center gap-2"><input type="checkbox" data-col="total_amount" checked> 金额汇总</label>
+      <div class="pt-1">
+        <button type="button" id="resetCols" class="btn btn-outline w-full">恢复默认</button>
+      </div>
+    </div>
+  </details>
+
+  <a class="btn btn-outline" href="?export=xlsx&{{ request.GET.urlencode }}">导出筛选(Excel)</a>
+{% endblock %}
+
+
+{% block filters %}
+  <form method="get" class="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
+    <div class="md:col-span-2">
+      <label class="block text-sm text-gray-600 mb-1">关键字</label>
+      <input type="text" name="q" value="{{ request.GET.q }}" class="rounded-xl border-gray-300" placeholder="订单号/备注">
+    </div>
+    <div>
+      <label class="block text-sm text-gray-600 mb-1">货主</label>
+      {{ form.owner }}
+    </div>
+    <div>
+      <label class="block text-sm text-gray-600 mb-1">供应商</label>
+      {{ form.supplier }}
+    </div>
+{#    <div>#}
+{#      <label class="block text-sm text-gray-600 mb-1">状态</label>#}
+{#      {{ form.status }}#}
+{#    </div>#}
+    <div class="md:col-span-3">
+      <label class="block text-sm text-gray-600 mb-1">业务日期</label>
+      <div class="flex gap-2">
+        {{ form.date_from }} <span class="self-center text-gray-400">—</span> {{ form.date_to }}
+      </div>
+    </div>
+    <div class="flex gap-2 md:col-span-3">
+      <button class="btn btn-outline" type="submit">筛选</button>
+      <a class="btn btn-outline" href="{% url 'inbound:order_list' %}">重置</a>
+    </div>
+  </form>
+{% endblock %}
+
+
+{% block table %}
+  <form id="bulkForm" method="post" action="{% url 'inbound:order_list' %}">
+    {% csrf_token %}
+    <input type="hidden" name="bulk_action" id="bulk_action">
+    <input type="hidden" name="confirm" id="confirm_delete"> {# 二次确认 #}
+
+    <div class="flex items-center justify-between mb-2 sticky top-0 z-10 bg-white/90 backdrop-blur rounded-xl px-3 py-2 border">
+      <div class="text-sm text-gray-600">已选 <span id="selCount">0</span> 项</div>
+      <div class="flex gap-2">
+        <button type="button" class="btn btn-outline disabled:opacity-50" data-action="export_xlsx" disabled>导出选中(Excel)</button>
+        {% if perms.inbound.delete_inboundorder %}
+        <button type="button" class="btn btn-danger disabled:opacity-50" data-action="bulk_delete" disabled>批量删除</button>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="table-wrap" id="tableWrap">
+      <table class="min-w-full text-sm" id="orderTable">
+        <thead class="sticky-header text-left">
+          <tr class="bg-gray-50">
+            <th class="sticky-col w-12 px-3 py-2"><input id="chkAll" type="checkbox" class="h-4 w-4 rounded border-gray-300"></th>
+            <th class="w-48 px-3 py-2">订单号</th>
+            <th class="px-3 py-2" data-col="owner">货主</th>
+            <th class="px-3 py-2" data-col="supplier">供应商</th>
+            <th class="w-36 px-3 py-2" data-col="biz_date">业务日期</th>
+            <th class="w-28 px-3 py-2" data-col="status">状态</th>
+            <th class="w-24 px-3 py-2 text-right" data-col="sku_count">种类数</th>
+            <th class="w-32 px-3 py-2 text-right" data-col="total_amount">金额汇总</th>
+            <th class="w-56 px-3 py-2">操作</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200 bg-white">
+          {% for o in object_list %}
+          <tr>
+            <td class="sticky-col px-3 py-2"><input name="ids" value="{{ o.pk }}" type="checkbox" class="rowchk h-4 w-4 rounded border-gray-300"></td>
+            <td class="px-3 py-2 font-medium text-gray-800"><a class="hover:underline" href="{% url 'inbound:order_detail' o.pk %}">{{ o.order_no }}</a></td>
+            <td class="px-3 py-2" data-col="owner">{{ o.owner }}</td>
+            <td class="px-3 py-2" data-col="supplier">{{ o.supplier }}</td>
+            <td class="px-3 py-2" data-col="biz_date">{{ o.biz_date }}</td>
+            <td class="px-3 py-2" data-col="status">
+              {% with s=o.submit_status %}
+              <span class="badge {% if s == 'DONE' %}badge-success{% elif s == 'SUBMITTED' %}badge-info{% elif s == 'RECEIVING' %}badge-warn{% elif s == 'PUTAWAY' %}bg-sky-100 text-sky-700{% elif s == 'CLOSED' %}badge-dark{% else %}badge-muted{% endif %}">{{ s }}</span>
+              {% endwith %}
+            </td>
+            <td class="px-3 py-2 text-right" data-col="sku_count">{{ o.sku_count|default:0 }}</td>
+            <td class="px-3 py-2 text-right" data-col="total_amount">{{ o.total_amount|default:0 }}</td>
+            <td class="px-3 py-2">
+              <div class="flex gap-2">
+                <a class="btn btn-outline" href="{% url 'inbound:order_detail' o.pk %}">查看</a>
+                {% if perms.inbound.change_inboundorder %}<a class="btn btn-outline" href="{% url 'inbound:order_edit' o.pk %}">编辑</a>{% endif %}
+                {% if perms.inbound.delete_inboundorder %}<a class="btn btn-danger" href="{% url 'inbound:order_delete' o.pk %}">删除</a>{% endif %}
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="9" class="px-3 py-6 text-center text-gray-500">没有符合条件的数据</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% with pg=page|default:page_obj %}
+      {% if pg and pg.paginator.num_pages > 1 %}
+        <div class="flex items-center justify-center gap-2 mt-3 text-sm">
+          {% if pg.has_previous %}<a class="btn btn-outline" href="?page={{ pg.previous_page_number }}&{{ request.GET.urlencode }}">上一页</a>{% endif %}
+          <span class="px-3 py-2">第 {{ pg.number }} / {{ pg.paginator.num_pages }} 页</span>
+          {% if pg.has_next %}<a class="btn btn-outline" href="?page={{ pg.next_page_number }}&{{ request.GET.urlencode }}">下一页</a>{% endif %}
+        </div>
+      {% endif %}
+    {% endwith %}
+  </form>
+{% endblock %}
+
+
+{% block extra_js %}
+<script>
+(function(){
+  // —— 勾选状态 + 批量按钮使能 ——
+  const chkAll = document.getElementById('chkAll');
+  const rowChks = () => Array.from(document.querySelectorAll('.rowchk'));
+  const setState = () => {
+    const cnt = rowChks().filter(c=>c.checked).length;
+    document.getElementById('selCount').textContent = cnt;
+    document.querySelectorAll('[data-action]').forEach(btn=>{ btn.disabled = cnt  == = 0; });
+  };
+  chkAll && (chkAll.onchange = () => { rowChks().forEach(c=>c.checked = chkAll.checked); setState(); });
+  document.addEventListener('change', e=>{ if(e.target.classList.contains('rowchk')) setState(); });
+  setState();
+
+  // —— 批量动作（带确认） ——
+  document.querySelectorAll('[data-action]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const action = btn.dataset.action;
+      if(action  == = 'bulk_delete'){
+        const cnt = rowChks().filter(c=>c.checked).length;
+        if(cnt  == = 0) return;
+        if(!confirm(`确定删除选中的 ${cnt} 条草稿订单吗？此操作不可撤销。`)) return;
+        document.getElementById('confirm_delete').value = 'yes';
+      }
+      document.getElementById('bulk_action').value = action;
+      document.getElementById('bulkForm').submit();
+    });
+  });
+
+  // —— 表格密度切换（记忆） ——
+  const wrap = document.getElementById('tableWrap');
+  const DKEY = 'inbound.table.density';
+  function applyDensity(v){
+    wrap.classList.toggle('density-compact', v  == = 'compact');
+    wrap.classList.toggle('density-comfortable', v ! ==  'compact');
+    localStorage.setItem(DKEY, v);
+  }
+  let dv = localStorage.getItem(DKEY) || 'comfortable';
+  applyDensity(dv);
+  document.getElementById('btnDensity').addEventListener('click', ()=>{
+    dv = (dv  == = 'compact') ? 'comfortable' : 'compact';
+    applyDensity(dv);
+  });
+
+  // —— 列显示/隐藏（持久化） ——
+  const CKEY = 'inbound.table.hiddenCols';
+  function setColVisible(col, visible){
+    document.querySelectorAll(`[data-col="${col}"]`).forEach(el=>{
+      el.classList.toggle('hidden', !visible);
+    });
+  }
+  // 恢复
+  const hidden = new Set(JSON.parse(localStorage.getItem(CKEY) || '[]'));
+  document.querySelectorAll('#colPanel [data-col]').forEach(chk=>{
+    const col = chk.dataset.col;
+    const v = !hidden.has(col);
+    chk.checked = v; setColVisible(col, v);
+    chk.addEventListener('change', ()=>{
+      if(chk.checked) hidden.delete(col); else hidden.add(col);
+      localStorage.setItem(CKEY, JSON.stringify(Array.from(hidden)));
+      setColVisible(col, chk.checked);
+    });
+  });
+  document.getElementById('resetCols').addEventListener('click', ()=>{
+    localStorage.removeItem(CKEY);
+    document.querySelectorAll('#colPanel [data-col]').forEach(chk=>{ chk.checked = true; setColVisible(chk.dataset.col, true); });
+  });
+})();
+</script>
+{% endblock %}

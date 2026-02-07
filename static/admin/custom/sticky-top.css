@@ -1,0 +1,25 @@
+/* 自定义高度，按你主题微调 */
+:root{
+  --wms-header-h: 48px;      /* 顶部“欢迎，ADMIN …”那条 */
+  --wms-breadcrumbs-h: 36px; /* 面包屑那条 */
+}
+
+/* 顶部栏吸顶 */
+#header{
+  position: sticky;
+  top: 0;
+  z-index: 2000;             /* 要比内容区/下拉层高 */
+}
+
+/* 面包屑也吸顶，紧贴 header 之下 */
+.breadcrumbs{
+  position: sticky;
+  top: var(--wms-header-h);
+  z-index: 1990;
+  /* 视觉更稳一些可加阴影 */
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+
+/* 如果表格或工具条被覆盖，可给它们加一点上边距（一般不需要）
+#content { scroll-margin-top: calc(var(--wms-header-h) + var(--wms-breadcrumbs-h)); }
+*/

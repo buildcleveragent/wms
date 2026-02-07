@@ -1,0 +1,31 @@
+{% extends "base.html.bak" %}
+{% block title %}入库订单列表{% endblock %}
+{% block content %}
+<h2>入库订单</h2>
+<p><a href="{% url 'inbound_ui:order_new' %}">+ 新建</a></p>
+<table>
+  <tr><th>ID</th><th>订单编号</th><th>业务日期</th><th>货主</th><th>供应商</th><th>状态</th><th>操作</th></tr>
+  {% for o in object_list %}
+  <tr>
+    <td>{{ o.id }}</td>
+    <td>{{ o.order_no }}</td>
+    <td>{{ o.biz_date }}</td>
+    <td>{{ o.owner }}</td>
+    <td>{{ o.supplier }}</td>
+    <td>{{ o.get_submit_status_display }}</td>
+    <td class="actions">
+      {% if o.submit_status == "DRAFT" and not o.is_closed %}
+        <a href="{% url 'inbound_ui:order_edit' o.id %}">编辑</a>
+        <form method="post" action="{% url 'inbound_ui:order_submit' o.id %}">
+          {% csrf_token %}<button type="submit">提交</button>
+        </form>
+      {% else %}
+        —
+      {% endif %}
+    </td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="7">暂无数据</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

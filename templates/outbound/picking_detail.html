@@ -1,0 +1,63 @@
+<!-- templates/outbound/picking_detail.html 片段：标题工具区 -->
+{% extends "outbound/base.html" %}
+<div class="flex items-center justify-between">
+  <div>
+    <h2 class="text-lg font-semibold">拣货计划：{{ picking.picking_no }}</h2>
+    <p class="text-sm text-gray-500">出库单：{{ picking.shipment.shipment_no }}</p>
+  </div>
+  <div class="space-x-2">
+    <!-- 先生成打包 -->
+    <form method="post" action="{% url 'outbound:create_packs' picking.id %}" class="inline">
+      {% csrf_token %}
+      <button class="px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700">生成打包任务</button>
+    </form>
+    <!-- 再生成发运 -->
+    <form method="post" action="{% url 'outbound:create_dispatch' picking.shipment.id %}" class="inline">
+      {% csrf_token %}
+      <button class="px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">生成发运任务</button>
+    </form>
+  </div>
+</div>
+
+
+
+
+{% block title %}拣货计划 {{ picking.picking_no }}{% endblock %}
+{% block content %}
+<div class="bg-white shadow rounded-lg p-5 space-y-4">
+  <div class="flex items-center justify-between">
+    <h2 class="text-lg font-semibold">拣货计划：{{ picking.picking_no }}</h2>
+    <form method="post" action="{% url 'outbound:create_dispatch' picking.shipment.id %}">
+      {% csrf_token %}
+      <button class="px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700">生成发运任务</button>
+    </form>
+  </div>
+  <table class="min-w-full text-sm">
+    <thead>
+      <tr class="border-b">
+        <th>行ID</th><th>商品</th><th>库位</th><th>应拣</th><th>已拣</th><th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ln in lines %}
+      <tr class="border-b">
+        <td>{{ ln.id }}</td>
+        <td>{{ ln.product }}</td>
+        <td>{{ ln.location }}</td>
+        <td>{{ ln.qty_required }}</td>
+        <td>{{ ln.qty_picked }}</td>
+        <td>
+          <form method="post" action="{% url 'outbound:record_pick' picking.id ln.id %}">
+            {% csrf_token %}
+            <input type="number" step="0.01" name="qty" class="border p-1 w-20" />
+            <button class="ml-1 px-2 py-1 rounded bg-blue-500 text-white">拣</button>
+          </form>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="text-gray-500">暂无拣货行</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

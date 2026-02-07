@@ -1,0 +1,65 @@
+/* ===== 顶部两条固定（①欢迎条，②面包屑） ===== */
+:root{
+  --wms-h1: 48px;   /* ① 顶栏高度：按你主题微调 */
+  --wms-h2: 40px;   /* ② 面包屑高度：按你主题微调 */
+
+  --wms-h-toolbar: 52px;  /* 搜索/日期工具条大致高度 */
+  --wms-h-actions: 40px;  /* “动作/执行”那行的大致高度 */
+}
+
+/* ① 顶栏固定 */
+#header{
+  position: fixed; top:0; left:0; right:0; z-index:3000;
+}
+
+/* ② 面包屑固定，紧贴①下面 */
+.breadcrumbs{
+  position: fixed; top:var(--wms-h1); left:0; right:0; z-index:2990;
+}
+
+/* 给正文留出空间，避免被①②遮住 */
+body{
+  padding-top: calc(var(--wms-h1) + var(--wms-h2));
+}
+
+/* ===== 把 #content 变成唯一滚动容器 ===== */
+#content{
+  height: calc(100vh - (var(--wms-h1) + var(--wms-h2)));
+  overflow: auto;                 /* 只有这里滚动 */
+  position: relative;
+}
+
+/* 避免上层容器的 overflow 影响 sticky */
+#container{ overflow: visible; }
+
+/* ===== Changelist 内部：工具条、动作条、表头都“顶住” ===== */
+#changelist #toolbar{
+  position: sticky; top: 0; z-index: 50;
+  background: var(--body-bg, #f7f7f7);
+}
+
+/* 批量操作条（动作/执行） */
+#changelist .actions{
+  position: sticky; top: var(--wms-h-toolbar); z-index: 49;
+  background: #fff;
+}
+
+/* 表头吸顶（位于工具条和动作条之下） */
+#result_list thead th{
+  position: sticky;
+  top: calc(var(--wms-h-toolbar) + var(--wms-h-actions));
+  z-index: 48;              /* 必须比行高 */
+  background: #fff;         /* 防止滚动时透明 */
+}
+
+/* 右侧筛选栏不随表格滚动（它在 #content 顶部区域之内） */
+#changelist-filter{
+  position: sticky; top: 0; z-index: 47;
+}
+
+/* 细节优化：表格在窄屏时不抖动 */
+#changelist .results{
+  background: #fff;
+}
+
+/* 如果你的主题让面包屑/工具条高度不同，微调变量即可 */

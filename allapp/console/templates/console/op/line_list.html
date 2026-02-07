@@ -1,0 +1,76 @@
+{#% extends "admin/base_site.html" %#}
+{% extends "console/base.html" %}
+{% load form_extras %}
+
+{% load i18n %}
+
+{% block console_content %}
+<h1>任务行工作台</h1>
+
+<!-- 顶部筛选，模仿 admin 的 filter bar 体验 -->
+
+<table class="listing">
+  <thead>
+    <tr>
+      <th>ID</th>
+{#      <th>归属</th>#}
+      <th>任务号</th>
+      <th>类型</th>
+      <th>商品</th>
+      <th>来源</th>
+      <th>去向</th>
+      <th>计划</th>
+      <th>已执行</th>
+      <th>行状态</th>
+      <th style="width:180px;"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for ln in lines %}
+      <tr>
+        <td>{{ ln.id }}</td>
+
+{#        <!-- 归属标记：我负责 / 可抢单（都满足时优先显示“我负责”） -->#}
+{#        <td>#}
+{#          {% if ln.is_mine %}#}
+{#            <span class="tag" style="background:#e6fffb;border:1px solid #87e8de;padding:2px 6px;border-radius:999px;">我负责</span>#}
+{#          {% elif ln.is_claimable %}#}
+{#            <span class="tag" style="background:#fff7e6;border:1px solid #ffd591;padding:2px 6px;border-radius:999px;">可抢单</span>#}
+{#          {% endif %}#}
+{#        </td>#}
+
+        <td>{{ ln.task.task_no }}</td>
+        <td>{{ ln.task.task_type }}</td>
+        <td>{{ ln.product }}</td>
+        <td>{{ ln.from_location }}</td>
+        <td>{{ ln.to_location }}</td>
+        <td>{{ ln.qty_plan }}</td>
+        <td>{{ ln.qty_done }}</td>
+        <td>{{ ln.status }}</td>
+
+        <td>
+          <!-- 进入（总是可见）：跳转到任务详情，带上 ?line= 行ID -->
+          <a class="button" href="{% url 'op:line_detail' ln.id %}">进入</a>
+
+          <!-- 操作按钮：根据归属显示“抢单/放回” -->
+{#          {% if ln.is_claimable %}#}
+{#            <form method="post" action="{% url 'op:line_claim' ln.id %}" style="display:inline-block;margin-left:6px;">#}
+{#              {% csrf_token %}#}
+{#              <button type="submit" class="button">抢单</button>#}
+{#            </form>#}
+{#          {% endif %}#}
+{##}
+{#          {% if ln.is_mine %}#}
+{#            <form method="post" action="{% url 'op:line_unclaim' ln.id %}" style="display:inline-block;margin-left:6px;">#}
+{#              {% csrf_token %}#}
+{#              <button type="submit" class="button">放回</button>#}
+{#            </form>#}
+{#          {% endif %}#}
+        </td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="11">暂无符合条件的任务行。</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

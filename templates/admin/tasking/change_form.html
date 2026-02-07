@@ -1,0 +1,11 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if opts.model_name == "wmstask" and original %}
+    <li><a href="{% url 'report_dispatch_html' original.pk %}" class="button">打印配送单</a></li>
+    <li><a href="{% url 'report_dispatch_html' original.pk %}?save=1" class="button">打印并保存快照</a></li>
+    <li><a href="{% url 'report_dispatch_pdf'  original.pk %}" class="button">导出PDF</a></li>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>{{ object.owner.name }}出库单 {{ object.order_no }}</title>
+
+  <style>
+    @page { size: A4; margin: 8mm; }
+
+    body {
+      font-family: "Microsoft YaHei", Arial, sans-serif;
+      font-size: 13px;
+      color: #000;
+      line-height: 1.4;
+    }
+
+    /* 标题 */
+    .title {
+      text-align: center;
+      font-size: 22px;
+      font-weight: 700;
+      margin: 2px 0 6px;
+    }
+
+    /* 无框线信息区 */
+    .top-row { margin-bottom: 4px; }
+    .top-row .center {
+      width: 100%;
+      text-align: center;
+      font-weight: 700;
+      margin: 2px 0 4px;
+      white-space: nowrap;
+    }
+
+    .meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 6px;
+    }
+    .meta-col { width: 49%; }
+    .meta-line {
+      display: flex;
+      gap: 6px;
+      margin: 2px 0;
+      white-space: nowrap;
+    }
+    .label { min-width: 70px; }
+    .value {
+      flex: 1;
+      min-height: 18px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* 只有货物列表表格有框线 */
+    table.goods {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+      font-size: 13px;
+      table-layout: fixed; /* 固定列宽，配合省略号 */
+    }
+    table.goods th, table.goods td {
+      border: 1px solid #000;
+      padding: 6px 6px;
+      text-align: center;
+      vertical-align: middle;
+
+      /* 固定行高，避免换行撑高 */
+      height: 28px;
+      line-height: 18px;
+    }
+    table.goods th { font-weight: 700; }
+
+    /* 不换行 + 超出省略 */
+    .nowrap {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .name-cell { text-align: left !important; }
+    .note-cell { text-align: left !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .t-right { text-align: right !important; }
+
+    /* 底部签字区（无框线） */
+    .sign { margin-top: 10px; }
+    .sign-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 6px 0;
+    }
+    .sign-item { flex: 1; white-space: nowrap; }
+    .line {
+      display: inline-block;
+      border-bottom: 1px solid #000;
+      min-width: 120px;
+      height: 16px;
+      vertical-align: bottom;
+    }
+    .line.long { min-width: 260px; }
+
+    .copies {
+      margin-top: 10px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+  </style>
+</head>
+
+<body onload="window.print()">
+
+  <!-- 标题 -->
+  <div class="title">金桥融通仓出库单</div>
+
+  <!-- 送货单号（居中） -->
+  <div class="top-row">
+    <div class="center">送货单号　{{ object.order_no }}</div>
+  </div>
+
+  <!-- 收发信息（无框线，两列） -->
+  <div class="meta">
+    <div class="meta-col">
+      <div class="meta-line">
+        <span class="label">收货人：</span>
+        <span class="value">{{ receiver_name|default_if_none:"" }}</span>
+      </div>
+      <div class="meta-line">
+        <span class="label">联系电话：</span>
+        <span class="value">{{ receiver_phone|default_if_none:"" }}</span>
+      </div>
+      <div class="meta-line">
+        <span class="label">地址：</span>
+        <span class="value">{{ receiver_address|default_if_none:"" }}</span>
+      </div>
+    </div>
+
+    <div class="meta-col">
+      <div class="meta-line">
+        <span class="label">发货人：</span>
+        <span class="value">{{ sender_name|default_if_none:"" }}</span>
+      </div>
+      <div class="meta-line">
+        <span class="label">联系电话：</span>
+        <span class="value">{{ sender_phone|default_if_none:"" }}</span>
+      </div>
+      <div class="meta-line">
+        <span class="label">发货时间：</span>
+        <span class="value">{{ ship_time|date:"Y年n月j日" }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 货物列表（唯一有框线区域） -->
+  <table class="goods">
+    <thead>
+      <tr>
+        <th style="width:36px;">序号</th>
+        <th>货物名称</th>
+        <th style="width:110px;">包装规格</th>
+        <th style="width:52px;">单位</th>
+        <th style="width:70px;">数量</th>
+        <th style="width:72px;">单价</th>
+        <th style="width:86px;">金额</th>
+        <th style="width:80px;">备注</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {% for line in lines %}
+      <tr>
+        <td>{{ forloop.counter }}</td>
+
+        <td class="name-cell nowrap" title="{{ line.product.name }}">{{ line.product.name }}</td>
+
+        <td class="nowrap" title="{{ line.product.spec|default_if_none:"" }}">
+          {{ line.product.spec|default_if_none:"" }}
+        </td>
+
+        <td class="nowrap">
+          {% if line.base_uom %}{{ line.base_uom.name }}{% else %}{{ line.product.base_uom.name }}{% endif %}
+        </td>
+
+        <!-- 数量：整数不显示小数；有小数保留最多3位并去尾0 -->
+        <td class="nowrap">{{ line.base_qty|floatformat:"-3" }}</td>
+
+        <td class="nowrap">{{ line.base_price|floatformat:2 }}</td>
+
+        <td class="nowrap">{{ line.amount|floatformat:2 }}</td>
+
+        <td class="note-cell" title="{{ line.note|default_if_none:"" }}">{{ line.note|default_if_none:"" }}</td>
+      </tr>
+      {% endfor %}
+
+      <!-- ✅ 合计 + 大写：同一行；“合计”在序号列下面，“大写”在其右侧 -->
+      <tr>
+        <!-- 合计写到“序号”列下 -->
+        <td><b>合计</b></td>
+
+        <!-- 大写在合计右边，同一行（覆盖：货物名称+包装规格+单位 三列） -->
+        <td colspan="3" class="name-cell nowrap" title="{{ total_amount_upper|default_if_none:"" }}">
+          <b>大写：</b>{{ total_amount_upper|default_if_none:"" }}
+        </td>
+
+        <!-- 数量合计落在“数量”列 -->
+        <td class="nowrap"><b>{{ total_qty|floatformat:"-3" }}</b></td>
+
+        <!-- 单价列按图为空 -->
+        <td></td>
+
+        <!-- 金额合计落在“金额”列 -->
+        <td class="nowrap"><b>{{ total_amount|floatformat:2 }}</b></td>
+
+        <!-- 备注空 -->
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- 签字区（无框线） -->
+  <div class="sign">
+    <div class="sign-row">
+      <div class="sign-item">送货人：<span class="line"></span></div>
+      <div class="sign-item">车牌：<span class="line"></span></div>
+      <div class="sign-item">电话：<span class="line"></span></div>
+    </div>
+    <div class="sign-row">
+      <div class="sign-item">收货人：<span class="line"></span></div>
+      <div class="sign-item">收货日期：<span class="line long"></span></div>
+    </div>
+  </div>
+
+  <!-- 联次（无框线） -->
+  <div class="copies">
+    <div>第一联：仓库</div>
+    <div>第二联：送货</div>
+    <div>第三联：客户</div>
+  </div>
+
+</body>
+</html>

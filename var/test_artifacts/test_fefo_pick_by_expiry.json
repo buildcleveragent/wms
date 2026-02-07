@@ -1,0 +1,78 @@
+{
+  "test": "test_fefo_pick_by_expiry",
+  "steps": [
+    {
+      "title": "前置现存（按批次/效期）",
+      "info": {
+        "LOT-A@2025-10-01": "5.0000",
+        "LOT-B@2025-12-01": "4.0000"
+      }
+    },
+    {
+      "title": "扫描明细（FEFO）",
+      "info": [
+        {
+          "id": 3,
+          "qty_base": "",
+          "qty_base_delta": "5.000",
+          "location": "BIN-A1",
+          "lot_no": "LOT-A",
+          "mfg": null,
+          "exp": "2025-10-01"
+        },
+        {
+          "id": 4,
+          "qty_base": "",
+          "qty_base_delta": "1.000",
+          "location": "BIN-A1",
+          "lot_no": "LOT-B",
+          "mfg": null,
+          "exp": "2025-12-01"
+        }
+      ]
+    },
+    {
+      "title": "台账分录（FEFO）",
+      "info": [
+        {
+          "id": 3,
+          "tx_type": "ISSUE",
+          "loc": "BIN-A1",
+          "qty": "-5.0000",
+          "batch_no": "LOT-A",
+          "mfg": null,
+          "exp": "2025-10-01"
+        },
+        {
+          "id": 4,
+          "tx_type": "ISSUE",
+          "loc": "BIN-A1",
+          "qty": "-1.0000",
+          "batch_no": "LOT-B",
+          "mfg": null,
+          "exp": "2025-12-01"
+        }
+      ]
+    },
+    {
+      "title": "FEFO ISSUE 明细（期望 vs 实际）",
+      "expected": {
+        "issues": "{'2025-10-01': Decimal('-5'), '2025-12-01': Decimal('-1')}"
+      },
+      "actual": {
+        "issues": "{'2025-10-01': '-5.0000', '2025-12-01': '-1.0000'}"
+      }
+    },
+    {
+      "title": "FEFO 剩余现存（期望 vs 实际）",
+      "expected": {
+        "LOT-A@2025-10-01": "0",
+        "LOT-B@2025-12-01": "3"
+      },
+      "actual": {
+        "LOT-A@2025-10-01": "0",
+        "LOT-B@2025-12-01": "3.0000"
+      }
+    }
+  ]
+}

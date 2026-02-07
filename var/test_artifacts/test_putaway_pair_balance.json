@@ -1,0 +1,76 @@
+{
+  "test": "test_putaway_pair_balance",
+  "steps": [
+    {
+      "title": "STEP-1 创建任务与行",
+      "info": {
+        "task_no": "PUT-1757737265145-b1a8",
+        "from": "DOCK-01",
+        "to": "BIN-A1",
+        "plan_qty": "3",
+        "product": "SKU-1"
+      }
+    },
+    {
+      "title": "STEP-2 扫码",
+      "info": {
+        "qty": 3,
+        "to": "BIN-A1"
+      }
+    },
+    {
+      "title": "扫描明细",
+      "info": [
+        {
+          "id": 1,
+          "product_id": 35,
+          "product": "SKU-1",
+          "qty_base": "",
+          "qty_base_delta": "3.000",
+          "location_id": 84,
+          "location": "BIN-A1",
+          "client_seq": "",
+          "label_key": null
+        }
+      ]
+    },
+    {
+      "title": "台账分录明细",
+      "info": [
+        {
+          "id": 1,
+          "tx_type": "ISSUE",
+          "loc_id": 1,
+          "loc": "DOCK-01",
+          "product_id": 35,
+          "product": "SKU-1",
+          "qty": "-3.0000",
+          "src_id": 1
+        },
+        {
+          "id": 2,
+          "tx_type": "RECEIVE",
+          "loc_id": 84,
+          "loc": "BIN-A1",
+          "product_id": 35,
+          "product": "SKU-1",
+          "qty": "3.0000",
+          "src_id": 1
+        }
+      ]
+    },
+    {
+      "title": "PUTAWAY 配平（期望 vs 实际）",
+      "expected": {
+        "tx_count": 2,
+        "types": "ISSUE/RECEIVE",
+        "sum_qty": "0"
+      },
+      "actual": {
+        "tx_count": 2,
+        "types": "ISSUE/RECEIVE",
+        "sum_qty": "0.0000"
+      }
+    }
+  ]
+}

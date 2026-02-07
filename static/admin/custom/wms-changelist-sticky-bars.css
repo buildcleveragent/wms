@@ -1,0 +1,349 @@
+:root{
+  /* 三条工具带的估算高度，先写死，有下一步 JS 会自动修正 */
+  --wms-h-toolbar: 56px;   /* #toolbar（搜索） */
+  --wms-h-toplinks: 32px;  /* nav.toplinks（日期） */
+  --wms-h-actions: 44px;   /* .actions（动作/执行） */
+}
+
+/* 让唯一滚动容器仍然是 #content-main（你前面已设置） */
+#content-main{
+  overflow: auto !important;
+  position: relative;
+}
+
+/* 搜索条吸顶 */
+#changelist #toolbar{
+  position: sticky;
+  top: 0;                 /* 贴在 #content-main 顶部 */
+  z-index: 260;           /* 低于两侧栏(你设为2800)，但高于表格行 */
+  background: #fff;       /* 必须有背景避免“消失/透底” */
+}
+
+/* 日期条吸顶，位于搜索条下面 */
+#changelist nav.toplinks{
+  position: sticky;
+  top: var(--wms-h-toolbar);
+  z-index: 259;
+  background: #fff;
+}
+
+/* 动作条吸顶，位于日期条下面 */
+#changelist .actions{
+  position: sticky;
+  top: calc(var(--wms-h-toolbar) + var(--wms-h-toplinks));
+  z-index: 258;
+  background: #fff;
+}
+
+/* 表头再往下，避免被三条工具带遮住 */
+#result_list thead th{
+  position: sticky;
+  top: calc(var(--wms-h-toolbar) + var(--wms-h-toplinks) + var(--wms-h-actions));
+  z-index: 257;
+  background: #fff;
+}
+
+/* 细节：表格上方加一点边线，滚动时更清晰（可选） */
+#result_list thead{ box-shadow: 0 1px 0 rgba(0,0,0,.06) inset; }
+
+/* 防止“行钻到工具条下面”的另一个保险：表格体顶端预留一点间距（可选） */
+/*
+.results{ padding-top: .5rem; }
+*/
+:root{
+  --wms-h-toolbar: 56px;   /* 搜索条 #toolbar */
+  --wms-h-toplinks: 32px;  /* 日期条 nav.toplinks */
+  --wms-h-actions: 44px;   /* 动作条 .actions */
+}
+
+/* 只让 #content-main 滚动（你前面已设置，保险起见再强调一下） */
+#content-main{ overflow: auto !important; position: relative; }
+
+/* 1) 搜索条 */
+#changelist #toolbar{
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 260 !important;
+  background: #fff;
+}
+
+/* 2) 日期条 */
+#changelist nav.toplinks{
+  position: sticky !important;
+  top: var(--wms-h-toolbar) !important;
+  z-index: 259 !important;
+  background: #fff;
+}
+
+/* 3) 动作条 */
+#changelist .actions{
+  position: sticky !important;
+  top: calc(var(--wms-h-toolbar) + var(--wms-h-toplinks)) !important;
+  z-index: 258 !important;
+  background: #fff;
+}
+
+/* 4) 表头在三条工具带下面，且不被遮 */
+#result_list thead th{
+  position: sticky !important;
+  top: calc(var(--wms-h-toolbar) + var(--wms-h-toplinks) + var(--wms-h-actions)) !important;
+  z-index: 257 !important;
+  background: #fff;
+}
+/* --- 0) 保险：只让 #content-main 滚动，其他容器不滚动 --- */
+html, body, #container, #main, .content, #content { overflow: visible !important; }
+#content-main { overflow: auto !important; position: relative; }
+
+/* --- 1) 让 <h1> 不被两侧栏遮住，并可选择性吸顶 --- */
+:root{
+  /* 左右侧栏宽度按你的值，如果用了自动测量 JS 就不用改 */
+  --wms-left: 260px;
+  --wms-right: 300px;
+  --wms-h-toolbar: 56px;  /* 搜索条 */
+  --wms-h-toplinks: 32px; /* 日期条 */
+  --wms-h-actions: 44px;  /* 动作条 */
+}
+/* 关键：#content 也要为两侧预留宽度（<h1> 在 #content 里） */
+#content{
+  margin-left: var(--wms-left) !important;
+  margin-right: var(--wms-right) !important;
+  position: relative;
+}
+/* 可选：标题也固定（不想固定就删掉这段） */
+#content > h1{
+  position: sticky !important;
+  top: 0 !important;           /* 在 #content-main 顶部之上仍可见 */
+  z-index: 270 !important;     /* 高于下面的工具条和表格 */
+  background: #fff;            /* 防止透底 */
+}
+
+/* --- 2) “搜索 / 日期 / 动作” 三条完全不动（在 #content-main 内吸顶） --- */
+#changelist #toolbar{
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 260 !important;
+  background: #fff;
+}
+#changelist nav.toplinks{
+  position: sticky !important;
+  top: var(--wms-h-toolbar) !important;
+  z-index: 259 !important;
+  background: #fff;
+}
+#changelist .actions{
+  position: sticky !important;
+  top: calc(var(--wms-h-toolbar) + var(--wms-h-toplinks)) !important;
+  z-index: 258 !important;
+  background: #fff;
+}
+
+/* --- 3) 表头在三条工具带下面，行不会“钻”上来 --- */
+#result_list thead th{
+  position: sticky !important;
+  top: calc(var(--wms-h-toolbar) + var(--wms-h-toplinks) + var(--wms-h-actions)) !important;
+  z-index: 257 !important;
+  background: #fff;
+}
+
+/* --- 4) 右侧筛选与左侧菜单已经 fixed；再给中间内容让位，避免任何重叠 --- */
+#content-main{
+  margin-left: var(--wms-left) !important;
+  margin-right: var(--wms-right) !important;
+  min-width: 980px; /* 可按需调整，防止窄屏抖动 */
+}
+/* 0) 只让 #content-main 滚动；其余容器不滚动（保险） */
+html, body, #container, #main, .content, #content { overflow: visible !important; }
+#content-main{
+  overflow-y: scroll !important;   /* 始终显示纵向滚动条，避免 sticky 触发时 reflow 抖动 */
+  overflow-x: hidden !important;
+  position: relative;
+}
+
+/* 1) 解决左侧空白：左右“让位”只放在 #content，去掉 #content-main 的让位 */
+#content{
+  margin-left: var(--wms-left) !important;
+  margin-right: var(--wms-right) !important;
+}
+#content-main{
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* 2) 三条工具带完全不动 + 去掉造成抖动的 margin 折叠 */
+:root{
+  /* 如果你已用 JS 自动测量，这些只是兜底值 */
+  --wms-h-toolbar: 56px;   /* #toolbar 高度 */
+  --wms-h-toplinks: 32px;  /* nav.toplinks 高度 */
+  --wms-h-actions: 44px;   /* .actions 高度 */
+}
+
+/* 搜索条 */
+#changelist #toolbar{
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 260 !important;
+  background: #fff;
+  margin: 0 !important;             /* 关键：去 margin 折叠 */
+  border-bottom: 1px solid rgba(0,0,0,.06);
+  will-change: transform; contain: paint;  /* 降低滚动抖动 */
+}
+
+/* 日期条（你页面里的“所有日期 … 2025年10月”这条） */
+#changelist nav.toplinks{
+  position: sticky !important;
+  top: var(--wms-h-toolbar) !important;
+  z-index: 259 !important;
+  background: #fff;
+  margin: 0 !important;
+  border-bottom: 1px solid rgba(0,0,0,.06);
+  will-change: transform; contain: paint;
+}
+
+/* 动作条（动作 / 执行 …） */
+#changelist .actions{
+  position: sticky !important;
+  top: calc(var(--wms-h-toolbar) + var(--wms-h-toplinks)) !important;
+  z-index: 258 !important;
+  background: #fff;
+  margin: 0 !important;
+  border-bottom: 1px solid rgba(0,0,0,.06);
+  will-change: transform; contain: paint;
+}
+
+/* 表头永远在三条工具带下面，不会被行“顶上来” */
+#result_list thead th{
+  position: sticky !important;
+  top: calc(var(--wms-h-toolbar) + var(--wms-h-toplinks) + var(--wms-h-actions)) !important;
+  z-index: 257 !important;
+  background: #fff;
+}
+/* ========== 固定三条工具带 ========== */
+:root{
+  /* 如果你有自动测量脚本，会覆盖这些兜底值 */
+  --wms-h1: 48px;            /* #header 高度 */
+  --wms-h2: 40px;            /* .breadcrumbs 高度 */
+  --wms-left: 260px;         /* 左侧菜单宽 */
+  --wms-right: 300px;        /* 右侧筛选宽 */
+
+  --wms-h-toolbar: 56px;     /* #toolbar 高度 */
+  --wms-h-toplinks: 32px;    /* nav.toplinks 高度 */
+  --wms-h-actions: 44px;     /* .actions 高度 */
+  --wms-top: calc(var(--wms-h1) + var(--wms-h2));
+}
+
+/* 只让 #content-main 作为唯一滚动容器 */
+html, body, #container, #main, .content, #content { overflow: visible !important; }
+#content{
+  margin-left: var(--wms-left) !important;
+  margin-right: var(--wms-right) !important;
+  padding: 8px 8px 0 !important;       /* 缩窄左右内边距 */
+}
+#content-main{
+  overflow-y: scroll !important;        /* 固定显示滚动条避免抖动 */
+  overflow-x: hidden !important;
+  margin: 0 !important;                 /* 去掉双重留白 */
+  padding-top: calc(var(--wms-h-toolbar) + var(--wms-h-toplinks) + var(--wms-h-actions) + 8px) !important; /* 给固定工具带让路 */
+}
+
+/* 三条工具带固定到视口，宽度随左右侧栏自动对齐 */
+#changelist #toolbar,
+#changelist nav.toplinks,
+#changelist .actions{
+  position: fixed !important;
+  left:  var(--wms-left) !important;
+  right: var(--wms-right) !important;
+  width: auto !important;
+  background: #fff;
+  margin: 0 !important;                 /* 消除 margin 折叠引起的跳动 */
+  border-bottom: 1px solid rgba(0,0,0,.06);
+  z-index: 2950;
+}
+#changelist #toolbar{        top: var(--wms-top) !important;                     z-index: 2950; }
+#changelist nav.toplinks{    top: calc(var(--wms-top) + var(--wms-h-toolbar)) !important;        z-index: 2949; }
+#changelist .actions{        top: calc(var(--wms-top) + var(--wms-h-toolbar) + var(--wms-h-toplinks)) !important; z-index: 2948; }
+
+/* 表头永远在三条工具带下面 */
+#result_list thead th{
+  position: sticky !important;
+  top: 0 !important;  /* 表头相对于 #content-main 顶部 */
+  z-index: 2947 !important;
+  background: #fff;
+}
+/* —— 变量（有自动测量脚本会覆盖，不用改） —— */
+:root{
+  --wms-h1: 48px;             /* #header 高度 */
+  --wms-h2: 40px;             /* .breadcrumbs 高度 */
+  --wms-left: 260px;          /* 左侧菜单宽 */
+  --wms-right: 300px;         /* 右侧筛选宽 */
+
+  --wms-h-toolbar: 56px;      /* 搜索条 #toolbar */
+  --wms-h-toplinks: 32px;     /* 日期条 nav.toplinks */
+  --wms-h-actions: 44px;      /* 动作条 .actions */
+  --wms-top: calc(var(--wms-h1) + var(--wms-h2));
+}
+
+/* ① 关闭 Django Admin 的三列 grid（否则会预留两侧空白列） */
+#main{ display: block !important; }           /* 原本是 grid */
+
+/* ② 只让 #content-main 滚动；#content 负责左右让位 */
+html, body, #container, .content, #content{ overflow: visible !important; }
+#content{
+  margin-left: var(--wms-left) !important;
+  margin-right: var(--wms-right) !important;
+  padding: 8px 8px 0 !important;             /* 缩窄内容左右边距 */
+}
+#content-main{
+  overflow-y: scroll !important;             /* 固定出现滚动条，避免 sticky 抖动 */
+  overflow-x: hidden !important;
+  margin: 0 !important;                      /* 去掉重复让位，消除大空白 */
+  padding-top: calc(var(--wms-h-toolbar) + var(--wms-h-toplinks) + var(--wms-h-actions) + 8px) !important;
+}
+
+/* ③ 三条工具带固定为 fixed（鼠标在上面滚轮，也不会带着动） */
+#changelist #toolbar,
+#changelist nav.toplinks,
+#changelist .actions{
+  position: fixed !important;
+  left:  calc(var(--wms-left) + 8px) !important;
+  right: calc(var(--wms-right) + 8px) !important;
+  width: auto !important;
+  background: #fff;
+  margin: 0 !important;
+  border-bottom: 1px solid rgba(0,0,0,.06);
+  z-index: 2950;
+}
+#changelist #toolbar{     top: var(--wms-top) !important;                                         z-index: 2950; }
+#changelist nav.toplinks{ top: calc(var(--wms-top) + var(--wms-h-toolbar)) !important;             z-index: 2949; }
+#changelist .actions{     top: calc(var(--wms-top) + var(--wms-h-toolbar) + var(--wms-h-toplinks)) !important; z-index: 2948; }
+
+/* ④ 表头不动（相对于 #content-main 固定在滚动区顶部） */
+#result_list thead th{
+  position: sticky !important;
+  top: 0 !important;                /* 因为上面给 #content-main 做了 padding-top */
+  z-index: 2947 !important;
+  background: #fff;
+}
+
+/* ⑤ 如果左侧“切换导航按钮”占了一条竖列，直接隐藏（可选） */
+#toggle-nav-sidebar{ display:none !important; }
+/* 让 sticky 只依赖 #content-main 的滚动；禁用内部滚动容器 */
+#changelist .changelist-form-container,
+#changelist .results{
+  overflow: visible !important;     /* 原来是 overflow:auto → 破坏 sticky */
+  position: static !important;      /* 保持默认定位，避免形成新的滚动上下文 */
+  max-height: none !important;
+}
+
+/* 表头真正吸顶（双保险：thead + th 都 sticky） */
+#result_list thead{
+  position: sticky !important;
+  top: 0 !important;                /* 因为 #content-main 已有足够 padding-top */
+  z-index: 2947 !important;
+  background: #fff;
+}
+#result_list thead th{
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 2947 !important;
+  background: #fff;
+}

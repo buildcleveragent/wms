@@ -1,0 +1,13 @@
+/* 仅作用到我们自定义的列 */
+.results th.column-task_no_clip,
+.results td.field-task_no_clip{
+  width: 180px;
+}
+.nowrap-ellipsis{
+  display: inline-block;
+  max-width: 170px;          /* = 列宽 - 一点内边距 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}

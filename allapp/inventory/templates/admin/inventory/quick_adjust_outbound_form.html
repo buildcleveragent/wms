@@ -1,0 +1,29 @@
+{# 出库快调：templates/admin/inventory/quick_adjust_outbound_form.html #}
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+{% block extrahead %}{{ block.super }}{{ media }}{% endblock %}
+{% block content %}
+  <h1 style="margin:0 0 12px 0;">出库快调</h1>
+  {% if messages %}
+    <ul class="messagelist">
+      {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+  <form method="post" novalidate>
+    {% csrf_token %}
+    <div class="module aligned">
+      <div class="form-row">{{ form.owner.label_tag }} {{ form.owner }}</div>
+{#      <div class="form-row">{{ form.warehouse.label_tag }} {{ form.warehouse }}</div>#}
+{#      <div class="form-row">{{ form.location.label_tag }} {{ form.location }}</div>#}
+      <div class="form-row">{{ form.product.label_tag }} {{ form.product }}</div>
+      <div class="form-row">{{ form.qty_out.label_tag }} {{ form.qty_out }}</div>
+{#      <div class="form-row">{{ form.reason.label_tag }} {{ form.reason }}</div>#}
+      <div class="form-row">{{ form.remark.label_tag }} {{ form.remark }}</div>
+{#      <div class="form-row">{{ form.allow_negative }} {{ form.allow_negative.label_tag }}</div>#}
+    </div>
+    <div class="submit-row">
+      <input type="submit" value="{% trans '提交出库快调' %}" class="default" />
+      <a class="button" href="{% url 'admin:index' %}" style="margin-left:8px;">返回</a>
+    </div>
+  </form>
+{% endblock %}

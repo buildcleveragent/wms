@@ -1,0 +1,87 @@
+{
+  "test": "test_count_gain_then_loss",
+  "steps": [
+    {
+      "title": "STEP-1 扫描与分录（GAIN）",
+      "info": {
+        "scans": [
+          {
+            "id": 2,
+            "product_id": 39,
+            "product": "SKU-1",
+            "qty_base": "13.000",
+            "qty_base_delta": "13.000",
+            "location_id": 92,
+            "location": "BIN-A1",
+            "client_seq": "",
+            "label_key": null
+          }
+        ],
+        "tx": [
+          {
+            "id": 2,
+            "tx_type": "ADJ_GAIN",
+            "loc_id": 92,
+            "loc": "BIN-A1",
+            "product_id": 39,
+            "product": "SKU-1",
+            "qty": "3.0000",
+            "src_id": 2
+          }
+        ]
+      }
+    },
+    {
+      "title": "COUNT(GAIN) 对照（期望 vs 实际）",
+      "expected": {
+        "gain_qty": "+3",
+        "onhand_bin1": "13"
+      },
+      "actual": {
+        "gain_qty": "3.0000",
+        "onhand_bin1": "13.0000"
+      }
+    },
+    {
+      "title": "STEP-2 扫描与分录（LOSS）",
+      "info": {
+        "scans": [
+          {
+            "id": 3,
+            "product_id": 39,
+            "product": "SKU-1",
+            "qty_base": "9.000",
+            "qty_base_delta": "9.000",
+            "location_id": 92,
+            "location": "BIN-A1",
+            "client_seq": "",
+            "label_key": null
+          }
+        ],
+        "tx": [
+          {
+            "id": 3,
+            "tx_type": "ADJ_LOSS",
+            "loc_id": 92,
+            "loc": "BIN-A1",
+            "product_id": 39,
+            "product": "SKU-1",
+            "qty": "-4.0000",
+            "src_id": 3
+          }
+        ]
+      }
+    },
+    {
+      "title": "COUNT(LOSS) 对照（期望 vs 实际）",
+      "expected": {
+        "loss_qty": "-4",
+        "onhand_bin1": "9"
+      },
+      "actual": {
+        "loss_qty": "-4.0000",
+        "onhand_bin1": "9.0000"
+      }
+    }
+  ]
+}

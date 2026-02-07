@@ -1,0 +1,556 @@
+{% extends "console/base_console.html" %}
+
+{% block title %}首页仪表盘{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 20px;">
+    <h1 style="margin:0 0 8px 0;">运营看板(开发中,数据为示例)</h1>
+{#    <div style="color: var(--text-secondary); font-size: 14px;">{{ current_date }} · 实时运营概览</div>#}
+</div>
+
+<!-- 核心KPI看板 -->
+<div class="section-title">核心运营指标</div>
+<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:24px;">
+    <!-- 库存准确率 -->
+    <div class="kpi-card">
+        <div class="kpi-header">
+            <div class="kpi-title">库存准确率</div>
+            <div class="kpi-trend positive">↑ 2.1%</div>
+        </div>
+        <div class="kpi-value" id="kpi_accuracy">99.99%</div>
+        <div class="kpi-progress">
+            <div class="kpi-progress-bar" style="width: 99.8%; background: #10b981;"></div>
+        </div>
+        <div class="kpi-target">目标: 100%</div>
+    </div>
+
+    <!-- 库存周转率 -->
+    <div class="kpi-card">
+        <div class="kpi-header">
+            <div class="kpi-title">库存周转率</div>
+            <div class="kpi-trend positive">↑ 0.3</div>
+        </div>
+        <div class="kpi-value" id="kpi_turnover">5.2</div>
+        <div class="kpi-comparison">同比: 4.9</div>
+        <div class="kpi-target">行业平均: 4.8</div>
+    </div>
+
+    <!-- 仓库利用率 -->
+    <div class="kpi-card">
+        <div class="kpi-header">
+            <div class="kpi-title">仓库利用率</div>
+            <div class="kpi-trend warning">↑ 5%</div>
+        </div>
+        <div class="kpi-value" id="kpi_utilization">85%</div>
+        <div class="kpi-progress">
+            <div class="kpi-progress-bar" style="width: 85%; background: #f59e0b;"></div>
+        </div>
+        <div class="kpi-target">警戒线: 90%</div>
+    </div>
+
+    <!-- 订单履行率 -->
+    <div class="kpi-card">
+        <div class="kpi-header">
+            <div class="kpi-title">订单履行率</div>
+            <div class="kpi-trend positive">↑ 1.2%</div>
+        </div>
+        <div class="kpi-value" id="kpi_fulfillment">98.5%</div>
+        <div class="kpi-progress">
+            <div class="kpi-progress-bar" style="width: 98.5%; background: #3b82f6;"></div>
+        </div>
+        <div class="kpi-target">目标: 98%</div>
+    </div>
+</div>
+
+<!-- 库存健康度 -->
+<div class="section-title">库存健康度分析</div>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:24px;">
+    <!-- ABC分类 -->
+    <div class="card">
+        <div class="card-title">
+            <span>库存ABC分类</span>
+            <span class="card-subtitle">按价值分布</span>
+        </div>
+        <div id="chart_abc" class="chart"></div>
+    </div>
+
+    <!-- 库龄分析 -->
+    <div class="card">
+        <div class="card-title">
+            <span>库龄分析</span>
+            <span class="card-subtitle">识别呆滞库存</span>
+        </div>
+        <div id="chart_aging" class="chart"></div>
+    </div>
+</div>
+
+<!-- 实时运营监控 -->
+<div class="section-title">实时运营监控</div>
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:24px;">
+    <!-- 运营趋势 -->
+    <div class="card">
+        <div class="card-title">关键指标趋势</div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;padding:12px;">
+            <div class="metric-card">
+                <div class="metric-label">今日收货</div>
+                <div class="metric-value" id="metric_receive">24批次</div>
+                <div class="metric-change positive">+8%</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">今日发货</div>
+                <div class="metric-value" id="metric_ship">186单</div>
+                <div class="metric-change positive">+12%</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">今日拣货</div>
+                <div class="metric-value" id="metric_pick">152单</div>
+                <div class="metric-change negative">-3%</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">今日打包</div>
+                <div class="metric-value" id="metric_pack">178单</div>
+                <div class="metric-change positive">+5%</div>
+            </div>
+        </div>
+        <div id="chart_trend" class="chart" style="height:200px;"></div>
+    </div>
+
+    <!-- 异常警报 -->
+    <div class="card">
+        <div class="card-title">
+            <span>异常警报</span>
+            <span class="alert-badge">3</span>
+        </div>
+        <div class="alert-list">
+            <div class="alert-item critical">
+                <div class="alert-icon">⚠️</div>
+                <div class="alert-content">
+                    <div class="alert-title">盘点差异待审核</div>
+                    <div class="alert-desc">SKU-A2387 差异数量: 15</div>
+                </div>
+            </div>
+            <div class="alert-item warning">
+                <div class="alert-icon">🔍</div>
+                <div class="alert-content">
+                    <div class="alert-title">收货异常</div>
+                    <div class="alert-desc">PO-20240128 数量不符</div>
+                </div>
+            </div>
+            <div class="alert-item info">
+                <div class="alert-icon">⏱️</div>
+                <div class="alert-content">
+                    <div class="alert-title">订单处理延迟</div>
+                    <div class="alert-desc">5单超时未处理</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 效率追踪 -->
+<div class="section-title">效率与生产力</div>
+<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;">
+    <div class="card">
+        <div class="card-title">订单履行趋势</div>
+        <div id="chart_fulfillment_trend" class="chart"></div>
+    </div>
+    <div class="card">
+        <div class="card-title">库存准确率趋势</div>
+        <div id="chart_accuracy_trend" class="chart"></div>
+    </div>
+    <div class="card">
+        <div class="card-title">各区域利用率</div>
+        <div id="chart_zone_utilization" class="chart"></div>
+    </div>
+</div>
+
+<style>
+.section-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 20px 0 12px 0;
+    color: var(--text-primary);
+}
+
+.kpi-card {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+    background: #fff;
+    transition: all 0.2s ease;
+}
+
+.kpi-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
+}
+
+.kpi-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.kpi-title {
+    font-size: 14px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.kpi-trend {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.kpi-trend.positive {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.kpi-trend.warning {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.kpi-trend.negative {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.kpi-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 8px 0;
+}
+
+.kpi-progress {
+    height: 6px;
+    background: #f3f4f6;
+    border-radius: 9999px;
+    margin: 8px 0;
+}
+
+.kpi-progress-bar {
+    height: 6px;
+    border-radius: 9999px;
+    transition: width 0.3s ease;
+}
+
+.kpi-comparison, .kpi-target {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.card {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+}
+
+.card-title {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.card-subtitle {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
+.alert-badge {
+    background: #ef4444;
+    color: white;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 9999px;
+}
+
+.alert-list {
+    padding: 8px 0;
+}
+
+.alert-item {
+    display: flex;
+    align-items: flex-start;
+    padding: 12px 16px;
+    border-left: 4px solid;
+}
+
+.alert-item.critical {
+    border-left-color: #ef4444;
+    background: #fef2f2;
+}
+
+.alert-item.warning {
+    border-left-color: #f59e0b;
+    background: #fffbeb;
+}
+
+.alert-item.info {
+    border-left-color: #3b82f6;
+    background: #eff6ff;
+}
+
+.alert-icon {
+    margin-right: 12px;
+    font-size: 16px;
+}
+
+.alert-content {
+    flex: 1;
+}
+
+.alert-title {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 2px;
+}
+
+.alert-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.metric-card {
+    text-align: center;
+    padding: 12px;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.metric-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.metric-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.metric-change {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.metric-change.positive {
+    color: #10b981;
+}
+
+.metric-change.negative {
+    color: #ef4444;
+}
+
+.chart {
+    width: 100%;
+    height: 300px;
+    padding: 12px;
+}
+
+@media (max-width: 1200px) {
+    .chart {
+        height: 260px;
+    }
+}
+
+@media (max-width: 768px) {
+    .chart {
+        height: 220px;
+    }
+
+    .section-title {
+        font-size: 14px;
+    }
+
+    .kpi-value {
+        font-size: 24px;
+    }
+}
+</style>
+
+<!-- ECharts CDN -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+(async function(){
+    const r = await fetch("{% url 'console:dashboard_summary' %}");
+    const {ok, data} = await r.json();
+    if(!ok){
+        console.warn("dashboard api failed");
+        return;
+    }
+
+    // 核心KPI数据
+    const kpi = data.kpi || {};
+    document.getElementById('kpi_accuracy').textContent = (kpi.accuracy || 0) + '%';
+    document.getElementById('kpi_turnover').textContent = kpi.turnover || '0';
+    document.getElementById('kpi_utilization').textContent = (kpi.utilization || 0) + '%';
+    document.getElementById('kpi_fulfillment').textContent = (kpi.fulfillment || 0) + '%';
+
+    // 实时指标
+    const metrics = data.metrics || {};
+    document.getElementById('metric_receive').textContent = (metrics.receive || 0) + '批次';
+    document.getElementById('metric_ship').textContent = (metrics.ship || 0) + '单';
+    document.getElementById('metric_pick').textContent = (metrics.pick || 0) + '单';
+    document.getElementById('metric_pack').textContent = (metrics.pack || 0) + '单';
+
+    // 图表渲染函数
+    function renderPie(domId, title, data) {
+        const chart = echarts.init(document.getElementById(domId));
+        chart.setOption({
+            tooltip: {
+                trigger: 'item',
+                formatter: '{a} <br/>{b}: {c} ({d}%)'
+            },
+            legend: {
+                orient: 'vertical',
+                right: 10,
+                top: 'center'
+            },
+            series: [{
+                name: title,
+                type: 'pie',
+                radius: ['40%', '70%'],
+                avoidLabelOverlap: false,
+                itemStyle: {
+                    borderRadius: 6,
+                    borderColor: '#fff',
+                    borderWidth: 2
+                },
+                label: {
+                    show: false
+                },
+                emphasis: {
+                    label: {
+                        show: true,
+                        fontSize: 14,
+                        fontWeight: 'bold'
+                    }
+                },
+                data: data
+            }]
+        });
+        return chart;
+    }
+
+    function renderBar(domId, title, data) {
+        const chart = echarts.init(document.getElementById(domId));
+        chart.setOption({
+            tooltip: {
+                trigger: 'axis'
+            },
+            grid: {
+                left: 50,
+                right: 20,
+                top: 20,
+                bottom: 30
+            },
+            xAxis: {
+                type: 'category',
+                data: data.categories
+            },
+            yAxis: {
+                type: 'value',
+                name: '数量'
+            },
+            series: [{
+                name: title,
+                type: 'bar',
+                data: data.values,
+                itemStyle: {
+                    color: function(params) {
+                        const colors = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981'];
+                        return colors[params.dataIndex] || '#6b7280';
+                    }
+                }
+            }]
+        });
+        return chart;
+    }
+
+    function renderLine(domId, title, data) {
+        const chart = echarts.init(document.getElementById(domId));
+        chart.setOption({
+            tooltip: {
+                trigger: 'axis'
+            },
+            legend: {
+                data: data.legends || [],
+                top: 6
+            },
+            grid: {
+                left: 40,
+                right: 20,
+                top: 40,
+                bottom: 30
+            },
+            xAxis: {
+                type: 'category',
+                data: data.dates
+            },
+            yAxis: {
+                type: 'value',
+                name: data.unit || '百分比'
+            },
+            series: data.series || []
+        });
+        return chart;
+    }
+
+    // 渲染图表
+    // ABC分类图
+    const abcData = data.abc_analysis || [
+        { value: 20, name: 'A类 (20%)' },
+        { value: 30, name: 'B类 (30%)' },
+        { value: 50, name: 'C类 (50%)' }
+    ];
+    renderPie('chart_abc', 'ABC分类', abcData);
+
+    // 库龄分析
+    const agingData = data.aging_analysis || {
+        categories: ['0-30天', '31-90天', '91-180天', '180天+'],
+        values: [60, 25, 10, 5]
+    };
+    renderBar('chart_aging', '库龄分布', agingData);
+
+    // 趋势图
+    const trendData = data.trend || {
+        dates: ['01-01', '01-02', '01-03', '01-04', '01-05'],
+        series: [
+            {
+                name: '订单履行率',
+                type: 'line',
+                data: [98.2, 98.5, 98.3, 98.7, 98.5],
+                smooth: true
+            },
+            {
+                name: '库存准确率',
+                type: 'line',
+                data: [99.5, 99.6, 99.7, 99.8, 99.8],
+                smooth: true
+            }
+        ]
+    };
+    renderLine('chart_trend', '运营趋势', trendData);
+
+    // 窗口大小变化时重绘图表
+    window.addEventListener('resize', function() {
+        echarts.getInstanceByDom(document.getElementById('chart_abc'))?.resize();
+        echarts.getInstanceByDom(document.getElementById('chart_aging'))?.resize();
+        echarts.getInstanceByDom(document.getElementById('chart_trend'))?.resize();
+    });
+
+})();
+</script>
+{% endblock %}

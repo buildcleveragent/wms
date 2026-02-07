@@ -1,0 +1,21 @@
+<tr class="border-t hover:bg-slate-50" id="row-{{ it.pk }}">
+  <td class="p-2">
+    <a class="text-blue-600 hover:underline"
+       hx-get="{% url 'console_tx_detail' it.pk %}"
+       hx-target="#modal-root" hx-swap="innerHTML"> {{ it.code }} </a>
+  </td>
+  <td class="p-2">{{ it.owner }}</td>
+  <td class="p-2">{{ it.product }}</td>
+  <td class="p-2">{{ it.warehouse }}</td>
+  <td class="p-2">{{ it.qty }}</td>
+  <td class="p-2">
+    {% if it.verified %}<span class="text-green-600">是</span>{% else %}<span class="text-slate-500">否</span>{% endif %}
+  </td>
+  <td class="p-2">
+    <button class="px-2 py-1 border rounded"
+            hx-post="{% url 'console_tx_toggle' it.pk %}"
+            hx-target="#row-{{ it.pk }}" hx-swap="outerHTML">
+      切换核对
+    </button>
+  </td>
+</tr>

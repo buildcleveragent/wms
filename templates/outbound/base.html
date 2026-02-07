@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{% block title %}WMS 出库{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.4/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50 text-gray-900">
+
+  <nav class="flex gap-4 text-sm mb-4">
+  <a href="{% url 'outbound:orders_list' %}" class="text-blue-700 hover:underline">出库订单</a>
+  <a href="{% url 'outbound:shipments_list' %}" class="text-blue-700 hover:underline">出库单</a>
+  <a href="{% url 'outbound:wave_create' %}" class="text-blue-700 hover:underline">拣货波次</a>
+  <a href="{% url 'outbound:my_picking_lines' %}" class="text-blue-700 hover:underline">我的拣货任务</a>
+</nav>
+
+  <div class="max-w-7xl mx-auto p-6">
+    <header class="mb-6">
+      <h1 class="text-2xl font-bold">WMS 出库流程</h1>
+      <nav class="mt-2 text-sm">
+        <a class="text-blue-600 hover:underline" href="{% url 'outbound:shipments_list' %}">出库单</a>
+      </nav>
+    </header>
+
+    {% if messages %}
+      <div class="space-y-2 mb-4">
+        {% for message in messages %}
+          <div class="px-4 py-2 rounded {% if message.tags == 'success' %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <main>{% block content %}{% endblock %}</main>
+  </div>
+</body>
+</html>

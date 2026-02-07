@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}入库订单 {{ order.order_no }}{% endblock %}
+
+{% block page_module %}入库管理{% endblock %}
+{% block page_title %}入库订单 {{ order.order_no }}{% endblock %}
+
+{% block sidebar %}
+  <details class="nav-group" open>
+    <summary>入库管理</summary>
+    <div class="pl-3 space-y-1">
+      {% if perms.inbound.view_inboundorder %}<a href="{% url 'inbound:order_list' %}" class="nav-item">入库订单</a>{% endif %}
+      {% if perms.inbound.view_inboundreceiving %}<a href="#" class="nav-item">收货任务</a>{% endif %}
+      {% if perms.inbound.view_inboundreceipt %}<a href="#" class="nav-item">收货记录</a>{% endif %}
+      {% if perms.inbound.view_inboundputaway %}<a href="#" class="nav-item">上架任务</a>{% endif %}
+    </div>
+  </details>
+  <details class="nav-group"><summary>库存管理</summary><div class="pl-3 space-y-1"><a href="#" class="nav-item">库存查询</a></div></details>
+{% endblock %}
+
+{% block page_actions %}
+  {% if perms.inbound.change_inboundorder %}
+  <a class="btn btn-outline" href="{% url 'inbound:order_edit' order.pk %}">编辑</a>
+  {% endif %}
+  {% if perms.inbound.delete_inboundorder %}
+  <a class="btn btn-danger" href="{% url 'inbound:order_delete' order.pk %}">删除</a>
+  {% endif %}
+  {% if perms.inbound.add_inboundreceiving %}
+  <form method="post" action="{% url 'inbound:order_make_receiving' order.pk %}">{% csrf_token %}
+    <button class="btn btn-primary" {% if not lines %}disabled{% endif %}>生成收货任务</button>
+  </form>
+  {% endif %}
+{% endblock %}
+
+{% block table %}
+  <div class="p-4 space-y-4">
+    <div>
+      <div class="card-title">基础信息</div>
+      <dl class="grid grid-cols-4 gap-2 text-sm">
+        <dt class="text-gray-500">订单号</dt><dd class="col-span-3">{{ order.order_no }}</dd>
+        <dt class="text-gray-500">货主</dt><dd class="col-span-3">{{ order.owner }}</dd>
+        <dt class="text-gray-500">供应商</dt><dd class="col-span-3">{{ order.supplier }}</dd>
+        <dt class="text-gray-500">业务日期</dt><dd class="col-span-3">{{ order.biz_date }}</dd>
+        <dt class="text-gray-500">状态</dt>
+        <dd class="col-span-3">{% with s=order.submit_status %}<span class="badge {% if s == 'DONE' %}badge-success{% elif s == 'SUBMITTED' %}badge-info{% elif s == 'RECEIVING' %}badge-warn{% elif s == 'PUTAWAY' %}bg-sky-100 text-sky-700{% elif s == 'CLOSED' %}badge-dark{% else %}badge-muted{% endif %}">{{ s }}</span>{% endwith %}</dd>
+      </dl>
+    </div>
+
+    <div>
+      <div class="card-title">订单明细</div>
+      <div class="table-wrap">
+        <table class="min-w-full text-sm">
+          <thead class="sticky-header"><tr class="bg-gray-50">
+            <th class="w-16 px-3 py-2">行号</th>
+            <th class="px-3 py-2">物料</th>
+            <th class="w-40 px-3 py-2">规格</th>
+            <th class="w-40 px-3 py-2">批次</th>
+            <th class="w-32 px-3 py-2 text-right">数量</th>
+            <th class="w-20 px-3 py-2">单位</th>
+            <th class="w-32 px-3 py-2 text-right">金额</th>
+          </tr></thead>
+          <tbody class="divide-y divide-gray-200 bg-white">
+            {% for l in lines %}
+            <tr>
+              <td class="px-3 py-2">{{ l.line_no }}</td>
+              <td class="px-3 py-2">{{ l.product_code }} / {{ l.product_name }}</td>
+              <td class="px-3 py-2">{{ l.spec }}</td>
+              <td class="px-3 py-2">{{ l.lot_no }}</td>
+              <td class="px-3 py-2 text-right">{{ l.base_qty }}</td>
+              <td class="px-3 py-2">{{ l.base_uom }}</td>
+              <td class="px-3 py-2 text-right">{{ l.amount }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7" class="px-3 py-6 text-center text-gray-500">无明细</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_sections %}
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="card p-4">
+      <div class="card-title">收货任务</div>
+      <div class="table-wrap"><table class="min-w-full text-sm">
+        <thead class="sticky-header"><tr class="bg-gray-50"><th class="px-3 py-2">任务号</th><th class="px-3 py-2">计划时间</th><th class="px-3 py-2">状态</th></tr></thead>
+        <tbody class="divide-y divide-gray-200 bg-white">
+          {% for r in receivings %}
+          <tr><td class="px-3 py-2">{{ r.task_no }}</td><td class="px-3 py-2">{{ r.planned_at }}</td><td class="px-3 py-2">{{ r.status }}</td></tr>
+          {% empty %}
+          <tr><td colspan="3" class="px-3 py-6 text-center text-gray-500">暂无</td></tr>
+          {% endfor %}
+        </tbody>
+      </table></div>
+    </div>
+    <div class="card p-4">
+      <div class="card-title">收货凭证</div>
+      <div class="table-wrap"><table class="min-w-full text-sm">
+        <thead class="sticky-header"><tr class="bg-gray-50"><th class="px-3 py-2">凭证号</th><th class="px-3 py-2">业务日期</th><th class="px-3 py-2">状态</th></tr></thead>
+        <tbody class="divide-y divide-gray-200 bg-white">
+          {% for r in receipts %}
+          <tr><td class="px-3 py-2">{{ r.receipt_no }}</td><td class="px-3 py-2">{{ r.biz_date }}</td><td class="px-3 py-2">{{ r.submit_status }}</td></tr>
+          {% empty %}
+          <tr><td colspan="3" class="px-3 py-6 text-center text-gray-500">暂无</td></tr>
+          {% endfor %}
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+{% endblock %}

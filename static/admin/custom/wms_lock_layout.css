@@ -1,0 +1,142 @@
+/* ===== 变量（JS 会写成真实值） ===== */
+:root{
+  --top-h1: 56px;      /* #header */
+  --top-h2: 40px;      /* .breadcrumbs */
+  --left-w: 260px;     /* 左侧菜单内容宽（不含滚动条） */
+  --right-w: 300px;    /* 右侧筛选内容宽（不含滚动条） */
+
+  --bar-1: 56px;       /* #toolbar */
+  --bar-2: 32px;       /* nav.toplinks */
+  --bar-3: 44px;       /* .actions */
+}
+:root{
+  --top-sum: calc(var(--top-h1) + var(--top-h2));
+  --bars-sum: calc(var(--bar-1) + var(--bar-2) + var(--bar-3));
+}
+
+/* 只作用于列表页 */
+body.change-list{ overflow: hidden !important; }
+#main{ display:block !important; } /* 去掉 Admin 的 3 列 grid 占位列 */
+
+/* 顶部两条固定 */
+#header{ position:fixed; top:0; left:0; right:0; z-index:3000; }
+.breadcrumbs{ position:fixed; top:var(--top-h1); left:0; right:0; z-index:2990; }
+
+/* 左侧菜单固定 + 隐藏按钮固定 */
+#nav-sidebar{
+  position:fixed; top:var(--top-sum); left:0;
+  width:var(--left-w);
+  height:calc(100vh - var(--top-sum));
+  overflow:auto; z-index:2800; background:#2b3b42;
+}
+#toggle-nav-sidebar{
+  position:fixed; top:var(--top-sum); left:var(--left-w);
+  z-index:2810; display:block !important;
+}
+
+/* 右侧筛选固定 */
+#content-related, #changelist-filter{
+  position:fixed; top:var(--top-sum); right:0;
+  width:var(--right-w);
+  height:calc(100vh - var(--top-sum));
+  background:#fff; overflow:auto; z-index:2800;
+}
+
+/* 中间内容区：给顶部/左右让路 */
+#content{
+  margin-left:var(--left-w); margin-right:var(--right-w);
+  padding-top:var(--top-sum);
+}
+
+/* 只让数据行区域滚动 */
+body.change-list #content-main{
+  position:relative;
+  height:calc(100vh - var(--top-sum));
+  overflow-y:auto; overflow-x:hidden;
+  padding-top:var(--bars-sum);  /* 为搜索/日期/动作让出空间 */
+  margin:0;
+}
+
+/* 搜索/日期/动作 三条固定为 fixed */
+body.change-list #changelist #toolbar,
+body.change-list #changelist nav.toplinks,
+body.change-list #changelist .actions{
+  position:fixed; left:var(--left-w); right:var(--right-w);
+  width:auto; margin:0; background:#fff;
+  border-bottom:1px solid rgba(0,0,0,.06); z-index:2950;
+}
+body.change-list #changelist #toolbar   { top:var(--top-sum); }
+body.change-list #changelist nav.toplinks{ top:calc(var(--top-sum) + var(--bar-1)); }
+body.change-list #changelist .actions    { top:calc(var(--top-sum) + var(--bar-1) + var(--bar-2)); }
+
+/* 右上“增加”按钮固定在同一行（不再滚走） */
+body.change-list .object-tools{
+  position:fixed; top:var(--top-sum);
+  right:calc(var(--right-w) + 12px);
+  z-index:2960; background:transparent; margin:0;
+}
+
+/* 表格外层禁用内部滚动容器，避免 sticky 失效 */
+#changelist .changelist-form-container,
+#changelist .results{
+  overflow:visible !important; position:static !important; max-height:none !important;
+}
+
+/* 表头固定且永远在行之上（解决“穿过去”） */
+#result_list{ border-collapse: separate; border-spacing: 0; } /* 让 z-index 生效更稳 */
+#result_list thead, #result_list thead th{
+  position:sticky; top:0; z-index:2970 !important; background:#fff;
+}
+
+/* 细节：防滚动穿透与误触 */
+#nav-sidebar *, #content-related *, #changelist-filter *{ overscroll-behavior: contain; }
+/* --- Fix#1：表头永远在行之上，行不再“穿过去” --- */
+/* 取消表格外层的内部滚动，避免 sticky 失效 */
+#changelist .changelist-form-container,
+#changelist .results{
+  overflow: visible !important;
+  position: static !important;
+  max-height: none !important;
+}
+
+/* 用 separate 让 z-index 生效更稳，给表头最高层级（但低于工具条） */
+#result_list{ border-collapse: separate; border-spacing: 0; }
+
+#result_list thead,
+#result_list thead th{
+  position: sticky !important;
+  top: 0 !important;                 /* 因为 #content-main 已有 padding-top = 三条工具带之和 */
+  z-index: 2960 !important;          /* 高于 tbody 默认层级，低于工具条(2950+)也OK */
+  background: #fff;
+}
+
+#result_list tbody{ position: relative; z-index: 1; }
+
+/* --- Fix#2：侧栏“隐藏按钮”不再压住搜索框 --- */
+#toggle-nav-sidebar{
+  position: fixed !important;
+  top: var(--top-sum);
+  left: calc(var(--left-w) - 14px) !important; /* 收回到侧栏边缘内 */
+  width: 14px !important;
+  z-index: 2810;                                 /* 在侧栏之上，但低于工具条 */
+}
+/* 让隐藏侧栏按钮永远可见：吸在左栏内侧 + 层级高于工具条与克隆表头 */
+:root{ --toggle-w: 18px; } /* 按钮宽度，可按主题调 */
+
+#toggle-nav-sidebar{
+  position: fixed !important;
+  top: var(--top-sum);
+  left: var(--left-w) !important;
+  transform: translateX(-100%);       /* 永远贴在侧栏内侧边缘 */
+  width: var(--toggle-w) !important;
+  z-index: 2999 !important;           /* > 工具条(2950~2965)，< 顶部 Header(3000) */
+}
+
+/* 防止任何固定块越界到左栏之上（再保险） */
+body.change-list #changelist #toolbar,
+body.change-list #changelist nav.toplinks,
+body.change-list #changelist .actions,
+#sticky-head,
+.object-tools{
+  left: calc(var(--left-w)) !important;
+}

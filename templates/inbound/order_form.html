@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title|default:"入库订单" }}{% endblock %}
+{% block page_module %}入库管理{% endblock %}
+{% block page_title %}{{ title|default:"新建入库订单" }}{% endblock %}
+
+{% block page_actions %}
+  <a class="btn btn-outline" href="{% url 'inbound:order_list' %}">返回列表</a>
+{% endblock %}
+
+{% block table %}
+<form method="post" novalidate class="p-4 space-y-4">
+  {% csrf_token %}
+
+  {# ===== 错误汇总 ===== #}
+  {% if form.errors or form.non_field_errors or formset.non_form_errors or formset.errors %}
+    <div class="card p-4 bg-rose-50 border-rose-200">
+      <div class="text-rose-700 font-medium mb-2">请修正以下错误：</div>
+      <ul class="list-disc pl-5 text-sm text-rose-700 space-y-1">
+        {% for e in form.non_field_errors %}<li>{{ e }}</li>{% endfor %}
+        {% for field in form.visible_fields %}
+          {% for e in field.errors %}<li>{{ field.label }}：{{ e }}</li>{% endfor %}
+        {% endfor %}
+        {% for e in formset.non_form_errors %}<li>{{ e }}</li>{% endfor %}
+        {% for f in formset.forms %}
+          {% if f.errors or f.non_field_errors %}
+            {% for field in f.visible_fields %}
+              {% for e in field.errors %}<li>第 {{ forloop.parentloop.counter }} 行 - {{ field.label }}：{{ e }}</li>{% endfor %}
+            {% endfor %}
+            {% for e in f.non_field_errors %}<li>第 {{ forloop.counter }} 行：{{ e }}</li>{% endfor %}
+          {% endif %}
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  {# ===== 订单信息 ===== #}
+  <section class="card p-4 form-dense form-hz">
+{#  <div class="card-title">订单信息</div>#}
+  <div class="grid grid-cols-1 md:grid-cols-6 gap-4 text-sm">
+{#    <div class="grid grid-cols-1 md:grid-cols-5 grid-flow-row-dense gap-4 text-sm">#}
+          <input type="hidden" name="_refresh" id="refresh-flag" value="">
+      <label class="block" >
+      <span >{{ form.order_no.label }}</span>
+      {{ form.order_no }}{% for e in form.order_no.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block">
+      <span class="text-gray-600">{{ form.owner.label }}</span>
+      {{ form.owner }}
+        {% for e in form.owner.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.supplier.label }}</span>
+      {{ form.supplier }}{% for e in form.supplier.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.inbound_type.label }}</span>
+      {{ form.inbound_type }}{% for e in form.inbound_type.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.delivery_method.label }}</span>
+      {{ form.delivery_method }}{% for e in form.delivery_method.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.eta.label }}</span>
+      {{ form.eta }}{% for e in form.eta.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.src_bill_no.label }}</span>
+      {{ form.src_bill_no }}{% for e in form.src_bill_no.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.address.label }}</span>
+      {{ form.address }}{% for e in form.address.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.carrierCompany.label }}</span>
+     {{ form.carrierCompany}}{% for e in form.carrierCompany.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.vehicle.label }}</span>
+      {{ form.vehicle }}{% for e in form.vehicle.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.memo.label }}</span>
+      {{ form.memo }}{% for e in form.memo.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    {{ form.non_field_errors }}
+  </div>
+</section>
+
+  {# ===== 订单明细 ===== #}
+  <section class="card p-4">
+    <div class="flex items-center justify-between mb-3">
+      <div class="card-title">订单明细</div>
+      <div class="flex gap-2">
+        <button type="button" id="addRow" class="btn btn-primary">新增一行</button>
+      </div>
+    </div>
+
+    {{ formset.management_form }}
+
+    {# 横向滚动只在本容器内出现 #}
+   <div id="linesWrap" class="w-full max-w-full min-w-0 overflow-x-auto">
+  <!-- 内层包裹器：可要可不要；留着更稳 -->
+  <div class="inline-block align-top">
+
+    <table
+      class="text-sm whitespace-nowrap"
+      style="table-layout:fixed; width:max-content;">   <!-- ★关键：width:max-content -->
+      <colgroup>
+        <col style="width:48px">      <!-- # -->
+        <col style="width:12rem">     <!-- 商品编码 -->
+        <col style="width:16rem">     <!-- 商品名称 -->
+        <col style="width:10rem">     <!-- 规格 -->
+        <col style="width:8rem">      <!-- 批次 -->
+        <col style="width:7rem">      <!-- 数量 -->
+        <col style="width:6rem">      <!-- 单位 -->
+        <col style="width:9rem">      <!-- 价格 -->
+        <col style="width:6rem">      <!-- 删除 -->
+
+      </colgroup>
+
+      <thead class="sticky top-0 bg-white z-10">
+            <tr class="bg-gray-50">
+              <th class="border border-gray-300 px-2 py-1 text-center">#</th>
+              <th class="border border-gray-300 px-2 py-1">商品编码</th>
+              <th class="border border-gray-300 px-2 py-1">商品名称</th>
+              <th class="border border-gray-300 px-2 py-1">规格</th>
+              <th class="border border-gray-300 px-2 py-1">批次</th>
+              <th class="border border-gray-300 px-2 py-1 text-right">数量</th>
+              <th class="border border-gray-300 px-2 py-1">单位</th>
+              <th class="border border-gray-300 px-2 py-1 text-right">价格</th>
+              <th class="border border-gray-300 px-2 py-1 text-center">删除</th>
+
+            </tr>
+          </thead>
+
+          <tbody id="lineBody">
+            {% for f in formset.forms %}
+            <tr class="line-row">
+              <td class="border border-gray-300 px-2 py-1 text-center text-gray-500">{{ forloop.counter }}</td>
+              <td class="border border-gray-300 px-2 py-1">{{ f.product_code }}</td>
+              <td class="border border-gray-300 px-2 py-1">{{ f.product_name }}</td>
+              <td class="border border-gray-300 px-2 py-1">{{ f.spec }}</td>
+              <td class="border border-gray-300 px-2 py-1">{{ f.lot_no }}</td>
+              <td class="border border-gray-300 px-2 py-1 text-right">{{ f.base_qty }}</td>
+              <td class="border border-gray-300 px-2 py-1">{{ f.base_uom }}</td>
+              <td class="border border-gray-300 px-2 py-1 text-right">{{ f.price }}</td>
+              <td class="border border-gray-300 px-2 py-1 text-center">
+                <button type="button" class="btn btn-outline btn-sm remove-row">移除</button>
+                <span class="hidden">{{ f.DELETE }}</span>
+              </td>
+              <td class="hidden">{{ f.id }}</td>
+
+            </tr>
+            {% endfor %}
+          </tbody>
+    </table>
+  </div>
+</div>
+
+  </section>
+
+  <div class="flex justify-end gap-2 mt-3">
+    <button name="action" value="save_draft" class="btn btn-outline">保存草稿</button>
+    <button name="action" value="save_submit" class="btn btn-primary">保存并提交</button>
+  </div>
+
+  {# 动态新增明细空行模板 #}
+  <template id="emptyRowTpl">
+    <tr class="line-row">
+      <td class="text-center text-gray-500">#</td>
+      <td>{{ formset.empty_form.product_code }}</td>
+      <td>{{ formset.empty_form.product_name }}</td>
+      <td>{{ formset.empty_form.spec }}</td>
+      <td>{{ formset.empty_form.lot_no }}</td>
+      <td class="text-right">{{ formset.empty_form.base_qty }}</td>
+      <td>{{ formset.empty_form.base_uom }}</td>
+      <td class="text-right">{{ formset.empty_form.price }}</td>
+      <td class="text-center">
+        <button type="button" class="btn btn-outline btn-sm remove-row">移除</button>
+        <span class="hidden">{{ formset.empty_form.DELETE }}</span>
+      </td>
+      <td class="hidden">{{ formset.empty_form.id }}</td>
+    </tr>
+  </template>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+  // 兼容 Django formset
+  const prefix  = "{{ formset.prefix }}";
+  const totalEl = document.getElementById(`id_${prefix}-TOTAL_FORMS`);
+  const tbody   = document.getElementById('lineBody');
+  const tpl     = document.getElementById('emptyRowTpl');
+
+  // 新增一行
+  const addBtn = document.getElementById('addRow');
+  if (addBtn) addBtn.addEventListener('click', () => {
+    const idx = parseInt(totalEl.value || '0', 10);
+    const html = tpl.innerHTML.replace(/__prefix__/g, idx);
+    const frag = document.createElement('tbody');
+    frag.innerHTML = html.trim();
+    const row = frag.firstElementChild;
+    tbody.appendChild(row);
+    totalEl.value = idx + 1;
+    renumber();
+  });
+
+  // 删除一行（软删勾选 DELETE）
+  tbody.addEventListener('click', (e) => {
+    const btn = e.target.closest('.remove-row'); if (!btn) return;
+    const tr = btn.closest('tr');
+    const del = tr.querySelector('input[type="checkbox"][name$="-DELETE"]');
+    if (del) { del.checked = true; tr.style.opacity = .45; tr.classList.add('line-through'); }
+    else { tr.remove(); totalEl.value = Math.max(0, parseInt(totalEl.value || '0', 10) - 1); }
+    renumber();
+  });
+
+  // 行号重排
+  function renumber(){
+    Array.from(tbody.querySelectorAll('tr.line-row')).forEach((tr, i) => {
+      const cell = tr.querySelector('td:first-child');
+      if (cell) cell.textContent = i + 1;
+    });
+  }
+  renumber();
+})();
+</script>
+
+    <script>
+  // 放在页面底部
+  (function () {
+    const refreshFlag = document.getElementById("refresh-flag");
+    const bind = (el) => {
+      const clears = (el.getAttribute("data-clear-targets") || "").split(",").map(s => s.trim()).filter(Boolean);
+      el.addEventListener("change", function () {
+        // 清空下游选择，避免“该选项不在可用项中”
+        clears.forEach(sel => {
+          const target = document.querySelector(sel);
+          if (target) target.value = "";
+        });
+        refreshFlag.value = "1";
+        console.log("el",el)
+        {#await sleep(1500);     #}
+        {#setTimeout(() => el.form.submit(), 15000)#}
+        el.form.submit()
+      });
+    };
+    document.querySelectorAll("[data-refresh-on-change='1']").forEach(bind);
+  })();
+</script>
+
+{#    <script>#}
+{#  // 放在页面底部#}
+{#  const carrier = document.getElementById("id_carrierCompany");#}
+{#  const vehicle = document.getElementById("id_vehicle");#}
+{#  const refreshFlag = document.getElementById("refresh-flag");#}
+{##}
+{#  if (carrier) {#}
+{#    carrier.addEventListener("change", function () {#}
+{#      // ✅ 关键：切换承运商时清空车辆选择，避免提交旧的无效值#}
+{#      if (vehicle) vehicle.value = "";#}
+{##}
+{#      // 标记为刷新并提交#}
+{#      refreshFlag.value = "1";#}
+{#      this.form.submit();#}
+{#    });#}
+{#  }#}
+{#</script>#}
+
+
+{#    <script>#}
+{#  // 承运商改变 → 触发“刷新提交”，后端按 carrier 过滤 vehicle 并重渲染#}
+{#  const carrier = document.getElementById("id_carrierCompany");#}
+{##}
+{#  if (carrier) {#}
+{#      console.log("当前承运商值：", carrier.value);#}
+{#    carrier.addEventListener("change", function () {#}
+{#      document.getElementById("refresh-flag").value = "1"; // 标记为刷新#}
+{#      console.log("id_carrierCompany,refresh-flag")#}
+{#      this.form.submit();#}
+{#    });#}
+{#  }#}
+{#</script>#}
+{% endblock %}
+

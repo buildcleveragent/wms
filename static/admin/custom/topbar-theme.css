@@ -1,0 +1,411 @@
+/* ===== 你可按需微调的变量（只改下面这些就行） ===== */
+:root{
+  /* 左侧菜单宽度：自动随文字长度缩放，但不会太窄/太宽 */
+  /* 24ch 大约能放下 12 个中文或 24 个英文字母；需要更窄就把 24ch 改成 20ch/18ch */
+  --nav-w: clamp(160px, 24ch, 240px);
+
+  /* 顶部两条（头部 & 面包屑）配色 */
+  --hdr-bg: #ffffff;
+  --hdr-fg: #111827;
+  --crumb-bg: #f3f4f6;
+  --crumb-fg: #374151;
+  --top-border: #e5e7eb;
+
+  /* 左侧菜单配色 */
+  --menu-bg: #ffffff;
+  --menu-fg: #111827;
+  --menu-muted: #6b7280;
+  --menu-border: #e5e7eb;
+  --menu-hover: #f3f4f6;
+  --menu-active-bg: #e5e7eb;   /* 想纯灰可换成 #e5e7eb */
+  --menu-active-fg: #111827;
+
+  /* 右侧过滤面板配色 */
+  --panel-bg: #ffffff;
+  --panel-hd-bg: #f3f4f6;
+  --panel-hd-fg: #374151;
+  --panel-border: #e5e7eb;
+
+  /* 顶部/侧栏链接（标准商务蓝；想纯灰可把两处换成 #374151 / #111827） */
+  --link: #2563eb;
+  --link-hover: #1d4ed8;
+}
+
+/* ===== 顶部两条（仅改颜色，不动布局） ===== */
+#header{
+  background: var(--hdr-bg) !important;
+  color: var(--hdr-fg) !important;
+  border-bottom: 1px solid var(--top-border) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+#header a{ color: var(--link) !important; }
+#header a:hover{ color: var(--link-hover) !important; text-decoration: underline; }
+
+.breadcrumbs{
+  background: var(--crumb-bg) !important;
+  color: var(--crumb-fg) !important;
+  border-bottom: 1px solid var(--top-border) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+.breadcrumbs a{ color: var(--link) !important; }
+.breadcrumbs a:hover{ color: var(--link-hover) !important; text-decoration: underline; }
+
+/* ===== 左侧菜单（变窄 + 商务白灰） ===== */
+#nav-sidebar{
+  width: var(--nav-w) !important;          /* 缩窄关键点 */
+  box-sizing: border-box;
+  background: var(--menu-bg) !important;
+  color: var(--menu-fg) !important;
+  border-right: 1px solid var(--menu-border) !important;
+}
+
+/* 左栏项目行的可读性与溢出处理 */
+#nav-sidebar th a, #nav-sidebar td a{
+  display: block; padding: 6px 10px;
+  color: var(--menu-fg) !important; text-decoration: none !important;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; /* 过长省略号 */
+  border-radius: 6px;
+}
+#nav-sidebar tr:hover th a, #nav-sidebar tr:hover td a{
+  background: var(--menu-hover) !important;
+}
+#nav-sidebar .current-model th a,
+#nav-sidebar .current-app caption a{
+  background: var(--menu-active-bg) !important;
+  color: var(--menu-active-fg) !important; font-weight: 600;
+}
+
+/* 左栏分组标题与搜索框 */
+#nav-sidebar caption{
+  color: var(--menu-muted) !important;
+  background: var(--menu-bg) !important;
+  border-bottom: 1px solid var(--menu-border) !important;
+  padding: 8px 10px; text-transform: none;
+}
+#nav-sidebar #nav-filter{
+  background: #fff !important; color: var(--menu-fg) !important;
+  border: 1px solid var(--menu-border) !important; border-radius: 6px;
+}
+
+/* 左侧“隐藏菜单”按钮外观保持一致（位置仍用官方默认） */
+#toggle-nav-sidebar{
+  background: var(--menu-bg) !important;
+  border: 1px solid var(--menu-border) !important;
+  filter: none !important;
+}
+
+/* ===== 右侧过滤面板（含头部） ===== */
+#content-related, #changelist-filter{
+  background: var(--panel-bg) !important;
+  border-left: 1px solid var(--panel-border) !important;
+}
+#content-related .module h2,
+#changelist-filter h2, #changelist-filter .filter-title{
+  background: var(--panel-hd-bg) !important;
+  color: var(--panel-hd-fg) !important;
+  border-bottom: 1px solid var(--panel-border) !important;
+  padding: 8px 12px !important; margin: 0 !important; font-weight: 600;
+}
+#content-related a, #changelist-filter a{
+  color: var(--link) !important; text-decoration: none !important;
+}
+#content-related a:hover, #changelist-filter a:hover{
+  color: var(--link-hover) !important; text-decoration: underline !important;
+}
+/* === 左侧菜单文字改成中灰、各种状态都保持可见 === */
+
+/* 换成更柔和的灰：#4b5563（Tailwind slate-600） */
+:root{
+  --menu-fg: #4b5563;     /* 普通项文字 */
+  --menu-muted: #6b7280;  /* 分组标题灰 */
+  --menu-active-fg: #374151; /* 当前项/高亮时的文字（深一点） */
+}
+
+/* 分组标题（如“任务管理”） */
+#nav-sidebar caption{
+  color: var(--menu-muted) !important;
+}
+
+/* 普通链接：未访问/已访问都用中灰 */
+#nav-sidebar th a,
+#nav-sidebar td a,
+#nav-sidebar th a:link,
+#nav-sidebar td a:link,
+#nav-sidebar th a:visited,
+#nav-sidebar td a:visited{
+  color: var(--menu-fg) !important;
+  -webkit-text-fill-color: var(--menu-fg); /* 兼容某些浏览器的着色 bug */
+}
+
+/* 悬停时：仅背景变浅灰，文字仍可读 */
+#nav-sidebar tr:hover th a,
+#nav-sidebar tr:hover td a{
+  background: var(--menu-hover) !important;
+  color: var(--menu-fg) !important;
+}
+
+/* 当前项高亮：淡蓝/灰背景 + 深灰文字 */
+#nav-sidebar .current-model th a,
+#nav-sidebar .current-app caption a{
+  background: var(--menu-active-bg) !important; /* 你前面设的淡高亮色 */
+  color: var(--menu-active-fg) !important;
+}
+
+/* 保险：如果有图标/箭头用到字体颜色，统一设成中灰 */
+#nav-sidebar *{ color: inherit; }
+/* --- 左侧菜单文字：中灰方案 --- */
+:root{
+  --menu-fg: #4b5563;        /* 普通项文字：中灰 */
+  --menu-muted: #6b7280;     /* 分组标题：稍浅灰 */
+  --menu-active-fg: #374151; /* 当前项/高亮文字：深灰 */
+}
+
+/* 分组标题（如“任务管理”） */
+#nav-sidebar caption{
+  color: var(--menu-muted) !important;
+}
+
+/* 普通链接文字（未访问/已访问统一中灰） */
+#nav-sidebar th a,
+#nav-sidebar td a,
+#nav-sidebar th a:link,
+#nav-sidebar td a:link,
+#nav-sidebar th a:visited,
+#nav-sidebar td a:visited{
+  color: var(--menu-fg) !important;
+  -webkit-text-fill-color: var(--menu-fg); /* 某些浏览器兼容 */
+}
+
+/* 悬停：背景浅灰，文字仍中灰 */
+#nav-sidebar tr:hover th a,
+#nav-sidebar tr:hover td a{
+  background: var(--menu-hover) !important;
+  color: var(--menu-fg) !important;
+}
+
+/* 当前项高亮：淡背景 + 深灰文字 */
+#nav-sidebar .current-model th a,
+#nav-sidebar .current-app caption a{
+  background: var(--menu-active-bg) !important;
+  color: var(--menu-active-fg) !important;
+  font-weight: 600;
+}
+/* === 左侧菜单：稍小的字号 + 更窄的宽度 === */
+:root{
+  /* 左栏宽度：再收窄一点。想更窄，把 20ch 改成 18ch 或把 140px 再降一点 */
+  --nav-w: clamp(140px, 15ch, 220px);
+
+  /* 菜单文字大小：相对页面“正常字号”略大一点 */
+  --menu-font: 0.95rem;          /* 常见相当于 ~15px（若还大，改成 0.9rem） */
+  --menu-caption-font: 0.3rem;   /* 分组标题（如“任务管理”）稍小一点 */
+}
+
+/* 应用更窄的宽度 */
+#nav-sidebar{
+  width: var(--nav-w) !important;
+}
+
+/* 菜单项字体大小 & 行高/内边距（更紧凑） */
+#nav-sidebar th a,
+#nav-sidebar td a{
+  font-size: var(--menu-font) !important;
+  line-height: 1.35;
+  padding: 6px 8px;              /* 两侧再收窄一点 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;       /* 过长省略号 */
+}
+
+/* 分组标题（粗体可读，略小一点） */
+#nav-sidebar caption{
+  font-size: var(--menu-caption-font) !important;
+  font-weight: 600 !important;
+  padding: 8px 8px !important;
+}
+
+/* 搜索框跟着收窄，字号同步 */
+#nav-sidebar #nav-filter{
+  width: 100% !important;
+  font-size: var(--menu-font) !important;
+  padding: 4px 6px !important;
+}
+/* 左侧菜单再小一号 */
+:root{
+  /* 更窄的左栏（可按需再减） */
+  --nav-w: clamp(130px, 18ch, 200px);
+
+  /* 菜单文字更小 */
+  --menu-font: 0.85rem;        /* ≈ 13–14px */
+  --menu-caption-font: 0.8rem; /* 分组标题更小一点 */
+}
+
+/* 应用更小字号与更紧凑间距 */
+#nav-sidebar th a,
+#nav-sidebar td a{
+  font-size: var(--menu-font) !important;
+  line-height: 1.25;
+  padding: 4px 8px !important;   /* 更紧凑 */
+}
+
+#nav-sidebar caption{
+  font-size: var(--menu-caption-font) !important;
+  padding: 6px 6px !important;
+}
+
+/* 搜索框字号同步变小 */
+#nav-sidebar #nav-filter{
+  font-size: var(--menu-font) !important;
+  padding: 3px 6px !important;
+}
+/* 仅隐藏左侧菜单栏中的“增加”列与文字/图标 */
+#nav-sidebar .module table td {            /* 侧栏模型表格第二列 = add 列 */
+  display: none !important;                /* 直接把整列隐掉，最稳妥 */
+}
+
+/* 兜底：不同版本有 a.addlink 或伪元素图标，全部隐藏 */
+#nav-sidebar a.addlink,
+#nav-sidebar .addlink,
+#nav-sidebar td a[href$="/add/"],
+#nav-sidebar td .addlink {
+  display: none !important;
+  visibility: hidden !important;
+}
+#nav-sidebar .addlink::before,
+#nav-sidebar .addlink::after {
+  content: none !important;
+}
+:root{
+  --nav-w: 110px;   /* 你想要的具体宽度，如 150/160/180px */
+}
+
+/* 4) 只收窄左侧菜单宽度（选一个数值即可） */
+:root{ --nav-w: 148px; }  /* 想再窄就改 140/136px，想稍宽改 160px 等 */
+
+#nav-sidebar{
+  width: var(--nav-w) !important;
+  min-width: var(--nav-w) !important;
+  max-width: var(--nav-w) !important;
+  box-sizing: border-box !important;
+}
+
+
+/* === 折叠侧栏时给内容留一个小间距，避免“过头”贴到最左 === */
+:root{
+  --collapsed-gap: 12px;     /* 你想要的留白，8~14px 都可以 */
+}
+
+/* 兼容不同 Django 版本的折叠标记： */
+#toggle-nav-sidebar[aria-expanded="false"] ~ #content,
+body.nav-sidebar-collapsed #content,
+body.toggle-nav-sidebar #content{
+  margin-left: var(--collapsed-gap) !important;     /* 或改成 padding-left 也行 */
+}
+
+/* 展开时不留间距（避免多出来空白） */
+#toggle-nav-sidebar[aria-expanded="true"] ~ #content,
+body:not(.nav-sidebar-collapsed):not(.toggle-nav-sidebar) #content{
+  margin-left: 0 !important;
+}
+/* ——— 可调：左侧菜单目标宽度 ——— */
+:root { --nav-w: 148px; }           /* 需要更窄/更宽自行改数字即可 */
+
+/* 侧栏宽度与按钮定位 */
+#nav-sidebar{
+  width: var(--nav-w) !important;
+  min-width: var(--nav-w) !important;
+  max-width: var(--nav-w) !important;
+}
+#toggle-nav-sidebar{
+  left: var(--nav-w) !important;    /* 展开时按钮贴在侧栏边缘 */
+  z-index: 1001 !important;         /* 保证不被侧栏遮住 */
+}
+
+/* 内容区域：默认不左移；展开(.shifted)时按侧栏宽度左移 */
+#main{ margin-left: 0 !important; }
+#main.shifted{ margin-left: var(--nav-w) !important; }
+
+/* 侧栏收起时把侧栏整体左移出视口（不影响布局流） */
+#main:not(.shifted) #nav-sidebar{
+  margin-left: calc(-1 * var(--nav-w)) !important;
+}
+
+/* 收起时按钮回到最左侧，便于再次展开 */
+#main:not(.shifted) #toggle-nav-sidebar{ left: 0 !important; }
+
+/* 放开内容区的最大宽，减少右侧大块空白 */
+#content, .content{ max-width: none !important; }
+/* === 只隐藏/显示侧栏；不再移动 #main，消除初始左侧空白 === */
+
+/* 侧栏目标宽度（可按需改） */
+:root { --nav-w: 148px; }
+
+/* 1) 永远不要给 #main 做左移/内边距 */
+#main,
+#main.shifted,
+body.toggle-nav-sidebar #main,
+body.nav-sidebar-collapsed #main {
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+}
+
+/* 2) 侧栏展开：正常显示在最左 */
+#nav-sidebar{
+  width: var(--nav-w) !important;
+  min-width: var(--nav-w) !important;
+  max-width: var(--nav-w) !important;
+  margin-left: 0 !important;
+}
+
+/* 3) 侧栏折叠：把侧栏整体左移出视口（而不是挤开 #main） */
+#main:not(.shifted) #nav-sidebar,
+body.nav-sidebar-collapsed #nav-sidebar {
+  margin-left: calc(-1 * var(--nav-w)) !important;
+}
+
+/* 4) 切换按钮：展开时贴在侧栏边缘；折叠时贴屏幕最左 */
+#toggle-nav-sidebar{
+  position: absolute !important;
+  top: 0; bottom: 0;
+  left: var(--nav-w) !important;       /* 展开时 */
+  width: 12px !important;
+  background: transparent !important;
+  border: 0 !important;
+  z-index: 1000 !important;
+}
+#main:not(.shifted) #toggle-nav-sidebar,
+body.nav-sidebar-collapsed #toggle-nav-sidebar{
+  left: 0 !important;                   /* 折叠时 */
+}
+
+/* 5) 保险：任何把 #main 往右挪的样式都清掉 */
+#container, .content, #content {
+  max-width: none !important;
+}
+/* === 左侧菜单与按钮的统一边距（可按需改 6~16px） === */
+:root{
+  --side-gutter: 10px;   /* 左侧想要保留的边距 */
+}
+
+/* 展开：菜单整体右移一个小边距 */
+#nav-sidebar{
+  margin-left: var(--side-gutter) !important;
+}
+
+/* 折叠：仍把菜单移出视口，但保留同样的边距基准 */
+#main:not(.shifted) #nav-sidebar,
+body.nav-sidebar-collapsed #nav-sidebar{
+  /* -nav-w + gutter：菜单隐藏，页面左侧仍留出 gutter */
+  margin-left: calc(-1 * var(--nav-w) + var(--side-gutter)) !important;
+}
+
+/* 按钮位置：展开贴在菜单右缘；折叠回到左侧“边距线” */
+#toggle-nav-sidebar{
+  left: calc(var(--side-gutter) + var(--nav-w)) !important;
+}
+#main:not(.shifted) #toggle-nav-sidebar,
+body.nav-sidebar-collapsed #toggle-nav-sidebar{
+  left: var(--side-gutter) !important;
+}
+

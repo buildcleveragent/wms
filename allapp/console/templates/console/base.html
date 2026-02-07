@@ -1,0 +1,44 @@
+{# templates/console/base.html #}
+{% extends "admin/base.html" %}
+{% load static %}
+
+{% block branding %}
+  {{ block.super }}
+  {% include "console/_user_dropdown.html" %}
+{% endblock %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  /* —— 只在 console 页生效 —— */
+
+  /* 顶栏：商业浅灰（Gray 200），文字深灰 */
+  #header{
+    position: relative;
+    background: #e5e7eb !important;   /* 浅灰 */
+    color: #111827 !important;         /* 深灰 */
+    border: 0 !important;
+    box-shadow: none !important;
+    padding-top: 0; padding-bottom: 0;
+  }
+  #header a, #header * { color: #111827 !important; text-shadow: none !important; }
+
+  /* 去掉第二行：面包屑整条隐藏（只留一行顶栏） */
+  .breadcrumbs{ display: none !important; }
+
+  /* 隐藏 admin 自带 user-tools，那行不再占空间 */
+  #header #user-tools{ display: none !important; }
+
+  /* 头像菜单固定在右上角，不参与布局高度 */
+  #ud-root{ position: absolute !important; right: 12px; top: 6px; z-index: 1000; }
+  #ud-root .ud-menu{ right: 0; }
+
+  /* 防止页面顶端还有任何边框/条带 */
+  html, body{ border: 0 !important; }
+</style>
+{% endblock %}
+
+
+
+{% block content %}
+  {% block console_content %}{% endblock %}
+{% endblock %}

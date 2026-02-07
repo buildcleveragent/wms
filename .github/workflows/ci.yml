@@ -1,0 +1,290 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop, feat/* ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 2 * * *'
+
+# 最小权限（可按需在各 job 层覆盖）
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION: '18'
+  MYSQL_VERSION: '8.0'
+
+jobs:
+  lint:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements/*.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements/dev.txt
+      - name: Run Black
+        run: black --check --diff .
+      - name: Run isort
+        run: isort --check-only --diff .
+      - name: Run Ruff
+        run: ruff check .
+      - name: Run Flake8
+        run: flake8 . --max-line-length=100 --extend-ignore=E203,W503
+      - name: Bandit
+        run: bandit -r allapp/ -ll || true
+      - name: Safety (or pip-audit)
+        run: safety check --json || true
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: wms_db_test
+          MYSQL_USER: wms_app
+          MYSQL_PASSWORD: testpass123
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -prootpassword || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+          --health-start-period=30s
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd="redis-cli ping || exit 1"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+          --health-start-period=10s
+    strategy:
+      fail-fast: false
+      matrix:
+        django-version: ['5.2.*']
+        test-group: [unit, integration, api]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements/*.txt
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmysqlclient-dev
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install Django==${{ matrix.django-version }}
+          pip install -r requirements/test.txt
+          pip install pytest-xdist
+      - name: Wait for DB ready (extra guard)
+        run: |
+          for i in {1..60}; do
+            python - <<'PY'
+import sys, socket
+s=socket.socket();
+try:
+  s.connect(("mysql",3306)); 
+  sys.exit(0)
+except Exception:
+  sys.exit(1)
+PY
+            if [ $? -eq 0 ]; then echo "MySQL ready"; break; fi
+            sleep 2
+          done
+      - name: Set up test env & migrate
+        env:
+          DB_NAME: wms_db_test
+          DB_USER: wms_app
+          DB_PASSWORD: testpass123
+          DB_HOST: mysql
+          DB_PORT: 3306
+          REDIS_HOST: redis
+          REDIS_PORT: 6379
+          SECRET_KEY: test-secret-key-for-ci
+          DEBUG: 'False'
+        run: |
+          python manage.py migrate --noinput
+      - name: Run ${{ matrix.test-group }} tests
+        env:
+          DB_NAME: wms_db_test
+          DB_USER: wms_app
+          DB_PASSWORD: testpass123
+          DB_HOST: mysql
+          DB_PORT: 3306
+          REDIS_HOST: redis
+          REDIS_PORT: 6379
+          SECRET_KEY: test-secret-key-for-ci
+          DEBUG: 'False'
+        run: |
+          if [ "${{ matrix.test-group }}" = "unit" ]; then
+            pytest -n auto allapp/tests/test_models.py allapp/*/tests/test_models.py -v --tb=short --maxfail=1 --cov=allapp --cov-append --cov-report=xml:coverage-${{ matrix.test-group }}.xml
+          elif [ "${{ matrix.test-group }}" = "integration" ]; then
+            pytest -n auto allapp/tests/test_integration.py -v --tb=short --maxfail=1 --cov=allapp --cov-append --cov-report=xml:coverage-${{ matrix.test-group }}.xml
+          else
+            pytest -n auto allapp/tests/test_api.py -v --tb=short --maxfail=1 --cov=allapp --cov-append --cov-report=xml:coverage-${{ matrix.test-group }}.xml
+          fi
+      - name: Upload test & coverage shards
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-${{ matrix.test-group }}
+          path: |
+            ./.pytest_cache
+            ./coverage-${{ matrix.test-group }}.xml
+
+  coverage-aggregate:
+    name: Combine Coverage
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download coverage shards
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pytest-*
+          merge-multiple: true
+      - name: Install coverage
+        run: |
+          python -m pip install --upgrade pip
+          pip install coverage[toml] pytest-cov
+      - name: Combine & report
+        run: |
+          coverage combine || true
+          coverage xml -o coverage.xml
+          coverage report --fail-under=70
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: combined
+          fail_ci_if_error: false
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: lint
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure reports dir
+        run: mkdir -p reports
+      - name: Trivy (FS)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+      - name: OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@v4.0.0
+        with:
+          project: 'WMS'
+          path: '.'
+          format: 'HTML'
+          out: 'reports'
+      - name: Upload OWASP results
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-report
+          path: reports/
+
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [coverage-aggregate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/wms:latest
+            ${{ secrets.DOCKER_USERNAME }}/wms:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+      - name: Trivy (Image)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ secrets.DOCKER_USERNAME }}/wms:${{ github.sha }}
+          format: 'sarif'
+          output: 'docker-scan-results.sarif'
+      - name: Upload Docker SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'docker-scan-results.sarif'
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: staging
+      url: https://staging.wms.example.com
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to staging
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_KEY: ${{ secrets.STAGING_KEY }}
+        run: |
+          echo "$STAGING_KEY" > deploy_key
+          chmod 600 deploy_key
+          ssh -i deploy_key -o StrictHostKeyChecking=no $STAGING_USER@$STAGING_HOST '
+            set -euo pipefail
+            cd /app/wms &&
+            docker compose pull &&
+            docker compose up -d &&
+            docker compose exec -T web python manage.py migrate --noinput &&
+            docker compose exec -T web python manage.py collectstatic --noinput
+          '

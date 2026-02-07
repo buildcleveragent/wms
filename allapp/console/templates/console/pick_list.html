@@ -1,0 +1,20 @@
+<!-- templates/console/pick_list.html -->
+{% extends "console/base.html" %}
+{% block content %}
+<h1 class="text-xl">拣货任务</h1>
+<table>
+  <thead><tr><th>单号</th><th>仓库</th><th>状态</th><th></th></tr></thead>
+  <tbody>
+  {% for t in tasks %}
+    <tr id="t{{t.id}}">
+      <td>{{ t.task_no }}</td>
+      <td>{{ t.warehouse.name }}</td>
+      <td>{{ t.status }}</td>
+      <td>
+        <a class="btn" href="/console/pick/{{t.id}}/">进入</a>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

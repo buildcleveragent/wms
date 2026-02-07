@@ -1,0 +1,125 @@
+{% load static %}
+<!doctype html>
+<html lang="zh-CN" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}WMS{% endblock %}</title>
+
+  {# 样式顺序：先 app.css，再 forms.css（forms 覆盖微调） #}
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  <link rel="stylesheet" href="{% static 'css/forms.css' %}">
+
+  {# 关键兜底：让 flex 子项可收缩，避免被内容最小宽度撑爆页面 #}
+  <style>
+    .layout-shell > * { min-width: 0; }
+  </style>
+
+  {% block extra_head %}{% endblock %}
+</head>
+<body class="min-h-screen bg-gray-50 text-gray-900">
+  {# 顶部栏 #}
+  <header class="h-14 bg-brand text-white flex items-center justify-between px-3 md:px-4">
+    <div class="flex items-center gap-3">
+      <button id="btnSidebar" class="md:hidden -ml-1 p-2 rounded hover:bg-white/10" aria-label="Toggle Sidebar">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <a href="/" class="flex items-center gap-2">
+        <div class="h-7 w-7 rounded bg-white/90 text-brand grid place-content-center font-bold">P</div>
+        <span class="hidden sm:block font-semibold tracking-wide">金桥融通仓管理系统</span>
+      </a>
+    </div>
+    <div class="flex items-center gap-2 md:gap-3 text-sm">
+      {% url 'logout' as logout_url %}
+      {% if logout_url %}
+        <a class="btn btn-outline !text-white !border-white/40 hover:!bg-white/10" href="{{ logout_url }}">退出</a>
+      {% endif %}
+    </div>
+  </header>
+
+  {# 主体布局：左侧栏 + 右内容 #}
+  <div class="flex layout-shell">
+    {# 侧边栏（桌面显示，移动端折叠） #}
+    <aside id="sidebar" class="w-56 md:w-64 shrink-0 bg-white border-r min-h-[calc(100vh-3.5rem)] p-2 hidden md:block overflow-y-auto">
+      <nav class="space-y-1">
+        {% block sidebar %}{% include "_sidebar.html" %}{% endblock %}
+      </nav>
+    </aside>
+
+    {# 右侧内容区：可收缩 + 阻止横向溢出撑爆页面 #}
+    <section class="flex-1 min-w-0 overflow-x-hidden p-3 md:p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <div>
+          <nav class="text-sm text-gray-500" aria-label="breadcrumb">
+            {% block breadcrumbs %}
+              <ol class="flex gap-1">
+                <li><a href="/" class="hover:text-gray-800">首页</a> /</li>
+                <li class="text-gray-800">{% block page_module %}模块{% endblock %}</li>
+              </ol>
+            {% endblock %}
+          </nav>
+          <h1 class="text-xl font-semibold mt-1">{% block page_title %}页面标题{% endblock %}</h1>
+        </div>
+        <div class="flex gap-2">{% block page_actions %}{% endblock %}</div>
+      </div>
+
+      <div class="tabs flex items-center gap-2 overflow-x-auto">
+        {% block top_tabs %}{% endblock %}
+      </div>
+
+      {% if messages %}
+        <div class="space-y-2">
+          {% for message in messages %}
+            <div class="rounded-xl border px-3 py-2 text-sm
+              {% if message.tags == 'success' %}bg-green-50 border-green-200 text-green-700
+              {% elif message.tags == 'error' %}bg-rose-50 border-rose-200 text-rose-700
+              {% else %}bg-sky-50 border-sky-200 text-sky-700{% endif %}">
+              {{ message }}
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {# 过滤区 & 主内容区 #}
+      <section class="card p-3 md:p-4">{% block filters %}{% endblock %}</section>
+
+      {# 核心表格/内容区：不让它把页面撑宽；横向滚动放到页面内层自己处理 #}
+      <section class="card p-0 overflow-x-hidden">
+        {% block table %}{% block content %}{% endblock %}{% endblock %}
+      </section>
+
+      {% block extra_sections %}{% endblock %}
+    </section>
+  </div>
+
+  {% block extra_js %}
+  <script>
+    // 移动端侧边栏折叠
+    (function(){
+      const btn = document.getElementById('btnSidebar');
+      const sb  = document.getElementById('sidebar');
+      if (btn && sb) btn.addEventListener('click', ()=> sb.classList.toggle('hidden'));
+    })();
+  </script>
+
+    <script>
+  document.addEventListener("DOMContentLoaded", function () {
+    // 获取 'accounts' 菜单的 dropdown-menu
+    var accountsDropdownMenu = document.querySelector('a[href="/admin/accounts/"]').closest('div.dropdown-menu');
+
+    // 如果找到了 accounts 下拉菜单，直接将 'Group' 组项添加进去
+    if (accountsDropdownMenu) {
+        var groupMenuItem = document.createElement('a');
+        groupMenuItem.className = 'dropdown-item';
+        groupMenuItem.href = '/admin/auth/group/';
+        groupMenuItem.textContent = '组';
+
+        // 将新的组项添加到 'accounts' 下拉菜单中
+        accountsDropdownMenu.appendChild(groupMenuItem);
+    }
+});
+    </script>
+
+  {% endblock %}
+</body>
+</html>

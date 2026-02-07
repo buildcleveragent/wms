@@ -1,0 +1,60 @@
+{% extends "base.html.bak" %}
+{% block title %}{{ is_edit|yesno:"编辑入库订单,新建入库订单" }}{% endblock %}
+{% block content %}
+<h2>{{ is_edit|yesno:"编辑入库订单,新建入库订单" }}</h2>
+
+<form method="post">
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+  <fieldset>
+    <legend>头信息</legend>
+    <div>订单编号：{{ form.order_no }}</div>
+    <div>业务日期：{{ form.biz_date }}</div>
+    <div>货主：{{ form.owner }}</div>
+    <div>供应商：{{ form.supplier }}</div>
+    <div>入库类型：{{ form.inbound_type }}</div>
+    <div>交货方式：{{ form.delivery_method }}</div>
+    <div>预计到货：{{ form.eta }}</div>
+    <div>源单号：{{ form.src_bill_no }}</div>
+    <div>地址：{{ form.address }}</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>明细</legend>
+    {{ line_formset.management_form }}
+    <table>
+      <tr>
+        <th>商品编号</th><th>名称</th><th>规格</th>
+        <th>数量</th><th>单位</th><th>单价</th>
+        <th>批号</th><th>备注</th><th>删除</th>
+      </tr>
+      {% for f in line_formset %}
+      <tr>
+        <td>{{ f.product_code }}</td>
+        <td>{{ f.product_name }}</td>
+        <td>{{ f.spec }}</td>
+        <td>{{ f.base_qty }}</td>
+        <td>{{ f.base_uom }}</td>
+        <td>{{ f.price }}</td>
+        <td>{{ f.lot_no }}</td>
+        <td>{{ f.note }}</td>
+        <td>{% if f.instance.pk %}{{ f.DELETE }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </fieldset>
+
+  <p>
+    <button type="submit">保存草稿</button>
+    {% if is_edit %}
+      <a href="#" onclick="document.getElementById('submit-form').submit();return false;">提交订单</a>
+    {% endif %}
+  </p>
+</form>
+
+{% if is_edit %}
+<form id="submit-form" method="post" action="{% url 'inbound_ui:order_submit' object.id %}" style="display:none;">
+  {% csrf_token %}
+</form>
+{% endif %}
+{% endblock %}

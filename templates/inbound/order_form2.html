@@ -1,0 +1,387 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title|default:"入库订单" }}{% endblock %}
+{% block page_module %}入库管理{% endblock %}
+{% block page_title %}{{ title|default:"新建入库订单" }}{% endblock %}
+
+{% block sidebar %}
+  <details class="nav-group" open>
+    <summary>入库管理</summary>
+    <div class="pl-3 space-y-1">
+      {% if perms.inbound.view_inboundorder %}<a href="{% url 'inbound:order_list' %}" class="nav-item">入库订单</a>{% endif %}
+      {% if perms.inbound.view_inboundreceiving %}<a href="#" class="nav-item">收货任务</a>{% endif %}
+      {% if perms.inbound.view_inboundreceipt %}<a href="#" class="nav-item">收货记录</a>{% endif %}
+      {% if perms.inbound.view_inboundputaway %}<a href="#" class="nav-item">上架任务</a>{% endif %}
+    </div>
+  </details>
+{% endblock %}
+
+{% block page_actions %}
+  <a class="btn btn-outline" href="{% url 'inbound:order_list' %}">返回列表</a>
+{% endblock %}
+
+{% block filters %}{% endblock %}
+
+{% block table %}
+<form method="post" novalidate class="p-4 space-y-4">
+  {% csrf_token %}
+  <section class="card p-4 form-dense form-hz">
+{#  <div class="card-title">订单信息</div>#}
+  <div class="grid grid-cols-1 md:grid-cols-6 gap-4 text-sm">
+{#    <div class="grid grid-cols-1 md:grid-cols-5 grid-flow-row-dense gap-4 text-sm">#}
+
+      <label class="block" >
+      <span >{{ form.order_no.label }}</span>
+      {{ form.order_no }}{% for e in form.order_no.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block">
+      <span class="text-gray-600">{{ form.owner.label }}</span>
+      {{ form.owner }}{% for e in form.owner.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.supplier.label }}</span>
+      {{ form.supplier }}{% for e in form.supplier.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.inbound_type.label }}</span>
+      {{ form.inbound_type }}{% for e in form.inbound_type.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.delivery_method.label }}</span>
+      {{ form.delivery_method }}{% for e in form.delivery_method.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.eta.label }}</span>
+      {{ form.eta }}{% for e in form.eta.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.src_bill_no.label }}</span>
+      {{ form.src_bill_no }}{% for e in form.src_bill_no.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.address.label }}</span>
+      {{ form.address }}{% for e in form.address.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.carrierCompany.label }}</span>
+      {{ form.carrierCompany }}{% for e in form.carrierCompany.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.vehicle.label }}</span>
+      {{ form.vehicle }}{% for e in form.vehicle.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+
+    <label class="block md:col-span-1">
+      <span class="text-gray-600">{{ form.memo.label }}</span>
+      {{ form.memo }}{% for e in form.memo.errors %}<p class="field-error">{{ e }}</p>{% endfor %}
+    </label>
+
+    {{ form.non_field_errors }}
+  </div>
+</section>
+
+
+
+
+
+  <section class="card p-4">
+  <div class="flex items-center justify-between mb-3">
+    <div class="card-title">订单明细</div>
+    <div class="flex gap-2">
+      <button type="button" id="addRow" class="btn btn-primary">新增一行</button>
+    </div>
+  </div>
+
+  {{ formset.management_form }}
+
+
+<div class="table-wrap  overflow-x-auto">
+  <table class="min-w-full table-fixed text-sm border-collapse" style="min-width: 1000px;">
+    <thead class="bg-gray-50">
+      <tr class="bg-gray-50">
+        <th class="w-10 border border-gray-300 px-2 py-1 text-center">#</th>
+        <th class="w-[18rem] border border-gray-300 px-2 py-1">商品编码</th>
+          <th class="w-[18rem] border border-gray-300 px-2 py-1">商品名称</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">规格</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">批次</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">数量</th>
+        <th class="w-24 border border-gray-300 px-2 py-1">单位</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">价格</th>
+        <th class="w-24 border border-gray-300 px-2 py-1 text-center">删除</th>
+
+          <th class="w-10 border border-gray-300 px-2 py-1 text-center">#</th>
+        <th class="w-[18rem] border border-gray-300 px-2 py-1">商品编码</th>
+          <th class="w-[18rem] border border-gray-300 px-2 py-1">商品名称</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">规格</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">批次</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">数量</th>
+        <th class="w-24 border border-gray-300 px-2 py-1">单位</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">价格</th>
+        <th class="w-24 border border-gray-300 px-2 py-1 text-center">删除</th>
+
+          <th class="w-10 border border-gray-300 px-2 py-1 text-center">#</th>
+        <th class="w-[18rem] border border-gray-300 px-2 py-1">商品编码</th>
+          <th class="w-[18rem] border border-gray-300 px-2 py-1">商品名称</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">规格</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">批次</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">数量</th>
+        <th class="w-24 border border-gray-300 px-2 py-1">单位</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">价格</th>
+        <th class="w-24 border border-gray-300 px-2 py-1 text-center">删除</th>
+            <th class="w-10 border border-gray-300 px-2 py-1 text-center">#</th>
+        <th class="w-[18rem] border border-gray-300 px-2 py-1">商品编码</th>
+          <th class="w-[18rem] border border-gray-300 px-2 py-1">商品名称</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">规格</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">批次</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">数量</th>
+        <th class="w-24 border border-gray-300 px-2 py-1">单位</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">价格</th>
+        <th class="w-24 border border-gray-300 px-2 py-1 text-center">删除</th>
+
+          <th class="w-10 border border-gray-300 px-2 py-1 text-center">#</th>
+        <th class="w-[18rem] border border-gray-300 px-2 py-1">商品编码</th>
+          <th class="w-[18rem] border border-gray-300 px-2 py-1">商品名称</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">规格</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">批次</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">数量</th>
+        <th class="w-24 border border-gray-300 px-2 py-1">单位</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">价格</th>
+        <th class="w-24 border border-gray-300 px-2 py-1 text-center">删除</th>
+
+          <th class="w-10 border border-gray-300 px-2 py-1 text-center">#</th>
+        <th class="w-[18rem] border border-gray-300 px-2 py-1">商品编码</th>
+          <th class="w-[18rem] border border-gray-300 px-2 py-1">商品名称</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">规格</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">批次</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">数量</th>
+        <th class="w-24 border border-gray-300 px-2 py-1">单位</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">价格</th>
+        <th class="w-24 border border-gray-300 px-2 py-1 text-center">删除</th>
+      </tr>
+    </thead>
+
+    <tbody id="lineBody">
+      {% for f in formset.forms %}
+      <tr class="line-row">
+        <td class="border border-gray-300 px-2 py-1 text-center text-gray-500">{{ forloop.counter }}</td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.product_code }} {{ f.product_name }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.spec }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.lot_no }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-right">
+          {{ f.base_qty }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.base_uom }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-right">
+          {{ f.price }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-center">
+          <button type="button" class="btn btn-outline btn-sm remove-row">移除</button>
+          <span class="hidden">{{ f.DELETE }}</span>
+        </td>
+<td class="border border-gray-300 px-2 py-1 text-center text-gray-500">{{ forloop.counter }}</td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.product_code }} {{ f.product_name }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.spec }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.lot_no }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-right">
+          {{ f.base_qty }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.base_uom }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-right">
+          {{ f.price }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-center">
+          <button type="button" class="btn btn-outline btn-sm remove-row">移除</button>
+          <span class="hidden">{{ f.DELETE }}</span>
+        </td>
+<td class="border border-gray-300 px-2 py-1 text-center text-gray-500">{{ forloop.counter }}</td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.product_code }} {{ f.product_name }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.spec }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.lot_no }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-right">
+          {{ f.base_qty }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.base_uom }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-right">
+          {{ f.price }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-center">
+          <button type="button" class="btn btn-outline btn-sm remove-row">移除</button>
+          <span class="hidden">{{ f.DELETE }}</span>
+        </td>
+<td class="border border-gray-300 px-2 py-1 text-center text-gray-500">{{ forloop.counter }}</td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.product_code }} {{ f.product_name }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.spec }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.lot_no }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-right">
+          {{ f.base_qty }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.base_uom }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-right">
+          {{ f.price }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-center">
+          <button type="button" class="btn btn-outline btn-sm remove-row">移除</button>
+          <span class="hidden">{{ f.DELETE }}</span>
+        </td>
+<td class="border border-gray-300 px-2 py-1 text-center text-gray-500">{{ forloop.counter }}</td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.product_code }} {{ f.product_name }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.spec }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.lot_no }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-right">
+          {{ f.base_qty }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.base_uom }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-right">
+          {{ f.price }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-center">
+          <button type="button" class="btn btn-outline btn-sm remove-row">移除</button>
+          <span class="hidden">{{ f.DELETE }}</span>
+        </td>
+
+        <td class="hidden">{{ f.id }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+
+
+
+  <div class="flex justify-end gap-2 mt-3">
+    <button name="action" value="save_draft" class="btn btn-outline">保存草稿</button>
+    <button name="action" value="save_submit" class="btn btn-primary">保存并提交</button>
+  </div>
+
+  <template id="emptyRowTpl">
+    <tr class="line-row">
+      <td class="center text-gray-500">#</td>
+      <td>{{ formset.empty_form.product_code }} {{ formset.empty_form.product_name }}</td>
+      <td>{{ formset.empty_form.spec }}</td>
+      <td>{{ formset.empty_form.lot_no }}</td>
+      <td class="num">{{ formset.empty_form.base_qty }}</td>
+      <td class="center">{{ formset.empty_form.base_uom }}</td>
+      <td class="num">{{ formset.empty_form.price }}</td>
+      <td class="center"><button type="button" class="btn btn-outline btn-sm remove-row">移除</button><span class="hidden">{{ formset.empty_form.DELETE }}</span></td>
+      <td class="hidden">{{ formset.empty_form.id }}</td>
+    </tr>
+  </template>
+</section>
+
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+  const prefix = "{{ formset.prefix }}";
+  const totalEl = document.getElementById(`id_${prefix}-TOTAL_FORMS`);
+  const tbody = document.getElementById('lineBody');
+  const tpl = document.getElementById('emptyRowTpl');
+  document.getElementById('addRow').addEventListener('click', () => {
+    const idx = parseInt(totalEl.value, 10);
+    let html = tpl.innerHTML.replace(/__prefix__/g, idx);
+    const frag = document.createElement('tbody');
+    frag.innerHTML = html.trim();
+    const row = frag.firstElementChild; tbody.appendChild(row);
+    totalEl.value = idx + 1; renumber();
+  });
+  tbody.addEventListener('click', (e)=>{
+    const btn = e.target.closest('.remove-row'); if(!btn) return;
+    const tr = btn.closest('tr'); const del = tr.querySelector('input[type="checkbox"][name$="-DELETE"]');
+    if (del) { del.checked = true; tr.style.opacity = .4; tr.classList.add('line-through'); }
+    else { tr.remove(); totalEl.value = Math.max(0, parseInt(totalEl.value, 10) - 1); }
+    renumber();
+  });
+  function renumber(){ Array.from(tbody.querySelectorAll('tr.line-row')).forEach((tr,i)=>{ const cell=tr.querySelector('td:first-child'); if(cell) cell.textContent=i+1;}); }
+  renumber();
+})();
+</script>
+{% endblock %}

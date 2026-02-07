@@ -1,0 +1,9 @@
+<div class="fixed inset-0 bg-black/40 flex items-center justify-center" hx-on="click: this.remove()">
+  <div class="bg-white rounded-lg shadow-xl max-w-lg w-full p-4" hx-on="click: event.stopPropagation()">
+    <div class="font-semibold text-lg mb-2">{{ title }}</div>
+    <div class="prose text-sm max-w-none">{{ body_html|safe }}</div>
+    <div class="mt-4 text-right">
+      <button class="px-3 py-1 border rounded" onclick="this.closest('.fixed').remove()">关闭</button>
+    </div>
+  </div>
+</div>

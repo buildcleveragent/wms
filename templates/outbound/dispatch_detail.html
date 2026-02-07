@@ -1,0 +1,22 @@
+{% extends "outbound/base.html" %}
+<!-- templates/outbound/dispatch_detail.html 按钮区 -->
+<div class="space-x-2 mb-4">
+  <form method="post" action="{% url 'outbound:ship' dispatch.id %}" class="inline">
+    {% csrf_token %}
+    <button class="px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">发运</button>
+  </form>
+  <form method="post" action="{% url 'outbound:deliver' dispatch.id %}" class="inline">
+    {% csrf_token %}
+    <button class="px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700">签收</button>
+  </form>
+</div>
+
+
+
+{% block title %}发运 {{ dispatch.dispatch_no }}{% endblock %}
+{% block content %}
+<div class="bg-white shadow rounded-lg p-5">
+  <h2 class="text-lg font-semibold mb-4">发运任务：{{ dispatch.dispatch_no }}</h2>
+  <p>关联出库单：{{ dispatch.shipment.shipment_no }}</p>
+</div>
+{% endblock %}

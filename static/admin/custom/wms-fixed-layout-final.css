@@ -1,0 +1,86 @@
+/* 可调变量（不想写死可配合下方 JS 自动测量） */
+:root{
+  --wms-h1: 48px;          /* 顶栏高度 header#header */
+  --wms-h2: 40px;          /* 面包屑高度 .breadcrumbs */
+  --wms-left: 260px;       /* 左侧菜单宽度（展开态） */
+  --wms-right: 300px;      /* 右侧筛选宽度 */
+  --wms-h-toolbar: 52px;   /* 列表页搜索工具条大致高度 #toolbar */
+  --wms-h-actions: 40px;   /* 动作条 .actions */
+}
+
+/* 顶部两条固定 */
+#header{
+  position: fixed !important; top:0; left:0; right:0; z-index:3000;
+}
+.breadcrumbs{
+  position: fixed !important; top:var(--wms-h1); left:0; right:0; z-index:2990;
+}
+body{
+  padding-top: calc(var(--wms-h1) + var(--wms-h2)) !important;
+}
+
+/* 左侧菜单固定（你的 DOM 是 nav#nav-sidebar） */
+#nav-sidebar{
+  position: fixed !important;
+  top: calc(var(--wms-h1) + var(--wms-h2));
+  left: 0; bottom: 0;
+  width: var(--wms-left);
+  overflow: auto;
+  z-index: 2800;
+  background: var(--body-bg, #f6f7f8);
+  border-right: 1px solid rgba(0,0,0,.06);
+}
+/* 折叠按钮也固定（可选） */
+#toggle-nav-sidebar{
+  position: fixed !important;
+  top: calc(var(--wms-h1) + var(--wms-h2));
+  left: var(--wms-left);
+  z-index: 2810;
+}
+
+/* 右侧筛选固定 —— 两个选择器都给，兼容不同模板 */
+#content-related, #changelist-filter{
+  position: fixed !important;
+  top: calc(var(--wms-h1) + var(--wms-h2));
+  right: 0; bottom: 0;
+  width: var(--wms-right);
+  overflow: auto;
+  z-index: 2800;
+  background: #fff;
+  border-left: 1px solid rgba(0,0,0,.06);
+}
+
+/* 只让中间内容滚动：把滚动放在 #content-main 上 */
+#container{ overflow: visible !important; }      /* 避免父级 overflow 破坏定位 */
+#content{   overflow: visible !important; }
+
+#content-main{
+  position: relative;
+  height: calc(100vh - (var(--wms-h1) + var(--wms-h2)));
+  overflow: auto !important;                     /* 唯一可滚动区域 */
+  margin-left: var(--wms-left) !important;       /* 给两侧留位置 —— 关键 */
+  margin-right: var(--wms-right) !important;
+  z-index: 1;
+  min-width: 980px;                              /* 防止窄屏抖动，可按需改 */
+}
+
+/* 列表页内部：工具条/动作条/表头在内容容器内吸顶 */
+#changelist #toolbar{
+  position: sticky; top: 0; z-index: 50;
+  background: var(--body-bg, #f6f7f8);
+}
+#changelist .actions{
+  position: sticky; top: var(--wms-h-toolbar); z-index: 49;
+  background: #fff;
+}
+#result_list thead th{
+  position: sticky;
+  top: calc(var(--wms-h-toolbar) + var(--wms-h-actions));
+  z-index: 48;
+  background: #fff; /* 避免透到底色 */
+}
+
+/* 防止侧栏滚动把页面带跑 */
+#nav-sidebar *, #content-related *, #changelist-filter *{
+  overscroll-behavior: contain;
+}

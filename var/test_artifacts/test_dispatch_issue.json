@@ -1,0 +1,65 @@
+{
+  "test": "test_dispatch_issue",
+  "steps": [
+    {
+      "title": "STEP-1 创建任务与行",
+      "info": {
+        "task_no": "DP-1757737265942-de5e",
+        "from": "DOCK-01",
+        "plan_qty": "6",
+        "product": "SKU-1"
+      }
+    },
+    {
+      "title": "STEP-2 扫码",
+      "info": {
+        "qty": 6,
+        "from": "DOCK-01"
+      }
+    },
+    {
+      "title": "扫描明细",
+      "info": [
+        {
+          "id": 2,
+          "product_id": 38,
+          "product": "SKU-1",
+          "qty_base": "",
+          "qty_base_delta": "6.000",
+          "location_id": 1,
+          "location": "DOCK-01",
+          "client_seq": "",
+          "label_key": null
+        }
+      ]
+    },
+    {
+      "title": "台账分录明细",
+      "info": [
+        {
+          "id": 2,
+          "tx_type": "ISSUE",
+          "loc_id": 1,
+          "loc": "DOCK-01",
+          "product_id": 38,
+          "product": "SKU-1",
+          "qty": "-6.0000",
+          "src_id": 2
+        }
+      ]
+    },
+    {
+      "title": "DISPATCH 发出与现存（期望 vs 实际）",
+      "expected": {
+        "tx_count": 1,
+        "issue_qty": "-6",
+        "onhand_dock": "0"
+      },
+      "actual": {
+        "tx_count": 1,
+        "issue_qty": "-6.0000",
+        "onhand_dock": "0"
+      }
+    }
+  ]
+}

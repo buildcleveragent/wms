@@ -1,0 +1,26 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block content %}
+<div class="container" style="max-width:480px;">
+  <h1 class="text-center mb-4">{% trans "Sign in" %}</h1>
+
+  {% if form.errors %}
+    <div class="errorlist">{{ form.non_field_errors }}</div>
+  {% endif %}
+
+  <form method="post" action="{% url 'login' %}">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ next }}"/>
+
+    <div class="form-row mb-3">
+      {{ form.username.label_tag }} {{ form.username }}
+    </div>
+    <div class="form-row mb-3">
+      {{ form.password.label_tag }} {{ form.password }}
+    </div>
+
+    <button type="submit" class="btn btn-primary w-100">{% trans "Log in" %}</button>
+  </form>
+</div>
+{% endblock %}

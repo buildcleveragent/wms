@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>收货单 {{ object.task_no }}</title>
+
+    <style>
+      /* 打印时隐藏不需要的元素 */
+      @media print {
+        .no-print {
+          display: none !important;
+        }
+      }
+
+      @page {
+        size: A4;
+        margin: 10mm;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, "Microsoft YaHei", sans-serif;
+        font-size: 12px;
+        color: #111;
+      }
+
+      .header {
+        text-align: center;
+        margin-bottom: 10px;
+      }
+
+      .header h1 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .meta {
+        margin-bottom: 8px;
+      }
+
+      .meta span {
+        margin-right: 16px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+      }
+
+      th,
+      td {
+        border: 1px solid #ccc;
+        padding: 4px 6px;
+        text-align: left;
+      }
+
+      th {
+        background: #f1f5f9;
+      }
+
+      .footer {
+        margin-top: 24px;
+      }
+    </style>
+  </head>
+
+  <body onload="window.print()">
+    <!-- 顶部仅在屏幕上显示的按钮 -->
+    <div class="no-print" style="text-align:right;margin-bottom:8px;">
+      <button onclick="window.print()">重新打印</button>
+      <button onclick="window.close()">关闭</button>
+    </div>
+
+    <div class="header">
+      <h1>收货单</h1>
+      <div>任务号：{{ object.task_no }}</div>
+    </div>
+
+    <div class="meta">
+      <span>货主：{{ object.owner.name }}</span>
+      <span>仓库：{{ object.warehouse.name }}</span>
+      <span>创建时间：{{ object.created_at|date:"Y-m-d H:i" }}</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>行号</th>
+          <th>商品编码</th>
+          <th>商品名称</th>
+          <th>收货数量(基本单位)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in lines %}
+          <tr>
+            <td>{{ forloop.counter }}</td>
+            <td>{{ line.product.sku }}</td>
+            <td>{{ line.product.name }}</td>
+            <td>{{ line.qty_plan }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <div>收货人：________________</div>
+      <div style="margin-top:8px;">签字日期：____年____月____日</div>
+    </div>
+
+    <script>
+      // 如果是通过 window.open 打开的新窗口，打印完自动关闭（不是必须）
+      window.onafterprint = function () {
+        // 有些浏览器不允许随便关闭当前标签，可以按需要保留或注释掉
+        // window.close();
+      };
+    </script>
+  </body>
+</html>

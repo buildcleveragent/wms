@@ -1,0 +1,6 @@
+from django.apps import AppConfig
+
+class InventoryConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'allapp.inventory'
+    verbose_name = "库存管理"           # 左侧一级菜单中文

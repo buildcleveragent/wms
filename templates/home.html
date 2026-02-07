@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4">
+  <h1 class="mb-3">仓配管理平台</h1>
+  <a class="btn btn-primary" href="{% url 'inbound:order_create' %}">新建入库订单</a>
+</div>
+{% endblock %}

@@ -1,0 +1,78 @@
+{
+  "test": "test_reloc_pair_balance",
+  "steps": [
+    {
+      "title": "STEP-1 创建任务与行",
+      "info": {
+        "task_no": "RLC-1757737265414-ab26",
+        "from": "BIN-A1",
+        "to": "BIN-A2",
+        "plan_qty": "5",
+        "product": "SKU-1"
+      }
+    },
+    {
+      "title": "STEP-2 扫码",
+      "info": {
+        "qty": 5,
+        "to": "BIN-A2"
+      }
+    },
+    {
+      "title": "扫描明细",
+      "info": [
+        {
+          "id": 2,
+          "product_id": 36,
+          "product": "SKU-1",
+          "qty_base": "",
+          "qty_base_delta": "5.000",
+          "location_id": 87,
+          "location": "BIN-A2",
+          "client_seq": "",
+          "label_key": null
+        }
+      ]
+    },
+    {
+      "title": "台账分录明细",
+      "info": [
+        {
+          "id": 2,
+          "tx_type": "ISSUE",
+          "loc_id": 86,
+          "loc": "BIN-A1",
+          "product_id": 36,
+          "product": "SKU-1",
+          "qty": "-5.0000",
+          "src_id": 2
+        },
+        {
+          "id": 3,
+          "tx_type": "RECEIVE",
+          "loc_id": 87,
+          "loc": "BIN-A2",
+          "product_id": 36,
+          "product": "SKU-1",
+          "qty": "5.0000",
+          "src_id": 2
+        }
+      ]
+    },
+    {
+      "title": "RELOC 配平与现存（期望 vs 实际）",
+      "expected": {
+        "tx_count": 2,
+        "sum_qty": "0",
+        "onhand_bin1": "0",
+        "onhand_bin2": "5"
+      },
+      "actual": {
+        "tx_count": 2,
+        "sum_qty": "0.0000",
+        "onhand_bin1": "0",
+        "onhand_bin2": "5.0000"
+      }
+    }
+  ]
+}

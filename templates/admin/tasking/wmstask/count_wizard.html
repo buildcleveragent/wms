@@ -1,0 +1,18 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+  <div class="module aligned">
+    <h1>{% trans "新增盘点任务（向导）" %}</h1>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <fieldset class="module aligned">
+        {{ form.as_p }}
+      </fieldset>
+      <div class="submit-row">
+        <input type="submit" class="default" value="{% trans '生成盘点' %}">
+        <a class="button" href="{% url 'admin:tasking_wmstask_changelist' %}">{% trans "返回列表" %}</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

@@ -1,0 +1,31 @@
+/* 折叠时隐藏列表（只负责折叠显示，不干预宽度/布局） */
+#nav-sidebar .module.collapsed tbody { display: none; }
+
+/* 组标题样式 & 小三角 */
+#nav-sidebar .module caption {
+  cursor: pointer;
+  position: relative;
+  padding-right: 0.2rem;
+}
+#nav-sidebar .module caption::after {
+  content: "▸";
+  position: absolute;
+  right: .2rem;
+  transform: rotate(90deg);
+  transition: transform .15s ease;
+  opacity: .7;
+}
+#nav-sidebar .module.collapsed caption::after {
+  transform: rotate(0deg);
+  opacity: .6;
+}
+
+/* —— 可选：把侧栏列表稍微紧凑点（不改字号与宽度） —— */
+#nav-sidebar .module caption { padding-top: 4px; padding-bottom: 4px; line-height: 1.2; }
+#nav-sidebar .module table th,
+#nav-sidebar .module table td { padding-top: 2px; padding-bottom: 2px; line-height: 1.2; }
+#nav-sidebar .module { margin-bottom: 6px; }
+#nav-sidebar #nav-filter { padding-top: 2px; padding-bottom: 2px; line-height: 1.1; }
+
+/* 只到此为止：不要在本文件里设置 #nav-sidebar 的 width/left、#content 的 margin-left、
+   也不要隐藏 addlink、不要写响应式宽度。宽度与配色一律交给 ui-neutral.css 管。 */

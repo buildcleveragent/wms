@@ -1,0 +1,33 @@
+{% extends "outbound/base.html" %}
+{% block title %}我的拣货行{% endblock %}
+{% block content %}
+<div class="bg-white shadow rounded-lg p-5">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-lg font-semibold">我的拣货任务</h2>
+    <a href="{% url 'outbound:wave_create' %}" class="text-blue-600">新建波次</a>
+  </div>
+  <table class="min-w-full text-sm">
+    <thead><tr class="border-b"><th>计划</th><th>商品</th><th>库位</th><th>应拣</th><th>操作</th></tr></thead>
+    <tbody>
+      {% for ln in lines %}
+      <tr class="border-b">
+        <td>{{ ln.picking.picking_no }}</td>
+        <td>{{ ln.product }}</td>
+        <td>{{ ln.location }}</td>
+        <td>{{ ln.qty_required }}</td>
+        <td>
+          <form method="post" action="{% url 'outbound:line_pick' ln.id %}" class="inline">
+            {% csrf_token %}
+            <input type="number" name="qty" step="0.0001" min="0" class="border rounded px-2 py-1 w-24" placeholder="数量" required />
+            <input type="text" name="lot_no" class="border rounded px-2 py-1 w-28" placeholder="批次(可选)" />
+            <button class="px-3 py-1 rounded bg-blue-600 text-white">拣</button>
+          </form>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="py-4 text-gray-500">暂无任务</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

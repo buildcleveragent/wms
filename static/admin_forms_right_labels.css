@@ -1,0 +1,71 @@
+/* ======= Django Admin 自定义样式 ======= */
+
+/* 全局表单样式微调 */
+#content-main .form-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+#content-main .form-row label {
+  font-weight: 500;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+#content-main .form-row input,
+#content-main .form-row select {
+  max-width: 300px;
+}
+
+/* ======= 特殊：长/宽/高 同行 ======= */
+#content-main .form-group.field-length_cm.field-width_cm.field-height_cm .row {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px; /* 输入与标签的间距 */
+  position: relative;
+}
+
+/* 占位列：强制对齐到上方“层级条码”的输入框起始位置 */
+#content-main .form-group.field-length_cm.field-width_cm.field-height_cm .row::before {
+  content: "";
+  flex: 0 0 25%;   /* 等于 Bootstrap col-sm-3 的宽度 */
+}
+
+/* 清掉原始的 col-sm-* 样式干扰 */
+#content-main .form-group.field-length_cm.field-width_cm.field-height_cm label,
+#content-main .form-group.field-length_cm.field-width_cm.field-height_cm .fieldBox {
+  flex: 0 0 auto !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* 输入框宽度保持一致 */
+#content-main .form-group.field-length_cm.field-width_cm.field-height_cm .fieldBox input {
+  width: 90px; /* 可调节 */
+}
+
+/* 小屏幕时回退换行，避免挤压 */
+@media (max-width: 576px) {
+  #content-main .form-group.field-length_cm.field-width_cm.field-height_cm .row::before {
+    flex-basis: 0;
+  }
+}
+
+/* ======= 其它字段保持一致性 ======= */
+#content-main .form-row .fieldBox {
+  margin-right: 16px;
+}
+
+#content-main .form-row input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+/* 按钮优化 */
+#content-main .submit-row input {
+  padding: 6px 16px;
+  font-size: 14px;
+  border-radius: 4px;
+}

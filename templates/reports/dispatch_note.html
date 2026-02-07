@@ -1,0 +1,103 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <title>{{ note.header.title }} - {{ note.header.note_no }}</title>
+  <style>
+    :root { --fs: 12px; }
+    * { box-sizing: border-box; }
+    body { font-family: "Microsoft YaHei", Arial, Helvetica, sans-serif; font-size: var(--fs); color:#222; }
+    .sheet { width: 190mm; margin: 0 auto; padding: 10mm 12mm; border: 1px solid #ddd; }
+    h1 { font-size: 20px; text-align:center; margin:0 0 6px; letter-spacing: 2px; }
+    .row { display:flex; flex-wrap: wrap; margin: 2px 0; }
+    .col { padding-right: 12px; white-space: nowrap; }
+    .bold { font-weight: 700; }
+    .muted { color:#666; }
+    .right { text-align: right; }
+    .mt8 { margin-top: 8px; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border:1px solid #333; padding: 6px 6px; text-align: center; }
+    th { background: #f6f6f6; }
+    td.tl { text-align: left; }
+    .sum { display:flex; justify-content: space-between; margin-top: 8px; }
+
+    .sign { display:grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+    .sign div { border:1px solid #333; padding: 8px; height: 34px; }
+
+    .print-actions { margin: 6px 0 12px; text-align:right; }
+    .print-actions button { padding:6px 10px; }
+
+    @media print { .sheet { width: auto; margin:0; border:none; padding: 0; } .print-actions { display:none; } }
+  </style>
+</head>
+<body>
+<div class="print-actions">
+  <button onclick="window.print()">打印</button>
+</div>
+<div class="sheet">
+  <h1>{{ note.header.owner_name }} {{ note.header.title }}</h1>
+
+  <div class="row">
+    <div class="col"><span class="bold">单号：</span>{{ note.header.note_no }}</div>
+    <div class="col"><span class="bold">日期：</span>{{ note.header.date }}</div>
+    {% if note.header.hotline %}
+    <div class="col"><span class="bold">服务热线：</span>{{ note.header.hotline }}</div>
+    {% endif %}
+  </div>
+
+  <div class="row">
+    <div class="col" style="min-width:40%"><span class="bold">客户名称：</span>{{ note.header.customer_name }}</div>
+    <div class="col" style="min-width:50%"><span class="bold">客户地址：</span>{{ note.header.customer_addr }}</div>
+  </div>
+  <div class="row">
+    {% if note.header.contact %}<div class="col"><span class="bold">联系人：</span>{{ note.header.contact }}</div>{% endif %}
+    {% if note.header.business_user %}<div class="col"><span class="bold">业务员：</span>{{ note.header.business_user }}</div>{% endif %}
+    {% if note.header.remark %}<div class="col" style="min-width:40%"><span class="bold">出库备注：</span>{{ note.header.remark }}</div>{% endif %}
+  </div>
+
+  <table class="mt8">
+    <thead>
+      <tr>
+        <th style="width:8%">商品编码</th>
+        <th style="width:26%">商品名称</th>
+        <th style="width:14%">规格</th>
+        <th style="width:10%">数量</th>
+        <th style="width:6%">单位</th>
+        <th style="width:10%">单价</th>
+        <th style="width:10%">金额</th>
+        <th style="width:10%">件数量</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in note.items %}
+      <tr>
+        <td>{{ it.sku_code }}</td>
+        <td class="tl">{{ it.sku_name }}</td>
+        <td>{{ it.spec }}</td>
+        <td>{{ it.qty|floatformat:2 }}</td>
+        <td>{{ it.uom }}</td>
+        <td>{{ it.price|floatformat:2 }}</td>
+        <td>{{ it.amount|floatformat:2 }}</td>
+        <td>{% if it.piece_qty %}{{ it.piece_qty|floatformat:4 }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="sum">
+    <div class="bold">金额：{{ note.total_amount|floatformat:2 }} （￥ {{ note.total_amount_upper }}）</div>
+    <div class="muted">共 {{ note.items|length }} 行</div>
+  </div>
+
+  <div class="sign">
+    <div>拣货员：</div>
+    <div>复核员：</div>
+    <div>配送员：</div>
+    <div>装车检核：</div>
+    <div>客户签名：</div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,387 @@
+/* 首页 App 卡片容器底色（白底） */
+.app-list .card {
+  background-color: #ffffff;   /* 白底 */
+  border-color: #d1d5db;       /* 浅灰边框 */
+  color: #000000;              /* 黑字 */
+}
+
+/* 卡片标题栏底色与文字色（白底黑字） */
+.app-list .card .card-header {
+  background-color: #ffffff;   /* 白底 */
+  color: #000000;              /* 黑字 */
+  border-bottom-color: #d1d5db;
+}
+
+/* 模型列表每一行的底色与悬停色 */
+.app-list .model-list .list-group-item {
+  background-color: #ffffff;   /* 白底 */
+  color: #000000;              /* 黑字 */
+  border-color: #d1d5db;       /* 浅灰分隔线 */
+}
+.app-list .model-list .list-group-item:hover {
+  background-color: #f3f4f6;   /* 浅灰悬停 */
+}
+
+/* 深色模式：保持白底黑字（可选） */
+body.dark-mode .app-list .card {
+  background-color: #ffffff;
+  color: #000000;
+}
+body.dark-mode .app-list .card .card-header {
+  background-color: #ffffff;
+  color: #000000;
+}
+body.dark-mode .app-list .model-list .list-group-item {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+/* 按钮样式可保留或调整 */
+.app-list .model-list .btn {
+  box-shadow: none;
+  border: 0;
+}
+/* 让这三个字段行变成“两列网格”：左label，右input */
+.form-row.field-length_cm > div,
+.form-row.field-width_cm > div,
+.form-row.field-height_cm > div {
+    display: grid !important;
+    grid-template-columns: 120px 1fr; /* 左列固定120px，可按需调整 */
+    align-items: center;
+    column-gap: 8px;
+}
+
+/* 右对齐 label，紧贴输入框左边 */
+.form-row.field-length_cm label,
+.form-row.field-width_cm label,
+.form-row.field-height_cm label {
+    text-align: right !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* 避免小部件外层 wrapper 撑坏布局 */
+.form-row.field-length_cm .related-widget-wrapper,
+.form-row.field-width_cm .related-widget-wrapper,
+.form-row.field-height_cm .related-widget-wrapper {
+    width: auto !important;
+}
+
+/* 可选：数字输入框更紧凑些 */
+.form-row.field-length_cm input,
+.form-row.field-width_cm input,
+.form-row.field-height_cm input {
+    max-width: 140px; /* 你喜欢的宽度 */
+}
+
+.select2-results__option {
+    background-color: #ffffff !important;  /* 设置默认背景颜色 */
+    color: #333333 !important;  /* 设置默认字体颜色 */
+}
+
+/* 去掉因侧栏产生的左侧预留，桌面端 */
+@media (min-width: 992px) {
+  .content-wrapper,
+  .main-header,
+  .main-footer {
+    margin-left: 0 !important;
+  }
+}
+/* 确保侧栏彻底不占位（可选） */
+aside.main-sidebar { display: none !important; }
+
+/* 确保隐藏所有外键字段旁的 CRUD 按钮 */
+.related-widget-wrapper a.related-widget-wrapper-link {
+    display: none !important;
+}
+
+.form-group input {
+    max-width: 300px;  /* 最大宽度为100% */
+}
+
+.form-group .field-username{
+    max-width: 230px;  /* 最大宽度为100% */
+}
+
+/* custom_admin.css */
+
+/* 让顶部菜单固定在页面顶部 */
+#jazzy-navbar {
+    position: fixed !important;  /* 强制固定位置 */
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 1050 !important;  /* 确保它在其他内容之上 */
+    background-color: #fff;  /* 背景颜色，确保透明背景时不被内容遮挡 */
+    border-bottom: 1px solid #ccc;  /* 给菜单下方加个边框 */
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1); /* 加个阴影效果 */
+}
+
+/* 如果页面内容较长，允许滚动 */
+.wrapper {
+    margin-top: 60px !important;
+}
+
+/* 让表头不换行；避免中文被强制断行 */
+.inline-group table th[class^="column-"],
+.inline-group table th.column-extra,
+.inline-group table td.field-extra {
+  white-space: nowrap;
+  word-break: keep-all;
+  vertical-align: middle;
+}
+
+/* 可按需调宽：给 extra 几列一个合理初始宽度 */
+.inline-group table col.field-extra { width: 120px; }
+
+/* static/admin_custom.css 已加载即可 */
+.inline-group table th[class^="column-"],
+.inline-group table th.column-extra,
+.inline-group table td.field-extra {
+  white-space: nowrap;
+  word-break: keep-all;
+  vertical-align: middle;
+}
+.inline-group table col.field-extra { width: 120px; }
+
+/* —— 提升右上角按钮视觉 —— */
+
+/* 通用按钮外观 */
+.submit-row input[type="submit"],
+.submit-row .button,
+.submit-row button,
+.submit-row .btn {
+  appearance: none;
+  background: #fff;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 8px 14px;
+  line-height: 1.2;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .06);
+  transition: border-color .15s ease, box-shadow .15s ease, transform .05s ease;
+  margin-left: .4rem; /* 这行没有逗号 */
+}
+
+/* 悬停效果 */
+.submit-row input[type="submit"]:hover,
+.submit-row .button:hover,
+.submit-row button:hover,
+.submit-row .btn:hover {
+  border-color: #6366f1;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, .16);
+}
+
+/* 主按钮（保存） */
+.submit-row [name="_save"],
+.submit-row input.default,
+.submit-row .btn.btn-primary {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #fff;
+}
+.submit-row [name="_save"]:hover,
+.submit-row input.default:hover,
+.submit-row .btn.btn-primary:hover {
+  background: #4f46e5;
+  border-color: #4f46e5;
+}
+
+/* 次要按钮（保存并增加一个 / 保存并继续编辑） */
+.submit-row [name="_addanother"],
+.submit-row [name="_continue"] {
+  background: #fff;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 8px 14px;
+  line-height: 1.2;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .06);
+  transition: border-color .15s ease, box-shadow .15s ease, transform .05s ease;
+}
+.submit-row [name="_addanother"]:hover,
+.submit-row [name="_continue"]:hover {
+  border-color: #6366f1;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, .16);
+}
+
+/* 让外键（owner / warehouse 等）在 Bootstrap 栅格里与其他字段对齐 */
+.form-group .col-sm-7 .related-widget-wrapper {
+  display: block;          /* 不要 inline，撑满整列 */
+  width: 100%;
+}
+
+/* select2 / admin-autocomplete 宽度占满 */
+.form-group .col-sm-7 .related-widget-wrapper > select.admin-autocomplete,
+.form-group .col-sm-7 .related-widget-wrapper .select2-container {
+  width: 100% !important;
+  min-width: 0;
+}
+
+/* 统一高度与边框（匹配 Bootstrap 4 的 .form-control 高度） */
+.select2-container--admin-autocomplete .select2-selection--single {
+  height: calc(1.5em + .75rem + 2px);
+  min-height: 38px;
+  border-color: #cbd5e1;       /* 跟你按钮同一套色系，更现代 */
+  border-radius: .25rem;
+  display: flex;               /* 让文本垂直居中 */
+  align-items: center;
+}
+.select2-container--admin-autocomplete .select2-selection__rendered {
+  line-height: normal;
+  padding: .375rem .75rem;
+}
+.select2-container--admin-autocomplete .select2-selection__arrow {
+  height: 100%;
+}
+
+/* 如果你本身就把外键右侧的小图标隐藏了，也把链接元素一起关掉，避免残余间距 */
+.related-widget-wrapper .related-widget-wrapper-link,
+.related-widget-wrapper .related-lookup,
+.related-widget-wrapper .btn {
+  display: none !important;
+}
+
+/* 1) 标签不换行，星号与文字同一行并垂直居中 */
+#content-main .form-group > .row > label {
+  white-space: nowrap;              /* 关键：避免“货主”与 * 分行 */
+  display: flex;                    /* 让 * 与文字同一基线 */
+  align-items: center;
+  gap: .25rem;
+}
+
+/* 2) 让外键包装器占满这一列，控件与其它字段左对齐 */
+#content-main .form-group .col-sm-7 .related-widget-wrapper {
+  display: block;
+  width: 100%;
+  margin-left: 0;                   /* 防止出现额外缩进 */
+}
+
+/* 3) select2 / admin-autocomplete 占满宽度 */
+#content-main .form-group .col-sm-7 .related-widget-wrapper > select.admin-autocomplete,
+#content-main .form-group .col-sm-7 .related-widget-wrapper .select2-container {
+  width: 100% !important;
+  min-width: 0;
+}
+
+/* 4) 统一高度与外观（和 .form-control 一致） */
+.select2-container--admin-autocomplete .select2-selection--single {
+  height: calc(1.5rem + .75rem + 2px);     /* ≈ 38px */
+  border: 1px solid #cbd5e1;               /* 与你按钮同系的现代边框色 */
+  border-radius: .25rem;
+  display: flex;
+  align-items: center;
+  padding: 0 .75rem;
+}
+.select2-container--admin-autocomplete .select2-selection__rendered {
+  line-height: 1.2;
+  padding-left: 0;
+}
+.select2-container--admin-autocomplete .select2-selection__arrow {
+  height: 100%;
+  right: .35rem;
+}
+
+/* 5)（可选）把 owner/warehouse 两行的输入列确保有默认内边距 */
+#content-main .form-group .col-sm-7.field-owner,
+#content-main .form-group .col-sm-7.field-warehouse {
+  padding-left: 15px;               /* 与其它字段保持一致 */
+}
+
+/* 让 label 不换行（已OK，保留） */
+#content-main .form-group > .row > label {
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+}
+
+/* 关键：related 包装器用 flex，让下拉占满剩余宽度 */
+#content-main .form-group .col-sm-7 .related-widget-wrapper {
+  display: flex;                 /* 让内部元素横向排布 */
+  align-items: center;
+  gap: .5rem;                    /* 与右侧小图标留点间距 */
+  width: 100%;
+}
+
+/* 下拉本体必须吃满宽度（无论是否已 select2 初始化） */
+#content-main .form-group .col-sm-7 .related-widget-wrapper > select,
+#content-main .form-group .col-sm-7 .related-widget-wrapper .select2-container {
+  flex: 1 1 auto;                /* 关键：占满剩余 */
+  width: 100% !important;
+  min-width: 0;
+}
+
+/* 统一高度和边框风格，和 .form-control 保持一致 */
+.select2-container--admin-autocomplete .select2-selection--single {
+  height: calc(1.5rem + .75rem + 2px);  /* ≈ 38px */
+  border: 1px solid #cbd5e1;
+  border-radius: .25rem;
+  display: flex;
+  align-items: center;
+  padding: 0 .75rem;
+}
+.select2-container--admin-autocomplete .select2-selection__rendered {
+  line-height: 1.2;
+  padding-left: 0;
+}
+.select2-container--admin-autocomplete .select2-selection__arrow {
+  height: 100%;
+  right: .35rem;
+}
+
+/* 若不需要右侧图标，直接关掉可进一步避免挤占宽度 */
+#content-main .related-widget-wrapper .related-widget-wrapper-link,
+#content-main .related-widget-wrapper .related-lookup,
+#content-main .related-widget-wrapper .btn {
+  display: none !important;
+}
+
+/* 1) 列表容器允许横向滚动 */
+.change-list .results {
+  overflow-x: auto;
+}
+
+/* 2) 表格按内容扩展宽度，不强行 100% 压缩 */
+.change-list .results table {
+  width: max-content;      /* 关键：让表格可以超出容器宽度 */
+  table-layout: auto;      /* 允许自然分配列宽 */
+  border-collapse: collapse;
+}
+
+/* 3) 单元格不换行，不折叠字段 */
+.change-list .results th,
+.change-list .results td {
+  white-space: nowrap;     /* 不换行 */
+  word-break: keep-all;    /* 避免中文被硬拆 */
+}
+
+/* 4) 可选：固定左侧勾选列，滚动时不丢 */
+.change-list .results th.action-checkbox,
+.change-list .results td.action-checkbox {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--body-bg, #fff);
+}
+
+/* 5) 可选：固定表头 */
+.change-list .results thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--body-bg, #fff);
+}
+
+/* 6) 可选：为特定字段设定最小列宽，提升可读性 */
+.change-list .results th.column-code,
+.change-list .results td.field-code { min-width: 120px; }
+
+.change-list .results th.column-name,
+.change-list .results td.field-name { min-width: 200px; }
+
+.custom-field {
+    white-space: nowrap;
+    width: auto;
+}
+

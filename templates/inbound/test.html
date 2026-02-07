@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+<section class="card p-4">
+  <div class="flex items-center justify-between mb-3">
+    <div class="card-title">订单明细</div>
+    <div class="flex gap-2">
+      <button type="button" id="addRow" class="btn btn-primary">新增一行</button>
+    </div>
+  </div>
+
+  {{ formset.management_form }}
+
+
+<div class="table-wrap  overflow-x-auto">
+  <table class="min-w-full table-fixed text-sm border-collapse" style="min-width: 1000px;">
+    <thead class="bg-gray-50">
+      <tr class="bg-gray-50">
+        <th class="w-10 border border-gray-300 px-2 py-1 text-center">#</th>
+        <th class="w-[18rem] border border-gray-300 px-2 py-1">商品编码</th>
+          <th class="w-[18rem] border border-gray-300 px-2 py-1">商品名称</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">规格</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">批次</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">数量</th>
+        <th class="w-24 border border-gray-300 px-2 py-1">单位</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">价格</th>
+        <th class="w-24 border border-gray-300 px-2 py-1 text-center">删除</th>
+
+          <th class="w-10 border border-gray-300 px-2 py-1 text-center">#</th>
+        <th class="w-[18rem] border border-gray-300 px-2 py-1">商品编码</th>
+          <th class="w-[18rem] border border-gray-300 px-2 py-1">商品名称</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">规格</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">批次</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">数量</th>
+        <th class="w-24 border border-gray-300 px-2 py-1">单位</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">价格</th>
+        <th class="w-24 border border-gray-300 px-2 py-1 text-center">删除</th>
+
+          <th class="w-10 border border-gray-300 px-2 py-1 text-center">#</th>
+        <th class="w-[18rem] border border-gray-300 px-2 py-1">商品编码</th>
+          <th class="w-[18rem] border border-gray-300 px-2 py-1">商品名称</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">规格</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">批次</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">数量</th>
+        <th class="w-24 border border-gray-300 px-2 py-1">单位</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">价格</th>
+        <th class="w-24 border border-gray-300 px-2 py-1 text-center">删除</th>
+            <th class="w-10 border border-gray-300 px-2 py-1 text-center">#</th>
+        <th class="w-[18rem] border border-gray-300 px-2 py-1">商品编码</th>
+          <th class="w-[18rem] border border-gray-300 px-2 py-1">商品名称</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">规格</th>
+        <th class="w-40 border border-gray-300 px-2 py-1">批次</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">数量</th>
+        <th class="w-24 border border-gray-300 px-2 py-1">单位</th>
+        <th class="w-28 border border-gray-300 px-2 py-1 text-right">价格</th>
+        <th class="w-24 border border-gray-300 px-2 py-1 text-center">删除</th>
+      </tr>
+    </thead>
+
+    <tbody id="lineBody">
+      {% for f in formset.forms %}
+      <tr class="line-row">
+        <td class="border border-gray-300 px-2 py-1 text-center text-gray-500">{{ forloop.counter }}</td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.product_code }} {{ f.product_name }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.spec }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.lot_no }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-right">
+          {{ f.base_qty }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1">
+          {{ f.base_uom }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-right">
+          {{ f.price }}
+        </td>
+
+        <td class="border border-gray-300 px-2 py-1 text-center">
+          <button type="button" class="btn btn-outline btn-sm remove-row">移除</button>
+          <span class="hidden">{{ f.DELETE }}</span>
+        </td>
+
+        <td class="hidden">{{ f.id }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+
+
+
+  <div class="flex justify-end gap-2 mt-3">
+    <button name="action" value="save_draft" class="btn btn-outline">保存草稿</button>
+    <button name="action" value="save_submit" class="btn btn-primary">保存并提交</button>
+  </div>
+
+  <template id="emptyRowTpl">
+    <tr class="line-row">
+      <td class="center text-gray-500">#</td>
+      <td>{{ formset.empty_form.product_code }} {{ formset.empty_form.product_name }}</td>
+      <td>{{ formset.empty_form.spec }}</td>
+      <td>{{ formset.empty_form.lot_no }}</td>
+      <td class="num">{{ formset.empty_form.base_qty }}</td>
+      <td class="center">{{ formset.empty_form.base_uom }}</td>
+      <td class="num">{{ formset.empty_form.price }}</td>
+      <td class="center"><button type="button" class="btn btn-outline btn-sm remove-row">移除</button><span class="hidden">{{ formset.empty_form.DELETE }}</span></td>
+      <td class="hidden">{{ formset.empty_form.id }}</td>
+    </tr>
+  </template>
+</section>

@@ -1,0 +1,15 @@
+{% extends "console/_base.html" %}
+{% block title %}库存流水{% endblock %}
+{% block content %}
+
+<form class="mb-3 flex gap-2 items-center"
+      hx-get="{% url 'console_tx_table' %}" hx-target="#tx-table" hx-swap="outerHTML">
+  <input name="q" value="{{ q }}" placeholder="按单号/货主/商品搜索"
+         class="border rounded px-3 py-1 w-72">
+  <button class="bg-blue-600 text-white rounded px-3 py-1">查询</button>
+</form>
+
+<div id="tx-table">
+  {% include "console/_inventory_tx_table.html" %}
+</div>
+{% endblock %}

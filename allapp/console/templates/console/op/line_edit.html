@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}任务行编辑 - {{ task.task_no }}{% endblock %}
+
+{% block content %}
+<style>
+  .container{max-width:1100px;margin:0 auto;padding:16px}
+  .section{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:16px}
+  .section h2{font-size:16px;margin:0 0 12px;font-weight:700;color:#111827}
+  .meta{margin-bottom:12px;color:#6b7280}
+  .fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  @media (max-width:800px){.fields{grid-template-columns:1fr}}
+  .field{display:flex;flex-direction:column;gap:6px}
+  .label{font-size:12px;color:#6b7280}
+  .help{font-size:12px;color:#6b7280}
+  .error{font-size:12px;color:#b91c1c}
+  .section input,.section select,.section textarea{
+    border:1px solid #d1d5db;border-radius:8px;padding:9px 10px;font-size:14px;outline:none;background:#fff
+  }
+  .section input:focus,.section select:focus,.section textarea:focus{
+    border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.15)
+  }
+  .alert{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:10px 12px;border-radius:8px;margin-bottom:12px}
+  .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
+  .btn{border:1px solid #d1d5db;border-radius:8px;padding:8px 14px;font-weight:600;background:#fff;cursor:pointer}
+  .btn.primary{background:#2563eb;color:#fff;border-color:#2563eb}
+  .btn.muted{opacity:.6;pointer-events:none}
+</style>
+
+<div class="container">
+  <h1 style="font-size:20px;font-weight:700;margin-bottom:8px;">
+    行编辑（ID: {{ line.id }}）— 任务 {{ task.task_no }} / {{ task.task_type }}
+  </h1>
+
+  {# 全局/跨字段错误 #}
+  {% if form.non_field_errors %}
+    <div class="alert">{{ form.non_field_errors }}</div>
+  {% endif %}
+  {% if extra_form and extra_form.non_field_errors %}
+    <div class="alert">{{ extra_form.non_field_errors }}</div>
+  {% endif %}
+
+  {# 安全反解，避免未注册命名空间导致 500；按你的路由名替换即可 #}
+  {% url 'console:task-detail' task.pk as task_detail_url %}
+  {% url 'console:op-line-list' as line_list_url %}
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+
+    <!-- 上：任务行（主表单） -->
+    <section class="section">
+      <h2>任务行信息</h2>
+      {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+      <div class="fields">
+        {% for field in form.visible_fields %}
+          <div class="field">
+            <label class="label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+            {% if field.errors %}<div class="error">{{ field.errors }}</div>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <!-- 下：扩展信息（有才显示） -->
+    {% if extra_form %}
+    <section class="section">
+      <h2>扩展信息{% if extra_form_label %}（{{ extra_form_label }}）{% endif %}</h2>
+      {% for hidden in extra_form.hidden_fields %}{{ hidden }}{% endfor %}
+      <div class="fields">
+        {% for field in extra_form.visible_fields %}
+          <div class="field">
+            <label class="label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+            {% if field.errors %}<div class="error">{{ field.errors }}</div>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <div class="actions">
+      <button type="submit" class="btn primary">保存</button>
+      {% if task_detail_url %}<a class="btn" href="{{ task_detail_url }}">返回任务</a>{% else %}<span class="btn muted">返回任务</span>{% endif %}
+      {% if line_list_url %}<a class="btn" href="{{ line_list_url }}?bucket=mine">返回列表</a>{% else %}<span class="btn muted">返回列表</span>{% endif %}
+    </div>
+  </form>
+</div>
+{% endblock %}

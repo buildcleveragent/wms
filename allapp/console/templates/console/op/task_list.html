@@ -1,0 +1,39 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>操作员任务</h1>
+
+<form method="get" style="margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap;">
+  <select name="type">
+    <option value="">全部类型</option>
+    <option value="RECEIVE">收货</option>
+    <option value="PUTAWAY">上架</option>
+    <option value="PICK">拣货</option>
+    <option value="REVIEW">复核</option>
+    <option value="PACK">打包</option>
+    <option value="DISPATCH">发运</option>
+  </select>
+  <input type="text" name="warehouse" placeholder="仓库ID">
+  <input type="text" name="owner" placeholder="货主ID">
+  <button type="submit" class="button">筛选</button>
+</form>
+
+<table class="listing">
+  <thead>
+    <tr><th>ID</th><th>任务号</th><th>类型</th><th>状态</th><th>仓库</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for t in object_list %}
+    <tr>
+      <td>{{ t.id }}</td>
+      <td>{{ t.task_no }}</td>
+      <td>{{ t.task_type }}</td>
+      <td>{{ t.status }}</td>
+      <td>{{ t.warehouse }}</td>
+      <td><a class="button" href="{% url 'op:task_detail' t.id %}">进入</a></td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="6">暂无任务</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

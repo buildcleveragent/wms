@@ -1,0 +1,48 @@
+{
+  "test": "test_receive_batch_expiry_modes[True-False-\\u6279\\u6b21=\\u5f00_\\u6548\\u671f=\\u5173_\\u4ec5LOT_\\u6e05\\u7a7aEXP_MFG]",
+  "steps": [
+    {
+      "title": "扫描明细",
+      "info": [
+        {
+          "id": 1,
+          "qty_base": "",
+          "qty_base_delta": "3.000",
+          "location": "BIN-A1",
+          "lot_no": "LOT-A",
+          "mfg": "2025-08-01",
+          "exp": "2025-10-01"
+        }
+      ]
+    },
+    {
+      "title": "台账分录",
+      "info": [
+        {
+          "id": 1,
+          "tx_type": "RECEIVE",
+          "loc": "BIN-A1",
+          "qty": "3.0000",
+          "batch_no": "LOT-A",
+          "mfg": "2025-08-01",
+          "exp": "2025-10-01"
+        }
+      ]
+    },
+    {
+      "title": "批次=开_效期=关_仅LOT_清空EXP_MFG（期望 vs 实际）",
+      "expected": {
+        "batch_no": "LOT-A",
+        "mfg": null,
+        "exp": null,
+        "qty": "3.0000"
+      },
+      "actual": {
+        "batch_no": "LOT-A",
+        "mfg": "2025-08-01",
+        "exp": "2025-10-01",
+        "qty": "3.0000"
+      }
+    }
+  ]
+}

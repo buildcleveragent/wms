@@ -1,0 +1,35 @@
+:root{
+  /* 根据你的主题实际高度微调 */
+  --wms-h1: 48px;  /* 顶部欢迎/用户条（①）高度 */
+  --wms-h2: 40px;  /* 面包屑横条（②）高度 */
+}
+
+/* ① 顶栏永远固定在最顶 */
+#header{
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 3000;               /* 要高于侧边栏/下拉层 */
+}
+
+/* ② 面包屑紧贴①之下，也固定 */
+.breadcrumbs{
+  position: fixed;
+  top: var(--wms-h1);
+  left: 0; right: 0;
+  z-index: 2990;
+  /* 视觉需要可加底部阴影： */
+  /* box-shadow: 0 1px 3px rgba(0,0,0,.06); */
+}
+
+/* 给正文让出空间，避免被①②遮住 */
+body{
+  padding-top: calc(var(--wms-h1) + var(--wms-h2));
+}
+
+/* 当用锚点/分页返回定位时，避免被固定头遮住 */
+#content, .changeform, .changelist{
+  scroll-margin-top: calc(var(--wms-h1) + var(--wms-h2));
+}
+
+/* 若父级容器意外设置了 overflow，取消之以免影响定位 */
+#container{ overflow: visible; }

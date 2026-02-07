@@ -1,0 +1,50 @@
+{% extends "outbound/base.html" %}
+{% block title %}出库单列表{% endblock %}
+{% block content %}
+<div class="bg-white shadow rounded-lg p-5">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-lg font-semibold">出库单</h2>
+    <a href="{% url 'outbound:shipment_create' %}"
+       class="px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700">新建出库单</a>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="min-w-full text-sm">
+      <thead>
+        <tr class="text-left border-b">
+          <th class="py-2 pr-4">ID</th>
+          <th class="py-2 pr-4">单号</th>
+          <th class="py-2 pr-4">货主</th>
+          <th class="py-2 pr-4">客户</th>
+          <th class="py-2 pr-4">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in shipments %}
+          <tr class="border-b">
+            <td class="py-2 pr-4">{{ s.id }}</td>
+            <td class="py-2 pr-4">{{ s.shipment_no }}</td>
+            <td class="py-2 pr-4">{{ s.owner }}</td>
+            <td class="py-2 pr-4">{{ s.customer }}</td>
+            <td class="py-2 pr-4 space-x-2">
+              <a href="{% url 'outbound:shipment_add_line' s.id %}"
+                 class="px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">维护行</a>
+              <form method="post" action="{% url 'outbound:create_picking' s.id %}" class="inline">
+                {% csrf_token %}
+                <button class="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700">生成拣货</button>
+              </form>
+              <form method="post" action="{% url 'outbound:create_dispatch' s.id %}" class="inline">
+                {% csrf_token %}
+                <button class="px-3 py-1 rounded bg-purple-600 text-white hover:bg-purple-700">生成发运</button>
+              </form>
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td class="py-4 text-gray-500" colspan="5">暂无出库单</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

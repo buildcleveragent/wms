@@ -1,0 +1,72 @@
+{
+  "test": "test_receive_with_pack_and_idempotent",
+  "steps": [
+    {
+      "title": "STEP-1 创建任务与行",
+      "info": {
+        "task_no": "RCV-1757737264921-174d",
+        "task_type": "RECEIVE",
+        "line_id": 1,
+        "product": "SKU-1",
+        "to_location": "BIN-A1"
+      }
+    },
+    {
+      "title": "STEP-2 扫码结果",
+      "info": [
+        {
+          "idempotent": false,
+          "client_seq": "X1"
+        },
+        {
+          "idempotent": true,
+          "client_seq": "X1"
+        }
+      ]
+    },
+    {
+      "title": "扫描明细",
+      "info": [
+        {
+          "id": 1,
+          "product_id": 34,
+          "product": "SKU-1",
+          "qty_base": "",
+          "qty_base_delta": "12.000",
+          "location_id": 82,
+          "location": "BIN-A1",
+          "client_seq": "",
+          "label_key": null
+        }
+      ]
+    },
+    {
+      "title": "台账分录明细",
+      "info": [
+        {
+          "id": 1,
+          "tx_type": "RECEIVE",
+          "loc_id": 82,
+          "loc": "BIN-A1",
+          "product_id": 34,
+          "product": "SKU-1",
+          "qty": "12.0000",
+          "src_id": 1
+        }
+      ]
+    },
+    {
+      "title": "RECEIVE 汇总（期望 vs 实际）",
+      "expected": {
+        "tx_count": 1,
+        "qty_total": "12",
+        "onhand_bin1": "12"
+      },
+      "actual": {
+        "tx_count": 1,
+        "qty_total": "12.0000",
+        "onhand_bin1": "12.0000"
+      }
+    }
+  ]
+}

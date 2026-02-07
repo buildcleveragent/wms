@@ -1,0 +1,166 @@
+{# templates/admin/inventory/quick_adjust_inbound_form.html #}
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+{% block extrahead %}
+  {{ block.super }}{{ media }}
+     <style>
+    .form-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+
+    .form-row label {
+      margin-right: 5px;
+    }
+
+    .form-row input, .form-row select {
+     max-width: 400px;  /* 最大宽度 400px */
+    width: 100%;       /* 宽度自适应，但最大不超过 400px */
+    padding: 5px;
+    font-size: 14px;
+    }
+
+    .form-row + .form-row {
+      margin-top: 15px;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+{#  <h1 style="margin:0 0 12px 0;">入库快调</h1>#}
+  {% if messages %}
+    <ul class="messagelist">
+      {% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+    <div class="module aligned">
+      <div class="form-row">{{ form.owner.label_tag }} {{ form.owner }}</div>
+      <div class="form-row">{{ form.product.label_tag }} {{ form.product }}</div>
+
+
+
+      <!-- 包装单位选择（从商品的包装单位中加载） -->
+      <div class="form-row">
+          <label for="box-qty">包装单位数量</label>
+          <input type="number" id="box-qty" name="box_qty" value="0" required>
+
+          <label for="pack-uom">包装单位</label>
+          <select id="pack-uom" name="pack_uom" required>
+            <option value="NONE" data-pack-qty="1">无包装</option>
+          </select>
+      </div>
+
+      <!-- 包装数量（例如：箱数） -->
+{#      <div class="form-row">#}
+{#        <label for="box-qty">包装数量（例如：箱数）</label>#}
+{#        <input type="number" id="box-qty" name="box_qty" value="0" required>#}
+{#      </div>#}
+
+      <!-- 基本数量（例如：包数） -->
+      <div class="form-row">
+        <label for="base-qty">基本单位数量</label>
+        <input type="number" id="base-qty" name="base_qty" value="0" required>
+{#        <span id="base-uom-unit">单位</span>  <!-- 显示基本单位 -->#}
+                <!-- 显示商品的基本单位 -->
+
+{#        <label for="base-uom">基本单位:</label>#}
+        <label id="base-uom">加载中...</label>  <!-- 显示商品基本单位 -->
+
+      </div>
+
+      <!-- 总入库数量 -->
+      <div class="form-row">
+        <label for="total-qty">总入库数量（基本单位）</label>
+        <input type="number" id="total-qty" name="total_qty" readonly>
+      </div>
+
+{#      <div class="form-row">{{ form.qty_in.label_tag }} {{ form.qty_in }}</div>#}
+{#      <div class="form-row">{{ form.reason.label_tag }} {{ form.reason }}</div>#}
+      <div class="form-row">{{ form.remark.label_tag }} {{ form.remark }}</div>
+    </div>
+
+    <div class="submit-row">
+      <input type="submit" value="{% trans '提交入库快调' %}" class="default" />
+      <a class="button" href="{% url 'admin:index' %}" style="margin-left:8px;">返回</a>
+    </div>
+
+  </form>
+
+  <script>
+    // 监听商品选择框的变化（即用户选择了一个商品）
+    document.getElementById('id_product').addEventListener('change', function() {
+  const productId = this.value;  // 获取商品的 ID
+
+  if (!productId) {
+    console.error('No product selected');
+    return;
+  }
+
+  // 清空包装单位选择框
+  const select = document.getElementById('pack-uom');
+  select.innerHTML = '';
+
+  // 调用后端 API 获取该商品的基本单位和包装单位
+  fetch(`/products/get_product_details/${productId}/`)
+    .then(response => response.json())
+    .then(data => {
+      // 更新商品的基本单位
+      document.getElementById('base-uom').textContent = data.base_uom;
+
+      // 填充包装单位
+      data.pack_uoms.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item.uom;
+        option.setAttribute('data-pack-qty', item.pack_qty);
+        option.textContent = `${item.uom} - ${item.uom} = ${item.pack_qty} ${item.unit}`;
+        select.appendChild(option);
+      });
+
+      // 默认选择第一个包装单位
+      if (data.pack_uoms.length > 0) {
+        select.value = data.pack_uoms[0].uom;
+        calculateTotal();  // 重新计算入库数量
+      }
+    })
+    .catch(error => {
+      console.error('Error fetching product details:', error);
+    });
+});
+
+    // 监听包装单位选择框的变化
+document.getElementById('pack-uom').addEventListener('change', calculateTotal);
+
+// 监听包装数量输入框的变化
+document.getElementById('box-qty').addEventListener('input', calculateTotal);
+
+// 监听基本数量输入框的变化
+document.getElementById('base-qty').addEventListener('input', calculateTotal);
+
+function calculateTotal() {
+  const packUomSelect = document.getElementById('pack-uom');
+  const packQtyInput = document.getElementById('box-qty');
+  const baseQtyInput = document.getElementById('base-qty');
+
+  // 获取包装单位的换算数量（从包装单位选项的 data-pack-qty 中获取）
+  const selectedOption = packUomSelect.options[packUomSelect.selectedIndex];
+  const packQty = parseFloat(packQtyInput.value) || 0;  // 包装数量（默认为 0）
+  const baseQty = parseFloat(baseQtyInput.value) || 0;  // 基本数量（默认为 0）
+
+  // 获取换算数量（包装单位的数量）
+  const packQtyMultiplier = parseFloat(selectedOption.getAttribute('data-pack-qty')) || 1;
+
+  // 计算总入库数量
+  const totalQty = (packQty * packQtyMultiplier) + baseQty;
+
+  // 更新总入库数量字段
+  document.getElementById('total-qty').value = totalQty.toFixed(3);  // 保留 3 位小数
+}
+
+
+  </script>
+{% endblock %}

@@ -1,0 +1,97 @@
+{% extends "console/base_console.html" %}
+{% block title %}{{ task_type_label }} · {{ task.task_no|default:task.id }}{% endblock %}
+{% block content %}
+  <p><a class="btn" href="{{ back_url }}">← 返回{{ task_type_label }}</a></p>
+  <h1 style="margin-bottom:12px;">任务 {{ task.task_no|default:task.id }} <span class="tag">{{ task_type_label }}</span></h1>
+
+  <div class="meta-grid">
+    <div><span>状态</span>{{ task.get_status_display }}</div>
+    <div><span>优先级</span>{{ task.get_priority_display }}</div>
+    <div><span>仓库</span>{{ task.warehouse }}</div>
+    <div><span>货主</span>{{ task.owner }}</div>
+    <div><span>来源单号</span>{{ task.ref_no|default:"-" }}</div>
+    <div><span>计划时间</span>{{ task.planned_start|date:"Y-m-d H:i" }} → {{ task.planned_end|date:"Y-m-d H:i" }}</div>
+    <div><span>实际时间</span>{{ task.started_at|date:"Y-m-d H:i" }} → {{ task.finished_at|date:"Y-m-d H:i" }}</div>
+    <div><span>备注</span>{{ task.remark|default:"-" }}</div>
+  </div>
+
+  <div class="action-bar">
+    <button class="btn" onclick="doPost('{% url 'tasking_console:task_claim' task.id %}')">领取</button>
+    <button class="btn" onclick="doPost('{% url 'tasking_console:task_post' task.id %}')">过账</button>
+  </div>
+
+  <h2 style="margin-top:24px;">明细行</h2>
+  <table class="lines-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>商品</th>
+        <th>来源库位</th>
+        <th>目标库位</th>
+        <th>计划数量</th>
+        <th>执行数量</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ln in lines %}
+      <tr>
+        <td>#{{ ln.id }}</td>
+        <td>{{ ln.product }}</td>
+        <td>{{ ln.from_location|default:"-" }}</td>
+        <td>{{ ln.to_location|default:"-" }}</td>
+        <td>{{ ln.qty_plan }}</td>
+        <td>{{ ln.qty_done }}</td>
+        <td>
+          <button class="btn" onclick="saveSnapshot({{ ln.id }})">保存快照</button>
+          <button class="btn" onclick="finalizeLine({{ ln.id }})">完成行</button>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="text-muted">无行</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <style>
+    .meta-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:20px;}
+    .meta-grid div{padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:rgba(148,163,184,0.08);font-size:14px;display:flex;flex-direction:column;gap:6px;}
+    .meta-grid span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;}
+    .action-bar{display:flex;gap:8px;margin:10px 0 16px 0;}
+    .lines-table{width:100%;border-collapse:collapse;margin-top:8px;}
+    .lines-table th,.lines-table td{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;}
+    .text-muted{color:var(--muted);text-align:center;}
+    @media (max-width:768px){.meta-grid{grid-template-columns:repeat(1,minmax(0,1fr));}}
+  </style>
+
+  <script>
+    async function postJSON(url, data) {
+      const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json','X-CSRFToken': getCookie('csrftoken')}, body: JSON.stringify(data||{}) });
+      return await res.json();
+    }
+    function getCookie(name){ const m=document.cookie.match('(?:^|; )'+name+'=([^;]*)'); return m?decodeURIComponent(m[1]):''; }
+
+    async function doPost(url){
+      const r = await postJSON(url, {});
+      alert(JSON.stringify(r));
+      if(r.ok){ location.reload(); }
+    }
+    async function finalizeLine(lineId){
+      const url = "{% url 'tasking_console:line_finalize' 0 %}".replace('/0/','/'+lineId+'/');
+      const r = await postJSON(url, {});
+      alert(JSON.stringify(r));
+      if(r.ok){ location.reload(); }
+    }
+    async function saveSnapshot(lineId){
+      const url = "{% url 'tasking_console:line_scan_snapshot' 0 %}".replace('/0/','/'+lineId+'/');
+      try {
+        const txt = prompt('输入 items JSON 数组（例：[{"product_id":1,"location_id":2,"qty_base":"10"}]）');
+        if(!txt) return;
+        const payload = { items: JSON.parse(txt), source: 'WEB' };
+        const r = await postJSON(url, payload);
+        alert(JSON.stringify(r));
+        if(r.ok){ location.reload(); }
+      } catch (e) { alert('JSON 解析失败：'+e); }
+    }
+  </script>
+{% endblock %}

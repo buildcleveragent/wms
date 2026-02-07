@@ -1,0 +1,46 @@
+<div id="session" class="card" style="padding:12px;">
+  {% if message %}
+    <div class="{% if ok %}success{% else %}error{% endif %}">{{ message }}</div>
+  {% endif %}
+
+  <h3>暂存明细</h3>
+  <table class="listing">
+    <thead>
+      <tr><th>行ID</th><th>数量</th><th>批次</th><th>效期</th><th>序列</th><th>库位ID</th><th>目标库位</th></tr>
+    </thead>
+    <tbody>
+    {% for line_id, entry in session_items.items %}
+      <tr>
+        <td>{{ line_id }}</td>
+        <td>{{ entry.qty }}</td>
+        <td>{{ entry.lot_no|default:"-" }}</td>
+        <td>{{ entry.expiry_date|default:"-" }}</td>
+        <td>{{ entry.serial_no|default:"-" }}</td>
+        <td>{{ entry.location_id|default:"-" }}</td>
+        <td>{{ entry.to_location_id|default:"-" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="7">暂无暂存</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+    <form hx-post="{% url 'op:save' task.id %}" hx-target="#session" hx-swap="outerHTML">
+      {% csrf_token %}
+      <label style="font-size:12px;"><input type="checkbox" name="confirm" required> 确认保存快照</label>
+      <button type="submit" class="button">保存快照</button>
+    </form>
+
+    <form hx-post="{% url 'op:post' task.id %}" hx-target="#session" hx-swap="outerHTML">
+      {% csrf_token %}
+      <label style="font-size:12px;"><input type="checkbox" name="confirm" required> 确认过账（不可回退）</label>
+      <button type="submit" class="button button-secondary">过账</button>
+    </form>
+
+    <form hx-post="{% url 'op:clear' task.id %}" hx-target="#session" hx-swap="outerHTML">
+      {% csrf_token %}
+      <button type="submit" class="button button-danger">清空暂存</button>
+    </form>
+  </div>
+</div>

@@ -1,0 +1,99 @@
+{# 右上角头像下拉菜单：全站可用 #}
+{% if request.user.is_authenticated %}
+  {% with uname=request.user.get_username init=request.user.get_username|slice:":1"|upper %}
+  <div id="user-menu-root" aria-live="polite">
+    <button id="user-menu-btn" class="um-btn" aria-haspopup="menu" aria-expanded="false" title="{{ uname }}">
+      <span class="um-avatar" aria-hidden="true">{{ init }}</span>
+    </button>
+    <div id="user-menu" class="um-menu" role="menu" aria-labelledby="user-menu-btn" hidden>
+      <div class="um-header" role="presentation">
+        <div class="um-avatar lg" aria-hidden="true">{{ init }}</div>
+        <div class="um-meta">
+          <div class="um-name">{{ uname }}</div>
+          {% if request.user.is_superuser %}<div class="um-role">超管</div>{% endif %}
+        </div>
+      </div>
+      <a role="menuitem" tabindex="-1" class="um-item" href="/console/op/lines/">操作台</a>
+      <a role="menuitem" tabindex="-1" class="um-item" href="{% url 'admin:index' %}">Admin 首页</a>
+      <a role="menuitem" tabindex="-1" class="um-item" href="{% url 'admin:password_change' %}">修改密码</a>
+      <form method="post" action="{% url 'admin:logout' %}" style="margin:0;">
+  {% csrf_token %}
+  <!-- 让按钮看起来像菜单项（链接样式），仍然是 POST 提交 -->
+  <button type="submit" role="menuitem" tabindex="-1" class="um-item danger um-as-link">
+    退出登录
+  </button>
+  <!-- 可选：登出后跳转到登录页；如无需求可删这一行 -->
+  <input type="hidden" name="next" value="/admin/login/">
+</form>
+
+    </div>
+  </div>
+  {% endwith %}
+{% else %}
+  <div id="user-menu-root">
+    <a class="um-login" href="/admin/login/?next={{ request.path|urlencode }}">登录</a>
+  </div>
+{% endif %}
+
+<style>
+#user-menu-root{
+  position:fixed; z-index:9999; top:10px; right:12px;
+}
+.um-btn{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:36px; height:36px; border-radius:9999px; border:none; cursor:pointer;
+  background:transparent; padding:0;
+}
+.um-avatar{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:36px; height:36px; border-radius:9999px; font-weight:700;
+  background:#111; color:#fff; user-select:none;
+}
+.um-avatar.lg{ width:44px; height:44px; font-size:16px; }
+.um-menu{
+  position:absolute; right:0; margin-top:8px; min-width:220px;
+  background:var(--body-bg, #fff); color:var(--body-fg, #111);
+  border:1px solid rgba(0,0,0,.08); border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.15);
+  overflow:hidden;
+}
+@media (prefers-color-scheme: dark){
+  .um-menu{ background:#1f2937; color:#f9fafb; border-color:rgba(255,255,255,.08); }
+  .um-avatar{ background:#fff; color:#111; }
+}
+.um-header{
+  display:flex; gap:10px; align-items:center; padding:10px 12px; border-bottom:1px solid rgba(0,0,0,.06);
+}
+.um-meta .um-name{ font-weight:600; }
+.um-meta .um-role{ font-size:12px; opacity:.75; }
+.um-item{
+  display:block; padding:10px 12px; text-decoration:none; color:inherit;
+  border-top:1px solid rgba(0,0,0,.04);
+}
+.um-item:hover{ background:rgba(0,0,0,.04); }
+.um-item.danger{ color:#b91c1c; font-weight:600; }
+.um-login{
+  display:inline-block; padding:6px 10px; border-radius:9999px;
+  background:#111; color:#fff; text-decoration:none;
+}
+</style>
+
+<script>
+(function(){
+  const root = document.getElementById('user-menu-root');
+  const btn  = document.getElementById('user-menu-btn');
+  const menu = document.getElementById('user-menu');
+  if (!root || !btn || !menu) return;
+
+  function open(){ menu.hidden = false; btn.setAttribute('aria-expanded','true'); }
+  function close(){ menu.hidden = true; btn.setAttribute('aria-expanded','false'); }
+  function toggle(e){ e.stopPropagation(); menu.hidden ? open() : close(); }
+
+  btn.addEventListener('click', toggle);
+  document.addEventListener('click', function(e){
+    if (!menu.hidden && !root.contains(e.target)) close();
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') close();
+  });
+})();
+</script>

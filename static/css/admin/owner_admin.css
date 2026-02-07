@@ -1,0 +1,22 @@
+.form-group {
+    display: flex;
+    align-items: center;  /* 垂直居中 */
+    gap: 10px;  /* 控制 label 和 input 之间的间距 */
+}
+
+.form-group label {
+    display: flex;
+    justify-content: flex-end; /* 右对齐 */
+    width: 300px;  /* 设置标签的宽度 */
+    margin-left: auto;  /* 保证右对齐 */
+}
+
+.form-group input {
+    max-width: 200px;  /* 最大宽度为100% */
+    height: 30px;
+}
+
+.form-group .field-username{
+    max-width: 230px;  /* 最大宽度为100% */
+}
+

@@ -1,0 +1,14 @@
+{% extends "admin/change_form.html" %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+  {% if owner_approve_freeze_url %}
+    <li><a class="historylink" href="{{ owner_approve_freeze_url }}">货主确认（冻结保留）</a></li>
+  {% endif %}
+  {% if wh_approve_promote_url %}
+    <li><a class="historylink" href="{{ wh_approve_promote_url }}">仓库确认（生成拣货草稿）</a></li>
+  {% endif %}
+  {% if wh_reject_unallocate_url %}
+    <li><a class="deletelink" href="{{ wh_reject_unallocate_url }}">仓库拒绝（释放冻结）</a></li>
+  {% endif %}
+{% endblock %}

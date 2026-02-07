@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}创建成功{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="alert alert-success">入库订单创建成功！</div>
+  <p>单号：<strong>{{ order.order_no }}</strong></p>
+  <p>货主：{{ order.owner }}</p>
+  <div class="mt-3">
+    <a class="btn btn-primary" href="{% url 'inbound:order_create' %}">继续新建</a>
+    <a class="btn btn-outline-secondary" href="{% url 'home' %}">返回首页</a>
+  </div>
+</div>
+{% endblock %}

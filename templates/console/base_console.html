@@ -1,0 +1,184 @@
+<!-- ===============================
+FILE: templates/console/base_console.html
+说明：企业感主题（按钮式一级菜单 + 紧凑二级动作条）
+=============================== -->
+<!doctype html>
+<html>
+<head>
+  {% load static %}
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}WMS 控制台{% endblock %}</title>
+  <style>
+    :root{
+      --bg:#ffffff; --fg:#0f172a; --muted:#64748b; --line:#e2e8f0;
+      --brand:#0b5fff; --brand-weak:#e6efff; --brand-strong:#0847bf;
+      --tab-bg:rgba(255,255,255,.85); --tab-blur:blur(8px);
+      --btn:#f8fafc; --btn-hover:#eef2ff;
+      --r-tab:9999px; --r-action:12px;
+      --pad-tab-y:6px; --pad-tab-x:14px;
+      --pad-act-y:6px; --pad-act-x:10px;
+      --container:1280px;
+    }
+    @media (prefers-color-scheme: dark){
+      :root{
+        --bg:#0b1220; --fg:#e5e7eb; --muted:#94a3b8; --line:#1f2937;
+        --brand:#7c3aed; --brand-weak:#22114b; --brand-strong:#6d28d9;
+        --tab-bg:rgba(12,16,28,.65); --btn:#111827; --btn-hover:#1f2937;
+      }
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{ margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; color:var(--fg); background:var(--bg); }
+    .shell{ position:sticky; top:0; z-index:50; box-shadow:0 1px 0 var(--line); }
+
+    .tabs-bar{ backdrop-filter:saturate(160%) var(--tab-blur); background:var(--tab-bg); border-bottom:1px solid var(--line); }
+    .tabs{ max-width:var(--container); margin:0 auto; display:flex; align-items:center; gap:10px; padding:6px 12px; flex-wrap:wrap; }
+    .brand{ display:flex; align-items:center; gap:8px; margin-right:6px; white-space:nowrap; font-weight:700; letter-spacing:.2px; }
+    .brand .logo{
+      width:22px; height:22px; border-radius:6px;
+      background: radial-gradient(120% 140% at 20% 100%, var(--brand) 0%, var(--brand-strong) 60%, #111 100%);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.35), 0 2px 6px rgba(0,0,0,.08);
+      display:inline-flex; align-items:center; justify-content:center; color:#fff; font-size:12px; font-weight:800;
+      user-select:none;
+    }
+    .brand .name{ font-size:14px; }
+    .user{ margin-left:auto; color:var(--muted); font-size:12px; white-space:nowrap; }
+
+    .tab-btn{
+      appearance:none; -webkit-appearance:none;
+      padding:var(--pad-tab-y) var(--pad-tab-x); border-radius:var(--r-tab);
+      cursor:pointer; user-select:none; white-space:nowrap;
+      font-size:14px; color:var(--fg);
+      background:var(--btn); border:1px solid var(--line);
+      box-shadow: 0 1px 0 rgba(15,23,42,.04);
+      transition: background .15s ease, color .15s ease, transform .12s ease, border-color .15s ease, box-shadow .15s ease;
+    }
+    .tab-btn:hover{ background:var(--brand-weak); transform: translateY(-1px); }
+    .tab-btn:focus{ outline:2px solid color-mix(in oklab, var(--brand) 55%, transparent); outline-offset:2px; }
+    .tab-btn.active, .tab-btn[aria-selected="true"]{
+      background:var(--brand); color:#fff; border-color:var(--brand-strong);
+      box-shadow: 0 2px 8px color-mix(in oklab, var(--brand) 35%, transparent);
+      transform:none;
+    }
+
+    .ribbon{ background:linear-gradient(180deg, rgba(2,6,23,.02), transparent); border-bottom:1px solid var(--line); }
+    .ribbon-scroll{ max-width:var(--container); margin:0 auto; padding:6px 12px; display:flex; gap:8px; overflow:auto; scrollbar-width:thin; }
+    .action{
+      display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+      background:var(--btn); color:inherit; text-decoration:none;
+      border:1px solid var(--line); border-radius:var(--r-action);
+      padding:var(--pad-act-y) var(--pad-act-x); font-size:14px; line-height:1.1;
+      transition: background .15s ease, transform .12s ease, border-color .15s ease;
+    }
+    .action:hover{ background:var(--btn-hover); transform: translateY(-1px); border-color: color-mix(in oklab, var(--brand) 15%, var(--line)); }
+    .action:active{ transform: translateY(0); }
+    .ico{ font-size:16px; line-height:1; }
+
+    .container{ max-width:var(--container); margin:14px auto; padding:0 12px; }
+    .btn{ padding:6px 10px; border:1px solid var(--line); border-radius:10px; cursor:pointer; background:var(--btn); }
+    .btn:hover{ background:var(--btn-hover); }
+    table{ border-collapse:collapse; width:100%; }
+    th, td{ border-bottom:1px solid var(--line); padding:8px 6px; text-align:left; }
+    .tag{ padding:2px 8px; border:1px solid var(--line); border-radius:9999px; font-size:12px; color:var(--muted); }
+
+    @media (max-width:768px){ .ribbon{ display:none; } }
+  </style>
+</head>
+
+<body class="shape-pill density-compact">
+  <div class="shell">
+    <div class="tabs-bar">
+      <div class="tabs" id="tabs" role="tablist" aria-label="主功能">
+        <!-- 品牌位：用你自己的 Logo 更企业化 -->
+        <div class="brand">
+          <img src="{% static 'img/aaa.png' %}" alt="Logo" style="width:22px;height:22px;border-radius:6px;">
+
+          <div class="name">金桥融通 · 运营台</div>
+        </div>
+
+
+
+        {% for t in CONSOLE_MENU.tabs %}
+          <button
+            class="tab-btn{% if forloop.counter0 == CONSOLE_MENU.active_index %} active{% endif %}"
+            type="button"
+            role="tab"
+            aria-selected="{% if forloop.counter0 == CONSOLE_MENU.active_index %}true{% else %}false{% endif %}"
+            data-index="{{ forloop.counter0 }}"
+          >{{ t.label }}</button>
+        {% empty %}
+          <div style="color:var(--muted)">无可用菜单</div>
+        {% endfor %}
+
+        <div class="user">{{ request.user.username }}</div>
+      </div>
+    </div>
+
+    <div class="ribbon">
+      {% for t in CONSOLE_MENU.tabs %}
+        <div class="ribbon-scroll" data-pane="{{ forloop.counter0 }}"
+             style="{% if forloop.counter0 != CONSOLE_MENU.active_index %}display:none{% endif %}">
+          {% for g in t.groups %}
+            {% for a in g.actions %}
+              <a class="action" href="{{ a.url|default:'#' }}" title="{{ a.label }}">
+                {% if a.icon %}<span class="ico">{{ a.icon }}</span>{% endif %}
+                <span>{{ a.label }}</span>
+              </a>
+            {% endfor %}
+          {% endfor %}
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="container">
+    {% block content %}{% endblock %}
+  </div>
+
+  <script>
+    (function(){
+      const tabsWrap = document.getElementById('tabs');
+      const tabs = tabsWrap ? tabsWrap.querySelectorAll('.tab-btn') : [];
+      const panes = document.querySelectorAll('[data-pane]');
+      const KEY = 'wms.console.activeTab';
+
+      function activate(i){
+        tabs.forEach((t,idx)=>{
+          const on = idx===i;
+          t.classList.toggle('active', on);
+          t.setAttribute('aria-selected', on ? 'true' : 'false');
+          t.setAttribute('tabindex', on ? '0' : '-1');
+        });
+        panes.forEach((p,idx)=>p.style.display = (idx===i ? '' : 'none'));
+        try{ localStorage.setItem(KEY, String(i)); }catch(e){}
+      }
+      tabs.forEach((t,i)=>{
+        t.addEventListener('click', ()=>activate(i));
+        t.addEventListener('keydown', (ev)=>{
+          if(ev.key==='ArrowRight' || ev.key==='ArrowLeft'){
+            ev.preventDefault();
+            const dir = ev.key==='ArrowRight' ? 1 : -1;
+            let ni = (i + dir + tabs.length) % tabs.length;
+            tabs[ni].focus(); activate(ni);
+          }
+        });
+      });
+      try{
+        const saved = Number(localStorage.getItem(KEY));
+        if(!Number.isNaN(saved) && saved>=0 && saved<tabs.length){
+          activate(saved);
+        }
+      }catch(e){}
+      document.querySelectorAll('.ribbon-scroll').forEach(sc=>{
+        sc.addEventListener('wheel', (ev)=>{
+          if(Math.abs(ev.deltaX) < Math.abs(ev.deltaY)) {
+            sc.scrollLeft += ev.deltaY;
+            ev.preventDefault();
+          }
+        }, {passive:false});
+      });
+    })();
+  </script>
+</body>
+</html>

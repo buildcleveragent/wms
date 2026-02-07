@@ -1,0 +1,12 @@
+{# templates/console/pick/_lines.html #}
+<table><thead><tr><th>SKU</th><th>库位</th><th>计划</th><th>已拣</th></tr></thead>
+<tbody>
+{% for line in lines %}
+<tr>
+  <td>{{ line.product.sku }}</td>
+  <td>{{ line.location.code }}</td>
+  <td>{{ line.qty_plan }}</td>
+  <td>{{ line.qty_picked }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
