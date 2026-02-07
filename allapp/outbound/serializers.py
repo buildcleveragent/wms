@@ -265,37 +265,52 @@ class OutboundOrderLineReadSerializer(serializers.ModelSerializer):
         except Exception:
             return Decimal("0.00")
 
+
+
+from decimal import Decimal
+from rest_framework import serializers
+
+# ... 你原来已有的 OutboundOrderLineReadSerializer 保持不变 ...
+
+
 class OutboundOrderReadSerializer(serializers.ModelSerializer):
+    submit_status_name   = serializers.SerializerMethodField()
+    approval_status_name = serializers.SerializerMethodField()
+    total_amount         = serializers.SerializerMethodField()
+    total_qty            = serializers.SerializerMethodField()
 
-    submit_status_name    = serializers.SerializerMethodField()
-    approval_status_name  = serializers.SerializerMethodField()
-    total_amount          = serializers.SerializerMethodField()
-    total_qty = serializers.SerializerMethodField()
+    # ✅ 新增：业务员姓名（制表人）
+    created_by_name      = serializers.SerializerMethodField()
 
-    # 确认你的 related_name；若模型里 related_name='items'，用 source="items"
-    lines = OutboundOrderLineReadSerializer(source="items", many=True, read_only=True)
+    # ✅ 你的模型 OutboundOrderLine.order 的 related_name = "lines"
+    #    所以这里不要写 source="lines"，直接这样写即可
+    lines = OutboundOrderLineReadSerializer(many=True, read_only=True)
 
     class Meta:
-
-        model  = OutboundOrder
+        model = OutboundOrder
         fields = [
-            "id","order_no","biz_date",
-            "submit_status","submit_status_name",
-            "approval_status","approval_status_name",
-            "outbound_type","delivery_method","etd",
-            "owner","customer","supplier","warehouse",
-            "ship_to","contact","contact_phone",
-            "memo","is_closed","close_reason",
-            "created_at","lines","total_amount",
-            "lines", "total_qty", "total_amount",
+            "id", "order_no", "biz_date",
+            "submit_status", "submit_status_name",
+            "approval_status", "approval_status_name",
+            "outbound_type", "delivery_method", "etd",
+
+            "owner", "customer", "supplier", "warehouse",
+
+            # ✅ 把 created_by id 和 created_by_name 都输出
+            "created_by", "created_by_name",
+            "created_at",
+
+            "ship_to", "contact", "contact_phone",
+            "memo", "is_closed", "close_reason",
+
+            "lines",
+            "total_qty", "total_amount",
         ]
-
-
 
     def _name_of(self, obj, field, fallback):
         try:
             mapping = dict(getattr(OutboundOrder, field))
-            code = getattr(obj, field.replace("_name",""))
+            code = getattr(obj, field.replace("_name", ""))
             return mapping.get(code, code)
         except Exception:
             return getattr(obj, fallback, None)
@@ -306,37 +321,151 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
     def get_approval_status_name(self, obj):
         return self._name_of(obj, "APPROVAL_CHOICES", "approval_status")
 
-    # --- 关键修复：安全获取明细可迭代对象 ---
-    def _iter_lines(self, obj):
-        rel = (
-            getattr(obj, "items", None) or     # 优先：related_name='items'
-            getattr(obj, "lines", None) or     # 其次：related_name='lines'
-            getattr(obj, "outboundorderline_set", None)  # 默认反向管理器
-        )
-        if rel is None:
-            return []
-        return rel.all() if hasattr(rel, "all") else rel
+    def get_created_by_name(self, obj):
+        u = getattr(obj, "created_by", None)
+        if not u:
+            return ""
+        # 你的 User 模型有 name 字段
+        return (getattr(u, "name", None) or getattr(u, "username", None) or "")
 
     def get_total_qty(self, obj):
         total = Decimal("0")
-        for l in self._iter_lines(obj):
-            qty = getattr(l, "base_qty", None)
-            if qty is None:
-                qty = getattr(l, "qty", 0)
-            total += Decimal(qty or 0)
+        for l in obj.lines.all():
+            total += Decimal(l.base_qty or 0)
         return total
 
     def get_total_amount(self, obj):
         total = Decimal("0")
-        for l in self._iter_lines(obj):
-            amt = getattr(l, "amount", None)
-            if amt is None:
-                price = getattr(l, "base_price", None)
-                if price is None:
-                    price = getattr(l, "price", 0)
-                qty = getattr(l, "base_qty", None)
-                if qty is None:
-                    qty = getattr(l, "qty", 0)
-                amt = Decimal(price or 0) * Decimal(qty or 0)
-            total += Decimal(amt or 0)
-        return total
+        for l in obj.lines.all():
+            total += Decimal(l.base_qty or 0) * Decimal(l.base_price or 0)
+        return total.quantize(Decimal("0.01"))
+
+
+# class OutboundOrderReadSerializer(serializers.ModelSerializer):
+#     submit_status_name    = serializers.SerializerMethodField()
+#     approval_status_name  = serializers.SerializerMethodField()
+#     total_amount          = serializers.SerializerMethodField()
+#     total_qty             = serializers.SerializerMethodField()
+#
+#     # ✅ related_name="lines" 时：不要写 source="lines"
+#     lines = OutboundOrderLineReadSerializer(many=True, read_only=True)
+#
+#     class Meta:
+#         model  = OutboundOrder
+#         fields = [
+#             "id","order_no","biz_date",
+#             "submit_status","submit_status_name",
+#             "approval_status","approval_status_name",
+#             "outbound_type","delivery_method","etd",
+#             "owner","customer","supplier","warehouse",
+#             "ship_to","contact","contact_phone",
+#             "memo","is_closed","close_reason",
+#             "created_at",
+#             "lines",
+#             "total_qty","total_amount",
+#         ]
+#
+#     def _name_of(self, obj, field, fallback):
+#         try:
+#             mapping = dict(getattr(OutboundOrder, field))
+#             code = getattr(obj, field.replace("_name",""))
+#             return mapping.get(code, code)
+#         except Exception:
+#             return getattr(obj, fallback, None)
+#
+#     def get_submit_status_name(self, obj):
+#         return self._name_of(obj, "SUBMIT_CHOICES", "submit_status")
+#
+#     def get_approval_status_name(self, obj):
+#         return self._name_of(obj, "APPROVAL_CHOICES", "approval_status")
+#
+#     def get_total_qty(self, obj):
+#         total = Decimal("0")
+#         for l in getattr(obj, "lines").all():
+#             total += Decimal(l.base_qty or 0)
+#         return total
+#
+#     def get_total_amount(self, obj):
+#         total = Decimal("0")
+#         for l in getattr(obj, "lines").all():
+#             total += (Decimal(l.base_qty or 0) * Decimal(l.base_price or 0))
+#         return total.quantize(Decimal("0.01"))
+
+
+
+
+# class OutboundOrderReadSerializer(serializers.ModelSerializer):
+#
+#     submit_status_name    = serializers.SerializerMethodField()
+#     approval_status_name  = serializers.SerializerMethodField()
+#     total_amount          = serializers.SerializerMethodField()
+#     total_qty = serializers.SerializerMethodField()
+#
+#     # 确认你的 related_name；若模型里 related_name='items'，用 source="items"
+#     lines = OutboundOrderLineReadSerializer(source="items", many=True, read_only=True)
+#
+#     class Meta:
+#
+#         model  = OutboundOrder
+#         fields = [
+#             "id","order_no","biz_date",
+#             "submit_status","submit_status_name",
+#             "approval_status","approval_status_name",
+#             "outbound_type","delivery_method","etd",
+#             "owner","customer","supplier","warehouse",
+#             "ship_to","contact","contact_phone",
+#             "memo","is_closed","close_reason",
+#             "created_at","lines","total_amount",
+#             "lines", "total_qty", "total_amount",
+#         ]
+#
+#
+#
+#     def _name_of(self, obj, field, fallback):
+#         try:
+#             mapping = dict(getattr(OutboundOrder, field))
+#             code = getattr(obj, field.replace("_name",""))
+#             return mapping.get(code, code)
+#         except Exception:
+#             return getattr(obj, fallback, None)
+#
+#     def get_submit_status_name(self, obj):
+#         return self._name_of(obj, "SUBMIT_CHOICES", "submit_status")
+#
+#     def get_approval_status_name(self, obj):
+#         return self._name_of(obj, "APPROVAL_CHOICES", "approval_status")
+#
+#     # --- 关键修复：安全获取明细可迭代对象 ---
+#     def _iter_lines(self, obj):
+#         rel = (
+#             getattr(obj, "items", None) or     # 优先：related_name='items'
+#             getattr(obj, "lines", None) or     # 其次：related_name='lines'
+#             getattr(obj, "outboundorderline_set", None)  # 默认反向管理器
+#         )
+#         if rel is None:
+#             return []
+#         return rel.all() if hasattr(rel, "all") else rel
+#
+#     def get_total_qty(self, obj):
+#         total = Decimal("0")
+#         for l in self._iter_lines(obj):
+#             qty = getattr(l, "base_qty", None)
+#             if qty is None:
+#                 qty = getattr(l, "qty", 0)
+#             total += Decimal(qty or 0)
+#         return total
+#
+#     def get_total_amount(self, obj):
+#         total = Decimal("0")
+#         for l in self._iter_lines(obj):
+#             amt = getattr(l, "amount", None)
+#             if amt is None:
+#                 price = getattr(l, "base_price", None)
+#                 if price is None:
+#                     price = getattr(l, "price", 0)
+#                 qty = getattr(l, "base_qty", None)
+#                 if qty is None:
+#                     qty = getattr(l, "qty", 0)
+#                 amt = Decimal(price or 0) * Decimal(qty or 0)
+#             total += Decimal(amt or 0)
+#         return total

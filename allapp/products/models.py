@@ -145,7 +145,7 @@ class ProductUom(BaseModel):
     code = models.CharField(
         "单位编码", max_length=20,
         help_text="EA/PCS/CTN/PLT/KG/L 等",
-        validators=[RegexValidator(r"^[A-Z0-9_\-]+$", "仅允许大写字母、数字、下划线、连字符")]
+        validators=[RegexValidator(r"^[A-Za-z0-9_\-]+$", "仅允许字母、数字、下划线、连字符")]
     )
     name = models.CharField("单位名称", max_length=50)
 
@@ -193,6 +193,13 @@ class ProductUom(BaseModel):
             self.name = self.name.strip()
         if not self.code:
             raise ValidationError({"code": "单位编码不能为空"})
+
+    def save(self, *args, **kwargs):
+        if isinstance(self.code, str):
+            self.code = self.code.strip().upper()
+        if isinstance(self.name, str):
+            self.name = self.name.strip()
+        super().save(*args, **kwargs)
 
 class TemperatureZone(BaseModel):
     """温区字典（适用于冷链/医药）"""
@@ -616,8 +623,8 @@ class ProductPackage(BaseModel):
     )
 
     is_pickable = models.BooleanField("可直接拣配", default=False)
-    is_purchase_default = models.BooleanField("采购辅助单位", default=False)
-    is_sales_default = models.BooleanField("销售辅助单位", default=False)
+    is_purchase_default = models.BooleanField("采购辅助单位", null=True, blank=True, default=None)
+    is_sales_default = models.BooleanField("销售辅助单位", null=True, blank=True, default=None)
 
     sort_order = models.PositiveIntegerField("排序", default=0)
 
@@ -627,8 +634,19 @@ class ProductPackage(BaseModel):
         ordering = ["product", "sort_order", "uom"]   # ✅ 用字段名
         constraints = [
             models.UniqueConstraint(fields=["product", "uom"], name="uniq_product_uom"),
-            models.UniqueConstraint(fields=["product", "is_purchase_default"], name="uniproduct_purchasedefault"),
-            models.UniqueConstraint(fields=["product", "is_sales_default"], name="uniproduct_salesdefault"),
+            # models.UniqueConstraint(fields=["product", "is_purchase_default"], name="uniproduct_purchasedefault"),
+            # models.UniqueConstraint(fields=["product", "is_sales_default"], name="uniproduct_salesdefault"),
+            # ✅ 每商品最多 1 条“采购默认”(True)（非默认用 NULL 不参与冲突）
+            models.UniqueConstraint(
+                fields=["product", "is_purchase_default", "is_deleted"],
+                name="uniq_prod_purchase_default_true",
+            ),
+
+            # ✅ 每商品最多 1 条“销售默认”(True)
+            models.UniqueConstraint(
+                fields=["product", "is_sales_default", "is_deleted"],
+                name="uniq_prod_sales_default_true",
+            ),
             models.CheckConstraint(check=Q(qty_in_base__gt=0), name="chk_qty_in_base_gt_0"),
             # 尺寸三者要么都为空，要么都 >0（可按需保留）
             models.CheckConstraint(
