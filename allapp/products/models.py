@@ -145,7 +145,7 @@ class ProductUom(BaseModel):
     code = models.CharField(
         "单位编码", max_length=20,
         help_text="EA/PCS/CTN/PLT/KG/L 等",
-        validators=[RegexValidator(r"^[A-Za-z0-9_\-]+$", "仅允许字母、数字、下划线、连字符")]
+        validators=[RegexValidator(r"^[A-Za-z0-9_\-\*]+$", "仅允许字母、数字、下划线、连字符、星号")]
     )
     name = models.CharField("单位名称", max_length=50)
 
@@ -574,6 +574,36 @@ class Product(BaseModel):
                 if not self.packages.filter(uom_id=self.replenish_uom_id).exists():
                     errors["replenish_uom"] = "补货单位必须存在于该商品的包装层级中。"
 
+        # ========= 唯一性校验（包含软删除记录）=========
+        # 说明：默认 manager 往往会过滤软删数据，导致表单校验通过、最终落库时触发 DB IntegrityError(500)
+        # 用 all_objects（若存在）把软删也纳入检查，提前给出友好提示。
+        mgr = getattr(type(self), "all_objects", None) or type(self)._base_manager
+
+        def _uniq_owner_field(field: str, label: str):
+            val = getattr(self, field, None)
+            if val in (None, "") or not self.owner_id:
+                return
+            qs = mgr.filter(owner_id=self.owner_id, **{field: val})
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            conflict = qs.only("id", "code", "name", "is_deleted").first()
+            if conflict:
+                if getattr(conflict, "is_deleted", False):
+                    errors[field] = (
+                        f"该货主下{label}“{val}”已存在（已软删除：{conflict.code}-{conflict.name}）。"
+                        f"请先恢复旧商品，或使用新的{label}。"
+                    )
+                else:
+                    errors[field] = f"该货主下{label}“{val}”已存在（{conflict.code}-{conflict.name}）。"
+
+        _uniq_owner_field("code", "商品编号")
+        _uniq_owner_field("sku", "SKU编码")
+        _uniq_owner_field("gtin", "标准条码")
+        _uniq_owner_field("unit_barcode", "零码")
+        _uniq_owner_field("carton_barcode", "箱码")
+        _uniq_owner_field("external_code", "外部系统编码")
+
+
         if self.pk:
             orig = type(self).objects.only(
                 "code", "sku", "gtin", "unit_barcode", "carton_barcode", "external_code"
@@ -677,11 +707,11 @@ class ProductPackage(BaseModel):
         return f"{self.product.code} - 1 {self.uom.code} = {self.qty_in_base} {self.product.base_uom.code}"
 
     def save(self, *args, **kwargs):
-        # 自动计算体积（cm→m³），三维都>0才计算
+        # ✅ 只做“自动计算/赋值”，不要在 save() 里 full_clean()（否则 admin 容易 500）
         if self.volume_auto:
             if (self.length_cm and self.length_cm > 0) and \
-               (self.width_cm  and self.width_cm  > 0) and \
-               (self.height_cm and self.height_cm > 0):
+                    (self.width_cm and self.width_cm > 0) and \
+                    (self.height_cm and self.height_cm > 0):
                 calc = (self.length_cm * self.width_cm * self.height_cm) / Decimal("1000000")
                 calc_q = calc.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
                 if self.volume_m3 is None:
@@ -698,13 +728,17 @@ class ProductPackage(BaseModel):
                 self.volume_m3_status = self.VolumeStatus.NONE
                 self.volume_m3 = None
 
-        # 严格校验
-        self.full_clean()
         return super().save(*args, **kwargs)
 
     def clean(self):
+        super().clean()
         errors = {}
 
+        # --- 规范化 ---
+        if isinstance(self.barcode, str):
+            self.barcode = self.barcode.strip() or None
+
+        # --- 基础校验 ---
         if not self.uom_id:
             errors["uom"] = "请选择包装单位。"
         if (self.qty_in_base or 0) <= 0:
@@ -714,7 +748,23 @@ class ProductPackage(BaseModel):
         if self.uom_id and self.product_id and self.uom_id == self.product.base_uom_id and self.qty_in_base != 1:
             errors["qty_in_base"] = "基础单位层级的换算数必须为 1。"
 
-        # 每商品的“默认单位”唯一（应用层校验；并发场景请在服务层加锁）
+        # --- ✅ 关键：把“会导致 500 的唯一性错误”提前到 clean()，让 admin 当作表单错误显示 ---
+        if self.product_id and self.uom_id:
+            qs = type(self).objects.filter(product_id=self.product_id, uom_id=self.uom_id, is_deleted=False)
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                # 放在 __all__，效果与 Django 默认“字段组合已存在”类似
+                errors["__all__"] = "包含 商品 和 包装单位 的 商品包装层级 已经存在。"
+
+        if self.product_id and self.barcode:
+            qs = type(self).objects.filter(product_id=self.product_id, barcode=self.barcode, is_deleted=False)
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                errors["barcode"] = "该商品下此层级条码已存在。"
+
+        # 每商品的“默认单位”唯一（应用层校验；并发场景仍由 DB 约束兜底）
         for flag, label in (("is_purchase_default", "采购"), ("is_sales_default", "销售")):
             if getattr(self, flag):
                 qs = type(self).objects.filter(product_id=self.product_id, **{flag: True}, is_deleted=False)
@@ -724,10 +774,64 @@ class ProductPackage(BaseModel):
                     conflict = qs.first()
                     errors[flag] = f"该商品已有默认{label}单位：{conflict.uom.code}"
 
-        # 条码长度基本校验
         if self.barcode and not (3 <= len(self.barcode) <= 50):
             errors["barcode"] = "条码长度需在 3~50 之间。"
 
         if errors:
             raise ValidationError(errors)
+
+    # def save(self, *args, **kwargs):
+    #     # 自动计算体积（cm→m³），三维都>0才计算
+    #     if self.volume_auto:
+    #         if (self.length_cm and self.length_cm > 0) and \
+    #            (self.width_cm  and self.width_cm  > 0) and \
+    #            (self.height_cm and self.height_cm > 0):
+    #             calc = (self.length_cm * self.width_cm * self.height_cm) / Decimal("1000000")
+    #             calc_q = calc.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+    #             if self.volume_m3 is None:
+    #                 self.volume_m3 = calc_q
+    #                 self.volume_m3_status = self.VolumeStatus.CALCULATED
+    #             else:
+    #                 tol = max(Decimal("0.000001"), calc_q * Decimal("0.001"))  # 容差 max(1e-6, 0.1%)
+    #                 if (self.volume_m3 - calc_q).copy_abs() > tol:
+    #                     self.volume_m3_status = self.VolumeStatus.MISMATCH
+    #                 else:
+    #                     self.volume_m3 = calc_q
+    #                     self.volume_m3_status = self.VolumeStatus.CALCULATED
+    #         else:
+    #             self.volume_m3_status = self.VolumeStatus.NONE
+    #             self.volume_m3 = None
+    #
+    #     # 严格校验
+    #     self.full_clean()
+    #     return super().save(*args, **kwargs)
+    #
+    # def clean(self):
+    #     errors = {}
+    #
+    #     if not self.uom_id:
+    #         errors["uom"] = "请选择包装单位。"
+    #     if (self.qty_in_base or 0) <= 0:
+    #         errors["qty_in_base"] = "换算数量必须 > 0。"
+    #
+    #     # 与基本单位相同则必须 1:1
+    #     if self.uom_id and self.product_id and self.uom_id == self.product.base_uom_id and self.qty_in_base != 1:
+    #         errors["qty_in_base"] = "基础单位层级的换算数必须为 1。"
+    #
+    #     # 每商品的“默认单位”唯一（应用层校验；并发场景请在服务层加锁）
+    #     for flag, label in (("is_purchase_default", "采购"), ("is_sales_default", "销售")):
+    #         if getattr(self, flag):
+    #             qs = type(self).objects.filter(product_id=self.product_id, **{flag: True}, is_deleted=False)
+    #             if self.pk:
+    #                 qs = qs.exclude(pk=self.pk)
+    #             if qs.exists():
+    #                 conflict = qs.first()
+    #                 errors[flag] = f"该商品已有默认{label}单位：{conflict.uom.code}"
+    #
+    #     # 条码长度基本校验
+    #     if self.barcode and not (3 <= len(self.barcode) <= 50):
+    #         errors["barcode"] = "条码长度需在 3~50 之间。"
+    #
+    #     if errors:
+    #         raise ValidationError(errors)
 

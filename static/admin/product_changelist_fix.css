@@ -1,0 +1,17 @@
+/* 只影响 Django Admin 的列表页（changelist） */
+.change-list .object-tools {
+  float: left !important;     /* 从右浮动改成左浮动 */
+  margin-left: 0 !important;
+  margin-right: 12px !important;
+}
+
+/* 避免 object-tools 的 li 还在右侧排列 */
+.change-list .object-tools li {
+  float: left !important;
+}
+
+/* 有些主题（如 simpleui）用了 flex/定位，这里兜底 */
+.change-list .object-tools {
+  right: auto !important;
+  left: 0 !important;
+}

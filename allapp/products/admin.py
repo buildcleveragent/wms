@@ -66,6 +66,9 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         "owner", "category", "brand","spec",
         "batch_control", "serial_control", "expiry_control", "pick_policy",
     )
+
+    list_display_links = ("name",)
+    
     search_fields = ("code", "name", "spec","sku", "gtin", "unit_barcode", "carton_barcode", "external_code")
     autocomplete_fields = ("owner", "category", "brand", "base_uom", "replenish_uom")
     list_select_related = ("owner", "category", "brand", "base_uom", "replenish_uom")
@@ -102,6 +105,11 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     def has_view_or_change_permission(self, request, obj=None):
         # Django 5.x 的 Autocomplete 调这个；我们显式放行
         return True
+
+    class Media:
+        css = {
+            "all": ("admin/product_changelist_fix.css",)
+        }
 
 @admin.register(ProductPackage)
 class ProductPackageAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
