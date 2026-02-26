@@ -1,328 +1,120 @@
 {# templates/admin/change_list.html #}
-{% extends "admin/base_site.html" %}
-{% load i18n admin_urls admin_list static admin_modify %}
-
-{% block bodyclass %}{{ block.super }} app-{{ app_label }} model-{{ opts.model_name }} change-list{% endblock %}
+{% extends "admin/change_list.html" %}
+{% load i18n admin_urls %}
 
 {% block extrastyle %}
   {{ block.super }}
-  {{ media.css }}
   <style>
-    :root{
-      --cl-btn-h: 36px;
-      --cl-btn-radius: 8px;
-      --cl-gap: 10px;
-      --cl-primary: #2f7fae;      /* 与“搜索”按钮一致的深蓝 */
-      --cl-primary-fg: #fff;
-      --cl-border: 1px solid var(--hairline-color,#e5e7eb);
-      --cl-bg: var(--body-bg,#fff);
-    }
-
-    /* 右侧筛选栏隐藏 + 单列布局 */
-    #changelist-filter,
-    aside#changelist-filter{ display:none !important; }
-    #content{ grid-template-columns: 1fr !important; }
-
-    /* 顶部工具条：左侧放 Add，右侧是 Search/Date（通过 order 把右侧块挪到左边） */
-    .top-bar{
+    /* 顶部：添加按钮 + 搜索框同一行、垂直对齐 */
+    .cl-toolbar{
       display:flex;
-      align-items:center;
-      justify-content:flex-start;
-      gap: var(--cl-gap);
-      margin-bottom: 8px;
+      align-items:center;         /* ✅ 垂直居中对齐 */
+      gap:10px;
+      margin: 0 0 10px 0;
       flex-wrap: wrap;
     }
-    .top-bar-left,
-    .top-bar-right{
-      display:flex;
-      align-items:center;
-      gap: var(--cl-gap);
-      margin:0;
-      padding:0;
-    }
-    .top-bar-left{ flex: 1 1 auto; flex-wrap: wrap; }
-    .top-bar-right{
-      order:-1;
-      margin-right: 12px;
-      flex: 0 0 auto;
-    }
 
-    /* 搜索表单横排对齐 */
-    #changelist-search{
-      display:flex !important;
-      align-items:center !important;
-      gap: var(--cl-gap) !important;
-      margin:0 !important;
-    }
-    #changelist-search input[type="text"],
-    #changelist-search input[type="search"]{
-      height: var(--cl-btn-h) !important;
-      line-height: var(--cl-btn-h) !important;
-      padding: 0 10px !important;
-      margin: 0 !important;
-      box-sizing: border-box;
-    }
-
-    /* object-tools（Add） */
-    .object-tools{
-      display:flex !important;
-      align-items:center !important;
-      gap: var(--cl-gap) !important;
+    /* 让 object-tools 参与 flex，不再 float */
+    .cl-toolbar .object-tools{
+      float:none !important;
       margin:0 !important;
       padding:0 !important;
       list-style:none !important;
+
+      display:flex !important;
+      align-items:center !important;   /* ✅ 垂直居中 */
+      gap:10px !important;
     }
-    .object-tools li{
+    .cl-toolbar .object-tools li{
       margin:0 !important;
       padding:0 !important;
       list-style:none !important;
       display:flex !important;
-      align-items:center !important;
+      align-items:center !important;   /* ✅ 垂直居中 */
     }
 
-    /* 统一“搜索”按钮和“添加”按钮：同高同色同圆角 */
-    #changelist-search input[type="submit"],
-    .object-tools a.addlink{
-      height: var(--cl-btn-h) !important;
-      line-height: var(--cl-btn-h) !important;
-      padding: 0 14px !important;
-      border-radius: var(--cl-btn-radius) !important;
-      box-sizing: border-box;
+    /* 搜索表单参与 flex，保证同一基线 */
+    .cl-toolbar #changelist-search{
+      display:flex !important;
+      align-items:center !important;   /* ✅ 垂直居中 */
+      gap:10px !important;
+      margin:0 !important;
+    }
 
+    /* 统一输入框高度 */
+    .cl-toolbar #changelist-search input[type="text"],
+    .cl-toolbar #changelist-search input[type="search"]{
+      height:36px !important;
+      line-height:36px !important;
+      padding:0 10px !important;
+      box-sizing:border-box;
+      margin:0 !important;
+    }
+
+    /* 搜索按钮统一高度 */
+    .cl-toolbar #changelist-search input[type="submit"]{
+      height:36px !important;
+      line-height:36px !important;
+      padding:0 14px !important;
+      border-radius:8px !important;
+      box-sizing:border-box;
+      margin:0 !important;
+    }
+
+    /* ✅ 添加按钮：同高 + 绿色底色 */
+    .cl-toolbar .object-tools a.addlink{
       display:inline-flex !important;
       align-items:center !important;
       justify-content:center !important;
-      gap: 8px !important;
 
+      height:36px !important;
+      line-height:36px !important;
+      padding:0 14px !important;
+      border-radius:8px !important;
+      box-sizing:border-box;
+
+      white-space:nowrap !important;
       margin:0 !important;
       vertical-align: middle !important;
 
-      background: var(--cl-primary) !important;
-      border: 1px solid var(--cl-primary) !important;
-      color: var(--cl-primary-fg) !important;
-
+      background:#2e7d32 !important;      /* ✅ 绿色 */
+      border:1px solid #2e7d32 !important;
+      color:#fff !important;              /* 白字 */
       text-decoration:none !important;
-
-      /* 禁掉主题可能用的背景图标（很多“多出来的小 +”就是它） */
-      background-image: none !important;
+      background-image:none !important;
     }
-    #changelist-search input[type="submit"]:hover,
-    .object-tools a.addlink:hover{
+    .cl-toolbar .object-tools a.addlink:visited{
+      color:#fff !important;
+    }
+    .cl-toolbar .object-tools a.addlink:hover{
       filter: brightness(0.95);
-      color: var(--cl-primary-fg) !important;
+      color:#fff !important;
     }
-    .object-tools a.addlink:visited{ color: var(--cl-primary-fg) !important; }
 
-    /* ✅ 彻底禁用主题自带 addlink 图标：伪元素（重叠 + 的根源） */
-    .object-tools a.addlink:before,
-    .object-tools a.addlink:after,
-    .object-tools a.addlink::before,
-    .object-tools a.addlink::after{
+    /* 如果你的主题给 addlink 额外加了伪元素图标，避免干扰对齐（可留着，没副作用） */
+    .cl-toolbar .object-tools a.addlink::before,
+    .cl-toolbar .object-tools a.addlink::after{
       content: none !important;
       display: none !important;
-    }
-
-    /* 我们自己的 + 放右边 */
-    .object-tools a.addlink .add-text{
-      display:inline-block;
-      line-height: 1;
-      white-space: nowrap;
-    }
-    .object-tools a.addlink .add-icon{
-      display:inline-block;
-      font-size: 16px;
-      font-weight: 700;
-      line-height: 1;
-      margin-left: 6px;
-    }
-
-    /* 顶部筛选：折叠面板 */
-    .top-filters{
-      margin: 8px 0 12px;
-      padding: 6px;
-      border: var(--cl-border);
-      border-radius: var(--cl-btn-radius);
-      background: var(--cl-bg);
-      display:flex;
-      flex-wrap:wrap;
-      gap: 8px 10px;
-    }
-    .filter-panel{ display:inline-block; position:relative; }
-    .filter-panel > summary{
-      cursor:pointer;
-      list-style:none;
-      display:inline-flex;
-      align-items:center;
-      gap:.5rem;
-      padding: .35rem .6rem;
-      border: var(--cl-border);
-      border-radius:9999px;
-      white-space:nowrap;
-      user-select:none;
-      background: var(--cl-bg);
-    }
-    .filter-panel > summary::-webkit-details-marker{ display:none; }
-    .filter-panel .badge{
-      font-size:12px;
-      line-height:1;
-      padding:.1rem .35rem;
-      border-radius:9999px;
-      background: rgba(0,0,0,.08);
-    }
-    .filter-panel .filter-body{
-      position:absolute;
-      z-index:20;
-      top: calc(100% + 6px);
-      left: 0;
-      min-width:240px;
-      padding: 8px 10px;
-      border: var(--cl-border);
-      border-radius: var(--cl-btn-radius);
-      background: var(--cl-bg);
-      box-shadow: 0 8px 24px rgba(0,0,0,.08);
-      display:block;
-    }
-    .filter-panel:not([open]) .filter-body{ display:none; }
-    .filter-body .filter > h2, .filter-body h3{ display:none; }
-    .filter-body .filter{ margin:0; }
-
-    /* 表格：不折叠不换行，靠横向滚动 */
-    #changelist-form .results,
-    #changelist{ overflow-x: auto !important; }
-
-    #result_list{
-      table-layout: auto !important;
-      width: max-content !important;
-      min-width: 100% !important;
-    }
-    #result_list thead th,
-    #result_list thead th a,
-    #result_list td,
-    #result_list td a{
-      writing-mode: horizontal-tb !important;
-      transform: none !important;
-      white-space: nowrap !important;
-      word-break: keep-all !important;
-      overflow-wrap: normal !important;
-      line-height: 1.2 !important;
-    }
-    #result_list thead th{
-      padding-top: 6px !important;
-      padding-bottom: 6px !important;
-      vertical-align: bottom !important;
     }
   </style>
 {% endblock %}
 
-{% block sidebar %}{% endblock %}
-{% block filters %}{% endblock %}
+{# 避免出现两次 Add（把默认 object-tools 清掉） #}
+{% block object-tools %}{% endblock %}
 
-{% block content %}
-  <div id="content-main">
-
-    <!-- 顶部栏 -->
-    <div class="top-bar">
-      <div class="top-bar-left">
-        {% if cl.search_fields %}{% search_form cl %}{% endif %}
-        {% if cl.date_hierarchy %}{% date_hierarchy cl %}{% endif %}
-      </div>
-
-      <div class="top-bar-right">
-        {% if has_add_permission %}
-          <ul class="object-tools">
-            <li>
-              <a class="addlink" href="{% url cl.opts|admin_urlname:'add' %}">
-                <span class="add-text">
-                  {% blocktrans with cl.opts.verbose_name as name %}Add {{ name }}{% endblocktrans %}
-                </span>
-                <span class="add-icon">+</span>
-              </a>
-            </li>
-          </ul>
-        {% endif %}
-      </div>
-    </div>
-
-    <!-- 顶部筛选器：每个 spec 一个折叠按钮 -->
-    {% if cl.filter_specs|length %}
-      <div class="top-filters" id="top-filters">
-        {% for spec in cl.filter_specs %}
-          <details class="filter-panel">
-            <summary>
-              {{ spec.title }}
-              <span class="badge" hidden></span>
-            </summary>
-            <div class="filter-body">
-              {% admin_list_filter cl spec %}
-            </div>
-          </details>
-        {% endfor %}
-      </div>
+{# 在搜索区块里插入 Add，使其在搜索框左侧 #}
+{% block search %}
+  <div class="cl-toolbar">
+    {% if has_add_permission %}
+      <ul class="object-tools">
+        <li>
+          <a class="addlink" href="{% url cl.opts|admin_urlname:'add' %}">
+            {% blocktrans with cl.opts.verbose_name as name %}Add {{ name }}{% endblocktrans %}
+          </a>
+        </li>
+      </ul>
     {% endif %}
-
-    <!-- 列表表单 -->
-    <form id="changelist-form" method="post" novalidate>
-      {% csrf_token %}
-      {% if cl.formset %}{{ cl.formset.management_form }}{% endif %}
-
-      {% block actions %}{% if action_form and cl.show_admin_actions %}{% admin_actions %}{% endif %}{% endblock %}
-      {% block result_list %}{% result_list cl %}{% endblock %}
-      {% if action_form and cl.show_admin_actions %}{% admin_actions %}{% endif %}
-    </form>
-
-    {% block pagination %}{% pagination cl %}{% endblock %}
+    {{ block.super }}
   </div>
-
-  <script>
-  (function(){
-    var qs   = new URLSearchParams(location.search);
-    var wrap = document.getElementById('top-filters');
-    if(!wrap) return;
-
-    wrap.querySelectorAll('.filter-panel').forEach(function(panel){
-      var names = new Set();
-      panel.querySelectorAll('.filter-body [name]').forEach(function(el){
-        var n = el.getAttribute('name'); if(n) names.add(n);
-      });
-
-      var count = 0;
-      names.forEach(function(n){
-        if(qs.has(n)) {
-          var v = qs.getAll(n).join('');
-          if(v !== '') count++;
-        }
-      });
-      var badge = panel.querySelector('.badge');
-      if(badge && count>0){ badge.textContent = count; badge.hidden = false; }
-
-      var body    = panel.querySelector('.filter-body');
-      var summary = panel.querySelector('summary');
-      if(!body || !summary) return;
-
-      panel.addEventListener('toggle', function(){
-        if(panel.open){
-          body.style.minWidth = Math.max(240, summary.offsetWidth) + 'px';
-          body.style.left = '0'; body.style.right = 'auto';
-          var rect = body.getBoundingClientRect();
-          if(rect.right > window.innerWidth - 8) {
-            body.style.left = 'auto'; body.style.right = '0';
-          }
-        }
-      });
-
-      document.addEventListener('click', function(e){
-        if(!panel.contains(e.target)) panel.open = false;
-      });
-    });
-  })();
-  </script>
-{% endblock %}
-
-{% block footer %}
-  {{ block.super }}
-  {% if action_form and cl.show_admin_actions %}
-    <script src="{% url 'admin:jsi18n' %}"></script>
-    <script src="{% static 'admin/js/core.js' %}"></script>
-    <script src="{% static 'admin/js/actions.js' %}"></script>
-  {% endif %}
 {% endblock %}

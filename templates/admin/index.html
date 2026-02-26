@@ -1,0 +1,26 @@
+{# templates/admin/index.html #}
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+  {# ✅ 有任务查看权限就跳到任务列表页，否则仍显示默认首页 app 列表 #}
+  {% if perms.tasking.view_wmstask %}
+    <script>
+      window.location.replace("{% url 'admin:tasking_wmstask_changelist' %}");
+    </script>
+    <noscript>
+      <p>
+        {% translate "Redirecting..." %}
+        <a href="{% url 'admin:tasking_wmstask_changelist' %}">{% translate "Go to Tasks" %}</a>
+      </p>
+    </noscript>
+  {% else %}
+    <div id="content-main">
+      {% if app_list %}
+        {% include "admin/app_list.html" with app_list=app_list show_changelinks=True %}
+      {% else %}
+        <p>{% translate "You don’t have permission to view or edit anything." %}</p>
+      {% endif %}
+    </div>
+  {% endif %}
+{% endblock %}

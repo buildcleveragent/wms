@@ -1,0 +1,163 @@
+{# templates/admin/change_list.html #}
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls admin_list static admin_modify %}
+
+{% block bodyclass %}{{ block.super }} app-{{ app_label }} model-{{ opts.model_name }} change-list{% endblock %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    /* 右侧筛选栏隐藏 + 单列布局 */
+    #changelist-filter { display: none !important; }
+    #content { grid-template-columns: 1fr !important; }
+    aside#changelist-filter { display: none !important; }
+
+    /* 顶部工具栏：左(搜索/日期) + 右(Add) */
+    .top-bar{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+    .top-bar-left{ flex:1 1 auto; }
+    .top-bar-right{ flex:0 0 auto; }
+    .object-tools{ margin:0; padding:0; list-style:none; }
+    .object-tools li{ display:inline-block; }
+    .object-tools .addlink{
+      display:inline-flex; align-items:center; gap:.5rem;
+      padding:.4rem .75rem; border-radius:8px;
+      border:1px solid var(--hairline-color,#e5e7eb);
+      background:var(--body-bg,#fff); text-decoration:none;
+    }
+
+    /* 顶部筛选条：每个筛选器一个折叠按钮（默认收起） */
+    .top-filters{ margin:8px 0 12px; padding:6px; border:1px solid var(--hairline-color,#e5e7eb);
+                  border-radius:8px; background:var(--body-bg,#fff); display:flex; flex-wrap:wrap; gap:8px 10px; }
+    .filter-panel{ display:inline-block; position:relative; } /* 关键：作为定位参考 */
+    .filter-panel > summary{
+      cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:.5rem;
+      padding:.35rem .6rem; border:1px solid var(--hairline-color,#e5e7eb);
+      border-radius:9999px; white-space:nowrap; user-select:none; background:var(--body-bg,#fff);
+    }
+    .filter-panel > summary::-webkit-details-marker{ display:none; }
+    .filter-panel .badge{ font-size:12px; line-height:1; padding:.1rem .35rem; border-radius:9999px; background:rgba(0,0,0,.08); }
+
+    /* 弹出面板：始终贴着 summary 正下方，不再用 JS 计算 top/left */
+    .filter-panel .filter-body{
+      position:absolute; z-index:20;
+      top: calc(100% + 6px); left: 0; /* 关键：就近锚定 */
+      min-width:240px; padding:8px 10px;
+      border:1px solid var(--hairline-color,#e5e7eb); border-radius:8px; background:var(--body-bg,#fff);
+      box-shadow:0 8px 24px rgba(0,0,0,.08);
+      display:block;
+    }
+    .filter-panel:not([open]) .filter-body{ display:none; } /* details 关闭时隐藏 */
+    .filter-body .filter > h2, .filter-body h3{ display:none; } /* 避免重复标题 */
+    .filter-body .filter{ margin:0; }
+  </style>
+{% endblock %}
+
+{% block sidebar %}{% endblock %}
+{% block filters %}{% endblock %}
+
+{% block content %}
+  <div id="content-main">
+
+    <!-- 顶部栏 -->
+    <div class="top-bar">
+      <div class="top-bar-left">
+        {% if cl.search_fields %}{% search_form cl %}{% endif %}
+        {% if cl.date_hierarchy %}{% date_hierarchy cl %}{% endif %}
+      </div>
+      <div class="top-bar-right">
+        {% if has_add_permission %}
+          <ul class="object-tools">
+            <li>
+              <a class="addlink" href="{% url cl.opts|admin_urlname:'add' %}">
+                {% blocktrans with cl.opts.verbose_name as name %}Add {{ name }}{% endblocktrans %}
+              </a>
+            </li>
+          </ul>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 顶部筛选器：每个 spec 一个折叠按钮 -->
+    {% if cl.filter_specs|length %}
+      <div class="top-filters" id="top-filters">
+        {% for spec in cl.filter_specs %}
+          <details class="filter-panel">
+            <summary>
+              {{ spec.title }}
+              <span class="badge" hidden></span>
+            </summary>
+            <div class="filter-body">
+              {% admin_list_filter cl spec %}
+            </div>
+          </details>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <!-- 列表表单 -->
+    <form id="changelist-form" method="post" novalidate>
+      {% csrf_token %}
+      {% if cl.formset %}{{ cl.formset.management_form }}{% endif %}
+
+      {% block actions %}{% if action_form and cl.show_admin_actions %}{% admin_actions %}{% endif %}{% endblock %}
+      {% block result_list %}{% result_list cl %}{% endblock %}
+      {% if action_form and cl.show_admin_actions %}{% admin_actions %}{% endif %}
+    </form>
+
+    {% block pagination %}{% pagination cl %}{% endblock %}
+  </div>
+
+  <script>
+  (function(){
+    var qs   = new URLSearchParams(location.search);
+    var wrap = document.getElementById('top-filters');
+    if(!wrap) return;
+
+    wrap.querySelectorAll('.filter-panel').forEach(function(panel){
+      var names = new Set();
+      panel.querySelectorAll('.filter-body [name]').forEach(function(el){
+        var n = el.getAttribute('name'); if(n) names.add(n);
+      });
+
+      // 徽标：统计该筛选是否选了值
+      var count = 0;
+      names.forEach(function(n){
+        if(qs.has(n)) {
+          var v = qs.getAll(n).join(''); if(v !== '') count++;
+        }
+      });
+      var badge = panel.querySelector('.badge');
+      if(badge && count>0){ badge.textContent = count; badge.hidden = false; }
+
+      // 防止超出右侧：展开后如溢出，则靠右对齐
+      var body    = panel.querySelector('.filter-body');
+      var summary = panel.querySelector('summary');
+      if(!body || !summary) return;
+
+      panel.addEventListener('toggle', function(){
+        if(panel.open){
+          body.style.minWidth = Math.max(240, summary.offsetWidth) + 'px';
+          body.style.left = '0'; body.style.right = 'auto';
+          var rect = body.getBoundingClientRect();
+          if(rect.right > window.innerWidth - 8) { body.style.left = 'auto'; body.style.right = '0'; }
+        }
+      });
+
+      // 点击外部关闭
+      document.addEventListener('click', function(e){
+        if(!panel.contains(e.target)) panel.open = false;
+      });
+    });
+  })();
+  </script>
+{% endblock %}
+{% block footer %}
+  {{ block.super }}
+  {% if action_form and cl.show_admin_actions %}
+    {# i18n 提示（actions.js 需要 gettext） #}
+    <script src="{% url 'admin:jsi18n' %}"></script>
+    {# admin 核心 & 批量动作脚本 #}
+    <script src="{% static 'admin/js/core.js' %}"></script>
+    <script src="{% static 'admin/js/actions.js' %}"></script>
+  {% endif %}
+{% endblock %}

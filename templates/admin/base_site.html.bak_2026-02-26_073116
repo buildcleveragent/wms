@@ -5,7 +5,6 @@
 {% block extrastyle %}{{ block.super }}
    <link rel="stylesheet" href="{% static 'admin/custom/collapse-apps.css' %}">
 <link rel="stylesheet" href="{% static 'admin/custom/topbar-theme.css' %}">
-    <link rel="stylesheet" href="{% static 'admin/custom/admin_nowrap_rows.css' %}">
 {% endblock %}
 
 {% block extrahead %}{{ block.super }}

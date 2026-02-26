@@ -1,0 +1,34 @@
+/* static/admin/admin_nowrap_rows.css */
+/* 目标：所有 admin 列表页（change-list）记录内容不折叠、不换行，行高保持紧凑 */
+
+.change-list #result_list {
+  table-layout: auto !important;
+  width: max-content !important;   /* 列按内容扩展 */
+  min-width: 100% !important;      /* 至少铺满容器 */
+}
+
+/* ✅ 关键：表头+内容都不换行（避免折叠成多行） */
+.change-list #result_list thead th,
+.change-list #result_list thead th a,
+.change-list #result_list tbody td,
+.change-list #result_list tbody td a {
+  white-space: nowrap !important;
+  word-break: keep-all !important;     /* 中文不按字断行 */
+  overflow-wrap: normal !important;
+  writing-mode: horizontal-tb !important;
+  transform: none !important;
+  line-height: 1.2 !important;
+}
+
+/* 行高更紧凑（可按需调 4px/6px） */
+.change-list #result_list tbody td {
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  vertical-align: middle !important;
+}
+
+/* 允许横向滚动查看超长内容 */
+.change-list #changelist-form .results,
+.change-list #changelist {
+  overflow-x: auto !important;
+}
