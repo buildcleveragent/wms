@@ -14,6 +14,8 @@ router.register(r"catalog/suppliers", SupplierViewSet, basename="ob-Supplier")
 
 router.register(r"catalog/receive_products", ReceiveProductViewSet, basename="ob-receive_products")
 router.register(r"pda/pick-tasks", PickTaskViewSet, basename="pda-pick-task")
+router.register("outbound/orders", OutboundOrderViewSet, basename="outbound-order")
+
 urlpatterns = [
     path("", include(router.urls)),
     path("pda/pick-tasks/<int:task_id>/print/", pick_task_print, name="pick-task-print"),

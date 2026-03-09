@@ -11,7 +11,7 @@ from .auth_views import LoginView         # ★ 直接导入视图，不再 incl
 from allapp.console.views_dashboard import DashboardHomeView
 urlpatterns = [
     path('api/inbound/', include('allapp.inbound.urls')),  # 放在可能覆盖它的 router 之前
-
+    path("api/", include("allapp.inventory.urls")),
     # path("", TemplateView.as_view(template_name="index.html"), name="home"),
     path('', DashboardHomeView.as_view(), name='dashboard_home'),
     path("admin/", admin.site.urls),

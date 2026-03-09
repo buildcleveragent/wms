@@ -1,0 +1,276 @@
+<template>
+	<div>
+		<button type="primary" @click="initRFID">RFID初始化</button>
+		<button type="primary" @click="readTid">{{textReadTid}}</button>
+		<button type="primary" @click="startInventory">开始盘存</button>
+		<button type="primary" @click="stopInventory">停止盘存</button>
+		
+		<input type="text"  placeholder="请输入要操作的EPC" v-model="currentValue"></input>
+		<input type="text"   placeholder="请输入要写入的内容(EPC)" v-model="currentValueNew"></input>
+		
+		<button type="primary" @click="choiceTag">选中标签</button>
+		<button type="primary" @click="writeTag">写标签</button>
+		<button type="primary" @click="setPower">设置功率</button>
+		<button type="primary" @click="getPower">获取功率</button>
+		 <button type="primary" @click="disconnect">断开连接</button>
+		 扫描得到的结果：<text> {{textValue}}</text>
+	</div>
+</template>
+
+<script>
+	var main = plus.android.runtimeMainActivity();
+	// 获取 module 
+	var urovoRFIDModule = uni.requireNativePlugin("TH-PlatformRFID-C")
+	var countNum = 0;
+	const modal = uni.requireNativePlugin('modal');
+	export default {
+		
+		data() {
+		    return {
+				isReadTid: true,
+				textReadTid:'读取TID',
+		        textValue: '',
+				currentValue:'',
+				currentValueNew:''
+		    };
+		},
+		
+		onLoad() {
+			
+				
+				var ret = urovoRFIDModule.soundInit();//初始时插件中的声音播放资源，可按自己实际需求看是否调用，如果有自己的声音播放资源，可以不用这个
+				console.log('soundInit()  ret == '+ret);
+			
+				
+			var globalEvent = uni.requireNativePlugin('globalEvent');
+			globalEvent.addEventListener('rfidEvent', function(e) {
+			  console.log('rfidEvent'+JSON.stringify(e));
+			});
+			
+			
+			
+			
+			urovoRFIDModule.registerCallbackDatas((ret) => {
+					console.log(JSON.stringify(ret))
+					this.textValue =(++countNum)+"\n"+ JSON.stringify(ret);
+					// modal.toast({
+					// 	message: ret,
+					// 	duration: 1.5
+					// });
+						urovoRFIDModule.soundPlay(1);
+				});
+				
+			urovoRFIDModule.registerCallbackStatus((ret) => {
+					console.log(ret)
+					// modal.toast({
+					// 	message: ret,
+					// 	duration: 1.5
+					// });
+				});
+			
+			urovoRFIDModule.registerCallbackInventoryEnd((ret) => {
+					console.log(ret)
+					// modal.toast({
+					// 	message: ret,
+					// 	duration: 1.5
+					// });
+				});
+			
+			
+			
+			
+			
+			
+			// plus.globalEvent.addEventListener('TestEvent', function(e){
+			// 	modal.toast({
+			// 		message: "TestEvent收到："+e.msg,
+			// 		duration: 1.5
+			// 	});
+			// });
+			var ws = plus.webview.currentWebview();
+			plus.key.addEventListener("keydown", function(e) {
+				if (e.keyCode == 520 || e.keyCode == 523  ) {
+					console.log("扫描按键触发，keydown 键值为 " + e.keyCode);								 
+				}
+			});
+			plus.key.addEventListener("keyup", function(e) {
+				if (e.keyCode == 520 || e.keyCode == 523  ) {
+					console.log("扫描按键触发，keyup 键值为 " + e.keyCode);
+					// urovoRFIDModule.stopInventory();
+				}
+			})
+		},
+		onUnload() {
+			plus.key.removeEventListener("keydown",function(e){});//移除监听手柄按键按下
+			plus.key.removeEventListener("keyup",function(e){});//移除监听手柄按键抬起
+			urovoRFIDModule.soundRelease();
+		},
+		methods: {
+			readTid() {
+				if (this.isReadTid) {
+				  
+				  this.isReadTid = !this.isReadTid;
+				  this.textReadTid = "不读TID";
+				} else {
+				 
+				  this.isReadTid = !this.isReadTid;
+				   this.textReadTid = "读取TID";
+				}
+				var that = this;
+				
+				
+				urovoRFIDModule.setReadTid(this.isReadTid,(ret) => {
+						console.log("setReadTid() "+that.isReadTid+"   ret == "+ret)
+						modal.toast({
+							message: that.isReadTid+"   "+ret,
+							duration: 1.5
+						});
+					});
+				},
+			
+			initRFID() {
+				
+			console.log("initRFID...");
+			
+			var that = this;
+			
+			var port = "/dev/ttyHSL0";
+			var baud = 115200;
+			
+			console.log(" port == "+port+"    baud == "+baud   );
+			
+			urovoRFIDModule.initRFID(port,baud,(ret) => {
+					console.log(ret)
+					modal.toast({
+						message: ret,
+						duration: 1.5
+					});
+					
+					 // if(ret.code == 0){//默认设置读取TID ，如果没有需要，可以不设置该方法
+						//  urovoRFIDModule.setReadTid(this.isReadTid,(ret) => {
+						//  		console.log("setReadTid() "+that.isReadTid+"   ret == "+ret)
+						//  		modal.toast({
+						//  			message: that.isReadTid+"   "+ret,
+						//  			duration: 1.5
+						//  		});
+						//  	});
+					 // }
+				});
+		 
+			},
+			startInventory() {
+				console.log('开始盘存')
+				// 第一个参数 
+				// 第二个参数  
+				urovoRFIDModule.startInventory(0,0,0,1,(ret) => {
+					console.log(ret)
+					modal.toast({
+						message: ret,
+						duration: 1.5
+					});
+				});
+			},
+			readTag() {
+				console.log('读其他区域')
+				// 第一个参数：0
+				// 第二个参数：0:RESERVED,  1:EPC, 2:TID,  3:USER 
+				// 第三个参数：读取区域的开始地址  
+				// 第四个参数：读取数据长度 ，按需求设置
+				// 第五个参数：访问密码，4字节。
+				urovoRFIDModule.readTag(0,3,0,len,"00000000",(ret) => {
+					console.log(ret)
+					modal.toast({
+						message: ret,
+						duration: 1.5
+					});
+				});
+			},
+			
+			stopInventory() {
+				console.log('停止盘存')
+			urovoRFIDModule.stopInventory();
+			},
+			choiceTag() {//先选中标签，再对标签做写入动作
+			var epc = this.currentValue;
+			var epcNew = this.currentValueNew;
+				console.log('选中标签  epc:'+epc );
+				// var epc = "E2801170000002139DDA8AAA";//实际读到的EPC值
+				urovoRFIDModule.onSelect(epc,(ret) => {
+					console.log("onSelect() ret == "+ret)
+					modal.toast({
+						message: ret,
+						duration: 1.5
+					});
+				
+				});
+			},
+			writeTag() {//先选中标签，再对标签做写入动作
+			var epc = this.currentValue;
+			var epcNew = this.currentValueNew;
+				console.log('写标签  epc:'+epc+'   epcNew:'+epcNew);
+				// var epc = "E2801170000002139DDA8AAA";//实际读到的EPC值
+						
+					// 第一个参数默认 
+					// 第二个参数，写数据的区域  0:RESERVED,  1:EPC,  2:TID,  3:USER	
+					// 第三个参数 起始地址，如果是要写EPC，则填2
+					// 第四个参数 数据长度：例如 "0002000200030008"为 4字节长度
+					// 第五个参数 密码，默认8个0
+					// 第六个参数 要写入的数据（16进制的字符串）
+					// 第七个参数  回调
+				urovoRFIDModule.writeTag(0,1,2,1,"00000000",epcNew,(ret) => {
+					
+					console.log("writeTag() ret == "+ret)
+					modal.toast({
+						message: ret,
+						duration: 1.5
+					});
+					
+					// //写完建议取消标签的选中状态
+					// urovoRFIDModule.onCancel((ret) => {
+					// 	console.log("onCancel() ret == "+ret)
+					// 	modal.toast({
+					// 		message: ret,
+					// 		duration: 1.5
+					// 	});
+					// });
+					
+					
+				});
+				
+				
+			},
+			setPower(){
+				//第一个参数 功率值大小
+				var power =8;//实际要设置的值 功率范围： 0-33 
+				urovoRFIDModule.setPower(power,(ret) => {
+						console.log("setPower() ret == "+ret)
+						modal.toast({
+							message: ret,
+							duration: 1.5
+						});
+				});
+			},
+			getPower(){
+				urovoRFIDModule.getPower((ret) => {
+						console.log("getPower() ret == "+ret)
+						modal.toast({
+							message: ret,
+							duration: 1.5
+						});
+				});
+			},
+			disconnect(){
+				console.log("disconnect")
+				
+				urovoRFIDModule.disconnect();
+				urovoRFIDModule.release();
+				
+				
+			},
+			gotoNativePage() {
+				testModule.gotoNativePage();
+			}
+			
+		}
+	}
+</script>

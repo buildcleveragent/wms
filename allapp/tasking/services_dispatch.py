@@ -3,8 +3,8 @@
 from allapp.reports.services import snapshot_dispatch_note
 
 # 任务头回填保存后：
-commit_posting_batch(posting_batch)
+# commit_posting_batch(posting_batch)
 
 # —— 定稿快照（幂等）：
-snapshot_dispatch_note(task, by_user=by_user, save_html=True, finalize=True)
-    return created, posting_batch
+# snapshot_dispatch_note(task, by_user=by_user, save_html=True, finalize=True)
+#     return created, posting_batch

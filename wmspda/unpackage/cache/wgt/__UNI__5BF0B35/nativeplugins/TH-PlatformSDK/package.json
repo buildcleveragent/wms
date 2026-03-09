@@ -1,0 +1,74 @@
+{
+	"name": "PlatformSDK",
+	"id": "TH-PlatformSDK",
+	"version": "0.0.1",
+	"description": "Android-SDK插件",
+	"_dp_type":"nativeplugin",
+	"_dp_nativeplugin":{
+		"android": {
+			"plugins": [
+				{
+					"type": "module",
+					"name": "TH-PlatformSDK",
+					"class": "com.uni.platformSDK.PlatformSDKModule"
+				},
+				{
+					"type": "module",
+					"name": "TH-PlatformRFID-C",
+					"class": "com.uni.compatRfidSDK.RFIDSDKModule"
+				},
+				{
+					"type": "module",
+					"name": "TH-PlatformRFID",
+					"class": "com.uni.rfidSDK.RFIDSDKModule"
+				},
+				{
+					"type": "module",
+					"name": "TH-Hardwar-ReadID",
+					"class": "com.uni.hardwarIDSDK.HardwarIDSDKIDSDKModule"
+				}
+				,
+				{
+					"type": "module",
+					"name": "TH-NFC-ReadID",
+					"class": "com.uni.platformSDK.NFCReadIDSDKModule"
+				},
+				{
+					"type": "module",
+					"name": "TH-PlatformBLE",
+					"class": "com.uni.blePrintSDK.PlatformBLESDKModule"
+				},
+				{
+					"type": "module",
+					"name": "TH-PlatformSDK-PrinterManager",
+					"class": "com.uni.platformSDK.PlatformSDKPrinterManagerModule"
+				},
+				{
+					"type": "module",
+					"name": "TH-PlatformSDK-IccManager",
+					"class": "com.uni.platformSDK.PlatformSDKIccManagerModule"
+				},
+				{
+					"type": "module",
+					"name": "TH-PlatformSDK-PiccManager",
+					"class": "com.uni.platformSDK.PlatformSDKPiccManagerModule"
+				},
+				{
+					"type": "module",
+					"name": "TH-PlatformSDK-MagManager",
+					"class": "com.uni.platformSDK.PlatformSDKMagManagerModule"
+				},
+				{
+					"type": "module",
+					"name": "TH-PlatformSDK-OCR",
+					"class": "com.uni.platformOCR.PlatformOCRModule"
+				}
+			],
+			
+
+			"integrateType": "aar",
+			"minSdkVersion" : 16
+		}
+	}
+}
+

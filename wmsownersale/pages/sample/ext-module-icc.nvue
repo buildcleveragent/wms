@@ -1,0 +1,83 @@
+<template>
+	<div>
+		<button type="primary" @click="init">Icc Initialize</button>
+		<button type="primary" @click="open">Open</button>
+		<button type="primary" @click="checkCard">Check Card</button>
+		<button type="primary" @click="activate">activate</button>
+		<input type="text"   placeholder="apdu" v-model="currentValue"></input>
+		<button type="primary" @click="apduTransmit">apduTransmit</button>
+		<button type="primary" @click="deactivate">deactivate</button>
+		<button type="primary" @click="closeClick">Close</button>
+		 结果：<text> {{textValue}}</text>
+	</div>
+</template>
+
+<script>
+	var main = plus.android.runtimeMainActivity();
+	// 获取 module 
+	var urovoIccModule = uni.requireNativePlugin("TH-PlatformSDK-IccManager")
+	var platformMagModule = uni.requireNativePlugin("TH-PlatformSDK-MagManager")
+	var countNum = 0;
+	const modal = uni.requireNativePlugin('modal');
+	export default {
+		
+		data() {
+		    return {
+		        textValue: '',
+				currentValue:''
+		    };
+		},
+		
+		onLoad() {
+		},
+		methods: {
+			init() {
+			console.log("initialize...");
+			urovoIccModule.initialize()
+			
+			},
+			open() {
+				var ret = urovoIccModule.open(0,1,1);
+				console.log('open ret：'+ret) 
+			},
+			checkCard(){
+				console.log('detect start') 
+				var ret = urovoIccModule.detect()
+				console.log('detect ret：'+ret) 
+				this.textValue = ret;
+			},
+			activate(){
+				console.log('activate start') 
+				var ret = urovoIccModule.activate()
+				console.log('activate ret：'+ret) 
+				this.textValue = ret;
+			},
+			apduTransmit(){  
+				//var apduVal = this.currentValue
+				var apduVal = "00a404000e325041592e5359532e444446303100"
+				console.log('apduTransmit start:'+apduVal) 
+				urovoIccModule.apduTransmit(apduVal,(ret) => {
+					console.log(ret)
+					this.textValue = JSON.stringify(ret);
+					modal.toast({
+						message: ret,
+						duration: 1.5
+					});
+				})
+			},
+			deactivate(){
+				console.log('deactivate ')
+				urovoIccModule.deactivate()	
+			},
+			closeClick(){
+				console.log('close ')
+				urovoIccModule.release()	
+			},
+			
+			gotoNativePage() {
+				testModule.gotoNativePage();
+			}
+			
+		}
+	}
+</script>

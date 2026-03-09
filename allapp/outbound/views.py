@@ -1,4 +1,26 @@
 # allapp/outbound/views.py  或  allapp/outbound/api_views.py
+from rest_framework.permissions import AllowAny
+from rest_framework.decorators import action
+from django.http import FileResponse, Http404
+from django.conf import settings
+from pathlib import Path
+from urllib.parse import quote
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from urllib.parse import quote
+
+from django.conf import settings
+from django.http import FileResponse, Http404
+from rest_framework.decorators import action
+from django.apps import apps
+from django.db import transaction
+
+from rest_framework.decorators import action
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.response import Response
+from rest_framework import status
+
+from openpyxl import load_workbook
 from django.apps import apps
 from datetime import datetime
 from django.db.models import Q, Sum, Prefetch
@@ -218,7 +240,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "base_quantity": 0,
                 })
         print("data", data)
-        logger.debug("ProductViewSet data ",data)
+        logger.debug("ProductViewSet data  %s",data)
         return self.get_paginated_response(data)
 
 class CustomerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -567,10 +589,305 @@ class OutboundOrderViewSet(
 
         return Response(OutboundOrderReadSerializer(order).data)
 
+    def _excel_str(self, v):
+        return "" if v is None else str(v).strip()
 
-# allapp/outbound/views.py 末尾附近增加
+    def _excel_decimal(self, v):
+        if v in (None, ""):
+            raise ValueError("数量不能为空")
+        try:
+            d = Decimal(str(v).strip())
+        except (InvalidOperation, ValueError):
+            raise ValueError("数量格式不正确")
+        if d <= 0:
+            raise ValueError("数量必须大于 0")
+        return d
+
+    def _build_ship_to(self, row_dict):
+        parts = [
+            self._excel_str(row_dict.get("收件人省")),
+            self._excel_str(row_dict.get("收件人市")),
+            self._excel_str(row_dict.get("收件人区")),
+            self._excel_str(row_dict.get("收件人详细地址")),
+        ]
+        return "".join([p for p in parts if p])
+
+    def _build_remark(self, row_dict):
+        parts = []
+
+        remark = self._excel_str(row_dict.get("备注"))
+        if remark:
+            parts.append(f"备注:{remark}")
+
+        express_no = self._excel_str(row_dict.get("物流单号"))
+        if express_no:
+            parts.append(f"物流单号:{express_no}")
+
+        sale_attr = self._excel_str(row_dict.get("销售属性"))
+        if sale_attr:
+            parts.append(f"销售属性:{sale_attr}")
+
+        goods_name = self._excel_str(row_dict.get("商品名称"))
+        if goods_name:
+            parts.append(f"商品名称:{goods_name}")
+
+        sender_name = self._excel_str(row_dict.get("发货人姓名"))
+        sender_phone = self._excel_str(row_dict.get("发货人手机/电话"))
+        sender_addr = "".join([
+            self._excel_str(row_dict.get("发货人省")),
+            self._excel_str(row_dict.get("发货人市")),
+            self._excel_str(row_dict.get("发货人区")),
+            self._excel_str(row_dict.get("发货人详细地址")),
+        ])
+        if sender_name or sender_phone or sender_addr:
+            parts.append(
+                f"发货人:{sender_name} {sender_phone} {sender_addr}".strip()
+            )
+
+        return " | ".join(parts)
+
+    def _get_default_price(self, product):
+        """
+        这份模板没有价格列，先沿用你系统里的商品默认售价逻辑。
+        如果取不到，就按 0 处理。
+        """
+        for attr in ("price", "sale_price", "base_price"):
+            val = getattr(product, attr, None)
+            if val not in (None, ""):
+                try:
+                    return Decimal(str(val))
+                except Exception:
+                    pass
+        return Decimal("0")
+
+    def _find_product_for_import(self, owner_id, row_dict):
+        Product = apps.get_model("products", "Product")
+
+        sku = self._excel_str(row_dict.get("商家编码"))
+        goods_name = self._excel_str(row_dict.get("商品名称"))
+
+        if sku:
+            p = Product.objects.filter(owner_id=owner_id, sku=sku).order_by("id").first()
+            if p:
+                return p
+            raise ValueError(f"商家编码[{sku}]匹配不到商品")
+
+        if goods_name:
+            qs = Product.objects.filter(owner_id=owner_id, name=goods_name).order_by("id")
+            cnt = qs.count()
+            if cnt == 1:
+                return qs.first()
+            if cnt > 1:
+                raise ValueError(f"商品名称[{goods_name}]匹配到多个商品，请改填商家编码")
+            raise ValueError(f"商品名称[{goods_name}]匹配不到商品")
+
+        raise ValueError("商家编码和商品名称不能同时为空")
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="import-drop-ship-excel",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def import_drop_ship_excel(self, request):
+        """
+        上传一件代发 Excel，按行生成 OutboundOrder。
+        每行 1 单、每单 1 条明细。
+        """
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response({"detail": "请上传 Excel 文件，字段名 file"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        owner_id = getattr(user, "owner_id", None)
+        warehouse_id = getattr(user, "warehouse_id", None)
+
+        if not owner_id:
+            return Response({"detail": "当前用户未绑定货主(owner)"}, status=status.HTTP_400_BAD_REQUEST)
+        if not warehouse_id:
+            return Response({"detail": "当前用户未绑定仓库(warehouse)"}, status=status.HTTP_400_BAD_REQUEST)
+
+        Customer = apps.get_model("baseinfo", "Customer")
+        OutboundOrder = apps.get_model("outbound", "OutboundOrder")
+
+        cash_customer = Customer.objects.filter(owner_id=owner_id, code="CASH").order_by("id").first()
+        if not cash_customer:
+            return Response(
+                {"detail": f"当前货主[{owner_id}]下不存在 code=CASH 的散客客户，请先创建"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            wb = load_workbook(file_obj, data_only=True)
+            ws = wb.active
+        except Exception as e:
+            return Response({"detail": f"Excel 解析失败: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            return Response({"detail": "Excel 为空"}, status=status.HTTP_400_BAD_REQUEST)
+
+        headers = [self._excel_str(x) for x in rows[0]]
+        required_headers = [
+            "收件人姓名",
+            "收件人手机/电话",
+            "收件人详细地址",
+            "数量",
+            "订单编号",
+        ]
+        missing = [h for h in required_headers if h not in headers]
+        if missing:
+            return Response(
+                {"detail": f"模板缺少必要列: {missing}", "headers": headers},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        result = {
+            "total_rows": 0,
+            "success_count": 0,
+            "skip_count": 0,
+            "fail_count": 0,
+            "successes": [],
+            "skips": [],
+            "errors": [],
+        }
+
+        serializer_cls = self.get_serializer_class()
+        if serializer_cls is OutboundOrderReadSerializer:
+            # create 动作外手工拿创建 serializer
+            from .serializers import OutboundOrderCreateSerializer
+            create_serializer_cls = OutboundOrderCreateSerializer
+        else:
+            create_serializer_cls = serializer_cls
+
+        for excel_row_no, raw_row in enumerate(rows[1:], start=2):
+            if not raw_row or all(self._excel_str(v) == "" for v in raw_row):
+                continue
+
+            result["total_rows"] += 1
+            row_dict = dict(zip(headers, raw_row))
+
+            try:
+                src_bill_no = self._excel_str(row_dict.get("订单编号"))
+                contact = self._excel_str(row_dict.get("收件人姓名"))
+                contact_phone = self._excel_str(row_dict.get("收件人手机/电话"))
+                ship_to = self._build_ship_to(row_dict)
+                qty = self._excel_decimal(row_dict.get("数量"))
+
+                if not src_bill_no:
+                    raise ValueError("订单编号不能为空")
+                if not contact:
+                    raise ValueError("收件人姓名不能为空")
+                if not contact_phone:
+                    raise ValueError("收件人手机/电话不能为空")
+                if not ship_to:
+                    raise ValueError("收货地址不能为空")
+
+                # 幂等：同 owner + src_bill_no 已存在则跳过
+                existing = OutboundOrder.objects.filter(
+                    owner_id=owner_id,
+                    src_bill_no=src_bill_no,
+                ).order_by("id").first()
+                if existing:
+                    result["skip_count"] += 1
+                    result["skips"].append({
+                        "row": excel_row_no,
+                        "src_bill_no": src_bill_no,
+                        "reason": f"订单已存在，order_id={existing.id}, order_no={existing.order_no}",
+                    })
+                    continue
+
+                product = self._find_product_for_import(owner_id, row_dict)
+                price = self._get_default_price(product)
+                remark = self._build_remark(row_dict)
+
+                payload = {
+                    "customer_id": cash_customer.id,
+                    "remark": remark,
+                    "src_bill_no": src_bill_no,
+                    "contact": contact,
+                    "contact_phone": contact_phone,
+                    "ship_to": ship_to,
+                    "items": [
+                        {
+                            "product_id": product.id,
+                            "qty": qty,
+                            "price": price,
+                        }
+                    ],
+                }
+
+                ser = create_serializer_cls(data=payload, context={"request": request})
+                ser.is_valid(raise_exception=True)
+
+                with transaction.atomic():
+                    order = ser.save()
+
+                result["success_count"] += 1
+                result["successes"].append({
+                    "row": excel_row_no,
+                    "src_bill_no": src_bill_no,
+                    "order_id": order.id,
+                    "order_no": getattr(order, "order_no", ""),
+                })
+
+            except Exception as e:
+                result["fail_count"] += 1
+                result["errors"].append({
+                    "row": excel_row_no,
+                    "src_bill_no": self._excel_str(row_dict.get("订单编号")) if "row_dict" in locals() else "",
+                    "reason": str(e),
+                })
+
+        return Response(result, status=status.HTTP_200_OK)
 
 
+    @action(detail=False, methods=["get"], url_path="import-drop-ship-template")
+    def import_drop_ship_template(self, request):
+        """
+        下载一件代发 Excel 模板
+        """
+        template_path = Path(settings.BASE_DIR) / "allapp" / "outbound" / "resources" / "一件代发.xlsx"
+
+        if not template_path.exists():
+            raise Http404("模板文件不存在，请联系管理员。")
+
+        filename = "一件代发.xlsx"
+        response = FileResponse(
+            open(template_path, "rb"),
+            as_attachment=True,
+            filename=filename,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        # 兼容中文文件名下载
+        response["Content-Disposition"] = (
+            f"attachment; filename*=UTF-8''{quote(filename)}"
+        )
+        return response
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="import-drop-ship-template",
+        permission_classes=[AllowAny],
+        authentication_classes=[],
+    )
+    def import_drop_ship_template(self, request):
+        template_path = Path(settings.BASE_DIR) / "allapp" / "outbound" / "resources" / "yi-jian-dai-fa-mo-ban.xlsx"
+
+        if not template_path.exists():
+            raise Http404("模板文件不存在，请联系管理员。")
+
+        filename = "一件代发模板.xlsx"
+        response = FileResponse(
+            open(template_path, "rb"),
+            as_attachment=True,
+            filename=filename,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+        return response
 
 class PickTaskSerializer(serializers.ModelSerializer):
     owner_name = serializers.CharField(source="owner.name", read_only=True)

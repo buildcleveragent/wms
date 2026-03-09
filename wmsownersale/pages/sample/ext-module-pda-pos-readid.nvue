@@ -1,0 +1,119 @@
+<template>
+	<div>
+		<button type="primary" @click="PowerOn">上电</button>
+		<button type="primary" @click="startReadCard">读身份证</button>
+		<button type="primary" @click="startAutoReadCard">自动读身份证</button>				
+		<button type="primary" @click="stopAutoReadCard">停止自动读身份证</button>
+		<button type="primary" @click="PowerDown">下电</button>
+		<image :src="imagePath" style="width: 60px; height: 70px;"></image>
+		 身份证读取结果：<text> {{textValue}}</text>
+	</div>
+</template>
+
+<script>
+	var main = plus.android.runtimeMainActivity();
+	// 获取 module 
+	var urovoReadIDModule = uni.requireNativePlugin("TH-Hardwar-ReadID")
+	var countNum = 0;
+	const modal = uni.requireNativePlugin('modal');
+	export default {
+		
+		data() {
+		    return {
+		        textValue: '',
+				imagePath: ''
+		    };
+		},
+		
+		onLoad() {
+			
+			urovoReadIDModule.registerCallbackDatas((ret) => {
+					console.log(JSON.stringify(ret))
+					this.textValue =(++countNum)+"\n"+ JSON.stringify(ret);
+				});
+		 
+		},
+		methods: {
+			PowerOn() {
+				
+			console.log("PowerOn...");
+			urovoReadIDModule.PowerOn((ret) => {
+					console.log(ret)
+					this.textValue =(++countNum)+"\n"+ JSON.stringify(ret);
+				});
+			//urovoReadIDModule.isConverBase64(true);//返回base64图像数据
+			},
+			startReadCard() {
+				console.log('读身份证') 
+				this.imagePath = '';
+				let that = this;
+				urovoReadIDModule.startReadCard((ret) => {
+					console.log(ret)
+					this.textValue =(++countNum)+"\n"+ JSON.stringify(ret);
+					let path =ret.bmpPath;
+					that.imagePath = path;
+				});
+			},
+			startAutoReadCard() {
+				console.log('自动读身份证')
+				let that = this;
+				// 第一个参数 
+				// 第二个参数  
+				urovoReadIDModule.startAutoReadCard((ret) => {
+					console.log(ret)
+					this.textValue =(++countNum)+"\n"+ JSON.stringify(ret);
+					let path =ret.bmpPath;
+					that.imagePath = path;
+				});
+			},
+			
+			stopAutoReadCard() {
+				console.log('停止自动读身份证')
+			urovoReadIDModule.stopAutoReadCard();
+			},
+			PowerDown() { 
+			console.log('下电')
+			urovoReadIDModule.PowerDown((ret) => {
+					console.log(ret)
+					this.textValue =(++countNum)+"\n"+ JSON.stringify(ret);
+				});
+			
+			},
+			
+			
+			
+			
+			
+			
+			
+			testAsyncFunc() {
+				// 调用异步方法
+				testModule.testAsyncFunc({
+						'name': 'unimp',
+						'age': 1
+					},
+					(ret) => {
+						modal.toast({
+							message: ret,
+							duration: 1.5
+						});
+					})
+			},
+			testSyncFunc() {
+				// 调用同步方法
+				var ret = testModule.testSyncFunc({
+					'name': 'unimp',
+					'age': 1
+				})
+				modal.toast({
+					message: ret,
+					duration: 1.5
+				});
+			},
+			gotoNativePage() {
+				testModule.gotoNativePage();
+			}
+			
+		}
+	}
+</script>

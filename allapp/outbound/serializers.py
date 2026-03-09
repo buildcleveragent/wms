@@ -30,90 +30,133 @@ class OutboundOrderLineCreateSerializer(serializers.Serializer):
     price      = serializers.DecimalField(max_digits=18, decimal_places=4)  # 约定为“基本单位单价”
 
 # class OutboundOrderCreateSerializer(serializers.Serializer):
-#     owner_id       = serializers.IntegerField(required=False)                # 多货主建议前端显式传
-#     customer_id    = serializers.IntegerField(required=False, allow_null=True)
-#     supplier_id    = serializers.IntegerField(required=False, allow_null=True)
-#     warehouse_id   = serializers.IntegerField()
-#     outbound_type  = serializers.CharField(required=False, default="SALES")  # 运行时校验 choices
-#     delivery_method= serializers.CharField(required=False, allow_null=True)
-#     etd            = serializers.DateTimeField(required=False, allow_null=True)
-#     remark         = serializers.CharField(required=False, allow_blank=True, default="")
-#     items          = OutboundOrderLineCreateSerializer(many=True)
+#     # 不再接收 owner_id / warehouse_id
+#     customer_id     = serializers.IntegerField(required=False, allow_null=True)
+#     supplier_id     = serializers.IntegerField(required=False, allow_null=True)
+#     outbound_type   = serializers.CharField(required=False, default="SALES")
+#     delivery_method = serializers.CharField(required=False, allow_null=True)
+#     etd             = serializers.DateTimeField(required=False, allow_null=True)
+#     remark          = serializers.CharField(required=False, allow_blank=True, default="")
+#     items           = OutboundOrderLineCreateSerializer(many=True)
 #
-#     logger.debug("OutboundOrderCreateSerializer items ", items)
+#     src_bill_no = serializers.CharField(required=False, allow_blank=True)
+#     contact = serializers.CharField(required=False, allow_blank=True)
+#     contact_phone = serializers.CharField(required=False, allow_blank=True)
+#     ship_to = serializers.CharField(required=False, allow_blank=True)
 #
+#     # ---------- 内部辅助 ----------
 #     def _allowed(self, model_field_name):
+#         OutboundOrder = apps.get_model("outbound", "OutboundOrder")
 #         try:
 #             f = OutboundOrder._meta.get_field(model_field_name)
 #             return [c[0] for c in (f.choices or [])]
 #         except Exception:
 #             return None
 #
-#     def _infer_owner_from_customer(self, customer_id):
-#         try:
-#             Customer = apps.get_model("baseinfo", "Customer")
-#             c = Customer.objects.only("id", "owner_id").get(pk=customer_id)
-#             return getattr(c, "owner_id", None)
-#         except Exception:
-#             return None
+#     def _assert_customer_belongs_to_owner(self, customer_id, owner_id):
+#         if not customer_id:
+#             return
+#         Customer = apps.get_model("baseinfo", "Customer")
+#         c = Customer.objects.only("id", "owner_id").get(pk=customer_id)
+#         if c.owner_id != owner_id:
+#             raise serializers.ValidationError("客户不属于当前用户的货主，禁止下单。")
 #
+#     def _assert_products_belong_to_owner(self, items, owner_id):
+#         Product = apps.get_model("products", "Product")
+#         pid_list = [it["product_id"] for it in items if it.get("product_id")]
+#         if not pid_list:
+#             return
+#         owners = dict(Product.objects.filter(id__in=pid_list).values_list("id", "owner_id"))
+#         bad = [pid for pid in pid_list if owners.get(pid) != owner_id]
+#         if bad:
+#             raise serializers.ValidationError(f"存在不属于当前货主的商品：{bad}")
+#
+#     # ---------- 校验 ----------
 #     def validate(self, data):
 #         if not data.get("items"):
 #             raise serializers.ValidationError("至少需要一条明细。")
 #
-#         # 校验 outbound_type / delivery_method 是否在模型 choices 内（若模型定义了）
+#         # 从登录用户获取 owner / warehouse（不再走前端）
+#         req = self.context.get("request")
+#         user = getattr(req, "user", None)
+#         owner_id = getattr(user, "owner_id", None)
+#         warehouse_id = getattr(user, "warehouse_id", None)
+#         if not owner_id:
+#             raise serializers.ValidationError("当前用户未绑定货主（owner），请联系管理员。")
+#         if not warehouse_id:
+#             raise serializers.ValidationError("当前用户未绑定仓库（warehouse），请联系管理员。")
+#
+#         # 出库类型 / 配送方式 choices 校验（若模型定义了）
 #         ot = data.get("outbound_type", "SALES")
 #         allowed_ot = self._allowed("outbound_type")
 #         if allowed_ot and ot not in allowed_ot:
 #             raise serializers.ValidationError(f"不支持的出库类型：{ot}")
 #
-#         dm = data.get("delivery_method", None)
+#         dm = data.get("delivery_method")
 #         allowed_dm = self._allowed("delivery_method")
 #         if dm and allowed_dm and dm not in allowed_dm:
 #             raise serializers.ValidationError(f"不支持的配送方式：{dm}")
 #
-#         # 退供 vs 销售 的客户/供应商约束（按你模型习惯）
+#         # 退供 vs 销售 的客户/供应商约束
 #         if ot == "SUPPLIER_RETURN":
 #             if not data.get("supplier_id") or data.get("customer_id"):
 #                 raise serializers.ValidationError("退供单必须提供 supplier_id 且 customer_id 为空。")
 #         else:
 #             if not data.get("customer_id") or data.get("supplier_id"):
 #                 raise serializers.ValidationError("非退供出库单必须提供 customer_id 且 supplier_id 为空。")
+#
+#         # 一致性：客户、商品均需属于当前用户的 owner
+#         self._assert_customer_belongs_to_owner(data.get("customer_id"), owner_id)
+#         self._assert_products_belong_to_owner(data["items"], owner_id)
+#
+#         # 把后端推断出的 owner/warehouse 放入 validated_data，供 create 使用
+#         data["owner_id__from_user"] = owner_id
+#         data["warehouse_id__from_user"] = warehouse_id
 #         return data
 #
+#     # ---------- 创建 ----------
 #     def create(self, validated):
+#         logger.debug("%s.create items=%d customer_id=%s",
+#                      self.__class__.__name__, len(validated.get("items", [])),
+#                      validated.get("customer_id"))
+#         OutboundOrder     = apps.get_model("outbound", "OutboundOrder")
+#         OutboundOrderLine = apps.get_model("outbound", "OutboundOrderLine")
+#
 #         req  = self.context.get("request")
 #         user = getattr(req, "user", None)
 #
-#         owner_id = validated.get("owner_id")
-#         if not owner_id and validated.get("customer_id"):
-#             owner_id = self._infer_owner_from_customer(validated["customer_id"])
-#         if not owner_id:
-#             raise serializers.ValidationError("缺少 owner_id，且无法从客户推断。")
-#         logger.debug("OutboundOrderCreateSerializer OutboundOrder.objects.create ")
-#         order = OutboundOrder.objects.create(
-#             owner_id=owner_id,
-#             customer_id=validated.get("customer_id"),
-#             supplier_id=validated.get("supplier_id"),
-#             warehouse_id=validated["warehouse_id"],
-#             outbound_type=validated.get("outbound_type", "SALES"),
-#             delivery_method=validated.get("delivery_method"),
-#             etd=validated.get("etd"),
-#             memo=validated.get("remark", ""),
-#             created_by=user if (user and user.is_authenticated) else None,
-#             biz_date=timezone.localdate(),
+#         owner_id     = validated["owner_id__from_user"]
+#         warehouse_id = validated["warehouse_id__from_user"]
+#
+#         logger.debug(
+#             "Create OutboundOrder owner_id=%s warehouse_id=%s customer_id=%s items=%s",
+#             owner_id, warehouse_id, validated.get("customer_id"), len(validated.get("items", []))
 #         )
+#
+#         order = OutboundOrder.objects.create(
+#             owner_id      = owner_id,
+#             customer_id   = validated.get("customer_id"),
+#             supplier_id   = validated.get("supplier_id"),
+#             warehouse_id  = warehouse_id,
+#             outbound_type = validated.get("outbound_type", "SALES"),
+#             delivery_method = validated.get("delivery_method"),
+#             etd           = validated.get("etd"),
+#             memo          = validated.get("remark", ""),
+#             created_by    = user if (user and user.is_authenticated) else None,
+#             biz_date      = date.today(),
+#             submit_status="SUBMITTED",
+#         )
+#
 #         for it in validated["items"]:
 #             OutboundOrderLine.objects.create(
-#                 order=order,
-#                 product_id=it["product_id"],
-#                 base_qty=it["qty"],
-#                 base_price=it["price"],
-#                 # 如需包装下单，可额外写入：aux_uom_id=it.get("uom_id"), aux_qty=..., aux_price=...
+#                 order      = order,
+#                 product_id = it["product_id"],
+#                 base_qty   = it["qty"],
+#                 base_price = it["price"],
+#                 # 如需包装下单：可额外写入 aux_uom_id / aux_qty / aux_price
 #             )
+#
 #         return order
-
-# ---------- 读取用 ----------
 
 class OutboundOrderCreateSerializer(serializers.Serializer):
     # 不再接收 owner_id / warehouse_id
@@ -125,6 +168,12 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
     remark          = serializers.CharField(required=False, allow_blank=True, default="")
     items           = OutboundOrderLineCreateSerializer(many=True)
 
+    # 新增：一件代发/收件信息
+    src_bill_no   = serializers.CharField(required=False, allow_blank=True)
+    contact       = serializers.CharField(required=False, allow_blank=True)
+    contact_phone = serializers.CharField(required=False, allow_blank=True)
+    ship_to       = serializers.CharField(required=False, allow_blank=True)
+
     # ---------- 内部辅助 ----------
     def _allowed(self, model_field_name):
         OutboundOrder = apps.get_model("outbound", "OutboundOrder")
@@ -134,12 +183,16 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         except Exception:
             return None
 
-    def _assert_customer_belongs_to_owner(self, customer_id, owner_id):
+    def _get_customer(self, customer_id):
         if not customer_id:
-            return
+            return None
         Customer = apps.get_model("baseinfo", "Customer")
-        c = Customer.objects.only("id", "owner_id").get(pk=customer_id)
-        if c.owner_id != owner_id:
+        return Customer.objects.only("id", "owner_id", "code", "name").get(pk=customer_id)
+
+    def _assert_customer_belongs_to_owner(self, customer, owner_id):
+        if not customer:
+            return
+        if customer.owner_id != owner_id:
             raise serializers.ValidationError("客户不属于当前用户的货主，禁止下单。")
 
     def _assert_products_belong_to_owner(self, items, owner_id):
@@ -152,6 +205,10 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         if bad:
             raise serializers.ValidationError(f"存在不属于当前货主的商品：{bad}")
 
+    def _is_cash_customer(self, customer):
+        code = (getattr(customer, "code", "") or "").strip().upper()
+        return code == "CASH"
+
     # ---------- 校验 ----------
     def validate(self, data):
         if not data.get("items"):
@@ -162,6 +219,7 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         user = getattr(req, "user", None)
         owner_id = getattr(user, "owner_id", None)
         warehouse_id = getattr(user, "warehouse_id", None)
+
         if not owner_id:
             raise serializers.ValidationError("当前用户未绑定货主（owner），请联系管理员。")
         if not warehouse_id:
@@ -182,13 +240,33 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         if ot == "SUPPLIER_RETURN":
             if not data.get("supplier_id") or data.get("customer_id"):
                 raise serializers.ValidationError("退供单必须提供 supplier_id 且 customer_id 为空。")
+            customer = None
         else:
             if not data.get("customer_id") or data.get("supplier_id"):
                 raise serializers.ValidationError("非退供出库单必须提供 customer_id 且 supplier_id 为空。")
+            customer = self._get_customer(data.get("customer_id"))
 
         # 一致性：客户、商品均需属于当前用户的 owner
-        self._assert_customer_belongs_to_owner(data.get("customer_id"), owner_id)
+        self._assert_customer_belongs_to_owner(customer, owner_id)
         self._assert_products_belong_to_owner(data["items"], owner_id)
+
+        # 清洗字符串
+        data["src_bill_no"]   = (data.get("src_bill_no") or "").strip()
+        data["contact"]       = (data.get("contact") or "").strip()
+        data["contact_phone"] = (data.get("contact_phone") or "").strip()
+        data["ship_to"]       = (data.get("ship_to") or "").strip()
+
+        # 一件代发客户：收件信息必填
+        if self._is_cash_customer(customer):
+            if not data["contact"]:
+                raise serializers.ValidationError({"contact": "一件代发客户必须填写收件人。"})
+            if not data["contact_phone"]:
+                raise serializers.ValidationError({"contact_phone": "一件代发客户必须填写联系电话。"})
+            if not data["ship_to"]:
+                raise serializers.ValidationError({"ship_to": "一件代发客户必须填写收货地址。"})
+            if len(data["contact_phone"]) < 6 or not any(ch.isdigit() for ch in data["contact_phone"]):
+                raise serializers.ValidationError({"contact_phone": "联系电话格式不正确。"})
+
 
         # 把后端推断出的 owner/warehouse 放入 validated_data，供 create 使用
         data["owner_id__from_user"] = owner_id
@@ -197,9 +275,14 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
 
     # ---------- 创建 ----------
     def create(self, validated):
-        logger.debug("%s.create items=%d customer_id=%s",
-                     self.__class__.__name__, len(validated.get("items", [])),
-                     validated.get("customer_id"))
+        logger.debug(
+            "%s.create items=%d customer_id=%s src_bill_no=%s",
+            self.__class__.__name__,
+            len(validated.get("items", [])),
+            validated.get("customer_id"),
+            validated.get("src_bill_no"),
+        )
+
         OutboundOrder     = apps.get_model("outbound", "OutboundOrder")
         OutboundOrderLine = apps.get_model("outbound", "OutboundOrderLine")
 
@@ -214,18 +297,36 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
             owner_id, warehouse_id, validated.get("customer_id"), len(validated.get("items", []))
         )
 
+        # 幂等：同 owner + src_bill_no 不重复创建
+        src_bill_no = validated.get("src_bill_no", "")
+        if src_bill_no:
+            existing = OutboundOrder.objects.filter(
+                owner_id=owner_id,
+                src_bill_no=src_bill_no,
+            ).order_by("id").first()
+            if existing:
+                logger.info(
+                    "Reuse existing outbound order id=%s owner_id=%s src_bill_no=%s",
+                    existing.id, owner_id, src_bill_no
+                )
+                return existing
+
         order = OutboundOrder.objects.create(
-            owner_id      = owner_id,
-            customer_id   = validated.get("customer_id"),
-            supplier_id   = validated.get("supplier_id"),
-            warehouse_id  = warehouse_id,
-            outbound_type = validated.get("outbound_type", "SALES"),
+            owner_id        = owner_id,
+            customer_id     = validated.get("customer_id"),
+            supplier_id     = validated.get("supplier_id"),
+            warehouse_id    = warehouse_id,
+            outbound_type   = validated.get("outbound_type", "SALES"),
             delivery_method = validated.get("delivery_method"),
-            etd           = validated.get("etd"),
-            memo          = validated.get("remark", ""),
-            created_by    = user if (user and user.is_authenticated) else None,
-            biz_date      = date.today(),
-            submit_status="SUBMITTED",
+            etd             = validated.get("etd"),
+            memo            = validated.get("remark", ""),
+            src_bill_no     = validated.get("src_bill_no", ""),
+            contact         = validated.get("contact", ""),
+            contact_phone   = validated.get("contact_phone", ""),
+            ship_to         = validated.get("ship_to", ""),
+            created_by      = user if (user and user.is_authenticated) else None,
+            biz_date        = date.today(),
+            submit_status   = "SUBMITTED",
         )
 
         for it in validated["items"]:
