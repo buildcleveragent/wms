@@ -2,10 +2,7 @@
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from django.contrib.auth.models import Permission
-from django.contrib.auth.models import User
-# views.py
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView  # noqa: F401
 
 
 
@@ -26,8 +23,8 @@ def profile_view(request):
         menus.append({"path": "/inventory", "title": "库存管理", "icon": "el-icon-box"})
 
     # 添加其他菜单项（根据权限动态生成）
-    if "billing.view_billing" in perms:
-        menus.append({"path": "/billing", "title": "计费", "icon": "el-icon-credit-card"})
+    if any(p.startswith("billing.") for p in perms):
+        menus.append({"path": "/admin/billing/", "title": "计费", "icon": "el-icon-credit-card"})
 
     return Response({
         "user": {

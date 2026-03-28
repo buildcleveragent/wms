@@ -62,19 +62,29 @@ class BillingPeriodAdmin(admin.ModelAdmin):
         ]
         return my + urls
 
+    def _guard_status(self, request, period, allowed_statuses, action_label: str):
+        if period.status in allowed_statuses:
+            return True
+        allowed = ", ".join(allowed_statuses)
+        self.message_user(request, f"{action_label}仅允许在账期状态 {allowed} 时执行，当前为 {period.status}。", level=messages.ERROR)
+        return False
+
     @transaction.atomic
     def accrue_storage_view(self, request, pk: int):
         period = self.get_object(request, pk)
         if not period:
             self.message_user(request, "账期不存在。", level=messages.ERROR)
             return redirect("admin:billing_billingperiod_changelist")
+        if not self._guard_status(request, period, ["OPEN"], "仓储计提"):
+            return redirect(f"../../{pk}/change/")
         from allapp.billing.services import accrue_storage_for_date, accrue_metrics_for_date
         d = period.start_date
         total_ev = total_acc = 0
         while d <= period.end_date:
             ev1, acc1 = accrue_storage_for_date(period.owner_id, period.warehouse_id, d, by_user=request.user)
             ev2, acc2 = accrue_metrics_for_date(period.owner_id, period.warehouse_id, d, by_user=request.user)
-            total_ev += (ev1 + ev2); total_acc += (acc1 + acc2)
+            total_ev += (ev1 + ev2)
+            total_acc += (acc1 + acc2)
             d += datetime.timedelta(days=1)
         self.message_user(request, f"仓储计费完成：事件 {total_ev} 条，应计 {total_acc} 条。", level=messages.SUCCESS)
         return redirect(f"../../{pk}/change/")
@@ -85,6 +95,8 @@ class BillingPeriodAdmin(admin.ModelAdmin):
         if not period:
             self.message_user(request, "账期不存在。", level=messages.ERROR)
             return redirect("admin:billing_billingperiod_changelist")
+        if not self._guard_status(request, period, ["OPEN"], "订单处理费计提"):
+            return redirect(f"../../{pk}/change/")
         try:
             from allapp.billing.services import accrue_order_processing_from_posted
             ev, acc = accrue_order_processing_from_posted(period.owner_id, period.warehouse_id, period.start_date, period.end_date, by_user=request.user)
@@ -100,8 +112,14 @@ class BillingPeriodAdmin(admin.ModelAdmin):
         if not period:
             self.message_user(request, "账期不存在。", level=messages.ERROR)
             return redirect("admin:billing_billingperiod_changelist")
+        if not self._guard_status(request, period, ["OPEN"], "关账"):
+            return redirect(f"../../{pk}/change/")
         from allapp.billing.services import lock_period
-        lock_period(period.owner_id, period.warehouse_id, period.label, period.start_date, period.end_date)
+        try:
+            lock_period(period.owner_id, period.warehouse_id, period.label, period.start_date, period.end_date)
+        except ValueError as e:
+            self.message_user(request, f"关账失败：{e}", level=messages.ERROR)
+            return redirect(f"../../{pk}/change/")
         self.message_user(request, "账期已锁定并关闭（OPEN→CLOSED），并已按账期口径应用封顶/打包。", level=messages.SUCCESS)
         return redirect(f"../../{pk}/change/")
 
@@ -111,6 +129,8 @@ class BillingPeriodAdmin(admin.ModelAdmin):
         if not period:
             self.message_user(request, "账期不存在。", level=messages.ERROR)
             return redirect("admin:billing_billingperiod_changelist")
+        if not self._guard_status(request, period, ["CLOSED"], "生成发票"):
+            return redirect(f"../../{pk}/change/")
         from allapp.billing.services import generate_invoice_for_period
         seq = Bill.objects.filter(period__owner=period.owner, period__warehouse=period.warehouse).count() + 1
         invoice_no = f"INV-{period.label}-{period.owner_id}-{seq:04d}"
