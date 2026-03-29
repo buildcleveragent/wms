@@ -9,11 +9,11 @@ https://docs.djangoproject.com/en/5.2/topics/settings/ddd在
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
-from django.contrib import admin
-from django.apps import apps
+from datetime import timedelta
 from pathlib import Path
-import environ
 import os
+
+import environ
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -95,7 +95,6 @@ REST_FRAMEWORK = {
 # }
 
 # （可选）JWT 令牌时效等
-from datetime import timedelta
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
@@ -251,6 +250,17 @@ OUTBOUND_ALLOCATE_FIRM_ON_APPROVE = True        # True：硬分配（allocated �
 OUTBOUND_AT_DRAFT_VALIDATE_MODE = "warn"  # "warn" | "block"
 COUNT_MAX_TIMES=2
 BILLING_TASKLINE_ORDER_RESOLVER = "allapp.billing.resolvers:taskline_to_order_mapping"
+BILLING_METRIC_SCHEDULER_ENABLED = env.bool("BILLING_METRIC_SCHEDULER_ENABLED", default=True)
+BILLING_METRIC_SCHEDULER_HOUR = env.int("BILLING_METRIC_SCHEDULER_HOUR", default=1)
+BILLING_METRIC_SCHEDULER_MINUTE = env.int("BILLING_METRIC_SCHEDULER_MINUTE", default=5)
+BILLING_METRIC_SCHEDULER_LOOKBACK_DAYS = env.int("BILLING_METRIC_SCHEDULER_LOOKBACK_DAYS", default=3)
+BILLING_METRIC_SCHEDULER_POLL_SECONDS = env.int("BILLING_METRIC_SCHEDULER_POLL_SECONDS", default=60)
+BILLING_METRIC_SCHEDULER_STALE_MINUTES = env.int("BILLING_METRIC_SCHEDULER_STALE_MINUTES", default=180)
+BILLING_METRIC_SCHEDULER_ALLOW_AREA_FALLBACK = env.bool("BILLING_METRIC_SCHEDULER_ALLOW_AREA_FALLBACK", default=False)
+INVENTORY_SNAPSHOT_LOCATION_AREA_RESOLVER = env(
+    "INVENTORY_SNAPSHOT_LOCATION_AREA_RESOLVER",
+    default="",
+)
 TEMPLATES[0]['OPTIONS']['context_processors'] += [
     'allapp.console.context_processors.console_menu',
 ]
@@ -266,5 +276,3 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB
 # 必须：给“默认仓库/默认快调库位”设定实际存在的 ID
 DEFAULT_WAREHOUSE_ID = 1              # ← 换成你的默认仓库ID
 DEFAULT_ADJUST_LOCATION_ID = 1     # ← 换成该仓库下的某个‘调整/暂存’库位ID
-
-

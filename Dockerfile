@@ -24,8 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 设置 Django 所需的环境变量
 ENV PYTHONUNBUFFERED=1
 
-# 运行 Django Migrations
-RUN python manage.py migrate
+RUN chmod +x /app/docker/start.sh
 
 # 设置容器启动时执行的命令
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+CMD ["/app/docker/start.sh"]

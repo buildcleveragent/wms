@@ -1,10 +1,9 @@
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import path, include
-from django.views.generic import TemplateView, RedirectView
-from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
+from django.views.generic import RedirectView
+from rest_framework_simplejwt.views import TokenVerifyView
 from .views import TokenObtainPairView, TokenRefreshView
-from allapp.core.api.routers import router_v1
 from . import settings
 from .views import profile_view           # 别再用名为 profile 的函数，避免与标准库冲突
 from .auth_views import LoginView         # ★ 直接导入视图，不再 include 模块
@@ -12,6 +11,7 @@ from allapp.console.views_dashboard import DashboardHomeView
 urlpatterns = [
     path('api/inbound/', include('allapp.inbound.urls')),  # 放在可能覆盖它的 router 之前
     path("api/", include("allapp.inventory.urls")),
+    path("api/", include("allapp.billing.urls")),
     # path("", TemplateView.as_view(template_name="index.html"), name="home"),
     path('', DashboardHomeView.as_view(), name='dashboard_home'),
     path("admin/", admin.site.urls),
@@ -59,4 +59,3 @@ if settings.DEBUG:
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-

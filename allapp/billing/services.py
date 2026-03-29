@@ -2,12 +2,12 @@
 import datetime
 from calendar import monthrange
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Optional, Tuple, Dict, Set
+from typing import Optional, Tuple, Dict, Set, Iterable
 import importlib
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Sum, Q, F
+from django.db.models import Sum, Q, F, Prefetch, ExpressionWrapper, DecimalField
 from django.utils import timezone
 
 from allapp.billing.enums import (
@@ -16,7 +16,7 @@ from allapp.billing.enums import (
 )
 from allapp.billing.models import (
     BillingRule, BillingRuleTier, BillingEvent, BillingAccrual,
-    BillingPeriod, Bill, BillLine, BillingMetricDaily
+    BillingPeriod, Bill, BillLine, BillingMetricDaily, BillingJobRun
 )
 
 # ------------------------ 基础工具 ------------------------ #
@@ -25,6 +25,10 @@ def _q(val, q="0.01"):
 
 def _days_in_month(d: datetime.date) -> int:
     return monthrange(d.year, d.month)[1]
+
+
+AUTO_METRIC_SOURCE_PREFIX = "AUTO:"
+SCHEDULED_METRIC_JOB_NAME = BillingJobRun.JobName.DAILY_METRIC_GENERATION
 #
 # def _select_rule(owner_id, warehouse_id, charge_type, calc_method, service_date) -> Optional[BillingRule]:
 #     qs = (BillingRule.objects
@@ -376,6 +380,753 @@ def accrue_storage_for_date(owner_id, warehouse_id, service_date: datetime.date,
 
 
 # ------------------------ 日指标：面积/CBM/托盘位/订单金额 等 ------------------------ #
+def _load_metric_resolver(metric_type: str):
+    path = getattr(settings, f"BILLING_{metric_type}_METRIC_RESOLVER", None)
+    if not path:
+        return None
+    mod, func = path.split(":")
+    return getattr(importlib.import_module(mod), func)
+
+
+def _normalize_metric_payload(metric_type: str, payload, default_source: str, default_note: str = ""):
+    if payload is None:
+        return None
+
+    if isinstance(payload, dict):
+        value = payload.get("value")
+        source = payload.get("source", default_source)
+        note = payload.get("note", default_note)
+    elif isinstance(payload, tuple):
+        if len(payload) == 3:
+            value, source, note = payload
+        elif len(payload) == 2:
+            value, source = payload
+            note = default_note
+        elif len(payload) == 1:
+            value = payload[0]
+            source = default_source
+            note = default_note
+        else:
+            raise ValueError(f"Unsupported metric payload tuple for {metric_type}: {payload!r}")
+    else:
+        value = payload
+        source = default_source
+        note = default_note
+
+    if value is None:
+        return None
+
+    return {
+        "metric_type": metric_type,
+        "value": _q(Decimal(value), "0.0001"),
+        "source": source,
+        "note": note or "",
+    }
+
+
+def _current_inventory_metric_rows(owner_id, warehouse_id):
+    from allapp.inventory.models import InventoryDetail
+    from allapp.products.models import ProductPackage
+
+    return list(
+        InventoryDetail.objects
+        .filter(owner_id=owner_id, warehouse_id=warehouse_id, is_active=True, onhand_qty__gt=0)
+        .select_related("product", "location")
+        .prefetch_related(
+            Prefetch(
+                "product__packages",
+                queryset=ProductPackage.objects.order_by("-is_sales_default", "-is_pickable", "sort_order", "id"),
+            )
+        )
+    )
+
+
+def _snapshot_inventory_metric_rows(owner_id, warehouse_id, service_date):
+    from allapp.inventory.models import InventorySnapshotDaily
+
+    return list(
+        InventorySnapshotDaily.objects
+        .filter(
+            snapshot_date=service_date,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            onhand_qty__gt=0,
+        )
+        .select_related("product", "location")
+    )
+
+
+def _ensure_inventory_snapshot_for_date(owner_id, warehouse_id, service_date):
+    from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_date
+
+    return generate_inventory_snapshot_for_date(
+        service_date,
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+    )
+
+
+def _inventory_rows_use_snapshot(service_date, rows=None) -> bool:
+    del rows
+    return service_date < timezone.now().date()
+
+
+def _inventory_metric_rows(owner_id, warehouse_id, service_date):
+    today = timezone.now().date()
+    if service_date < today:
+        rows = _snapshot_inventory_metric_rows(owner_id, warehouse_id, service_date)
+        if rows:
+            return rows
+        _ensure_inventory_snapshot_for_date(owner_id, warehouse_id, service_date)
+        return _snapshot_inventory_metric_rows(owner_id, warehouse_id, service_date)
+
+    return _current_inventory_metric_rows(owner_id, warehouse_id)
+
+
+def _resolve_product_unit_volume(product, cache: Dict[int, Optional[Decimal]]) -> Optional[Decimal]:
+    if product.id in cache:
+        return cache[product.id]
+
+    unit_volume = Decimal(product.volume) if getattr(product, "volume", None) is not None else None
+    if unit_volume is None:
+        for pkg in product.packages.all():
+            pkg_volume = getattr(pkg, "volume_m3", None)
+            qty_in_base = getattr(pkg, "qty_in_base", None)
+            if pkg_volume is None or not qty_in_base:
+                continue
+            unit_volume = Decimal(pkg_volume) / Decimal(qty_in_base)
+            break
+
+    cache[product.id] = unit_volume
+    return unit_volume
+
+
+def _build_pallet_metric(owner_id, warehouse_id, service_date, *, inventory_rows=None, **kwargs):
+    rows = inventory_rows if inventory_rows is not None else _inventory_metric_rows(owner_id, warehouse_id, service_date)
+    occupied_locations = {row.location_id for row in rows if Decimal(row.onhand_qty or 0) > 0}
+    use_snapshot = _inventory_rows_use_snapshot(service_date, rows)
+    return {
+        "value": Decimal(len(occupied_locations)),
+        "source": (
+            f"{AUTO_METRIC_SOURCE_PREFIX}SNAPSHOT_PALLET_LOC"
+            if use_snapshot
+            else f"{AUTO_METRIC_SOURCE_PREFIX}PALLET_OCCUPIED_LOCATION_COUNT"
+        ),
+        "note": "Distinct occupied inventory locations with onhand_qty > 0.",
+    }
+
+
+def _build_cbm_metric(owner_id, warehouse_id, service_date, *, inventory_rows=None, **kwargs):
+    rows = inventory_rows if inventory_rows is not None else _inventory_metric_rows(owner_id, warehouse_id, service_date)
+    if _inventory_rows_use_snapshot(service_date, rows):
+        total = Decimal("0.0000")
+        missing_product_ids = set()
+
+        for row in rows:
+            unit_volume = row.unit_volume_m3_snapshot
+            if unit_volume is None:
+                missing_product_ids.add(row.product_id)
+                continue
+            total += Decimal(row.onhand_qty or 0) * Decimal(unit_volume)
+
+        notes = ["Sum(onhand_qty * unit_volume_m3_snapshot)."]
+        if missing_product_ids:
+            notes.append(f"{len(missing_product_ids)} snapshot products missing volume and were skipped.")
+        return {
+            "value": total,
+            "source": f"{AUTO_METRIC_SOURCE_PREFIX}INVENTORY_SNAPSHOT_ONHAND_VOLUME",
+            "note": " ".join(notes),
+        }
+
+    volume_cache: Dict[int, Optional[Decimal]] = {}
+    total = Decimal("0.0000")
+    missing_product_ids = set()
+    package_fallback_hits = 0
+
+    for row in rows:
+        unit_volume = _resolve_product_unit_volume(row.product, volume_cache)
+        if unit_volume is None:
+            missing_product_ids.add(row.product_id)
+            continue
+        if getattr(row.product, "volume", None) is None:
+            package_fallback_hits += 1
+        total += Decimal(row.onhand_qty or 0) * unit_volume
+
+    notes = ["Sum(onhand_qty * unit_volume_m3)."]
+    if package_fallback_hits:
+        notes.append(f"{package_fallback_hits} detail rows used package-level volume fallback.")
+    if missing_product_ids:
+        notes.append(f"{len(missing_product_ids)} products missing volume and were skipped.")
+
+    return {
+        "value": total,
+        "source": f"{AUTO_METRIC_SOURCE_PREFIX}INVENTORY_ONHAND_VOLUME",
+        "note": " ".join(notes),
+    }
+
+
+def _build_area_metric(owner_id, warehouse_id, service_date, *, inventory_rows=None, allow_area_fallback=False, **kwargs):
+    rows = inventory_rows if inventory_rows is not None else _inventory_metric_rows(owner_id, warehouse_id, service_date)
+    if _inventory_rows_use_snapshot(service_date, rows):
+        occupied_locations = {row.location_id for row in rows if Decimal(row.onhand_qty or 0) > 0}
+        location_areas = {}
+        missing_area_locations = set()
+
+        for row in rows:
+            if Decimal(row.onhand_qty or 0) <= 0:
+                continue
+            if row.location_area_m2_snapshot is None:
+                missing_area_locations.add(row.location_id)
+                continue
+            location_areas.setdefault(row.location_id, Decimal(row.location_area_m2_snapshot))
+
+        if location_areas:
+            notes = ["Sum(distinct occupied location_area_m2_snapshot)."]
+            if missing_area_locations:
+                notes.append(f"{len(missing_area_locations)} occupied locations missing area snapshot.")
+            return {
+                "value": sum(location_areas.values(), Decimal("0.0000")),
+                "source": f"{AUTO_METRIC_SOURCE_PREFIX}SNAPSHOT_AREA_M2",
+                "note": " ".join(notes),
+            }
+
+        if not allow_area_fallback:
+            return None
+
+        return {
+            "value": Decimal(len(occupied_locations)),
+            "source": f"{AUTO_METRIC_SOURCE_PREFIX}AREA_FALLBACK_LOC_COUNT",
+            "note": "No snapshot location area data found; using occupied location count as area proxy.",
+        }
+
+    resolver = _load_metric_resolver(MetricType.AREA_M2)
+    if resolver:
+        return resolver(owner_id=owner_id, warehouse_id=warehouse_id, service_date=service_date, inventory_rows=rows)
+
+    if not allow_area_fallback:
+        return None
+
+    occupied_locations = {row.location_id for row in rows if Decimal(row.onhand_qty or 0) > 0}
+    return {
+        "value": Decimal(len(occupied_locations)),
+        "source": f"{AUTO_METRIC_SOURCE_PREFIX}AREA_FALLBACK_LOC_COUNT",
+        "note": "No explicit area master data found; using occupied location count as area proxy.",
+    }
+
+
+def _build_order_amount_metric(owner_id, warehouse_id, service_date, **kwargs):
+    from allapp.outbound.models import OutboundOrderLine
+
+    amount_expr = ExpressionWrapper(
+        F("base_qty") * F("base_price"),
+        output_field=DecimalField(max_digits=18, decimal_places=2),
+    )
+    total = (
+        OutboundOrderLine.objects
+        .filter(
+            order__owner_id=owner_id,
+            order__warehouse_id=warehouse_id,
+            order__biz_date=service_date,
+            order__submit_status="SUBMITTED",
+            order__is_deleted=False,
+            is_deleted=False,
+        )
+        .exclude(order__approval_status="CANCELLED")
+        .aggregate(total=Sum(amount_expr))["total"]
+        or Decimal("0.00")
+    )
+    return {
+        "value": total,
+        "source": f"{AUTO_METRIC_SOURCE_PREFIX}OUTBOUND_ORDER_LINE_AMOUNT",
+        "note": "Sum(base_qty * base_price) for submitted outbound order lines, excluding cancelled orders.",
+    }
+
+
+def _default_metric_payload(metric_type: str, owner_id, warehouse_id, service_date, **kwargs):
+    resolver = _load_metric_resolver(metric_type)
+    if resolver:
+        return resolver(owner_id=owner_id, warehouse_id=warehouse_id, service_date=service_date, **kwargs)
+
+    if metric_type == MetricType.PALLET:
+        return _build_pallet_metric(owner_id, warehouse_id, service_date, **kwargs)
+    if metric_type == MetricType.CBM:
+        return _build_cbm_metric(owner_id, warehouse_id, service_date, **kwargs)
+    if metric_type == MetricType.AREA_M2:
+        return _build_area_metric(owner_id, warehouse_id, service_date, **kwargs)
+    if metric_type == MetricType.ORDER_AMT:
+        return _build_order_amount_metric(owner_id, warehouse_id, service_date, **kwargs)
+    return None
+
+
+def _auto_metric_types(metric_types: Optional[Iterable[str]] = None):
+    base_types = [MetricType.PALLET, MetricType.CBM, MetricType.AREA_M2, MetricType.ORDER_AMT]
+    if metric_types is None:
+        return base_types
+    allowed = set(base_types)
+    return [metric_type for metric_type in metric_types if metric_type in allowed]
+
+
+def _is_auto_metric_row(metric: BillingMetricDaily) -> bool:
+    return (metric.source or "").startswith(AUTO_METRIC_SOURCE_PREFIX)
+
+
+def _store_generated_metric(
+    *,
+    owner_id,
+    warehouse_id,
+    service_date,
+    metric_payload,
+    overwrite: bool = False,
+):
+    metric_type = metric_payload["metric_type"]
+    value = Decimal(metric_payload["value"])
+    source = metric_payload["source"]
+    note = metric_payload["note"]
+
+    existing = BillingMetricDaily.objects.filter(
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+        service_date=service_date,
+        metric_type=metric_type,
+    ).first()
+
+    if existing and not overwrite and not _is_auto_metric_row(existing):
+        return {
+            "metric_type": metric_type,
+            "action": "skipped_manual",
+            "value": existing.value,
+            "source": existing.source,
+            "note": existing.note,
+        }
+
+    if value <= 0:
+        if existing and (_is_auto_metric_row(existing) or overwrite):
+            existing.delete()
+            return {
+                "metric_type": metric_type,
+                "action": "deleted_zero",
+                "value": Decimal("0.0000"),
+                "source": source,
+                "note": note,
+            }
+        return {
+            "metric_type": metric_type,
+            "action": "skipped_zero",
+            "value": value,
+            "source": source,
+            "note": note,
+        }
+
+    if not existing:
+        BillingMetricDaily.objects.create(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            service_date=service_date,
+            metric_type=metric_type,
+            value=value,
+            source=source,
+            note=note,
+        )
+        return {
+            "metric_type": metric_type,
+            "action": "created",
+            "value": value,
+            "source": source,
+            "note": note,
+        }
+
+    changed = (
+        Decimal(existing.value) != value
+        or (existing.source or "") != source
+        or (existing.note or "") != note
+    )
+    if changed:
+        existing.value = value
+        existing.source = source
+        existing.note = note
+        existing.save(update_fields=["value", "source", "note"])
+        action = "updated"
+    else:
+        action = "noop"
+
+    return {
+        "metric_type": metric_type,
+        "action": action,
+        "value": value,
+        "source": source,
+        "note": note,
+    }
+
+
+@transaction.atomic
+def generate_metrics_for_date(
+    owner_id,
+    warehouse_id,
+    service_date: datetime.date,
+    *,
+    metric_types: Optional[Iterable[str]] = None,
+    overwrite: bool = False,
+    allow_area_fallback: bool = False,
+):
+    selected_types = _auto_metric_types(metric_types)
+    inventory_rows = None
+    if any(metric_type in {MetricType.PALLET, MetricType.CBM, MetricType.AREA_M2} for metric_type in selected_types):
+        inventory_rows = _inventory_metric_rows(owner_id, warehouse_id, service_date)
+
+    results = []
+    counters = {
+        "created": 0,
+        "updated": 0,
+        "deleted_zero": 0,
+        "skipped_zero": 0,
+        "skipped_manual": 0,
+        "unsupported": 0,
+        "noop": 0,
+    }
+
+    for metric_type in selected_types:
+        payload = _default_metric_payload(
+            metric_type,
+            owner_id,
+            warehouse_id,
+            service_date,
+            inventory_rows=inventory_rows,
+            allow_area_fallback=allow_area_fallback,
+        )
+        normalized = _normalize_metric_payload(
+            metric_type,
+            payload,
+            default_source=f"{AUTO_METRIC_SOURCE_PREFIX}{metric_type}",
+        )
+        if normalized is None:
+            counters["unsupported"] += 1
+            results.append(
+                {
+                    "metric_type": metric_type,
+                    "action": "unsupported",
+                    "value": None,
+                    "source": None,
+                    "note": "No metric resolver or default builder is available for this metric type.",
+                }
+            )
+            continue
+
+        stored = _store_generated_metric(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            service_date=service_date,
+            metric_payload=normalized,
+            overwrite=overwrite,
+        )
+        counters[stored["action"]] = counters.get(stored["action"], 0) + 1
+        results.append(stored)
+
+    return {
+        "owner_id": owner_id,
+        "warehouse_id": warehouse_id,
+        "service_date": service_date,
+        "results": results,
+        **counters,
+    }
+
+
+@transaction.atomic
+def generate_metrics_for_range(
+    owner_id,
+    warehouse_id,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    *,
+    metric_types: Optional[Iterable[str]] = None,
+    overwrite: bool = False,
+    allow_area_fallback: bool = False,
+):
+    summary = {
+        "owner_id": owner_id,
+        "warehouse_id": warehouse_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "days": [],
+        "created": 0,
+        "updated": 0,
+        "deleted_zero": 0,
+        "skipped_zero": 0,
+        "skipped_manual": 0,
+        "unsupported": 0,
+        "noop": 0,
+    }
+
+    current = start_date
+    while current <= end_date:
+        day_result = generate_metrics_for_date(
+            owner_id,
+            warehouse_id,
+            current,
+            metric_types=metric_types,
+            overwrite=overwrite,
+            allow_area_fallback=allow_area_fallback,
+        )
+        summary["days"].append(day_result)
+        for key in ("created", "updated", "deleted_zero", "skipped_zero", "skipped_manual", "unsupported", "noop"):
+            summary[key] += day_result.get(key, 0)
+        current += datetime.timedelta(days=1)
+
+    return summary
+
+
+def _metric_job_run_payload(metric_summary):
+    return {
+        "service_date": metric_summary["service_date"].isoformat(),
+        "created": metric_summary["created"],
+        "updated": metric_summary["updated"],
+        "deleted_zero": metric_summary["deleted_zero"],
+        "skipped_zero": metric_summary["skipped_zero"],
+        "skipped_manual": metric_summary["skipped_manual"],
+        "unsupported": metric_summary["unsupported"],
+        "noop": metric_summary["noop"],
+    }
+
+
+def _metric_job_run_message(metric_summary):
+    payload = _metric_job_run_payload(metric_summary)
+    return (
+        f"created={payload['created']}, updated={payload['updated']}, "
+        f"deleted_zero={payload['deleted_zero']}, skipped_zero={payload['skipped_zero']}, "
+        f"skipped_manual={payload['skipped_manual']}, unsupported={payload['unsupported']}, "
+        f"noop={payload['noop']}"
+    )
+
+
+def _metric_scheduler_stale_minutes():
+    return max(1, int(getattr(settings, "BILLING_METRIC_SCHEDULER_STALE_MINUTES", 180)))
+
+
+@transaction.atomic
+def _claim_scheduled_metric_job(owner_id, warehouse_id, service_date: datetime.date, *, force: bool = False):
+    now = timezone.now()
+    stale_before = now - datetime.timedelta(minutes=_metric_scheduler_stale_minutes())
+    job_run, created = (
+        BillingJobRun.objects
+        .select_for_update()
+        .get_or_create(
+            job_name=SCHEDULED_METRIC_JOB_NAME,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            service_date=service_date,
+            defaults={
+                "status": BillingJobRun.Status.RUNNING,
+                "attempts": 1,
+                "started_at": now,
+                "message": "",
+                "summary": {},
+            },
+        )
+    )
+
+    if created:
+        return job_run, "claimed"
+
+    if job_run.status == BillingJobRun.Status.SUCCESS and not force:
+        return job_run, "skipped_success"
+
+    if (
+        job_run.status == BillingJobRun.Status.RUNNING
+        and job_run.started_at
+        and job_run.started_at >= stale_before
+        and not force
+    ):
+        return job_run, "skipped_running"
+
+    job_run.status = BillingJobRun.Status.RUNNING
+    job_run.attempts = (job_run.attempts or 0) + 1
+    job_run.started_at = now
+    job_run.finished_at = None
+    job_run.message = ""
+    job_run.summary = {}
+    job_run.save(update_fields=["status", "attempts", "started_at", "finished_at", "message", "summary", "updated_at"])
+    return job_run, "claimed"
+
+
+def _finish_scheduled_metric_job(job_run: BillingJobRun, *, status: str, message: str, summary=None):
+    job_run.status = status
+    job_run.finished_at = timezone.now()
+    job_run.message = message[:200]
+    job_run.summary = summary or {}
+    job_run.save(update_fields=["status", "finished_at", "message", "summary", "updated_at"])
+
+
+def _run_scheduled_metric_generation_for_scope(
+    owner_id,
+    warehouse_id,
+    service_date: datetime.date,
+    *,
+    metric_types: Optional[Iterable[str]] = None,
+    overwrite: bool = False,
+    allow_area_fallback: bool = False,
+    force: bool = False,
+):
+    selected_types = _auto_metric_types(metric_types)
+    job_run, claim_status = _claim_scheduled_metric_job(
+        owner_id,
+        warehouse_id,
+        service_date,
+        force=force,
+    )
+    if claim_status != "claimed":
+        return {
+            "owner_id": owner_id,
+            "warehouse_id": warehouse_id,
+            "service_date": service_date,
+            "job_run_id": job_run.id,
+            "status": claim_status,
+            "summary": job_run.summary,
+            "message": job_run.message,
+        }
+
+    try:
+        snapshot_summary = None
+        if (
+            service_date < timezone.now().date()
+            and any(metric_type in {MetricType.PALLET, MetricType.CBM, MetricType.AREA_M2} for metric_type in selected_types)
+        ):
+            from allapp.inventory.snapshot_services import generate_inventory_snapshots_for_dates
+
+            snapshot_summary = generate_inventory_snapshots_for_dates(
+                [service_date],
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+            )
+
+        metric_summary = generate_metrics_for_date(
+            owner_id,
+            warehouse_id,
+            service_date,
+            metric_types=selected_types,
+            overwrite=overwrite,
+            allow_area_fallback=allow_area_fallback,
+        )
+        if snapshot_summary is not None:
+            metric_summary["inventory_snapshot"] = snapshot_summary["days"][0]
+    except Exception as exc:
+        _finish_scheduled_metric_job(
+            job_run,
+            status=BillingJobRun.Status.FAILED,
+            message=str(exc),
+        )
+        return {
+            "owner_id": owner_id,
+            "warehouse_id": warehouse_id,
+            "service_date": service_date,
+            "job_run_id": job_run.id,
+            "status": "failed",
+            "summary": {},
+            "message": str(exc),
+        }
+
+    payload = _metric_job_run_payload(metric_summary)
+    _finish_scheduled_metric_job(
+        job_run,
+        status=BillingJobRun.Status.SUCCESS,
+        message=_metric_job_run_message(metric_summary),
+        summary=payload,
+    )
+    return {
+        "owner_id": owner_id,
+        "warehouse_id": warehouse_id,
+        "service_date": service_date,
+        "job_run_id": job_run.id,
+        "status": "success",
+        "summary": metric_summary,
+        "message": _metric_job_run_message(metric_summary),
+    }
+
+
+def run_scheduled_metric_generation_for_dates(
+    service_dates: Iterable[datetime.date],
+    *,
+    owner_id=None,
+    warehouse_id=None,
+    metric_types: Optional[Iterable[str]] = None,
+    overwrite: bool = False,
+    allow_area_fallback: bool = False,
+    force: bool = False,
+):
+    from allapp.baseinfo.models import Owner
+    from allapp.locations.models import Warehouse
+
+    owners_qs = Owner.objects.order_by("id")
+    warehouses_qs = Warehouse.objects.order_by("id")
+    if owner_id:
+        owners_qs = owners_qs.filter(id=owner_id)
+    if warehouse_id:
+        warehouses_qs = warehouses_qs.filter(id=warehouse_id)
+
+    owners = list(owners_qs.only("id"))
+    warehouses = list(warehouses_qs.only("id"))
+    dates = sorted({service_date for service_date in service_dates})
+
+    summary = {
+        "service_dates": dates,
+        "runs": [],
+        "scopes_total": len(dates) * len(owners) * len(warehouses),
+        "success": 0,
+        "failed": 0,
+        "skipped_success": 0,
+        "skipped_running": 0,
+        "created": 0,
+        "updated": 0,
+        "deleted_zero": 0,
+        "skipped_zero": 0,
+        "skipped_manual": 0,
+        "unsupported": 0,
+        "noop": 0,
+    }
+
+    for service_date in dates:
+        for owner in owners:
+            for warehouse in warehouses:
+                run_result = _run_scheduled_metric_generation_for_scope(
+                    owner.id,
+                    warehouse.id,
+                    service_date,
+                    metric_types=metric_types,
+                    overwrite=overwrite,
+                    allow_area_fallback=allow_area_fallback,
+                    force=force,
+                )
+                summary["runs"].append(run_result)
+                status = run_result["status"]
+                if status in {"success", "failed", "skipped_success", "skipped_running"}:
+                    summary[status] += 1
+                if status == "success":
+                    metric_summary = run_result["summary"]
+                    for key in ("created", "updated", "deleted_zero", "skipped_zero", "skipped_manual", "unsupported", "noop"):
+                        summary[key] += metric_summary.get(key, 0)
+
+    return summary
+
+
+def run_scheduled_metric_generation_for_date(
+    service_date: datetime.date,
+    *,
+    owner_id=None,
+    warehouse_id=None,
+    metric_types: Optional[Iterable[str]] = None,
+    overwrite: bool = False,
+    allow_area_fallback: bool = False,
+    force: bool = False,
+):
+    return run_scheduled_metric_generation_for_dates(
+        [service_date],
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+        metric_types=metric_types,
+        overwrite=overwrite,
+        allow_area_fallback=allow_area_fallback,
+        force=force,
+    )
+
+
 @transaction.atomic
 def accrue_metrics_for_date(owner_id, warehouse_id, service_date: datetime.date, by_user=None) -> Tuple[int, int]:
     created_events = created_accruals = 0

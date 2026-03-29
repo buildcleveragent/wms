@@ -4,17 +4,17 @@ from django.contrib.auth import get_user_model
 from django.utils.translation import gettext_lazy as _
 from decimal import Decimal, ROUND_HALF_UP
 from allapp.billing.enums import ChargeType, CalcMethod, AccrualStatus, PeriodStatus, BillStatus, MetricType, LadderMode, CapMode, BundleScope, BundleType
-from wmsmaster import settings
 
 User = get_user_model()
 
 def qmoney(val):
-    if val is None: return None
+    if val is None:
+        return None
     return (Decimal(val)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 class BillingRule(models.Model):
     owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), null=True, blank=True, on_delete=models.PROTECT)
-    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), null=True, blank=True, on_delete=models.PROTECT,default=settings.DEFAULT_WAREHOUSE_ID,editable=False,)
+    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), null=True, blank=True, on_delete=models.PROTECT)
     charge_type = models.CharField(verbose_name=_("计费类型"), max_length=20, choices=ChargeType.choices)
     calc_method = models.CharField(verbose_name=_("计量方式"), max_length=40, choices=CalcMethod.choices)
     ladder_mode = models.CharField(verbose_name=_("阶梯模式"), max_length=16, choices=LadderMode.choices, null=True, blank=True, default=None)
@@ -76,7 +76,7 @@ class BillingRuleTier(models.Model):
 
 class BillingPeriod(models.Model):
     owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), on_delete=models.PROTECT)
-    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT,default=settings.DEFAULT_WAREHOUSE_ID,editable=False,)
+    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT)
     label = models.CharField(verbose_name=_("账期标签"), max_length=20)
     start_date = models.DateField(verbose_name=_("开始日期"))
     end_date = models.DateField(verbose_name=_("结束日期"))
@@ -93,7 +93,7 @@ class BillingPeriod(models.Model):
 
 class BillingEvent(models.Model):
     owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), on_delete=models.PROTECT)
-    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT, editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT)
     charge_type = models.CharField(verbose_name=_("计费类型"), max_length=20, choices=ChargeType.choices)
     service_date = models.DateField(verbose_name=_("服务日期"))
     task = models.ForeignKey("tasking.WmsTask", verbose_name=_("来源任务"), null=True, blank=True, on_delete=models.SET_NULL)
@@ -111,7 +111,7 @@ class BillingEvent(models.Model):
 
 class BillingAccrual(models.Model):
     owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), on_delete=models.PROTECT)
-    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT, editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT)
     period = models.ForeignKey("billing.BillingPeriod", verbose_name=_("账期"), null=True, blank=True, on_delete=models.SET_NULL)
     charge_type = models.CharField(verbose_name=_("计费类型"), max_length=20, choices=ChargeType.choices)
     rule = models.ForeignKey("billing.BillingRule", verbose_name=_("计费规则"), on_delete=models.PROTECT)
@@ -143,7 +143,7 @@ class BillingAccrual(models.Model):
 
 class BillingMetricDaily(models.Model):
     owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), on_delete=models.PROTECT)
-    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"),  editable=False,on_delete=models.PROTECT,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT)
     service_date = models.DateField(verbose_name=_("日期"))
     metric_type = models.CharField(verbose_name=_("指标类型"), max_length=20, choices=MetricType.choices)
     value = models.DecimalField(verbose_name=_("指标值"), max_digits=18, decimal_places=4)
@@ -157,9 +157,46 @@ class BillingMetricDaily(models.Model):
         indexes = [models.Index(fields=["owner", "warehouse", "service_date", "metric_type"])]
         constraints = [models.UniqueConstraint(fields=["owner", "warehouse", "service_date", "metric_type"], name="ux_billing_metric_daily_owh_date_metric")]
 
+class BillingJobRun(models.Model):
+    class JobName(models.TextChoices):
+        DAILY_METRIC_GENERATION = "DAILY_METRIC_GENERATION", "日指标生成"
+
+    class Status(models.TextChoices):
+        RUNNING = "RUNNING", "运行中"
+        SUCCESS = "SUCCESS", "成功"
+        FAILED = "FAILED", "失败"
+        SKIPPED = "SKIPPED", "跳过"
+
+    owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), on_delete=models.PROTECT)
+    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT)
+    job_name = models.CharField(verbose_name=_("作业名"), max_length=40, choices=JobName.choices)
+    service_date = models.DateField(verbose_name=_("服务日期"))
+    status = models.CharField(verbose_name=_("执行状态"), max_length=20, choices=Status.choices, default=Status.RUNNING)
+    attempts = models.PositiveIntegerField(verbose_name=_("尝试次数"), default=1)
+    started_at = models.DateTimeField(verbose_name=_("开始时间"), null=True, blank=True)
+    finished_at = models.DateTimeField(verbose_name=_("结束时间"), null=True, blank=True)
+    message = models.CharField(verbose_name=_("执行消息"), max_length=200, blank=True, default="")
+    summary = models.JSONField(verbose_name=_("执行摘要"), blank=True, default=dict)
+    created_at = models.DateTimeField(verbose_name=_("创建时间"), auto_now_add=True)
+    updated_at = models.DateTimeField(verbose_name=_("更新时间"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("计费作业执行记录")
+        verbose_name_plural = _("计费作业执行记录")
+        indexes = [
+            models.Index(fields=["job_name", "status", "service_date"]),
+            models.Index(fields=["owner", "warehouse", "service_date"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["job_name", "owner", "warehouse", "service_date"],
+                name="ux_billing_job_run_job_owh_date",
+            )
+        ]
+
 class Bill(models.Model):
     owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), on_delete=models.PROTECT)
-    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT, editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT)
     period = models.ForeignKey("billing.BillingPeriod", verbose_name=_("账期"), on_delete=models.PROTECT)
     invoice_no = models.CharField(verbose_name=_("发票/结算单号"), max_length=40, unique=True)
     issue_date = models.DateField(verbose_name=_("开票日期"), default=timezone.now)

@@ -250,6 +250,57 @@ class InventoryDetail(BaseModel):
     #     if errors:
     #         raise ValidationError(errors)
 
+class InventorySnapshotDaily(models.Model):
+    snapshot_date = models.DateField("快照日期", db_index=True)
+    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
+    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
+    location = models.ForeignKey("locations.Location", on_delete=models.PROTECT, verbose_name="库位")
+    product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
+
+    batch_no = models.CharField("批次号", max_length=64, blank=True, default="")
+    production_date = models.DateField("生产日期", null=True, blank=True)
+    expiry_date = models.DateField("有效期至", null=True, blank=True)
+    serial_no = models.CharField("序列号", max_length=64, blank=True, default="")
+
+    onhand_qty = models.DecimalField("账面库存快照", max_digits=18, decimal_places=4, default=0)
+    available_qty = models.DecimalField("可用库存快照", max_digits=18, decimal_places=4, default=0)
+    allocated_qty = models.DecimalField("已分配快照", max_digits=18, decimal_places=4, default=0)
+    locked_qty = models.DecimalField("锁定快照", max_digits=18, decimal_places=4, default=0)
+    damaged_qty = models.DecimalField("损坏快照", max_digits=18, decimal_places=4, default=0)
+
+    unit_volume_m3_snapshot = models.DecimalField("单位体积快照(m³)", max_digits=12, decimal_places=6, null=True, blank=True)
+    location_area_m2_snapshot = models.DecimalField("库位面积快照(㎡)", max_digits=12, decimal_places=4, null=True, blank=True)
+    snapshot_source = models.CharField("快照来源", max_length=40, blank=True, default="")
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "库存日快照"
+        verbose_name_plural = "库存日快照"
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "snapshot_date",
+                    "owner",
+                    "warehouse",
+                    "location",
+                    "product",
+                    "batch_no",
+                    "production_date",
+                    "expiry_date",
+                    "serial_no",
+                ],
+                name="ux_inv_snapshot_daily_dim",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["snapshot_date", "owner", "warehouse"], name="idx_inv_snapshot_date_scope"),
+            models.Index(fields=["owner", "warehouse", "location"], name="idx_inv_snapshot_scope_loc"),
+            models.Index(fields=["product", "snapshot_date"], name="idx_inv_snapshot_product_date"),
+        ]
+
+    def __str__(self):
+        return f"SNAP[{self.snapshot_date}][{self.owner_id}/{self.warehouse_id}/{self.location_id}/{self.product_id}]"
+
 # =========================B. 汇总（Owner+SKU）=========================
 class InventorySummary(BaseModel):
     """
@@ -562,4 +613,3 @@ class InventoryQuickOutboundAdjust(InventoryDetail):
         proxy = True
         verbose_name = "出库快调"
         verbose_name_plural = "出库快调"
-

@@ -1,6 +1,7 @@
 # allapp/inventory/admin.py
 from .models import (
     InventoryDetail,
+    InventorySnapshotDaily,
     InventorySummary,
     InventoryTransaction,
 
@@ -144,6 +145,60 @@ class InventoryTransactionAdmin(admin.ModelAdmin):
     ordering = _safe_fields(InventoryTransaction, ["-id"])
     list_per_page = 50
     list_select_related = ("owner", "product", "warehouse", "location")
+
+
+@admin.register(InventorySnapshotDaily)
+class InventorySnapshotDailyAdmin(admin.ModelAdmin):
+    list_display = (
+        "snapshot_date",
+        "owner",
+        "warehouse",
+        "location",
+        "product",
+        "onhand_qty",
+        "available_qty",
+        "allocated_qty",
+        "locked_qty",
+        "damaged_qty",
+        "snapshot_source",
+        "created_at",
+    )
+    list_filter = ("snapshot_date", "owner", "warehouse", "location", "product", "snapshot_source")
+    search_fields = (
+        "batch_no",
+        "serial_no",
+        "product__code",
+        "product__name",
+        "owner__code",
+        "owner__name",
+        "warehouse__code",
+        "warehouse__name",
+        "location__code",
+        "location__name",
+    )
+    readonly_fields = (
+        "snapshot_date",
+        "owner",
+        "warehouse",
+        "location",
+        "product",
+        "batch_no",
+        "production_date",
+        "expiry_date",
+        "serial_no",
+        "onhand_qty",
+        "available_qty",
+        "allocated_qty",
+        "locked_qty",
+        "damaged_qty",
+        "unit_volume_m3_snapshot",
+        "location_area_m2_snapshot",
+        "snapshot_source",
+        "created_at",
+    )
+    ordering = ("-snapshot_date", "owner", "warehouse", "location", "product")
+    list_per_page = 50
+    list_select_related = ("owner", "warehouse", "location", "product")
 
 
 
