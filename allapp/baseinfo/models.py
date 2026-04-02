@@ -202,8 +202,6 @@ class Employee(BaseModel):
         on_delete=models.PROTECT,  # 也可以使用 models.PROTECT, 根据业务需求来选择
         blank=True, null=True,
         related_name="employees",  # 如果需要通过 Warehouse 模型反向查找关联员工
-        editable=False,
-        default=settings.DEFAULT_WAREHOUSE_ID
     )
     owner = models.ForeignKey(
         'Owner',
@@ -261,8 +259,6 @@ class CarrierCompany(BaseModel, AddressMixin):
         on_delete=models.PROTECT,  # 也可以使用 models.CASCADE, 根据业务需求来选择
         blank=True, null=True,
         related_name="carrier_company",  # 如果需要通过 Warehouse 模型反向查找关联员工
-        editable=False,
-        default=settings.DEFAULT_WAREHOUSE_ID
     )
     owner = models.ForeignKey(
         'Owner',

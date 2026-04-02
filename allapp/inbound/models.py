@@ -79,7 +79,7 @@ class InboundOrder(BaseModel):
 
     owner = models.ForeignKey("baseinfo.Owner", verbose_name="货主", on_delete=models.PROTECT,related_name="inbound_orders")
     supplier = models.ForeignKey("baseinfo.Supplier", verbose_name="供应商", on_delete=models.PROTECT, related_name="inbound_orders")
-    warehouse = models.ForeignKey("locations.Warehouse", verbose_name="仓库",on_delete=models.PROTECT, related_name="inbound_orders",editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", verbose_name="仓库",on_delete=models.PROTECT, related_name="inbound_orders")
     order_no = models.CharField("订单编号", max_length=100, unique=True)
     biz_date = models.DateField("日期", default=datetime.date.today)
     src_bill_no = models.CharField("源单号", max_length=100, blank=True, null=True)
@@ -139,6 +139,8 @@ class InboundOrder(BaseModel):
         return reverse("inbound:order_detail", kwargs={"pk": self.pk})
 
     def save(self, *args, **kwargs):
+        if not self.warehouse_id:
+            raise ValidationError({"warehouse": "必须明确指定入库订单仓库"})
         # 仅在创建时赋号
         if not self.pk and not self.order_no:
             self.order_no = DocSequence.next_code(
@@ -150,11 +152,14 @@ class InboundOrder(BaseModel):
                 # width=DocSequence.DEFAULT_WIDTH,
                 # fmt="{prefix}-{yyyy}{mm}{dd}-{wh}-{own}-{seq}",
             )
-        super().save(*args, **kwargs)
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     def clean(self):
         errors = {}
         # 校验订单关闭逻辑
+        if not self.warehouse_id:
+            errors["warehouse"] = "必须明确指定入库订单仓库"
         if self.is_closed and not self.close_reason:
             errors["close_reason"] = "订单关闭时必须提供关闭理由"
 
@@ -455,7 +460,7 @@ class InboundReceipt(BaseModel):
     receipt_no = models.CharField("单据编号", max_length=100, unique=True)  # 去掉 db_index
     order = models.ForeignKey("inbound.InboundOrder", verbose_name="关联订单",on_delete=models.PROTECT, related_name="receipts", blank=True, null=True)
     owner = models.ForeignKey("baseinfo.Owner", verbose_name="货主", on_delete=models.PROTECT, related_name="inbound_receipts")
-    warehouse = models.ForeignKey("locations.Warehouse", verbose_name="所属仓库",on_delete=models.PROTECT, related_name="inbound_receipts",editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", verbose_name="所属仓库",on_delete=models.PROTECT, related_name="inbound_receipts")
     supplier = models.ForeignKey("baseinfo.Supplier", verbose_name="供应商",on_delete=models.PROTECT, related_name="inbound_receipts")
     # campus_name = models.CharField("园区(快照)", max_length=80, blank=True, null=True)  # 若无实体就留快照
     biz_date = models.DateField("日期")  # 默认由服务层设置为今天
@@ -509,6 +514,8 @@ class InboundReceipt(BaseModel):
 
     def clean(self):
         errors = {}
+        if self.order_id and not self.warehouse_id:
+            self.warehouse_id = self.order.warehouse_id
         # 订单一致性（如果有 FK）
         if self.order_id:
             if self.order.owner_id != self.owner_id:
@@ -517,6 +524,8 @@ class InboundReceipt(BaseModel):
                 errors["supplier"] = "收货单供应商与关联订单供应商不一致。"
             if self.order.warehouse_id != self.warehouse_id:
                 errors["warehouse"] = "收货单仓库与关联订单仓库不一致。"
+        elif not self.warehouse_id:
+            errors["warehouse"] = "必须明确指定入库收货单仓库。"
 
         # 审批与提交关系（与 DB 约束一致，给出友好文案）
         if self.approved_by_id and self.submit_status != "SUBMITTED":
@@ -527,6 +536,14 @@ class InboundReceipt(BaseModel):
         if errors:
             from django.core.exceptions import ValidationError
             raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if self.order_id and not self.warehouse_id:
+            self.warehouse_id = self.order.warehouse_id
+        if not self.warehouse_id:
+            raise ValidationError({"warehouse": "必须明确指定入库收货单仓库。"})
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 class InboundReceiptLine(BaseModel):
     """
@@ -829,7 +846,7 @@ class ReturnInspection(BaseModel):
         related_name="inspections", verbose_name="来源订单行"
     )
     owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, related_name="return_inspections")
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, related_name="return_inspections",editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, related_name="return_inspections", editable=False)
 
     # 实物标识
     lot_no = models.CharField("批号", max_length=60, blank=True, null=True)
@@ -1034,7 +1051,7 @@ class Lot(BaseModel):
 class LotWarehouse(BaseModel):
     owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, related_name="lot_warehouses")
     lot = models.ForeignKey("Lot", on_delete=models.PROTECT, related_name="warehouses")
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, related_name="lot_warehouses",editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, related_name="lot_warehouses")
 
     # 建议给出 choices，若暂不收口也可保留自由文本
     QA_STATUS = [
@@ -1075,12 +1092,17 @@ class LotWarehouse(BaseModel):
     # —— 业务校验 —— #
     def clean(self):
         errs = {}
+        if self.lot_id and not self.owner_id:
+            self.owner_id = self.lot.owner_id
 
         # 1) owner 与 lot.owner 必须一致
         if self.lot_id and self.owner_id:
             lot_owner_id = getattr(self.lot, "owner_id", None)
             if lot_owner_id and lot_owner_id != self.owner_id:
                 errs["owner"] = "货主与批次的货主不一致"
+
+        if not self.warehouse_id:
+            errs["warehouse"] = "必须明确指定批次仓库状态所属仓库"
 
         # 2) blocked_until 不得早于“现在”（业务口径：冻结结束时间应是未来；若允许历史记录，可移除此条）
         if self.blocked_until and self.blocked_until <= timezone.now():
@@ -1095,12 +1117,13 @@ class LotWarehouse(BaseModel):
 
     # —— 保存：必要的默认/同步 —— #
     def save(self, *args, **kwargs):
+        if self.lot_id and not self.owner_id:
+            self.owner_id = self.lot.owner_id
         # 若未给 qa_status，尝试沿用 Lot 的默认
         if not self.qa_status and self.lot_id:
             default_status = getattr(self.lot, "default_qa_status", None)
             if default_status:
                 self.qa_status = default_status
 
-        self.clean()
+        self.full_clean()
         return super().save(*args, **kwargs)
-

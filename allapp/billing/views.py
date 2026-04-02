@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import datetime
+import io
 from decimal import Decimal
+from openpyxl import Workbook
 
+from django.http import HttpResponse
 from django.db import transaction
-from django.db.models import Count, QuerySet, Sum
+from django.db.models import Count, Q, QuerySet, Sum
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
@@ -107,9 +110,46 @@ class BillingRuleViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMi
     ordering_fields = ["id", "priority", "effective_from", "effective_to"]
     ordering = ["owner_id", "priority", "id"]
 
+    def scope_queryset(self, qs: QuerySet):
+        request = getattr(self, "request", None)
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return qs.none()
+        if getattr(user, "is_superuser", False):
+            return qs
+
+        owner_id = getattr(user, "owner_id", None)
+        warehouse_id = getattr(user, "warehouse_id", None)
+        if owner_id:
+            qs = qs.filter(Q(owner_id=owner_id) | Q(owner__isnull=True))
+        if warehouse_id:
+            qs = qs.filter(Q(warehouse_id=warehouse_id) | Q(warehouse__isnull=True))
+        return qs
+
+    def _validate_rule_write_scope(self, rule: BillingRule):
+        user = self.request.user
+        if getattr(user, "is_superuser", False):
+            return
+
+        owner_id = getattr(user, "owner_id", None)
+        warehouse_id = getattr(user, "warehouse_id", None)
+        if owner_id and rule.owner_id != owner_id:
+            raise PermissionDenied("无权修改通用规则或其他货主规则。")
+        if warehouse_id and rule.warehouse_id != warehouse_id:
+            raise PermissionDenied("无权修改通用规则或其他仓库规则。")
+
+    def perform_update(self, serializer):
+        self._validate_rule_write_scope(serializer.instance)
+        super().perform_update(serializer)
+
+    def perform_destroy(self, instance):
+        self._validate_rule_write_scope(instance)
+        instance.delete()
+
     @action(detail=True, methods=["post"], url_path="activate")
     def activate(self, request, pk=None):
         rule = self.get_object()
+        self._validate_rule_write_scope(rule)
         rule.active = True
         rule.save(update_fields=["active"])
         return Response(self.get_serializer(rule).data)
@@ -117,6 +157,7 @@ class BillingRuleViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMi
     @action(detail=True, methods=["post"], url_path="deactivate")
     def deactivate(self, request, pk=None):
         rule = self.get_object()
+        self._validate_rule_write_scope(rule)
         rule.active = False
         rule.save(update_fields=["active"])
         return Response(self.get_serializer(rule).data)
@@ -135,17 +176,18 @@ class BillingRuleTierViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelVi
     ordering = ["rule_id", "threshold_from", "id"]
 
     def scope_queryset(self, qs: QuerySet):
-        qs = super().scope_queryset(qs)
         user = getattr(self.request, "user", None)
+        if not user or not user.is_authenticated:
+            return qs.none()
         if getattr(user, "is_superuser", False):
             return qs
 
         owner_id = getattr(user, "owner_id", None)
         warehouse_id = getattr(user, "warehouse_id", None)
         if owner_id:
-            qs = qs.filter(rule__owner_id=owner_id)
+            qs = qs.filter(Q(rule__owner_id=owner_id) | Q(rule__owner__isnull=True))
         if warehouse_id:
-            qs = qs.filter(rule__warehouse_id=warehouse_id)
+            qs = qs.filter(Q(rule__warehouse_id=warehouse_id) | Q(rule__warehouse__isnull=True))
         return qs
 
     def _validate_rule_scope(self, rule):
@@ -154,9 +196,9 @@ class BillingRuleTierViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelVi
             owner_id = getattr(user, "owner_id", None)
             warehouse_id = getattr(user, "warehouse_id", None)
             if owner_id and rule.owner_id != owner_id:
-                raise PermissionDenied("无权为其他货主规则新增阶梯。")
+                raise PermissionDenied("无权操作通用规则或其他货主规则的阶梯。")
             if warehouse_id and rule.warehouse_id != warehouse_id:
-                raise PermissionDenied("无权为其他仓库规则新增阶梯。")
+                raise PermissionDenied("无权操作通用规则或其他仓库规则的阶梯。")
 
     def perform_create(self, serializer):
         rule = serializer.validated_data["rule"]
@@ -167,6 +209,10 @@ class BillingRuleTierViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelVi
         rule = serializer.validated_data.get("rule", serializer.instance.rule)
         self._validate_rule_scope(rule)
         serializer.save()
+
+    def perform_destroy(self, instance):
+        self._validate_rule_scope(instance.rule)
+        instance.delete()
 
 
 class BillingMetricDailyViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMixin, viewsets.ModelViewSet):
@@ -474,3 +520,115 @@ class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewS
         if self.action == "retrieve":
             return BillDetailSerializer
         return BillListSerializer
+
+    def _xlsx_response(self, workbook: Workbook, filename: str) -> HttpResponse:
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)
+        response = HttpResponse(
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    @action(detail=False, methods=["get"], url_path="export")
+    def export_list(self, request):
+        qs = self.filter_queryset(self.get_queryset())
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Bills"
+        sheet.append(
+            [
+                "Invoice No",
+                "Status",
+                "Owner",
+                "Warehouse",
+                "Period",
+                "Issue Date",
+                "Due Date",
+                "Currency",
+                "Subtotal",
+                "Tax Total",
+                "Total",
+                "Line Count",
+                "Memo",
+            ]
+        )
+
+        for bill in qs:
+            lines = list(bill.lines.all())
+            sheet.append(
+                [
+                    bill.invoice_no,
+                    bill.status,
+                    getattr(bill.owner, "name", "") if bill.owner_id else "",
+                    getattr(bill.warehouse, "name", "") if bill.warehouse_id else "",
+                    getattr(bill.period, "label", "") if bill.period_id else "",
+                    bill.issue_date.isoformat() if bill.issue_date else "",
+                    bill.due_date.isoformat() if bill.due_date else "",
+                    bill.currency,
+                    Decimal(bill.subtotal),
+                    Decimal(bill.tax_total),
+                    Decimal(bill.total),
+                    len(lines),
+                    bill.memo or "",
+                ]
+            )
+
+        return self._xlsx_response(
+            workbook,
+            f"billing-bills-{datetime.date.today().isoformat()}.xlsx",
+        )
+
+    @action(detail=True, methods=["get"], url_path="export")
+    def export_detail(self, request, pk=None):
+        bill = self.get_object()
+        workbook = Workbook()
+
+        summary_sheet = workbook.active
+        summary_sheet.title = "Bill"
+        summary_sheet.append(["Field", "Value"])
+        summary_sheet.append(["Invoice No", bill.invoice_no])
+        summary_sheet.append(["Status", bill.status])
+        summary_sheet.append(["Owner", getattr(bill.owner, "name", "") if bill.owner_id else ""])
+        summary_sheet.append(["Warehouse", getattr(bill.warehouse, "name", "") if bill.warehouse_id else ""])
+        summary_sheet.append(["Period", getattr(bill.period, "label", "") if bill.period_id else ""])
+        summary_sheet.append(["Issue Date", bill.issue_date.isoformat() if bill.issue_date else ""])
+        summary_sheet.append(["Due Date", bill.due_date.isoformat() if bill.due_date else ""])
+        summary_sheet.append(["Currency", bill.currency])
+        summary_sheet.append(["Subtotal", Decimal(bill.subtotal)])
+        summary_sheet.append(["Tax Total", Decimal(bill.tax_total)])
+        summary_sheet.append(["Total", Decimal(bill.total)])
+        summary_sheet.append(["Memo", bill.memo or ""])
+
+        lines_sheet = workbook.create_sheet("Lines")
+        lines_sheet.append(
+            [
+                "Service Date",
+                "Charge Type",
+                "Quantity",
+                "Unit Price",
+                "Amount",
+                "Tax Amount",
+                "Description",
+                "Accrual Fingerprint",
+            ]
+        )
+        for line in bill.lines.all():
+            lines_sheet.append(
+                [
+                    line.service_date.isoformat() if line.service_date else "",
+                    line.charge_type,
+                    Decimal(line.quantity),
+                    Decimal(line.unit_price),
+                    Decimal(line.amount),
+                    Decimal(line.tax_amount),
+                    line.description or "",
+                    getattr(line.accrual, "acc_fingerprint", ""),
+                ]
+            )
+
+        invoice_token = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in bill.invoice_no or f"bill-{bill.id}")
+        return self._xlsx_response(workbook, f"{invoice_token or f'bill-{bill.id}'}.xlsx")

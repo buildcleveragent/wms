@@ -55,14 +55,14 @@ class OutboundOrderAdmin(admin.ModelAdmin):
 
     # —— 列表配置 —— #
     list_display = (
-        "order_no", "biz_date", "outbound_type", "owner", "customer", "supplier",
+        "order_no", "biz_date", "outbound_type", "owner", "warehouse", "customer", "supplier",
         "submit_status", "approval_status", "delivery_method", "is_closed",
         "created_by", "created_at",
     )
     list_select_related = ("owner", "warehouse", "customer", "supplier", "created_by")
     list_filter = (
         "outbound_type", "submit_status", "approval_status", "delivery_method", "is_closed",
-        ("biz_date", admin.DateFieldListFilter), "owner", "customer", "supplier",
+        ("biz_date", admin.DateFieldListFilter), "owner", "warehouse", "customer", "supplier",
     )
     search_fields = (
         "order_no", "src_bill_no", "ship_to", "contact", "contact_phone",
@@ -73,7 +73,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
     show_full_result_count = False
 
     # —— 表单配置 —— #
-    autocomplete_fields = ("owner",  "customer", "supplier",)
+    autocomplete_fields = ("owner", "warehouse", "customer", "supplier",)
     readonly_fields = (
         "order_no", "created_at", "created_by",
         "approved_by_ownermanager", "approved_at_ownermanager",
@@ -83,7 +83,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
     # 使用简单的 fields（用户此前偏好），避免 fieldsets 造成冗长切分
     fields = (
         ("order_no", "biz_date", "outbound_type"),
-        ("owner", ),
+        ("owner", "warehouse"),
         ("customer", "supplier"),
         ("delivery_method", "etd"),
         ("submit_status", "approval_status"),

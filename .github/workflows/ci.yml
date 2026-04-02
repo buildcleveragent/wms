@@ -83,7 +83,7 @@ jobs:
       fail-fast: false
       matrix:
         django-version: ['5.2.*']
-        test-group: [unit, integration, api]
+        test-group: [platform, warehouse, settlement, business-flows]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -102,19 +102,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install Django==${{ matrix.django-version }}
           pip install -r requirements/test.txt
-          pip install pytest-xdist
       - name: Wait for DB ready (extra guard)
         run: |
           for i in {1..60}; do
             python - <<'PY'
-import sys, socket
-s=socket.socket();
-try:
-  s.connect(("mysql",3306)); 
-  sys.exit(0)
-except Exception:
-  sys.exit(1)
-PY
+            import sys, socket
+            s = socket.socket()
+            try:
+              s.connect(("mysql", 3306))
+              sys.exit(0)
+            except Exception:
+              sys.exit(1)
+            PY
             if [ $? -eq 0 ]; then echo "MySQL ready"; break; fi
             sleep 2
           done
@@ -129,6 +128,7 @@ PY
           REDIS_PORT: 6379
           SECRET_KEY: test-secret-key-for-ci
           DEBUG: 'False'
+          DJANGO_SETTINGS_MODULE: wmsmaster.settings
         run: |
           python manage.py migrate --noinput
       - name: Run ${{ matrix.test-group }} tests
@@ -142,13 +142,32 @@ PY
           REDIS_PORT: 6379
           SECRET_KEY: test-secret-key-for-ci
           DEBUG: 'False'
+          DJANGO_SETTINGS_MODULE: wmsmaster.settings
         run: |
-          if [ "${{ matrix.test-group }}" = "unit" ]; then
-            pytest -n auto allapp/tests/test_models.py allapp/*/tests/test_models.py -v --tb=short --maxfail=1 --cov=allapp --cov-append --cov-report=xml:coverage-${{ matrix.test-group }}.xml
-          elif [ "${{ matrix.test-group }}" = "integration" ]; then
-            pytest -n auto allapp/tests/test_integration.py -v --tb=short --maxfail=1 --cov=allapp --cov-append --cov-report=xml:coverage-${{ matrix.test-group }}.xml
+          export COVERAGE_FILE=".coverage.${{ matrix.test-group }}"
+          if [ "${{ matrix.test-group }}" = "platform" ]; then
+            python -m pytest -n auto -q --tb=short --maxfail=1 --cov=allapp --cov-report= \
+              allapp/accounts/tests.py \
+              allapp/baseinfo/tests.py \
+              allapp/core/tests.py \
+              allapp/driverapp/tests.py \
+              allapp/locations/tests.py \
+              allapp/products/tests.py
+          elif [ "${{ matrix.test-group }}" = "warehouse" ]; then
+            python -m pytest -n auto -q --tb=short --maxfail=1 --cov=allapp --cov-report= \
+              allapp/inbound/tests.py \
+              allapp/inventory/tests.py \
+              allapp/outbound/tests.py \
+              allapp/tasking/tests.py
+          elif [ "${{ matrix.test-group }}" = "business-flows" ]; then
+            python -m pytest -n auto -q --tb=short --maxfail=1 --cov=allapp --cov-report= \
+              allapp/test_business_flows.py
           else
-            pytest -n auto allapp/tests/test_api.py -v --tb=short --maxfail=1 --cov=allapp --cov-append --cov-report=xml:coverage-${{ matrix.test-group }}.xml
+            python -m pytest -n auto -q --tb=short --maxfail=1 --cov=allapp --cov-report= \
+              allapp/reports/tests.py \
+              allapp/billing/tests.py \
+              allapp/console/tests.py \
+              allapp/salesapp/tests.py
           fi
       - name: Upload test & coverage shards
         if: always()
@@ -157,7 +176,7 @@ PY
           name: pytest-${{ matrix.test-group }}
           path: |
             ./.pytest_cache
-            ./coverage-${{ matrix.test-group }}.xml
+            ./.coverage.*
 
   coverage-aggregate:
     name: Combine Coverage
@@ -176,7 +195,7 @@ PY
           pip install coverage[toml] pytest-cov
       - name: Combine & report
         run: |
-          coverage combine || true
+          coverage combine . || true
           coverage xml -o coverage.xml
           coverage report --fail-under=70
       - name: Upload to Codecov

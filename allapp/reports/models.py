@@ -1,8 +1,8 @@
 # allapp/reports/models.py
 from django.db import models
 from django.db.models import Q, F, CheckConstraint, UniqueConstraint
-from django.core.validators import MinValueValidator, RegexValidator
-from django.db import models
+from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.conf import settings
 # ===========================
 # 通用 Mixin
@@ -506,7 +506,7 @@ class ReportSnapshot(models.Model):
     """通用报表快照：冻结渲染上下文与关键抬头字段。
     可用于配送单、收货单、盘点单等。"""
     owner = models.ForeignKey("baseinfo.Owner", verbose_name="货主", on_delete=models.PROTECT)
-    warehouse = models.ForeignKey("locations.Warehouse", verbose_name="出库", on_delete=models.PROTECT,editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", verbose_name="出库", on_delete=models.PROTECT)
 
 
     src_model = models.CharField("来源模型", max_length=40) # e.g. "WmsTask"
@@ -546,3 +546,13 @@ class ReportSnapshot(models.Model):
 
     def __str__(self):
         return f"{self.doc_type}:{self.doc_no}#{self.id}"
+
+    def clean(self):
+        if not self.warehouse_id:
+            raise ValidationError({"warehouse": "必须明确指定报表快照仓库"})
+
+    def save(self, *args, **kwargs):
+        if not self.warehouse_id:
+            raise ValidationError({"warehouse": "必须明确指定报表快照仓库"})
+        self.full_clean()
+        return super().save(*args, **kwargs)

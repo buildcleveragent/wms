@@ -155,6 +155,16 @@ RIBBON_TABS: List[RibbonTab] = [
             RibbonGroup(
                 label="规则/账单",
                 actions=[
+                    RibbonAction(
+                        "计费总览",
+                        "console:billing_overview",
+                        "💳",
+                        perms_any=[
+                            "billing.view_bill",
+                            "billing.view_billingperiod",
+                            "billing.view_billingaccrual",
+                        ],
+                    ),
                     RibbonAction("计费规则", "admin:billing_billingrule_changelist", "⚙️"),
                     RibbonAction("规则阶梯", "admin:billing_billingruletier_changelist", "🪜"),
                     RibbonAction("计费期间", "admin:billing_billingperiod_changelist", "🗓️"),

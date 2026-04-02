@@ -24,7 +24,7 @@ class InventoryDetail(BaseModel):
     # —— 维度外键 —— #
     owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
     product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库",editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
     subwarehouse = models.ForeignKey("locations.Subwarehouse", on_delete=models.PROTECT, verbose_name="仓库",null=True, blank=True,)
     zone_type = models.PositiveSmallIntegerField(
         _("区域类型"), choices=ZoneType.choices, default=ZoneType.STORAGE, db_index=True
@@ -140,8 +140,13 @@ class InventoryDetail(BaseModel):
     def __str__(self):
         return f"INV[{self.owner_id}/{self.warehouse_id}/{self.location_id}/{self.product_id}]"
 
+    def _sync_scope_from_location(self):
+        if self.location_id and not self.warehouse_id:
+            self.warehouse_id = self.location.warehouse_id
+
     # —— 业务校验：保存前标准化 + 一致性 —— #
     def clean(self):
+        self._sync_scope_from_location()
         errors = {}
 
         # 位置一致性（跨表只能在应用层校验）
@@ -149,7 +154,7 @@ class InventoryDetail(BaseModel):
             if self.warehouse_id and self.warehouse_id != self.location.warehouse_id:
                 errors["warehouse"] = "warehouse 必须与 location.warehouse 一致。"
             if self.subwarehouse_id and self.subwarehouse_id != self.location.subwarehouse_id:
-                errors["warehouse"] = "subwarehouse 必须与 location.subwarehouse 一致。"
+                errors["subwarehouse"] = "subwarehouse 必须与 location.subwarehouse 一致。"
 
         # 产品驱动的控制口径
         if self.product_id:
@@ -199,6 +204,8 @@ class InventoryDetail(BaseModel):
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
+        self._sync_scope_from_location()
+
         # —— 回填快照 —— #
         if self.product_id and getattr(self.product, "base_uom_id", None):
             self.base_unit = self.product.base_uom.code
@@ -398,7 +405,7 @@ class InventoryTransaction(BaseModel):
 
     owner     = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
     product   = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库",editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
     location  = models.ForeignKey("locations.Location", on_delete=models.PROTECT, verbose_name="库位")
     subwarehouse = models.ForeignKey("locations.Subwarehouse", on_delete=models.PROTECT, verbose_name="仓库", null=True,
                                      blank=True, )
@@ -466,6 +473,8 @@ class InventoryTransaction(BaseModel):
 
     def clean(self):
         super().clean()
+        if self.location_id and not self.warehouse_id:
+            self.warehouse_id = self.location.warehouse_id
 
         # 1) base_unit 回填
         if self.product_id and getattr(self.product, "base_uom_id", None):
@@ -500,6 +509,9 @@ class InventoryTransaction(BaseModel):
             raise ValidationError({"pair_id": "仅 RECEIVE/ISSUE 允许指定 pair_id"})
 
     def save(self, *args, **kwargs):
+        if self.location_id and not self.warehouse_id:
+            self.warehouse_id = self.location.warehouse_id
+
         # 再次兜底 base_unit
         if self.product_id and getattr(self.product, "base_uom_id", None):
             self.base_unit = self.product.base_uom.code
@@ -551,7 +563,7 @@ class ReviewDifference(models.Model):
         CANCELLED = 'CANCELLED', '已取消'
 
     order_no = models.CharField(max_length=50, unique=True, verbose_name="单号")
-    warehouse = models.ForeignKey('locations.Warehouse', on_delete=models.PROTECT, verbose_name="仓库",editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey('locations.Warehouse', on_delete=models.PROTECT, verbose_name="仓库")
     reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
                                     verbose_name="复核人")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, verbose_name="状态")
@@ -561,8 +573,19 @@ class ReviewDifference(models.Model):
     note = models.TextField(null=True, blank=True, verbose_name="备注")
 
     def clean(self):
+        errors = {}
+        if not self.warehouse_id:
+            errors["warehouse"] = "必须明确指定复核差异单仓库。"
         if self.status == self.Status.COMPLETED and not self.completed_at:
-            raise ValidationError("复核完成后必须填写完成时间。")
+            errors["completed_at"] = "复核完成后必须填写完成时间。"
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if not self.warehouse_id:
+            raise ValidationError({"warehouse": "必须明确指定复核差异单仓库。"})
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f"复核差异单 {self.order_no} - {self.get_status_display()}"

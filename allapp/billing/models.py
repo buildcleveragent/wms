@@ -1,6 +1,7 @@
 from django.db import models
 from django.utils import timezone
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 from decimal import Decimal, ROUND_HALF_UP
 from allapp.billing.enums import ChargeType, CalcMethod, AccrualStatus, PeriodStatus, BillStatus, MetricType, LadderMode, CapMode, BundleScope, BundleType
@@ -12,7 +13,35 @@ def qmoney(val):
         return None
     return (Decimal(val)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-class BillingRule(models.Model):
+
+def bill_issue_date_default():
+    now = timezone.now()
+    return timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
+
+
+def _decimal_range_end(value):
+    return Decimal("Infinity") if value is None else Decimal(value)
+
+
+def _decimal_ranges_overlap(start_a, end_a, start_b, end_b) -> bool:
+    return Decimal(start_a) < _decimal_range_end(end_b) and Decimal(start_b) < _decimal_range_end(end_a)
+
+
+class BillingValidationMixin(models.Model):
+    """
+    Save-time guardrail for normal ORM writes.
+
+    Note: QuerySet.update(), bulk_create(), and bulk_update() bypass this hook.
+    """
+    class Meta:
+        abstract = True
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class BillingRule(BillingValidationMixin, models.Model):
     owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), null=True, blank=True, on_delete=models.PROTECT)
     warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), null=True, blank=True, on_delete=models.PROTECT)
     charge_type = models.CharField(verbose_name=_("计费类型"), max_length=20, choices=ChargeType.choices)
@@ -41,17 +70,60 @@ class BillingRule(models.Model):
     class Meta:
         verbose_name = _("计费规则")
         verbose_name_plural = _("计费规则")
-        indexes = [models.Index(fields=["owner", "charge_type", "active", "priority"])]
+        indexes = [
+            models.Index(
+                fields=["active", "charge_type", "calc_method", "owner", "warehouse", "priority"],
+                name="ix_rule_select",
+            )
+        ]
         constraints = [
             models.CheckConstraint(name="chk_rule_price_nonneg", check=models.Q(unit_price__gte=0)),
             models.CheckConstraint(name="chk_rule_taxrate_range", check=models.Q(tax_rate__gte=0, tax_rate__lte=1)),
+            models.CheckConstraint(name="chk_rule_min_charge_nonneg", check=models.Q(min_charge__gte=0)),
+            models.CheckConstraint(
+                name="chk_rule_cap_amount_nonneg",
+                check=models.Q(cap_amount__isnull=True) | models.Q(cap_amount__gte=0),
+            ),
+            models.CheckConstraint(
+                name="chk_rule_bundle_price_nonneg",
+                check=models.Q(bundle_price__isnull=True) | models.Q(bundle_price__gte=0),
+            ),
         ]
 
     def __str__(self):
         scope = f"{self.owner_id or '*'}"
         return f"[{scope}] {self.charge_type}/{self.calc_method} ladder={self.ladder_mode or '-'} cap={self.cap_mode or '-'} bundle={self.bundle_scope or '-'}"
 
-class BillingRuleTier(models.Model):
+    def clean(self):
+        errors = {}
+        if self.effective_from and self.effective_to and self.effective_from > self.effective_to:
+            errors["effective_to"] = "生效截止日不能早于生效开始日。"
+        if self.cap_mode in {None, "", CapMode.NONE}:
+            if self.cap_amount is not None:
+                errors["cap_amount"] = "cap_mode 为 NONE 时，cap_amount 必须为空。"
+        elif self.cap_amount is None:
+            errors["cap_amount"] = "启用封顶时必须填写 cap_amount。"
+
+        if self.bundle_scope in {None, "", BundleScope.NONE}:
+            if self.bundle_key:
+                errors["bundle_key"] = "bundle_scope 为 NONE 时，bundle_key 必须为空。"
+            if self.bundle_price is not None:
+                errors["bundle_price"] = "bundle_scope 为 NONE 时，bundle_price 必须为空。"
+        else:
+            if not self.bundle_key:
+                errors["bundle_key"] = "启用打包时必须填写 bundle_key。"
+            if self.bundle_price is None:
+                errors["bundle_price"] = "启用打包时必须填写 bundle_price。"
+
+        if self.calc_method == CalcMethod.PERCENT_OF_ORDER_AMOUNT and self.unit_price is not None:
+            if not (Decimal("0") <= Decimal(self.unit_price) <= Decimal("1")):
+                errors["unit_price"] = "按订单金额比例计费时，unit_price 必须在 0~1 之间。"
+
+        if errors:
+            raise ValidationError(errors)
+
+
+class BillingRuleTier(BillingValidationMixin, models.Model):
     rule = models.ForeignKey("billing.BillingRule", verbose_name=_("计费规则"), on_delete=models.CASCADE, related_name="tiers")
     threshold_from = models.DecimalField(verbose_name=_("起始阈值(含)"), max_digits=18, decimal_places=4)
     threshold_to = models.DecimalField(verbose_name=_("截至阈值(不含)"), max_digits=18, decimal_places=4, null=True, blank=True)
@@ -67,6 +139,15 @@ class BillingRuleTier(models.Model):
             models.UniqueConstraint(fields=["rule", "threshold_from", "threshold_to"], name="ux_rule_tier_from_to"),
             models.CheckConstraint(name="chk_tier_range_valid", check=models.Q(threshold_to__isnull=True) | models.Q(threshold_to__gt=models.F("threshold_from"))),
             models.CheckConstraint(name="chk_tier_price_or_rate", check=(models.Q(unit_price__isnull=False, percent_rate__isnull=True) | models.Q(unit_price__isnull=True, percent_rate__isnull=False))),
+            models.CheckConstraint(name="chk_tier_from_nonneg", check=models.Q(threshold_from__gte=0)),
+            models.CheckConstraint(
+                name="chk_tier_unit_price_nonneg",
+                check=models.Q(unit_price__isnull=True) | models.Q(unit_price__gte=0),
+            ),
+            models.CheckConstraint(
+                name="chk_tier_percent_rate_rng",
+                check=models.Q(percent_rate__isnull=True) | (models.Q(percent_rate__gte=0) & models.Q(percent_rate__lte=1)),
+            ),
         ]
 
     def __str__(self):
@@ -74,7 +155,54 @@ class BillingRuleTier(models.Model):
         tag = f"价{self.unit_price}" if self.unit_price is not None else f"率{self.percent_rate}"
         return f"{self.rule_id} {rng} {tag}"
 
-class BillingPeriod(models.Model):
+    def clean(self):
+        errors = {}
+        if self.threshold_from is not None and self.threshold_from < 0:
+            errors["threshold_from"] = "起始阈值不能为负数。"
+        if self.threshold_to is not None and self.threshold_to <= self.threshold_from:
+            errors["threshold_to"] = "截至阈值必须大于起始阈值。"
+        if self.unit_price is not None and self.unit_price < 0:
+            errors["unit_price"] = "unit_price 不能为负数。"
+        if self.percent_rate is not None:
+            if self.percent_rate < 0:
+                errors["percent_rate"] = "percent_rate 不能为负数。"
+            elif self.percent_rate > 1:
+                errors["percent_rate"] = "percent_rate 必须在 0~1 之间。"
+
+        has_unit_price = self.unit_price is not None
+        has_percent_rate = self.percent_rate is not None
+        if has_unit_price == has_percent_rate:
+            errors["percent_rate"] = "unit_price 和 percent_rate 必须二选一。"
+
+        if self.rule_id:
+            if self.rule.calc_method == CalcMethod.PERCENT_OF_ORDER_AMOUNT:
+                if self.unit_price is not None:
+                    errors["unit_price"] = "按订单金额比例的阶梯规则只允许填写 percent_rate。"
+            elif self.percent_rate is not None:
+                errors["percent_rate"] = "当前计量方式的阶梯规则只允许填写 unit_price。"
+
+        if self.rule_id and self.threshold_from is not None:
+            overlapping = (
+                BillingRuleTier.objects
+                .filter(rule_id=self.rule_id)
+                .exclude(pk=self.pk)
+                .only("id", "threshold_from", "threshold_to")
+            )
+            for tier in overlapping:
+                if _decimal_ranges_overlap(
+                    self.threshold_from,
+                    self.threshold_to,
+                    tier.threshold_from,
+                    tier.threshold_to,
+                ):
+                    errors["threshold_from"] = "同一规则下的阶梯区间不能重叠。"
+                    break
+
+        if errors:
+            raise ValidationError(errors)
+
+
+class BillingPeriod(BillingValidationMixin, models.Model):
     owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), on_delete=models.PROTECT)
     warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT)
     label = models.CharField(verbose_name=_("账期标签"), max_length=20)
@@ -86,12 +214,43 @@ class BillingPeriod(models.Model):
     class Meta:
         verbose_name = _("账期")
         verbose_name_plural = _("账期")
-        constraints = [models.UniqueConstraint(fields=["owner", "warehouse", "label"], name="ux_billing_period_owner_wh_label")]
+        constraints = [
+            models.UniqueConstraint(fields=["owner", "warehouse", "label"], name="ux_billing_period_owner_wh_label"),
+            models.CheckConstraint(
+                name="chk_billing_period_date_order",
+                condition=models.Q(end_date__gte=models.F("start_date")),
+            ),
+        ]
 
     def __str__(self):
         return f"{self.owner_id}-{self.label}({self.status})"
 
-class BillingEvent(models.Model):
+    def clean(self):
+        errors = {}
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            errors["end_date"] = "账期结束日期不能早于开始日期。"
+
+        if self.owner_id and self.warehouse_id and self.start_date and self.end_date:
+            overlap = (
+                BillingPeriod.objects
+                .filter(
+                    owner_id=self.owner_id,
+                    warehouse_id=self.warehouse_id,
+                    start_date__lte=self.end_date,
+                    end_date__gte=self.start_date,
+                )
+                .exclude(pk=self.pk)
+                .only("id", "label")
+                .first()
+            )
+            if overlap:
+                errors["start_date"] = f"账期不能重叠，冲突账期: {overlap.label}。"
+
+        if errors:
+            raise ValidationError(errors)
+
+
+class BillingEvent(BillingValidationMixin, models.Model):
     owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), on_delete=models.PROTECT)
     warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT)
     charge_type = models.CharField(verbose_name=_("计费类型"), max_length=20, choices=ChargeType.choices)
@@ -108,8 +267,45 @@ class BillingEvent(models.Model):
     class Meta:
         verbose_name = _("计费事件")
         verbose_name_plural = _("计费事件")
+        indexes = [
+            models.Index(fields=["owner", "warehouse", "service_date", "charge_type"], name="ix_bevt_scope_dt"),
+        ]
 
-class BillingAccrual(models.Model):
+    def clean(self):
+        errors = {}
+
+        if self.task_id:
+            if self.task.owner_id != self.owner_id or self.task.warehouse_id != self.warehouse_id:
+                errors["task"] = "task 的 owner/warehouse 必须与计费事件一致。"
+
+        if self.task_line_id:
+            task_line_task = self.task_line.task
+            if task_line_task.owner_id != self.owner_id or task_line_task.warehouse_id != self.warehouse_id:
+                errors["task_line"] = "task_line 的 owner/warehouse 必须与计费事件一致。"
+            if self.task_id and self.task_line.task_id != self.task_id:
+                errors["task_line"] = "task_line 必须属于当前 task。"
+
+        if self.scan_log_id:
+            if self.scan_log.owner_id != self.owner_id or self.scan_log.warehouse_id != self.warehouse_id:
+                errors["scan_log"] = "scan_log 的 owner/warehouse 必须与计费事件一致。"
+            if self.task_id and self.scan_log.task_id != self.task_id:
+                errors["scan_log"] = "scan_log 必须属于当前 task。"
+            if self.task_line_id and self.scan_log.task_line_id != self.task_line_id:
+                errors["scan_log"] = "scan_log 必须属于当前 task_line。"
+
+        if self.posting_journal_id:
+            expected_task_id = self.task_id or getattr(self.task_line, "task_id", None) or getattr(self.scan_log, "task_id", None)
+            if not expected_task_id:
+                errors["posting_journal"] = "设置 posting_journal 时，必须同时关联 task、task_line 或 scan_log。"
+            elif expected_task_id:
+                if self.posting_journal.src_model != "WmsTask" or self.posting_journal.src_id != expected_task_id:
+                    errors["posting_journal"] = "posting_journal 必须与当前事件关联的 task 一致。"
+
+        if errors:
+            raise ValidationError(errors)
+
+
+class BillingAccrual(BillingValidationMixin, models.Model):
     owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), on_delete=models.PROTECT)
     warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT)
     period = models.ForeignKey("billing.BillingPeriod", verbose_name=_("账期"), null=True, blank=True, on_delete=models.SET_NULL)
@@ -134,14 +330,54 @@ class BillingAccrual(models.Model):
         verbose_name_plural = _("应计费用")
         indexes = [
             models.Index(fields=["owner", "service_date", "charge_type", "status"]),
+            models.Index(fields=["owner", "warehouse", "service_date", "charge_type", "status"], name="ix_accr_owh_dt_ct_st"),
             models.Index(fields=["bundle_key", "service_date"]),  # 便于打包分组
         ]
         constraints = [
             models.CheckConstraint(name="chk_amount_nonneg", check=models.Q(amount__gte=0)),
             models.CheckConstraint(name="chk_qty_nonneg", check=models.Q(quantity__gte=0)),
+            models.CheckConstraint(name="chk_unit_price_nonneg", check=models.Q(unit_price__gte=0)),
+            models.CheckConstraint(name="chk_tax_amount_nonneg", check=models.Q(tax_amount__gte=0)),
         ]
 
-class BillingMetricDaily(models.Model):
+    def clean(self):
+        errors = {}
+        currency_errors = []
+
+        if self.rule_id:
+            if self.rule.owner_id is not None and self.rule.owner_id != self.owner_id:
+                errors["rule"] = "rule.owner 必须与 accrual.owner 一致。"
+            if self.rule.warehouse_id is not None and self.rule.warehouse_id != self.warehouse_id:
+                errors["rule"] = "rule.warehouse 必须与 accrual.warehouse 一致。"
+            if self.rule.charge_type != self.charge_type:
+                errors["charge_type"] = "charge_type 必须与 rule.charge_type 一致。"
+            if self.rule.currency and self.currency and self.rule.currency != self.currency:
+                currency_errors.append("currency 必须与 rule.currency 一致。")
+
+        if self.period_id:
+            if self.period.owner_id != self.owner_id or self.period.warehouse_id != self.warehouse_id:
+                errors["period"] = "period 的 owner/warehouse 必须与 accrual 一致。"
+            if not (self.period.start_date <= self.service_date <= self.period.end_date):
+                errors["service_date"] = "service_date 必须落在 period 区间内。"
+            if self.period.currency and self.currency and self.period.currency != self.currency:
+                currency_errors.append("currency 必须与 period.currency 一致。")
+
+        if self.event_id:
+            if self.event.owner_id != self.owner_id or self.event.warehouse_id != self.warehouse_id:
+                errors["event"] = "event 的 owner/warehouse 必须与 accrual 一致。"
+            if self.event.charge_type != self.charge_type:
+                errors["charge_type"] = "charge_type 必须与 event.charge_type 一致。"
+            if self.event.service_date != self.service_date:
+                errors["service_date"] = "service_date 必须与 event.service_date 一致。"
+
+        if currency_errors:
+            errors["currency"] = currency_errors
+
+        if errors:
+            raise ValidationError(errors)
+
+
+class BillingMetricDaily(BillingValidationMixin, models.Model):
     owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), on_delete=models.PROTECT)
     warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT)
     service_date = models.DateField(verbose_name=_("日期"))
@@ -155,9 +391,19 @@ class BillingMetricDaily(models.Model):
         verbose_name = _("计费日指标")
         verbose_name_plural = _("计费日指标")
         indexes = [models.Index(fields=["owner", "warehouse", "service_date", "metric_type"])]
-        constraints = [models.UniqueConstraint(fields=["owner", "warehouse", "service_date", "metric_type"], name="ux_billing_metric_daily_owh_date_metric")]
+        constraints = [
+            models.UniqueConstraint(fields=["owner", "warehouse", "service_date", "metric_type"], name="ux_billing_metric_daily_owh_date_metric"),
+            models.CheckConstraint(name="chk_metric_value_nonneg", check=models.Q(value__gte=0)),
+        ]
 
-class BillingJobRun(models.Model):
+    def clean(self):
+        errors = {}
+        if self.value is not None and self.value < 0:
+            errors["value"] = "计费指标值不能为负数。"
+        if errors:
+            raise ValidationError(errors)
+
+class BillingJobRun(BillingValidationMixin, models.Model):
     class JobName(models.TextChoices):
         DAILY_METRIC_GENERATION = "DAILY_METRIC_GENERATION", "日指标生成"
 
@@ -194,12 +440,25 @@ class BillingJobRun(models.Model):
             )
         ]
 
-class Bill(models.Model):
+    def clean(self):
+        errors = {}
+        if self.attempts is not None and self.attempts < 1:
+            errors["attempts"] = "attempts 必须大于等于 1。"
+        if self.started_at and self.finished_at and self.finished_at < self.started_at:
+            errors["finished_at"] = "finished_at 不能早于 started_at。"
+        if self.status in {self.Status.SUCCESS, self.Status.FAILED, self.Status.SKIPPED} and self.finished_at is None:
+            errors["finished_at"] = "终态作业必须填写 finished_at。"
+        if self.status == self.Status.RUNNING and self.finished_at is not None:
+            errors["finished_at"] = "RUNNING 状态下 finished_at 必须为空。"
+        if errors:
+            raise ValidationError(errors)
+
+class Bill(BillingValidationMixin, models.Model):
     owner = models.ForeignKey("baseinfo.Owner", verbose_name=_("货主"), on_delete=models.PROTECT)
     warehouse = models.ForeignKey("locations.Warehouse", verbose_name=_("大仓"), on_delete=models.PROTECT)
     period = models.ForeignKey("billing.BillingPeriod", verbose_name=_("账期"), on_delete=models.PROTECT)
     invoice_no = models.CharField(verbose_name=_("发票/结算单号"), max_length=40, unique=True)
-    issue_date = models.DateField(verbose_name=_("开票日期"), default=timezone.now)
+    issue_date = models.DateField(verbose_name=_("开票日期"), default=bill_issue_date_default)
     due_date = models.DateField(verbose_name=_("到期日期"), null=True, blank=True)
     currency = models.CharField(verbose_name=_("币种"), max_length=8, default="CNY")
     subtotal = models.DecimalField(verbose_name=_("小计(不含税)"), max_digits=18, decimal_places=2, default=Decimal("0.00"))
@@ -211,8 +470,34 @@ class Bill(models.Model):
     class Meta:
         verbose_name = _("发票/结算单")
         verbose_name_plural = _("发票/结算单")
+        indexes = [
+            models.Index(fields=["owner", "warehouse", "status"], name="ix_bill_owh_stat"),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["owner", "warehouse", "period"], name="ux_bill_owner_wh_period"),
+            models.CheckConstraint(name="chk_bill_subtotal_nonneg", condition=models.Q(subtotal__gte=0)),
+            models.CheckConstraint(name="chk_bill_tax_total_nonneg", condition=models.Q(tax_total__gte=0)),
+            models.CheckConstraint(name="chk_bill_total_nonneg", condition=models.Q(total__gte=0)),
+        ]
 
-class BillLine(models.Model):
+    def clean(self):
+        errors = {}
+        if self.period_id:
+            if self.period.owner_id != self.owner_id or self.period.warehouse_id != self.warehouse_id:
+                errors["period"] = "period 的 owner/warehouse 必须与 bill 一致。"
+            if self.currency and self.period.currency and self.currency != self.period.currency:
+                errors["currency"] = "bill.currency 必须与 period.currency 一致。"
+        if self.issue_date and self.due_date and self.due_date < self.issue_date:
+            errors["due_date"] = "due_date 不能早于 issue_date。"
+        if self.total is not None and self.subtotal is not None and self.tax_total is not None:
+            expected_total = qmoney(Decimal(self.subtotal) + Decimal(self.tax_total))
+            if qmoney(self.total) != expected_total:
+                errors["total"] = "total 必须等于 subtotal + tax_total。"
+        if errors:
+            raise ValidationError(errors)
+
+
+class BillLine(BillingValidationMixin, models.Model):
     bill = models.ForeignKey("billing.Bill", verbose_name=_("所属发票/结算单"), on_delete=models.CASCADE, related_name="lines")
     accrual = models.ForeignKey("billing.BillingAccrual", verbose_name=_("来源应计"), on_delete=models.PROTECT)
     charge_type = models.CharField(verbose_name=_("计费类型"), max_length=20, choices=ChargeType.choices)
@@ -226,3 +511,36 @@ class BillLine(models.Model):
     class Meta:
         verbose_name = _("发票/结算单明细")
         verbose_name_plural = _("发票/结算单明细")
+        constraints = [
+            models.UniqueConstraint(fields=["accrual"], name="ux_billline_accrual_once"),
+            models.CheckConstraint(name="chk_billline_qty_nonneg", condition=models.Q(quantity__gte=0)),
+            models.CheckConstraint(name="chk_billline_unit_price_nonneg", condition=models.Q(unit_price__gte=0)),
+            models.CheckConstraint(name="chk_billline_amount_nonneg", condition=models.Q(amount__gte=0)),
+            models.CheckConstraint(name="chk_billline_tax_amount_nonneg", condition=models.Q(tax_amount__gte=0)),
+        ]
+
+    def clean(self):
+        errors = {}
+
+        if self.bill_id and self.accrual_id:
+            if self.bill.owner_id != self.accrual.owner_id or self.bill.warehouse_id != self.accrual.warehouse_id:
+                errors["accrual"] = "accrual 的 owner/warehouse 必须与 bill 一致。"
+            if self.bill.period_id != self.accrual.period_id:
+                errors["accrual"] = "accrual 必须属于当前 bill.period。"
+
+        if self.accrual_id:
+            if self.charge_type != self.accrual.charge_type:
+                errors["charge_type"] = "charge_type 必须与 accrual.charge_type 一致。"
+            if self.service_date != self.accrual.service_date:
+                errors["service_date"] = "service_date 必须与 accrual.service_date 一致。"
+            if self.quantity != self.accrual.quantity:
+                errors["quantity"] = "quantity 必须与 accrual.quantity 一致。"
+            if self.unit_price != self.accrual.unit_price:
+                errors["unit_price"] = "unit_price 必须与 accrual.unit_price 一致。"
+            if self.amount != self.accrual.amount:
+                errors["amount"] = "amount 必须与 accrual.amount 一致。"
+            if self.tax_amount != self.accrual.tax_amount:
+                errors["tax_amount"] = "tax_amount 必须与 accrual.tax_amount 一致。"
+
+        if errors:
+            raise ValidationError(errors)

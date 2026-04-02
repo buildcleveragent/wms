@@ -43,6 +43,7 @@ export default {
       { key: "replenish", title: "补货", emoji: "🔀", desc: "从存储区到拣货区",   op: "replenish",path: "/pages/inventory/replenish/index" },
       { key: "move",      title: "移库", emoji: "🔁", desc: "库内移位/合并/分拆", op: "move",path: "/pages/inventory/move/index" },
       { key: "stocktake", title: "盘点", emoji: "🧮", desc: "周期盘点/抽盘/全盘", op: "stocktake",path: "/pages/inventory/stocktake/index" },
+	  { key: "stocktake", title: "查询", emoji: "🧮", desc: "查询", op: "chaxun",path: "/pages/inventory/company" },
     ])
     
     const lastScan = ref("")

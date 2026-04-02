@@ -4,7 +4,6 @@ from allapp.core.models import DocSequence
 from allapp.tasking.models import WmsTask, WmsTaskLine,ReceiveTaskExtra,ReceiveLineExtra
 from allapp.inventory.models import InventoryDetail, InventoryTransaction
 from allapp.inbound.models import InboundOrder, InboundOrderLine
-from django.db import transaction
 
 @transaction.atomic
 def create_receive_task_draft(order, by_user=None):
@@ -73,9 +72,11 @@ def create_receive_task_draft(order, by_user=None):
 
 
 @transaction.atomic
-def receive_goods_without_order(owner_id, items, remark="仓库操作员入库"):
+def receive_goods_without_order(owner_id, items, remark="仓库操作员入库", warehouse_id=None, location_id=None):
     print("receive_goods_without_order 111111111111112222222222222")
-    inbound_order = InboundOrder.objects.create(owner_id=owner_id, remark=remark)
+    if not warehouse_id:
+        raise ValueError("receive_goods_without_order 必须显式传 warehouse_id")
+    inbound_order = InboundOrder.objects.create(owner_id=owner_id, warehouse_id=warehouse_id, remark=remark)
     print("22 receive_goods_without_order")
     for item in items:
         product_id = item["product_id"]
@@ -94,7 +95,7 @@ def receive_goods_without_order(owner_id, items, remark="仓库操作员入库")
             product_id=product_id,
             qty_on_hand=qty,
             uom="PCS",
-            location_id=1  # 假设默认库位
+            location_id=location_id,
         )
 
         # 创建库存事务

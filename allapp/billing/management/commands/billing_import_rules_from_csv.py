@@ -1,6 +1,7 @@
 # allapp/billing/management/commands/billing_import_rules_from_csv.py
 #useage python manage.py billing_import_rules_from_csv /path/to/billing_rules_template.csv
-import csv, decimal
+import csv
+import decimal
 from django.core.management.base import BaseCommand
 from allapp.billing.models import BillingRule
 
@@ -16,8 +17,13 @@ class Command(BaseCommand):
             reader = csv.DictReader(f)
             created = updated = 0
             for r in reader:
+                lookup = dict(
+                    owner_id=(int(r["owner_id"]) if r.get("owner_id") else None),
+                    warehouse_id=(int(r["warehouse_id"]) if r.get("warehouse_id") else None),
+                    charge_type=r["charge_type"],
+                    calc_method=r["calc_method"],
+                )
                 defaults = dict(
-                    warehouse_id = (int(r["warehouse_id"]) if r.get("warehouse_id") else None),
                     unit_price   = decimal.Decimal(r["unit_price"] or "0"),
                     currency     = r.get("currency") or "CNY",
                     taxable      = bool(int(r.get("taxable") or "1")),
@@ -30,10 +36,9 @@ class Command(BaseCommand):
                     note          = r.get("note") or "",
                 )
                 obj, is_new = BillingRule.objects.update_or_create(
-                    owner_id = (int(r["owner_id"]) if r.get("owner_id") else None),
-                    charge_type = r["charge_type"],
-                    calc_method = r["calc_method"],
-                    defaults = defaults
+                    defaults=defaults,
+                    **lookup,
                 )
-                created += int(is_new); updated += int(not is_new)
+                created += int(is_new)
+                updated += int(not is_new)
         self.stdout.write(self.style.SUCCESS(f"Imported rules: created={created}, updated={updated}"))

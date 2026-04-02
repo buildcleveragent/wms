@@ -9,6 +9,50 @@
 
     <!-- 明细 -->
    <view class="content" v-if="cart.items.length">
+	   <view class="receiver-card">
+	     <view class="receiver-title">收件信息</view>
+	   
+	     <view class="receiver-grid">
+	       <view class="receiver-item">
+	         <view class="receiver-label">平台单号</view>
+	         <input
+	           v-model="form.src_bill_no"
+	           class="receiver-input"
+	           placeholder="可选，平台单号"
+	         />
+	       </view>
+	   
+	       <view v-if="isCashCustomer" class="receiver-item">
+	         <view class="receiver-label">收件人</view>
+	         <input
+	           v-model="form.contact"
+	           class="receiver-input"
+	           placeholder="请输入收件人"
+	         />
+	       </view>
+	   
+	       <view v-if="isCashCustomer" class="receiver-item">
+	         <view class="receiver-label">联系电话</view>
+	         <input
+	           v-model="form.contact_phone"
+	           class="receiver-input"
+	           placeholder="请输入联系电话"
+	         />
+	       </view>
+	   
+			<view v-if="isCashCustomer"  class="receiver-item receiver-item-full">
+			  <view class="receiver-label">收货地址</view>
+			  <input
+				v-model="form.ship_to"
+				class="receiver-input"
+				placeholder="请输入完整收货地址"
+			  />
+			</view>
+	     </view>
+	   </view>
+	   
+	   <view class="section-divider"></view>
+	   
       <!-- 商品行 -->
 	  <view v-for="(it, i) in cart.items" :key="it.product_id ?? i"  :class="['row item', { 'odd': i % 2 === 0 }]" >
         <!-- 左侧商品图像 -->
@@ -70,28 +114,44 @@
 		  
        </view>
       </view>
+	  
+	 
+	  
     </view>
 	
-	<view class="footer">
-	  <!-- 合计 -->
-	  <view class="row total-row">
-		<view class="font-bold"></view>
-		<view class="font-bold">合计：¥ {{ fmt(cart.totalAmount) }}</view>
-	  </view>
 
-	  <!-- 操作 -->
-	  <view class="button-row">
-		<button class="btn-outline" @click="backToProducts">继续选品</button>
-		<button class="btn" :disabled="!canSubmit" @click="submitOrder">提交订单</button>
-	  </view>
-	</view>
+	
+  <view class="footer">
+    <view class="row total-row">
+      <view class="font-bold"></view>
+      <view class="font-bold">合计：¥ {{ fmt(cart.totalAmount) }}</view>
+    </view>
+
+    <view class="button-row">
+      <button class="btn-outline" @click="backToProducts">继续选品</button>
+      <button class="btn" :disabled="!canSubmit" @click="submitOrder">提交订单</button>
+    </view>
   </view>
+</view>
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted,reactive } from 'vue'
 import { useCart } from '@/store/cart'
 import { api } from '@/utils/request'
+
+const form = reactive({
+  src_bill_no: '',
+  contact: '',
+  contact_phone: '',
+  ship_to: '',
+})
+
+const isCashCustomer = computed(() => {
+  const code = String(cart.customer?.code || '').toUpperCase()
+  const name = String(cart.customer?.name || '')
+  return code === 'CASH' || name.includes('一件代发')
+})
 
 const cart = useCart()
 const canSubmit = computed(()=> !!cart.customer && cart.items.length>0 )
@@ -180,38 +240,118 @@ onMounted(()=>{
 
 function backToProducts(){ uni.navigateTo({ url:'/pages/products/search' }) }
 
-async function submitOrder(){
-  // 提交前兜底校验：不允许低于
+async function submitOrder() {
+  if (!cart.customer?.id) {
+    uni.showToast({ title: '请先选择客户', icon: 'none' })
+    return
+  }
+
+  if (!cart.items?.length) {
+    uni.showToast({ title: '请先添加商品', icon: 'none' })
+    return
+  }
+
+  // 提交前兜底校验：不允许低于最低价
   const bad = cart.items.find(it => {
     ensureItemGuard(it)
     return typeof it.orig_price === 'number' && it.price < it.min_price
   })
   if (bad) {
-    uni.showToast({ title:'存在价格低于系统最低价的商品，请修正后再提交', icon:'none' })
+    uni.showToast({ title: '存在价格低于系统最低价的商品，请修正后再提交', icon: 'none' })
     return
   }
 
-  try{
+  // 一件代发客户：收件信息必填
+  if (isCashCustomer.value) {
+    if (!String(form.contact || '').trim()) {
+      uni.showToast({ title: '请填写收件人', icon: 'none' })
+      return
+    }
+    const phone = String(form.contact_phone || '').trim()
+    if (!phone) {
+      uni.showToast({ title: '请填写联系电话', icon: 'none' })
+      return
+    }
+    if (phone.length < 6 || !/\d/.test(phone)) {
+      uni.showToast({ title: '联系电话格式不正确', icon: 'none' })
+      return
+    }
+    if (!String(form.ship_to || '').trim()) {
+      uni.showToast({ title: '请填写收货地址', icon: 'none' })
+      return
+    }
+  }
+
+  try {
     const payload = {
       customer_id: cart.customer?.id,
       remark: '业务员下单',
-      items: cart.items.map(it=> ({
+      src_bill_no: String(form.src_bill_no || '').trim(),
+      contact: String(form.contact || '').trim(),
+      contact_phone: String(form.contact_phone || '').trim(),
+      ship_to: String(form.ship_to || '').trim(),
+      items: cart.items.map(it => ({
         product_id: it.product_id,
         qty: it.qty,
         price: it.price
       }))
     }
+    console.log('createOutboundOrder payload=', payload)
     const res = await api.createOutboundOrder(payload)
-    uni.showToast({ title: '已创建：'+ (res?.order_no||res?.id), icon:'none' })
+
+    uni.showToast({
+      title: '已创建：' + (res?.order_no || res?.id),
+      icon: 'none'
+    })
+
     cart.clear()
-    uni.switchTab({ url:'/pages/features/index' })
-	// uni.navigateTo({
-	//   url: '/pages/customers/select'
-	// })
-  }catch(e){
+    form.src_bill_no = ''
+    form.contact = ''
+    form.contact_phone = ''
+    form.ship_to = ''
+
+    uni.switchTab({ url: '/pages/features/index' })
+  } catch (e) {
     console.error(e)
+    uni.showToast({
+      title: e?.data?.detail || e?.data?.message || '创建订单失败',
+      icon: 'none'
+    })
   }
 }
+
+// async function submitOrder(){
+//   // 提交前兜底校验：不允许低于
+//   const bad = cart.items.find(it => {
+//     ensureItemGuard(it)
+//     return typeof it.orig_price === 'number' && it.price < it.min_price
+//   })
+//   if (bad) {
+//     uni.showToast({ title:'存在价格低于系统最低价的商品，请修正后再提交', icon:'none' })
+//     return
+//   }
+
+//   try{
+//     const payload = {
+//       customer_id: cart.customer?.id,
+//       remark: '业务员下单',
+//       items: cart.items.map(it=> ({
+//         product_id: it.product_id,
+//         qty: it.qty,
+//         price: it.price
+//       }))
+//     }
+//     const res = await api.createOutboundOrder(payload)
+//     uni.showToast({ title: '已创建：'+ (res?.order_no||res?.id), icon:'none' })
+//     cart.clear()
+//     uni.switchTab({ url:'/pages/features/index' })
+// 	// uni.navigateTo({
+// 	//   url: '/pages/customers/select'
+// 	// })
+//   }catch(e){
+//     console.error(e)
+//   }
+// }
 </script>
 
 <style scoped>
@@ -531,6 +671,141 @@ async function submitOrder(){
   flex-direction: column;
 }
 
+.receiver-card {
+  margin: 16rpx 20rpx 220rpx;
+  padding: 20rpx;
+  background: #fff;
+  border-radius: 12rpx;
+  box-sizing: border-box;
+}
+
+.receiver-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #111;
+  margin-bottom: 20rpx;
+}
+
+.receiver-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 16rpx 16rpx;
+  align-items: start;
+}
+
+.receiver-item {
+  min-width: 0;
+}
+
+.receiver-item-full {
+  grid-column: 1 / -1;
+}
+
+.receiver-label {
+  font-size: 26rpx;
+  color: #333;
+  margin-bottom: 8rpx;
+  line-height: 1.4;
+}
+
+.receiver-input,
+.receiver-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12rpx 16rpx;
+  border: 1rpx solid #dcdfe6;
+  border-radius: 8rpx;
+  background: #fff;
+  font-size: 28rpx;
+  color: #333;
+}
+
+.receiver-input {
+  height: 72rpx;
+}
+
+.receiver-textarea {
+  min-height: 140rpx;
+}
+
+.receiver-card {
+  margin: 16rpx 20rpx 12rpx;
+  padding: 20rpx;
+  background: #fff;
+  border-radius: 12rpx;
+  box-sizing: border-box;
+}
+
+.receiver-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 16rpx;
+  align-items: start;
+}
+
+.receiver-item {
+  min-width: 0;
+}
+
+.receiver-item-full {
+  grid-column: 1 / -1;
+}
+
+.receiver-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #111;
+  margin-bottom: 20rpx;
+}
+
+.receiver-label {
+  font-size: 26rpx;
+  color: #333;
+  margin-bottom: 8rpx;
+}
+
+.receiver-input {
+  width: 100%;
+  height: 72rpx;
+  box-sizing: border-box;
+  padding: 0 16rpx;
+  border: 1rpx solid #dcdfe6;
+  border-radius: 8rpx;
+  background: #fff;
+  font-size: 28rpx;
+  color: #333;
+}
+
+.section-divider {
+  height: 1rpx;
+  margin: 0 20rpx 16rpx;
+  background: #e5e7eb;
+}
+
+
+/* 窄屏时自动改成两列 */
+@media (max-width: 1200px) {
+  .receiver-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .receiver-item-full {
+    grid-column: 1 / -1;
+  }
+}
+
+/* 更窄时改成一列 */
+@media (max-width: 768px) {
+  .receiver-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .receiver-item,
+  .receiver-item-full {
+    grid-column: auto;
+  }
+}
+
 /* 针对电脑浏览器的额外调整 */
 @media (min-width: 768px) {
   .container {
@@ -555,4 +830,6 @@ async function submitOrder(){
     padding: 15rpx 20rpx;
   }
 }
+
+
 </style>

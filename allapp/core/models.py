@@ -120,7 +120,7 @@ class DocSequence(models.Model):
     # —— 号段关键字段 ——
     doc_type  = models.CharField(max_length=16)   # 例如: 'INB','RCV','OUT',...
     biz_date  = models.DateField()
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, null=True, blank=True,editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, null=True, blank=True)
     owner     = models.ForeignKey("baseinfo.Owner",       on_delete=models.PROTECT, null=True, blank=True)
     next_no   = models.BigIntegerField(default=1)    # 下一个可用序号(从1开始)
 
@@ -192,4 +192,3 @@ class IdempotentRequestMixin(models.Model):
 
     class Meta:
         abstract = True
-

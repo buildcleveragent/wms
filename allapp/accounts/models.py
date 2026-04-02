@@ -4,7 +4,6 @@ from django.core.validators import RegexValidator
 from django.db import models
 
 from allapp.core.models import BaseModel
-from wmsmaster import settings
 
 
 class User(AbstractUser):
@@ -18,7 +17,7 @@ class User(AbstractUser):
     name = models.CharField("姓名", max_length=50, blank=True, null=True)
     email= models.EmailField("电子邮件", max_length=100, blank=True, null=True)
     owner = models.ForeignKey("baseinfo.Owner", verbose_name="所属货主", null=True, blank=True, on_delete=models.PROTECT)
-    warehouse = models.ForeignKey("locations.Warehouse", verbose_name="所属大仓",null=True, blank=True, on_delete=models.PROTECT,default=settings.DEFAULT_WAREHOUSE_ID,editable=False)
+    warehouse = models.ForeignKey("locations.Warehouse", verbose_name="所属大仓",null=True, blank=True, on_delete=models.PROTECT)
 
     remark = models.CharField("备注", max_length=200, blank=True, null=True)
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
@@ -122,4 +121,3 @@ class SystemLog(BaseModel):
         """保存前清洗数据"""
         self.clean()  # 在保存前调用 `clean` 方法
         super().save(*args, **kwargs)  # 调用父类的 save 方法进行保存
-

@@ -5,7 +5,6 @@ from datetime import date
 from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
-from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
@@ -28,27 +27,33 @@ class ReceiveGoodsWithoutOrder(APIView):
         s = ReceiveWithoutOrderPayloadSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         payload = s.validated_data
-        # payload = request.data
         owner_id = int(payload["owner_id"])
-        items = payload["items"]
-
-        owner_id = payload["owner_id"]
         items = payload["items"]
         remark = (payload.get("remark") or "PDA无ASN收货").strip()
 
-        wid = getattr(settings, 'DEFAULT_WAREHOUSE_ID', None)
+        wid = payload.get("warehouse_id") or getattr(request.user, "warehouse_id", None)
         if not wid:
-            raise ValueError("settings.DEFAULT_WAREHOUSE_ID 未配置")
+            raise ValidationError("必须提供 warehouse_id 或为当前用户绑定 warehouse")
 
         try:
             wh = Warehouse.objects.only('id').get(id=wid)
         except Warehouse.DoesNotExist:
-            raise ValueError(f"默认仓库不存在：{wid}")
+            raise ValidationError(f"warehouse_id 不存在：{wid}")
 
         try:
             owner = Owner.objects.only('id').get(id=owner_id)
         except Owner.DoesNotExist:
-            raise ValueError(f"owner_id：{owner_id}")
+            raise ValidationError(f"owner_id 不存在：{owner_id}")
+
+        location = None
+        location_id = payload.get("location_id")
+        if location_id:
+            try:
+                location = Location.objects.only("id", "warehouse_id").get(id=location_id)
+            except Location.DoesNotExist:
+                raise ValidationError(f"location_id 不存在：{location_id}")
+            if location.warehouse_id != wh.id:
+                raise ValidationError("location_id 必须属于当前 warehouse")
 
         task_no = DocSequence.next_code(
             doc_type="RK",
@@ -62,7 +67,7 @@ class ReceiveGoodsWithoutOrder(APIView):
             task_no=task_no,
             task_type=WmsTask.TaskType.RECEIVE,
             owner_id=owner_id,
-            warehouse_id=getattr(settings, "DEFAULT_WAREHOUSE_ID", None),
+            warehouse_id=wh.id,
             created_by=request.user,
             created_at=timezone.now(),
             posting_note="PDA无ASN收货",
@@ -95,11 +100,10 @@ class ReceiveGoodsWithoutOrder(APIView):
                 )
 
             p = Product.objects.only("id").get(id=pid)
-            default_loc = Location.objects.get(pk=1)
             snap_items = [{
                 "product": p,                 # 关键：用 product 实例
                 "qty_ok": total_qty,          # 关键：你的函数要的是 qty_ok
-                "location":default_loc,
+                "location": location,
                 # 可选：批次/效期/库位等： "lot_no": "...", "expiry_date": date(...)
             }]
             save_receiving_snapshot(

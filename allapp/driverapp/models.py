@@ -1,9 +1,9 @@
 # tms/models.py
 from django.db import models
+from django.core.exceptions import ValidationError
 from allapp.core.models import BaseModel  # 含 created_at/created_by/updated_at/updated_by 等
 from allapp.baseinfo.models import Owner,Driver,Vehicle,CarrierCompany
 from allapp.locations.models import Warehouse
-from wmsmaster import settings
 
 
 class TrackingDevice(BaseModel):
@@ -49,7 +49,7 @@ class DriverShift(BaseModel):
         CLOCK_OUT = "out", "下班"
 
     driver = models.ForeignKey(Driver, on_delete=models.PROTECT, related_name="shifts")
-    warehouse = models.ForeignKey(Warehouse, on_delete=models.PROTECT, related_name="driver_shifts", null=True, blank=True,editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey(Warehouse, on_delete=models.PROTECT, related_name="driver_shifts", null=True, blank=True)
     action = models.CharField(max_length=8, choices=Action.choices)
     at = models.DateTimeField()  # 客户端时间戳
     geo_lat = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
@@ -77,7 +77,7 @@ class DeliveryTask(BaseModel):
         CANCELLED = "cancelled", "已取消"
 
     owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="delivery_tasks")
-    warehouse = models.ForeignKey(Warehouse, on_delete=models.PROTECT, related_name="delivery_tasks",editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey(Warehouse, on_delete=models.PROTECT, related_name="delivery_tasks")
     CarrierCompany = models.ForeignKey(CarrierCompany, on_delete=models.PROTECT, related_name="delivery_tasks", null=True, blank=True)
     driver = models.ForeignKey(Driver, on_delete=models.PROTECT, related_name="delivery_tasks", null=True, blank=True)
     vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="delivery_tasks", null=True, blank=True)
@@ -101,6 +101,16 @@ class DeliveryTask(BaseModel):
             models.Index(fields=["status", "planned_depart_at"]),
             models.Index(fields=["driver", "status"]),
         ]
+
+    def clean(self):
+        if not self.warehouse_id:
+            raise ValidationError({"warehouse": "必须明确指定配送任务仓库"})
+
+    def save(self, *args, **kwargs):
+        if not self.warehouse_id:
+            raise ValidationError({"warehouse": "必须明确指定配送任务仓库"})
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 
 class TaskStop(BaseModel):

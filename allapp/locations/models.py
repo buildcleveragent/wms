@@ -3,7 +3,6 @@ from django.core.exceptions import ValidationError
 from decimal import Decimal
 
 from allapp.core.models import BaseModel
-from wmsmaster import settings
 from django.utils.translation import gettext_lazy as _
 from allapp.core.choices import ZoneType
 
@@ -18,7 +17,7 @@ class Warehouse(BaseModel):
 
 class Subwarehouse(BaseModel):
     warehouse = models.ForeignKey("Warehouse", verbose_name="所属仓库", on_delete=models.PROTECT,
-                                  related_name="subwarehouse", editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+                                  related_name="subwarehouse")
     code = models.CharField("仓库编号", max_length=10, unique=True)
     name = models.CharField("仓库名称", max_length=30)
     floor_no = models.PositiveSmallIntegerField(_("楼层"), default=1, db_index=True)
@@ -28,9 +27,21 @@ class Subwarehouse(BaseModel):
         ordering = ["code"]
     def __str__(self): return f"{self.name}"
 
+    def clean(self):
+        super().clean()
+        if not self.warehouse_id:
+            raise ValidationError({"warehouse": "必须明确指定所属仓库"})
+
+    def save(self, *args, **kwargs):
+        # 先执行一次 clean，让 code/subwarehouse 能补齐 warehouse，
+        # 避免 full_clean() 在 clean_fields 阶段先因为 warehouse=None 失败。
+        self.clean()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
 class Location(BaseModel):
 
-    warehouse = models.ForeignKey("Warehouse", verbose_name="所属仓库", on_delete=models.PROTECT, related_name="locations",editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("Warehouse", verbose_name="所属仓库", on_delete=models.PROTECT, related_name="locations")
     subwarehouse = models.ForeignKey("Subwarehouse", verbose_name="所属仓", on_delete=models.PROTECT,
                                   related_name="locations", blank=True, null=True)
     zone_type = models.PositiveSmallIntegerField(
@@ -80,6 +91,7 @@ class Location(BaseModel):
 
     def clean(self):
         super().clean()
+        errors = {}
 
         # 校验并解析编码（例：WH01-Z01-R01-01-02）
         if self.code:
@@ -90,22 +102,35 @@ class Location(BaseModel):
             # 解析编码并填充对应字段
             # self. = parts[0]  # 货架编码
             subwarehouse_no=parts[0]  # 子仓号
-            sw=Subwarehouse.objects.get(code=subwarehouse_no)
-            if sw:
-               self.subwarehouse=sw
-            else:
-               raise ValidationError("该仓库不存在,先建立仓库")
+            sw = Subwarehouse.objects.filter(code=subwarehouse_no).select_related("warehouse").first()
+            if not sw:
+               raise ValidationError({"subwarehouse": "该子仓不存在，请先建立子仓"})
+            self.subwarehouse = sw
+            if not self.warehouse_id:
+                self.warehouse = sw.warehouse
             self.level_code = parts[1]  # 货架层编码
             self.col_no = parts[2]  # 列号
             self.slot_no = parts[3]  # 位号
             self.barcode=self.code
 
-    def save(self, *args, **kwargs):
-        # 如果没有设置 rack_code 等字段，尝试通过编码解析
-        if not self.rack_code or not self.rack_level_code or not self.col_no or not self.slot_no:
-            self.clean()  # 调用 clean() 方法进行校验和填充字段
+        if self.subwarehouse_id:
+            if not self.warehouse_id:
+                self.warehouse_id = self.subwarehouse.warehouse_id
+            elif self.warehouse_id != self.subwarehouse.warehouse_id:
+                errors["warehouse"] = "所属仓库必须与子仓一致"
 
-        super().save(*args, **kwargs)
+        if not self.warehouse_id:
+            errors["warehouse"] = "必须明确指定所属仓库"
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        # 先执行一次 clean，让 code/subwarehouse 能补齐 warehouse，
+        # 避免 full_clean() 在 clean_fields 阶段先因为 warehouse=None 失败。
+        self.clean()
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 class Container(BaseModel):
     TYPES = [("TOTE", "料箱"), ("CARTON", "纸箱"), ("PALLET", "托盘")]
@@ -115,7 +140,7 @@ class Container(BaseModel):
         PRIVATE = "PRIVATE", "私有（按货主）"
         PUBLIC  = "PUBLIC",  "公共（仓库）"
 
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库",editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
     owner     = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, null=True, blank=True, verbose_name="货主")
 
     scope     = models.CharField("范围", max_length=16, choices=Scope.choices, default=Scope.PRIVATE)
@@ -147,12 +172,21 @@ class Container(BaseModel):
     def __str__(self):
         return f"{self.container_no}"
 
+    def _sync_warehouse_from_relations(self):
+        if self.location_id and not self.warehouse_id:
+            self.warehouse_id = self.location.warehouse_id
+        if self.parent_id and not self.warehouse_id:
+            self.warehouse_id = self.parent.warehouse_id
+
     # 可选：简易承载能力计算
     def gross_limit_kg(self):
         return self.max_gross_kg or Decimal("0")
 
     def clean(self):
         super().clean()
+        self._sync_warehouse_from_relations()
+        if not self.warehouse_id:
+            raise ValidationError({"warehouse": "必须明确指定容器仓库"})
         # 位置与仓一致
         if self.location_id and self.location.warehouse_id != self.warehouse_id:
             raise ValidationError({"location": "当前位置的仓库必须与容器仓库一致"})
@@ -177,8 +211,10 @@ class Container(BaseModel):
                     raise ValidationError("容器不能嵌套自身")
                 current = current.parent
 
-
-
+    def save(self, *args, **kwargs):
+        self._sync_warehouse_from_relations()
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 
 

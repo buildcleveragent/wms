@@ -16,11 +16,30 @@
 			<button class="btn" @click="goto('/pages/customers/select')">开单</button>
 			<button class="btn-outline" @click="goto('/pages/approval/index')">审核</button>
 			<button class="btn-outline" @click="goto('/pages/orders/index')">查询</button>
+			<button class="btn-outline" @click="goto('/pages/orders/import_drop_ship')">批量导入一件代发</button>			
+			<button class="btn-outline" @click="downloadDropShipTemplate()">下载一件代发模板</button>					
 		</view>
+		
+
 		</view>
 	</view>
 </template>
 
 <script setup>
+	import { BASE_URL } from '@/utils/request.js'
+	
 	function goto(url){ uni.navigateTo({ url }) }
+	
+	function downloadDropShipTemplate() {
+	  const url = `${BASE_URL}/api/outbound/orders/import-drop-ship-template/`
+	
+	  if (typeof window !== 'undefined') {
+	    window.open(url, '_blank')
+	    return
+	  }
+	
+	  // #ifdef APP-PLUS
+	  plus.runtime.openURL(url)
+	  // #endif
+	}
 </script>

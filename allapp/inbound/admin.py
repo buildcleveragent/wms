@@ -141,7 +141,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     inlines = [InboundOrderLineInline]
     # 显示的字段
     list_display = (
-        "order_no", "owner", "supplier", "biz_date",
+        "order_no", "owner", "warehouse", "supplier", "biz_date",
         "submit_status", "approval_status", "is_closed", "approved_by_ownermanager", "approved_at_ownermanager"
     )
     # 显示在搜索框中的字段
@@ -150,7 +150,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     # 筛选功能
     list_filter = (
         "submit_status", "approval_status", "is_closed",
-        "owner", "supplier", "biz_date"
+        "owner", "warehouse", "supplier", "biz_date"
     )
 
     # 可编辑的字段
@@ -158,7 +158,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
 
     # 表单中字段的显示顺序
     fields = (
-        "order_no", "inbound_type", "owner", "supplier", "biz_date",)
+        "order_no", "inbound_type", "owner", "warehouse", "supplier", "biz_date",)
 
     # fields = (
     #     "order_no",  "inbound_type", "owner", "supplier", "biz_date","approval_status",
@@ -558,8 +558,8 @@ class InboundReceiptLineInline(admin.TabularInline):
 @admin.register(InboundReceipt)
 class InboundReceiptAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     admin_priority =3
-    list_display = ("receipt_no", "biz_date", "owner", "supplier", "submit_status", "approved_by", "approved_at")
-    list_filter = ("submit_status", "owner", "supplier")
+    list_display = ("receipt_no", "biz_date", "owner", "warehouse", "supplier", "submit_status", "approved_by", "approved_at")
+    list_filter = ("submit_status", "owner", "warehouse", "supplier")
     search_fields = ("receipt_no", "order_no", "src_bill_no")
     inlines = [InboundReceiptLineInline]
     readonly_fields = ("approved_at",)
@@ -698,7 +698,6 @@ class ReturnInspectionInline(admin.StackedInline):  # 也可以使用 admin.Tabu
         if obj and obj.status == "POSTED":
             return False
         return super().has_delete_permission(request, obj)
-
 
 
 

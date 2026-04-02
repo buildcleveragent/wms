@@ -1415,7 +1415,14 @@ def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingP
     )
     if not created and period.status != PeriodStatus.OPEN:
         raise ValueError(f"Period {period.label} is already {period.status}.")
+    if not created and (period.start_date != start_date or period.end_date != end_date):
+        raise ValueError(
+            f"Period {period.label} already exists with range "
+            f"{period.start_date}~{period.end_date}, expected {start_date}~{end_date}."
+        )
 
+    # 这里使用批量 update 是有意为之：这批 accrual 已经按 owner/warehouse/date 范围收口，
+    # 仅做 status/period 的批量状态迁移，不依赖 save()->full_clean()。
     (BillingAccrual.objects
      .filter(owner_id=owner_id, warehouse_id=warehouse_id, status=AccrualStatus.OPEN)
      .filter(service_date__gte=start_date, service_date__lte=end_date)

@@ -11,6 +11,7 @@ from django.utils import timezone
 
 # 统一过账入口（按你冻结版已有的 services ）
 from allapp.inventory import services as inv_services
+from allapp.core.models import DocSequence
 from allapp.locations.models import Location
 from allapp.baseinfo.models import Owner
 from allapp.products.models import Product
@@ -40,12 +41,23 @@ def quick_adjust_via_post_task(data: QuickAdjustInput) -> dict:
 
     # 解析默认库位和仓库
     location = data.location or Location.objects.get(pk=getattr(settings, "DEFAULT_ADJUST_LOCATION_ID"))
-    warehouse = data.warehouse or getattr(location, "warehouse", None) or Warehouse.objects.get(
-        pk=getattr(settings, "DEFAULT_WAREHOUSE_ID")
+    location_warehouse = getattr(location, "warehouse", None)
+    warehouse = data.warehouse or location_warehouse
+    if warehouse is None:
+        raise ValueError("无法确定调整任务所属仓库，请显式传 warehouse 或传入带仓库的 location。")
+    if data.warehouse and getattr(location, "warehouse_id", None) and data.warehouse.id != location.warehouse_id:
+        raise ValueError("warehouse 必须与 location.warehouse 一致")
+
+    task_no = DocSequence.next_code(
+        doc_type="TJ",
+        warehouse=warehouse,
+        owner=data.owner,
+        biz_date=timezone.now().date(),
     )
 
     # 创建 WmsTask 实例
     task = WmsTask.objects.create(
+        task_no=task_no,
         task_type="ADJUST",
         owner=data.owner,
         warehouse=warehouse,
@@ -63,8 +75,8 @@ def quick_adjust_via_post_task(data: QuickAdjustInput) -> dict:
     task_line = WmsTaskLine.objects.create(
         task=task,
         product=data.product,
-        from_location=location,  # 使用 from_location
-        to_location=location,    # 目标库位
+        from_location=location,
+        to_location=None,
         qty_plan=Decimal(data.qty_base_delta),  # 使用 qty_plan 代替 qty_base
     )
 

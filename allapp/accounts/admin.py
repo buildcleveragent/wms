@@ -11,13 +11,13 @@ class CustomUserCreationForm(UserCreationForm):
     class Meta(UserCreationForm.Meta):
         model = User
         # 新增时展示的字段（含标准的 password1/password2）
-        fields = ("username", "name", "email", "phone", "owner",)
+        fields = ("username", "name", "email", "phone", "owner", "warehouse")
 
 class CustomUserChangeForm(UserChangeForm):
     class Meta(UserChangeForm.Meta):
         model = User
         # 编辑时展示的字段（密码是已加密的 password 字段，走只读小部件）
-        fields = ("username", "name", "email", "phone", "owner",
+        fields = ("username", "name", "email", "phone", "owner", "warehouse",
                   "is_active", "is_staff", "is_superuser", "groups", "user_permissions")
 
 @admin.register(User)
@@ -26,15 +26,15 @@ class UserAdmin(DjangoUserAdmin):
     form = CustomUserChangeForm
     model = User
 
-    list_display = ("username", "name", "email", "phone", "owner",
+    list_display = ("username", "name", "email", "phone", "owner", "warehouse",
                     "is_active", "is_staff", "is_superuser")
-    list_filter = ("is_active", "is_staff", "is_superuser", "owner", "groups")
+    list_filter = ("is_active", "is_staff", "is_superuser", "owner", "warehouse", "groups")
     search_fields = ("username", "name", "email", "phone")
     ordering = ("id",)
 
     fieldsets = (
         (None, {"fields": ("username", "password")}),
-        ("个人信息", {"fields": ("name", "email", "phone", "owner", )}),
+        ("个人信息", {"fields": ("name", "email", "phone", "owner", "warehouse")}),
         ("权限", {"fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")}),
         ("重要日期", {"fields": ("last_login", "date_joined")}),
     )
@@ -43,7 +43,7 @@ class UserAdmin(DjangoUserAdmin):
         (None, {
             "classes": ("wide",),
             # 注意：这里必须是 password1/password2（来自 UserCreationForm）
-            "fields": ("username", "name", "email", "phone", "owner",
+            "fields": ("username", "name", "email", "phone", "owner", "warehouse",
                        "password1", "password2", "is_active", "is_staff", "is_superuser", "groups"),
         }),
     )

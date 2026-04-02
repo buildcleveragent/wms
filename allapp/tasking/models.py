@@ -85,7 +85,7 @@ class WmsTask(BaseModel):
     posting_note = models.CharField(verbose_name=_("过账备注"),max_length=200, blank=True, null=True,default="")
 
     owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT,related_name="tasks", verbose_name=_("货主"))
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT,related_name="tasks", verbose_name=_("仓库"),editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT,related_name="tasks", verbose_name=_("仓库"))
 
     task_group_no = models.CharField(_("计划组号"), max_length=40, blank=True, default="", db_index=True)
     released_at = models.DateTimeField(_("发布时间"), null=True, blank=True)
@@ -173,6 +173,17 @@ class WmsTask(BaseModel):
 
     def __str__(self):
         return f"{self.task_no}({self.task_type})-{self.status}"
+
+    def clean(self):
+        super().clean()
+        if not self.warehouse_id:
+            raise ValidationError({"warehouse": _("必须明确指定任务仓库。")})
+
+    def save(self, *args, **kwargs):
+        if not self.warehouse_id:
+            raise ValidationError({"warehouse": _("必须明确指定任务仓库。")})
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     def release(self, *, by_user=None):
         """
@@ -444,7 +455,7 @@ class TaskScanLog(TimeStampedMixin):
         REJECTED = "REJECTED", "已驳回"
     # —— 归属 —— #
     owner     = models.ForeignKey("baseinfo.Owner",on_delete=models.PROTECT,verbose_name="货主",db_index=True)
-    warehouse = models.ForeignKey("locations.Warehouse",on_delete=models.PROTECT,verbose_name="仓库",db_index=True,editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse",on_delete=models.PROTECT,verbose_name="仓库",db_index=True)
     task = models.ForeignKey("tasking.WmsTask", verbose_name=_("任务"),on_delete=models.PROTECT, related_name="scan_logs")
     task_line = models.ForeignKey("tasking.WmsTaskLine", verbose_name=_("任务行"),on_delete=models.PROTECT, null=True, blank=True, related_name="scan_logs")
     product = models.ForeignKey("products.Product", verbose_name=_("商品"),on_delete=models.PROTECT, null=True, blank=True)  # ✅ 允许未知SKU
@@ -534,8 +545,16 @@ class TaskScanLog(TimeStampedMixin):
     def __str__(self):
         return f"{self.task_id}-{self.barcode or self.label_key or ''}"
 
+    def _sync_scope_from_relations(self):
+        if self.task_id and not self.warehouse_id:
+            self.warehouse_id = self.task.warehouse_id
+        if not self.warehouse_id and self.location_id:
+            self.warehouse_id = self.location.warehouse_id
+
     # —— 一致性与归一化 —— #
     def clean(self):
+        self._sync_scope_from_relations()
+
         def _norm(s): return (s or "").strip()
         if isinstance(self.barcode, str):
             self.barcode = _norm(self.barcode) or None
@@ -566,10 +585,23 @@ class TaskScanLog(TimeStampedMixin):
         # if self.method == self.Method.SCAN and not self.barcode:
         #     errors["barcode"] = _("扫码录入必须提供条码")
 
+        if not self.warehouse_id:
+            errors["warehouse"] = _("必须明确指定扫描记录仓库。")
+
+        if self.task_id:
+            if self.owner_id and self.owner_id != self.task.owner_id:
+                errors["owner"] = _("扫描记录货主必须与任务货主一致。")
+            if self.warehouse_id and self.warehouse_id != self.task.warehouse_id:
+                errors["warehouse"] = _("扫描记录仓库必须与任务仓库一致。")
+
+        if self.location_id and self.warehouse_id and self.location.warehouse_id != self.warehouse_id:
+            errors["location"] = _("扫描记录库位必须属于当前仓库。")
+
         if errors:
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
+        self._sync_scope_from_relations()
         self.full_clean()
         return super().save(*args, **kwargs)
 
@@ -2829,7 +2861,6 @@ class ContainerUsage(BaseModel):
 
         self.full_clean()
         return super().save(*args, **kwargs)
-
 
 
 

@@ -60,7 +60,7 @@ class OutboundOrder(BaseModel):
 
     owner = models.ForeignKey("baseinfo.Owner", verbose_name="货主", on_delete=models.PROTECT, related_name="outbound_orders")
     customer = models.ForeignKey("baseinfo.Customer", verbose_name="客户", on_delete=models.PROTECT, related_name="outbound_orders", blank=True, null=True)
-    warehouse = models.ForeignKey("locations.Warehouse", verbose_name="仓库", on_delete=models.PROTECT, related_name="outbound_orders",editable=False,default=settings.DEFAULT_WAREHOUSE_ID)
+    warehouse = models.ForeignKey("locations.Warehouse", verbose_name="仓库", on_delete=models.PROTECT, related_name="outbound_orders")
 
     order_no = models.CharField("订单编号", max_length=100, unique=True)  # 去掉多余 db_index=True
     biz_date = models.DateField("日期", default=date.today)
@@ -145,6 +145,8 @@ class OutboundOrder(BaseModel):
         return self.order_no or f"OUT@{self.id}"
 
     def save(self, *args, **kwargs):
+        if not self.warehouse_id:
+            raise ValidationError({"warehouse": "必须明确指定出库订单仓库"})
         if not self.pk and not self.order_no:
             self.order_no = DocSequence.next_code(
                 doc_type="CK",
@@ -152,10 +154,13 @@ class OutboundOrder(BaseModel):
                 owner=self.owner,
                 biz_date=self.biz_date,
             )
-        super().save(*args, **kwargs)
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     def clean(self):
         errs = {}
+        if not self.warehouse_id:
+            errs["warehouse"] = "必须明确指定出库订单仓库"
         if self.is_closed and not self.close_reason:
             errs["close_reason"] = "订单关闭时必须提供关闭理由"
         # 可选：预计发货时间不得早于业务日期

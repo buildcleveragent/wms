@@ -1,26 +1,42 @@
 import datetime
+import csv
+import io
+import tempfile
 from decimal import Decimal
 from unittest import mock
 
+from openpyxl import load_workbook
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import models
 from django.test import TestCase
 from django.utils import timezone
+from django.urls import reverse
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from allapp.baseinfo.models import Customer, Owner
 from allapp.core.choices import InvTxType
-from allapp.billing.enums import AccrualStatus, BundleScope, BundleType, CalcMethod, ChargeType, PeriodStatus
-from allapp.billing.models import Bill, BillingAccrual, BillingJobRun, BillingMetricDaily, BillingPeriod, BillingRule
+from allapp.billing.enums import AccrualStatus, BillStatus, BundleScope, BundleType, CalcMethod, CapMode, ChargeType, PeriodStatus
+from allapp.billing.models import (
+    Bill,
+    BillLine,
+    BillingAccrual,
+    BillingEvent,
+    BillingJobRun,
+    BillingMetricDaily,
+    BillingPeriod,
+    BillingRule,
+    BillingRuleTier,
+)
 from allapp.billing.services import (
     accrue_order_processing_from_posted,
     generate_invoice_for_period,
     generate_metrics_for_date,
     lock_period,
 )
-from allapp.inventory.models import InventorySnapshotDaily, InventoryTransaction
+from allapp.inventory.models import InventorySnapshotDaily, InventoryTransaction, PostingJournal
 from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_date
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product, ProductUom
@@ -291,6 +307,25 @@ class BillingServiceTests(TestCase):
                 datetime.date(2026, 3, 31),
             )
 
+    def test_lock_period_rejects_existing_open_period_with_different_dates(self):
+        BillingPeriod.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            label="2026-03-RANGE",
+            start_date=datetime.date(2026, 3, 1),
+            end_date=datetime.date(2026, 3, 31),
+            status=PeriodStatus.OPEN,
+        )
+
+        with self.assertRaises(ValueError):
+            lock_period(
+                self.owner.id,
+                self.warehouse.id,
+                "2026-03-RANGE",
+                datetime.date(2026, 3, 5),
+                datetime.date(2026, 3, 20),
+            )
+
     def test_generate_invoice_requires_closed_period_and_is_single_use(self):
         open_period = BillingPeriod.objects.create(
             owner=self.owner,
@@ -317,14 +352,14 @@ class BillingServiceTests(TestCase):
             owner=self.owner,
             warehouse=self.warehouse,
             label="2026-03-CINV",
-            start_date=datetime.date(2026, 3, 1),
-            end_date=datetime.date(2026, 3, 31),
+            start_date=datetime.date(2026, 4, 1),
+            end_date=datetime.date(2026, 4, 30),
             status=PeriodStatus.CLOSED,
         )
         self._create_accrual(
             rule=rule,
             amount="15.00",
-            service_date=datetime.date(2026, 3, 2),
+            service_date=datetime.date(2026, 4, 2),
             period=closed_period,
             status=AccrualStatus.LOCKED,
             fingerprint="acc-closed-invoice",
@@ -336,6 +371,642 @@ class BillingServiceTests(TestCase):
         self.assertEqual(bill.status, "ISSUED")
         with self.assertRaises(ValueError):
             generate_invoice_for_period(closed_period, invoice_no="INV-CLOSED-2")
+
+
+class BillingModelGuardrailTests(TestCase):
+    def setUp(self):
+        self.owner = Owner.objects.create(name="Owner Guardrail", code="OWGRD")
+        self.other_owner = Owner.objects.create(name="Owner Guardrail Other", code="OWGRX")
+        self.warehouse = Warehouse.objects.create(code="WHGR1", name="Warehouse Guardrail 1")
+        self.other_warehouse = Warehouse.objects.create(code="WHGR2", name="Warehouse Guardrail 2")
+        self.user = get_user_model().objects.create_user(
+            username="billing-guardrail-user",
+            password="x",
+            warehouse=self.warehouse,
+        )
+
+    def _create_rule(
+        self,
+        *,
+        owner=None,
+        warehouse=None,
+        charge_type=ChargeType.DISPATCH,
+        calc_method=CalcMethod.PER_ORDER,
+        unit_price="10.00",
+    ):
+        return BillingRule.objects.create(
+            owner=owner or self.owner,
+            warehouse=warehouse or self.warehouse,
+            charge_type=charge_type,
+            calc_method=calc_method,
+            unit_price=Decimal(unit_price),
+        )
+
+    def _create_period(self, *, label="2026-05-A", start_date=None, end_date=None):
+        start_date = start_date or datetime.date(2026, 5, 1)
+        end_date = end_date or datetime.date(2026, 5, 31)
+        return BillingPeriod.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            label=label,
+            start_date=start_date,
+            end_date=end_date,
+            status=PeriodStatus.OPEN,
+        )
+
+    def _create_accrual(self, *, rule=None, period=None, fingerprint="guardrail-acc-1"):
+        rule = rule or self._create_rule()
+        period = period or self._create_period()
+        return BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            period=period,
+            charge_type=rule.charge_type,
+            rule=rule,
+            service_date=period.start_date,
+            currency="CNY",
+            quantity=Decimal("1.0000"),
+            unit_price=Decimal("10.0000"),
+            amount=Decimal("10.00"),
+            tax_amount=Decimal("0.00"),
+            status=AccrualStatus.LOCKED,
+            acc_fingerprint=fingerprint,
+            created_by=self.user,
+        )
+
+    def test_billing_period_rejects_overlapping_ranges(self):
+        self._create_period(label="2026-05-A")
+
+        with self.assertRaises(ValidationError):
+            BillingPeriod.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                label="2026-05-B",
+                start_date=datetime.date(2026, 5, 15),
+                end_date=datetime.date(2026, 6, 14),
+                status=PeriodStatus.OPEN,
+            )
+
+    def test_billing_rule_tier_rejects_overlapping_ranges(self):
+        rule = self._create_rule(charge_type=ChargeType.STORAGE, calc_method=CalcMethod.PER_CBM_DAY)
+        BillingRuleTier.objects.create(
+            rule=rule,
+            threshold_from=Decimal("0.0000"),
+            threshold_to=Decimal("100.0000"),
+            unit_price=Decimal("1.0000"),
+        )
+
+        with self.assertRaises(ValidationError):
+            BillingRuleTier.objects.create(
+                rule=rule,
+                threshold_from=Decimal("50.0000"),
+                threshold_to=Decimal("200.0000"),
+                unit_price=Decimal("2.0000"),
+            )
+
+    def test_billing_rule_rejects_invalid_cap_bundle_and_percent_config(self):
+        with self.assertRaises(ValidationError):
+            BillingRule.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                charge_type=ChargeType.DISPATCH,
+                calc_method=CalcMethod.PER_ORDER,
+                unit_price=Decimal("10.0000"),
+                cap_mode=CapMode.NONE,
+                cap_amount=Decimal("1.00"),
+            )
+
+        with self.assertRaises(ValidationError):
+            BillingRule.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                charge_type=ChargeType.DISPATCH,
+                calc_method=CalcMethod.PER_ORDER,
+                unit_price=Decimal("10.0000"),
+                bundle_scope=BundleScope.NONE,
+                bundle_key="BUNDLE-X",
+            )
+
+        with self.assertRaises(ValidationError):
+            BillingRule.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                charge_type=ChargeType.DISPATCH,
+                calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+                unit_price=Decimal("1.5000"),
+            )
+
+    def test_billing_rule_tier_rejects_invalid_numeric_ranges(self):
+        rule = self._create_rule(
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+            unit_price="0.1000",
+        )
+
+        with self.assertRaises(ValidationError):
+            BillingRuleTier.objects.create(
+                rule=rule,
+                threshold_from=Decimal("-1.0000"),
+                threshold_to=Decimal("100.0000"),
+                percent_rate=Decimal("0.100000"),
+            )
+
+        with self.assertRaises(ValidationError):
+            BillingRuleTier.objects.create(
+                rule=rule,
+                threshold_from=Decimal("0.0000"),
+                threshold_to=Decimal("100.0000"),
+                percent_rate=Decimal("1.500000"),
+            )
+
+        with self.assertRaises(ValidationError):
+            BillingRuleTier.objects.create(
+                rule=self._create_rule(charge_type=ChargeType.STORAGE, calc_method=CalcMethod.PER_CBM_DAY),
+                threshold_from=Decimal("0.0000"),
+                threshold_to=Decimal("100.0000"),
+                unit_price=Decimal("-1.0000"),
+            )
+
+    def test_billing_rule_tier_requires_price_field_to_match_calc_method(self):
+        percent_rule = self._create_rule(
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+            unit_price="0.1000",
+        )
+        qty_rule = self._create_rule(
+            charge_type=ChargeType.STORAGE,
+            calc_method=CalcMethod.PER_CBM_DAY,
+            unit_price="10.0000",
+        )
+
+        with self.assertRaises(ValidationError):
+            BillingRuleTier.objects.create(
+                rule=percent_rule,
+                threshold_from=Decimal("0.0000"),
+                threshold_to=Decimal("100.0000"),
+                unit_price=Decimal("0.1000"),
+            )
+
+        with self.assertRaises(ValidationError):
+            BillingRuleTier.objects.create(
+                rule=qty_rule,
+                threshold_from=Decimal("0.0000"),
+                threshold_to=Decimal("100.0000"),
+                percent_rate=Decimal("0.100000"),
+            )
+
+    def test_billing_accrual_rejects_rule_scope_mismatch(self):
+        rule = self._create_rule(owner=self.owner, warehouse=self.warehouse)
+
+        with self.assertRaises(ValidationError):
+            BillingAccrual.objects.create(
+                owner=self.other_owner,
+                warehouse=self.warehouse,
+                charge_type=rule.charge_type,
+                rule=rule,
+                service_date=datetime.date(2026, 5, 1),
+                currency="CNY",
+                quantity=Decimal("1.0000"),
+                unit_price=Decimal("10.0000"),
+                amount=Decimal("10.00"),
+                tax_amount=Decimal("0.00"),
+                status=AccrualStatus.OPEN,
+                acc_fingerprint="guardrail-bad-accrual",
+                created_by=self.user,
+            )
+
+    def test_billing_accrual_rejects_currency_mismatch_with_rule_and_period(self):
+        rule = self._create_rule(owner=self.owner, warehouse=self.warehouse)
+        period = self._create_period(label="2026-05-CURRENCY")
+
+        with self.assertRaises(ValidationError):
+            BillingAccrual.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                period=period,
+                charge_type=rule.charge_type,
+                rule=rule,
+                service_date=period.start_date,
+                currency="USD",
+                quantity=Decimal("1.0000"),
+                unit_price=Decimal("10.0000"),
+                amount=Decimal("10.00"),
+                tax_amount=Decimal("0.00"),
+                status=AccrualStatus.OPEN,
+                acc_fingerprint="guardrail-acc-currency-mismatch",
+                created_by=self.user,
+            )
+
+    def test_billing_event_rejects_task_scope_mismatch(self):
+        task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="TASK-GUARDRAIL-1",
+            task_type=WmsTask.TaskType.DISPATCH,
+        )
+
+        with self.assertRaises(ValidationError):
+            BillingEvent.objects.create(
+                owner=self.other_owner,
+                warehouse=self.warehouse,
+                charge_type=ChargeType.DISPATCH,
+                service_date=datetime.date(2026, 5, 1),
+                task=task,
+                quantity=Decimal("1.0000"),
+                quantity_uom="BASE",
+                event_fp="event-guardrail-1",
+            )
+
+    def test_billing_event_rejects_posting_journal_task_mismatch(self):
+        task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="TASK-GUARDRAIL-2",
+            task_type=WmsTask.TaskType.DISPATCH,
+        )
+        other_task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="TASK-GUARDRAIL-3",
+            task_type=WmsTask.TaskType.DISPATCH,
+        )
+        posting_journal = PostingJournal.objects.create(
+            src_model="WmsTask",
+            src_id=other_task.id,
+            tx_type="POST",
+        )
+
+        with self.assertRaises(ValidationError):
+            BillingEvent.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                charge_type=ChargeType.DISPATCH,
+                service_date=datetime.date(2026, 5, 1),
+                task=task,
+                posting_journal=posting_journal,
+                quantity=Decimal("1.0000"),
+                quantity_uom="BASE",
+                event_fp="event-guardrail-posting-mismatch",
+            )
+
+    def test_billing_event_rejects_posting_journal_without_task_context(self):
+        posting_journal = PostingJournal.objects.create(
+            src_model="WmsTask",
+            src_id=999999,
+            tx_type="POST",
+        )
+
+        with self.assertRaises(ValidationError):
+            BillingEvent.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                charge_type=ChargeType.DISPATCH,
+                service_date=datetime.date(2026, 5, 1),
+                posting_journal=posting_journal,
+                quantity=Decimal("1.0000"),
+                quantity_uom="BASE",
+                event_fp="event-guardrail-posting-without-task",
+            )
+
+    def test_billing_metric_daily_rejects_negative_value(self):
+        with self.assertRaises(ValidationError):
+            BillingMetricDaily.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                service_date=datetime.date(2026, 5, 1),
+                metric_type="CBM",
+                value=Decimal("-1.0000"),
+                source="AUTO:TEST",
+            )
+
+    def test_billing_job_run_rejects_invalid_attempts_and_time_order(self):
+        with self.assertRaises(ValidationError):
+            BillingJobRun.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                job_name=BillingJobRun.JobName.DAILY_METRIC_GENERATION,
+                service_date=datetime.date(2026, 5, 1),
+                attempts=0,
+                started_at=timezone.now(),
+            )
+
+        started_at = timezone.now()
+        with self.assertRaises(ValidationError):
+            BillingJobRun.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                job_name=BillingJobRun.JobName.DAILY_METRIC_GENERATION,
+                service_date=datetime.date(2026, 5, 2),
+                attempts=1,
+                started_at=started_at,
+                finished_at=started_at - datetime.timedelta(minutes=1),
+            )
+
+        with self.assertRaises(ValidationError):
+            BillingJobRun.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                job_name=BillingJobRun.JobName.DAILY_METRIC_GENERATION,
+                service_date=datetime.date(2026, 5, 3),
+                status=BillingJobRun.Status.SUCCESS,
+                started_at=started_at,
+            )
+
+        with self.assertRaises(ValidationError):
+            BillingJobRun.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                job_name=BillingJobRun.JobName.DAILY_METRIC_GENERATION,
+                service_date=datetime.date(2026, 5, 4),
+                status=BillingJobRun.Status.RUNNING,
+                started_at=started_at,
+                finished_at=started_at,
+            )
+
+    def test_bill_and_billline_reject_duplicate_billing(self):
+        period = self._create_period()
+        accrual = self._create_accrual(period=period, fingerprint="guardrail-acc-dup")
+        bill = Bill.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            period=period,
+            invoice_no="INV-GUARDRAIL-1",
+            currency=period.currency,
+        )
+        BillLine.objects.create(
+            bill=bill,
+            accrual=accrual,
+            charge_type=accrual.charge_type,
+            service_date=accrual.service_date,
+            quantity=accrual.quantity,
+            unit_price=accrual.unit_price,
+            amount=accrual.amount,
+            tax_amount=accrual.tax_amount,
+        )
+
+        with self.assertRaises(ValidationError):
+            Bill.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                period=period,
+                invoice_no="INV-GUARDRAIL-2",
+                currency=period.currency,
+            )
+
+        with self.assertRaises(ValidationError):
+            BillLine.objects.create(
+                bill=bill,
+                accrual=accrual,
+                charge_type=accrual.charge_type,
+                service_date=accrual.service_date,
+                quantity=accrual.quantity,
+                unit_price=accrual.unit_price,
+                amount=accrual.amount,
+                tax_amount=accrual.tax_amount,
+            )
+
+    def test_billing_accrual_rejects_negative_unit_price_and_tax_amount(self):
+        rule = self._create_rule(owner=self.owner, warehouse=self.warehouse)
+
+        with self.assertRaises(ValidationError):
+            BillingAccrual.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                charge_type=rule.charge_type,
+                rule=rule,
+                service_date=datetime.date(2026, 5, 3),
+                currency="CNY",
+                quantity=Decimal("1.0000"),
+                unit_price=Decimal("-1.0000"),
+                amount=Decimal("1.00"),
+                tax_amount=Decimal("0.00"),
+                status=AccrualStatus.OPEN,
+                acc_fingerprint="guardrail-acc-negative-unit-price",
+                created_by=self.user,
+            )
+
+        with self.assertRaises(ValidationError):
+            BillingAccrual.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                charge_type=rule.charge_type,
+                rule=rule,
+                service_date=datetime.date(2026, 5, 4),
+                currency="CNY",
+                quantity=Decimal("1.0000"),
+                unit_price=Decimal("1.0000"),
+                amount=Decimal("1.00"),
+                tax_amount=Decimal("-0.01"),
+                status=AccrualStatus.OPEN,
+                acc_fingerprint="guardrail-acc-negative-tax",
+                created_by=self.user,
+            )
+
+    def test_bill_rejects_invalid_due_date_and_total(self):
+        period = self._create_period(label="2026-05-BILL-CHECK")
+
+        with self.assertRaises(ValidationError):
+            Bill.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                period=period,
+                invoice_no="INV-GUARDRAIL-BAD-DUE",
+                issue_date=datetime.date(2026, 5, 10),
+                due_date=datetime.date(2026, 5, 9),
+                currency=period.currency,
+            )
+
+        with self.assertRaises(ValidationError):
+            Bill.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                period=period,
+                invoice_no="INV-GUARDRAIL-BAD-TOTAL",
+                issue_date=datetime.date(2026, 5, 10),
+                due_date=datetime.date(2026, 5, 12),
+                currency=period.currency,
+                subtotal=Decimal("10.00"),
+                tax_total=Decimal("1.00"),
+                total=Decimal("12.00"),
+            )
+
+    def test_bill_rejects_negative_amount_fields(self):
+        period = self._create_period(label="2026-05-BILL-NONNEG")
+
+        with self.assertRaises(ValidationError):
+            Bill.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                period=period,
+                invoice_no="INV-GUARDRAIL-BAD-NEG",
+                currency=period.currency,
+                subtotal=Decimal("-1.00"),
+                tax_total=Decimal("0.00"),
+                total=Decimal("-1.00"),
+            )
+
+    def test_bill_defaults_issue_date_to_localdate(self):
+        period = self._create_period(label="2026-05-BILL-DATE")
+
+        bill = Bill.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            period=period,
+            invoice_no="INV-GUARDRAIL-LOCALDATE",
+            currency=period.currency,
+        )
+
+        now = timezone.now()
+        expected_issue_date = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
+        self.assertEqual(bill.issue_date, expected_issue_date)
+
+    def test_billline_rejects_amount_fields_that_do_not_match_accrual(self):
+        period = self._create_period(label="2026-05-BILLLINE")
+        accrual = self._create_accrual(period=period, fingerprint="guardrail-acc-billline")
+        bill = Bill.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            period=period,
+            invoice_no="INV-GUARDRAIL-BILLLINE",
+            currency=period.currency,
+        )
+
+        with self.assertRaises(ValidationError):
+            BillLine.objects.create(
+                bill=bill,
+                accrual=accrual,
+                charge_type=accrual.charge_type,
+                service_date=accrual.service_date,
+                quantity=Decimal("2.0000"),
+                unit_price=accrual.unit_price,
+                amount=accrual.amount,
+                tax_amount=accrual.tax_amount,
+            )
+
+        with self.assertRaises(ValidationError):
+            BillLine.objects.create(
+                bill=bill,
+                accrual=accrual,
+                charge_type=accrual.charge_type,
+                service_date=accrual.service_date,
+                quantity=accrual.quantity,
+                unit_price=Decimal("9.9999"),
+                amount=accrual.amount,
+                tax_amount=accrual.tax_amount,
+            )
+
+        with self.assertRaises(ValidationError):
+            BillLine.objects.create(
+                bill=bill,
+                accrual=accrual,
+                charge_type=accrual.charge_type,
+                service_date=accrual.service_date,
+                quantity=accrual.quantity,
+                unit_price=accrual.unit_price,
+                amount=Decimal("9.99"),
+                tax_amount=accrual.tax_amount,
+            )
+
+        with self.assertRaises(ValidationError):
+            BillLine.objects.create(
+                bill=bill,
+                accrual=accrual,
+                charge_type=accrual.charge_type,
+                service_date=accrual.service_date,
+                quantity=accrual.quantity,
+                unit_price=accrual.unit_price,
+                amount=accrual.amount,
+                tax_amount=Decimal("0.01"),
+            )
+
+    def test_billline_rejects_negative_values(self):
+        period = self._create_period(label="2026-05-BLLNNEG")
+        accrual = self._create_accrual(period=period, fingerprint="guardrail-acc-billline-nonneg")
+        bill = Bill.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            period=period,
+            invoice_no="INV-GUARDRAIL-BILLLINE-NONNEG",
+            currency=period.currency,
+        )
+
+        with self.assertRaises(ValidationError):
+            BillLine.objects.create(
+                bill=bill,
+                accrual=accrual,
+                charge_type=accrual.charge_type,
+                service_date=accrual.service_date,
+                quantity=Decimal("-1.0000"),
+                unit_price=Decimal("-10.0000"),
+                amount=Decimal("-10.00"),
+                tax_amount=Decimal("-0.01"),
+            )
+
+    def test_billing_import_rules_from_csv_is_scoped_by_warehouse(self):
+        fieldnames = [
+            "owner_id",
+            "warehouse_id",
+            "charge_type",
+            "calc_method",
+            "unit_price",
+            "currency",
+            "taxable",
+            "tax_rate",
+            "min_charge",
+            "priority",
+            "effective_from",
+            "effective_to",
+            "note",
+        ]
+        with tempfile.NamedTemporaryFile("w+", newline="", suffix=".csv") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "owner_id": self.owner.id,
+                    "warehouse_id": self.warehouse.id,
+                    "charge_type": ChargeType.DISPATCH,
+                    "calc_method": CalcMethod.PER_ORDER,
+                    "unit_price": "10.00",
+                    "currency": "CNY",
+                    "taxable": "1",
+                    "tax_rate": "0.00",
+                    "min_charge": "0.00",
+                    "priority": "100",
+                    "effective_from": "",
+                    "effective_to": "",
+                    "note": "warehouse-1",
+                }
+            )
+            writer.writerow(
+                {
+                    "owner_id": self.owner.id,
+                    "warehouse_id": self.other_warehouse.id,
+                    "charge_type": ChargeType.DISPATCH,
+                    "calc_method": CalcMethod.PER_ORDER,
+                    "unit_price": "20.00",
+                    "currency": "CNY",
+                    "taxable": "1",
+                    "tax_rate": "0.00",
+                    "min_charge": "0.00",
+                    "priority": "100",
+                    "effective_from": "",
+                    "effective_to": "",
+                    "note": "warehouse-2",
+                }
+            )
+            csv_file.flush()
+
+            call_command("billing_import_rules_from_csv", csv_file.name)
+
+        rules = list(
+            BillingRule.objects
+            .filter(owner=self.owner, charge_type=ChargeType.DISPATCH, calc_method=CalcMethod.PER_ORDER)
+            .order_by("warehouse_id")
+        )
+        self.assertEqual(len(rules), 2)
+        self.assertEqual([rule.warehouse_id for rule in rules], [self.warehouse.id, self.other_warehouse.id])
+        self.assertEqual([Decimal(rule.unit_price) for rule in rules], [Decimal("10.0000"), Decimal("20.0000")])
 
 
 class BillingMenuTests(TestCase):
@@ -358,6 +1029,22 @@ class BillingMenuTests(TestCase):
             {"path": "/admin/billing/", "title": "计费", "icon": "el-icon-credit-card"},
             menus,
         )
+
+    def test_console_ribbon_exposes_billing_overview_for_billing_users(self):
+        warehouse = Warehouse.objects.create(code="WHM2", name="Warehouse Menu 2")
+        user = get_user_model().objects.create_user(
+            username="billing-menu-console",
+            password="x",
+            warehouse=warehouse,
+        )
+        permission = Permission.objects.get(codename="view_bill")
+        user.user_permissions.add(permission)
+
+        self.client.force_login(user)
+        response = self.client.get("/console/billing/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("console:billing_overview"))
 
 
 class BillingApiTests(TestCase):
@@ -402,14 +1089,87 @@ class BillingApiTests(TestCase):
             created_by=self.user,
         )
 
-    def test_rules_list_is_scoped_to_current_user_owner(self):
+    def test_rules_list_includes_scoped_and_generic_rules(self):
         own_rule = self._create_rule(unit_price="10.00")
+        generic_rule = BillingRule.objects.create(
+            owner=None,
+            warehouse=None,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("8.00"),
+        )
         self._create_rule(owner=self.other_owner, unit_price="20.00")
+        BillingRule.objects.create(
+            owner=self.owner,
+            warehouse=Warehouse.objects.create(code="WHAPIX", name="Warehouse API X"),
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("30.00"),
+        )
 
         response = self.client.get("/api/billing/rules/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([item["id"] for item in response.data], [own_rule.id])
+        self.assertEqual(
+            sorted(item["id"] for item in response.data),
+            sorted([own_rule.id, generic_rule.id]),
+        )
+
+    def test_rule_tiers_list_includes_scoped_and_generic_rules(self):
+        own_rule = self._create_rule(unit_price="10.00")
+        generic_rule = BillingRule.objects.create(
+            owner=None,
+            warehouse=None,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("8.00"),
+        )
+        other_rule = self._create_rule(owner=self.other_owner, unit_price="20.00")
+        own_tier = BillingRuleTier.objects.create(
+            rule=own_rule,
+            threshold_from=Decimal("0.0000"),
+            threshold_to=Decimal("100.0000"),
+            unit_price=Decimal("10.0000"),
+        )
+        generic_tier = BillingRuleTier.objects.create(
+            rule=generic_rule,
+            threshold_from=Decimal("0.0000"),
+            threshold_to=Decimal("100.0000"),
+            unit_price=Decimal("8.0000"),
+        )
+        BillingRuleTier.objects.create(
+            rule=other_rule,
+            threshold_from=Decimal("0.0000"),
+            threshold_to=Decimal("100.0000"),
+            unit_price=Decimal("20.0000"),
+        )
+
+        response = self.client.get("/api/billing/rule-tiers/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            sorted(item["id"] for item in response.data),
+            sorted([own_tier.id, generic_tier.id]),
+        )
+
+    def test_generic_rule_is_readable_but_not_mutable_for_scoped_user(self):
+        generic_rule = BillingRule.objects.create(
+            owner=None,
+            warehouse=None,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("8.00"),
+        )
+
+        get_response = self.client.get(f"/api/billing/rules/{generic_rule.id}/")
+        patch_response = self.client.patch(
+            f"/api/billing/rules/{generic_rule.id}/",
+            {"note": "should-fail"},
+            format="json",
+        )
+
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(patch_response.status_code, 403)
 
     def test_period_preview_returns_open_accrual_summary(self):
         period = BillingPeriod.objects.create(
@@ -498,6 +1258,66 @@ class BillingApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["invoice_no"], "INV-API-DETAIL")
         self.assertEqual(len(response.data["lines"]), 1)
+
+    def test_bill_list_export_endpoint_returns_workbook(self):
+        period = BillingPeriod.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            label="2026-04-EXPORT-LIST",
+            start_date=datetime.date(2026, 4, 1),
+            end_date=datetime.date(2026, 4, 30),
+            status=PeriodStatus.CLOSED,
+        )
+        rule = self._create_rule(unit_price="20.00")
+        self._create_accrual(
+            rule=rule,
+            amount="20.00",
+            service_date=datetime.date(2026, 4, 5),
+            period=period,
+            status=AccrualStatus.LOCKED,
+            fingerprint="acc-bill-export-list-1",
+        )
+        bill = generate_invoice_for_period(period, invoice_no="INV-API-EXPORT-LIST")
+
+        response = self.client.get("/api/billing/bills/export/", {"period": period.id})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        workbook = load_workbook(io.BytesIO(response.content))
+        sheet = workbook["Bills"]
+        self.assertEqual(sheet["A2"].value, bill.invoice_no)
+        self.assertEqual(sheet["E2"].value, period.label)
+
+    def test_bill_detail_export_endpoint_returns_line_workbook(self):
+        period = BillingPeriod.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            label="2026-04-EXP-DET",
+            start_date=datetime.date(2026, 4, 1),
+            end_date=datetime.date(2026, 4, 30),
+            status=PeriodStatus.CLOSED,
+        )
+        rule = self._create_rule(unit_price="21.00")
+        self._create_accrual(
+            rule=rule,
+            amount="21.00",
+            service_date=datetime.date(2026, 4, 6),
+            period=period,
+            status=AccrualStatus.LOCKED,
+            fingerprint="acc-bill-export-detail-1",
+        )
+        bill = generate_invoice_for_period(period, invoice_no="INV-API-EXPORT-DETAIL")
+
+        response = self.client.get(f"/api/billing/bills/{bill.id}/export/")
+
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(io.BytesIO(response.content))
+        self.assertEqual(workbook["Bill"]["B2"].value, bill.invoice_no)
+        self.assertEqual(workbook["Lines"]["A2"].value, "2026-04-06")
+        self.assertEqual(workbook["Lines"]["B2"].value, ChargeType.DISPATCH)
 
     def test_superuser_can_create_period_for_explicit_warehouse(self):
         other_warehouse = Warehouse.objects.create(code="WHAPI2", name="Warehouse API 2")
@@ -845,3 +1665,139 @@ class BillingMetricGenerationTests(TestCase):
             metric_type="CBM",
         )
         self.assertEqual(Decimal(cbm_metric.value), Decimal("1.5000"))
+
+
+class BillingConsolePageTests(TestCase):
+    def setUp(self):
+        self.owner = Owner.objects.create(name="Owner Console", code="OWCON")
+        self.warehouse = Warehouse.objects.create(code="WHCON", name="Warehouse Console")
+        self.user = get_user_model().objects.create_user(
+            username="billing-console-user",
+            password="x",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="view_bill"),
+            Permission.objects.get(codename="view_billingperiod"),
+            Permission.objects.get(codename="view_billingaccrual"),
+        )
+        self.client.force_login(self.user)
+
+        self.period = BillingPeriod.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            label="2026-03-CONSOLE",
+            start_date=datetime.date(2026, 3, 1),
+            end_date=datetime.date(2026, 3, 31),
+            status=PeriodStatus.CLOSED,
+        )
+        self.rule = BillingRule.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.STORAGE,
+            calc_method=CalcMethod.PER_CBM_DAY,
+            unit_price=Decimal("3.5000"),
+        )
+        self.accrual_a = BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            period=self.period,
+            charge_type=ChargeType.STORAGE,
+            rule=self.rule,
+            service_date=datetime.date(2026, 3, 1),
+            currency="CNY",
+            quantity=Decimal("12.0000"),
+            unit_price=Decimal("3.5000"),
+            amount=Decimal("42.00"),
+            tax_amount=Decimal("2.52"),
+            status=AccrualStatus.LOCKED,
+            acc_fingerprint="console-acc-1",
+            created_by=self.user,
+        )
+        self.accrual_b = BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            period=self.period,
+            charge_type=ChargeType.DISPATCH,
+            rule=BillingRule.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                charge_type=ChargeType.DISPATCH,
+                calc_method=CalcMethod.PER_ORDER,
+                unit_price=Decimal("10.0000"),
+            ),
+            service_date=datetime.date(2026, 3, 2),
+            currency="CNY",
+            quantity=Decimal("5.0000"),
+            unit_price=Decimal("10.0000"),
+            amount=Decimal("50.00"),
+            tax_amount=Decimal("3.00"),
+            status=AccrualStatus.LOCKED,
+            acc_fingerprint="console-acc-2",
+            created_by=self.user,
+        )
+        self.bill = Bill.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            period=self.period,
+            invoice_no="INV-CONSOLE-0001",
+            issue_date=datetime.date(2026, 4, 1),
+            due_date=datetime.date(2026, 4, 10),
+            currency="CNY",
+            subtotal=Decimal("92.00"),
+            tax_total=Decimal("5.52"),
+            total=Decimal("97.52"),
+            status=BillStatus.ISSUED,
+        )
+        BillLine.objects.create(
+            bill=self.bill,
+            accrual=self.accrual_a,
+            charge_type=self.accrual_a.charge_type,
+            service_date=self.accrual_a.service_date,
+            quantity=self.accrual_a.quantity,
+            unit_price=self.accrual_a.unit_price,
+            amount=self.accrual_a.amount,
+            tax_amount=self.accrual_a.tax_amount,
+            description="按日仓储费",
+        )
+        BillLine.objects.create(
+            bill=self.bill,
+            accrual=self.accrual_b,
+            charge_type=self.accrual_b.charge_type,
+            service_date=self.accrual_b.service_date,
+            quantity=self.accrual_b.quantity,
+            unit_price=self.accrual_b.unit_price,
+            amount=self.accrual_b.amount,
+            tax_amount=self.accrual_b.tax_amount,
+            description="订单处理费",
+        )
+
+    def test_billing_overview_page_renders_period_summary_and_bill_link(self):
+        response = self.client.get(
+            reverse("console:billing_overview"),
+            {"period": self.period.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "计费总览")
+        self.assertContains(response, self.period.label)
+        self.assertContains(response, self.bill.invoice_no)
+        self.assertContains(response, "¥92.00")
+        self.assertContains(response, reverse("console:billing_bill_detail", args=[self.bill.id]))
+
+    def test_bill_detail_page_filters_lines_by_charge_type(self):
+        response = self.client.get(
+            reverse("console:billing_bill_detail", args=[self.bill.id]),
+            {
+                "period": self.period.id,
+                "owner": self.owner.id,
+                "warehouse": self.warehouse.id,
+                "charge_type": ChargeType.STORAGE,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "账单详情")
+        self.assertContains(response, "按日仓储费")
+        self.assertNotContains(response, "订单处理费")

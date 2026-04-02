@@ -1,0 +1,229 @@
+{% extends "console/base_console.html" %}
+
+{% block title %}账单详情{% endblock %}
+
+{% block content %}
+<div class="bill-shell">
+  <section class="bill-hero">
+    <div>
+      <div class="bill-eyebrow">Bill Detail</div>
+      <h1>{{ bill.invoice_no }}</h1>
+      <div class="hero-meta">
+        <span class="pill">{{ bill.get_status_display }}</span>
+        <span>{{ bill.owner.name }}</span>
+        <span>{{ bill.warehouse.name }}</span>
+        <span>{{ bill.period.label }}</span>
+      </div>
+    </div>
+    <a class="hero-link" href="{{ overview_url }}">返回总览</a>
+  </section>
+
+  <section class="headline-grid">
+    <article class="headline-card">
+      <div class="label">不含税小计</div>
+      <div class="value">¥{{ bill.subtotal|floatformat:2 }}</div>
+      <div class="meta">账单整体金额</div>
+    </article>
+    <article class="headline-card">
+      <div class="label">税额合计</div>
+      <div class="value">¥{{ bill.tax_total|floatformat:2 }}</div>
+      <div class="meta">账单整体税额</div>
+    </article>
+    <article class="headline-card">
+      <div class="label">价税合计</div>
+      <div class="value">¥{{ bill.total|floatformat:2 }}</div>
+      <div class="meta">{% if bill.due_date %}到期 {{ bill.due_date|date:"Y-m-d" }}{% else %}未设置到期日{% endif %}</div>
+    </article>
+    <article class="headline-card emphasis">
+      <div class="label">当前筛选结果</div>
+      <div class="value">{{ filtered_summary.line_count }} 条</div>
+      <div class="meta">¥{{ filtered_summary.total|floatformat:2 }}{% if has_filters %} · 已应用筛选{% else %} · 全部明细{% endif %}</div>
+    </article>
+  </section>
+
+  <form method="get" class="filter-card">
+    <input type="hidden" name="owner" value="{{ request.GET.owner|default:bill.owner_id }}">
+    <input type="hidden" name="warehouse" value="{{ request.GET.warehouse|default:bill.warehouse_id }}">
+    <input type="hidden" name="period" value="{{ request.GET.period|default:bill.period_id }}">
+    <div class="filter-grid">
+      <label>
+        <span>日期从</span>
+        <input type="date" name="date_from" value="{{ date_from }}">
+      </label>
+      <label>
+        <span>日期到</span>
+        <input type="date" name="date_to" value="{{ date_to }}">
+      </label>
+      <label>
+        <span>费用类型</span>
+        <select name="charge_type">
+          <option value="">全部类型</option>
+          {% for code, label in charge_type_choices %}
+            <option value="{{ code }}"{% if selected_charge_type == code %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>关键字</span>
+        <input type="text" name="q" value="{{ keyword }}" placeholder="匹配说明或应计指纹">
+      </label>
+      <div class="filter-actions">
+        <button class="btn solid" type="submit">筛选</button>
+        <a class="btn" href="{% url 'console:billing_bill_detail' bill.id %}?{{ back_query }}">清空</a>
+      </div>
+    </div>
+  </form>
+
+  <section class="chip-row">
+    <a class="chip{% if not selected_charge_type %} active{% endif %}" href="{% url 'console:billing_bill_detail' bill.id %}?{{ back_query }}">全部</a>
+    {% for row in grouped_rows %}
+      <a class="chip{% if selected_charge_type == row.charge_type %} active{% endif %}" href="{% url 'console:billing_bill_detail' bill.id %}?{{ back_query }}{% if back_query %}&{% endif %}charge_type={{ row.charge_type }}">
+        {{ row.label }} · ¥{{ row.total|floatformat:2 }}
+      </a>
+    {% endfor %}
+  </section>
+
+  <section class="table-card">
+    <div class="table-head">
+      <div>
+        <h2>账单明细</h2>
+        <p>保留服务日期、费用类型、数量、单价、金额和说明，足够追溯但不过度技术化。</p>
+      </div>
+      <div class="table-note">开票日期 {{ bill.issue_date|date:"Y-m-d" }}</div>
+    </div>
+    <table class="detail-table">
+      <thead>
+        <tr>
+          <th>日期</th>
+          <th>费用类型</th>
+          <th>数量</th>
+          <th>单价/费率</th>
+          <th>金额</th>
+          <th>税额</th>
+          <th>说明</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in lines %}
+          <tr>
+            <td>{{ line.service_date|date:"Y-m-d" }}</td>
+            <td>{{ line.get_charge_type_display }}</td>
+            <td>{{ line.quantity|floatformat:4 }}</td>
+            <td>{{ line.unit_price|floatformat:4 }}</td>
+            <td><strong>¥{{ line.amount|floatformat:2 }}</strong></td>
+            <td>¥{{ line.tax_amount|floatformat:2 }}</td>
+            <td>{{ line.description|default:"-" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="empty-cell">当前筛选下没有账单明细。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="group-card">
+    <div class="table-head">
+      <div>
+        <h2>当前筛选汇总</h2>
+        <p>方便演示时快速回答各收费项各收了多少钱。</p>
+      </div>
+      <div class="table-note">¥{{ filtered_summary.total|floatformat:2 }}</div>
+    </div>
+    <div class="group-grid">
+      {% for row in grouped_rows %}
+        <article class="group-item">
+          <div class="group-label">{{ row.label }}</div>
+          <div class="group-total">¥{{ row.total|floatformat:2 }}</div>
+          <div class="group-meta">{{ row.line_count }} 条 · 税额 ¥{{ row.tax_total|floatformat:2 }}</div>
+        </article>
+      {% empty %}
+        <div class="empty-cell">当前筛选下没有可汇总的收费项。</div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<style>
+  .bill-shell { display:grid; gap:18px; }
+  .bill-hero {
+    display:flex; justify-content:space-between; align-items:flex-end; gap:16px;
+    padding:24px 26px; border:1px solid var(--line); border-radius:24px;
+    background:
+      radial-gradient(circle at top right, rgba(11,95,255,.14), transparent 32%),
+      linear-gradient(135deg, #fff8ef 0%, #fffdf8 45%, #f6fbff 100%);
+  }
+  .bill-eyebrow {
+    display:inline-block; padding:5px 10px; border-radius:999px; margin-bottom:8px;
+    background:#fff; color:#b45309; font-size:12px; font-weight:700; letter-spacing:.08em;
+    text-transform:uppercase;
+  }
+  .bill-hero h1 { margin:0; font-size:34px; line-height:1.05; }
+  .hero-meta { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; color:var(--muted); }
+  .hero-link {
+    color:#0b5fff; text-decoration:none; font-weight:700;
+    padding:10px 14px; border-radius:999px; border:1px solid rgba(11,95,255,.18); background:#fff;
+  }
+  .pill {
+    display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px;
+    background:#eef4ff; color:#0b5fff; font-size:12px; font-weight:700;
+  }
+
+  .headline-grid, .filter-grid, .group-grid { display:grid; gap:12px; }
+  .headline-grid { grid-template-columns:repeat(4, minmax(0, 1fr)); }
+  .headline-card, .filter-card, .table-card, .group-card {
+    border:1px solid var(--line); border-radius:22px; background:#fff;
+  }
+  .headline-card {
+    padding:18px; background:linear-gradient(160deg, #fff, #f9fbff);
+  }
+  .headline-card.emphasis {
+    background:linear-gradient(160deg, #0f172a 0%, #16233d 100%);
+    color:#f8fafc;
+  }
+  .headline-card.emphasis .meta { color:rgba(248,250,252,.74); }
+  .headline-card .label { color:var(--muted); font-size:12px; text-transform:uppercase; font-weight:700; }
+  .headline-card .value { margin-top:8px; font-size:30px; font-weight:800; line-height:1.05; }
+  .headline-card .meta { margin-top:10px; color:var(--muted); font-size:13px; }
+
+  .filter-card { padding:18px 20px; }
+  .filter-grid { grid-template-columns:repeat(5, minmax(0, 1fr)); align-items:end; }
+  .filter-grid label { display:grid; gap:6px; }
+  .filter-grid span { font-size:12px; color:var(--muted); font-weight:600; }
+  .filter-grid input, .filter-grid select {
+    width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:14px; background:#fff;
+  }
+  .filter-actions { display:flex; gap:10px; justify-content:flex-end; }
+  .btn.solid { background:#0b5fff; color:#fff; border-color:#0b5fff; text-decoration:none; }
+
+  .chip-row { display:flex; flex-wrap:wrap; gap:8px; }
+  .chip {
+    display:inline-flex; align-items:center; padding:8px 12px; border-radius:999px;
+    border:1px solid var(--line); background:#fff; color:inherit; text-decoration:none; font-size:13px;
+  }
+  .chip.active { background:#0b5fff; color:#fff; border-color:#0b5fff; }
+
+  .table-card, .group-card { padding:18px 20px; }
+  .table-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:14px; }
+  .table-head h2 { margin:0 0 4px; font-size:18px; }
+  .table-head p { margin:0; color:var(--muted); font-size:13px; }
+  .table-note { color:var(--muted); font-weight:600; }
+  .detail-table th { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .detail-table td, .detail-table th { border-bottom:1px solid var(--line); padding:10px 6px; text-align:left; vertical-align:top; }
+  .group-grid { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+  .group-item {
+    padding:16px; border:1px solid #ecf1f7; border-radius:18px; background:linear-gradient(160deg, #fbfdff, #fff);
+  }
+  .group-label { font-size:13px; color:var(--muted); font-weight:700; text-transform:uppercase; }
+  .group-total { margin-top:8px; font-size:28px; font-weight:800; line-height:1.05; }
+  .group-meta, .empty-cell { margin-top:8px; color:var(--muted); font-size:13px; text-align:center; }
+
+  @media (max-width: 1100px) {
+    .headline-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+    .filter-grid, .group-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 720px) {
+    .bill-hero, .table-head, .filter-actions { flex-direction:column; align-items:stretch; }
+    .headline-grid, .filter-grid, .group-grid { grid-template-columns:1fr; }
+  }
+</style>
+{% endblock %}

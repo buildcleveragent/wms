@@ -29,9 +29,9 @@ class FloorNoListFilter(admin.SimpleListFilter):
 
 @admin.register(Subwarehouse)
 class SubwarehouseAdmin(admin.ModelAdmin):
-    fields = ("code", "name",  "floor_no",)
-    list_display = ("code", "name",  "floor_no", "loc_cnt", "locations_link","is_active",)
-    list_filter = ( "is_active", FloorNoListFilter)
+    fields = ("warehouse", "code", "name",  "floor_no",)
+    list_display = ("warehouse", "code", "name",  "floor_no", "loc_cnt", "locations_link","is_active",)
+    list_filter = ("warehouse", "is_active", FloorNoListFilter)
     search_fields = ("code", "name","floor_no",)
     ordering = ("code",)
     list_per_page = 50
@@ -54,12 +54,12 @@ class SubwarehouseAdmin(admin.ModelAdmin):
         return format_html('<a href="{}">{}</a>', url, _("查看该子仓库位"))
 
 ##---------- Admins ----------
-# @admin.register(Warehouse)
-# class WarehouseAdmin(HideAuditFieldsMixin, admin.ModelAdmin):
-#     fields = ("code", "name")
-#     list_display = ("code", "name")
-#     search_fields = ("code", "name")
-#     ordering = ("code",)
+@admin.register(Warehouse)
+class WarehouseAdmin(admin.ModelAdmin):
+    fields = ("code", "name")
+    list_display = ("code", "name")
+    search_fields = ("code", "name")
+    ordering = ("code",)
 
 @admin.action(description="批量设为禁用")
 def mark_disabled(modeladmin, request, queryset):
@@ -80,18 +80,18 @@ def unmark_frozen(modeladmin, request, queryset):
 @admin.register(Location)
 class LocationAdmin(admin.ModelAdmin):
     list_display = (
-        "code", "name", "zone_type", "subwarehouse","level_code","col_no", "slot_no", "barcode","is_disabled", "is_frozen")
+        "warehouse", "code", "name", "zone_type", "subwarehouse","level_code","col_no", "slot_no", "barcode","is_disabled", "is_frozen")
     list_filter = (
-        "subwarehouse", "zone_type", "is_disabled", "is_frozen",
+        "warehouse", "subwarehouse", "zone_type", "is_disabled", "is_frozen",
     )
     search_fields = ("code", "name", "barcode", )
     ordering = ("subwarehouse", "zone_type", "code")
-    readonly_fields = ("subwarehouse","level_code","col_no","slot_no", "barcode", )
+    readonly_fields = ("warehouse", "subwarehouse","level_code","col_no","slot_no", "barcode", )
 
     fieldsets = (
         (None, {
             'fields': (
-                "code", "name", "zone_type", "subwarehouse","level_code","col_no", "slot_no", "barcode", )
+                "code", "name", "zone_type", ("warehouse", "subwarehouse"),"level_code","col_no", "slot_no", "barcode", )
         }),
         ("存储能力", {
             'fields': (("max_volume_m3", "max_weight_kg"))
@@ -123,7 +123,7 @@ class LocationAdmin(admin.ModelAdmin):
 class ContainerAdmin(admin.ModelAdmin):
     # —— 列表展示 —— #
     list_display = (
-        "id", "container_no", "container_type", "owner",
+        "id", "container_no", "container_type", "owner", "warehouse",
         "location", "parent",
         "volume_l", "gross_limit_kg_disp",
     )
@@ -151,7 +151,7 @@ class ContainerAdmin(admin.ModelAdmin):
     fieldsets = (
         ("基础信息", {
             "fields": (("container_no", "container_type"),
-                       ("owner", ),
+                       ("owner", "warehouse"),
                        ("location", "parent")),
         }),
         ("尺寸/载重", {

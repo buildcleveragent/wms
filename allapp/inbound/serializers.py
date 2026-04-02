@@ -12,5 +12,7 @@ class ReceiveWithoutOrderItemSerializer(serializers.Serializer):
 
 class ReceiveWithoutOrderPayloadSerializer(serializers.Serializer):
     owner_id = serializers.IntegerField(required=True)
+    warehouse_id = serializers.IntegerField(required=False, allow_null=True)
+    location_id = serializers.IntegerField(required=False, allow_null=True)
     remark = serializers.CharField(required=False, allow_blank=True, default="")
     items = ReceiveWithoutOrderItemSerializer(many=True, required=True)

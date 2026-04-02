@@ -310,7 +310,8 @@ def scan_task(
     if not product_id:
         raise ValidationError("条码解析未识别商品。")
     pack_qty = r.get("pack_qty") or 1
-    label_key = (r.get("label_key") or "").strip() or None
+    raw_label_key = (r.get("label_key") or "").strip() or None
+    label_key = raw_label_key
     code_type = r.get("code_type")
     uom_code = r.get("uom_code")
     lot_no = r.get("lot_no")
@@ -477,29 +478,9 @@ def scan_task(
         source="PDA",
     )
 
-    # 6) 写扫描日志（严格对齐你的字段）
-    scan = TaskScanLog.objects.create(
-        scan_snapshot_rev=rev,
-        owner_id=task.owner_id,  # ✅ 必填：归属货主
-        task_id=task.id,
-        task_line_id=line.id,
-        product_id=product_id,
-        location_id=location_id or getattr(line, "from_location_id", None) or getattr(line, "to_location_id", None) ,
-        method="SCAN",
-        source="PDA",
-        by_user_id=user_id,
-        barcode=barcode,
-        label_key=label_key,
-        code_type=code_type,
-        uom_code=uom_code,
-        pack_qty=pack_qty,
-        qty_base_delta=inc_qty,
-        qty_base=(inc_qty if task.task_type == "COUNT" else None),
-        lot_no=lot_no,
-        mfg_date=mfg_date,
-        exp_date=exp_date,
-        fp=fp,
-    )
+    # 6) 回填当前扫描对应的快照版本号
+    TaskScanLog.objects.filter(pk=scan.pk).update(scan_snapshot_rev=rev)
+    scan.scan_snapshot_rev = rev
 
     return {"idempotent": False, "line_id": line.id, "qty_done": line.qty_done, "scan_id": scan.id}
 
@@ -1718,4 +1699,3 @@ FINALIZERS = {
     # WmsTask.TaskType.PICK: services.finalize_pick_task_after_logs,
     # ...
 }
-

@@ -40,13 +40,13 @@ class CustomerAdmin(admin.ModelAdmin):
 # --- Employee Admin ---
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
-    list_display = ('code', 'name', 'gender', 'department', 'position', 'mobile', 'email', )
+    list_display = ('code', 'name', 'warehouse', 'gender', 'department', 'position', 'mobile', 'email', )
     search_fields = ['code', 'name', 'department', 'position']
-    list_filter = ['department', 'position', ]
+    list_filter = ['warehouse', 'department', 'position', ]
     ordering = ['code']
 
     fields = (
-        'code', 'name', 'gender', 'phone', 'mobile', 'email',
+        'code', 'name', 'warehouse', 'gender', 'phone', 'mobile', 'email',
         'department', 'position', 'hire_date', 'leave_date',
         'birthday', 'education', 'id_number', 'bank_name', 'bank_account', 'address',
     )
@@ -55,13 +55,13 @@ class EmployeeAdmin(admin.ModelAdmin):
 # --- CarrierCompany Admin ---
 @admin.register(CarrierCompany)
 class CarrierCompanyAdmin(admin.ModelAdmin):
-    list_display = ('name', 'manager', 'mobile', 'phone', 'owner')
+    list_display = ('name', 'manager', 'warehouse', 'mobile', 'phone', 'owner')
     search_fields = ['name', 'manager', 'owner__name']
-    list_filter = ['owner']
+    list_filter = ['warehouse', 'owner']
     ordering = ['name']
 
     fields = (
-        'name', 'manager', 'owner',
+        'name', 'manager', 'warehouse', 'owner',
         'mobile', 'phone'
     )
 
@@ -141,4 +141,3 @@ class DictItemAdmin(admin.ModelAdmin):
     fields = (
         'category', 'code', 'name', 'value', 'extra', 'sort_order'
     )
-
