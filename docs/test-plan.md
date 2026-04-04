@@ -86,6 +86,9 @@ Executable coverage for the eight flows lives in:
 Manual multi-client smoke companion lives in:
 
 - `docs/business-flow-smoke-checklist.md`
+- `docs/data-accuracy-runbook.md`
+- `docs/data-accuracy-role-checklist.md`
+- `docs/data-accuracy-daily-record-template.md`
 
 ### 5. Frontend and Multi-Client Smoke Tests
 
@@ -116,6 +119,21 @@ Track separately from feature regression:
 - Unauthorized and cross-scope access attempts
 - Backup, restore, and migration verification
 - Scheduler and command observability
+
+Current executable P1-1 coverage includes:
+
+- `inbound.create_receive_task_draft()` repeated call remains single-task and single-line
+- `outbound.owner_approve() / allocate_inventory()` repeated call does not double-freeze inventory
+- `tasking.services_posting.post_task()` repeated call does not execute posting twice
+- `billing.generate_metrics_for_date()` repeated call does not duplicate daily metrics
+- `inbound.create_receive_task_draft()` true concurrent submit still creates exactly one receive task
+- `outbound.owner_approve() / allocate_inventory()` true concurrent approval still freezes inventory once
+- `tasking.services_posting.post_task()` true concurrent submit still executes posting handler once
+- `billing` scheduler true concurrent run still claims a single `BillingJobRun` and skips the loser
+- `billing.lock_period()` true concurrent close only allows one successful close for the same period label/range
+- `billing.generate_invoice_for_period()` true concurrent invoice only allows one successful invoice for the same period
+- `inventory.generate_inventory_snapshot_for_date()` true concurrent generation stays single-result and does not corrupt the final snapshot
+- `billing.generate_metrics_for_date()` true concurrent generation for the same day survives unique-key write races and keeps a single metric row
 
 ## CI Suite Layout
 

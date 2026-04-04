@@ -1,7 +1,9 @@
 import datetime
 import json
+import tempfile
 from decimal import Decimal
 from io import StringIO
+from pathlib import Path
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -476,3 +478,141 @@ class DataAccuracyCommandTests(TestCase):
         )
         self.assertIn("missing_serial_no", serial_problem_text)
         self.assertIn("tx_abs_qty_not_one", serial_problem_text)
+
+    def test_reconcile_data_accuracy_cleanup_command_applies_safe_fixes(self):
+        self.create_consistent_inventory()
+        self.create_consistent_billing()
+        InventorySummary.objects.filter(
+            owner=self.owner,
+            product=self.product,
+        ).update(
+            onhand_qty=Decimal("4.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            available_qty=Decimal("4.0000"),
+        )
+        Bill.objects.filter(invoice_no="INV-ACC-001").update(total=Decimal("9.99"))
+
+        out = StringIO()
+        call_command(
+            "reconcile_data_accuracy_cleanup",
+            "--owner",
+            str(self.owner.id),
+            "--apply-safe-fixes",
+            "--json",
+            stdout=out,
+        )
+
+        payload = json.loads(out.getvalue())
+        self.assertFalse(payload["before"]["ok"])
+        self.assertEqual(payload["before"]["issue_count"], 2)
+        self.assertTrue(payload["after"]["ok"])
+        self.assertEqual(payload["after"]["issue_count"], 0)
+        self.assertEqual(
+            payload["fixes"]["inventory_summaries"]["updated"],
+            1,
+        )
+        self.assertEqual(payload["fixes"]["bill_headers"]["updated"], 1)
+
+        summary = InventorySummary.objects.get(owner=self.owner, product=self.product)
+        bill = Bill.objects.get(invoice_no="INV-ACC-001")
+        self.assertEqual(summary.onhand_qty, Decimal("5.0000"))
+        self.assertEqual(summary.available_qty, Decimal("4.0000"))
+        self.assertEqual(bill.total, Decimal("2.50"))
+
+    def test_reconcile_data_accuracy_cleanup_command_skips_summary_rebuild_for_warehouse_scope(self):
+        self.create_consistent_inventory()
+
+        out = StringIO()
+        call_command(
+            "reconcile_data_accuracy_cleanup",
+            "--owner",
+            str(self.owner.id),
+            "--warehouse",
+            str(self.warehouse.id),
+            "--apply-safe-fixes",
+            "--json",
+            stdout=out,
+        )
+
+        payload = json.loads(out.getvalue())
+        self.assertTrue(payload["after"]["ok"])
+        self.assertTrue(payload["fixes"]["inventory_summaries"]["skipped"])
+
+    def test_generate_data_accuracy_workpack_command_creates_prefilled_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "accuracy-workpack"
+            out = StringIO()
+
+            call_command(
+                "generate_data_accuracy_workpack",
+                "--owner",
+                str(self.owner.id),
+                "--warehouse",
+                str(self.warehouse.id),
+                "--period",
+                str(self.period.id),
+                "--days",
+                "5",
+                "--output-dir",
+                str(output_dir),
+                stdout=out,
+            )
+
+            self.assertIn(str(output_dir), out.getvalue())
+            scope_payload = json.loads((output_dir / "scope.json").read_text(encoding="utf-8"))
+            self.assertEqual(scope_payload["owner"]["id"], self.owner.id)
+            self.assertEqual(scope_payload["warehouse"]["id"], self.warehouse.id)
+            self.assertEqual(scope_payload["period"]["id"], self.period.id)
+            self.assertEqual(scope_payload["service_date"], self.period.end_date.isoformat())
+            self.assertEqual(scope_payload["shadow_run_days"], 5)
+
+            commands = (output_dir / "commands.sh").read_text(encoding="utf-8")
+            self.assertIn(
+                (
+                    f"python manage.py inventory_generate_snapshot --date {self.period.end_date.isoformat()} "
+                    f"--owner {self.owner.id} --warehouse {self.warehouse.id}"
+                ),
+                commands,
+            )
+            self.assertIn(
+                (
+                    f"python manage.py reconcile_data_accuracy --owner {self.owner.id} "
+                    f"--warehouse {self.warehouse.id} --period {self.period.id} --json"
+                ),
+                commands,
+            )
+
+            runbook = (output_dir / "RUNBOOK.md").read_text(encoding="utf-8")
+            self.assertIn(self.owner.code, runbook)
+            self.assertIn(self.warehouse.code, runbook)
+            self.assertIn(self.period.label, runbook)
+
+            daily_record_rows = (
+                (output_dir / "daily-record.csv")
+                .read_text(encoding="utf-8")
+                .strip()
+                .splitlines()
+            )
+            self.assertEqual(len(daily_record_rows), 10)
+            self.assertIn(f",{self.owner.id},{self.warehouse.id},{self.period.id},", daily_record_rows[1])
+            self.assertTrue(daily_record_rows[1].endswith("Day 0 baseline"))
+            self.assertTrue(daily_record_rows[-1].endswith("Day 8 shadow run 5/5"))
+
+    def test_generate_data_accuracy_workpack_command_rejects_period_scope_mismatch(self):
+        other_warehouse = Warehouse.objects.create(code="ACC-WH-02", name="Other Warehouse")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertRaises(CommandError):
+                call_command(
+                    "generate_data_accuracy_workpack",
+                    "--owner",
+                    str(self.owner.id),
+                    "--warehouse",
+                    str(other_warehouse.id),
+                    "--period",
+                    str(self.period.id),
+                    "--output-dir",
+                    str(Path(tmpdir) / "invalid-workpack"),
+                )

@@ -10,6 +10,8 @@ def create_receive_task_draft(order, by_user=None):
     """
     根据入库订单生成一张【收货(RECEIVE)】任务草稿（幂等：同源只建一张）。
     """
+    order = type(order).objects.select_for_update().get(pk=order.pk)
+
     # 1) 幂等：已有同源任务则直接返回（排除已取消）
     exists = (WmsTask.objects
               .filter(task_type=WmsTask.TaskType.RECEIVE,

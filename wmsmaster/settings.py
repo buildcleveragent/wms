@@ -18,21 +18,31 @@ import environ
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 env = environ.Env(
-    DEBUG=(bool, False)
+    DEBUG=(bool, False),
+    ENABLE_DEBUG_TOOLBAR=(bool, True),
+    CORS_ALLOW_ALL_ORIGINS=(bool, False),
+    LOG_LEVEL=(str, "INFO"),
 )
 environ.Env.read_env(BASE_DIR / ".env")
+
+
+def _csv_env(name, default=None):
+    value = env(name, default=None)
+    if value is None:
+        return list(default or [])
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in str(value).split(",") if item.strip()]
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env("SECRET_KEY", default="changeme-secret-key")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-# DEBUG = env.bool("DEBUG")
-DEBUG=True
-# DEBUG=False
+DEBUG = env.bool("DEBUG", default=False)
+ENABLE_DEBUG_TOOLBAR = DEBUG and env.bool("ENABLE_DEBUG_TOOLBAR", default=True)
 
 # Application definition
 INSTALLED_APPS = [
-    'debug_toolbar',  # 确保 django-debug-toolbar 在这里
     'allapp.core',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -68,6 +78,9 @@ INSTALLED_APPS = [
     'allapp.strategies',
 
 ]
+
+if ENABLE_DEBUG_TOOLBAR:
+    INSTALLED_APPS.insert(0, "debug_toolbar")
 
 AUTH_USER_MODEL = 'accounts.User'
 
@@ -111,19 +124,19 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'debug_toolbar.middleware.DebugToolbarMiddleware',
-    'django_htmx.middleware.HtmxMiddleware'
-    # 'debug_toolbar.middleware.DebugToolbarMiddleware',
-
+    'django_htmx.middleware.HtmxMiddleware',
 ]
-INTERNAL_IPS = ['127.0.0.1']  # 允许调试工具显示
+
+if ENABLE_DEBUG_TOOLBAR:
+    MIDDLEWARE.insert(8, "debug_toolbar.middleware.DebugToolbarMiddleware")
+
+INTERNAL_IPS = _csv_env("INTERNAL_IPS", default=["127.0.0.1"]) if ENABLE_DEBUG_TOOLBAR else []
 
 # 允许指定的域访问（修改为你的前端 URL）
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:5173',  # 前端开发时的地址
-    # 如果生产环境用的是不同的域名（例如 admin.example.com），则添加
-    'https://admin.example.com',
-]
+CORS_ALLOWED_ORIGINS = _csv_env(
+    "CORS_ALLOWED_ORIGINS",
+    default=["http://localhost:5173", "http://127.0.0.1:5173"] if DEBUG else [],
+)
 
 # MIDDLEWARE_CLASSES = (
 #    'admin_model_list_order.middleware.AdminModelListOrder',
@@ -154,6 +167,15 @@ WSGI_APPLICATION = 'wmsmaster.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+db_options = {
+    "charset": "utf8mb4",  # 避免乱码
+    # 如需 SSL，可以在这里加 SSL 相关参数
+    # "ssl": {"ca": "/path/to/ca.pem", "cert": "...", "key": "..."},
+}
+db_socket = env("DB_SOCKET", default="")
+if db_socket:
+    db_options["unix_socket"] = db_socket
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",  # 或 django.db.backends.mysql
@@ -162,11 +184,7 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD", default=""),  # 密码
         "HOST": env("DB_HOST", default="127.0.0.1"),       # 主机（本机用 localhost 或 127.0.0.1）
         "PORT": env("DB_PORT", default="3306"),            # 端口
-        "OPTIONS": {
-            "charset": "utf8mb4",  # 避免乱码
-            # 如需 SSL，可以在这里加 SSL 相关参数
-            # "ssl": {"ca": "/path/to/ca.pem", "cert": "...", "key": "..."},
-        },
+        "OPTIONS": db_options,
         'TEST': {
             'OPTIONS': {
                 'init_command': 'SET foreign_key_checks = 0;',
@@ -214,13 +232,15 @@ LOGOUT_REDIRECT_URL = "/accounts/login/"
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+LOG_LEVEL = env("LOG_LEVEL", default="INFO").upper()
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "handlers": {
         "console": {"class": "logging.StreamHandler"},
     },
-    "root": {"handlers": ["console"], "level": "DEBUG"},
+    "root": {"handlers": ["console"], "level": LOG_LEVEL},
     # 可选：减少重复
     "loggers": {
         "django.server": {"handlers": ["console"], "level": "INFO", "propagate": False},
@@ -239,8 +259,14 @@ TASKING_POST_ONLY_APPROVED = True
 TASKING_DEFAULT_RECEIVE_LOCATION_ID = 241            # 替换为你“收货暂存位”的ID
 TASKING_DEFAULT_PUTAWAY_FROM_LOCATION_ID = 241       # 替换为你“待上架暂存位”的ID
 
-ALLOWED_HOSTS = ["127.0.0.1", "localhost","192.168.187.128","192.168.1.9","192.168.61.128","*"]
-CSRF_TRUSTED_ORIGINS = ["http://127.0.0.1", "http://localhost"]
+ALLOWED_HOSTS = _csv_env(
+    "ALLOWED_HOSTS",
+    default=["127.0.0.1", "localhost", "testserver"],
+)
+CSRF_TRUSTED_ORIGINS = _csv_env(
+    "CSRF_TRUSTED_ORIGINS",
+    default=["http://127.0.0.1", "http://localhost"],
+)
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
 
@@ -264,7 +290,7 @@ INVENTORY_SNAPSHOT_LOCATION_AREA_RESOLVER = env(
 TEMPLATES[0]['OPTIONS']['context_processors'] += [
     'allapp.console.context_processors.console_menu',
 ]
-CORS_ALLOW_ALL_ORIGINS = True  # 联调阶段
+CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)
 # Media文件配置
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')

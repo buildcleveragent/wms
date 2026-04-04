@@ -1,15 +1,17 @@
 # allapp/billing/services.py
+from allapp.outbound.models import OutboundOrder
+from allapp.outbound.enums import PricingStatus
 import datetime
 from calendar import monthrange
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, Tuple, Dict, Set, Iterable
 import importlib
-
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum, Q, F, Prefetch, ExpressionWrapper, DecimalField
+from django.db.utils import IntegrityError
+from django.db.models import Sum, Q, F, Prefetch, ExpressionWrapper, DecimalField, Case, When
 from django.utils import timezone
-
 from allapp.billing.enums import (
     ChargeType, CalcMethod, AccrualStatus, PeriodStatus, BillStatus,
     MetricType, LadderMode, CapMode, BundleScope, BundleType
@@ -18,6 +20,7 @@ from allapp.billing.models import (
     BillingRule, BillingRuleTier, BillingEvent, BillingAccrual,
     BillingPeriod, Bill, BillLine, BillingMetricDaily, BillingJobRun
 )
+from allapp.core.data_accuracy import reconcile_data_accuracy
 
 # ------------------------ 基础工具 ------------------------ #
 def _q(val, q="0.01"):
@@ -26,9 +29,137 @@ def _q(val, q="0.01"):
 def _days_in_month(d: datetime.date) -> int:
     return monthrange(d.year, d.month)[1]
 
-
 AUTO_METRIC_SOURCE_PREFIX = "AUTO:"
 SCHEDULED_METRIC_JOB_NAME = BillingJobRun.JobName.DAILY_METRIC_GENERATION
+
+class BillingAccuracyGateError(ValueError):
+    def __init__(self, *, stage: str, issue_count: int, failed_checks: Iterable[str], details=None):
+        self.stage = stage
+        self.issue_count = int(issue_count or 0)
+        self.failed_checks = list(dict.fromkeys(failed_checks))
+        self.details = details or {}
+        checks_text = ", ".join(self.failed_checks[:5])
+        if len(self.failed_checks) > 5:
+            checks_text += ", ..."
+        message = f"数据对账未通过，已阻止{stage}：发现 {self.issue_count} 个问题"
+        if checks_text:
+            message += f"（{checks_text}）"
+        super().__init__(message)
+
+def _billing_accuracy_gate_enabled(setting_name: str) -> bool:
+    if not getattr(settings, "BILLING_RECONCILIATION_GATE_ENABLED", True):
+        return False
+    return getattr(settings, setting_name, True)
+
+def _date_range(start_date: datetime.date, end_date: datetime.date):
+    day_count = (end_date - start_date).days
+    for offset in range(day_count + 1):
+        yield start_date + datetime.timedelta(days=offset)
+
+def _failed_check_names(result):
+    failed = []
+    for section_name in ("inventory", "billing"):
+        section = result.get(section_name)
+        if not section:
+            continue
+        failed.extend(check["name"] for check in section["checks"] if not check["ok"])
+    return failed
+
+
+def _raise_if_reconciliation_failed(*, stage: str, results):
+    issue_count = sum(result["issue_count"] for _, result in results)
+    if issue_count <= 0:
+        return
+
+    failed_checks = []
+    scoped_results = []
+    for scope_label, result in results:
+        failed_checks.extend(_failed_check_names(result))
+        scoped_results.append(
+            {
+                "scope": scope_label,
+                "issue_count": result["issue_count"],
+                "result": result,
+            }
+        )
+
+    raise BillingAccuracyGateError(
+        stage=stage,
+        issue_count=issue_count,
+        failed_checks=failed_checks,
+        details={"results": scoped_results},
+    )
+
+
+def _ensure_reconciliation_for_service_date(
+    *,
+    stage: str,
+    owner_id,
+    warehouse_id,
+    service_date: datetime.date,
+    include_inventory: bool = True,
+    include_billing: bool = True,
+):
+    result = reconcile_data_accuracy(
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+        service_date=service_date,
+        include_inventory=include_inventory,
+        include_billing=include_billing,
+        limit=5,
+    )
+    _raise_if_reconciliation_failed(
+        stage=stage,
+        results=[(service_date.isoformat(), result)],
+    )
+
+
+def _ensure_reconciliation_for_date_range(
+    *,
+    stage: str,
+    owner_id,
+    warehouse_id,
+    start_date: datetime.date,
+    end_date: datetime.date,
+):
+    results = []
+
+    inventory_result = reconcile_data_accuracy(
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+        include_inventory=True,
+        include_billing=False,
+        limit=5,
+    )
+    results.append(("inventory", inventory_result))
+
+    for service_date in _date_range(start_date, end_date):
+        billing_result = reconcile_data_accuracy(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            service_date=service_date,
+            include_inventory=False,
+            include_billing=True,
+            limit=5,
+        )
+        results.append((service_date.isoformat(), billing_result))
+
+    _raise_if_reconciliation_failed(stage=stage, results=results)
+
+
+def _ensure_reconciliation_for_period(*, stage: str, period: BillingPeriod):
+    result = reconcile_data_accuracy(
+        owner_id=period.owner_id,
+        warehouse_id=period.warehouse_id,
+        period_id=period.id,
+        include_inventory=False,
+        include_billing=True,
+        limit=5,
+    )
+    _raise_if_reconciliation_failed(
+        stage=stage,
+        results=[(period.label, result)],
+    )
 #
 # def _select_rule(owner_id, warehouse_id, charge_type, calc_method, service_date) -> Optional[BillingRule]:
 #     qs = (BillingRule.objects
@@ -614,33 +745,137 @@ def _build_area_metric(owner_id, warehouse_id, service_date, *, inventory_rows=N
     }
 
 
-def _build_order_amount_metric(owner_id, warehouse_id, service_date, **kwargs):
-    from allapp.outbound.models import OutboundOrderLine
+# def _build_order_amount_metric(owner_id, warehouse_id, service_date, **kwargs):
+#     from allapp.outbound.models import OutboundOrderLine
+#
+#     amount_expr = ExpressionWrapper(
+#         F("base_qty") * F("base_price"),
+#         output_field=DecimalField(max_digits=18, decimal_places=2),
+#     )
+#     total = (
+#         OutboundOrderLine.objects
+#         .filter(
+#             order__owner_id=owner_id,
+#             order__warehouse_id=warehouse_id,
+#             order__biz_date=service_date,
+#             order__submit_status="SUBMITTED",
+#             order__is_deleted=False,
+#             is_deleted=False,
+#         )
+#         .exclude(order__approval_status="CANCELLED")
+#         .aggregate(total=Sum(amount_expr))["total"]
+#         or Decimal("0.00")
+#     )
+#     return {
+#         "value": total,
+#         "source": f"{AUTO_METRIC_SOURCE_PREFIX}OUTBOUND_ORDER_LINE_AMOUNT",
+#         "note": "Sum(base_qty * base_price) for submitted outbound order lines, excluding cancelled orders.",
+#     }
 
-    amount_expr = ExpressionWrapper(
-        F("base_qty") * F("base_price"),
-        output_field=DecimalField(max_digits=18, decimal_places=2),
-    )
+
+# 替换 allapp/billing/services.py 中负责生成 ORDER_AMT 指标的函数
+# 如果你当前函数名不同，请把这段逻辑并入实际的 ORDER_AMT 构建器。
+
+
+
+
+# def _build_order_amount_metric(owner_id, warehouse_id, service_date, **kwargs):
+#     """
+#     订单金额日指标（ORDER_AMT）
+#
+#     当前口径：
+#     - 归属日期：OutboundOrder.biz_date
+#     - 仅统计已提交、未取消、价格已确认的订单
+#     - 金额来源：OutboundOrder.final_order_amount
+#     """
+#     total = (
+#         OutboundOrder.objects
+#         .filter(
+#             owner_id=owner_id,
+#             warehouse_id=warehouse_id,
+#             biz_date=service_date,
+#             submit_status="SUBMITTED",
+#             pricing_status=PricingStatus.CONFIRMED,
+#             is_deleted=False,
+#         )
+#         .exclude(approval_status="CANCELLED")
+#         .aggregate(total=Sum("final_order_amount"))["total"]
+#         or Decimal("0.00")
+#     )
+#
+#     return {
+#         "value": total,
+#         "source": f"{AUTO_METRIC_SOURCE_PREFIX}OUTBOUND_ORDER_AMOUNT",
+#         "note": "Sum(final_order_amount) for submitted & pricing-confirmed outbound orders.",
+#     }
+
+# def _build_order_amount_metric(owner_id, warehouse_id, service_date, **kwargs):
+#     """
+#     订单金额日指标：
+#     - 优先使用冻结后的 final_line_amount
+#     - 未冻结时回退 base_qty * base_price
+#     - 仅统计已提交、未取消的订单
+#     """
+#     line_amount_expr = Case(
+#         When(
+#             final_line_amount__gt=0,
+#             then=F("final_line_amount"),
+#         ),
+#         default=ExpressionWrapper(
+#             F("base_qty") * F("base_price"),
+#             output_field=DecimalField(max_digits=18, decimal_places=2),
+#         ),
+#         output_field=DecimalField(max_digits=18, decimal_places=2),
+#     )
+#     total = (
+#         OutboundOrderLine.objects
+#         .filter(
+#             order__owner_id=owner_id,
+#             order__warehouse_id=warehouse_id,
+#             order__biz_date=service_date,
+#             order__submit_status="SUBMITTED",
+#             order__is_deleted=False,
+#             is_deleted=False,
+#         )
+#         .exclude(order__approval_status="CANCELLED")
+#         .aggregate(total=Sum(line_amount_expr))["total"]
+#         or Decimal("0.00")
+#     )
+#
+#     return {
+#         "value": total,
+#         "source": f"{AUTO_METRIC_SOURCE_PREFIX}OUTBOUND_ORDER_AMOUNT",
+#         "note": "Sum(final_line_amount) with fallback to base_qty * base_price for submitted outbound lines, excluding cancelled orders.",
+#     }
+
+
+
+
+def _build_order_amount_metric(owner_id, warehouse_id, service_date, **kwargs):
+    """
+    订单金额日指标：
+    当前口径 = biz_date 当天、已提交、价格已确认的订单 final_order_amount 总和
+    """
     total = (
-        OutboundOrderLine.objects
+        OutboundOrder.objects
         .filter(
-            order__owner_id=owner_id,
-            order__warehouse_id=warehouse_id,
-            order__biz_date=service_date,
-            order__submit_status="SUBMITTED",
-            order__is_deleted=False,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            biz_date=service_date,
+            submit_status="SUBMITTED",
+            pricing_status=PricingStatus.CONFIRMED,
             is_deleted=False,
         )
-        .exclude(order__approval_status="CANCELLED")
-        .aggregate(total=Sum(amount_expr))["total"]
+        .exclude(approval_status="CANCELLED")
+        .aggregate(total=Sum("final_order_amount"))["total"]
         or Decimal("0.00")
     )
+
     return {
         "value": total,
-        "source": f"{AUTO_METRIC_SOURCE_PREFIX}OUTBOUND_ORDER_LINE_AMOUNT",
-        "note": "Sum(base_qty * base_price) for submitted outbound order lines, excluding cancelled orders.",
+        "source": f"{AUTO_METRIC_SOURCE_PREFIX}OUTBOUND_ORDER_AMOUNT",
+        "note": "Sum(final_order_amount) for submitted & pricing-confirmed outbound orders.",
     }
-
 
 def _default_metric_payload(metric_type: str, owner_id, warehouse_id, service_date, **kwargs):
     resolver = _load_metric_resolver(metric_type)
@@ -682,13 +917,14 @@ def _store_generated_metric(
     value = Decimal(metric_payload["value"])
     source = metric_payload["source"]
     note = metric_payload["note"]
+    metric_filter = {
+        "owner_id": owner_id,
+        "warehouse_id": warehouse_id,
+        "service_date": service_date,
+        "metric_type": metric_type,
+    }
 
-    existing = BillingMetricDaily.objects.filter(
-        owner_id=owner_id,
-        warehouse_id=warehouse_id,
-        service_date=service_date,
-        metric_type=metric_type,
-    ).first()
+    existing = BillingMetricDaily.objects.select_for_update().filter(**metric_filter).first()
 
     if existing and not overwrite and not _is_auto_metric_row(existing):
         return {
@@ -718,18 +954,51 @@ def _store_generated_metric(
         }
 
     if not existing:
-        BillingMetricDaily.objects.create(
-            owner_id=owner_id,
-            warehouse_id=warehouse_id,
-            service_date=service_date,
-            metric_type=metric_type,
-            value=value,
-            source=source,
-            note=note,
-        )
+        try:
+            BillingMetricDaily.objects.create(
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                service_date=service_date,
+                metric_type=metric_type,
+                value=value,
+                source=source,
+                note=note,
+            )
+            return {
+                "metric_type": metric_type,
+                "action": "created",
+                "value": value,
+                "source": source,
+                "note": note,
+            }
+        except (IntegrityError, ValidationError) as exc:
+            try:
+                existing = BillingMetricDaily.objects.select_for_update().get(**metric_filter)
+            except BillingMetricDaily.DoesNotExist:
+                raise exc
+
+    if not overwrite and not _is_auto_metric_row(existing):
         return {
             "metric_type": metric_type,
-            "action": "created",
+            "action": "skipped_manual",
+            "value": existing.value,
+            "source": existing.source,
+            "note": existing.note,
+        }
+
+    if value <= 0:
+        if _is_auto_metric_row(existing) or overwrite:
+            existing.delete()
+            return {
+                "metric_type": metric_type,
+                "action": "deleted_zero",
+                "value": Decimal("0.0000"),
+                "source": source,
+                "note": note,
+            }
+        return {
+            "metric_type": metric_type,
+            "action": "skipped_zero",
             "value": value,
             "source": source,
             "note": note,
@@ -984,6 +1253,14 @@ def _run_scheduled_metric_generation_for_scope(
         }
 
     try:
+        if _billing_accuracy_gate_enabled("BILLING_RECONCILIATION_GATE_DAILY_ENABLED"):
+            _ensure_reconciliation_for_service_date(
+                stage="日调度前的计费数据生成",
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                service_date=service_date,
+            )
+
         snapshot_summary = None
         if (
             service_date < timezone.now().date()
@@ -1007,11 +1284,20 @@ def _run_scheduled_metric_generation_for_scope(
         )
         if snapshot_summary is not None:
             metric_summary["inventory_snapshot"] = snapshot_summary["days"][0]
+        if _billing_accuracy_gate_enabled("BILLING_RECONCILIATION_GATE_DAILY_ENABLED"):
+            _ensure_reconciliation_for_service_date(
+                stage="日调度后的计费数据生成",
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                service_date=service_date,
+            )
     except Exception as exc:
+        failure_summary = getattr(exc, "details", None) or {}
         _finish_scheduled_metric_job(
             job_run,
             status=BillingJobRun.Status.FAILED,
             message=str(exc),
+            summary=failure_summary,
         )
         return {
             "owner_id": owner_id,
@@ -1019,7 +1305,7 @@ def _run_scheduled_metric_generation_for_scope(
             "service_date": service_date,
             "job_run_id": job_run.id,
             "status": "failed",
-            "summary": {},
+            "summary": failure_summary,
             "message": str(exc),
         }
 
@@ -1402,6 +1688,26 @@ def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_
 
 
 # ------------------------ 关账/开票 ------------------------ #
+def _get_or_create_period_locked(*, owner_id, warehouse_id, label, start_date, end_date):
+    try:
+        period, created = BillingPeriod.objects.get_or_create(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            label=label,
+            defaults=dict(start_date=start_date, end_date=end_date, status=PeriodStatus.OPEN),
+        )
+    except IntegrityError:
+        period = BillingPeriod.objects.get(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            label=label,
+        )
+        created = False
+
+    period = BillingPeriod.objects.select_for_update().get(pk=period.pk)
+    return period, created
+
+
 @transaction.atomic
 def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingPeriod:
     """
@@ -1409,9 +1715,21 @@ def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingP
       1) 将区间内 OPEN 的应计全部挂到该 period 并置为 LOCKED；
       2) 应用“按账期口径”的封顶与打包（CAP & FIXED）。
     """
-    period, created = BillingPeriod.objects.get_or_create(
-        owner_id=owner_id, warehouse_id=warehouse_id, label=label,
-        defaults=dict(start_date=start_date, end_date=end_date, status=PeriodStatus.OPEN)
+    if _billing_accuracy_gate_enabled("BILLING_RECONCILIATION_GATE_LOCK_ENABLED"):
+        _ensure_reconciliation_for_date_range(
+            stage="锁账",
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    period, created = _get_or_create_period_locked(
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+        label=label,
+        start_date=start_date,
+        end_date=end_date,
     )
     if not created and period.status != PeriodStatus.OPEN:
         raise ValueError(f"Period {period.label} is already {period.status}.")
@@ -1496,10 +1814,14 @@ def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingP
 
 @transaction.atomic
 def generate_invoice_for_period(period: BillingPeriod, invoice_no: str, issue_date=None, due_date=None) -> Bill:
+    original_period = period
+    period = BillingPeriod.objects.select_for_update().get(pk=period.pk)
     if period.status != PeriodStatus.CLOSED:
         raise ValueError("Only closed periods can be invoiced.")
     if Bill.objects.filter(period=period).exists():
         raise ValueError("Invoice already exists for this period.")
+    if _billing_accuracy_gate_enabled("BILLING_RECONCILIATION_GATE_INVOICE_ENABLED"):
+        _ensure_reconciliation_for_period(stage="开票", period=period)
 
     accs = (BillingAccrual.objects
             .filter(period=period, status=AccrualStatus.LOCKED)
@@ -1534,4 +1856,6 @@ def generate_invoice_for_period(period: BillingPeriod, invoice_no: str, issue_da
 
     period.status = PeriodStatus.INVOICED
     period.save(update_fields=["status"])
+    if original_period is not period:
+        original_period.status = period.status
     return bill

@@ -1,0 +1,2 @@
+date,executor,tech_owner,business_owner,warehouse_owner,owner_id,warehouse_id,period_id,reconcile_result,issue_count,safe_fix_applied,tracking_repair_applied,smoke_done,spot_check_done,billing_only_check_done,duplicate_job_run_found,duplicate_bill_found,snapshot_gap_found,abnormal_accrual_found,allow_lock_or_invoice,allow_external_commitment,notes
+2026-04-03,,,,,,,,PASS,0,N,N,N,N,N,N,N,N,N,Y,N,

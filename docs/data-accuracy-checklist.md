@@ -2,6 +2,13 @@
 
 这份清单的目标不是“多跑一点测试”，而是把库存与计费最关键的数据准确性检查固定成一套可执行动作。
 
+执行层面的按天步骤见：
+
+- [docs/data-accuracy-runbook.md](/wms/docs/data-accuracy-runbook.md)
+- [docs/data-accuracy-role-checklist.md](/wms/docs/data-accuracy-role-checklist.md)
+- [docs/data-accuracy-daily-record-template.md](/wms/docs/data-accuracy-daily-record-template.md)
+- [docs/data-accuracy-daily-record-template.csv](/wms/docs/data-accuracy-daily-record-template.csv)
+
 ## 原则
 
 - 先查差异，再决定是否修数据。
@@ -14,6 +21,7 @@
 已提供统一命令：
 
 ```bash
+python manage.py generate_data_accuracy_workpack --owner 1 --warehouse 1 --period 12
 python manage.py reconcile_data_accuracy
 ```
 
@@ -28,11 +36,40 @@ python manage.py reconcile_data_accuracy --owner 1 --json
 python manage.py reconcile_data_accuracy --owner 1 --fail-on-issues
 ```
 
+现网全量清账命令：
+
+```bash
+python manage.py reconcile_data_accuracy_cleanup
+python manage.py reconcile_data_accuracy_cleanup --apply-safe-fixes
+python manage.py reconcile_data_accuracy_cleanup --apply-safe-fixes --output /tmp/data_accuracy_cleanup.json
+python manage.py reconcile_data_accuracy_cleanup --owner 1 --fail-on-issues
+```
+
+剩余批次/效期问题的人工修复模板：
+
+```bash
+python manage.py export_inventory_tracking_repair_template /tmp/inventory_tracking_repair_template.csv
+python manage.py export_inventory_tracking_business_reply_sheet /tmp/inventory_tracking_repair_template.csv /tmp/inventory_tracking_business_reply.csv
+python manage.py merge_inventory_tracking_business_reply /tmp/inventory_tracking_repair_template.csv /tmp/inventory_tracking_business_reply.csv --output /tmp/inventory_tracking_repair_ready.csv
+python manage.py apply_inventory_tracking_repairs /tmp/inventory_tracking_repair_ready.csv
+```
+
 说明：
 
 - `--warehouse` 只影响库存明细级检查与 billing 仓库级检查。
 - `InventorySummary` 是 `owner + product` 粒度，不是仓库粒度；传 `--warehouse` 时，`inventory_summary_vs_detail` 会自动跳过。
 - `--fail-on-issues` 适合挂到 CI、定时任务或月结前阻断。
+- `reconcile_data_accuracy_cleanup --apply-safe-fixes` 只修“安全项”：
+  `InventoryDetail.available_qty` 回算、
+  `InventorySummary` 从明细重建（仅 owner 级，不支持 warehouse 级重建）、
+  `Bill` 头金额按 `BillLine` 重算。
+  其余差异仍需人工核因后再处理。
+- `export_inventory_tracking_repair_template` 会导出当前仍未通过的批次/效期缺失行，包含 `new_batch_no / new_production_date / new_expiry_date` 空列供人工填写。
+- `export_inventory_tracking_business_reply_sheet` 会把技术修复模板聚合成业务确认表，按 `owner + product + warehouse + location` 分组，便于业务回填真实值。
+- `merge_inventory_tracking_business_reply` 会把业务确认表自动合并回技术修复模板；默认输出一个新的 `.merged.csv` 文件，也可用 `--in-place` 直接覆盖原模板。
+- `apply_inventory_tracking_repairs` 会逐行读取 CSV 并按模型校验后回填到 `InventoryDetail / InventoryTransaction`。
+  命令会整批事务执行，并校验 CSV 里的 `current_*` 字段必须仍和数据库一致；
+  如果期间有人手工改过库存追踪字段，必须先重新导出模板，避免旧模板覆盖新数据。
 
 ## 命令当前覆盖的检查
 

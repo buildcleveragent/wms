@@ -166,8 +166,17 @@ def _fefo_details_qs(owner_id: int, warehouse_id: int, product_id: int):
 @transaction.atomic
 def allocate_inventory(order, by_user=None, allow_backorder=True):
     """货主管理员确认时，冻结库存，并生成/刷新保留拣货任务（RESERVED）"""
+    order = type(order).objects.select_for_update().get(pk=order.pk)
     print("-1 allocate_inventory order=",order)
     task = _get_or_create_reserved_task(order, by_user=by_user)
+    existing_lines = (
+        WmsTaskLine.objects
+        .select_for_update()
+        .filter(task=task)
+        .exclude(status=WmsTaskLine.Status.CANCELLED)
+    )
+    if existing_lines.exists():
+        return task
     print("0 allocate_inventory ")
     demands = _compute_line_demands(order)
     if not demands:
@@ -232,6 +241,8 @@ def allocate_inventory(order, by_user=None, allow_backorder=True):
             print(f"警告：库存不足，产品 {d['product_id']} 缺口 {remaining}。")
 
         print("5 allocate_inventory ")
+
+    return task
 
 
 # 仓库管理员确认：将保留态任务（RESERVED）升级为 DRAFT 或 READY，不再重新切分

@@ -467,13 +467,16 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
         if blocked is not None:
             return blocked
 
-        locked_period = lock_period(
-            period.owner_id,
-            period.warehouse_id,
-            period.label,
-            period.start_date,
-            period.end_date,
-        )
+        try:
+            locked_period = lock_period(
+                period.owner_id,
+                period.warehouse_id,
+                period.label,
+                period.start_date,
+                period.end_date,
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self.get_serializer(locked_period).data)
 
     @action(detail=True, methods=["post"], url_path="invoice")
@@ -492,12 +495,15 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
             seq = Bill.objects.filter(period__owner=period.owner, period__warehouse=period.warehouse).count() + 1
             invoice_no = f"INV-{period.label}-{period.owner_id}-{seq:04d}"
 
-        bill = generate_invoice_for_period(
-            period,
-            invoice_no=invoice_no,
-            issue_date=payload.validated_data.get("issue_date"),
-            due_date=payload.validated_data.get("due_date"),
-        )
+        try:
+            bill = generate_invoice_for_period(
+                period,
+                invoice_no=invoice_no,
+                issue_date=payload.validated_data.get("issue_date"),
+                due_date=payload.validated_data.get("due_date"),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(BillDetailSerializer(bill, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
 

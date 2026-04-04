@@ -48,7 +48,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "origin_country",
             "is_active",
             "extra",
-            "packages","min_price","max_discount",
+            "packages","price","min_price","max_discount",
         ]
         read_only_fields = ("id", "created_at", "updated_at")
         # 如果需要强制要求 owner/base_uom 必填，可解开下面注释

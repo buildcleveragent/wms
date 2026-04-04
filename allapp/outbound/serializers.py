@@ -1,17 +1,18 @@
 from datetime import date
-
-from django.apps import apps
-from django.utils import timezone
-# serializers.py
+from decimal import Decimal
 import logging
 from django.apps import apps
-from django.utils import timezone
-from rest_framework import serializers
-
 logger = logging.getLogger(__name__)
 from rest_framework import serializers
-from decimal import Decimal
+from .models import OutboundOrder, OutboundOrderLine
 
+
+# 合并到 allapp/outbound/serializers.py
+
+from decimal import Decimal
+from rest_framework import serializers
+
+from allapp.outbound.enums import PricingStatus
 from .models import OutboundOrder, OutboundOrderLine
 
 # 兼容不同字段命名的小工具
@@ -22,13 +23,84 @@ def _get(obj, names, default=None):
             return v() if callable(v) else v
     return default
 
+class ConfirmPricingLineSerializer(serializers.Serializer):
+    line_id = serializers.IntegerField()
+    base_price = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=4,
+        min_value=Decimal("0.0000"),
+    )
+
+
+class ConfirmPricingSerializer(serializers.Serializer):
+    lines = ConfirmPricingLineSerializer(many=True)
+
+    def validate(self, attrs):
+        order: OutboundOrder = self.context["order"]
+        lines_payload = attrs["lines"]
+
+        if order.pricing_status == PricingStatus.CONFIRMED:
+            raise serializers.ValidationError("该订单已确认价格，不能重复确认。")
+
+        db_lines = {
+            line.id: line
+            for line in OutboundOrderLine.objects.filter(order=order, is_deleted=False)
+        }
+        if not db_lines:
+            raise serializers.ValidationError("订单没有可定价的明细行。")
+
+        payload_ids = [item["line_id"] for item in lines_payload]
+        if len(payload_ids) != len(set(payload_ids)):
+            raise serializers.ValidationError("请求中存在重复的 line_id。")
+
+        for item in lines_payload:
+            line = db_lines.get(item["line_id"])
+            if not line:
+                raise serializers.ValidationError(
+                    f"订单行 {item['line_id']} 不存在或不属于当前订单。"
+                )
+
+        missing_ids = set(db_lines.keys()) - set(payload_ids)
+        if missing_ids:
+            raise serializers.ValidationError(
+                f"还有订单行未定价：{sorted(missing_ids)}"
+            )
+
+        return attrs
+
+
+# 给现有 OutboundOrderReadSerializer 增加如下字段
+# 如果你当前 serializer 名字不是这个，请合并到实际详情 serializer 里
+
+# priced_by_name = serializers.SerializerMethodField()
+
+# class Meta.fields 里补：
+# "pricing_status",
+# "priced_at",
+# "priced_by",
+# "priced_by_name",
+# "final_order_amount",
+
+# 建议实现：
+# def get_priced_by_name(self, obj):
+#     u = getattr(obj, "priced_by", None)
+#     if not u:
+#         return ""
+#     return getattr(u, "name", None) or getattr(u, "username", None) or ""
+
+
 # ---------- 创建用 ----------
 class OutboundOrderLineCreateSerializer(serializers.Serializer):
     product_id = serializers.IntegerField()
     uom_id     = serializers.IntegerField(required=False, allow_null=True)  # 如需包装下单可使用
     qty        = serializers.DecimalField(max_digits=18, decimal_places=3)  # 约定为“基本单位数量”
-    price      = serializers.DecimalField(max_digits=18, decimal_places=4)  # 约定为“基本单位单价”
-
+    # price      = serializers.DecimalField(max_digits=18, decimal_places=4)  # 约定为“基本单位单价”
+    price      = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=4,
+        required=False,
+        allow_null=True,
+    )
 # class OutboundOrderCreateSerializer(serializers.Serializer):
 #     # 不再接收 owner_id / warehouse_id
 #     customer_id     = serializers.IntegerField(required=False, allow_null=True)
@@ -334,7 +406,7 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
                 order      = order,
                 product_id = it["product_id"],
                 base_qty   = it["qty"],
-                base_price = it["price"],
+                base_price = it["price"]  or Decimal("0.0000"),
                 # 如需包装下单：可额外写入 aux_uom_id / aux_qty / aux_price
             )
 
@@ -379,9 +451,11 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
     approval_status_name = serializers.SerializerMethodField()
     total_amount         = serializers.SerializerMethodField()
     total_qty            = serializers.SerializerMethodField()
+    created_by_name      = serializers.SerializerMethodField()
+    priced_by_name       = serializers.SerializerMethodField()
 
     # ✅ 新增：业务员姓名（制表人）
-    created_by_name      = serializers.SerializerMethodField()
+
 
     # ✅ 你的模型 OutboundOrderLine.order 的 related_name = "lines"
     #    所以这里不要写 source="lines"，直接这样写即可
@@ -393,20 +467,53 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
             "id", "order_no", "biz_date",
             "submit_status", "submit_status_name",
             "approval_status", "approval_status_name",
+
+            "pricing_status",
+            "priced_at",
+            "priced_by",
+            "priced_by_name",
+            "final_order_amount",
+
             "outbound_type", "delivery_method", "etd",
-
             "owner", "customer", "supplier", "warehouse",
-
-            # ✅ 把 created_by id 和 created_by_name 都输出
             "created_by", "created_by_name",
             "created_at",
-
             "ship_to", "contact", "contact_phone",
             "memo", "is_closed", "close_reason",
-
             "lines",
             "total_qty", "total_amount",
         ]
+        #
+        # fields = [
+        #     "id", "order_no", "biz_date",
+        #     "submit_status", "submit_status_name",
+        #     "approval_status", "approval_status_name",
+        #     "outbound_type", "delivery_method", "etd",
+        #
+        #     "owner", "customer", "supplier", "warehouse",
+        #
+        #     # ✅ 把 created_by id 和 created_by_name 都输出
+        #     "created_by", "created_by_name",
+        #     "created_at",
+        #
+        #     "ship_to", "contact", "contact_phone",
+        #     "memo", "is_closed", "close_reason",
+        #
+        #     "lines",
+        #     "total_qty", "total_amount",
+        #
+        #     "pricing_status",
+        #     "priced_at",
+        #     "priced_by",
+        #     "priced_by_name",
+        #     "final_order_amount",
+        # ]
+
+    def get_priced_by_name(self, obj):
+        u = getattr(obj, "priced_by", None)
+        if not u:
+            return ""
+        return getattr(u, "name", None) or getattr(u, "username", None) or ""
 
     def _name_of(self, obj, field, fallback):
         try:

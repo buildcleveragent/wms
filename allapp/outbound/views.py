@@ -1,57 +1,104 @@
 # allapp/outbound/views.py  或  allapp/outbound/api_views.py
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.permissions import AllowAny
-from rest_framework.decorators import action
-from django.http import FileResponse, Http404
-from django.conf import settings
-from pathlib import Path
-from urllib.parse import quote
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import quote
-
 from django.conf import settings
 from django.http import FileResponse, Http404
-from rest_framework.decorators import action
-from django.apps import apps
-from django.db import transaction
-
-from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.response import Response
-from rest_framework import status
-
 from openpyxl import load_workbook
 from django.apps import apps
 from datetime import datetime
 from django.db.models import Q, Sum, Prefetch
 import logging
-from django.db.models import F
-from rest_framework.exceptions import ValidationError
 from ..products.models import ProductPackage
-from decimal import Decimal
-from django.db import transaction
 from django.db.models import F
 from rest_framework.exceptions import ValidationError
-from django.utils import timezone
-
-
-
 logger = logging.getLogger(__name__)
-from django.utils import timezone
 from rest_framework import viewsets, mixins, status
 from rest_framework.pagination import PageNumberPagination
-
 from .models import OutboundOrder
-from . import services as ob_services  # 你现有的出库业务服务（分配等）
-from .serializers import (OutboundOrderCreateSerializer, OutboundOrderReadSerializer)
 from rest_framework import serializers
-from rest_framework.decorators import action
-from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-
 from allapp.tasking.models import WmsTask, WmsTaskLine
 from allapp.tasking import services as task_services
 from allapp.tasking.services import _run_posting_handler, adjust_pick_line_qty
+from django.db import transaction
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from allapp.billing.enums import PeriodStatus
+from allapp.billing.models import BillingPeriod
+from allapp.outbound.enums import PricingStatus
+from allapp.outbound.models import OutboundOrderLine
+from allapp.outbound.serializers import OutboundOrderCreateSerializer,ConfirmPricingSerializer, OutboundOrderReadSerializer
+
+
+# 放到 OutboundOrderViewSet 类中
+@action(detail=True, methods=["post"], url_path="confirm-pricing")
+@transaction.atomic
+def confirm_pricing(self, request, pk=None):
+    order = self.get_object()
+
+    locked_period_exists = BillingPeriod.objects.filter(
+        owner_id=order.owner_id,
+        warehouse_id=order.warehouse_id,
+        start_date__lte=order.biz_date,
+        end_date__gte=order.biz_date,
+        status__in=[PeriodStatus.CLOSED, PeriodStatus.INVOICED],
+    ).exists()
+    if locked_period_exists:
+        return Response(
+            {"detail": "该订单所属账期已关账或已开票，禁止确认/修改价格。"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    serializer = ConfirmPricingSerializer(
+        data=request.data,
+        context={"order": order, "request": request},
+    )
+    serializer.is_valid(raise_exception=True)
+
+    lines_map = {
+        line.id: line
+        for line in OutboundOrderLine.objects.select_for_update().filter(
+            order=order,
+            is_deleted=False,
+        )
+    }
+
+    total_amount = Decimal("0.00")
+    for item in serializer.validated_data["lines"]:
+        line = lines_map[item["line_id"]]
+        line.base_price = item["base_price"]
+        line.save(update_fields=["base_price", "updated_at"])
+
+        line_amount = (
+            Decimal(line.base_qty or 0) * Decimal(line.base_price or 0)
+        ).quantize(Decimal("0.01"))
+        total_amount += line_amount
+
+    order.final_order_amount = total_amount.quantize(Decimal("0.01"))
+    order.pricing_status = PricingStatus.CONFIRMED
+    order.priced_at = timezone.now()
+    order.priced_by = request.user
+    order.save(
+        update_fields=[
+            "final_order_amount",
+            "pricing_status",
+            "priced_at",
+            "priced_by",
+            "updated_at",
+        ]
+    )
+
+    return Response(
+        OutboundOrderReadSerializer(order, context={"request": request}).data,
+        status=status.HTTP_200_OK,
+    )
+
 
 
 def _q3(x) -> Decimal:
@@ -565,29 +612,82 @@ class OutboundOrderViewSet(
         return Response(OutboundOrderReadSerializer(order).data)
 
     # 货主管理员审核并尝试分配库存
+    # @action(detail=True, methods=["post"], url_path="owner-approve")
+    # def owner_approve(self, request, pk=None):
+    #     order = self.get_object()
+    #     # 状态名称以你的模型为准（这里给出常见约定）
+    #     if getattr(order, "approval_status", None) not in ("OWNER_PENDING", "OWNER_REJECTED"):
+    #         return Response({"detail": "当前状态不可进行货主管理员审核"}, status=400)
+    #
+    #     order.approval_status = "OWNER_APPROVED"
+    #     if hasattr(order, "approved_by_ownermanager"):
+    #         order.approved_by_ownermanager = request.user
+    #     if hasattr(order, "approved_at_ownermanager"):
+    #         order.approved_at_ownermanager = timezone.now()
+    #     order.save()
+    #
+    #     # 分配库存 available->allocated（你现有服务）
+    #     print("owner_approve order=",order)
+    #     try:
+    #         ob_services.allocate_inventory(order, by_user=request.user, allow_backorder=True)
+    #     except Exception as e:
+    #         # 分配失败不回滚审核（按需调整）
+    #         return Response({"detail": f"审核通过，但分配库存失败：{e}"}, status=202)
+    #
+    #     return Response(OutboundOrderReadSerializer(order).data)
+
+
+    # @action(detail=True, methods=["post"], url_path="owner-approve")
+    # def owner_approve(self, request, pk=None):
+    #     order = self.get_object()
+    #
+    #     if getattr(order, "approval_status", None) not in ("OWNER_PENDING", "OWNER_REJECTED"):
+    #         return Response(
+    #             {"detail": "当前状态不可进行货主管理员审核"},
+    #             status=status.HTTP_400_BAD_REQUEST,
+    #         )
+    #
+    #     try:
+    #         order.owner_approve(by_user=request.user, allow_backorder=True)
+    #     except DjangoValidationError as e:
+    #         return Response(
+    #             {"detail": e.message_dict if hasattr(e, "message_dict") else e.messages},
+    #             status=status.HTTP_400_BAD_REQUEST,
+    #         )
+    #     except Exception as e:
+    #         return Response(
+    #             {"detail": f"订单确认失败：{e}"},
+    #             status=status.HTTP_400_BAD_REQUEST,
+    #         )
+    #
+    #     return Response(OutboundOrderReadSerializer(order).data, status=status.HTTP_200_OK)
+
+
+
     @action(detail=True, methods=["post"], url_path="owner-approve")
     def owner_approve(self, request, pk=None):
         order = self.get_object()
-        # 状态名称以你的模型为准（这里给出常见约定）
+
         if getattr(order, "approval_status", None) not in ("OWNER_PENDING", "OWNER_REJECTED"):
-            return Response({"detail": "当前状态不可进行货主管理员审核"}, status=400)
+            return Response(
+                {"detail": "当前状态不可进行货主管理员审核"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        order.approval_status = "OWNER_APPROVED"
-        if hasattr(order, "approved_by_ownermanager"):
-            order.approved_by_ownermanager = request.user
-        if hasattr(order, "approved_at_ownermanager"):
-            order.approved_at_ownermanager = timezone.now()
-        order.save()
-
-        # 分配库存 available->allocated（你现有服务）
-        print("owner_approve order=",order)
         try:
-            ob_services.allocate_inventory(order, by_user=request.user, allow_backorder=True)
+            order.owner_approve(by_user=request.user, allow_backorder=True)
+        except DjangoValidationError as e:
+            return Response(
+                {"detail": e.message_dict if hasattr(e, "message_dict") else e.messages},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except Exception as e:
-            # 分配失败不回滚审核（按需调整）
-            return Response({"detail": f"审核通过，但分配库存失败：{e}"}, status=202)
+            return Response(
+                {"detail": f"订单确认失败：{e}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        return Response(OutboundOrderReadSerializer(order).data)
+        return Response(OutboundOrderReadSerializer(order, context={"request": request}).data)
 
     def _excel_str(self, v):
         return "" if v is None else str(v).strip()

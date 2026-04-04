@@ -8,8 +8,10 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import Prefetch, Sum
 
+from allapp.baseinfo.models import Owner
 from allapp.inventory.models import InventoryDetail, InventorySnapshotDaily, InventoryTransaction
 from allapp.locations.models import Location
+from allapp.locations.models import Warehouse
 from allapp.products.models import Product, ProductPackage
 
 
@@ -31,6 +33,18 @@ def _snapshot_scope_filters(queryset, owner_id=None, warehouse_id=None):
     if warehouse_id:
         queryset = queryset.filter(warehouse_id=warehouse_id)
     return queryset
+
+
+def _lock_snapshot_scope(*, owner_id=None, warehouse_id=None):
+    owner_qs = Owner.objects.order_by("id")
+    warehouse_qs = Warehouse.objects.order_by("id")
+    if owner_id:
+        owner_qs = owner_qs.filter(id=owner_id)
+    if warehouse_id:
+        warehouse_qs = warehouse_qs.filter(id=warehouse_id)
+
+    list(owner_qs.select_for_update().values_list("id", flat=True))
+    list(warehouse_qs.select_for_update().values_list("id", flat=True))
 
 
 @lru_cache(maxsize=1)
@@ -290,6 +304,7 @@ def generate_inventory_snapshot_for_date(
     warehouse_id=None,
     bootstrap: bool = False,
 ):
+    _lock_snapshot_scope(owner_id=owner_id, warehouse_id=warehouse_id)
     snapshot_qs = _snapshot_scope_filters(
         InventorySnapshotDaily.objects.filter(snapshot_date=service_date),
         owner_id=owner_id,

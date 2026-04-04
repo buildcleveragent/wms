@@ -1,8 +1,10 @@
+from django.utils import timezone
+from allapp.outbound.enums import PricingStatus
+from decimal import Decimal
+from django.core.exceptions import ValidationError
 from datetime import date
-
 from allapp.outbound import services as ob_services
 from django.contrib.contenttypes.models import ContentType
-from django.utils import timezone
 from django.db.models import Q, F, Max
 from django.contrib.contenttypes.fields import GenericForeignKey
 from decimal import Decimal
@@ -15,7 +17,7 @@ from allapp.products.models import Product, ProductPackage, ProductUom
 from allapp.inbound.models import InboundOrder, InboundOrderLine
 from allapp.baseinfo.models import Supplier
 from allapp.core.models import BaseModel, DocSequence
-
+from allapp.outbound.enums import PricingStatus
 
 # ===================== 订单:出库订单 =====================
 class OutboundOrder(BaseModel):
@@ -42,6 +44,8 @@ class OutboundOrder(BaseModel):
         ("OTHER_OUT", "其他出库"),
         ("SUPPLIER_RETURN", "退回供应商"),
     ]
+
+
 
     created_at = models.DateTimeField("制表时间", auto_now_add=True)
     created_by = models.ForeignKey(
@@ -97,6 +101,38 @@ class OutboundOrder(BaseModel):
     approved_at_warehouse = models.DateTimeField("仓库管理员审核时间", blank=True, null=True)
 
     next_line_no = models.PositiveIntegerField("下一个订单行号", default=10)
+
+    # 在 OutboundOrder 模型中新增下面 4 个字段
+    pricing_status = models.CharField(
+        "价格状态",
+        max_length=20,
+        choices=PricingStatus.choices,
+        default=PricingStatus.PENDING,
+        db_index=True,
+    )
+
+    priced_at = models.DateTimeField("价格确认时间", null=True, blank=True)
+
+    priced_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="价格确认人",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="priced_outbound_orders",
+    )
+
+    final_order_amount = models.DecimalField(
+        "最终订单金额",
+        max_digits=18,
+        decimal_places=2,
+        default=Decimal("0.00"),
+    )
+
+    # 业务语义约定：
+    # - Product.price：参考价 / 建议价
+    # - OutboundOrderLine.base_price：最终成交的基本单位单价
+    # - OutboundOrder.final_order_amount：冻结后的订单总金额
 
     class Meta:
         verbose_name = "出库订单"
@@ -171,25 +207,166 @@ class OutboundOrder(BaseModel):
             raise ValidationError(errs)
 
     # 可选：增加一个 OWNER_APPROVED 状态常量，或用你现有枚举
+    # STATUS_OWNER_APPROVED = "OWNER_APPROVED"
+
+    # @transaction.atomic
+    # def owner_approve(self, by_user=None, allow_backorder=True):
+    #     """
+    #     货主管理员确认：
+    #     - 置状态为 OWNER_APPROVED（按你项目枚举对齐）
+    #     - 冻结库存（available → allocated）
+    #     """
+    #     # 1) 改变订单状态
+    #     self.approval_status = self.STATUS_OWNER_APPROVED
+    #     self.save(update_fields=["approval_status"])
+    #
+    #     # 2) 冻结库存：冻结 available → allocated
+    #     print("allocate_inventory kkk")
+    #     ob_services.allocate_inventory(self, by_user=by_user, allow_backorder=allow_backorder )
+    #     print("allocate_inventory NNN")
+
+    # STATUS_OWNER_APPROVED = "OWNER_APPROVED"
+
+    # @transaction.atomic
+    # def owner_approve(self, by_user=None, allow_backorder=True):
+    #     """
+    #     货主管理员确认：
+    #     1. 自动确认价格并冻结最终金额
+    #     2. 置状态为 OWNER_APPROVED
+    #     3. 冻结库存（available -> allocated）
+    #     """
+    #
+    #     # 先自动确认价格
+    #     self.auto_confirm_pricing(by_user=by_user)
+    #
+    #     # 再改订单审核状态
+    #     self.approval_status = self.STATUS_OWNER_APPROVED
+    #
+    #     update_fields = ["approval_status", "updated_at"]
+    #     if hasattr(self, "approved_by_ownermanager"):
+    #         self.approved_by_ownermanager = by_user
+    #         update_fields.append("approved_by_ownermanager")
+    #     if hasattr(self, "approved_at_ownermanager"):
+    #         self.approved_at_ownermanager = timezone.now()
+    #         update_fields.append("approved_at_ownermanager")
+    #
+    #     self.save(update_fields=update_fields)
+    #
+    #     # 最后冻结库存
+    #     ob_services.allocate_inventory(self, by_user=by_user, allow_backorder=allow_backorder)
+
     STATUS_OWNER_APPROVED = "OWNER_APPROVED"
 
     @transaction.atomic
     def owner_approve(self, by_user=None, allow_backorder=True):
         """
         货主管理员确认：
-        - 置状态为 OWNER_APPROVED（按你项目枚举对齐）
-        - 冻结库存（available → allocated）
+        - 如果当前货主需要按订单金额收费，则先自动确认价格
+        - 再置状态为 OWNER_APPROVED
+        - 最后冻结库存
         """
-        # 1) 改变订单状态
+        # 1. 按 billing 规则决定是否需要价格
+        self.auto_confirm_pricing_if_required(by_user=by_user)
+
+        # 2. 订单审核状态
         self.approval_status = self.STATUS_OWNER_APPROVED
-        self.save(update_fields=["approval_status"])
 
-        # 2) 冻结库存：冻结 available → allocated
-        print("allocate_inventory kkk")
-        ob_services.allocate_inventory(self, by_user=by_user, allow_backorder=allow_backorder )
-        print("allocate_inventory NNN")
+        update_fields = ["approval_status", "updated_at"]
+        if hasattr(self, "approved_by_ownermanager"):
+            self.approved_by_ownermanager = by_user
+            update_fields.append("approved_by_ownermanager")
+        if hasattr(self, "approved_at_ownermanager"):
+            self.approved_at_ownermanager = timezone.now()
+            update_fields.append("approved_at_ownermanager")
 
+        self.save(update_fields=update_fields)
 
+        # 3. 冻结库存
+        ob_services.allocate_inventory(self, by_user=by_user, allow_backorder=allow_backorder)
+
+    def _calculate_final_order_amount(self):
+        """
+        用订单行 base_qty * base_price 计算最终订单金额。
+        当前约定：
+        - OutboundOrderLine.base_price = 最终成交基本单位单价
+        - 订单确认时自动冻结价格
+        """
+        lines = self.lines.filter(is_deleted=False)
+        if not lines.exists():
+            raise ValidationError("订单没有可确认的明细行。")
+
+        total = Decimal("0.00")
+        for line in lines:
+            qty = Decimal(line.base_qty or 0)
+            price = Decimal(line.base_price or 0)
+
+            # 如果你的业务允许 0 元商品，把这里改成 < 0
+            if price <= 0:
+                raise ValidationError(f"订单行 {line.line_no} 的价格未填写或不合法。")
+
+            total += (qty * price).quantize(Decimal("0.01"))
+
+        return total.quantize(Decimal("0.01"))
+
+    def auto_confirm_pricing(self, by_user=None):
+        """
+        在订单确认时自动确认价格。
+        """
+        total = self._calculate_final_order_amount()
+        self.final_order_amount = total
+        self.pricing_status = PricingStatus.CONFIRMED
+        self.priced_at = timezone.now()
+        self.priced_by = by_user
+        self.save(update_fields=[
+            "final_order_amount",
+            "pricing_status",
+            "priced_at",
+            "priced_by",
+            "updated_at",
+        ])
+
+    def requires_order_amount_billing(self):
+        """
+        判断当前订单所属货主/仓库/日期，是否存在有效的
+        DISPATCH + PERCENT_OF_ORDER_AMOUNT 规则。
+        """
+        from django.db.models import Q
+        from allapp.billing.models import BillingRule
+        from allapp.billing.enums import ChargeType, CalcMethod
+
+        biz_date = self.biz_date
+        return BillingRule.objects.filter(
+            active=True,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+        ).filter(
+            Q(owner_id=self.owner_id) | Q(owner__isnull=True)
+        ).filter(
+            Q(warehouse_id=self.warehouse_id) | Q(warehouse__isnull=True)
+        ).filter(
+            Q(effective_from__isnull=True) | Q(effective_from__lte=biz_date),
+            Q(effective_to__isnull=True) | Q(effective_to__gte=biz_date),
+        ).exists()
+
+    def auto_confirm_pricing_if_required(self, by_user=None):
+        """
+        只有在当前订单需要按订单金额收费时，才自动确认价格。
+        """
+        if not self.requires_order_amount_billing():
+            return
+
+        total = self._calculate_final_order_amount()
+        self.final_order_amount = total
+        self.pricing_status = PricingStatus.CONFIRMED
+        self.priced_at = timezone.now()
+        self.priced_by = by_user
+        self.save(update_fields=[
+            "final_order_amount",
+            "pricing_status",
+            "priced_at",
+            "priced_by",
+            "updated_at",
+        ])
 
 class OutboundOrderLine(BaseModel):
     PACK_REQ_CHOICES = [
@@ -220,6 +397,13 @@ class OutboundOrderLine(BaseModel):
     pack_requirement = models.CharField("打包要求", max_length=20, choices=PACK_REQ_CHOICES, default="NONE")
     pack_note = models.CharField("打包备注", max_length=120, blank=True, default="")
     note = models.CharField("明细备注", max_length=200, blank=True, null=True)
+
+    final_line_amount = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        verbose_name="最终行金额",
+    )
 
     class Meta:
         verbose_name = "出库订单行"

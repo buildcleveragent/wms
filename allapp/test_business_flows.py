@@ -207,6 +207,20 @@ class BusinessFlowTests(TestCase):
         service_date = service_date or datetime.date(2026, 3, 31)
         product = self.create_product(product_code, volume="0.500000")
         self.seed_inventory(product, "10.0000", location=self.pick_location)
+        InventoryTransaction.objects.create(
+            tx_type="RECEIVE",
+            owner=self.owner,
+            product=product,
+            warehouse=self.warehouse,
+            subwarehouse=self.subwarehouse,
+            location=self.pick_location,
+            qty_delta=Decimal("10.0000"),
+            src_model="business_flow_seed",
+            src_id=product.id,
+            src_line_id=1,
+            src_no=f"SEED-{product.code}",
+            posted_at=datetime.datetime.combine(service_date, datetime.time(9, 0)),
+        )
 
         generate_inventory_snapshot_for_date(
             service_date,

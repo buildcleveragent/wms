@@ -350,7 +350,7 @@ class Product(BaseModel):
         choices=[('WAC', '加权平均法'), ('NEW', '按最新批次')],
         default='WAC'  # 默认使用加权平均法
     )  # 定价策略字段
-    price = models.DecimalField("价格",max_digits=10, decimal_places=2)  # 基本价格字段
+    price = models.DecimalField("默认价格",max_digits=18, decimal_places=2, null=True, blank=True, default=None)  # 基本价格字段
     min_price = models.DecimalField("最低价格",max_digits=10, decimal_places=2, blank=True, null=True)
     max_discount = models.DecimalField("最高折扣%", max_digits=10, decimal_places=2, blank=True, null=True)
 
