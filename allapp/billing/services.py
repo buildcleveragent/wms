@@ -1,7 +1,7 @@
 # allapp/billing/services.py
-from allapp.outbound.models import OutboundOrder
-from allapp.outbound.enums import PricingStatus
+from allapp.outbound.models import OutboundOrderLine
 import datetime
+import time
 from calendar import monthrange
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, Tuple, Dict, Set, Iterable
@@ -854,27 +854,40 @@ def _build_area_metric(owner_id, warehouse_id, service_date, *, inventory_rows=N
 def _build_order_amount_metric(owner_id, warehouse_id, service_date, **kwargs):
     """
     订单金额日指标：
-    当前口径 = biz_date 当天、已提交、价格已确认的订单 final_order_amount 总和
+    - 优先使用冻结后的 final_line_amount
+    - 未冻结时回退 base_qty * base_price
+    - 仅统计已提交、未取消的订单
     """
+    line_amount_expr = Case(
+        When(
+            final_line_amount__gt=0,
+            then=F("final_line_amount"),
+        ),
+        default=ExpressionWrapper(
+            F("base_qty") * F("base_price"),
+            output_field=DecimalField(max_digits=18, decimal_places=2),
+        ),
+        output_field=DecimalField(max_digits=18, decimal_places=2),
+    )
     total = (
-        OutboundOrder.objects
+        OutboundOrderLine.objects
         .filter(
-            owner_id=owner_id,
-            warehouse_id=warehouse_id,
-            biz_date=service_date,
-            submit_status="SUBMITTED",
-            pricing_status=PricingStatus.CONFIRMED,
+            order__owner_id=owner_id,
+            order__warehouse_id=warehouse_id,
+            order__biz_date=service_date,
+            order__submit_status="SUBMITTED",
+            order__is_deleted=False,
             is_deleted=False,
         )
-        .exclude(approval_status="CANCELLED")
-        .aggregate(total=Sum("final_order_amount"))["total"]
+        .exclude(order__approval_status="CANCELLED")
+        .aggregate(total=Sum(line_amount_expr))["total"]
         or Decimal("0.00")
     )
 
     return {
         "value": total,
         "source": f"{AUTO_METRIC_SOURCE_PREFIX}OUTBOUND_ORDER_AMOUNT",
-        "note": "Sum(final_order_amount) for submitted & pricing-confirmed outbound orders.",
+        "note": "Sum(final_line_amount) with fallback to base_qty * base_price for submitted outbound lines, excluding cancelled orders.",
     }
 
 def _default_metric_payload(metric_type: str, owner_id, warehouse_id, service_date, **kwargs):
@@ -903,6 +916,15 @@ def _auto_metric_types(metric_types: Optional[Iterable[str]] = None):
 
 def _is_auto_metric_row(metric: BillingMetricDaily) -> bool:
     return (metric.source or "").startswith(AUTO_METRIC_SOURCE_PREFIX)
+
+
+def _recover_existing_metric_after_create_race(metric_filter, *, attempts: int = 20, delay: float = 0.05):
+    for _ in range(attempts):
+        existing = BillingMetricDaily.objects.select_for_update().filter(**metric_filter).first()
+        if existing is not None:
+            return existing
+        time.sleep(delay)
+    return None
 
 
 def _store_generated_metric(
@@ -955,15 +977,16 @@ def _store_generated_metric(
 
     if not existing:
         try:
-            BillingMetricDaily.objects.create(
-                owner_id=owner_id,
-                warehouse_id=warehouse_id,
-                service_date=service_date,
-                metric_type=metric_type,
-                value=value,
-                source=source,
-                note=note,
-            )
+            with transaction.atomic():
+                BillingMetricDaily.objects.create(
+                    owner_id=owner_id,
+                    warehouse_id=warehouse_id,
+                    service_date=service_date,
+                    metric_type=metric_type,
+                    value=value,
+                    source=source,
+                    note=note,
+                )
             return {
                 "metric_type": metric_type,
                 "action": "created",
@@ -972,9 +995,8 @@ def _store_generated_metric(
                 "note": note,
             }
         except (IntegrityError, ValidationError) as exc:
-            try:
-                existing = BillingMetricDaily.objects.select_for_update().get(**metric_filter)
-            except BillingMetricDaily.DoesNotExist:
+            existing = _recover_existing_metric_after_create_race(metric_filter)
+            if existing is None:
                 raise exc
 
     if not overwrite and not _is_auto_metric_row(existing):

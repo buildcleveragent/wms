@@ -1,9 +1,9 @@
-from django.contrib.auth.mixins import LoginRequiredMixin
 from dal import autocomplete
 from django.db.models import Q
 from .models import ProductUom
 
-class ProductUomAutocomplete(LoginRequiredMixin, autocomplete.Select2QuerySetView):
+
+class ProductUomAutocomplete(autocomplete.Select2QuerySetView):
     def get_queryset(self):
         qs = ProductUom.objects.filter(is_active=True).only("id", "code", "name")
         if self.forwarded.get("only_count") in ("1", 1, True):

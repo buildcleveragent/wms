@@ -29,6 +29,11 @@ class ProductSerializer(serializers.ModelSerializer):
     packages = ProductPackageBriefSerializer(many=True, read_only=True)
     product_image = serializers.SerializerMethodField()
 
+    def get_product_image(self, obj):
+        if obj.product_image:
+            return obj.product_image.url
+        return None
+
     class Meta:
         model = Product
         fields = [
@@ -41,23 +46,13 @@ class ProductSerializer(serializers.ModelSerializer):
             "pick_policy", "break_box_allowed", "min_pick_multiple",
             "replenish_min", "replenish_uom",
             "volume", "weight",
-            "min_stock", "max_stock","product_image",
+            "min_stock", "max_stock", "product_image",
             "serial_control", "batch_control", "expiry_control",
-            "expiry_basis", "shelf_life_days", "inbound_valid_days", "min_expiry_days",
+            "expiry_basis", "shelf_life_days", "inbound_valid_days", "expiry_warning_days",
             "fefo_required", "mix_lot_allowed", "mix_expiry_allowed",
             "origin_country",
             "is_active",
             "extra",
-            "packages","price","min_price","max_discount",
+            "packages", "price", "min_price", "max_discount",
         ]
         read_only_fields = ("id", "created_at", "updated_at")
-        # 如果需要强制要求 owner/base_uom 必填，可解开下面注释
-        # extra_kwargs = {
-        #     "owner": {"required": True},
-        #     "base_uom": {"required": True},
-        # }
-        def get_product_image(self, obj):
-            # 返回图片的 URL 地址
-            if obj.product_image:
-                return obj.product_image.url  # 获取图片的 URL 地址
-            return None

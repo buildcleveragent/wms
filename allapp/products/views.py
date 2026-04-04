@@ -83,7 +83,7 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
             "volume", "weight", "aux_volume", "aux_weight",
             "min_stock", "max_stock",
             "batch_control", "expiry_control",
-            "shelf_life_days", "inbound_valid_days", "min_expiry_days",
+            "shelf_life_days", "inbound_valid_days", "expiry_warning_days",
             "is_active",
         ]
         dataset = tablib.Dataset(headers=headers)
@@ -224,5 +224,4 @@ def get_product_details(request, product_id):
         })
     except Product.DoesNotExist:
         return JsonResponse({"error": "Product not found"}, status=404)
-
 
