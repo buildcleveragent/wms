@@ -34,6 +34,7 @@ from allapp.billing.models import BillingPeriod
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.models import OutboundOrderLine
 from allapp.outbound.serializers import OutboundOrderCreateSerializer,ConfirmPricingSerializer, OutboundOrderReadSerializer
+from allapp.core.utils.log_context import build_log_payload
 
 
 # 放到 OutboundOrderViewSet 类中
@@ -121,11 +122,18 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         owner_id = getattr(request.user, "owner_id", None)
         if not owner_id:
             owner_id = request.query_params.get("owner")
-            print("owner_id:",owner_id)
             if not owner_id:
-                # return self.get_paginated_response([])
-                print("not owner_id:")
+                ctx, ctx_text = build_log_payload(
+                    user=request.user,
+                    warehouse_id=request.query_params.get("warehouse_id"),
+                )
+                logger.warning("outbound.product_list.owner_missing %s", ctx_text, extra=ctx)
                 return Response([])
+        ctx, ctx_text = build_log_payload(
+            user=request.user,
+            owner_id=owner_id,
+            warehouse_id=request.query_params.get("warehouse_id"),
+        )
 
         # ✅ 只预取“当前查询命中的产品”的包装，并连带 uom，限制字段，避免 N+1
         pkg_qs = (ProductPackage.objects
@@ -260,7 +268,6 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
             product_image_url = None
             if p.product_image:
-                print("ProductViewSet ProductViewSet")
                 product_image_url = request.build_absolute_uri(p.product_image.url)
                 # product_image_url = "http://192.168.1.6:8001"+p.product_image.url  # 获取图片的 URL 地址
 
@@ -286,8 +293,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "selectedUnitIndex": sel_idx,
                     "base_quantity": 0,
                 })
-        print("data", data)
-        logger.debug("ProductViewSet data  %s",data)
+        logger.debug("outbound.product_list.response %s count=%s", ctx_text, len(data), extra=ctx)
         return self.get_paginated_response(data)
 
 class CustomerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -381,11 +387,11 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         ProductPackage = apps.get_model("products", "ProductPackage")
 
         owner_id = request.query_params.get("owner")
-        print("owner_id:",owner_id)
         if not owner_id:
-            # return self.get_paginated_response([])
-            print("not owner_id:")
+            ctx, ctx_text = build_log_payload(user=request.user)
+            logger.warning("outbound.receive_product_list.owner_missing %s", ctx_text, extra=ctx)
             return Response([])
+        ctx, ctx_text = build_log_payload(user=request.user, owner_id=owner_id)
 
         # 预取 packages + uom，减少 N+1
         # pkg_qs = (ProductPackage.objects
@@ -526,7 +532,6 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
             product_image_url = None
             if p.product_image:
-                print("ProductViewSet ProductViewSet")
                 product_image_url = request.build_absolute_uri(p.product_image.url)
                 # product_image_url = "http://192.168.1.6:8001"+p.product_image.url  # 获取图片的 URL 地址
 
@@ -555,9 +560,7 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 "base_quantity":0,
                 # "selectedUnit": sel_unit,  # 若不想冗余，可不下发这个，前端用 index 取
             })
-        print("data", data)
-        # logger.debug("ReceiveProductViewSet data ",data)
-        logger.debug("ReceiveProductViewSet data %s", data)
+        logger.debug("outbound.receive_product_list.response %s count=%s", ctx_text, len(data), extra=ctx)
         return self.get_paginated_response(data)
 
 class OutboundOrderViewSet(
@@ -627,7 +630,7 @@ class OutboundOrderViewSet(
     #     order.save()
     #
     #     # 分配库存 available->allocated（你现有服务）
-    #     print("owner_approve order=",order)
+    #     logger.debug("owner_approve order=%s", order)
     #     try:
     #         ob_services.allocate_inventory(order, by_user=request.user, allow_backorder=True)
     #     except Exception as e:
@@ -1085,7 +1088,8 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(methods=["get"], detail=True)
     def lines(self, request, pk=None):
-        print("PickTaskViewSet lines pk=", pk)
+        ctx, ctx_text = build_log_payload(task_id=pk, user=request.user)
+        logger.info("outbound.pick.lines.request %s", ctx_text, extra=ctx)
         lines = (
             WmsTaskLine.objects
             .filter(task_id=pk)
@@ -1093,7 +1097,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             .order_by("id")
         )
         data = PickTaskLineSerializer(lines, many=True).data
-        print("PickTaskViewSet  lines data=",data)
+        logger.debug("outbound.pick.lines.response %s count=%s", ctx_text, len(data), extra=ctx)
         return Response(data)
 
     @action(methods=["post"], detail=True)
@@ -1144,7 +1148,6 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
     @action(methods=["post"], detail=True, url_path="create-review-task")
     @transaction.atomic
     def create_review_task(self, request, pk=None):
-        print("create-review-task 123,PK=",pk)
         """
         拣货完成，不直接过账：
           - 校验所有明细 qty_done >= qty_plan
@@ -1159,7 +1162,8 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             .select_for_update()
             .get(id=pk, task_type=WmsTask.TaskType.PICK)
         )
-        print("create-review-task 222,PK=", pk)
+        ctx, ctx_text = build_log_payload(task=task, user=request.user)
+        logger.info("outbound.pick.create_review.begin %s", ctx_text, extra=ctx)
         # 1）必须是进行中或已发布等“可完成”的状态
         if task.status not in (
             WmsTask.Status.RELEASED,
@@ -1167,17 +1171,14 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             WmsTask.Status.RESERVED,
         ):
             raise ValidationError(f"当前任务状态为 {task.status}，不能提交复核。")
-        print("create-review-task 333,PK=", pk)
         # 2）检查是否还有未拣完的明细
         has_undone = WmsTaskLine.objects.filter(
             task_id=task.id,
             qty_done__lt=F("qty_plan"),
         ).exists()
-        print("create-review-task aabbcc,PK=", pk)
         if has_undone:
-            print("create-review-task has_undone,has_undone=", has_undone)
+            logger.warning("outbound.pick.create_review.pending_lines %s", ctx_text, extra=ctx)
             raise ValidationError("还有未拣完的明细，不能提交复核。")
-        print("create-review-task 444,PK=", pk)
         # 3）流转到“已完成，待审核”
         task.status = WmsTask.Status.COMPLETED
         task.review_status = WmsTask.ReviewStatus.PENDING
@@ -1188,7 +1189,6 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             task.picked_by = request.user
 
         task.finished_at = task.finished_at or timezone.now()
-        print("create-review-task 555,PK=", pk)
         task.save(update_fields=[
             "status",
             "review_status",
@@ -1196,7 +1196,14 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             "picked_by",
             "updated_at",
         ])
-        print("create-review-task 666,PK=", pk)
+        logger.info(
+            "outbound.pick.create_review.completed %s status=%s review_status=%s posting_status=%s",
+            ctx_text,
+            task.status,
+            task.review_status,
+            task.posting_status,
+            extra=ctx,
+        )
         return Response({
             "task_id": task.id,
             "status": task.status,
@@ -1226,18 +1233,18 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             .select_for_update()
             .get(id=pk, task_type=WmsTask.TaskType.PICK)
         )
-        print("post pk=",pk)
+        ctx, ctx_text = build_log_payload(task=task, user=request.user)
+        logger.info("outbound.pick.post.begin %s", ctx_text, extra=ctx)
         # 1）必须是“已完成，待审核”
         if task.status != WmsTask.Status.COMPLETED:
             raise ValidationError("任务未处于已完成状态，不能过账。")
         if task.review_status != WmsTask.ReviewStatus.PENDING:
             raise ValidationError("当前任务不在待审核状态，不能过账。")
-        print("禁止拣货人自己复核自己", pk)
         # 2）禁止拣货人自己复核自己
         picker = getattr(task, "picked_by", None)
         if picker and picker.id == request.user.id:
+            logger.warning("outbound.pick.post.self_review_blocked %s", ctx_text, extra=ctx)
             raise ValidationError("拣货人不能作为本任务的复核人。")
-        print("设置审核通过 & 准备过账", pk)
         # 3）设置审核通过 & 准备过账
         task.review_status = WmsTask.ReviewStatus.APPROVED
         task.approved_by = request.user
@@ -1259,6 +1266,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             by_user=request.user,
             note="PDA拣货复核通过并过账",
         )
+        logger.info("outbound.pick.post.completed %s", ctx_text, extra=ctx)
         # 这里假设 _run_posting_handler 内部会把 posting_status / posted_by / posted_at 更新好
 
         return Response({
@@ -1274,7 +1282,8 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
           - 请求体：{ line_id, final_qty_done, client_seq? }
           - 调用 tasking.services.adjust_pick_line_qty
         """
-        print("889 adjust_line_qty adjust_line_qty adjust_line_qtypk=",pk)
+        ctx, ctx_text = build_log_payload(task_id=pk, user=request.user)
+        logger.info("outbound.pick.adjust_line_qty.begin %s", ctx_text, extra=ctx)
         task_id = int(pk)
         line_id = request.data.get("line_id")
         final_qty_done = request.data.get("final_qty_done")

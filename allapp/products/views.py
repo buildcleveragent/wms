@@ -198,8 +198,12 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
 
 
 # allapp/products/views.py
+import logging
+
 from django.http import JsonResponse
 from allapp.products.models import Product, ProductPackage
+
+logger = logging.getLogger(__name__)
 
 
 def get_product_details(request, product_id):
@@ -222,7 +226,11 @@ def get_product_details(request, product_id):
             }
             for package in product_packages
         ]
-        print("get_product_details get_product_details get_product_details")
+        logger.debug(
+            "products.product_details.loaded product_id=%s package_count=%s",
+            product.id,
+            len(pack_uoms),
+        )
         return JsonResponse({
             "base_uom": base_uom,
             "pack_uoms": pack_uoms

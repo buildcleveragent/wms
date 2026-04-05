@@ -9,6 +9,7 @@ from allapp.tasking import services
 logger = logging.getLogger(__name__)
 
 from datetime import datetime
+from allapp.core.utils.log_context import build_log_payload
 from allapp.tasking.models import DocSequence
 from allapp.inventory.models import InventoryDetail
 from decimal import Decimal, ROUND_HALF_UP
@@ -173,8 +174,15 @@ def adjust_pick_line_qty(
         source="PDA",
     )
 
-    # 7) 写 TaskScanLog（method 用已有字段，不新增列）
-    print("126 TaskScanLog.objects.create")
+    ctx, ctx_text = build_log_payload(task=task, user=by_user)
+    logger.info(
+        "tasking.pick.manual_adjust.snapshot_saved %s line_id=%s rev=%s diff=%s",
+        ctx_text,
+        line.id,
+        rev,
+        diff,
+        extra=ctx,
+    )
 
     #
     # scan = TaskScanLog.objects.create(
@@ -243,10 +251,24 @@ def _run_posting_handler(task_id: int, by_user=None, note: str = "过账"):
     task = WmsTask.objects.select_for_update().get(id=task_id)
     scans = list(TaskScanLog.objects.filter(task_id=task.id).order_by("id"))
     # 支持 settings 配字符串或可调用
-    print("188  _run_posting_handler scans=",scans)
+    ctx, ctx_text = build_log_payload(task=task, user=by_user)
+    logger.info(
+        "tasking.posting.run.begin %s scans=%s note=%s",
+        ctx_text,
+        len(scans),
+        note or "",
+        extra=ctx,
+    )
     handler_cfg = getattr(settings, "TASKING_POSTING_HANDLER", "allapp.tasking.plugins.handlers.DefaultPostingHandler")
     handler = import_string(handler_cfg)() if isinstance(handler_cfg, str) else handler_cfg()
     created = handler.handle(task=task, scans=scans, now=None, batch_no=None, note=note or "")
+    logger.info(
+        "tasking.posting.run.completed %s scans=%s created=%s",
+        ctx_text,
+        len(scans),
+        created,
+        extra=ctx,
+    )
     return {"ok": True, "tx_created": created}
 
 def _resolver():
@@ -1032,16 +1054,23 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
         product(Product实例), location(Location或None), lot_no, expiry_date, serial_no, qty_ok(Decimal)
     注意：owner/warehouse 一律由 tl.task 真源补齐，外部不允许写。
     """
-    print("save_receiving_snapshot items=",items)
     from allapp.tasking.models import WmsTask, WmsTaskLine, TaskScanLog  # 依据你的实际 app 路径
     # 如果你表里没有 posted_at 字段，请使用 posting_journal__isnull 判断“未过账”
-    print("task_line_id: int, items, operator",task_line_id, items, operator)
     with transaction.atomic():
         # 1) 锁行并拿到任务归属（owner/warehouse）
         tl = (WmsTaskLine.objects
               .select_for_update()
               .select_related("task", "product")
               .get(pk=task_line_id))
+        ctx, ctx_text = build_log_payload(task=tl.task, user=operator)
+        logger.info(
+            "tasking.snapshot.save.begin %s line_id=%s items=%s source=%s",
+            ctx_text,
+            tl.id,
+            len(items),
+            source,
+            extra=ctx,
+        )
 
         # 2) 审核/过账后禁止覆盖
         if getattr(tl.task, "review_status", "") == "APPROVED" or \
@@ -1049,7 +1078,6 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
             raise ValueError("该行已进入审核/过账阶段，禁止覆盖，请走冲销流程。")
 
         # 3) 软删除当前未过账事实（READY & 未关联过账）
-        print("task_line_id=tl.id=",tl.id)
         # (TaskScanLog.objects
         #     .filter(task_line_id=tl.id, status__in=["READY", "RESERVED"], posting_journal__isnull=True)
         #     .update(status="IGNORED", remark="SNAPSHOT_REPLACED"))
@@ -1060,14 +1088,14 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
 
        #test
         # 查询所有记录
-        print("111 task_line_id=tl.id=", tl.id)
         task_scan_logs = TaskScanLog.objects.filter(task_line_id=tl.id)
-
-        # 打印每条记录的基本信息
-        for task_scan_log in task_scan_logs:
-            print(
-                f"TaskScanLog(id={task_scan_log.id}, status={task_scan_log.status}, task_line_id={task_scan_log.task_line_id})")
-        print("222 task_line_id=tl.id=", tl.id)
+        logger.debug(
+            "tasking.snapshot.existing_logs %s line_id=%s logs=%s",
+            ctx_text,
+            tl.id,
+            list(task_scan_logs.values("id", "status", "task_line_id")[:20]),
+            extra=ctx,
+        )
        #/test
 
 
@@ -1084,10 +1112,8 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
         # 5) 生成新日志（把归属信息 owner/warehouse 在此统一补齐）
         now = timezone.now()
         new_logs = []
-        print("1 items",items)
         for it in items:
             qty = it.get("qty_ok")
-            print("qty_ok qty_ok qty_ok", qty)
             if not qty:
                 continue
 
@@ -1139,18 +1165,36 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
                 fp=fp,
                 # posting_journal 过账时再赋值
             ))
-        print("len new_logs 0 ", len(new_logs), new_logs[0] if new_logs else None)
+        logger.debug(
+            "tasking.snapshot.prepared_logs %s line_id=%s rev=%s logs=%s is_count_task=%s",
+            ctx_text,
+            tl.id,
+            new_rev,
+            len(new_logs),
+            is_count_task,
+            extra=ctx,
+        )
 
         if not new_logs:
             # 没有任何有效数量（qty_ok <= 0 等），不写日志，直接返回当前版本号
+            logger.warning(
+                "tasking.snapshot.save.empty %s line_id=%s rev=%s",
+                ctx_text,
+                tl.id,
+                new_rev,
+                extra=ctx,
+            )
             return new_rev
-        obj = new_logs[0]
-        fields = [f.name for f in obj._meta.concrete_fields]
-        print({name: getattr(obj, name) for name in fields})
         if new_logs:
-            print("2 new_logs", new_logs)
             TaskScanLog.objects.bulk_create(new_logs, batch_size=1000)
-            print("3 new_logs after TaskScanLog.objects.bulk_create")
+            logger.info(
+                "tasking.snapshot.save.completed %s line_id=%s rev=%s logs=%s",
+                ctx_text,
+                tl.id,
+                new_rev,
+                len(new_logs),
+                extra=ctx,
+            )
             # TaskScanLog.objects.bulk_create(new_logs, ignore_conflicts=True, batch_size=1000)
 
     return new_rev
@@ -1211,7 +1255,15 @@ def _advance_task(task: WmsTask) -> None:
         task.review_status = pending
         task.finished_at = timezone.now()
         task.save(update_fields=["status", "review_status", "finished_at"])
-        print("887 task.review_status,task.posting_status",task.review_status,task.posting_status)
+        ctx, ctx_text = build_log_payload(task=task)
+        logger.info(
+            "tasking.task.advance.completed %s status=%s review_status=%s posting_status=%s",
+            ctx_text,
+            task.status,
+            task.review_status,
+            task.posting_status,
+            extra=ctx,
+        )
 
 # ---- 通用：获取扩展并计算数量（通用 fetch 函数）----
 def make_fetch(
@@ -1436,18 +1488,22 @@ def finalize_count_task_after_logs(task: WmsTask, *, by_user=None) -> str:
           * 若已达上限：当前任务直接 COMPLETED + APPROVED + PENDING；返回 "FINALIZED_FOR_POSTING"
       - 无差异：当前任务直接 COMPLETED + APPROVED + PENDING；返回 "COMPLETED_NO_DIFF"
     """
-    print("1 finalize_count_task_after_logs")
     if not task or task.task_type != WmsTask.TaskType.COUNT:
         return "NOOP_NOT_COUNT"
+    ctx, ctx_text = build_log_payload(task=task, user=by_user)
 
-    print("2 finalize_count_task_after_logs")
     # 若已处于审核/过账流，不再处理
     if task.review_status == WmsTask.ReviewStatus.APPROVED or \
        task.posting_status in (WmsTask.PostingStatus.PENDING, WmsTask.PostingStatus.POSTED):
-        print("2.1 已处于审核/过账流，不再处理 finalize_count_task_after_logs")
+        logger.info(
+            "tasking.count.finalize.skip_locked %s review_status=%s posting_status=%s",
+            ctx_text,
+            task.review_status,
+            task.posting_status,
+            extra=ctx,
+        )
         return "NOOP_LOCKED"
 
-    print("3 finalize_count_task_after_logs")
     line_ids = list(task.lines.values_list("id", flat=True))
     if not line_ids:
         # 没有行，当作无差异直接完成
@@ -1457,15 +1513,23 @@ def finalize_count_task_after_logs(task: WmsTask, *, by_user=None) -> str:
             review_status=WmsTask.ReviewStatus.APPROVED,
             posting_status=WmsTask.PostingStatus.PENDING,
         )
+        logger.warning(
+            "tasking.count.finalize.no_lines %s",
+            ctx_text,
+            extra=ctx,
+        )
         return "COMPLETED_NO_LINES"
 
-    print("3.1 # task没有行，当作无差异直接完成 finalize_count_task_after_logs")
     # 还有未盘行 → 不收尾
     if CountLineExtra.objects.filter(line_id__in=line_ids).exclude(count_status="COUNTED").exists():
-        print("4 还有未盘行 → 不收尾  finalize_count_task_after_logs")
+        logger.info(
+            "tasking.count.finalize.pending_lines %s line_count=%s",
+            ctx_text,
+            len(line_ids),
+            extra=ctx,
+        )
         return "NOOP_PENDING_LINES"
 
-    print("5 没有未盘行 → 收尾 finalize_count_task_after_logs")
     # 差异集合（任一行 qty_diff != 0 即视为有差异）
     diff_qs = (CountLineExtra.objects
                .filter(line_id__in=line_ids)
@@ -1484,11 +1548,17 @@ def finalize_count_task_after_logs(task: WmsTask, *, by_user=None) -> str:
     i = ORDER.index(cur_order)
 
     if diff_qs.exists():
-        print("6 有差异  diff_qs.exists finalize_count_task_after_logs")
         # —— 有差异 —— #
         if i + 1 < limit:
             # 还有下一轮：创建复盘任务（幂等防重复）
-            print("7 还有下一轮：创建复盘任务 幂等防重复 finalize_count_task_after_logs")
+            logger.warning(
+                "tasking.count.finalize.diff_detected %s current_order=%s next_order=%s limit=%s",
+                ctx_text,
+                cur_order,
+                ORDER[i + 1],
+                limit,
+                extra=ctx,
+            )
             remark = f"任务号{task.task_no}的复盘"
             exists_rc = WmsTask.objects.filter(
                 task_type=WmsTask.TaskType.COUNT,
@@ -1505,7 +1575,6 @@ def finalize_count_task_after_logs(task: WmsTask, *, by_user=None) -> str:
                     owner=task.owner,
                     biz_date=biz_date,
                 )
-                print("8 rc = WmsTask.objects.create finalize_count_task_after_logs")
                 rc = WmsTask.objects.create(
                     task_no=count_task_no,
                     task_type=WmsTask.TaskType.COUNT,
@@ -1518,7 +1587,6 @@ def finalize_count_task_after_logs(task: WmsTask, *, by_user=None) -> str:
                 new_order = ORDER[i + 1]
                 # 用本轮的账面快照作为下一轮的计划/账面
                 for d in diff_qs.select_related("line", "line__product", "line__from_location"):
-                    print("9 WmsTaskLine.objects.create CountLineExtra.objects.create")
                     line = WmsTaskLine.objects.create(
                         task=rc,
                         product=d.line.product,
@@ -1535,23 +1603,41 @@ def finalize_count_task_after_logs(task: WmsTask, *, by_user=None) -> str:
                         method="BLIND",
                         countorder=new_order,
                     )
+                next_ctx, next_ctx_text = build_log_payload(task=rc, user=by_user)
+                logger.info(
+                    "tasking.count.finalize.next_round_created %s parent_task_id=%s parent_task_no=%s",
+                    next_ctx_text,
+                    task.id,
+                    task.task_no,
+                    extra=next_ctx,
+                )
 
             # 当前轮只置已完成，不审核不过账
-            print("10 当前轮只置已完成，不审核不过账")
             WmsTask.objects.filter(pk=task.pk).update(
                 status=WmsTask.Status.COMPLETED,
                 review_status=WmsTask.ReviewStatus.NEED_RECOUNT,
                 posting_status=WmsTask.PostingStatus.NEED_RECOUNT,
             )
+            logger.info(
+                "tasking.count.finalize.need_recount %s",
+                ctx_text,
+                extra=ctx,
+            )
             return "NEXT_ROUND_CREATED"
 
         else:
             # 达到上限，不能再复盘：直接进入审核/过账流
-            print("11 达到上限，不能再复盘：直接进入审核/过账流")
             WmsTask.objects.filter(pk=task.pk).update(
                 status=WmsTask.Status.COMPLETED,
                 review_status=WmsTask.ReviewStatus.APPROVED,
                 posting_status=WmsTask.PostingStatus.PENDING,
+            )
+            logger.warning(
+                "tasking.count.finalize.max_round_reached %s current_order=%s limit=%s",
+                ctx_text,
+                cur_order,
+                limit,
+                extra=ctx,
             )
             return "FINALIZED_FOR_POSTING_WITH_DIFF"
 
@@ -1560,6 +1646,11 @@ def finalize_count_task_after_logs(task: WmsTask, *, by_user=None) -> str:
         status=WmsTask.Status.COMPLETED,
         review_status=WmsTask.ReviewStatus.APPROVED,
         posting_status=WmsTask.PostingStatus.PENDING,
+    )
+    logger.info(
+        "tasking.count.finalize.completed_no_diff %s",
+        ctx_text,
+        extra=ctx,
     )
     return "COMPLETED_NO_DIFF"
 

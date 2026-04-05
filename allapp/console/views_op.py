@@ -2,6 +2,7 @@
 # 统一“仓库操作员控制台”（CBV）
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
@@ -17,6 +18,8 @@ from django.views.generic import ListView, DetailView
 from allapp.tasking.models import WmsTask, WmsTaskLine
 from allapp.tasking import services as tasking_services
 from allapp.inventory import services as inventory_services
+
+logger = logging.getLogger(__name__)
 
 # ---- 常量 / 配置 ----
 Q_DEC_PLACES = 3
@@ -318,11 +321,14 @@ class OpLineListView(LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         user = self.request.user
-        print("OpLineListView user=",user)
         allowed_wh = _allowed_wh_ids_for(user)
-        print("OpLineListView allowed_wh=", allowed_wh)
         scope = (self.request.GET.get("scope") or "all").lower()
-        print("OpLineListView scope=", scope)
+        logger.debug(
+            "console.op_line_list.begin user_id=%s allowed_wh=%s scope=%s",
+            getattr(user, "id", None),
+            sorted(allowed_wh),
+            scope,
+        )
         if not allowed_wh:
             ctx.update({"lines": [], "scope": scope, "totals": {"all": 0, "mine": 0, "claimable": 0}})
             return ctx
@@ -386,7 +392,12 @@ class OpLineListView(LoginRequiredMixin, TemplateView):
         # 排序：我负责的优先，然后按 id 倒序
         qs = qs.order_by("-is_mine", "-id")
         # qs = WmsTaskLine.objects.all()
-        print("OpLineListView qs=", qs)
+        logger.debug(
+            "console.op_line_list.completed user_id=%s scope=%s count=%s",
+            getattr(user, "id", None),
+            scope,
+            qs.count(),
+        )
 
         ctx.update({
             "lines": qs,

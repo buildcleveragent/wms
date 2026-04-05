@@ -53,6 +53,7 @@ from django.utils import timezone
 
 from allapp.baseinfo.models import Owner
 from allapp.tasking.models import WmsTask  # 确保导入你的模型
+from allapp.core.utils.log_context import build_log_payload
 
 def get_line_extra_generic(tl):
     """
@@ -1066,7 +1067,12 @@ class WmsTaskAdmin(admin.ModelAdmin):
                 # 每条单独事务，避免一条失败拖累其他
                 with transaction.atomic():
                     # 让处理器自动查“可过账扫描”（不传 scans 即可）
-                    print("handler.handle task.id task by_user:::",task.id,task,request.user)
+                    ctx, ctx_text = build_log_payload(task=task, user=request.user)
+                    logger.info(
+                        "tasking.admin.post.begin %s",
+                        ctx_text,
+                        extra=ctx,
+                    )
                     handler.handle(task=task, scans=None, note="ADMIN", by_user=request.user)
                 ok += 1
             except Exception as e:
@@ -1220,7 +1226,7 @@ class ReviewLineExtraInline(_BaseLineExtraInline):
 #                     'qty_reviewed': reviewlineextra_data.qty_reviewed,
 #                     'qty_picked': reviewlineextra_data.qty_picked,
 #                 }
-#                 print("Form initial data:", form.initial)  # 调试输出，检查初始化数据
+#                 logger.debug("Form initial data: %s", form.initial)  # 调试输出，检查初始化数据
 #         return form
 
 class PackLineExtraInline(_BaseLineExtraInline):
@@ -1246,17 +1252,13 @@ def _is_blind_count(obj: WmsTaskLine) -> bool:
     判断该行是否处于复盘/三盘（SECOND/THIRD）。
     obj 是父对象 WmsTaskLine。利用一对一反向关系拿到扩展。
     """
-    print("0 _is_blind_count")
     if not obj:
-        print("1 not obj _is_blind_count")
         return False
     try:
-        print("2  obj _is_blind_count")
         order = obj.countlineextra.countorder
     except CountLineExtra.DoesNotExist:
-        print("3 except CountLineExtra.DoesNotExist")
         return False
-    print("4 return order _is_blind_count")
+    logger.debug("tasking.admin.blind_count_check line_id=%s order=%s", obj.id, order)
     return order in (CountLineExtra.CountOrder.SECOND, CountLineExtra.CountOrder.THIRD)
 
 class CountLineExtraInline(admin.StackedInline):
@@ -1273,10 +1275,10 @@ class CountLineExtraInline(admin.StackedInline):
 
     # 1) 从“渲染用字段集”里剔除（模板层一定会调用 get_fieldsets）
     def get_fieldsets(self, request, obj=None):
-        print("get_fieldsets")
         fs = super().get_fieldsets(request, obj)
         if not _is_blind_count(obj):
             return fs
+        logger.debug("tasking.admin.count_inline.get_fieldsets line_id=%s", getattr(obj, "id", None))
         new = []
         for name, opts in fs:
             fields = list(opts.get("fields", ()))
@@ -1288,10 +1290,10 @@ class CountLineExtraInline(admin.StackedInline):
 
     # 2) 从“表单字段”里剔除（避免被提交/校验）
     def get_formset(self, request, obj=None, **kwargs):
-        print("get_formset")
         FormSet = super().get_formset(request, obj, **kwargs)
         if not _is_blind_count(obj):
             return FormSet
+        logger.debug("tasking.admin.count_inline.get_formset line_id=%s", getattr(obj, "id", None))
         base_form = FormSet.form
 
         class BlindForm(base_form):
@@ -1392,12 +1394,15 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
     def get_fields(self, request, obj=None):
         f = list(super().get_fields(request, obj))
         if _is_blind_count(obj):
-            print("tasklineadmin get fields _is_blind_count")
             # 复盘/三盘：不渲染账面数和差异
             for name in ("qty_book", "qty_diff","qty_plan"):
                 if name in f:
                     f.remove(name)
-            print("tasklineadmin get fields _is_blind_count f=",f)
+            logger.debug(
+                "tasking.admin.taskline.get_fields.blind_count line_id=%s fields=%s",
+                getattr(obj, "id", None),
+                f,
+            )
         return f
     def get_inline_instances(self, request, obj=None):
         instances = super().get_inline_instances(request, obj)
@@ -1481,15 +1486,17 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
                 & Q(_has_line=False)  # 该行无人
                 & Q(assignments__finished_at__isnull=True)  # 任务指派未完成（finished_at 为空）
         )
-
-
-        print("tasklineadmin cond_pool",cond_pool)
         # 5) 合并筛选：我的 ∪ 可抢
         qs = qs.filter(cond_mine | cond_pool)
-        print("tasklineadmin qs", qs)
+        logger.debug(
+            "tasking.admin.taskline.get_queryset user_id=%s cond_pool=%s qs_count=%s",
+            getattr(request.user, "id", None),
+            cond_pool,
+            qs.count(),
+        )
         # task=qs.filter() or None
         # if task:
-        #     print("self.task.review_status,self.task.posting_statu",task.review_status,task.posting_statu)
+        #     logger.debug("task review/posting status %s %s", task.review_status, task.posting_statu)
 
         # 6) 排序：我的在前（行级>头级兜底），再可抢；组内按 id 逆序
         # 说明：Django 对布尔注解可直接排序；True>False，因此用降序把 True 放前面
@@ -1584,38 +1591,38 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
     #     """
     #     让 Admin 先把 inlines 落库，再读取最新 1:1 扩展值，重建快照生成手工 ScanLog。
     #     """
-    #     print("Saving related data...")
+    #     logger.debug("Saving related data...")
     #     if form.is_valid():
-    #         print(form.cleaned_data)  # 检查 qty_reviewed 和 qty_picked 是否传递
+    #         logger.debug("cleaned_data=%s", form.cleaned_data)  # 检查 qty_reviewed 和 qty_picked 是否传递
     #
-    #     print("1 taskline save_related aaa")
+    #     logger.debug("taskline save_related begin")
     #     super().save_related(request, form, formsets, change)
-    #     # print("request, form, formsets, change 2 taskline save_related",request, form, formsets, change)
+    #     # logger.debug("save_related args %s %s %s %s", request, form, formsets, change)
     #
     #     tl: WmsTaskLine = form.instance
     #     if not tl.task_id:
     #         return
     #
-    #     print("0 # 已进入审核/过账阶段，不覆盖，直接返回")
+    #     logger.debug("已进入审核/过账阶段，不覆盖，直接返回")
     #     # 已进入审核/过账阶段，不覆盖，直接返回
     #     if getattr(tl.task, "review_status", "") == "APPROVED" or \
     #        getattr(tl.task, "posting_status", "") in ("PENDING", "POSTED"):
     #         return
-    #     print("1 # 已进入审核/过账阶段，不覆盖，直接返回")
+    #     logger.debug("已进入审核/过账阶段，不覆盖，直接返回")
     #
     #     # models_to_check = ["ReceiveLineExtra", "PutawayLineExtra","PickLineExtra","ReviewLineExtra","PackLineExtra","LoadLineExtra","DispatchLineExtra","ReplenishLineExtra","CountLineExtra","AdjustLineExtra"]
     #     # extra_obj = None
     #     # for fs in formsets:
-    #     #     print("2 Extra save_related fs",fs)
+    #     #     logger.debug("Extra save_related fs=%s", fs)
     #     #     # 找到那个 inline（模型类名按你实际导入修改）
     #     #     # if getattr(getattr(fs, "model", None), "__name__", "") == "ReceiveLineExtra":
     #     #     if getattr(getattr(fs, "model", None), "__name__", "") in models_to_check:
-    #     #         print("3  getattr Extra save_related ",getattr(getattr(fs, "model", None), "__name__", ""))
+    #     #         logger.debug("Extra save_related model=%s", getattr(getattr(fs, "model", None), "__name__", ""))
     #     #         # fs.save() 已由 super().save_related 调过，这里拿实例更稳
     #     #         # cleaned_data 里可能包含删除/空表单，过滤一下
     #     #         for f in fs.forms:
-    #     #             # print("f in fs.forms",f)
-    #     #             print("f.cleaned_data", f.cleaned_data)
+    #     #             # logger.debug("form=%s", f)
+    #     #             logger.debug("f.cleaned_data=%s", f.cleaned_data)
     #     #             if f.cleaned_data and not f.cleaned_data.get("DELETE"):
     #     #                 extra_obj = f.instance  # ← 本次提交后的最新值
     #     #                 break
@@ -1624,11 +1631,11 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
     #     # ★ 通用：按任务类型/一对一反查拿扩展
     #     extra_obj = get_line_extra_generic(tl)
     #
-    #     print("4 Extra save_related")
+    #     logger.debug("Extra save_related step4")
     #     if not extra_obj:
-    #         print("not extra_obj aaa Extra save_related")
+    #         logger.debug("extra_obj missing in save_related")
     #         return  # 没有扩展就不生成
-    #     print("5 Extra save_related")
+    #     logger.debug("Extra save_related step5")
     #     # 3) 用“最新实例”取字段，避免 relation 缓存
     #     product  = getattr(tl, "product", None)
     #     location = getattr(extra_obj, "to_location", None) or getattr(extra_obj, "location", None) or getattr(tl, "to_location", None)
@@ -1641,11 +1648,11 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
     #                 or getattr(extra_obj, "qty_dispatch", None)
     #                 or getattr(extra_obj, "qty_counted", None))
     #
-    #     print("50 qty_ok=",qty_ok)
+    #     logger.debug("qty_ok=%s", qty_ok)
     #     if not qty_ok:
     #         return  # 无合格数量不建 ScanLog
     #
-    #     print("6 taskline save_related")
+    #     logger.debug("taskline save_related step6")
     #     # 没有数量就不建 ScanLog
     #     if not qty_ok or not product:
     #         return
@@ -1659,7 +1666,7 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
     #         "serial_no":    serial,             # 可选
     #         "qty_ok":       qty_ok,             # Decimal
     #     }]
-    #     print("1403 taskline save_related item items",len(items),items)
+    #     logger.debug("taskline save_related items count=%s items=%s", len(items), items)
     #     # —— 重建快照（软删旧 READY + 行版本自增 + 新建 READY 日志）——
     #     try:
     #         services.save_receiving_snapshot(task_line_id=tl.id,items=items,
@@ -1806,20 +1813,20 @@ def get_inline_instances(self, request, obj=None):
                 inline_inst._initial_for_fields = initial
     if not _is_blind_count(obj):
         return instances
-    print("123 tasklineadmin _is_blind_count(obj) ")
+    logger.debug("tasking.admin.taskline.inline_replace_blind_count line_id=%s", getattr(obj, "id", None))
 
     # 盲盘：把“模型=CountLineExtra”的 inline 全部替换成 Blind
     new_instances = []
     for inline in instances:
         # 调试：看看到底拿到的是什么类
-        # print("inline class:", inline.__class__.__name__, " model:", getattr(inline, "model", None))
+        # logger.debug("inline class=%s model=%s", inline.__class__.__name__, getattr(inline, "model", None))
 
         if getattr(inline, "model", None) is CountLineExtra:
             new_instances.append(CountLineExtraInlineBlind(self.model, self.admin_site))
-            # print("→ replaced with Blind")
+            # logger.debug("replaced with blind inline")
         else:
             new_instances.append(inline)
-            # print("→ kept:", inline.__class__.__name__)
+            # logger.debug("kept inline %s", inline.__class__.__name__)
     return new_instances
 
     return instances
@@ -1894,5 +1901,3 @@ class _HiddenContentTypeAdmin(admin.ModelAdmin):
     # 返回空权限字典：让它不出现在侧边栏/索引里，但路由仍可用
     def get_model_perms(self, request):
         return {}
-
-

@@ -1,4 +1,6 @@
 # inbound/admin.py
+import logging
+
 from django.urls import reverse
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
@@ -28,6 +30,7 @@ from allapp.baseinfo.models import Supplier
 from allapp.products.models import Product
 from .models import InboundOrder, InboundOrderLine
 
+logger = logging.getLogger(__name__)
 
 # === Admin 表单：一次性加载联动 JS ===
 class InboundOrderAdminForm(forms.ModelForm):
@@ -63,13 +66,9 @@ class InboundOrderLineInline(admin.TabularInline):
     def get_formset(self, request, obj=None, **kwargs):
         FormSet = super().get_formset(request, obj, **kwargs)
 
-        print("Entering get_formset")  # 你可以在这里看到是否进入了这个方法
-
         if obj:  # 当前正在编辑的 InboundOrder 已经保存
-            print(f"obj exists: {obj}")  # 输出当前 InboundOrder 对象
-            print(f"owner_id: {obj.owner_id}")  # 输出货主ID
-
             owner_id = obj.owner_id  # 获取当前 InboundOrder 对象的货主 ID
+            logger.debug("inbound.admin.inline_formset order_id=%s owner_id=%s", obj.id, owner_id)
 
             # 自定义表单类
             class FilteredForm(FormSet.form):
@@ -78,14 +77,13 @@ class InboundOrderLineInline(admin.TabularInline):
                     if "product" in self.fields:
                         # 根据货主ID过滤商品
                         self.fields["product"].queryset = Product.objects.filter(owner_id=owner_id)
-                        print(f"Filtered products for owner_id={owner_id}")  # 输出过滤后的商品
-                        print("productsproductsproductsproductsproductsproductsproducts")
-                        print(self.fields["product"].queryset)
+                        logger.debug(
+                            "inbound.admin.inline_formset.products_filtered owner_id=%s queryset_count=%s",
+                            owner_id,
+                            self.fields["product"].queryset.count(),
+                        )
 
             FormSet.form = FilteredForm  # 替换表单类
-
-        else:
-            print("obj is None")  # 如果 obj 为 None，说明当前不是编辑已保存的 InboundOrder 对象
 
         return FormSet
 
@@ -698,7 +696,6 @@ class ReturnInspectionInline(admin.StackedInline):  # 也可以使用 admin.Tabu
         if obj and obj.status == "POSTED":
             return False
         return super().has_delete_permission(request, obj)
-
 
 
 

@@ -1,6 +1,9 @@
 # allapp/tasking/models.py
+import logging
+
 from django.template.context_processors import request
 
+from allapp.core.utils.log_context import build_log_payload
 from allapp.tasking.utils import get_task_status_via_line
 from django.db.models import F, Q, ExpressionWrapper, DecimalField
 from django.contrib.contenttypes.models import ContentType
@@ -18,6 +21,7 @@ from allapp.inventory.models import PostingJournal
 from allapp.products.models import ProductUom
 
 DEC_QTY = dict(max_digits=18, decimal_places=4)
+logger = logging.getLogger(__name__)
 
 def _norm(s):
     return (s or "").strip().upper() or None
@@ -1153,14 +1157,38 @@ class PickLineExtra(TaskLineExtraBase):
                     from allapp.tasking.services import finalize_receive_line
                     try:
                         from allapp.tasking.services import finalize_task_line
-                        print("1103 before finalize_task_line")
+                        task = getattr(line, "task", None)
+                        ctx, ctx_text = build_log_payload(task=task, user=by_user)
+                        logger.info(
+                            "tasking.pick.auto_finalize.begin %s line_id=%s",
+                            ctx_text,
+                            self.line_id,
+                            extra=ctx,
+                        )
                         result=finalize_task_line(self.line_id, by_user=by_user, trigger="AUTO_ON_REACH_PLAN")
-                        print("1105 before if create_review_task(task)")
+                        logger.info(
+                            "tasking.pick.auto_finalize.completed %s line_id=%s task_status=%s",
+                            ctx_text,
+                            self.line_id,
+                            result.get("task_status") if result else None,
+                            extra=ctx,
+                        )
                         if result and result.get("task_status") == "COMPLETED":
                              task = getattr(line, "task", None)
-                             print("1108 before create_review_task(task)")
+                             ctx, ctx_text = build_log_payload(task=task, user=by_user)
+                             logger.info(
+                                 "tasking.review_task.auto_create.begin %s source_line_id=%s",
+                                 ctx_text,
+                                 self.line_id,
+                                 extra=ctx,
+                             )
                              self.create_review_task(task)
-                             print("1110 after create_review_task(task)")
+                             logger.info(
+                                 "tasking.review_task.auto_create.completed %s source_line_id=%s",
+                                 ctx_text,
+                                 self.line_id,
+                                 extra=ctx,
+                             )
                     except ValidationError:
                         # 不阻断保存；把错误交给上游 Admin 动作提示即可
                         pass
@@ -1190,7 +1218,13 @@ class PickLineExtra(TaskLineExtraBase):
             owner=owner,
             biz_date=biz_date,
         )
-        print("before 创建复核任务 1140 create_review_task(task)")
+        ctx, ctx_text = build_log_payload(task=task, owner=owner, warehouse=warehouse, user=created_by)
+        logger.info(
+            "tasking.review_task.create.begin %s source_task_type=%s",
+            ctx_text,
+            getattr(task, "task_type", None),
+            extra=ctx,
+        )
         # 创建复核任务
         review_task = WmsTask.objects.create(
             task_no=task_no,
@@ -1202,8 +1236,14 @@ class PickLineExtra(TaskLineExtraBase):
             # review_status=WmsTask.ReviewStatus.NOT_READY,
             # posting_status=WmsTask.PostingStatus.NOT_READY,
         )
-        print("review_task ",review_task)
-        print("after 创建复核任务 1153 create_review_task(task)")
+        review_ctx, review_ctx_text = build_log_payload(task=review_task, owner=owner, warehouse=warehouse, user=created_by)
+        logger.info(
+            "tasking.review_task.create.created %s source_task_id=%s source_task_no=%s",
+            review_ctx_text,
+            task.id,
+            task.task_no,
+            extra=review_ctx,
+        )
 
         # 为复核任务创建额外的任务信息（extra）
         ReviewTaskExtra.objects.create(
@@ -1212,7 +1252,7 @@ class PickLineExtra(TaskLineExtraBase):
             review_mode="AUTO",  # 假设复核模式是自动
             # 添加其他字段
         )
-        print("将任务行信息复制到复核任务")
+        copied_lines = 0
         # 将任务行信息复制到复核任务
         for task_line in task_lines.all():  # 假设 WmsTaskLine 是与任务关联的模型
             review_task_line = WmsTaskLine.objects.create(
@@ -1226,10 +1266,7 @@ class PickLineExtra(TaskLineExtraBase):
                 src_model="wmstaskline",
                 src_id=getattr(task_line,"id",None)  # 关联拣货任务行
             )
-            print("review_task_line ", review_task_line)
-            print("# 为每个任务行创建额外的行信息（extraline）")
             # 为每个任务行创建额外的行信息（extraline）
-            print("task_line.qty_plan,task_line.qty_done, ", task_line.qty_plan,task_line.qty_done)
             rl=ReviewLineExtra.objects.create(
                 line=review_task_line,
                 # 根据需要设置行的额外信息
@@ -1240,9 +1277,23 @@ class PickLineExtra(TaskLineExtraBase):
                 # qty_discrepancy_picked=0,
                 # 添加其他字段
             )
-            print("rl rl.qty_plan,rl.qty_picked",rl.qty_plan_origin,rl.qty_picked_origin)
-            print("after ReviewLineExtra.objects.create( # 为每个任务行创建额外的行信息（extraline）")
-        print("before return  review_task")
+            copied_lines += 1
+            logger.debug(
+                "tasking.review_task.create.line_copied %s line_id=%s source_line_id=%s qty_plan=%s qty_picked=%s",
+                review_ctx_text,
+                review_task_line.id,
+                task_line.id,
+                task_line.qty_plan,
+                task_line.qty_done,
+                extra=review_ctx,
+            )
+        logger.info(
+            "tasking.review_task.create.completed %s source_task_id=%s copied_lines=%s",
+            review_ctx_text,
+            task.id,
+            copied_lines,
+            extra=review_ctx,
+        )
         return review_task
 
     @transaction.atomic
@@ -1372,7 +1423,6 @@ class ReviewLineExtra(TaskLineExtraBase):
 
     @transaction.atomic
     def save(self, *args, **kwargs):
-        print("*********************Save method called!")  # 检查是否在页面加载时调用
         def _to_dec(x):
             return x if isinstance(x, Decimal) else Decimal(x or 0)
 
@@ -1394,7 +1444,14 @@ class ReviewLineExtra(TaskLineExtraBase):
         discrepancy_plan = Decimal(self.qty_discrepancy_plan or 0)
         discrepancy_picked = Decimal(self.qty_discrepancy_picked or 0)
         has_discrepancy = bool(discrepancy_plan) or bool(discrepancy_picked)
-        print("1338 has_discrepancy and line and task:")
+        ctx, ctx_text = build_log_payload(task=task)
+        logger.debug(
+            "tasking.review_line.save %s line_id=%s has_discrepancy=%s",
+            ctx_text,
+            getattr(line, "id", None),
+            has_discrepancy,
+            extra=ctx,
+        )
         if has_discrepancy and line and task:
             product = getattr(line, "product", None)
             location = (
@@ -1447,28 +1504,41 @@ class ReviewLineExtra(TaskLineExtraBase):
                     quantity_difference=_quantize_4(_to_decimal(quantity_difference)),
                     status=ReviewDifference.Status.PENDING,
                 )
-        print("0 1390 if task:")
+                logger.warning(
+                    "tasking.review_line.discrepancy_created %s line_id=%s review_diff_id=%s qty_plan_diff=%s qty_picked_diff=%s",
+                    ctx_text,
+                    line.id,
+                    review_diff.id,
+                    discrepancy_plan,
+                    discrepancy_picked,
+                    extra=ctx,
+                )
         if task:
             line_ids = task.lines.values_list("id", flat=True)
-            print("0 pending_exists::")
             pending_exists = (
                 self.__class__.objects
                 .filter(line_id__in=line_ids)
                 .exclude(review_status_rev=self.REVIEW_Status.REVIEWED)
                 .exists()
             )
-            print("1 pending_exists::")
+            logger.debug(
+                "tasking.review_task.pending_check %s pending_exists=%s",
+                ctx_text,
+                pending_exists,
+                extra=ctx,
+            )
             if not pending_exists:
                 WmsTask.objects.filter(pk=task.pk).update(
                     status=WmsTask.Status.COMPLETED,
                     review_status=WmsTask.ReviewStatus.APPROVED,
                     posting_status=WmsTask.PostingStatus.PENDING,
                 )
-                print("0 PackTaskExtra.create_followup_from_review(task):")
                 PackTaskExtra.create_followup_from_review(task)
-                print("1 PackTaskExtra.create_followup_from_review(task):")
-
-        print("1 if task:")
+                logger.info(
+                    "tasking.review_task.completed %s followup=pack",
+                    ctx_text,
+                    extra=ctx,
+                )
         return ret
 
     @transaction.atomic
@@ -2041,9 +2111,22 @@ class DispatchLineExtra(TaskLineExtraBase):
                     from allapp.tasking.services import finalize_receive_line
                     try:
                         from allapp.tasking.services import finalize_task_line
-                        print(" before finalize_task_line")
+                        task = getattr(line, "task", None)
+                        ctx, ctx_text = build_log_payload(task=task, user=by_user)
+                        logger.info(
+                            "tasking.line.auto_finalize.begin %s line_id=%s",
+                            ctx_text,
+                            self.line_id,
+                            extra=ctx,
+                        )
                         result = finalize_task_line(self.line_id, by_user=by_user, trigger="AUTO_ON_REACH_PLAN")
-                        print(" before if create_review_task(task)")
+                        logger.info(
+                            "tasking.line.auto_finalize.completed %s line_id=%s task_status=%s",
+                            ctx_text,
+                            self.line_id,
+                            result.get("task_status") if result else None,
+                            extra=ctx,
+                        )
                         # if result and result.get("task_status") == "COMPLETED":
 
                     except ValidationError:
@@ -2409,16 +2492,24 @@ class CountLineExtra(TaskLineExtraBase):
                 raise ValidationError({"__all__": "盘点库位不属于该任务仓库"})
         c = self.qty_counted or Decimal("0")
         b = self.qty_book    or Decimal("0")
-        print("0 self.qty_diff= c,b " ,self.qty_diff,c,b)
         # 精度按你的字段 decimal_places 量化（假设 3 位）
         self.qty_diff = (c - b).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
-        print("1 self.qty_diff=" ,self.qty_diff)
+        task = getattr(getattr(self, "line", None), "task", None)
+        ctx, ctx_text = build_log_payload(task=task)
+        logger.debug(
+            "tasking.count_line.clean %s line_id=%s qty_counted=%s qty_book=%s qty_diff=%s",
+            ctx_text,
+            getattr(self, "line_id", None),
+            c,
+            b,
+            self.qty_diff,
+            extra=ctx,
+        )
         if self.qty_counted>0:
             self.count_status="COUNTED"
 
     @transaction.atomic
     def save(self, *args, **kwargs):
-        print("*********************Save method called!")  # 检查是否在页面加载时调用
         by_user = kwargs.pop("by_user", None)   # 调用方传入 request.user
 
         if self.lot_no:
@@ -2436,17 +2527,28 @@ class CountLineExtra(TaskLineExtraBase):
                 kwargs["update_fields"] = list(update_fields)
 
         self.full_clean()  # 确保先进行数据验证
+        task = getattr(getattr(self, "line", None), "task", None)
+        ctx, ctx_text = build_log_payload(task=task, user=by_user)
+        logger.info(
+            "tasking.count_line.save %s line_id=%s count_status=%s qty_counted=%s qty_diff=%s",
+            ctx_text,
+            getattr(self, "line_id", None),
+            self.count_status,
+            self.qty_counted,
+            self.qty_diff,
+            extra=ctx,
+        )
         return super().save(*args, **kwargs)
 
         # countorder=self.countorder
         # line = getattr(self, "line", None)
         # task = getattr(line, "task", None) if line else None
         #
-        # print("0 COUNTALINEEXTRA SAVE if task:")
+        # logger.debug("COUNTALINEEXTRA save if task")
         # if task:
-        #     print("1 COUNTALINEEXTRA SAVE task is true:")
+        #     logger.debug("COUNTALINEEXTRA save task is true")
         #     line_ids = task.lines.values_list("id", flat=True)
-        #     print("0 pending_exists::")
+        #     logger.debug("COUNTALINEEXTRA pending_exists begin")
         #     pending_exists = (
         #         self.__class__.objects
         #         .filter(line_id__in=line_ids)
@@ -2456,14 +2558,14 @@ class CountLineExtra(TaskLineExtraBase):
         #     if pending_exists:
         #         return ret
         #
-        #     print("1 pending_exists::")
+        #     logger.debug("COUNTALINEEXTRA pending_exists end")
         #
         #     WmsTask.objects.filter(pk=task.pk).update(
         #         status=WmsTask.Status.COMPLETED,
         #         review_status=WmsTask.ReviewStatus.APPROVED,
         #         posting_status=WmsTask.PostingStatus.PENDING,
         #     )
-        #     print("WmsTask.objects.filter(pk=task.pk).update 1 not pending_exists::")
+        #     logger.debug("COUNTALINEEXTRA update task status")
         #     ORDER = ("FIRST", "SECOND", "THIRD")  # 现在只用到三次
         #     limit = max(1, min(getattr(settings, "COUNT_MAX_TIMES", 3), len(ORDER)))
         #
@@ -2520,8 +2622,8 @@ class CountLineExtra(TaskLineExtraBase):
         #             countorder=newcountorder,
         #         )
         #         created += 1
-        #         print("created CountLineExtra",created)
-        # print("1 if task:")
+        #         logger.debug("created CountLineExtra %s", created)
+        # logger.debug("COUNTALINEEXTRA save completed")
         # return ret
 
 # == 质检头 ==
@@ -2861,8 +2963,6 @@ class ContainerUsage(BaseModel):
 
         self.full_clean()
         return super().save(*args, **kwargs)
-
-
 
 
 

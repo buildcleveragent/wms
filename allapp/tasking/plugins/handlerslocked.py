@@ -1,6 +1,7 @@
 # allapp/tasking/plugins/handlers.py
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4
 
@@ -12,6 +13,9 @@ from django.utils import timezone
 from allapp.tasking.models import WmsTask, TaskScanLog
 from allapp.inventory.models import PostingJournal
 from allapp.inventory import services as inv_services
+from allapp.core.utils.log_context import build_log_payload
+
+logger = logging.getLogger(__name__)
 
 
 # -----------------------
@@ -71,7 +75,13 @@ class DefaultPostingHandler(BasePostingHandler):
                 task_id=task.id, status=ok_val, posted_at__isnull=True
             )
 
-        print("scans", scans,len(scans))
+        ctx, ctx_text = build_log_payload(task=task, user=by_user)
+        logger.info(
+            "tasking.posting_handler_locked.handle.begin %s scans=%s",
+            ctx_text,
+            len(scans),
+            extra=ctx,
+        )
 
         # —— 1) 任务级 PJ：幂等与审计（先建成 PENDING） —— #
         pj, created = PostingJournal.objects.get_or_create(
@@ -177,4 +187,3 @@ class DefaultPostingHandler(BasePostingHandler):
 
         # 你想返回什么都行：这里返回 1 表示这次任务级过账成功
         return 1
-

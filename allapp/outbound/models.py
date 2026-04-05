@@ -221,9 +221,9 @@ class OutboundOrder(BaseModel):
     #     self.save(update_fields=["approval_status"])
     #
     #     # 2) 冻结库存：冻结 available → allocated
-    #     print("allocate_inventory kkk")
+    #     logger.debug("allocate_inventory begin")
     #     ob_services.allocate_inventory(self, by_user=by_user, allow_backorder=allow_backorder )
-    #     print("allocate_inventory NNN")
+    #     logger.debug("allocate_inventory completed")
 
     # STATUS_OWNER_APPROVED = "OWNER_APPROVED"
 

@@ -17,6 +17,7 @@ from allapp.locations.models import Warehouse, Location
 from allapp.products.models import Product
 from allapp.tasking.models import WmsTask, WmsTaskLine
 from allapp.tasking.services import save_receiving_snapshot, _run_posting_handler
+from allapp.core.utils.log_context import build_log_payload
 
 class ReceiveGoodsWithoutOrder(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -119,6 +120,7 @@ class ReceiveGoodsWithoutOrder(APIView):
         task.save(update_fields=["status", "review_status", "posting_status"])
 
         task.refresh_from_db()
+        ctx, ctx_text = build_log_payload(task=task, user=request.user, owner=owner, warehouse=wh)
         logger.debug(
             "task after save in DB: id=%s status=%s review_status=%s posting_status=%s",
             task.id,
@@ -128,9 +130,14 @@ class ReceiveGoodsWithoutOrder(APIView):
         )
 
         # 4) 过账
-        print("过账 _run_posting_handler")
+        logger.info(
+            "inbound.receive_without_order.posting.begin %s item_count=%s",
+            ctx_text,
+            len(grouped),
+            extra=ctx,
+        )
         result = _run_posting_handler(task_id=task.id, by_user=request.user, note="PDA无ASN收货")
-        print("after 过账 _run_posting_handler")
+        logger.info("inbound.receive_without_order.posting.completed %s", ctx_text, extra=ctx)
         return Response({
             "task_id": task.id,
             "task_no": getattr(task, "task_no", None),

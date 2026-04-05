@@ -1,17 +1,15 @@
-const ENV =
-  (uni.getAccountInfoSync && uni.getAccountInfoSync().miniProgram?.envVersion) ||
-  'develop'
+const RAW_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').trim()
+export const BASE_URL = RAW_BASE_URL.replace(/\/+$/, '')
 
-const BASE_MAP = {
-  develop: 'http://192.168.1.6:8001',
-  trial: 'https://trial.example.com',
-  mobilephone: 'http://8.148.198.200:8080',
-  owner: 'http://8.148.198.200:8080',
-  onsite: 'http://192.168.2.6:8001',
+function requireBaseUrl() {
+  if (BASE_URL) {
+    return BASE_URL
+  }
+
+  const message = '未配置 VITE_API_BASE_URL，请联系管理员'
+  console.error(message)
+  throw new Error(message)
 }
-
-// export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
-export const BASE_URL = BASE_MAP.develop
 
 function getToken() {
   try {
@@ -98,10 +96,11 @@ function buildQuery(params = {}) {
 
 export function request(opts = {}) {
   const token = getToken()
+  const baseUrl = requireBaseUrl()
 
   return new Promise((resolve, reject) => {
     uni.request({
-      url: BASE_URL + (opts.url || ''),
+      url: baseUrl + (opts.url || ''),
       method: opts.method || 'GET',
       data: opts.data || {},
       header: {
@@ -191,7 +190,7 @@ export function downloadFileWithAuth(opts = {}) {
   const token = getToken()
   const qs = buildQuery(opts.params || {})
   const targetUrl = qs ? `${opts.url}${opts.url.includes('?') ? '&' : '?'}${qs}` : opts.url
-  const fullUrl = BASE_URL + targetUrl
+  const fullUrl = requireBaseUrl() + targetUrl
   const headers = {
     ...(opts.header || {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -420,10 +419,11 @@ export const api = {
   // 上传一件代发 Excel
   importDropShipExcel(filePath) {
     const access = uni.getStorageSync('access') || ''
+    const baseUrl = requireBaseUrl()
 
     return new Promise((resolve, reject) => {
       uni.uploadFile({
-        url: `${BASE_URL}/api/outbound/orders/import-drop-ship-excel/`,
+        url: `${baseUrl}/api/outbound/orders/import-drop-ship-excel/`,
         filePath,
         name: 'file',
         header: access ? { Authorization: `Bearer ${access}` } : {},
