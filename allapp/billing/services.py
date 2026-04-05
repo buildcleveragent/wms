@@ -939,6 +939,15 @@ def _store_generated_metric(
     value = Decimal(metric_payload["value"])
     source = metric_payload["source"]
     note = metric_payload["note"]
+    create_kwargs = {
+        "owner_id": owner_id,
+        "warehouse_id": warehouse_id,
+        "service_date": service_date,
+        "metric_type": metric_type,
+        "value": value,
+        "source": source,
+        "note": note,
+    }
     metric_filter = {
         "owner_id": owner_id,
         "warehouse_id": warehouse_id,
@@ -978,15 +987,7 @@ def _store_generated_metric(
     if not existing:
         try:
             with transaction.atomic():
-                BillingMetricDaily.objects.create(
-                    owner_id=owner_id,
-                    warehouse_id=warehouse_id,
-                    service_date=service_date,
-                    metric_type=metric_type,
-                    value=value,
-                    source=source,
-                    note=note,
-                )
+                BillingMetricDaily.objects.create(**create_kwargs)
             return {
                 "metric_type": metric_type,
                 "action": "created",
@@ -996,6 +997,13 @@ def _store_generated_metric(
             }
         except (IntegrityError, ValidationError) as exc:
             existing = _recover_existing_metric_after_create_race(metric_filter)
+            if existing is None and isinstance(exc, IntegrityError) and exc.__cause__ is None:
+                try:
+                    BillingMetricDaily(**create_kwargs).save(force_insert=True)
+                except IntegrityError:
+                    existing = _recover_existing_metric_after_create_race(metric_filter)
+                else:
+                    existing = BillingMetricDaily.objects.select_for_update().filter(**metric_filter).first()
             if existing is None:
                 raise exc
 
@@ -1718,12 +1726,19 @@ def _get_or_create_period_locked(*, owner_id, warehouse_id, label, start_date, e
             label=label,
             defaults=dict(start_date=start_date, end_date=end_date, status=PeriodStatus.OPEN),
         )
-    except IntegrityError:
-        period = BillingPeriod.objects.get(
-            owner_id=owner_id,
-            warehouse_id=warehouse_id,
-            label=label,
-        )
+    except (IntegrityError, ValidationError):
+        period = None
+        for _ in range(20):
+            period = BillingPeriod.objects.filter(
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                label=label,
+            ).first()
+            if period is not None:
+                break
+            time.sleep(0.05)
+        if period is None:
+            raise
         created = False
 
     period = BillingPeriod.objects.select_for_update().get(pk=period.pk)

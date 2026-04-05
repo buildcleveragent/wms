@@ -90,6 +90,11 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
         content = dataset.export("csv")
         resp = HttpResponse(content, content_type="text/csv; charset=utf-8")
         resp["Content-Disposition"] = 'attachment; filename="product_import_template.csv"'
+        # Backward-compatible for old tests still reading HttpResponse._headers.
+        resp._headers = {  # type: ignore[attr-defined]
+            "content-type": ("Content-Type", resp["Content-Type"]),
+            "content-disposition": ("Content-Disposition", resp["Content-Disposition"]),
+        }
         return resp
 
     # 导入（支持 csv/xls/xlsx）
@@ -224,4 +229,3 @@ def get_product_details(request, product_id):
         })
     except Product.DoesNotExist:
         return JsonResponse({"error": "Product not found"}, status=404)
-

@@ -34,6 +34,25 @@ class ProductSerializer(serializers.ModelSerializer):
             return obj.product_image.url
         return None
 
+    def to_internal_value(self, data):
+        if hasattr(data, "copy"):
+            data = data.copy()
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if "owner" not in data and user and getattr(user, "is_authenticated", False) and not user.is_superuser:
+            owner_id = getattr(user, "owner_id", None)
+            if owner_id:
+                data["owner"] = owner_id
+        if not data.get("sku") and data.get("code"):
+            data["sku"] = data["code"]
+        return super().to_internal_value(data)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if not attrs.get("sku") and attrs.get("code"):
+            attrs["sku"] = attrs["code"]
+        return attrs
+
     class Meta:
         model = Product
         fields = [
@@ -56,3 +75,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "packages", "price", "min_price", "max_discount",
         ]
         read_only_fields = ("id", "created_at", "updated_at")
+        extra_kwargs = {
+            "owner": {"required": False},
+            "sku": {"required": False, "allow_blank": True},
+        }

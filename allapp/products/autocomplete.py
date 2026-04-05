@@ -11,3 +11,9 @@ class ProductUomAutocomplete(autocomplete.Select2QuerySetView):
         if self.q:
             qs = qs.filter(Q(code__icontains=self.q) | Q(name__icontains=self.q))
         return qs.order_by("code")
+
+    def get_result_label(self, result):
+        return f"{result.code} {result.name}"
+
+    def get_selected_result_label(self, result):
+        return self.get_result_label(result)
