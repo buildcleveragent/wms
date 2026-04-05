@@ -1,15 +1,16 @@
-const RAW_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').trim()
-export const BASE_URL = RAW_BASE_URL.replace(/\/+$/, '')
+const ENV =
+  (uni.getAccountInfoSync && uni.getAccountInfoSync().miniProgram?.envVersion) ||
+  'develop'
 
-function requireBaseUrl() {
-  if (BASE_URL) {
-    return BASE_URL
-  }
-
-  const message = '未配置 VITE_API_BASE_URL，请联系管理员'
-  console.error(message)
-  throw new Error(message)
+const BASE_MAP = {
+  develop: 'http://192.168.1.6:8001',
+  trial: 'https://trial.example.com',
+  owner: 'http://8.148.198.200:8080',
+  onsite: 'http://192.168.2.6:8001',
 }
+
+// export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
+export const BASE_URL = BASE_MAP.onsite
 
 function getToken() {
   try {
@@ -96,11 +97,10 @@ function buildQuery(params = {}) {
 
 export function request(opts = {}) {
   const token = getToken()
-  const baseUrl = requireBaseUrl()
 
   return new Promise((resolve, reject) => {
     uni.request({
-      url: baseUrl + (opts.url || ''),
+      url: BASE_URL + (opts.url || ''),
       method: opts.method || 'GET',
       data: opts.data || {},
       header: {
@@ -166,103 +166,6 @@ export function request(opts = {}) {
   })
 }
 
-function getDispositionFilename(headerValue = '', fallback = 'download.xlsx') {
-  if (!headerValue) return fallback
-
-  const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i)
-  if (utf8Match?.[1]) {
-    try {
-      return decodeURIComponent(utf8Match[1])
-    } catch (e) {
-      return utf8Match[1]
-    }
-  }
-
-  const plainMatch = headerValue.match(/filename="?([^"]+)"?/i)
-  if (plainMatch?.[1]) {
-    return plainMatch[1]
-  }
-
-  return fallback
-}
-
-export function downloadFileWithAuth(opts = {}) {
-  const token = getToken()
-  const qs = buildQuery(opts.params || {})
-  const targetUrl = qs ? `${opts.url}${opts.url.includes('?') ? '&' : '?'}${qs}` : opts.url
-  const fullUrl = requireBaseUrl() + targetUrl
-  const headers = {
-    ...(opts.header || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  }
-
-  // #ifdef H5
-  return new Promise((resolve, reject) => {
-    uni.request({
-      url: fullUrl,
-      method: 'GET',
-      responseType: 'arraybuffer',
-      header: headers,
-      success: (res) => {
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          uni.showToast({ title: '导出失败', icon: 'none' })
-          reject(res)
-          return
-        }
-
-        const disposition = res.header?.['content-disposition'] || res.header?.['Content-Disposition'] || ''
-        const contentType = res.header?.['content-type'] || res.header?.['Content-Type'] || 'application/octet-stream'
-        const filename = opts.filename || getDispositionFilename(disposition, 'download.xlsx')
-        const blob = new Blob([res.data], { type: contentType })
-        const blobUrl = window.URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = blobUrl
-        link.download = filename
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        window.URL.revokeObjectURL(blobUrl)
-        resolve({ filename })
-      },
-      fail: (error) => {
-        uni.showToast({ title: '导出失败', icon: 'none' })
-        reject(error)
-      },
-    })
-  })
-  // #endif
-
-  // #ifndef H5
-  return new Promise((resolve, reject) => {
-    uni.downloadFile({
-      url: fullUrl,
-      header: headers,
-      success: (res) => {
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          uni.showToast({ title: '导出失败', icon: 'none' })
-          reject(res)
-          return
-        }
-
-        uni.openDocument({
-          filePath: res.tempFilePath,
-          showMenu: true,
-          success: () => resolve({ filePath: res.tempFilePath }),
-          fail: () => {
-            uni.showToast({ title: '文件已下载', icon: 'none' })
-            resolve({ filePath: res.tempFilePath })
-          },
-        })
-      },
-      fail: (error) => {
-        uni.showToast({ title: '导出失败', icon: 'none' })
-        reject(error)
-      },
-    })
-  })
-  // #endif
-}
-
 export const api = {
   // 登录
   login: (username, password) =>
@@ -273,27 +176,10 @@ export const api = {
     }),
 
   // 目录
-  customers: (q = '', page = 1, owner_id, mine) => {
-    const qs = buildQuery({
-      search: q,
-      page,
-      owner_id,
-      mine: mine ? 1 : undefined,
-    })
-    return request({
-      url: `/api/catalog/customers?${qs}`,
-    })
-  },
-
-  myOwners: (q = '', page = 1) => {
-    const qs = buildQuery({
-      search: q,
-      page,
-    })
-    return request({
-      url: `/api/catalog/owners/?${qs}`,
-    })
-  },
+  customers: (q = '', page = 1) =>
+    request({
+      url: `/api/catalog/customers?search=${encodeURIComponent(q)}&page=${page}`,
+    }),
 
   products: (q = '', page = 1, warehouse_id) => {
     const qs = buildQuery({
@@ -305,7 +191,7 @@ export const api = {
       url: `/api/catalog/products?${qs}`,
     })
   },
-
+  
   inventorySummary: (params = {}) => {
     const qs = buildQuery({
       search: params.search || '',
@@ -316,50 +202,7 @@ export const api = {
       url: `/api/inventory/summary/?${qs}`,
     })
   },
-
-  billingPeriods: (params = {}) => {
-    const qs = buildQuery(params)
-    return request({
-      url: qs ? `/api/billing/periods/?${qs}` : '/api/billing/periods/',
-    })
-  },
-
-  billingPeriodPreview: (id) =>
-    request({
-      url: `/api/billing/periods/${id}/preview/`,
-    }),
-
-  billingBills: (params = {}) => {
-    const qs = buildQuery(params)
-    return request({
-      url: qs ? `/api/billing/bills/?${qs}` : '/api/billing/bills/',
-    })
-  },
-
-  billingBillDetail: (id) =>
-    request({
-      url: `/api/billing/bills/${id}/`,
-    }),
-
-  billingAccruals: (params = {}) => {
-    const qs = buildQuery(params)
-    return request({
-      url: qs ? `/api/billing/accruals/?${qs}` : '/api/billing/accruals/',
-    })
-  },
-
-  billingBillsExport: (params = {}) =>
-    downloadFileWithAuth({
-      url: '/api/billing/bills/export/',
-      params,
-      filename: 'billing-bills.xlsx',
-    }),
-
-  billingBillExport: (id) =>
-    downloadFileWithAuth({
-      url: `/api/billing/bills/${id}/export/`,
-      filename: `bill-${id}.xlsx`,
-    }),
+  
 
   // 出库单创建
   createOutboundOrder: (payload) =>
@@ -415,32 +258,31 @@ export const api = {
       url: `/api/outbound/orders/${id}/cancel/`,
       method: 'POST',
     }),
-
-  // 上传一件代发 Excel
-  importDropShipExcel(filePath) {
-    const access = uni.getStorageSync('access') || ''
-    const baseUrl = requireBaseUrl()
-
-    return new Promise((resolve, reject) => {
-      uni.uploadFile({
-        url: `${baseUrl}/api/outbound/orders/import-drop-ship-excel/`,
-        filePath,
-        name: 'file',
-        header: access ? { Authorization: `Bearer ${access}` } : {},
-        success: (res) => {
-          try {
-            const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
-            if (res.statusCode >= 200 && res.statusCode < 300) {
-              resolve(data)
-            } else {
-              reject({ statusCode: res.statusCode, data })
-            }
-          } catch (e) {
-            reject(e)
-          }
-        },
-        fail: (err) => reject(err),
-      })
-    })
-  },
+	
+	// 上传一件代发 Excel
+   importDropShipExcel(filePath) {
+	  const access = uni.getStorageSync('access') || ''
+	
+	  return new Promise((resolve, reject) => {
+	    uni.uploadFile({
+	      url: `${BASE_URL}/api/outbound/orders/import-drop-ship-excel/`,
+	      filePath,
+	      name: 'file',
+	      header: access ? { Authorization: `Bearer ${access}` } : {},
+	      success: (res) => {
+	        try {
+	          const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
+	          if (res.statusCode >= 200 && res.statusCode < 300) {
+	            resolve(data)
+	          } else {
+	            reject({ statusCode: res.statusCode, data })
+	          }
+	        } catch (e) {
+	          reject(e)
+	        }
+	      },
+	      fail: (err) => reject(err),
+	    })
+	  })
+	},
 }

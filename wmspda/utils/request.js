@@ -1,15 +1,16 @@
-const RAW_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').trim()
-export const BASE_URL = RAW_BASE_URL.replace(/\/+$/, '')
+const ENV =
+  (uni.getAccountInfoSync && uni.getAccountInfoSync().miniProgram?.envVersion) ||
+  'develop'
 
-function requireBaseUrl() {
-  if (BASE_URL) {
-    return BASE_URL
-  }
-
-  const message = '未配置 VITE_API_BASE_URL，请联系管理员'
-  console.error(message)
-  throw new Error(message)
+const BASE_MAP = {
+  develop: 'http://192.168.1.6:8001',
+  trial: 'https://trial.example.com',
+  pda: 'http://8.148.198.200:8080',
+  onsite: 'http://192.168.2.6:8001',
 }
+
+// export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
+export const BASE_URL = BASE_MAP.develop
 
 function getToken() {
   try {
@@ -97,11 +98,10 @@ function buildQuery(params = {}) {
 
 export function request(opts = {}) {
   const token = getToken()
-  const baseUrl = requireBaseUrl()
 
   return new Promise((resolve, reject) => {
     uni.request({
-      url: baseUrl + (opts.url || ''),
+      url: BASE_URL + (opts.url || ''),
       method: opts.method || 'GET',
       data: opts.data || {},
       header: {
