@@ -12,6 +12,7 @@ from allapp.tasking.models import WmsTask, TaskScanLog,WmsTaskLine
 from allapp.inventory.models import PostingJournal, InventoryTransaction
 from allapp.inventory import services as inv_services
 from allapp.core.models import DocSequence
+from allapp.core.utils.log_context import build_log_payload
 
 import logging
 log = logging.getLogger(__name__)
@@ -31,14 +32,20 @@ def get_posting_handler():
     例如：'allapp.tasking.plugins.handlers.DefaultPostingHandler'
     """
     from importlib import import_module
-    print("begin def get_posting_handler ")
+    ctx, ctx_text = build_log_payload()
+    log.info("tasking.posting_handler.load.begin %s", ctx_text, extra=ctx)
     path = getattr(settings, "TASKING_POSTING_HANDLER", None)
     if not path:
         raise ImproperlyConfigured("TASKING_POSTING_HANDLER 未配置")
     mod_path, cls_name = path.rsplit(".", 1)
     mod = import_module(mod_path)
     cls = getattr(mod, cls_name)
-    print("1 def get_posting_handler cls ",cls)
+    log.info(
+        "tasking.posting_handler.load.completed %s handler=%s",
+        ctx_text,
+        path,
+        extra=ctx,
+    )
     return cls()
 
 
@@ -96,8 +103,15 @@ class DefaultPostingHandler(BasePostingHandler):
             defaults={"status": "PENDING", "message": (note or "过账")[:255], "attempt_count": 0},
         )
 
-        log.info("[POST] begin task=%s", task.id)
-        log.info("[POST] pj load/create: task=%s pj_id=%s status=%s", task.id, pj.id, pj.status)
+        ctx, ctx_text = build_log_payload(task=task, user=by_user, journal=pj, posting_batch=batch_no)
+        log.info("tasking.post.begin %s", ctx_text, extra=ctx)
+        log.info(
+            "tasking.post.journal_ready %s status=%s created=%s",
+            ctx_text,
+            pj.status,
+            created,
+            extra=ctx,
+        )
         # （如果你做了“PJ=POSTED 但还有扫描则 REPOST”的逻辑）
         # log.info("[POST] repost decision: task=%s need_repost=%s new_pj=%s",
         #          task.id, need_repost, getattr(new_pj, "id", None))
@@ -109,7 +123,7 @@ class DefaultPostingHandler(BasePostingHandler):
 
         if not created:
             if pj.status == "POSTED":
-                log.info("[POST] done task=%s pj=%s status=POSTED", task.id, pj.id)
+                log.info("tasking.post.already_posted %s", ctx_text, extra=ctx)
                 # 幂等：任务已过账，直接返回
                 return 0
             pj.attempt_count = (pj.attempt_count or 0) + 1
@@ -132,7 +146,7 @@ class DefaultPostingHandler(BasePostingHandler):
         except Exception as e:
             # 外层非原子写 PJ 失败状态（避免在回滚态里 save）
             pj.status = "FAILED"
-            log.error("[POST] fail task=%s pj=%s err=%s", task.id, pj.id, e)
+            log.exception("tasking.post.failed %s", ctx_text, extra=ctx)
             pj.message = (str(e) or "FAILED")[:255]
             pj.save(update_fields=["status", "message", "updated_at"])
             raise
@@ -152,9 +166,7 @@ class DefaultPostingHandler(BasePostingHandler):
             from allapp.billing import services as billing_services
             billing_services.accrue_for_posting(task, pj, by_user=by_user)
         except Exception as e:
-            # 记一条警告日志，不影响主流程
-            import logging
-            logging.getLogger(__name__).warning("Billing accrue failed: %s", e)
+            log.warning("tasking.post.billing_accrue_failed %s err=%s", ctx_text, e, extra=ctx)
 
         return affected
 
@@ -188,20 +200,21 @@ class DefaultPostingHandler(BasePostingHandler):
             # posting_status=WmsTask.PostingStatus.NOT_READY,
             posting_note="由收货任务自动生成的上架任务草稿",
         )
-        print("222222222222221")
+        putaway_ctx, putaway_text = build_log_payload(task=putaway_task, user=by_user)
+        receive_ctx, receive_text = build_log_payload(task=receive_task, user=by_user)
+        log.info("tasking.putaway_task.created %s source_task_id=%s", putaway_text, receive_task.id, extra=putaway_ctx)
 
         # 获取过账数据：从 InventoryTransaction 获取已过账商品及数量
         transactions = InventoryTransaction.objects.filter(
             src_model="WmsTask", src_id=receive_task.id, tx_type="RECEIVE"
         )
-        print("3333333333333")
 
         # 遍历所有相关的库存事务，创建对应的上架任务行
+        line_count = 0
         for tx in transactions:
             product_id = tx.product_id  # 获取商品ID
             qty = tx.qty_delta  # 获取过账数量（即收货数量）
             location_id = tx.location_id  # 获取库位ID（从事务中获取）
-            print("1111111111111111122222222222222222333333333333")
             # 创建上架任务行
             WmsTaskLine.objects.create(
                 task=putaway_task,
@@ -211,8 +224,15 @@ class DefaultPostingHandler(BasePostingHandler):
                 to_location=None,  # 上架目标库位待补充，可能根据策略计算
                 status=WmsTaskLine.Status.DRAFT,  # 初始状态为待处理
             )
-        print("aaaaaaaaaaaaaaaaaaa1111111111111111122222222222222222333333333333")
-        log.info("[POST] Created putaway task=%s for receive task=%s", putaway_task.id, receive_task.id)
+            line_count += 1
+        log.info(
+            "tasking.putaway_task.lines_created %s source_task_no=%s line_count=%s",
+            putaway_text,
+            receive_task.task_no,
+            line_count,
+            extra=putaway_ctx,
+        )
+        log.info("tasking.post.receive_to_putaway_linked %s putaway_task_id=%s", receive_text, putaway_task.id, extra=receive_ctx)
 
     @transaction.atomic
     def _handle_atomic(
@@ -238,6 +258,7 @@ class DefaultPostingHandler(BasePostingHandler):
         """
         now_ts = now or timezone.now()
         batch = batch_no or (timezone.now().strftime("%Y%m%d-%H%M%S-") + str(uuid4())[:8])
+        ctx, ctx_text = build_log_payload(task=task, user=by_user, journal=pj, posting_batch=batch)
 
         from allapp.tasking.models import WmsTask
         # ① 先锁任务头（统一顺序第 1 位）
@@ -245,7 +266,7 @@ class DefaultPostingHandler(BasePostingHandler):
                 .select_for_update()
                 .get(pk=task.id))
 
-        log.info("[POST] lock task=%s ok", task.id)
+        log.info("tasking.post.lock_task %s", ctx_text, extra=ctx)
         # ② 再锁任务行（统一顺序第 2 位；有行就按 id 升序锁一下，保持顺序一致）
         # try:
         #     # 反向关系命名为 lines（常见写法）
@@ -270,7 +291,7 @@ class DefaultPostingHandler(BasePostingHandler):
                         .filter(task_id=task.id)
                         .order_by("id"))
         _ = list(qs_lines)  # ← 关键：强制查询，确保锁生效
-        log.info("[POST] lock lines=%s ok", task.id)
+        log.info("tasking.post.lock_lines %s", ctx_text, extra=ctx)
 
         # ③ 再锁候选扫描（统一顺序第 3 位；清空默认排序后只按 id 升序）
         if scans is None:
@@ -296,7 +317,7 @@ class DefaultPostingHandler(BasePostingHandler):
                     .order_by()          # 清默认排序
                     .order_by("id")      # 主键升序
                 )
-        log.info("[POST] lock scans: task=%s candidates=%d", task.id, len(scans_locked))
+        log.info("tasking.post.lock_scans %s candidate_count=%s", ctx_text, len(scans_locked), extra=ctx)
         # 过滤：仅保留 OK 且未被拒绝且未打点的扫描
         scans_ok: List[TaskScanLog] = [
             s for s in scans_locked
@@ -307,16 +328,21 @@ class DefaultPostingHandler(BasePostingHandler):
         if not scans_ok:
             raise ValueError("无可过账明细（需要 OK 且未过账的 TaskScanLog）。")
 
-        log.info("[POST] scans_ok=%d first_id=%s",
-                 len(scans_ok), (scans_ok[0].id if scans_ok else None))
+        log.info(
+            "tasking.post.scans_ready %s scan_count=%s first_scan_id=%s",
+            ctx_text,
+            len(scans_ok),
+            scans_ok[0].id if scans_ok else None,
+            extra=ctx,
+        )
 
-        log.info("[POST] inventory.post_task (scan-only) call: task=%s user=%s",task.id, getattr(by_user, "id", None))
+        log.info("tasking.post.inventory_call %s", ctx_text, extra=ctx)
 
         # ④ 调用库存服务做真实入账
         # result = inv_services.post_task(task=task, user=by_user)
         result = inv_services.post_task(task=task, user=by_user, scans=scans_ok)
 
-        log.info("[POST] inventory.post_task result=%r", result)
+        log.info("tasking.post.inventory_result %s result=%r", ctx_text, result, extra=ctx)
 
         # ⑤ 严格校验返回：无交易即失败回滚（根据你们 services 的返回结构尽量取“受影响条数”）
         affected = 0
@@ -358,16 +384,19 @@ class DefaultPostingHandler(BasePostingHandler):
                 setattr(task, k, v)
             task.save(update_fields=list(updates.keys()))
 
-        log.info("[POST] task header updated: task=%s status=%s",
-                 task.id, getattr(task, "posting_status", None))
+        log.info(
+            "tasking.post.task_header_updated %s posting_status=%s",
+            ctx_text,
+            getattr(task, "posting_status", None),
+            extra=ctx,
+        )
 
         # self._create_putaway_task(task, by_user, now_ts)
         # … 成功过账后 …
         # from allapp.tasking.models import WmsTask
         # 仅“收货任务”且本次确实写出了分录，才派生上架任务
         if getattr(task, "task_type", None) == WmsTask.TaskType.RECEIVE and affected > 0:
-            print("create_puta11111111111111_1create_putaway_task_create_putaway_task_create_putaway_task")
+            log.info("tasking.post.putaway_task_triggered %s affected=%s", ctx_text, affected, extra=ctx)
             self._create_putaway_task(task, by_user, now_ts)
-            print("11111111111111_1create_putaway_task_create_putaway_task_create_putaway_task")
 
         return affected

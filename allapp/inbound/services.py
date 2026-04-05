@@ -1,9 +1,15 @@
 # allapp/inbound/services.py
+import logging
+
 from django.db import transaction
 from allapp.core.models import DocSequence
+from allapp.core.utils.log_context import build_log_payload
 from allapp.tasking.models import WmsTask, WmsTaskLine,ReceiveTaskExtra,ReceiveLineExtra
 from allapp.inventory.models import InventoryDetail, InventoryTransaction
 from allapp.inbound.models import InboundOrder, InboundOrderLine
+
+
+logger = logging.getLogger(__name__)
 
 @transaction.atomic
 def create_receive_task_draft(order, by_user=None):
@@ -21,6 +27,8 @@ def create_receive_task_draft(order, by_user=None):
               .exclude(status=WmsTask.Status.CANCELLED)
               .first())
     if exists:
+        ctx, ctx_text = build_log_payload(order=order, task=exists, user=by_user)
+        logger.info("inbound.receive_task.reuse %s", ctx_text, extra=ctx)
         return exists
 
     # 2) 生成任务号（用你项目已有的 DocSequence）
@@ -55,7 +63,7 @@ def create_receive_task_draft(order, by_user=None):
     for orderline in order.lines.select_related("product").all():
         plan = orderline.base_qty or 0
         if plan and plan > 0:
-            taskline=WmsTaskLine.objects.create(
+            taskline = WmsTaskLine.objects.create(
                 task=task,
                 product=orderline.product,
                 qty_plan=plan,
@@ -69,17 +77,33 @@ def create_receive_task_draft(order, by_user=None):
                 lot_no=orderline.lot_no
             )
 
-
+    ctx, ctx_text = build_log_payload(order=order, task=task, user=by_user)
+    logger.info("inbound.receive_task.created %s", ctx_text, extra=ctx)
     return task
 
 
 @transaction.atomic
 def receive_goods_without_order(owner_id, items, remark="仓库操作员入库", warehouse_id=None, location_id=None):
-    print("receive_goods_without_order 111111111111112222222222222")
+    ctx, ctx_text = build_log_payload(
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+    )
+    logger.info(
+        "inbound.receive_without_order.begin %s item_count=%s location_id=%s",
+        ctx_text,
+        len(items),
+        location_id,
+        extra=ctx,
+    )
     if not warehouse_id:
         raise ValueError("receive_goods_without_order 必须显式传 warehouse_id")
     inbound_order = InboundOrder.objects.create(owner_id=owner_id, warehouse_id=warehouse_id, remark=remark)
-    print("22 receive_goods_without_order")
+    order_ctx, order_text = build_log_payload(
+        order=inbound_order,
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+    )
+    logger.info("inbound.receive_without_order.order_created %s", order_text, extra=order_ctx)
     for item in items:
         product_id = item["product_id"]
         qty = item["qty"]
@@ -106,6 +130,14 @@ def receive_goods_without_order(owner_id, items, remark="仓库操作员入库",
             qty_received=qty,
             transaction_type="RECEIVE",
             reference=inbound_order.id,
+        )
+        logger.info(
+            "inbound.receive_without_order.item_received %s product_id=%s qty=%s location_id=%s",
+            order_text,
+            product_id,
+            qty,
+            location_id,
+            extra=order_ctx,
         )
 
     return {"order_id": inbound_order.id, "status": "success"}

@@ -48,7 +48,6 @@ B) 扫描打点：仅处理 status=OK & posted_at IS NULL 的扫描；写完统�
 """
 from __future__ import annotations
 import logging
-from django.db.models import F
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -62,6 +61,7 @@ from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 
+from allapp.core.utils.log_context import build_log_payload
 from allapp.inventory.models import (InvTxType,
     InventoryDetail,
     InventoryTransaction,
@@ -70,8 +70,6 @@ from allapp.inventory.models import (InvTxType,
 )
 from allapp.locations.models import Location
 from allapp.tasking.models import WmsTask, WmsTaskLine, TaskScanLog
-from decimal import Decimal
-from django.core.exceptions import ValidationError
 logger = logging.getLogger(__name__)
 # ======================
 # 小工具：统一数量精度/安全
@@ -174,7 +172,6 @@ def _upsert_detail(
     - available_qty 的更新由模型层规则保证（通常是 onhand - allocated - locked - damaged）。
     - batch_no/serial_no 统一大写与空值归一（None 而非 ""），以免同一维度被拆成两条。
     """
-    print("173 所有参数: localaaa", locals())
     # serial_no=""
     # batch_no=""
     det, created = InventoryDetail.objects.get_or_create(
@@ -195,7 +192,20 @@ def _upsert_detail(
     )
 
     if created:
-         print("created det111", det)
+        ctx, ctx_text = build_log_payload(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+        )
+        logger.info(
+            "inventory.detail.created %s product_id=%s location_id=%s detail_id=%s batch_no=%s serial_no=%s",
+            ctx_text,
+            product_id,
+            location_id,
+            det.id,
+            (batch_no or "").strip().upper() or "-",
+            (serial_no or "").strip().upper() or "-",
+            extra=ctx,
+        )
 
     if not task_type:
         raise ValidationError(f"未知任务类型: {task_type}")
@@ -232,11 +242,24 @@ def _upsert_detail(
         raise ValidationError("库存不足：出库数量超出当前账面库存。")
 
     det.available_qty = det.onhand_qty - det.allocated_qty - det.locked_qty - det.damaged_qty
-
-    print("bbb 190 所有参数:det.product_id,det.location_id,qty_delta,det.onhand_qty det.available_qty",det.product_id,det.location_id,qty_delta,det.onhand_qty,det.available_qty )
-    print("det  所有参数:",det)
     det.save()
-    print("ccc 192 所有参数:")
+    ctx, ctx_text = build_log_payload(
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+    )
+    logger.info(
+        "inventory.detail.upserted %s product_id=%s location_id=%s qty_delta=%s onhand_qty=%s allocated_qty=%s available_qty=%s detail_id=%s task_type=%s",
+        ctx_text,
+        det.product_id,
+        det.location_id,
+        qty_delta,
+        det.onhand_qty,
+        det.allocated_qty,
+        det.available_qty,
+        det.id,
+        task_type,
+        extra=ctx,
+    )
     return det
 
 
@@ -269,7 +292,7 @@ def _insert_tx(
     if qty_delta == 0:
         # 按照常见 WMS 规则，0 数量不应入账；若你要保留，也建议在上层就过滤掉。
         raise ValidationError("qty_delta 不能为 0")
-    # print("_insert_tx")
+    # 交易幂等由任务级 PostingJournal + 扫描打点保证，这里不做静默去重。
 
     return InventoryTransaction.objects.create(
         tx_type=tx_type,
@@ -506,7 +529,17 @@ def _group_receive_like(task: WmsTask, scans: List[TaskScanLog], *, now, batch_n
         )
 
         agg[key] += qty
-        print("459 _group_receive_like key qty  agg[key]=", key.as_tuple(), qty, agg[key])
+        ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
+        logger.info(
+            "inventory.receive_like.scan_grouped %s tx_type=%s product_id=%s location_id=%s qty=%s grouped_qty=%s",
+            ctx_text,
+            tx_type,
+            pid,
+            loc_id,
+            qty,
+            agg[key],
+            extra=ctx,
+        )
 
     return agg
 
@@ -554,12 +587,21 @@ def _group_putaway(task: WmsTask, scans: List[TaskScanLog], *, now, batch_no: st
             expiry_date=getattr(s, "exp_date", None),
             serial_no=getattr(s, "serial_no", ""),
         )
-        print("2 MOVE_OUT pair" )
 
         key_in  = _AggKey(location_id=s_to,  tx_type=InvTxType.RECEIVE, **common)
         key_out = _AggKey(location_id=s_from, tx_type=InvTxType.ISSUE, **common)
         agg[(key_out, key_in)] += qty_pos
-        print("MOVE_OUT key_out key_out.as_tuple()",key_out.as_tuple())
+        ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
+        logger.info(
+            "inventory.putaway.scan_grouped %s from_location_id=%s to_location_id=%s product_id=%s qty=%s grouped_qty=%s",
+            ctx_text,
+            s_from,
+            s_to,
+            pid,
+            qty_pos,
+            agg[(key_out, key_in)],
+            extra=ctx,
+        )
 
     return agg
 
@@ -577,7 +619,6 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
     created = 0
     task_type = task.task_type
     touched_pairs: Set[Tuple[int, int]] = set()
-    print("529 groups.items()=",groups.items())
     for key, qty in groups.items():
         qty = _q4(qty)
         if qty == 0:
@@ -598,7 +639,6 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
             task_type=task_type,
         )
         touched_pairs.add((key.owner_id, key.product_id))
-        print("529 touched_pairs ", touched_pairs)
         # 交易
         _insert_tx(
             tx_type=key.tx_type,
@@ -619,6 +659,16 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
             posted_at=now,
             posting_batch=batch_no,
         )
+        ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
+        logger.info(
+            "inventory.receive_like.applied %s tx_type=%s product_id=%s location_id=%s qty=%s",
+            ctx_text,
+            key.tx_type,
+            key.product_id,
+            key.location_id,
+            qty,
+            extra=ctx,
+        )
         created += 1
     _refresh_summaries(touched_pairs)
     return created
@@ -630,7 +680,6 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
     - 每个分组（同一条路径 from→to） → 两条交易：MOVE_OUT(-qty) + MOVE_IN(+qty)，用 pair_id 关联。
     - 同时更新两个库位的库存明细。
     """
-    print("1 MOVE_OUT pair")
     created = 0
     task_type = task.task_type
     touched_pairs: Set[Tuple[int, int]] = set()
@@ -639,7 +688,6 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
         if qty_pos == 0:
             continue
 
-        print("_upsert_detail 570 out qty_pos= key_out.location_id,",qty_pos,key_out.location_id,)
         # 先 OUT（发出库位 onhand -= qty_pos）
         # 这里生成本对 OUT/IN 的 pair_id（字符串，满足 _insert_tx 的类型注解）
         pair = str(uuid4())
@@ -675,7 +723,6 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
             posted_at=now,
             posting_batch=batch_no,
         )
-        print("_upsert_detail 601 in, ")
         # 再 IN（目标库位 onhand += qty_pos）
         _upsert_detail(
             owner_id=key_in.owner_id,
@@ -708,6 +755,17 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
             pair_id=pair,
             posted_at=now,
             posting_batch=batch_no,
+        )
+        ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
+        logger.info(
+            "inventory.putaway.applied_pair %s from_location_id=%s to_location_id=%s product_id=%s qty=%s pair_id=%s",
+            ctx_text,
+            key_out.location_id,
+            key_in.location_id,
+            key_out.product_id,
+            qty_pos,
+            pair,
+            extra=ctx,
         )
         created += 2
     _refresh_summaries(touched_pairs)
@@ -742,6 +800,8 @@ def post_task(
     """
     # 1) 任务 + 可过账
     task = _lock_task(task.id)
+    ctx, ctx_text = build_log_payload(task=task, user=user)
+    logger.info("inventory.post_task.begin %s", ctx_text, extra=ctx)
     ok, why = _can_post(task)
     if not ok:
         raise ValidationError(why)
@@ -750,6 +810,8 @@ def post_task(
     pj = _lock_journal("WmsTask", task.id, "POST")
     if pj.status == "POSTED":
         # 说明之前一次已完成；直接返回幂等成功
+        pj_ctx, pj_text = build_log_payload(task=task, user=user, journal=pj)
+        logger.info("inventory.post_task.already_posted %s", pj_text, extra=pj_ctx)
         return {"ok": True, "affected_tx_count": 0, "batch_no": pj.message or "", "message": "already POSTED"}
 
     # 3) 过滤扫描
@@ -757,6 +819,10 @@ def post_task(
     batch = batch_no or now_ts.strftime("%Y%m%d-%H%M%S")
     status_ok = getattr(TaskScanLog.ScanStatus, "OK", "OK")
     scans = [s for s in (scans or []) if getattr(s, "status", None) == status_ok and getattr(s, "posted_at", None) is None]
+    pj_ctx, pj_text = build_log_payload(task=task, user=user, journal=pj, posting_batch=batch)
+    logger.info("inventory.post_task.scans_loaded %s scan_count=%s", pj_text, len(scans), extra=pj_ctx)
+    if not scans:
+        logger.warning("inventory.post_task.no_pending_scans %s", pj_text, extra=pj_ctx)
 
     # 4) 任务类型映射
     t = (getattr(task, "task_type", "") or "").upper()
@@ -816,6 +882,7 @@ def post_task(
 
     else:
         # 未知类型：保底按 RECEIVE 规则处理，或改为 raise ValidationError 更严格
+        logger.warning("inventory.post_task.unknown_task_type_fallback %s task_type=%s", pj_text, t, extra=pj_ctx)
         groups = _group_receive_like(task, scans, now=now_ts, batch_no=batch, tx_type=InvTxType.RECEIVE)
         affected = _apply_receive_like(task, groups, now=now_ts, batch_no=batch)
 
@@ -833,14 +900,15 @@ def post_task(
     try:
         task.posting_status = posted
         task.save(update_fields=["posting_status"])
-    except Exception as e:
-        logger.error("[SERVICES] 任务状态更新失败: task=%s, 错误=%s", task.id, e)
+    except Exception:
+        logger.exception("inventory.post_task.task_status_update_failed %s", pj_text, extra=pj_ctx)
         raise  # 重新抛出异常，让事务回滚
 
     pj.status = "POSTED"
     pj.message = f"{batch}"                         # 把批号记入 message，便于追查
     pj.attempt_count = (pj.attempt_count or 0) + 1
     pj.save(update_fields=["status", "message", "attempt_count"])
+    logger.info("inventory.post_task.completed %s affected_tx_count=%s", pj_text, affected, extra=pj_ctx)
 
     return {"ok": True, "affected_tx_count": int(affected), "batch_no": batch, "message": "OK"}
 
@@ -872,7 +940,5 @@ def _release_allocated_after_issue(owner_id, warehouse_id, product_id, location_
         allocated_qty=F("allocated_qty") - used,
         available_qty=F("available_qty") + used,
     )
-
-
 
 
