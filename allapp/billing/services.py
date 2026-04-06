@@ -1779,7 +1779,8 @@ def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingP
     # 这里使用批量 update 是有意为之：这批 accrual 已经按 owner/warehouse/date 范围收口，
     # 仅做 status/period 的批量状态迁移，不依赖 save()->full_clean()。
     (BillingAccrual.objects
-     .filter(owner_id=owner_id, warehouse_id=warehouse_id, status=AccrualStatus.OPEN)
+     .filter(owner_id=owner_id, warehouse_id=warehouse_id, status=AccrualStatus.OPEN,
+             period__isnull=True)
      .filter(service_date__gte=start_date, service_date__lte=end_date)
      .update(status=AccrualStatus.LOCKED, period=period))
 
