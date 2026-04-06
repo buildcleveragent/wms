@@ -111,6 +111,53 @@ class BillingServiceTests(TestCase):
             posted_at=posted_at,
         )
 
+    def _create_outbound_order_line(
+        self,
+        service_date: datetime.date,
+        *,
+        suffix: str,
+        qty="1.000",
+        price="10.0000",
+        final_line_amount="0.00",
+    ):
+        from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+
+        uom = ProductUom.objects.create(code=f"PCS-{suffix}", name=f"件-{suffix}", is_active=True)
+        product = Product.objects.create(
+            owner=self.owner,
+            code=f"SKU-{suffix}",
+            name=f"Product {suffix}",
+            sku=f"SKU-{suffix}",
+            base_uom=uom,
+            price=Decimal(price),
+        )
+        customer = Customer.objects.create(
+            owner=self.owner,
+            salesperson=self.user,
+            code=f"CUST-{suffix}",
+            name=f"Customer {suffix}",
+        )
+        order = OutboundOrder.objects.create(
+            owner=self.owner,
+            customer=customer,
+            warehouse=self.warehouse,
+            order_no=f"OUT-{suffix}",
+            biz_date=service_date,
+            submit_status="SUBMITTED",
+            approval_status="OWNER_APPROVED",
+            created_by=self.user,
+        )
+        order_line = OutboundOrderLine.objects.create(
+            order=order,
+            product=product,
+            base_qty=Decimal(qty),
+            base_price=Decimal(price),
+            base_uom=uom,
+            line_no=10,
+            final_line_amount=Decimal(final_line_amount),
+        )
+        return order, order_line, product
+
     def _create_accrual(
         self,
         *,
@@ -203,6 +250,117 @@ class BillingServiceTests(TestCase):
         }
         self.assertEqual(amounts[day1], Decimal("10.00"))
         self.assertEqual(amounts[day2], Decimal("20.00"))
+
+    def test_accrue_order_processing_resolves_direct_outbound_order_line_binding(self):
+        service_date = datetime.date(2026, 3, 3)
+        self._create_rule(calc_method=CalcMethod.PER_ORDER, unit_price="10.00")
+        _order, order_line, product = self._create_outbound_order_line(
+            service_date,
+            suffix="DIRECT",
+        )
+
+        task = self._create_task("TASK-ORDER-DIRECT")
+        task_line = WmsTaskLine.objects.create(
+            task=task,
+            product=product,
+            src_model="OutboundOrderLine",
+            src_id=order_line.id,
+        )
+        self._create_scan_log(task, task_line, service_date, fp="fp-direct-order", label_key="LBL-DIRECT")
+
+        events, accruals = accrue_order_processing_from_posted(
+            self.owner.id,
+            self.warehouse.id,
+            service_date,
+            service_date,
+            by_user=self.user,
+        )
+
+        self.assertEqual(events, 1)
+        self.assertEqual(accruals, 1)
+        accrual = BillingAccrual.objects.get()
+        self.assertEqual(accrual.amount, Decimal("10.00"))
+
+    def test_accrue_order_processing_resolves_nested_task_line_binding(self):
+        service_date = datetime.date(2026, 3, 4)
+        self._create_rule(calc_method=CalcMethod.PER_ORDER, unit_price="12.00")
+        _order, order_line, product = self._create_outbound_order_line(
+            service_date,
+            suffix="CHAIN",
+        )
+
+        pick_task = self._create_task("TASK-PICK-CHAIN", task_type=WmsTask.TaskType.PICK)
+        pick_line = WmsTaskLine.objects.create(
+            task=pick_task,
+            product=product,
+            src_model="OutboundOrderLine",
+            src_id=order_line.id,
+        )
+        review_task = self._create_task("TASK-REVIEW-CHAIN", task_type=WmsTask.TaskType.REVIEW)
+        review_line = WmsTaskLine.objects.create(
+            task=review_task,
+            product=product,
+            src_model="wmstaskline",
+            src_id=pick_line.id,
+        )
+        dispatch_task = self._create_task("TASK-DISPATCH-CHAIN")
+        dispatch_line = WmsTaskLine.objects.create(
+            task=dispatch_task,
+            product=product,
+            src_model="WmsTaskLine",
+            src_id=review_line.id,
+        )
+        self._create_scan_log(dispatch_task, dispatch_line, service_date, fp="fp-chain-order", label_key="LBL-CHAIN")
+
+        events, accruals = accrue_order_processing_from_posted(
+            self.owner.id,
+            self.warehouse.id,
+            service_date,
+            service_date,
+            by_user=self.user,
+        )
+
+        self.assertEqual(events, 1)
+        self.assertEqual(accruals, 1)
+        accrual = BillingAccrual.objects.get()
+        self.assertEqual(accrual.amount, Decimal("12.00"))
+
+    def test_accrue_order_processing_uses_base_amount_when_final_line_amount_is_zero(self):
+        service_date = datetime.date(2026, 3, 5)
+        self._create_rule(
+            calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+            unit_price="0.1000",
+        )
+        _order, order_line, product = self._create_outbound_order_line(
+            service_date,
+            suffix="PCTZERO",
+            qty="2.000",
+            price="15.0000",
+            final_line_amount="0.00",
+        )
+
+        task = self._create_task("TASK-ORDER-PCTZERO")
+        task_line = WmsTaskLine.objects.create(
+            task=task,
+            product=product,
+            src_model="OutboundOrderLine",
+            src_id=order_line.id,
+        )
+        self._create_scan_log(task, task_line, service_date, fp="fp-pct-order", label_key="LBL-PCTZERO")
+
+        events, accruals = accrue_order_processing_from_posted(
+            self.owner.id,
+            self.warehouse.id,
+            service_date,
+            service_date,
+            by_user=self.user,
+        )
+
+        self.assertEqual(events, 1)
+        self.assertEqual(accruals, 1)
+        accrual = BillingAccrual.objects.get()
+        self.assertEqual(accrual.quantity, Decimal("30.00"))
+        self.assertEqual(accrual.amount, Decimal("3.00"))
 
     def test_lock_period_uses_bundle_rule_scoped_to_owner_and_warehouse(self):
         service_date = datetime.date(2026, 3, 1)

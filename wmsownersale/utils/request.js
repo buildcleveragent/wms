@@ -5,12 +5,13 @@ const ENV =
 const BASE_MAP = {
   develop: 'http://192.168.1.6:8001',
   trial: 'https://trial.example.com',
+  mobilephone: 'http://8.148.198.200:8080',
   owner: 'http://8.148.198.200:8080',
   onsite: 'http://192.168.2.6:8001',
 }
 
 // export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
-export const BASE_URL = BASE_MAP.onsite
+export const BASE_URL = BASE_MAP.develop
 
 function getToken() {
   try {
@@ -176,10 +177,27 @@ export const api = {
     }),
 
   // 目录
-  customers: (q = '', page = 1) =>
-    request({
-      url: `/api/catalog/customers?search=${encodeURIComponent(q)}&page=${page}`,
-    }),
+  customers: (q = '', page = 1, owner_id, mine) => {
+    const qs = buildQuery({
+      search: q,
+      page,
+      owner_id,
+      mine: mine ? 1 : undefined,
+    })
+    return request({
+      url: `/api/catalog/customers?${qs}`,
+    })
+  },
+
+  myOwners: (q = '', page = 1) => {
+    const qs = buildQuery({
+      search: q,
+      page,
+    })
+    return request({
+      url: `/api/catalog/owners/?${qs}`,
+    })
+  },
 
   products: (q = '', page = 1, warehouse_id) => {
     const qs = buildQuery({
@@ -191,7 +209,7 @@ export const api = {
       url: `/api/catalog/products?${qs}`,
     })
   },
-  
+
   inventorySummary: (params = {}) => {
     const qs = buildQuery({
       search: params.search || '',
@@ -202,7 +220,37 @@ export const api = {
       url: `/api/inventory/summary/?${qs}`,
     })
   },
-  
+
+  billingPeriods: (params = {}) => {
+    const qs = buildQuery(params)
+    return request({
+      url: qs ? `/api/billing/periods/?${qs}` : '/api/billing/periods/',
+    })
+  },
+
+  billingPeriodPreview: (id) =>
+    request({
+      url: `/api/billing/periods/${id}/preview/`,
+    }),
+
+  billingBills: (params = {}) => {
+    const qs = buildQuery(params)
+    return request({
+      url: qs ? `/api/billing/bills/?${qs}` : '/api/billing/bills/',
+    })
+  },
+
+  billingBillDetail: (id) =>
+    request({
+      url: `/api/billing/bills/${id}/`,
+    }),
+
+  billingAccruals: (params = {}) => {
+    const qs = buildQuery(params)
+    return request({
+      url: qs ? `/api/billing/accruals/?${qs}` : '/api/billing/accruals/',
+    })
+  },
 
   // 出库单创建
   createOutboundOrder: (payload) =>
@@ -258,31 +306,31 @@ export const api = {
       url: `/api/outbound/orders/${id}/cancel/`,
       method: 'POST',
     }),
-	
-	// 上传一件代发 Excel
-   importDropShipExcel(filePath) {
-	  const access = uni.getStorageSync('access') || ''
-	
-	  return new Promise((resolve, reject) => {
-	    uni.uploadFile({
-	      url: `${BASE_URL}/api/outbound/orders/import-drop-ship-excel/`,
-	      filePath,
-	      name: 'file',
-	      header: access ? { Authorization: `Bearer ${access}` } : {},
-	      success: (res) => {
-	        try {
-	          const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
-	          if (res.statusCode >= 200 && res.statusCode < 300) {
-	            resolve(data)
-	          } else {
-	            reject({ statusCode: res.statusCode, data })
-	          }
-	        } catch (e) {
-	          reject(e)
-	        }
-	      },
-	      fail: (err) => reject(err),
-	    })
-	  })
-	},
+
+  // 上传一件代发 Excel
+  importDropShipExcel(filePath) {
+    const access = uni.getStorageSync('access') || ''
+
+    return new Promise((resolve, reject) => {
+      uni.uploadFile({
+        url: `${BASE_URL}/api/outbound/orders/import-drop-ship-excel/`,
+        filePath,
+        name: 'file',
+        header: access ? { Authorization: `Bearer ${access}` } : {},
+        success: (res) => {
+          try {
+            const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              resolve(data)
+            } else {
+              reject({ statusCode: res.statusCode, data })
+            }
+          } catch (e) {
+            reject(e)
+          }
+        },
+        fail: (err) => reject(err),
+      })
+    })
+  },
 }

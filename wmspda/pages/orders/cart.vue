@@ -88,65 +88,28 @@ onMounted(()=>{
 
 
 
-// function printReceiveTask(taskId){
-// 	console.log("92 printReceiveTask printReceiveTask ")
-//   // 后端打印页 URL，如 http://192.168.1.10:8000/console/receive_task/58/print/
-//   const base = BASE_URL.replace(/\/$/, '')
-//   // const url = `${base}/inbound/receive_task/${taskId}/print/`
-//   const url = `${BASE_URL}/api/inbound/receive_task/${taskId}/print/`
+function printReceiveTask(taskId){
+	console.log("3 printReceiveTask printReceiveTask ")
+  // 后端打印页 URL，如 http://192.168.1.10:8000/console/receive_task/58/print/
+  const base = BASE_URL.replace(/\/$/, '')
+  // const url = `${base}/inbound/receive_task/${taskId}/print/`
+  const url = `${BASE_URL}/api/inbound/receive_task/${taskId}/print/`
   
-//   // 在 H5（PC 浏览器）里：新开一个标签页，里面会自动 window.print()
-//   // #ifdef H5
-//   console.log("1 window.open  ")
-// 		window.open(url, '_blank')
-// 		console.log("2 window.open  ")
-//   // #endif
-
-//   // 在 APP-PLUS（打成 Android App）里：调起系统浏览器打开这个地址
-//   // 这样如果设备有系统级打印功能，也可以打印
-//   // #ifdef APP-PLUS
-//   try {
-// 	  console.log("1 plus.runtime.openURL printReceiveTask  ")
-//     plus.runtime.openURL(url)
-	
-// 	console.log("2 plus.runtime.openURL printReceiveTask  ")
-//   } catch (e) {
-	
-// 	console.log("4 printReceiveTask catch ")
-//     uni.showToast({ title: '当前环境不支持直接打印', icon: 'none' })
-//   }
-//   // #endif
-// }
-function printReceiveTask(taskId) {
-  console.log("92 printReceiveTask printReceiveTask ")
-
-  const token = uni.getStorageSync('access') || ''
-  if (!token) {
-    uni.showToast({ title: '未登录或缺少token', icon: 'none' })
-    return
-  }
-
-  const url = `${BASE_URL}/api/inbound/receive_task/${taskId}/print/?token=${encodeURIComponent(token)}`
-
+  // 在 H5（PC 浏览器）里：新开一个标签页，里面会自动 window.print()
   // #ifdef H5
-  console.log("1 window.open")
   window.open(url, '_blank')
-  console.log("2 window.open")
   // #endif
 
+  // 在 APP-PLUS（打成 Android App）里：调起系统浏览器打开这个地址
+  // 这样如果设备有系统级打印功能，也可以打印
   // #ifdef APP-PLUS
   try {
-    console.log("1 plus.runtime.openURL printReceiveTask")
     plus.runtime.openURL(url)
-    console.log("2 plus.runtime.openURL printReceiveTask")
   } catch (e) {
-    console.log("4 printReceiveTask catch", e)
     uni.showToast({ title: '当前环境不支持直接打印', icon: 'none' })
   }
   // #endif
 }
-
-
 
 function backToProducts(){ uni.navigateTo({ url:'/pages/products/search' }) }
 
@@ -197,34 +160,17 @@ async function submitOrder(){
 	  // H5：直接打开下载
 	  // #ifdef H5
 	  // window.open(exportUrl, '_blank')
-	  console.log("163 printReceiveTask")
-      printReceiveTask(taskId)
-		// console.log("excel url ",url)
+printReceiveTask(taskId)
+		console.log("excel url ",url)
 	  console.log("excel 12311111111111111 H5H5H5H5H5H5 ")
 	  // #endif
 
 	  // App：下载到本地后用系统应用打开
 	  // #ifdef APP-PLUS
-	  const token = uni.getStorageSync('access') || ''
-	  
-	  if (!token) {
-	    uni.showToast({
-	      title: '登录已失效，请重新登录',
-	      icon: 'none'
-	    })
-	    return
-	  }
-	  
-	  if (!exportUrl) {
-	    uni.showToast({ title: '导出地址无效', icon: 'none' })
-	    return
-	  }
-
-	  
 	  uni.downloadFile({
 		url: exportUrl,
 		header: {
-		  'Authorization': 'Bearer ' + token,   // 如果你的导出接口需要鉴权
+		  'Authorization': 'Bearer ' + TOKEN,   // 如果你的导出接口需要鉴权
 		},
 		success: (dlRes) => {
 		  if (dlRes.statusCode === 200) {
@@ -250,7 +196,7 @@ async function submitOrder(){
 	
 	console.log("1 printReceiveTask printReceiveTask ")
 
-	// printReceiveTask(taskId)
+	printReceiveTask(taskId)
 	
 	console.log("2 printReceiveTask printReceiveTask ")
 	
@@ -297,7 +243,7 @@ async function submitOrder(){
 .content {
   flex: 1;
   overflow-y: auto;
-  padding-top: 150rpx; /* 为顶部固定区域留出空间 */
+  padding-top: 60rpx; /* 为顶部固定区域留出空间 */
   padding-bottom: 180rpx; /* 为底部footer留出空间 */
   padding-left: 2rpx;
   padding-right: 2rpx;

@@ -328,6 +328,26 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         data["contact_phone"] = (data.get("contact_phone") or "").strip()
         data["ship_to"]       = (data.get("ship_to") or "").strip()
 
+        # 手工创建：同 owner 下 src_bill_no 不允许重复
+        src_bill_no = data["src_bill_no"]
+        if src_bill_no:
+            OutboundOrder = apps.get_model("outbound", "OutboundOrder")
+            existing = (
+                OutboundOrder.objects
+                .filter(owner_id=owner_id, src_bill_no=src_bill_no)
+                .order_by("id")
+                .first()
+            )
+            if existing:
+                raise serializers.ValidationError({
+                    "src_bill_no": f"平台单号重复，已存在订单 {existing.order_no}",
+                    "existing_order_id": str(existing.id),
+                    "existing_order_no": existing.order_no or "",
+                    "existing_approval_status": existing.approval_status or "",
+                    "existing_submit_status": existing.submit_status or "",
+                })
+
+
         # 一件代发客户：收件信息必填
         if self._is_cash_customer(customer):
             if not data["contact"]:
@@ -368,20 +388,6 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
             "Create OutboundOrder owner_id=%s warehouse_id=%s customer_id=%s items=%s",
             owner_id, warehouse_id, validated.get("customer_id"), len(validated.get("items", []))
         )
-
-        # 幂等：同 owner + src_bill_no 不重复创建
-        src_bill_no = validated.get("src_bill_no", "")
-        if src_bill_no:
-            existing = OutboundOrder.objects.filter(
-                owner_id=owner_id,
-                src_bill_no=src_bill_no,
-            ).order_by("id").first()
-            if existing:
-                logger.info(
-                    "Reuse existing outbound order id=%s owner_id=%s src_bill_no=%s",
-                    existing.id, owner_id, src_bill_no
-                )
-                return existing
 
         order = OutboundOrder.objects.create(
             owner_id        = owner_id,
@@ -453,10 +459,6 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
     total_qty            = serializers.SerializerMethodField()
     created_by_name      = serializers.SerializerMethodField()
     priced_by_name       = serializers.SerializerMethodField()
-
-    # ✅ 新增：业务员姓名（制表人）
-
-
     # ✅ 你的模型 OutboundOrderLine.order 的 related_name = "lines"
     #    所以这里不要写 source="lines"，直接这样写即可
     lines = OutboundOrderLineReadSerializer(many=True, read_only=True)
@@ -483,31 +485,6 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
             "lines",
             "total_qty", "total_amount",
         ]
-        #
-        # fields = [
-        #     "id", "order_no", "biz_date",
-        #     "submit_status", "submit_status_name",
-        #     "approval_status", "approval_status_name",
-        #     "outbound_type", "delivery_method", "etd",
-        #
-        #     "owner", "customer", "supplier", "warehouse",
-        #
-        #     # ✅ 把 created_by id 和 created_by_name 都输出
-        #     "created_by", "created_by_name",
-        #     "created_at",
-        #
-        #     "ship_to", "contact", "contact_phone",
-        #     "memo", "is_closed", "close_reason",
-        #
-        #     "lines",
-        #     "total_qty", "total_amount",
-        #
-        #     "pricing_status",
-        #     "priced_at",
-        #     "priced_by",
-        #     "priced_by_name",
-        #     "final_order_amount",
-        # ]
 
     def get_priced_by_name(self, obj):
         u = getattr(obj, "priced_by", None)

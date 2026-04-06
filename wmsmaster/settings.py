@@ -125,17 +125,6 @@ REST_FRAMEWORK = {
     ),
 }
 
-# REST_FRAMEWORK = {
-#     "DEFAULT_AUTHENTICATION_CLASSES": (
-#         "rest_framework_simplejwt.authentication.JWTAuthentication",
-#     ),
-#     "DEFAULT_PERMISSION_CLASSES": (
-#         "rest_framework.permissions.AllowAny",
-#     ),
-#     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-#     "PAGE_SIZE": 10,
-# }
-
 # （可选）JWT 令牌时效等
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
@@ -162,10 +151,8 @@ if ENABLE_DEBUG_TOOLBAR:
 INTERNAL_IPS = _csv_env("INTERNAL_IPS", default=["127.0.0.1"]) if ENABLE_DEBUG_TOOLBAR else []
 
 # 允许指定的域访问（修改为你的前端 URL）
-CORS_ALLOWED_ORIGINS = _csv_env(
-    "CORS_ALLOWED_ORIGINS",
-    default=["http://localhost:5173", "http://127.0.0.1:5173"] if DEBUG else [],
-)
+
+CORS_ALLOWED_ORIGINS = _csv_env("CORS_ALLOWED_ORIGINS", ...)
 
 # MIDDLEWARE_CLASSES = (
 #    'admin_model_list_order.middleware.AdminModelListOrder',

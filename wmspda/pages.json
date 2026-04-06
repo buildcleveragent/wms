@@ -1,18 +1,16 @@
 {
 	"pages": [ //pages数组中第一项表示应用启动页，参考：https://uniapp.dcloud.io/collocation/pages
-		{"path": "pages/login","style":{"navigationBarTitleText":"登录"}},
+		{"path":"pages/login","style":{"navigationBarTitleText":"登录"}},
 		{"path": "pages/inbound/createwithoutorder/selectowner","style": {"navigationBarTitleText": "无订单入库"}},	
 		{"path": "pages/inbound/selectsupplier","style": {"navigationBarTitleText": "无订单入库"}},
 		{"path": "pages/products/search","style": {"navigationBarTitleText": "录入产品"}},
+
 		{"path": "pages/orders/cart","style": {"navigationBarTitleText": "入库单"}},
+		
 		{"path": "pages/index/index","style": {"navigationBarTitleText": "金桥融通仓库作业平台"}},
 		{"path": "pages/sample/ext-module-device-scan","style": {"navigationBarTitleText": "Device Scan Sdk module"}},
-		{"path": "pages/picking/task_list", "style": { "navigationBarTitleText": "拣货任务列表" } },
-		{"path": "pages/picking/task_detail", "style": { "navigationBarTitleText": "拣货明细" } },
-		{"path": "pages/review/pick_task_list", "style": { "navigationBarTitleText": "拣货复核任务列表" } },
-		{"path": "pages/review/pick_task", "style": { "navigationBarTitleText": "拣货复核明细" } },
-		{"path": "pages/inventory/company", "style": {"navigationBarTitleText": "公司库存汇总" }},
-		{"path": "pages/me/index","style":{"navigationBarTitleText":"我的"}},
+		{"path": "pages/picking/task_list", "style": { "navigationBarTitleText": "拣货任务" } },
+		{ "path": "pages/picking/task_detail", "style": { "navigationBarTitleText": "拣货明细" } }
 
 	],
 	
@@ -35,11 +33,15 @@
 		
 		"list": [
 			{"pagePath":"pages/index/index","text":"首页", "iconPath": "static/tabbar/home.png","selectedIconPath": "static/tabbar/home_active.png"},
+			// {"pagePath":"pages/workbench/index","text":"开单",
+			//  "iconPath": "static/tabbar/order.png",		  
+	  //        "selectedIconPath": "static/tabbar/order_active.png"},
 	        { "pagePath": "pages/features/index","text": "功能", "iconPath": "static/tabbar/feat.png", "selectedIconPath": "static/tabbar/feat_active.png" },
 			{"pagePath":"pages/reports/index","text":"报表","iconPath": "static/tabbar/reports.png","selectedIconPath": "static/tabbar/reports_active.png"},
 			{"pagePath":"pages/me/index","text":"我的","iconPath": "static/tabbar/mine.png","selectedIconPath": "static/tabbar/mine_active.png"}
 			],
-			
+	
+		
 		"iconfont": {
 		  "fontSize": "24px"   // 如果使用字体图标，设置图标大小
 		}

@@ -37,13 +37,12 @@ export default {
       { key: "receivewithoutorder", title: "收货(无订单)", emoji: "📥", desc: "到货验收/收货登记", op: "receivewithoutorder",path: "/pages/inbound/createwithoutorder/selectowner" },
       { key: "putaway",   title: "上架", emoji: "📦", desc: "库位分配/上架确认",  op: "putaway" },                                               
       { key: "picking",   title: "拣货", emoji: "🧾", desc: "波次拣货/拣货确认",   op: "pick",path: "/pages/picking/task_list" },
-      { key: "recheck",   title: "复核", emoji: "✅", desc: "对拣货结果复核",     op: "recheck", path: "/pages/review/pick_task_list" },
+      { key: "recheck",   title: "复核", emoji: "✅", desc: "对拣货结果复核",     op: "recheck" },
       { key: "pack",      title: "打包", emoji: "🎁", desc: "装箱/封箱/打印",     op: "pack" },
       { key: "shipping",  title: "发运", emoji: "🚚", desc: "复核装车/出库发运",  op: "ship" },
       { key: "replenish", title: "补货", emoji: "🔀", desc: "从存储区到拣货区",   op: "replenish",path: "/pages/inventory/replenish/index" },
       { key: "move",      title: "移库", emoji: "🔁", desc: "库内移位/合并/分拆", op: "move",path: "/pages/inventory/move/index" },
       { key: "stocktake", title: "盘点", emoji: "🧮", desc: "周期盘点/抽盘/全盘", op: "stocktake",path: "/pages/inventory/stocktake/index" },
-	  { key: "stocktake", title: "查询", emoji: "🧮", desc: "查询", op: "chaxun",path: "/pages/inventory/company" },
     ])
     
     const lastScan = ref("")

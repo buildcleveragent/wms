@@ -890,6 +890,13 @@ def _build_order_amount_metric(owner_id, warehouse_id, service_date, **kwargs):
         "note": "Sum(final_line_amount) with fallback to base_qty * base_price for submitted outbound lines, excluding cancelled orders.",
     }
 
+
+def _resolve_outbound_order_line_amount(*, final_line_amount, base_qty, base_price) -> Decimal:
+    final_amount = Decimal(final_line_amount or 0)
+    if final_amount > 0:
+        return final_amount
+    return Decimal(base_qty or 0) * Decimal(base_price or 0)
+
 def _default_metric_payload(metric_type: str, owner_id, warehouse_id, service_date, **kwargs):
     resolver = _load_metric_resolver(metric_type)
     if resolver:
@@ -1515,41 +1522,602 @@ def _load_taskline_order_resolver():
         return None
     mod, func = path.split(":")
     return getattr(importlib.import_module(mod), func)
+#
+# @transaction.atomic
+# def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_date, by_user=None) -> Tuple[int, int]:
+#     from allapp.tasking.models import TaskScanLog
+#     resolver = _load_taskline_order_resolver()
+#     rule_cache: Dict[Tuple[str, str, datetime.date], Optional[BillingRule]] = {}
+#
+#     logs = (TaskScanLog.objects
+#             .filter(owner_id=owner_id, warehouse_id=warehouse_id, status="OK", posted_at__isnull=False)
+#             .filter(posted_at__date__gte=start_date, posted_at__date__lte=end_date)
+#             .filter(task__task_type__in=["DISPATCH", "PACK", "REVIEW", "PICK"])
+#             .select_related("task", "task_line"))
+#
+#     order_ids: Set[Tuple[int, datetime.date]] = set()
+#     order_lines: Set[Tuple[int, int, datetime.date]] = set()
+#     parcels_by_date: Dict[datetime.date, int] = {}
+#     order_amount_by_date: Dict[datetime.date, Decimal] = {}
+#     bundle_by_date: Dict[datetime.date, str] = {}  # 可选：从 resolver 动态传入 bundle_key
+#
+#     for log in logs:
+#         if not log.task_line or resolver is None:
+#             continue
+#         mapping = resolver(log.task_line) or {}
+#         svc_date = (log.posted_at or timezone.now()).date()
+#
+#         for oid in mapping.get("order_ids", set()):
+#             order_ids.add((oid, svc_date))
+#         for olid in mapping.get("order_line_ids", set()):
+#             order_lines.add((olid[0], olid[1], svc_date))
+#         if mapping.get("parcels"):
+#             parcels_by_date[svc_date] = parcels_by_date.get(svc_date, 0) + int(mapping["parcels"])
+#         # if mapping.get("order_amount"):
+#         #     order_amount_by_date[svc_date] = order_amount_by_date.get(svc_date, Decimal("0")) + Decimal(mapping["order_amount"])
+#         if mapping.get("bundle_key"):
+#             bundle_by_date[svc_date] = mapping["bundle_key"]
+#
+#     created_events = created_accruals = 0
+#
+#     def _rule_for(charge_type: str, calc_method: str, service_date: datetime.date) -> Optional[BillingRule]:
+#         key = (charge_type, calc_method, service_date)
+#         if key not in rule_cache:
+#             rule_cache[key] = _select_rule(owner_id, warehouse_id, charge_type, calc_method, service_date)
+#         return rule_cache[key]
+#
+#     # PER_ORDER
+#     for (_oid, svc_date) in sorted(order_ids):
+#         rule_order = _rule_for(ChargeType.DISPATCH, CalcMethod.PER_ORDER, svc_date)
+#         if not rule_order:
+#             continue
+#         ev_fp = _event_fp(_oid, None, ChargeType.DISPATCH, CalcMethod.PER_ORDER, svc_date, 1)
+#         event, ev_new = BillingEvent.objects.get_or_create(
+#             event_fp=ev_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, charge_type=ChargeType.DISPATCH,
+#                 service_date=svc_date, quantity=1, quantity_uom="ORDER"
+#             )
+#         )
+#         amount, eff_price = _compute_fee_with_rule(rule_order, Decimal(1))
+#         amount = _apply_caps_bundles_day(rule_order, owner_id, warehouse_id, svc_date, amount)
+#         if rule_order.min_charge and amount < rule_order.min_charge:
+#             amount = rule_order.min_charge
+#         if amount <= 0:
+#             continue
+#         eff_price = _q(amount, "0.0001")
+#         tax_amount = _q(amount * (rule_order.tax_rate or 0), "0.01") if rule_order.taxable else Decimal("0.00")
+#         bk = bundle_by_date.get(svc_date) or (rule_order.bundle_key or "")
+#         acc_fp = _acc_fp(owner_id, warehouse_id, rule_order.id, ChargeType.DISPATCH, svc_date, 1, eff_price, rule_order.currency, ev_fp)
+#         _, acc_new = BillingAccrual.objects.get_or_create(
+#             acc_fingerprint=acc_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, period=None, charge_type=ChargeType.DISPATCH, rule=rule_order,
+#                 service_date=svc_date, currency=rule_order.currency, quantity=1, unit_price=_q(eff_price, "0.0001"),
+#                 amount=amount, tax_amount=tax_amount, status=AccrualStatus.OPEN, event=event, created_by=by_user,
+#                 bundle_key=bk
+#             )
+#         )
+#         created_events += int(ev_new)
+#         created_accruals += int(acc_new)
+#
+#     # PER_ORDER_LINE
+#     for (_oid, _olid, svc_date) in sorted(order_lines):
+#         rule_line = _rule_for(ChargeType.DISPATCH, CalcMethod.PER_ORDER_LINE, svc_date)
+#         if not rule_line:
+#             continue
+#         ev_fp = _event_fp(_oid, _olid, ChargeType.DISPATCH, CalcMethod.PER_ORDER_LINE, svc_date, 1)
+#         event, ev_new = BillingEvent.objects.get_or_create(
+#             event_fp=ev_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, charge_type=ChargeType.DISPATCH,
+#                 service_date=svc_date, quantity=1, quantity_uom="ORDER_LINE"
+#             )
+#         )
+#         amount, eff_price = _compute_fee_with_rule(rule_line, Decimal(1))
+#         amount = _apply_caps_bundles_day(rule_line, owner_id, warehouse_id, svc_date, amount)
+#         if rule_line.min_charge and amount < rule_line.min_charge:
+#             amount = rule_line.min_charge
+#         if amount <= 0:
+#             continue
+#         eff_price = _q(amount, "0.0001")
+#         tax_amount = _q(amount * (rule_line.tax_rate or 0), "0.01") if rule_line.taxable else Decimal("0.00")
+#         bk = bundle_by_date.get(svc_date) or (rule_line.bundle_key or "")
+#         acc_fp = _acc_fp(owner_id, warehouse_id, rule_line.id, ChargeType.DISPATCH, svc_date, 1, eff_price, rule_line.currency, ev_fp)
+#         _, acc_new = BillingAccrual.objects.get_or_create(
+#             acc_fingerprint=acc_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, period=None, charge_type=ChargeType.DISPATCH, rule=rule_line,
+#                 service_date=svc_date, currency=rule_line.currency, quantity=1, unit_price=_q(eff_price, "0.0001"),
+#                 amount=amount, tax_amount=tax_amount, status=AccrualStatus.OPEN, event=event, created_by=by_user,
+#                 bundle_key=bk
+#             )
+#         )
+#         created_events += int(ev_new)
+#         created_accruals += int(acc_new)
+#
+#     # PER_PARCEL
+#     for svc_date, cnt in sorted(parcels_by_date.items()):
+#         rule_parcel = _rule_for(ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date)
+#         if not rule_parcel or cnt <= 0:
+#             continue
+#         ev_fp = _event_fp(None, None, ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date, cnt)
+#         event, ev_new = BillingEvent.objects.get_or_create(
+#             event_fp=ev_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, charge_type=ChargeType.PACK,
+#                 service_date=svc_date, quantity=_q(cnt, "0.0001"), quantity_uom="PARCEL"
+#             )
+#         )
+#         amount, eff_price = _compute_fee_with_rule(rule_parcel, Decimal(cnt))
+#         amount = _apply_caps_bundles_day(rule_parcel, owner_id, warehouse_id, svc_date, amount)
+#         if rule_parcel.min_charge and cnt > 0 and amount < rule_parcel.min_charge:
+#             amount = rule_parcel.min_charge
+#         if amount <= 0:
+#             continue
+#         eff_price = _q((amount / Decimal(cnt)) if cnt > 0 else eff_price, "0.0001")
+#         tax_amount = _q(amount * (rule_parcel.tax_rate or 0), "0.01") if rule_parcel.taxable else Decimal("0.00")
+#         bk = bundle_by_date.get(svc_date) or (rule_parcel.bundle_key or "")
+#         acc_fp = _acc_fp(owner_id, warehouse_id, rule_parcel.id, ChargeType.PACK, svc_date, cnt, eff_price, rule_parcel.currency, ev_fp)
+#         _, acc_new = BillingAccrual.objects.get_or_create(
+#             acc_fingerprint=acc_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, period=None, charge_type=ChargeType.PACK, rule=rule_parcel,
+#                 service_date=svc_date, currency=rule_parcel.currency, quantity=_q(cnt, "0.0001"),
+#                 unit_price=_q(eff_price, "0.0001"), amount=amount, tax_amount=tax_amount,
+#                 status=AccrualStatus.OPEN, event=event, created_by=by_user, bundle_key=bk
+#             )
+#         )
+#         created_events += int(ev_new)
+#         created_accruals += int(acc_new)
+#
+#     # PERCENT_OF_ORDER_AMOUNT
+#     by_date_amounts = dict(order_amount_by_date)
+#     missing_dates = []
+#     for n in range((end_date - start_date).days + 1):
+#         d = start_date + datetime.timedelta(days=n)
+#         if d not in by_date_amounts:
+#             missing_dates.append(d)
+#     if missing_dates:
+#         ms = (BillingMetricDaily.objects
+#               .filter(owner_id=owner_id, warehouse_id=warehouse_id, service_date__in=missing_dates, metric_type=MetricType.ORDER_AMT))
+#         for m in ms:
+#             by_date_amounts[m.service_date] = by_date_amounts.get(m.service_date, Decimal("0")) + Decimal(m.value)
+#
+#     for svc_date, amt in sorted(by_date_amounts.items()):
+#         rule_pct = _rule_for(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date)
+#         if not rule_pct:
+#             continue
+#         amt = Decimal(amt or 0)
+#         if amt <= 0:
+#             continue
+#         amount, eff_rate = _compute_fee_with_rule(rule_pct, amt)  # base=金额
+#         amount = _apply_caps_bundles_day(rule_pct, owner_id, warehouse_id, svc_date, amount)
+#         if rule_pct.min_charge and amount < rule_pct.min_charge:
+#             amount = rule_pct.min_charge
+#         if amount <= 0:
+#             continue
+#         eff_rate = _q((amount / amt) if amt > 0 else eff_rate, "0.0001")
+#         tax_amount = _q(amount * (rule_pct.tax_rate or 0), "0.01") if rule_pct.taxable else Decimal("0.00")
+#         ev_fp = _event_fp(None, None, ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date, amt)
+#         event, ev_new = BillingEvent.objects.get_or_create(
+#             event_fp=ev_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, charge_type=ChargeType.DISPATCH,
+#                 service_date=svc_date, quantity=_q(amt, "0.01"), quantity_uom="CURRENCY"
+#             )
+#         )
+#         bk = bundle_by_date.get(svc_date) or (rule_pct.bundle_key or "")
+#         acc_fp = _acc_fp(owner_id, warehouse_id, rule_pct.id, ChargeType.DISPATCH, svc_date, amt, eff_rate, rule_pct.currency, ev_fp)
+#         _, acc_new = BillingAccrual.objects.get_or_create(
+#             acc_fingerprint=acc_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, period=None, charge_type=ChargeType.DISPATCH, rule=rule_pct,
+#                 service_date=svc_date, currency=rule_pct.currency, quantity=_q(amt, "0.01"),
+#                 unit_price=_q(eff_rate, "0.0001"), amount=amount, tax_amount=tax_amount,
+#                 status=AccrualStatus.OPEN, event=event, created_by=by_user, bundle_key=bk
+#             )
+#         )
+#         created_events += int(ev_new)
+#         created_accruals += int(acc_new)
+#
+#     return created_events, created_accruals
+#
+#
+# def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_date, by_user=None) -> Tuple[int, int]:
+#     from allapp.tasking.models import TaskScanLog
+#
+#     resolver = _load_taskline_order_resolver()
+#     rule_cache: Dict[Tuple[str, str, datetime.date], Optional[BillingRule]] = {}
+#
+#     logs = (
+#         TaskScanLog.objects
+#         .filter(owner_id=owner_id, warehouse_id=warehouse_id, status="OK", posted_at__isnull=False)
+#         .filter(posted_at__date__gte=start_date, posted_at__date__lte=end_date)
+#         .filter(task__task_type__in=["DISPATCH", "PACK", "REVIEW", "PICK"])
+#         .select_related("task", "task_line")
+#     )
+#
+#     # 已过账事实关联出来的唯一订单 / 订单行
+#     order_ids: Set[Tuple[int, datetime.date]] = set()
+#     order_lines: Set[Tuple[int, int, datetime.date]] = set()   # (order_id, order_line_id, svc_date)
+#
+#     parcels_by_date: Dict[datetime.date, int] = {}
+#     bundle_by_date: Dict[datetime.date, str] = {}  # 可选：从 resolver 动态传入 bundle_key
+#
+#     for log in logs:
+#         if not log.task_line or resolver is None:
+#             continue
+#
+#         mapping = resolver(log.task_line) or {}
+#         svc_date = (log.posted_at or timezone.now()).date()
+#
+#         for oid in mapping.get("order_ids", set()):
+#             order_ids.add((oid, svc_date))
+#
+#         for olid in mapping.get("order_line_ids", set()):
+#             # resolver 当前返回 (order_id, order_line_id)
+#             order_lines.add((olid[0], olid[1], svc_date))
+#
+#         if mapping.get("parcels"):
+#             parcels_by_date[svc_date] = parcels_by_date.get(svc_date, 0) + int(mapping["parcels"])
+#
+#         if mapping.get("bundle_key"):
+#             bundle_by_date[svc_date] = mapping["bundle_key"]
+#
+#     created_events = created_accruals = 0
+#
+#     def _rule_for(charge_type: str, calc_method: str, service_date: datetime.date) -> Optional[BillingRule]:
+#         key = (charge_type, calc_method, service_date)
+#         if key not in rule_cache:
+#             rule_cache[key] = _select_rule(owner_id, warehouse_id, charge_type, calc_method, service_date)
+#         return rule_cache[key]
+#
+#     # ----------------------------
+#     # 先基于“唯一订单行集合”重建按日订单金额
+#     # 目的：
+#     # 1) 只计算已进入已过账事实链的订单行
+#     # 2) 避免同一 task_line / 多条 scan log 导致金额重复累计
+#     # 3) 不再把未拣货/未过账但 submit 的订单纳入比例计费
+#     # ----------------------------
+#     order_amount_by_date: Dict[datetime.date, Decimal] = {}
+#
+#     all_line_ids = sorted({olid for (_oid, olid, _svc_date) in order_lines})
+#     line_amount_map: Dict[int, Decimal] = {}
+#
+#     if all_line_ids:
+#         rows = (
+#             OutboundOrderLine.objects
+#             .filter(
+#                 id__in=all_line_ids,
+#                 order__owner_id=owner_id,
+#                 order__warehouse_id=warehouse_id,
+#             )
+#             .values("id", "final_line_amount", "base_qty", "base_price")
+#         )
+#
+#         for row in rows:
+#             amt = row.get("final_line_amount")
+#             if amt is None:
+#                 qty = row.get("base_qty") or Decimal("0")
+#                 price = row.get("base_price") or Decimal("0")
+#                 amt = Decimal(qty) * Decimal(price)
+#             line_amount_map[row["id"]] = Decimal(amt or 0)
+#
+#         for (_oid, olid, svc_date) in order_lines:
+#             amt = line_amount_map.get(olid, Decimal("0"))
+#             if amt > 0:
+#                 order_amount_by_date[svc_date] = order_amount_by_date.get(svc_date, Decimal("0")) + amt
+#
+#     # PER_ORDER
+#     for (_oid, svc_date) in sorted(order_ids):
+#         rule_order = _rule_for(ChargeType.DISPATCH, CalcMethod.PER_ORDER, svc_date)
+#         if not rule_order:
+#             continue
+#
+#         ev_fp = _event_fp(_oid, None, ChargeType.DISPATCH, CalcMethod.PER_ORDER, svc_date, 1)
+#         event, ev_new = BillingEvent.objects.get_or_create(
+#             event_fp=ev_fp,
+#             defaults=dict(
+#                 owner_id=owner_id,
+#                 warehouse_id=warehouse_id,
+#                 charge_type=ChargeType.DISPATCH,
+#                 service_date=svc_date,
+#                 quantity=1,
+#                 quantity_uom="ORDER",
+#             )
+#         )
+#
+#         amount, eff_price = _compute_fee_with_rule(rule_order, Decimal(1))
+#         amount = _apply_caps_bundles_day(rule_order, owner_id, warehouse_id, svc_date, amount)
+#         if rule_order.min_charge and amount < rule_order.min_charge:
+#             amount = rule_order.min_charge
+#         if amount <= 0:
+#             continue
+#
+#         eff_price = _q(amount, "0.0001")
+#         tax_amount = _q(amount * (rule_order.tax_rate or 0), "0.01") if rule_order.taxable else Decimal("0.00")
+#         bk = bundle_by_date.get(svc_date) or (rule_order.bundle_key or "")
+#
+#         acc_fp = _acc_fp(
+#             owner_id, warehouse_id, rule_order.id,
+#             ChargeType.DISPATCH, svc_date, 1, eff_price, rule_order.currency, ev_fp
+#         )
+#         _, acc_new = BillingAccrual.objects.get_or_create(
+#             acc_fingerprint=acc_fp,
+#             defaults=dict(
+#                 owner_id=owner_id,
+#                 warehouse_id=warehouse_id,
+#                 period=None,
+#                 charge_type=ChargeType.DISPATCH,
+#                 rule=rule_order,
+#                 service_date=svc_date,
+#                 currency=rule_order.currency,
+#                 quantity=1,
+#                 unit_price=_q(eff_price, "0.0001"),
+#                 amount=amount,
+#                 tax_amount=tax_amount,
+#                 status=AccrualStatus.OPEN,
+#                 event=event,
+#                 created_by=by_user,
+#                 bundle_key=bk,
+#             )
+#         )
+#         created_events += int(ev_new)
+#         created_accruals += int(acc_new)
+#
+#     # PER_ORDER_LINE
+#     for (_oid, _olid, svc_date) in sorted(order_lines):
+#         rule_line = _rule_for(ChargeType.DISPATCH, CalcMethod.PER_ORDER_LINE, svc_date)
+#         if not rule_line:
+#             continue
+#
+#         ev_fp = _event_fp(_oid, _olid, ChargeType.DISPATCH, CalcMethod.PER_ORDER_LINE, svc_date, 1)
+#         event, ev_new = BillingEvent.objects.get_or_create(
+#             event_fp=ev_fp,
+#             defaults=dict(
+#                 owner_id=owner_id,
+#                 warehouse_id=warehouse_id,
+#                 charge_type=ChargeType.DISPATCH,
+#                 service_date=svc_date,
+#                 quantity=1,
+#                 quantity_uom="ORDER_LINE",
+#             )
+#         )
+#
+#         amount, eff_price = _compute_fee_with_rule(rule_line, Decimal(1))
+#         amount = _apply_caps_bundles_day(rule_line, owner_id, warehouse_id, svc_date, amount)
+#         if rule_line.min_charge and amount < rule_line.min_charge:
+#             amount = rule_line.min_charge
+#         if amount <= 0:
+#             continue
+#
+#         eff_price = _q(amount, "0.0001")
+#         tax_amount = _q(amount * (rule_line.tax_rate or 0), "0.01") if rule_line.taxable else Decimal("0.00")
+#         bk = bundle_by_date.get(svc_date) or (rule_line.bundle_key or "")
+#
+#         acc_fp = _acc_fp(
+#             owner_id, warehouse_id, rule_line.id,
+#             ChargeType.DISPATCH, svc_date, 1, eff_price, rule_line.currency, ev_fp
+#         )
+#         _, acc_new = BillingAccrual.objects.get_or_create(
+#             acc_fingerprint=acc_fp,
+#             defaults=dict(
+#                 owner_id=owner_id,
+#                 warehouse_id=warehouse_id,
+#                 period=None,
+#                 charge_type=ChargeType.DISPATCH,
+#                 rule=rule_line,
+#                 service_date=svc_date,
+#                 currency=rule_line.currency,
+#                 quantity=1,
+#                 unit_price=_q(eff_price, "0.0001"),
+#                 amount=amount,
+#                 tax_amount=tax_amount,
+#                 status=AccrualStatus.OPEN,
+#                 event=event,
+#                 created_by=by_user,
+#                 bundle_key=bk,
+#             )
+#         )
+#         created_events += int(ev_new)
+#         created_accruals += int(acc_new)
+#
+#     # PER_PARCEL
+#     for svc_date, cnt in sorted(parcels_by_date.items()):
+#         rule_parcel = _rule_for(ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date)
+#         if not rule_parcel or cnt <= 0:
+#             continue
+#
+#         ev_fp = _event_fp(None, None, ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date, cnt)
+#         event, ev_new = BillingEvent.objects.get_or_create(
+#             event_fp=ev_fp,
+#             defaults=dict(
+#                 owner_id=owner_id,
+#                 warehouse_id=warehouse_id,
+#                 charge_type=ChargeType.PACK,
+#                 service_date=svc_date,
+#                 quantity=_q(cnt, "0.0001"),
+#                 quantity_uom="PARCEL",
+#             )
+#         )
+#
+#         amount, eff_price = _compute_fee_with_rule(rule_parcel, Decimal(cnt))
+#         amount = _apply_caps_bundles_day(rule_parcel, owner_id, warehouse_id, svc_date, amount)
+#         if rule_parcel.min_charge and cnt > 0 and amount < rule_parcel.min_charge:
+#             amount = rule_parcel.min_charge
+#         if amount <= 0:
+#             continue
+#
+#         eff_price = _q((amount / Decimal(cnt)) if cnt > 0 else eff_price, "0.0001")
+#         tax_amount = _q(amount * (rule_parcel.tax_rate or 0), "0.01") if rule_parcel.taxable else Decimal("0.00")
+#         bk = bundle_by_date.get(svc_date) or (rule_parcel.bundle_key or "")
+#
+#         acc_fp = _acc_fp(
+#             owner_id, warehouse_id, rule_parcel.id,
+#             ChargeType.PACK, svc_date, cnt, eff_price, rule_parcel.currency, ev_fp
+#         )
+#         _, acc_new = BillingAccrual.objects.get_or_create(
+#             acc_fingerprint=acc_fp,
+#             defaults=dict(
+#                 owner_id=owner_id,
+#                 warehouse_id=warehouse_id,
+#                 period=None,
+#                 charge_type=ChargeType.PACK,
+#                 rule=rule_parcel,
+#                 service_date=svc_date,
+#                 currency=rule_parcel.currency,
+#                 quantity=_q(cnt, "0.0001"),
+#                 unit_price=_q(eff_price, "0.0001"),
+#                 amount=amount,
+#                 tax_amount=tax_amount,
+#                 status=AccrualStatus.OPEN,
+#                 event=event,
+#                 created_by=by_user,
+#                 bundle_key=bk,
+#             )
+#         )
+#         created_events += int(ev_new)
+#         created_accruals += int(acc_new)
+#
+#     # PERCENT_OF_ORDER_AMOUNT
+#     # 只基于“已过账任务关联到的订单行金额”计费；
+#     # 不再 fallback 到宽口径的 ORDER_AMT 日指标，避免未拣货/未过账订单被计费。
+#     by_date_amounts = dict(order_amount_by_date)
+#
+#     for svc_date, amt in sorted(by_date_amounts.items()):
+#         rule_pct = _rule_for(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date)
+#         if not rule_pct:
+#             continue
+#
+#         amt = Decimal(amt or 0)
+#         if amt <= 0:
+#             continue
+#
+#         amount, eff_rate = _compute_fee_with_rule(rule_pct, amt)  # base=金额
+#         amount = _apply_caps_bundles_day(rule_pct, owner_id, warehouse_id, svc_date, amount)
+#         if rule_pct.min_charge and amount < rule_pct.min_charge:
+#             amount = rule_pct.min_charge
+#         if amount <= 0:
+#             continue
+#
+#         eff_rate = _q((amount / amt) if amt > 0 else eff_rate, "0.0001")
+#         tax_amount = _q(amount * (rule_pct.tax_rate or 0), "0.01") if rule_pct.taxable else Decimal("0.00")
+#
+#         ev_fp = _event_fp(None, None, ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date, amt)
+#         event, ev_new = BillingEvent.objects.get_or_create(
+#             event_fp=ev_fp,
+#             defaults=dict(
+#                 owner_id=owner_id,
+#                 warehouse_id=warehouse_id,
+#                 charge_type=ChargeType.DISPATCH,
+#                 service_date=svc_date,
+#                 quantity=_q(amt, "0.01"),
+#                 quantity_uom="CURRENCY",
+#             )
+#         )
+#
+#         bk = bundle_by_date.get(svc_date) or (rule_pct.bundle_key or "")
+#         acc_fp = _acc_fp(
+#             owner_id, warehouse_id, rule_pct.id,
+#             ChargeType.DISPATCH, svc_date, amt, eff_rate, rule_pct.currency, ev_fp
+#         )
+#         _, acc_new = BillingAccrual.objects.get_or_create(
+#             acc_fingerprint=acc_fp,
+#             defaults=dict(
+#                 owner_id=owner_id,
+#                 warehouse_id=warehouse_id,
+#                 period=None,
+#                 charge_type=ChargeType.DISPATCH,
+#                 rule=rule_pct,
+#                 service_date=svc_date,
+#                 currency=rule_pct.currency,
+#                 quantity=_q(amt, "0.01"),
+#                 unit_price=_q(eff_rate, "0.0001"),
+#                 amount=amount,
+#                 tax_amount=tax_amount,
+#                 status=AccrualStatus.OPEN,
+#                 event=event,
+#                 created_by=by_user,
+#                 bundle_key=bk,
+#             )
+#         )
+#         created_events += int(ev_new)
+#         created_accruals += int(acc_new)
+#
+#     return created_events, created_accruals
+#
+# ------------------------ 关账/开票 ------------------------ #
 
 @transaction.atomic
 def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_date, by_user=None) -> Tuple[int, int]:
     from allapp.tasking.models import TaskScanLog
+
     resolver = _load_taskline_order_resolver()
     rule_cache: Dict[Tuple[str, str, datetime.date], Optional[BillingRule]] = {}
 
-    logs = (TaskScanLog.objects
-            .filter(owner_id=owner_id, warehouse_id=warehouse_id, status="OK", posted_at__isnull=False)
-            .filter(posted_at__date__gte=start_date, posted_at__date__lte=end_date)
-            .filter(task__task_type__in=["DISPATCH", "PACK", "REVIEW", "PICK"])
-            .select_related("task", "task_line"))
+    logs = (
+        TaskScanLog.objects
+        .filter(owner_id=owner_id, warehouse_id=warehouse_id, status="OK", posted_at__isnull=False)
+        .filter(posted_at__date__gte=start_date, posted_at__date__lte=end_date)
+        .filter(task__task_type__in=["DISPATCH", "PACK", "REVIEW", "PICK"])
+        .select_related("task", "task_line")
+    )
 
     order_ids: Set[Tuple[int, datetime.date]] = set()
     order_lines: Set[Tuple[int, int, datetime.date]] = set()
     parcels_by_date: Dict[datetime.date, int] = {}
-    order_amount_by_date: Dict[datetime.date, Decimal] = {}
-    bundle_by_date: Dict[datetime.date, str] = {}  # 可选：从 resolver 动态传入 bundle_key
+    bundle_by_date: Dict[datetime.date, str] = {}
 
     for log in logs:
         if not log.task_line or resolver is None:
             continue
+
         mapping = resolver(log.task_line) or {}
         svc_date = (log.posted_at or timezone.now()).date()
 
         for oid in mapping.get("order_ids", set()):
             order_ids.add((oid, svc_date))
-        for olid in mapping.get("order_line_ids", set()):
-            order_lines.add((olid[0], olid[1], svc_date))
+
+        for oid, olid in mapping.get("order_line_ids", set()):
+            order_lines.add((oid, olid, svc_date))
+
         if mapping.get("parcels"):
             parcels_by_date[svc_date] = parcels_by_date.get(svc_date, 0) + int(mapping["parcels"])
-        if mapping.get("order_amount"):
-            order_amount_by_date[svc_date] = order_amount_by_date.get(svc_date, Decimal("0")) + Decimal(mapping["order_amount"])
+
         if mapping.get("bundle_key"):
             bundle_by_date[svc_date] = mapping["bundle_key"]
+
+    # 只基于“已过账任务实际关联到的唯一订单行”重建按日订单金额
+    # 避免：
+    # 1) 未拣货/未过账订单被带入比例计费
+    # 2) 同一订单行被多条 scan log 重复累计
+    order_amount_by_date: Dict[datetime.date, Decimal] = {}
+    line_ids = sorted({olid for (_oid, olid, _svc_date) in order_lines})
+    line_amount_map: Dict[int, Decimal] = {}
+
+    if line_ids:
+        rows = (
+            OutboundOrderLine.objects
+            .filter(
+                id__in=line_ids,
+                order__owner_id=owner_id,
+                order__warehouse_id=warehouse_id,
+            )
+            .values("id", "final_line_amount", "base_qty", "base_price")
+        )
+
+        for row in rows:
+            line_amount_map[row["id"]] = _resolve_outbound_order_line_amount(
+                final_line_amount=row["final_line_amount"],
+                base_qty=row["base_qty"],
+                base_price=row["base_price"],
+            )
+
+        for _oid, olid, svc_date in order_lines:
+            amt = line_amount_map.get(olid, Decimal("0"))
+            if amt > 0:
+                order_amount_by_date[svc_date] = order_amount_by_date.get(svc_date, Decimal("0")) + amt
 
     created_events = created_accruals = 0
 
@@ -1560,71 +2128,129 @@ def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_
         return rule_cache[key]
 
     # PER_ORDER
-    for (_oid, svc_date) in sorted(order_ids):
+    for _oid, svc_date in sorted(order_ids):
         rule_order = _rule_for(ChargeType.DISPATCH, CalcMethod.PER_ORDER, svc_date)
         if not rule_order:
             continue
+
         ev_fp = _event_fp(_oid, None, ChargeType.DISPATCH, CalcMethod.PER_ORDER, svc_date, 1)
         event, ev_new = BillingEvent.objects.get_or_create(
             event_fp=ev_fp,
             defaults=dict(
-                owner_id=owner_id, warehouse_id=warehouse_id, charge_type=ChargeType.DISPATCH,
-                service_date=svc_date, quantity=1, quantity_uom="ORDER"
-            )
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                charge_type=ChargeType.DISPATCH,
+                service_date=svc_date,
+                quantity=1,
+                quantity_uom="ORDER",
+            ),
         )
+
         amount, eff_price = _compute_fee_with_rule(rule_order, Decimal(1))
         amount = _apply_caps_bundles_day(rule_order, owner_id, warehouse_id, svc_date, amount)
         if rule_order.min_charge and amount < rule_order.min_charge:
             amount = rule_order.min_charge
         if amount <= 0:
             continue
+
         eff_price = _q(amount, "0.0001")
         tax_amount = _q(amount * (rule_order.tax_rate or 0), "0.01") if rule_order.taxable else Decimal("0.00")
         bk = bundle_by_date.get(svc_date) or (rule_order.bundle_key or "")
-        acc_fp = _acc_fp(owner_id, warehouse_id, rule_order.id, ChargeType.DISPATCH, svc_date, 1, eff_price, rule_order.currency, ev_fp)
+
+        acc_fp = _acc_fp(
+            owner_id,
+            warehouse_id,
+            rule_order.id,
+            ChargeType.DISPATCH,
+            svc_date,
+            1,
+            eff_price,
+            rule_order.currency,
+            ev_fp,
+        )
         _, acc_new = BillingAccrual.objects.get_or_create(
             acc_fingerprint=acc_fp,
             defaults=dict(
-                owner_id=owner_id, warehouse_id=warehouse_id, period=None, charge_type=ChargeType.DISPATCH, rule=rule_order,
-                service_date=svc_date, currency=rule_order.currency, quantity=1, unit_price=_q(eff_price, "0.0001"),
-                amount=amount, tax_amount=tax_amount, status=AccrualStatus.OPEN, event=event, created_by=by_user,
-                bundle_key=bk
-            )
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                period=None,
+                charge_type=ChargeType.DISPATCH,
+                rule=rule_order,
+                service_date=svc_date,
+                currency=rule_order.currency,
+                quantity=1,
+                unit_price=_q(eff_price, "0.0001"),
+                amount=amount,
+                tax_amount=tax_amount,
+                status=AccrualStatus.OPEN,
+                event=event,
+                created_by=by_user,
+                bundle_key=bk,
+            ),
         )
         created_events += int(ev_new)
         created_accruals += int(acc_new)
 
     # PER_ORDER_LINE
-    for (_oid, _olid, svc_date) in sorted(order_lines):
+    for _oid, _olid, svc_date in sorted(order_lines):
         rule_line = _rule_for(ChargeType.DISPATCH, CalcMethod.PER_ORDER_LINE, svc_date)
         if not rule_line:
             continue
+
         ev_fp = _event_fp(_oid, _olid, ChargeType.DISPATCH, CalcMethod.PER_ORDER_LINE, svc_date, 1)
         event, ev_new = BillingEvent.objects.get_or_create(
             event_fp=ev_fp,
             defaults=dict(
-                owner_id=owner_id, warehouse_id=warehouse_id, charge_type=ChargeType.DISPATCH,
-                service_date=svc_date, quantity=1, quantity_uom="ORDER_LINE"
-            )
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                charge_type=ChargeType.DISPATCH,
+                service_date=svc_date,
+                quantity=1,
+                quantity_uom="ORDER_LINE",
+            ),
         )
+
         amount, eff_price = _compute_fee_with_rule(rule_line, Decimal(1))
         amount = _apply_caps_bundles_day(rule_line, owner_id, warehouse_id, svc_date, amount)
         if rule_line.min_charge and amount < rule_line.min_charge:
             amount = rule_line.min_charge
         if amount <= 0:
             continue
+
         eff_price = _q(amount, "0.0001")
         tax_amount = _q(amount * (rule_line.tax_rate or 0), "0.01") if rule_line.taxable else Decimal("0.00")
         bk = bundle_by_date.get(svc_date) or (rule_line.bundle_key or "")
-        acc_fp = _acc_fp(owner_id, warehouse_id, rule_line.id, ChargeType.DISPATCH, svc_date, 1, eff_price, rule_line.currency, ev_fp)
+
+        acc_fp = _acc_fp(
+            owner_id,
+            warehouse_id,
+            rule_line.id,
+            ChargeType.DISPATCH,
+            svc_date,
+            1,
+            eff_price,
+            rule_line.currency,
+            ev_fp,
+        )
         _, acc_new = BillingAccrual.objects.get_or_create(
             acc_fingerprint=acc_fp,
             defaults=dict(
-                owner_id=owner_id, warehouse_id=warehouse_id, period=None, charge_type=ChargeType.DISPATCH, rule=rule_line,
-                service_date=svc_date, currency=rule_line.currency, quantity=1, unit_price=_q(eff_price, "0.0001"),
-                amount=amount, tax_amount=tax_amount, status=AccrualStatus.OPEN, event=event, created_by=by_user,
-                bundle_key=bk
-            )
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                period=None,
+                charge_type=ChargeType.DISPATCH,
+                rule=rule_line,
+                service_date=svc_date,
+                currency=rule_line.currency,
+                quantity=1,
+                unit_price=_q(eff_price, "0.0001"),
+                amount=amount,
+                tax_amount=tax_amount,
+                status=AccrualStatus.OPEN,
+                event=event,
+                created_by=by_user,
+                bundle_key=bk,
+            ),
         )
         created_events += int(ev_new)
         created_accruals += int(acc_new)
@@ -1634,82 +2260,133 @@ def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_
         rule_parcel = _rule_for(ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date)
         if not rule_parcel or cnt <= 0:
             continue
+
         ev_fp = _event_fp(None, None, ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date, cnt)
         event, ev_new = BillingEvent.objects.get_or_create(
             event_fp=ev_fp,
             defaults=dict(
-                owner_id=owner_id, warehouse_id=warehouse_id, charge_type=ChargeType.PACK,
-                service_date=svc_date, quantity=_q(cnt, "0.0001"), quantity_uom="PARCEL"
-            )
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                charge_type=ChargeType.PACK,
+                service_date=svc_date,
+                quantity=_q(cnt, "0.0001"),
+                quantity_uom="PARCEL",
+            ),
         )
+
         amount, eff_price = _compute_fee_with_rule(rule_parcel, Decimal(cnt))
         amount = _apply_caps_bundles_day(rule_parcel, owner_id, warehouse_id, svc_date, amount)
         if rule_parcel.min_charge and cnt > 0 and amount < rule_parcel.min_charge:
             amount = rule_parcel.min_charge
         if amount <= 0:
             continue
+
         eff_price = _q((amount / Decimal(cnt)) if cnt > 0 else eff_price, "0.0001")
         tax_amount = _q(amount * (rule_parcel.tax_rate or 0), "0.01") if rule_parcel.taxable else Decimal("0.00")
         bk = bundle_by_date.get(svc_date) or (rule_parcel.bundle_key or "")
-        acc_fp = _acc_fp(owner_id, warehouse_id, rule_parcel.id, ChargeType.PACK, svc_date, cnt, eff_price, rule_parcel.currency, ev_fp)
+
+        acc_fp = _acc_fp(
+            owner_id,
+            warehouse_id,
+            rule_parcel.id,
+            ChargeType.PACK,
+            svc_date,
+            cnt,
+            eff_price,
+            rule_parcel.currency,
+            ev_fp,
+        )
         _, acc_new = BillingAccrual.objects.get_or_create(
             acc_fingerprint=acc_fp,
             defaults=dict(
-                owner_id=owner_id, warehouse_id=warehouse_id, period=None, charge_type=ChargeType.PACK, rule=rule_parcel,
-                service_date=svc_date, currency=rule_parcel.currency, quantity=_q(cnt, "0.0001"),
-                unit_price=_q(eff_price, "0.0001"), amount=amount, tax_amount=tax_amount,
-                status=AccrualStatus.OPEN, event=event, created_by=by_user, bundle_key=bk
-            )
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                period=None,
+                charge_type=ChargeType.PACK,
+                rule=rule_parcel,
+                service_date=svc_date,
+                currency=rule_parcel.currency,
+                quantity=_q(cnt, "0.0001"),
+                unit_price=_q(eff_price, "0.0001"),
+                amount=amount,
+                tax_amount=tax_amount,
+                status=AccrualStatus.OPEN,
+                event=event,
+                created_by=by_user,
+                bundle_key=bk,
+            ),
         )
         created_events += int(ev_new)
         created_accruals += int(acc_new)
 
     # PERCENT_OF_ORDER_AMOUNT
+    # 只按“已过账任务实际关联到的订单行金额”计费，
+    # 不再 fallback 到宽口径的 ORDER_AMT。
     by_date_amounts = dict(order_amount_by_date)
-    missing_dates = []
-    for n in range((end_date - start_date).days + 1):
-        d = start_date + datetime.timedelta(days=n)
-        if d not in by_date_amounts:
-            missing_dates.append(d)
-    if missing_dates:
-        ms = (BillingMetricDaily.objects
-              .filter(owner_id=owner_id, warehouse_id=warehouse_id, service_date__in=missing_dates, metric_type=MetricType.ORDER_AMT))
-        for m in ms:
-            by_date_amounts[m.service_date] = by_date_amounts.get(m.service_date, Decimal("0")) + Decimal(m.value)
 
     for svc_date, amt in sorted(by_date_amounts.items()):
         rule_pct = _rule_for(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date)
         if not rule_pct:
             continue
+
         amt = Decimal(amt or 0)
         if amt <= 0:
             continue
-        amount, eff_rate = _compute_fee_with_rule(rule_pct, amt)  # base=金额
+
+        amount, eff_rate = _compute_fee_with_rule(rule_pct, amt)
         amount = _apply_caps_bundles_day(rule_pct, owner_id, warehouse_id, svc_date, amount)
         if rule_pct.min_charge and amount < rule_pct.min_charge:
             amount = rule_pct.min_charge
         if amount <= 0:
             continue
+
         eff_rate = _q((amount / amt) if amt > 0 else eff_rate, "0.0001")
         tax_amount = _q(amount * (rule_pct.tax_rate or 0), "0.01") if rule_pct.taxable else Decimal("0.00")
+
         ev_fp = _event_fp(None, None, ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date, amt)
         event, ev_new = BillingEvent.objects.get_or_create(
             event_fp=ev_fp,
             defaults=dict(
-                owner_id=owner_id, warehouse_id=warehouse_id, charge_type=ChargeType.DISPATCH,
-                service_date=svc_date, quantity=_q(amt, "0.01"), quantity_uom="CURRENCY"
-            )
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                charge_type=ChargeType.DISPATCH,
+                service_date=svc_date,
+                quantity=_q(amt, "0.01"),
+                quantity_uom="CURRENCY",
+            ),
         )
+
         bk = bundle_by_date.get(svc_date) or (rule_pct.bundle_key or "")
-        acc_fp = _acc_fp(owner_id, warehouse_id, rule_pct.id, ChargeType.DISPATCH, svc_date, amt, eff_rate, rule_pct.currency, ev_fp)
+        acc_fp = _acc_fp(
+            owner_id,
+            warehouse_id,
+            rule_pct.id,
+            ChargeType.DISPATCH,
+            svc_date,
+            amt,
+            eff_rate,
+            rule_pct.currency,
+            ev_fp,
+        )
         _, acc_new = BillingAccrual.objects.get_or_create(
             acc_fingerprint=acc_fp,
             defaults=dict(
-                owner_id=owner_id, warehouse_id=warehouse_id, period=None, charge_type=ChargeType.DISPATCH, rule=rule_pct,
-                service_date=svc_date, currency=rule_pct.currency, quantity=_q(amt, "0.01"),
-                unit_price=_q(eff_rate, "0.0001"), amount=amount, tax_amount=tax_amount,
-                status=AccrualStatus.OPEN, event=event, created_by=by_user, bundle_key=bk
-            )
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                period=None,
+                charge_type=ChargeType.DISPATCH,
+                rule=rule_pct,
+                service_date=svc_date,
+                currency=rule_pct.currency,
+                quantity=_q(amt, "0.01"),
+                unit_price=_q(eff_rate, "0.0001"),
+                amount=amount,
+                tax_amount=tax_amount,
+                status=AccrualStatus.OPEN,
+                event=event,
+                created_by=by_user,
+                bundle_key=bk,
+            ),
         )
         created_events += int(ev_new)
         created_accruals += int(acc_new)
@@ -1717,7 +2394,7 @@ def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_
     return created_events, created_accruals
 
 
-# ------------------------ 关账/开票 ------------------------ #
+
 def _get_or_create_period_locked(*, owner_id, warehouse_id, label, start_date, end_date):
     try:
         period, created = BillingPeriod.objects.get_or_create(
