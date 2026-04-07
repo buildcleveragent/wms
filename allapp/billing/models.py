@@ -47,7 +47,7 @@ class BillingRule(BillingValidationMixin, models.Model):
     charge_type = models.CharField(verbose_name=_("计费类型"), max_length=20, choices=ChargeType.choices)
     calc_method = models.CharField(verbose_name=_("计量方式"), max_length=40, choices=CalcMethod.choices)
     ladder_mode = models.CharField(verbose_name=_("阶梯模式"), max_length=16, choices=LadderMode.choices, null=True, blank=True, default=None)
-    unit_price = models.DecimalField(verbose_name=_("单价/费率（无阶梯时生效）"), max_digits=18, decimal_places=4)
+    unit_price = models.DecimalField(verbose_name=_("单价/费率（无阶梯时生效）"), max_digits=18, decimal_places=4, null=True, blank=True)
     currency = models.CharField(verbose_name=_("币种"), max_length=8, default="CNY")
     taxable = models.BooleanField(verbose_name=_("含税"), default=False)
     tax_rate = models.DecimalField(verbose_name=_("税率"), max_digits=6, decimal_places=4, default=Decimal("0.0000"))
@@ -77,7 +77,7 @@ class BillingRule(BillingValidationMixin, models.Model):
             )
         ]
         constraints = [
-            models.CheckConstraint(name="chk_rule_price_nonneg", check=models.Q(unit_price__gte=0)),
+            models.CheckConstraint(name="chk_rule_price_nonneg", check=models.Q(unit_price__isnull=True) | models.Q(unit_price__gte=0)),
             models.CheckConstraint(name="chk_rule_taxrate_range", check=models.Q(tax_rate__gte=0, tax_rate__lte=1)),
             models.CheckConstraint(name="chk_rule_min_charge_nonneg", check=models.Q(min_charge__gte=0)),
             models.CheckConstraint(
@@ -114,6 +114,10 @@ class BillingRule(BillingValidationMixin, models.Model):
                 errors["bundle_key"] = "启用打包时必须填写 bundle_key。"
             if self.bundle_price is None:
                 errors["bundle_price"] = "启用打包时必须填写 bundle_price。"
+
+        has_tiers = self.pk and self.tiers.exists() if self.pk else False
+        if self.unit_price is None and not has_tiers and self.ladder_mode is None:
+            errors["unit_price"] = "非阶梯模式下必须填写 unit_price。"
 
         if self.calc_method == CalcMethod.PERCENT_OF_ORDER_AMOUNT and self.unit_price is not None:
             if not (Decimal("0") <= Decimal(self.unit_price) <= Decimal("1")):
