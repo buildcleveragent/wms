@@ -292,8 +292,9 @@ def _compute_fee_with_rule(rule: BillingRule, base_value: Decimal) -> Tuple[Deci
 
     tiers = list(rule.tiers.all().order_by("threshold_from"))
     if not tiers:
-        amt = _q(bv * Decimal(rule.unit_price), "0.01")
-        eff = _q(Decimal(rule.unit_price), "0.0001")
+        up = Decimal(rule.unit_price) if rule.unit_price is not None else Decimal("0")
+        amt = _q(bv * up, "0.01")
+        eff = _q(up, "0.0001")
         return (amt, eff)
 
     mode = rule.ladder_mode or LadderMode.WHOLE
@@ -1002,15 +1003,8 @@ def _store_generated_metric(
                 "source": source,
                 "note": note,
             }
-        except (IntegrityError, ValidationError) as exc:
+        except IntegrityError as exc:
             existing = _recover_existing_metric_after_create_race(metric_filter)
-            if existing is None and isinstance(exc, IntegrityError) and exc.__cause__ is None:
-                try:
-                    BillingMetricDaily(**create_kwargs).save(force_insert=True)
-                except IntegrityError:
-                    existing = _recover_existing_metric_after_create_race(metric_filter)
-                else:
-                    existing = BillingMetricDaily.objects.select_for_update().filter(**metric_filter).first()
             if existing is None:
                 raise exc
 
@@ -2403,17 +2397,12 @@ def _get_or_create_period_locked(*, owner_id, warehouse_id, label, start_date, e
             label=label,
             defaults=dict(start_date=start_date, end_date=end_date, status=PeriodStatus.OPEN),
         )
-    except (IntegrityError, ValidationError):
-        period = None
-        for _ in range(20):
-            period = BillingPeriod.objects.filter(
-                owner_id=owner_id,
-                warehouse_id=warehouse_id,
-                label=label,
-            ).first()
-            if period is not None:
-                break
-            time.sleep(0.05)
+    except IntegrityError:
+        period = BillingPeriod.objects.filter(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            label=label,
+        ).first()
         if period is None:
             raise
         created = False
@@ -2477,7 +2466,7 @@ def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingP
             allowed = max(Decimal("0"), cap - running)
             new_amt = min(Decimal(a.amount), allowed)
             _save_adjusted_accrual(a, new_amt)
-            running += a.amount
+            running += new_amt
 
     # --- 按账期：打包（BundleScope.PER_PERIOD） ---
     bundle_keys = list(
@@ -2518,7 +2507,7 @@ def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingP
                 allowed = max(Decimal("0"), bprice - running)
                 new_amt = min(Decimal(a.amount), allowed)
                 _save_adjusted_accrual(a, new_amt)
-                running += a.amount
+                running += new_amt
         else:
             _apply_fixed_bundle_total(accs, bprice)
 
