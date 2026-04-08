@@ -66,6 +66,7 @@ class BillingPeriodAdmin(admin.ModelAdmin):
             path("<int:pk>/accrue-orders-posted/", self.admin_site.admin_view(self.accrue_orders_posted_view), name="billingperiod_accrue_orders_posted"),
             path("<int:pk>/lock/", self.admin_site.admin_view(self.lock_view), name="billingperiod_lock"),
             path("<int:pk>/invoice/", self.admin_site.admin_view(self.invoice_view), name="billingperiod_invoice"),
+            path("<int:pk>/unlock/", self.admin_site.admin_view(self.unlock_view), name="billingperiod_unlock"),
         ]
         return my + urls
 
@@ -155,4 +156,30 @@ class BillingPeriodAdmin(admin.ModelAdmin):
             self.message_user(request, f"生成失败：{e}", level=messages.WARNING)
             return redirect(f"../../{pk}/change/")
         self.message_user(request, f"已生成发票 {bill.invoice_no}（金额 {bill.total}）。", level=messages.SUCCESS)
+        return redirect(f"../../{pk}/change/")
+
+    @transaction.atomic
+    def unlock_view(self, request, pk: int):
+        period = self.get_object(request, pk)
+        if not period:
+            self.message_user(request, "账期不存在。", level=messages.ERROR)
+            return redirect("admin:billing_billingperiod_changelist")
+        if not self._guard_status(request, period, ["CLOSED", "INVOICED"], "撤销关账"):
+            return redirect(f"../../{pk}/change/")
+        from allapp.billing.services import unlock_period
+        try:
+            result = unlock_period(period, by_user=request.user, reason="admin unlock")
+        except ValueError as e:
+            self.message_user(request, f"撤销失败：{e}", level=messages.ERROR)
+            return redirect(f"../../{pk}/change/")
+        action = result["action"]
+        if action == "direct_rollback":
+            self.message_user(request, f"已直接回退，恢复 {result['accruals_reverted']} 条应计为 OPEN。", level=messages.SUCCESS)
+        else:
+            self.message_user(
+                request,
+                f"已红冲处理，创建 {result['reversal_accruals_created']} 条冲销记录"
+                f"{'，发票 ' + result['bill_voided'] + ' 已作废' if result['bill_voided'] else ''}。",
+                level=messages.SUCCESS,
+            )
         return redirect(f"../../{pk}/change/")
