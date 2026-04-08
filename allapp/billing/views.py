@@ -35,6 +35,7 @@ from .serializers import (
     BillingPeriodSerializer,
     BillingRuleSerializer,
     BillingRuleTierSerializer,
+    UnlockPeriodSerializer,
 )
 from .services import (
     accrue_metrics_for_date,
@@ -44,6 +45,8 @@ from .services import (
     generate_metrics_for_range,
     generate_invoice_for_period,
     lock_period,
+    preview_lock_period,
+    unlock_period,
 )
 
 
@@ -505,6 +508,43 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(BillDetailSerializer(bill, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="preview-lock")
+    def preview_lock(self, request, pk=None):
+        period = self.get_object()
+        blocked = self._guard_status(period, [PeriodStatus.OPEN])
+        if blocked is not None:
+            return blocked
+
+        result = preview_lock_period(
+            period.owner_id,
+            period.warehouse_id,
+            period.label,
+            period.start_date,
+            period.end_date,
+        )
+        return Response(result)
+
+    @action(detail=True, methods=["post"], url_path="unlock")
+    @transaction.atomic
+    def unlock(self, request, pk=None):
+        period = self.get_object()
+        blocked = self._guard_status(period, [PeriodStatus.CLOSED, PeriodStatus.INVOICED])
+        if blocked is not None:
+            return blocked
+
+        payload = UnlockPeriodSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        try:
+            result = unlock_period(
+                period,
+                by_user=request.user,
+                reason=payload.validated_data.get("reason", ""),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
 
 
 class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):

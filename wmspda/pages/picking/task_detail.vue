@@ -1,4 +1,4 @@
-<template>
+<template> 
   <view class="page">
     <!-- 任务头信息 -->
     <view class="card-first">
@@ -47,25 +47,40 @@
           <view class="meta">
             <text>货位：{{ ln.from_loc_code || '-' }}</text>
           </view>
+
+          <!-- 原有计划/已拣显示 -->
           <view class="qty-row">
-            <text>计划：{{ ln.qty_plan }}</text>
-            <text style="margin-left: 24rpx;">已拣：{{ ln.qty_done }}</text>
+            <text>计划：{{ formatQty(ln.qty_plan) }}</text>
+            <text style="margin-left: 24rpx;">已拣：{{ formatQty(ln.qty_done) }}</text>
           </view>
+
+		  <view class="qty-edit-row">
+		    <text class="qty-edit-label">当前拣货数：</text>
+		    <input
+		      class="line-qty-input"
+		      type="number"
+		      :value="formatQty(ln.qty_done)"
+		      placeholder=""
+		      @input="(e) => onEditQty(e, ln)"
+			  @blur="applyManualQty(ln)"
+
+		    />
+		  </view>
         </view>
       </view>
     </view>
 
     <!-- 底部完成按钮 -->
     <view class="footer">
-      <button class="btn-primary" :disabled="!allDone" @click="postTask">
-        完成拣货并过账
+      <button class="btn-primary" :disabled="!allDone" @click="createReviewTask">
+        完成拣货，创建复核任务
       </button>
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted} from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
@@ -78,8 +93,9 @@ const scanBarcode = ref('')
 const scanQty = ref<string>('1')
 const loading = ref(false)
 
-// 扫描钩子（复用你现有的模式）
-const { lastScan, quickScan, setScanCallback, initScanner, unRegisterBroadcast } = useBarcodeScanner()
+// 扫描钩子
+const { lastScan, quickScan, setScanCallback, initScanner, unRegisterBroadcast } =
+  useBarcodeScanner()
 
 const allDone = computed(() => {
   if (!lines.value.length) return false
@@ -88,11 +104,10 @@ const allDone = computed(() => {
   )
 })
 
-// ✅ 每次扫描生成一个唯一的 client_seq，用来区分不同扫描事件
+// 每次扫描生成一个唯一的 client_seq
 function genClientSeq(): string {
   return Date.now().toString() + '-' + Math.random().toString(36).slice(2, 8)
 }
-
 
 async function loadTask() {
   if (!taskId.value) return
@@ -110,7 +125,12 @@ async function loadLines() {
   loading.value = true
   try {
     const res: any = await api.pickTaskLines(taskId.value)
-    lines.value = Array.isArray(res) ? res : (res.results || [])
+    const list = Array.isArray(res) ? res : (res.results || [])
+    // ✅ 初始化每行的可编辑拣货数
+    lines.value = list.map((ln: any) => ({
+      ...ln,
+      _edit_qty_done: ln.qty_done ?? 0,
+    }))
   } catch (e) {
     console.error(e)
     uni.showToast({ title: '加载任务行失败', icon: 'none' })
@@ -118,6 +138,34 @@ async function loadLines() {
     loading.value = false
   }
 }
+
+
+async function applyManualQty(ln: any) {
+  const raw = ln.qty_done          // 你在 v-model 里绑定的那个
+  const val = Number(raw)
+
+  if (Number.isNaN(val) || val < 0) {
+    uni.showToast({ title: '请输入合法的拣货数量', icon: 'none' })
+    return
+  }
+  
+  console.log("applyManualQty")
+
+  try {
+    const res: any = await api.adjustPickLineQty(taskId.value, {
+      line_id: ln.id,
+      final_qty_done: val,
+      client_seq: genClientSeq(),
+    })
+    ln.qty_done = res.qty_done    // 后端返回为准
+    ln.edit_qty = res.qty_done
+  } catch (e: any) {
+    const msg = e?.data?.detail || e?.data?.message || '调整拣货数量失败'
+    uni.showToast({ title: String(msg), icon: 'none' })
+  }
+}
+
+
 
 async function submitScan(barcodeOverride?: string) {
   if (!taskId.value) return
@@ -132,17 +180,23 @@ async function submitScan(barcodeOverride?: string) {
     const res: any = await api.scanPick(taskId.value, {
       barcode: code,
       qty: q,
-	  client_seq: genClientSeq(),  // ⭐ 每次扫描一个新的 client_seq
+      client_seq: genClientSeq(), // 每次扫描一个新的 client_seq
     })
 
     const lineId = res.line_id
     if (lineId) {
       const ln = lines.value.find((x: any) => x.id === lineId)
-      // 优先用 res.line.qty_done（我们在后台补了）
-      if (ln && res.line && typeof res.line.qty_done !== 'undefined') {
-        ln.qty_done = res.line.qty_done
-      } else if (ln && typeof res.qty_done !== 'undefined') {
-        ln.qty_done = res.qty_done
+      // 优先用 res.line.qty_done
+      let newQtyDone: number | undefined
+      if (res.line && typeof res.line.qty_done !== 'undefined') {
+        newQtyDone = Number(res.line.qty_done)
+      } else if (typeof res.qty_done !== 'undefined') {
+        newQtyDone = Number(res.qty_done)
+      }
+
+      if (ln && !Number.isNaN(newQtyDone as number)) {
+        ln.qty_done = newQtyDone
+        ln._edit_qty_done = formatQty(newQtyDone) // ✅ 同步到输入框
       }
     }
 
@@ -167,12 +221,6 @@ setScanCallback((barcode: string) => {
   submitScan(barcode)
 })
 
-//（可选）同时监听 lastScan（与其它页面一致风格）
-// watch(lastScan, (code) => {
-//   if (!code) return
-//   // 这里我们已经在 setScanCallback 里处理了，可以不做额外事情
-// })
-
 // 完成任务并过账
 async function postTask() {
   if (!taskId.value) return
@@ -182,7 +230,6 @@ async function postTask() {
       title: res?.message || '拣货已过账',
       icon: 'none',
     })
-    // 返回任务列表
     setTimeout(() => {
       uni.navigateBack()
     }, 800)
@@ -192,6 +239,70 @@ async function postTask() {
     uni.showToast({ title: String(msg), icon: 'none' })
   }
 }
+
+async function createReviewTask() {
+  if (!taskId.value) return
+  if (!allDone.value) {
+    uni.showToast({ title: '还有未拣完的行，不能提交复核', icon: 'none' })
+    return
+  }
+
+  try {
+    const res: any = await api.createPickReviewTask(taskId.value)
+    uni.showToast({
+      title: res?.message || '拣货完成，已创建复核任务',
+      icon: 'none',
+    })
+    setTimeout(() => {
+      uni.navigateBack()
+    }, 800)
+  } catch (err: any) {
+    console.error(err)
+    const msg = err?.data?.detail || err?.data?.message || '提交复核任务失败'
+    uni.showToast({ title: String(msg), icon: 'none' })
+  }
+}
+
+function formatQty(val: any): string {
+  if (val === null || val === undefined || val === '') return ''
+
+  const n = Number(val)
+  if (Number.isNaN(n)) {
+    // 非数字，就原样返回字符串
+    return String(val)
+  }
+
+  // 是整数，就只显示整数部分
+  if (Number.isInteger(n)) {
+    return n.toString()
+  }
+
+  // 有小数，就正常显示（会自动去掉多余的 0，比如 10.50 -> 10.5）
+  return n.toString()
+}
+
+function onEditQty(e: any, ln: any) {
+  // uni-app 的 input 事件里，值在 e.detail.value
+  const raw = e?.detail?.value ?? e?.target?.value ?? ''
+  const val = Number(raw)
+
+  if (Number.isNaN(val) || val < 0) {
+    uni.showToast({ title: '请输入合法的拣货数量', icon: 'none' })
+    // 输入非法时，可以归零或保持原值，这里我保持原值：
+    return
+  }
+
+  // 真正参与业务 / allDone 计算的是 qty_done
+  ln.qty_done = val
+}
+
+// function  adjustPickLineQty(taskId: number, data: any){
+//   request({
+//     url: `/api/pda/pick-tasks/${taskId}/adjust-line-qty/`,
+//     method: 'POST',
+//     data,
+//   })
+// }
 
 onLoad((opts: any) => {
   const id = Number(opts?.task_id)
@@ -205,7 +316,6 @@ onLoad((opts: any) => {
 })
 
 onMounted(() => {
-  // 注册广播 + SDK
   initScanner()
 })
 
@@ -296,6 +406,27 @@ onUnmounted(() => {
   margin-top: 4rpx;
   font-size: 24rpx;
 }
+
+/* ✅ 新增样式：行内手工输入拣货数 */
+.qty-edit-row {
+  margin-top: 6rpx;
+  font-size: 24rpx;
+  display: flex;
+  align-items: center;
+}
+.qty-edit-label {
+  margin-right: 8rpx;
+  color: #64748b;
+}
+.line-qty-input {
+  flex: 0 0 180rpx;
+  border: 1rpx solid #e5e7eb;
+  border-radius: 8rpx;
+  padding: 4rpx 8rpx;
+  background: #fff;
+  text-align: center;
+}
+
 .footer {
   margin-top: 24rpx;
 }

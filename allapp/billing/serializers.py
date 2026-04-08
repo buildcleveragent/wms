@@ -247,6 +247,10 @@ class BillingPeriodInvoiceSerializer(serializers.Serializer):
     due_date = serializers.DateField(required=False, allow_null=True)
 
 
+class UnlockPeriodSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+
 class BillingMetricGenerateSerializer(serializers.Serializer):
     service_date = serializers.DateField(required=False)
     start_date = serializers.DateField(required=False)

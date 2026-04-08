@@ -67,7 +67,7 @@
 				 
 				 <view class="col-label-first">
 						<text class="label-text">收货单位</text>
-						<text class="label-text-sh">{{ p.unitOptions[p.selectedUnitIndex].label }}</text>
+						<text class="label-text-name">{{ p.unitOptions[p.selectedUnitIndex].label }}</text>
 				 </view>  
 				    
 
@@ -474,7 +474,6 @@ function getBatch(pid: number): string {
 
 
 </script>
-
 <style scoped>
 /* 搜索栏样式 */
 
@@ -684,13 +683,16 @@ function getBatch(pid: number): string {
 }
 
 /* 整体容器 */
-.bar {
+/* .bar {
   display: flex;
   align-items: stretch;
   justify-content: flex-start;
   gap: 10rpx;
   padding-top:40rpx;
-}
+} */
+
+/* 搜索栏：固定在顶部信息(card-first)下面，避免被遮挡 */
+
 
 /* 输入框样式 */
 .flex-input {
@@ -723,14 +725,14 @@ function getBatch(pid: number): string {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  padding-top: 200rpx; 
+/*  padding-top: 200rpx; */
   overflow: hidden;
   margin-left:2rpx;
   margin-right:2rpx;
 }
 
 /* 顶部固定 */
-.card-first {
+/* .card-first {
   position: fixed;
   top: 0;
   left: 0;
@@ -744,17 +746,29 @@ function getBatch(pid: number): string {
   display: flex;
   flex-direction: column;
   justify-content: center;
-}
+} */
 
 /* 中间可滚动区域 */
-.content {
+/* .content {
   flex: 1;
   overflow-y: auto;
   padding-top: 5rpx;
   padding-bottom: 80rpx;
   padding-left: 2rpx;
   padding-right: 2rpx;
+} */
+.content {
+  flex: 1;
+  overflow-y: auto;
+
+  /* 100rpx(card-first) + 96rpx(搜索条大概高度) */
+  padding-top: 200rpx;
+
+  padding-bottom: 80rpx;
+  padding-left: 2rpx;
+  padding-right: 2rpx;
 }
+
 
 /* 底部固定区域 */
 .footer {
@@ -1069,30 +1083,115 @@ function getBatch(pid: number): string {
   flex-direction: column;
 }
 
+
+/* ✅ 统一用变量控制布局（手机/电脑都不遮挡） */
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding-top: 0;     /* ✅ 不要再顶 200rpx */
+  overflow: hidden;
+  margin-left: 2rpx;
+  margin-right: 2rpx;
+}
+
+
+/* 顶部固定：货主信息 */
+.card-first {
+  position: fixed;
+  top: 2;           /* ✅ 不要再 top:80rpx */
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: 60rpx;    /* ✅ 更矮 */
+  background-color: white;
+  z-index: 1000;
+  padding: 6rpx 10rpx;  /* ✅ 更小 */
+  box-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.1);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+}
+.row-first {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 60rpx;   /* ✅ 去掉 60rpx */
+}
+
+
+/* ✅ 搜索栏固定在 header 下面（关键） */
+.bar {
+  position: fixed;
+  top: 160rpx;        /* ✅ 紧贴 header 下面（对应 card-first 高度） */
+  left: 0;
+  right: 0;
+  z-index: 101;
+  background: #fff;
+
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+
+  padding: 6rpx 10rpx;   /* ✅ 更小 */
+  box-sizing: border-box;
+}
+
+
+/* ✅ 中间滚动区：顶部让位给 header + bar */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding-top: 200rpx;   /* ✅ 64 + ~74 + 10 */
+  padding-bottom: 80rpx;
+  padding-left: 2rpx;
+  padding-right: 2rpx;
+}
+
+
 /* 针对电脑浏览器的额外调整 */
-@media (min-width: 768px) {
-  .container {
+/* @media (min-width: 768px) { */
+/*  .container {
     padding-top: 0px;
   }
-  
-  .card-first {
+  */
+/*  .card-first {
     top:80rpx;
     height: 60px;
     padding: 10px;
   }
-}
+} */
 
 /* 针对移动设备的优化 */
-@media (max-width: 767px) {
-  .container {
+/* @media (max-width: 767px) { */
+/*  .container {
     padding-top: 0px;
   }
-  
-  .card-first {	  
+  */
+/*  .card-first {	  
     height: 60rpx;
     padding: 10rpx 10rpx;
   }
+} */
+
+@media (min-width: 768px) {
+  .container {
+    --header-top: 80rpx;
+    --header-h: 44px;
+    --bar-h: 52px;
+  }
 }
+
+
+/* 手机：保持默认即可；如果你想更高/更低，在这里改变量 */
+@media (max-width: 767px) {
+  .container {
+    --header-top: 0px;
+    --header-h: 60rpx;
+    --bar-h: 86rpx;
+  }
+}
+
 
 
 /* 日期输入组 */

@@ -328,6 +328,10 @@ class BillingAccrual(BillingValidationMixin, models.Model):
     acc_fingerprint = models.CharField(verbose_name=_("应计指纹"), max_length=160, unique=True)
     created_at = models.DateTimeField(verbose_name=_("创建时间"), auto_now_add=True)
     created_by = models.ForeignKey(User, verbose_name=_("创建人"), null=True, blank=True, on_delete=models.SET_NULL, related_name="billing_created_by")
+    # —— 撤销/红冲支持 —— #
+    pre_adjustment_amount = models.DecimalField(verbose_name=_("调整前金额"), max_digits=18, decimal_places=2, null=True, blank=True)
+    is_reversal = models.BooleanField(verbose_name=_("是否冲销"), default=False)
+    reversal_of = models.ForeignKey("self", verbose_name=_("冲销来源"), null=True, blank=True, on_delete=models.PROTECT, related_name="reversals")
 
     class Meta:
         verbose_name = _("应计费用")
@@ -338,15 +342,24 @@ class BillingAccrual(BillingValidationMixin, models.Model):
             models.Index(fields=["bundle_key", "service_date"]),  # 便于打包分组
         ]
         constraints = [
-            models.CheckConstraint(name="chk_amount_nonneg", check=models.Q(amount__gte=0)),
             models.CheckConstraint(name="chk_qty_nonneg", check=models.Q(quantity__gte=0)),
-            models.CheckConstraint(name="chk_unit_price_nonneg", check=models.Q(unit_price__gte=0)),
-            models.CheckConstraint(name="chk_tax_amount_nonneg", check=models.Q(tax_amount__gte=0)),
+            models.CheckConstraint(
+                name="chk_reversal_has_ref",
+                check=models.Q(is_reversal=False) | models.Q(reversal_of__isnull=False),
+            ),
         ]
 
     def clean(self):
         errors = {}
         currency_errors = []
+
+        if not self.is_reversal:
+            if self.amount is not None and self.amount < 0:
+                errors["amount"] = "非冲销记录金额不能为负。"
+            if self.unit_price is not None and self.unit_price < 0:
+                errors["unit_price"] = "非冲销记录单价不能为负。"
+            if self.tax_amount is not None and self.tax_amount < 0:
+                errors["tax_amount"] = "非冲销记录税额不能为负。"
 
         if self.rule_id:
             if self.rule.owner_id is not None and self.rule.owner_id != self.owner_id:
@@ -479,9 +492,6 @@ class Bill(BillingValidationMixin, models.Model):
         ]
         constraints = [
             models.UniqueConstraint(fields=["owner", "warehouse", "period"], name="ux_bill_owner_wh_period"),
-            models.CheckConstraint(name="chk_bill_subtotal_nonneg", condition=models.Q(subtotal__gte=0)),
-            models.CheckConstraint(name="chk_bill_tax_total_nonneg", condition=models.Q(tax_total__gte=0)),
-            models.CheckConstraint(name="chk_bill_total_nonneg", condition=models.Q(total__gte=0)),
         ]
 
     def clean(self):
@@ -518,9 +528,6 @@ class BillLine(BillingValidationMixin, models.Model):
         constraints = [
             models.UniqueConstraint(fields=["accrual"], name="ux_billline_accrual_once"),
             models.CheckConstraint(name="chk_billline_qty_nonneg", condition=models.Q(quantity__gte=0)),
-            models.CheckConstraint(name="chk_billline_unit_price_nonneg", condition=models.Q(unit_price__gte=0)),
-            models.CheckConstraint(name="chk_billline_amount_nonneg", condition=models.Q(amount__gte=0)),
-            models.CheckConstraint(name="chk_billline_tax_amount_nonneg", condition=models.Q(tax_amount__gte=0)),
         ]
 
     def clean(self):
