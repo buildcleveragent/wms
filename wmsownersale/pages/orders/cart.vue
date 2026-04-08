@@ -311,47 +311,47 @@ async function submitOrder() {
     form.ship_to = ''
 
     uni.switchTab({ url: '/pages/features/index' })
- } catch (e) {
-  console.error(e)
-
-  const data = e?.data || {}
-  const duplicateMsg =
-    data?.src_bill_no ||
-    data?.message ||
-    data?.detail ||
-    ''
-
-  const existingOrderId = Number(data?.existing_order_id || 0)
-  const existingOrderNo = String(data?.existing_order_no || '').trim()
-
-  // 命中“平台单号重复”
-  if (duplicateMsg && String(duplicateMsg).includes('平台单号重复')) {
-    uni.showModal({
-      title: '平台单号重复',
-      content: existingOrderNo
-        ? `该平台单号已存在，对应订单：${existingOrderNo}。是否查看原订单？`
-        : '该平台单号已存在。是否查看原订单？',
-      confirmText: '查看原单',
-      cancelText: '返回修改',
-      success: (res) => {
-        if (res.confirm && existingOrderId) {
-          uni.navigateTo({
-            url: '/pages/orders/detail?id=' + existingOrderId
-          })
-        }
-      }
+  } catch (e) {
+    console.error(e)
+    uni.showToast({
+      title: e?.data?.detail || e?.data?.message || '创建订单失败',
+      icon: 'none'
     })
-    return
   }
-
-  uni.showToast({
-    title: e?.message || data?.detail || data?.message || '创建订单失败',
-    icon: 'none'
-  })
-}
 }
 
+// async function submitOrder(){
+//   // 提交前兜底校验：不允许低于
+//   const bad = cart.items.find(it => {
+//     ensureItemGuard(it)
+//     return typeof it.orig_price === 'number' && it.price < it.min_price
+//   })
+//   if (bad) {
+//     uni.showToast({ title:'存在价格低于系统最低价的商品，请修正后再提交', icon:'none' })
+//     return
+//   }
 
+//   try{
+//     const payload = {
+//       customer_id: cart.customer?.id,
+//       remark: '业务员下单',
+//       items: cart.items.map(it=> ({
+//         product_id: it.product_id,
+//         qty: it.qty,
+//         price: it.price
+//       }))
+//     }
+//     const res = await api.createOutboundOrder(payload)
+//     uni.showToast({ title: '已创建：'+ (res?.order_no||res?.id), icon:'none' })
+//     cart.clear()
+//     uni.switchTab({ url:'/pages/features/index' })
+// 	// uni.navigateTo({
+// 	//   url: '/pages/customers/select'
+// 	// })
+//   }catch(e){
+//     console.error(e)
+//   }
+// }
 </script>
 
 <style scoped>
