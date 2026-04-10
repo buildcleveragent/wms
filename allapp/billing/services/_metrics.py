@@ -240,10 +240,16 @@ def _ensure_inventory_snapshot_for_date(owner_id, warehouse_id, service_date):
     调用时机：_inventory_metric_rows 发现历史日期的快照为空时，
     调用本函数生成快照，随后再次查询，保证历史指标可以补算。
 
-    设计决策：
-    - 快照生成操作委托给 inventory.snapshot_services，隔离职责。
-    - 若对应日期已有快照，generate_inventory_snapshot_for_date 内部应具备
-      幂等性（不重复生成），避免数据重复。
+    生成策略：
+    - 先尝试常规增量生成（基于前一天快照 + 当天库存事务推演）
+    - 如果因为前一天快照缺失而失败（快照链断裂），自动回退到 bootstrap 模式
+      （直接从当前实时库存生成快照）
+
+    bootstrap 模式的精度说明：
+    - bootstrap 快照基于当前实时库存状态，不是历史某天的真实状态
+    - 对于近期日期（1-2 天前），误差很小
+    - 对于较远的历史日期，可能与真实历史有偏差
+    - 但总比没有快照（导致指标为 0 或操作被阻断）要好
 
     参数：
         owner_id:      货主 ID。
@@ -255,11 +261,24 @@ def _ensure_inventory_snapshot_for_date(owner_id, warehouse_id, service_date):
     """
     from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_date
 
-    return generate_inventory_snapshot_for_date(
-        service_date,
-        owner_id=owner_id,
-        warehouse_id=warehouse_id,
-    )
+    try:
+        return generate_inventory_snapshot_for_date(
+            service_date,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+        )
+    except ValueError:
+        # 快照链断裂（前一天快照缺失）→ 回退到 bootstrap 模式
+        logger.warning(
+            "Snapshot chain broken for %s (owner=%s, warehouse=%s), falling back to bootstrap mode",
+            service_date, owner_id, warehouse_id,
+        )
+        return generate_inventory_snapshot_for_date(
+            service_date,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            bootstrap=True,
+        )
 
 
 def _inventory_rows_use_snapshot(service_date, rows=None) -> bool:

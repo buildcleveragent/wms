@@ -25,6 +25,7 @@
 import dataclasses
 import datetime
 from decimal import Decimal
+from itertools import groupby
 from typing import Optional
 
 from django.db import transaction
@@ -202,6 +203,68 @@ def _apply_period_bundles(period, *, adjust_fn):
 
 
 # ============================================================================
+# 关账时的 accrual 去重
+#
+# 问题场景:
+#   Day 1: 规则价格=1.00, accrue_for_posting 创建 accrual A (指纹含 "1.0000")
+#   Day 2: 管理员改价为 0.80
+#   Day 3: 同一过账被重触发, accrue_for_posting 创建 accrual B (指纹含 "0.8000")
+#   → A 和 B 的 acc_fingerprint 不同（因为含 unit_price），都是 OPEN
+#   → lock_period 如果不去重，两条都会被锁定 → 重复收费
+#
+# 解决: 锁定后、封顶前，按 event_id 分组检测重复，保留最新、VOID 旧的。
+# ============================================================================
+
+def _dedup_locked_accruals(period: BillingPeriod) -> int:
+    """
+    对刚锁定到 period 的 accrual 执行 event 级去重。
+
+    同一个 BillingEvent 对应多条 accrual（因规则改价导致指纹不同），
+    只保留 created_at 最晚的那条（最新价格），其余标记为 VOID。
+
+    被 VOID 的 accrual 设置 is_reversal=True, reversal_of 指向保留的那条，
+    保留完整的审计轨迹。
+
+    对于 event_id=NULL 的 accrual（理论上不应出现，因为所有计费路径都创建 event），
+    跳过去重，不处理。
+
+    参数:
+        period: 刚锁定的 BillingPeriod
+
+    返回:
+        被 VOID 的 accrual 数量
+    """
+    # 查询该 period 下所有已锁定、非冲销、有 event 关联的 accrual
+    # 按 event_id 分组，同组内按 created_at 倒序（最新在前）
+    accruals = list(
+        BillingAccrual.objects
+        .filter(period=period, status=AccrualStatus.LOCKED, is_reversal=False)
+        .exclude(event__isnull=True)
+        .order_by("event_id", "-created_at")
+        .select_related("rule")
+    )
+
+    voided = 0
+    # groupby 要求输入已按 key 排序，上面的 order_by("event_id", ...) 满足此条件
+    for event_id, group in groupby(accruals, key=lambda a: a.event_id):
+        group_list = list(group)
+        if len(group_list) <= 1:
+            # 只有一条 → 无重复，跳过
+            continue
+
+        # 保留第一条（created_at 最晚 = 最新价格）
+        keep = group_list[0]
+        for dup in group_list[1:]:
+            dup.status = AccrualStatus.VOID
+            dup.is_reversal = True
+            dup.reversal_of = keep
+            dup.save(update_fields=["status", "is_reversal", "reversal_of"])
+            voided += 1
+
+    return voided
+
+
+# ============================================================================
 # lock_period（关账）
 # ============================================================================
 
@@ -258,6 +321,14 @@ def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingP
      .filter(service_date__gte=start_date, service_date__lte=end_date)
      .update(status=AccrualStatus.LOCKED, period=period))
 
+    # 步骤 4: 去重 — 同一 event 因改价产生的多条 accrual，只保留最新价格的那条
+    voided_count = _dedup_locked_accruals(period)
+    if voided_count:
+        logger.info(
+            "lock_period: voided %d duplicate accruals (repricing) for period %s",
+            voided_count, label,
+        )
+
     # 关账时的调整回调: 先保存调整前金额（用于 unlock 恢复），再执行实际调整
     def _lock_adjust_fn(accrual, new_amount, reason):
         # 首次被调整时记录原始金额，后续 unlock 时可恢复
@@ -266,7 +337,7 @@ def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingP
             accrual.save(update_fields=["pre_adjustment_amount"])
         _save_adjusted_accrual(accrual, new_amount)
 
-    # 步骤 4 & 5: 应用账期封顶和打包
+    # 步骤 5 & 6: 应用账期封顶和打包
     _apply_period_caps(period, owner_id, warehouse_id, start_date, end_date, adjust_fn=_lock_adjust_fn)
     _apply_period_bundles(period, adjust_fn=_lock_adjust_fn)
 
@@ -304,6 +375,8 @@ class _PreviewAccrual:
     3. 需要同时保留 original 和 adjusted 两个版本的金额
     """
     accrual_id: int
+    event_id: Optional[int]
+    created_at: datetime.datetime
     charge_type: str
     service_date: datetime.date
     rule_id: int
@@ -314,6 +387,7 @@ class _PreviewAccrual:
     original_tax_amount: Decimal
     adjusted_tax_amount: Decimal
     adjustment_reason: str
+    _voided_by_dedup: bool = False
     # internal refs for adjustment logic
     _rule_taxable: bool = False
     _rule_tax_rate: Decimal = Decimal("0")
@@ -338,6 +412,8 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
     for a in accruals_qs:
         previews[a.id] = _PreviewAccrual(
             accrual_id=a.id,
+            event_id=a.event_id,
+            created_at=a.created_at,
             charge_type=a.charge_type,
             service_date=a.service_date,
             rule_id=a.rule_id,
@@ -352,7 +428,26 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
             _rule_tax_rate=Decimal(a.rule.tax_rate or 0) if a.rule else Decimal("0"),
         )
 
-    if not previews:
+    # --- 模拟去重（与 lock_period 中的 _dedup_locked_accruals 逻辑一致） ---
+    # 按 event_id 分组，同组内只保留 created_at 最晚的，其余标记为 voided
+    event_groups = {}
+    for p in previews.values():
+        if p.event_id is not None:
+            event_groups.setdefault(p.event_id, []).append(p)
+    for event_id, group in event_groups.items():
+        if len(group) <= 1:
+            continue
+        group.sort(key=lambda x: x.created_at, reverse=True)
+        for dup in group[1:]:
+            dup._voided_by_dedup = True
+            dup.adjusted_amount = Decimal("0.00")
+            dup.adjustment_reason = f"voided_by_dedup:kept_accrual={group[0].accrual_id}"
+
+    # 从 previews 中移除被去重的条目（它们不参与后续封顶/打包计算）
+    active_previews = {k: v for k, v in previews.items() if not v._voided_by_dedup}
+    voided_previews = {k: v for k, v in previews.items() if v._voided_by_dedup}
+
+    if not active_previews and not voided_previews:
         return {
             "accrual_count": 0,
             "original_subtotal": Decimal("0.00"),
@@ -379,14 +474,14 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
     # We need the actual DB accrual objects for the queryset-based cap/bundle logic
     # So we use a different approach: simulate by iterating previews
 
-    # --- Simulate PER_PERIOD caps ---
+    # --- 对 active_previews 模拟 PER_PERIOD 封顶 ---
     cap_rules = _scoped_cap_rules(owner_id, warehouse_id, start_date, end_date)
     for rid, cap in cap_rules:
         cap = Decimal(cap or 0)
         if cap <= 0:
             continue
         rule_previews = sorted(
-            [p for p in previews.values() if p.rule_id == rid],
+            [p for p in active_previews.values() if p.rule_id == rid],
             key=lambda p: (p.service_date, p.accrual_id),
         )
         running = Decimal("0")
@@ -398,10 +493,10 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
                 p.adjustment_reason = f"per_period_cap:rule={rid},cap={cap}"
             running += new_amt
 
-    # --- Simulate PER_PERIOD bundles ---
-    bundle_keys_set = {p.bundle_key for p in previews.values() if p.bundle_key}
+    # --- 对 active_previews 模拟 PER_PERIOD 打包 ---
+    bundle_keys_set = {p.bundle_key for p in active_previews.values() if p.bundle_key}
     for bk in bundle_keys_set:
-        involved_rule_ids = list({p.rule_id for p in previews.values() if p.bundle_key == bk})
+        involved_rule_ids = list({p.rule_id for p in active_previews.values() if p.bundle_key == bk})
         r = _select_bundle_rule_for_period(period, bk, preferred_rule_ids=involved_rule_ids)
         if not r:
             continue
@@ -410,7 +505,7 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
             continue
 
         bk_previews = sorted(
-            [p for p in previews.values() if p.bundle_key == bk],
+            [p for p in active_previews.values() if p.bundle_key == bk],
             key=lambda p: (p.service_date, p.accrual_id),
         )
         total = sum(p.adjusted_amount for p in bk_previews)
@@ -427,7 +522,6 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
                     p.adjustment_reason = f"per_period_bundle_cap:bundle_key={bk},cap={bprice}"
                 running += new_amt
         else:
-            # FIXED: redistribute to target total
             target = max(Decimal("0.00"), _q(bprice, "0.01"))
             current_total = sum(p.adjusted_amount for p in bk_previews)
             diff = _q(target - current_total, "0.01")
@@ -446,14 +540,15 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
                             p.adjustment_reason = f"per_period_bundle_fixed:bundle_key={bk},target={bprice}"
                             remaining -= reducible
 
-    # Recalculate tax on adjusted amounts
-    for p in previews.values():
+    # 重算税额（active + voided 都要算）
+    all_previews = {**active_previews, **voided_previews}
+    for p in all_previews.values():
         if p._rule_taxable:
             p.adjusted_tax_amount = _q(p.adjusted_amount * p._rule_tax_rate, "0.01")
         else:
             p.adjusted_tax_amount = Decimal("0.00")
 
-    accrual_list = sorted(previews.values(), key=lambda p: (p.service_date, p.accrual_id))
+    accrual_list = sorted(all_previews.values(), key=lambda p: (p.service_date, p.accrual_id))
     adjustments_applied = sum(1 for p in accrual_list if p.adjustment_reason)
 
     logger.info(
