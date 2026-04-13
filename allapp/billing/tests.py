@@ -22,7 +22,17 @@ from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from allapp.baseinfo.models import Customer, Owner
 from allapp.core.choices import InvTxType
-from allapp.billing.enums import AccrualStatus, BillStatus, BundleScope, BundleType, CalcMethod, CapMode, ChargeType, PeriodStatus
+from allapp.billing.enums import (
+    AccrualStatus,
+    BillStatus,
+    BundleScope,
+    BundleType,
+    CalcMethod,
+    CapMode,
+    ChargeType,
+    MetricType,
+    PeriodStatus,
+)
 from allapp.billing.models import (
     Bill,
     BillLine,
@@ -35,6 +45,7 @@ from allapp.billing.models import (
     BillingRuleTier,
 )
 from allapp.billing.services import (
+    accrue_order_processing_for_task,
     accrue_order_processing_from_posted,
     generate_invoice_for_period,
     generate_metrics_for_date,
@@ -46,9 +57,8 @@ from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_d
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product, ProductUom
 from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
+from allapp.tasking.plugins.handlers import DefaultPostingHandler
 from wmsmaster.views import profile_view
-
-from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
 from allapp.tasking.plugins.handlers import DefaultPostingHandler
 
 
@@ -206,7 +216,7 @@ class BillingServiceTests(TestCase):
         def resolver(task_line):
             return {"order_ids": {1000 + task_line.id}}
 
-        with mock.patch("allapp.billing.services._load_taskline_order_resolver", return_value=resolver):
+        with mock.patch("allapp.billing.services.accrual._load_taskline_order_resolver", return_value=resolver):
             events, accruals = accrue_order_processing_from_posted(
                 self.owner.id,
                 self.warehouse.id,
@@ -238,7 +248,7 @@ class BillingServiceTests(TestCase):
         def resolver(task_line):
             return {"order_ids": {2000 + task_line.id}}
 
-        with mock.patch("allapp.billing.services._load_taskline_order_resolver", return_value=resolver):
+        with mock.patch("allapp.billing.services.accrual._load_taskline_order_resolver", return_value=resolver):
             accrue_order_processing_from_posted(
                 self.owner.id,
                 self.warehouse.id,
@@ -632,18 +642,20 @@ class BillingServiceTests(TestCase):
 
         with mock.patch.object(DefaultPostingHandler, "_handle_atomic", return_value=1), \
              mock.patch("allapp.billing.services.accrue_for_posting") as accrue_for_posting_mock, \
-             mock.patch("allapp.billing.services.accrue_order_processing_from_posted") as accrue_order_processing_mock:
+             mock.patch("allapp.billing.services.accrue_order_processing_for_task") as accrue_for_task_mock:
             affected = handler.handle(task=review_task, now=now_ts, note="AUTO", by_user=self.user)
 
         self.assertEqual(affected, 1)
         accrue_for_posting_mock.assert_called_once()
-        accrue_order_processing_mock.assert_called_once_with(
-            review_task.owner_id,
-            review_task.warehouse_id,
-            now_ts.date(),
-            now_ts.date(),
+        accrue_for_task_mock.assert_called_once_with(
+            review_task,
+            mock.ANY,
             by_user=self.user,
-            allowed_methods={CalcMethod.PER_ORDER, CalcMethod.PER_ORDER_LINE},
+            allowed_methods={
+                CalcMethod.PER_ORDER,
+                CalcMethod.PER_ORDER_LINE,
+                CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+            },
         )
 
     def test_handler_does_not_trigger_order_processing_for_non_review_tasks(self):
@@ -653,12 +665,111 @@ class BillingServiceTests(TestCase):
 
         with mock.patch.object(DefaultPostingHandler, "_handle_atomic", return_value=1), \
              mock.patch("allapp.billing.services.accrue_for_posting") as accrue_for_posting_mock, \
-             mock.patch("allapp.billing.services.accrue_order_processing_from_posted") as accrue_order_processing_mock:
+             mock.patch("allapp.billing.services.accrue_order_processing_for_task") as accrue_for_task_mock:
             affected = handler.handle(task=pick_task, now=now_ts, note="AUTO", by_user=self.user)
 
         self.assertEqual(affected, 1)
         accrue_for_posting_mock.assert_called_once()
-        accrue_order_processing_mock.assert_not_called()
+        accrue_for_task_mock.assert_not_called()
+
+    def test_accrue_order_processing_for_task_uses_precise_order_line_amount_not_daily_metric(self):
+        service_date = datetime.date(2026, 3, 9)
+        self._create_rule(
+            calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+            unit_price="0.1000",
+        )
+        order, order_line, product = self._create_outbound_order_line(
+            service_date,
+            suffix="TASK-AMT",
+            qty="2.000",
+            price="15.0000",
+            final_line_amount="0.00",
+        )
+
+        task = self._create_task("TASK-REVIEW-AMT", task_type=WmsTask.TaskType.REVIEW)
+        task_line = WmsTaskLine.objects.create(
+            task=task,
+            product=product,
+            src_model="OutboundOrderLine",
+            src_id=order_line.id,
+        )
+        posting_journal = PostingJournal.objects.create(
+            src_model="WmsTask",
+            src_id=task.id,
+            tx_type="POST",
+            status="PENDING",
+        )
+        TaskScanLog.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task=task,
+            task_line=task_line,
+            posting_journal=posting_journal,
+            status=TaskScanLog.ScanStatus.OK,
+            qty_base_delta=Decimal("1"),
+            fp="fp-review-amt-task",
+            label_key="LBL-REVIEW-AMT-TASK",
+            scan_snapshot_rev=0,
+            posted_at=datetime.datetime.combine(service_date, datetime.time(10, 0)),
+        )
+
+        # 故意写一个夸张的日指标，证明新函数不会再用它
+        BillingMetricDaily.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            service_date=service_date,
+            metric_type=MetricType.ORDER_AMT,
+            value=Decimal("9999.0000"),
+            source="TEST",
+        )
+
+        def resolver(_task_line):
+            return {
+                "order_ids": {order.id},
+                "order_line_ids": {(order.id, order_line.id)},
+            }
+
+        with mock.patch(
+            "allapp.billing.services.accrual._load_taskline_order_resolver",
+            return_value=resolver,
+        ):
+            events, accruals = accrue_order_processing_for_task(
+                task,
+                posting_journal,
+                by_user=self.user,
+                allowed_methods={CalcMethod.PERCENT_OF_ORDER_AMOUNT},
+            )
+
+        self.assertEqual(events, 1)
+        self.assertEqual(accruals, 1)
+        accrual = BillingAccrual.objects.get(rule__calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT)
+
+        # 当前 task 真实金额 = 2 * 15 = 30，不应使用 9999 的日指标
+        self.assertEqual(accrual.quantity, Decimal("30.00"))
+        self.assertEqual(accrual.amount, Decimal("3.00"))
+
+    def test_handler_triggers_review_task_level_order_processing(self):
+        review_task = self._create_task("TASK-REVIEW-TASK-LEVEL", task_type=WmsTask.TaskType.REVIEW)
+        handler = DefaultPostingHandler()
+        now_ts = timezone.make_aware(datetime.datetime(2026, 3, 10, 10, 0, 0))
+
+        with mock.patch.object(DefaultPostingHandler, "_handle_atomic", return_value=1), \
+             mock.patch("allapp.billing.services.accrue_for_posting") as accrue_for_posting_mock, \
+             mock.patch("allapp.billing.services.accrue_order_processing_for_task") as accrue_for_task_mock:
+            affected = handler.handle(task=review_task, now=now_ts, note="AUTO", by_user=self.user)
+
+        self.assertEqual(affected, 1)
+        accrue_for_posting_mock.assert_called_once()
+        accrue_for_task_mock.assert_called_once_with(
+            review_task,
+            mock.ANY,
+            by_user=self.user,
+            allowed_methods={
+                CalcMethod.PER_ORDER,
+                CalcMethod.PER_ORDER_LINE,
+                CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+            },
+        )
 
 class BillingModelGuardrailTests(TestCase):
     def setUp(self):

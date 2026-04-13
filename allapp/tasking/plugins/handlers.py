@@ -172,18 +172,15 @@ class DefaultPostingHandler(BasePostingHandler):
         try:
             from allapp.billing import services as billing_services
             from allapp.billing.services.accrual import AUTO_REVIEW_ORDER_PROCESSING_METHODS
+
             billing_services.accrue_for_posting(task, pj, by_user=by_user)
 
             # 当前业务下：PICK → REVIEW → 订单完成。
-            # REVIEW 过账后自动触发订单处理费，但本轮只开放
-            # PER_ORDER / PER_ORDER_LINE；金额百分比与包裹维度仍走批量补算。
+            # REVIEW 过账后自动触发订单处理费。
             if task.task_type == WmsTask.TaskType.REVIEW:
-                service_date = now_ts.date()
-                billing_services.accrue_order_processing_from_posted(
-                    task.owner_id,
-                    task.warehouse_id,
-                    service_date,
-                    service_date,
+                billing_services.accrue_order_processing_for_task(
+                    task,
+                    pj,
                     by_user=by_user,
                     allowed_methods=AUTO_REVIEW_ORDER_PROCESSING_METHODS,
                 )

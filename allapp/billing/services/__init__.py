@@ -30,6 +30,7 @@ from allapp.billing.services._common import BillingAccuracyGateError  # noqa: F4
 from allapp.billing.services.accrual import (  # noqa: F401
     accrue_for_posting,
     accrue_metrics_for_date,
+    accrue_order_processing_for_task,
     accrue_order_processing_from_posted,
     accrue_storage_for_date,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "BillingAccuracyGateError",
     "accrue_for_posting",
     "accrue_metrics_for_date",
+    "accrue_order_processing_for_task",
     "accrue_order_processing_from_posted",
     "accrue_storage_for_date",
     "generate_metrics_for_date",
