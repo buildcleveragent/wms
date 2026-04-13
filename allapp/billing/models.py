@@ -118,6 +118,8 @@ class BillingRule(BillingValidationMixin, models.Model):
         has_tiers = self.pk and self.tiers.exists() if self.pk else False
         if self.unit_price is None and not has_tiers and self.ladder_mode is None:
             errors["unit_price"] = "非阶梯模式下必须填写 unit_price。"
+        if self.ladder_mode is not None and not has_tiers and self.unit_price is None:
+            errors["unit_price"] = "启用阶梯模式但尚无阶梯配置时，必须填写 unit_price 作为兜底。"
 
         if self.calc_method == CalcMethod.PERCENT_OF_ORDER_AMOUNT and self.unit_price is not None:
             if not (Decimal("0") <= Decimal(self.unit_price) <= Decimal("1")):

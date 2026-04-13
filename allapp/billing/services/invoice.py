@@ -60,7 +60,7 @@ def generate_invoice_for_period(period: BillingPeriod, invoice_no: str, issue_da
     # ---- 前置校验 ----
     if period.status != PeriodStatus.CLOSED:
         raise ValueError("Only closed periods can be invoiced.")
-    if Bill.objects.filter(period=period).exists():
+    if Bill.objects.filter(period=period).exclude(status=BillStatus.VOID).exists():
         raise ValueError("Invoice already exists for this period.")
 
     # 数据对账门控（可通过 settings 关闭）

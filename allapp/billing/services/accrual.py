@@ -48,7 +48,7 @@
 import datetime
 import importlib
 from decimal import Decimal
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, Iterable, Optional, Set, Tuple
 
 from django.conf import settings
 from django.db import transaction
@@ -62,17 +62,10 @@ from allapp.billing.models import (
     BillingAccrual, BillingEvent, BillingMetricDaily, BillingRule,
 )
 
-# from ._common import (
-#     _acc_fp, _apply_caps_bundles_day, _compute_fee_with_rule, _days_in_month,
-#     _event_fp, _q, _select_rule, logger,
-# )
-
 from ._common import (
     _acc_fp, _apply_caps_bundles_day, _compute_fee_with_rule, _days_in_month,
     _event_fp, _q, _select_rule, logger,
 )
-
-from typing import Optional, Iterable, Set
 
 # AUTO_REVIEW_ORDER_PROCESSING_METHODS = {
 #     CalcMethod.PER_ORDER,
@@ -296,7 +289,8 @@ def accrue_storage_for_date(owner_id, warehouse_id, service_date: datetime.date,
             continue
 
         # 步骤 3：生成事件指纹（task_id=None, log_id=None 因为存储费无对应扫描日志）
-        ev_fp = _event_fp(None, None, ChargeType.STORAGE, CalcMethod.PER_DAY_ONHAND_BASE, service_date, qty)
+        ev_fp = _event_fp(None, None, ChargeType.STORAGE, CalcMethod.PER_DAY_ONHAND_BASE, service_date, qty,
+                         scope_key=f"{owner_id}:{warehouse_id}")
         event, ev_created = BillingEvent.objects.get_or_create(
             event_fp=ev_fp,
             defaults=dict(
@@ -446,7 +440,8 @@ def accrue_metrics_for_date(owner_id, warehouse_id, service_date: datetime.date,
         tax_amount = _q(amount * (rule.tax_rate or 0), "0.01") if rule.taxable else Decimal("0.00")
 
         # 步骤 6：生成事件指纹并幂等创建 BillingEvent
-        ev_fp = _event_fp(None, None, ctype, cm, service_date, qty_bill)
+        ev_fp = _event_fp(None, None, ctype, cm, service_date, qty_bill,
+                         scope_key=f"{owner_id}:{warehouse_id}")
         event, ev_new = BillingEvent.objects.get_or_create(
             event_fp=ev_fp,
             defaults=dict(
@@ -1073,7 +1068,8 @@ def accrue_order_processing_from_posted(
         if not rule_parcel or cnt <= 0:
             continue
         # 事件指纹：task_id=None, log_id=None，以日期+数量区分（同日包裹已汇总）
-        ev_fp = _event_fp(None, None, ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date, cnt)
+        ev_fp = _event_fp(None, None, ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date, cnt,
+                         scope_key=f"{owner_id}:{warehouse_id}")
         event, ev_new = BillingEvent.objects.get_or_create(
             event_fp=ev_fp,
             defaults=dict(
@@ -1145,7 +1141,8 @@ def accrue_order_processing_from_posted(
         eff_rate = _q((amount / amt) if amt > 0 else eff_rate, "0.0001")
         tax_amount = _q(amount * (rule_pct.tax_rate or 0), "0.01") if rule_pct.taxable else Decimal("0.00")
         # 事件数量单位为 CURRENCY（货币金额），表示计费基数是一笔订单金额
-        ev_fp = _event_fp(None, None, ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date, amt)
+        ev_fp = _event_fp(None, None, ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date, amt,
+                         scope_key=f"{owner_id}:{warehouse_id}")
         event, ev_new = BillingEvent.objects.get_or_create(
             event_fp=ev_fp,
             defaults=dict(
@@ -1282,6 +1279,18 @@ def accrue_order_processing_for_task(
             by_date_amounts[svc_date] = amt
 
     created_events = created_accruals = 0
+
+    def _batch_accrual_exists(charge_type: str, calc_method: str, svc_date: datetime.date) -> bool:
+        """检查 batch 函数是否已为同一 owner/warehouse/date/method 生成过 accrual。"""
+        scope_prefix = f"{task.owner_id}:{task.warehouse_id}|-|-|"
+        return BillingEvent.objects.filter(
+            owner_id=task.owner_id,
+            warehouse_id=task.warehouse_id,
+            charge_type=charge_type,
+            service_date=svc_date,
+            event_fp__startswith=scope_prefix,
+            event_fp__contains=f"|{calc_method}|",
+        ).exists()
 
     def _rule_for(charge_type: str, calc_method: str, service_date: datetime.date) -> Optional[BillingRule]:
         key = (charge_type, calc_method, service_date)
@@ -1420,6 +1429,13 @@ def accrue_order_processing_for_task(
         if not _method_enabled(CalcMethod.PER_PARCEL):
             continue
 
+        if _batch_accrual_exists(ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date):
+            logger.warning(
+                "accrue_order_processing_for_task: skipping PER_PARCEL for task=%s date=%s "
+                "(batch accrual already exists)", task.id, svc_date,
+            )
+            continue
+
         rule_parcel = _rule_for(ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date)
         if not rule_parcel or cnt <= 0:
             continue
@@ -1479,6 +1495,13 @@ def accrue_order_processing_for_task(
     # ── 维度 4：PERCENT_OF_ORDER_AMOUNT（精确按当前 task 金额）────────────
     for svc_date, amt in sorted(by_date_amounts.items()):
         if not _method_enabled(CalcMethod.PERCENT_OF_ORDER_AMOUNT):
+            continue
+
+        if _batch_accrual_exists(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date):
+            logger.warning(
+                "accrue_order_processing_for_task: skipping PERCENT_OF_ORDER_AMOUNT for task=%s date=%s "
+                "(batch accrual already exists)", task.id, svc_date,
+            )
             continue
 
         rule_pct = _rule_for(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date)

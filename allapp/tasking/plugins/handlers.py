@@ -185,7 +185,13 @@ class DefaultPostingHandler(BasePostingHandler):
                     allowed_methods=AUTO_REVIEW_ORDER_PROCESSING_METHODS,
                 )
         except Exception as e:
-            log.warning("tasking.post.billing_accrue_failed %s err=%s", ctx_text, e, extra=ctx)
+            log.error("tasking.post.billing_accrue_failed %s err=%s", ctx_text, e, extra=ctx)
+            # 在 PJ 上标记 billing 失败，便于 billing_retry_failed 命令后续补算
+            try:
+                pj.message = f"{pj.message}|BILLING_FAILED:{str(e)[:100]}"[:255]
+                pj.save(update_fields=["message", "updated_at"])
+            except Exception:
+                pass
 
 
         return affected

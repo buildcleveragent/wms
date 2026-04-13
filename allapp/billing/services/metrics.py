@@ -125,7 +125,6 @@ def generate_metrics_for_date(
     }
 
 
-@transaction.atomic
 def generate_metrics_for_range(
     owner_id, warehouse_id, start_date: datetime.date, end_date: datetime.date, *,
     metric_types: Optional[Iterable[str]] = None,

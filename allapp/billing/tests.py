@@ -47,11 +47,14 @@ from allapp.billing.models import (
 from allapp.billing.services import (
     accrue_order_processing_for_task,
     accrue_order_processing_from_posted,
+    accrue_storage_for_date,
     generate_invoice_for_period,
     generate_metrics_for_date,
     lock_period,
     run_scheduled_metric_generation_for_date,
+    unlock_period,
 )
+from allapp.billing.services._common import _compute_fee_with_rule
 from allapp.inventory.models import InventoryDetail, InventorySnapshotDaily, InventoryTransaction, PostingJournal
 from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_date
 from allapp.locations.models import Location, Subwarehouse, Warehouse
@@ -770,6 +773,346 @@ class BillingServiceTests(TestCase):
                 CalcMethod.PERCENT_OF_ORDER_AMOUNT,
             },
         )
+
+    # ── Bugfix regression tests ──────────────────────────────────────────
+
+    def test_storage_fingerprint_unique_per_owner(self):
+        """A-2: 两个 owner 同量同日应各自生成独立的 BillingEvent。"""
+        from allapp.billing.enums import LadderMode
+        service_date = datetime.date(2026, 3, 15)
+        other_owner = Owner.objects.create(name="Owner B", code="OWNB")
+
+        for ow in (self.owner, other_owner):
+            BillingRule.objects.create(
+                owner=ow, warehouse=self.warehouse,
+                charge_type=ChargeType.STORAGE, calc_method=CalcMethod.PER_DAY_ONHAND_BASE,
+                unit_price=Decimal("1.00"),
+            )
+
+        from allapp.inventory.models import InventoryDetail
+        for ow in (self.owner, other_owner):
+            InventoryDetail.objects.create(
+                owner=ow, warehouse=self.warehouse,
+                product=Product.objects.create(
+                    owner=ow, code=f"SKU-STORE-{ow.code}", name=f"P-{ow.code}",
+                    sku=f"SKU-STORE-{ow.code}",
+                    base_uom=ProductUom.objects.create(code=f"EA-{ow.code}", name=f"EA-{ow.code}", is_active=True),
+                ),
+                location=Location.objects.create(
+                    warehouse=self.warehouse, code=f"LOC-{ow.code}", name=f"LOC-{ow.code}",
+                ),
+                onhand_qty=Decimal("100"),
+                is_active=True,
+            )
+
+        accrue_storage_for_date(self.owner.id, self.warehouse.id, service_date, by_user=self.user)
+        accrue_storage_for_date(other_owner.id, self.warehouse.id, service_date, by_user=self.user)
+
+        self.assertEqual(BillingEvent.objects.count(), 2)
+        self.assertEqual(BillingAccrual.objects.count(), 2)
+        fps = list(BillingEvent.objects.values_list("event_fp", flat=True))
+        self.assertNotEqual(fps[0], fps[1])
+
+    def test_task_level_skips_percent_when_batch_exists(self):
+        """A-1: batch 已存在时 task-level 跳过 PERCENT_OF_ORDER_AMOUNT。"""
+        service_date = datetime.date(2026, 3, 16)
+        self._create_rule(
+            calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+            unit_price="0.1000",
+        )
+        order, order_line, product = self._create_outbound_order_line(
+            service_date, suffix="BATCH-VS-TASK", qty="5.000", price="20.0000",
+            final_line_amount="0.00",
+        )
+        task = self._create_task("TASK-BATCH-CHECK", task_type=WmsTask.TaskType.REVIEW)
+        task_line = WmsTaskLine.objects.create(
+            task=task, product=product,
+            src_model="OutboundOrderLine", src_id=order_line.id,
+        )
+        posting_journal = PostingJournal.objects.create(
+            src_model="WmsTask", src_id=task.id, tx_type="POST", status="PENDING",
+        )
+        TaskScanLog.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            task=task, task_line=task_line, posting_journal=posting_journal,
+            status=TaskScanLog.ScanStatus.OK, qty_base_delta=Decimal("1"),
+            fp="fp-batch-vs-task", label_key="LBL-BVT", scan_snapshot_rev=0,
+            posted_at=datetime.datetime.combine(service_date, datetime.time(10, 0)),
+        )
+
+        def resolver(_tl):
+            return {"order_ids": {order.id}, "order_line_ids": {(order.id, order_line.id)}}
+
+        # 先跑 batch 函数
+        with mock.patch("allapp.billing.services.accrual._load_taskline_order_resolver", return_value=resolver):
+            accrue_order_processing_from_posted(
+                self.owner.id, self.warehouse.id, service_date, service_date,
+                by_user=self.user,
+                allowed_methods={CalcMethod.PERCENT_OF_ORDER_AMOUNT},
+            )
+        self.assertEqual(
+            BillingAccrual.objects.filter(rule__calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT).count(), 1,
+        )
+
+        # 再跑 task-level 函数，应该跳过
+        with mock.patch("allapp.billing.services.accrual._load_taskline_order_resolver", return_value=resolver):
+            events, accruals = accrue_order_processing_for_task(
+                task, posting_journal, by_user=self.user,
+                allowed_methods={CalcMethod.PERCENT_OF_ORDER_AMOUNT},
+            )
+        self.assertEqual(events, 0)
+        self.assertEqual(accruals, 0)
+        # 仍然只有 batch 那一条
+        self.assertEqual(
+            BillingAccrual.objects.filter(rule__calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT).count(), 1,
+        )
+
+    def test_reinvoice_after_unlock_with_void_bill(self):
+        """A-3: unlock 后 VOID bill 不应阻止重新开票。"""
+        service_date = datetime.date(2026, 3, 17)
+        rule = self._create_rule(calc_method=CalcMethod.PER_ORDER, unit_price="10.00")
+
+        # 手工创建一条 OPEN accrual
+        BillingAccrual.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, rule=rule,
+            service_date=service_date, currency="CNY",
+            quantity=Decimal("1"), unit_price=Decimal("10.0000"),
+            amount=Decimal("10.00"), tax_amount=Decimal("0.00"),
+            status=AccrualStatus.OPEN,
+            acc_fingerprint="fp-reinvoice-test-1",
+        )
+
+        period = lock_period(self.owner.id, self.warehouse.id, "T-REINV",
+                             service_date, service_date)
+        bill = generate_invoice_for_period(period, invoice_no="INV-REINV-1",
+                                           issue_date=service_date, due_date=service_date)
+        self.assertEqual(bill.status, "ISSUED")
+
+        # unlock（红冲）
+        unlock_period(period, by_user=self.user, reason="test")
+        period.refresh_from_db()
+
+        # 重建 OPEN accrual 供重新 lock
+        BillingAccrual.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, rule=rule,
+            service_date=service_date, currency="CNY",
+            quantity=Decimal("1"), unit_price=Decimal("10.0000"),
+            amount=Decimal("10.00"), tax_amount=Decimal("0.00"),
+            status=AccrualStatus.OPEN,
+            acc_fingerprint="fp-reinvoice-test-2",
+        )
+
+        # 重新 lock 和开票，不应报错
+        period2 = lock_period(self.owner.id, self.warehouse.id, "T-REINV-2",
+                              service_date, service_date)
+        bill2 = generate_invoice_for_period(period2, invoice_no="INV-REINV-2",
+                                            issue_date=service_date, due_date=service_date)
+        self.assertEqual(bill2.status, "ISSUED")
+
+    def test_unlock_cleans_void_dedup_accruals(self):
+        """B-2: unlock 应清理 dedup 产生的 VOID accrual。"""
+        service_date = datetime.date(2026, 3, 18)
+        rule = self._create_rule(calc_method=CalcMethod.PER_ORDER, unit_price="10.00")
+
+        # 同一个 event 两条不同价的 accrual（模拟 repricing）
+        event = BillingEvent.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, service_date=service_date,
+            quantity=Decimal("1"), quantity_uom="ORDER",
+            event_fp="fp-dedup-test-event",
+        )
+        BillingAccrual.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, rule=rule,
+            service_date=service_date, currency="CNY",
+            quantity=Decimal("1"), unit_price=Decimal("10.0000"),
+            amount=Decimal("10.00"), tax_amount=Decimal("0.00"),
+            status=AccrualStatus.OPEN, event=event,
+            acc_fingerprint="fp-dedup-old",
+        )
+        BillingAccrual.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, rule=rule,
+            service_date=service_date, currency="CNY",
+            quantity=Decimal("1"), unit_price=Decimal("12.0000"),
+            amount=Decimal("12.00"), tax_amount=Decimal("0.00"),
+            status=AccrualStatus.OPEN, event=event,
+            acc_fingerprint="fp-dedup-new",
+        )
+
+        period = lock_period(self.owner.id, self.warehouse.id, "T-DEDUP",
+                             service_date, service_date)
+
+        # lock 后应有 1 条 LOCKED + 1 条 VOID
+        self.assertEqual(BillingAccrual.objects.filter(period=period, status=AccrualStatus.LOCKED).count(), 1)
+        self.assertEqual(BillingAccrual.objects.filter(period=period, status=AccrualStatus.VOID).count(), 1)
+
+        # unlock
+        unlock_period(period, by_user=self.user, reason="test")
+
+        # VOID accrual 应已与 period 解绑
+        self.assertEqual(BillingAccrual.objects.filter(period=period).count(), 0)
+        self.assertEqual(BillingAccrual.objects.filter(status=AccrualStatus.VOID, period__isnull=True).count(), 1)
+
+    def test_incremental_tier_gap_logs_warning(self):
+        """B-3: INCREMENTAL 模式 tier 有空档时应 log warning。"""
+        from allapp.billing.enums import LadderMode
+        rule = self._create_rule(calc_method=CalcMethod.PER_ORDER, unit_price="1.00")
+        rule.ladder_mode = LadderMode.INCREMENTAL
+        rule.save(update_fields=["ladder_mode"])
+
+        # 创建有间隙的 tier: [0,10) 和 [20,∞)，间隙 [10,20)
+        BillingRuleTier.objects.create(rule=rule, threshold_from=0, threshold_to=10, unit_price=Decimal("1.00"))
+        BillingRuleTier.objects.create(rule=rule, threshold_from=20, threshold_to=None, unit_price=Decimal("2.00"))
+
+        with self.assertLogs("allapp.billing", level="WARNING") as cm:
+            amt, eff = _compute_fee_with_rule(rule, Decimal("15"))
+
+        self.assertTrue(any("tier gap" in msg for msg in cm.output))
+        # 只有 [0,10) 被定价: 10 * 1.00 = 10.00, [10,15) 未被定价
+        self.assertEqual(amt, Decimal("10.00"))
+
+    def test_resolver_max_depth(self):
+        """B-6: 超深 task_line 链不应 RecursionError。"""
+        from allapp.billing.resolvers import taskline_to_order_mapping
+
+        # 创建 60 层深的 task_line chain（超过 _MAX_RECURSION_DEPTH=50）
+        task = self._create_task("TASK-DEEP-CHAIN")
+        uom = ProductUom.objects.create(code="EA-DEEP", name="EA-DEEP", is_active=True)
+        product = Product.objects.create(
+            owner=self.owner, code="SKU-DEEP", name="P-DEEP", sku="SKU-DEEP", base_uom=uom,
+        )
+        prev_line = None
+        for i in range(60):
+            line = WmsTaskLine.objects.create(
+                task=task, product=product,
+                src_model="WmsTaskLine" if prev_line else "",
+                src_id=prev_line.id if prev_line else None,
+            )
+            prev_line = line
+
+        # 从最后一层开始解析，不应爆栈
+        with self.assertLogs("allapp.billing", level="WARNING") as cm:
+            result = taskline_to_order_mapping(prev_line)
+
+        self.assertTrue(any("max recursion depth" in msg for msg in cm.output))
+        self.assertIsNotNone(result)
+
+    def test_void_accrual_not_counted_in_daily_cap(self):
+        """日口径 cap 不应把 VOID/reversal accrual 算进已用额度。"""
+        from allapp.billing.enums import CapMode
+        service_date = datetime.date(2026, 3, 20)
+        rule = BillingRule.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("10.00"), cap_mode=CapMode.PER_DAY, cap_amount=Decimal("20.00"),
+        )
+
+        # 创建一条 VOID accrual（占 10 额度）
+        BillingAccrual.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, rule=rule,
+            service_date=service_date, currency="CNY",
+            quantity=Decimal("1"), unit_price=Decimal("10.0000"),
+            amount=Decimal("10.00"), tax_amount=Decimal("0.00"),
+            status=AccrualStatus.VOID, is_reversal=True,
+            acc_fingerprint="fp-void-cap-test",
+        )
+
+        # 日封顶是 20，VOID 的 10 不应占用额度，所以还能用 20
+        from allapp.billing.services._common import _apply_caps_bundles_day
+        result = _apply_caps_bundles_day(rule, self.owner.id, self.warehouse.id, service_date, Decimal("15.00"))
+        self.assertEqual(result, Decimal("15.00"))
+
+    def test_void_accrual_not_counted_in_period_cap(self):
+        """账期口径 cap 不应把 VOID accrual 算进封顶额度。"""
+        from allapp.billing.enums import CapMode
+        service_date = datetime.date(2026, 3, 21)
+        rule = BillingRule.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("10.00"), cap_mode=CapMode.PER_PERIOD, cap_amount=Decimal("25.00"),
+        )
+
+        # 创建 3 条 accrual：2 条 OPEN + 1 条 VOID（dedup 残留）
+        BillingAccrual.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, rule=rule,
+            service_date=service_date, currency="CNY",
+            quantity=Decimal("1"), unit_price=Decimal("10.0000"),
+            amount=Decimal("10.00"), tax_amount=Decimal("0.00"),
+            status=AccrualStatus.OPEN,
+            acc_fingerprint="fp-period-cap-1",
+        )
+        BillingAccrual.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, rule=rule,
+            service_date=service_date, currency="CNY",
+            quantity=Decimal("1"), unit_price=Decimal("10.0000"),
+            amount=Decimal("10.00"), tax_amount=Decimal("0.00"),
+            status=AccrualStatus.OPEN,
+            acc_fingerprint="fp-period-cap-2",
+        )
+
+        period = lock_period(self.owner.id, self.warehouse.id, "T-PCAP",
+                             service_date, service_date)
+
+        # 两条有效 accrual 各 10 = 20，cap = 25 → 不应被截断
+        locked = BillingAccrual.objects.filter(
+            period=period, status=AccrualStatus.LOCKED, is_reversal=False,
+        )
+        total = sum(a.amount for a in locked)
+        self.assertEqual(total, Decimal("20.00"))
+
+    def test_invoiced_period_unlock_reopens_for_rebilling(self):
+        """红冲后 period 应回到 OPEN，可以重新 lock 和 invoice。"""
+        service_date = datetime.date(2026, 3, 22)
+        rule = self._create_rule(calc_method=CalcMethod.PER_ORDER, unit_price="10.00")
+
+        BillingAccrual.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, rule=rule,
+            service_date=service_date, currency="CNY",
+            quantity=Decimal("1"), unit_price=Decimal("10.0000"),
+            amount=Decimal("10.00"), tax_amount=Decimal("0.00"),
+            status=AccrualStatus.OPEN,
+            acc_fingerprint="fp-rebill-1",
+        )
+
+        # lock → invoice → unlock (红冲)
+        period = lock_period(self.owner.id, self.warehouse.id, "T-REBILL",
+                             service_date, service_date)
+        generate_invoice_for_period(period, invoice_no="INV-RB-1",
+                                    issue_date=service_date, due_date=service_date)
+        result = unlock_period(period, by_user=self.user, reason="test rebill")
+
+        period.refresh_from_db()
+        self.assertEqual(result["action"], "red_reversal")
+        self.assertEqual(period.status, "OPEN")
+
+        # period 上不应有任何 accrual 残留
+        self.assertEqual(BillingAccrual.objects.filter(period=period).count(), 0)
+
+        # 重新创建 accrual → lock → invoice，应成功
+        BillingAccrual.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, rule=rule,
+            service_date=service_date, currency="CNY",
+            quantity=Decimal("1"), unit_price=Decimal("12.0000"),
+            amount=Decimal("12.00"), tax_amount=Decimal("0.00"),
+            status=AccrualStatus.OPEN,
+            acc_fingerprint="fp-rebill-2",
+        )
+
+        period2 = lock_period(self.owner.id, self.warehouse.id, "T-REBILL-2",
+                              service_date, service_date)
+        bill2 = generate_invoice_for_period(period2, invoice_no="INV-RB-2",
+                                            issue_date=service_date, due_date=service_date)
+        self.assertEqual(bill2.status, "ISSUED")
+        self.assertEqual(bill2.subtotal, Decimal("12.00"))
+
 
 class BillingModelGuardrailTests(TestCase):
     def setUp(self):

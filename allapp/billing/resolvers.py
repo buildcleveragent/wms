@@ -1,3 +1,4 @@
+import logging
 from typing import Dict, Optional, Set, Tuple
 
 from django.contrib.contenttypes.models import ContentType
@@ -12,6 +13,9 @@ try:
     from allapp.tasking.models import WmsTaskLine
 except Exception:
     WmsTaskLine = None
+
+_logger = logging.getLogger("allapp.billing")
+_MAX_RECURSION_DEPTH = 50
 
 
 def _normalize_model_name(value) -> str:
@@ -50,6 +54,7 @@ def _collect_links_from_direct_source(
     order_ids: Set[int],
     order_line_ids: Set[Tuple[int, int]],
     visited_task_line_ids: Set[int],
+    _depth: int = 0,
 ) -> None:
     if OutboundOrderLine is None:
         return
@@ -80,6 +85,7 @@ def _collect_links_from_direct_source(
             order_ids=order_ids,
             order_line_ids=order_line_ids,
             visited_task_line_ids=visited_task_line_ids,
+            _depth=_depth + 1,
         )
         return
 
@@ -109,9 +115,17 @@ def _collect_taskline_mapping(
     order_ids: Set[int],
     order_line_ids: Set[Tuple[int, int]],
     visited_task_line_ids: Set[int],
+    _depth: int = 0,
 ) -> None:
     task_line_id = getattr(task_line, "id", None)
     if not task_line_id or task_line_id in visited_task_line_ids:
+        return
+
+    if _depth >= _MAX_RECURSION_DEPTH:
+        _logger.warning(
+            "_collect_taskline_mapping: max recursion depth %d reached at task_line=%s",
+            _MAX_RECURSION_DEPTH, task_line_id,
+        )
         return
 
     visited_task_line_ids.add(task_line_id)
@@ -121,6 +135,7 @@ def _collect_taskline_mapping(
         order_ids=order_ids,
         order_line_ids=order_line_ids,
         visited_task_line_ids=visited_task_line_ids,
+        _depth=_depth,
     )
 
 

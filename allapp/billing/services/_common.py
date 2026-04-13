@@ -162,7 +162,7 @@ def _select_rule(owner_id, warehouse_id, charge_type, calc_method, service_date)
 # 指纹防重
 # ============================================================================
 
-def _event_fp(task_id, scanlog_id, charge_type, calc_method, service_date, qty):
+def _event_fp(task_id, scanlog_id, charge_type, calc_method, service_date, qty, scope_key=None):
     """
     生成 BillingEvent 的唯一指纹。
 
@@ -171,8 +171,14 @@ def _event_fp(task_id, scanlog_id, charge_type, calc_method, service_date, qty):
     同一笔过账被重复处理时，不会产生重复的 Event。
 
     对于非任务来源的事件（如仓储/指标），task_id 和 scanlog_id 为 None，用 '-' 代替。
+
+    scope_key: 可选前缀（如 "{owner_id}:{warehouse_id}"），用于区分不同
+    owner/warehouse 在 task_id 为 None 时的指纹碰撞。
     """
-    return f"{task_id or '-'}|{scanlog_id or '-'}|{charge_type}|{calc_method}|{service_date}|{_q(qty,'0.0001')}"
+    base = f"{task_id or '-'}|{scanlog_id or '-'}|{charge_type}|{calc_method}|{service_date}|{_q(qty,'0.0001')}"
+    if scope_key:
+        return f"{scope_key}|{base}"
+    return base
 
 
 def _acc_fp(owner_id, warehouse_id, rule_id, charge_type, service_date, qty, unit_price, currency, ev_fp):
@@ -252,15 +258,20 @@ def _period_bundle_rule_queryset(period: BillingPeriod, bundle_key: str):
     )
 
 
-def _select_bundle_rule_for_period(period: BillingPeriod, bundle_key: str, preferred_rule_ids=None) -> Optional[BillingRule]:
+def _select_bundle_rule_for_period(period: BillingPeriod, bundle_key: str,
+                                   preferred_rule_ids=None, charge_types=None) -> Optional[BillingRule]:
     """
     为指定账期和打包键选择最匹配的打包规则。
 
     与 _select_rule 的优先级逻辑一致（owner/warehouse 非空优先）。
     额外支持 preferred_rule_ids：优先匹配已产生 accrual 的规则，
     避免关账时选到一个与已有 accrual 无关的规则。
+    charge_types：限制只匹配指定 charge_type 的规则，
+    避免跨 charge_type 的 bundle_key 误选。
     """
     qs = _period_bundle_rule_queryset(period, bundle_key)
+    if charge_types:
+        qs = qs.filter(charge_type__in=charge_types)
     ordering = (
         F("owner_id").asc(nulls_last=True),
         F("warehouse_id").asc(nulls_last=True),
@@ -406,6 +417,12 @@ def _compute_fee_with_rule(rule: BillingRule, base_value: Decimal) -> Tuple[Deci
             amt += seg * t_price(t)
             last = upto
     amt = _q(amt, "0.01")
+    if last < bv:
+        logger.warning(
+            "INCREMENTAL tier gap: rule=%s base_value=%s priced_up_to=%s "
+            "(quantity in [%s, %s) received zero pricing)",
+            rule.id, bv, last, last, bv,
+        )
     # 有效费率 = 总费用 / 总量，方便记录
     eff = _q((amt / bv) if bv > 0 else Decimal("0"), "0.0001")
     return (amt, eff)
@@ -416,19 +433,25 @@ def _compute_fee_with_rule(rule: BillingRule, base_value: Decimal) -> Tuple[Deci
 # ============================================================================
 
 def _sum_amount_rule_day(rule_id, owner_id, warehouse_id, d):
-    """查询某规则在某天已累计的 accrual 金额总和。"""
+    """查询某规则在某天已累计的有效 accrual 金额总和（排除 VOID/reversal，加行锁防并发超限）。"""
     agg = (BillingAccrual.objects
+           .select_for_update()
            .filter(rule_id=rule_id, owner_id=owner_id, warehouse_id=warehouse_id, service_date=d)
+           .exclude(status=AccrualStatus.VOID)
+           .filter(is_reversal=False)
            .aggregate(s=Sum("amount"))["s"])
     return Decimal(agg or 0)
 
 
 def _sum_amount_bundle_day(bundle_key, owner_id, warehouse_id, d):
-    """查询某打包组（bundle_key）在某天已累计的 accrual 金额总和。"""
+    """查询某打包组（bundle_key）在某天已累计的有效 accrual 金额总和（排除 VOID/reversal，加行锁防并发超限）。"""
     if not bundle_key:
         return Decimal(0)
     agg = (BillingAccrual.objects
+           .select_for_update()
            .filter(bundle_key=bundle_key, owner_id=owner_id, warehouse_id=warehouse_id, service_date=d)
+           .exclude(status=AccrualStatus.VOID)
+           .filter(is_reversal=False)
            .aggregate(s=Sum("amount"))["s"])
     return Decimal(agg or 0)
 

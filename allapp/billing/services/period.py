@@ -133,7 +133,7 @@ def _apply_period_caps(period, owner_id, warehouse_id, start_date, end_date, *, 
         if cap <= 0:
             continue
         accs = (BillingAccrual.objects
-                .filter(period=period, rule_id=rid)
+                .filter(period=period, rule_id=rid, status=AccrualStatus.LOCKED, is_reversal=False)
                 .order_by("service_date", "id"))
         running = Decimal("0")
         for a in accs:
@@ -157,7 +157,7 @@ def _apply_period_bundles(period, *, adjust_fn):
     """
     bundle_keys = list(
         BillingAccrual.objects
-        .filter(period=period)
+        .filter(period=period, status=AccrualStatus.LOCKED, is_reversal=False)
         .exclude(bundle_key="")
         .values_list("bundle_key", flat=True)
         .distinct()
@@ -166,11 +166,18 @@ def _apply_period_bundles(period, *, adjust_fn):
     for bk in bundle_keys:
         involved_rule_ids = list(
             BillingAccrual.objects
-            .filter(period=period, bundle_key=bk)
+            .filter(period=period, bundle_key=bk, status=AccrualStatus.LOCKED, is_reversal=False)
             .values_list("rule_id", flat=True)
             .distinct()
         )
-        r = _select_bundle_rule_for_period(period, bk, preferred_rule_ids=involved_rule_ids)
+        involved_charge_types = list(
+            BillingAccrual.objects
+            .filter(period=period, bundle_key=bk, status=AccrualStatus.LOCKED, is_reversal=False)
+            .values_list("charge_type", flat=True)
+            .distinct()
+        )
+        r = _select_bundle_rule_for_period(period, bk, preferred_rule_ids=involved_rule_ids,
+                                           charge_types=involved_charge_types)
         if not r:
             continue
         bprice = Decimal(r.bundle_price or 0)
@@ -179,7 +186,7 @@ def _apply_period_bundles(period, *, adjust_fn):
 
         accs = list(
             BillingAccrual.objects
-            .filter(period=period, bundle_key=bk)
+            .filter(period=period, bundle_key=bk, status=AccrualStatus.LOCKED, is_reversal=False)
             .select_related("rule")
             .order_by("service_date", "id")
         )
@@ -497,7 +504,9 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
     bundle_keys_set = {p.bundle_key for p in active_previews.values() if p.bundle_key}
     for bk in bundle_keys_set:
         involved_rule_ids = list({p.rule_id for p in active_previews.values() if p.bundle_key == bk})
-        r = _select_bundle_rule_for_period(period, bk, preferred_rule_ids=involved_rule_ids)
+        involved_charge_types = list({p.charge_type for p in active_previews.values() if p.bundle_key == bk})
+        r = _select_bundle_rule_for_period(period, bk, preferred_rule_ids=involved_rule_ids,
+                                           charge_types=involved_charge_types)
         if not r:
             continue
         bprice = Decimal(r.bundle_price or 0)
@@ -656,6 +665,18 @@ def _unlock_closed_period(period: BillingPeriod, *, by_user=None, reason: str = 
         a.save(update_fields=["amount", "tax_amount", "unit_price", "status", "period", "pre_adjustment_amount"])
         reverted += 1
 
+    # 清理 lock 阶段 _dedup_locked_accruals 产生的 VOID accrual，解除其与 period 的关联
+    void_dedup_count = (
+        BillingAccrual.objects
+        .filter(period=period, status=AccrualStatus.VOID, is_reversal=True)
+        .update(period=None)
+    )
+    if void_dedup_count:
+        logger.info(
+            "unlock_period: detached %d VOID dedup accruals from period %s",
+            void_dedup_count, period.label,
+        )
+
     period.status = PeriodStatus.OPEN
     period.save(update_fields=["status"])
 
@@ -685,7 +706,9 @@ def _unlock_invoiced_period(period: BillingPeriod, *, by_user=None, reason: str 
            - amount = -原金额, tax_amount = -原税额, unit_price = -原单价
            - is_reversal=True, reversal_of=原记录
            - status=VOID, acc_fingerprint=原指纹+"|REV"
-        3. 原始 accrual 和 period 状态保持不变（审计轨迹完整）
+        3. 原始 INVOICED accrual 与 period 解绑（保留记录用于审计）
+        4. 红冲 accrual 也与 period 解绑
+        5. Period 状态恢复为 OPEN，允许重新计费→关账→开票
 
     使用 bulk_create(ignore_conflicts=True) 防止重复红冲时指纹冲突报错。
     """
@@ -727,6 +750,20 @@ def _unlock_invoiced_period(period: BillingPeriod, *, by_user=None, reason: str 
 
     created = BillingAccrual.objects.bulk_create(reversal_accruals, ignore_conflicts=True)
     created_count = len(created)
+
+    # 解绑原 INVOICED accrual 与 period（保留记录用于审计，但不影响 period 重新使用）
+    BillingAccrual.objects.filter(
+        period=period, status=AccrualStatus.INVOICED
+    ).update(period=None)
+
+    # 红冲 accrual 也解绑（它们是 VOID 状态，不应留在 period 上干扰后续 lock）
+    BillingAccrual.objects.filter(
+        period=period, status=AccrualStatus.VOID, is_reversal=True
+    ).update(period=None)
+
+    # period 恢复为 OPEN，允许重新生成 accrual → lock → invoice
+    period.status = PeriodStatus.OPEN
+    period.save(update_fields=["status"])
 
     logger.info(
         "unlock_period (red-reversal): period=%s reversals_created=%d bill_voided=%s reason=%s",
