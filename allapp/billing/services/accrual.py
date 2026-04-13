@@ -62,11 +62,30 @@ from allapp.billing.models import (
     BillingAccrual, BillingEvent, BillingMetricDaily, BillingRule,
 )
 
+# from ._common import (
+#     _acc_fp, _apply_caps_bundles_day, _compute_fee_with_rule, _days_in_month,
+#     _event_fp, _q, _select_rule, logger,
+# )
+
 from ._common import (
     _acc_fp, _apply_caps_bundles_day, _compute_fee_with_rule, _days_in_month,
     _event_fp, _q, _select_rule, logger,
 )
 
+from typing import Optional, Iterable, Set
+
+# AUTO_REVIEW_ORDER_PROCESSING_METHODS = {
+#     CalcMethod.PER_ORDER,
+#     CalcMethod.PER_ORDER_LINE,
+# }
+
+# REVIEW 过账自动触发订单处理费时，仅开放这两个维度。
+# PERCENT_OF_ORDER_AMOUNT / PER_PARCEL 仍保留给批量补算入口，
+# 待 task 级精确金额/包裹输入补齐后再自动化。
+AUTO_REVIEW_ORDER_PROCESSING_METHODS: Set[str] = {
+    CalcMethod.PER_ORDER,
+    CalcMethod.PER_ORDER_LINE,
+}
 
 # ------------------------ 路径一：过账触发的扫描日志应计 ------------------------ #
 
@@ -493,8 +512,338 @@ def _load_taskline_order_resolver():
     return getattr(importlib.import_module(mod), func)
 
 
+
+
+# @transaction.atomic
+# def accrue_order_processing_from_posted(
+#         owner_id, warehouse_id, start_date, end_date,
+#         by_user=None,
+#         allowed_methods: Optional[Set] = None,
+# ) -> Tuple[int, int]:
+#     """
+#     汇总指定日期区间内已过账扫描日志，从四个维度生成订单处理费应计。
+#
+#     调用时机
+#     --------
+#     可由日结任务或手动触发，通常在过账后批量补算订单处理费。
+#     支持指定任意日期区间（start_date ～ end_date，含首尾），可安全重入。
+#
+#     参数
+#     ----
+#     owner_id     : 货主 ID。
+#     warehouse_id : 仓库 ID。
+#     start_date   : 区间起始日期（含）。
+#     end_date     : 区间结束日期（含）。
+#     by_user      : 操作人。
+#
+#     Resolver 机制（可插拔订单关联）
+#     --------------------------------
+#     不同业务系统的"任务行→订单"关系各不相同（有的一行对应一单，
+#     有的一行关联多单）。本函数通过 _load_taskline_order_resolver()
+#     加载外部解析函数，将 TaskLine 解析为标准字典格式，
+#     从而解耦计费引擎与具体业务模型。
+#
+#     四维度汇总逻辑
+#     ---------------
+#     第一阶段（扫描日志聚合）：
+#       遍历区间内 DISPATCH/PACK/REVIEW/PICK 类型的已过账扫描日志，
+#       通过 resolver 解析每条日志的 task_line，将结果累积到：
+#         - order_ids          : set of (order_id, svc_date)      → PER_ORDER
+#         - order_lines        : set of (order_id, line_id, date) → PER_ORDER_LINE
+#         - parcels_by_date    : dict[date, int]                  → PER_PARCEL
+#         - order_amount_by_date: dict[date, Decimal]             → PERCENT_OF_ORDER_AMOUNT
+#         - bundle_by_date     : dict[date, str]                  → 打包键
+#
+#     第二阶段（四维度逐一生成应计）：
+#
+#     维度 1 - PER_ORDER（每单费）
+#       对 order_ids 中每个 (order_id, svc_date) 生成一条事件和应计，
+#       计费数量固定为 1（每单）。ChargeType=DISPATCH。
+#
+#     维度 2 - PER_ORDER_LINE（每单行费）
+#       对 order_lines 中每个 (order_id, line_id, svc_date) 生成一条事件和应计，
+#       计费数量固定为 1（每行）。ChargeType=DISPATCH。
+#
+#     维度 3 - PER_PARCEL（每包裹费）
+#       对 parcels_by_date 按日期汇总包裹总数，整日一条应计，
+#       计费数量 = 当日包裹总数。ChargeType=PACK。
+#
+#     维度 4 - PERCENT_OF_ORDER_AMOUNT（订单金额百分比费）
+#       先从 order_amount_by_date（来自扫描日志解析）取订单金额；
+#       对于区间内尚无订单金额数据的日期，回退查询 BillingMetricDaily
+#       中的 ORDER_AMT 指标记录作为兜底（fallback）。
+#       ChargeType=DISPATCH，计费数量为订单金额（币种金额），
+#       单价字段实际存储费率（百分比值）。
+#
+#     ORDER_AMT 兜底（Fallback）说明
+#     --------------------------------
+#     某些日期可能扫描日志中无 order_amount 数据（例如：当日无派发操作，
+#     但存在外部系统录入的销售额）。此时函数检查 by_date_amounts 中的
+#     缺失日期，从 BillingMetricDaily 补充 ORDER_AMT 指标值，
+#     确保不遗漏任何有效计费日。
+#
+#     规则缓存（rule_cache）
+#     ----------------------
+#     _rule_for 内部使用 dict 缓存 (charge_type, calc_method, date) → rule，
+#     避免对同一规则参数重复查库（一个日期区间内同类型规则通常固定）。
+#
+#     通用计算流程（四个维度共享）
+#     -----------------------------
+#     _compute_fee_with_rule → _apply_caps_bundles_day → min_charge → tax → get_or_create
+#
+#     返回
+#     ----
+#     (created_events, created_accruals): 本次调用新创建的总事件数和总应计数。
+#     """
+#     from allapp.tasking.models import TaskScanLog
+#     # 加载可插拔的任务行→订单解析器；未配置则为 None
+#     resolver = _load_taskline_order_resolver()
+#     # 规则缓存：避免同一 (charge_type, calc_method, date) 重复查库
+#     rule_cache: Dict[Tuple[str, str, datetime.date], Optional[BillingRule]] = {}
+#
+#     # 第一阶段：查询区间内相关任务类型的已过账扫描日志
+#     # 只处理与订单处理直接相关的任务类型（派发/打包/复核/拣货）
+#     logs = (TaskScanLog.objects
+#             .filter(owner_id=owner_id, warehouse_id=warehouse_id, status="OK", posted_at__isnull=False)
+#             .filter(posted_at__date__gte=start_date, posted_at__date__lte=end_date)
+#             .filter(task__task_type__in=["DISPATCH", "PACK", "REVIEW", "PICK"])
+#             .select_related("task", "task_line"))
+#
+#     # 各维度的汇总容器
+#     order_ids: Set[Tuple[int, datetime.date]] = set()           # (order_id, svc_date) → PER_ORDER 去重
+#     order_lines: Set[Tuple[int, int, datetime.date]] = set()    # (order_id, line_id, svc_date) → PER_ORDER_LINE 去重
+#     parcels_by_date: Dict[datetime.date, int] = {}              # date → 包裹总数
+#     order_amount_by_date: Dict[datetime.date, Decimal] = {}     # date → 订单金额总计
+#     bundle_by_date: Dict[datetime.date, str] = {}               # date → 打包键（最后一条覆盖，通常同日一致）
+#
+#     for log in logs:
+#         # 无 task_line 或未配置 resolver 则跳过（无法关联到订单维度）
+#         if not log.task_line or resolver is None:
+#             continue
+#         # 调用可插拔解析器，将任务行解析为标准字典
+#         mapping = resolver(log.task_line) or {}
+#         svc_date = (log.posted_at or timezone.now()).date()
+#
+#         # 累积 PER_ORDER 维度：用集合自动去重（同一订单在同日多次扫描不重复计费）
+#         for oid in mapping.get("order_ids", set()):
+#             order_ids.add((oid, svc_date))
+#         # 累积 PER_ORDER_LINE 维度：(order_id, line_id, date) 三元组去重
+#         for olid in mapping.get("order_line_ids", set()):
+#             order_lines.add((olid[0], olid[1], svc_date))
+#         # 累积 PER_PARCEL 维度：同日包裹数累加
+#         if mapping.get("parcels"):
+#             parcels_by_date[svc_date] = parcels_by_date.get(svc_date, 0) + int(mapping["parcels"])
+#         # 累积 PERCENT_OF_ORDER_AMOUNT 维度：同日订单金额累加
+#         if mapping.get("order_amount"):
+#             order_amount_by_date[svc_date] = order_amount_by_date.get(svc_date, Decimal("0")) + Decimal(mapping["order_amount"])
+#         # 记录打包键（用于 bundle 打包分组，同日多条取最后一条）
+#         if mapping.get("bundle_key"):
+#             bundle_by_date[svc_date] = mapping["bundle_key"]
+#
+#     created_events = created_accruals = 0
+#
+#     def _rule_for(charge_type: str, calc_method: str, service_date: datetime.date) -> Optional[BillingRule]:
+#         """
+#         带缓存的规则查找辅助函数。
+#         同一 (charge_type, calc_method, date) 组合只查库一次，
+#         结果缓存在 rule_cache 中供后续调用复用。
+#         """
+#         key = (charge_type, calc_method, service_date)
+#         if key not in rule_cache:
+#             rule_cache[key] = _select_rule(owner_id, warehouse_id, charge_type, calc_method, service_date)
+#         return rule_cache[key]
+#
+#     # ── 维度 1：PER_ORDER（每单费，ChargeType=DISPATCH）────────────────────
+#     # 每个 (order_id, svc_date) 独立产生一条事件和一条应计，计费数量固定为 1
+#     for (_oid, svc_date) in sorted(order_ids):
+#         rule_order = _rule_for(ChargeType.DISPATCH, CalcMethod.PER_ORDER, svc_date)
+#         if not rule_order:
+#             continue
+#         # 事件指纹：以订单ID为第一维度，确保同一订单同日唯一
+#         ev_fp = _event_fp(_oid, None, ChargeType.DISPATCH, CalcMethod.PER_ORDER, svc_date, 1)
+#         event, ev_new = BillingEvent.objects.get_or_create(
+#             event_fp=ev_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, charge_type=ChargeType.DISPATCH,
+#                 service_date=svc_date, quantity=1, quantity_uom="ORDER"
+#             )
+#         )
+#         # 固定数量 1，阶梯定价通常为固定单价
+#         amount, eff_price = _compute_fee_with_rule(rule_order, Decimal(1))
+#         amount = _apply_caps_bundles_day(rule_order, owner_id, warehouse_id, svc_date, amount)
+#         if rule_order.min_charge and amount < rule_order.min_charge:
+#             amount = rule_order.min_charge
+#         if amount <= 0:
+#             continue
+#         # 数量为 1 时，有效单价等于总金额
+#         eff_price = _q(amount, "0.0001")
+#         tax_amount = _q(amount * (rule_order.tax_rate or 0), "0.01") if rule_order.taxable else Decimal("0.00")
+#         # 打包键优先从解析器结果取，否则用规则默认打包键
+#         bk = bundle_by_date.get(svc_date) or (rule_order.bundle_key or "")
+#         acc_fp = _acc_fp(owner_id, warehouse_id, rule_order.id, ChargeType.DISPATCH, svc_date, 1, eff_price, rule_order.currency, ev_fp)
+#         _, acc_new = BillingAccrual.objects.get_or_create(
+#             acc_fingerprint=acc_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, period=None, charge_type=ChargeType.DISPATCH, rule=rule_order,
+#                 service_date=svc_date, currency=rule_order.currency, quantity=1, unit_price=_q(eff_price, "0.0001"),
+#                 amount=amount, tax_amount=tax_amount, status=AccrualStatus.OPEN, event=event, created_by=by_user,
+#                 bundle_key=bk
+#             )
+#         )
+#         created_events += int(ev_new)
+#         created_accruals += int(acc_new)
+#
+#     # ── 维度 2：PER_ORDER_LINE（每单行费，ChargeType=DISPATCH）───────────────
+#     # 每个 (order_id, line_id, svc_date) 独立产生一条事件和一条应计，计费数量固定为 1
+#     for (_oid, _olid, svc_date) in sorted(order_lines):
+#         rule_line = _rule_for(ChargeType.DISPATCH, CalcMethod.PER_ORDER_LINE, svc_date)
+#         if not rule_line:
+#             continue
+#         # 事件指纹：同时包含订单ID和行ID，(order_id, line_id, date) 全局唯一
+#         ev_fp = _event_fp(_oid, _olid, ChargeType.DISPATCH, CalcMethod.PER_ORDER_LINE, svc_date, 1)
+#         event, ev_new = BillingEvent.objects.get_or_create(
+#             event_fp=ev_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, charge_type=ChargeType.DISPATCH,
+#                 service_date=svc_date, quantity=1, quantity_uom="ORDER_LINE"
+#             )
+#         )
+#         amount, eff_price = _compute_fee_with_rule(rule_line, Decimal(1))
+#         amount = _apply_caps_bundles_day(rule_line, owner_id, warehouse_id, svc_date, amount)
+#         if rule_line.min_charge and amount < rule_line.min_charge:
+#             amount = rule_line.min_charge
+#         if amount <= 0:
+#             continue
+#         eff_price = _q(amount, "0.0001")
+#         tax_amount = _q(amount * (rule_line.tax_rate or 0), "0.01") if rule_line.taxable else Decimal("0.00")
+#         bk = bundle_by_date.get(svc_date) or (rule_line.bundle_key or "")
+#         acc_fp = _acc_fp(owner_id, warehouse_id, rule_line.id, ChargeType.DISPATCH, svc_date, 1, eff_price, rule_line.currency, ev_fp)
+#         _, acc_new = BillingAccrual.objects.get_or_create(
+#             acc_fingerprint=acc_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, period=None, charge_type=ChargeType.DISPATCH, rule=rule_line,
+#                 service_date=svc_date, currency=rule_line.currency, quantity=1, unit_price=_q(eff_price, "0.0001"),
+#                 amount=amount, tax_amount=tax_amount, status=AccrualStatus.OPEN, event=event, created_by=by_user,
+#                 bundle_key=bk
+#             )
+#         )
+#         created_events += int(ev_new)
+#         created_accruals += int(acc_new)
+#
+#     # ── 维度 3：PER_PARCEL（每包裹费，ChargeType=PACK）─────────────────────
+#     # 同日所有包裹合并为一条应计，计费数量为当日包裹总数（整日汇总后统一计费）
+#     for svc_date, cnt in sorted(parcels_by_date.items()):
+#         rule_parcel = _rule_for(ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date)
+#         if not rule_parcel or cnt <= 0:
+#             continue
+#         # 事件指纹：task_id=None, log_id=None，以日期+数量区分（同日包裹已汇总）
+#         ev_fp = _event_fp(None, None, ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date, cnt)
+#         event, ev_new = BillingEvent.objects.get_or_create(
+#             event_fp=ev_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, charge_type=ChargeType.PACK,
+#                 service_date=svc_date, quantity=_q(cnt, "0.0001"), quantity_uom="PARCEL"
+#             )
+#         )
+#         # 以当日包裹总数参与阶梯定价（多包裹可能触发阶梯折扣）
+#         amount, eff_price = _compute_fee_with_rule(rule_parcel, Decimal(cnt))
+#         amount = _apply_caps_bundles_day(rule_parcel, owner_id, warehouse_id, svc_date, amount)
+#         if rule_parcel.min_charge and cnt > 0 and amount < rule_parcel.min_charge:
+#             amount = rule_parcel.min_charge
+#         if amount <= 0:
+#             continue
+#         # 反推每包裹均摊单价
+#         eff_price = _q((amount / Decimal(cnt)) if cnt > 0 else eff_price, "0.0001")
+#         tax_amount = _q(amount * (rule_parcel.tax_rate or 0), "0.01") if rule_parcel.taxable else Decimal("0.00")
+#         bk = bundle_by_date.get(svc_date) or (rule_parcel.bundle_key or "")
+#         acc_fp = _acc_fp(owner_id, warehouse_id, rule_parcel.id, ChargeType.PACK, svc_date, cnt, eff_price, rule_parcel.currency, ev_fp)
+#         _, acc_new = BillingAccrual.objects.get_or_create(
+#             acc_fingerprint=acc_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, period=None, charge_type=ChargeType.PACK, rule=rule_parcel,
+#                 service_date=svc_date, currency=rule_parcel.currency, quantity=_q(cnt, "0.0001"),
+#                 unit_price=_q(eff_price, "0.0001"), amount=amount, tax_amount=tax_amount,
+#                 status=AccrualStatus.OPEN, event=event, created_by=by_user, bundle_key=bk
+#             )
+#         )
+#         created_events += int(ev_new)
+#         created_accruals += int(acc_new)
+#
+#     # ── 维度 4：PERCENT_OF_ORDER_AMOUNT（订单金额百分比，ChargeType=DISPATCH）─
+#     # 计费基数：订单商品金额（货值），费率从规则获取（如 1.5% 的增值服务费）
+#     # quantity 字段存储金额，unit_price 字段存储费率（百分比）
+#
+#     # 先从扫描日志解析结果取已有的订单金额数据
+#     by_date_amounts = dict(order_amount_by_date)
+#     # 识别区间内没有订单金额数据的日期（需要从指标表兜底）
+#     missing_dates = []
+#     for n in range((end_date - start_date).days + 1):
+#         d = start_date + datetime.timedelta(days=n)
+#         if d not in by_date_amounts:
+#             missing_dates.append(d)
+#     # ORDER_AMT 兜底：从 BillingMetricDaily 补充缺失日期的订单金额
+#     # 场景：当日可能无相关扫描操作，但订单金额已由其他系统录入指标表
+#     if missing_dates:
+#         ms = (BillingMetricDaily.objects
+#               .filter(owner_id=owner_id, warehouse_id=warehouse_id, service_date__in=missing_dates, metric_type=MetricType.ORDER_AMT))
+#         for m in ms:
+#             by_date_amounts[m.service_date] = by_date_amounts.get(m.service_date, Decimal("0")) + Decimal(m.value)
+#
+#     for svc_date, amt in sorted(by_date_amounts.items()):
+#         rule_pct = _rule_for(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date)
+#         if not rule_pct:
+#             continue
+#         amt = Decimal(amt or 0)
+#         if amt <= 0:
+#             continue
+#         # 以订单金额为基数乘以费率，_compute_fee_with_rule 对 PERCENT 类型返回 (金额×费率, 费率)
+#         amount, eff_rate = _compute_fee_with_rule(rule_pct, amt)
+#         amount = _apply_caps_bundles_day(rule_pct, owner_id, warehouse_id, svc_date, amount)
+#         if rule_pct.min_charge and amount < rule_pct.min_charge:
+#             amount = rule_pct.min_charge
+#         if amount <= 0:
+#             continue
+#         # 反推有效费率（费用 / 订单金额），单价字段语义为"费率"而非"单价"
+#         eff_rate = _q((amount / amt) if amt > 0 else eff_rate, "0.0001")
+#         tax_amount = _q(amount * (rule_pct.tax_rate or 0), "0.01") if rule_pct.taxable else Decimal("0.00")
+#         # 事件数量单位为 CURRENCY（货币金额），表示计费基数是一笔订单金额
+#         ev_fp = _event_fp(None, None, ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date, amt)
+#         event, ev_new = BillingEvent.objects.get_or_create(
+#             event_fp=ev_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, charge_type=ChargeType.DISPATCH,
+#                 service_date=svc_date, quantity=_q(amt, "0.01"), quantity_uom="CURRENCY"
+#             )
+#         )
+#         bk = bundle_by_date.get(svc_date) or (rule_pct.bundle_key or "")
+#         acc_fp = _acc_fp(owner_id, warehouse_id, rule_pct.id, ChargeType.DISPATCH, svc_date, amt, eff_rate, rule_pct.currency, ev_fp)
+#         _, acc_new = BillingAccrual.objects.get_or_create(
+#             acc_fingerprint=acc_fp,
+#             defaults=dict(
+#                 owner_id=owner_id, warehouse_id=warehouse_id, period=None, charge_type=ChargeType.DISPATCH, rule=rule_pct,
+#                 service_date=svc_date, currency=rule_pct.currency, quantity=_q(amt, "0.01"),
+#                 unit_price=_q(eff_rate, "0.0001"), amount=amount, tax_amount=tax_amount,
+#                 status=AccrualStatus.OPEN, event=event, created_by=by_user, bundle_key=bk
+#             )
+#         )
+#         created_events += int(ev_new)
+#         created_accruals += int(acc_new)
+#
+#     logger.info(
+#         "accrue_order_processing_from_posted: owner=%s warehouse=%s %s~%s events=%d accruals=%d",
+#         owner_id, warehouse_id, start_date, end_date, created_events, created_accruals,
+#     )
+#     return created_events, created_accruals
+
 @transaction.atomic
-def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_date, by_user=None) -> Tuple[int, int]:
+def accrue_order_processing_from_posted(
+    owner_id,
+    warehouse_id,
+    start_date,
+    end_date,
+    by_user=None,
+    allowed_methods: Optional[Set[str]] = None,
+) -> Tuple[int, int]:
     """
     汇总指定日期区间内已过账扫描日志，从四个维度生成订单处理费应计。
 
@@ -573,6 +922,12 @@ def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_
     from allapp.tasking.models import TaskScanLog
     # 加载可插拔的任务行→订单解析器；未配置则为 None
     resolver = _load_taskline_order_resolver()
+
+    def _method_enabled(method: str) -> bool:
+        if allowed_methods is None:
+            return True
+        return method in allowed_methods
+
     # 规则缓存：避免同一 (charge_type, calc_method, date) 重复查库
     rule_cache: Dict[Tuple[str, str, datetime.date], Optional[BillingRule]] = {}
 
@@ -631,7 +986,9 @@ def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_
     # ── 维度 1：PER_ORDER（每单费，ChargeType=DISPATCH）────────────────────
     # 每个 (order_id, svc_date) 独立产生一条事件和一条应计，计费数量固定为 1
     for (_oid, svc_date) in sorted(order_ids):
-        rule_order = _rule_for(ChargeType.DISPATCH, CalcMethod.PER_ORDER, svc_date)
+        rule_order = None
+        if _method_enabled(CalcMethod.PER_ORDER):
+            rule_order = _rule_for(ChargeType.DISPATCH, CalcMethod.PER_ORDER, svc_date)
         if not rule_order:
             continue
         # 事件指纹：以订单ID为第一维度，确保同一订单同日唯一
@@ -671,7 +1028,9 @@ def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_
     # ── 维度 2：PER_ORDER_LINE（每单行费，ChargeType=DISPATCH）───────────────
     # 每个 (order_id, line_id, svc_date) 独立产生一条事件和一条应计，计费数量固定为 1
     for (_oid, _olid, svc_date) in sorted(order_lines):
-        rule_line = _rule_for(ChargeType.DISPATCH, CalcMethod.PER_ORDER_LINE, svc_date)
+        rule_line = None
+        if _method_enabled(CalcMethod.PER_ORDER_LINE):
+            rule_line = _rule_for(ChargeType.DISPATCH, CalcMethod.PER_ORDER_LINE, svc_date)
         if not rule_line:
             continue
         # 事件指纹：同时包含订单ID和行ID，(order_id, line_id, date) 全局唯一
@@ -708,7 +1067,9 @@ def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_
     # ── 维度 3：PER_PARCEL（每包裹费，ChargeType=PACK）─────────────────────
     # 同日所有包裹合并为一条应计，计费数量为当日包裹总数（整日汇总后统一计费）
     for svc_date, cnt in sorted(parcels_by_date.items()):
-        rule_parcel = _rule_for(ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date)
+        rule_parcel = None
+        if _method_enabled(CalcMethod.PER_PARCEL):
+            rule_parcel = _rule_for(ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date)
         if not rule_parcel or cnt <= 0:
             continue
         # 事件指纹：task_id=None, log_id=None，以日期+数量区分（同日包裹已汇总）
@@ -758,14 +1119,16 @@ def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_
             missing_dates.append(d)
     # ORDER_AMT 兜底：从 BillingMetricDaily 补充缺失日期的订单金额
     # 场景：当日可能无相关扫描操作，但订单金额已由其他系统录入指标表
-    if missing_dates:
+    if missing_dates and _method_enabled(CalcMethod.PERCENT_OF_ORDER_AMOUNT):
         ms = (BillingMetricDaily.objects
               .filter(owner_id=owner_id, warehouse_id=warehouse_id, service_date__in=missing_dates, metric_type=MetricType.ORDER_AMT))
         for m in ms:
             by_date_amounts[m.service_date] = by_date_amounts.get(m.service_date, Decimal("0")) + Decimal(m.value)
 
     for svc_date, amt in sorted(by_date_amounts.items()):
-        rule_pct = _rule_for(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date)
+        rule_pct = None
+        if _method_enabled(CalcMethod.PERCENT_OF_ORDER_AMOUNT):
+            rule_pct = _rule_for(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date)
         if not rule_pct:
             continue
         amt = Decimal(amt or 0)

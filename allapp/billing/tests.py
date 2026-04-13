@@ -48,6 +48,9 @@ from allapp.products.models import Product, ProductUom
 from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
 from wmsmaster.views import profile_view
 
+from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
+from allapp.tasking.plugins.handlers import DefaultPostingHandler
+
 
 class BillingServiceTests(TestCase):
     def setUp(self):
@@ -581,6 +584,81 @@ class BillingServiceTests(TestCase):
 
         self.assertIn("数据对账未通过", str(exc.exception))
 
+
+    def test_accrue_order_processing_can_filter_allowed_methods(self):
+        service_date = datetime.date(2026, 3, 6)
+        self._create_rule(calc_method=CalcMethod.PER_ORDER, unit_price="10.00")
+        self._create_rule(
+            calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+            unit_price="0.1000",
+        )
+        _order, order_line, product = self._create_outbound_order_line(
+            service_date,
+            suffix="FILTER",
+            qty="2.000",
+            price="15.0000",
+            final_line_amount="0.00",
+        )
+
+        task = self._create_task("TASK-ORDER-FILTER")
+        task_line = WmsTaskLine.objects.create(
+            task=task,
+            product=product,
+            src_model="OutboundOrderLine",
+            src_id=order_line.id,
+        )
+        self._create_scan_log(task, task_line, service_date, fp="fp-filter-order", label_key="LBL-FILTER")
+
+        events, accruals = accrue_order_processing_from_posted(
+            self.owner.id,
+            self.warehouse.id,
+            service_date,
+            service_date,
+            by_user=self.user,
+            allowed_methods={CalcMethod.PER_ORDER},
+        )
+
+        self.assertEqual(events, 1)
+        self.assertEqual(accruals, 1)
+        self.assertEqual(BillingAccrual.objects.count(), 1)
+        accrual = BillingAccrual.objects.get()
+        self.assertEqual(accrual.rule.calc_method, CalcMethod.PER_ORDER)
+        self.assertEqual(accrual.amount, Decimal("10.00"))
+
+    def test_handler_triggers_review_order_processing_with_allowed_methods(self):
+        review_task = self._create_task("TASK-REVIEW-AUTO", task_type=WmsTask.TaskType.REVIEW)
+        handler = DefaultPostingHandler()
+        now_ts = timezone.make_aware(datetime.datetime(2026, 3, 7, 10, 0, 0))
+
+        with mock.patch.object(DefaultPostingHandler, "_handle_atomic", return_value=1), \
+             mock.patch("allapp.billing.services.accrue_for_posting") as accrue_for_posting_mock, \
+             mock.patch("allapp.billing.services.accrue_order_processing_from_posted") as accrue_order_processing_mock:
+            affected = handler.handle(task=review_task, now=now_ts, note="AUTO", by_user=self.user)
+
+        self.assertEqual(affected, 1)
+        accrue_for_posting_mock.assert_called_once()
+        accrue_order_processing_mock.assert_called_once_with(
+            review_task.owner_id,
+            review_task.warehouse_id,
+            now_ts.date(),
+            now_ts.date(),
+            by_user=self.user,
+            allowed_methods={CalcMethod.PER_ORDER, CalcMethod.PER_ORDER_LINE},
+        )
+
+    def test_handler_does_not_trigger_order_processing_for_non_review_tasks(self):
+        pick_task = self._create_task("TASK-PICK-AUTO", task_type=WmsTask.TaskType.PICK)
+        handler = DefaultPostingHandler()
+        now_ts = timezone.make_aware(datetime.datetime(2026, 3, 8, 10, 0, 0))
+
+        with mock.patch.object(DefaultPostingHandler, "_handle_atomic", return_value=1), \
+             mock.patch("allapp.billing.services.accrue_for_posting") as accrue_for_posting_mock, \
+             mock.patch("allapp.billing.services.accrue_order_processing_from_posted") as accrue_order_processing_mock:
+            affected = handler.handle(task=pick_task, now=now_ts, note="AUTO", by_user=self.user)
+
+        self.assertEqual(affected, 1)
+        accrue_for_posting_mock.assert_called_once()
+        accrue_order_processing_mock.assert_not_called()
 
 class BillingModelGuardrailTests(TestCase):
     def setUp(self):
