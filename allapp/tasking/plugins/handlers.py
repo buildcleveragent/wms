@@ -197,6 +197,7 @@ class DefaultPostingHandler(BasePostingHandler):
             )
 
             if should_accrue_order_processing:
+                print("should_accrue_order_processing")
                 billing_services.accrue_order_processing_for_task(
                     task,
                     pj,

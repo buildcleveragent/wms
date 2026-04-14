@@ -265,8 +265,11 @@ class OutboundOrder(BaseModel):
         - 再置状态为 OWNER_APPROVED
         - 最后冻结库存
         """
-        # 1. 按 billing 规则决定是否需要价格
-        self.auto_confirm_pricing_if_required(by_user=by_user)
+        # # 1. 按 billing 规则决定是否需要价格
+        # self.auto_confirm_pricing_if_required(by_user=by_user)
+
+        # 1. 审核通过动作中：先冻结订单价格，再更新审核状态
+        self.auto_confirm_pricing(by_user=by_user)
 
         # 2. 订单审核状态
         self.approval_status = self.STATUS_OWNER_APPROVED
@@ -312,11 +315,44 @@ class OutboundOrder(BaseModel):
 
         return total.quantize(Decimal("0.01"))
 
+    def _freeze_line_amounts_and_total(self):
+        """
+        冻结订单行金额，并汇总最终订单金额。
+        - final_line_amount = base_qty * base_price
+        - final_order_amount = sum(final_line_amount)
+        """
+        lines = self.lines.filter(is_deleted=False)
+        if not lines.exists():
+            raise ValidationError("订单没有可确认的明细行。")
+
+        total = Decimal("0.00")
+        now_ts = timezone.now()
+
+        for line in lines:
+            qty = Decimal(line.base_qty or 0)
+            price = Decimal(line.base_price or 0)
+
+            if price <= 0:
+                raise ValidationError(f"订单行 {line.line_no} 的价格未填写或不合法。")
+
+            line_total = (qty * price).quantize(Decimal("0.01"))
+
+            if line.final_line_amount != line_total:
+                type(line).objects.filter(pk=line.pk).update(
+                    final_line_amount=line_total,
+                    updated_at=now_ts,
+                )
+
+            total += line_total
+
+        return total.quantize(Decimal("0.01"))
+
     def auto_confirm_pricing(self, by_user=None):
         """
         在订单确认时自动确认价格。
         """
-        total = self._calculate_final_order_amount()
+        # total = self._calculate_final_order_amount()
+        total = self._freeze_line_amounts_and_total()
         self.final_order_amount = total
         self.pricing_status = PricingStatus.CONFIRMED
         self.priced_at = timezone.now()
