@@ -66,8 +66,12 @@ class Command(BaseCommand):
                         allowed_methods=AUTO_REVIEW_ORDER_PROCESSING_METHODS,
                     )
 
-                # 清除失败标记
-                pj.message = pj.message.replace(BILLING_FAILED_MARKER, "BILLING_RETRIED")[:255]
+                # 清除失败标记（确保 BILLING_RETRIED 不被截断）
+                new_msg = pj.message.replace(BILLING_FAILED_MARKER, "BILLING_RETRIED")
+                if len(new_msg) > 255:
+                    # 保留末尾的 marker 完整，截断前面的内容
+                    new_msg = new_msg[:252] + "..."
+                pj.message = new_msg
                 pj.save(update_fields=["message", "updated_at"])
                 retried += 1
                 self.stdout.write(f"  OK PJ#{pj.id}: task={task.task_no}")

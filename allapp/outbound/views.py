@@ -74,11 +74,12 @@ def confirm_pricing(self, request, pk=None):
     for item in serializer.validated_data["lines"]:
         line = lines_map[item["line_id"]]
         line.base_price = item["base_price"]
-        line.save(update_fields=["base_price", "updated_at"])
 
         line_amount = (
             Decimal(line.base_qty or 0) * Decimal(line.base_price or 0)
         ).quantize(Decimal("0.01"))
+        line.final_line_amount = line_amount
+        line.save(update_fields=["base_price", "final_line_amount", "updated_at"])
         total_amount += line_amount
 
     order.final_order_amount = total_amount.quantize(Decimal("0.01"))

@@ -118,7 +118,7 @@ class BillingRule(BillingValidationMixin, models.Model):
         has_tiers = self.pk and self.tiers.exists() if self.pk else False
         if self.unit_price is None and not has_tiers and self.ladder_mode is None:
             errors["unit_price"] = "非阶梯模式下必须填写 unit_price。"
-        if self.ladder_mode is not None and not has_tiers and self.unit_price is None:
+        elif self.ladder_mode is not None and not has_tiers and self.unit_price is None:
             errors["unit_price"] = "启用阶梯模式但尚无阶梯配置时，必须填写 unit_price 作为兜底。"
 
         if self.calc_method == CalcMethod.PERCENT_OF_ORDER_AMOUNT and self.unit_price is not None:
@@ -384,7 +384,7 @@ class BillingAccrual(BillingValidationMixin, models.Model):
         if self.event_id:
             if self.event.owner_id != self.owner_id or self.event.warehouse_id != self.warehouse_id:
                 errors["event"] = "event 的 owner/warehouse 必须与 accrual 一致。"
-            if self.event.charge_type != self.charge_type:
+            if self.event.charge_type != self.charge_type and "charge_type" not in errors:
                 errors["charge_type"] = "charge_type 必须与 event.charge_type 一致。"
             if self.event.service_date != self.service_date:
                 errors["service_date"] = "service_date 必须与 event.service_date 一致。"

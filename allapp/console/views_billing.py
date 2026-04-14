@@ -12,7 +12,7 @@ from django.utils.dateparse import parse_date
 from django.views.generic import TemplateView
 
 from allapp.baseinfo.models import Owner
-from allapp.billing.enums import AccrualStatus, ChargeType, PeriodStatus
+from allapp.billing.enums import AccrualStatus, BillStatus, ChargeType, PeriodStatus
 from allapp.billing.models import Bill, BillingAccrual, BillingPeriod
 from allapp.locations.models import Warehouse
 
@@ -44,7 +44,8 @@ def _preview_queryset(period: BillingPeriod):
             service_date__gte=period.start_date,
             service_date__lte=period.end_date,
         )
-    return qs.filter(period=period)
+    # 排除 VOID/reversal accrual（dedup 残留、红冲记录不应参与汇总）
+    return qs.filter(period=period).exclude(status=AccrualStatus.VOID).filter(is_reversal=False)
 
 
 class BillingConsoleBaseView(LoginRequiredMixin, TemplateView):
@@ -280,6 +281,7 @@ class BillingOverviewView(BillingConsoleBaseView):
                 current_bill = (
                     Bill.objects.select_related("period", "owner", "warehouse")
                     .filter(period=selected_period)
+                    .exclude(status=BillStatus.VOID)
                     .order_by("-id")
                     .first()
                 )
