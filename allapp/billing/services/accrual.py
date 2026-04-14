@@ -1277,12 +1277,24 @@ def accrue_order_processing_for_task(
     mapped_order_amount_by_date: Dict[datetime.date, Decimal] = {}
     line_ids_by_date: Dict[datetime.date, Set[int]] = {}
 
+    log_count = 0
     for log in logs:
+        log_count += 1
         if not log.task_line or resolver is None:
+            logger.debug(
+                "accrue_order_processing_for_task: skip log=%s task_line=%s resolver=%s",
+                log.id, log.task_line_id, resolver is not None,
+            )
             continue
 
         mapping = resolver(log.task_line) or {}
         svc_date = (log.posted_at or timezone.now()).date()
+        logger.info(
+            "accrue_order_processing_for_task: log=%s task_line=%s mapping_keys=%s "
+            "order_ids=%s order_line_ids=%s",
+            log.id, log.task_line_id, list(mapping.keys()),
+            mapping.get("order_ids"), mapping.get("order_line_ids"),
+        )
 
         for oid in mapping.get("order_ids", set()):
             order_ids.add((oid, svc_date))
@@ -1303,6 +1315,12 @@ def accrue_order_processing_for_task(
 
         if mapping.get("bundle_key"):
             bundle_by_date[svc_date] = mapping["bundle_key"]
+
+    logger.info(
+        "accrue_order_processing_for_task: scan_log_count=%d order_ids=%s order_line_ids=%s "
+        "line_ids_by_date=%s mapped_order_amount_by_date=%s",
+        log_count, order_ids, order_lines, line_ids_by_date, mapped_order_amount_by_date,
+    )
 
     # resolver 未直接给金额时，按当前 task 真正关联到的订单行精确聚合金额
     line_amount_by_id: Dict[int, Decimal] = {}
@@ -1327,6 +1345,12 @@ def accrue_order_processing_for_task(
         if total > 0:
             precise_order_amount_by_date[svc_date] = total
 
+    logger.info(
+        "accrue_order_processing_for_task: all_line_ids=%s line_amount_by_id=%s "
+        "precise_order_amount_by_date=%s",
+        all_line_ids, line_amount_by_id, precise_order_amount_by_date,
+    )
+
     # 金额优先级：
     # 1. resolver 直接返回的 order_amount
     # 2. 当前 task 关联订单行精确聚合金额
@@ -1335,6 +1359,11 @@ def accrue_order_processing_for_task(
     for svc_date, amt in precise_order_amount_by_date.items():
         if svc_date not in by_date_amounts:
             by_date_amounts[svc_date] = amt
+
+    logger.info(
+        "accrue_order_processing_for_task: by_date_amounts=%s (will generate PERCENT accruals for these dates)",
+        by_date_amounts,
+    )
 
     created_events = created_accruals = 0
 
