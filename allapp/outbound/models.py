@@ -286,13 +286,14 @@ class OutboundOrder(BaseModel):
 
     def _calculate_final_order_amount(self):
         """
-        用订单行 base_qty * base_price 计算最终订单金额。
+        用订单行 base_qty * base_price 计算最终订单金额，
+        同时将每行金额写入 final_line_amount。
         当前约定：
         - OutboundOrderLine.base_price = 最终成交基本单位单价
         - 订单确认时自动冻结价格
         """
-        lines = self.lines.filter(is_deleted=False)
-        if not lines.exists():
+        lines = list(self.lines.filter(is_deleted=False))
+        if not lines:
             raise ValidationError("订单没有可确认的明细行。")
 
         total = Decimal("0.00")
@@ -304,7 +305,10 @@ class OutboundOrder(BaseModel):
             if price <= 0:
                 raise ValidationError(f"订单行 {line.line_no} 的价格未填写或不合法。")
 
-            total += (qty * price).quantize(Decimal("0.01"))
+            line_amount = (qty * price).quantize(Decimal("0.01"))
+            line.final_line_amount = line_amount
+            line.save(update_fields=["final_line_amount", "updated_at"])
+            total += line_amount
 
         return total.quantize(Decimal("0.01"))
 

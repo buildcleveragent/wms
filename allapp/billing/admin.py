@@ -77,7 +77,6 @@ class BillingPeriodAdmin(admin.ModelAdmin):
         self.message_user(request, f"{action_label}仅允许在账期状态 {allowed} 时执行，当前为 {period.status}。", level=messages.ERROR)
         return False
 
-    @transaction.atomic
     def accrue_storage_view(self, request, pk: int):
         period = self.get_object(request, pk)
         if not period:
@@ -149,7 +148,7 @@ class BillingPeriodAdmin(admin.ModelAdmin):
             return redirect(f"../../{pk}/change/")
         from allapp.billing.services import generate_invoice_for_period
         seq = Bill.objects.filter(period__owner=period.owner, period__warehouse=period.warehouse).count() + 1
-        invoice_no = f"INV-{period.label}-{period.owner_id}-{seq:04d}"
+        invoice_no = f"INV-{period.label}-{period.owner_id}-{period.warehouse_id}-{seq:04d}"
         try:
             bill = generate_invoice_for_period(period, invoice_no=invoice_no)
         except ValueError as e:

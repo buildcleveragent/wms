@@ -152,6 +152,22 @@ def accrue_for_posting(task, posting_journal, by_user=None) -> Tuple[int, int]:
         "COUNT":    (ChargeType.COUNT,    CalcMethod.PER_LINE),
     }
 
+    # 预查已关账 period，用于检测晚到过账
+    from allapp.billing.models import BillingPeriod
+    from allapp.billing.enums import PeriodStatus as _PeriodStatus
+    _closed_period_cache: Dict[tuple, Optional[str]] = {}
+
+    def _check_closed_period(owner_id_chk, warehouse_id_chk, svc_date):
+        cache_key = (owner_id_chk, warehouse_id_chk, svc_date)
+        if cache_key not in _closed_period_cache:
+            cp = BillingPeriod.objects.filter(
+                owner_id=owner_id_chk, warehouse_id=warehouse_id_chk,
+                start_date__lte=svc_date, end_date__gte=svc_date,
+                status__in=[_PeriodStatus.CLOSED, _PeriodStatus.INVOICED],
+            ).values_list("label", flat=True).first()
+            _closed_period_cache[cache_key] = cp
+        return _closed_period_cache[cache_key]
+
     created_events = created_accruals = 0
     for log in logs:
         ttype = task.task_type
@@ -222,6 +238,14 @@ def accrue_for_posting(task, posting_journal, by_user=None) -> Tuple[int, int]:
         )
         if acc_created:
             created_accruals += 1
+            # 晚到过账检测：accrual 落在已关账区间时发出警告
+            closed_label = _check_closed_period(log.owner_id, log.warehouse_id, service_date)
+            if closed_label:
+                logger.warning(
+                    "accrue_for_posting: late-posting detected — accrual for date %s "
+                    "falls in closed/invoiced period '%s' (task=%s, may need re-lock)",
+                    service_date, closed_label, task.id,
+                )
 
     logger.info(
         "accrue_for_posting: task=%s posting_journal=%s events=%d accruals=%d",
@@ -267,19 +291,27 @@ def accrue_storage_for_date(owner_id, warehouse_id, service_date: datetime.date,
     ----
     (created_events, created_accruals)
     """
-    from allapp.inventory.models import InventoryDetail
+    from allapp.inventory.models import InventoryDetail, InventorySnapshotDaily
 
     # 步骤 1：查找存储费计费规则；无规则则本次无需产生应计
     rule = _select_rule(owner_id, warehouse_id, ChargeType.STORAGE, CalcMethod.PER_DAY_ONHAND_BASE, service_date)
     if not rule:
         return (0, 0)
 
-    # 步骤 2：汇总该客户在该仓库的当前在库总量
-    # 只聚合 is_active=True 的库存明细，排除已出库或无效记录
-    qs = (InventoryDetail.objects
-          .filter(owner_id=owner_id, warehouse_id=warehouse_id, is_active=True)
-          .values("owner_id", "warehouse_id")
-          .annotate(onhand=Sum("onhand_qty")))
+    # 步骤 2：汇总该客户在该仓库的在库总量
+    # 历史日期使用库存快照（InventorySnapshotDaily），当天使用实时库存（InventoryDetail）
+    today = timezone.now().date()
+    if service_date < today:
+        qs = (InventorySnapshotDaily.objects
+              .filter(owner_id=owner_id, warehouse_id=warehouse_id,
+                      snapshot_date=service_date, onhand_qty__gt=0)
+              .values("owner_id", "warehouse_id")
+              .annotate(onhand=Sum("onhand_qty")))
+    else:
+        qs = (InventoryDetail.objects
+              .filter(owner_id=owner_id, warehouse_id=warehouse_id, is_active=True)
+              .values("owner_id", "warehouse_id")
+              .annotate(onhand=Sum("onhand_qty")))
 
     created_events = created_accruals = 0
     for row in qs:
@@ -967,6 +999,20 @@ def accrue_order_processing_from_posted(
 
     created_events = created_accruals = 0
 
+    def _task_level_accrual_exists(charge_type: str, calc_method: str, svc_date: datetime.date) -> bool:
+        """检查 task 级函数是否已为同一 owner/warehouse/date/method 生成过 accrual。"""
+        scope_prefix = f"{owner_id}:{warehouse_id}|-|-|"
+        return BillingEvent.objects.filter(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            charge_type=charge_type,
+            service_date=svc_date,
+        ).exclude(
+            event_fp__startswith=scope_prefix,
+        ).filter(
+            event_fp__contains=f"|{calc_method}|",
+        ).exists()
+
     def _rule_for(charge_type: str, calc_method: str, service_date: datetime.date) -> Optional[BillingRule]:
         """
         带缓存的规则查找辅助函数。
@@ -1067,6 +1113,12 @@ def accrue_order_processing_from_posted(
             rule_parcel = _rule_for(ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date)
         if not rule_parcel or cnt <= 0:
             continue
+        if _task_level_accrual_exists(ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date):
+            logger.warning(
+                "accrue_order_processing_from_posted: skipping PER_PARCEL for date=%s "
+                "(task-level accrual already exists)", svc_date,
+            )
+            continue
         # 事件指纹：task_id=None, log_id=None，以日期+数量区分（同日包裹已汇总）
         ev_fp = _event_fp(None, None, ChargeType.PACK, CalcMethod.PER_PARCEL, svc_date, cnt,
                          scope_key=f"{owner_id}:{warehouse_id}")
@@ -1126,6 +1178,12 @@ def accrue_order_processing_from_posted(
         if _method_enabled(CalcMethod.PERCENT_OF_ORDER_AMOUNT):
             rule_pct = _rule_for(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date)
         if not rule_pct:
+            continue
+        if _task_level_accrual_exists(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date):
+            logger.warning(
+                "accrue_order_processing_from_posted: skipping PERCENT_OF_ORDER_AMOUNT for date=%s "
+                "(task-level accrual already exists)", svc_date,
+            )
             continue
         amt = Decimal(amt or 0)
         if amt <= 0:

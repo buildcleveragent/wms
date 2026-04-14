@@ -50,6 +50,12 @@ from .services import (
 )
 
 
+def _require_billing_perm(request, perm_codename: str):
+    """检查用户是否有指定的 billing 权限，无则抛 PermissionDenied。"""
+    if not request.user.has_perm(f"billing.{perm_codename}"):
+        raise PermissionDenied(f"需要 billing.{perm_codename} 权限。")
+
+
 class OwnerWarehouseScopedQuerysetMixin:
     permission_classes = [permissions.IsAuthenticated]
 
@@ -151,6 +157,7 @@ class BillingRuleViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMi
 
     @action(detail=True, methods=["post"], url_path="activate")
     def activate(self, request, pk=None):
+        _require_billing_perm(request, "change_billingrule")
         rule = self.get_object()
         self._validate_rule_write_scope(rule)
         rule.active = True
@@ -159,6 +166,7 @@ class BillingRuleViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMi
 
     @action(detail=True, methods=["post"], url_path="deactivate")
     def deactivate(self, request, pk=None):
+        _require_billing_perm(request, "change_billingrule")
         rule = self.get_object()
         self._validate_rule_write_scope(rule)
         rule.active = False
@@ -204,16 +212,19 @@ class BillingRuleTierViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelVi
                 raise PermissionDenied("无权操作通用规则或其他仓库规则的阶梯。")
 
     def perform_create(self, serializer):
+        _require_billing_perm(self.request, "change_billingrule")
         rule = serializer.validated_data["rule"]
         self._validate_rule_scope(rule)
         serializer.save()
 
     def perform_update(self, serializer):
+        _require_billing_perm(self.request, "change_billingrule")
         rule = serializer.validated_data.get("rule", serializer.instance.rule)
         self._validate_rule_scope(rule)
         serializer.save()
 
     def perform_destroy(self, instance):
+        _require_billing_perm(self.request, "change_billingrule")
         self._validate_rule_scope(instance.rule)
         instance.delete()
 
@@ -379,6 +390,7 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
     @action(detail=True, methods=["post"], url_path="generate-metrics")
     @transaction.atomic
     def generate_metrics(self, request, pk=None):
+        _require_billing_perm(request, "change_billingperiod")
         period = self.get_object()
         summary = generate_metrics_for_range(
             period.owner_id,
@@ -394,6 +406,7 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
     @action(detail=True, methods=["post"], url_path="accrue-storage")
     @transaction.atomic
     def accrue_storage(self, request, pk=None):
+        _require_billing_perm(request, "change_billingperiod")
         period = self.get_object()
         blocked = self._guard_status(period, [PeriodStatus.OPEN])
         if blocked is not None:
@@ -442,6 +455,7 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
     @action(detail=True, methods=["post"], url_path="accrue-orders-posted")
     @transaction.atomic
     def accrue_orders_posted(self, request, pk=None):
+        _require_billing_perm(request, "change_billingperiod")
         period = self.get_object()
         blocked = self._guard_status(period, [PeriodStatus.OPEN])
         if blocked is not None:
@@ -465,6 +479,7 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
     @action(detail=True, methods=["post"], url_path="lock")
     @transaction.atomic
     def lock(self, request, pk=None):
+        _require_billing_perm(request, "change_billingperiod")
         period = self.get_object()
         blocked = self._guard_status(period, [PeriodStatus.OPEN])
         if blocked is not None:
@@ -485,6 +500,7 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
     @action(detail=True, methods=["post"], url_path="invoice")
     @transaction.atomic
     def invoice(self, request, pk=None):
+        _require_billing_perm(request, "add_bill")
         period = self.get_object()
         blocked = self._guard_status(period, [PeriodStatus.CLOSED])
         if blocked is not None:
@@ -496,7 +512,7 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
         invoice_no = payload.validated_data.get("invoice_no")
         if not invoice_no:
             seq = Bill.objects.filter(period__owner=period.owner, period__warehouse=period.warehouse).count() + 1
-            invoice_no = f"INV-{period.label}-{period.owner_id}-{seq:04d}"
+            invoice_no = f"INV-{period.label}-{period.owner_id}-{period.warehouse_id}-{seq:04d}"
 
         try:
             bill = generate_invoice_for_period(
@@ -528,6 +544,7 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
     @action(detail=True, methods=["post"], url_path="unlock")
     @transaction.atomic
     def unlock(self, request, pk=None):
+        _require_billing_perm(request, "change_billingperiod")
         period = self.get_object()
         blocked = self._guard_status(period, [PeriodStatus.CLOSED, PeriodStatus.INVOICED])
         if blocked is not None:

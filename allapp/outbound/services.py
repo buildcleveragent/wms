@@ -379,17 +379,15 @@ def create_pick_task(order, task_status="DRAFT") -> WmsTask:
 
             alloc = min(avail, remaining)
 
-            # 生成任务行
+            # 生成任务行（指向 OutboundOrderLine，与 allocate_inventory 一致）
             WmsTaskLine.objects.create(
                 task=task,
                 product_id=d['product_id'],
                 from_location_id=det.location_id,
                 to_location_id=None,  # 集货位
                 qty_plan=alloc,
-                # src_model=order.__class__.__name__,
-                src_model=order._meta.model_name,
-                src_id=order.id,
-                src_line_id=d['line_id'],
+                src_model="OutboundOrderLine",
+                src_id=d['line_id'],
                 rule_key="FEFO",
             )
             remaining -= alloc
