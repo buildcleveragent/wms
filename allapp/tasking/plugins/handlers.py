@@ -171,13 +171,32 @@ class DefaultPostingHandler(BasePostingHandler):
         # 4) 计费
         try:
             from allapp.billing import services as billing_services
+            # from allapp.billing.services.accrual import AUTO_REVIEW_ORDER_PROCESSING_METHODS
+            #
+            # billing_services.accrue_for_posting(task, pj, by_user=by_user)
+            #
+            # # 当前业务下：PICK → REVIEW → 订单完成。
+            # # REVIEW 过账后自动触发订单处理费。
+            # if task.task_type == WmsTask.TaskType.REVIEW:
+            #     billing_services.accrue_order_processing_for_task(
+            #         task,
+            #         pj,
+            #         by_user=by_user,
+            #         allowed_methods=AUTO_REVIEW_ORDER_PROCESSING_METHODS,
+            #     )
             from allapp.billing.services.accrual import AUTO_REVIEW_ORDER_PROCESSING_METHODS
 
             billing_services.accrue_for_posting(task, pj, by_user=by_user)
 
-            # 当前业务下：PICK → REVIEW → 订单完成。
-            # REVIEW 过账后自动触发订单处理费。
-            if task.task_type == WmsTask.TaskType.REVIEW:
+            should_accrue_order_processing = (
+                    task.task_type == WmsTask.TaskType.REVIEW
+                    or (
+                            task.task_type == WmsTask.TaskType.PICK
+                            and task.review_status == WmsTask.ReviewStatus.APPROVED
+                    )
+            )
+
+            if should_accrue_order_processing:
                 billing_services.accrue_order_processing_for_task(
                     task,
                     pj,
