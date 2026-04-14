@@ -1173,11 +1173,35 @@ def accrue_order_processing_from_posted(
         for m in ms:
             by_date_amounts[m.service_date] = by_date_amounts.get(m.service_date, Decimal("0")) + Decimal(m.value)
 
+    print("=== ENTER PERCENT BLOCK ===")
+    print("by_date_amounts runtime =", by_date_amounts)
+    print("allowed_methods runtime =", allowed_methods)
+
     for svc_date, amt in sorted(by_date_amounts.items()):
+        print("=== LOOP ENTERED ===", svc_date, amt)
         rule_pct = None
         if _method_enabled(CalcMethod.PERCENT_OF_ORDER_AMOUNT):
+            print("method enabled =true", )
             rule_pct = _rule_for(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date)
+            print("rule_pct check =", rule_pct)
+            # print(
+            #     "rule_pct check:",
+            #     {
+            #         "task_id": task.id,
+            #         "owner_id": task.owner_id,
+            #         "warehouse_id": task.warehouse_id,
+            #         "svc_date": svc_date,
+            #         "amt": str(amt),
+            #         "rule_pct_id": getattr(rule_pct, "id", None),
+            #         "rule_pct_code": getattr(rule_pct, "code", None),
+            #         "rule_pct_charge_type": getattr(rule_pct, "charge_type", None),
+            #         "rule_pct_calc_method": getattr(rule_pct, "calc_method", None),
+            #         "rule_pct_unit_price": str(getattr(rule_pct, "unit_price", None)) if rule_pct else None,
+            #     }
+            # )
+        print("before not rule_pct check, rule_pct =", rule_pct)
         if not rule_pct:
+            print("rule_pct is None, continue")
             continue
         if _task_level_accrual_exists(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date):
             logger.warning(
@@ -1248,8 +1272,10 @@ def accrue_order_processing_for_task(
     """
     from allapp.tasking.models import TaskScanLog
     from allapp.outbound.models import OutboundOrderLine
+    print("2 accrue_order_processing_for_task 2")
 
     resolver = _load_taskline_order_resolver()
+    print("3 accrue_order_processing_for_task 3")
 
     def _method_enabled(method: str) -> bool:
         if allowed_methods is None:
@@ -1268,6 +1294,8 @@ def accrue_order_processing_for_task(
         )
         .select_related("task", "task_line")
     )
+
+    print("logs=",logs)
 
     order_ids: Set[Tuple[int, datetime.date]] = set()
     order_lines: Set[Tuple[int, int, datetime.date]] = set()
@@ -1306,7 +1334,10 @@ def accrue_order_processing_for_task(
 
     # resolver 未直接给金额时，按当前 task 真正关联到的订单行精确聚合金额
     line_amount_by_id: Dict[int, Decimal] = {}
+
+    print("line_ids_by_date=", line_ids_by_date)
     all_line_ids = sorted({line_id for line_ids in line_ids_by_date.values() for line_id in line_ids})
+    print("after all_line_ids=" )
 
     if all_line_ids:
         rows = (
@@ -1331,6 +1362,7 @@ def accrue_order_processing_for_task(
     # 1. resolver 直接返回的 order_amount
     # 2. 当前 task 关联订单行精确聚合金额
     # 不再 fallback 到 BillingMetricDaily.ORDER_AMT
+    print("1356 line=")
     by_date_amounts: Dict[datetime.date, Decimal] = dict(mapped_order_amount_by_date)
     for svc_date, amt in precise_order_amount_by_date.items():
         if svc_date not in by_date_amounts:
@@ -1361,6 +1393,8 @@ def accrue_order_processing_for_task(
                 service_date,
             )
         return rule_cache[key]
+
+    print("维度 1：PER_ORDER ")
 
     # ── 维度 1：PER_ORDER ────────────────────────────────────────────────
     for (_oid, svc_date) in sorted(order_ids):
@@ -1421,7 +1455,7 @@ def accrue_order_processing_for_task(
         )
         created_events += int(ev_new)
         created_accruals += int(acc_new)
-
+    print("维度 2：PER_ORDER_LINE  ")
     # ── 维度 2：PER_ORDER_LINE ───────────────────────────────────────────
     for (_oid, _olid, svc_date) in sorted(order_lines):
         if not _method_enabled(CalcMethod.PER_ORDER_LINE):
@@ -1481,7 +1515,7 @@ def accrue_order_processing_for_task(
         )
         created_events += int(ev_new)
         created_accruals += int(acc_new)
-
+    print("维度 3：PER_PARCEL  ")
     # ── 维度 3：PER_PARCEL（仍依赖 resolver 是否返回 parcels）─────────────
     for svc_date, cnt in sorted(parcels_by_date.items()):
         if not _method_enabled(CalcMethod.PER_PARCEL):
@@ -1551,7 +1585,12 @@ def accrue_order_processing_for_task(
         created_accruals += int(acc_new)
 
     # ── 维度 4：PERCENT_OF_ORDER_AMOUNT（精确按当前 task 金额）────────────
+    print("维度 4：PERCENT_OF_ORDER_AMOUNT")
+    print("123 by_date_amounts=",by_date_amounts)
     for svc_date, amt in sorted(by_date_amounts.items()):
+
+        print("=== LOOP ENTERED ===", svc_date, amt)
+
         if not _method_enabled(CalcMethod.PERCENT_OF_ORDER_AMOUNT):
             continue
 
@@ -1563,8 +1602,43 @@ def accrue_order_processing_for_task(
             continue
 
         rule_pct = _rule_for(ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT, svc_date)
+
+        print(
+            "rule lookup params=",
+            {
+                "owner_id": task.owner_id,
+                "warehouse_id": task.warehouse_id,
+                "charge_type": ChargeType.DISPATCH,
+                "calc_method": CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+                "service_date": svc_date,
+            }
+        )
+
+
+
+        qs = BillingRule.objects.filter(
+            active=True,
+            charge_type="DISPATCH",
+            calc_method="PERCENT_OF_ORDER_AMOUNT",
+        )
+
+        print("candidate rules=", list(qs.values(
+            "id",
+            "owner_id",
+            "warehouse_id",
+            "charge_type",
+            "calc_method",
+            "effective_from",
+            "effective_to",
+            "unit_price",
+            "active",
+        )))
+
         if not rule_pct:
+            print("rule_pct is None, continue")
             continue
+
+        print("rule_pct=",rule_pct)
 
         amt = Decimal(amt or 0)
         if amt <= 0:
