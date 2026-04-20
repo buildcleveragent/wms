@@ -1112,6 +1112,149 @@ class BillingServiceTests(TestCase):
                                             issue_date=service_date, due_date=service_date)
         self.assertEqual(bill2.status, "ISSUED")
         self.assertEqual(bill2.subtotal, Decimal("12.00"))
+    def test_accrue_metrics_for_date_skips_order_amount_metric(self):
+        service_date = datetime.date(2026, 3, 17)
+        self._create_rule(
+            calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+            unit_price="0.1000",
+        )
+        BillingMetricDaily.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            service_date=service_date,
+            metric_type=MetricType.ORDER_AMT,
+            value=Decimal("1620.0000"),
+            source="TEST",
+        )
+
+        events, accruals = accrue_metrics_for_date(
+            self.owner.id,
+            self.warehouse.id,
+            service_date,
+            by_user=self.user,
+        )
+
+        self.assertEqual(events, 0)
+        self.assertEqual(accruals, 0)
+        self.assertFalse(
+            BillingAccrual.objects.filter(rule__calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT).exists()
+        )
+
+    def test_batch_percent_backfills_missing_task_without_rebilling_existing_task(self):
+        service_date = datetime.date(2026, 3, 18)
+        self._create_rule(
+            calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+            unit_price="0.1000",
+        )
+        old_order, old_line, old_product = self._create_outbound_order_line(
+            service_date,
+            suffix="PCT-OLD",
+            final_line_amount="1320.00",
+        )
+        new_order, new_line, new_product = self._create_outbound_order_line(
+            service_date,
+            suffix="PCT-NEW",
+            final_line_amount="300.00",
+        )
+
+        old_task = self._create_task("TASK-PCT-OLD", task_type=WmsTask.TaskType.REVIEW)
+        old_task_line = WmsTaskLine.objects.create(
+            task=old_task,
+            product=old_product,
+            src_model="OutboundOrderLine",
+            src_id=old_line.id,
+        )
+        self._create_scan_log(
+            old_task,
+            old_task_line,
+            service_date,
+            fp="fp-pct-old",
+            label_key="LBL-PCT-OLD",
+        )
+
+        new_task = self._create_task("TASK-PCT-NEW", task_type=WmsTask.TaskType.REVIEW)
+        new_task_line = WmsTaskLine.objects.create(
+            task=new_task,
+            product=new_product,
+            src_model="OutboundOrderLine",
+            src_id=new_line.id,
+        )
+        posting_journal = PostingJournal.objects.create(
+            src_model="WmsTask",
+            src_id=new_task.id,
+            tx_type="POST",
+            status="PENDING",
+        )
+        TaskScanLog.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task=new_task,
+            task_line=new_task_line,
+            posting_journal=posting_journal,
+            status=TaskScanLog.ScanStatus.OK,
+            qty_base_delta=Decimal("1"),
+            fp="fp-pct-new",
+            label_key="LBL-PCT-NEW",
+            scan_snapshot_rev=0,
+            posted_at=datetime.datetime.combine(service_date, datetime.time(11, 0)),
+        )
+
+        resolver_map = {
+            old_task_line.id: {
+                "order_ids": {old_order.id},
+                "order_line_ids": {(old_order.id, old_line.id)},
+            },
+            new_task_line.id: {
+                "order_ids": {new_order.id},
+                "order_line_ids": {(new_order.id, new_line.id)},
+            },
+        }
+
+        def resolver(task_line):
+            return resolver_map[task_line.id]
+
+        with mock.patch(
+            "allapp.billing.services.accrual._load_taskline_order_resolver",
+            return_value=resolver,
+        ):
+            task_events, task_accruals = accrue_order_processing_for_task(
+                new_task,
+                posting_journal,
+                by_user=self.user,
+                allowed_methods={CalcMethod.PERCENT_OF_ORDER_AMOUNT},
+            )
+            batch_events, batch_accruals = accrue_order_processing_from_posted(
+                self.owner.id,
+                self.warehouse.id,
+                service_date,
+                service_date,
+                by_user=self.user,
+                allowed_methods={CalcMethod.PERCENT_OF_ORDER_AMOUNT},
+            )
+
+        self.assertEqual(task_events, 1)
+        self.assertEqual(task_accruals, 1)
+        self.assertEqual(batch_events, 1)
+        self.assertEqual(batch_accruals, 1)
+
+        percent_accruals = BillingAccrual.objects.filter(
+            rule__calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT
+        ).order_by("amount")
+        self.assertEqual(percent_accruals.count(), 2)
+        self.assertEqual(
+            list(percent_accruals.values_list("amount", flat=True)),
+            [Decimal("30.00"), Decimal("132.00")],
+        )
+        self.assertEqual(
+            list(percent_accruals.values_list("quantity", flat=True)),
+            [Decimal("300.00"), Decimal("1320.00")],
+        )
+        self.assertFalse(
+            BillingAccrual.objects.filter(
+                rule__calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+                quantity=Decimal("1620.00"),
+            ).exists()
+        )
 
 
 class BillingModelGuardrailTests(TestCase):
@@ -1811,10 +1954,21 @@ class BillingApiTests(TestCase):
             unit_price=Decimal(unit_price),
         )
 
-    def _create_accrual(self, *, rule, amount, service_date, period=None, status=AccrualStatus.OPEN, fingerprint):
+    def _create_accrual(
+        self,
+        *,
+        rule,
+        amount,
+        service_date,
+        period=None,
+        status=AccrualStatus.OPEN,
+        fingerprint,
+        owner=None,
+        warehouse=None,
+    ):
         return BillingAccrual.objects.create(
-            owner=self.owner,
-            warehouse=self.warehouse,
+            owner=owner or self.owner,
+            warehouse=warehouse or self.warehouse,
             period=period,
             charge_type=rule.charge_type,
             rule=rule,
@@ -2139,6 +2293,159 @@ class BillingApiTests(TestCase):
         period = BillingPeriod.objects.get(id=response.data["id"])
         self.assertEqual(period.warehouse_id, other_warehouse.id)
         self.assertEqual(response.data["warehouse"], other_warehouse.id)
+
+    def test_warehouse_dashboard_overview_aggregates_multiple_owners_in_same_warehouse(self):
+        boss = get_user_model().objects.create_user(
+            username="billing-warehouse-boss",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        client = APIClient()
+        client.force_authenticate(boss)
+
+        own_rule = self._create_rule(unit_price="20.00")
+        other_rule = BillingRule.objects.create(
+            owner=self.other_owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("35.00"),
+        )
+        other_warehouse = Warehouse.objects.create(code="WHAPI3", name="Warehouse API 3")
+        ignored_rule = BillingRule.objects.create(
+            owner=self.other_owner,
+            warehouse=other_warehouse,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("99.00"),
+        )
+
+        self._create_accrual(
+            rule=own_rule,
+            amount="20.00",
+            service_date=datetime.date(2026, 4, 10),
+            fingerprint="acc-dash-own",
+            owner=self.owner,
+        )
+        self._create_accrual(
+            rule=other_rule,
+            amount="35.00",
+            service_date=datetime.date(2026, 4, 11),
+            fingerprint="acc-dash-other",
+            owner=self.other_owner,
+        )
+        self._create_accrual(
+            rule=ignored_rule,
+            amount="99.00",
+            service_date=datetime.date(2026, 4, 12),
+            fingerprint="acc-dash-ignored",
+            owner=self.other_owner,
+            warehouse=other_warehouse,
+        )
+
+        response = client.get(
+            "/api/billing/dashboard/warehouse-overview/",
+            {"date_from": "2026-04-01", "date_to": "2026-04-30"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["scope"]["warehouse"], self.warehouse.id)
+        self.assertEqual(response.data["summary"]["owner_count"], 2)
+        self.assertEqual(response.data["summary"]["accrual_count"], 2)
+        self.assertEqual(Decimal(response.data["summary"]["subtotal"]), Decimal("55.00"))
+        self.assertEqual(len(response.data["by_owner"]), 2)
+        self.assertEqual(
+            {row["owner"] for row in response.data["by_owner"]},
+            {self.owner.id, self.other_owner.id},
+        )
+        self.assertEqual(
+            {row["id"] for row in response.data["owner_options"]},
+            {self.owner.id, self.other_owner.id},
+        )
+
+    def test_warehouse_dashboard_overview_owner_filter_narrows_results(self):
+        boss = get_user_model().objects.create_user(
+            username="billing-warehouse-boss-filter",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        client = APIClient()
+        client.force_authenticate(boss)
+
+        own_rule = self._create_rule(unit_price="20.00")
+        other_rule = BillingRule.objects.create(
+            owner=self.other_owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("35.00"),
+        )
+
+        self._create_accrual(
+            rule=own_rule,
+            amount="20.00",
+            service_date=datetime.date(2026, 4, 10),
+            fingerprint="acc-dash-filter-own",
+            owner=self.owner,
+        )
+        self._create_accrual(
+            rule=other_rule,
+            amount="35.00",
+            service_date=datetime.date(2026, 4, 11),
+            fingerprint="acc-dash-filter-other",
+            owner=self.other_owner,
+        )
+
+        response = client.get(
+            "/api/billing/dashboard/warehouse-overview/",
+            {
+                "owner": self.owner.id,
+                "date_from": "2026-04-01",
+                "date_to": "2026-04-30",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["summary"]["owner_count"], 1)
+        self.assertEqual(response.data["summary"]["accrual_count"], 1)
+        self.assertEqual(Decimal(response.data["summary"]["subtotal"]), Decimal("20.00"))
+        self.assertEqual(len(response.data["by_owner"]), 1)
+        self.assertEqual(response.data["by_owner"][0]["owner"], self.owner.id)
+
+    def test_owner_scoped_dashboard_rejects_other_owner_query(self):
+        boss = get_user_model().objects.create_user(
+            username="billing-owner-boss-filter",
+            password="x",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        client = APIClient()
+        client.force_authenticate(boss)
+
+        response = client.get(
+            "/api/billing/dashboard/warehouse-overview/",
+            {"owner": self.other_owner.id},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_warehouse_dashboard_scope_owner_name_does_not_leak_unscoped_owner(self):
+        boss = get_user_model().objects.create_user(
+            username="billing-warehouse-boss-scope",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        client = APIClient()
+        client.force_authenticate(boss)
+
+        response = client.get(
+            "/api/billing/dashboard/warehouse-overview/",
+            {"owner": self.other_owner.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["scope"]["owner"], self.other_owner.id)
+        self.assertEqual(response.data["scope"]["owner_name"], "")
 
 
 class BillingMetricGenerationTests(TestCase):
