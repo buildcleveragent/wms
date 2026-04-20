@@ -206,55 +206,6 @@ class OutboundOrder(BaseModel):
             from django.core.exceptions import ValidationError
             raise ValidationError(errs)
 
-    # 可选：增加一个 OWNER_APPROVED 状态常量，或用你现有枚举
-    # STATUS_OWNER_APPROVED = "OWNER_APPROVED"
-
-    # @transaction.atomic
-    # def owner_approve(self, by_user=None, allow_backorder=True):
-    #     """
-    #     货主管理员确认：
-    #     - 置状态为 OWNER_APPROVED（按你项目枚举对齐）
-    #     - 冻结库存（available → allocated）
-    #     """
-    #     # 1) 改变订单状态
-    #     self.approval_status = self.STATUS_OWNER_APPROVED
-    #     self.save(update_fields=["approval_status"])
-    #
-    #     # 2) 冻结库存：冻结 available → allocated
-    #     logger.debug("allocate_inventory begin")
-    #     ob_services.allocate_inventory(self, by_user=by_user, allow_backorder=allow_backorder )
-    #     logger.debug("allocate_inventory completed")
-
-    # STATUS_OWNER_APPROVED = "OWNER_APPROVED"
-
-    # @transaction.atomic
-    # def owner_approve(self, by_user=None, allow_backorder=True):
-    #     """
-    #     货主管理员确认：
-    #     1. 自动确认价格并冻结最终金额
-    #     2. 置状态为 OWNER_APPROVED
-    #     3. 冻结库存（available -> allocated）
-    #     """
-    #
-    #     # 先自动确认价格
-    #     self.auto_confirm_pricing(by_user=by_user)
-    #
-    #     # 再改订单审核状态
-    #     self.approval_status = self.STATUS_OWNER_APPROVED
-    #
-    #     update_fields = ["approval_status", "updated_at"]
-    #     if hasattr(self, "approved_by_ownermanager"):
-    #         self.approved_by_ownermanager = by_user
-    #         update_fields.append("approved_by_ownermanager")
-    #     if hasattr(self, "approved_at_ownermanager"):
-    #         self.approved_at_ownermanager = timezone.now()
-    #         update_fields.append("approved_at_ownermanager")
-    #
-    #     self.save(update_fields=update_fields)
-    #
-    #     # 最后冻结库存
-    #     ob_services.allocate_inventory(self, by_user=by_user, allow_backorder=allow_backorder)
-
     STATUS_OWNER_APPROVED = "OWNER_APPROVED"
 
     @transaction.atomic

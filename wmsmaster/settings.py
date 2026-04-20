@@ -278,8 +278,8 @@ TASKING_POSTING_HANDLER = "allapp.tasking.plugins.handlers.DefaultPostingHandler
 # （可选）仅过账已复核通过的扫描
 TASKING_POST_ONLY_APPROVED = True
 # 可选但强烈建议（避免 PUTAWAY/RECEIVE 无库位）
-TASKING_DEFAULT_RECEIVE_LOCATION_ID = 241            # 替换为你“收货暂存位”的ID
-TASKING_DEFAULT_PUTAWAY_FROM_LOCATION_ID = 241       # 替换为你“待上架暂存位”的ID
+TASKING_DEFAULT_RECEIVE_LOCATION_ID = 1            # 替换为你“收货暂存位”的ID
+TASKING_DEFAULT_PUTAWAY_FROM_LOCATION_ID = 2     # 替换为你“待上架暂存位”的ID
 
 ALLOWED_HOSTS = _csv_env(
     "ALLOWED_HOSTS",

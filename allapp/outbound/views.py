@@ -615,59 +615,6 @@ class OutboundOrderViewSet(
         order.save(update_fields=["submit_status"])
         return Response(OutboundOrderReadSerializer(order).data)
 
-    # 货主管理员审核并尝试分配库存
-    # @action(detail=True, methods=["post"], url_path="owner-approve")
-    # def owner_approve(self, request, pk=None):
-    #     order = self.get_object()
-    #     # 状态名称以你的模型为准（这里给出常见约定）
-    #     if getattr(order, "approval_status", None) not in ("OWNER_PENDING", "OWNER_REJECTED"):
-    #         return Response({"detail": "当前状态不可进行货主管理员审核"}, status=400)
-    #
-    #     order.approval_status = "OWNER_APPROVED"
-    #     if hasattr(order, "approved_by_ownermanager"):
-    #         order.approved_by_ownermanager = request.user
-    #     if hasattr(order, "approved_at_ownermanager"):
-    #         order.approved_at_ownermanager = timezone.now()
-    #     order.save()
-    #
-    #     # 分配库存 available->allocated（你现有服务）
-    #     logger.debug("owner_approve order=%s", order)
-    #     try:
-    #         ob_services.allocate_inventory(order, by_user=request.user, allow_backorder=True)
-    #     except Exception as e:
-    #         # 分配失败不回滚审核（按需调整）
-    #         return Response({"detail": f"审核通过，但分配库存失败：{e}"}, status=202)
-    #
-    #     return Response(OutboundOrderReadSerializer(order).data)
-
-
-    # @action(detail=True, methods=["post"], url_path="owner-approve")
-    # def owner_approve(self, request, pk=None):
-    #     order = self.get_object()
-    #
-    #     if getattr(order, "approval_status", None) not in ("OWNER_PENDING", "OWNER_REJECTED"):
-    #         return Response(
-    #             {"detail": "当前状态不可进行货主管理员审核"},
-    #             status=status.HTTP_400_BAD_REQUEST,
-    #         )
-    #
-    #     try:
-    #         order.owner_approve(by_user=request.user, allow_backorder=True)
-    #     except DjangoValidationError as e:
-    #         return Response(
-    #             {"detail": e.message_dict if hasattr(e, "message_dict") else e.messages},
-    #             status=status.HTTP_400_BAD_REQUEST,
-    #         )
-    #     except Exception as e:
-    #         return Response(
-    #             {"detail": f"订单确认失败：{e}"},
-    #             status=status.HTTP_400_BAD_REQUEST,
-    #         )
-    #
-    #     return Response(OutboundOrderReadSerializer(order).data, status=status.HTTP_200_OK)
-
-
-
     @action(detail=True, methods=["post"], url_path="owner-approve")
     def owner_approve(self, request, pk=None):
         order = self.get_object()
@@ -692,6 +639,102 @@ class OutboundOrderViewSet(
             )
 
         return Response(OutboundOrderReadSerializer(order, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="owner-reject")
+    def owner_reject(self, request, pk=None):
+        order = self.get_object()
+        print("owner_reject is tabbed")
+        if getattr(order, "approval_status", None) != "OWNER_PENDING":
+            return Response(
+                {"detail": "仅待审核订单可退回修改"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                order = type(order).objects.select_for_update().get(pk=order.pk)
+                order.approval_status = "OWNER_REJECTED"
+                if hasattr(order, "approved_by_ownermanager"):
+                    order.approved_by_ownermanager = request.user
+                if hasattr(order, "approved_at_ownermanager"):
+                    order.approved_at_ownermanager = timezone.now()
+                order.save(update_fields=[
+                    "approval_status",
+                    "approved_by_ownermanager",
+                    "approved_at_ownermanager",
+                    "updated_at",
+                ])
+        except DjangoValidationError as e:
+            return Response(
+                {"detail": e.message_dict if hasattr(e, "message_dict") else e.messages},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            return Response(
+                {"detail": f"退回修改失败：{e}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            OutboundOrderReadSerializer(order, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        from allapp.outbound import services as ob_services
+
+        order = self.get_object()
+        print("1 cancel is tabbed")
+
+        if getattr(order, "approval_status", None) == "CANCELLED":
+            return Response(
+                {"detail": "订单已取消，请勿重复操作"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if getattr(order, "approval_status", None) == "WHS_APPROVED":
+            return Response(
+                {"detail": "订单已进入仓库处理流程，不能直接取消"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        print("2 cancel is tabbed")
+        try:
+            with transaction.atomic():
+                order = type(order).objects.select_for_update().get(pk=order.pk)
+
+                if getattr(order, "approval_status", None) in ("OWNER_APPROVED", "WHS_PENDING"):
+                    print("2.1 cancel is tabbed before ob_services.unallocate_for_order")
+                    ob_services.unallocate_for_order(order)
+                print("3 cancel is tabbed")
+                order.approval_status = "CANCELLED"
+                # order.is_closed = True
+                if not order.close_reason:
+                    order.close_reason = "货主管理员取消订单"
+
+                order.save(update_fields=[
+                    "approval_status",
+                    "close_reason",
+                    "updated_at",
+                ])
+        except DjangoValidationError as e:
+            print("4 cancel is tabbed")
+            return Response(
+                {"detail": e.message_dict if hasattr(e, "message_dict") else e.messages},
+
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            print("5 cancel is tabbed")
+            return Response(
+                {"detail": f"取消订单失败：{e}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        print("6 cancel is tabbed")
+        return Response(
+            OutboundOrderReadSerializer(order, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
     def _excel_str(self, v):
         return "" if v is None else str(v).strip()

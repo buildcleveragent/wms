@@ -4,8 +4,8 @@
   {{ block.super }}
   {% if original %}
     {% if original.status == "OPEN" %}
-      <li><a class="button" href="{% url 'admin:billingperiod_accrue_storage' original.pk %}">{% trans "按区间计提仓储" %}</a></li>
-      <li><a class="button" href="{% url 'admin:billingperiod_accrue_orders_posted' original.pk %}">{% trans "按区间计提订单处理费（事实）" %}</a></li>
+      <li><a class="button" href="{% url 'admin:billingperiod_accrue_storage' original.pk %}">{% trans "按区间计提仓储（仅占用）" %}</a></li>
+      <li><a class="button" href="{% url 'admin:billingperiod_accrue_orders_posted' original.pk %}">{% trans "按按区间回补订单处理费（事实）" %}</a></li>
       <li><a class="button" href="{% url 'admin:billingperiod_lock' original.pk %}">{% trans "锁定账期（关账）" %}</a></li>
     {% elif original.status == "CLOSED" %}
       <li><a class="button" href="{% url 'admin:billingperiod_invoice' original.pk %}">{% trans "生成发票" %}</a></li>
