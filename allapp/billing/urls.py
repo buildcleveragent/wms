@@ -1,3 +1,4 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
@@ -8,6 +9,7 @@ from .views import (
     BillingPeriodViewSet,
     BillingRuleTierViewSet,
     BillingRuleViewSet,
+    BillingWarehouseOverviewApi,
 )
 
 router = DefaultRouter()
@@ -19,4 +21,7 @@ router.register(r"billing/accruals", BillingAccrualViewSet, basename="billing-ac
 router.register(r"billing/periods", BillingPeriodViewSet, basename="billing-period")
 router.register(r"billing/bills", BillViewSet, basename="billing-bill")
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("billing/dashboard/warehouse-overview/", BillingWarehouseOverviewApi.as_view(), name="billing-warehouse-overview"),
+]
+urlpatterns += router.urls

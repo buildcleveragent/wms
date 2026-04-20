@@ -154,6 +154,85 @@ class BillingAccrualSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class BillingAccrualDetailSerializer(BillingAccrualSerializer):
+    event_charge_type = serializers.CharField(source="event.charge_type", read_only=True)
+    event_service_date = serializers.DateField(source="event.service_date", read_only=True)
+    event_task = serializers.IntegerField(source="event.task_id", read_only=True)
+    event_task_no = serializers.CharField(source="event.task.task_no", read_only=True)
+    event_task_line = serializers.IntegerField(source="event.task_line_id", read_only=True)
+    event_scan_log = serializers.IntegerField(source="event.scan_log_id", read_only=True)
+    event_posting_journal = serializers.IntegerField(source="event.posting_journal_id", read_only=True)
+    event_quantity = serializers.DecimalField(
+        source="event.quantity",
+        max_digits=18,
+        decimal_places=4,
+        read_only=True,
+    )
+    event_quantity_uom = serializers.CharField(source="event.quantity_uom", read_only=True)
+    is_reversal = serializers.BooleanField(read_only=True)
+    reversal_of = serializers.IntegerField(source="reversal_of_id", read_only=True)
+    pre_adjustment_amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        read_only=True,
+    )
+    bill_id = serializers.SerializerMethodField()
+    bill_invoice_no = serializers.SerializerMethodField()
+    bill_status = serializers.SerializerMethodField()
+    bill_line_description = serializers.SerializerMethodField()
+
+    class Meta(BillingAccrualSerializer.Meta):
+        fields = BillingAccrualSerializer.Meta.fields + [
+            "event_charge_type",
+            "event_service_date",
+            "event_task",
+            "event_task_no",
+            "event_task_line",
+            "event_scan_log",
+            "event_posting_journal",
+            "event_quantity",
+            "event_quantity_uom",
+            "is_reversal",
+            "reversal_of",
+            "pre_adjustment_amount",
+            "bill_id",
+            "bill_invoice_no",
+            "bill_status",
+            "bill_line_description",
+        ]
+        read_only_fields = fields
+
+    def _bill_line(self, obj):
+        if hasattr(obj, "_billing_detail_bill_line_loaded"):
+            return getattr(obj, "_billing_detail_bill_line", None)
+
+        prefetched = getattr(obj, "_prefetched_objects_cache", {})
+        bill_lines = prefetched.get("billline_set")
+        bill_line = bill_lines[0] if bill_lines else None
+        if bill_lines is None:
+            bill_line = obj.billline_set.select_related("bill").first()
+
+        obj._billing_detail_bill_line = bill_line
+        obj._billing_detail_bill_line_loaded = True
+        return bill_line
+
+    def get_bill_id(self, obj):
+        bill_line = self._bill_line(obj)
+        return getattr(bill_line, "bill_id", None)
+
+    def get_bill_invoice_no(self, obj):
+        bill_line = self._bill_line(obj)
+        return getattr(getattr(bill_line, "bill", None), "invoice_no", None)
+
+    def get_bill_status(self, obj):
+        bill_line = self._bill_line(obj)
+        return getattr(getattr(bill_line, "bill", None), "status", None)
+
+    def get_bill_line_description(self, obj):
+        bill_line = self._bill_line(obj)
+        return getattr(bill_line, "description", "")
+
+
 class BillingPeriodSerializer(serializers.ModelSerializer):
     owner_name = serializers.CharField(source="owner.name", read_only=True)
     warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)

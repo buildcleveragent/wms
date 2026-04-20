@@ -8,13 +8,17 @@ from openpyxl import Workbook
 from django.http import HttpResponse
 from django.db import transaction
 from django.db.models import Count, Q, QuerySet, Sum
+from django.utils.dateparse import parse_date
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from .enums import AccrualStatus, PeriodStatus
+from allapp.locations.models import Warehouse
+
+from .enums import AccrualStatus, BillStatus, PeriodStatus
 from .models import (
     Bill,
     BillingAccrual,
@@ -27,6 +31,7 @@ from .models import (
 from .serializers import (
     BillDetailSerializer,
     BillListSerializer,
+    BillingAccrualDetailSerializer,
     BillingAccrualSerializer,
     BillingEventSerializer,
     BillingMetricGenerateSerializer,
@@ -48,6 +53,7 @@ from .services import (
     preview_lock_period,
     unlock_period,
 )
+from .services.dashboard import build_warehouse_overview_payload
 
 
 def _require_billing_perm(request, perm_codename: str):
@@ -99,6 +105,146 @@ class OwnerWarehouseSaveMixin:
 
     def perform_update(self, serializer):
         serializer.save(**self._save_scope_kwargs(serializer))
+
+
+class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _resolve_scope_label(self, model_cls, pk):
+        if not pk:
+            return ""
+        obj = model_cls.objects.filter(pk=pk).only("name").first()
+        if obj is None:
+            return ""
+        return getattr(obj, "name", "")
+
+    def get(self, request):
+        owner_raw = (request.query_params.get("owner") or "").strip()
+        warehouse_raw = (request.query_params.get("warehouse") or "").strip()
+        charge_type = (request.query_params.get("charge_type") or "").strip()
+        accrual_status = (request.query_params.get("status") or "").strip()
+        date_from_raw = (request.query_params.get("date_from") or "").strip()
+        date_to_raw = (request.query_params.get("date_to") or "").strip()
+        recent_limit_raw = (request.query_params.get("recent_limit") or "").strip()
+
+        if owner_raw and not owner_raw.isdigit():
+            return Response({"detail": "owner must be an integer id."}, status=status.HTTP_400_BAD_REQUEST)
+        if warehouse_raw and not warehouse_raw.isdigit():
+            return Response({"detail": "warehouse must be an integer id."}, status=status.HTTP_400_BAD_REQUEST)
+
+        owner_id = int(owner_raw) if owner_raw else None
+        warehouse_id = int(warehouse_raw) if warehouse_raw else None
+
+        user_owner_id = getattr(request.user, "owner_id", None)
+        user_warehouse_id = getattr(request.user, "warehouse_id", None)
+        if user_owner_id and owner_id and owner_id != user_owner_id:
+            raise PermissionDenied("No access to other owners in billing dashboard.")
+        if user_warehouse_id and warehouse_id and warehouse_id != user_warehouse_id:
+            raise PermissionDenied("No access to other warehouses in billing dashboard.")
+
+        date_from = parse_date(date_from_raw) if date_from_raw else None
+        date_to = parse_date(date_to_raw) if date_to_raw else None
+        if date_from_raw and date_from is None:
+            return Response({"detail": "date_from must be YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+        if date_to_raw and date_to is None:
+            return Response({"detail": "date_to must be YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+        if date_from and date_to and date_from > date_to:
+            return Response({"detail": "date_from cannot be after date_to."}, status=status.HTTP_400_BAD_REQUEST)
+
+        recent_limit = int(recent_limit_raw) if recent_limit_raw.isdigit() else 10
+        recent_limit = max(1, min(recent_limit, 50))
+
+        base_accrual_qs = self.scope_queryset(
+            BillingAccrual.objects.select_related("owner", "warehouse", "period", "rule", "event", "created_by")
+            .filter(is_reversal=False)
+            .exclude(status=AccrualStatus.VOID)
+        )
+        base_bill_qs = self.scope_queryset(
+            Bill.objects.select_related("owner", "warehouse", "period")
+            .prefetch_related("lines")
+            .exclude(status=BillStatus.VOID)
+        )
+
+        option_period_qs = self.scope_queryset(BillingPeriod.objects.select_related("owner", "warehouse"))
+        option_accrual_qs = base_accrual_qs
+        option_bill_qs = self.scope_queryset(
+            Bill.objects.select_related("owner", "warehouse").exclude(status=BillStatus.VOID)
+        )
+
+        if warehouse_id:
+            base_accrual_qs = base_accrual_qs.filter(warehouse_id=warehouse_id)
+            base_bill_qs = base_bill_qs.filter(warehouse_id=warehouse_id)
+            option_period_qs = option_period_qs.filter(warehouse_id=warehouse_id)
+            option_accrual_qs = option_accrual_qs.filter(warehouse_id=warehouse_id)
+            option_bill_qs = option_bill_qs.filter(warehouse_id=warehouse_id)
+
+        owner_options_map = {}
+        for row in option_period_qs.values("owner_id", "owner__name").distinct():
+            owner_options_map[row["owner_id"]] = {
+                "id": row["owner_id"],
+                "name": row["owner__name"] or f"Owner #{row['owner_id']}",
+            }
+        for row in option_accrual_qs.values("owner_id", "owner__name").distinct():
+            owner_options_map[row["owner_id"]] = {
+                "id": row["owner_id"],
+                "name": row["owner__name"] or f"Owner #{row['owner_id']}",
+            }
+        for row in option_bill_qs.values("owner_id", "owner__name").distinct():
+            owner_options_map[row["owner_id"]] = {
+                "id": row["owner_id"],
+                "name": row["owner__name"] or f"Owner #{row['owner_id']}",
+            }
+        owner_options = sorted(owner_options_map.values(), key=lambda item: (item["name"], item["id"]))
+
+        if owner_id:
+            base_accrual_qs = base_accrual_qs.filter(owner_id=owner_id)
+            base_bill_qs = base_bill_qs.filter(owner_id=owner_id)
+
+        if charge_type:
+            base_accrual_qs = base_accrual_qs.filter(charge_type=charge_type)
+
+        if accrual_status:
+            base_accrual_qs = base_accrual_qs.filter(status=accrual_status)
+
+        if date_from:
+            base_accrual_qs = base_accrual_qs.filter(service_date__gte=date_from)
+            base_bill_qs = base_bill_qs.filter(period__end_date__gte=date_from)
+
+        if date_to:
+            base_accrual_qs = base_accrual_qs.filter(service_date__lte=date_to)
+            base_bill_qs = base_bill_qs.filter(period__start_date__lte=date_to)
+
+        scope_owner_id = owner_id or getattr(request.user, "owner_id", None)
+        scope_owner_name = ""
+        if scope_owner_id:
+            scope_owner_name = owner_options_map.get(scope_owner_id, {}).get("name", "")
+            if (
+                not scope_owner_name
+                and scope_owner_id == getattr(request.user, "owner_id", None)
+                and getattr(request.user, "owner", None) is not None
+            ):
+                scope_owner_name = request.user.owner.name
+
+        payload = build_warehouse_overview_payload(
+            accrual_qs=base_accrual_qs,
+            bill_qs=base_bill_qs,
+            recent_limit=recent_limit,
+        )
+        payload["scope"] = {
+            "owner": scope_owner_id,
+            "owner_name": scope_owner_name,
+            "warehouse": warehouse_id or getattr(request.user, "warehouse_id", None),
+            "warehouse_name": self._resolve_scope_label(
+                Warehouse,
+                warehouse_id or getattr(request.user, "warehouse_id", None),
+            ),
+            "date_from": date_from,
+            "date_to": date_to,
+            "charge_type": charge_type,
+            "status": accrual_status,
+        }
+        payload["owner_options"] = owner_options
+        return Response(payload)
 
 
 class BillingRuleViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMixin, viewsets.ModelViewSet):
@@ -298,10 +444,18 @@ class BillingEventViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyMo
 
 class BillingAccrualViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
     queryset = (
-        BillingAccrual.objects.select_related("owner", "warehouse", "period", "rule", "event", "created_by")
+        BillingAccrual.objects.select_related(
+            "owner",
+            "warehouse",
+            "period",
+            "rule",
+            "event",
+            "event__task",
+            "created_by",
+        )
+        .prefetch_related("billline_set__bill")
         .all()
     )
-    serializer_class = BillingAccrualSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = {
         "owner": ["exact"],
@@ -311,11 +465,19 @@ class BillingAccrualViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnly
         "rule": ["exact"],
         "service_date": ["exact", "gte", "lte"],
         "status": ["exact", "in"],
+        "event": ["exact"],
+        "is_reversal": ["exact"],
+        "reversal_of": ["exact"],
         "bundle_key": ["exact", "icontains"],
     }
     search_fields = ["acc_fingerprint", "bundle_key", "event__event_fp"]
     ordering_fields = ["id", "service_date", "amount", "tax_amount", "created_at"]
     ordering = ["-service_date", "-id"]
+
+    def get_serializer_class(self):  # type: ignore[override]
+        if self.action == "retrieve":
+            return BillingAccrualDetailSerializer
+        return BillingAccrualSerializer
 
 
 class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMixin, viewsets.ModelViewSet):
