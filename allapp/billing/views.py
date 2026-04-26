@@ -110,6 +110,22 @@ class OwnerWarehouseSaveMixin:
 class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+    def _scope_dashboard_queryset(self, qs: QuerySet, *, warehouse_boss_mode: bool):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return qs.none()
+        if getattr(user, "is_superuser", False):
+            return qs
+
+        warehouse_id = getattr(user, "warehouse_id", None)
+        owner_id = getattr(user, "owner_id", None)
+
+        if warehouse_id and hasattr(qs.model, "warehouse_id"):
+            qs = qs.filter(warehouse_id=warehouse_id)
+        if owner_id and hasattr(qs.model, "owner_id") and not (warehouse_boss_mode and warehouse_id):
+            qs = qs.filter(owner_id=owner_id)
+        return qs
+
     def _resolve_scope_label(self, model_cls, pk):
         if not pk:
             return ""
@@ -126,6 +142,8 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
         date_from_raw = (request.query_params.get("date_from") or "").strip()
         date_to_raw = (request.query_params.get("date_to") or "").strip()
         recent_limit_raw = (request.query_params.get("recent_limit") or "").strip()
+        scope_mode = (request.query_params.get("scope_mode") or "").strip()
+        warehouse_boss_mode = scope_mode == "warehouse_boss"
 
         if owner_raw and not owner_raw.isdigit():
             return Response({"detail": "owner must be an integer id."}, status=status.HTTP_400_BAD_REQUEST)
@@ -137,7 +155,7 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
 
         user_owner_id = getattr(request.user, "owner_id", None)
         user_warehouse_id = getattr(request.user, "warehouse_id", None)
-        if user_owner_id and owner_id and owner_id != user_owner_id:
+        if user_owner_id and owner_id and owner_id != user_owner_id and not (warehouse_boss_mode and user_warehouse_id):
             raise PermissionDenied("No access to other owners in billing dashboard.")
         if user_warehouse_id and warehouse_id and warehouse_id != user_warehouse_id:
             raise PermissionDenied("No access to other warehouses in billing dashboard.")
@@ -154,21 +172,27 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
         recent_limit = int(recent_limit_raw) if recent_limit_raw.isdigit() else 10
         recent_limit = max(1, min(recent_limit, 50))
 
-        base_accrual_qs = self.scope_queryset(
+        base_accrual_qs = self._scope_dashboard_queryset(
             BillingAccrual.objects.select_related("owner", "warehouse", "period", "rule", "event", "created_by")
             .filter(is_reversal=False)
-            .exclude(status=AccrualStatus.VOID)
+            .exclude(status=AccrualStatus.VOID),
+            warehouse_boss_mode=warehouse_boss_mode,
         )
-        base_bill_qs = self.scope_queryset(
+        base_bill_qs = self._scope_dashboard_queryset(
             Bill.objects.select_related("owner", "warehouse", "period")
             .prefetch_related("lines")
-            .exclude(status=BillStatus.VOID)
+            .exclude(status=BillStatus.VOID),
+            warehouse_boss_mode=warehouse_boss_mode,
         )
 
-        option_period_qs = self.scope_queryset(BillingPeriod.objects.select_related("owner", "warehouse"))
+        option_period_qs = self._scope_dashboard_queryset(
+            BillingPeriod.objects.select_related("owner", "warehouse"),
+            warehouse_boss_mode=warehouse_boss_mode,
+        )
         option_accrual_qs = base_accrual_qs
-        option_bill_qs = self.scope_queryset(
-            Bill.objects.select_related("owner", "warehouse").exclude(status=BillStatus.VOID)
+        option_bill_qs = self._scope_dashboard_queryset(
+            Bill.objects.select_related("owner", "warehouse").exclude(status=BillStatus.VOID),
+            warehouse_boss_mode=warehouse_boss_mode,
         )
 
         if warehouse_id:

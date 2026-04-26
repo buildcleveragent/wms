@@ -22,8 +22,8 @@ class Subwarehouse(BaseModel):
     name = models.CharField("仓库名称", max_length=30)
     floor_no = models.PositiveSmallIntegerField(_("楼层"), default=1, db_index=True)
     class Meta:
-        verbose_name = "仓库"
-        verbose_name_plural = "仓库"
+        verbose_name = "子仓库"
+        verbose_name_plural = "子仓库"
         ordering = ["code"]
     def __str__(self): return f"{self.name}"
 

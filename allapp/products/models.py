@@ -375,17 +375,6 @@ class Product(BaseModel):
         "原产国(ISO-2)", max_length=2, blank=True, null=True,
         validators=[RegexValidator(r'^[A-Z]{2}$', "必须为两位大写字母的 ISO-2 代码")]
     )
-
-    # 成本
-    # class CostMethod(models.TextChoices):
-    #     FIFO = "FIFO", "先进先出"
-    #     MA = "MA", "移动加权平均"
-    #
-    # cost_method = models.CharField(
-    #     "成本方法", max_length=10, choices=CostMethod.choices, default=CostMethod.MA
-    # )
-    # standard_cost = models.DecimalField("标准成本(基本单位)", max_digits=12, decimal_places=4, default=0)
-
     external_code = models.CharField("外部系统编码", max_length=50, blank=True, null=True)
     extra = models.JSONField("扩展属性", blank=True, null=False, default=dict)  # 建议默认空 dict
     material_quality = models.CharField("材质", max_length=20, blank=True, null=True)

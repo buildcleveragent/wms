@@ -27,6 +27,14 @@ class FloorNoListFilter(admin.SimpleListFilter):
             return queryset.filter(locations__floor_no=floor).distinct()
         return queryset
 
+##---------- Admins ----------
+@admin.register(Warehouse)
+class WarehouseAdmin(admin.ModelAdmin):
+    fields = ("code", "name")
+    list_display = ("code", "name")
+    search_fields = ("code", "name")
+    ordering = ("code",)
+
 @admin.register(Subwarehouse)
 class SubwarehouseAdmin(admin.ModelAdmin):
     fields = ("warehouse", "code", "name",  "floor_no",)
@@ -53,13 +61,7 @@ class SubwarehouseAdmin(admin.ModelAdmin):
         )
         return format_html('<a href="{}">{}</a>', url, _("查看该子仓库位"))
 
-##---------- Admins ----------
-@admin.register(Warehouse)
-class WarehouseAdmin(admin.ModelAdmin):
-    fields = ("code", "name")
-    list_display = ("code", "name")
-    search_fields = ("code", "name")
-    ordering = ("code",)
+
 
 @admin.action(description="批量设为禁用")
 def mark_disabled(modeladmin, request, queryset):

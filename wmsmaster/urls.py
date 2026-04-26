@@ -34,6 +34,7 @@ urlpatterns = [
     path("accounts/", include("django.contrib.auth.urls")),
     path("accounts/login/", RedirectView.as_view(pattern_name="admin:login", query_string=True), name="login"),
     path("api/tasking/", include("allapp.tasking.urls")),
+    path("api/reports/", include("allapp.reports.urls_api")),
 
     path("reports/", include("allapp.reports.urls")),
     path("tasking/console/", include("allapp.tasking.urls_console", namespace="tasking_console")),

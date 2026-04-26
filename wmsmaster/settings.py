@@ -283,7 +283,7 @@ TASKING_DEFAULT_PUTAWAY_FROM_LOCATION_ID = 2     # 替换为你“待上架暂�
 
 ALLOWED_HOSTS = _csv_env(
     "ALLOWED_HOSTS",
-    default=[] if IS_PRODUCTION else ["127.0.0.1", "localhost", "testserver"],
+    default=[] if IS_PRODUCTION else ["127.0.0.1", "localhost", "testserver","192.168.1.128"],
 )
 CSRF_TRUSTED_ORIGINS = _csv_env(
     "CSRF_TRUSTED_ORIGINS",

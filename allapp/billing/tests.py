@@ -2429,6 +2429,57 @@ class BillingApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_warehouse_boss_scope_mode_keeps_multi_owner_view_for_owner_bound_user(self):
+        boss = get_user_model().objects.create_user(
+            username="billing-owner-bound-warehouse-boss",
+            password="x",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        client = APIClient()
+        client.force_authenticate(boss)
+
+        own_rule = self._create_rule(unit_price="20.00")
+        other_rule = BillingRule.objects.create(
+            owner=self.other_owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("35.00"),
+        )
+
+        self._create_accrual(
+            rule=own_rule,
+            amount="20.00",
+            service_date=datetime.date(2026, 4, 10),
+            fingerprint="acc-dash-scope-own",
+            owner=self.owner,
+        )
+        self._create_accrual(
+            rule=other_rule,
+            amount="35.00",
+            service_date=datetime.date(2026, 4, 11),
+            fingerprint="acc-dash-scope-other",
+            owner=self.other_owner,
+        )
+
+        response = client.get(
+            "/api/billing/dashboard/warehouse-overview/",
+            {
+                "scope_mode": "warehouse_boss",
+                "date_from": "2026-04-01",
+                "date_to": "2026-04-30",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["summary"]["owner_count"], 2)
+        self.assertEqual(len(response.data["by_owner"]), 2)
+        self.assertEqual(
+            {row["id"] for row in response.data["owner_options"]},
+            {self.owner.id, self.other_owner.id},
+        )
+
     def test_warehouse_dashboard_scope_owner_name_does_not_leak_unscoped_owner(self):
         boss = get_user_model().objects.create_user(
             username="billing-warehouse-boss-scope",
