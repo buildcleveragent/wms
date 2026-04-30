@@ -24,6 +24,10 @@ from .models import (
     InventoryQuickOutboundAdjust,
 )
 from .services_quick_adjust import QuickAdjustInput, quick_adjust_via_post_task
+
+from allapp.core.formatters import format_product_qty
+from django.utils.html import format_html
+
 # ============== 公共小工具 ==============
 def _safe_fields(model, candidates):
     """仅返回当前模型真实存在的字段名，避免因为基类差异报错。"""
@@ -33,15 +37,42 @@ def _safe_fields(model, candidates):
 # ============== 1) 现存量 ==============
 @admin.register(InventoryDetail)
 class InventoryDetailAdmin(admin.ModelAdmin):
-    list_display = _safe_fields(
-        InventoryDetail,
-        [
-            "owner", "product", "subwarehouse","zone_type", "location",
-            "batch_no", "production_date", "expiry_date", "serial_no",
-            "onhand_qty", "allocated_qty", "locked_qty", "damaged_qty", "available_qty",
-            "is_active",
-        ],
+    # list_display = _safe_fields(
+    #     InventoryDetail,
+    #     [
+    #         "owner", "product", "product_spec","subwarehouse","zone_type", "location",
+    #         "batch_no", "production_date", "expiry_date", "serial_no",
+    #         "onhand_qty", "allocated_qty", "locked_qty", "damaged_qty", "available_qty",
+    #         "is_active",
+    #     ],
+    # )
+
+    # list_display = (
+    #         "owner", "product", "product_spec","subwarehouse","zone_type", "location",
+    #         "batch_no", "production_date", "expiry_date", "serial_no",
+    #         "onhand_qty", "allocated_qty", "locked_qty", "damaged_qty", "available_qty",
+    #         "is_active",
+    #         )
+
+    list_display = (
+        "owner",
+        "product",
+        "product_spec",
+        "subwarehouse",
+        "zone_type",
+        "location",
+        "batch_no",
+        "production_date",
+        "expiry_date",
+        "serial_no",
+        "onhand_qty_display",
+        "allocated_qty_display",
+        "locked_qty_display",
+        "damaged_qty_display",
+        "available_qty_display",
+        "is_active",
     )
+
     list_filter = _safe_fields(
         InventoryDetail,
         ["owner", "subwarehouse","zone_type", "location", "product", "is_active"],
@@ -62,6 +93,48 @@ class InventoryDetailAdmin(admin.ModelAdmin):
     list_per_page = 50
     list_select_related = ("owner", "product", "warehouse", "subwarehouse", "location")
 
+    @admin.display(description="规格")
+    def product_spec(self,obj):
+        return getattr(obj.product,"spec","") if obj.product else ""
+
+    @admin.display(description="账面库存")
+    def onhand_qty_display(self, obj):
+        return format_html(
+            '<div style="text-align:right;">{}</div>',
+            format_product_qty(obj.onhand_qty, obj.product),
+        )
+
+    @admin.display(description="已分配")
+    def allocated_qty_display(self, obj):
+        return format_html(
+            '<div style="text-align:right;">{}</div>',
+            format_product_qty(obj.allocated_qty, obj.product),
+        )
+
+    @admin.display(description="锁定")
+    def locked_qty_display(self, obj):
+        return format_html(
+            '<div style="text-align:right;">{}</div>',
+            format_product_qty(obj.locked_qty, obj.product),
+        )
+
+    @admin.display(description="残次")
+    def damaged_qty_display(self, obj):
+        return format_html(
+            '<div style="text-align:right;">{}</div>',
+            format_product_qty(obj.damaged_qty, obj.product),
+        )
+
+    @admin.display(description="可用")
+    def available_qty_display(self, obj):
+        return format_html(
+            '<div style="text-align:right;">{}</div>',
+            format_product_qty(obj.available_qty, obj.product),
+        )
+
+
+
+
     fieldsets = (
         ("维度", {
             "fields": _safe_fields(InventoryDetail, ["owner", "product", "subwarehouse", "zone_type", "location", "is_active"])
@@ -77,17 +150,31 @@ class InventoryDetailAdmin(admin.ModelAdmin):
         }),
     )
 
+
 # ============== 2) 汇总 ==============
 @admin.register(InventorySummary)
 class InventorySummaryAdmin(admin.ModelAdmin):
-    list_display = _safe_fields(
-        InventorySummary,
-        [
-            "owner", "product",
-            "onhand_qty", "allocated_qty", "locked_qty", "damaged_qty", "available_qty",
-            "base_unit", "is_active",
-        ],
+    # list_display = _safe_fields(
+    #     InventorySummary,
+    #     [
+    #         "owner", "product",
+    #         "onhand_qty", "allocated_qty", "locked_qty", "damaged_qty", "available_qty",
+    #         "base_unit", "is_active",
+    #     ],
+    # )
+
+    list_display = (
+        "owner",
+        "product",
+        "onhand_qty_display",
+        "allocated_qty_display",
+        "locked_qty_display",
+        "damaged_qty_display",
+        "available_qty_display",
+        "base_unit",
+        "is_active",
     )
+
     list_filter = _safe_fields(InventorySummary, ["owner", "product", "is_active"])
     search_fields = [
         "product__code", "product__name",
@@ -101,6 +188,42 @@ class InventorySummaryAdmin(admin.ModelAdmin):
     ordering = _safe_fields(InventorySummary, ["owner", "product"])
     list_per_page = 50
     list_select_related = ("owner", "product")
+
+    @admin.display(description="账面库存")
+    def onhand_qty_display(self, obj):
+        return format_html(
+            '<div style="text-align:right;">{}</div>',
+            format_product_qty(obj.onhand_qty, obj.product),
+        )
+
+    @admin.display(description="已分配")
+    def allocated_qty_display(self, obj):
+        return format_html(
+            '<div style="text-align:right;">{}</div>',
+            format_product_qty(obj.allocated_qty, obj.product),
+        )
+
+    @admin.display(description="锁定")
+    def locked_qty_display(self, obj):
+        return format_html(
+            '<div style="text-align:right;">{}</div>',
+            format_product_qty(obj.locked_qty, obj.product),
+        )
+
+    @admin.display(description="残次")
+    def damaged_qty_display(self, obj):
+        return format_html(
+            '<div style="text-align:right;">{}</div>',
+            format_product_qty(obj.damaged_qty, obj.product),
+        )
+
+    @admin.display(description="可用")
+    def available_qty_display(self, obj):
+        return format_html(
+            '<div style="text-align:right;">{}</div>',
+            format_product_qty(obj.available_qty, obj.product),
+        )
+
 
     @admin.action(description="批量设为启用")
     def action_mark_active(self, request, queryset):
@@ -117,15 +240,42 @@ class InventorySummaryAdmin(admin.ModelAdmin):
 # ============== 3) 事务流水 ==============
 @admin.register(InventoryTransaction)
 class InventoryTransactionAdmin(admin.ModelAdmin):
-    list_display = _safe_fields(
-        InventoryTransaction,
-        [
-            "tx_type", "owner", "product", "subwarehouse", "location",
-            "qty_delta", "batch_no", "production_date", "expiry_date", "serial_no",
-            "src_model", "src_id", "src_line_id", "src_no",
-            "pair_id",
-        ],
+    # list_display = _safe_fields(
+    #     InventoryTransaction,
+    #     [
+    #         "tx_type", "owner", "product", "subwarehouse", "location",
+    #         "qty_delta", "batch_no", "production_date", "expiry_date", "serial_no",
+    #         "src_model", "src_id", "src_line_id", "src_no",
+    #         "pair_id",
+    #     ],
+    # )
+
+    list_display = (
+        "tx_type",
+        "owner",
+        "product",
+        "subwarehouse",
+        "location",
+        "qty_delta_display",
+        "batch_no",
+        "production_date",
+        "expiry_date",
+        "serial_no",
+        "src_model",
+        "src_id",
+        "src_line_id",
+        "src_no",
+        "pair_id",
     )
+
+    @admin.display(description="数量变动")
+    def qty_delta_display(self, obj):
+        return format_html(
+            '<div style="text-align:right; min-width:80px;">{}</div>',
+            format_product_qty(obj.qty_delta, obj.product),
+        )
+
+
     list_filter = _safe_fields(
         InventoryTransaction,
         ["tx_type", "owner", "subwarehouse", "product", "location"],

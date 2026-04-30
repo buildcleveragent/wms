@@ -112,6 +112,12 @@ class DefaultPagination(PageNumberPagination):
     page_size_query_param = "page_size"
     max_page_size = 100
 
+
+class ReceiveProductPagination(PageNumberPagination):
+    page_size = 300
+    page_size_query_param = "page_size"
+    max_page_size = 500
+
 class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = DefaultPagination
@@ -381,7 +387,7 @@ class SupplierViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
 class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
-    pagination_class = DefaultPagination
+    pagination_class = ReceiveProductPagination
 
     def list(self, request, *args, **kwargs):
         Product   = apps.get_model("products", "Product")

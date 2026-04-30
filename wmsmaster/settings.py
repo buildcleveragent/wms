@@ -65,11 +65,11 @@ DEBUG = env.bool("DEBUG", default=IS_DEVELOPMENT)
 if IS_PRODUCTION and DEBUG:
     raise ImproperlyConfigured("生产环境必须设置 DEBUG=False。")
 
-ENABLE_DEBUG_TOOLBAR = (not IS_PRODUCTION) and DEBUG and env.bool(
-    "ENABLE_DEBUG_TOOLBAR",
-    default=IS_DEVELOPMENT,
-)
-
+# ENABLE_DEBUG_TOOLBAR = (not IS_PRODUCTION) and DEBUG and env.bool(
+#     "ENABLE_DEBUG_TOOLBAR",
+#     default=IS_DEVELOPMENT,
+# )
+ENABLE_DEBUG_TOOLBAR=False
 # Application definition
 INSTALLED_APPS = [
     'allapp.core',

@@ -1,7 +1,32 @@
 
 from rest_framework import serializers
 from .models import InventorySummary
-
+from rest_framework import serializers
+from allapp.core.formatters import format_product_qty
+#
+# class OwnerInventorySummarySerializer(serializers.ModelSerializer):
+#     product_id = serializers.IntegerField(source="product.id", read_only=True)
+#     product_code = serializers.CharField(source="product.code", read_only=True)
+#     product_name = serializers.CharField(source="product.name", read_only=True)
+#     product_spec = serializers.CharField(source="product.spec", read_only=True)
+#     product_sku = serializers.CharField(source="product.sku", read_only=True)
+#
+#     class Meta:
+#         model = InventorySummary
+#         fields = [
+#             "id",
+#             "product_id",
+#             "product_code",
+#             "product_name",
+#             "product_spec",
+#             "product_sku",
+#             "base_unit",
+#             "onhand_qty",
+#             "available_qty",
+#             "allocated_qty",
+#             "locked_qty",
+#             "damaged_qty",
+#         ]
 
 class OwnerInventorySummarySerializer(serializers.ModelSerializer):
     product_id = serializers.IntegerField(source="product.id", read_only=True)
@@ -9,6 +34,12 @@ class OwnerInventorySummarySerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
     product_spec = serializers.CharField(source="product.spec", read_only=True)
     product_sku = serializers.CharField(source="product.sku", read_only=True)
+
+    onhand_qty_display = serializers.SerializerMethodField()
+    available_qty_display = serializers.SerializerMethodField()
+    allocated_qty_display = serializers.SerializerMethodField()
+    locked_qty_display = serializers.SerializerMethodField()
+    damaged_qty_display = serializers.SerializerMethodField()
 
     class Meta:
         model = InventorySummary
@@ -20,13 +51,34 @@ class OwnerInventorySummarySerializer(serializers.ModelSerializer):
             "product_spec",
             "product_sku",
             "base_unit",
+
             "onhand_qty",
             "available_qty",
             "allocated_qty",
             "locked_qty",
             "damaged_qty",
+
+            "onhand_qty_display",
+            "available_qty_display",
+            "allocated_qty_display",
+            "locked_qty_display",
+            "damaged_qty_display",
         ]
 
+    def get_onhand_qty_display(self, obj):
+        return format_product_qty(obj.onhand_qty, obj.product)
+
+    def get_available_qty_display(self, obj):
+        return format_product_qty(obj.available_qty, obj.product)
+
+    def get_allocated_qty_display(self, obj):
+        return format_product_qty(obj.allocated_qty, obj.product)
+
+    def get_locked_qty_display(self, obj):
+        return format_product_qty(obj.locked_qty, obj.product)
+
+    def get_damaged_qty_display(self, obj):
+        return format_product_qty(obj.damaged_qty, obj.product)
 
 
 from rest_framework import serializers

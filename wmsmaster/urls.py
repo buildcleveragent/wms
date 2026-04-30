@@ -27,6 +27,9 @@ urlpatterns = [
     # 统一 API 版本入口（把所有业务路由聚合到 allapp.api.urls）
     path("api/v1/", include("allapp.api.urls")),
 
+
+
+
     # 调试
     path("api-auth/", include("rest_framework.urls")),
 

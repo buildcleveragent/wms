@@ -85,10 +85,15 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
         - user.groups.filter(name='warehouse_boss').exists()
         - user.role == 'COMPANY_ADMIN'
         """
-        if getattr(user, "is_superuser", False):
+        if user.is_superuser:
             return
 
-        # 你后续可以替换成真实角色判断
+        # 仓库操作员 / 仓库管理员：
+        # 只要用户绑定了 warehouse，认为是仓库端用户，允许查看公司级库存汇总
+        if getattr(user, "warehouse_id", None):
+            return
+
+        # 货主端用户通常只有 owner，没有 warehouse，不允许查看
         raise PermissionDenied("无权查看公司级库存汇总")
 
     def get_serializer_class(self):

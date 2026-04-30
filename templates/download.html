@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WMS PDA 下载</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial; text-align: center; padding: 40px; }
+    .btn {
+      display: inline-block;
+      padding: 14px 24px;
+      background: #1677ff;
+      color: #fff;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 18px;
+    }
+    .tip {
+      margin-top: 20px;
+      color: #666;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+<h2>WMS PDA 下载</h2>
+
+<a class="btn" id="downloadBtn">下载安装</a>
+
+<div class="tip" id="tip"></div>
+
+<script>
+const apkUrl = "{{ apk_url }}";
+const ua = navigator.userAgent.toLowerCase();
+
+// 判断是否微信/企业微信
+if (ua.includes('micromessenger') || ua.includes('wxwork')) {
+  document.getElementById('tip').innerHTML =
+    "请点击右上角菜单 → 在浏览器中打开，再下载";
+}
+
+// 按钮点击下载
+document.getElementById('downloadBtn').onclick = function() {
+  window.location.href = apkUrl;
+};
+</script>
+
+</body>
+</html>
