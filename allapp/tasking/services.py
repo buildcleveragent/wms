@@ -226,7 +226,7 @@ def adjust_pick_line_qty(
     }
 
 
-def build_scan_fp(*, task_id, line_id, product_id, location_id, lot, expiry, serial, qty, rev) -> str:
+def build_scan_fp(*, task_id, line_id, product_id, location_id, lot, expiry, serial, qty, rev, mfg=None) -> str:
     """
     生成稳定、长度固定的 fp（64 个十六进制字符）。
     - 先把关键字段做成规范化 JSON（键名排序、None→null）
@@ -238,6 +238,7 @@ def build_scan_fp(*, task_id, line_id, product_id, location_id, lot, expiry, ser
         "product_id": product_id,
         "location_id": location_id,
         "lot": lot or "",
+        "mfg": "" if mfg in (None, "") else str(mfg),
         "expiry": "" if expiry in (None, "") else str(expiry),
         "serial": serial or "",
         "qty": str(qty),
@@ -1122,17 +1123,35 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
             location    = it.get("location")
             location_id = getattr(location, "pk", None) if location else None
             lot_no      = it.get("lot_no") or ""
+            # 兼容键名：mfg_date / production_date
+            mfg_date    = it.get("mfg_date")
+            if mfg_date is None:
+                mfg_date = it.get("production_date")
+
             # 兼容键名：expiry_date / exp_date
             expiry      = it.get("expiry_date")
             if expiry is None:
                 expiry = it.get("exp_date")
             serial      = it.get("serial_no") or ""
 
+            logger.info(
+                "tasking.snapshot.item %s line_id=%s product_id=%s location_id=%s qty=%s lot_no=%s mfg_date=%s exp_date=%s",
+                ctx_text,
+                tl.id,
+                product_id,
+                location_id,
+                qty,
+                lot_no or "-",
+                mfg_date or "-",
+                expiry or "-",
+                extra=ctx,
+            )
+
             fp = build_scan_fp(
                 task_id=tl.task_id, line_id=tl.id,
                 product_id=product_id, location_id=location_id,
                 lot=lot_no, expiry=expiry, serial=serial,
-                qty=str(qty), rev=new_rev,
+                qty=str(qty), rev=new_rev,mfg=mfg_date,
             )
 
             # ★ 关键分支：COUNT 用 qty_base，其他用 qty_base_delta
@@ -1187,6 +1206,25 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
             return new_rev
         if new_logs:
             TaskScanLog.objects.bulk_create(new_logs, batch_size=1000)
+
+            mfg_backfilled = 0
+            for log in new_logs:
+                if getattr(log, "mfg_date", None):
+                    mfg_backfilled += TaskScanLog.objects.filter(
+                        fp=log.fp,
+                        mfg_date__isnull=True,
+                    ).update(mfg_date=log.mfg_date)
+            if mfg_backfilled:
+                logger.info(
+                    "tasking.snapshot.mfg_backfilled %s line_id=%s rev=%s rows=%s",
+                    ctx_text,
+                    tl.id,
+                    new_rev,
+                    mfg_backfilled,
+                    extra=ctx,
+                )
+
+
             logger.info(
                 "tasking.snapshot.save.completed %s line_id=%s rev=%s logs=%s",
                 ctx_text,

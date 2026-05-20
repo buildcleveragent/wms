@@ -260,6 +260,24 @@ def _upsert_detail(
         task_type,
         extra=ctx,
     )
+
+    logger.info(
+        "inventory.detail.upserted %s product_id=%s location_id=%s batch_no=%s production_date=%s expiry_date=%s qty_delta=%s onhand_qty=%s allocated_qty=%s available_qty=%s detail_id=%s task_type=%s",
+        ctx_text,
+        det.product_id,
+        det.location_id,
+        det.batch_no or "-",
+        det.production_date or "-",
+        det.expiry_date or "-",
+        qty_delta,
+        det.onhand_qty,
+        det.allocated_qty,
+        det.available_qty,
+        det.id,
+        task_type,
+        extra=ctx,
+    )
+
     return det
 
 
@@ -531,15 +549,19 @@ def _group_receive_like(task: WmsTask, scans: List[TaskScanLog], *, now, batch_n
         agg[key] += qty
         ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
         logger.info(
-            "inventory.receive_like.scan_grouped %s tx_type=%s product_id=%s location_id=%s qty=%s grouped_qty=%s",
+            "inventory.receive_like.scan_grouped %s tx_type=%s scan_id=%s product_id=%s location_id=%s batch_no=%s production_date=%s expiry_date=%s qty=%s grouped_qty=%s",
             ctx_text,
             tx_type,
+            getattr(s, "id", None),
             pid,
             loc_id,
+            key.batch_no or "-",
+            key.production_date or "-",
+            key.expiry_date or "-",
             qty,
             agg[key],
             extra=ctx,
-        )
+          )
 
     return agg
 

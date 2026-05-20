@@ -1,4 +1,5 @@
 import logging
+from allapp.tasking.models import WmsTask, WmsTaskLine, TaskScanLog
 logger = logging.getLogger(__name__)
 from collections import defaultdict
 from datetime import date
@@ -78,14 +79,106 @@ class ReceiveGoodsWithoutOrder(APIView):
             posting_status=WmsTask.PostingStatus.NOT_READY,
         )
 
-        # 2) 聚合数量
+        # # 2) 聚合数量
+        # grouped = defaultdict(Decimal)
+        # for it in items:
+        #     pid = int(it["product_id"])
+        #     q = Decimal(str(it["qty"]))
+        #     if q <= 0:
+        #         raise ValidationError(f"产品 {pid} 的数量必须 > 0")
+        #     grouped[pid] += q
+
+        # 2) 聚合数量，同时保留批次/生产日期/有效期维度生成扫描快照。
+        # grouped = defaultdict(Decimal)
+        # snapshot_grouped = defaultdict(Decimal)
+        # for it in items:
+        #     pid = int(it["product_id"])
+        #     q = Decimal(str(it["qty"]))
+        #     if q <= 0:
+        #         raise ValidationError(f"产品 {pid} 的数量必须 > 0")
+        #     grouped[pid] += q
+        #     snapshot_grouped[
+        #         (
+        #             pid,
+        #             (it.get("lot_no") or "").strip().upper(),
+        #             it.get("mfg_date"),
+        #             it.get("exp_date"),
+        #         )
+        #     ] += q
+
+        # # 3) 行 + 快照（快照会直接生成 TaskScanLog）
+        # for pid, total_qty in grouped.items():
+        #     line = (WmsTaskLine.objects
+        #             .filter(task_id=task.id, product_id=pid)
+        #             .order_by("id").first())
+        #     if not line:
+        #         line = WmsTaskLine.objects.create(
+        #             task_id=task.id,
+        #             product_id=pid,
+        #             status=WmsTaskLine.Status.RELEASED,
+        #             qty_plan=total_qty,   # 可选：计划=本次合计，便于对账
+        #         )
+        #
+        #     p = Product.objects.only("id").get(id=pid)
+        #     snap_items = [{
+        #         "product": p,                 # 关键：用 product 实例
+        #         "qty_ok": total_qty,          # 关键：你的函数要的是 qty_ok
+        #         "location": location,
+        #         # 可选：批次/效期/库位等： "lot_no": "...", "expiry_date": date(...)
+        #     }]
+        #     save_receiving_snapshot(
+        #         task_line_id=line.id,
+        #         items=snap_items,
+        #         operator=request.user,
+        #         source="PDA",
+        #     )
+        # task.status = WmsTask.Status.COMPLETED
+        # task.review_status = WmsTask.ReviewStatus.APPROVED
+        # task.posting_status = WmsTask.PostingStatus.PENDING
+        #
+        # task.save(update_fields=["status", "review_status", "posting_status"])
+        #
+        # task.refresh_from_db()
+        # ctx, ctx_text = build_log_payload(task=task, user=request.user, owner=owner, warehouse=wh)
+        # logger.debug(
+        #     "task after save in DB: id=%s status=%s review_status=%s posting_status=%s",
+        #     task.id,
+        #     task.status,
+        #     task.review_status,
+        #     task.posting_status,
+        # )
+
+
+        # 2) 聚合数量，同时保留批次/生产日期/有效期维度生成扫描快照。
         grouped = defaultdict(Decimal)
+        snapshot_grouped = defaultdict(Decimal)
+        received_items = []
         for it in items:
             pid = int(it["product_id"])
             q = Decimal(str(it["qty"]))
             if q <= 0:
                 raise ValidationError(f"产品 {pid} 的数量必须 > 0")
+            lot_no = (it.get("lot_no") or "").strip().upper()
+            mfg_date = it.get("mfg_date")
+            exp_date = it.get("exp_date")
             grouped[pid] += q
+            snapshot_grouped[(pid, lot_no, mfg_date, exp_date)] += q
+            received_items.append({
+                "product_id": pid,
+                "qty": str(q),
+                "lot_no": lot_no,
+                "mfg_date": str(mfg_date) if mfg_date else None,
+                "exp_date": str(exp_date) if exp_date else None,
+            })
+
+        logger.info(
+            "inbound.receive_without_order.normalized_items owner_id=%s warehouse_id=%s items=%s",
+            owner_id,
+            wh.id,
+            received_items,
+        )
+
+        ctx, ctx_text = build_log_payload(task=task, user=request.user, owner=owner, warehouse=wh)
 
         # 3) 行 + 快照（快照会直接生成 TaskScanLog）
         for pid, total_qty in grouped.items():
@@ -101,18 +194,50 @@ class ReceiveGoodsWithoutOrder(APIView):
                 )
 
             p = Product.objects.only("id").get(id=pid)
-            snap_items = [{
-                "product": p,                 # 关键：用 product 实例
-                "qty_ok": total_qty,          # 关键：你的函数要的是 qty_ok
-                "location": location,
-                # 可选：批次/效期/库位等： "lot_no": "...", "expiry_date": date(...)
-            }]
+            snap_items = []
+            for (item_pid, lot_no, mfg_date, exp_date), item_qty in snapshot_grouped.items():
+                if item_pid != pid:
+                    continue
+                snap_items.append({
+                    "product": p,                 # 关键：用 product 实例
+                    "qty_ok": item_qty,           # 关键：你的函数要的是 qty_ok
+                    "location": location,
+                    "lot_no": lot_no,
+                    "mfg_date": mfg_date,
+                    "exp_date": exp_date,
+                })
             save_receiving_snapshot(
                 task_line_id=line.id,
                 items=snap_items,
                 operator=request.user,
                 source="PDA",
             )
+
+            scan_mfg_backfilled = 0
+            for snap in snap_items:
+                mfg_date = snap.get("mfg_date")
+                if not mfg_date:
+                    continue
+                scan_mfg_backfilled += TaskScanLog.objects.filter(
+                    task_id=task.id,
+                    task_line_id=line.id,
+                    product_id=pid,
+                    lot_no=(snap.get("lot_no") or None),
+                    exp_date=snap.get("exp_date"),
+                    mfg_date__isnull=True,
+                    posted_at__isnull=True,
+                ).update(mfg_date=mfg_date)
+
+            if scan_mfg_backfilled:
+                logger.info(
+                    "inbound.receive_without_order.scan_mfg_backfilled %s line_id=%s rows=%s",
+                    ctx_text,
+                    line.id,
+                    scan_mfg_backfilled,
+                    extra=ctx,
+                )
+
+
         task.status = WmsTask.Status.COMPLETED
         task.review_status = WmsTask.ReviewStatus.APPROVED
         task.posting_status = WmsTask.PostingStatus.PENDING
@@ -128,6 +253,7 @@ class ReceiveGoodsWithoutOrder(APIView):
             task.review_status,
             task.posting_status,
         )
+
 
         # 4) 过账
         logger.info(
