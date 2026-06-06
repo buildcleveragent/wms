@@ -5,6 +5,7 @@
 		{"path": "pages/inbound/selectsupplier","style": {"navigationBarTitleText": "无订单入库"}},
 		{"path": "pages/products/search","style": {"navigationBarTitleText": "录入产品"}},
 		{"path": "pages/orders/cart","style": {"navigationBarTitleText": "入库单"}},
+		{"path": "pages/pos/index","style": {"navigationBarTitleText": "POS收银"}},
 		{"path": "pages/index/index","style": {"navigationBarTitleText": "金桥融通仓库作业平台"}},
 		{"path": "pages/sample/ext-module-device-scan","style": {"navigationBarTitleText": "Device Scan Sdk module"}},
 		{"path": "pages/picking/task_list", "style": { "navigationBarTitleText": "拣货任务列表" } },

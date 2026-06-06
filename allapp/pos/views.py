@@ -24,8 +24,6 @@ class PosProductListApi(generics.ListAPIView):
 
     def _scope_error(self):
         user = self.request.user
-        if not getattr(user, "owner_id", None):
-            return "当前用户未绑定货主(owner)，无法查询 POS 商品。"
         if not getattr(user, "warehouse_id", None):
             return "当前用户未绑定仓库(warehouse)，无法查询 POS 商品。"
         return ""
@@ -40,13 +38,14 @@ class PosProductListApi(generics.ListAPIView):
         user = self.request.user
         owner_id = getattr(user, "owner_id", None)
         warehouse_id = getattr(user, "warehouse_id", None)
-        if not owner_id or not warehouse_id:
+        if not warehouse_id:
             return Product.objects.none()
 
         queryset = Product.objects.filter(
-            owner_id=owner_id,
             is_active=True,
         ).select_related("base_uom")
+        if owner_id:
+            queryset = queryset.filter(owner_id=owner_id)
         search = (self.request.query_params.get("search") or "").strip()
         barcode = (self.request.query_params.get("barcode") or "").strip()
 

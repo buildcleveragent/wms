@@ -86,6 +86,22 @@ class PosApiTests(TestCase):
         self.assertEqual(row["unit_options"][0]["kind"], "base")
         self.assertEqual(row["unit_options"][1]["kind"], "package")
 
+    def test_product_lookup_does_not_require_user_owner(self):
+        no_owner_user = get_user_model().objects.create_user(
+            username="pos-no-owner",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        self.client.force_authenticate(no_owner_user)
+
+        response = self.client.get("/api/pos/products/", {"barcode": "POS-CTN-BAR"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        row = response.data["results"][0]
+        self.assertEqual(row["id"], self.product.id)
+        self.assertEqual(Decimal(str(row["available_qty"])), Decimal("10.0000"))
+
     def test_checkout_creates_submitted_sales_outbound_order(self):
         response = self.client.post(
             "/api/pos/checkout/",
