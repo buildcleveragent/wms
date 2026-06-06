@@ -10,10 +10,11 @@
 
     <view class="section">
       <view class="section-head">
-        <text class="section-title">客户</text>
+        <text class="section-title">客户（可选）</text>
         <text class="selected-text" v-if="selectedCustomer">
           {{ selectedCustomer.name || selectedCustomer.code || selectedCustomer.id }}
         </text>
+        <text class="selected-text" v-else>未选客户按散客结账</text>
       </view>
       <view class="search-row">
         <input
@@ -98,28 +99,43 @@
         </view>
 
         <view class="cart-controls">
-          <picker
-            class="unit-picker"
-            mode="selector"
-            :range="item.unit_labels"
-            :value="item.unit_index"
-            @change="changeUnit(index, $event)"
-          >
-            <view class="picker-value">{{ item.unit_labels[item.unit_index] }}</view>
-          </picker>
-          <input
-            class="small-input"
-            type="digit"
-            v-model="item.qty"
-            @blur="normalizeLine(index)"
-          />
-          <input
-            class="price-input"
-            type="digit"
-            v-model="item.price"
-            @blur="normalizeLine(index)"
-          />
-          <button class="danger-btn remove-btn" @click="removeLine(index)">删</button>
+          <view class="control-field unit-field">
+            <text class="field-label">单位</text>
+            <picker
+              class="unit-picker"
+              mode="selector"
+              :range="item.unit_labels"
+              :value="item.unit_index"
+              @change="changeUnit(index, $event)"
+            >
+              <view class="picker-value">{{ item.unit_labels[item.unit_index] }}</view>
+            </picker>
+          </view>
+          <view class="control-field qty-field">
+            <text class="field-label">数量</text>
+            <input
+              class="small-input"
+              type="digit"
+              v-model="item.qty"
+              @blur="normalizeLine(index)"
+            />
+          </view>
+          <view class="control-field price-field">
+            <text class="field-label">单价</text>
+            <view class="price-wrap">
+              <text class="yuan">¥</text>
+              <input
+                class="price-input"
+                type="digit"
+                v-model="item.price"
+                @blur="normalizeLine(index)"
+              />
+            </view>
+          </view>
+          <view class="control-field action-field">
+            <text class="field-label">操作</text>
+            <button class="danger-btn remove-btn" @click="removeLine(index)">删</button>
+          </view>
         </view>
       </view>
     </view>
@@ -174,7 +190,7 @@ const {
   unRegisterBroadcast,
 } = useBarcodeScanner()
 
-const canCheckout = computed(() => selectedCustomer.value && cartItems.value.length > 0)
+const canCheckout = computed(() => cartItems.value.length > 0)
 const totalBaseQty = computed(() =>
   cartItems.value.reduce((sum, item) => sum + Number(lineBaseQty(item) || 0), 0)
 )
@@ -247,21 +263,10 @@ function selectCustomer(customer) {
 async function handleScan(code) {
   if (!code) return
   productKeyword.value = code
-  await lookupByBarcode(code)
-}
-
-async function lookupByBarcode(barcode) {
   productLoading.value = true
   productSearched.value = true
   try {
-    const res = await api.posProducts({ barcode, page: 1, page_size: 20 })
-    const rows = normalizePage(res)
-    products.value = rows
-    if (rows.length === 1) {
-      addToCart(rows[0])
-    } else if (!rows.length) {
-      uni.showToast({ title: '未找到商品', icon: 'none' })
-    }
+    await lookupByBarcode(code)
   } catch (e) {
     console.error('lookup product failed', e)
   } finally {
@@ -269,12 +274,39 @@ async function lookupByBarcode(barcode) {
   }
 }
 
+async function fetchProductsByBarcode(barcode) {
+  const res = await api.posProducts({ barcode, page: 1, page_size: 20 })
+  return normalizePage(res)
+}
+
+async function lookupByBarcode(barcode, options = {}) {
+  const showNotFound = options.showNotFound !== false
+  const rows = await fetchProductsByBarcode(barcode)
+  products.value = rows
+  if (rows.length === 1) {
+    addToCart(rows[0])
+    products.value = []
+    return rows
+  }
+  if (showNotFound && !rows.length) {
+    uni.showToast({ title: '未找到商品', icon: 'none' })
+  }
+  return rows
+}
+
 async function searchProducts() {
+  const keyword = productKeyword.value || ''
   productLoading.value = true
   productSearched.value = true
   try {
-    const res = await api.posProducts({ search: productKeyword.value || '', page: 1, page_size: 20 })
+    const exactRows = keyword ? await lookupByBarcode(keyword, { showNotFound: false }) : []
+    if (exactRows.length) return
+
+    const res = await api.posProducts({ search: keyword, page: 1, page_size: 20 })
     products.value = normalizePage(res)
+    if (!products.value.length) {
+      uni.showToast({ title: '未找到商品', icon: 'none' })
+    }
   } catch (e) {
     console.error('search products failed', e)
   } finally {
@@ -378,10 +410,6 @@ function resetSale() {
 }
 
 function validateBeforeCheckout() {
-  if (!selectedCustomer.value) {
-    uni.showToast({ title: '请选择客户', icon: 'none' })
-    return false
-  }
   if (!cartItems.value.length) {
     uni.showToast({ title: '购物车不能为空', icon: 'none' })
     return false
@@ -399,7 +427,6 @@ async function checkout() {
   submitting.value = true
   try {
     const payload = {
-      customer_id: selectedCustomer.value.id,
       src_bill_no: srcBillNo.value || '',
       remark: remark.value || '',
       items: cartItems.value.map((item) => ({
@@ -407,6 +434,9 @@ async function checkout() {
         qty: Number(lineBaseQty(item)).toFixed(3),
         price: Number(item.price || 0).toFixed(4),
       })),
+    }
+    if (selectedCustomer.value) {
+      payload.customer_id = selectedCustomer.value.id
     }
     const res = await api.posCheckout(payload)
     uni.showToast({ title: `结账成功：${res.order_no || res.id || ''}`, icon: 'none' })
@@ -621,10 +651,39 @@ button {
 .cart-controls {
   width: 100%;
   margin-top: 14rpx;
+  align-items: flex-end;
+}
+
+.control-field {
+  margin-right: 10rpx;
+}
+
+.field-label {
+  display: block;
+  color: #667085;
+  font-size: 22rpx;
+  margin-bottom: 8rpx;
+}
+
+.unit-field {
+  width: 180rpx;
+}
+
+.qty-field {
+  width: 126rpx;
+}
+
+.price-field {
+  width: 174rpx;
+}
+
+.action-field {
+  width: 78rpx;
+  margin-right: 0;
 }
 
 .unit-picker {
-  width: 170rpx;
+  width: 100%;
 }
 
 .picker-value {
@@ -639,18 +698,35 @@ button {
 }
 
 .small-input {
-  width: 132rpx;
-  margin-left: 10rpx;
+  width: 100%;
+}
+
+.price-wrap {
+  height: 74rpx;
+  background: #f8fafc;
+  border: 1rpx solid #d7dde6;
+  border-radius: 8rpx;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.yuan {
+  color: #667085;
+  font-size: 26rpx;
+  padding-left: 14rpx;
 }
 
 .price-input {
-  width: 156rpx;
-  margin-left: 10rpx;
+  flex: 1;
+  height: 70rpx;
+  border: 0;
+  background: transparent;
+  padding-left: 8rpx;
 }
 
 .remove-btn {
-  width: 80rpx;
-  margin-left: 10rpx;
+  width: 78rpx;
 }
 
 .submit-panel {
