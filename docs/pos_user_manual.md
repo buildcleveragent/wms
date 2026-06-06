@@ -1,25 +1,29 @@
-# POS 第一阶段使用手册
+# POS 使用手册
 
-本文面向仓库管理员、门店收银员和实施人员，说明当前系统已实现的 POS 第一阶段能力。示例地址使用本地后端 `http://127.0.0.1:8000`。
+本文面向仓库管理员、门店收银员和实施人员，说明当前系统已实现的门店 POS 能力。示例地址使用本地后端 `http://127.0.0.1:8000`。
 
 ## 1. 功能概述
 
-当前 POS 第一阶段可以完成：
+当前 POS 可以完成：
 
 - 扫码或搜索商品。
 - 查看商品建议售价、最低价、最高折扣限制和当前仓库可售库存。
-- 提交收银结账请求。
-- 结账成功后按商品货主创建一张或多张销售出库单 `OutboundOrder`，类型为 `SALES`，提交状态为 `SUBMITTED`。
+- 记录收款方式、实收金额和找零。
+- 提交收银结账请求并生成 POS 销售单。
+- 结账成功后按商品货主创建一张或多张销售出库单 `OutboundOrder`。
+- 按 FEFO 自动扣减当前仓库库存，写入 `InventoryTransaction` 并刷新 `InventorySummary`。
+- 返回小票数据用于前端展示或后续打印。
+- 支持整单撤销，回补库存并撤销收款状态。
 - PDA 前端提供 `POS收银` 页面入口。
 
 当前暂不包含：
 
-- 现金、微信、支付宝等支付流水记录。
-- 小票打印模板和打印动作。
-- 退款、退货、换货流程。
-- 自动拣货、自动过账、自动扣减库存。
+- 微信、支付宝、银行卡网关联机支付；当前为手工确认已收款。
+- 物理小票打印机驱动和打印队列。
+- 部分退款、部分退货、换货流程。
+- 普通仓库出库的拣货、复核、打包流程。
 
-因此，当前“结账”只代表系统创建销售出库单，不代表已经完成支付、打印或库存扣减。后续仍需按现有出库流程审批、拣货、复核、过账。
+因此，当前 POS “结账”代表门店即时销售完成：系统已记录收款、创建销售出库单、扣减库存并生成库存流水；但不代表已经完成第三方支付通道确认或物理打印。
 
 ## 2. 使用前准备
 
@@ -34,7 +38,7 @@
   - `price`：建议售价。
   - `min_price`：最低成交价，可为空。
   - `max_discount`：最高折扣百分比，可为空。
-- 当前仓库已有可售库存，系统按 `InventoryDetail.available_qty` 汇总。
+- 当前仓库已有可售库存，系统按 `InventoryDetail.available_qty` 汇总并在结账时扣减。
 
 如果用户未绑定仓库，商品查询和结账都会失败。用户未绑定货主也可以搜索商品和提交结账。
 
@@ -204,7 +208,12 @@ POST /api/pos/checkout/
 
 - `customer_id`：可选，客户 ID；不传时按每个商品货主使用散客客户 `CASH`。
 - `src_bill_no`：可选，POS 小票号或外部单号；同一货主下不能重复。
+- `idempotency_key`：建议填写，重试同一笔销售时避免重复建单和重复扣库存。
 - `remark`：可选，备注。
+- `payment`：必填，收款信息。
+- `payment.method`：必填，支持 `CASH`、`WECHAT`、`ALIPAY`、`BANK_CARD`、`OTHER`。
+- `payment.amount_received`：现金必填且必须大于或等于应收金额；非现金可不传，传入时必须等于应收金额。
+- `payment.reference_no`：可选，支付流水号或备注。
 - `items`：必填，购物车明细。
 - `items[].product_id`：必填，商品 ID。
 - `items[].qty`：必填，基本单位数量，必须大于 `0`。
@@ -219,7 +228,13 @@ curl -X POST http://127.0.0.1:8000/api/pos/checkout/ \
   -d '{
     "customer_id": 2001,
     "src_bill_no": "POS-RECEIPT-001",
+    "idempotency_key": "POS-RECEIPT-001",
     "remark": "门店收银",
+    "payment": {
+      "method": "CASH",
+      "amount_received": "20.00",
+      "reference_no": ""
+    },
     "items": [
       {
         "product_id": 101,
@@ -230,27 +245,42 @@ curl -X POST http://127.0.0.1:8000/api/pos/checkout/ \
   }'
 ```
 
-成功后返回创建的销售出库单列表，HTTP 状态码为 `201`。返回结构为：
+成功后返回 POS 销售单、收款、小票数据和销售出库单列表，HTTP 状态码为 `201`。返回结构为：
 
 ```json
 {
+  "sale": {},
+  "payment": {},
   "orders": [],
   "order_count": 1,
-  "src_bill_no": "POS-RECEIPT-001"
+  "src_bill_no": "POS-RECEIPT-001",
+  "receipt": {}
 }
 ```
 
 业务结果为：
 
+- 创建一张 `PosSale`，代表本次门店销售。
+- 创建一张 `PosPayment`，代表本次总收款。
 - 按商品货主拆分创建 `OutboundOrder`；一笔 POS 结账可能生成一张或多张销售出库单。
 - `outbound_type` 为 `SALES`。
 - `delivery_method` 为 `PICKUP`。
 - `submit_status` 为 `SUBMITTED`。
+- `approval_status` 为 `WHS_APPROVED`，订单按 POS 即时销售关闭。
 - 每个购物车条目创建一条 `OutboundOrderLine`，写入 `base_qty` 和 `base_price`。
-
-注意：该接口不会自动创建支付记录，不会自动打印小票，也不会自动扣减库存。
+- 按 FEFO 自动扣减库存，写入 `InventoryTransaction(ISSUE)`。
 
 如果未传 `customer_id`，系统会按每个商品货主自动使用 `code=CASH` 的散客客户；如果该客户不存在，会自动创建 `CASH / 散客`。
+
+### 6.1 查询小票与撤销
+
+```http
+GET /api/pos/sales/{id}/
+GET /api/pos/sales/{id}/receipt/
+POST /api/pos/sales/{id}/void/
+```
+
+`void` 为整单撤销：系统会将 POS 销售单和收款标记为已撤销，销售出库单标记为取消，并按原库存流水写入反向 `InventoryTransaction(RECEIVE)` 回补库存。
 
 ## 7. 结账校验规则
 
@@ -258,6 +288,8 @@ curl -X POST http://127.0.0.1:8000/api/pos/checkout/ \
 
 - 当前用户必须绑定仓库 `warehouse`。
 - `items` 不能为空。
+- `payment.method` 必须有效。
+- 现金实收金额不能小于应收金额；非现金实收金额如传入，必须等于应收金额。
 - `customer_id` 如果传入，对应客户必须存在；它只应用到客户货主一致的销售出库单，其他货主使用散客客户。
 - `src_bill_no` 如果传入，同一货主下不能重复。
 - 每个 `product_id` 对应商品必须存在且启用。
@@ -336,6 +368,16 @@ curl -X POST http://127.0.0.1:8000/api/pos/checkout/ \
 
 处理：减少销售数量，或先完成入库、库存调整、释放占用等库存处理。
 
+### 实收金额不足
+
+现象：
+
+```json
+{"payment": ["现金实收金额不能小于应收金额。"]}
+```
+
+处理：重新输入实收金额，或选择正确支付方式。
+
 ### 小票号或外部单号重复
 
 现象：
@@ -362,13 +404,18 @@ PDA 首页已提供 `POS收银` 入口，页面路径为：
 - 将商品加入购物车。
 - 选择销售单位，并按单位换算为基本数量提交。
 - 修改销售数量和基本单位成交价。
-- 提交结账，按商品货主生成一张或多张销售出库单。
+- 选择支付方式、输入实收金额并显示找零。
+- 提交结账，生成 POS 销售单、收款记录、销售出库单和库存流水。
+- 展示最近一次小票摘要。
 
 `wmspda/utils/request.js` 中对应请求方法为：
 
 ```js
 api.posProducts(params)
 api.posCheckout(payload)
+api.posSaleDetail(id)
+api.posSaleReceipt(id)
+api.posSaleVoid(id, payload)
 ```
 
 示例：
@@ -383,7 +430,13 @@ await api.posProducts({
 await api.posCheckout({
   customer_id: 2001,
   src_bill_no: 'POS-RECEIPT-001',
+  idempotency_key: 'POS-RECEIPT-001',
   remark: '门店收银',
+  payment: {
+    method: 'CASH',
+    amount_received: '20.00',
+    reference_no: '',
+  },
   items: [
     {
       product_id: 101,
@@ -394,7 +447,7 @@ await api.posCheckout({
 })
 ```
 
-注意：当前 POS 页面只完成第一阶段收银建单能力，不包含支付流水、小票打印、退款退货和自动扣库存。
+注意：当前 POS 页面已完成门店即时销售闭环；物理打印、部分退款退货和第三方支付联机仍需后续扩展。
 
 ## 10. 验证方式
 
@@ -404,5 +457,5 @@ await api.posCheckout({
 
 ```bash
 python3 manage.py check
-pytest -q allapp/pos/tests.py --reuse-db
+pytest -q allapp/pos/tests.py --create-db
 ```

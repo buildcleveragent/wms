@@ -140,6 +140,24 @@
       </view>
     </view>
 
+    <view class="section receipt-section" v-if="lastReceipt">
+      <view class="section-head">
+        <text class="section-title">最近小票</text>
+        <text class="selected-text">{{ lastReceipt.sale_no || lastReceipt.src_bill_no }}</text>
+      </view>
+      <view class="receipt-row">
+        <text>应收 {{ money(lastReceipt.total_amount) }}</text>
+        <text>
+          {{ paymentMethodName(lastReceipt.payment?.method) }}
+          实收 {{ money(lastReceipt.payment?.amount_received) }}
+        </text>
+      </view>
+      <view class="receipt-row">
+        <text>找零 {{ money(lastReceipt.payment?.change_amount) }}</text>
+        <text>出库单 {{ (lastReceipt.orders || []).length }} 张</text>
+      </view>
+    </view>
+
     <view class="submit-panel">
       <view class="bill-row">
         <text class="bill-label">小票号</text>
@@ -149,10 +167,35 @@
         <text class="bill-label">备注</text>
         <input class="bill-input" v-model.trim="remark" placeholder="可选" />
       </view>
+      <view class="bill-row">
+        <text class="bill-label">支付</text>
+        <picker
+          class="payment-picker"
+          mode="selector"
+          :range="paymentMethodLabels"
+          :value="paymentMethodIndex"
+          @change="changePaymentMethod"
+        >
+          <view class="payment-value">{{ selectedPaymentMethod.label }}</view>
+        </picker>
+        <input
+          class="payment-input"
+          type="digit"
+          v-model="amountReceived"
+          :disabled="paymentMethod !== 'CASH'"
+          placeholder="实收"
+        />
+      </view>
+      <view class="bill-row">
+        <text class="bill-label">参考号</text>
+        <input class="bill-input" v-model.trim="paymentReferenceNo" placeholder="支付流水号/可选" />
+      </view>
       <view class="summary-row">
         <view>
           <text class="summary-title">{{ money(totalAmount) }}</text>
-          <text class="summary-sub">合计 {{ qtyText(totalBaseQty) }} 基本数量</text>
+          <text class="summary-sub">
+            合计 {{ qtyText(totalBaseQty) }} / 找零 {{ money(changeAmount) }}
+          </text>
         </view>
         <button class="submit-btn" :disabled="!canCheckout || submitting" @click="checkout">
           结账
@@ -163,7 +206,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '@/utils/request'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
 
@@ -181,6 +224,19 @@ const cartItems = ref([])
 const srcBillNo = ref(makeReceiptNo())
 const remark = ref('')
 const submitting = ref(false)
+const idempotencyKey = ref(makeIdempotencyKey())
+const lastReceipt = ref(null)
+
+const paymentMethods = [
+  { label: '现金', value: 'CASH' },
+  { label: '微信', value: 'WECHAT' },
+  { label: '支付宝', value: 'ALIPAY' },
+  { label: '银行卡', value: 'BANK_CARD' },
+  { label: '其他', value: 'OTHER' },
+]
+const paymentMethod = ref('CASH')
+const amountReceived = ref('')
+const paymentReferenceNo = ref('')
 
 const {
   lastScan,
@@ -190,13 +246,29 @@ const {
   unRegisterBroadcast,
 } = useBarcodeScanner()
 
-const canCheckout = computed(() => cartItems.value.length > 0)
 const totalBaseQty = computed(() =>
   cartItems.value.reduce((sum, item) => sum + Number(lineBaseQty(item) || 0), 0)
 )
 const totalAmount = computed(() =>
   cartItems.value.reduce((sum, item) => sum + Number(lineBaseQty(item) || 0) * Number(item.price || 0), 0)
 )
+const paymentMethodLabels = computed(() => paymentMethods.map((method) => method.label))
+const paymentMethodIndex = computed(() =>
+  Math.max(0, paymentMethods.findIndex((method) => method.value === paymentMethod.value))
+)
+const selectedPaymentMethod = computed(() => paymentMethods[paymentMethodIndex.value] || paymentMethods[0])
+const receivedAmount = computed(() =>
+  paymentMethod.value === 'CASH' ? Number(amountReceived.value || 0) : Number(totalAmount.value || 0)
+)
+const changeAmount = computed(() =>
+  paymentMethod.value === 'CASH' ? Math.max(receivedAmount.value - totalAmount.value, 0) : 0
+)
+const paymentReady = computed(() => {
+  if (totalAmount.value <= 0) return false
+  if (paymentMethod.value === 'CASH') return receivedAmount.value >= totalAmount.value
+  return true
+})
+const canCheckout = computed(() => cartItems.value.length > 0 && paymentReady.value)
 
 onMounted(() => {
   setScanCallback(handleScan)
@@ -205,6 +277,12 @@ onMounted(() => {
 
 onUnmounted(() => {
   unRegisterBroadcast()
+})
+
+watch(totalAmount, (amount) => {
+  if (paymentMethod.value === 'CASH' && amount > 0 && Number(amountReceived.value || 0) < amount) {
+    amountReceived.value = amount.toFixed(2)
+  }
 })
 
 function makeReceiptNo() {
@@ -221,6 +299,10 @@ function makeReceiptNo() {
   ].join('')
 }
 
+function makeIdempotencyKey() {
+  return `${makeReceiptNo()}-${Math.random().toString(16).slice(2, 10)}`
+}
+
 function normalizePage(data) {
   if (Array.isArray(data)) return data
   return data && Array.isArray(data.results) ? data.results : []
@@ -229,6 +311,10 @@ function normalizePage(data) {
 function money(value) {
   const n = Number(value || 0)
   return `¥${n.toFixed(2)}`
+}
+
+function paymentMethodName(value) {
+  return paymentMethods.find((method) => method.value === value)?.label || value || '-'
 }
 
 function qtyText(value) {
@@ -397,7 +483,15 @@ function removeLine(index) {
   cartItems.value.splice(index, 1)
 }
 
-function resetSale() {
+function changePaymentMethod(event) {
+  const index = Number(event.detail.value || 0)
+  paymentMethod.value = paymentMethods[index]?.value || 'CASH'
+  if (paymentMethod.value !== 'CASH') {
+    amountReceived.value = Number(totalAmount.value || 0).toFixed(2)
+  }
+}
+
+function resetSale(options = {}) {
   selectedCustomer.value = null
   customers.value = []
   customerKeyword.value = ''
@@ -406,7 +500,14 @@ function resetSale() {
   productSearched.value = false
   cartItems.value = []
   srcBillNo.value = makeReceiptNo()
+  idempotencyKey.value = makeIdempotencyKey()
   remark.value = ''
+  paymentMethod.value = 'CASH'
+  amountReceived.value = ''
+  paymentReferenceNo.value = ''
+  if (!options.keepReceipt) {
+    lastReceipt.value = null
+  }
 }
 
 function validateBeforeCheckout() {
@@ -419,6 +520,10 @@ function validateBeforeCheckout() {
     uni.showToast({ title: `${overStock.code} 可售库存不足`, icon: 'none' })
     return false
   }
+  if (!paymentReady.value) {
+    uni.showToast({ title: '实收金额不足', icon: 'none' })
+    return false
+  }
   return true
 }
 
@@ -428,7 +533,13 @@ async function checkout() {
   try {
     const payload = {
       src_bill_no: srcBillNo.value || '',
+      idempotency_key: idempotencyKey.value || '',
       remark: remark.value || '',
+      payment: {
+        method: paymentMethod.value,
+        amount_received: Number(receivedAmount.value || 0).toFixed(2),
+        reference_no: paymentReferenceNo.value || '',
+      },
       items: cartItems.value.map((item) => ({
         product_id: item.product_id,
         qty: Number(lineBaseQty(item)).toFixed(3),
@@ -440,12 +551,13 @@ async function checkout() {
     }
     const res = await api.posCheckout(payload)
     const orders = Array.isArray(res.orders) ? res.orders : []
+    lastReceipt.value = res.receipt || null
     const msg =
       orders.length > 1
         ? `结账成功：已生成${orders.length}张销售出库单`
-        : `结账成功：${orders[0]?.order_no || orders[0]?.id || res.order_no || res.id || ''}`
+        : `结账成功：${res.sale?.sale_no || orders[0]?.order_no || orders[0]?.id || ''}`
     uni.showToast({ title: msg, icon: 'none' })
-    resetSale()
+    resetSale({ keepReceipt: true })
   } catch (e) {
     console.error('pos checkout failed', e)
   } finally {
@@ -459,7 +571,7 @@ async function checkout() {
   min-height: 100vh;
   background: #f4f6f8;
   padding: 18rpx;
-  padding-bottom: 260rpx;
+  padding-bottom: 360rpx;
   box-sizing: border-box;
 }
 
@@ -524,6 +636,7 @@ async function checkout() {
 
 .input,
 .bill-input,
+.payment-input,
 .small-input,
 .price-input {
   height: 74rpx;
@@ -754,6 +867,37 @@ button {
   width: 104rpx;
   color: #475467;
   font-size: 25rpx;
+}
+
+.payment-picker {
+  width: 164rpx;
+  margin-right: 10rpx;
+}
+
+.payment-value {
+  height: 74rpx;
+  line-height: 74rpx;
+  border: 1rpx solid #d7dde6;
+  border-radius: 8rpx;
+  background: #fff;
+  color: #172033;
+  font-size: 26rpx;
+  text-align: center;
+}
+
+.payment-input {
+  flex: 1;
+}
+
+.receipt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #475467;
+  font-size: 24rpx;
+  border-top: 1rpx solid #edf0f4;
+  padding-top: 14rpx;
+  margin-top: 14rpx;
 }
 
 .summary-title {

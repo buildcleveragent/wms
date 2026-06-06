@@ -298,6 +298,23 @@ export const api = {
       data: payload,
     }),
 
+  posSaleDetail: (id) =>
+    request({
+      url: `/api/pos/sales/${id}/`,
+    }),
+
+  posSaleReceipt: (id) =>
+    request({
+      url: `/api/pos/sales/${id}/receipt/`,
+    }),
+
+  posSaleVoid: (id, payload = {}) =>
+    request({
+      url: `/api/pos/sales/${id}/void/`,
+      method: 'POST',
+      data: payload,
+    }),
+
   // PDA 拣货
   pickTasks: (params = {}) =>
     request({

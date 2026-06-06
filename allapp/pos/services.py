@@ -1,0 +1,527 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from decimal import Decimal, ROUND_HALF_UP
+from uuid import uuid4
+
+from django.apps import apps
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.db.models import Sum
+from django.utils import timezone
+
+from allapp.core.choices import InvTxType
+from allapp.inventory.models import InventoryDetail, InventorySummary, InventoryTransaction
+from allapp.outbound.enums import PricingStatus
+from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+from allapp.products.models import Product
+
+from .models import PosPayment, PosSale, PosSaleLine, PosSaleOrder
+
+
+ZERO = Decimal("0")
+QTY4 = Decimal("0.0001")
+QTY3 = Decimal("0.001")
+MONEY = Decimal("0.01")
+PRICE = Decimal("0.0001")
+
+
+def _decimal(value, default=ZERO):
+    if value in (None, ""):
+        return default
+    return Decimal(str(value))
+
+
+def _q4(value):
+    return _decimal(value).quantize(QTY4, rounding=ROUND_HALF_UP)
+
+
+def _q3(value):
+    return _decimal(value).quantize(QTY3, rounding=ROUND_HALF_UP)
+
+
+def _money(value):
+    return _decimal(value).quantize(MONEY, rounding=ROUND_HALF_UP)
+
+
+def _price(value):
+    return _decimal(value).quantize(PRICE, rounding=ROUND_HALF_UP)
+
+
+def _make_sale_no(now=None):
+    now = now or timezone.now()
+    for _ in range(8):
+        sale_no = f"POS{now:%Y%m%d%H%M%S}{uuid4().hex[:6].upper()}"
+        if not PosSale.objects.filter(sale_no=sale_no).exists():
+            return sale_no
+    raise ValidationError("无法生成 POS 销售单号，请重试。")
+
+
+def _error(field, message):
+    raise ValidationError({field: message})
+
+
+def _cash_customer(owner_id, user):
+    Customer = apps.get_model("baseinfo", "Customer")
+    customer = Customer.objects.filter(owner_id=owner_id, code="CASH").order_by("id").first()
+    if customer:
+        return customer
+    return Customer.objects.create(owner_id=owner_id, code="CASH", name="散客", salesperson=user)
+
+
+def _load_products(items):
+    product_ids = [item["product_id"] for item in items]
+    products = {
+        product.id: product
+        for product in Product.objects.filter(id__in=product_ids, is_active=True).select_related(
+            "owner", "base_uom"
+        )
+    }
+    missing = [product_id for product_id in product_ids if product_id not in products]
+    if missing:
+        _error("items", f"商品不存在或已停用：{missing}")
+    return products
+
+
+def _validate_prices_and_shape(items, products):
+    normalized = []
+    qty_by_product = defaultdict(lambda: ZERO)
+    for raw in items:
+        product = products[raw["product_id"]]
+        qty = _q3(raw["qty"])
+        price = _price(raw["price"])
+        if qty <= 0:
+            _error("items", "商品数量必须大于 0。")
+
+        min_price = getattr(product, "min_price", None)
+        if min_price is not None and price < Decimal(min_price):
+            _error("price", f"{product.code} 成交价不能低于最低价 {min_price}。")
+
+        base_price = getattr(product, "price", None)
+        max_discount = getattr(product, "max_discount", None)
+        if base_price is not None and max_discount is not None:
+            discount_rate = (Decimal("100") - Decimal(max_discount)) / Decimal("100")
+            lowest = (Decimal(base_price) * discount_rate).quantize(PRICE)
+            if price < lowest:
+                _error("price", f"{product.code} 成交价超过最高折扣限制，最低可售 {lowest}。")
+
+        amount = _money(qty * price)
+        qty_by_product[product.id] += qty
+        normalized.append(
+            {
+                "product": product,
+                "qty": qty,
+                "price": price,
+                "amount": amount,
+            }
+        )
+    return normalized, qty_by_product
+
+
+def _available_qty(owner_id, warehouse_id, product_id):
+    result = (
+        InventoryDetail.objects.filter(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            product_id=product_id,
+            is_active=True,
+            available_qty__gt=0,
+        )
+        .aggregate(total=Sum("available_qty"))
+    )
+    return result["total"] or ZERO
+
+
+def _validate_stock(qty_by_product, products, warehouse_id):
+    for product_id, required_qty in qty_by_product.items():
+        product = products[product_id]
+        available = _available_qty(product.owner_id, warehouse_id, product_id)
+        if available < required_qty:
+            _error("items", f"{product.code} 可售库存不足，可售 {available}，需要 {required_qty}。")
+
+
+def _normalize_payment(payment, total_amount):
+    payment = payment or {}
+    method = (payment.get("method") or "").strip().upper()
+    valid_methods = {choice.value for choice in PosPayment.Method}
+    if method not in valid_methods:
+        _error("payment", "请选择有效的支付方式。")
+
+    if method == PosPayment.Method.CASH:
+        received = _money(payment.get("amount_received"))
+        if received < total_amount:
+            _error("payment", "现金实收金额不能小于应收金额。")
+        change = _money(received - total_amount)
+    else:
+        received = _money(payment.get("amount_received", total_amount))
+        if received != total_amount:
+            _error("payment", "非现金支付实收金额必须等于应收金额。")
+        change = ZERO.quantize(MONEY)
+
+    return {
+        "method": method,
+        "amount_due": total_amount,
+        "amount_received": received,
+        "change_amount": change,
+        "reference_no": (payment.get("reference_no") or "").strip(),
+    }
+
+
+def _refresh_summaries(pairs):
+    for owner_id, product_id in {pair for pair in pairs if pair and all(pair)}:
+        aggregates = InventoryDetail.objects.filter(
+            owner_id=owner_id,
+            product_id=product_id,
+            is_active=True,
+        ).aggregate(
+            onhand=Sum("onhand_qty"),
+            allocated=Sum("allocated_qty"),
+            locked=Sum("locked_qty"),
+            damaged=Sum("damaged_qty"),
+        )
+        product = Product.objects.select_related("base_uom").get(pk=product_id)
+        summary = (
+            InventorySummary.objects.select_for_update()
+            .filter(owner_id=owner_id, product_id=product_id, is_active=True)
+            .first()
+        )
+        if summary is None:
+            summary = InventorySummary(owner_id=owner_id, product_id=product_id)
+        summary.base_unit = product.base_uom.code if product.base_uom_id else ""
+        summary.onhand_qty = aggregates["onhand"] or ZERO
+        summary.allocated_qty = aggregates["allocated"] or ZERO
+        summary.locked_qty = aggregates["locked"] or ZERO
+        summary.damaged_qty = aggregates["damaged"] or ZERO
+        summary.available_qty = (
+            summary.onhand_qty
+            - summary.allocated_qty
+            - summary.locked_qty
+            - summary.damaged_qty
+        )
+        summary.save()
+
+
+def _fefo_details(owner_id, warehouse_id, product_id):
+    return (
+        InventoryDetail.objects.select_for_update(skip_locked=True)
+        .filter(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            product_id=product_id,
+            is_active=True,
+            available_qty__gt=0,
+        )
+        .order_by("expiry_date", "-onhand_qty", "id")
+    )
+
+
+def _insert_inventory_tx(*, tx_type, detail, qty_delta, sale_line, sale_no, memo, now):
+    return InventoryTransaction.objects.create(
+        tx_type=tx_type,
+        owner_id=detail.owner_id,
+        product_id=detail.product_id,
+        warehouse_id=detail.warehouse_id,
+        location_id=detail.location_id,
+        subwarehouse_id=detail.subwarehouse_id,
+        zone_type=detail.zone_type,
+        batch_no=detail.batch_no or "",
+        production_date=detail.production_date,
+        expiry_date=detail.expiry_date,
+        serial_no=detail.serial_no or "",
+        qty_delta=_q4(qty_delta),
+        src_model="PosSaleLine",
+        src_id=sale_line.id,
+        src_line_id=detail.id,
+        src_no=sale_no,
+        memo=memo,
+        posted_at=now,
+        posting_batch=sale_no[:40],
+    )
+
+
+def _deduct_stock_for_line(sale_line, warehouse_id, sale_no, now):
+    remaining = _q4(sale_line.qty)
+    touched = set()
+    for detail in _fefo_details(sale_line.owner_id, warehouse_id, sale_line.product_id):
+        if remaining <= 0:
+            break
+        available = _q4(detail.available_qty)
+        if available <= 0:
+            continue
+        take = min(available, remaining)
+        if _q4(detail.onhand_qty) < take:
+            take = min(_q4(detail.onhand_qty), take)
+        if take <= 0:
+            continue
+
+        detail.onhand_qty = _q4(detail.onhand_qty - take)
+        detail.available_qty = _q4(
+            detail.onhand_qty - detail.allocated_qty - detail.locked_qty - detail.damaged_qty
+        )
+        detail.save()
+        _insert_inventory_tx(
+            tx_type=InvTxType.ISSUE,
+            detail=detail,
+            qty_delta=-take,
+            sale_line=sale_line,
+            sale_no=sale_no,
+            memo="POS_SALE",
+            now=now,
+        )
+        touched.add((detail.owner_id, detail.product_id))
+        remaining = _q4(remaining - take)
+
+    if remaining > 0:
+        product = sale_line.product
+        _error("items", f"{product.code} 可售库存不足，缺口 {remaining}。")
+    _refresh_summaries(touched)
+
+
+def _restore_stock_from_sale(sale, user, reason):
+    now = timezone.now()
+    batch_no = f"{sale.sale_no}-VOID"
+    line_ids = list(sale.lines.values_list("id", flat=True))
+    issue_txs = (
+        InventoryTransaction.objects.select_for_update()
+        .filter(src_model="PosSaleLine", src_id__in=line_ids, tx_type=InvTxType.ISSUE)
+        .order_by("id")
+    )
+    touched = set()
+    line_map = {line.id: line for line in sale.lines.select_related("product")}
+    for tx in issue_txs:
+        detail = InventoryDetail.objects.select_for_update().get(pk=tx.src_line_id)
+        qty = _q4(-tx.qty_delta)
+        detail.onhand_qty = _q4(detail.onhand_qty + qty)
+        detail.available_qty = _q4(
+            detail.onhand_qty - detail.allocated_qty - detail.locked_qty - detail.damaged_qty
+        )
+        detail.save()
+        sale_line = line_map[tx.src_id]
+        InventoryTransaction.objects.create(
+            tx_type=InvTxType.RECEIVE,
+            owner_id=detail.owner_id,
+            product_id=detail.product_id,
+            warehouse_id=detail.warehouse_id,
+            location_id=detail.location_id,
+            subwarehouse_id=detail.subwarehouse_id,
+            zone_type=detail.zone_type,
+            batch_no=detail.batch_no or "",
+            production_date=detail.production_date,
+            expiry_date=detail.expiry_date,
+            serial_no=detail.serial_no or "",
+            qty_delta=qty,
+            src_model="PosSaleLine",
+            src_id=sale_line.id,
+            src_line_id=detail.id,
+            src_no=sale.sale_no,
+            memo=(reason or "POS_VOID")[:255],
+            posted_at=now,
+            posting_batch=batch_no[:40],
+        )
+        touched.add((detail.owner_id, detail.product_id))
+    _refresh_summaries(touched)
+
+
+def _receipt_line(line):
+    product = line.product
+    return {
+        "line_no": line.line_no,
+        "product_id": product.id,
+        "code": product.code,
+        "sku": product.sku,
+        "name": product.name,
+        "qty": str(line.qty),
+        "price": str(line.price),
+        "amount": str(line.amount),
+    }
+
+
+def build_receipt(sale):
+    payment = getattr(sale, "payment", None)
+    orders = [
+        link.outbound_order
+        for link in sale.sale_orders.select_related("outbound_order", "owner").order_by("owner_id")
+    ]
+    return {
+        "sale_no": sale.sale_no,
+        "src_bill_no": sale.src_bill_no,
+        "status": sale.status,
+        "warehouse_id": sale.warehouse_id,
+        "cashier": getattr(sale.cashier, "username", "") if sale.cashier_id else "",
+        "total_amount": str(sale.total_amount),
+        "payment": {
+            "method": payment.method if payment else "",
+            "amount_due": str(payment.amount_due) if payment else "0.00",
+            "amount_received": str(payment.amount_received) if payment else "0.00",
+            "change_amount": str(payment.change_amount) if payment else "0.00",
+            "reference_no": payment.reference_no if payment else "",
+            "status": payment.status if payment else "",
+        },
+        "lines": [_receipt_line(line) for line in sale.lines.select_related("product").order_by("line_no")],
+        "orders": [{"id": order.id, "order_no": order.order_no, "owner_id": order.owner_id} for order in orders],
+        "created_at": sale.created_at.isoformat() if sale.created_at else "",
+    }
+
+
+def result_for_sale(sale):
+    sale = (
+        PosSale.objects.select_related("payment", "cashier", "warehouse")
+        .prefetch_related("lines__product", "sale_orders__outbound_order")
+        .get(pk=sale.pk)
+    )
+    orders = [link.outbound_order for link in sale.sale_orders.select_related("outbound_order").order_by("owner_id")]
+    return {"sale": sale, "payment": sale.payment, "orders": orders, "receipt": build_receipt(sale)}
+
+
+@transaction.atomic
+def create_pos_sale(*, user, customer_id=None, src_bill_no="", remark="", items=None, payment=None, idempotency_key=""):
+    warehouse_id = getattr(user, "warehouse_id", None)
+    if not warehouse_id:
+        raise ValidationError("当前用户未绑定仓库(warehouse)，无法收银。")
+    items = items or []
+    if not items:
+        _error("items", "购物车不能为空。")
+
+    idempotency_key = (idempotency_key or "").strip() or None
+    if idempotency_key:
+        existing = PosSale.objects.select_for_update().filter(idempotency_key=idempotency_key).first()
+        if existing:
+            return result_for_sale(existing)
+
+    products = _load_products(items)
+    normalized_items, qty_by_product = _validate_prices_and_shape(items, products)
+    _validate_stock(qty_by_product, products, warehouse_id)
+
+    Customer = apps.get_model("baseinfo", "Customer")
+    selected_customer = None
+    if customer_id:
+        selected_customer = Customer.objects.filter(id=customer_id).first()
+        if not selected_customer:
+            _error("customer_id", "客户不存在。")
+
+    total_amount = _money(sum((item["amount"] for item in normalized_items), ZERO))
+    payment_data = _normalize_payment(payment, total_amount)
+    sale_no = _make_sale_no()
+    receipt_no = (src_bill_no or "").strip() or sale_no
+
+    if PosSale.objects.filter(src_bill_no=receipt_no).exists():
+        _error("src_bill_no", "POS 小票号/外部单号已存在。")
+
+    owner_ids = sorted({item["product"].owner_id for item in normalized_items})
+    duplicate_owner_ids = [
+        owner_id
+        for owner_id in owner_ids
+        if OutboundOrder.objects.filter(owner_id=owner_id, src_bill_no=receipt_no).exists()
+    ]
+    if duplicate_owner_ids:
+        _error("src_bill_no", "POS 小票号/外部单号已存在。")
+
+    customers_by_owner = {}
+    for owner_id in owner_ids:
+        if selected_customer and selected_customer.owner_id == owner_id:
+            customers_by_owner[owner_id] = selected_customer
+        else:
+            customers_by_owner[owner_id] = _cash_customer(owner_id, user)
+
+    sale = PosSale.objects.create(
+        sale_no=sale_no,
+        src_bill_no=receipt_no,
+        idempotency_key=idempotency_key,
+        warehouse_id=warehouse_id,
+        cashier=user if user and user.is_authenticated else None,
+        selected_customer=selected_customer,
+        total_amount=total_amount,
+        remark=(remark or "").strip(),
+    )
+
+    items_by_owner = defaultdict(list)
+    for item in normalized_items:
+        items_by_owner[item["product"].owner_id].append(item)
+
+    orders = []
+    owner_amounts = {
+        owner_id: _money(sum((item["amount"] for item in owner_items), ZERO))
+        for owner_id, owner_items in items_by_owner.items()
+    }
+    for owner_id in owner_ids:
+        order = OutboundOrder.objects.create(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            customer=customers_by_owner[owner_id],
+            outbound_type="SALES",
+            delivery_method="PICKUP",
+            submit_status="SUBMITTED",
+            approval_status="WHS_APPROVED",
+            src_bill_no=receipt_no,
+            memo=(remark or "").strip(),
+            is_closed=True,
+            close_reason="POS即时销售完成",
+            pricing_status=PricingStatus.CONFIRMED,
+            priced_at=timezone.now(),
+            priced_by=user if user and user.is_authenticated else None,
+            final_order_amount=owner_amounts[owner_id],
+            created_by=user if user and user.is_authenticated else None,
+        )
+        PosSaleOrder.objects.create(
+            sale=sale,
+            owner_id=owner_id,
+            outbound_order=order,
+            amount=owner_amounts[owner_id],
+        )
+        orders.append(order)
+
+    order_by_owner = {order.owner_id: order for order in orders}
+    line_no = 10
+    now = timezone.now()
+    for item in normalized_items:
+        product = item["product"]
+        order = order_by_owner[product.owner_id]
+        order_line = OutboundOrderLine.objects.create(
+            order=order,
+            product=product,
+            base_qty=item["qty"],
+            base_price=item["price"],
+            final_line_amount=item["amount"],
+        )
+        sale_line = PosSaleLine.objects.create(
+            sale=sale,
+            owner_id=product.owner_id,
+            product=product,
+            outbound_order_line=order_line,
+            line_no=line_no,
+            qty=item["qty"],
+            price=item["price"],
+            amount=item["amount"],
+        )
+        _deduct_stock_for_line(sale_line, warehouse_id, sale_no, now)
+        line_no += 10
+
+    PosPayment.objects.create(sale=sale, **payment_data)
+    return result_for_sale(sale)
+
+
+@transaction.atomic
+def void_pos_sale(*, sale_id, user, reason=""):
+    sale = PosSale.objects.select_for_update().get(pk=sale_id)
+    if sale.status == PosSale.Status.VOIDED:
+        raise ValidationError("POS 销售单已撤销。")
+
+    _restore_stock_from_sale(sale, user, reason)
+    payment = PosPayment.objects.select_for_update().get(sale=sale)
+    payment.status = PosPayment.Status.VOIDED
+    payment.save(update_fields=["status", "updated_at"])
+
+    for link in sale.sale_orders.select_related("outbound_order").select_for_update():
+        order = link.outbound_order
+        order.approval_status = "CANCELLED"
+        order.is_closed = False
+        order.close_reason = ""
+        order.memo = ((order.memo or "") + " POS撤销").strip()[:100]
+        order.save(update_fields=["approval_status", "is_closed", "close_reason", "memo", "updated_at"])
+
+    sale.status = PosSale.Status.VOIDED
+    sale.voided_at = timezone.now()
+    sale.voided_by = user if user and user.is_authenticated else None
+    sale.void_reason = (reason or "").strip()
+    sale.save(update_fields=["status", "voided_at", "voided_by", "void_reason", "updated_at"])
+    return result_for_sale(sale)

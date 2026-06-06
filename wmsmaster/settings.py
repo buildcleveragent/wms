@@ -100,6 +100,7 @@ INSTALLED_APPS = [
     'allapp.locations',
     "allapp.outbound.apps.OutboundConfig",
     'allapp.products',
+    'allapp.pos.apps.PosConfig',
     'allapp.salesapp',
     'allapp.reports',
     'allapp.driverapp',
