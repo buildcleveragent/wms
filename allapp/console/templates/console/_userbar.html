@@ -15,7 +15,7 @@
       </div>
       <a role="menuitem" tabindex="-1" class="um-item" href="/console/op/lines/">操作台</a>
       <a role="menuitem" tabindex="-1" class="um-item" href="{% url 'admin:index' %}">Admin 首页</a>
-      <a role="menuitem" tabindex="-1" class="um-item" href="{% url 'admin:password_change' %}">修改密码</a>
+      <a role="menuitem" tabindex="-1" class="um-item" href="{% url 'password_change' %}">修改密码</a>
       <form method="post" action="{% url 'admin:logout' %}" style="margin:0;">
   {% csrf_token %}
   <!-- 让按钮看起来像菜单项（链接样式），仍然是 POST 提交 -->

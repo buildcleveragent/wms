@@ -5,6 +5,7 @@ input[type="text"],
 input[type="date"],
 input[type="datetime-local"],
 input[type="number"],
+input[type="password"],
 select,
 textarea {
   display: block;
@@ -30,6 +31,7 @@ input[type="text"]:focus,
 input[type="date"]:focus,
 input[type="datetime-local"]:focus,
 input[type="number"]:focus,
+input[type="password"]:focus,
 select:focus,
 textarea:focus {
   outline: none;
