@@ -134,6 +134,28 @@ class PosApiTests(TestCase):
         self.assertEqual(line.base_qty, Decimal("2.000"))
         self.assertEqual(line.base_price, Decimal("9.0000"))
 
+    def test_checkout_without_customer_uses_cash_customer(self):
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-RECEIPT-CASH",
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        cash_customer = Customer.objects.get(owner=self.owner, code="CASH")
+        self.assertEqual(cash_customer.name, "散客")
+        order = OutboundOrder.objects.get(src_bill_no="POS-RECEIPT-CASH")
+        self.assertEqual(order.customer_id, cash_customer.id)
+
     def test_checkout_rejects_price_below_min_price(self):
         response = self.client.post(
             "/api/pos/checkout/",

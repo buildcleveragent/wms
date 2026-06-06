@@ -119,7 +119,7 @@ class PosCheckoutLineSerializer(serializers.Serializer):
 
 
 class PosCheckoutSerializer(serializers.Serializer):
-    customer_id = serializers.IntegerField()
+    customer_id = serializers.IntegerField(required=False, allow_null=True)
     src_bill_no = serializers.CharField(required=False, allow_blank=True, default="")
     remark = serializers.CharField(required=False, allow_blank=True, default="")
     items = PosCheckoutLineSerializer(many=True)
@@ -146,10 +146,21 @@ class PosCheckoutSerializer(serializers.Serializer):
             raise serializers.ValidationError({"items": "购物车不能为空。"})
 
         Customer = apps.get_model("baseinfo", "Customer")
-        customer = Customer.objects.filter(id=attrs["customer_id"], owner_id=owner_id).first()
-        if not customer:
-            raise serializers.ValidationError(
-                {"customer_id": "客户不存在或不属于当前货主。"}
+        customer_id = attrs.get("customer_id")
+        if customer_id:
+            customer = Customer.objects.filter(id=customer_id, owner_id=owner_id).first()
+            if not customer:
+                raise serializers.ValidationError(
+                    {"customer_id": "客户不存在或不属于当前货主。"}
+                )
+        else:
+            customer, _ = Customer.objects.get_or_create(
+                owner_id=owner_id,
+                code="CASH",
+                defaults={
+                    "name": "散客",
+                    "salesperson": self.context["request"].user,
+                },
             )
 
         src_bill_no = (attrs.get("src_bill_no") or "").strip()
