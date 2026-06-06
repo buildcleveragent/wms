@@ -1,0 +1,82 @@
+<template>
+	<div>
+		<button type="primary" @click="tip">贴身份证读取身份证信息</button>
+		<image :src='imgUrl.replace(/[\r\n]/g, "")'  ></image>
+		<text> {{textValue}}</text>
+	</div>
+</template>
+
+<script>
+	// var activity = plus.android.runtimeMainActivity();
+	var activity = plus.android.importClass('android.app.Activity');
+	var receiver;
+	// 获取 module 
+	var nfcReadIDModule = uni.requireNativePlugin("TH-NFC-ReadID")
+	const modal = uni.requireNativePlugin('modal');
+	
+	
+	
+	
+	// let main = plus.android.runtimeMainActivity();
+	//    let Intent = plus.android.importClass('android.content.Intent');
+	//    // let Activity = plus.android.importClass('android.app.Activity');
+	//    let PendingIntent = plus.android.importClass('android.app.PendingIntent');
+	//    let IntentFilter = plus.android.importClass('android.content.IntentFilter');
+	//    let NfcAdapter = plus.android.importClass('android.nfc.NfcAdapter');
+	//    let nfcAdapter = NfcAdapter.getDefaultAdapter(main);
+	
+	export default {
+		data() {
+		    return {
+		        textValue: '',
+				imgUrl:'',
+		    };
+		},
+		
+		onLoad() {
+			console.log('页面初始化');
+ 
+			nfcReadIDModule.registerCallbackDatas((ret) => {
+				 console.log(JSON.stringify(ret))
+				 this.textValue = JSON.stringify(ret);
+				 
+					this.imgUrl = 'data:image/png;base64,'+ret.picture;
+					 
+				});
+					
+			nfcReadIDModule.onLoad((ret) => {
+					console.log(JSON.stringify(ret))
+					this.textValue = JSON.stringify(ret);
+					 
+				});		
+				 
+		},
+		
+		onShow (){  
+		    console.log("onShow()" );
+			
+			nfcReadIDModule.onShow((ret) => {
+					console.log(JSON.stringify(ret))
+					this.textValue = JSON.stringify(ret);
+					 
+				});
+		},
+		onHide() {  
+		    
+			 console.log("onHide()" );
+			 nfcReadIDModule.onHide();
+		},
+		
+		onUnload() {
+		    
+			 console.log("onUnload()" );
+			 nfcReadIDModule.onUnload();
+		},
+		
+		methods: {
+			
+			tip(){}
+		 
+		}
+	}
+</script>

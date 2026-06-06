@@ -3,9 +3,8 @@ from django.contrib import admin
 from django.urls import path, include
 from django.views.generic import RedirectView
 from rest_framework_simplejwt.views import TokenVerifyView
-from .views import TokenObtainPairView, TokenRefreshView
+from .views import TokenObtainPairView, TokenRefreshView, change_password_view, profile_view
 from . import settings
-from .views import profile_view           # 别再用名为 profile 的函数，避免与标准库冲突
 from .auth_views import LoginView         # ★ 直接导入视图，不再 include 模块
 from allapp.console.views_dashboard import DashboardHomeView
 urlpatterns = [
@@ -22,6 +21,7 @@ urlpatterns = [
     path("api/auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/auth/verify/",  TokenVerifyView.as_view(),  name="token_verify"),
     path("api/auth/profile/", profile_view,               name="auth_profile"),
+    path("api/auth/password/change/", change_password_view, name="auth_password_change"),
 
     # 业务 API
     # 统一 API 版本入口（把所有业务路由聚合到 allapp.api.urls）
@@ -38,6 +38,7 @@ urlpatterns = [
     path("accounts/login/", RedirectView.as_view(pattern_name="admin:login", query_string=True), name="login"),
     path("api/tasking/", include("allapp.tasking.urls")),
     path("api/reports/", include("allapp.reports.urls_api")),
+    path("api/pos/", include("allapp.pos.urls")),
 
     path("reports/", include("allapp.reports.urls")),
     path("tasking/console/", include("allapp.tasking.urls_console", namespace="tasking_console")),

@@ -1,0 +1,123 @@
+<template>
+	<div>
+		<button type="primary" @click="initPicc">Picc Initialize</button>
+		<button type="primary" @click="open">Open</button>
+		<button type="primary" @click="checkCard">Check Card</button>
+		
+		<input type="text"   placeholder="apdu" v-model="currentValue"></input>
+		<button type="primary" @click="apduClick">apdu</button>
+		<text>M1 Card</text>
+		<input type="text"   placeholder="block NO" v-model="blockNoValue"></input>
+		<button type="primary" @click="authClick">Auth</button>
+		<button type="primary" @click="readM1Click">readM1</button>
+		<button type="primary" @click="writeM1Click">writeM1</button>
+		<button type="primary" @click="closeClick">Close</button>
+		 结果：<text> {{textValue}}</text>
+	</div>
+</template>
+
+<script>
+	var main = plus.android.runtimeMainActivity();
+	// 获取 module 
+	var urovoPiccModule = uni.requireNativePlugin("TH-PlatformSDK-PiccManager")
+	var countNum = 0;
+	const modal = uni.requireNativePlugin('modal');
+	export default {
+		
+		data() {
+		    return {
+		        textValue: '',
+				currentValue:'',
+				blockNoValue:''
+			
+		    };
+		},
+		
+		onLoad() {
+			
+		},
+		methods: {
+			initPicc() {
+			console.log("initPicc...");
+			urovoPiccModule.initialize()
+		 
+			},
+			open() {
+				console.log('open') 
+				var ret = urovoPiccModule.open();
+				console.log('open ret：'+ret) 
+			},
+			checkCard(){
+				console.log('checkCard start') 
+				var ret = urovoPiccModule.check()
+				console.log('checkCard ret：'+ret) 
+				this.textValue = ret;
+			},
+			
+			apduClick(){  
+				//var apduVal = this.currentValue
+				var apduVal = "00a404000e325041592e5359532e444446303100"
+				console.log('apdu start:'+apduVal) 
+				urovoPiccModule.apduTransmit(apduVal,(ret) => {
+					console.log(ret)
+					this.textValue = JSON.stringify(ret);
+					modal.toast({
+						message: ret,
+						duration: 1.5
+					});
+				})
+			},
+			authClick(){
+				//var blockNoVal = this.blockNoValue
+				var blockNoVal = 5;
+				console.log('block No start:'+blockNoVal)
+				var keyData = "ffffffffffff";
+				urovoPiccModule.authM1Key(blockNoVal,keyData,(ret) => {
+					console.log(ret)
+					this.textValue = JSON.stringify(ret);
+					modal.toast({
+						message: ret,
+						duration: 1.5
+					});
+				})	
+			},
+			readM1Click(){
+				console.log('readM1 start')
+				var blockNoVal = 5;
+				console.log('block No start:'+blockNoVal)
+				urovoPiccModule.readM1Block(blockNoVal,(ret) => {
+					console.log(ret)
+					this.textValue = JSON.stringify(ret);
+					modal.toast({
+						message: ret,
+						duration: 1.5
+					});
+				})	
+				
+			},
+			writeM1Click(){
+				console.log('writeM1 start')
+				var blockNoVal = 5;
+				console.log('block No start:'+blockNoVal)
+				var keyData = "ffffffffffff";
+				urovoPiccModule.writeM1Block(blockNoVal,keyData,(ret) => {
+					console.log(ret)
+					this.textValue = JSON.stringify(ret);
+					modal.toast({
+						message: ret,
+						duration: 1.5
+					});
+				})	
+			},
+			closeClick(){
+				console.log('close ')
+				urovoPiccModule.release()	
+			},
+			
+			gotoNativePage() {
+				testModule.gotoNativePage();
+			}
+			
+		}
+	}
+</script>

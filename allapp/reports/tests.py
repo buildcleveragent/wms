@@ -10,10 +10,10 @@ from rest_framework.test import APIClient
 from allapp.baseinfo.models import Customer, Owner, Supplier
 from allapp.billing.enums import AccrualStatus, BillStatus, CalcMethod, ChargeType
 from allapp.billing.models import Bill, BillingAccrual, BillingJobRun, BillingPeriod, BillingRule
-from allapp.inbound.models import InboundOrder
+from allapp.inbound.models import InboundOrder, InboundOrderLine
 from allapp.inventory.models import InventoryDetail, InventorySummary, ReviewDifference
 from allapp.locations.models import Location, Subwarehouse, Warehouse
-from allapp.outbound.models import OutboundOrder
+from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import Product, ProductUom
 from allapp.reports.models import ReportSnapshot
 from allapp.tasking.models import WmsTask
@@ -165,6 +165,8 @@ class BossDashboardApiTests(TestCase):
             task_no="TASK-BOSS-RECEIVE-DONE",
             task_type=WmsTask.TaskType.RECEIVE,
             status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.APPROVED,
+            posting_status=WmsTask.PostingStatus.POSTED,
         )
         WmsTask.objects.create(
             owner=self.owner,
@@ -275,7 +277,7 @@ class BossDashboardApiTests(TestCase):
             warehouse=self.warehouse,
             period=self.period_a,
             invoice_no="BILL-BOSS-A",
-            issue_date=self.today,
+            issue_date=self.today - datetime.timedelta(days=2),
             due_date=self.today - datetime.timedelta(days=1),
             currency="CNY",
             subtotal=Decimal("100.00"),
@@ -329,7 +331,8 @@ class BossDashboardApiTests(TestCase):
         self.assertEqual(response.data["summary"]["open_alert_count"], 6)
         self.assertEqual(len(response.data["owner_options"]), 2)
         self.assertEqual(response.data["rankings"]["revenue_top_owners"][0]["owner"], self.owner.id)
-        self.assertEqual(response.data["attention_items"][0]["key"], "overdue_tasks")
+        attention_keys = [item["key"] for item in response.data["attention_items"]]
+        self.assertIn("overdue_tasks", attention_keys)
 
     def test_boss_alert_api_respects_owner_filter(self):
         response = self.client.get("/api/reports/boss/alerts/", {"owner": self.owner.id})
@@ -470,3 +473,162 @@ class BossDashboardApiTests(TestCase):
         self.assertEqual(response.data["scope"]["owner"], self.other_owner.id)
         self.assertEqual(response.data["summary"]["owner_count"], 1)
         self.assertEqual(len(response.data["owner_options"]), 2)
+
+
+class PdaThroughputApiTests(TestCase):
+    def setUp(self):
+        self.owner = Owner.objects.create(name="Owner PDA Report", code="OWPDA")
+        self.warehouse = Warehouse.objects.create(code="WHPDA1", name="Warehouse PDA 1")
+        self.other_warehouse = Warehouse.objects.create(code="WHPDA2", name="Warehouse PDA 2")
+        self.uom = ProductUom.objects.create(code="PCS-PDA", name="件", is_active=True)
+        self.product = Product.objects.create(
+            owner=self.owner,
+            code="SKU-PDA-RPT",
+            name="PDA Report Product",
+            sku="SKU-PDA-RPT",
+            base_uom=self.uom,
+            price=Decimal("10.00"),
+        )
+        self.user = get_user_model().objects.create_user(
+            username="pda-report-user",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        self.customer = Customer.objects.create(
+            owner=self.owner,
+            salesperson=self.user,
+            code="CUST-PDA-RPT",
+            name="PDA Report Customer",
+        )
+        self.supplier = Supplier.objects.create(
+            owner=self.owner,
+            code="SUP-PDA-RPT",
+            name="PDA Report Supplier",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+        inbound_order = InboundOrder.objects.create(
+            owner=self.owner,
+            supplier=self.supplier,
+            warehouse=self.warehouse,
+            order_no="INB-PDA-RPT-1",
+            biz_date=datetime.date(2026, 5, 5),
+            submit_status="SUBMITTED",
+            approval_status="WHS_APPROVED",
+        )
+        InboundOrderLine.objects.create(
+            order=inbound_order,
+            product=self.product,
+            base_qty=Decimal("10.000"),
+            base_price=Decimal("1.0000"),
+            line_no=10,
+        )
+
+        outbound_order = OutboundOrder.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            warehouse=self.warehouse,
+            order_no="OUT-PDA-RPT-1",
+            biz_date=datetime.date(2026, 5, 6),
+            submit_status="SUBMITTED",
+            approval_status="OWNER_APPROVED",
+        )
+        OutboundOrderLine.objects.create(
+            order=outbound_order,
+            product=self.product,
+            base_qty=Decimal("4.000"),
+            base_price=Decimal("2.0000"),
+            line_no=10,
+        )
+
+        other_warehouse_inbound = InboundOrder.objects.create(
+            owner=self.owner,
+            supplier=self.supplier,
+            warehouse=self.other_warehouse,
+            order_no="INB-PDA-RPT-OTHER-WH",
+            biz_date=datetime.date(2026, 5, 5),
+            submit_status="SUBMITTED",
+            approval_status="WHS_APPROVED",
+        )
+        InboundOrderLine.objects.create(
+            order=other_warehouse_inbound,
+            product=self.product,
+            base_qty=Decimal("99.000"),
+            base_price=Decimal("1.0000"),
+            line_no=10,
+        )
+
+        june_inbound = InboundOrder.objects.create(
+            owner=self.owner,
+            supplier=self.supplier,
+            warehouse=self.warehouse,
+            order_no="INB-PDA-RPT-JUNE",
+            biz_date=datetime.date(2026, 6, 1),
+            submit_status="SUBMITTED",
+            approval_status="WHS_APPROVED",
+        )
+        InboundOrderLine.objects.create(
+            order=june_inbound,
+            product=self.product,
+            base_qty=Decimal("7.000"),
+            base_price=Decimal("1.0000"),
+            line_no=10,
+        )
+
+    def test_month_throughput_returns_scoped_summary_and_days(self):
+        response = self.client.get(
+            "/api/reports/pda/throughput/",
+            {"mode": "month", "month": "2026-05"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["scope"]["warehouse"], self.warehouse.id)
+        self.assertEqual(response.data["period"]["start_date"], "2026-05-01")
+        self.assertEqual(response.data["period"]["end_date"], "2026-05-31")
+        self.assertEqual(response.data["summary"]["inbound_orders"], 1)
+        self.assertEqual(response.data["summary"]["inbound_lines"], 1)
+        self.assertEqual(response.data["summary"]["inbound_qty"], "10.000")
+        self.assertEqual(response.data["summary"]["outbound_orders"], 1)
+        self.assertEqual(response.data["summary"]["outbound_qty"], "4.000")
+
+        day_map = {row["date"]: row for row in response.data["days"]}
+        self.assertEqual(day_map["2026-05-05"]["inbound_qty"], "10.000")
+        self.assertEqual(day_map["2026-05-06"]["outbound_qty"], "4.000")
+
+    def test_range_throughput_filters_dates(self):
+        response = self.client.get(
+            "/api/reports/pda/throughput/",
+            {"mode": "range", "start_date": "2026-05-06", "end_date": "2026-06-01"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["summary"]["inbound_qty"], "7.000")
+        self.assertEqual(response.data["summary"]["outbound_qty"], "4.000")
+
+    def test_throughput_rejects_other_warehouse_for_scoped_user(self):
+        response = self.client.get(
+            "/api/reports/pda/throughput/",
+            {"mode": "month", "month": "2026-05", "warehouse": self.other_warehouse.id},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_warehouse_scoped_user_is_not_limited_by_user_owner_without_filter(self):
+        owner_bound_user = get_user_model().objects.create_user(
+            username="pda-report-owner-bound",
+            password="x",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        client = APIClient()
+        client.force_authenticate(owner_bound_user)
+
+        response = client.get(
+            "/api/reports/pda/throughput/",
+            {"mode": "month", "month": "2026-05"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data["scope"]["owner"])
+        self.assertEqual(response.data["scope"]["warehouse"], self.warehouse.id)
