@@ -6,6 +6,7 @@ APP_ORDER = [
     "tasking",  # 任务管理
     "inbound",     # 入库管理
     "outbound",    # 出库管理
+    "pos",
     "inventory",  # 库存管理
     "products",    # 商品管理
     "baseinfo",    # 基础信息

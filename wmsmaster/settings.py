@@ -101,6 +101,7 @@ INSTALLED_APPS = [
     "allapp.outbound.apps.OutboundConfig",
     'allapp.products',
     'allapp.salesapp',
+    'allapp.pos.apps.PosConfig',
     'allapp.reports',
     'allapp.driverapp',
     'allapp.tasking.apps.TaskingConfig',
