@@ -22,14 +22,16 @@ def decimal_or_zero(value):
     return Decimal(str(value))
 
 
-def available_qty_for_product(*, owner_id, warehouse_id, product_id):
-    result = InventoryDetail.objects.filter(
-        owner_id=owner_id,
+def available_qty_for_product(*, owner_id=None, warehouse_id, product_id):
+    queryset = InventoryDetail.objects.filter(
         warehouse_id=warehouse_id,
         product_id=product_id,
         is_active=True,
         available_qty__gt=0,
-    ).aggregate(total=Sum("available_qty"))
+    )
+    if owner_id:
+        queryset = queryset.filter(owner_id=owner_id)
+    result = queryset.aggregate(total=Sum("available_qty"))
     return result["total"] or ZERO
 
 
