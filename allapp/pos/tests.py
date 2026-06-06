@@ -14,6 +14,7 @@ from allapp.products.models import Product, ProductPackage, ProductUom
 class PosApiTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="POS Owner", code="POSOWN")
+        self.other_owner = Owner.objects.create(name="POS Other Owner", code="POSOTH")
         self.warehouse = Warehouse.objects.create(code="WHPOS", name="POS Warehouse")
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
@@ -37,6 +38,12 @@ class PosApiTests(TestCase):
             code="POS-CUS",
             name="POS Customer",
         )
+        self.other_customer = Customer.objects.create(
+            owner=self.other_owner,
+            salesperson=self.user,
+            code="POS-OTH-CUS",
+            name="POS Other Customer",
+        )
         self.uom = ProductUom.objects.create(code="PCS-POS", name="件", is_active=True)
         self.carton_uom = ProductUom.objects.create(code="CTN-POS", name="箱", is_active=True)
         self.product = Product.objects.create(
@@ -53,6 +60,20 @@ class PosApiTests(TestCase):
             batch_control=False,
             expiry_control=False,
         )
+        self.other_product = Product.objects.create(
+            owner=self.other_owner,
+            code="POS-OTH-SKU",
+            name="POS Other Product",
+            sku="POS-OTH-SKU",
+            gtin="6901234567893",
+            unit_barcode="POS-OTH-UNIT-BAR",
+            base_uom=self.uom,
+            price=Decimal("20.00"),
+            min_price=Decimal("15.00"),
+            max_discount=Decimal("10.00"),
+            batch_control=False,
+            expiry_control=False,
+        )
         ProductPackage.objects.create(
             product=self.product,
             uom=self.carton_uom,
@@ -66,6 +87,17 @@ class PosApiTests(TestCase):
             warehouse=self.warehouse,
             location=self.location,
             onhand_qty=Decimal("10.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+        )
+        InventoryDetail.objects.create(
+            owner=self.other_owner,
+            product=self.other_product,
+            warehouse=self.warehouse,
+            location=self.location,
+            onhand_qty=Decimal("8.0000"),
             allocated_qty=Decimal("0.0000"),
             locked_qty=Decimal("0.0000"),
             damaged_qty=Decimal("0.0000"),
@@ -102,6 +134,15 @@ class PosApiTests(TestCase):
         self.assertEqual(row["id"], self.product.id)
         self.assertEqual(Decimal(str(row["available_qty"])), Decimal("10.0000"))
 
+    def test_product_lookup_returns_other_owner_available_qty(self):
+        response = self.client.get("/api/pos/products/", {"barcode": "POS-OTH-UNIT-BAR"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        row = response.data["results"][0]
+        self.assertEqual(row["id"], self.other_product.id)
+        self.assertEqual(Decimal(str(row["available_qty"])), Decimal("8.0000"))
+
     def test_checkout_creates_submitted_sales_outbound_order(self):
         response = self.client.post(
             "/api/pos/checkout/",
@@ -120,7 +161,7 @@ class PosApiTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, response.data)
         order = OutboundOrder.objects.get(src_bill_no="POS-RECEIPT-001")
         self.assertEqual(order.owner_id, self.owner.id)
         self.assertEqual(order.warehouse_id, self.warehouse.id)
@@ -150,11 +191,80 @@ class PosApiTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, response.data)
         cash_customer = Customer.objects.get(owner=self.owner, code="CASH")
         self.assertEqual(cash_customer.name, "散客")
         order = OutboundOrder.objects.get(src_bill_no="POS-RECEIPT-CASH")
         self.assertEqual(order.customer_id, cash_customer.id)
+
+    def test_checkout_does_not_require_user_owner(self):
+        no_owner_user = get_user_model().objects.create_user(
+            username="pos-checkout-no-owner",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        self.client.force_authenticate(no_owner_user)
+
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-RECEIPT-NO-OWNER",
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["order_count"], 1)
+        order = OutboundOrder.objects.get(src_bill_no="POS-RECEIPT-NO-OWNER")
+        self.assertEqual(order.owner_id, self.owner.id)
+
+    def test_checkout_splits_products_by_owner(self):
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "customer_id": self.customer.id,
+                "src_bill_no": "POS-RECEIPT-MULTI",
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    },
+                    {
+                        "product_id": self.other_product.id,
+                        "qty": "2.000",
+                        "price": "18.0000",
+                    },
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["order_count"], 2)
+        orders = OutboundOrder.objects.filter(src_bill_no="POS-RECEIPT-MULTI").order_by(
+            "owner_id"
+        )
+        self.assertEqual(orders.count(), 2)
+        order_by_owner = {order.owner_id: order for order in orders}
+        self.assertEqual(order_by_owner[self.owner.id].customer_id, self.customer.id)
+        cash_customer = Customer.objects.get(owner=self.other_owner, code="CASH")
+        self.assertEqual(order_by_owner[self.other_owner.id].customer_id, cash_customer.id)
+        self.assertEqual(
+            OutboundOrderLine.objects.get(order=order_by_owner[self.owner.id]).product_id,
+            self.product.id,
+        )
+        self.assertEqual(
+            OutboundOrderLine.objects.get(order=order_by_owner[self.other_owner.id]).product_id,
+            self.other_product.id,
+        )
 
     def test_checkout_rejects_price_below_min_price(self):
         response = self.client.post(

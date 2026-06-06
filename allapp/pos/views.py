@@ -36,7 +36,6 @@ class PosProductListApi(generics.ListAPIView):
 
     def get_queryset(self):
         user = self.request.user
-        owner_id = getattr(user, "owner_id", None)
         warehouse_id = getattr(user, "warehouse_id", None)
         if not warehouse_id:
             return Product.objects.none()
@@ -44,8 +43,6 @@ class PosProductListApi(generics.ListAPIView):
         queryset = Product.objects.filter(
             is_active=True,
         ).select_related("base_uom")
-        if owner_id:
-            queryset = queryset.filter(owner_id=owner_id)
         search = (self.request.query_params.get("search") or "").strip()
         barcode = (self.request.query_params.get("barcode") or "").strip()
 
@@ -72,7 +69,6 @@ class PosProductListApi(generics.ListAPIView):
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
-        context["owner_id"] = getattr(self.request.user, "owner_id", None)
         context["warehouse_id"] = getattr(self.request.user, "warehouse_id", None)
         return context
 
@@ -83,8 +79,16 @@ class PosCheckoutApi(APIView):
     def post(self, request):
         serializer = PosCheckoutSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        order = serializer.save()
+        orders = serializer.save()
         return Response(
-            PosCheckoutResponseSerializer(order, context={"request": request}).data,
+            {
+                "orders": PosCheckoutResponseSerializer(
+                    orders,
+                    many=True,
+                    context={"request": request},
+                ).data,
+                "order_count": len(orders),
+                "src_bill_no": serializer.validated_data.get("src_bill_no", ""),
+            },
             status=status.HTTP_201_CREATED,
         )

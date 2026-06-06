@@ -439,7 +439,12 @@ async function checkout() {
       payload.customer_id = selectedCustomer.value.id
     }
     const res = await api.posCheckout(payload)
-    uni.showToast({ title: `结账成功：${res.order_no || res.id || ''}`, icon: 'none' })
+    const orders = Array.isArray(res.orders) ? res.orders : []
+    const msg =
+      orders.length > 1
+        ? `结账成功：已生成${orders.length}张销售出库单`
+        : `结账成功：${orders[0]?.order_no || orders[0]?.id || res.order_no || res.id || ''}`
+    uni.showToast({ title: msg, icon: 'none' })
     resetSale()
   } catch (e) {
     console.error('pos checkout failed', e)
