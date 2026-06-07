@@ -5,3 +5,4 @@ class PosConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "allapp.pos"
     verbose_name = "POS收银"
+

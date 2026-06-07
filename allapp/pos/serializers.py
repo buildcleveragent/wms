@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from decimal import Decimal
 
-from django.apps import apps
-from django.db import transaction
 from django.db.models import Sum
 from rest_framework import serializers
 
 from allapp.inventory.models import InventoryDetail
-from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.outbound.serializers import OutboundOrderReadSerializer
 from allapp.products.models import Product
+
+from .models import PosPayment, PosSale, PosSaleLine
+from .services import create_pos_sale, build_receipt
 
 
 ZERO = Decimal("0")
@@ -119,160 +118,136 @@ class PosCheckoutLineSerializer(serializers.Serializer):
     price = serializers.DecimalField(max_digits=18, decimal_places=4, min_value=Decimal("0.0000"))
 
 
+class PosPaymentInputSerializer(serializers.Serializer):
+    method = serializers.ChoiceField(choices=[choice.value for choice in PosPayment.Method])
+    amount_received = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        required=False,
+    )
+    reference_no = serializers.CharField(required=False, allow_blank=True, default="")
+
+
 class PosCheckoutSerializer(serializers.Serializer):
     customer_id = serializers.IntegerField(required=False, allow_null=True)
     src_bill_no = serializers.CharField(required=False, allow_blank=True, default="")
     remark = serializers.CharField(required=False, allow_blank=True, default="")
+    idempotency_key = serializers.CharField(required=False, allow_blank=True, default="")
+    payment = PosPaymentInputSerializer()
     items = PosCheckoutLineSerializer(many=True)
 
-    def _user_scope(self):
-        request = self.context["request"]
-        user = request.user
-        owner_id = getattr(user, "owner_id", None)
-        warehouse_id = getattr(user, "warehouse_id", None)
-        if not warehouse_id:
-            raise serializers.ValidationError(
-                "当前用户未绑定仓库(warehouse)，无法收银。"
-            )
-        return owner_id, warehouse_id
-
     def validate(self, attrs):
-        _, warehouse_id = self._user_scope()
-        items = attrs.get("items") or []
-        if not items:
+        if not attrs.get("items"):
             raise serializers.ValidationError({"items": "购物车不能为空。"})
-
-        product_ids = [item["product_id"] for item in items]
-        product_queryset = Product.objects.filter(
-            id__in=product_ids,
-            is_active=True,
-        )
-        products = {
-            product.id: product
-            for product in product_queryset
-        }
-        missing = [product_id for product_id in product_ids if product_id not in products]
-        if missing:
-            raise serializers.ValidationError(
-                {"items": f"商品不存在或已停用：{missing}"}
-            )
-
-        owner_ids = sorted({product.owner_id for product in products.values()})
-
-        Customer = apps.get_model("baseinfo", "Customer")
-        customer_id = attrs.get("customer_id")
-        selected_customer = None
-        if customer_id:
-            selected_customer = Customer.objects.filter(id=customer_id).first()
-            if not selected_customer:
-                raise serializers.ValidationError(
-                    {"customer_id": "客户不存在。"}
-                )
-
-        customers_by_owner = {}
-        for owner_id in owner_ids:
-            if selected_customer and selected_customer.owner_id == owner_id:
-                customers_by_owner[owner_id] = selected_customer
-                continue
-            customers_by_owner[owner_id], _ = Customer.objects.get_or_create(
-                owner_id=owner_id,
-                code="CASH",
-                defaults={"name": "散客", "salesperson": self.context["request"].user},
-            )
-
-        src_bill_no = (attrs.get("src_bill_no") or "").strip()
-        if src_bill_no:
-            duplicate_owner_ids = [
-                owner_id
-                for owner_id in owner_ids
-                if OutboundOrder.objects.filter(owner_id=owner_id, src_bill_no=src_bill_no).exists()
-            ]
-            if duplicate_owner_ids:
-                raise serializers.ValidationError(
-                    {"src_bill_no": "POS 小票号/外部单号已存在。"}
-                )
-        attrs["src_bill_no"] = src_bill_no
-        attrs["remark"] = (attrs.get("remark") or "").strip()
-
-        qty_by_product = {}
-        items_by_owner = defaultdict(list)
-        for item in items:
-            product = products[item["product_id"]]
-            qty = Decimal(item["qty"])
-            price = Decimal(item["price"])
-            qty_by_product[product.id] = qty_by_product.get(product.id, ZERO) + qty
-            items_by_owner[product.owner_id].append(item)
-
-            min_price = getattr(product, "min_price", None)
-            if min_price is not None and price < Decimal(min_price):
-                raise serializers.ValidationError(
-                    {"price": f"{product.code} 成交价不能低于最低价 {min_price}。"}
-                )
-
-            base_price = getattr(product, "price", None)
-            max_discount = getattr(product, "max_discount", None)
-            if base_price is not None and max_discount is not None:
-                discount_rate = (Decimal("100") - Decimal(max_discount)) / Decimal("100")
-                lowest = (Decimal(base_price) * discount_rate).quantize(Decimal("0.0001"))
-                if price < lowest:
-                    raise serializers.ValidationError(
-                        {
-                            "price": (
-                                f"{product.code} 成交价超过最高折扣限制，"
-                                f"最低可售 {lowest}。"
-                            )
-                        }
-                    )
-
-        for product_id, required_qty in qty_by_product.items():
-            product = products[product_id]
-            available = available_qty_for_product(
-                owner_id=product.owner_id,
-                warehouse_id=warehouse_id,
-                product_id=product_id,
-            )
-            if available < required_qty:
-                raise serializers.ValidationError(
-                    {
-                        "items": (
-                            f"{product.code} 可售库存不足，可售 {available}，"
-                            f"需要 {required_qty}。"
-                        )
-                    }
-                )
-
-        attrs["owner_ids__from_products"] = owner_ids
-        attrs["warehouse_id__from_user"] = warehouse_id
-        attrs["customers_by_owner__objects"] = customers_by_owner
-        attrs["items_by_owner__from_products"] = dict(items_by_owner)
         return attrs
 
-    @transaction.atomic
     def create(self, validated_data):
-        request = self.context["request"]
-        user = request.user
-        orders = []
-        for owner_id in validated_data["owner_ids__from_products"]:
-            order = OutboundOrder.objects.create(
-                owner_id=owner_id,
-                warehouse_id=validated_data["warehouse_id__from_user"],
-                customer=validated_data["customers_by_owner__objects"][owner_id],
-                outbound_type="SALES",
-                delivery_method="PICKUP",
-                submit_status="SUBMITTED",
-                src_bill_no=validated_data.get("src_bill_no", ""),
-                memo=validated_data.get("remark", ""),
-                created_by=user if user and user.is_authenticated else None,
-            )
-            for item in validated_data["items_by_owner__from_products"][owner_id]:
-                OutboundOrderLine.objects.create(
-                    order=order,
-                    product_id=item["product_id"],
-                    base_qty=item["qty"],
-                    base_price=item["price"],
-                )
-            orders.append(order)
-        return orders
+        return create_pos_sale(
+            user=self.context["request"].user,
+            customer_id=validated_data.get("customer_id"),
+            src_bill_no=validated_data.get("src_bill_no", ""),
+            remark=validated_data.get("remark", ""),
+            items=validated_data.get("items", []),
+            payment=validated_data.get("payment"),
+            idempotency_key=validated_data.get("idempotency_key", ""),
+        )
+
+
+class PosPaymentReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PosPayment
+        fields = [
+            "id",
+            "method",
+            "amount_due",
+            "amount_received",
+            "change_amount",
+            "reference_no",
+            "status",
+            "created_at",
+        ]
+
+
+class PosSaleLineReadSerializer(serializers.ModelSerializer):
+    product_code = serializers.CharField(source="product.code", read_only=True)
+    product_name = serializers.CharField(source="product.name", read_only=True)
+
+    class Meta:
+        model = PosSaleLine
+        fields = [
+            "id",
+            "line_no",
+            "owner_id",
+            "product_id",
+            "product_code",
+            "product_name",
+            "qty",
+            "price",
+            "amount",
+            "outbound_order_line_id",
+        ]
+
+
+class PosSaleReadSerializer(serializers.ModelSerializer):
+    payment = PosPaymentReadSerializer(read_only=True)
+    lines = PosSaleLineReadSerializer(many=True, read_only=True)
+    receipt = serializers.SerializerMethodField()
+    orders = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PosSale
+        fields = [
+            "id",
+            "sale_no",
+            "src_bill_no",
+            "warehouse_id",
+            "cashier_id",
+            "selected_customer_id",
+            "status",
+            "total_amount",
+            "remark",
+            "voided_at",
+            "voided_by_id",
+            "void_reason",
+            "created_at",
+            "payment",
+            "lines",
+            "orders",
+            "receipt",
+        ]
+
+    def get_receipt(self, obj):
+        return build_receipt(obj)
+
+    def get_orders(self, obj):
+        orders = [
+            link.outbound_order
+            for link in obj.sale_orders.select_related("outbound_order").order_by("owner_id")
+        ]
+        return PosCheckoutResponseSerializer(
+            orders,
+            many=True,
+            context=self.context,
+        ).data
+
+
+def serialize_checkout_result(result, request):
+    orders = result["orders"]
+    sale = result["sale"]
+    payment = result["payment"]
+    return {
+        "sale": PosSaleReadSerializer(sale, context={"request": request}).data,
+        "payment": PosPaymentReadSerializer(payment).data,
+        "orders": PosCheckoutResponseSerializer(
+            orders,
+            many=True,
+            context={"request": request},
+        ).data,
+        "order_count": len(orders),
+        "src_bill_no": sale.src_bill_no,
+        "receipt": result["receipt"],
+    }
 
 
 class PosCheckoutResponseSerializer(OutboundOrderReadSerializer):

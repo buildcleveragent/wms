@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
@@ -8,7 +10,14 @@ from rest_framework.views import APIView
 
 from allapp.products.models import Product
 
-from .serializers import PosCheckoutResponseSerializer, PosCheckoutSerializer, PosProductSerializer
+from .models import PosSale
+from .serializers import (
+    PosCheckoutSerializer,
+    PosProductSerializer,
+    PosSaleReadSerializer,
+    serialize_checkout_result,
+)
+from .services import build_receipt, void_pos_sale
 
 
 class PosProductPagination(PageNumberPagination):
@@ -79,16 +88,59 @@ class PosCheckoutApi(APIView):
     def post(self, request):
         serializer = PosCheckoutSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        orders = serializer.save()
+        try:
+            result = serializer.save()
+        except DjangoValidationError as exc:
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
+        return Response(serialize_checkout_result(result, request), status=status.HTTP_201_CREATED)
+
+
+def _validation_error_data(exc):
+    if hasattr(exc, "message_dict"):
+        return exc.message_dict
+    if hasattr(exc, "messages"):
+        return exc.messages
+    return {"detail": str(exc)}
+
+
+def _sale_queryset_for_user(user):
+    queryset = PosSale.objects.select_related("payment", "cashier", "warehouse").prefetch_related(
+        "lines__product",
+        "sale_orders__outbound_order",
+    )
+    warehouse_id = getattr(user, "warehouse_id", None)
+    if not warehouse_id:
+        return queryset.none()
+    return queryset.filter(warehouse_id=warehouse_id)
+
+
+class PosSaleDetailApi(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, sale_id):
+        sale = get_object_or_404(_sale_queryset_for_user(request.user), pk=sale_id)
         return Response(
-            {
-                "orders": PosCheckoutResponseSerializer(
-                    orders,
-                    many=True,
-                    context={"request": request},
-                ).data,
-                "order_count": len(orders),
-                "src_bill_no": serializer.validated_data.get("src_bill_no", ""),
-            },
-            status=status.HTTP_201_CREATED,
+            PosSaleReadSerializer(sale, context={"request": request}).data,
+            status=status.HTTP_200_OK,
         )
+
+
+class PosSaleReceiptApi(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, sale_id):
+        sale = get_object_or_404(_sale_queryset_for_user(request.user), pk=sale_id)
+        return Response(build_receipt(sale), status=status.HTTP_200_OK)
+
+
+class PosSaleVoidApi(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, sale_id):
+        reason = (request.data.get("reason") or "").strip()
+        get_object_or_404(_sale_queryset_for_user(request.user), pk=sale_id)
+        try:
+            result = void_pos_sale(sale_id=sale_id, user=request.user, reason=reason)
+        except DjangoValidationError as exc:
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
+        return Response(serialize_checkout_result(result, request), status=status.HTTP_200_OK)
