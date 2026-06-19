@@ -14,6 +14,11 @@ from rest_framework.exceptions import ValidationError
 from allapp.baseinfo.models import Owner
 from allapp.core.models import DocSequence
 from allapp.inbound.serializers import ReceiveWithoutOrderPayloadSerializer
+from allapp.inbound.constants import (
+    PDA_NO_ORDER_RECEIVE_NOTE,
+    PDA_NO_ORDER_RECEIVE_SOURCE_APP,
+    PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
+)
 from allapp.locations.models import Warehouse, Location
 from allapp.products.models import Product
 from allapp.tasking.models import WmsTask, WmsTaskLine
@@ -31,7 +36,7 @@ class ReceiveGoodsWithoutOrder(APIView):
         payload = s.validated_data
         owner_id = int(payload["owner_id"])
         items = payload["items"]
-        remark = (payload.get("remark") or "PDA无ASN收货").strip()
+        remark = (payload.get("remark") or PDA_NO_ORDER_RECEIVE_NOTE).strip()
 
         wid = payload.get("warehouse_id") or getattr(request.user, "warehouse_id", None)
         if not wid:
@@ -72,7 +77,10 @@ class ReceiveGoodsWithoutOrder(APIView):
             warehouse_id=wh.id,
             created_by=request.user,
             created_at=timezone.now(),
-            posting_note="PDA无ASN收货",
+            source_app=PDA_NO_ORDER_RECEIVE_SOURCE_APP,
+            source_model=PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
+            remark=remark,
+            posting_note=PDA_NO_ORDER_RECEIVE_NOTE,
 
             status=WmsTask.Status.RELEASED,
             review_status=WmsTask.ReviewStatus.NOT_READY,
@@ -262,7 +270,11 @@ class ReceiveGoodsWithoutOrder(APIView):
             len(grouped),
             extra=ctx,
         )
-        result = _run_posting_handler(task_id=task.id, by_user=request.user, note="PDA无ASN收货")
+        result = _run_posting_handler(
+            task_id=task.id,
+            by_user=request.user,
+            note=PDA_NO_ORDER_RECEIVE_NOTE,
+        )
         logger.info("inbound.receive_without_order.posting.completed %s", ctx_text, extra=ctx)
         return Response({
             "task_id": task.id,

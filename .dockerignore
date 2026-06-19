@@ -4,3 +4,16 @@ __pycache__
 *.idea
 *.vscode
 *.env
+auth.json
+*.key
+*.pem
+*.p12
+*.jks
+*.keystore
+**/unpackage/
+*.apk
+*.aab
+*.ipa
+*.wgt
+media/
+staticfiles/

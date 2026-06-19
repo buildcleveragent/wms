@@ -3,13 +3,20 @@ import threading
 from decimal import Decimal
 from unittest import mock
 
+from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
-from django.test import TestCase, TransactionTestCase
+from django.test import RequestFactory, TestCase, TransactionTestCase
 
 from allapp.baseinfo.models import Owner, Supplier
-from allapp.inbound.models import InboundOrder, InboundReceipt, Lot, LotWarehouse
+from allapp.inbound.admin import PdaNoOrderReceiveAdmin
+from allapp.inbound.constants import (
+    PDA_NO_ORDER_RECEIVE_NOTE,
+    PDA_NO_ORDER_RECEIVE_SOURCE_APP,
+    PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
+)
+from allapp.inbound.models import InboundOrder, InboundReceipt, Lot, LotWarehouse, PdaNoOrderReceive
 from allapp.inbound.services import create_receive_task_draft
 from allapp.locations.models import Warehouse
 from allapp.products.models import Product, ProductUom
@@ -100,6 +107,54 @@ class InboundWarehouseScopeTests(TestCase):
             1,
         )
         self.assertEqual(first_task.lines.count(), 1)
+
+    def test_pda_no_order_receive_admin_shows_only_pda_no_order_receipts(self):
+        admin_user = get_user_model().objects.create_superuser(
+            username="pda-receive-admin",
+            email="pda-receive-admin@example.com",
+            password="x",
+        )
+
+        def make_task(task_no, **overrides):
+            data = {
+                "owner": self.owner,
+                "warehouse": self.warehouse,
+                "task_no": task_no,
+                "task_type": WmsTask.TaskType.RECEIVE,
+                "status": WmsTask.Status.COMPLETED,
+                "review_status": WmsTask.ReviewStatus.APPROVED,
+                "posting_status": WmsTask.PostingStatus.POSTED,
+            }
+            data.update(overrides)
+            return WmsTask.objects.create(**data)
+
+        current_pda = make_task(
+            "RK-PDA-CURRENT",
+            source_app=PDA_NO_ORDER_RECEIVE_SOURCE_APP,
+            source_model=PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
+        )
+        legacy_pda = make_task("RK-PDA-LEGACY", posting_note=PDA_NO_ORDER_RECEIVE_NOTE)
+        formal_receive = make_task(
+            "SH-FORMAL",
+            source_app="inbound",
+            source_model="InboundOrder",
+            posting_note="入库订单收货",
+        )
+        make_task(
+            "PUT-PDA-NOTE",
+            task_type=WmsTask.TaskType.PUTAWAY,
+            posting_note=PDA_NO_ORDER_RECEIVE_NOTE,
+        )
+
+        request = RequestFactory().get("/admin/inbound/pdanoorderreceive/")
+        request.user = admin_user
+        model_admin = PdaNoOrderReceiveAdmin(PdaNoOrderReceive, admin.site)
+
+        ids = set(model_admin.get_queryset(request).values_list("id", flat=True))
+
+        self.assertIn(current_pda.id, ids)
+        self.assertIn(legacy_pda.id, ids)
+        self.assertNotIn(formal_receive.id, ids)
 
 
 class InboundConcurrencyTests(TransactionTestCase):

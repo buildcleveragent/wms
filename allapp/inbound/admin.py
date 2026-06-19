@@ -5,17 +5,19 @@ from django.urls import reverse
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.db import transaction
+from django.utils.html import format_html
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import PermissionDenied, ValidationError
 
 from allapp.core.admin_base import AdvancedAdminBase, BaseReadonlyAdmin
+from allapp.core.formatters import format_product_qty
 from allapp.products.models import Product
 
 from .models import (
     InboundOrder, InboundOrderLine,
     InboundReceipt, InboundReceiptLine,
-    ReturnInspection,InboundOrderReturnInfo, Lot
+    ReturnInspection,InboundOrderReturnInfo, Lot, PdaNoOrderReceive,
 )
 
 # === 顶部 import（补充） ===
@@ -27,7 +29,13 @@ from django.core.exceptions import ValidationError
 from django.db import models as dj_models
 
 from allapp.baseinfo.models import Supplier
+from allapp.inbound.constants import (
+    PDA_NO_ORDER_RECEIVE_NOTE,
+    PDA_NO_ORDER_RECEIVE_SOURCE_APP,
+    PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
+)
 from allapp.products.models import Product
+from allapp.tasking.models import WmsTask, WmsTaskLine
 from .models import InboundOrder, InboundOrderLine
 
 logger = logging.getLogger(__name__)
@@ -549,6 +557,203 @@ class MyTaskFilter(SimpleListFilter):
         # 普通收货员：强制只看到自己的
         return queryset.filter(assigned_to=request.user)
 
+
+def pda_no_order_receive_q():
+    return dj_models.Q(task_type=WmsTask.TaskType.RECEIVE) & (
+        dj_models.Q(
+            source_app=PDA_NO_ORDER_RECEIVE_SOURCE_APP,
+            source_model=PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
+        )
+        | dj_models.Q(posting_note__icontains=PDA_NO_ORDER_RECEIVE_NOTE)
+    )
+
+
+class PdaNoOrderReceiveLineInline(admin.TabularInline):
+    model = WmsTaskLine
+    extra = 0
+    can_delete = False
+    show_change_link = True
+    fields = (
+        "product",
+        "to_location",
+        "qty_plan_display",
+        "qty_done_display",
+        "scan_summary",
+    )
+    readonly_fields = fields
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .select_related("product", "to_location")
+            .prefetch_related("scan_logs__location", "scan_logs__product")
+        )
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="计划数量")
+    def qty_plan_display(self, obj):
+        return format_html(
+            '<div style="text-align:right; min-width:72px;">{}</div>',
+            format_product_qty(obj.qty_plan, obj.product),
+        )
+
+    @admin.display(description="收货数量")
+    def qty_done_display(self, obj):
+        return format_html(
+            '<div style="text-align:right; min-width:72px;">{}</div>',
+            format_product_qty(obj.qty_done, obj.product),
+        )
+
+    @admin.display(description="扫描批次/效期/库位")
+    def scan_summary(self, obj):
+        scans = list(obj.scan_logs.all()[:6])
+        if not scans:
+            return "-"
+
+        parts = []
+        for scan in scans[:5]:
+            location = (
+                getattr(scan.location, "code", "")
+                or getattr(scan.location, "name", "")
+                or "-"
+            )
+            lot_no = scan.lot_no or "-"
+            exp_date = scan.exp_date.isoformat() if scan.exp_date else "-"
+            qty = scan.qty_base_delta if scan.qty_base_delta is not None else scan.qty_base
+            product = scan.product or obj.product
+            qty_display = format_product_qty(qty, product)
+            parts.append(f"{location} / {lot_no} / {exp_date} / {qty_display}")
+        if len(scans) > 5:
+            parts.append("...")
+        return "；".join(parts)
+
+
+@admin.register(PdaNoOrderReceive)
+class PdaNoOrderReceiveAdmin(admin.ModelAdmin):
+    admin_priority = 4
+    list_display = (
+        "task_no",
+        "created_at",
+        "owner",
+        "warehouse",
+        "created_by",
+        "items_summary",
+        "received_qty",
+        "posting_status",
+        "posted_at",
+    )
+    list_filter = ("warehouse", "owner", "posting_status", "created_by")
+    search_fields = (
+        "task_no",
+        "owner__code",
+        "owner__name",
+        "warehouse__code",
+        "warehouse__name",
+        "created_by__username",
+        "lines__product__code",
+        "lines__product__sku",
+        "lines__product__name",
+        "scan_logs__lot_no",
+        "posting_note",
+        "remark",
+    )
+    date_hierarchy = "created_at"
+    ordering = ("-created_at", "-id")
+    list_select_related = ("owner", "warehouse", "created_by", "posted_by")
+    inlines = [PdaNoOrderReceiveLineInline]
+    fields = (
+        ("task_no", "created_at"),
+        ("owner", "warehouse"),
+        ("created_by", "posted_by"),
+        ("status", "review_status", "posting_status"),
+        ("posted_at", "posting_note"),
+        "remark",
+        "items_summary",
+        "received_qty",
+    )
+    readonly_fields = (
+        "task_no",
+        "created_at",
+        "owner",
+        "warehouse",
+        "created_by",
+        "posted_by",
+        "status",
+        "review_status",
+        "posting_status",
+        "posted_at",
+        "posting_note",
+        "remark",
+        "items_summary",
+        "received_qty",
+    )
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .filter(pda_no_order_receive_q())
+            .select_related("owner", "warehouse", "created_by", "posted_by")
+            .annotate(
+                _line_count=dj_models.Count("lines", distinct=True),
+                _qty_done=dj_models.Sum("lines__qty_done"),
+            )
+        )
+
+    def has_module_permission(self, request):
+        return super().has_module_permission(request) or request.user.has_perm(
+            "tasking.view_wmstask"
+        )
+
+    def has_view_permission(self, request, obj=None):
+        return super().has_view_permission(request, obj) or request.user.has_perm(
+            "tasking.view_wmstask"
+        )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="商品摘要")
+    def items_summary(self, obj):
+        lines = list(obj.lines.select_related("product").order_by("id")[:4])
+        if not lines:
+            return "-"
+
+        parts = []
+        for line in lines[:3]:
+            product = line.product
+            code = (
+                getattr(product, "code", "")
+                or getattr(product, "sku", "")
+                or str(line.product_id or "")
+            )
+            name = getattr(product, "name", "") or ""
+            qty = line.qty_done or line.qty_plan
+            parts.append(f"{code} {name} x {format_product_qty(qty, product)}".strip())
+        if len(lines) > 3 or getattr(obj, "_line_count", 0) > 3:
+            parts.append("...")
+        return "；".join(parts)
+
+    @admin.display(description="收货数量", ordering="_qty_done")
+    def received_qty(self, obj):
+        return obj._qty_done or 0
+
+
 class InboundReceiptLineInline(admin.TabularInline):
     model = InboundReceiptLine
     extra = 0
@@ -696,7 +901,3 @@ class ReturnInspectionInline(admin.StackedInline):  # 也可以使用 admin.Tabu
         if obj and obj.status == "POSTED":
             return False
         return super().has_delete_permission(request, obj)
-
-
-
-

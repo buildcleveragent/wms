@@ -14,6 +14,7 @@ from allapp.core.models import BaseModel,DocSequence
 from allapp.products.models import Product,ProductPackage,ProductUom
 from allapp.baseinfo.models import Owner,Supplier,Vehicle,CarrierCompany
 from allapp.locations.models import Location,Warehouse
+from allapp.tasking.models import WmsTask
 
 QTY_Q = Decimal("0.0001")  # 数量保留 3 位
 
@@ -1127,3 +1128,10 @@ class LotWarehouse(BaseModel):
 
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+class PdaNoOrderReceive(WmsTask):
+    class Meta:
+        proxy = True
+        verbose_name = "PDA无订单收货"
+        verbose_name_plural = "PDA无订单收货"

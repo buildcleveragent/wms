@@ -27,6 +27,14 @@ db.sqlite3
 .env.production
 .env.development
 
+# Local auth / secrets
+auth.json
+*.key
+*.pem
+*.p12
+*.jks
+*.keystore
+
 # Virtual environments
 .venv/
 venv/
@@ -69,6 +77,12 @@ out/
 .pub-cache/
 .pub/
 build/
+.hbuilderx/
+**/unpackage/
+*.apk
+*.aab
+*.ipa
+*.wgt
 .flutter-plugins
 .flutter-plugins-dependencies
 .melos_tool/
