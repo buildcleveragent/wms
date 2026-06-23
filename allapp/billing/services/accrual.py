@@ -534,12 +534,14 @@ def _load_taskline_order_resolver():
         "bundle_key":     str,              # 打包分组键（可选）
     }
 
-    未配置 BILLING_TASKLINE_ORDER_RESOLVER 时返回 None，
-    accrue_order_processing_from_posted 将跳过所有日志的订单维度汇总。
+    未配置 BILLING_TASKLINE_ORDER_RESOLVER 时使用内置解析器，
+    支持从 task_line.src_model/src_id 和 OrderLineSourceLink 解析订单维度。
     """
     path = getattr(settings, "BILLING_TASKLINE_ORDER_RESOLVER", None)
     if not path:
-        return None
+        from allapp.billing.resolvers import taskline_to_order_mapping
+
+        return taskline_to_order_mapping
     mod, func = path.split(":")
     return getattr(importlib.import_module(mod), func)
 
@@ -550,12 +552,12 @@ def _is_order_processing_amount_source(task) -> bool:
 
     from allapp.tasking.models import WmsTask
 
-    return (
-        task.task_type == WmsTask.TaskType.REVIEW
-        or (
-            task.task_type == WmsTask.TaskType.PICK
-            and task.review_status == WmsTask.ReviewStatus.APPROVED
-        )
+    return task.task_type in {
+        WmsTask.TaskType.DISPATCH,
+        WmsTask.TaskType.REVIEW,
+    } or (
+        task.task_type == WmsTask.TaskType.PICK
+        and task.review_status == WmsTask.ReviewStatus.APPROVED
     )
 
 

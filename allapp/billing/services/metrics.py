@@ -21,7 +21,6 @@
     - management commands: billing_generate_metrics, billing_run_scheduler
 """
 import datetime
-from decimal import Decimal
 from typing import Iterable, Optional
 
 from django.conf import settings
@@ -34,7 +33,8 @@ from allapp.billing.models import BillingJobRun
 from ._common import AUTO_METRIC_SOURCE_PREFIX, SCHEDULED_METRIC_JOB_NAME, logger
 from ._metrics import (
     _auto_metric_types, _default_metric_payload, _inventory_metric_rows,
-    _normalize_metric_payload, _store_generated_metric,
+    _ensure_inventory_snapshot_for_date, _normalize_metric_payload,
+    _store_generated_metric,
 )
 from ._reconciliation import _billing_accuracy_gate_enabled, _ensure_reconciliation_for_service_date
 
@@ -301,10 +301,15 @@ def _run_scheduled_metric_generation_for_scope(
             service_date < timezone.now().date()
             and any(mt in {MetricType.PALLET, MetricType.CBM, MetricType.AREA_M2} for mt in selected_types)
         ):
-            from allapp.inventory.snapshot_services import generate_inventory_snapshots_for_dates
-            snapshot_summary = generate_inventory_snapshots_for_dates(
-                [service_date], owner_id=owner_id, warehouse_id=warehouse_id,
-            )
+            snapshot_summary = {
+                "days": [
+                    _ensure_inventory_snapshot_for_date(
+                        owner_id,
+                        warehouse_id,
+                        service_date,
+                    )
+                ]
+            }
 
         # 生成指标
         metric_summary = generate_metrics_for_date(

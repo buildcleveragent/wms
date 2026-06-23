@@ -5,7 +5,7 @@ from typing import Any, Dict, Iterable, Optional
 
 from django.db.models import DecimalField, ExpressionWrapper, F
 
-from allapp.billing.enums import AccrualStatus
+from allapp.billing.enums import AccrualStatus, BillStatus
 from allapp.billing.models import (
     Bill,
     BillLine,
@@ -647,7 +647,9 @@ def _billing_accrual_queryset(
 def _billing_line_queryset(
     *, owner_id=None, warehouse_id=None, service_date=None, period_id=None
 ):
-    queryset = BillLine.objects.select_related("bill", "bill__period", "accrual")
+    queryset = BillLine.objects.select_related("bill", "bill__period", "accrual").exclude(
+        bill__status=BillStatus.VOID
+    )
     if owner_id:
         queryset = queryset.filter(bill__owner_id=owner_id)
     if warehouse_id:
@@ -713,13 +715,13 @@ def reconcile_billing_accuracy(
     )
     for accrual in accruals:
         problems = []
-        if accrual.amount < 0:
+        if accrual.amount < 0 and not accrual.is_reversal:
             problems.append("amount_negative")
         if accrual.quantity < 0:
             problems.append("quantity_negative")
-        if accrual.unit_price < 0:
+        if accrual.unit_price < 0 and not accrual.is_reversal:
             problems.append("unit_price_negative")
-        if accrual.tax_amount < 0:
+        if accrual.tax_amount < 0 and not accrual.is_reversal:
             problems.append("tax_amount_negative")
         if (
             accrual.rule.owner_id is not None
@@ -891,7 +893,7 @@ def reconcile_billing_accuracy(
     )
 
     line_counts = {}
-    line_count_queryset = BillLine.objects.all()
+    line_count_queryset = BillLine.objects.exclude(bill__status=BillStatus.VOID)
     if owner_id:
         line_count_queryset = line_count_queryset.filter(bill__owner_id=owner_id)
     if warehouse_id:
@@ -908,7 +910,7 @@ def reconcile_billing_accuracy(
     invoicing_issues = []
     for accrual in accruals:
         line_count = line_counts.get(accrual.id, 0)
-        if accrual.status == AccrualStatus.INVOICED and line_count != 1:
+        if accrual.status == AccrualStatus.INVOICED and accrual.period_id and line_count != 1:
             invoicing_issues.append(
                 {
                     "accrual_id": accrual.id,

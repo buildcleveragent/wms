@@ -262,10 +262,29 @@ def _ensure_inventory_snapshot_for_date(owner_id, warehouse_id, service_date):
     from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_date
 
     try:
+        summary = generate_inventory_snapshot_for_date(
+            service_date,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+        )
+        if summary.get("rows_created", 0) > 0:
+            return summary
+
+        has_current_inventory = _current_inventory_metric_rows(owner_id, warehouse_id)
+        if not has_current_inventory:
+            return summary
+
+        logger.warning(
+            "No rollforward snapshot rows for %s (owner=%s, warehouse=%s), falling back to bootstrap mode",
+            service_date,
+            owner_id,
+            warehouse_id,
+        )
         return generate_inventory_snapshot_for_date(
             service_date,
             owner_id=owner_id,
             warehouse_id=warehouse_id,
+            bootstrap=True,
         )
     except ValueError:
         # 快照链断裂（前一天快照缺失）→ 回退到 bootstrap 模式

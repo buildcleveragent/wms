@@ -45,6 +45,7 @@ from allapp.billing.models import (
     BillingRuleTier,
 )
 from allapp.billing.services import (
+    accrue_metrics_for_date,
     accrue_order_processing_for_task,
     accrue_order_processing_from_posted,
     accrue_storage_for_date,
@@ -62,7 +63,6 @@ from allapp.products.models import Product, ProductUom
 from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
 from allapp.tasking.plugins.handlers import DefaultPostingHandler
 from wmsmaster.views import profile_view
-from allapp.tasking.plugins.handlers import DefaultPostingHandler
 
 
 class BillingServiceTests(TestCase):
@@ -778,9 +778,8 @@ class BillingServiceTests(TestCase):
 
     def test_storage_fingerprint_unique_per_owner(self):
         """A-2: 两个 owner 同量同日应各自生成独立的 BillingEvent。"""
-        from allapp.billing.enums import LadderMode
         service_date = datetime.date(2026, 3, 15)
-        other_owner = Owner.objects.create(name="Owner B", code="OWNB")
+        other_owner = Owner.objects.create(name="Owner Storage B", code="OWN-ST-B")
 
         for ow in (self.owner, other_owner):
             BillingRule.objects.create(
@@ -789,8 +788,12 @@ class BillingServiceTests(TestCase):
                 unit_price=Decimal("1.00"),
             )
 
-        from allapp.inventory.models import InventoryDetail
-        for ow in (self.owner, other_owner):
+        for index, ow in enumerate((self.owner, other_owner), start=1):
+            subwarehouse = Subwarehouse.objects.create(
+                warehouse=self.warehouse,
+                code=f"SWST{index}",
+                name=f"SW-{ow.code}",
+            )
             InventoryDetail.objects.create(
                 owner=ow, warehouse=self.warehouse,
                 product=Product.objects.create(
@@ -799,12 +802,20 @@ class BillingServiceTests(TestCase):
                     base_uom=ProductUom.objects.create(code=f"EA-{ow.code}", name=f"EA-{ow.code}", is_active=True),
                 ),
                 location=Location.objects.create(
-                    warehouse=self.warehouse, code=f"LOC-{ow.code}", name=f"LOC-{ow.code}",
+                    warehouse=self.warehouse,
+                    subwarehouse=subwarehouse,
+                    code=f"{subwarehouse.code}-01-01-01",
+                    name=f"LOC-{ow.code}",
                 ),
                 onhand_qty=Decimal("100"),
                 is_active=True,
             )
 
+        generate_inventory_snapshot_for_date(
+            service_date,
+            warehouse_id=self.warehouse.id,
+            bootstrap=True,
+        )
         accrue_storage_for_date(self.owner.id, self.warehouse.id, service_date, by_user=self.user)
         accrue_storage_for_date(other_owner.id, self.warehouse.id, service_date, by_user=self.user)
 
@@ -904,8 +915,8 @@ class BillingServiceTests(TestCase):
             acc_fingerprint="fp-reinvoice-test-2",
         )
 
-        # 重新 lock 和开票，不应报错
-        period2 = lock_period(self.owner.id, self.warehouse.id, "T-REINV-2",
+        # 重新 lock 和开票，不应报错。红冲后原 period 回到 OPEN，应复用原账期。
+        period2 = lock_period(self.owner.id, self.warehouse.id, "T-REINV",
                               service_date, service_date)
         bill2 = generate_invoice_for_period(period2, invoice_no="INV-REINV-2",
                                             issue_date=service_date, due_date=service_date)
@@ -1010,15 +1021,24 @@ class BillingServiceTests(TestCase):
             unit_price=Decimal("10.00"), cap_mode=CapMode.PER_DAY, cap_amount=Decimal("20.00"),
         )
 
-        # 创建一条 VOID accrual（占 10 额度）
-        BillingAccrual.objects.create(
+        # 创建一组 VOID/reversal accrual（占 10 额度，但不应计入日封顶已用额度）
+        voided = BillingAccrual.objects.create(
             owner=self.owner, warehouse=self.warehouse,
             charge_type=ChargeType.DISPATCH, rule=rule,
             service_date=service_date, currency="CNY",
             quantity=Decimal("1"), unit_price=Decimal("10.0000"),
             amount=Decimal("10.00"), tax_amount=Decimal("0.00"),
-            status=AccrualStatus.VOID, is_reversal=True,
-            acc_fingerprint="fp-void-cap-test",
+            status=AccrualStatus.VOID,
+            acc_fingerprint="fp-void-cap-test-original",
+        )
+        BillingAccrual.objects.create(
+            owner=self.owner, warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH, rule=rule,
+            service_date=service_date, currency="CNY",
+            quantity=Decimal("1"), unit_price=Decimal("-10.0000"),
+            amount=Decimal("-10.00"), tax_amount=Decimal("0.00"),
+            status=AccrualStatus.VOID, is_reversal=True, reversal_of=voided,
+            acc_fingerprint="fp-void-cap-test-reversal",
         )
 
         # 日封顶是 20，VOID 的 10 不应占用额度，所以还能用 20
@@ -1106,7 +1126,7 @@ class BillingServiceTests(TestCase):
             acc_fingerprint="fp-rebill-2",
         )
 
-        period2 = lock_period(self.owner.id, self.warehouse.id, "T-REBILL-2",
+        period2 = lock_period(self.owner.id, self.warehouse.id, "T-REBILL",
                               service_date, service_date)
         bill2 = generate_invoice_for_period(period2, invoice_no="INV-RB-2",
                                             issue_date=service_date, due_date=service_date)
@@ -1942,6 +1962,10 @@ class BillingApiTests(TestCase):
             owner=self.owner,
             warehouse=self.warehouse,
         )
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="change_billingperiod"),
+            Permission.objects.get(codename="add_bill"),
+        )
         self.client = APIClient()
         self.client.force_authenticate(self.user)
 
@@ -2509,6 +2533,7 @@ class BillingMetricGenerationTests(TestCase):
             owner=self.owner,
             warehouse=self.warehouse,
         )
+        self.user.user_permissions.add(Permission.objects.get(codename="change_billingperiod"))
         self.client = APIClient()
         self.client.force_authenticate(self.user)
         self.uom = ProductUom.objects.create(code="PCS-MT", name="件", is_active=True)
@@ -2546,8 +2571,6 @@ class BillingMetricGenerationTests(TestCase):
         )
 
     def _create_inventory(self, *, location, qty):
-        from allapp.inventory.models import InventoryDetail
-
         return InventoryDetail.objects.create(
             owner=self.owner,
             product=self.product,
@@ -2922,10 +2945,10 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
                 close_old_connections()
 
         with mock.patch(
-            "allapp.billing.services.generate_metrics_for_date",
+            "allapp.billing.services.metrics.generate_metrics_for_date",
             side_effect=fake_generate_metrics_for_date,
         ), mock.patch(
-            "allapp.billing.services._billing_accuracy_gate_enabled",
+            "allapp.billing.services.metrics._billing_accuracy_gate_enabled",
             return_value=False,
         ):
             thread1 = threading.Thread(target=invoke, args=(0,))
@@ -3047,7 +3070,7 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
             finally:
                 close_old_connections()
 
-        with mock.patch("allapp.billing.services.BillingMetricDaily.objects.create", side_effect=fake_metric_create):
+        with mock.patch("allapp.billing.services._metrics.BillingMetricDaily.objects.create", side_effect=fake_metric_create):
             thread1 = threading.Thread(target=invoke, args=(0,))
             thread1.start()
             self.assertTrue(create_entered.wait(timeout=5))
@@ -3129,19 +3152,23 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
             line_no=10,
         )
 
+        real_metric_create = BillingMetricDaily.objects.create
+        metric_create_kwargs = {}
+
         def fake_metric_create(*args, **kwargs):
-            BillingMetricDaily(
-                owner_id=kwargs["owner_id"],
-                warehouse_id=kwargs["warehouse_id"],
-                service_date=kwargs["service_date"],
-                metric_type=kwargs["metric_type"],
-                value=kwargs["value"],
-                source=kwargs["source"],
-                note=kwargs["note"],
-            ).save(force_insert=True)
+            metric_create_kwargs.update(kwargs)
             raise IntegrityError("duplicate metric row")
 
-        with mock.patch("allapp.billing.services.BillingMetricDaily.objects.create", side_effect=fake_metric_create):
+        def fake_recover_existing_metric(_metric_filter):
+            return real_metric_create(**metric_create_kwargs)
+
+        with mock.patch(
+            "allapp.billing.services._metrics.BillingMetricDaily.objects.create",
+            side_effect=fake_metric_create,
+        ), mock.patch(
+            "allapp.billing.services._metrics._recover_existing_metric_after_create_race",
+            side_effect=fake_recover_existing_metric,
+        ):
             summary = generate_metrics_for_date(
                 self.owner.id,
                 self.warehouse.id,
@@ -3237,7 +3264,10 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
         release_adjustment = threading.Event()
         results = [None, None]
         errors = []
-        real_save_adjusted_accrual = __import__("allapp.billing.services", fromlist=["_save_adjusted_accrual"])._save_adjusted_accrual
+        real_save_adjusted_accrual = __import__(
+            "allapp.billing.services.period",
+            fromlist=["_save_adjusted_accrual"],
+        )._save_adjusted_accrual
 
         def fake_save_adjusted_accrual(accrual, new_amount):
             if not adjustment_entered.is_set():
@@ -3261,7 +3291,10 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
             finally:
                 close_old_connections()
 
-        with mock.patch("allapp.billing.services._save_adjusted_accrual", side_effect=fake_save_adjusted_accrual):
+        with mock.patch(
+            "allapp.billing.services.period._save_adjusted_accrual",
+            side_effect=fake_save_adjusted_accrual,
+        ):
             thread1 = threading.Thread(target=invoke, args=(0,))
             thread1.start()
             self.assertTrue(adjustment_entered.wait(timeout=5))
@@ -3322,14 +3355,14 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
         release_billline = threading.Event()
         results = [None, None]
         errors = []
-        real_billline_create = BillLine.objects.create
+        real_billline_bulk_create = BillLine.objects.bulk_create
 
-        def fake_billline_create(*args, **kwargs):
+        def fake_billline_bulk_create(*args, **kwargs):
             if not billline_entered.is_set():
                 billline_entered.set()
                 if not release_billline.wait(timeout=5):
                     raise AssertionError("timed out waiting to release concurrent invoice test")
-            return real_billline_create(*args, **kwargs)
+            return real_billline_bulk_create(*args, **kwargs)
 
         def invoke(index, invoice_no):
             close_old_connections()
@@ -3344,7 +3377,10 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
             finally:
                 close_old_connections()
 
-        with mock.patch("allapp.billing.services.BillLine.objects.create", side_effect=fake_billline_create):
+        with mock.patch(
+            "allapp.billing.services.invoice.BillLine.objects.bulk_create",
+            side_effect=fake_billline_bulk_create,
+        ):
             thread1 = threading.Thread(target=invoke, args=(0, "INV-CONC-1"))
             thread1.start()
             self.assertTrue(billline_entered.wait(timeout=5))

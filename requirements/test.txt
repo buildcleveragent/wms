@@ -1,2 +1,0 @@
--r dev.txt
-pytest-cov==6.2.1

@@ -492,9 +492,6 @@ class Bill(BillingValidationMixin, models.Model):
         indexes = [
             models.Index(fields=["owner", "warehouse", "status"], name="ix_bill_owh_stat"),
         ]
-        constraints = [
-            models.UniqueConstraint(fields=["owner", "warehouse", "period"], name="ux_bill_owner_wh_period"),
-        ]
 
     def clean(self):
         errors = {}
@@ -503,8 +500,24 @@ class Bill(BillingValidationMixin, models.Model):
                 errors["period"] = "period 的 owner/warehouse 必须与 bill 一致。"
             if self.currency and self.period.currency and self.currency != self.period.currency:
                 errors["currency"] = "bill.currency 必须与 period.currency 一致。"
+            if self.status != BillStatus.VOID:
+                duplicate_bill = Bill.objects.filter(
+                    owner_id=self.owner_id,
+                    warehouse_id=self.warehouse_id,
+                    period_id=self.period_id,
+                ).exclude(status=BillStatus.VOID)
+                if self.pk:
+                    duplicate_bill = duplicate_bill.exclude(pk=self.pk)
+                if duplicate_bill.exists():
+                    errors["period"] = "该账期已存在有效发票/结算单。"
         if self.issue_date and self.due_date and self.due_date < self.issue_date:
             errors["due_date"] = "due_date 不能早于 issue_date。"
+        if self.subtotal is not None and self.subtotal < 0:
+            errors["subtotal"] = "subtotal 不能为负数。"
+        if self.tax_total is not None and self.tax_total < 0:
+            errors["tax_total"] = "tax_total 不能为负数。"
+        if self.total is not None and self.total < 0:
+            errors["total"] = "total 不能为负数。"
         if self.total is not None and self.subtotal is not None and self.tax_total is not None:
             expected_total = qmoney(Decimal(self.subtotal) + Decimal(self.tax_total))
             if qmoney(self.total) != expected_total:
