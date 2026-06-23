@@ -9,8 +9,10 @@ from django.db import close_old_connections
 from django.test import TestCase, TransactionTestCase
 
 from allapp.baseinfo.models import Owner
-from allapp.inventory.models import PostingJournal
+from allapp.inventory.models import InventoryDetail, PostingJournal
 from allapp.locations.models import Location, Subwarehouse, Warehouse
+from allapp.products.models import Product, ProductUom
+from allapp.tasking.counting import create_lines_from_scope
 from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
 from allapp.tasking.services_posting import post_task
 
@@ -25,6 +27,11 @@ class TaskingWarehouseScopeTests(TestCase):
             code="SWTASK1",
             name="Subwarehouse Tasking 1",
         )
+        self.alt_subwarehouse = Subwarehouse.objects.create(
+            warehouse=self.warehouse,
+            code="SWTASK3",
+            name="Subwarehouse Tasking 3",
+        )
         self.other_subwarehouse = Subwarehouse.objects.create(
             warehouse=self.other_warehouse,
             code="SWTASK2",
@@ -35,10 +42,25 @@ class TaskingWarehouseScopeTests(TestCase):
             code="SWTASK1-01-01-01",
             name="Tasking Location 1",
         )
+        self.alt_location = Location.objects.create(
+            warehouse=self.warehouse,
+            code="SWTASK3-01-01-01",
+            name="Tasking Location 3",
+        )
         self.other_location = Location.objects.create(
             warehouse=self.other_warehouse,
             code="SWTASK2-01-01-01",
             name="Tasking Location 2",
+        )
+        self.uom = ProductUom.objects.create(code="PCS-TASK", name="件", is_active=True)
+        self.product = Product.objects.create(
+            owner=self.owner,
+            code="SKU-TASK",
+            name="Tasking Product",
+            sku="SKU-TASK",
+            base_uom=self.uom,
+            volume=Decimal("0.100000"),
+            price=Decimal("10.00"),
         )
         self.superuser = get_user_model().objects.create_superuser(
             username="tasking-admin",
@@ -97,6 +119,51 @@ class TaskingWarehouseScopeTests(TestCase):
             )
 
         self.assertIn("location", exc.exception.message_dict)
+
+    def test_count_scope_filters_by_subwarehouse_inside_warehouse(self):
+        selected_detail = InventoryDetail.objects.create(
+            owner=self.owner,
+            product=self.product,
+            location=self.location,
+            onhand_qty=Decimal("5.0000"),
+            allocated_qty=Decimal("0"),
+            locked_qty=Decimal("0"),
+            damaged_qty=Decimal("0"),
+        )
+        InventoryDetail.objects.create(
+            owner=self.owner,
+            product=self.product,
+            location=self.alt_location,
+            onhand_qty=Decimal("7.0000"),
+            allocated_qty=Decimal("0"),
+            locked_qty=Decimal("0"),
+            damaged_qty=Decimal("0"),
+        )
+
+        task, created_count, truncated, notes = create_lines_from_scope(
+            created_by=self.superuser,
+            owner_id=self.owner.id,
+            warehouse_id=self.warehouse.id,
+            subwarehouse_id=self.subwarehouse.id,
+        )
+
+        self.assertIsNotNone(task)
+        self.assertEqual(created_count, 1)
+        self.assertFalse(truncated)
+        self.assertEqual(notes, [])
+        self.assertEqual(task.warehouse_id, self.warehouse.id)
+        self.assertEqual(task.lines.get().src_id, selected_detail.id)
+
+    def test_count_scope_rejects_subwarehouse_from_other_warehouse(self):
+        with self.assertRaises(ValidationError) as exc:
+            create_lines_from_scope(
+                created_by=self.superuser,
+                owner_id=self.owner.id,
+                warehouse_id=self.warehouse.id,
+                subwarehouse_id=self.other_subwarehouse.id,
+            )
+
+        self.assertIn("subwarehouse_id", exc.exception.message_dict)
 
     def test_post_task_is_idempotent(self):
         task = WmsTask.objects.create(

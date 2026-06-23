@@ -59,7 +59,7 @@ class SubwarehouseAdmin(admin.ModelAdmin):
             reverse("admin:locations_location_changelist")
             + f"?subwarehouse__id__exact={obj.pk}"
         )
-        return format_html('<a href="{}">{}</a>', url, _("查看该子仓库位"))
+        return format_html('<a href="{}">{}</a>', url, _("查看该子仓的库位"))
 
 
 

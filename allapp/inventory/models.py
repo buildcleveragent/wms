@@ -25,7 +25,7 @@ class InventoryDetail(BaseModel):
     owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
     product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
     warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
-    subwarehouse = models.ForeignKey("locations.Subwarehouse", on_delete=models.PROTECT, verbose_name="仓库",null=True, blank=True,)
+    subwarehouse = models.ForeignKey("locations.Subwarehouse", on_delete=models.PROTECT, verbose_name="子仓",null=True, blank=True,)
     zone_type = models.PositiveSmallIntegerField(
         _("区域类型"), choices=ZoneType.choices, default=ZoneType.STORAGE, db_index=True
     )
@@ -141,8 +141,11 @@ class InventoryDetail(BaseModel):
         return f"INV[{self.owner_id}/{self.warehouse_id}/{self.location_id}/{self.product_id}]"
 
     def _sync_scope_from_location(self):
-        if self.location_id and not self.warehouse_id:
-            self.warehouse_id = self.location.warehouse_id
+        if self.location_id:
+            if not self.warehouse_id:
+                self.warehouse_id = self.location.warehouse_id
+            if not self.subwarehouse_id:
+                self.subwarehouse_id = self.location.subwarehouse_id
 
     # —— 业务校验：保存前标准化 + 一致性 —— #
     def clean(self):
@@ -407,7 +410,7 @@ class InventoryTransaction(BaseModel):
     product   = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
     warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
     location  = models.ForeignKey("locations.Location", on_delete=models.PROTECT, verbose_name="库位")
-    subwarehouse = models.ForeignKey("locations.Subwarehouse", on_delete=models.PROTECT, verbose_name="仓库", null=True,
+    subwarehouse = models.ForeignKey("locations.Subwarehouse", on_delete=models.PROTECT, verbose_name="子仓", null=True,
                                      blank=True, )
     zone_type = models.PositiveSmallIntegerField(
         _("区域类型"), choices=ZoneType.choices, default=ZoneType.STORAGE, db_index=True
@@ -471,10 +474,16 @@ class InventoryTransaction(BaseModel):
             ),
         ]
 
+    def _sync_scope_from_location(self):
+        if self.location_id:
+            if not self.warehouse_id:
+                self.warehouse_id = self.location.warehouse_id
+            if not self.subwarehouse_id:
+                self.subwarehouse_id = self.location.subwarehouse_id
+
     def clean(self):
         super().clean()
-        if self.location_id and not self.warehouse_id:
-            self.warehouse_id = self.location.warehouse_id
+        self._sync_scope_from_location()
 
         # 1) base_unit 回填
         if self.product_id and getattr(self.product, "base_uom_id", None):
@@ -503,14 +512,15 @@ class InventoryTransaction(BaseModel):
         # 4) 仓库一致性
         if self.location_id and self.location.warehouse_id != self.warehouse_id:
             raise ValidationError({"warehouse": "location 必须隶属 warehouse"})
+        if self.location_id and self.subwarehouse_id and self.subwarehouse_id != self.location.subwarehouse_id:
+            raise ValidationError({"subwarehouse": "subwarehouse 必须与 location.subwarehouse 一致。"})
 
         # 5) pair_id 使用范围
         if self.pair_id and self.tx_type not in (InvTxType.RECEIVE, InvTxType.ISSUE):
             raise ValidationError({"pair_id": "仅 RECEIVE/ISSUE 允许指定 pair_id"})
 
     def save(self, *args, **kwargs):
-        if self.location_id and not self.warehouse_id:
-            self.warehouse_id = self.location.warehouse_id
+        self._sync_scope_from_location()
 
         # 再次兜底 base_unit
         if self.product_id and getattr(self.product, "base_uom_id", None):

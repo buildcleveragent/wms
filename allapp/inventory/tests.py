@@ -79,6 +79,22 @@ class InventoryWarehouseScopeTests(TestCase):
         )
 
         self.assertEqual(detail.warehouse_id, self.warehouse.id)
+        self.assertEqual(detail.subwarehouse_id, self.subwarehouse.id)
+
+    def test_inventory_detail_rejects_mismatched_subwarehouse(self):
+        with self.assertRaises(ValidationError) as exc:
+            InventoryDetail.objects.create(
+                owner=self.owner,
+                product=self.product,
+                location=self.location,
+                subwarehouse=self.other_subwarehouse,
+                onhand_qty=Decimal("5.0000"),
+                allocated_qty=Decimal("0"),
+                locked_qty=Decimal("0"),
+                damaged_qty=Decimal("0"),
+            )
+
+        self.assertIn("subwarehouse", exc.exception.message_dict)
 
     def test_inventory_transaction_derives_warehouse_from_location(self):
         tx = InventoryTransaction.objects.create(
@@ -94,6 +110,24 @@ class InventoryWarehouseScopeTests(TestCase):
         )
 
         self.assertEqual(tx.warehouse_id, self.warehouse.id)
+        self.assertEqual(tx.subwarehouse_id, self.subwarehouse.id)
+
+    def test_inventory_transaction_rejects_mismatched_subwarehouse(self):
+        with self.assertRaises(ValidationError) as exc:
+            InventoryTransaction.objects.create(
+                tx_type=InvTxType.RECEIVE,
+                owner=self.owner,
+                product=self.product,
+                location=self.location,
+                subwarehouse=self.other_subwarehouse,
+                qty_delta=Decimal("2.0000"),
+                src_model="inventory.tests",
+                src_id=2,
+                src_line_id=1,
+                src_no="INV-TX-2",
+            )
+
+        self.assertIn("subwarehouse", exc.exception.message_dict)
 
     def test_review_difference_requires_explicit_warehouse(self):
         with self.assertRaises(ValidationError) as exc:

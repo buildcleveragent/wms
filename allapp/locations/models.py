@@ -18,12 +18,12 @@ class Warehouse(BaseModel):
 class Subwarehouse(BaseModel):
     warehouse = models.ForeignKey("Warehouse", verbose_name="所属仓库", on_delete=models.PROTECT,
                                   related_name="subwarehouse")
-    code = models.CharField("仓库编号", max_length=10, unique=True)
-    name = models.CharField("仓库名称", max_length=30)
+    code = models.CharField("子仓编号", max_length=10, unique=True)
+    name = models.CharField("子仓名称", max_length=30)
     floor_no = models.PositiveSmallIntegerField(_("楼层"), default=1, db_index=True)
     class Meta:
-        verbose_name = "子仓库"
-        verbose_name_plural = "子仓库"
+        verbose_name = "子仓"
+        verbose_name_plural = "子仓"
         ordering = ["code"]
     def __str__(self): return f"{self.name}"
 
@@ -42,7 +42,7 @@ class Subwarehouse(BaseModel):
 class Location(BaseModel):
 
     warehouse = models.ForeignKey("Warehouse", verbose_name="所属仓库", on_delete=models.PROTECT, related_name="locations")
-    subwarehouse = models.ForeignKey("Subwarehouse", verbose_name="所属仓", on_delete=models.PROTECT,
+    subwarehouse = models.ForeignKey("Subwarehouse", verbose_name="所属子仓", on_delete=models.PROTECT,
                                   related_name="locations", blank=True, null=True)
     zone_type = models.PositiveSmallIntegerField(
         _("区域类型"), choices=ZoneType.choices, default=ZoneType.STORAGE, db_index=True
@@ -93,16 +93,15 @@ class Location(BaseModel):
         super().clean()
         errors = {}
 
-        # 校验并解析编码（例：WH01-Z01-R01-01-02）
+        # 校验并解析编码（例：SW01-01-01-01，第一段为子仓编号）
         if self.code:
             parts = self.code.split('-')
             if len(parts) != 4:
-                raise ValidationError("储位编码格式不正确，应为[仓号]-[层号]-[列号]-[位号]")
+                raise ValidationError("储位编码格式不正确，应为[子仓号]-[层号]-[列号]-[位号]")
 
             # 解析编码并填充对应字段
-            # self. = parts[0]  # 货架编码
-            subwarehouse_no=parts[0]  # 子仓号
-            sw = Subwarehouse.objects.filter(code=subwarehouse_no).select_related("warehouse").first()
+            subwarehouse_code=parts[0]
+            sw = Subwarehouse.objects.filter(code=subwarehouse_code).select_related("warehouse").first()
             if not sw:
                raise ValidationError({"subwarehouse": "该子仓不存在，请先建立子仓"})
             self.subwarehouse = sw
@@ -215,6 +214,4 @@ class Container(BaseModel):
         self._sync_warehouse_from_relations()
         self.full_clean()
         return super().save(*args, **kwargs)
-
-
 

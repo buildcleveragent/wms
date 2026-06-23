@@ -5,21 +5,22 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Optional, Tuple, List
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
-from django.utils import timezone
 
+from allapp.core.models import DocSequence
 from allapp.inventory.models import InventoryDetail
-from allapp.locations.models import Location, Warehouse
 from allapp.baseinfo.models import Owner
+from allapp.locations.models import Subwarehouse, Warehouse
 from allapp.tasking.models import WmsTask, WmsTaskLine
 
 
 @dataclass
 class CountScopeParams:
     warehouse_id: int
-    subwarehouse_id: int
     owner_id: int
+    subwarehouse_id: Optional[int] = None
     # 细化筛选（均为可选）
     # zone_id: Optional[int] = None
     zone_type: Optional[int] = None  # Optional[int] 表示该字段为可选，存储 ZoneType 的枚举值
@@ -43,9 +44,9 @@ def _apply_optional_filters(qs, p: CountScopeParams, notes: List[str]):
     qs = qs.filter(warehouse_id=p.warehouse_id, owner_id=p.owner_id)
 
     # —— zone 过滤
-    if p.zone_tpye:
-        if _has_field(InventoryDetail, "zone_tpye"):
-            qs = qs.filter(zone_tpye=p.zone_tpye)
+    if p.zone_type:
+        if _has_field(InventoryDetail, "zone_type"):
+            qs = qs.filter(zone_type=p.zone_type)
 
 
     if p.subwarehouse_id:
@@ -59,7 +60,7 @@ def _apply_optional_filters(qs, p: CountScopeParams, notes: List[str]):
         else:
             notes.append("InventoryDetail 无 location_id，忽略“指定库位”过滤。")
 
-    # —— location 前缀（优先匹配 Location.code，其次 name）
+    # —— location 前缀（优先匹配库位 code，其次 name）
     if p.location_prefix:
         if _has_field(InventoryDetail, "location_id"):
             q_code = Q(location__code__istartswith=p.location_prefix)
@@ -124,6 +125,7 @@ def create_lines_from_scope(
     created_by,
     owner_id: int,
     warehouse_id: int,
+    subwarehouse_id: Optional[int] = None,
     zone_type: Optional[int] = None,
     location_id: Optional[int] = None,
     location_prefix: Optional[str] = None,
@@ -142,8 +144,12 @@ def create_lines_from_scope(
     - truncated=True 表示行数被 max_lines 截断
     """
     # 1) 预取校验（尽量避免跨 owner/warehouse 错误）
-    Warehouse.objects.only("id").get(id=warehouse_id)
-    Owner.objects.only("id").get(id=owner_id)
+    warehouse = Warehouse.objects.only("id", "code").get(id=warehouse_id)
+    owner = Owner.objects.only("id", "code").get(id=owner_id)
+    if subwarehouse_id:
+        subwarehouse = Subwarehouse.objects.only("id", "warehouse_id").get(id=subwarehouse_id)
+        if subwarehouse.warehouse_id != warehouse_id:
+            raise ValidationError({"subwarehouse_id": "子仓必须隶属于所选仓库。"})
 
     # 2) 构建查询
     params = CountScopeParams(
@@ -174,9 +180,16 @@ def create_lines_from_scope(
         details = details[:max_lines]
 
     # 3) 创建任务头（DRAFT, COUNT）
+    task_no = DocSequence.next_code(
+        doc_type="PD",
+        warehouse=warehouse,
+        owner=owner,
+        biz_date=date.today(),
+    )
     tt = getattr(WmsTask.TaskType, "COUNT", "COUNT")
     st = getattr(WmsTask.Status, "DRAFT", "DRAFT")
     task = WmsTask(
+        task_no=task_no,
         task_type=tt,
         status=st,
         owner_id=owner_id,
