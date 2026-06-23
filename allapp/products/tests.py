@@ -121,6 +121,23 @@ class ProductViewSetTests(TestCase):
         codes = [i["code"] for i in resp2.data]
         self.assertIn("SKU-NEW", codes)
 
+    def test_regular_user_cannot_create_for_other_owner(self):
+        view = ProductViewSet.as_view({"post": "create"})
+        payload = {
+            "owner": self.owner_b.id,
+            "code": "SKU-LOCKED",
+            "name": "锁回当前货主",
+            "base_uom": self.uom.id,
+            "is_active": True,
+        }
+        req = self.factory.post("/products/", data=payload, format="json")
+        force_authenticate(req, user=self.user_a)
+        resp = view(req)
+
+        self.assertEqual(resp.status_code, 201, resp.data)
+        product = Product.objects.get(code="SKU-LOCKED")
+        self.assertEqual(product.owner_id, self.owner_a.id)
+
     def test_view_all_owner_permission_can_list_other_owner_products(self):
         view = ProductViewSet.as_view({"get": "list"})
         req = self.factory.get("/products/")

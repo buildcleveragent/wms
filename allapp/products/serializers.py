@@ -1,6 +1,7 @@
 # apps/products/serializers.py  可直接覆盖版
 from rest_framework import serializers
 from .models import Product, ProductPackage  # ProductUom 未使用可移除
+from .permissions import can_manage_all_owner_products
 
 class ProductPackageBriefSerializer(serializers.ModelSerializer):
     uom_code = serializers.CharField(source="uom.code", read_only=True)
@@ -39,13 +40,20 @@ class ProductSerializer(serializers.ModelSerializer):
             data = data.copy()
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        if (
-            self.instance is None
-            and "owner" not in data
-            and user
+        authed_non_superuser = (
+            user
             and getattr(user, "is_authenticated", False)
-            and not user.is_superuser
-        ):
+            and not getattr(user, "is_superuser", False)
+        )
+        if authed_non_superuser:
+            can_manage_all = can_manage_all_owner_products(user)
+            owner_id = getattr(user, "owner_id", None)
+            if self.instance is None:
+                if owner_id and (not can_manage_all or "owner" not in data):
+                    data["owner"] = owner_id
+            elif not can_manage_all:
+                data["owner"] = self.instance.owner_id
+        elif self.instance is None and "owner" not in data:
             owner_id = getattr(user, "owner_id", None)
             if owner_id:
                 data["owner"] = owner_id
