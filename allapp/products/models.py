@@ -384,6 +384,10 @@ class Product(BaseModel):
         verbose_name = "商品档案"
         verbose_name_plural = "商品档案"
         ordering = ["owner", "code"]
+        permissions = [
+            ("view_all_owner_products", "可查看所有货主商品"),
+            ("manage_all_owner_products", "可处理所有货主商品"),
+        ]
         constraints = [
             models.CheckConstraint(check=~Q(code=""), name="chk_prod_code_not_empty"),
             models.UniqueConstraint(fields=["owner", "code"], name="uniq_owner_code"),
@@ -823,4 +827,3 @@ class ProductPackage(BaseModel):
     #
     #     if errors:
     #         raise ValidationError(errors)
-

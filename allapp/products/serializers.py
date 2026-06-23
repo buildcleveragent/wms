@@ -39,7 +39,13 @@ class ProductSerializer(serializers.ModelSerializer):
             data = data.copy()
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        if "owner" not in data and user and getattr(user, "is_authenticated", False) and not user.is_superuser:
+        if (
+            self.instance is None
+            and "owner" not in data
+            and user
+            and getattr(user, "is_authenticated", False)
+            and not user.is_superuser
+        ):
             owner_id = getattr(user, "owner_id", None)
             if owner_id:
                 data["owner"] = owner_id

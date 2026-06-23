@@ -153,7 +153,7 @@ INTERNAL_IPS = _csv_env("INTERNAL_IPS", default=["127.0.0.1"]) if ENABLE_DEBUG_T
 
 # 允许指定的域访问（修改为你的前端 URL）
 
-CORS_ALLOWED_ORIGINS = _csv_env("CORS_ALLOWED_ORIGINS", ...)
+CORS_ALLOWED_ORIGINS = _csv_env("CORS_ALLOWED_ORIGINS", default=[])
 
 # MIDDLEWARE_CLASSES = (
 #    'admin_model_list_order.middleware.AdminModelListOrder',

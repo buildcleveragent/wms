@@ -8,7 +8,7 @@ from django.utils.translation import gettext_lazy as _
 from .models import Warehouse, Subwarehouse,Location,Container
 
 class FloorNoListFilter(admin.SimpleListFilter):
-    """按楼层筛选：显示“有某楼层库位”的子仓"""
+    """按楼层筛选子仓。"""
     title = _("楼层")
     parameter_name = "floor"
 
@@ -23,8 +23,7 @@ class FloorNoListFilter(admin.SimpleListFilter):
                 floor = int(val)
             except ValueError:
                 return queryset
-            # 仅保留“有该楼层库位”的子仓
-            return queryset.filter(locations__floor_no=floor).distinct()
+            return queryset.filter(floor_no=floor)
         return queryset
 
 ##---------- Admins ----------

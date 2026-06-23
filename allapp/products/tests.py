@@ -43,11 +43,35 @@ class ProductViewSetTests(TestCase):
         cls.user_a = User.objects.create_user(username="a", password="a", owner=cls.owner_a, is_staff=True)
         cls.user_b = User.objects.create_user(username="b", password="b", owner=cls.owner_b, is_staff=True)
 
-        # 给两位用户授予 Product 的增/改/查/删权限（DjangoModelPermissions 需要）
+        # 给两位普通用户授予 Product 的内置增/改/查/删权限（DjangoModelPermissions 需要）。
         ct = ContentType.objects.get_for_model(Product)
-        perms = Permission.objects.filter(content_type=ct)
-        cls.user_a.user_permissions.add(*list(perms))
-        cls.user_b.user_permissions.add(*list(perms))
+        builtin_perms = Permission.objects.filter(
+            content_type=ct,
+            codename__in=["add_product", "change_product", "delete_product", "view_product"],
+        )
+        cls.user_a.user_permissions.add(*list(builtin_perms))
+        cls.user_b.user_permissions.add(*list(builtin_perms))
+
+        cls.view_all_user = User.objects.create_user(
+            username="view-all",
+            password="x",
+            owner=cls.owner_a,
+            is_staff=True,
+        )
+        cls.manage_all_user = User.objects.create_user(
+            username="manage-all",
+            password="x",
+            owner=cls.owner_a,
+            is_staff=True,
+        )
+        cls.view_all_user.user_permissions.add(*list(builtin_perms))
+        cls.view_all_user.user_permissions.add(
+            Permission.objects.get(content_type=ct, codename="view_all_owner_products")
+        )
+        cls.manage_all_user.user_permissions.add(*list(builtin_perms))
+        cls.manage_all_user.user_permissions.add(
+            Permission.objects.get(content_type=ct, codename="manage_all_owner_products")
+        )
 
         # 现存商品：A/B 各一条
         cls.prod_a = Product.objects.create(
@@ -96,6 +120,59 @@ class ProductViewSetTests(TestCase):
         resp2 = view_list(req2)
         codes = [i["code"] for i in resp2.data]
         self.assertIn("SKU-NEW", codes)
+
+    def test_view_all_owner_permission_can_list_other_owner_products(self):
+        view = ProductViewSet.as_view({"get": "list"})
+        req = self.factory.get("/products/")
+        force_authenticate(req, user=self.view_all_user)
+        resp = view(req)
+
+        self.assertEqual(resp.status_code, 200)
+        codes = [item["code"] for item in resp.data]
+        self.assertIn("SKU-A", codes)
+        self.assertIn("SKU-B", codes)
+
+    def test_view_all_owner_permission_cannot_modify_other_owner_products(self):
+        view = ProductViewSet.as_view({"patch": "partial_update"})
+        req = self.factory.patch(
+            f"/products/{self.prod_b.id}/",
+            data={"name": "Should Not Update"},
+            format="json",
+        )
+        force_authenticate(req, user=self.view_all_user)
+        resp = view(req, pk=self.prod_b.id)
+
+        self.assertEqual(resp.status_code, 404)
+
+    def test_manage_all_owner_permission_can_modify_other_owner_products(self):
+        view = ProductViewSet.as_view({"patch": "partial_update"})
+        req = self.factory.patch(
+            f"/products/{self.prod_b.id}/",
+            data={"name": "Managed Update"},
+            format="json",
+        )
+        force_authenticate(req, user=self.manage_all_user)
+        resp = view(req, pk=self.prod_b.id)
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.prod_b.refresh_from_db()
+        self.assertEqual(self.prod_b.name, "Managed Update")
+        self.assertEqual(self.prod_b.owner_id, self.owner_b.id)
+
+    def test_regular_user_cannot_reassign_product_owner_on_update(self):
+        view = ProductViewSet.as_view({"patch": "partial_update"})
+        req = self.factory.patch(
+            f"/products/{self.prod_a.id}/",
+            data={"owner": self.owner_b.id, "name": "Owner Guarded"},
+            format="json",
+        )
+        force_authenticate(req, user=self.user_a)
+        resp = view(req, pk=self.prod_a.id)
+
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.prod_a.refresh_from_db()
+        self.assertEqual(self.prod_a.owner_id, self.owner_a.id)
+        self.assertEqual(self.prod_a.name, "Owner Guarded")
 
     def test_barcode_action_returns_zpl(self):
         """

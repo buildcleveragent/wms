@@ -6,10 +6,11 @@ from django.http import HttpResponse
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, DjangoModelPermissions
+from rest_framework.permissions import IsAuthenticated, DjangoModelPermissions, SAFE_METHODS
 from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import Product
+from .permissions import can_manage_all_owner_products, can_view_all_owner_products
 from .serializers import ProductSerializer
 
 # ✅ 补上资源导入（若资源缺失则统一给出 501 提示，避免 NameError）
@@ -24,22 +25,35 @@ class OwnerScopedMixin:
     permission_classes = [IsAuthenticated, DjangoModelPermissions]
     owner_path = "owner"
 
+    def has_all_owner_scope(self):
+        user = self.request.user
+        if self.request.method in SAFE_METHODS:
+            return can_view_all_owner_products(user)
+        return can_manage_all_owner_products(user)
+
     def get_queryset(self):
         qs = super().get_queryset()  # type: ignore[attr-defined]
         user = getattr(self, "request", None).user if getattr(self, "request", None) else None
         if not user or not user.is_authenticated:
             return qs.none()
-        if user.is_superuser:
+        if self.has_all_owner_scope():
             return qs
         owner_id = getattr(user, "owner_id", None)
         return qs.filter(**{f"{self.owner_path}_id": owner_id}) if owner_id else qs.none()
 
     def perform_create(self, serializer):
-        extra = {}
         user = self.request.user
-        if "owner" in serializer.fields and not user.is_superuser:
-            extra["owner"] = getattr(user, "owner", None)
-        serializer.save(**extra)
+        if self.has_all_owner_scope():
+            serializer.save()
+            return
+        serializer.save(owner=getattr(user, "owner", None))
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        if self.has_all_owner_scope():
+            serializer.save()
+            return
+        serializer.save(owner=getattr(user, "owner", None))
 
 
 class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):

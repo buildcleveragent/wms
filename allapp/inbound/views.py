@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, permissions
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from allapp.baseinfo.models import Owner
 from allapp.core.models import DocSequence
@@ -21,6 +21,7 @@ from allapp.inbound.constants import (
 )
 from allapp.locations.models import Warehouse, Location
 from allapp.products.models import Product
+from allapp.products.permissions import can_manage_all_owner_products
 from allapp.tasking.models import WmsTask, WmsTaskLine
 from allapp.tasking.services import save_receiving_snapshot, _run_posting_handler
 from allapp.core.utils.log_context import build_log_payload
@@ -28,19 +29,42 @@ from allapp.core.utils.log_context import build_log_payload
 class ReceiveGoodsWithoutOrder(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+    def _resolve_scope(self, request, payload):
+        user = request.user
+        payload_owner_id = int(payload["owner_id"])
+        payload_warehouse_id = payload.get("warehouse_id")
+
+        if getattr(user, "is_superuser", False):
+            warehouse_id = payload_warehouse_id or getattr(user, "warehouse_id", None)
+            if not warehouse_id:
+                raise ValidationError("必须提供 warehouse_id 或为当前用户绑定 warehouse")
+            return payload_owner_id, warehouse_id
+
+        user_warehouse_id = getattr(user, "warehouse_id", None)
+        if not user_warehouse_id:
+            raise PermissionDenied("当前用户未绑定仓库，不能执行仓库收货操作")
+        if payload_warehouse_id and str(payload_warehouse_id) != str(user_warehouse_id):
+            raise PermissionDenied("无权处理其他仓库")
+
+        if can_manage_all_owner_products(user):
+            return payload_owner_id, user_warehouse_id
+
+        user_owner_id = getattr(user, "owner_id", None)
+        if not user_owner_id:
+            raise PermissionDenied("当前用户未绑定货主，不能处理货主商品")
+        if payload_owner_id != user_owner_id:
+            raise PermissionDenied("无权处理其他货主商品")
+        return user_owner_id, user_warehouse_id
+
     @transaction.atomic
     def post(self, request):
         # allapp/inbound/views.py（关键片段）
         s = ReceiveWithoutOrderPayloadSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         payload = s.validated_data
-        owner_id = int(payload["owner_id"])
+        owner_id, wid = self._resolve_scope(request, payload)
         items = payload["items"]
         remark = (payload.get("remark") or PDA_NO_ORDER_RECEIVE_NOTE).strip()
-
-        wid = payload.get("warehouse_id") or getattr(request.user, "warehouse_id", None)
-        if not wid:
-            raise ValidationError("必须提供 warehouse_id 或为当前用户绑定 warehouse")
 
         try:
             wh = Warehouse.objects.only('id').get(id=wid)
@@ -51,6 +75,22 @@ class ReceiveGoodsWithoutOrder(APIView):
             owner = Owner.objects.only('id').get(id=owner_id)
         except Owner.DoesNotExist:
             raise ValidationError(f"owner_id 不存在：{owner_id}")
+
+        product_ids = {int(item["product_id"]) for item in items}
+        product_map = {
+            product.id: product
+            for product in Product.objects.only("id", "owner_id").filter(id__in=product_ids)
+        }
+        missing_product_ids = sorted(product_ids - set(product_map))
+        if missing_product_ids:
+            raise ValidationError({"items": f"product_id 不存在：{missing_product_ids}"})
+        bad_product_ids = sorted(
+            product_id
+            for product_id, product in product_map.items()
+            if product.owner_id != owner_id
+        )
+        if bad_product_ids:
+            raise PermissionDenied(f"存在不属于当前货主的商品：{bad_product_ids}")
 
         location = None
         location_id = payload.get("location_id")
@@ -201,7 +241,7 @@ class ReceiveGoodsWithoutOrder(APIView):
                     qty_plan=total_qty,   # 可选：计划=本次合计，便于对账
                 )
 
-            p = Product.objects.only("id").get(id=pid)
+            p = product_map[pid]
             snap_items = []
             for (item_pid, lot_no, mfg_date, exp_date), item_qty in snapshot_grouped.items():
                 if item_pid != pid:

@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import quote
 from django.conf import settings
 from django.http import FileResponse, Http404
+from django.shortcuts import get_object_or_404
 from rest_framework.parsers import MultiPartParser, FormParser
 from openpyxl import load_workbook
 from django.apps import apps
@@ -14,7 +15,7 @@ from django.db.models import Q, Sum, Prefetch
 import logging
 from ..products.models import ProductPackage
 from django.db.models import F
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 logger = logging.getLogger(__name__)
 from rest_framework import viewsets, mixins, status
 from rest_framework.pagination import PageNumberPagination
@@ -34,6 +35,7 @@ from allapp.billing.models import BillingPeriod
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.models import OutboundOrderLine
 from allapp.outbound.serializers import OutboundOrderCreateSerializer,ConfirmPricingSerializer, OutboundOrderReadSerializer
+from allapp.products.permissions import can_manage_all_owner_products, can_view_all_owner_products
 from allapp.core.utils.log_context import build_log_payload
 
 
@@ -123,6 +125,28 @@ class ProductPagination(PageNumberPagination):
     page_size_query_param = "page_size"
     max_page_size = 1000
 
+
+def _resolve_product_owner_scope(request, *, param_name="owner", default_to_user_owner=True):
+    requested_owner = request.query_params.get(param_name)
+    user_owner = getattr(request.user, "owner_id", None)
+    if can_view_all_owner_products(request.user):
+        if requested_owner:
+            return requested_owner
+        return user_owner if default_to_user_owner else None
+    if requested_owner and str(requested_owner) != str(user_owner):
+        raise PermissionDenied("无权查看其他货主商品")
+    return user_owner
+
+
+def _resolve_inventory_warehouse_scope(request):
+    requested_wh = request.query_params.get("warehouse_id")
+    if getattr(request.user, "is_superuser", False):
+        return requested_wh
+    user_wh = getattr(request.user, "warehouse_id", None)
+    if requested_wh and str(requested_wh) != str(user_wh):
+        raise PermissionDenied("无权查看其他仓库库存")
+    return user_wh or None
+
 class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = ProductPagination
@@ -131,16 +155,18 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         Product   = apps.get_model("products", "Product")
         InvDetail = apps.get_model("inventory", "InventoryDetail")
 
-        owner_id = getattr(request.user, "owner_id", None)
-        if not owner_id:
-            owner_id = request.query_params.get("owner")
-            if not owner_id:
-                ctx, ctx_text = build_log_payload(
-                    user=request.user,
-                    warehouse_id=request.query_params.get("warehouse_id"),
-                )
-                logger.warning("outbound.product_list.owner_missing %s", ctx_text, extra=ctx)
-                return Response([])
+        owner_id = _resolve_product_owner_scope(
+            request,
+            param_name="owner",
+            default_to_user_owner=False,
+        )
+        if not owner_id and not can_view_all_owner_products(request.user):
+            ctx, ctx_text = build_log_payload(
+                user=request.user,
+                warehouse_id=request.query_params.get("warehouse_id"),
+            )
+            logger.warning("outbound.product_list.owner_missing %s", ctx_text, extra=ctx)
+            return Response([])
         ctx, ctx_text = build_log_payload(
             user=request.user,
             owner_id=owner_id,
@@ -156,9 +182,10 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                         "is_purchase_default", "sort_order",
                         "uom__name", "uom__code"))
 
-        qs = (Product.objects
-              .filter(owner_id=owner_id)
-              .select_related("base_uom", "replenish_uom",)
+        qs = Product.objects.all()
+        if owner_id:
+            qs = qs.filter(owner_id=owner_id)
+        qs = (qs.select_related("base_uom", "replenish_uom",)
               .only("id", "owner_id", "code", "name", "sku", "spec","product_image","gtin","min_price","max_discount",
                     "base_uom__code","base_uom__name", "replenish_uom__code", "replenish_uom__name","replenish_uom_id")
               .order_by("id"))
@@ -179,8 +206,10 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             return self.get_paginated_response([])
 
         pid_list = [p.id for p in page]
-        wh_id = request.query_params.get("warehouse_id")
-        inv_filter = {"owner_id": owner_id, "product_id__in": pid_list}
+        wh_id = _resolve_inventory_warehouse_scope(request)
+        inv_filter = {"product_id__in": pid_list}
+        if owner_id:
+            inv_filter["owner_id"] = owner_id
         if wh_id:
             inv_filter["warehouse_id"] = int(wh_id)
 
@@ -344,8 +373,11 @@ class OwnerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         user = self.request.user
 
         qs = Owner.objects.all()
-        # if getattr(user, "owner_id", None):
-        #     qs = qs.filter(owner_id=user.owner_id)
+        if not can_view_all_owner_products(user):
+            if getattr(user, "owner_id", None):
+                qs = qs.filter(id=user.owner_id)
+            else:
+                qs = qs.none()
 
         q = self.request.query_params.get("search")
         if q:
@@ -373,7 +405,7 @@ class SupplierViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         #     qs = qs.filter(owner_id=user.owner_id)
 
         q = self.request.query_params.get("search")
-        o = self.request.query_params.get("owner")
+        o = _resolve_product_owner_scope(self.request, param_name="owner")
         if q:
             qs = qs.filter(Q(code__icontains=q) | Q(name__icontains=q))
 
@@ -398,7 +430,7 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         Product   = apps.get_model("products", "Product")
         ProductPackage = apps.get_model("products", "ProductPackage")
 
-        owner_id = request.query_params.get("owner")
+        owner_id = _resolve_product_owner_scope(request, param_name="owner")
         if not owner_id:
             ctx, ctx_text = build_log_payload(user=request.user)
             logger.warning("outbound.receive_product_list.owner_missing %s", ctx_text, extra=ctx)
@@ -1103,10 +1135,34 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = PickTaskSerializer
 
+    def _scope_pick_queryset(self, qs):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return qs.none()
+        if getattr(user, "is_superuser", False):
+            return qs
+
+        warehouse_id = getattr(user, "warehouse_id", None)
+        if not warehouse_id:
+            return qs.none()
+        qs = qs.filter(warehouse_id=warehouse_id)
+
+        if can_manage_all_owner_products(user):
+            return qs
+
+        owner_id = getattr(user, "owner_id", None)
+        return qs.filter(owner_id=owner_id) if owner_id else qs.none()
+
+    def _get_pick_task_for_update(self, pk):
+        qs = self._scope_pick_queryset(
+            WmsTask.objects.select_for_update().filter(task_type=WmsTask.TaskType.PICK)
+        )
+        return get_object_or_404(qs, pk=pk)
+
     def get_queryset(self):
-        qs = WmsTask.objects.filter(
+        qs = self._scope_pick_queryset(WmsTask.objects.filter(
             task_type=WmsTask.TaskType.PICK,
-        ).order_by("-id")
+        )).order_by("-id")
 
         action = getattr(self, "action", None)
 
@@ -1143,11 +1199,12 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(methods=["get"], detail=True)
     def lines(self, request, pk=None):
+        task = self.get_object()
         ctx, ctx_text = build_log_payload(task_id=pk, user=request.user)
         logger.info("outbound.pick.lines.request %s", ctx_text, extra=ctx)
         lines = (
             WmsTaskLine.objects
-            .filter(task_id=pk)
+            .filter(task_id=task.id)
             .select_related("product", "from_location", "to_location")
             .order_by("id")
         )
@@ -1171,8 +1228,9 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         if not barcode:
             return Response({"detail": "缺少条码"}, status=400)
 
+        task = self.get_object()
         res = task_services.scan_task(
-            task_id=int(pk),
+            task_id=task.id,
             barcode=barcode,
             qty=qty,
             location_id=location_id,
@@ -1213,9 +1271,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
           - 记录 picked_by = 当前用户（拣货人）
         """
         task = (
-            WmsTask.objects
-            .select_for_update()
-            .get(id=pk, task_type=WmsTask.TaskType.PICK)
+            self._get_pick_task_for_update(pk)
         )
         ctx, ctx_text = build_log_payload(task=task, user=request.user)
         logger.info("outbound.pick.create_review.begin %s", ctx_text, extra=ctx)
@@ -1284,9 +1340,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
           - 然后调用 _run_posting_handler 真正过账
         """
         task = (
-            WmsTask.objects
-            .select_for_update()
-            .get(id=pk, task_type=WmsTask.TaskType.PICK)
+            self._get_pick_task_for_update(pk)
         )
         ctx, ctx_text = build_log_payload(task=task, user=request.user)
         logger.info("outbound.pick.post.begin %s", ctx_text, extra=ctx)
@@ -1339,7 +1393,8 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         """
         ctx, ctx_text = build_log_payload(task_id=pk, user=request.user)
         logger.info("outbound.pick.adjust_line_qty.begin %s", ctx_text, extra=ctx)
-        task_id = int(pk)
+        task = self.get_object()
+        task_id = task.id
         line_id = request.data.get("line_id")
         final_qty_done = request.data.get("final_qty_done")
         client_seq = request.data.get("client_seq")
@@ -1352,6 +1407,11 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         if final_qty_done is None:
             return Response(
                 {"detail": "缺少 final_qty_done"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not WmsTaskLine.objects.filter(id=line_id, task_id=task.id).exists():
+            return Response(
+                {"detail": "line_id 不属于当前任务"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
