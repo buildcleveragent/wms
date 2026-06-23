@@ -11,7 +11,7 @@ const BASE_MAP = {
 }
 
 // export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
-export const BASE_URL = BASE_MAP.onsite
+export const BASE_URL = BASE_MAP.develop
 
 function getToken() {
   try {

@@ -10,7 +10,7 @@ const BASE_MAP = {
 }
 
 // export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
-export const BASE_URL = BASE_MAP.onsite
+export const BASE_URL = BASE_MAP.develop
 
 function getToken() {
   try {
@@ -281,6 +281,7 @@ export const api = {
 
   posProducts: (params = {}) => {
     const qs = buildQuery({
+      ...params,
       search: params.search || '',
       barcode: params.barcode || '',
       page: params.page || 1,
@@ -376,6 +377,7 @@ export const api = {
 	
   companyInventorySummary: (params = {}) => {
     const qs = buildQuery({
+      ...params,
       mode: params.mode || 'warehouse',
       warehouse_id: params.warehouse_id || '',
       owner_id: params.owner_id || '',
