@@ -14,6 +14,7 @@
 		{"path": "pages/review/pick_task", "style": { "navigationBarTitleText": "拣货复核明细" } },
 		{"path": "pages/inventory/company", "style": {"navigationBarTitleText": "公司库存汇总" }},
 		{"path": "pages/reports/index","style":{"navigationBarTitleText":"仓库统计"}},
+		{"path": "pages/reports/detail","style":{"navigationBarTitleText":"统计明细"}},
 		{"path": "pages/me/index","style":{"navigationBarTitleText":"我的"}},
 		{"path": "pages/me/change_password","style":{"navigationBarTitleText":"修改密码"}}
 

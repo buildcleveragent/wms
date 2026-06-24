@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>POS交班单</title>
+  <style>
+    body { margin: 0; background: #f3f4f6; color: #111827; font-family: Arial, "Microsoft YaHei", sans-serif; }
+    .sheet { width: 96mm; margin: 12px auto; padding: 14px; background: #fff; box-sizing: border-box; }
+    .title { text-align: center; font-size: 20px; font-weight: 700; margin-bottom: 10px; }
+    .meta, .summary { font-size: 13px; line-height: 1.7; }
+    .block { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #9ca3af; }
+    .row { display: flex; justify-content: space-between; gap: 12px; }
+    .strong { font-weight: 700; }
+    .danger { color: #dc2626; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+    th, td { padding: 5px 0; border-bottom: 1px dashed #e5e7eb; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    .actions { width: 96mm; margin: 8px auto; text-align: right; }
+    .actions button { padding: 6px 10px; }
+    @media print {
+      body { background: #fff; }
+      .sheet { width: auto; margin: 0; padding: 0; }
+      .actions { display: none; }
+    }
+  </style>
+</head>
+<body onload="window.print()">
+  <div class="actions"><button onclick="window.print()">重新打印</button></div>
+  <div class="sheet">
+    <div class="title">POS交班单</div>
+    <div class="meta">
+      <div>班次号：{{ shift.shift_no }}</div>
+      <div>状态：{{ shift.status }}</div>
+      <div>收银员：{{ shift.cashier_username }}</div>
+      <div>开班时间：{{ shift.opened_at }}</div>
+      <div>交班时间：{{ shift.closed_at|default:"-" }}</div>
+      <div>重打次数：{{ copy_no }}</div>
+    </div>
+
+    <div class="summary block">
+      <div class="row strong"><span>净销售额</span><span>{{ shift.summary.net_amount }}</span></div>
+      <div class="row"><span>完成单数</span><span>{{ shift.summary.completed_count }}</span></div>
+      <div class="row danger"><span>作废单数</span><span>{{ shift.summary.voided_count }}</span></div>
+      <div class="row danger"><span>作废金额</span><span>{{ shift.summary.voided_amount }}</span></div>
+      <div class="row"><span>备用金</span><span>{{ shift.summary.opening_cash_amount }}</span></div>
+      <div class="row"><span>现金应点</span><span>{{ shift.summary.expected_cash_amount }}</span></div>
+      <div class="row"><span>现金实点</span><span>{{ shift.summary.actual_cash_amount }}</span></div>
+      <div class="row strong"><span>现金差异</span><span>{{ shift.summary.cash_difference }}</span></div>
+    </div>
+
+    <div class="block">
+      <div class="strong">支付方式</div>
+      <table>
+        <thead>
+          <tr>
+            <th>方式</th>
+            <th>单数</th>
+            <th>系统</th>
+            <th>实点</th>
+            <th>差异</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in shift.summary.payments %}
+            <tr>
+              <td>{{ row.method_label }}</td>
+              <td>{{ row.sale_count }}</td>
+              <td>{{ row.expected_amount }}</td>
+              <td>{{ row.actual_amount }}</td>
+              <td>{{ row.difference }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5">无收款记录</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="block">备注：{{ shift.remark|default:"无" }}</div>
+  </div>
+</body>
+</html>

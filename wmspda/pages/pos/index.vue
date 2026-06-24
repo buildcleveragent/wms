@@ -6,6 +6,45 @@
       <view class="nav-spacer"></view>
     </view>
 
+    <view class="section shift-section">
+      <view class="section-head">
+        <text class="section-title">当前班次</text>
+        <view class="section-actions">
+          <button class="ghost-btn shift-refresh-btn" :disabled="shiftLoading" @click="loadCurrentShift">
+            刷新
+          </button>
+          <button v-if="currentShift" class="ghost-btn shift-refresh-btn" @click="exportCurrentShift">
+            导出
+          </button>
+        </view>
+      </view>
+      <view v-if="currentShift" class="shift-card">
+        <view class="shift-main">
+          <text class="shift-no">{{ currentShift.shift_no }}</text>
+          <text class="shift-meta">{{ currentShift.cashier_username || '-' }} / {{ shiftStatusText(currentShift.status) }}</text>
+          <text class="shift-meta">开班 {{ formatDateTime(currentShift.opened_at) }}</text>
+        </view>
+        <view class="shift-numbers">
+          <text>净销售 {{ money(shiftSummary.net_amount) }}</text>
+          <text>完成 {{ shiftSummary.completed_count || 0 }} 单 / 作废 {{ shiftSummary.voided_count || 0 }} 单</text>
+          <text>现金应点 {{ money(shiftSummary.expected_cash_amount) }}</text>
+        </view>
+        <view v-if="currentShift.status === 'OPEN'" class="shift-close-row">
+          <input class="input shift-cash-input" v-model.trim="shiftActualCashAmount" type="digit" placeholder="现金实点金额" />
+          <button class="primary-btn shift-action-btn" :disabled="shiftLoading" @click="closeCurrentShift">
+            交班
+          </button>
+        </view>
+      </view>
+      <view v-else class="shift-open-row">
+        <input class="input shift-cash-input" v-model.trim="shiftOpeningCashAmount" type="digit" placeholder="备用金" />
+        <button class="primary-btn shift-action-btn" :disabled="shiftLoading" @click="openCurrentShift">
+          开班
+        </button>
+        <text class="shift-hint">开班后才能结账</text>
+      </view>
+    </view>
+
     <view class="pos-main">
       <view class="pos-left">
     <view class="section pos-toolbar">
@@ -193,6 +232,7 @@
             type="digit"
             v-model="amountReceived"
             placeholder="实收"
+            :disabled="paymentMethod !== 'CASH'"
           />
         </view>
         <view class="bill-row reference-row">
@@ -217,6 +257,10 @@
           <view class="summary-sub">
             <text>商品 {{ cartItems.length }} 项</text>
             <text>基本数量 {{ qtyText(totalBaseQty) }}</text>
+            <text v-if="ownerCount > 1">货主 {{ ownerCount }} 个，将自动拆单</text>
+          </view>
+          <view v-if="selectedCustomer && ownerCount > 1" class="owner-warning">
+            已选客户仅用于同货主订单，其他货主自动使用散客
           </view>
           <checkbox-group class="print-check-group" @change="onAutoPrintChange">
             <label class="print-option">
@@ -227,6 +271,44 @@
           <button class="submit-btn" :disabled="!canCheckout || submitting" @click="checkout">
             结账
           </button>
+        </view>
+      </view>
+    </view>
+
+    <view class="section stats-section">
+      <view class="section-head">
+        <text class="section-title">今日统计</text>
+        <view class="section-actions">
+          <button class="ghost-btn stats-refresh-btn" :disabled="statsLoading" @click="loadPosStats({ force: true })">
+            刷新
+          </button>
+          <button class="ghost-btn stats-refresh-btn" @click="exportTodayStats">
+            导出
+          </button>
+        </view>
+      </view>
+      <view class="stats-grid">
+        <view class="stats-card primary">
+          <text class="stats-label">净销售</text>
+          <text class="stats-value">{{ money(statsSummary.net_amount) }}</text>
+        </view>
+        <view class="stats-card">
+          <text class="stats-label">完成单</text>
+          <text class="stats-value">{{ statsSummary.completed_count || 0 }}</text>
+        </view>
+        <view class="stats-card">
+          <text class="stats-label">作废单</text>
+          <text class="stats-value danger">{{ statsSummary.voided_count || 0 }}</text>
+        </view>
+        <view class="stats-card">
+          <text class="stats-label">作废金额</text>
+          <text class="stats-value danger">{{ money(statsSummary.voided_amount) }}</text>
+        </view>
+      </view>
+      <view class="stats-payments" v-if="statsPayments.length">
+        <view class="stats-payment-row" v-for="row in statsPayments" :key="row.method || row.method_label">
+          <text>{{ row.method_label || paymentMethodName(row.method) }}</text>
+          <text>{{ money(row.amount) }} / {{ row.sale_count || 0 }} 单</text>
         </view>
       </view>
     </view>
@@ -249,6 +331,64 @@
       <view class="receipt-row">
         <text>找零 {{ money(lastReceipt.payment?.change_amount) }}</text>
         <text>出库单 {{ (lastReceipt.orders || []).length }} 张</text>
+      </view>
+      <view class="receipt-row" v-if="orderNosText(lastReceipt.orders)">
+        <text>出库单号</text>
+        <text class="receipt-nos">{{ orderNosText(lastReceipt.orders) }}</text>
+      </view>
+    </view>
+
+    <view class="section history-section">
+      <view class="section-head">
+        <text class="section-title">销售历史</text>
+        <button class="ghost-btn history-refresh-btn" :disabled="historyLoading" @click="loadPosSaleHistory({ force: true })">
+          刷新
+        </button>
+      </view>
+      <view class="history-search-row">
+        <input
+          class="input history-input"
+          v-model.trim="historyKeyword"
+          placeholder="小票号 / POS单号"
+          confirm-type="search"
+          @confirm="loadPosSaleHistory({ force: true })"
+        />
+        <button class="primary-btn history-search-btn" :disabled="historyLoading" @click="loadPosSaleHistory({ force: true })">
+          查询
+        </button>
+      </view>
+
+      <view v-if="pendingVoidSale" class="void-panel">
+        <text class="void-title">作废 {{ saleDisplayNo(pendingVoidSale) }}</text>
+        <input class="input void-input" v-model.trim="voidReason" placeholder="请输入作废原因" />
+        <view class="void-actions">
+          <button class="ghost-btn void-action-btn" @click="cancelVoidSale">取消</button>
+          <button class="danger-btn void-action-btn" @click="confirmVoidSale">确认作废</button>
+        </view>
+      </view>
+
+      <view v-if="!historySales.length && !historyLoading" class="empty-tip">暂无销售记录</view>
+      <view v-else class="history-list">
+        <view class="history-row" v-for="sale in historySales" :key="sale.id">
+          <view class="history-main">
+            <view class="history-title-row">
+              <text class="history-no">{{ saleDisplayNo(sale) }}</text>
+              <text :class="['history-status', isVoidedSale(sale) ? 'voided' : 'completed']">
+                {{ saleStatusText(sale.status) }}
+              </text>
+            </view>
+            <text class="history-meta">
+              {{ saleCreatedText(sale) }} / {{ salePaymentMethod(sale) }} / {{ money(sale.total_amount) }}
+            </text>
+            <text class="history-meta">
+              出库单 {{ saleOrderCount(sale) }} 张 {{ orderNosText(sale.orders) }}
+            </text>
+          </view>
+          <view class="history-actions">
+            <button class="ghost-btn history-action-btn" @click="reprintSale(sale)">重打</button>
+            <button class="danger-btn history-action-btn" :disabled="isVoidedSale(sale)" @click="startVoidSale(sale)">作废</button>
+          </view>
+        </view>
       </view>
     </view>
       </view>
@@ -288,6 +428,17 @@ const submitting = ref(false)
 const idempotencyKey = ref(makeIdempotencyKey())
 const lastReceipt = ref(null)
 const lastSalePrintData = ref(null)
+const historyKeyword = ref('')
+const historySales = ref([])
+const historyLoading = ref(false)
+const pendingVoidSale = ref(null)
+const voidReason = ref('')
+const posStats = ref(defaultPosStats())
+const statsLoading = ref(false)
+const currentShift = ref(null)
+const shiftLoading = ref(false)
+const shiftOpeningCashAmount = ref('0.00')
+const shiftActualCashAmount = ref('')
 const POS_DRAFT_KEY = 'pos_sale_draft_v1'
 const POS_AUTO_PRINT_KEY = 'pos_auto_print_sale_v1'
 const SALE_PRINT_COMPANY_NAME = '百年达生鲜包装供应链'
@@ -322,6 +473,12 @@ const totalBaseQty = computed(() =>
 const totalAmount = computed(() =>
   cartItems.value.reduce((sum, item) => sum + Number(lineAmount(item) || 0), 0)
 )
+const ownerCount = computed(() => {
+  const ownerIds = cartItems.value
+    .map((item) => item.owner_id)
+    .filter((ownerId) => ownerId !== undefined && ownerId !== null && ownerId !== '')
+  return new Set(ownerIds).size
+})
 const paymentMethodLabels = computed(() => paymentMethods.map((method) => method.label))
 const paymentMethodIndex = computed(() =>
   Math.max(0, paymentMethods.findIndex((method) => method.value === paymentMethod.value))
@@ -339,9 +496,20 @@ const changeAmount = computed(() =>
 )
 const paymentReady = computed(() => {
   if (totalAmount.value <= 0) return false
-  return receivedAmount.value >= totalAmount.value
+  if (paymentMethod.value === 'CASH') {
+    return receivedAmount.value >= totalAmount.value
+  }
+  return moneyEqual(receivedAmount.value, totalAmount.value)
 })
-const canCheckout = computed(() => cartItems.value.length > 0 && paymentReady.value)
+const shiftSummary = computed(() => currentShift.value?.summary || {})
+const canCheckout = computed(() =>
+  cartItems.value.length > 0 && paymentReady.value && currentShift.value?.status === 'OPEN'
+)
+const statsSummary = computed(() => posStats.value?.summary || defaultPosStats().summary)
+const statsPayments = computed(() => {
+  const rows = Array.isArray(posStats.value?.payments) ? posStats.value.payments : []
+  return rows.slice(0, 4)
+})
 
 onMounted(() => {
   restoreAutoPrintPreference()
@@ -349,11 +517,16 @@ onMounted(() => {
   setScanCallback(handleScan)
   initScanner()
   focusProductInput()
+  loadCurrentShift()
+  loadPosSaleHistory({ silent: true })
+  loadPosStats({ silent: true })
 })
 
 onShow(() => {
   focusProductInput()
   refreshCartStock()
+  loadPosSaleHistory({ silent: true })
+  loadPosStats({ silent: true })
 })
 
 onHide(() => {
@@ -382,6 +555,10 @@ watch(
   () => saveSaleDraft(),
   { deep: true }
 )
+
+watch(totalAmount, () => {
+  syncNonCashAmount()
+})
 
 function makeReceiptNo() {
   const d = new Date()
@@ -504,6 +681,7 @@ function restoreSaleDraft() {
     amountReceived.value = draft.amount_received || ''
     paymentReferenceNo.value = draft.payment_reference_no || ''
     idempotencyKey.value = draft.idempotency_key || makeIdempotencyKey()
+    syncNonCashAmount()
     setScanFeedback(`已恢复未结账购物车：${cartItems.value.length}项`, 'info')
     refreshCartStock({ force: true, silent: true })
   } catch (e) {
@@ -592,6 +770,56 @@ function plainMoney(value) {
   return Number.isFinite(n) ? n.toFixed(2) : '0.00'
 }
 
+function moneyEqual(a, b) {
+  return Math.abs(Number(a || 0) - Number(b || 0)) < 0.005
+}
+
+function syncNonCashAmount() {
+  if (paymentMethod.value !== 'CASH') {
+    amountReceived.value = plainMoney(totalAmount.value)
+  }
+}
+
+function confirmDialog({ title, content, confirmText = '确定', cancelText = '取消' }) {
+  return new Promise((resolve) => {
+    uni.showModal({
+      title,
+      content,
+      confirmText,
+      cancelText,
+      success: (res) => resolve(!!res.confirm),
+      fail: () => resolve(false),
+    })
+  })
+}
+
+function errorMessage(error, fallback = '操作失败') {
+  if (!error) return fallback
+  if (typeof error === 'string') return error
+  if (typeof error.message === 'string' && error.message) return error.message
+  const data = error.data || error.response || error
+  if (typeof data === 'string') return data
+  if (Array.isArray(data)) return data[0] || fallback
+  if (typeof data.detail === 'string') return data.detail
+  if (Array.isArray(data.detail) && data.detail.length) return data.detail[0]
+  for (const key in data) {
+    const value = data[key]
+    if (Array.isArray(value) && value.length) return value[0]
+    if (typeof value === 'string' && value) return value
+  }
+  return fallback
+}
+
+function showPosError(error, fallback = 'POS 操作失败') {
+  const message = errorMessage(error, fallback)
+  setScanFeedback(message, 'error')
+  uni.showModal({
+    title: '操作失败',
+    content: message,
+    showCancel: false,
+  })
+}
+
 function plainQty(value, context) {
   const n = Number(value || 0)
   if (!Number.isFinite(n)) return '0'
@@ -674,31 +902,61 @@ function amountToChinese(value) {
 
 function buildSalePrintData(response = {}) {
   const receipt = response.receipt || {}
-  const sale = response.sale || {}
-  const payment = receipt.payment || response.payment || {}
-  const orders = Array.isArray(response.orders) ? response.orders : []
-  const customer = selectedCustomer.value || {}
-  const lines = cartItems.value.map((item, index) => {
-    const qty = Number(lineBaseQty(item) || 0)
-    const price = Number(item.price || 0)
-    const amount = Number(lineAmount(item) || 0)
-    const unit = item.base_unit_name || item.unit_labels?.[item.unit_index] || ''
-    return {
-      index: index + 1,
-      name: item.name || item.code || item.sku || '',
-      code: item.code || item.sku || '',
-      spec: item.spec || item.product_spec || selectedUnit(item).label || '',
-      unit,
-      qty,
-      qtyText: plainQty(qty, item),
-      price,
-      priceText: plainMoney(price),
-      amount,
-      amountText: plainMoney(amount),
-      remark: '',
-      locationCode: item.location_code || '',
-    }
-  })
+  const sale = response.sale || (response.sale_no || response.id ? response : {})
+  const payment = receipt.payment || response.payment || sale.payment || {}
+  const orders = Array.isArray(response.orders)
+    ? response.orders
+    : Array.isArray(receipt.orders)
+      ? receipt.orders
+      : []
+  const customer = response.customer || receipt.customer || (cartItems.value.length ? selectedCustomer.value || {} : {})
+  const receiptLines = Array.isArray(receipt.lines)
+    ? receipt.lines
+    : Array.isArray(response.lines)
+      ? response.lines
+      : []
+  const lines = cartItems.value.length
+    ? cartItems.value.map((item, index) => {
+        const qty = Number(lineBaseQty(item) || 0)
+        const price = Number(item.price || 0)
+        const amount = Number(lineAmount(item) || 0)
+        const unit = item.base_unit_name || item.unit_labels?.[item.unit_index] || ''
+        return {
+          index: index + 1,
+          name: item.name || item.code || item.sku || '',
+          code: item.code || item.sku || '',
+          spec: item.spec || item.product_spec || selectedUnit(item).label || '',
+          unit,
+          qty,
+          qtyText: plainQty(qty, item),
+          price,
+          priceText: plainMoney(price),
+          amount,
+          amountText: plainMoney(amount),
+          remark: '',
+          locationCode: item.location_code || '',
+        }
+      })
+    : receiptLines.map((line, index) => {
+        const qty = numberFromValue(line.qty, 0)
+        const price = numberFromValue(line.price, 0)
+        const amount = numberFromValue(line.amount, qty * price)
+        return {
+          index: index + 1,
+          name: line.name || line.product_name || line.code || line.product_code || '',
+          code: line.code || line.product_code || '',
+          spec: line.spec || '',
+          unit: line.unit || '',
+          qty,
+          qtyText: plainQty(qty),
+          price,
+          priceText: plainMoney(price),
+          amount,
+          amountText: plainMoney(amount),
+          remark: '',
+          locationCode: line.location_code || '',
+        }
+      })
   const totalQty = lines.reduce((sum, line) => sum + Number(line.qty || 0), 0)
   const total = Number(receipt.total_amount ?? sale.total_amount ?? totalAmount.value ?? 0)
   const amountReceivedValue = numberFromValue(payment.amount_received ?? receivedAmount.value, 0)
@@ -877,6 +1135,276 @@ function printLastSale() {
     return
   }
   printSaleDocument(lastSalePrintData.value)
+}
+
+function normalizePosSaleRows(data) {
+  if (Array.isArray(data)) return data
+  return data && Array.isArray(data.results) ? data.results : []
+}
+
+function saleDisplayNo(sale = {}) {
+  return sale.src_bill_no || sale.sale_no || String(sale.id || '')
+}
+
+function saleStatusText(status) {
+  if (status === 'VOIDED') return '已作废'
+  if (status === 'COMPLETED') return '已完成'
+  return status || '-'
+}
+
+function isVoidedSale(sale = {}) {
+  return sale.status === 'VOIDED'
+}
+
+function salePaymentMethod(sale = {}) {
+  return paymentMethodName(sale.payment?.method || sale.receipt?.payment?.method)
+}
+
+function saleCreatedText(sale = {}) {
+  return sale.created_at ? formatDateTime(sale.created_at) : '-'
+}
+
+function saleOrderCount(sale = {}) {
+  const orders = Array.isArray(sale.orders)
+    ? sale.orders
+    : Array.isArray(sale.receipt?.orders)
+      ? sale.receipt.orders
+      : []
+  return orders.length
+}
+
+function orderNosText(orders = []) {
+  if (!Array.isArray(orders)) return ''
+  return orders.map((order) => order.order_no || order.id).filter(Boolean).join('、')
+}
+
+async function loadPosSaleHistory(options = {}) {
+  if (historyLoading.value && !options.force) return
+  historyLoading.value = true
+  try {
+    const res = await api.posSales({
+      search: historyKeyword.value || '',
+      page: 1,
+      page_size: 10,
+    })
+    historySales.value = normalizePosSaleRows(res)
+  } catch (e) {
+    if (!options.silent) {
+      showPosError(e, '销售历史加载失败')
+    }
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+function defaultPosStats() {
+  return {
+    summary: {
+      sale_count: 0,
+      completed_count: 0,
+      voided_count: 0,
+      gross_amount: '0.00',
+      net_amount: '0.00',
+      voided_amount: '0.00',
+    },
+    payments: [],
+    owners: [],
+    products: [],
+    cashiers: [],
+  }
+}
+
+async function loadPosStats(options = {}) {
+  if (statsLoading.value && !options.force) return
+  statsLoading.value = true
+  try {
+    const today = dateOnly(new Date())
+    const res = await api.posStats({
+      start_date: today,
+      end_date: today,
+      top_n: 5,
+    })
+    posStats.value = res || defaultPosStats()
+  } catch (e) {
+    if (!options.silent) {
+      showPosError(e, 'POS 统计加载失败')
+    }
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+function shiftStatusText(status) {
+  if (status === 'OPEN') return '进行中'
+  if (status === 'CLOSED') return '已交班'
+  if (status === 'REOPENED') return '已重开'
+  return status || '-'
+}
+
+function authHeader() {
+  try {
+    const token = uni.getStorageSync('access') || ''
+    return token ? { Authorization: `Bearer ${token}` } : {}
+  } catch (e) {
+    return {}
+  }
+}
+
+function downloadExcel(url, filename = 'pos.xlsx') {
+  if (typeof uni.downloadFile !== 'function') {
+    if (typeof window !== 'undefined' && window.open) {
+      window.open(url, '_blank')
+    }
+    return
+  }
+  uni.downloadFile({
+    url,
+    header: authHeader(),
+    success: (res) => {
+      if (res.statusCode && res.statusCode !== 200) {
+        uni.showToast({ title: '导出失败', icon: 'none' })
+        return
+      }
+      const filePath = res.tempFilePath
+      if (typeof uni.openDocument === 'function') {
+        uni.openDocument({
+          filePath,
+          fileType: 'xlsx',
+          showMenu: true,
+          fail: () => {
+            uni.showToast({ title: `${filename} 已下载`, icon: 'none' })
+          },
+        })
+      } else {
+        uni.showToast({ title: `${filename} 已下载`, icon: 'none' })
+      }
+    },
+    fail: () => {
+      uni.showToast({ title: '导出失败', icon: 'none' })
+    },
+  })
+}
+
+function exportTodayStats() {
+  const today = dateOnly(new Date())
+  downloadExcel(api.posStatsExport({ start_date: today, end_date: today, top_n: 50 }), 'pos-stats.xlsx')
+}
+
+function exportCurrentShift() {
+  if (!currentShift.value?.id) return
+  downloadExcel(api.posShiftExportUrl(currentShift.value.id), `${currentShift.value.shift_no || 'pos-shift'}.xlsx`)
+}
+
+async function loadCurrentShift() {
+  if (shiftLoading.value) return
+  shiftLoading.value = true
+  try {
+    const res = await api.posShiftCurrent()
+    currentShift.value = res.shift || null
+    if (currentShift.value?.summary?.expected_cash_amount) {
+      shiftActualCashAmount.value = currentShift.value.summary.expected_cash_amount
+    }
+  } catch (e) {
+    showPosError(e, '班次加载失败')
+  } finally {
+    shiftLoading.value = false
+  }
+}
+
+async function openCurrentShift() {
+  if (shiftLoading.value) return
+  shiftLoading.value = true
+  try {
+    const res = await api.posShiftOpen({
+      opening_cash_amount: shiftOpeningCashAmount.value || '0.00',
+    })
+    currentShift.value = res.shift || null
+    shiftActualCashAmount.value = currentShift.value?.summary?.expected_cash_amount || ''
+    uni.showToast({ title: '开班成功', icon: 'none' })
+  } catch (e) {
+    showPosError(e, '开班失败')
+  } finally {
+    shiftLoading.value = false
+  }
+}
+
+async function closeCurrentShift() {
+  if (!currentShift.value?.id || shiftLoading.value) return
+  const confirmed = await confirmDialog({
+    title: '确认交班',
+    content: `现金应点 ${money(shiftSummary.value.expected_cash_amount)}，确认交班？`,
+    confirmText: '交班',
+  })
+  if (!confirmed) return
+  shiftLoading.value = true
+  try {
+    const res = await api.posShiftClose(currentShift.value.id, {
+      actual_cash_amount: shiftActualCashAmount.value || shiftSummary.value.expected_cash_amount || '0.00',
+      remark: '',
+    })
+    currentShift.value = res.shift || null
+    uni.showToast({ title: '交班完成', icon: 'none' })
+    loadPosStats({ force: true, silent: true })
+    loadPosSaleHistory({ force: true, silent: true })
+  } catch (e) {
+    showPosError(e, '交班失败')
+  } finally {
+    shiftLoading.value = false
+  }
+}
+
+async function reprintSale(sale) {
+  if (!sale?.id) return
+  try {
+    const detail = await api.posSaleDetail(sale.id)
+    const printData = buildSalePrintData(detail)
+    lastSalePrintData.value = printData
+    lastReceipt.value = detail.receipt || lastReceipt.value
+    printSaleDocument(printData)
+  } catch (e) {
+    showPosError(e, '重打销售单失败')
+  }
+}
+
+function startVoidSale(sale) {
+  if (!sale || isVoidedSale(sale)) return
+  pendingVoidSale.value = sale
+  voidReason.value = ''
+}
+
+function cancelVoidSale() {
+  pendingVoidSale.value = null
+  voidReason.value = ''
+}
+
+async function confirmVoidSale() {
+  const sale = pendingVoidSale.value
+  const reason = (voidReason.value || '').trim()
+  if (!sale?.id) return
+  if (!reason) {
+    uni.showToast({ title: '请输入作废原因', icon: 'none' })
+    return
+  }
+  const confirmed = await confirmDialog({
+    title: '确认作废',
+    content: `确定作废 ${saleDisplayNo(sale)}？库存将按原扣减明细恢复。`,
+    confirmText: '作废',
+  })
+  if (!confirmed) return
+
+  try {
+    const res = await api.posSaleVoid(sale.id, { reason })
+    cancelVoidSale()
+    uni.showToast({ title: '已作废并恢复库存', icon: 'none' })
+    const receipt = res.receipt || null
+    if (receipt && lastReceipt.value && saleDisplayNo(lastReceipt.value) === saleDisplayNo(sale)) {
+      lastReceipt.value = receipt
+    }
+    await loadPosSaleHistory({ force: true, silent: true })
+    await loadPosStats({ force: true, silent: true })
+  } catch (e) {
+    showPosError(e, '作废失败')
+  }
 }
 
 function qtyText(value, context) {
@@ -1193,6 +1721,7 @@ function applyProductSnapshotToCartItem(item, product) {
   const matchedUnitIndex = currentUnitLabel ? unitLabels.findIndex((label) => label === currentUnitLabel) : -1
 
   item.code = product.code || item.code || ''
+  item.owner_id = product.owner_id ?? item.owner_id
   item.sku = product.sku || item.sku || ''
   item.name = productDisplayName(product) || item.name
   item.spec = product.spec || product.specification || product.product_spec || product.package_spec || item.spec || ''
@@ -1251,6 +1780,7 @@ function addToCart(product) {
   const unitLabels = options.map((option) => option.label || (option.kind === 'base' ? '基本单位' : '包装'))
   cartItems.value.push({
     product_id: product.id,
+    owner_id: product.owner_id,
     code: product.code || '',
     sku: product.sku || '',
     name: productName,
@@ -1331,6 +1861,7 @@ function removeLine(index) {
 function changePaymentMethod(event) {
   const index = Number(event.detail.value || 0)
   paymentMethod.value = paymentMethods[index]?.value || 'CASH'
+  syncNonCashAmount()
 }
 
 function goBack() {
@@ -1390,6 +1921,10 @@ function resetSale(options = {}) {
 }
 
 async function validateBeforeCheckout() {
+  if (currentShift.value?.status !== 'OPEN') {
+    uni.showToast({ title: '请先开班后再结账', icon: 'none' })
+    return false
+  }
   if (!cartItems.value.length) {
     uni.showToast({ title: '购物车不能为空', icon: 'none' })
     return false
@@ -1403,8 +1938,19 @@ async function validateBeforeCheckout() {
     return false
   }
   if (!paymentReady.value) {
-    uni.showToast({ title: '实收金额不足', icon: 'none' })
+    const message = paymentMethod.value === 'CASH'
+      ? '实收金额不足'
+      : '非现金支付实收必须等于应收'
+    uni.showToast({ title: message, icon: 'none' })
     return false
+  }
+  if (selectedCustomer.value && ownerCount.value > 1) {
+    const confirmed = await confirmDialog({
+      title: '多货主拆单',
+      content: '已选客户仅用于同货主订单，其他货主将自动使用散客客户。是否继续结账？',
+      confirmText: '继续',
+    })
+    if (!confirmed) return false
   }
   return true
 }
@@ -1414,9 +1960,11 @@ async function checkout() {
   submitting.value = true
   const preparedPrintWindow = autoPrintSale.value ? openSalePrintWindow() : null
   try {
+    syncNonCashAmount()
     const payload = {
       src_bill_no: srcBillNo.value || '',
       idempotency_key: idempotencyKey.value || '',
+      stock_zone_type: POS_STOCK_QUERY.zone_type,
       remark: remark.value || '',
       payment: {
         method: paymentMethod.value,
@@ -1456,10 +2004,14 @@ async function checkout() {
       printSaleDocument(printData, preparedPrintWindow)
     }
     resetSale({ keepReceipt: true })
+    loadPosSaleHistory({ force: true, silent: true })
+    loadPosStats({ force: true, silent: true })
+    loadCurrentShift()
   } catch (e) {
     if (preparedPrintWindow && !preparedPrintWindow.closed) {
       preparedPrintWindow.close()
     }
+    showPosError(e, '结账失败')
     console.error('pos checkout failed', e)
   } finally {
     submitting.value = false
@@ -1585,6 +2137,73 @@ function focusProductInput(delay = 80) {
 .pos-toolbar {
   padding: 8rpx 10rpx;
   margin-bottom: 0;
+}
+
+.shift-section {
+  margin: 8rpx 10rpx;
+}
+
+.shift-refresh-btn {
+  width: 96rpx;
+  height: 46rpx;
+  font-size: 22rpx;
+}
+
+.shift-card,
+.shift-open-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+}
+
+.shift-main {
+  display: flex;
+  flex-direction: column;
+  width: 360rpx;
+  min-width: 0;
+}
+
+.shift-no {
+  color: #172033;
+  font-size: 26rpx;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shift-meta,
+.shift-hint {
+  color: #667085;
+  font-size: 22rpx;
+  line-height: 1.35;
+}
+
+.shift-numbers {
+  display: flex;
+  flex: 1;
+  gap: 18rpx;
+  min-width: 0;
+  color: #344054;
+  font-size: 23rpx;
+}
+
+.shift-close-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.shift-cash-input {
+  width: 180rpx;
+  height: 52rpx;
+}
+
+.shift-action-btn {
+  width: 112rpx;
+  height: 52rpx;
+  font-size: 22rpx;
 }
 
 .scan-line,
@@ -1788,6 +2407,9 @@ function focusProductInput(delay = 80) {
   display: flex;
   flex-direction: column;
   gap: 10rpx;
+  overflow-y: auto;
+  padding-right: 2rpx;
+  box-sizing: border-box;
 }
 
 .customer-panel {
@@ -1865,6 +2487,12 @@ function focusProductInput(delay = 80) {
   color: #172033;
   font-size: 26rpx;
   font-weight: 700;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
 }
 
 .selected-text,
@@ -2294,6 +2922,12 @@ button {
   padding: 0 16rpx;
 }
 
+.submit-panel .payment-input[disabled] {
+  background: #f8fafc;
+  border-color: #d7dde6;
+  color: #475467;
+}
+
 .receipt-row {
   display: flex;
   align-items: center;
@@ -2306,8 +2940,98 @@ button {
 }
 
 .receipt-section {
+  order: 4;
+  margin-bottom: 0;
+}
+
+.stats-section {
   order: 3;
   margin-bottom: 0;
+}
+
+.history-section {
+  order: 5;
+  margin-bottom: 0;
+}
+
+.stats-refresh-btn {
+  width: 96rpx;
+  height: 46rpx;
+  font-size: 22rpx;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8rpx;
+  margin-top: 10rpx;
+}
+
+.stats-card {
+  min-width: 0;
+  background: #f8fafc;
+  border: 1rpx solid #e6eaf0;
+  border-radius: 8rpx;
+  padding: 10rpx;
+}
+
+.stats-card.primary {
+  background: #ecfdf3;
+  border-color: #bbf7d0;
+}
+
+.stats-label {
+  display: block;
+  color: #667085;
+  font-size: 20rpx;
+  line-height: 1.2;
+  margin-bottom: 4rpx;
+}
+
+.stats-value {
+  display: block;
+  color: #172033;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-card.primary .stats-value {
+  color: #027a48;
+}
+
+.stats-value.danger {
+  color: #b42318;
+}
+
+.stats-payments {
+  margin-top: 10rpx;
+  border-top: 1rpx solid #edf0f4;
+}
+
+.stats-payment-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8rpx;
+  color: #475467;
+  font-size: 21rpx;
+  line-height: 1.35;
+  padding-top: 8rpx;
+}
+
+.stats-payment-row text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-payment-row text:last-child {
+  flex: 0 0 auto;
+  text-align: right;
 }
 
 .receipt-print-btn {
@@ -2315,6 +3039,142 @@ button {
   height: 50rpx;
   margin-top: 8rpx;
   font-size: 22rpx;
+}
+
+.history-refresh-btn {
+  width: 96rpx;
+  height: 46rpx;
+  font-size: 22rpx;
+}
+
+.history-search-row {
+  display: flex;
+  gap: 8rpx;
+  margin-top: 10rpx;
+}
+
+.history-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.history-search-btn {
+  width: 104rpx;
+  height: 56rpx;
+  font-size: 22rpx;
+}
+
+.history-list {
+  margin-top: 10rpx;
+}
+
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 12rpx 0;
+  border-top: 1rpx solid #edf0f4;
+}
+
+.history-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.history-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8rpx;
+}
+
+.history-no {
+  color: #172033;
+  font-size: 24rpx;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-status {
+  flex: 0 0 auto;
+  font-size: 20rpx;
+  font-weight: 700;
+}
+
+.history-status.completed {
+  color: #0f766e;
+}
+
+.history-status.voided {
+  color: #b42318;
+}
+
+.history-meta {
+  display: block;
+  color: #667085;
+  font-size: 21rpx;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  flex: 0 0 90rpx;
+}
+
+.history-action-btn {
+  width: 90rpx;
+  height: 44rpx;
+  font-size: 20rpx;
+}
+
+.void-panel {
+  margin-top: 10rpx;
+  padding: 10rpx;
+  background: #fff7ed;
+  border: 1rpx solid #fed7aa;
+  border-radius: 8rpx;
+}
+
+.void-title {
+  display: block;
+  color: #9a3412;
+  font-size: 22rpx;
+  font-weight: 700;
+  margin-bottom: 8rpx;
+}
+
+.void-input {
+  width: 100%;
+  height: 56rpx;
+  background: #fff;
+}
+
+.void-actions {
+  display: flex;
+  gap: 8rpx;
+  margin-top: 8rpx;
+}
+
+.void-action-btn {
+  flex: 1;
+  height: 48rpx;
+  font-size: 22rpx;
+}
+
+.receipt-nos {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .summary-title {
@@ -2370,6 +3230,16 @@ button {
   color: #667085;
   font-size: 22rpx;
   white-space: nowrap;
+}
+
+.owner-warning {
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1rpx solid #fed7aa;
+  border-radius: 8rpx;
+  padding: 8rpx 10rpx;
+  font-size: 22rpx;
+  line-height: 1.35;
 }
 
 .print-check-group {

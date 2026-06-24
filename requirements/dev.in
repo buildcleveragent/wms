@@ -1,0 +1,20 @@
+# dev.in
+-r requirements.in
+
+# 交互调试
+ipython
+
+# 测试
+pytest
+pytest-django
+pytest-xdist
+coverage
+
+# 代码质量
+black
+isort
+ruff
+
+# Git hooks
+pre-commit
+

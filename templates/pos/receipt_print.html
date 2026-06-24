@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>POS销售小票</title>
+  <style>
+    body { margin: 0; background: #f3f4f6; color: #111827; font-family: Arial, "Microsoft YaHei", sans-serif; }
+    .sheet { width: 78mm; margin: 12px auto; padding: 12px; background: #fff; box-sizing: border-box; }
+    .title { text-align: center; font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+    .meta { font-size: 12px; line-height: 1.6; border-bottom: 1px dashed #9ca3af; padding-bottom: 6px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+    th, td { padding: 4px 0; border-bottom: 1px dashed #e5e7eb; text-align: left; vertical-align: top; }
+    th.qty, td.qty, th.amount, td.amount { text-align: right; }
+    .totals { margin-top: 8px; font-size: 13px; line-height: 1.8; border-top: 1px dashed #9ca3af; padding-top: 6px; }
+    .total-line { display: flex; justify-content: space-between; }
+    .strong { font-weight: 700; }
+    .voided { margin-top: 8px; padding: 4px; border: 1px solid #dc2626; color: #dc2626; text-align: center; font-weight: 700; }
+    .actions { width: 78mm; margin: 8px auto; text-align: right; }
+    .actions button { padding: 6px 10px; }
+    @media print {
+      body { background: #fff; }
+      .sheet { width: auto; margin: 0; padding: 0; }
+      .actions { display: none; }
+    }
+  </style>
+</head>
+<body onload="window.print()">
+  <div class="actions"><button onclick="window.print()">重新打印</button></div>
+  <div class="sheet">
+    <div class="title">POS销售小票</div>
+    <div class="meta">
+      <div>小票号：{{ receipt.src_bill_no|default:receipt.sale_no }}</div>
+      <div>POS单号：{{ receipt.sale_no }}</div>
+      <div>班次：{{ receipt.shift.shift_no|default:"-" }}</div>
+      <div>收银员：{{ receipt.cashier|default:"-" }}</div>
+      <div>销售时间：{{ receipt.created_at }}</div>
+      <div>重打次数：{{ copy_no }}</div>
+    </div>
+
+    {% if receipt.status == "VOIDED" %}
+      <div class="voided">已作废</div>
+    {% endif %}
+
+    <table>
+      <thead>
+        <tr>
+          <th>商品</th>
+          <th class="qty">数量</th>
+          <th class="amount">金额</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in receipt.lines %}
+          <tr>
+            <td>
+              <div>{{ line.product_name }}</div>
+              <div>{{ line.product_code }} / 货主 {{ line.owner_name }}</div>
+            </td>
+            <td class="qty">{{ line.qty }}</td>
+            <td class="amount">{{ line.amount }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="totals">
+      <div class="total-line strong"><span>应收</span><span>{{ receipt.total_amount }}</span></div>
+      <div class="total-line"><span>支付方式</span><span>{{ receipt.payment.method }}</span></div>
+      <div class="total-line"><span>实收</span><span>{{ receipt.payment.amount_received }}</span></div>
+      <div class="total-line"><span>找零</span><span>{{ receipt.payment.change_amount }}</span></div>
+      <div>支付参考号：{{ receipt.payment.reference_no|default:"-" }}</div>
+      <div>内部出库单：
+        {% for order in receipt.orders %}
+          {{ order.order_no }}{% if not forloop.last %}、{% endif %}
+        {% empty %}
+          -
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</body>
+</html>

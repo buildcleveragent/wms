@@ -10,8 +10,7 @@ from allapp.outbound.serializers import OutboundOrderReadSerializer
 from allapp.products.models import Product
 
 from .models import PosPayment, PosSale, PosSaleLine
-from .services import create_pos_sale, build_receipt
-
+from .services import build_receipt, create_pos_sale
 
 ZERO = Decimal("0")
 
@@ -23,6 +22,17 @@ def decimal_or_zero(value):
 
 
 def available_qty_for_product(*, owner_id=None, warehouse_id, product_id):
+    return available_qty_for_product_in_scope(
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+        product_id=product_id,
+        zone_type=None,
+    )
+
+
+def available_qty_for_product_in_scope(
+    *, owner_id=None, warehouse_id, product_id, zone_type=None
+):
     queryset = InventoryDetail.objects.filter(
         warehouse_id=warehouse_id,
         product_id=product_id,
@@ -31,6 +41,8 @@ def available_qty_for_product(*, owner_id=None, warehouse_id, product_id):
     )
     if owner_id:
         queryset = queryset.filter(owner_id=owner_id)
+    if zone_type is not None:
+        queryset = queryset.filter(zone_type=zone_type)
     result = queryset.aggregate(total=Sum("available_qty"))
     return result["total"] or ZERO
 
@@ -47,6 +59,7 @@ class PosProductSerializer(serializers.ModelSerializer):
         model = Product
         fields = [
             "id",
+            "owner_id",
             "code",
             "sku",
             "name",
@@ -79,10 +92,11 @@ class PosProductSerializer(serializers.ModelSerializer):
         return None if value in (None, "") else value
 
     def get_available_qty(self, obj):
-        return available_qty_for_product(
+        return available_qty_for_product_in_scope(
             owner_id=obj.owner_id,
             warehouse_id=self.context["warehouse_id"],
             product_id=obj.id,
+            zone_type=self.context.get("zone_type"),
         )
 
     def get_unit_options(self, obj):
@@ -97,8 +111,10 @@ class PosProductSerializer(serializers.ModelSerializer):
                     "barcode": obj.unit_barcode or obj.gtin or "",
                 }
             )
-        for package in obj.packages.filter(is_active=True).select_related("uom").order_by(
-            "sort_order", "id"
+        for package in (
+            obj.packages.filter(is_active=True)
+            .select_related("uom")
+            .order_by("sort_order", "id")
         ):
             options.append(
                 {
@@ -114,12 +130,18 @@ class PosProductSerializer(serializers.ModelSerializer):
 
 class PosCheckoutLineSerializer(serializers.Serializer):
     product_id = serializers.IntegerField()
-    qty = serializers.DecimalField(max_digits=18, decimal_places=3, min_value=Decimal("0.001"))
-    price = serializers.DecimalField(max_digits=18, decimal_places=4, min_value=Decimal("0.0000"))
+    qty = serializers.DecimalField(
+        max_digits=18, decimal_places=3, min_value=Decimal("0.001")
+    )
+    price = serializers.DecimalField(
+        max_digits=18, decimal_places=4, min_value=Decimal("0.0000")
+    )
 
 
 class PosPaymentInputSerializer(serializers.Serializer):
-    method = serializers.ChoiceField(choices=[choice.value for choice in PosPayment.Method])
+    method = serializers.ChoiceField(
+        choices=[choice.value for choice in PosPayment.Method]
+    )
     amount_received = serializers.DecimalField(
         max_digits=18,
         decimal_places=2,
@@ -133,7 +155,10 @@ class PosCheckoutSerializer(serializers.Serializer):
     customer_id = serializers.IntegerField(required=False, allow_null=True)
     src_bill_no = serializers.CharField(required=False, allow_blank=True, default="")
     remark = serializers.CharField(required=False, allow_blank=True, default="")
-    idempotency_key = serializers.CharField(required=False, allow_blank=True, default="")
+    idempotency_key = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+    stock_zone_type = serializers.IntegerField(required=False, allow_null=True)
     payment = PosPaymentInputSerializer()
     items = PosCheckoutLineSerializer(many=True)
 
@@ -151,6 +176,7 @@ class PosCheckoutSerializer(serializers.Serializer):
             items=validated_data.get("items", []),
             payment=validated_data.get("payment"),
             idempotency_key=validated_data.get("idempotency_key", ""),
+            stock_zone_type=validated_data.get("stock_zone_type"),
         )
 
 
@@ -203,6 +229,7 @@ class PosSaleReadSerializer(serializers.ModelSerializer):
             "src_bill_no",
             "warehouse_id",
             "cashier_id",
+            "shift_id",
             "selected_customer_id",
             "status",
             "total_amount",
@@ -223,13 +250,47 @@ class PosSaleReadSerializer(serializers.ModelSerializer):
     def get_orders(self, obj):
         orders = [
             link.outbound_order
-            for link in obj.sale_orders.select_related("outbound_order").order_by("owner_id")
+            for link in obj.sale_orders.select_related("outbound_order").order_by(
+                "owner_id"
+            )
         ]
         return PosCheckoutResponseSerializer(
             orders,
             many=True,
             context=self.context,
         ).data
+
+
+class PosShiftOpenSerializer(serializers.Serializer):
+    opening_cash_amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        required=False,
+        default=Decimal("0.00"),
+    )
+    remark = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class PosShiftClosePaymentSerializer(serializers.Serializer):
+    method = serializers.ChoiceField(
+        choices=[choice.value for choice in PosPayment.Method]
+    )
+    actual_amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        required=False,
+    )
+
+
+class PosShiftCloseSerializer(serializers.Serializer):
+    actual_cash_amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        required=False,
+    )
+    payments = PosShiftClosePaymentSerializer(many=True, required=False, default=list)
+    remark = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 def serialize_checkout_result(result, request):

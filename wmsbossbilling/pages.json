@@ -1,0 +1,66 @@
+{
+  "pages": [
+    {
+      "path": "pages/login",
+      "style": {
+        "navigationBarTitleText": "仓储经营分析中心"
+      }
+    },
+    {
+      "path": "pages/home/index",
+      "style": {
+        "navigationBarTitleText": "仓储经营分析中心"
+      }
+    },
+    {
+      "path": "pages/inventory/index",
+      "style": {
+        "navigationBarTitleText": "仓储经营分析中心 - 库存与库容"
+      }
+    },
+    {
+      "path": "pages/alerts/index",
+      "style": {
+        "navigationBarTitleText": "仓储经营分析中心 - 预警中心"
+      }
+    },
+    {
+      "path": "pages/billing/overview",
+      "style": {
+        "navigationBarTitleText": "仓储经营分析中心 - 收入与计费"
+      }
+    },
+    {
+      "path": "pages/billing/owner_detail",
+      "style": {
+        "navigationBarTitleText": "仓储经营分析中心 - 货主收入明细"
+      }
+    },
+    {
+      "path": "pages/billing/accrual_detail",
+      "style": {
+        "navigationBarTitleText": "仓储经营分析中心 - 收费记录详情"
+      }
+    },
+    {
+      "path": "pages/billing/bill_detail",
+      "style": {
+        "navigationBarTitleText": "仓储经营分析中心 - 账单详情"
+      }
+    },
+	
+	{
+	  "path": "pages/inventory/detail",
+	  "style": {
+	    "navigationBarTitleText": "仓储经营分析中心 - 库存明细"
+	  }
+	}
+	
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "仓储经营分析中心",
+    "navigationBarBackgroundColor": "#ffffff",
+    "backgroundColor": "#f6f8fc"
+  }
+}

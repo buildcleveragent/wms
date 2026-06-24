@@ -299,6 +299,53 @@ export const api = {
       data: payload,
     }),
 
+  posSales: (params = {}) => {
+    const qs = buildQuery({
+      search: params.search || '',
+      status: params.status || '',
+      page: params.page || 1,
+      page_size: params.page_size || 20,
+    })
+    return request({
+      url: `/api/pos/sales/?${qs}`,
+    })
+  },
+
+  posSalesExport: (params = {}) => {
+    const qs = buildQuery({
+      search: params.search || '',
+      status: params.status || '',
+      start_date: params.start_date || '',
+      end_date: params.end_date || '',
+      shift: params.shift || '',
+    })
+    return `${BASE_URL}/api/pos/sales/export/?${qs}`
+  },
+
+  posStats: (params = {}) => {
+    const qs = buildQuery({
+      start_date: params.start_date || '',
+      end_date: params.end_date || '',
+      owner_id: params.owner_id || '',
+      cashier_id: params.cashier_id || '',
+      top_n: params.top_n || 10,
+    })
+    return request({
+      url: `/api/pos/stats/?${qs}`,
+    })
+  },
+
+  posStatsExport: (params = {}) => {
+    const qs = buildQuery({
+      start_date: params.start_date || '',
+      end_date: params.end_date || '',
+      owner_id: params.owner_id || '',
+      cashier_id: params.cashier_id || '',
+      top_n: params.top_n || 10,
+    })
+    return `${BASE_URL}/api/pos/stats/export/?${qs}`
+  },
+
   posSaleDetail: (id) =>
     request({
       url: `/api/pos/sales/${id}/`,
@@ -315,6 +362,29 @@ export const api = {
       method: 'POST',
       data: payload,
     }),
+
+  posShiftCurrent: () =>
+    request({
+      url: '/api/pos/shifts/current/',
+    }),
+
+  posShiftOpen: (payload = {}) =>
+    request({
+      url: '/api/pos/shifts/open/',
+      method: 'POST',
+      data: payload,
+    }),
+
+  posShiftClose: (id, payload = {}) =>
+    request({
+      url: `/api/pos/shifts/${id}/close/`,
+      method: 'POST',
+      data: payload,
+    }),
+
+  posShiftPrintUrl: (id) => `${BASE_URL}/api/pos/shifts/${id}/print/`,
+
+  posShiftExportUrl: (id) => `${BASE_URL}/api/pos/shifts/${id}/export/`,
 
   // PDA 拣货
   pickTasks: (params = {}) =>
@@ -401,6 +471,21 @@ export const api = {
     })
     return request({
       url: `/api/reports/pda/throughput/?${qs}`,
+    })
+  },
+
+  pdaThroughputDetails: (params = {}) => {
+    const qs = buildQuery({
+      mode: params.mode || 'month',
+      month: params.month || '',
+      start_date: params.start_date || '',
+      end_date: params.end_date || '',
+      owner: params.owner || '',
+      warehouse: params.warehouse || '',
+      metric: params.metric || 'all',
+    })
+    return request({
+      url: `/api/reports/pda/throughput/details/?${qs}`,
     })
   },
 	  

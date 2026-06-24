@@ -1,29 +1,39 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import defaultdict
-from decimal import Decimal, ROUND_HALF_UP
+from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
 from uuid import uuid4
 
 from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import DateField, Sum, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from allapp.core.choices import InvTxType
-from allapp.inventory.models import InventoryDetail, InventorySummary, InventoryTransaction
+from allapp.core.choices import InvTxType, ZoneType
+from allapp.inventory.models import (
+    InventoryDetail,
+    InventorySummary,
+    InventoryTransaction,
+)
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import Product
 
-from .models import PosPayment, PosSale, PosSaleLine, PosSaleOrder
-
+from .models import PosPayment, PosSale, PosSaleLine, PosSaleOrder, PosShift
+from .shift_services import current_shift_for_user
 
 ZERO = Decimal("0")
 QTY4 = Decimal("0.0001")
 QTY3 = Decimal("0.001")
 MONEY = Decimal("0.01")
 PRICE = Decimal("0.0001")
+POS_ORDER_MEMO_PREFIX = "[POS]"
+POS_ORDER_CLOSE_REASON = "POS即时销售完成"
 
 
 def _decimal(value, default=ZERO):
@@ -61,21 +71,80 @@ def _error(field, message):
     raise ValidationError({field: message})
 
 
+def _normalize_stock_zone_type(value):
+    if value in (None, ""):
+        return None
+    try:
+        zone_type = int(value)
+    except (TypeError, ValueError):
+        _error("stock_zone_type", "库存范围参数无效。")
+    valid_zone_types = {choice.value for choice in ZoneType}
+    if zone_type not in valid_zone_types:
+        _error("stock_zone_type", "库存范围参数无效。")
+    return zone_type
+
+
+def _pos_order_memo(remark):
+    remark = (remark or "").strip()
+    if not remark:
+        return POS_ORDER_MEMO_PREFIX
+    return f"{POS_ORDER_MEMO_PREFIX} {remark}"[:100]
+
+
+def _idempotency_fingerprint(
+    *, warehouse_id, customer_id, src_bill_no, remark, items, payment, stock_zone_type
+):
+    payment = payment or {}
+    canonical_items = [
+        {
+            "product_id": int(item["product_id"]),
+            "qty": str(_q3(item["qty"])),
+            "price": str(_price(item["price"])),
+        }
+        for item in items
+    ]
+    canonical = {
+        "warehouse_id": warehouse_id,
+        "customer_id": customer_id or None,
+        "src_bill_no": (src_bill_no or "").strip(),
+        "remark": (remark or "").strip(),
+        "stock_zone_type": stock_zone_type,
+        "payment": {
+            "method": (payment.get("method") or "").strip().upper(),
+            "amount_received": (
+                str(_money(payment.get("amount_received")))
+                if payment.get("amount_received") not in (None, "")
+                else ""
+            ),
+            "reference_no": (payment.get("reference_no") or "").strip(),
+        },
+        "items": canonical_items,
+    }
+    encoded = json.dumps(
+        canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def _cash_customer(owner_id, user):
     Customer = apps.get_model("baseinfo", "Customer")
-    customer = Customer.objects.filter(owner_id=owner_id, code="CASH").order_by("id").first()
+    customer = (
+        Customer.objects.filter(owner_id=owner_id, code="CASH").order_by("id").first()
+    )
     if customer:
         return customer
-    return Customer.objects.create(owner_id=owner_id, code="CASH", name="散客", salesperson=user)
+    return Customer.objects.create(
+        owner_id=owner_id, code="CASH", name="散客", salesperson=user
+    )
 
 
 def _load_products(items):
     product_ids = [item["product_id"] for item in items]
     products = {
         product.id: product
-        for product in Product.objects.filter(id__in=product_ids, is_active=True).select_related(
-            "owner", "base_uom"
-        )
+        for product in Product.objects.filter(
+            id__in=product_ids, is_active=True
+        ).select_related("owner", "base_uom")
     }
     missing = [product_id for product_id in product_ids if product_id not in products]
     if missing:
@@ -103,7 +172,10 @@ def _validate_prices_and_shape(items, products):
             discount_rate = (Decimal("100") - Decimal(max_discount)) / Decimal("100")
             lowest = (Decimal(base_price) * discount_rate).quantize(PRICE)
             if price < lowest:
-                _error("price", f"{product.code} 成交价超过最高折扣限制，最低可售 {lowest}。")
+                _error(
+                    "price",
+                    f"{product.code} 成交价超过最高折扣限制，最低可售 {lowest}。",
+                )
 
         amount = _money(qty * price)
         qty_by_product[product.id] += qty
@@ -118,26 +190,33 @@ def _validate_prices_and_shape(items, products):
     return normalized, qty_by_product
 
 
-def _available_qty(owner_id, warehouse_id, product_id):
-    result = (
-        InventoryDetail.objects.filter(
-            owner_id=owner_id,
-            warehouse_id=warehouse_id,
-            product_id=product_id,
-            is_active=True,
-            available_qty__gt=0,
-        )
-        .aggregate(total=Sum("available_qty"))
+def _available_qty(owner_id, warehouse_id, product_id, *, zone_type=None):
+    filters = {
+        "owner_id": owner_id,
+        "warehouse_id": warehouse_id,
+        "product_id": product_id,
+        "is_active": True,
+        "available_qty__gt": 0,
+    }
+    if zone_type is not None:
+        filters["zone_type"] = zone_type
+    result = InventoryDetail.objects.filter(**filters).aggregate(
+        total=Sum("available_qty")
     )
     return result["total"] or ZERO
 
 
-def _validate_stock(qty_by_product, products, warehouse_id):
+def _validate_stock(qty_by_product, products, warehouse_id, *, zone_type=None):
     for product_id, required_qty in qty_by_product.items():
         product = products[product_id]
-        available = _available_qty(product.owner_id, warehouse_id, product_id)
+        available = _available_qty(
+            product.owner_id, warehouse_id, product_id, zone_type=zone_type
+        )
         if available < required_qty:
-            _error("items", f"{product.code} 可售库存不足，可售 {available}，需要 {required_qty}。")
+            _error(
+                "items",
+                f"{product.code} 可售库存不足，可售 {available}，需要 {required_qty}。",
+            )
 
 
 def _normalize_payment(payment, total_amount):
@@ -201,17 +280,25 @@ def _refresh_summaries(pairs):
         summary.save()
 
 
-def _fefo_details(owner_id, warehouse_id, product_id):
+def _fefo_details(owner_id, warehouse_id, product_id, *, zone_type=None):
+    filters = {
+        "owner_id": owner_id,
+        "warehouse_id": warehouse_id,
+        "product_id": product_id,
+        "is_active": True,
+        "available_qty__gt": 0,
+    }
+    if zone_type is not None:
+        filters["zone_type"] = zone_type
+
+    expiry_sort = Coalesce(
+        "expiry_date",
+        Value(date(9999, 12, 31), output_field=DateField()),
+    )
     return (
         InventoryDetail.objects.select_for_update(skip_locked=True)
-        .filter(
-            owner_id=owner_id,
-            warehouse_id=warehouse_id,
-            product_id=product_id,
-            is_active=True,
-            available_qty__gt=0,
-        )
-        .order_by("expiry_date", "-onhand_qty", "id")
+        .filter(**filters)
+        .order_by(expiry_sort.asc(), "-onhand_qty", "id")
     )
 
 
@@ -239,10 +326,12 @@ def _insert_inventory_tx(*, tx_type, detail, qty_delta, sale_line, sale_no, memo
     )
 
 
-def _deduct_stock_for_line(sale_line, warehouse_id, sale_no, now):
+def _deduct_stock_for_line(sale_line, warehouse_id, sale_no, now, *, zone_type=None):
     remaining = _q4(sale_line.qty)
     touched = set()
-    for detail in _fefo_details(sale_line.owner_id, warehouse_id, sale_line.product_id):
+    for detail in _fefo_details(
+        sale_line.owner_id, warehouse_id, sale_line.product_id, zone_type=zone_type
+    ):
         if remaining <= 0:
             break
         available = _q4(detail.available_qty)
@@ -256,7 +345,10 @@ def _deduct_stock_for_line(sale_line, warehouse_id, sale_no, now):
 
         detail.onhand_qty = _q4(detail.onhand_qty - take)
         detail.available_qty = _q4(
-            detail.onhand_qty - detail.allocated_qty - detail.locked_qty - detail.damaged_qty
+            detail.onhand_qty
+            - detail.allocated_qty
+            - detail.locked_qty
+            - detail.damaged_qty
         )
         detail.save()
         _insert_inventory_tx(
@@ -293,7 +385,10 @@ def _restore_stock_from_sale(sale, user, reason):
         qty = _q4(-tx.qty_delta)
         detail.onhand_qty = _q4(detail.onhand_qty + qty)
         detail.available_qty = _q4(
-            detail.onhand_qty - detail.allocated_qty - detail.locked_qty - detail.damaged_qty
+            detail.onhand_qty
+            - detail.allocated_qty
+            - detail.locked_qty
+            - detail.damaged_qty
         )
         detail.save()
         sale_line = line_map[tx.src_id]
@@ -326,13 +421,40 @@ def _receipt_line(line):
     product = line.product
     return {
         "line_no": line.line_no,
+        "owner_id": line.owner_id,
+        "owner_name": getattr(line.owner, "name", ""),
         "product_id": product.id,
         "code": product.code,
+        "product_code": product.code,
         "sku": product.sku,
         "name": product.name,
+        "product_name": product.name,
         "qty": str(line.qty),
         "price": str(line.price),
         "amount": str(line.amount),
+    }
+
+
+def _receipt_customer(customer):
+    if not customer:
+        return None
+
+    address_parts = [
+        getattr(customer, "province", "") or "",
+        getattr(customer, "city", "") or "",
+        getattr(customer, "district", "") or "",
+        getattr(customer, "street", "") or "",
+        getattr(customer, "address", "") or "",
+    ]
+    full_address = "".join(part for part in address_parts if part)
+    return {
+        "id": customer.id,
+        "code": customer.code or "",
+        "name": customer.name or "",
+        "phone": customer.phone or customer.mobile or "",
+        "mobile": customer.mobile or "",
+        "address": customer.address or "",
+        "full_address": full_address,
     }
 
 
@@ -340,14 +462,21 @@ def build_receipt(sale):
     payment = getattr(sale, "payment", None)
     orders = [
         link.outbound_order
-        for link in sale.sale_orders.select_related("outbound_order", "owner").order_by("owner_id")
+        for link in sale.sale_orders.select_related("outbound_order", "owner").order_by(
+            "owner_id"
+        )
     ]
     return {
         "sale_no": sale.sale_no,
         "src_bill_no": sale.src_bill_no,
         "status": sale.status,
         "warehouse_id": sale.warehouse_id,
+        "shift": {
+            "id": sale.shift_id,
+            "shift_no": getattr(sale.shift, "shift_no", "") if sale.shift_id else "",
+        },
         "cashier": getattr(sale.cashier, "username", "") if sale.cashier_id else "",
+        "customer": _receipt_customer(getattr(sale, "selected_customer", None)),
         "total_amount": str(sale.total_amount),
         "payment": {
             "method": payment.method if payment else "",
@@ -357,24 +486,54 @@ def build_receipt(sale):
             "reference_no": payment.reference_no if payment else "",
             "status": payment.status if payment else "",
         },
-        "lines": [_receipt_line(line) for line in sale.lines.select_related("product").order_by("line_no")],
-        "orders": [{"id": order.id, "order_no": order.order_no, "owner_id": order.owner_id} for order in orders],
+        "lines": [
+            _receipt_line(line)
+            for line in sale.lines.select_related("owner", "product").order_by(
+                "line_no"
+            )
+        ],
+        "orders": [
+            {"id": order.id, "order_no": order.order_no, "owner_id": order.owner_id}
+            for order in orders
+        ],
         "created_at": sale.created_at.isoformat() if sale.created_at else "",
     }
 
 
 def result_for_sale(sale):
     sale = (
-        PosSale.objects.select_related("payment", "cashier", "warehouse")
+        PosSale.objects.select_related(
+            "payment", "cashier", "warehouse", "selected_customer", "shift"
+        )
         .prefetch_related("lines__product", "sale_orders__outbound_order")
         .get(pk=sale.pk)
     )
-    orders = [link.outbound_order for link in sale.sale_orders.select_related("outbound_order").order_by("owner_id")]
-    return {"sale": sale, "payment": sale.payment, "orders": orders, "receipt": build_receipt(sale)}
+    orders = [
+        link.outbound_order
+        for link in sale.sale_orders.select_related("outbound_order").order_by(
+            "owner_id"
+        )
+    ]
+    return {
+        "sale": sale,
+        "payment": sale.payment,
+        "orders": orders,
+        "receipt": build_receipt(sale),
+    }
 
 
 @transaction.atomic
-def create_pos_sale(*, user, customer_id=None, src_bill_no="", remark="", items=None, payment=None, idempotency_key=""):
+def create_pos_sale(
+    *,
+    user,
+    customer_id=None,
+    src_bill_no="",
+    remark="",
+    items=None,
+    payment=None,
+    idempotency_key="",
+    stock_zone_type=None,
+):
     warehouse_id = getattr(user, "warehouse_id", None)
     if not warehouse_id:
         raise ValidationError("当前用户未绑定仓库(warehouse)，无法收银。")
@@ -382,15 +541,40 @@ def create_pos_sale(*, user, customer_id=None, src_bill_no="", remark="", items=
     if not items:
         _error("items", "购物车不能为空。")
 
+    stock_zone_type = _normalize_stock_zone_type(stock_zone_type)
+    fingerprint = _idempotency_fingerprint(
+        warehouse_id=warehouse_id,
+        customer_id=customer_id,
+        src_bill_no=src_bill_no,
+        remark=remark,
+        items=items,
+        payment=payment,
+        stock_zone_type=stock_zone_type,
+    )
     idempotency_key = (idempotency_key or "").strip() or None
     if idempotency_key:
-        existing = PosSale.objects.select_for_update().filter(idempotency_key=idempotency_key).first()
+        existing = (
+            PosSale.objects.select_for_update()
+            .filter(idempotency_key=idempotency_key)
+            .first()
+        )
         if existing:
+            if (
+                existing.idempotency_fingerprint
+                and existing.idempotency_fingerprint != fingerprint
+            ):
+                _error(
+                    "idempotency_key", "同一幂等键对应的收银内容不一致，请刷新后重试。"
+                )
             return result_for_sale(existing)
+
+    shift = current_shift_for_user(user, for_update=True)
+    if not shift:
+        raise ValidationError("当前收银员没有进行中的 POS 班次，请先开班。")
 
     products = _load_products(items)
     normalized_items, qty_by_product = _validate_prices_and_shape(items, products)
-    _validate_stock(qty_by_product, products, warehouse_id)
+    _validate_stock(qty_by_product, products, warehouse_id, zone_type=stock_zone_type)
 
     Customer = apps.get_model("baseinfo", "Customer")
     selected_customer = None
@@ -411,7 +595,9 @@ def create_pos_sale(*, user, customer_id=None, src_bill_no="", remark="", items=
     duplicate_owner_ids = [
         owner_id
         for owner_id in owner_ids
-        if OutboundOrder.objects.filter(owner_id=owner_id, src_bill_no=receipt_no).exists()
+        if OutboundOrder.objects.filter(
+            owner_id=owner_id, src_bill_no=receipt_no
+        ).exists()
     ]
     if duplicate_owner_ids:
         _error("src_bill_no", "POS 小票号/外部单号已存在。")
@@ -427,7 +613,9 @@ def create_pos_sale(*, user, customer_id=None, src_bill_no="", remark="", items=
         sale_no=sale_no,
         src_bill_no=receipt_no,
         idempotency_key=idempotency_key,
+        idempotency_fingerprint=fingerprint if idempotency_key else "",
         warehouse_id=warehouse_id,
+        shift=shift,
         cashier=user if user and user.is_authenticated else None,
         selected_customer=selected_customer,
         total_amount=total_amount,
@@ -453,9 +641,9 @@ def create_pos_sale(*, user, customer_id=None, src_bill_no="", remark="", items=
             submit_status="SUBMITTED",
             approval_status="WHS_APPROVED",
             src_bill_no=receipt_no,
-            memo=(remark or "").strip(),
+            memo=_pos_order_memo(remark),
             is_closed=True,
-            close_reason="POS即时销售完成",
+            close_reason=POS_ORDER_CLOSE_REASON,
             pricing_status=PricingStatus.CONFIRMED,
             priced_at=timezone.now(),
             priced_by=user if user and user.is_authenticated else None,
@@ -493,7 +681,9 @@ def create_pos_sale(*, user, customer_id=None, src_bill_no="", remark="", items=
             price=item["price"],
             amount=item["amount"],
         )
-        _deduct_stock_for_line(sale_line, warehouse_id, sale_no, now)
+        _deduct_stock_for_line(
+            sale_line, warehouse_id, sale_no, now, zone_type=stock_zone_type
+        )
         line_no += 10
 
     PosPayment.objects.create(sale=sale, **payment_data)
@@ -505,6 +695,15 @@ def void_pos_sale(*, sale_id, user, reason=""):
     sale = PosSale.objects.select_for_update().get(pk=sale_id)
     if sale.status == PosSale.Status.VOIDED:
         raise ValidationError("POS 销售单已撤销。")
+    if (
+        sale.shift_id
+        and PosShift.objects.filter(
+            pk=sale.shift_id, status=PosShift.Status.CLOSED
+        ).exists()
+    ):
+        raise ValidationError("该 POS 销售单所属班次已交班，不能作废。")
+    if not (reason or "").strip():
+        _error("reason", "POS 作废必须填写原因。")
 
     _restore_stock_from_sale(sale, user, reason)
     payment = PosPayment.objects.select_for_update().get(sale=sale)
@@ -517,11 +716,21 @@ def void_pos_sale(*, sale_id, user, reason=""):
         order.is_closed = False
         order.close_reason = ""
         order.memo = ((order.memo or "") + " POS撤销").strip()[:100]
-        order.save(update_fields=["approval_status", "is_closed", "close_reason", "memo", "updated_at"])
+        order.save(
+            update_fields=[
+                "approval_status",
+                "is_closed",
+                "close_reason",
+                "memo",
+                "updated_at",
+            ]
+        )
 
     sale.status = PosSale.Status.VOIDED
     sale.voided_at = timezone.now()
     sale.voided_by = user if user and user.is_authenticated else None
     sale.void_reason = (reason or "").strip()
-    sale.save(update_fields=["status", "voided_at", "voided_by", "void_reason", "updated_at"])
+    sale.save(
+        update_fields=["status", "voided_at", "voided_by", "void_reason", "updated_at"]
+    )
     return result_for_sale(sale)
