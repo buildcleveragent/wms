@@ -1,7 +1,9 @@
 import datetime
+import importlib
 import io
 from decimal import Decimal
 
+from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.test import TestCase
@@ -352,6 +354,70 @@ class PosApiTests(TestCase):
             ).available_qty,
             Decimal("8.0000"),
         )
+
+    def test_payment_line_backfill_migration_copies_legacy_payment_once(self):
+        migration = importlib.import_module(
+            "allapp.pos.migrations.0006_backfill_pos_payment_lines"
+        )
+        legacy_sale = PosSale.objects.create(
+            sale_no="POS-LEGACY-PAYMENT",
+            src_bill_no="POS-LEGACY-PAYMENT",
+            warehouse=self.warehouse,
+            cashier=self.user,
+            shift=self.shift,
+            total_amount=Decimal("18.00"),
+        )
+        PosPayment.objects.create(
+            sale=legacy_sale,
+            method=PosPayment.Method.CASH,
+            amount_due=Decimal("18.00"),
+            amount_received=Decimal("20.00"),
+            change_amount=Decimal("2.00"),
+            reference_no="LEGACY-CASH",
+            status=PosPayment.Status.PAID,
+        )
+        existing_sale = PosSale.objects.create(
+            sale_no="POS-HAS-PAYMENT-LINE",
+            src_bill_no="POS-HAS-PAYMENT-LINE",
+            warehouse=self.warehouse,
+            cashier=self.user,
+            shift=self.shift,
+            total_amount=Decimal("9.00"),
+        )
+        PosPayment.objects.create(
+            sale=existing_sale,
+            method=PosPayment.Method.WECHAT,
+            amount_due=Decimal("9.00"),
+            amount_received=Decimal("9.00"),
+            change_amount=Decimal("0.00"),
+            reference_no="LEGACY-WECHAT",
+            status=PosPayment.Status.PAID,
+        )
+        PosPaymentLine.objects.create(
+            sale=existing_sale,
+            method=PosPayment.Method.WECHAT,
+            amount=Decimal("9.00"),
+            amount_received=Decimal("9.00"),
+            change_amount=Decimal("0.00"),
+            reference_no="EXISTING-LINE",
+            status=PosPayment.Status.PAID,
+        )
+
+        migration.backfill_payment_lines(apps, None)
+
+        legacy_line = PosPaymentLine.objects.get(sale=legacy_sale)
+        self.assertEqual(legacy_line.method, PosPayment.Method.CASH)
+        self.assertEqual(legacy_line.amount, Decimal("18.00"))
+        self.assertEqual(legacy_line.amount_received, Decimal("20.00"))
+        self.assertEqual(legacy_line.change_amount, Decimal("2.00"))
+        self.assertEqual(legacy_line.reference_no, "LEGACY-CASH")
+        self.assertEqual(legacy_line.status, PosPayment.Status.PAID)
+        self.assertEqual(PosPaymentLine.objects.filter(sale=existing_sale).count(), 1)
+
+        migration.backfill_payment_lines(apps, None)
+
+        self.assertEqual(PosPaymentLine.objects.filter(sale=legacy_sale).count(), 1)
+        self.assertEqual(PosPaymentLine.objects.filter(sale=existing_sale).count(), 1)
 
     def test_checkout_without_customer_uses_cash_customer(self):
         response = self.client.post(
