@@ -8,6 +8,7 @@ from django.test import TestCase
 from django.utils import timezone
 from openpyxl import load_workbook
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from allapp.baseinfo.models import Customer, Owner
 from allapp.core.choices import InvTxType, ZoneType
@@ -19,8 +20,13 @@ from allapp.inventory.models import (
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.pos.models import (
+    PosAuditLog,
     PosPayment,
+    PosPaymentLine,
     PosPrintLog,
+    PosRefund,
+    PosReturn,
+    PosReturnLine,
     PosSale,
     PosSaleLine,
     PosSaleOrder,
@@ -55,6 +61,10 @@ class PosApiTests(TestCase):
             Permission.objects.get(codename="add_possale"),
             Permission.objects.get(codename="change_possale"),
             Permission.objects.get(codename="view_possale"),
+            Permission.objects.get(codename="add_posreturn"),
+            Permission.objects.get(codename="view_posreturn"),
+            Permission.objects.get(codename="add_posrefund"),
+            Permission.objects.get(codename="view_posrefund"),
         )
         self.customer = Customer.objects.create(
             owner=self.owner,
@@ -496,6 +506,75 @@ class PosApiTests(TestCase):
             Decimal("6.0000"),
         )
 
+    def test_checkout_accepts_split_payments_and_shift_close_uses_payment_lines(self):
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-RECEIPT-SPLIT-PAY",
+                "payments": [
+                    {
+                        "method": "CASH",
+                        "amount": "10.00",
+                        "amount_received": "10.00",
+                    },
+                    {
+                        "method": "WECHAT",
+                        "amount": "8.00",
+                        "amount_received": "8.00",
+                        "reference_no": "WX-001",
+                    },
+                ],
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "2.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-SPLIT-PAY")
+        self.assertEqual(sale.payment.method, PosPayment.Method.OTHER)
+        self.assertEqual(sale.payment.reference_no, "MULTI")
+        payment_lines = {
+            line.method: line for line in PosPaymentLine.objects.filter(sale=sale)
+        }
+        self.assertEqual(payment_lines[PosPayment.Method.CASH].amount, Decimal("10.00"))
+        self.assertEqual(
+            payment_lines[PosPayment.Method.WECHAT].amount, Decimal("8.00")
+        )
+        self.assertEqual(
+            Decimal(str(response.data["receipt"]["payment_lines"][0]["amount"])),
+            Decimal("10.00"),
+        )
+
+        close_response = self.client.post(
+            f"/api/pos/shifts/{self.shift.id}/close/",
+            {
+                "actual_cash_amount": "110.00",
+                "payments": [{"method": "WECHAT", "actual_amount": "8.00"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(close_response.status_code, 200, close_response.data)
+        summary = close_response.data["shift"]["summary"]
+        self.assertEqual(summary["net_amount"], "18.00")
+        self.assertEqual(summary["expected_cash_amount"], "110.00")
+        payments = {
+            row.method: row
+            for row in PosShiftPaymentSummary.objects.filter(shift=self.shift)
+        }
+        self.assertEqual(
+            payments[PosPayment.Method.CASH].expected_amount, Decimal("10.00")
+        )
+        self.assertEqual(
+            payments[PosPayment.Method.WECHAT].expected_amount, Decimal("8.00")
+        )
+
     def test_checkout_idempotency_key_rejects_different_payload(self):
         payload = {
             "src_bill_no": "POS-RECEIPT-IDEM-CONFLICT",
@@ -702,6 +781,254 @@ class PosApiTests(TestCase):
                 src_model="PosSaleLine", tx_type=InvTxType.RECEIVE
             ).count(),
             0,
+        )
+
+    def test_pos_return_restores_stock_and_updates_shift_stats_and_payments(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-RECEIPT-RETURN",
+                "payment": self.payment("18.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "2.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-RETURN")
+        sale_line = PosSaleLine.objects.get(sale=sale)
+
+        response = self.client.post(
+            "/api/pos/returns/",
+            {
+                "sale_id": sale.id,
+                "reason": "customer returned one item",
+                "idempotency_key": "idem-return-one",
+                "lines": [{"sale_line_id": sale_line.id, "qty": "1.000"}],
+                "refunds": [{"method": "CASH", "amount": "9.00"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        return_order = PosReturn.objects.get(sale=sale)
+        self.assertEqual(return_order.total_amount, Decimal("9.00"))
+        self.assertEqual(
+            PosReturnLine.objects.get(return_order=return_order).qty, Decimal("1.000")
+        )
+        self.assertEqual(
+            PosRefund.objects.get(return_order=return_order).amount, Decimal("9.00")
+        )
+        self.assertEqual(
+            InventoryDetail.objects.get(
+                owner=self.owner, product=self.product
+            ).available_qty,
+            Decimal("9.0000"),
+        )
+        self.assertEqual(
+            InventorySummary.objects.get(
+                owner=self.owner, product=self.product
+            ).available_qty,
+            Decimal("9.0000"),
+        )
+        self.assertEqual(
+            InventoryTransaction.objects.filter(
+                src_model="PosReturnLine", tx_type=InvTxType.RECEIVE
+            ).count(),
+            1,
+        )
+
+        detail_response = self.client.get(f"/api/pos/sales/{sale.id}/")
+        self.assertEqual(detail_response.status_code, 200, detail_response.data)
+        line_payload = detail_response.data["lines"][0]
+        self.assertEqual(Decimal(str(line_payload["returned_qty"])), Decimal("1.000"))
+        self.assertEqual(Decimal(str(line_payload["returnable_qty"])), Decimal("1.000"))
+
+        over_return = self.client.post(
+            "/api/pos/returns/",
+            {
+                "sale_id": sale.id,
+                "reason": "too many",
+                "lines": [{"sale_line_id": sale_line.id, "qty": "2.000"}],
+                "refunds": [{"method": "CASH", "amount": "18.00"}],
+            },
+            format="json",
+        )
+        self.assertEqual(over_return.status_code, 400)
+        self.assertEqual(PosReturn.objects.filter(sale=sale).count(), 1)
+        self.assertEqual(
+            InventoryDetail.objects.get(
+                owner=self.owner, product=self.product
+            ).available_qty,
+            Decimal("9.0000"),
+        )
+
+        void_after_return = self.client.post(
+            f"/api/pos/sales/{sale.id}/void/",
+            {"reason": "cannot void returned sale"},
+            format="json",
+        )
+        self.assertEqual(void_after_return.status_code, 400)
+        sale.refresh_from_db()
+        self.assertEqual(sale.status, PosSale.Status.COMPLETED)
+
+        today = timezone.now().date().isoformat()
+        stats = self.client.get(
+            "/api/pos/stats/",
+            {"start_date": today, "end_date": today},
+        )
+        self.assertEqual(stats.status_code, 200, stats.data)
+        self.assertEqual(stats.data["summary"]["sales_amount"], "18.00")
+        self.assertEqual(stats.data["summary"]["return_amount"], "9.00")
+        self.assertEqual(stats.data["summary"]["net_amount"], "9.00")
+        payments = {row["method"]: row for row in stats.data["payments"]}
+        self.assertEqual(payments["CASH"]["sale_amount"], "18.00")
+        self.assertEqual(payments["CASH"]["refund_amount"], "9.00")
+        self.assertEqual(payments["CASH"]["net_amount"], "9.00")
+        owners = {row["owner_id"]: row for row in stats.data["owners"]}
+        self.assertEqual(owners[self.owner.id]["sale_amount"], "18.00")
+        self.assertEqual(owners[self.owner.id]["return_amount"], "9.00")
+        self.assertEqual(owners[self.owner.id]["amount"], "9.00")
+        self.assertEqual(owners[self.owner.id]["qty"], "1.000")
+
+        sales_export = self.client.get(
+            "/api/pos/sales/export/", {"search": "POS-RECEIPT-RETURN"}
+        )
+        self.assertEqual(sales_export.status_code, 200)
+        workbook = load_workbook(io.BytesIO(sales_export.content))
+        self.assertIn("PaymentLines", workbook.sheetnames)
+        self.assertIn("Returns", workbook.sheetnames)
+        self.assertIn("ReturnLines", workbook.sheetnames)
+        self.assertIn("Refunds", workbook.sheetnames)
+        self.assertEqual(Decimal(str(workbook["Returns"]["G2"].value)), Decimal("9"))
+        self.assertEqual(
+            Decimal(str(workbook["ReturnLines"]["K2"].value)), Decimal("9")
+        )
+        self.assertEqual(Decimal(str(workbook["Refunds"]["E2"].value)), Decimal("9"))
+
+        close_response = self.client.post(
+            f"/api/pos/shifts/{self.shift.id}/close/",
+            {"actual_cash_amount": "109.00"},
+            format="json",
+        )
+        self.assertEqual(close_response.status_code, 200, close_response.data)
+        summary = close_response.data["shift"]["summary"]
+        self.assertEqual(summary["gross_sales_amount"], "18.00")
+        self.assertEqual(summary["return_count"], 1)
+        self.assertEqual(summary["return_amount"], "9.00")
+        self.assertEqual(summary["net_amount"], "9.00")
+        self.assertEqual(summary["expected_cash_amount"], "109.00")
+        shift = PosShift.objects.get(pk=self.shift.id)
+        self.assertEqual(shift.total_sales_amount, Decimal("9.00"))
+        self.assertEqual(shift.total_return_amount, Decimal("9.00"))
+        self.assertEqual(shift.return_count, 1)
+        cash_summary = PosShiftPaymentSummary.objects.get(
+            shift=self.shift, method=PosPayment.Method.CASH
+        )
+        self.assertEqual(cash_summary.expected_amount, Decimal("9.00"))
+        self.assertEqual(cash_summary.refund_count, 1)
+        self.assertEqual(cash_summary.refund_amount, Decimal("9.00"))
+        self.assertTrue(
+            PosAuditLog.objects.filter(
+                action=PosAuditLog.Action.RETURN, return_order=return_order
+            ).exists()
+        )
+
+    def test_pos_return_idempotency_does_not_double_restore_stock(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-RECEIPT-RETURN-IDEM",
+                "payment": self.payment("18.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "2.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-RETURN-IDEM")
+        sale_line = PosSaleLine.objects.get(sale=sale)
+        payload = {
+            "sale_id": sale.id,
+            "reason": "same return retry",
+            "idempotency_key": "idem-return-retry",
+            "lines": [{"sale_line_id": sale_line.id, "qty": "1.000"}],
+            "refunds": [{"method": "CASH", "amount": "9.00"}],
+        }
+
+        first = self.client.post("/api/pos/returns/", payload, format="json")
+        second = self.client.post("/api/pos/returns/", payload, format="json")
+
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertEqual(first.data["return"]["id"], second.data["return"]["id"])
+        self.assertEqual(PosReturn.objects.filter(sale=sale).count(), 1)
+        self.assertEqual(
+            InventoryTransaction.objects.filter(src_model="PosReturnLine").count(),
+            1,
+        )
+        self.assertEqual(
+            InventoryDetail.objects.get(
+                owner=self.owner, product=self.product
+            ).available_qty,
+            Decimal("9.0000"),
+        )
+
+    def test_pos_return_requires_refund_permission(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-RECEIPT-RETURN-NO-PERM",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-RETURN-NO-PERM")
+        sale_line = PosSaleLine.objects.get(sale=sale)
+        cashier = get_user_model().objects.create_user(
+            username="pos-return-no-perm",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        cashier.user_permissions.add(Permission.objects.get(codename="view_possale"))
+        self.client.force_authenticate(cashier)
+
+        response = self.client.post(
+            "/api/pos/returns/",
+            {
+                "sale_id": sale.id,
+                "reason": "no permission",
+                "lines": [{"sale_line_id": sale_line.id, "qty": "1.000"}],
+                "refunds": [{"method": "CASH", "amount": "9.00"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(PosReturn.objects.filter(sale=sale).exists())
+        self.assertEqual(
+            InventoryDetail.objects.get(
+                owner=self.owner, product=self.product
+            ).available_qty,
+            Decimal("9.0000"),
         )
 
     def test_checkout_rejects_price_below_min_price(self):
@@ -1234,6 +1561,207 @@ class PosApiTests(TestCase):
             for row in stats_workbook["Summary"].iter_rows(min_row=2, max_col=2)
         }
         self.assertEqual(summary_rows["net_amount"], "9.00")
+
+    def test_frontend_print_log_records_source_and_copy_number(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-FRONTEND-PRINT",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale_id = checkout.data["sale"]["id"]
+
+        first = self.client.post(
+            f"/api/pos/sales/{sale_id}/print-log/",
+            {"remark": "frontend auto print"},
+            format="json",
+        )
+        second = self.client.post(
+            f"/api/pos/sales/{sale_id}/print-log/",
+            {"remark": "frontend reprint"},
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertEqual(first.data["copy_no"], 1)
+        self.assertEqual(second.data["copy_no"], 2)
+        logs = PosPrintLog.objects.filter(
+            sale_id=sale_id,
+            print_type=PosPrintLog.PrintType.RECEIPT,
+        ).order_by("copy_no")
+        self.assertEqual(
+            list(logs.values_list("source", flat=True)),
+            [PosPrintLog.Source.FRONTEND_HTML, PosPrintLog.Source.FRONTEND_HTML],
+        )
+        self.assertTrue(all(log.payload_hash for log in logs))
+
+    def test_print_pages_accept_query_token_and_record_backend_source(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-TOKEN-PRINT",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale_id = checkout.data["sale"]["id"]
+        token = str(RefreshToken.for_user(self.user).access_token)
+        anonymous = APIClient()
+
+        sale_print = anonymous.get(f"/api/pos/sales/{sale_id}/print/?token={token}")
+        shift_print = anonymous.get(
+            f"/api/pos/shifts/{self.shift.id}/print/?token={token}"
+        )
+
+        self.assertEqual(sale_print.status_code, 200)
+        self.assertContains(sale_print, "POS-TOKEN-PRINT")
+        self.assertEqual(shift_print.status_code, 200)
+        self.assertContains(shift_print, self.shift.shift_no)
+        self.assertEqual(
+            PosPrintLog.objects.get(
+                sale_id=sale_id, print_type=PosPrintLog.PrintType.RECEIPT
+            ).source,
+            PosPrintLog.Source.BACKEND_HTML,
+        )
+        self.assertEqual(
+            PosPrintLog.objects.get(
+                shift_id=self.shift.id,
+                print_type=PosPrintLog.PrintType.SHIFT_SUMMARY,
+            ).source,
+            PosPrintLog.Source.BACKEND_HTML,
+        )
+
+    def test_reopen_shift_allows_more_sales_and_recalculates_shift_totals(self):
+        first = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-REOPEN-FIRST",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201, first.data)
+        close_first = self.client.post(
+            f"/api/pos/shifts/{self.shift.id}/close/",
+            {"actual_cash_amount": "109.00"},
+            format="json",
+        )
+        self.assertEqual(close_first.status_code, 200, close_first.data)
+
+        blocked_sale = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-REOPEN-BLOCKED",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(blocked_sale.status_code, 400)
+
+        no_supervisor = get_user_model().objects.create_user(
+            username="pos-no-reopen-perm",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        no_supervisor.user_permissions.add(
+            Permission.objects.get(codename="view_possale")
+        )
+        no_supervisor_client = APIClient()
+        no_supervisor_client.force_authenticate(no_supervisor)
+        denied = no_supervisor_client.post(
+            f"/api/pos/shifts/{self.shift.id}/reopen/",
+            {"reason": "no permission"},
+            format="json",
+        )
+        self.assertEqual(denied.status_code, 403)
+
+        reopen = self.client.post(
+            f"/api/pos/shifts/{self.shift.id}/reopen/",
+            {"reason": "cashier found missed sale"},
+            format="json",
+        )
+        self.assertEqual(reopen.status_code, 200, reopen.data)
+        self.assertEqual(reopen.data["shift"]["status"], PosShift.Status.REOPENED)
+        self.assertEqual(reopen.data["shift"]["reopen_count"], 1)
+        current = self.client.get("/api/pos/shifts/current/")
+        self.assertEqual(current.status_code, 200, current.data)
+        self.assertEqual(current.data["shift"]["id"], self.shift.id)
+
+        second = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-REOPEN-SECOND",
+                "payment": self.payment("18.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "2.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertEqual(second.data["sale"]["shift_id"], self.shift.id)
+
+        close_second = self.client.post(
+            f"/api/pos/shifts/{self.shift.id}/close/",
+            {"actual_cash_amount": "127.00"},
+            format="json",
+        )
+        self.assertEqual(close_second.status_code, 200, close_second.data)
+        summary = close_second.data["shift"]["summary"]
+        self.assertEqual(summary["sale_count"], 2)
+        self.assertEqual(summary["completed_count"], 2)
+        self.assertEqual(summary["net_amount"], "27.00")
+        self.assertEqual(summary["expected_cash_amount"], "127.00")
+        self.assertEqual(summary["actual_cash_amount"], "127.00")
+        self.assertEqual(summary["cash_difference"], "0.00")
+
+        shift = PosShift.objects.get(pk=self.shift.id)
+        self.assertEqual(shift.status, PosShift.Status.CLOSED)
+        self.assertEqual(shift.reopen_count, 1)
+        self.assertEqual(shift.reopen_reason, "cashier found missed sale")
+        self.assertEqual(shift.total_sales_amount, Decimal("27.00"))
+        cash_summary = PosShiftPaymentSummary.objects.get(
+            shift=self.shift, method=PosPayment.Method.CASH
+        )
+        self.assertEqual(cash_summary.expected_amount, Decimal("27.00"))
+        self.assertEqual(cash_summary.actual_amount, Decimal("27.00"))
 
     def test_pos_stats_respects_date_range(self):
         inside = self.client.post(

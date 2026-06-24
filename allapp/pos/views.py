@@ -10,10 +10,12 @@ from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.utils import timezone
 from rest_framework import generics, permissions, status
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from allapp.core.choices import ZoneType
 from allapp.products.models import Product
@@ -23,14 +25,18 @@ from .exports import (
     build_sales_export_workbook,
     build_shift_export_workbook,
 )
-from .models import PosPrintLog, PosSale, PosShift
+from .models import PosPrintLog, PosReturn, PosSale, PosShift
 from .serializers import (
     PosCheckoutSerializer,
     PosProductSerializer,
+    PosReturnCreateSerializer,
+    PosReturnReadSerializer,
     PosSaleReadSerializer,
     PosShiftCloseSerializer,
     PosShiftOpenSerializer,
+    PosShiftReopenSerializer,
     serialize_checkout_result,
+    serialize_return_result,
 )
 from .services import build_receipt, void_pos_sale
 from .shift_services import (
@@ -38,6 +44,7 @@ from .shift_services import (
     current_shift_for_user,
     open_pos_shift,
     record_print_log,
+    reopen_pos_shift,
     serialize_shift,
 )
 from .stats import build_pos_stats_payload
@@ -62,6 +69,33 @@ class HasPosVoidPermission(BasePermission):
 
     def has_permission(self, request, view):
         return bool(request.user and request.user.has_perm("pos.change_possale"))
+
+
+class HasPosReturnPermission(BasePermission):
+    message = "缺少 POS 退货/退款权限。"
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.has_perm("pos.add_posreturn")
+            and request.user.has_perm("pos.add_posrefund")
+        )
+
+
+class HasPosShiftSupervisorPermission(BasePermission):
+    message = "缺少 POS 主管权限。"
+
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.has_perm("pos.change_possale"))
+
+
+class QueryTokenAuthentication(JWTAuthentication):
+    def authenticate(self, request):
+        token = request.query_params.get("token") or request.query_params.get("access")
+        if token:
+            validated_token = self.get_validated_token(token)
+            return self.get_user(validated_token), validated_token
+        return super().authenticate(request)
 
 
 class PosProductPagination(PageNumberPagination):
@@ -172,12 +206,24 @@ def _sale_queryset_for_user(user):
         "payment", "cashier", "warehouse", "selected_customer", "shift"
     ).prefetch_related(
         "lines__product",
+        "payment_lines",
         "sale_orders__outbound_order",
     )
     warehouse_id = getattr(user, "warehouse_id", None)
     if not warehouse_id:
         return queryset.none()
     return queryset.filter(warehouse_id=warehouse_id)
+
+
+def _return_queryset_for_user(user):
+    warehouse_id = getattr(user, "warehouse_id", None)
+    if not warehouse_id:
+        return PosReturn.objects.none()
+    return (
+        PosReturn.objects.select_related("sale", "warehouse", "shift", "cashier")
+        .prefetch_related("lines__product", "refunds")
+        .filter(warehouse_id=warehouse_id)
+    )
 
 
 def _date_bounds(start_date, end_date):
@@ -329,6 +375,7 @@ class PosSaleReceiptApi(APIView):
 
 
 class PosSalePrintApi(APIView):
+    authentication_classes = [QueryTokenAuthentication, SessionAuthentication]
     permission_classes = [permissions.IsAuthenticated, HasPosSaleViewPermission]
 
     def get(self, request, sale_id):
@@ -347,6 +394,26 @@ class PosSalePrintApi(APIView):
         )
 
 
+class PosSalePrintLogApi(APIView):
+    permission_classes = [permissions.IsAuthenticated, HasPosSaleViewPermission]
+
+    def post(self, request, sale_id):
+        sale = get_object_or_404(_sale_queryset_for_user(request.user), pk=sale_id)
+        receipt = build_receipt(sale)
+        log = record_print_log(
+            user=request.user,
+            print_type=PosPrintLog.PrintType.RECEIPT,
+            sale=sale,
+            payload=receipt,
+            source=PosPrintLog.Source.FRONTEND_HTML,
+            remark=(request.data.get("remark") or "").strip(),
+        )
+        return Response(
+            {"copy_no": log.copy_no, "source": log.source},
+            status=status.HTTP_201_CREATED,
+        )
+
+
 class PosSaleVoidApi(APIView):
     permission_classes = [permissions.IsAuthenticated, HasPosVoidPermission]
 
@@ -361,6 +428,59 @@ class PosSaleVoidApi(APIView):
             )
         return Response(
             serialize_checkout_result(result, request), status=status.HTTP_200_OK
+        )
+
+
+class PosReturnListCreateApi(APIView):
+    permission_classes = [permissions.IsAuthenticated, HasPosSaleViewPermission]
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [permissions.IsAuthenticated(), HasPosReturnPermission()]
+        return super().get_permissions()
+
+    def get(self, request):
+        queryset = _return_queryset_for_user(request.user).order_by(
+            "-created_at", "-id"
+        )
+        sale_id = (request.query_params.get("sale_id") or "").strip()
+        if sale_id:
+            if not sale_id.isdigit():
+                return Response(
+                    {"detail": "sale_id must be an integer id."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            queryset = queryset.filter(sale_id=int(sale_id))
+        paginator = PageNumberPagination()
+        paginator.page_size = 20
+        page = paginator.paginate_queryset(queryset, request)
+        rows = PosReturnReadSerializer(page, many=True).data
+        return paginator.get_paginated_response(rows)
+
+    def post(self, request):
+        serializer = PosReturnCreateSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        try:
+            result = serializer.save()
+        except DjangoValidationError as exc:
+            return Response(
+                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response(serialize_return_result(result), status=status.HTTP_201_CREATED)
+
+
+class PosReturnDetailApi(APIView):
+    permission_classes = [permissions.IsAuthenticated, HasPosSaleViewPermission]
+
+    def get(self, request, return_id):
+        return_order = get_object_or_404(
+            _return_queryset_for_user(request.user), pk=return_id
+        )
+        return Response(
+            {"return": PosReturnReadSerializer(return_order).data},
+            status=status.HTTP_200_OK,
         )
 
 
@@ -444,7 +564,30 @@ class PosShiftCloseApi(APIView):
         return Response({"shift": serialize_shift(shift)}, status=status.HTTP_200_OK)
 
 
+class PosShiftReopenApi(APIView):
+    permission_classes = [
+        permissions.IsAuthenticated,
+        HasPosShiftSupervisorPermission,
+    ]
+
+    def post(self, request, shift_id):
+        serializer = PosShiftReopenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            shift = reopen_pos_shift(
+                shift_id=shift_id,
+                user=request.user,
+                reason=serializer.validated_data["reason"],
+            )
+        except DjangoValidationError as exc:
+            return Response(
+                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response({"shift": serialize_shift(shift)}, status=status.HTTP_200_OK)
+
+
 class PosShiftPrintApi(APIView):
+    authentication_classes = [QueryTokenAuthentication, SessionAuthentication]
     permission_classes = [permissions.IsAuthenticated, HasPosSaleViewPermission]
 
     def get(self, request, shift_id):

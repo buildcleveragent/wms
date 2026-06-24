@@ -3,10 +3,13 @@ from django.urls import path
 from .views import (
     PosCheckoutApi,
     PosProductListApi,
+    PosReturnDetailApi,
+    PosReturnListCreateApi,
     PosSaleDetailApi,
     PosSaleExportApi,
     PosSaleListApi,
     PosSalePrintApi,
+    PosSalePrintLogApi,
     PosSaleReceiptApi,
     PosSaleVoidApi,
     PosShiftCloseApi,
@@ -17,6 +20,7 @@ from .views import (
     PosShiftListExportApi,
     PosShiftOpenApi,
     PosShiftPrintApi,
+    PosShiftReopenApi,
     PosStatsApi,
     PosStatsExportApi,
 )
@@ -39,7 +43,18 @@ urlpatterns = [
         PosSalePrintApi.as_view(),
         name="pos-sale-print",
     ),
+    path(
+        "sales/<int:sale_id>/print-log/",
+        PosSalePrintLogApi.as_view(),
+        name="pos-sale-print-log",
+    ),
     path("sales/<int:sale_id>/void/", PosSaleVoidApi.as_view(), name="pos-sale-void"),
+    path("returns/", PosReturnListCreateApi.as_view(), name="pos-return-list-create"),
+    path(
+        "returns/<int:return_id>/",
+        PosReturnDetailApi.as_view(),
+        name="pos-return-detail",
+    ),
     path("shifts/", PosShiftListApi.as_view(), name="pos-shift-list"),
     path(
         "shifts/export/",
@@ -60,6 +75,11 @@ urlpatterns = [
         "shifts/<int:shift_id>/print/",
         PosShiftPrintApi.as_view(),
         name="pos-shift-print",
+    ),
+    path(
+        "shifts/<int:shift_id>/reopen/",
+        PosShiftReopenApi.as_view(),
+        name="pos-shift-reopen",
     ),
     path(
         "shifts/<int:shift_id>/export/",

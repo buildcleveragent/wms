@@ -119,6 +119,16 @@ class PosShift(models.Model):
         null=True,
         blank=True,
     )
+    reopened_at = models.DateTimeField("重开时间", null=True, blank=True)
+    reopened_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="reopened_pos_shifts",
+        null=True,
+        blank=True,
+    )
+    reopen_reason = models.CharField("重开原因", max_length=200, blank=True, default="")
+    reopen_count = models.PositiveIntegerField("重开次数", default=0)
     opening_cash_amount = models.DecimalField(
         "备用金", max_digits=18, decimal_places=2, default=Decimal("0.00")
     )
@@ -137,9 +147,13 @@ class PosShift(models.Model):
     total_voided_amount = models.DecimalField(
         "作废金额", max_digits=18, decimal_places=2, default=Decimal("0.00")
     )
+    total_return_amount = models.DecimalField(
+        "退货金额", max_digits=18, decimal_places=2, default=Decimal("0.00")
+    )
     sale_count = models.PositiveIntegerField("销售单数", default=0)
     completed_count = models.PositiveIntegerField("完成单数", default=0)
     voided_count = models.PositiveIntegerField("作废单数", default=0)
+    return_count = models.PositiveIntegerField("退货单数", default=0)
     remark = models.CharField("备注", max_length=200, blank=True, default="")
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
     updated_at = models.DateTimeField("更新时间", auto_now=True)
@@ -175,8 +189,12 @@ class PosShiftPaymentSummary(models.Model):
         ],
     )
     sale_count = models.PositiveIntegerField("销售单数", default=0)
+    refund_count = models.PositiveIntegerField("退款单数", default=0)
     expected_amount = models.DecimalField(
         "系统金额", max_digits=18, decimal_places=2, default=Decimal("0.00")
+    )
+    refund_amount = models.DecimalField(
+        "退款金额", max_digits=18, decimal_places=2, default=Decimal("0.00")
     )
     actual_amount = models.DecimalField(
         "实点金额", max_digits=18, decimal_places=2, default=Decimal("0.00")
@@ -282,6 +300,197 @@ class PosPayment(models.Model):
         return f"{self.sale.sale_no}-{self.method}"
 
 
+class PosPaymentLine(models.Model):
+    sale = models.ForeignKey(
+        PosSale, on_delete=models.PROTECT, related_name="payment_lines"
+    )
+    method = models.CharField(
+        "支付方式", max_length=20, choices=PosPayment.Method.choices
+    )
+    amount = models.DecimalField("抵扣金额", max_digits=18, decimal_places=2)
+    amount_received = models.DecimalField("实收金额", max_digits=18, decimal_places=2)
+    change_amount = models.DecimalField(
+        "找零", max_digits=18, decimal_places=2, default=Decimal("0.00")
+    )
+    reference_no = models.CharField(
+        "支付参考号", max_length=100, blank=True, default=""
+    )
+    status = models.CharField(
+        "状态",
+        max_length=20,
+        choices=PosPayment.Status.choices,
+        default=PosPayment.Status.PAID,
+        db_index=True,
+    )
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        verbose_name = "POS收款明细"
+        verbose_name_plural = "POS收款明细"
+        indexes = [
+            models.Index(fields=["sale", "method"], name="idx_pos_payline_sale"),
+            models.Index(
+                fields=["method", "created_at"], name="idx_pos_payline_method"
+            ),
+            models.Index(
+                fields=["status", "created_at"], name="idx_pos_payline_status"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.sale.sale_no}-{self.method}-{self.amount}"
+
+
+class PosReturn(models.Model):
+    class Status(models.TextChoices):
+        COMPLETED = "COMPLETED", "已完成"
+        VOIDED = "VOIDED", "已撤销"
+
+    return_no = models.CharField("POS退货单号", max_length=100, unique=True)
+    sale = models.ForeignKey(PosSale, on_delete=models.PROTECT, related_name="returns")
+    warehouse = models.ForeignKey(
+        "locations.Warehouse", on_delete=models.PROTECT, related_name="pos_returns"
+    )
+    shift = models.ForeignKey(
+        PosShift, on_delete=models.PROTECT, related_name="returns"
+    )
+    cashier = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="pos_returns",
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(
+        "状态",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.COMPLETED,
+        db_index=True,
+    )
+    total_amount = models.DecimalField(
+        "退货金额", max_digits=18, decimal_places=2, default=Decimal("0.00")
+    )
+    reason = models.CharField("退货原因", max_length=200, blank=True, default="")
+    idempotency_key = models.CharField(
+        "幂等键", max_length=100, unique=True, null=True, blank=True
+    )
+    idempotency_fingerprint = models.CharField(
+        "幂等请求指纹", max_length=64, blank=True, default=""
+    )
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        verbose_name = "POS退货单"
+        verbose_name_plural = "POS退货单"
+        indexes = [
+            models.Index(
+                fields=["warehouse", "created_at"], name="idx_pos_return_wh_created"
+            ),
+            models.Index(fields=["shift", "created_at"], name="idx_pos_return_shift"),
+            models.Index(fields=["sale", "created_at"], name="idx_pos_return_sale"),
+        ]
+
+    def __str__(self) -> str:
+        return self.return_no
+
+
+class PosReturnLine(models.Model):
+    return_order = models.ForeignKey(
+        PosReturn, on_delete=models.PROTECT, related_name="lines"
+    )
+    sale_line = models.ForeignKey(
+        PosSaleLine, on_delete=models.PROTECT, related_name="return_lines"
+    )
+    owner = models.ForeignKey(
+        "baseinfo.Owner", on_delete=models.PROTECT, related_name="pos_return_lines"
+    )
+    product = models.ForeignKey(
+        "products.Product", on_delete=models.PROTECT, related_name="pos_return_lines"
+    )
+    line_no = models.PositiveIntegerField("行号")
+    qty = models.DecimalField("基本数量", max_digits=18, decimal_places=3)
+    price = models.DecimalField("基本单价", max_digits=18, decimal_places=4)
+    amount = models.DecimalField("金额", max_digits=18, decimal_places=2)
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "POS退货明细"
+        verbose_name_plural = "POS退货明细"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["return_order", "line_no"], name="ux_pos_return_line_no"
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["return_order", "owner"], name="idx_pos_return_line_owner"
+            ),
+            models.Index(fields=["sale_line"], name="idx_pos_return_line_sale_line"),
+            models.Index(fields=["product"], name="idx_pos_return_line_product"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.return_order.return_no}-{self.line_no}"
+
+
+class PosRefund(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "待退款"
+        REFUNDED = "REFUNDED", "已退款"
+        FAILED = "FAILED", "退款失败"
+        CANCELED = "CANCELED", "已取消"
+
+    return_order = models.ForeignKey(
+        PosReturn, on_delete=models.PROTECT, related_name="refunds"
+    )
+    sale = models.ForeignKey(PosSale, on_delete=models.PROTECT, related_name="refunds")
+    shift = models.ForeignKey(
+        PosShift, on_delete=models.PROTECT, related_name="refunds"
+    )
+    method = models.CharField(
+        "退款方式", max_length=20, choices=PosPayment.Method.choices
+    )
+    amount = models.DecimalField("退款金额", max_digits=18, decimal_places=2)
+    reference_no = models.CharField(
+        "退款参考号", max_length=100, blank=True, default=""
+    )
+    status = models.CharField(
+        "状态",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.REFUNDED,
+        db_index=True,
+    )
+    processed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="processed_pos_refunds",
+        null=True,
+        blank=True,
+    )
+    processed_at = models.DateTimeField("退款时间", null=True, blank=True)
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        verbose_name = "POS退款流水"
+        verbose_name_plural = "POS退款流水"
+        indexes = [
+            models.Index(
+                fields=["return_order", "method"], name="idx_pos_refund_return"
+            ),
+            models.Index(fields=["shift", "created_at"], name="idx_pos_refund_shift"),
+            models.Index(fields=["method", "created_at"], name="idx_pos_refund_method"),
+            models.Index(fields=["status", "created_at"], name="idx_pos_refund_status"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.return_order.return_no}-{self.method}-{self.amount}"
+
+
 class PosSaleOrder(models.Model):
     sale = models.ForeignKey(
         PosSale, on_delete=models.PROTECT, related_name="sale_orders"
@@ -321,6 +530,10 @@ class PosPrintLog(models.Model):
         SHIFT_SUMMARY = "SHIFT_SUMMARY", "交班单"
         POS_STATS = "POS_STATS", "POS统计"
 
+    class Source(models.TextChoices):
+        FRONTEND_HTML = "FRONTEND_HTML", "前端HTML"
+        BACKEND_HTML = "BACKEND_HTML", "后端HTML"
+
     sale = models.ForeignKey(
         PosSale,
         on_delete=models.PROTECT,
@@ -336,6 +549,13 @@ class PosPrintLog(models.Model):
         blank=True,
     )
     print_type = models.CharField("打印类型", max_length=30, choices=PrintType.choices)
+    source = models.CharField(
+        "打印来源",
+        max_length=30,
+        choices=Source.choices,
+        default=Source.BACKEND_HTML,
+        db_index=True,
+    )
     printed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -359,3 +579,64 @@ class PosPrintLog(models.Model):
     def __str__(self) -> str:
         target = self.sale_id or self.shift_id or "-"
         return f"{self.print_type}-{target}-{self.copy_no}"
+
+
+class PosAuditLog(models.Model):
+    class Action(models.TextChoices):
+        CHECKOUT = "CHECKOUT", "收银结账"
+        VOID = "VOID", "销售作废"
+        RETURN = "RETURN", "退货"
+        REFUND = "REFUND", "退款"
+        SHIFT_OPEN = "SHIFT_OPEN", "开班"
+        SHIFT_CLOSE = "SHIFT_CLOSE", "交班"
+        SHIFT_REOPEN = "SHIFT_REOPEN", "重开班次"
+        PRINT = "PRINT", "打印"
+
+    action = models.CharField("动作", max_length=30, choices=Action.choices)
+    sale = models.ForeignKey(
+        PosSale,
+        on_delete=models.PROTECT,
+        related_name="audit_logs",
+        null=True,
+        blank=True,
+    )
+    return_order = models.ForeignKey(
+        PosReturn,
+        on_delete=models.PROTECT,
+        related_name="audit_logs",
+        null=True,
+        blank=True,
+    )
+    shift = models.ForeignKey(
+        PosShift,
+        on_delete=models.PROTECT,
+        related_name="audit_logs",
+        null=True,
+        blank=True,
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="pos_audit_logs",
+        null=True,
+        blank=True,
+    )
+    reason = models.CharField("原因", max_length=200, blank=True, default="")
+    metadata = models.JSONField("元数据", default=dict, blank=True)
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "POS操作审计"
+        verbose_name_plural = "POS操作审计"
+        indexes = [
+            models.Index(fields=["action", "created_at"], name="idx_pos_audit_action"),
+            models.Index(fields=["sale", "created_at"], name="idx_pos_audit_sale"),
+            models.Index(fields=["shift", "created_at"], name="idx_pos_audit_shift"),
+            models.Index(
+                fields=["return_order", "created_at"], name="idx_pos_audit_return"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        target = self.sale_id or self.return_order_id or self.shift_id or "-"
+        return f"{self.action}-{target}"

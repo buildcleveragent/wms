@@ -96,6 +96,13 @@ function buildQuery(params = {}) {
   return qs
 }
 
+export function withAuthToken(url) {
+  const token = getToken()
+  if (!token) return url
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}token=${encodeURIComponent(token)}`
+}
+
 export function request(opts = {}) {
   const token = getToken()
 
@@ -303,6 +310,9 @@ export const api = {
     const qs = buildQuery({
       search: params.search || '',
       status: params.status || '',
+      start_date: params.start_date || '',
+      end_date: params.end_date || '',
+      shift: params.shift || '',
       page: params.page || 1,
       page_size: params.page_size || 20,
     })
@@ -356,11 +366,43 @@ export const api = {
       url: `/api/pos/sales/${id}/receipt/`,
     }),
 
+  posSalePrintLog: (id, payload = {}) =>
+    request({
+      url: `/api/pos/sales/${id}/print-log/`,
+      method: 'POST',
+      data: payload,
+    }),
+
+  posSalePrintUrl: (id) => `${BASE_URL}/api/pos/sales/${id}/print/`,
+
   posSaleVoid: (id, payload = {}) =>
     request({
       url: `/api/pos/sales/${id}/void/`,
       method: 'POST',
       data: payload,
+    }),
+
+  posReturns: (params = {}) => {
+    const qs = buildQuery({
+      sale_id: params.sale_id || '',
+      page: params.page || 1,
+      page_size: params.page_size || 20,
+    })
+    return request({
+      url: `/api/pos/returns/?${qs}`,
+    })
+  },
+
+  posReturnCreate: (payload = {}) =>
+    request({
+      url: '/api/pos/returns/',
+      method: 'POST',
+      data: payload,
+    }),
+
+  posReturnDetail: (id) =>
+    request({
+      url: `/api/pos/returns/${id}/`,
     }),
 
   posShiftCurrent: () =>
@@ -375,6 +417,16 @@ export const api = {
       data: payload,
     }),
 
+  posShifts: (params = {}) => {
+    const qs = buildQuery({
+      page: params.page || 1,
+      page_size: params.page_size || 20,
+    })
+    return request({
+      url: `/api/pos/shifts/?${qs}`,
+    })
+  },
+
   posShiftClose: (id, payload = {}) =>
     request({
       url: `/api/pos/shifts/${id}/close/`,
@@ -382,9 +434,18 @@ export const api = {
       data: payload,
     }),
 
+  posShiftReopen: (id, payload = {}) =>
+    request({
+      url: `/api/pos/shifts/${id}/reopen/`,
+      method: 'POST',
+      data: payload,
+    }),
+
   posShiftPrintUrl: (id) => `${BASE_URL}/api/pos/shifts/${id}/print/`,
 
   posShiftExportUrl: (id) => `${BASE_URL}/api/pos/shifts/${id}/export/`,
+
+  authUrl: (url) => withAuthToken(url),
 
   // PDA 拣货
   pickTasks: (params = {}) =>

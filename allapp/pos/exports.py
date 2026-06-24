@@ -2,9 +2,17 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from django.db.models import Sum
 from openpyxl import Workbook
 
-from .models import PosSale, PosSaleLine
+from .models import (
+    PosPaymentLine,
+    PosRefund,
+    PosReturn,
+    PosReturnLine,
+    PosSale,
+    PosSaleLine,
+)
 
 
 def _text(value):
@@ -40,6 +48,15 @@ def build_sales_export_workbook(sales):
         ).order_by("-created_at", "-id")
     )
     sale_ids = [sale.id for sale in sales]
+    return_amounts = {
+        row["sale_id"]: row["amount"] or Decimal("0.00")
+        for row in PosReturn.objects.filter(
+            sale_id__in=sale_ids,
+            status=PosReturn.Status.COMPLETED,
+        )
+        .values("sale_id")
+        .annotate(amount=Sum("total_amount"))
+    }
 
     workbook = Workbook()
     sheet = workbook.active
@@ -55,6 +72,8 @@ def build_sales_export_workbook(sales):
             "客户",
             "销售时间",
             "应收金额",
+            "退货金额",
+            "净金额",
             "支付方式",
             "实收金额",
             "找零",
@@ -66,6 +85,12 @@ def build_sales_export_workbook(sales):
     )
     for sale in sales:
         payment = getattr(sale, "payment", None)
+        return_amount = _money(return_amounts.get(sale.id, Decimal("0.00")))
+        net_amount = (
+            _money(sale.total_amount) - return_amount
+            if sale.status == PosSale.Status.COMPLETED
+            else Decimal("0.00")
+        )
         sheet.append(
             [
                 sale.sale_no,
@@ -81,6 +106,8 @@ def build_sales_export_workbook(sales):
                 ),
                 _dt(sale.created_at),
                 _money(sale.total_amount),
+                return_amount,
+                net_amount,
                 payment.method if payment else "",
                 _money(payment.amount_received) if payment else Decimal("0.00"),
                 _money(payment.change_amount) if payment else Decimal("0.00"),
@@ -88,6 +115,40 @@ def build_sales_export_workbook(sales):
                 _dt(sale.voided_at),
                 sale.void_reason,
                 sale.remark,
+            ]
+        )
+
+    payment_sheet = workbook.create_sheet("PaymentLines")
+    payment_sheet.append(
+        [
+            "销售单号",
+            "小票号",
+            "支付方式",
+            "抵扣金额",
+            "实收金额",
+            "找零",
+            "支付参考号",
+            "状态",
+            "收款时间",
+        ]
+    )
+    payment_lines = (
+        PosPaymentLine.objects.filter(sale_id__in=sale_ids)
+        .select_related("sale")
+        .order_by("-sale__created_at", "-sale_id", "id")
+    )
+    for line in payment_lines:
+        payment_sheet.append(
+            [
+                line.sale.sale_no,
+                line.sale.src_bill_no,
+                line.method,
+                Decimal(line.amount),
+                Decimal(line.amount_received),
+                Decimal(line.change_amount),
+                line.reference_no,
+                line.status,
+                _dt(line.created_at),
             ]
         )
 
@@ -144,6 +205,130 @@ def build_sales_export_workbook(sales):
             ]
         )
 
+    returns = (
+        PosReturn.objects.filter(sale_id__in=sale_ids)
+        .select_related("sale", "shift", "cashier")
+        .order_by("-created_at", "-id")
+    )
+    return_ids = [return_order.id for return_order in returns]
+
+    return_sheet = workbook.create_sheet("Returns")
+    return_sheet.append(
+        [
+            "退货单号",
+            "销售单号",
+            "小票号",
+            "状态",
+            "班次号",
+            "收银员",
+            "退货金额",
+            "退货原因",
+            "退货时间",
+        ]
+    )
+    for return_order in returns:
+        return_sheet.append(
+            [
+                return_order.return_no,
+                return_order.sale.sale_no,
+                return_order.sale.src_bill_no,
+                return_order.status,
+                (
+                    getattr(return_order.shift, "shift_no", "")
+                    if return_order.shift_id
+                    else ""
+                ),
+                (
+                    getattr(return_order.cashier, "username", "")
+                    if return_order.cashier_id
+                    else ""
+                ),
+                Decimal(return_order.total_amount),
+                return_order.reason,
+                _dt(return_order.created_at),
+            ]
+        )
+
+    return_line_sheet = workbook.create_sheet("ReturnLines")
+    return_line_sheet.append(
+        [
+            "退货单号",
+            "销售单号",
+            "小票号",
+            "状态",
+            "货主",
+            "商品编码",
+            "SKU",
+            "商品名称",
+            "数量",
+            "单价",
+            "金额",
+            "原销售行号",
+            "退货时间",
+        ]
+    )
+    return_lines = (
+        PosReturnLine.objects.filter(return_order_id__in=return_ids)
+        .select_related(
+            "return_order",
+            "return_order__sale",
+            "sale_line",
+            "owner",
+            "product",
+        )
+        .order_by("-return_order__created_at", "-return_order_id", "line_no")
+    )
+    for line in return_lines:
+        return_line_sheet.append(
+            [
+                line.return_order.return_no,
+                line.return_order.sale.sale_no,
+                line.return_order.sale.src_bill_no,
+                line.return_order.status,
+                getattr(line.owner, "name", ""),
+                getattr(line.product, "code", ""),
+                getattr(line.product, "sku", ""),
+                getattr(line.product, "name", ""),
+                Decimal(line.qty),
+                Decimal(line.price),
+                Decimal(line.amount),
+                line.sale_line.line_no if line.sale_line_id else "",
+                _dt(line.return_order.created_at),
+            ]
+        )
+
+    refund_sheet = workbook.create_sheet("Refunds")
+    refund_sheet.append(
+        [
+            "退货单号",
+            "销售单号",
+            "小票号",
+            "退款方式",
+            "退款金额",
+            "退款参考号",
+            "状态",
+            "退款时间",
+        ]
+    )
+    refunds = (
+        PosRefund.objects.filter(return_order_id__in=return_ids)
+        .select_related("return_order", "sale")
+        .order_by("-return_order__created_at", "-return_order_id", "id")
+    )
+    for refund in refunds:
+        refund_sheet.append(
+            [
+                refund.return_order.return_no,
+                refund.sale.sale_no,
+                refund.sale.src_bill_no,
+                refund.method,
+                Decimal(refund.amount),
+                refund.reference_no,
+                refund.status,
+                _dt(refund.processed_at or refund.created_at),
+            ]
+        )
+
     return workbook
 
 
@@ -160,13 +345,24 @@ def build_pos_stats_export_workbook(payload):
     _append_stats_sheet(
         workbook,
         "Payments",
-        ["支付方式", "支付方式名称", "销售单数", "金额"],
+        [
+            "支付方式",
+            "支付方式名称",
+            "销售单数",
+            "退款单数",
+            "销售金额",
+            "退款金额",
+            "净金额",
+        ],
         [
             [
                 row.get("method", ""),
                 row.get("method_label", ""),
                 row.get("sale_count", 0),
-                row.get("amount", "0.00"),
+                row.get("refund_count", 0),
+                row.get("sale_amount", row.get("amount", "0.00")),
+                row.get("refund_amount", "0.00"),
+                row.get("net_amount", row.get("amount", "0.00")),
             ]
             for row in payload.get("payments", [])
         ],
@@ -174,16 +370,34 @@ def build_pos_stats_export_workbook(payload):
     _append_stats_sheet(
         workbook,
         "Owners",
-        ["货主ID", "货主编码", "货主名称", "销售单数", "行数", "数量", "金额"],
+        [
+            "货主ID",
+            "货主编码",
+            "货主名称",
+            "销售单数",
+            "退货单数",
+            "行数",
+            "销售数量",
+            "退货数量",
+            "净数量",
+            "销售金额",
+            "退货金额",
+            "净金额",
+        ],
         [
             [
                 row.get("owner_id", ""),
                 row.get("owner_code", ""),
                 row.get("owner_name", ""),
                 row.get("sale_count", 0),
+                row.get("return_count", 0),
                 row.get("line_count", 0),
-                row.get("qty", "0.000"),
-                row.get("amount", "0.00"),
+                row.get("sale_qty", row.get("qty", "0.000")),
+                row.get("return_qty", "0.000"),
+                row.get("net_qty", row.get("qty", "0.000")),
+                row.get("sale_amount", row.get("amount", "0.00")),
+                row.get("return_amount", "0.00"),
+                row.get("net_amount", row.get("amount", "0.00")),
             ]
             for row in payload.get("owners", [])
         ],
@@ -198,9 +412,14 @@ def build_pos_stats_export_workbook(payload):
             "商品名称",
             "货主",
             "销售单数",
+            "退货单数",
             "行数",
-            "数量",
-            "金额",
+            "销售数量",
+            "退货数量",
+            "净数量",
+            "销售金额",
+            "退货金额",
+            "净金额",
         ],
         [
             [
@@ -210,9 +429,14 @@ def build_pos_stats_export_workbook(payload):
                 row.get("product_name", ""),
                 row.get("owner_name", ""),
                 row.get("sale_count", 0),
+                row.get("return_count", 0),
                 row.get("line_count", 0),
-                row.get("qty", "0.000"),
-                row.get("amount", "0.00"),
+                row.get("sale_qty", row.get("qty", "0.000")),
+                row.get("return_qty", "0.000"),
+                row.get("net_qty", row.get("qty", "0.000")),
+                row.get("sale_amount", row.get("amount", "0.00")),
+                row.get("return_amount", "0.00"),
+                row.get("net_amount", row.get("amount", "0.00")),
             ]
             for row in payload.get("products", [])
         ],
@@ -226,8 +450,11 @@ def build_pos_stats_export_workbook(payload):
             "销售单数",
             "完成单数",
             "作废单数",
+            "退货单数",
             "完成金额",
             "作废金额",
+            "退货金额",
+            "净金额",
         ],
         [
             [
@@ -236,8 +463,11 @@ def build_pos_stats_export_workbook(payload):
                 row.get("sale_count", 0),
                 row.get("completed_count", 0),
                 row.get("voided_count", 0),
+                row.get("return_count", 0),
                 row.get("completed_amount", "0.00"),
                 row.get("voided_amount", "0.00"),
+                row.get("return_amount", "0.00"),
+                row.get("net_amount", row.get("completed_amount", "0.00")),
             ]
             for row in payload.get("cashiers", [])
         ],
@@ -264,13 +494,24 @@ def build_shift_export_workbook(shift, payload):
     _append_stats_sheet(
         workbook,
         "Payments",
-        ["支付方式", "支付方式名称", "销售单数", "系统金额", "实点金额", "差异"],
+        [
+            "支付方式",
+            "支付方式名称",
+            "销售单数",
+            "退款单数",
+            "系统金额",
+            "退款金额",
+            "实点金额",
+            "差异",
+        ],
         [
             [
                 row.get("method", ""),
                 row.get("method_label", ""),
                 row.get("sale_count", 0),
+                row.get("refund_count", 0),
                 row.get("expected_amount", "0.00"),
+                row.get("refund_amount", "0.00"),
                 row.get("actual_amount", "0.00"),
                 row.get("difference", "0.00"),
             ]

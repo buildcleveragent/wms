@@ -12,8 +12,12 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .models import (
+    PosAuditLog,
     PosPayment,
+    PosPaymentLine,
     PosPrintLog,
+    PosRefund,
+    PosReturn,
     PosSale,
     PosSaleLine,
     PosShift,
@@ -83,7 +87,7 @@ def current_shift_for_user(user, *, for_update=False):
     queryset = PosShift.objects.filter(
         warehouse_id=warehouse_id,
         cashier=user,
-        status=PosShift.Status.OPEN,
+        status__in=[PosShift.Status.OPEN, PosShift.Status.REOPENED],
     ).order_by("-opened_at", "-id")
     if for_update:
         queryset = queryset.select_for_update()
@@ -97,7 +101,7 @@ def open_pos_shift(*, user, opening_cash_amount=ZERO_MONEY, remark=""):
         raise ValidationError("当前收银员已有进行中的 POS 班次，请先交班。")
 
     now = timezone.now()
-    return PosShift.objects.create(
+    shift = PosShift.objects.create(
         shift_no=_make_shift_no(now),
         warehouse_id=warehouse_id,
         cashier=user,
@@ -108,11 +112,18 @@ def open_pos_shift(*, user, opening_cash_amount=ZERO_MONEY, remark=""):
         actual_cash_amount=_money(opening_cash_amount),
         remark=(remark or "").strip(),
     )
+    PosAuditLog.objects.create(
+        action=PosAuditLog.Action.SHIFT_OPEN,
+        shift=shift,
+        actor=user if user and user.is_authenticated else None,
+        metadata={"opening_cash_amount": _money_text(opening_cash_amount)},
+    )
+    return shift
 
 
 def _payment_summary_rows_for_shift(shift):
-    rows = (
-        PosPayment.objects.filter(
+    sale_rows = (
+        PosPaymentLine.objects.filter(
             sale__shift=shift,
             sale__status=PosSale.Status.COMPLETED,
             status=PosPayment.Status.PAID,
@@ -120,23 +131,61 @@ def _payment_summary_rows_for_shift(shift):
         .values("method")
         .annotate(
             sale_count=Count("sale_id", distinct=True),
-            expected_amount=_sum_money("amount_due"),
+            sale_amount=_sum_money("amount"),
             amount_received=_sum_money("amount_received"),
             change_amount=_sum_money("change_amount"),
         )
         .order_by("method")
     )
-    return {
+    result = {
         row["method"]: {
             "method": row["method"],
             "method_label": dict(PosPayment.Method.choices).get(row["method"], ""),
             "sale_count": row["sale_count"] or 0,
-            "expected_amount": row["expected_amount"] or ZERO_MONEY,
+            "refund_count": 0,
+            "sale_amount": row["sale_amount"] or ZERO_MONEY,
+            "refund_amount": ZERO_MONEY,
+            "expected_amount": row["sale_amount"] or ZERO_MONEY,
             "amount_received": row["amount_received"] or ZERO_MONEY,
             "change_amount": row["change_amount"] or ZERO_MONEY,
         }
-        for row in rows
+        for row in sale_rows
     }
+    refund_rows = (
+        PosRefund.objects.filter(
+            shift=shift,
+            return_order__status=PosReturn.Status.COMPLETED,
+            status=PosRefund.Status.REFUNDED,
+        )
+        .values("method")
+        .annotate(
+            refund_count=Count("return_order_id", distinct=True),
+            refund_amount=_sum_money("amount"),
+        )
+        .order_by("method")
+    )
+    for row in refund_rows:
+        method = row["method"]
+        current = result.setdefault(
+            method,
+            {
+                "method": method,
+                "method_label": dict(PosPayment.Method.choices).get(method, ""),
+                "sale_count": 0,
+                "refund_count": 0,
+                "sale_amount": ZERO_MONEY,
+                "refund_amount": ZERO_MONEY,
+                "expected_amount": ZERO_MONEY,
+                "amount_received": ZERO_MONEY,
+                "change_amount": ZERO_MONEY,
+            },
+        )
+        current["refund_count"] = row["refund_count"] or 0
+        current["refund_amount"] = row["refund_amount"] or ZERO_MONEY
+        current["expected_amount"] = _money(
+            current["sale_amount"] - current["refund_amount"]
+        )
+    return result
 
 
 def build_shift_summary(shift):
@@ -150,6 +199,12 @@ def build_shift_summary(shift):
         ),
         voided_amount=_sum_money(
             "total_amount", filter_expr=Q(status=PosSale.Status.VOIDED)
+        ),
+    )
+    return_totals = PosReturn.objects.filter(shift=shift).aggregate(
+        return_count=Count("id", filter=Q(status=PosReturn.Status.COMPLETED)),
+        return_amount=_sum_money(
+            "total_amount", filter_expr=Q(status=PosReturn.Status.COMPLETED)
         ),
     )
     line_totals = PosSaleLine.objects.filter(sale__shift=shift).aggregate(
@@ -168,6 +223,10 @@ def build_shift_summary(shift):
             "amount", filter_expr=Q(sale__status=PosSale.Status.VOIDED)
         ),
     )
+    net_amount = _money(
+        (sale_counts["net_amount"] or ZERO_MONEY)
+        - (return_totals["return_amount"] or ZERO_MONEY)
+    )
 
     payment_rows = _payment_summary_rows_for_shift(shift)
     payment_summaries = []
@@ -181,6 +240,9 @@ def build_shift_summary(shift):
                 "method": method,
                 "method_label": label,
                 "sale_count": row["sale_count"],
+                "refund_count": row["refund_count"],
+                "sale_amount": _money_text(row["sale_amount"]),
+                "refund_amount": _money_text(row["refund_amount"]),
                 "expected_amount": _money_text(expected),
                 "actual_amount": _money_text(expected),
                 "difference": _money_text(ZERO_MONEY),
@@ -202,7 +264,10 @@ def build_shift_summary(shift):
         "completed_line_count": line_totals["completed_line_count"] or 0,
         "completed_qty": _qty_text(line_totals["completed_qty"]),
         "voided_qty": _qty_text(line_totals["voided_qty"]),
-        "net_amount": _money_text(sale_counts["net_amount"]),
+        "gross_sales_amount": _money_text(sale_counts["net_amount"]),
+        "return_count": return_totals["return_count"] or 0,
+        "return_amount": _money_text(return_totals["return_amount"]),
+        "net_amount": _money_text(net_amount),
         "completed_line_amount": _money_text(line_totals["completed_amount"]),
         "voided_amount": _money_text(sale_counts["voided_amount"]),
         "voided_line_amount": _money_text(line_totals["voided_amount"]),
@@ -243,7 +308,7 @@ def close_pos_shift(
     )
     if not shift:
         raise ValidationError("POS 班次不存在或无权操作。")
-    if shift.status != PosShift.Status.OPEN:
+    if shift.status not in [PosShift.Status.OPEN, PosShift.Status.REOPENED]:
         raise ValidationError("只有进行中的 POS 班次可以交班。")
     if shift.cashier_id != getattr(user, "id", None):
         raise ValidationError("只能交接当前收银员自己的班次。")
@@ -270,7 +335,9 @@ def close_pos_shift(
             shift=shift,
             method=method,
             sale_count=row["sale_count"],
+            refund_count=row.get("refund_count", 0),
             expected_amount=expected,
+            refund_amount=_money(row.get("refund_amount", ZERO_MONEY)),
             actual_amount=actual,
             difference=_money(actual - expected),
         )
@@ -283,9 +350,11 @@ def close_pos_shift(
     shift.cash_difference = _money(actual_cash_total - expected_cash_total)
     shift.total_sales_amount = _money(summary["net_amount"])
     shift.total_voided_amount = _money(summary["voided_amount"])
+    shift.total_return_amount = _money(summary["return_amount"])
     shift.sale_count = summary["sale_count"]
     shift.completed_count = summary["completed_count"]
     shift.voided_count = summary["voided_count"]
+    shift.return_count = summary["return_count"]
     shift.remark = (remark or "").strip()
     shift.save(
         update_fields=[
@@ -297,12 +366,82 @@ def close_pos_shift(
             "cash_difference",
             "total_sales_amount",
             "total_voided_amount",
+            "total_return_amount",
             "sale_count",
             "completed_count",
             "voided_count",
+            "return_count",
             "remark",
             "updated_at",
         ]
+    )
+    PosAuditLog.objects.create(
+        action=PosAuditLog.Action.SHIFT_CLOSE,
+        shift=shift,
+        actor=user if user and user.is_authenticated else None,
+        reason=(remark or "").strip(),
+        metadata={
+            "net_amount": summary["net_amount"],
+            "return_amount": summary["return_amount"],
+            "expected_cash_amount": summary["expected_cash_amount"],
+            "actual_cash_amount": _money_text(actual_cash_total),
+        },
+    )
+    return shift
+
+
+@transaction.atomic
+def reopen_pos_shift(*, shift_id, user, reason=""):
+    warehouse_id = _warehouse_id_or_error(user)
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValidationError({"reason": "重开 POS 班次必须填写原因。"})
+
+    shift = (
+        PosShift.objects.select_for_update()
+        .filter(pk=shift_id, warehouse_id=warehouse_id)
+        .first()
+    )
+    if not shift:
+        raise ValidationError("POS 班次不存在或无权操作。")
+    if shift.status != PosShift.Status.CLOSED:
+        raise ValidationError("只有已交班的 POS 班次可以重开。")
+
+    existing = (
+        PosShift.objects.select_for_update()
+        .filter(
+            warehouse_id=warehouse_id,
+            cashier_id=shift.cashier_id,
+            status__in=[PosShift.Status.OPEN, PosShift.Status.REOPENED],
+        )
+        .exclude(pk=shift.pk)
+        .first()
+    )
+    if existing:
+        raise ValidationError("该收银员已有进行中的 POS 班次，请先交班后再重开。")
+
+    now = timezone.now()
+    shift.status = PosShift.Status.REOPENED
+    shift.reopened_at = now
+    shift.reopened_by = user if user and user.is_authenticated else None
+    shift.reopen_reason = reason
+    shift.reopen_count = (shift.reopen_count or 0) + 1
+    shift.save(
+        update_fields=[
+            "status",
+            "reopened_at",
+            "reopened_by",
+            "reopen_reason",
+            "reopen_count",
+            "updated_at",
+        ]
+    )
+    PosAuditLog.objects.create(
+        action=PosAuditLog.Action.SHIFT_REOPEN,
+        shift=shift,
+        actor=user if user and user.is_authenticated else None,
+        reason=reason,
+        metadata={"reopen_count": shift.reopen_count},
     )
     return shift
 
@@ -316,6 +455,8 @@ def _stored_payment_summaries(shift):
                 "method": row.method,
                 "method_label": labels.get(row.method, row.method),
                 "sale_count": row.sale_count,
+                "refund_count": row.refund_count,
+                "refund_amount": _money_text(row.refund_amount),
                 "expected_amount": _money_text(row.expected_amount),
                 "actual_amount": _money_text(row.actual_amount),
                 "difference": _money_text(row.difference),
@@ -332,8 +473,13 @@ def serialize_shift(shift, *, include_dynamic_summary=True):
             "sale_count": shift.sale_count,
             "completed_count": shift.completed_count,
             "voided_count": shift.voided_count,
+            "return_count": shift.return_count,
+            "gross_sales_amount": _money_text(
+                shift.total_sales_amount + shift.total_return_amount
+            ),
             "net_amount": _money_text(shift.total_sales_amount),
             "voided_amount": _money_text(shift.total_voided_amount),
+            "return_amount": _money_text(shift.total_return_amount),
             "opening_cash_amount": _money_text(shift.opening_cash_amount),
             "expected_cash_amount": _money_text(shift.expected_cash_amount),
             "actual_cash_amount": _money_text(shift.actual_cash_amount),
@@ -366,13 +512,26 @@ def serialize_shift(shift, *, include_dynamic_summary=True):
         "status": shift.status,
         "opened_at": shift.opened_at.isoformat() if shift.opened_at else "",
         "closed_at": shift.closed_at.isoformat() if shift.closed_at else "",
+        "reopened_at": shift.reopened_at.isoformat() if shift.reopened_at else "",
+        "reopened_by_id": shift.reopened_by_id,
+        "reopen_reason": shift.reopen_reason or "",
+        "reopen_count": shift.reopen_count or 0,
         "opening_cash_amount": _money_text(shift.opening_cash_amount),
         "remark": shift.remark or "",
         "summary": summary,
     }
 
 
-def record_print_log(*, user, print_type, payload, sale=None, shift=None, remark=""):
+def record_print_log(
+    *,
+    user,
+    print_type,
+    payload,
+    sale=None,
+    shift=None,
+    source=PosPrintLog.Source.BACKEND_HTML,
+    remark="",
+):
     encoded = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")
     )
@@ -387,12 +546,22 @@ def record_print_log(*, user, print_type, payload, sale=None, shift=None, remark
     else:
         existing = existing.filter(shift__isnull=True)
     copy_no = existing.count() + 1
-    return PosPrintLog.objects.create(
+    log = PosPrintLog.objects.create(
         sale=sale,
         shift=shift,
         print_type=print_type,
+        source=source,
         printed_by=user if user and user.is_authenticated else None,
         copy_no=copy_no,
         payload_hash=payload_hash,
         remark=(remark or "").strip(),
     )
+    PosAuditLog.objects.create(
+        action=PosAuditLog.Action.PRINT,
+        sale=sale,
+        shift=shift,
+        actor=user if user and user.is_authenticated else None,
+        reason=(remark or "").strip(),
+        metadata={"print_type": print_type, "source": source, "copy_no": copy_no},
+    )
+    return log

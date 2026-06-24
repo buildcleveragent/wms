@@ -9,8 +9,16 @@ from allapp.inventory.models import InventoryDetail
 from allapp.outbound.serializers import OutboundOrderReadSerializer
 from allapp.products.models import Product
 
-from .models import PosPayment, PosSale, PosSaleLine
-from .services import build_receipt, create_pos_sale
+from .models import (
+    PosPayment,
+    PosPaymentLine,
+    PosRefund,
+    PosReturn,
+    PosReturnLine,
+    PosSale,
+    PosSaleLine,
+)
+from .services import build_receipt, create_pos_return, create_pos_sale
 
 ZERO = Decimal("0")
 
@@ -151,6 +159,24 @@ class PosPaymentInputSerializer(serializers.Serializer):
     reference_no = serializers.CharField(required=False, allow_blank=True, default="")
 
 
+class PosPaymentLineInputSerializer(serializers.Serializer):
+    method = serializers.ChoiceField(
+        choices=[choice.value for choice in PosPayment.Method]
+    )
+    amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+    )
+    amount_received = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+        required=False,
+    )
+    reference_no = serializers.CharField(required=False, allow_blank=True, default="")
+
+
 class PosCheckoutSerializer(serializers.Serializer):
     customer_id = serializers.IntegerField(required=False, allow_null=True)
     src_bill_no = serializers.CharField(required=False, allow_blank=True, default="")
@@ -159,12 +185,15 @@ class PosCheckoutSerializer(serializers.Serializer):
         required=False, allow_blank=True, default=""
     )
     stock_zone_type = serializers.IntegerField(required=False, allow_null=True)
-    payment = PosPaymentInputSerializer()
+    payment = PosPaymentInputSerializer(required=False)
+    payments = PosPaymentLineInputSerializer(many=True, required=False, default=list)
     items = PosCheckoutLineSerializer(many=True)
 
     def validate(self, attrs):
         if not attrs.get("items"):
             raise serializers.ValidationError({"items": "购物车不能为空。"})
+        if not attrs.get("payment") and not attrs.get("payments"):
+            raise serializers.ValidationError({"payment": "请填写支付信息。"})
         return attrs
 
     def create(self, validated_data):
@@ -175,6 +204,7 @@ class PosCheckoutSerializer(serializers.Serializer):
             remark=validated_data.get("remark", ""),
             items=validated_data.get("items", []),
             payment=validated_data.get("payment"),
+            payments=validated_data.get("payments", []),
             idempotency_key=validated_data.get("idempotency_key", ""),
             stock_zone_type=validated_data.get("stock_zone_type"),
         )
@@ -195,9 +225,26 @@ class PosPaymentReadSerializer(serializers.ModelSerializer):
         ]
 
 
+class PosPaymentLineReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PosPaymentLine
+        fields = [
+            "id",
+            "method",
+            "amount",
+            "amount_received",
+            "change_amount",
+            "reference_no",
+            "status",
+            "created_at",
+        ]
+
+
 class PosSaleLineReadSerializer(serializers.ModelSerializer):
     product_code = serializers.CharField(source="product.code", read_only=True)
     product_name = serializers.CharField(source="product.name", read_only=True)
+    returned_qty = serializers.SerializerMethodField()
+    returnable_qty = serializers.SerializerMethodField()
 
     class Meta:
         model = PosSaleLine
@@ -211,12 +258,33 @@ class PosSaleLineReadSerializer(serializers.ModelSerializer):
             "qty",
             "price",
             "amount",
+            "returned_qty",
+            "returnable_qty",
             "outbound_order_line_id",
         ]
+
+    def get_returned_qty(self, obj):
+        returned = getattr(obj, "_pos_returned_qty", None)
+        if returned is None:
+            returned = sum(
+                (
+                    line.qty
+                    for line in obj.return_lines.filter(
+                        return_order__status=PosReturn.Status.COMPLETED
+                    )
+                ),
+                Decimal("0.000"),
+            )
+        return returned
+
+    def get_returnable_qty(self, obj):
+        returned = Decimal(str(self.get_returned_qty(obj) or 0))
+        return max(obj.qty - returned, Decimal("0.000"))
 
 
 class PosSaleReadSerializer(serializers.ModelSerializer):
     payment = PosPaymentReadSerializer(read_only=True)
+    payment_lines = PosPaymentLineReadSerializer(many=True, read_only=True)
     lines = PosSaleLineReadSerializer(many=True, read_only=True)
     receipt = serializers.SerializerMethodField()
     orders = serializers.SerializerMethodField()
@@ -239,6 +307,7 @@ class PosSaleReadSerializer(serializers.ModelSerializer):
             "void_reason",
             "created_at",
             "payment",
+            "payment_lines",
             "lines",
             "orders",
             "receipt",
@@ -293,6 +362,119 @@ class PosShiftCloseSerializer(serializers.Serializer):
     remark = serializers.CharField(required=False, allow_blank=True, default="")
 
 
+class PosShiftReopenSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=True, allow_blank=False, max_length=200)
+
+
+class PosRefundInputSerializer(serializers.Serializer):
+    method = serializers.ChoiceField(
+        choices=[choice.value for choice in PosPayment.Method]
+    )
+    amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+    )
+    reference_no = serializers.CharField(required=False, allow_blank=True, default="")
+    status = serializers.ChoiceField(
+        choices=[choice.value for choice in PosRefund.Status],
+        required=False,
+        default=PosRefund.Status.REFUNDED,
+    )
+
+
+class PosReturnLineInputSerializer(serializers.Serializer):
+    sale_line_id = serializers.IntegerField()
+    qty = serializers.DecimalField(
+        max_digits=18, decimal_places=3, min_value=Decimal("0.001")
+    )
+
+
+class PosReturnCreateSerializer(serializers.Serializer):
+    sale_id = serializers.IntegerField()
+    reason = serializers.CharField(required=True, allow_blank=False, max_length=200)
+    idempotency_key = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+    lines = PosReturnLineInputSerializer(many=True)
+    refunds = PosRefundInputSerializer(many=True)
+
+    def validate(self, attrs):
+        if not attrs.get("lines"):
+            raise serializers.ValidationError({"lines": "退货明细不能为空。"})
+        if not attrs.get("refunds"):
+            raise serializers.ValidationError({"refunds": "退款明细不能为空。"})
+        return attrs
+
+    def create(self, validated_data):
+        return create_pos_return(
+            user=self.context["request"].user,
+            sale_id=validated_data["sale_id"],
+            lines=validated_data.get("lines", []),
+            refunds=validated_data.get("refunds", []),
+            reason=validated_data.get("reason", ""),
+            idempotency_key=validated_data.get("idempotency_key", ""),
+        )
+
+
+class PosRefundReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PosRefund
+        fields = [
+            "id",
+            "method",
+            "amount",
+            "reference_no",
+            "status",
+            "processed_by_id",
+            "processed_at",
+            "created_at",
+        ]
+
+
+class PosReturnLineReadSerializer(serializers.ModelSerializer):
+    product_code = serializers.CharField(source="product.code", read_only=True)
+    product_name = serializers.CharField(source="product.name", read_only=True)
+
+    class Meta:
+        model = PosReturnLine
+        fields = [
+            "id",
+            "line_no",
+            "sale_line_id",
+            "owner_id",
+            "product_id",
+            "product_code",
+            "product_name",
+            "qty",
+            "price",
+            "amount",
+            "created_at",
+        ]
+
+
+class PosReturnReadSerializer(serializers.ModelSerializer):
+    lines = PosReturnLineReadSerializer(many=True, read_only=True)
+    refunds = PosRefundReadSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = PosReturn
+        fields = [
+            "id",
+            "return_no",
+            "sale_id",
+            "warehouse_id",
+            "shift_id",
+            "cashier_id",
+            "status",
+            "total_amount",
+            "reason",
+            "created_at",
+            "lines",
+            "refunds",
+        ]
+
+
 def serialize_checkout_result(result, request):
     orders = result["orders"]
     sale = result["sale"]
@@ -300,6 +482,9 @@ def serialize_checkout_result(result, request):
     return {
         "sale": PosSaleReadSerializer(sale, context={"request": request}).data,
         "payment": PosPaymentReadSerializer(payment).data,
+        "payment_lines": PosPaymentLineReadSerializer(
+            sale.payment_lines.order_by("id"), many=True
+        ).data,
         "orders": PosCheckoutResponseSerializer(
             orders,
             many=True,
@@ -309,6 +494,11 @@ def serialize_checkout_result(result, request):
         "src_bill_no": sale.src_bill_no,
         "receipt": result["receipt"],
     }
+
+
+def serialize_return_result(result):
+    return_order = result["return"]
+    return {"return": PosReturnReadSerializer(return_order).data}
 
 
 class PosCheckoutResponseSerializer(OutboundOrderReadSerializer):
