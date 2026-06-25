@@ -1,0 +1,93 @@
+<div class="wms-permission-matrix" data-permission-matrix>
+  <div class="wms-permission-toolbar">
+    <div class="wms-permission-summary">
+      已选 <strong data-permission-selected-count>{{ widget.selected_count }}</strong>
+      / <span data-permission-total-count>{{ widget.total_count }}</span>
+    </div>
+    <input
+      type="search"
+      class="wms-permission-search"
+      placeholder="搜索应用、功能项、权限名称"
+      data-permission-filter
+    >
+    <button type="button" class="button" data-permission-check-visible>勾选筛选结果</button>
+    <button type="button" class="button" data-permission-clear-visible>清空筛选结果</button>
+  </div>
+
+  <div class="wms-permission-body">
+    {% for group in widget.groups %}
+      <section class="wms-permission-app" data-permission-app>
+        <header class="wms-permission-app-header">
+          <label>
+            <input type="checkbox" data-permission-app-toggle>
+            <span>{{ group.label }}</span>
+          </label>
+          <span class="wms-permission-count" data-permission-app-count>
+            {{ group.selected_count }}/{{ group.total_count }}
+          </span>
+        </header>
+        <div class="wms-permission-table-wrap">
+          <table class="wms-permission-table">
+            <thead>
+              <tr>
+                <th class="wms-permission-feature-col">功能项</th>
+                {% for action in widget.action_order %}
+                  <th>{{ action.label }}</th>
+                {% endfor %}
+                <th class="wms-permission-extra-col">其他权限</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for model in group.models %}
+                <tr data-permission-row data-search-text="{{ model.search_text }}">
+                  <th class="wms-permission-feature-col">
+                    <label>
+                      <input type="checkbox" data-permission-row-toggle>
+                      <span>{{ model.label }}</span>
+                    </label>
+                  </th>
+                  {% for cell in model.cells %}
+                    <td>
+                      {% if cell.permission %}
+                        <label class="wms-permission-check">
+                          <input
+                            type="checkbox"
+                            name="{{ widget.name }}"
+                            value="{{ cell.permission.id }}"
+                            id="{{ widget.name }}_{{ cell.permission.id }}"
+                            {% if cell.permission.checked %}checked{% endif %}
+                          >
+                          <span>{{ cell.label }}</span>
+                        </label>
+                      {% else %}
+                        <span class="wms-permission-empty">-</span>
+                      {% endif %}
+                    </td>
+                  {% endfor %}
+                  <td class="wms-permission-extra-col">
+                    {% for permission in model.extras %}
+                      <label class="wms-permission-extra">
+                        <input
+                          type="checkbox"
+                          name="{{ widget.name }}"
+                          value="{{ permission.id }}"
+                          id="{{ widget.name }}_{{ permission.id }}"
+                          {% if permission.checked %}checked{% endif %}
+                        >
+                        <span class="wms-permission-extra-text">
+                          <span>{{ permission.label }}</span>
+                        </span>
+                      </label>
+                    {% empty %}
+                      <span class="wms-permission-empty">-</span>
+                    {% endfor %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endfor %}
+  </div>
+</div>

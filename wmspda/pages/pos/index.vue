@@ -2007,6 +2007,12 @@ function setScanFeedback(message, type = 'info') {
   scanFeedbackType.value = type
 }
 
+function collapseProductResults() {
+  products.value = []
+  productKeyword.value = ''
+  productSearched.value = false
+}
+
 async function searchCustomers() {
   customerLoading.value = true
   try {
@@ -2298,6 +2304,7 @@ function addToCart(product) {
     exists.qty = String(toPositiveNumber(exists.qty) + 1)
     normalizeCartLine(exists)
     setScanFeedback(`已加入：${exists.name}`, 'success')
+    collapseProductResults()
     focusProductInput()
     return true
   }
@@ -2330,6 +2337,7 @@ function addToCart(product) {
   })
   setScanFeedback(`已加入：${productName}`, 'success')
   uni.showToast({ title: '已加入购物车', icon: 'none' })
+  collapseProductResults()
   focusProductInput()
   return true
 }

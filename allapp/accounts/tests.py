@@ -1,6 +1,10 @@
+from django.contrib import admin
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.contrib.auth.models import Group, Permission
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
+
+from allapp.accounts.admin import PermissionMatrixWidget
 
 
 class AccountsWarehouseScopeTests(TestCase):
@@ -38,3 +42,40 @@ class PasswordChangeTests(TestCase):
         user.refresh_from_db()
         self.assertTrue(user.check_password("NewPass12345!"))
         self.assertEqual(int(self.client.session["_auth_user_id"]), user.pk)
+
+
+class GroupAdminPermissionMatrixTests(TestCase):
+    def setUp(self):
+        self.request = RequestFactory().get("/admin/auth/group/add/")
+        self.request.user = get_user_model().objects.create_superuser(
+            username="admin",
+            password="admin",
+            email="admin@example.com",
+        )
+        self.model_admin = admin.site._registry[Group]
+
+    def test_group_admin_uses_permission_matrix_widget(self):
+        form_class = self.model_admin.get_form(self.request)
+        form = form_class()
+
+        self.assertIsInstance(form.fields["permissions"].widget, PermissionMatrixWidget)
+        html = form["permissions"].as_widget()
+
+        self.assertIn("data-permission-matrix", html)
+        self.assertIn('type="checkbox"', html)
+        self.assertIn("POS销售单", html)
+
+    def test_group_admin_permission_matrix_saves_selected_permissions(self):
+        permission = Permission.objects.get(codename="add_possale")
+        form_class = self.model_admin.get_form(self.request)
+        form = form_class(
+            data={
+                "name": "POS收银员",
+                "permissions": [str(permission.pk)],
+            }
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        group = form.save()
+
+        self.assertTrue(group.permissions.filter(pk=permission.pk).exists())
