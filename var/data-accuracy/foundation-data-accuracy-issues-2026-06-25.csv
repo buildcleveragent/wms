@@ -1,0 +1,3 @@
+﻿check_name,detail
+posted_task_line_reserved_status,id=397; task_no=JH-260520-1-dz-00001; task_status=COMPLETED; review_status=APPROVED; posting_status=POSTED; line_status=RESERVED; qty_plan=7.000; qty_done=7.000; product_id=412; code=DZ-0001
+posted_task_line_reserved_status,id=398; task_no=JH-260520-1-dz-00001; task_status=COMPLETED; review_status=APPROVED; posting_status=POSTED; line_status=RESERVED; qty_plan=6.000; qty_done=6.000; product_id=413; code=DZ-0002
