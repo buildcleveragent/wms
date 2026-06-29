@@ -1,6 +1,15 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from . import viewsets as v
+from . import views as v
+from .mobile_api import (
+    MobileCatalogApi,
+    MobileCustomerListApi,
+    MobileHomeApi,
+    MobileOrderDetailApi,
+    MobileOrderListCreateApi,
+    MobileOrderQuoteApi,
+    MobileOrderSubmitApi,
+)
 
 router = DefaultRouter()
 router.register(r"biz-orgs", v.BizOrgViewSet)
@@ -36,5 +45,16 @@ router.register(r"merch-audits", v.MerchandisingAuditViewSet)
 router.register(r"rebate-payouts", v.RebatePayoutViewSet)
 
 urlpatterns = [
+    path("mobile/home/", MobileHomeApi.as_view(), name="sales-mobile-home"),
+    path("mobile/customers/", MobileCustomerListApi.as_view(), name="sales-mobile-customers"),
+    path("mobile/catalog/", MobileCatalogApi.as_view(), name="sales-mobile-catalog"),
+    path("mobile/quote/", MobileOrderQuoteApi.as_view(), name="sales-mobile-quote"),
+    path("mobile/orders/", MobileOrderListCreateApi.as_view(), name="sales-mobile-orders"),
+    path("mobile/orders/<int:pk>/", MobileOrderDetailApi.as_view(), name="sales-mobile-order-detail"),
+    path(
+        "mobile/orders/<int:pk>/submit/",
+        MobileOrderSubmitApi.as_view(),
+        name="sales-mobile-order-submit",
+    ),
     path("", include(router.urls)),
 ]

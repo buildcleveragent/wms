@@ -39,6 +39,8 @@ export default {
       { key: "picking",   title: "拣货", emoji: "🧾", desc: "波次拣货/拣货确认",   op: "pick",path: "/pages/picking/task_list" },
       { key: "recheck",   title: "复核", emoji: "✅", desc: "对拣货结果复核",     op: "recheck", path: "/pages/review/pick_task_list" },
       { key: "pos",       title: "POS收银", emoji: "💳", desc: "扫码收银/销售出库", op: "pos", path: "/pages/pos/index" },
+      { key: "pos-report", title: "POS销售报表", emoji: "📊", desc: "销售记录/统计汇总", op: "pos_report", path: "/pages/pos/report" },
+      { key: "pos-accuracy", title: "POS数据对账", emoji: "✓", desc: "销售数据核查", op: "pos_accuracy", path: "/pages/pos/accuracy" },
       { key: "pack",      title: "打包", emoji: "🎁", desc: "装箱/封箱/打印",     op: "pack" },
       { key: "shipping",  title: "发运", emoji: "🚚", desc: "复核装车/出库发运",  op: "ship" },
       { key: "replenish", title: "补货", emoji: "🔀", desc: "从存储区到拣货区",   op: "replenish",path: "/pages/inventory/replenish/index" },

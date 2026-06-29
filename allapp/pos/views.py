@@ -20,6 +20,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from allapp.core.choices import ZoneType
 from allapp.products.models import Product
 
+from .accuracy import reconcile_pos_accuracy
 from .exports import (
     build_pos_stats_export_workbook,
     build_sales_export_workbook,
@@ -339,6 +340,21 @@ class PosStatsExportApi(APIView):
         start = payload.get("period", {}).get("start_date", "start")
         end = payload.get("period", {}).get("end_date", "end")
         return _xlsx_response(workbook, f"pos-stats-{start}-{end}.xlsx")
+
+
+class PosAccuracyApi(APIView):
+    permission_classes = [permissions.IsAuthenticated, HasPosSaleViewPermission]
+
+    def get(self, request):
+        try:
+            payload = reconcile_pos_accuracy(
+                user=request.user, params=request.query_params
+            )
+        except (DjangoValidationError, ValueError) as exc:
+            return Response(
+                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response(payload, status=status.HTTP_200_OK)
 
 
 class PosSaleExportApi(APIView):

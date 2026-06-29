@@ -1,7 +1,9 @@
 from decimal import Decimal
+
 from django.db import transaction
-from ..models import Promotion, PromotionGiftItem, PromotionDiscountStep, SalesOrder, SalesOrderLine
-from .pricing import compute_price_for_line
+
+from .models import PromotionDiscountStep, PromotionGiftItem, SalesOrder, SalesOrderLine
+from .services_pricing import compute_price_for_line
 
 def _calc_base_amount(order: SalesOrder):
     amount = Decimal("0.00")

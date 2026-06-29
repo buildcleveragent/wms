@@ -356,6 +356,16 @@ export const api = {
     return `${BASE_URL}/api/pos/stats/export/?${qs}`
   },
 
+  posAccuracy: (params = {}) => {
+    const qs = buildQuery({
+      start_date: params.start_date || '',
+      end_date: params.end_date || '',
+    })
+    return request({
+      url: `/api/pos/accuracy/?${qs}`,
+    })
+  },
+
   posSaleDetail: (id) =>
     request({
       url: `/api/pos/sales/${id}/`,

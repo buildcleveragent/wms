@@ -9,10 +9,11 @@ https://docs.djangoproject.com/en/5.2/topics/settings/ddd在
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
-from datetime import timedelta
-from pathlib import Path
+
 import os
 import sys
+from datetime import timedelta
+from pathlib import Path
 
 import environ
 from django.core.exceptions import ImproperlyConfigured
@@ -47,6 +48,7 @@ def _csv_env(name, default=None):
         return [str(item).strip() for item in value if str(item).strip()]
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
+
 APP_ENV = _detect_app_env()
 if APP_ENV not in {"development", "test", "production"}:
     raise ImproperlyConfigured("APP_ENV 必须是 development、test 或 production。")
@@ -69,50 +71,47 @@ if IS_PRODUCTION and DEBUG:
 #     "ENABLE_DEBUG_TOOLBAR",
 #     default=IS_DEVELOPMENT,
 # )
-ENABLE_DEBUG_TOOLBAR=False
+ENABLE_DEBUG_TOOLBAR = False
 # Application definition
 INSTALLED_APPS = [
-    'allapp.core',
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    "dal", "dal_select2",
-
+    "allapp.core",
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "dal",
+    "dal_select2",
     "rest_framework",
-    'rest_framework_simplejwt',
+    "rest_framework_simplejwt",
     "rest_framework.authtoken",
-    'corsheaders',
+    "corsheaders",
     "django_filters",
     "import_export",
     "django_htmx",
-
     # 'allapp.tasking',
     "allapp.console",
-    'allapp.accounts',
-    'allapp.baseinfo',
+    "allapp.accounts",
+    "allapp.baseinfo",
     "allapp.billing.apps.BillingConfig",
-
-    'allapp.inbound',
-    'allapp.inventory.apps.InventoryConfig',
-    'allapp.locations',
+    "allapp.inbound",
+    "allapp.inventory.apps.InventoryConfig",
+    "allapp.locations",
     "allapp.outbound.apps.OutboundConfig",
-    'allapp.products',
-    'allapp.pos.apps.PosConfig',
-    'allapp.salesapp',
-    'allapp.reports',
-    'allapp.driverapp',
-    'allapp.tasking.apps.TaskingConfig',
-    'allapp.strategies',
-
+    "allapp.products",
+    "allapp.pos.apps.PosConfig",
+    "allapp.salesapp",
+    "allapp.reports",
+    "allapp.driverapp",
+    "allapp.tasking.apps.TaskingConfig",
+    "allapp.strategies",
 ]
 
 if ENABLE_DEBUG_TOOLBAR:
     INSTALLED_APPS.insert(0, "debug_toolbar")
 
-AUTH_USER_MODEL = 'accounts.User'
+AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -134,22 +133,64 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": False,  # 若启用黑名单请设 True 并安装 token_blacklist
 }
 
+WECHAT_MINI_APPID = env("WECHAT_MINI_APPID", default="").strip()
+WECHAT_MINI_SECRET = env("WECHAT_MINI_SECRET", default="").strip()
+WECHAT_JSCODE2SESSION_URL = env(
+    "WECHAT_JSCODE2SESSION_URL",
+    default="https://api.weixin.qq.com/sns/jscode2session",
+).strip()
+WECHAT_PAY_API_BASE_URL = (
+    env(
+        "WECHAT_PAY_API_BASE_URL",
+        default="https://api.mch.weixin.qq.com",
+    )
+    .strip()
+    .rstrip("/")
+)
+WECHAT_PAY_MCH_ID = env("WECHAT_PAY_MCH_ID", default="").strip()
+WECHAT_PAY_MCH_SERIAL_NO = env("WECHAT_PAY_MCH_SERIAL_NO", default="").strip()
+WECHAT_PAY_PRIVATE_KEY = env("WECHAT_PAY_PRIVATE_KEY", default="").strip()
+WECHAT_PAY_PRIVATE_KEY_PATH = env("WECHAT_PAY_PRIVATE_KEY_PATH", default="").strip()
+WECHAT_PAY_APIV3_KEY = env("WECHAT_PAY_APIV3_KEY", default="").strip()
+WECHAT_PAY_NOTIFY_URL = env("WECHAT_PAY_NOTIFY_URL", default="").strip()
+WECHAT_PAY_REFUND_NOTIFY_URL = env("WECHAT_PAY_REFUND_NOTIFY_URL", default="").strip()
+WECHAT_PAY_PLATFORM_PUBLIC_KEY = env(
+    "WECHAT_PAY_PLATFORM_PUBLIC_KEY",
+    default="",
+).strip()
+WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH = env(
+    "WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH",
+    default="",
+).strip()
+WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE = env.bool(
+    "WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE",
+    default=IS_PRODUCTION,
+)
+SALE_MINI_PAY_TIMEOUT_MINUTES = env.int("SALE_MINI_PAY_TIMEOUT_MINUTES", default=30)
+SALE_MINI_POINT_EXCHANGE_RATE = env("SALE_MINI_POINT_EXCHANGE_RATE", default="100")
+SALE_MINI_DISTRIBUTION_COMMISSION_RATE = env(
+    "SALE_MINI_DISTRIBUTION_COMMISSION_RATE",
+    default="0",
+)
+
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # 放在最上面
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'django_htmx.middleware.HtmxMiddleware',
+    "corsheaders.middleware.CorsMiddleware",  # 放在最上面
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "django_htmx.middleware.HtmxMiddleware",
 ]
 
 if ENABLE_DEBUG_TOOLBAR:
     MIDDLEWARE.insert(8, "debug_toolbar.middleware.DebugToolbarMiddleware")
 
-INTERNAL_IPS = _csv_env("INTERNAL_IPS", default=["127.0.0.1"]) if ENABLE_DEBUG_TOOLBAR else []
+INTERNAL_IPS = (
+    _csv_env("INTERNAL_IPS", default=["127.0.0.1"]) if ENABLE_DEBUG_TOOLBAR else []
+)
 
 # 允许指定的域访问（修改为你的前端 URL）
 
@@ -160,7 +201,7 @@ CORS_ALLOWED_ORIGINS = _csv_env("CORS_ALLOWED_ORIGINS", default=[])
 # )
 ADMIN_MODEL_DEFAULT_PRIORITY = 100
 
-ROOT_URLCONF = 'wmsmaster.urls'
+ROOT_URLCONF = "wmsmaster.urls"
 
 TEMPLATES = [
     {
@@ -184,36 +225,47 @@ if DEBUG:
         "django.template.context_processors.debug",
     )
 
-WSGI_APPLICATION = 'wmsmaster.wsgi.application'
+WSGI_APPLICATION = "wmsmaster.wsgi.application"
 
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-db_options = {
-    "charset": "utf8mb4",  # 避免乱码
-    # 如需 SSL，可以在这里加 SSL 相关参数
-    # "ssl": {"ca": "/path/to/ca.pem", "cert": "...", "key": "..."},
-}
-db_socket = env("DB_SOCKET", default="")
-if db_socket:
-    db_options["unix_socket"] = db_socket
+DB_ENGINE = env("DB_ENGINE", default="django.db.backends.mysql").strip()
+DB_NAME = env("DB_NAME", default="wms_db").strip()
+
+db_options = {}
+if DB_ENGINE == "django.db.backends.mysql":
+    db_options = {
+        "charset": "utf8mb4",  # 避免乱码
+        # 如需 SSL，可以在这里加 SSL 相关参数
+        # "ssl": {"ca": "/path/to/ca.pem", "cert": "...", "key": "..."},
+    }
+    db_socket = env("DB_SOCKET", default="")
+    if db_socket:
+        db_options["unix_socket"] = db_socket
+
+db_test = {}
+db_test_name = env("DB_TEST_NAME", default="").strip()
+if db_test_name:
+    db_test["NAME"] = db_test_name
+if DB_ENGINE == "django.db.backends.mysql":
+    db_test["OPTIONS"] = {
+        "init_command": "SET foreign_key_checks = 0;",
+    }
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.mysql",  # 或 django.db.backends.mysql
-        "NAME": env("DB_NAME", default="wms_db"),          # 数据库名
-        "USER": env("DB_USER", default="wmsuser"),         # MySQL 用户
+        "ENGINE": DB_ENGINE,
+        "NAME": DB_NAME,  # 数据库名
+        "USER": env("DB_USER", default="wmsuser"),  # MySQL 用户
         "PASSWORD": env("DB_PASSWORD", default=""),  # 密码
-        "HOST": env("DB_HOST", default="127.0.0.1"),       # 主机（本机用 localhost 或 127.0.0.1）
-        "PORT": env("DB_PORT", default="3306"),            # 端口
+        "HOST": env(
+            "DB_HOST", default="127.0.0.1"
+        ),  # 主机（本机用 localhost 或 127.0.0.1）
+        "PORT": env("DB_PORT", default="3306"),  # 端口
         "OPTIONS": db_options,
-        'TEST': {
-            'OPTIONS': {
-                'init_command': 'SET foreign_key_checks = 0;',
-            },
-        },
-
+        "TEST": db_test,
     }
 }
 
@@ -222,18 +274,26 @@ DATABASES = {
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
-    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',},
-    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',},
-    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',},
-    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',},
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
+    },
 ]
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'zh-hans'
+LANGUAGE_CODE = "zh-hans"
 
-TIME_ZONE = 'Asia/Shanghai'
+TIME_ZONE = "Asia/Shanghai"
 USE_TZ = False  # 确保启用时区支持
 
 USE_I18N = True
@@ -242,18 +302,18 @@ USE_I18N = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 # STATIC_URL = '/static/'
-STATIC_URL = '/static/'
-STATICFILES_DIRS = [BASE_DIR / 'static']     # 指向外层 /wmsmaster/static
-STATIC_ROOT = BASE_DIR / 'staticfiles'       # 生产用，开发不影响
+STATIC_URL = "/static/"
+STATICFILES_DIRS = [BASE_DIR / "static"]  # 指向外层 /wmsmaster/static
+STATIC_ROOT = BASE_DIR / "staticfiles"  # 生产用，开发不影响
 
 LOGIN_URL = "/accounts/login/"
-LOGIN_REDIRECT_URL = "/admin/"              # 或 'inbound:order_list'
+LOGIN_REDIRECT_URL = "/admin/"  # 或 'inbound:order_list'
 LOGOUT_REDIRECT_URL = "/accounts/login/"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LOG_LEVEL = env("LOG_LEVEL", default="INFO").upper()
 
@@ -271,7 +331,6 @@ LOGGING = {
 }
 
 
-
 # 条码解析函数（点路径）
 TASKING_BARCODE_RESOLVER = "allapp.tasking.plugins.barcodes.default_resolver"
 # 过账处理器（点路径）
@@ -279,12 +338,16 @@ TASKING_POSTING_HANDLER = "allapp.tasking.plugins.handlers.DefaultPostingHandler
 # （可选）仅过账已复核通过的扫描
 TASKING_POST_ONLY_APPROVED = True
 # 可选但强烈建议（避免 PUTAWAY/RECEIVE 无库位）
-TASKING_DEFAULT_RECEIVE_LOCATION_ID = 1            # 替换为你“收货暂存位”的ID
-TASKING_DEFAULT_PUTAWAY_FROM_LOCATION_ID = 2     # 替换为你“待上架暂存位”的ID
+TASKING_DEFAULT_RECEIVE_LOCATION_ID = 1  # 替换为你“收货暂存位”的ID
+TASKING_DEFAULT_PUTAWAY_FROM_LOCATION_ID = 2  # 替换为你“待上架暂存位”的ID
 
 ALLOWED_HOSTS = _csv_env(
     "ALLOWED_HOSTS",
-    default=[] if IS_PRODUCTION else ["127.0.0.1", "localhost", "testserver","192.168.1.128"],
+    default=(
+        []
+        if IS_PRODUCTION
+        else ["127.0.0.1", "localhost", "testserver", "192.168.1.128"]
+    ),
 )
 CSRF_TRUSTED_ORIGINS = _csv_env(
     "CSRF_TRUSTED_ORIGINS",
@@ -296,37 +359,47 @@ if IS_PRODUCTION and not ALLOWED_HOSTS:
 SESSION_COOKIE_SECURE = IS_PRODUCTION
 CSRF_COOKIE_SECURE = IS_PRODUCTION
 
-OUTBOUND_ALLOCATE_ON = "OWNER_APPROVE"          # 何时分配：OWNER_APPROVE / WH_APPROVE
+OUTBOUND_ALLOCATE_ON = "OWNER_APPROVE"  # 何时分配：OWNER_APPROVE / WH_APPROVE
 OUTBOUND_PICK_TASK_STATUS_ON_APPROVE = "DRAFT"  # 生成的拣货任务初始态
-OUTBOUND_ALLOCATE_FIRM_ON_APPROVE = True        # True：硬分配（allocated 冻结）
+OUTBOUND_ALLOCATE_FIRM_ON_APPROVE = True  # True：硬分配（allocated 冻结）
 OUTBOUND_AT_DRAFT_VALIDATE_MODE = "warn"  # "warn" | "block"
-COUNT_MAX_TIMES=2
+COUNT_MAX_TIMES = 2
 BILLING_TASKLINE_ORDER_RESOLVER = "allapp.billing.resolvers:taskline_to_order_mapping"
-BILLING_METRIC_SCHEDULER_ENABLED = env.bool("BILLING_METRIC_SCHEDULER_ENABLED", default=True)
+BILLING_METRIC_SCHEDULER_ENABLED = env.bool(
+    "BILLING_METRIC_SCHEDULER_ENABLED", default=True
+)
 BILLING_METRIC_SCHEDULER_HOUR = env.int("BILLING_METRIC_SCHEDULER_HOUR", default=1)
 BILLING_METRIC_SCHEDULER_MINUTE = env.int("BILLING_METRIC_SCHEDULER_MINUTE", default=5)
-BILLING_METRIC_SCHEDULER_LOOKBACK_DAYS = env.int("BILLING_METRIC_SCHEDULER_LOOKBACK_DAYS", default=3)
-BILLING_METRIC_SCHEDULER_POLL_SECONDS = env.int("BILLING_METRIC_SCHEDULER_POLL_SECONDS", default=60)
-BILLING_METRIC_SCHEDULER_STALE_MINUTES = env.int("BILLING_METRIC_SCHEDULER_STALE_MINUTES", default=180)
-BILLING_METRIC_SCHEDULER_ALLOW_AREA_FALLBACK = env.bool("BILLING_METRIC_SCHEDULER_ALLOW_AREA_FALLBACK", default=False)
+BILLING_METRIC_SCHEDULER_LOOKBACK_DAYS = env.int(
+    "BILLING_METRIC_SCHEDULER_LOOKBACK_DAYS", default=3
+)
+BILLING_METRIC_SCHEDULER_POLL_SECONDS = env.int(
+    "BILLING_METRIC_SCHEDULER_POLL_SECONDS", default=60
+)
+BILLING_METRIC_SCHEDULER_STALE_MINUTES = env.int(
+    "BILLING_METRIC_SCHEDULER_STALE_MINUTES", default=180
+)
+BILLING_METRIC_SCHEDULER_ALLOW_AREA_FALLBACK = env.bool(
+    "BILLING_METRIC_SCHEDULER_ALLOW_AREA_FALLBACK", default=False
+)
 INVENTORY_SNAPSHOT_LOCATION_AREA_RESOLVER = env(
     "INVENTORY_SNAPSHOT_LOCATION_AREA_RESOLVER",
     default="",
 )
-TEMPLATES[0]['OPTIONS']['context_processors'] += [
-    'allapp.console.context_processors.console_menu',
+TEMPLATES[0]["OPTIONS"]["context_processors"] += [
+    "allapp.console.context_processors.console_menu",
 ]
 CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)
 if IS_PRODUCTION and CORS_ALLOW_ALL_ORIGINS:
     raise ImproperlyConfigured("生产环境禁止启用 CORS_ALLOW_ALL_ORIGINS。")
 # Media文件配置
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_URL = "/media/"
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 # 可选：调整上传文件大小限制
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB
 
 # 必须：给“默认仓库/默认快调库位”设定实际存在的 ID
-DEFAULT_WAREHOUSE_ID = 1              # ← 换成你的默认仓库ID
-DEFAULT_ADJUST_LOCATION_ID = 1     # ← 换成该仓库下的某个‘调整/暂存’库位ID
+DEFAULT_WAREHOUSE_ID = 1  # ← 换成你的默认仓库ID
+DEFAULT_ADJUST_LOCATION_ID = 1  # ← 换成该仓库下的某个‘调整/暂存’库位ID

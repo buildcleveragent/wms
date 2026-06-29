@@ -32,8 +32,14 @@
           <view class="meta-container">
             <view class="baradd">
               <text class="metabar">条码: {{ p.gtin }} </text>    
-              <button class="btnnew" @click="add(p)">添加</button>    
+              <view class="row-actions">
+                <button class="btnnew" @click="add(p)">添加</button>
+                <button class="btnnew btn-set" @click="setCartLineToInput(p)">改为</button>
+              </view>
             </view>  
+            <text v-if="cartBaseQtyForProduct(p) > 0" class="cart-hint">
+              待收货已录：{{ cartBaseQtyForProduct(p) }} {{ p.base_unit_name }}
+            </text>
           </view>
 
 			<!-- 收货单位选择（单选按钮） -->
@@ -315,6 +321,92 @@ function fillCartItemDates(it: any, batch: string, productionDate: string, expir
   it.expiry_date = expiryDate
 }
 
+function currentBatchKey(pid: number) {
+  return {
+    batch: cleanLot(batchMap.value[pid]),
+    productionDate: cleanText(productionDateMap.value[pid]),
+    expiryDate: cleanText(expiryDateMap.value[pid]),
+  }
+}
+
+function cartLineIndexForProduct(p: any) {
+  if (!p?.id) return -1
+  const { batch, productionDate, expiryDate } = currentBatchKey(p.id)
+  return cart.items.findIndex((x: any) =>
+    x.id === p.id &&
+    cartLotNo(x) === batch &&
+    cartMfgDate(x) === productionDate &&
+    cartExpDate(x) === expiryDate
+  )
+}
+
+function cartBaseQtyForProduct(p: any) {
+  const idx = cartLineIndexForProduct(p)
+  return idx > -1 ? Number(cart.items[idx].base_quantity || 0) : 0
+}
+
+function selectedMultiplier(p: any) {
+  return Number(p?.unitOptions?.[p.selectedUnitIndex]?.multiplier || 1)
+}
+
+function desiredBaseQty(p: any) {
+  return Number((selectedMultiplier(p) * getDesiredQty(p.id)).toFixed(4))
+}
+
+function updateCartLineFromProduct(idx: number, p: any, desired: number, baseQty: number) {
+  cart.setQty(idx, desired)
+  cart.setbase_quantity(idx, baseQty)
+  const item = cart.items[idx]
+  if (!item) return
+  item.unitOptions = p.unitOptions
+  item.selectedUnitIndex = p.selectedUnitIndex
+  item.base_unit_name = p.base_unit_name
+  item.aux_uom_name = p.aux_uom_name
+  item.aux_qty_in_base = p.aux_qty_in_base
+  const { batch, productionDate, expiryDate } = currentBatchKey(p.id)
+  fillCartItemDates(item, batch, productionDate, expiryDate)
+}
+
+function setCartLineToInput(p: any) {
+  if (!p?.id) return
+  const desired = getDesiredQty(p.id)
+  const baseQty = desiredBaseQty(p)
+  const { batch, productionDate, expiryDate } = currentBatchKey(p.id)
+  const idx = cartLineIndexForProduct(p)
+
+  if (idx > -1) {
+    updateCartLineFromProduct(idx, p, desired, baseQty)
+  } else {
+    cart.addItem({
+      id: p.id,
+      sku: p.sku,
+      name: p.name,
+      spec: p.spec,
+      qty: desired,
+      product_image_url: p.product_image_url,
+      gtin: p.gtin,
+      aux_uom_name: p.aux_uom_name,
+      base_unit_name: p.base_unit_name,
+      aux_qty_in_base: p.aux_qty_in_base,
+      packaging: p.packaging,
+      unitOptions: p.unitOptions,
+      selectedUnitIndex: p.selectedUnitIndex,
+      lot_no: batch,
+      batch_number: batch,
+      mfg_date: productionDate,
+      production_date: productionDate,
+      exp_date: expiryDate,
+      expiry_date: expiryDate,
+      base_quantity: baseQty,
+    })
+  }
+
+  uni.showToast({
+    title: '已改为：' + (p.name || p.sku) + ' × ' + desired,
+    icon: 'none'
+  })
+}
+
 function add(p: any) {
   if (!p?.id) return;
   console.log("function add p?.id =",p.id)
@@ -540,6 +632,13 @@ function getBatch(pid: number): string {
   width: 100%;
 }
 
+.row-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 12rpx;
+  margin-right: 20rpx;
+}
+
 .btnnew {
   background: #3498db;
   color: white;
@@ -558,7 +657,17 @@ function getBatch(pid: number): string {
   white-space: nowrap;
   width: 100rpx;
   height: 30rpx;
-  margin-right:20rpx;
+}
+
+.btn-set {
+  background: #16a085;
+}
+
+.cart-hint {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 24rpx;
+  color: #16a085;
 }
 
 /* 包装选择区域 */

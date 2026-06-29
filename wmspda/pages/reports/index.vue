@@ -5,7 +5,11 @@
         <view class="title">仓库统计</view>
         <view class="subtitle">{{ periodText }}</view>
       </view>
-      <button class="refresh-btn" :disabled="loading" @click="loadData">刷新</button>
+      <view class="header-actions">
+        <button class="secondary-btn" @click="openPosReport">POS销售报表</button>
+        <button class="secondary-btn" @click="openPosAccuracy">POS数据对账</button>
+        <button class="refresh-btn" :disabled="loading" @click="loadData">刷新</button>
+      </view>
     </view>
 
     <view class="segmented">
@@ -218,6 +222,14 @@ function openDayDetail(day) {
   })
 }
 
+function openPosReport() {
+  uni.navigateTo({ url: '/pages/pos/report' })
+}
+
+function openPosAccuracy() {
+  uni.navigateTo({ url: '/pages/pos/accuracy' })
+}
+
 function setMode(nextMode) {
   if (mode.value === nextMode) return
   mode.value = nextMode
@@ -281,7 +293,15 @@ onShow(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16rpx;
   margin-bottom: 20rpx;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  flex: 0 0 auto;
 }
 
 .title {
@@ -306,6 +326,19 @@ onShow(() => {
   background: #111827;
   color: #fff;
   font-size: 26rpx;
+  line-height: 64rpx;
+}
+
+.secondary-btn {
+  width: 180rpx;
+  height: 64rpx;
+  margin: 0;
+  padding: 0;
+  border: 1rpx solid #d1d5db;
+  border-radius: 8rpx;
+  background: #fff;
+  color: #111827;
+  font-size: 24rpx;
   line-height: 64rpx;
 }
 

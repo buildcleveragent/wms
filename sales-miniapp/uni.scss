@@ -1,0 +1,136 @@
+$brand: #0f766e;
+$brand-dark: #115e59;
+$ink: #17202a;
+$muted: #64748b;
+$line: #d8dee8;
+$danger: #b42318;
+$warn: #b45309;
+
+.page {
+  min-height: 100vh;
+  padding: 24rpx;
+  box-sizing: border-box;
+}
+
+.panel {
+  width: calc(100vw - 48rpx);
+  max-width: 100%;
+  box-sizing: border-box;
+  background: #ffffff;
+  border: 1rpx solid #e3e8ef;
+  border-radius: 8rpx;
+  padding: 24rpx;
+}
+
+.product,
+.customer,
+.order,
+.item,
+.metric,
+.action {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.title {
+  font-size: 38rpx;
+  font-weight: 700;
+  color: $ink;
+}
+
+.subtle {
+  color: $muted;
+  font-size: 24rpx;
+}
+
+.input {
+  height: 80rpx;
+  border: 1rpx solid $line;
+  border-radius: 8rpx;
+  padding: 0 22rpx;
+  background: #ffffff;
+  box-sizing: border-box;
+  font-size: 28rpx;
+}
+
+.button {
+  width: 100%;
+  height: 84rpx;
+  border-radius: 8rpx;
+  border: 0;
+  background: $brand;
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 650;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 28rpx;
+}
+
+.button::after {
+  border: 0;
+}
+
+.button[disabled] {
+  background: #cbd5e1;
+  color: #f8fafc;
+}
+
+.button.secondary {
+  background: #eef6f5;
+  color: $brand-dark;
+}
+
+.button.ghost {
+  background: #ffffff;
+  color: $ink;
+  border: 1rpx solid $line;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+}
+
+.between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.tag {
+  min-width: 96rpx;
+  height: 44rpx;
+  border-radius: 8rpx;
+  background: #edf7f4;
+  color: $brand-dark;
+  font-size: 22rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12rpx;
+}
+
+.amount {
+  color: #0f766e;
+  font-weight: 750;
+}
+
+.danger {
+  color: $danger;
+}
+
+.warn {
+  color: $warn;
+}
+
+.empty {
+  padding: 80rpx 24rpx;
+  text-align: center;
+  color: $muted;
+  font-size: 28rpx;
+}

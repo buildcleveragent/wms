@@ -725,14 +725,7 @@ def _receipt_customer(customer):
     if not customer:
         return None
 
-    address_parts = [
-        getattr(customer, "province", "") or "",
-        getattr(customer, "city", "") or "",
-        getattr(customer, "district", "") or "",
-        getattr(customer, "street", "") or "",
-        getattr(customer, "address", "") or "",
-    ]
-    full_address = "".join(part for part in address_parts if part)
+    full_address = _full_address(customer)
     return {
         "id": customer.id,
         "code": customer.code or "",
@@ -741,7 +734,37 @@ def _receipt_customer(customer):
         "mobile": customer.mobile or "",
         "address": customer.address or "",
         "full_address": full_address,
+        "bank_name": customer.bank_name or "",
+        "bank_account": customer.bank_account or "",
     }
+
+
+def _full_address(entity):
+    address_parts = [
+        getattr(entity, "province", "") or "",
+        getattr(entity, "city", "") or "",
+        getattr(entity, "district", "") or "",
+        getattr(entity, "street", "") or "",
+        getattr(entity, "address", "") or "",
+    ]
+    return "".join(part for part in address_parts if part)
+
+
+def _customer_cumulative_debt(sale):
+    if not sale.selected_customer_id:
+        return ZERO
+    totals = (
+        PosSale.objects.filter(
+            selected_customer_id=sale.selected_customer_id,
+            warehouse_id=sale.warehouse_id,
+        )
+        .exclude(status=PosSale.Status.VOIDED)
+        .aggregate(
+            total_amount=Sum("total_amount"),
+            amount_received=Sum("payment__amount_received"),
+        )
+    )
+    return _money((totals["total_amount"] or ZERO) - (totals["amount_received"] or ZERO))
 
 
 def build_receipt(sale):
@@ -757,6 +780,7 @@ def build_receipt(sale):
         }
         for line in sale.payment_lines.order_by("id")
     ]
+    sale_lines = list(sale.lines.select_related("product").order_by("line_no"))
     orders = [
         link.outbound_order
         for link in sale.sale_orders.select_related("outbound_order", "owner").order_by(
@@ -775,6 +799,7 @@ def build_receipt(sale):
         "cashier": getattr(sale.cashier, "username", "") if sale.cashier_id else "",
         "customer": _receipt_customer(getattr(sale, "selected_customer", None)),
         "total_amount": str(sale.total_amount),
+        "cumulative_debt": str(_customer_cumulative_debt(sale)),
         "payment": {
             "method": payment.method if payment else "",
             "amount_due": str(payment.amount_due) if payment else "0.00",
@@ -786,9 +811,7 @@ def build_receipt(sale):
         "payment_lines": payment_lines,
         "lines": [
             _receipt_line(line)
-            for line in sale.lines.select_related("owner", "product").order_by(
-                "line_no"
-            )
+            for line in sale_lines
         ],
         "orders": [
             {"id": order.id, "order_no": order.order_no, "owner_id": order.owner_id}

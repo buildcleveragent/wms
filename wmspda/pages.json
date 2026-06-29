@@ -6,6 +6,8 @@
 		{"path": "pages/products/search","style": {"navigationBarTitleText": "录入产品"}},
 		{"path": "pages/orders/cart","style": {"navigationBarTitleText": "入库单"}},
 		{"path": "pages/pos/index","style": {"navigationBarTitleText": "POS收银", "navigationStyle": "custom"}},
+		{"path": "pages/pos/report","style": {"navigationBarTitleText": "POS销售报表"}},
+		{"path": "pages/pos/accuracy","style": {"navigationBarTitleText": "POS数据对账"}},
 		{"path": "pages/index/index","style": {"navigationBarTitleText": "金桥融通仓库作业平台"}},
 		{"path": "pages/features/index","style": {"navigationBarTitleText": "功能"}},
 		{"path": "pages/picking/task_list", "style": { "navigationBarTitleText": "拣货任务列表" } },

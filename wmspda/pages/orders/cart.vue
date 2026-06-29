@@ -47,14 +47,17 @@
 				@change="enforceAvailable(it)"
               />
             </view>
-			
 			<!--基本单位 -->
-			<view class="col-label-first">				            
+			<view class="col-label-first">
 			  <text class="label-text">基本单位</text>
 			  <text class="label-text-name">{{ it.base_unit_name }}</text>
 			</view>			
 
           </view>
+
+		  <view class="item-actions">
+		    <button class="btn-danger-outline" @click="removeItem(i)">删除本行</button>
+		  </view>
 		  
        </view>
       </view>
@@ -155,6 +158,20 @@ function printReceiveTask(taskId) {
 
 function backToProducts(){ uni.navigateTo({ url:'/pages/products/search' }) }
 
+function enforceAvailable(it) {
+  const qty = Number(it?.base_quantity)
+  it.base_quantity = Number.isFinite(qty) && qty > 0 ? Number(qty.toFixed(4)) : 0
+}
+
+function removeItem(index) {
+  const item = cart.items[index]
+  cart.remove(index)
+  uni.showToast({
+    title: '已删除：' + (item?.name || item?.sku || '明细'),
+    icon: 'none'
+  })
+}
+
 
 function compactReceiveItem(it) {
   const item = { product_id: it.id, qty: it.base_quantity }
@@ -190,6 +207,12 @@ async function submitOrder(){
   // }
 
   try{
+    const invalid = cart.items.find(it => !(Number(it.base_quantity) > 0))
+    if (invalid) {
+      uni.showToast({ title: '存在 0 数量明细，请删除或改正后提交', icon: 'none' })
+      return
+    }
+
     const payload = {
       owner_id: cart.owner?.id,
       remark: '仓库操作员入库',
@@ -484,6 +507,24 @@ async function submitOrder(){
   display: flex;
   justify-content: space-between;
 /*  margin-top: 5rpx; */
+}
+
+.item-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12rpx;
+}
+
+.btn-danger-outline {
+  width: 180rpx;
+  height: 60rpx;
+  line-height: 60rpx;
+  border: 1rpx solid #d93025;
+  border-radius: 8rpx;
+  background: transparent;
+  color: #d93025;
+  font-size: 26rpx;
+  padding: 0;
 }
 
 

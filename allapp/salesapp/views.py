@@ -1,15 +1,49 @@
-from rest_framework import viewsets, status, mixins
+from rest_framework import viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.db import transaction
 from .serializers import *
 from .models import *
-from .services.pricing import compute_price_for_line
-from .services.promotion import apply_promotions_for_order
+from .services_promotion import apply_promotions_for_order
 
 class BaseModelViewSet(viewsets.ModelViewSet):
-    # 统一分页、过滤钩子可在此添加
-    pass
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = getattr(self.request, "user", None)
+        if not user or not user.is_authenticated:
+            return qs.none()
+        if user.is_superuser:
+            return qs
+
+        owner_id = getattr(user, "owner_id", None)
+        if not owner_id:
+            return qs.none()
+
+        model_fields = {field.name for field in qs.model._meta.fields}
+        if "owner" in model_fields:
+            return qs.filter(owner_id=owner_id)
+        return qs
+
+    def _save_with_audit_scope(self, serializer, *, creating=False):
+        user = self.request.user
+        model_fields = {field.name for field in serializer.Meta.model._meta.fields}
+        kwargs = {}
+        if "owner" in model_fields and not user.is_superuser:
+            kwargs["owner_id"] = getattr(user, "owner_id", None)
+        if creating and "created_by" in model_fields:
+            kwargs["created_by"] = user
+        if "updated_by" in model_fields:
+            kwargs["updated_by"] = user
+        serializer.save(**kwargs)
+
+    def perform_create(self, serializer):
+        self._save_with_audit_scope(serializer, creating=True)
+
+    def perform_update(self, serializer):
+        self._save_with_audit_scope(serializer)
 
 class SimpleViewSet(BaseModelViewSet):
     """无自定义动作的简单模型通用 ViewSet"""

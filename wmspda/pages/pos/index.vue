@@ -305,12 +305,26 @@
           <view v-if="selectedCustomer && ownerCount > 1" class="owner-warning">
             已选客户仅用于同货主订单，其他货主自动使用散客
           </view>
-          <checkbox-group class="print-check-group" @change="onAutoPrintChange">
-            <label class="print-option">
-              <checkbox value="auto" :checked="autoPrintSale" color="#1677ff" />
-              <text>自动打印销售单</text>
-            </label>
-          </checkbox-group>
+          <view class="print-settings">
+            <checkbox-group class="print-check-group" @change="onAutoPrintChange">
+              <label class="print-option">
+                <checkbox value="auto" :checked="autoPrintSale" color="#1677ff" />
+                <text>自动打印销售单</text>
+              </label>
+            </checkbox-group>
+            <view class="print-mode-control">
+              <text class="print-mode-label">纸型</text>
+              <picker
+                class="print-mode-picker"
+                mode="selector"
+                :range="salePrintModeLabels"
+                :value="salePrintModeIndex"
+                @change="changeSalePrintMode"
+              >
+                <view class="print-mode-value">{{ selectedSalePrintMode.label }}</view>
+              </picker>
+            </view>
+          </view>
           <button class="submit-btn" :disabled="!canCheckout || submitting" @click="checkout">
             结账
           </button>
@@ -456,7 +470,38 @@
 
       <view v-if="!historySales.length && !historyLoading" class="empty-tip">暂无销售记录</view>
       <view v-else class="history-list">
-        <view class="history-row" v-for="sale in historySales" :key="sale.id">
+        <view class="history-row" v-for="sale in historyPreviewSales" :key="sale.id">
+          <view class="history-main">
+            <view class="history-title-row">
+              <text class="history-no">{{ saleDisplayNo(sale) }}</text>
+              <text :class="['history-status', isVoidedSale(sale) ? 'voided' : 'completed']">
+                {{ saleStatusText(sale.status) }}
+              </text>
+            </view>
+            <text class="history-meta">
+              {{ saleCreatedText(sale) }} / {{ salePaymentMethod(sale) }} / {{ money(sale.total_amount) }}
+            </text>
+            <text class="history-meta">
+              出库单 {{ saleOrderCount(sale) }} 张 {{ orderNosText(sale.orders) }}
+            </text>
+          </view>
+          <view class="history-actions">
+            <button class="ghost-btn history-action-btn" @click="reprintSale(sale)">重打</button>
+            <button class="ghost-btn history-action-btn" @click="backupPrintSale(sale)">备用打印</button>
+            <button class="ghost-btn history-action-btn" :disabled="!saleCanReturn(sale)" @click="startReturnSale(sale)">退货</button>
+            <button class="danger-btn history-action-btn" :disabled="isVoidedSale(sale)" @click="startVoidSale(sale)">作废</button>
+          </view>
+        </view>
+      </view>
+      <button
+        v-if="historyMoreSales.length"
+        class="ghost-btn history-more-btn"
+        @click="toggleHistoryMore"
+      >
+        {{ historyMoreButtonText }}
+      </button>
+      <view v-if="historyMoreOpen && historyMoreSales.length" class="history-more-panel">
+        <view class="history-row" v-for="sale in historyMoreSales" :key="'more-' + sale.id">
           <view class="history-main">
             <view class="history-title-row">
               <text class="history-no">{{ saleDisplayNo(sale) }}</text>
@@ -553,6 +598,7 @@ const lastSalePrintData = ref(null)
 const historyKeyword = ref('')
 const historySales = ref([])
 const historyLoading = ref(false)
+const historyMoreOpen = ref(false)
 const pendingVoidSale = ref(null)
 const voidReason = ref('')
 const posStats = ref(defaultPosStats())
@@ -566,11 +612,22 @@ const shiftHistory = ref([])
 const shiftHistoryLoading = ref(false)
 const POS_DRAFT_KEY = 'pos_sale_draft_v1'
 const POS_AUTO_PRINT_KEY = 'pos_auto_print_sale_v1'
-const SALE_PRINT_COMPANY_NAME = '百年达生鲜包装供应链'
+const POS_SALE_PRINT_MODE_KEY = 'pos_sale_print_mode_v1'
+const SALE_PRINT_COMPANY_NAME = '金桥融通仓'
+const SALE_PRINT_SHOP_ADDRESS = ' '
+const SALE_PRINT_SHOP_PHONE = ' '
+const SALE_PRINT_BANK_ACCOUNT = ' '
+const HISTORY_PREVIEW_LIMIT = 3
 const POS_STOCK_QUERY = {
   zone_type: 1,
   picking_only: 1,
 }
+const SALE_PRINT_MODES = [
+  { label: 'A4横向', value: 'a4_landscape' },
+  { label: '针式9.5x5.5', value: 'dot_9_5_5' },
+  { label: '针式9.5x11', value: 'dot_9_5_11' },
+]
+const DEFAULT_SALE_PRINT_MODE = SALE_PRINT_MODES[0].value
 
 const paymentMethods = [
   { label: '现金', value: 'CASH' },
@@ -585,6 +642,7 @@ const paymentReferenceNo = ref('')
 const splitPaymentEnabled = ref(false)
 const paymentLines = ref([])
 const autoPrintSale = ref(true)
+const salePrintMode = ref(DEFAULT_SALE_PRINT_MODE)
 const pendingReturnSale = ref(null)
 const returnLines = ref([])
 const returnReason = ref('')
@@ -618,6 +676,12 @@ const paymentMethodIndex = computed(() =>
   Math.max(0, paymentMethods.findIndex((method) => method.value === paymentMethod.value))
 )
 const selectedPaymentMethod = computed(() => paymentMethods[paymentMethodIndex.value] || paymentMethods[0])
+const salePrintModeLabels = computed(() => SALE_PRINT_MODES.map((mode) => mode.label))
+const salePrintModeIndex = computed(() => {
+  const index = SALE_PRINT_MODES.findIndex((mode) => mode.value === salePrintMode.value)
+  return index >= 0 ? index : 0
+})
+const selectedSalePrintMode = computed(() => SALE_PRINT_MODES[salePrintModeIndex.value] || SALE_PRINT_MODES[0])
 const splitPaymentAmount = computed(() =>
   paymentLines.value.reduce((sum, line) => sum + numberFromValue(line.amount, 0), 0)
 )
@@ -677,6 +741,11 @@ const shiftSummary = computed(() => currentShift.value?.summary || {})
 const canCheckout = computed(() =>
   cartItems.value.length > 0 && paymentReady.value && isActiveShift(currentShift.value)
 )
+const historyPreviewSales = computed(() => historySales.value.slice(0, HISTORY_PREVIEW_LIMIT))
+const historyMoreSales = computed(() => historySales.value.slice(HISTORY_PREVIEW_LIMIT))
+const historyMoreButtonText = computed(() =>
+  historyMoreOpen.value ? '收起销售记录' : `更多销售记录（${historyMoreSales.value.length}）`
+)
 const shiftPaymentRows = computed(() => {
   const rows = Array.isArray(shiftSummary.value.payments) ? shiftSummary.value.payments : []
   return rows.filter((row) => row.method && row.method !== 'CASH')
@@ -689,6 +758,7 @@ const statsPayments = computed(() => {
 
 onMounted(() => {
   restoreAutoPrintPreference()
+  restoreSalePrintModePreference()
   restoreSaleDraft()
   setScanCallback(handleScan)
   initScanner()
@@ -802,10 +872,37 @@ function saveAutoPrintPreference() {
   }
 }
 
+function isValidSalePrintMode(value) {
+  return SALE_PRINT_MODES.some((mode) => mode.value === value)
+}
+
+function restoreSalePrintModePreference() {
+  try {
+    const stored = getStorage()?.getStorageSync(POS_SALE_PRINT_MODE_KEY)
+    salePrintMode.value = isValidSalePrintMode(stored) ? stored : DEFAULT_SALE_PRINT_MODE
+  } catch (e) {
+    salePrintMode.value = DEFAULT_SALE_PRINT_MODE
+  }
+}
+
+function saveSalePrintModePreference() {
+  try {
+    getStorage()?.setStorageSync(POS_SALE_PRINT_MODE_KEY, salePrintMode.value)
+  } catch (e) {
+    console.warn('save POS sale print mode failed', e)
+  }
+}
+
 function onAutoPrintChange(event) {
   const values = Array.isArray(event?.detail?.value) ? event.detail.value : []
   autoPrintSale.value = values.includes('auto')
   saveAutoPrintPreference()
+}
+
+function changeSalePrintMode(event) {
+  const index = Number(event?.detail?.value || 0)
+  salePrintMode.value = SALE_PRINT_MODES[index]?.value || DEFAULT_SALE_PRINT_MODE
+  saveSalePrintModePreference()
 }
 
 function removeSaleDraft() {
@@ -1242,6 +1339,15 @@ function buildSalePrintData(response = {}) {
   const total = Number(receipt.total_amount ?? sale.total_amount ?? totalAmount.value ?? 0)
   const amountReceivedValue = numberFromValue(payment.amount_received ?? receivedAmount.value, 0)
   const changeValue = numberFromValue(payment.change_amount ?? changeAmount.value, 0)
+  const unpaidAmount = Math.max(total - amountReceivedValue, 0)
+  const cumulativeDebtValue = numberFromValue(
+    receipt.cumulative_debt ??
+      sale.cumulative_debt ??
+      response.cumulative_debt ??
+      customer.cumulative_debt ??
+      customer.debt_balance,
+    unpaidAmount
+  )
   const billNo =
     sale.sale_no ||
     receipt.sale_no ||
@@ -1260,6 +1366,9 @@ function buildSalePrintData(response = {}) {
     customerName: customer.name || customer.code || '散客',
     customerAddress: customer.address || customer.full_address || '',
     customerPhone: customer.phone || customer.mobile || '',
+    shopAddress: SALE_PRINT_SHOP_ADDRESS,
+    shopPhone: SALE_PRINT_SHOP_PHONE,
+    bankAccount: SALE_PRINT_BANK_ACCOUNT,
     lines,
     totalQty,
     totalQtyText: plainQty(totalQty),
@@ -1269,14 +1378,25 @@ function buildSalePrintData(response = {}) {
     amountReceived: amountReceivedValue,
     amountReceivedText: plainMoney(amountReceivedValue),
     changeAmount: changeValue,
-    changeAmountText: plainMoney(changeValue),
-    paymentMethod: paymentMethodName(payment.method || paymentMethod.value),
+    cumulativeDebt: cumulativeDebtValue,
+    cumulativeDebtText: plainMoney(cumulativeDebtValue),
     remark: receipt.remark || sale.remark || remark.value || '',
     orderNos: orders.map((order) => order.order_no || order.id).filter(Boolean).join('、'),
   }
 }
 
-function buildSalePrintHtml(data) {
+function isDotMatrixPrintMode(printMode) {
+  return printMode === 'dot_9_5_5' || printMode === 'dot_9_5_11'
+}
+
+function buildSalePrintHtml(data, printMode = salePrintMode.value) {
+  if (isDotMatrixPrintMode(printMode)) {
+    return buildDotMatrixSalePrintHtml(data, printMode)
+  }
+  return buildA4SalePrintHtml(data)
+}
+
+function buildA4SalePrintHtml(data) {
   const rows = data.lines.map((line) => `
     <tr>
       <td class="name">${escapeHtml(line.name)}</td>
@@ -1298,21 +1418,20 @@ function buildSalePrintHtml(data) {
   <style>
     @page { size: A4 landscape; margin: 8mm; }
     * { box-sizing: border-box; }
-    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: 14px; }
-    .sheet { width: 100%; padding: 4px 6px; }
-    .company { text-align: center; font-size: 28px; font-weight: 700; line-height: 1.1; }
-    .title { text-align: center; font-size: 20px; line-height: 1.2; margin-bottom: 4px; }
-    .meta { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 12px; font-size: 16px; line-height: 1.5; margin-bottom: 6px; }
-    .meta .wide { grid-column: 1 / 3; }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 15px; }
-    th, td { border: 1px solid #111; padding: 3px 5px; line-height: 1.2; vertical-align: middle; word-break: break-all; }
-    th { text-align: center; font-weight: 400; font-size: 16px; }
+    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: 15px; }
+    .sheet { width: 90%; margin: 0 auto; padding: 0 4px; }
+    .company { text-align: center; font-size: 28px; font-weight: 700; line-height: 1.05; }
+    .title { text-align: center; font-size: 18px; line-height: 1.05; margin-bottom: 2px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 18px; font-size: 15px; line-height: 1.2; margin-bottom: 2px; }
+    .meta .wide { grid-column: 1 / -1; }
+    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: 15px; }
+    th, td { border: 1px solid #111; padding: 1px 3px; line-height: 1.05; vertical-align: middle; word-break: break-all; }
+    th { text-align: center; font-weight: 400; font-size: 15px; }
     .name { text-align: left; }
     .num { text-align: right; font-variant-numeric: tabular-nums; }
     .summary-name { text-align: left; }
-    .footer { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 12px; font-size: 16px; line-height: 1.6; }
-    .full { grid-column: 1 / -1; }
-    .note { margin-top: 4px; font-size: 14px; }
+    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin-top: 8px; font-size: 15px; line-height: 1.2; }
+    .footer-line { margin-top: 1px; font-size: 15px; line-height: 1.18; white-space: normal; }
   </style>
 </head>
 <body>
@@ -1324,18 +1443,17 @@ function buildSalePrintHtml(data) {
       <div>单据日期：${escapeHtml(data.billDate)}</div>
       <div>单据编号：${escapeHtml(data.billNo)}</div>
       <div class="wide">客户地址：${escapeHtml(data.customerAddress)}</div>
-      <div>客户电话：${escapeHtml(data.customerPhone)}</div>
     </div>
     <table>
       <colgroup>
-        <col style="width: 39%" />
-        <col style="width: 12%" />
-        <col style="width: 6%" />
+        <col style="width: 36%" />
+        <col style="width: 14%" />
+        <col style="width: 5%" />
         <col style="width: 7%" />
         <col style="width: 8%" />
-        <col style="width: 10%" />
-        <col style="width: 8%" />
-        <col style="width: 10%" />
+        <col style="width: 11%" />
+        <col style="width: 7%" />
+        <col style="width: 12%" />
       </colgroup>
       <thead>
         <tr>
@@ -1359,7 +1477,7 @@ function buildSalePrintHtml(data) {
           <td colspan="2"></td>
         </tr>
         <tr>
-          <td colspan="3" class="summary-name">合计：${escapeHtml(data.totalAmountChinese)}</td>
+          <td colspan="3" class="summary-name">合计: ${escapeHtml(data.totalAmountChinese)}</td>
           <td class="num">${escapeHtml(data.totalQtyText)}</td>
           <td></td>
           <td class="num">${escapeHtml(data.totalAmountText)}</td>
@@ -1367,14 +1485,123 @@ function buildSalePrintHtml(data) {
         </tr>
       </tbody>
     </table>
-    <div class="footer">
+    <div class="money-row">
       <div>本单应收：${escapeHtml(data.totalAmountText)}</div>
       <div>本单实收：${escapeHtml(data.amountReceivedText)}</div>
-      <div>本单找零：${escapeHtml(data.changeAmountText)}</div>
-      <div>支付方式：${escapeHtml(data.paymentMethod)}</div>
-      <div class="full">备注：${escapeHtml(data.remark || '无')}</div>
-      <div class="full note">销售出库单：${escapeHtml(data.orderNos || '-')}</div>
+      <div>累计欠款：${escapeHtml(data.cumulativeDebtText)}</div>
     </div>
+    <div class="footer-line">店铺地址：${escapeHtml(data.shopAddress || '')}　　店铺电话：${escapeHtml(data.shopPhone || '')}</div>
+    <div class="footer-line">银行账号：${escapeHtml(data.bankAccount || '')}</div>
+    <div class="footer-line">备注：${escapeHtml(data.remark || '无')}</div>
+  </div>
+</body>
+</html>`
+}
+
+function dotMatrixPageCss(printMode) {
+  if (printMode === 'dot_9_5_11') {
+    return '@page { size: 9.5in 11in; margin: 0.2in; }'
+  }
+  return '@page { size: 9.5in 5.5in; margin: 0.2in; }'
+}
+
+function buildDotMatrixSalePrintHtml(data, printMode) {
+  const rows = data.lines.map((line) => `
+    <tr>
+      <td class="name">${escapeHtml(line.name)}</td>
+      <td>${escapeHtml(line.spec)}</td>
+      <td>${escapeHtml(line.unit)}</td>
+      <td class="num">${escapeHtml(line.qtyText)}</td>
+      <td class="num">${escapeHtml(line.priceText)}</td>
+      <td class="num">${escapeHtml(line.amountText)}</td>
+      <td>${escapeHtml(line.remark)}</td>
+      <td>${escapeHtml(line.locationCode)}</td>
+    </tr>
+  `).join('')
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(data.companyName)}${escapeHtml(data.title)}</title>
+  <style>
+    ${dotMatrixPageCss(printMode)}
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: 12px; }
+    .sheet { width: 90%; margin: 0 auto; padding: 0; }
+    .company { text-align: center; font-size: 20px; font-weight: 700; line-height: 1.05; }
+    .title { text-align: center; font-size: 14px; line-height: 1.05; margin-bottom: 2px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 8px; font-size: 12px; line-height: 1.15; margin-bottom: 2px; }
+    .meta .wide { grid-column: 1 / -1; }
+    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: 12px; }
+    th, td { border: 1px solid #111; padding: 1px 2px; line-height: 1.05; vertical-align: middle; word-break: break-all; }
+    th { text-align: center; font-weight: 400; font-size: 12px; }
+    .name { text-align: left; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .summary-name { text-align: left; }
+    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 5px; font-size: 12px; line-height: 1.15; }
+    .footer-line { margin-top: 1px; font-size: 12px; line-height: 1.12; white-space: normal; }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="company">${escapeHtml(data.companyName)}</div>
+    <div class="title">${escapeHtml(data.title)}</div>
+    <div class="meta">
+      <div>客户名称：${escapeHtml(data.customerName)}</div>
+      <div>单据日期：${escapeHtml(data.billDate)}</div>
+      <div>单据编号：${escapeHtml(data.billNo)}</div>
+      <div class="wide">客户地址：${escapeHtml(data.customerAddress)}</div>
+    </div>
+    <table>
+      <colgroup>
+        <col style="width: 36%" />
+        <col style="width: 14%" />
+        <col style="width: 5%" />
+        <col style="width: 7%" />
+        <col style="width: 8%" />
+        <col style="width: 11%" />
+        <col style="width: 7%" />
+        <col style="width: 12%" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th>商品名称</th>
+          <th>规格</th>
+          <th>单位</th>
+          <th>数量</th>
+          <th>单价</th>
+          <th>金额</th>
+          <th>备注</th>
+          <th>库位</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows}
+        <tr>
+          <td colspan="3" class="summary-name">本页小计</td>
+          <td class="num">${escapeHtml(data.totalQtyText)}</td>
+          <td></td>
+          <td class="num">${escapeHtml(data.totalAmountText)}</td>
+          <td colspan="2"></td>
+        </tr>
+        <tr>
+          <td colspan="3" class="summary-name">合计: ${escapeHtml(data.totalAmountChinese)}</td>
+          <td class="num">${escapeHtml(data.totalQtyText)}</td>
+          <td></td>
+          <td class="num">${escapeHtml(data.totalAmountText)}</td>
+          <td colspan="2"></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="money-row">
+      <div>本单应收：${escapeHtml(data.totalAmountText)}</div>
+      <div>本单实收：${escapeHtml(data.amountReceivedText)}</div>
+      <div>累计欠款：${escapeHtml(data.cumulativeDebtText)}</div>
+    </div>
+    <div class="footer-line">店铺地址：${escapeHtml(data.shopAddress || '')}　店铺电话：${escapeHtml(data.shopPhone || '')}</div>
+    <div class="footer-line">银行账号：${escapeHtml(data.bankAccount || '')}</div>
+    <div class="footer-line">备注：${escapeHtml(data.remark || '无')}</div>
   </div>
 </body>
 </html>`
@@ -1483,6 +1710,7 @@ async function loadPosSaleHistory(options = {}) {
       page_size: 10,
     })
     historySales.value = normalizePosSaleRows(res)
+    historyMoreOpen.value = false
   } catch (e) {
     if (!options.silent) {
       showPosError(e, '销售历史加载失败')
@@ -1490,6 +1718,10 @@ async function loadPosSaleHistory(options = {}) {
   } finally {
     historyLoading.value = false
   }
+}
+
+function toggleHistoryMore() {
+  historyMoreOpen.value = !historyMoreOpen.value
 }
 
 function defaultPosStats() {
@@ -2401,7 +2633,11 @@ function removeLine(index) {
 function changePaymentMethod(event) {
   const index = Number(event.detail.value || 0)
   paymentMethod.value = paymentMethods[index]?.value || 'CASH'
-  syncNonCashAmount()
+  if (paymentMethod.value === 'CASH') {
+    amountReceived.value = ''
+  } else {
+    syncNonCashAmount()
+  }
 }
 
 function goBack() {
@@ -3444,12 +3680,14 @@ button {
 
 .submit-panel {
   order: 2;
-  position: static;
+  position: sticky;
+  top: 0;
+  z-index: 5;
   background: #fff;
   border: 1rpx solid #e6eaf0;
   border-radius: 8rpx;
   padding: 14rpx;
-  box-shadow: none;
+  box-shadow: 0 4rpx 14rpx rgba(15, 23, 42, 0.08);
   box-sizing: border-box;
 }
 
@@ -3745,6 +3983,28 @@ button {
   margin-top: 10rpx;
 }
 
+.history-more-btn {
+  width: 100%;
+  height: 48rpx;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+}
+
+.history-more-panel {
+  margin-top: 8rpx;
+  max-height: 360rpx;
+  overflow-y: auto;
+  border: 1rpx solid #e6eaf0;
+  border-radius: 8rpx;
+  background: #fff;
+  padding: 0 8rpx;
+  box-sizing: border-box;
+}
+
+.history-more-panel .history-row:first-child {
+  border-top: 0;
+}
+
 .history-row,
 .shift-history-row {
   display: flex;
@@ -3968,6 +4228,14 @@ button {
   display: block;
 }
 
+.print-settings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10rpx;
+  flex-wrap: wrap;
+}
+
 .print-option {
   display: flex;
   align-items: center;
@@ -3980,6 +4248,41 @@ button {
   transform: scale(0.78);
   transform-origin: left center;
   margin-right: 2rpx;
+}
+
+.print-mode-control {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+  min-width: 0;
+}
+
+.print-mode-label {
+  color: #667085;
+  font-size: 22rpx;
+  white-space: nowrap;
+}
+
+.print-mode-picker {
+  flex: 0 0 auto;
+}
+
+.print-mode-value {
+  min-width: 150rpx;
+  max-width: 220rpx;
+  height: 44rpx;
+  line-height: 44rpx;
+  padding: 0 14rpx;
+  border: 1rpx solid #d0d5dd;
+  border-radius: 8rpx;
+  color: #344054;
+  background: #fff;
+  font-size: 22rpx;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-sizing: border-box;
 }
 
 .submit-btn {

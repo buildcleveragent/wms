@@ -1,0 +1,105 @@
+from django.urls import path
+
+from .salemini_api import (
+    SaleMiniAddressDetailApi,
+    SaleMiniAddressListCreateApi,
+    SaleMiniAfterSaleListCreateApi,
+    SaleMiniBrandApi,
+    SaleMiniCartAddApi,
+    SaleMiniCartApi,
+    SaleMiniCartClearApi,
+    SaleMiniCartRemoveApi,
+    SaleMiniCartUpdateApi,
+    SaleMiniCategoryApi,
+    SaleMiniCouponListApi,
+    SaleMiniHomeApi,
+    SaleMiniMerchantApi,
+    SaleMiniOrderCancelApi,
+    SaleMiniOrderDetailApi,
+    SaleMiniOrderListCreateApi,
+    SaleMiniOrderPreviewApi,
+    SaleMiniPointBalanceApi,
+    SaleMiniProductDetailApi,
+    SaleMiniProductListApi,
+    SaleMiniProfileApi,
+    SaleMiniWechatLoginApi,
+    SaleMiniWechatPaymentCallbackApi,
+    SaleMiniWechatPrepayApi,
+    SaleMiniWechatRefundApi,
+    SaleMiniWechatRefundCallbackApi,
+)
+
+urlpatterns = [
+    path(
+        "auth/wechat-login/",
+        SaleMiniWechatLoginApi.as_view(),
+        name="sale-mini-wechat-login",
+    ),
+    path("me/", SaleMiniProfileApi.as_view(), name="sale-mini-me"),
+    path("home/", SaleMiniHomeApi.as_view(), name="sale-mini-home"),
+    path("merchants/", SaleMiniMerchantApi.as_view(), name="sale-mini-merchants"),
+    path("categories/", SaleMiniCategoryApi.as_view(), name="sale-mini-categories"),
+    path("brands/", SaleMiniBrandApi.as_view(), name="sale-mini-brands"),
+    path("coupons/", SaleMiniCouponListApi.as_view(), name="sale-mini-coupons"),
+    path("points/", SaleMiniPointBalanceApi.as_view(), name="sale-mini-points"),
+    path("products/", SaleMiniProductListApi.as_view(), name="sale-mini-products"),
+    path(
+        "products/<int:pk>/",
+        SaleMiniProductDetailApi.as_view(),
+        name="sale-mini-product-detail",
+    ),
+    path("cart/", SaleMiniCartApi.as_view(), name="sale-mini-cart"),
+    path("cart/add/", SaleMiniCartAddApi.as_view(), name="sale-mini-cart-add"),
+    path("cart/update/", SaleMiniCartUpdateApi.as_view(), name="sale-mini-cart-update"),
+    path("cart/remove/", SaleMiniCartRemoveApi.as_view(), name="sale-mini-cart-remove"),
+    path("cart/clear/", SaleMiniCartClearApi.as_view(), name="sale-mini-cart-clear"),
+    path(
+        "addresses/", SaleMiniAddressListCreateApi.as_view(), name="sale-mini-addresses"
+    ),
+    path(
+        "addresses/<int:pk>/",
+        SaleMiniAddressDetailApi.as_view(),
+        name="sale-mini-address-detail",
+    ),
+    path(
+        "orders/preview/",
+        SaleMiniOrderPreviewApi.as_view(),
+        name="sale-mini-order-preview",
+    ),
+    path("orders/", SaleMiniOrderListCreateApi.as_view(), name="sale-mini-orders"),
+    path(
+        "payments/wechat/prepay/",
+        SaleMiniWechatPrepayApi.as_view(),
+        name="sale-mini-wechat-prepay",
+    ),
+    path(
+        "payments/wechat/callback/",
+        SaleMiniWechatPaymentCallbackApi.as_view(),
+        name="sale-mini-wechat-callback",
+    ),
+    path(
+        "payments/wechat/refund/",
+        SaleMiniWechatRefundApi.as_view(),
+        name="sale-mini-wechat-refund",
+    ),
+    path(
+        "payments/wechat/refund-callback/",
+        SaleMiniWechatRefundCallbackApi.as_view(),
+        name="sale-mini-wechat-refund-callback",
+    ),
+    path(
+        "after-sales/",
+        SaleMiniAfterSaleListCreateApi.as_view(),
+        name="sale-mini-after-sales",
+    ),
+    path(
+        "orders/<int:pk>/",
+        SaleMiniOrderDetailApi.as_view(),
+        name="sale-mini-order-detail",
+    ),
+    path(
+        "orders/<int:pk>/cancel/",
+        SaleMiniOrderCancelApi.as_view(),
+        name="sale-mini-order-cancel",
+    ),
+]

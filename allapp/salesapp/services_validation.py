@@ -1,5 +1,6 @@
 from decimal import Decimal
-from ..models import CustomerProductPolicy, ChannelProductPolicy, CustomerChannel
+
+from .models import ChannelProductPolicy, CustomerChannel, CustomerProductPolicy
 
 class OrderRuleError(Exception):
     pass

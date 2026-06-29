@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    PosAccuracyApi,
     PosCheckoutApi,
     PosProductListApi,
     PosReturnDetailApi,
@@ -28,6 +29,7 @@ from .views import (
 urlpatterns = [
     path("products/", PosProductListApi.as_view(), name="pos-products"),
     path("checkout/", PosCheckoutApi.as_view(), name="pos-checkout"),
+    path("accuracy/", PosAccuracyApi.as_view(), name="pos-accuracy"),
     path("stats/", PosStatsApi.as_view(), name="pos-stats"),
     path("stats/export/", PosStatsExportApi.as_view(), name="pos-stats-export"),
     path("sales/", PosSaleListApi.as_view(), name="pos-sale-list"),

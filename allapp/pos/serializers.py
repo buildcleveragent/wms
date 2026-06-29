@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import datetime
 from decimal import Decimal
 
+from django.conf import settings
 from django.db.models import Sum
+from django.utils import timezone
 from rest_framework import serializers
 
 from allapp.inventory.models import InventoryDetail
@@ -21,6 +24,16 @@ from .models import (
 from .services import build_receipt, create_pos_return, create_pos_sale
 
 ZERO = Decimal("0")
+
+
+class SafeDateTimeField(serializers.DateTimeField):
+    def to_representation(self, value):
+        if not value:
+            return None
+        if isinstance(value, datetime.datetime) and settings.USE_TZ:
+            if timezone.is_naive(value):
+                value = timezone.make_aware(value, timezone.get_current_timezone())
+        return super().to_representation(value)
 
 
 def decimal_or_zero(value):
@@ -211,6 +224,8 @@ class PosCheckoutSerializer(serializers.Serializer):
 
 
 class PosPaymentReadSerializer(serializers.ModelSerializer):
+    created_at = SafeDateTimeField(read_only=True)
+
     class Meta:
         model = PosPayment
         fields = [
@@ -226,6 +241,8 @@ class PosPaymentReadSerializer(serializers.ModelSerializer):
 
 
 class PosPaymentLineReadSerializer(serializers.ModelSerializer):
+    created_at = SafeDateTimeField(read_only=True)
+
     class Meta:
         model = PosPaymentLine
         fields = [
@@ -288,6 +305,8 @@ class PosSaleReadSerializer(serializers.ModelSerializer):
     lines = PosSaleLineReadSerializer(many=True, read_only=True)
     receipt = serializers.SerializerMethodField()
     orders = serializers.SerializerMethodField()
+    created_at = SafeDateTimeField(read_only=True)
+    voided_at = SafeDateTimeField(read_only=True)
 
     class Meta:
         model = PosSale
@@ -418,6 +437,9 @@ class PosReturnCreateSerializer(serializers.Serializer):
 
 
 class PosRefundReadSerializer(serializers.ModelSerializer):
+    processed_at = SafeDateTimeField(read_only=True)
+    created_at = SafeDateTimeField(read_only=True)
+
     class Meta:
         model = PosRefund
         fields = [
@@ -435,6 +457,7 @@ class PosRefundReadSerializer(serializers.ModelSerializer):
 class PosReturnLineReadSerializer(serializers.ModelSerializer):
     product_code = serializers.CharField(source="product.code", read_only=True)
     product_name = serializers.CharField(source="product.name", read_only=True)
+    created_at = SafeDateTimeField(read_only=True)
 
     class Meta:
         model = PosReturnLine
@@ -456,6 +479,7 @@ class PosReturnLineReadSerializer(serializers.ModelSerializer):
 class PosReturnReadSerializer(serializers.ModelSerializer):
     lines = PosReturnLineReadSerializer(many=True, read_only=True)
     refunds = PosRefundReadSerializer(many=True, read_only=True)
+    created_at = SafeDateTimeField(read_only=True)
 
     class Meta:
         model = PosReturn
@@ -502,4 +526,6 @@ def serialize_return_result(result):
 
 
 class PosCheckoutResponseSerializer(OutboundOrderReadSerializer):
-    pass
+    created_at = SafeDateTimeField(read_only=True)
+    etd = SafeDateTimeField(read_only=True)
+    priced_at = SafeDateTimeField(read_only=True)

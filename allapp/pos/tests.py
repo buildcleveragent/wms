@@ -4,9 +4,10 @@ import io
 from decimal import Decimal
 
 from django.apps import apps
+from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from openpyxl import load_workbook
 from rest_framework.test import APIClient
@@ -21,6 +22,7 @@ from allapp.inventory.models import (
 )
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+from allapp.pos.accuracy import _parse_params
 from allapp.pos.models import (
     PosAuditLog,
     PosPayment,
@@ -35,7 +37,50 @@ from allapp.pos.models import (
     PosShift,
     PosShiftPaymentSummary,
 )
+from allapp.pos.serializers import SafeDateTimeField
 from allapp.products.models import Product, ProductPackage, ProductUom
+
+
+class PosAccuracyUtilityTests(SimpleTestCase):
+    def test_parse_params_uses_safe_default_date(self):
+        start_date, end_date = _parse_params({})
+
+        self.assertIsInstance(start_date, datetime.date)
+        self.assertEqual(start_date, end_date)
+
+    def test_pos_safe_datetime_field_handles_naive_datetime(self):
+        field = SafeDateTimeField()
+        value = field.to_representation(datetime.datetime(2026, 1, 10, 10, 30))
+
+        self.assertIn("2026-01-10T10:30", value)
+
+
+class PosAdminRegistrationTests(SimpleTestCase):
+    def test_pos_models_are_registered_in_admin(self):
+        registered_models = set(admin.site._registry)
+
+        for model in (
+            PosSale,
+            PosSaleLine,
+            PosPayment,
+            PosPaymentLine,
+            PosShift,
+            PosShiftPaymentSummary,
+            PosReturn,
+            PosReturnLine,
+            PosRefund,
+            PosSaleOrder,
+            PosPrintLog,
+            PosAuditLog,
+        ):
+            self.assertIn(model, registered_models)
+
+    def test_pos_sale_admin_is_read_only(self):
+        model_admin = admin.site._registry[PosSale]
+
+        self.assertFalse(model_admin.has_add_permission(None))
+        self.assertFalse(model_admin.has_change_permission(None))
+        self.assertFalse(model_admin.has_delete_permission(None))
 
 
 class PosApiTests(TestCase):
@@ -419,6 +464,80 @@ class PosApiTests(TestCase):
         self.assertEqual(
             InventoryTransaction.objects.get(src_model="PosSaleLine").tx_type,
             InvTxType.ISSUE,
+        )
+
+    def test_pos_accuracy_api_reports_pass_for_consistent_sale(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "customer_id": self.customer.id,
+                "src_bill_no": "POS-ACCURACY-PASS",
+                "idempotency_key": "idem-pos-accuracy-pass",
+                "payment": self.payment("10.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "10.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+
+        today = _parse_params({})[0].isoformat()
+        response = self.client.get(
+            "/api/pos/accuracy/",
+            {"start_date": today, "end_date": today},
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "passed")
+        self.assertEqual(response.data["summary"]["issue_count"], 0)
+
+    def test_pos_accuracy_api_uses_safe_default_date(self):
+        response = self.client.get("/api/pos/accuracy/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIn("period", response.data)
+        self.assertIn("start_date", response.data["period"])
+        self.assertIn("end_date", response.data["period"])
+
+    def test_pos_accuracy_api_detects_amount_mismatch(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "customer_id": self.customer.id,
+                "src_bill_no": "POS-ACCURACY-BAD",
+                "idempotency_key": "idem-pos-accuracy-bad",
+                "payment": self.payment("10.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "10.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        PosSale.objects.filter(src_bill_no="POS-ACCURACY-BAD").update(
+            total_amount=Decimal("11.00")
+        )
+
+        today = _parse_params({})[0].isoformat()
+        response = self.client.get(
+            "/api/pos/accuracy/",
+            {"start_date": today, "end_date": today},
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "failed")
+        self.assertGreater(response.data["summary"]["issue_count"], 0)
+        self.assertTrue(
+            any(issue["code"] == "sale_amount" for issue in response.data["issues"])
         )
         self.assertEqual(
             InventoryDetail.objects.get(
