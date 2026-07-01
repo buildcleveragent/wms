@@ -39,6 +39,9 @@
 
     <div class="summary block">
       <div class="row strong"><span>净销售额</span><span>{{ shift.summary.net_amount }}</span></div>
+      <div class="row"><span>实收金额</span><span>{{ shift.summary.received_amount }}</span></div>
+      <div class="row"><span>赊账金额</span><span>{{ shift.summary.credit_amount }}</span></div>
+      <div class="row"><span>客户还款</span><span>{{ shift.summary.repayment_amount }}</span></div>
       <div class="row"><span>完成单数</span><span>{{ shift.summary.completed_count }}</span></div>
       <div class="row danger"><span>作废单数</span><span>{{ shift.summary.voided_count }}</span></div>
       <div class="row danger"><span>作废金额</span><span>{{ shift.summary.voided_amount }}</span></div>
@@ -55,6 +58,7 @@
           <tr>
             <th>方式</th>
             <th>单数</th>
+            <th>还款</th>
             <th>系统</th>
             <th>实点</th>
             <th>差异</th>
@@ -65,12 +69,13 @@
             <tr>
               <td>{{ row.method_label }}</td>
               <td>{{ row.sale_count }}</td>
+              <td>{{ row.repayment_amount }}</td>
               <td>{{ row.expected_amount }}</td>
               <td>{{ row.actual_amount }}</td>
               <td>{{ row.difference }}</td>
             </tr>
           {% empty %}
-            <tr><td colspan="5">无收款记录</td></tr>
+            <tr><td colspan="6">无收款记录</td></tr>
           {% endfor %}
         </tbody>
       </table>

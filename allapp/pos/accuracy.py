@@ -232,7 +232,30 @@ def _check_sale_payments(sales, collector):
                     expected=expected_status,
                     actual=line.status,
                 )
-            if line.method == PosPayment.Method.CASH:
+            if line.method == PosPayment.Method.CREDIT:
+                if _money(line.amount_received) != ZERO:
+                    collector.add_issue(
+                        code=code,
+                        label=label,
+                        object_type="PosPaymentLine",
+                        object_id=line.id,
+                        object_no=sale_no,
+                        message="赊账明细实收金额应为 0。",
+                        expected=ZERO,
+                        actual=_money(line.amount_received),
+                    )
+                if _money(line.change_amount) != ZERO:
+                    collector.add_issue(
+                        code=code,
+                        label=label,
+                        object_type="PosPaymentLine",
+                        object_id=line.id,
+                        object_no=sale_no,
+                        message="赊账明细找零金额应为 0。",
+                        expected=ZERO,
+                        actual=_money(line.change_amount),
+                    )
+            elif line.method == PosPayment.Method.CASH:
                 expected_change = max(
                     _money(line.amount_received) - _money(line.amount), ZERO
                 )

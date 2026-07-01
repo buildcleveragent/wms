@@ -5,6 +5,7 @@
 from django.urls import path, include
 from .views_dashboard import DashboardHomeView, DashboardSummaryApi
 from .views_billing import BillingBillDetailView, BillingOverviewView
+from .views_salemini import SaleMiniProductListingView
 
 app_name = "console"
 
@@ -20,6 +21,13 @@ urlpatterns = [
     path("billing/", BillingOverviewView.as_view(), name="billing_overview"),
     path("billing/overview/", BillingOverviewView.as_view(), name="billing_overview_alias"),
     path("billing/bills/<int:pk>/", BillingBillDetailView.as_view(), name="billing_bill_detail"),
+
+    # 商城运营
+    path(
+        "sale-mini/products/",
+        SaleMiniProductListingView.as_view(),
+        name="sale_mini_product_listing",
+    ),
 
     # 若你已在其它地方挂了 tasking console，可以保留一份直达
     path("tasking/", include("allapp.tasking.urls_console", namespace="tasking_console")),

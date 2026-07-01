@@ -3,13 +3,13 @@
     <view class="topbar">
       <view>
         <view class="shop-name">{{ profileName }}</view>
-        <view class="shop-sub">{{ warehouseName }}</view>
+        <view class="shop-sub">{{ brandTagline }}</view>
       </view>
       <button class="icon-btn" @click="goUser">我</button>
     </view>
 
     <view class="search" @click="goSearch">
-      <text>搜索商品名称、编码、条码</text>
+      <text>搜索商品、品牌、关键词</text>
     </view>
 
     <view class="fulfillment">
@@ -31,7 +31,7 @@
     <view v-else class="banner fallback">
       <view>
         <view class="fallback-title">严选好货</view>
-        <view class="fallback-sub">多商家 · 安心下单</view>
+        <view class="fallback-sub">统一精选 · 安心下单</view>
       </view>
     </view>
 
@@ -40,9 +40,9 @@
         <view class="channel-icon">类</view>
         <view class="channel-text">全部分类</view>
       </view>
-      <view class="channel" @click="goMerchants">
-        <view class="channel-icon merchant">商</view>
-        <view class="channel-text">全部商家</view>
+      <view class="channel" @click="goList('sort')">
+        <view class="channel-icon selected">优</view>
+        <view class="channel-text">品质优选</view>
       </view>
       <view class="channel" @click="goList('hot')">
         <view class="channel-icon hot">爆</view>
@@ -75,22 +75,6 @@
         <view v-for="item in home.categories" :key="item.id" class="category" @click="goCategory(item.id)">
           <view class="category-mark">{{ item.name.slice(0, 1) }}</view>
           <view class="category-name">{{ item.name }}</view>
-        </view>
-      </view>
-    </scroll-view>
-
-    <view v-if="merchants.length" class="section-head">
-      <text>精选商家</text>
-      <text class="more" @click="goMerchants">全部</text>
-    </view>
-    <scroll-view v-if="merchants.length" class="merchant-scroll" scroll-x>
-      <view class="merchant-row">
-        <view v-for="merchant in merchants" :key="merchant.id" class="merchant-card" @click="goMerchant(merchant)">
-          <view class="merchant-avatar">{{ merchant.name.slice(0, 1) }}</view>
-          <view class="merchant-main">
-            <view class="merchant-name">{{ merchant.name }}</view>
-            <view class="merchant-meta">{{ merchant.product_count }} 件在售</view>
-          </view>
         </view>
       </view>
     </scroll-view>
@@ -142,7 +126,6 @@ import { getToken } from '../../utils/request'
 const cart = useCartStore()
 const session = useSessionStore()
 const loading = ref(false)
-const merchants = ref([])
 const home = reactive({
   banners: [],
   categories: [],
@@ -152,21 +135,11 @@ const home = reactive({
 })
 
 const profile = computed(() => session.profile)
-const profileName = computed(() => {
-  const current = profile.value || {}
-  if (current.customer && current.customer.name) return current.customer.name
-  return '博悦商城'
-})
-const warehouseName = computed(() => {
-  const current = profile.value || {}
-  const bindings = Array.isArray(current.bindings) ? current.bindings : []
-  if (bindings.length > 1) return `已开通 ${bindings.length} 个商家`
-  if (current.owner && current.owner.name) return `可选购 ${current.owner.name} 商品`
-  return '多商家商品 · 在线选购'
+const profileName = computed(() => '博悦商城')
+const brandTagline = computed(() => {
+  return '品质好货 · 在线选购'
 })
 const deliveryText = computed(() => {
-  const current = profile.value || {}
-  if (current.customer && current.customer.name) return `${current.customer.name} 默认收货信息`
   if (getToken()) return '请选择收货地址'
   return '登录后管理收货地址'
 })
@@ -193,14 +166,6 @@ async function load() {
       hot_products: data.hot_products || [],
       new_products: data.new_products || [],
     })
-    merchants.value = (data.merchants || []).slice(0, 8)
-    if (!merchants.value.length) {
-      try {
-        merchants.value = (await productService.merchants()).slice(0, 8)
-      } catch (err) {
-        merchants.value = []
-      }
-    }
   } finally {
     loading.value = false
   }
@@ -231,7 +196,6 @@ function openProduct(product) {
 
 function productDetailUrl(product) {
   const params = [`id=${product.id}`]
-  if (product.owner_id) params.push(`owner_id=${product.owner_id}`)
   if (product.config_id) params.push(`config_id=${product.config_id}`)
   return `/pages/product-detail/product-detail?${params.join('&')}`
 }
@@ -243,17 +207,12 @@ function openBanner(banner) {
   if (!type && !value) return
   if (['PRODUCT', 'GOODS', 'SKU'].includes(type) && value) {
     const params = [`id=${encodeURIComponent(value)}`]
-    if (banner.owner_id) params.push(`owner_id=${banner.owner_id}`)
+    if (banner.config_id) params.push(`config_id=${banner.config_id}`)
     uni.navigateTo({ url: `/pages/product-detail/product-detail?${params.join('&')}` })
     return
   }
   if (['CATEGORY', 'CAT'].includes(type) && value) {
     goCategory(value)
-    return
-  }
-  if (['MERCHANT', 'OWNER', 'STORE'].includes(type)) {
-    const ownerId = value || banner.owner_id
-    if (ownerId) uni.navigateTo({ url: `/pages/merchant-detail/merchant-detail?owner_id=${ownerId}` })
     return
   }
   if (type === 'SEARCH' && value) {
@@ -305,21 +264,12 @@ function goStockedList() {
   uni.navigateTo({ url: '/pages/product-list/product-list?only_stock=1' })
 }
 
-function goMerchants() {
-  uni.navigateTo({ url: '/pages/merchants/merchants' })
-}
-
 function requireLoginPage(url) {
   if (!getToken()) {
     uni.navigateTo({ url: '/pages/login/login' })
     return
   }
   uni.navigateTo({ url })
-}
-
-function goMerchant(merchant) {
-  if (!merchant || !merchant.id) return
-  uni.navigateTo({ url: `/pages/merchant-detail/merchant-detail?owner_id=${merchant.id}` })
 }
 
 function goBenefits() {
@@ -538,7 +488,7 @@ onPullDownRefresh(async () => {
   color: #b42318;
 }
 
-.channel-icon.merchant {
+.channel-icon.selected {
   background: #ecfeff;
   color: #0e7490;
 }
@@ -615,58 +565,6 @@ onPullDownRefresh(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.merchant-scroll {
-  white-space: nowrap;
-}
-
-.merchant-row {
-  display: flex;
-  gap: 14rpx;
-}
-
-.merchant-card {
-  width: 292rpx;
-  padding: 18rpx;
-  display: flex;
-  align-items: center;
-  gap: 14rpx;
-  border: 1rpx solid #e1e7ef;
-  border-radius: 8rpx;
-  background: #fff;
-  flex-shrink: 0;
-}
-
-.merchant-avatar {
-  width: 58rpx;
-  height: 58rpx;
-  line-height: 58rpx;
-  border-radius: 8rpx;
-  background: #edf8f5;
-  color: #0f766e;
-  text-align: center;
-  font-weight: 900;
-  flex-shrink: 0;
-}
-
-.merchant-main {
-  min-width: 0;
-}
-
-.merchant-name {
-  color: #17202a;
-  font-size: 25rpx;
-  font-weight: 800;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.merchant-meta {
-  margin-top: 6rpx;
-  color: #64748b;
-  font-size: 22rpx;
 }
 
 .section-head {

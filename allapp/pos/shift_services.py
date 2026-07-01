@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from .models import (
     PosAuditLog,
+    PosCustomerRepayment,
     PosPayment,
     PosPaymentLine,
     PosPrintLog,
@@ -143,8 +144,10 @@ def _payment_summary_rows_for_shift(shift):
             "method_label": dict(PosPayment.Method.choices).get(row["method"], ""),
             "sale_count": row["sale_count"] or 0,
             "refund_count": 0,
+            "repayment_count": 0,
             "sale_amount": row["sale_amount"] or ZERO_MONEY,
             "refund_amount": ZERO_MONEY,
+            "repayment_amount": ZERO_MONEY,
             "expected_amount": row["sale_amount"] or ZERO_MONEY,
             "amount_received": row["amount_received"] or ZERO_MONEY,
             "change_amount": row["change_amount"] or ZERO_MONEY,
@@ -173,8 +176,10 @@ def _payment_summary_rows_for_shift(shift):
                 "method_label": dict(PosPayment.Method.choices).get(method, ""),
                 "sale_count": 0,
                 "refund_count": 0,
+                "repayment_count": 0,
                 "sale_amount": ZERO_MONEY,
                 "refund_amount": ZERO_MONEY,
+                "repayment_amount": ZERO_MONEY,
                 "expected_amount": ZERO_MONEY,
                 "amount_received": ZERO_MONEY,
                 "change_amount": ZERO_MONEY,
@@ -184,6 +189,46 @@ def _payment_summary_rows_for_shift(shift):
         current["refund_amount"] = row["refund_amount"] or ZERO_MONEY
         current["expected_amount"] = _money(
             current["sale_amount"] - current["refund_amount"]
+        )
+    repayment_rows = (
+        PosCustomerRepayment.objects.filter(
+            shift=shift,
+            status=PosCustomerRepayment.Status.COMPLETED,
+        )
+        .values("method")
+        .annotate(
+            repayment_count=Count("id"),
+            repayment_amount=_sum_money("amount"),
+        )
+        .order_by("method")
+    )
+    for row in repayment_rows:
+        method = row["method"]
+        current = result.setdefault(
+            method,
+            {
+                "method": method,
+                "method_label": dict(PosPayment.Method.choices).get(method, ""),
+                "sale_count": 0,
+                "refund_count": 0,
+                "repayment_count": 0,
+                "sale_amount": ZERO_MONEY,
+                "refund_amount": ZERO_MONEY,
+                "repayment_amount": ZERO_MONEY,
+                "expected_amount": ZERO_MONEY,
+                "amount_received": ZERO_MONEY,
+                "change_amount": ZERO_MONEY,
+            },
+        )
+        current["repayment_count"] = row["repayment_count"] or 0
+        current["repayment_amount"] = row["repayment_amount"] or ZERO_MONEY
+        current["expected_amount"] = _money(
+            current["sale_amount"]
+            - current["refund_amount"]
+            + current["repayment_amount"]
+        )
+        current["amount_received"] = _money(
+            current["amount_received"] + current["repayment_amount"]
         )
     return result
 
@@ -230,19 +275,30 @@ def build_shift_summary(shift):
 
     payment_rows = _payment_summary_rows_for_shift(shift)
     payment_summaries = []
+    credit_amount = ZERO_MONEY
+    repayment_amount = ZERO_MONEY
+    received_amount = ZERO_MONEY
     for method, label in PosPayment.Method.choices:
         row = payment_rows.get(method)
         if not row:
             continue
         expected = _money(row["expected_amount"])
+        repayment = _money(row["repayment_amount"])
+        repayment_amount = _money(repayment_amount + repayment)
+        if method == PosPayment.Method.CREDIT:
+            credit_amount = _money(credit_amount + expected)
+        else:
+            received_amount = _money(received_amount + expected)
         payment_summaries.append(
             {
                 "method": method,
                 "method_label": label,
                 "sale_count": row["sale_count"],
                 "refund_count": row["refund_count"],
+                "repayment_count": row["repayment_count"],
                 "sale_amount": _money_text(row["sale_amount"]),
                 "refund_amount": _money_text(row["refund_amount"]),
+                "repayment_amount": _money_text(repayment),
                 "expected_amount": _money_text(expected),
                 "actual_amount": _money_text(expected),
                 "difference": _money_text(ZERO_MONEY),
@@ -274,6 +330,9 @@ def build_shift_summary(shift):
         "opening_cash_amount": _money_text(shift.opening_cash_amount),
         "expected_cash_amount": _money_text(expected_cash_total),
         "cash_sales_amount": _money_text(cash_expected_sales),
+        "received_amount": _money_text(received_amount),
+        "credit_amount": _money_text(credit_amount),
+        "repayment_amount": _money_text(repayment_amount),
         "payments": payment_summaries,
     }
 
@@ -338,6 +397,8 @@ def close_pos_shift(
             refund_count=row.get("refund_count", 0),
             expected_amount=expected,
             refund_amount=_money(row.get("refund_amount", ZERO_MONEY)),
+            repayment_count=row.get("repayment_count", 0),
+            repayment_amount=_money(row.get("repayment_amount", ZERO_MONEY)),
             actual_amount=actual,
             difference=_money(actual - expected),
         )
@@ -456,7 +517,9 @@ def _stored_payment_summaries(shift):
                 "method_label": labels.get(row.method, row.method),
                 "sale_count": row.sale_count,
                 "refund_count": row.refund_count,
+                "repayment_count": row.repayment_count,
                 "refund_amount": _money_text(row.refund_amount),
+                "repayment_amount": _money_text(row.repayment_amount),
                 "expected_amount": _money_text(row.expected_amount),
                 "actual_amount": _money_text(row.actual_amount),
                 "difference": _money_text(row.difference),
@@ -486,6 +549,29 @@ def serialize_shift(shift, *, include_dynamic_summary=True):
             "cash_difference": _money_text(shift.cash_difference),
             "payments": payments,
         }
+        summary["credit_amount"] = _money_text(
+            sum(
+                (
+                    _money(row["expected_amount"])
+                    for row in payments
+                    if row["method"] == PosPayment.Method.CREDIT
+                ),
+                ZERO_MONEY,
+            )
+        )
+        summary["repayment_amount"] = _money_text(
+            sum((_money(row.get("repayment_amount")) for row in payments), ZERO_MONEY)
+        )
+        summary["received_amount"] = _money_text(
+            sum(
+                (
+                    _money(row["expected_amount"])
+                    for row in payments
+                    if row["method"] != PosPayment.Method.CREDIT
+                ),
+                ZERO_MONEY,
+            )
+        )
         if computed:
             summary.update(
                 {

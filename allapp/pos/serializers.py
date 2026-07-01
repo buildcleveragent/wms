@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from django.conf import settings
 from django.db.models import Sum
@@ -13,17 +14,39 @@ from allapp.outbound.serializers import OutboundOrderReadSerializer
 from allapp.products.models import Product
 
 from .models import (
+    PosCustomer,
+    PosCustomerRepayment,
     PosPayment,
     PosPaymentLine,
+    PosReceiptWarehouseInfo,
     PosRefund,
     PosReturn,
     PosReturnLine,
     PosSale,
     PosSaleLine,
 )
-from .services import build_receipt, create_pos_return, create_pos_sale
+from .services import (
+    build_receipt,
+    create_customer_repayment,
+    create_pos_return,
+    create_pos_sale,
+)
 
 ZERO = Decimal("0")
+
+
+def make_pos_customer_code(warehouse_id):
+    now = timezone.now()
+    if timezone.is_aware(now):
+        now = timezone.localtime(now)
+    today = now.strftime("%y%m%d")
+    for _ in range(12):
+        code = f"PC{today}{uuid4().hex[:6].upper()}"
+        if not PosCustomer.objects.filter(
+            warehouse_id=warehouse_id, code=code
+        ).exists():
+            return code
+    return f"PC{today}{uuid4().hex[:8].upper()}"[:30]
 
 
 class SafeDateTimeField(serializers.DateTimeField):
@@ -147,6 +170,107 @@ class PosProductSerializer(serializers.ModelSerializer):
                 }
             )
         return options
+
+
+class PosReceiptWarehouseInfoSerializer(serializers.ModelSerializer):
+    warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
+
+    class Meta:
+        model = PosReceiptWarehouseInfo
+        fields = [
+            "id",
+            "warehouse_id",
+            "warehouse_name",
+            "name",
+            "address",
+            "phone",
+            "bank_account",
+            "is_default",
+        ]
+
+
+class PosCustomerSerializer(serializers.ModelSerializer):
+    warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
+    created_at = SafeDateTimeField(read_only=True)
+    updated_at = SafeDateTimeField(read_only=True)
+
+    class Meta:
+        model = PosCustomer
+        fields = [
+            "id",
+            "warehouse_id",
+            "warehouse_name",
+            "code",
+            "name",
+            "contact_person",
+            "phone",
+            "mobile",
+            "address",
+            "remark",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "warehouse_id",
+            "warehouse_name",
+            "created_at",
+            "updated_at",
+        ]
+        extra_kwargs = {
+            "code": {"required": False, "allow_blank": True},
+            "name": {"required": True, "allow_blank": False},
+            "contact_person": {"required": False, "allow_blank": True},
+            "phone": {"required": False, "allow_blank": True},
+            "mobile": {"required": False, "allow_blank": True},
+            "address": {"required": False, "allow_blank": True},
+            "remark": {"required": False, "allow_blank": True},
+            "is_active": {"required": False},
+        }
+
+    def validate_code(self, value):
+        return (value or "").strip()
+
+    def validate_name(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("客户名称不能为空。")
+        return value
+
+    def validate(self, attrs):
+        warehouse_id = self.context.get("warehouse_id")
+        if not warehouse_id:
+            raise serializers.ValidationError("当前用户未绑定仓库，无法维护 POS 客户。")
+        code = (attrs.get("code") or "").strip()
+        if code:
+            queryset = PosCustomer.objects.filter(warehouse_id=warehouse_id, code=code)
+            if self.instance:
+                queryset = queryset.exclude(pk=self.instance.pk)
+            if queryset.exists():
+                raise serializers.ValidationError(
+                    {"code": "同一仓库下客户编号已存在。"}
+                )
+        return attrs
+
+    def create(self, validated_data):
+        warehouse_id = self.context["warehouse_id"]
+        user = self.context.get("user")
+        code = (validated_data.get("code") or "").strip()
+        if not code:
+            code = make_pos_customer_code(warehouse_id)
+        validated_data["code"] = code
+        validated_data["warehouse_id"] = warehouse_id
+        if user and user.is_authenticated:
+            validated_data["created_by"] = user
+            validated_data["updated_by"] = user
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        user = self.context.get("user")
+        if user and user.is_authenticated:
+            validated_data["updated_by"] = user
+        return super().update(instance, validated_data)
 
 
 class PosCheckoutLineSerializer(serializers.Serializer):
@@ -317,6 +441,7 @@ class PosSaleReadSerializer(serializers.ModelSerializer):
             "warehouse_id",
             "cashier_id",
             "shift_id",
+            "pos_customer_id",
             "selected_customer_id",
             "status",
             "total_amount",
@@ -499,6 +624,79 @@ class PosReturnReadSerializer(serializers.ModelSerializer):
         ]
 
 
+class PosCustomerRepaymentCreateSerializer(serializers.Serializer):
+    customer_id = serializers.IntegerField()
+    method = serializers.ChoiceField(
+        choices=[
+            choice.value
+            for choice in PosPayment.Method
+            if choice.value != PosPayment.Method.CREDIT
+        ]
+    )
+    amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+    )
+    reference_no = serializers.CharField(required=False, allow_blank=True, default="")
+    remark = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def create(self, validated_data):
+        return create_customer_repayment(
+            user=self.context["request"].user,
+            customer_id=validated_data["customer_id"],
+            method=validated_data["method"],
+            amount=validated_data["amount"],
+            reference_no=validated_data.get("reference_no", ""),
+            remark=validated_data.get("remark", ""),
+        )
+
+
+class PosCustomerRepaymentReadSerializer(serializers.ModelSerializer):
+    customer_id = serializers.SerializerMethodField()
+    customer_code = serializers.SerializerMethodField()
+    customer_name = serializers.SerializerMethodField()
+    cashier_username = serializers.CharField(source="cashier.username", read_only=True)
+    shift_no = serializers.CharField(source="shift.shift_no", read_only=True)
+    created_at = SafeDateTimeField(read_only=True)
+
+    class Meta:
+        model = PosCustomerRepayment
+        fields = [
+            "id",
+            "repayment_no",
+            "warehouse_id",
+            "customer_id",
+            "customer_code",
+            "customer_name",
+            "shift_id",
+            "shift_no",
+            "cashier_id",
+            "cashier_username",
+            "method",
+            "amount",
+            "reference_no",
+            "status",
+            "remark",
+            "created_at",
+        ]
+
+    def _customer(self, obj):
+        return getattr(obj, "pos_customer", None) or getattr(obj, "customer", None)
+
+    def get_customer_id(self, obj):
+        customer = self._customer(obj)
+        return customer.id if customer else None
+
+    def get_customer_code(self, obj):
+        customer = self._customer(obj)
+        return getattr(customer, "code", "") if customer else ""
+
+    def get_customer_name(self, obj):
+        customer = self._customer(obj)
+        return getattr(customer, "name", "") if customer else ""
+
+
 def serialize_checkout_result(result, request):
     orders = result["orders"]
     sale = result["sale"]
@@ -523,6 +721,20 @@ def serialize_checkout_result(result, request):
 def serialize_return_result(result):
     return_order = result["return"]
     return {"return": PosReturnReadSerializer(return_order).data}
+
+
+def serialize_repayment_result(result):
+    repayment = result["repayment"]
+    return {
+        "repayment": PosCustomerRepaymentReadSerializer(repayment).data,
+        "customer": {
+            "id": result["customer"].id,
+            "code": result["customer"].code or "",
+            "name": result["customer"].name or "",
+        },
+        "debt_before": str(result["debt_before"]),
+        "debt_after": str(result["debt_after"]),
+    }
 
 
 class PosCheckoutResponseSerializer(OutboundOrderReadSerializer):

@@ -1,0 +1,293 @@
+{% extends "console/base_console.html" %}
+{% block title %}商城上架管理{% endblock %}
+
+{% block content %}
+<style>
+  .sale-mini-toolbar{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin:12px 0;}
+  .sale-mini-toolbar label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
+  .sale-mini-toolbar input,.sale-mini-toolbar select,.bulk-panel input,.bulk-panel select{
+    width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 8px;background:#fff;color:var(--fg);
+  }
+  .stat-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:12px 0;}
+  .stat-card{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff;}
+  .stat-card .num{font-size:22px;font-weight:700;margin-top:4px;}
+  .bulk-panel{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff;margin:12px 0;}
+  .bulk-grid{display:grid;grid-template-columns:1.4fr repeat(7,minmax(0,1fr));gap:8px;align-items:end;}
+  .badge{display:inline-flex;align-items:center;border-radius:9999px;padding:2px 8px;font-size:12px;border:1px solid var(--line);}
+  .badge-ok{background:#ecfdf5;color:#047857;border-color:#a7f3d0;}
+  .badge-warn{background:#fffbeb;color:#b45309;border-color:#fde68a;}
+  .badge-muted{background:#f8fafc;color:#64748b;}
+  .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff;}
+  .table-wrap table{min-width:1420px;}
+  .price{font-variant-numeric:tabular-nums;}
+  .messages{margin:10px 0;}
+  .message{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px;background:#fff;}
+  .message.success{border-color:#86efac;background:#f0fdf4;color:#166534;}
+  .message.warning{border-color:#fde68a;background:#fffbeb;color:#92400e;}
+  .message.error{border-color:#fecaca;background:#fef2f2;color:#991b1b;}
+  @media (max-width:1100px){
+    .sale-mini-toolbar{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .bulk-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+  }
+</style>
+
+<h1 style="margin:0 0 8px 0;">商城上架管理</h1>
+<p style="margin:0;color:var(--muted);">
+  只维护小程序商城货架配置，不修改库存、不直接修改商品主数据。上架商品会进入公开商城浏览接口。
+</p>
+
+{% if messages %}
+  <div class="messages">
+    {% for message in messages %}
+      <div class="message {{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<div class="stat-grid">
+  <div class="stat-card"><div>当前筛选商品</div><div class="num">{{ summary.total }}</div></div>
+  <div class="stat-card"><div>已上架</div><div class="num">{{ summary.listed }}</div></div>
+  <div class="stat-card"><div>未配置</div><div class="num">{{ summary.unconfigured }}</div></div>
+  <div class="stat-card"><div>有可售库存</div><div class="num">{{ summary.in_stock }}</div></div>
+  <div class="stat-card"><div>缺价格</div><div class="num">{{ summary.missing_price }}</div></div>
+</div>
+
+<form method="get">
+  <div class="sale-mini-toolbar">
+    <div>
+      <label>货主</label>
+      <select name="owner">
+        <option value="">全部货主</option>
+        {% for owner in owners %}
+          <option value="{{ owner.id }}" {% if filters.owner == owner.id|stringformat:"s" %}selected{% endif %}>{{ owner.code }} · {{ owner.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>分类</label>
+      <select name="category">
+        <option value="">全部分类</option>
+        {% for category in categories %}
+          <option value="{{ category.id }}" {% if filters.category == category.id|stringformat:"s" %}selected{% endif %}>{{ category.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>品牌</label>
+      <select name="brand">
+        <option value="">全部品牌</option>
+        {% for brand in brands %}
+          <option value="{{ brand.id }}" {% if filters.brand == brand.id|stringformat:"s" %}selected{% endif %}>{{ brand.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>上架状态</label>
+      <select name="listing">
+        <option value="" {% if not filters.listing %}selected{% endif %}>全部</option>
+        <option value="listed" {% if filters.listing == "listed" %}selected{% endif %}>已上架</option>
+        <option value="unlisted" {% if filters.listing == "unlisted" %}selected{% endif %}>未上架</option>
+        <option value="unconfigured" {% if filters.listing == "unconfigured" %}selected{% endif %}>未配置</option>
+        <option value="configured" {% if filters.listing == "configured" %}selected{% endif %}>已配置</option>
+      </select>
+    </div>
+    <div>
+      <label>库存</label>
+      <select name="stock">
+        <option value="" {% if not filters.stock %}selected{% endif %}>全部</option>
+        <option value="in" {% if filters.stock == "in" %}selected{% endif %}>有库存</option>
+        <option value="out" {% if filters.stock == "out" %}selected{% endif %}>无库存</option>
+      </select>
+    </div>
+    <div>
+      <label>价格</label>
+      <select name="price">
+        <option value="" {% if not filters.price %}selected{% endif %}>全部</option>
+        <option value="priced" {% if filters.price == "priced" %}selected{% endif %}>有价格</option>
+        <option value="missing" {% if filters.price == "missing" %}selected{% endif %}>缺价格</option>
+      </select>
+    </div>
+    <div>
+      <label>标签</label>
+      <select name="tag">
+        <option value="" {% if not filters.tag %}selected{% endif %}>全部</option>
+        <option value="recommended" {% if filters.tag == "recommended" %}selected{% endif %}>推荐</option>
+        <option value="hot" {% if filters.tag == "hot" %}selected{% endif %}>热卖</option>
+        <option value="new" {% if filters.tag == "new" %}selected{% endif %}>新品</option>
+      </select>
+    </div>
+    <div>
+      <label>商品状态</label>
+      <select name="active">
+        <option value="active" {% if filters.active == "active" or not filters.active %}selected{% endif %}>启用商品</option>
+        <option value="inactive" {% if filters.active == "inactive" %}selected{% endif %}>停用商品/货主</option>
+        <option value="all" {% if filters.active == "all" %}selected{% endif %}>全部</option>
+      </select>
+    </div>
+    <div style="grid-column:span 3;">
+      <label>关键词</label>
+      <input name="q" value="{{ filters.q }}" placeholder="商品名 / 编码 / SKU / 条码 / 规格">
+    </div>
+    <div style="display:flex;gap:8px;align-items:end;">
+      <button class="btn" type="submit">查询</button>
+      <a class="btn" href="{% url 'console:sale_mini_product_listing' %}" style="text-decoration:none;color:inherit;">重置</a>
+    </div>
+  </div>
+</form>
+
+<form method="post">
+  {% csrf_token %}
+  <div class="bulk-panel">
+    <div class="bulk-grid">
+      <div>
+        <label>批量操作</label>
+        <select name="bulk_action">
+          <option value="create_config">创建商城配置</option>
+          <option value="list">上架</option>
+          <option value="unlist">下架</option>
+          <option value="set_sale_price">设置商城售价</option>
+          <option value="sync_sale_price">按商品基础价格同步售价</option>
+          <option value="set_market_price">设置/清空划线价</option>
+          <option value="set_stock_display">设置库存展示</option>
+          <option value="set_badges">设置推荐/热卖/新品</option>
+          <option value="set_rules">设置购买规则</option>
+          <option value="set_sort_order">设置排序</option>
+        </select>
+      </div>
+      <div><label>商城售价</label><input name="sale_price" placeholder="如 9.90"></div>
+      <div><label>划线价</label><input name="market_price" placeholder="留空为清空"></div>
+      <div>
+        <label>库存展示</label>
+        <select name="stock_display">
+          {% for value,label in stock_display_choices %}
+            <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div><label>起购</label><input name="min_order_qty" placeholder="1"></div>
+      <div><label>倍数</label><input name="multiple_qty" placeholder="1"></div>
+      <div><label>最大量</label><input name="max_order_qty" placeholder="可空"></div>
+      <div><label>排序</label><input name="sort_order" placeholder="0"></div>
+    </div>
+    <div style="display:flex;gap:14px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+      <label><input type="checkbox" name="is_recommended" value="1"> 推荐</label>
+      <label><input type="checkbox" name="is_hot" value="1"> 热卖</label>
+      <label><input type="checkbox" name="is_new" value="1"> 新品</label>
+      <button class="btn" type="submit">执行批量操作</button>
+      <a href="{{ admin_config_changelist_url }}" class="btn" style="text-decoration:none;color:inherit;">打开 Django Admin 配置表</a>
+      <span style="color:var(--muted);font-size:12px;">上架会校验商品启用、货主启用和价格；不会修改库存。</span>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:34px;"><input type="checkbox" id="select-all"></th>
+          <th>状态</th>
+          <th>货主</th>
+          <th>商品</th>
+          <th>分类/品牌</th>
+          <th>基础价</th>
+          <th>商城售价</th>
+          <th>划线价</th>
+          <th>可售库存</th>
+          <th>库存展示</th>
+          <th>标签</th>
+          <th>规则</th>
+          <th>提示</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td><input type="checkbox" name="product_ids" value="{{ row.product.id }}" class="row-check"></td>
+            <td>
+              {% if row.is_public_visible %}
+                <span class="badge badge-ok">前台可见</span>
+              {% elif row.config %}
+                <span class="badge badge-warn">已配置</span>
+              {% else %}
+                <span class="badge badge-muted">未配置</span>
+              {% endif %}
+            </td>
+            <td>
+              <div>{{ row.product.owner.code }}</div>
+              <div style="color:var(--muted);font-size:12px;">{{ row.product.owner.name }}</div>
+            </td>
+            <td>
+              <div style="font-weight:600;">{{ row.product.name }}</div>
+              <div style="color:var(--muted);font-size:12px;">{{ row.product.code }}{% if row.product.sku %} · {{ row.product.sku }}{% endif %}</div>
+              {% if row.product.spec %}<div style="color:var(--muted);font-size:12px;">{{ row.product.spec }}</div>{% endif %}
+            </td>
+            <td>
+              <div>{{ row.product.category.name|default:"未分类" }}</div>
+              <div style="color:var(--muted);font-size:12px;">{{ row.product.brand.name|default:"无品牌" }}</div>
+            </td>
+            <td class="price">{{ row.product.price|default:"-" }}</td>
+            <td class="price">{% if row.config and row.config.sale_price != None %}{{ row.config.sale_price }}{% else %}-{% endif %}</td>
+            <td class="price">{% if row.config and row.config.market_price != None %}{{ row.config.market_price }}{% else %}-{% endif %}</td>
+            <td class="price">{{ row.available_qty }} {{ row.product.base_uom.code }}</td>
+            <td>{% if row.config %}{{ row.config.get_stock_display_display }}{% else %}-{% endif %}</td>
+            <td>
+              {% if row.config and row.config.is_recommended %}<span class="badge badge-ok">推荐</span>{% endif %}
+              {% if row.config and row.config.is_hot %}<span class="badge badge-warn">热卖</span>{% endif %}
+              {% if row.config and row.config.is_new %}<span class="badge badge-muted">新品</span>{% endif %}
+            </td>
+            <td>
+              {% if row.config %}
+                起购 {{ row.config.min_order_qty }} / 倍数 {{ row.config.multiple_qty }}
+                {% if row.config.max_order_qty %}<br>最大 {{ row.config.max_order_qty }}{% endif %}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td>
+              {% if row.warnings %}
+                <span class="badge badge-warn">{{ row.warnings|join:"，" }}</span>
+              {% else %}
+                <span class="badge badge-ok">正常</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.config %}
+                <a class="btn" href="{% url 'admin:salesapp_saleproductconfig_change' row.config.id %}" style="text-decoration:none;color:inherit;">编辑配置</a>
+              {% else %}
+                <span style="color:var(--muted);font-size:12px;">勾选后创建</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="14" style="text-align:center;color:var(--muted);padding:30px;">没有符合条件的商品</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</form>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0;">
+  <div style="color:var(--muted);">第 {{ page_obj.number }} / {{ paginator.num_pages }} 页，共 {{ paginator.count }} 条</div>
+  <div style="display:flex;gap:8px;">
+    {% if page_obj.has_previous %}
+      <a class="btn" href="?{{ query_without_page }}{% if query_without_page %}&{% endif %}page={{ page_obj.previous_page_number }}" style="text-decoration:none;color:inherit;">上一页</a>
+    {% endif %}
+    {% if page_obj.has_next %}
+      <a class="btn" href="?{{ query_without_page }}{% if query_without_page %}&{% endif %}page={{ page_obj.next_page_number }}" style="text-decoration:none;color:inherit;">下一页</a>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+  (function(){
+    const all = document.getElementById('select-all');
+    if(!all) return;
+    all.addEventListener('change', function(){
+      document.querySelectorAll('.row-check').forEach(function(item){
+        item.checked = all.checked;
+      });
+    });
+  })();
+</script>
+{% endblock %}

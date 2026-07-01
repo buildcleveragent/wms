@@ -44,6 +44,16 @@ class PosSale(models.Model):
         related_name="pos_sales",
         null=True,
         blank=True,
+        verbose_name="历史终端客户",
+        help_text="历史兼容字段。新的 POS 收银客户使用 POS客户。",
+    )
+    pos_customer = models.ForeignKey(
+        "PosCustomer",
+        on_delete=models.PROTECT,
+        related_name="sales",
+        null=True,
+        blank=True,
+        verbose_name="POS客户",
     )
     status = models.CharField(
         "状态",
@@ -77,10 +87,71 @@ class PosSale(models.Model):
             ),
             models.Index(fields=["status", "created_at"], name="idx_pos_sale_status"),
             models.Index(fields=["shift", "created_at"], name="idx_pos_sale_shift"),
+            models.Index(
+                fields=["pos_customer", "created_at"], name="idx_pos_sale_customer"
+            ),
         ]
 
     def __str__(self) -> str:
         return self.sale_no
+
+
+class PosCustomer(models.Model):
+    warehouse = models.ForeignKey(
+        "locations.Warehouse",
+        on_delete=models.PROTECT,
+        related_name="pos_customers",
+        verbose_name="所属仓库",
+    )
+    code = models.CharField("客户编号", max_length=30, db_index=True)
+    name = models.CharField("客户名称", max_length=80, db_index=True)
+    contact_person = models.CharField("联系人", max_length=80, blank=True, default="")
+    phone = models.CharField("联系电话", max_length=30, blank=True, default="")
+    mobile = models.CharField("移动电话", max_length=30, blank=True, default="")
+    address = models.CharField("地址", max_length=255, blank=True, default="")
+    remark = models.CharField("备注", max_length=200, blank=True, default="")
+    is_active = models.BooleanField("启用", default=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_pos_customers",
+        null=True,
+        blank=True,
+        verbose_name="创建人",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="updated_pos_customers",
+        null=True,
+        blank=True,
+        verbose_name="更新人",
+    )
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        verbose_name = "POS客户"
+        verbose_name_plural = "POS客户管理"
+        ordering = ["warehouse_id", "code", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["warehouse", "code"], name="ux_pos_customer_wh_code"
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["warehouse", "is_active", "name"],
+                name="idx_pos_customer_wh_active",
+            ),
+            models.Index(fields=["warehouse", "phone"], name="idx_pos_customer_phone"),
+            models.Index(
+                fields=["warehouse", "mobile"], name="idx_pos_customer_mobile"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.code} {self.name}".strip()
 
 
 class PosShift(models.Model):
@@ -185,6 +256,7 @@ class PosShiftPaymentSummary(models.Model):
             ("WECHAT", "微信"),
             ("ALIPAY", "支付宝"),
             ("BANK_CARD", "银行卡"),
+            ("CREDIT", "赊账"),
             ("OTHER", "其他"),
         ],
     )
@@ -195,6 +267,10 @@ class PosShiftPaymentSummary(models.Model):
     )
     refund_amount = models.DecimalField(
         "退款金额", max_digits=18, decimal_places=2, default=Decimal("0.00")
+    )
+    repayment_count = models.PositiveIntegerField("还款单数", default=0)
+    repayment_amount = models.DecimalField(
+        "还款金额", max_digits=18, decimal_places=2, default=Decimal("0.00")
     )
     actual_amount = models.DecimalField(
         "实点金额", max_digits=18, decimal_places=2, default=Decimal("0.00")
@@ -216,6 +292,51 @@ class PosShiftPaymentSummary(models.Model):
 
     def __str__(self) -> str:
         return f"{self.shift.shift_no}-{self.method}"
+
+
+class PosReceiptWarehouseInfo(models.Model):
+    warehouse = models.ForeignKey(
+        "locations.Warehouse",
+        on_delete=models.PROTECT,
+        related_name="pos_receipt_infos",
+        null=True,
+        blank=True,
+        verbose_name="适用仓库",
+        help_text="留空表示所有仓库通用。",
+    )
+    name = models.CharField("名称", max_length=100)
+    address = models.CharField("店铺地址", max_length=255, blank=True, default="")
+    phone = models.CharField("电话", max_length=50, blank=True, default="")
+    bank_account = models.CharField("银行账号", max_length=255, blank=True, default="")
+    is_active = models.BooleanField("启用", default=True)
+    is_default = models.BooleanField("默认", default=False)
+    sort_order = models.PositiveIntegerField("排序", default=0)
+    remark = models.CharField("备注", max_length=200, blank=True, default="")
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        verbose_name = "POS销售单仓库信息"
+        verbose_name_plural = "POS销售单仓库信息"
+        indexes = [
+            models.Index(
+                fields=["warehouse", "is_active", "sort_order"],
+                name="idx_pos_receipt_info_wh",
+            ),
+            models.Index(
+                fields=["is_default", "sort_order"], name="idx_pos_receipt_info_def"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.is_default:
+            type(self).objects.filter(warehouse_id=self.warehouse_id).exclude(
+                pk=self.pk
+            ).update(is_default=False)
 
 
 class PosSaleLine(models.Model):
@@ -260,6 +381,7 @@ class PosPayment(models.Model):
         WECHAT = "WECHAT", "微信"
         ALIPAY = "ALIPAY", "支付宝"
         BANK_CARD = "BANK_CARD", "银行卡"
+        CREDIT = "CREDIT", "赊账"
         OTHER = "OTHER", "其他"
 
     class Status(models.TextChoices):
@@ -340,6 +462,100 @@ class PosPaymentLine(models.Model):
 
     def __str__(self) -> str:
         return f"{self.sale.sale_no}-{self.method}-{self.amount}"
+
+
+class PosCustomerRepayment(models.Model):
+    class Status(models.TextChoices):
+        COMPLETED = "COMPLETED", "已完成"
+        VOIDED = "VOIDED", "已撤销"
+
+    repayment_no = models.CharField("POS客户还款单号", max_length=100, unique=True)
+    warehouse = models.ForeignKey(
+        "locations.Warehouse", on_delete=models.PROTECT, related_name="pos_repayments"
+    )
+    customer = models.ForeignKey(
+        "baseinfo.Customer",
+        on_delete=models.PROTECT,
+        related_name="pos_repayments",
+        null=True,
+        blank=True,
+        verbose_name="历史终端客户",
+        help_text="历史兼容字段。新的 POS 客户还款使用 POS客户。",
+    )
+    pos_customer = models.ForeignKey(
+        "PosCustomer",
+        on_delete=models.PROTECT,
+        related_name="repayments",
+        null=True,
+        blank=True,
+        verbose_name="POS客户",
+    )
+    shift = models.ForeignKey(
+        PosShift,
+        on_delete=models.PROTECT,
+        related_name="repayments",
+        null=True,
+        blank=True,
+    )
+    cashier = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="pos_repayments",
+        null=True,
+        blank=True,
+    )
+    method = models.CharField(
+        "还款方式", max_length=20, choices=PosPayment.Method.choices
+    )
+    amount = models.DecimalField("还款金额", max_digits=18, decimal_places=2)
+    reference_no = models.CharField(
+        "还款参考号", max_length=100, blank=True, default=""
+    )
+    status = models.CharField(
+        "状态",
+        max_length=20,
+        choices=Status.choices,
+        default=Status.COMPLETED,
+        db_index=True,
+    )
+    remark = models.CharField("备注", max_length=200, blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_pos_repayments",
+        null=True,
+        blank=True,
+    )
+    voided_at = models.DateTimeField("撤销时间", null=True, blank=True)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="voided_pos_repayments",
+        null=True,
+        blank=True,
+    )
+    void_reason = models.CharField("撤销原因", max_length=200, blank=True, default="")
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        verbose_name = "POS客户还款"
+        verbose_name_plural = "POS客户还款"
+        indexes = [
+            models.Index(
+                fields=["warehouse", "created_at"], name="idx_pos_repay_wh_created"
+            ),
+            models.Index(
+                fields=["pos_customer", "created_at"], name="idx_pos_repay_customer"
+            ),
+            models.Index(fields=["shift", "created_at"], name="idx_pos_repay_shift"),
+            models.Index(fields=["method", "created_at"], name="idx_pos_repay_method"),
+            models.Index(fields=["status", "created_at"], name="idx_pos_repay_status"),
+        ]
+
+    def __str__(self) -> str:
+        customer_id = self.pos_customer_id or self.customer_id or "-"
+        return f"{self.repayment_no}-{customer_id}-{self.amount}"
 
 
 class PosReturn(models.Model):
@@ -587,6 +803,7 @@ class PosAuditLog(models.Model):
         VOID = "VOID", "销售作废"
         RETURN = "RETURN", "退货"
         REFUND = "REFUND", "退款"
+        REPAYMENT = "REPAYMENT", "客户还款"
         SHIFT_OPEN = "SHIFT_OPEN", "开班"
         SHIFT_CLOSE = "SHIFT_CLOSE", "交班"
         SHIFT_REOPEN = "SHIFT_REOPEN", "重开班次"

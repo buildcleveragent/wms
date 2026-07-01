@@ -1,7 +1,7 @@
 {
   "name": "博悦商城",
   "appid": "__UNI__WMS_SALES",
-  "description": "多商家商品选购小程序",
+  "description": "博悦商城商品选购小程序",
   "versionName": "0.1.0",
   "versionCode": "100",
   "transformPx": false,

@@ -23,10 +23,10 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from allapp.baseinfo.models import Customer
-from allapp.inventory.models import InventoryDetail, InventorySummary
+from allapp.inventory.models import InventoryDetail
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.outbound.services import unallocate_for_order
-from allapp.products.models import Brand, ProductCategory
+from allapp.products.models import Brand, Product, ProductCategory
 
 from .mobile_api import (
     MONEY_QUANT,
@@ -283,6 +283,11 @@ class SaleMiniPreviewSerializer(serializers.Serializer):
     owner_id = serializers.IntegerField(required=False)
     customer_id = serializers.IntegerField(required=False)
     cart_id = serializers.IntegerField(required=False, allow_null=True)
+    cart_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True,
+    )
     address_id = serializers.IntegerField(required=False, allow_null=True)
     payment_method = serializers.ChoiceField(
         choices=PAYMENT_METHOD_CHOICES,
@@ -425,6 +430,14 @@ def _buyer_for_user(owner, user):
     )
 
 
+def _buyer_record_for_user(owner, user):
+    return (
+        MiniProgramUser.objects.filter(owner=owner, user=user)
+        .select_related("owner", "customer", "user", "user__warehouse")
+        .first()
+    )
+
+
 def _buyer_bindings_for_user(user):
     return (
         MiniProgramUser.objects.filter(
@@ -448,12 +461,60 @@ def _default_owner_for_user(user):
     return _owner_for_user(user)
 
 
+def _mini_customer_code(owner, user):
+    base = f"MINI-U{user.id or '0'}"
+    for index in range(20):
+        suffix = "" if index == 0 else f"-{index}"
+        candidate = f"{base}{suffix}"[:30]
+        if not Customer.objects.filter(owner=owner, code=candidate).exists():
+            return candidate
+    return f"MINI-{uuid.uuid4().hex[:24]}"[:30]
+
+
+def _ensure_buyer_for_owner(owner, user, customer=None):
+    buyer = _buyer_for_user(owner, user)
+    if buyer and buyer.customer_id:
+        return buyer.customer, buyer
+
+    existing = _buyer_record_for_user(owner, user)
+    if existing:
+        if not existing.is_active or not existing.customer.is_active:
+            raise PermissionDenied("当前账号购买权限无效或已停用，请联系客服。")
+        return existing.customer, existing
+
+    primary = _buyer_bindings_for_user(user).first()
+    if customer is None:
+        primary_customer = primary.customer if primary else None
+        customer = Customer.objects.create(
+            owner=owner,
+            salesperson=user,
+            code=_mini_customer_code(owner, user),
+            name=(
+                getattr(primary_customer, "name", "")
+                or getattr(user, "get_username", lambda: "")()
+                or f"商城客户{user.id}"
+            )[:50],
+            contact_person=getattr(primary_customer, "contact_person", None),
+            phone=getattr(primary_customer, "phone", None),
+            mobile=getattr(primary_customer, "mobile", None),
+        )
+    buyer = MiniProgramUser.objects.create(
+        owner=owner,
+        user=user,
+        customer=customer,
+        nickname=(getattr(primary, "nickname", "") if primary else "")[:80],
+        avatar_url=(getattr(primary, "avatar_url", "") if primary else ""),
+        phone=(getattr(primary, "phone", "") if primary else ""),
+        created_by=user,
+        updated_by=user,
+    )
+    return customer, buyer
+
+
 def _buyer_binding_payload(buyer):
     return {
         "owner": {
             "id": buyer.owner_id,
-            "code": buyer.owner.code,
-            "name": buyer.owner.name,
         },
         "buyer": {
             "id": buyer.id,
@@ -464,13 +525,11 @@ def _buyer_binding_payload(buyer):
         },
         "customer": {
             "id": buyer.customer_id,
-            "code": buyer.customer.code,
-            "name": buyer.customer.name,
         },
     }
 
 
-def _customer_for_context(owner, user, data=None, *, required=True):
+def _customer_for_context(owner, user, data=None, *, required=True, auto_create=False):
     data = data or {}
     buyer = _buyer_for_user(owner, user)
     if buyer and buyer.customer_id:
@@ -482,11 +541,16 @@ def _customer_for_context(owner, user, data=None, *, required=True):
             Customer.objects.filter(owner=owner, is_active=True),
             pk=customer_id,
         )
+        if auto_create:
+            return _ensure_buyer_for_owner(owner, user, customer=customer)
         return customer, buyer
+
+    if auto_create:
+        return _ensure_buyer_for_owner(owner, user)
 
     if required:
         raise PermissionDenied(
-            f"当前小程序用户未绑定 {owner.name} 客户，请联系管理员。"
+            "当前商品暂未对你的账号开通购买权限，可先浏览或联系客服。"
         )
     return None, buyer
 
@@ -494,7 +558,7 @@ def _customer_for_context(owner, user, data=None, *, required=True):
 def _warehouse_for_user(user):
     warehouse = getattr(user, "warehouse", None)
     if not warehouse:
-        raise PermissionDenied("当前用户未绑定出库仓库，不能从小程序下单。")
+        raise PermissionDenied("当前账号暂未完成商城履约配置，请联系客服处理。")
     return warehouse
 
 
@@ -543,12 +607,9 @@ def _token_payload_for_user(user):
 
 def _sale_mini_context_payload(buyer):
     user = buyer.user
-    owner = buyer.owner
     customer = buyer.customer
-    warehouse = user.warehouse
     bindings = [_buyer_binding_payload(row) for row in _buyer_bindings_for_user(user)]
     return {
-        "owner": {"id": owner.id, "code": owner.code, "name": owner.name},
         "buyer": {
             "id": buyer.id,
             "nickname": buyer.nickname or "",
@@ -558,13 +619,6 @@ def _sale_mini_context_payload(buyer):
         },
         "customer": {
             "id": customer.id,
-            "code": customer.code,
-            "name": customer.name,
-        },
-        "warehouse": {
-            "id": warehouse.id,
-            "code": warehouse.code,
-            "name": warehouse.name,
         },
         "bindings": bindings,
     }
@@ -572,17 +626,17 @@ def _sale_mini_context_payload(buyer):
 
 def _validate_wechat_buyer(buyer, openid, unionid):
     if not buyer:
-        raise PermissionDenied("当前微信用户未绑定客户，请联系管理员。")
+        raise PermissionDenied("当前微信账号暂未开通购买权限，请联系客服。")
     if not buyer.user_id:
-        raise PermissionDenied("当前微信用户未绑定系统账号，请联系管理员。")
+        raise PermissionDenied("当前账号暂未完成商城服务配置，请联系客服处理。")
     if not buyer.user.is_active:
         raise PermissionDenied("当前绑定账号已停用。")
     if not buyer.customer_id or not buyer.customer.is_active:
-        raise PermissionDenied("当前微信用户绑定的客户无效或已停用。")
+        raise PermissionDenied("当前账号购买权限无效或已停用，请联系客服。")
     if buyer.customer.owner_id != buyer.owner_id:
-        raise PermissionDenied("当前微信用户绑定的客户货主不一致。")
+        raise PermissionDenied("当前账号购买权限配置异常，请联系客服处理。")
     if not buyer.user.warehouse_id:
-        raise PermissionDenied("当前微信用户绑定的系统账号未设置出库仓库。")
+        raise PermissionDenied("当前账号暂未完成商城履约配置，请联系客服处理。")
     if buyer.openid and buyer.openid != openid:
         raise PermissionDenied("当前微信用户 openid 与已绑定记录不一致。")
     if unionid and buyer.unionid and buyer.unionid != unionid:
@@ -612,11 +666,11 @@ def _bound_wechat_buyer(data, session_data):
         duplicate = duplicate | scoped(base_qs.filter(openid="", unionid=unionid))
     buyers = list(duplicate.distinct())
     if not buyers:
-        raise PermissionDenied("当前微信用户未绑定客户，请联系管理员。")
+        raise PermissionDenied("当前微信账号暂未开通购买权限，请联系客服。")
     user_ids = {buyer.user_id for buyer in buyers if buyer.user_id}
     if len(user_ids) > 1:
         raise ValidationError(
-            {"openid": "当前微信用户存在多个绑定记录，请联系管理员合并后再登录。"}
+            {"openid": "当前微信账号存在多个购买权限记录，请联系客服处理。"}
         )
 
     buyer = buyers[0]
@@ -652,30 +706,38 @@ def _bound_wechat_buyer(data, session_data):
     return buyer
 
 
+def _saleable_inventory_detail_filter():
+    batch_ready = Q(product__batch_control=False) | (
+        Q(product__batch_control=True) & ~Q(batch_no="")
+    )
+    expiry_ready = Q(product__expiry_control=False) | (
+        Q(product__expiry_control=True)
+        & Q(expiry_date__isnull=False)
+        & (
+            Q(product__expiry_basis=Product.ExpiryBasis.INBOUND)
+            | (
+                Q(product__expiry_basis=Product.ExpiryBasis.MFG)
+                & Q(production_date__isnull=False)
+            )
+        )
+    )
+    serial_ready = Q(product__serial_control=False) | (
+        Q(product__serial_control=True) & Q(serial_no_norm__isnull=False)
+    )
+    return batch_ready & expiry_ready & serial_ready
+
+
 def _available_map(owner, product_ids, warehouse=None):
     if not product_ids:
         return {}
+    qs = InventoryDetail.objects.filter(
+        owner=owner,
+        product_id__in=product_ids,
+        is_active=True,
+    ).filter(_saleable_inventory_detail_filter())
     if warehouse:
-        rows = (
-            InventoryDetail.objects.filter(
-                owner=owner,
-                warehouse=warehouse,
-                product_id__in=product_ids,
-                is_active=True,
-            )
-            .values("product_id")
-            .annotate(available_qty=Sum("available_qty"))
-        )
-    else:
-        rows = (
-            InventorySummary.objects.filter(
-                owner=owner,
-                product_id__in=product_ids,
-                is_active=True,
-            )
-            .values("product_id")
-            .annotate(available_qty=Sum("available_qty"))
-        )
+        qs = qs.filter(warehouse=warehouse)
+    rows = qs.values("product_id").annotate(available_qty=Sum("available_qty"))
     return {row["product_id"]: Decimal(row["available_qty"] or 0) for row in rows}
 
 
@@ -729,6 +791,7 @@ def _available_map_for_configs(configs):
             product_id__in=product_ids,
             is_active=True,
         )
+        .filter(_saleable_inventory_detail_filter())
         .values("owner_id", "product_id")
         .annotate(available_qty=Sum("available_qty"))
     )
@@ -839,15 +902,6 @@ def _product_payload(
     payload = {
         "id": product.id,
         "config_id": config.id,
-        "owner": {
-            "id": owner.id,
-            "code": owner.code,
-            "name": owner.name,
-        },
-        "owner_id": owner.id,
-        "owner_name": owner.name,
-        "code": product.code,
-        "sku": product.sku,
         "name": product.name,
         "spec": product.spec or "",
         "brand": getattr(product.brand, "name", "") if product.brand_id else "",
@@ -857,12 +911,10 @@ def _product_payload(
         ),
         "image_url": _image_url(request, product),
         "price": _str(unit_price, PRICE_QUANT),
-        "base_unit_price": _str(base_unit_price, PRICE_QUANT),
         "market_price": (
             _str(config.market_price, PRICE_QUANT) if config.market_price else ""
         ),
         "order_uom": order_uom,
-        "qty_in_base": _str(qty_in_base, QTY_QUANT),
         "uom_options": uom_options,
         "stock": _stock_payload(config, product, available_qty),
         "badges": {
@@ -886,11 +938,6 @@ def _product_payload(
                 "description": product.description or "",
                 "pack_requirement": product.get_pack_requirement_display(),
                 "pack_note": product.pack_note or "",
-                "barcodes": {
-                    "gtin": product.gtin or "",
-                    "unit_barcode": product.unit_barcode or "",
-                    "carton_barcode": product.carton_barcode or "",
-                },
             }
         )
     return payload
@@ -903,9 +950,7 @@ def _line_quote_payload(
     base_qty = _qty(qty * qty_in_base)
     owner = config.owner
     return {
-        "owner": {"id": owner.id, "code": owner.code, "name": owner.name},
         "owner_id": owner.id,
-        "owner_name": owner.name,
         "config_id": config.id,
         "product_id": product.id,
         "product_code": product.code,
@@ -924,6 +969,10 @@ def _line_quote_payload(
         "ok": True,
         "message": "",
     }
+
+
+def _buyer_product_name(product):
+    return product.name or "该商品"
 
 
 def _adjustment_spec_payload(spec):
@@ -992,31 +1041,32 @@ def _build_order_preview(
 
         qty_in_base = _qty_in_base_for_uom(product, order_uom) or Decimal("1")
         min_qty, multiple_qty = _effective_rules(product, config, policy, qty_in_base)
+        product_name = _buyer_product_name(product)
         if qty < min_qty:
             line_ok = False
             message = (
-                f"{product.code} 起订量为 {_str(min_qty, QTY_QUANT)} {order_uom}。"
+                f"{product_name} 起订量为 {_str(min_qty, QTY_QUANT)} {order_uom}。"
             )
         if config.max_order_qty and qty > config.max_order_qty:
             line_ok = False
-            message = f"{product.code} 超过限购数量 {_str(config.max_order_qty, QTY_QUANT)} {order_uom}。"
+            message = f"{product_name} 超过限购数量 {_str(config.max_order_qty, QTY_QUANT)} {order_uom}。"
         if not _is_multiple(qty, multiple_qty):
             line_ok = False
-            message = f"{product.code} 购买数量需按 {_str(multiple_qty, QTY_QUANT)} {order_uom} 递增。"
+            message = f"{product_name} 购买数量需按 {_str(multiple_qty, QTY_QUANT)} {order_uom} 递增。"
         if (
             not product.break_box_allowed
             and qty_in_base == Decimal("1")
             and product.packages.exists()
         ):
             line_ok = False
-            message = f"{product.code} 不允许拆箱销售，请选择整箱单位。"
+            message = f"{product_name} 不支持当前单位购买，请选择整箱单位。"
 
         base_qty = _qty(qty * qty_in_base)
         available_qty = available.get(product.id, Decimal("0"))
         if base_qty > available_qty:
             line_ok = False
             message = (
-                f"{product.code} 可用库存不足：需要 {_str(base_qty, QTY_QUANT)}，"
+                f"{product_name} 库存不足：需要 {_str(base_qty, QTY_QUANT)}，"
                 f"当前 {_str(available_qty, QTY_QUANT)}。"
             )
 
@@ -1080,13 +1130,9 @@ def _build_order_preview(
             "ok": ok,
             "warehouse": {
                 "id": warehouse.id,
-                "code": warehouse.code,
-                "name": warehouse.name,
             },
             "customer": {
                 "id": customer.id,
-                "code": customer.code,
-                "name": customer.name,
             },
             "goods_amount": _str(goods_amount, MONEY_QUANT),
             "adjustment_amount": _str(adjustment_amount, MONEY_QUANT),
@@ -1103,8 +1149,363 @@ def _build_order_preview(
     )
 
 
+def _order_has_owner_scoped_adjustments(data):
+    return bool(data.get("coupon_id")) or int(data.get("points") or 0) > 0
+
+
+def _cart_ids_by_owner_for_payload(request, data):
+    cart_ids = data.get("cart_ids") or []
+    if not cart_ids:
+        return {}
+    carts = SaleMiniCart.objects.filter(
+        id__in=cart_ids,
+        buyer_user__user=request.user,
+        is_active=True,
+    ).select_related("owner", "customer", "buyer_user")
+    return {cart.owner_id: cart.id for cart in carts}
+
+
+def _order_contexts_for_payload(request, data, *, auto_create=False):
+    owner_id = data.get("owner_id")
+    if owner_id:
+        binding = get_object_or_404(
+            _buyer_bindings_for_user(request.user),
+            owner_id=owner_id,
+        )
+        customer, buyer = _customer_for_context(
+            binding.owner,
+            request.user,
+            data,
+            auto_create=auto_create,
+        )
+        return [
+            {
+                "owner": binding.owner,
+                "customer": customer,
+                "buyer": buyer,
+                "lines": data.get("lines", []),
+                "cart_id": data.get("cart_id"),
+            }
+        ]
+
+    product_ids = [line["product_id"] for line in data.get("lines", [])]
+    configs = list(_public_config_qs().filter(product_id__in=product_ids))
+    configs_by_product = {config.product_id: config for config in configs}
+    missing = [pid for pid in product_ids if pid not in configs_by_product]
+    if missing:
+        raise ValidationError({"products": f"商品未上架或无权购买：{missing}"})
+
+    cart_ids_by_owner = _cart_ids_by_owner_for_payload(request, data)
+    grouped = {}
+    for line in data.get("lines", []):
+        config = configs_by_product[line["product_id"]]
+        bucket = grouped.setdefault(
+            config.owner_id,
+            {
+                "owner": config.owner,
+                "lines": [],
+                "cart_id": cart_ids_by_owner.get(config.owner_id),
+            },
+        )
+        bucket["lines"].append(line)
+    if len(grouped) == 1 and data.get("cart_id"):
+        next(iter(grouped.values()))["cart_id"] = data.get("cart_id")
+
+    contexts = []
+    for group in grouped.values():
+        customer, buyer = _customer_for_context(
+            group["owner"],
+            request.user,
+            data,
+            auto_create=True if auto_create or not owner_id else auto_create,
+        )
+        contexts.append(
+            {
+                "owner": group["owner"],
+                "customer": customer,
+                "buyer": buyer,
+                "lines": group["lines"],
+                "cart_id": group["cart_id"],
+            }
+        )
+    return contexts
+
+
+def _combined_preview_payload(group_previews):
+    goods_amount = Decimal("0.00")
+    adjustment_amount = Decimal("0.00")
+    payable_amount = Decimal("0.00")
+    lines = []
+    groups = []
+    ok = True
+    warehouse = None
+    for group in group_previews:
+        preview = dict(group["preview"])
+        preview["owner_id"] = group["owner"].id
+        groups.append(preview)
+        lines.extend(preview["lines"])
+        ok = ok and preview["ok"]
+        goods_amount += Decimal(preview["goods_amount"])
+        adjustment_amount += Decimal(preview["adjustment_amount"])
+        payable_amount += Decimal(preview["payable_amount"])
+        warehouse = warehouse or preview.get("warehouse")
+
+    return {
+        "ok": ok,
+        "is_combined": True,
+        "warehouse": warehouse or {},
+        "customer": {"id": None},
+        "goods_amount": _str(goods_amount, MONEY_QUANT),
+        "adjustment_amount": _str(adjustment_amount, MONEY_QUANT),
+        "payable_amount": _str(payable_amount, MONEY_QUANT),
+        "total_amount": _str(payable_amount, MONEY_QUANT),
+        "adjustments": [],
+        "line_count": len(lines),
+        "lines": lines,
+        "groups": groups,
+    }
+
+
+def _create_sale_mini_order_mapping(
+    request,
+    owner,
+    customer,
+    buyer,
+    data,
+    lines_data,
+    *,
+    cart_id=None,
+    adjustment_data=None,
+    source="sale-mini",
+):
+    preview, contexts, adjustment_specs = _build_order_preview(
+        request,
+        owner,
+        customer,
+        lines_data,
+        strict=True,
+        buyer=buyer,
+        adjustment_data=adjustment_data or data,
+    )
+    warehouse = _warehouse_for_user(request.user)
+    delivery_method = _delivery_method(data)
+    contact, contact_phone, ship_to, _address = _fulfillment_for_order_payload(
+        owner, customer, data
+    )
+
+    order = OutboundOrder.objects.create(
+        owner=owner,
+        customer=customer,
+        warehouse=warehouse,
+        outbound_type="SALES",
+        delivery_method=delivery_method,
+        submit_status="SUBMITTED",
+        approval_status="OWNER_PENDING",
+        ship_to=ship_to,
+        contact=contact,
+        contact_phone=contact_phone,
+        memo=data.get("remark", ""),
+        biz_date=_business_date(),
+        created_by=request.user,
+        updated_by=request.user,
+    )
+    order.src_bill_no = f"SALE-MINI-{order.id}"
+    order.save(update_fields=["src_bill_no", "updated_at"])
+    for ctx in contexts:
+        line_kwargs = {
+            "order": order,
+            "product": ctx["product"],
+            "base_qty": ctx["base_qty"],
+            "base_price": ctx["base_price"],
+            "final_line_amount": ctx["line_amount"],
+            "pack_requirement": ctx["product"].pack_requirement,
+            "pack_note": ctx["product"].pack_note or "",
+            "created_by": request.user,
+            "updated_by": request.user,
+        }
+        if ctx["package"]:
+            line_kwargs.update(
+                {
+                    "aux_qty": ctx["qty"],
+                    "aux_uom": ctx["package"],
+                    "aux_price": ctx["unit_price"],
+                }
+            )
+        OutboundOrderLine.objects.create(**line_kwargs)
+
+    order.final_order_amount = Decimal(preview["goods_amount"])
+    order.save(update_fields=["final_order_amount", "updated_at"])
+    order.owner_approve(by_user=request.user, allow_backorder=False)
+    payment_method = data.get("payment_method") or "OFFLINE"
+    mapping = SaleMiniOrderMapping.objects.create(
+        owner=owner,
+        customer=customer,
+        buyer_user=buyer,
+        outbound_order=order,
+        payment_status=(
+            SaleMiniOrderMapping.PaymentStatus.UNPAID
+            if payment_method == "WECHAT"
+            else SaleMiniOrderMapping.PaymentStatus.OFFLINE
+        ),
+        goods_amount=Decimal(preview["goods_amount"]),
+        adjustment_amount=Decimal(preview["adjustment_amount"]),
+        payable_amount=Decimal(preview["payable_amount"]),
+        pay_deadline_at=_payment_deadline() if payment_method == "WECHAT" else None,
+        source=source,
+        created_by=request.user,
+        updated_by=request.user,
+    )
+    lock_adjustments(
+        owner=owner,
+        customer=customer,
+        buyer=buyer,
+        mapping=mapping,
+        specs=adjustment_specs,
+        payment_method=payment_method,
+        by_user=request.user,
+    )
+    create_distribution_record(
+        mapping,
+        referrer_id=data.get("referrer_buyer_id"),
+        by_user=request.user,
+    )
+    _clear_source_cart(
+        request,
+        owner,
+        customer,
+        buyer,
+        cart_id,
+        contexts,
+    )
+    return mapping
+
+
+SALE_MINI_BATCH_SOURCE_PREFIX = "sale-mini-batch-"
+
+
+def _new_sale_mini_batch_source():
+    return f"{SALE_MINI_BATCH_SOURCE_PREFIX}{uuid.uuid4().hex[:10]}"
+
+
+def _is_sale_mini_batch_source(source):
+    return str(source or "").startswith(SALE_MINI_BATCH_SOURCE_PREFIX)
+
+
+def _public_batch_order_no(source):
+    suffix = str(source or "").removeprefix(SALE_MINI_BATCH_SOURCE_PREFIX)
+    return f"SC{suffix.upper()}" if suffix else "SC"
+
+
+def _combined_display_status(orders):
+    statuses = {order["status"] for order in orders}
+    if len(statuses) == 1:
+        return orders[0]["status"], orders[0]["status_name"]
+    if "WAIT_PAY" in statuses:
+        return "WAIT_PAY", "待付款"
+    if "REFUNDING" in statuses:
+        return "REFUNDING", "退款中"
+    if statuses <= {"COMPLETED", "REFUNDED"}:
+        return "COMPLETED", "已完成"
+    if statuses <= {"CANCELLED", "REFUNDED"}:
+        return "CANCELLED", "已取消"
+    return "WAIT_SHIP", "待发货"
+
+
+def _combined_order_payload(request, mappings):
+    orders = [_order_payload(request, mapping) for mapping in mappings]
+    if len(orders) == 1:
+        return orders[0]
+
+    goods_amount = sum(Decimal(order["goods_amount"]) for order in orders)
+    adjustment_amount = sum(Decimal(order["adjustment_amount"]) for order in orders)
+    payable_amount = sum(Decimal(order["payable_amount"]) for order in orders)
+    first = orders[0]
+    display_status, display_status_name = _combined_display_status(orders)
+    payment_statuses = {order["payment_status"] for order in orders}
+    deadline_values = [
+        order["pay_deadline_at"] for order in orders if order.get("pay_deadline_at")
+    ]
+    source = mappings[0].source if mappings else ""
+    return {
+        "id": first["id"],
+        "mapping_id": first["mapping_id"],
+        "is_combined": True,
+        "order_count": len(orders),
+        "orders": orders,
+        "order_no": _public_batch_order_no(source),
+        "created_at": first.get("created_at", ""),
+        "biz_date": first.get("biz_date", ""),
+        "status": display_status,
+        "status_name": display_status_name,
+        "submit_status": first.get("submit_status", ""),
+        "approval_status": first.get("approval_status", ""),
+        "payment_status": (
+            first["payment_status"] if len(payment_statuses) == 1 else "MIXED"
+        ),
+        "payment_status_name": (
+            first["payment_status_name"] if len(payment_statuses) == 1 else "混合"
+        ),
+        "pay_deadline_at": min(deadline_values) if deadline_values else "",
+        "paid_at": first.get("paid_at", ""),
+        "payment": first.get("payment", {}),
+        "refund": first.get("refund", {}),
+        "after_sale": None,
+        "customer": first.get("customer", {}),
+        "warehouse": first.get("warehouse", {}),
+        "delivery_method": first["delivery_method"],
+        "delivery_method_name": first["delivery_method_name"],
+        "contact": first.get("contact", ""),
+        "contact_phone": first.get("contact_phone", ""),
+        "ship_to": first.get("ship_to", ""),
+        "remark": first.get("remark", ""),
+        "goods_amount": _str(goods_amount, MONEY_QUANT),
+        "adjustment_amount": _str(adjustment_amount, MONEY_QUANT),
+        "payable_amount": _str(payable_amount, MONEY_QUANT),
+        "total_amount": _str(payable_amount, MONEY_QUANT),
+        "adjustments": [
+            adjustment
+            for order in orders
+            for adjustment in order.get("adjustments", [])
+        ],
+        "line_count": sum(order["line_count"] for order in orders),
+        "lines": [
+            line
+            for order in orders
+            for line in order.get("lines", [])
+        ],
+    }
+
+
+def _order_mapping_groups(mappings):
+    groups = []
+    index = {}
+    for mapping in mappings:
+        key = (
+            mapping.source
+            if _is_sale_mini_batch_source(mapping.source)
+            else f"single:{mapping.id}"
+        )
+        if key not in index:
+            index[key] = []
+            groups.append(index[key])
+        index[key].append(mapping)
+    return groups
+
+
+def _order_group_payload(request, mappings):
+    mappings = list(mappings)
+    if len(mappings) == 1:
+        return _order_payload(request, mappings[0])
+    return _combined_order_payload(request, mappings)
+
+
 def _cart_for_owner(request, owner, data=None, *, create=True, for_update=False):
-    customer, buyer = _customer_for_context(owner, request.user, data or {})
+    customer, buyer = _customer_for_context(
+        owner,
+        request.user,
+        data or {},
+        auto_create=True,
+    )
     qs = SaleMiniCart.objects.filter(
         owner=owner,
         customer=customer,
@@ -1140,9 +1541,7 @@ def _cart_invalid_line(request, item, message):
         "cart_id": item.cart_id,
         "item_id": item.id,
         "key": _cart_key(product.id, item.order_uom),
-        "owner": {"id": owner.id, "code": owner.code, "name": owner.name},
         "owner_id": owner.id,
-        "owner_name": owner.name,
         "product_id": product.id,
         "product_code": product.code,
         "product_name": product.name,
@@ -1174,19 +1573,13 @@ def _cart_payload(request, cart, owner, customer):
         return {
             "id": cart.id,
             "cart_id": cart.id,
-            "owner": {"id": owner.id, "code": owner.code, "name": owner.name},
             "owner_id": owner.id,
-            "owner_name": owner.name,
             "ok": True,
             "warehouse": {
                 "id": warehouse.id,
-                "code": warehouse.code,
-                "name": warehouse.name,
             },
             "customer": {
                 "id": customer.id,
-                "code": customer.code,
-                "name": customer.name,
             },
             "goods_amount": _str(Decimal("0"), MONEY_QUANT),
             "adjustment_amount": _str(Decimal("0"), MONEY_QUANT),
@@ -1257,16 +1650,12 @@ def _cart_payload(request, cart, owner, customer):
     return {
         "id": cart.id,
         "cart_id": cart.id,
-        "owner": {"id": owner.id, "code": owner.code, "name": owner.name},
         "owner_id": owner.id,
-        "owner_name": owner.name,
         "ok": ok,
         "warehouse": {
             "id": warehouse.id,
-            "code": warehouse.code,
-            "name": warehouse.name,
         },
-        "customer": {"id": customer.id, "code": customer.code, "name": customer.name},
+        "customer": {"id": customer.id},
         "goods_amount": _str(goods_amount, MONEY_QUANT),
         "adjustment_amount": _str(adjustment_amount, MONEY_QUANT),
         "payable_amount": _str(payable_amount, MONEY_QUANT),
@@ -1286,8 +1675,6 @@ def _empty_combined_cart_payload(request):
         "ok": True,
         "warehouse": {
             "id": warehouse.id,
-            "code": warehouse.code,
-            "name": warehouse.name,
         },
         "goods_amount": _str(Decimal("0"), MONEY_QUANT),
         "adjustment_amount": _str(Decimal("0"), MONEY_QUANT),
@@ -1344,8 +1731,6 @@ def _combined_cart_payload(request):
         "ok": ok,
         "warehouse": {
             "id": warehouse.id,
-            "code": warehouse.code,
-            "name": warehouse.name,
         },
         "goods_amount": _str(goods_amount, MONEY_QUANT),
         "adjustment_amount": _str(adjustment_amount, MONEY_QUANT),
@@ -1428,6 +1813,7 @@ def _clear_source_cart(request, owner, customer, buyer, cart_id, contexts):
 def _address_payload(address):
     return {
         "id": address.id,
+        "owner_id": address.owner_id,
         "contact": address.contact,
         "phone": address.phone,
         "province": address.province,
@@ -1443,19 +1829,19 @@ def _fulfillment_status(order):
     if order.approval_status == "CANCELLED":
         return "CANCELLED", "已取消"
     if order.approval_status in {"OWNER_REJECTED", "WHS_REJECTED"}:
-        return "REJECTED", "已驳回"
+        return "REJECTED", "已关闭"
     if order.is_closed:
         return "COMPLETED", "已完成"
     if order.submit_status == "DRAFT":
         return "DRAFT", "待提交"
     if order.approval_status == "OWNER_PENDING":
-        return "PENDING_REVIEW", "待审核"
+        return "PENDING_REVIEW", "平台处理中"
     if order.approval_status == "OWNER_APPROVED":
-        return "WAIT_WAREHOUSE", "待仓库确认"
+        return "WAIT_WAREHOUSE", "平台处理中"
     if order.approval_status == "WHS_PENDING":
-        return "WAIT_WAREHOUSE", "待仓库确认"
+        return "WAIT_WAREHOUSE", "平台处理中"
     if order.approval_status == "WHS_APPROVED":
-        return "WAIT_PICK", "待拣货"
+        return "WAIT_PICK", "备货中"
     return "PROCESSING", "处理中"
 
 
@@ -1640,13 +2026,7 @@ def _order_payload(request, mapping):
         "id": order.id,
         "mapping_id": mapping.id,
         "order_no": order.order_no,
-        "owner": {
-            "id": order.owner_id,
-            "code": getattr(order.owner, "code", ""),
-            "name": getattr(order.owner, "name", ""),
-        },
         "owner_id": order.owner_id,
-        "owner_name": getattr(order.owner, "name", ""),
         "created_at": order.created_at.isoformat() if order.created_at else "",
         "biz_date": order.biz_date.isoformat() if order.biz_date else "",
         "status": display_status,
@@ -1664,13 +2044,9 @@ def _order_payload(request, mapping):
         "after_sale": _after_sale_payload(latest_after_sale),
         "customer": {
             "id": order.customer_id,
-            "code": getattr(order.customer, "code", ""),
-            "name": getattr(order.customer, "name", ""),
         },
         "warehouse": {
             "id": order.warehouse_id,
-            "code": getattr(order.warehouse, "code", ""),
-            "name": getattr(order.warehouse, "name", ""),
         },
         "delivery_method": order.delivery_method,
         "delivery_method_name": (
@@ -1718,35 +2094,16 @@ class SaleMiniProfileApi(APIView):
             )
         if not primary and bindings:
             primary = bindings[0]
-        owner = primary.owner if primary else getattr(request.user, "owner", None)
         customer = primary.customer if primary else None
         buyer = primary
         return Response(
             {
-                "owner": (
-                    {"id": owner.id, "code": owner.code, "name": owner.name}
-                    if owner
-                    else None
-                ),
                 "buyer": {
                     "id": buyer.id if buyer else None,
                     "nickname": buyer.nickname if buyer else "",
                     "phone": buyer.phone if buyer else "",
                 },
-                "customer": (
-                    {"id": customer.id, "code": customer.code, "name": customer.name}
-                    if customer
-                    else None
-                ),
-                "warehouse": (
-                    {
-                        "id": request.user.warehouse_id,
-                        "code": getattr(request.user.warehouse, "code", ""),
-                        "name": getattr(request.user.warehouse, "name", ""),
-                    }
-                    if getattr(request.user, "warehouse_id", None)
-                    else None
-                ),
+                "customer": ({"id": customer.id} if customer else None),
                 "bindings": [_buyer_binding_payload(row) for row in bindings],
             }
         )
@@ -1777,8 +2134,6 @@ class SaleMiniHomeApi(APIView):
             {
                 "id": banner.id,
                 "title": banner.title,
-                "owner_id": banner.owner_id,
-                "owner_name": banner.owner.name,
                 "image_url": banner.image_url,
                 "link_type": banner.link_type,
                 "link_value": banner.link_value,
@@ -1813,7 +2168,6 @@ class SaleMiniHomeApi(APIView):
             {
                 "banners": banners,
                 "categories": categories,
-                "merchants": _merchant_rows()[:8],
                 "recommend_products": take("is_recommended", 12, fallback=True),
                 "hot_products": take("is_hot", 12, fallback=True),
                 "new_products": take("is_new", 8),
@@ -1846,7 +2200,6 @@ def _category_rows(owner=None, owner_id=None):
     return [
         {
             "id": category.id,
-            "code": category.code,
             "name": category.name,
             "parent_id": category.parent_id,
             "product_count": category.product_count or 0,
@@ -1881,39 +2234,10 @@ def _brand_rows(owner_id=None, category_id=None):
     return [
         {
             "id": brand.id,
-            "code": brand.code,
             "name": brand.name,
             "product_count": brand.product_count or 0,
         }
         for brand in qs
-    ]
-
-
-def _merchant_rows():
-    rows = (
-        _public_config_qs()
-        .values("owner_id", "owner__code", "owner__name")
-        .annotate(
-            product_count=Count("product_id", distinct=True),
-            hot_count=Count("product_id", filter=Q(is_hot=True), distinct=True),
-            recommended_count=Count(
-                "product_id",
-                filter=Q(is_recommended=True),
-                distinct=True,
-            ),
-        )
-        .order_by("owner__code")
-    )
-    return [
-        {
-            "id": row["owner_id"],
-            "code": row["owner__code"],
-            "name": row["owner__name"],
-            "product_count": row["product_count"] or 0,
-            "hot_count": row["hot_count"] or 0,
-            "recommended_count": row["recommended_count"] or 0,
-        }
-        for row in rows
     ]
 
 
@@ -1926,6 +2250,7 @@ def _sale_mini_coupon_payload(coupon, order_amount=None):
     usable = order_amount is None or order_amount >= template.threshold_amount
     return {
         "id": coupon.id,
+        "owner_id": coupon.owner_id,
         "coupon_no": coupon.coupon_no,
         "title": template.title,
         "coupon_type": template.coupon_type,
@@ -1941,18 +2266,11 @@ def _sale_mini_coupon_payload(coupon, order_amount=None):
     }
 
 
-class SaleMiniMerchantApi(APIView):
-    permission_classes = [AllowAny]
-
-    def get(self, request):
-        return Response(_merchant_rows())
-
-
 class SaleMiniCategoryApi(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        return Response(_category_rows(owner_id=request.query_params.get("owner_id")))
+        return Response(_category_rows())
 
 
 class SaleMiniBrandApi(APIView):
@@ -1961,7 +2279,6 @@ class SaleMiniBrandApi(APIView):
     def get(self, request):
         return Response(
             _brand_rows(
-                owner_id=request.query_params.get("owner_id"),
                 category_id=request.query_params.get("category_id"),
             )
         )
@@ -1977,40 +2294,56 @@ class SaleMiniCouponListApi(APIView):
                 _buyer_bindings_for_user(request.user),
                 owner_id=owner_id,
             )
-            owner = binding.owner
+            contexts = [(binding.owner, binding.customer, binding)]
         else:
-            owner = _default_owner_for_user(request.user)
-        customer, buyer = _customer_for_context(
-            owner, request.user, request.query_params
-        )
+            contexts = [
+                (binding.owner, binding.customer, binding)
+                for binding in _buyer_bindings_for_user(request.user)
+            ]
+            if not contexts:
+                owner = _default_owner_for_user(request.user)
+                customer, buyer = _customer_for_context(
+                    owner, request.user, request.query_params
+                )
+                contexts = [(owner, customer, buyer)]
         today = _business_date()
         now = timezone.now()
         order_amount = request.query_params.get("order_amount")
-        qs = (
-            SaleMiniCoupon.objects.select_related("template")
-            .filter(
-                owner=owner,
-                customer=customer,
-                is_active=True,
-                status=SaleMiniCoupon.Status.AVAILABLE,
-                template__is_active=True,
-                template__effective_from__lte=today,
+        rows = []
+        for owner, customer, buyer in contexts:
+            qs = (
+                SaleMiniCoupon.objects.select_related("template")
+                .filter(
+                    owner=owner,
+                    customer=customer,
+                    is_active=True,
+                    status=SaleMiniCoupon.Status.AVAILABLE,
+                    template__is_active=True,
+                    template__effective_from__lte=today,
+                )
+                .filter(
+                    Q(template__effective_to__isnull=True)
+                    | Q(template__effective_to__gte=today)
+                )
+                .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+                .order_by(
+                    "template__threshold_amount", "-template__discount_amount", "id"
+                )
             )
-            .filter(
-                Q(template__effective_to__isnull=True)
-                | Q(template__effective_to__gte=today)
-            )
-            .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
-            .order_by("template__threshold_amount", "-template__discount_amount", "id")
-        )
-        if buyer:
-            qs = qs.filter(Q(buyer_user=buyer) | Q(buyer_user__isnull=True))
-        return Response(
-            [
+            if buyer:
+                qs = qs.filter(Q(buyer_user=buyer) | Q(buyer_user__isnull=True))
+            rows.extend(
                 _sale_mini_coupon_payload(coupon, order_amount=order_amount)
                 for coupon in qs
-            ]
+            )
+        rows.sort(
+            key=lambda row: (
+                Decimal(row["threshold_amount"]),
+                -Decimal(row["discount_amount"]),
+                row["id"],
+            )
         )
+        return Response(rows)
 
 
 class SaleMiniPointBalanceApi(APIView):
@@ -2023,13 +2356,24 @@ class SaleMiniPointBalanceApi(APIView):
                 _buyer_bindings_for_user(request.user),
                 owner_id=owner_id,
             )
-            owner = binding.owner
+            contexts = [(binding.owner, binding.customer, binding)]
         else:
-            owner = _default_owner_for_user(request.user)
-        customer, buyer = _customer_for_context(
-            owner, request.user, request.query_params
-        )
-        points, frozen = point_balance(owner, customer, buyer)
+            contexts = [
+                (binding.owner, binding.customer, binding)
+                for binding in _buyer_bindings_for_user(request.user)
+            ]
+            if not contexts:
+                owner = _default_owner_for_user(request.user)
+                customer, buyer = _customer_for_context(
+                    owner, request.user, request.query_params
+                )
+                contexts = [(owner, customer, buyer)]
+        points = 0
+        frozen = 0
+        for owner, customer, buyer in contexts:
+            context_points, context_frozen = point_balance(owner, customer, buyer)
+            points += context_points
+            frozen += context_frozen
         try:
             rate = Decimal(
                 str(getattr(settings, "SALE_MINI_POINT_EXCHANGE_RATE", "100"))
@@ -2055,26 +2399,21 @@ class SaleMiniProductListApi(APIView):
         search = (request.query_params.get("search") or "").strip()
         category_id = request.query_params.get("category_id")
         brand_id = request.query_params.get("brand_id")
-        owner_id = request.query_params.get("owner_id")
         only_stock = request.query_params.get("only_stock") in {"1", "true", "True"}
         ordering = request.query_params.get("ordering") or "sort"
 
         qs = _public_config_qs()
         if search:
             qs = qs.filter(
-                Q(product__code__icontains=search)
-                | Q(product__sku__icontains=search)
-                | Q(product__name__icontains=search)
-                | Q(product__gtin__icontains=search)
-                | Q(product__unit_barcode__icontains=search)
-                | Q(product__carton_barcode__icontains=search)
+                Q(product__name__icontains=search)
+                | Q(product__spec__icontains=search)
+                | Q(product__brand__name__icontains=search)
+                | Q(product__category__name__icontains=search)
             )
         if category_id:
             qs = qs.filter(product__category_id=category_id)
         if brand_id:
             qs = qs.filter(product__brand_id=brand_id)
-        if owner_id:
-            qs = qs.filter(owner_id=owner_id)
         if only_stock:
             stock_configs = list(qs)
             stocked_qty = _available_map_for_configs(stock_configs)
@@ -2127,10 +2466,7 @@ class SaleMiniProductDetailApi(APIView):
 
     def get(self, request, pk):
         qs = _public_config_qs().filter(product_id=pk)
-        owner_id = request.query_params.get("owner_id")
         config_id = request.query_params.get("config_id")
-        if owner_id:
-            qs = qs.filter(owner_id=owner_id)
         if config_id:
             qs = qs.filter(id=config_id)
         config = qs.order_by("sort_order", "id").first()
@@ -2160,20 +2496,32 @@ class SaleMiniAddressListCreateApi(APIView):
                 _buyer_bindings_for_user(request.user),
                 owner_id=owner_id,
             )
-            owner = binding.owner
+            contexts = [(binding.owner, binding.customer, binding)]
         else:
-            owner = _default_owner_for_user(request.user)
-        customer, buyer = _customer_for_context(
-            owner, request.user, request.query_params
-        )
-        qs = MiniCustomerAddress.objects.filter(
-            owner=owner, customer=customer, is_active=True
-        )
-        if buyer:
-            qs = qs.filter(Q(buyer_user=buyer) | Q(buyer_user__isnull=True))
-        return Response(
-            [_address_payload(address) for address in qs.order_by("-is_default", "-id")]
-        )
+            contexts = [
+                (binding.owner, binding.customer, binding)
+                for binding in _buyer_bindings_for_user(request.user)
+            ]
+            if not contexts:
+                owner = _default_owner_for_user(request.user)
+                customer, buyer = _customer_for_context(
+                    owner, request.user, request.query_params
+                )
+                contexts = [(owner, customer, buyer)]
+        rows = []
+        seen = set()
+        for owner, customer, buyer in contexts:
+            qs = MiniCustomerAddress.objects.filter(
+                owner=owner, customer=customer, is_active=True
+            )
+            if buyer:
+                qs = qs.filter(Q(buyer_user=buyer) | Q(buyer_user__isnull=True))
+            for address in qs.order_by("-is_default", "-id"):
+                if address.id in seen:
+                    continue
+                seen.add(address.id)
+                rows.append(_address_payload(address))
+        return Response(rows)
 
     @transaction.atomic
     def post(self, request):
@@ -2278,6 +2626,18 @@ class SaleMiniCartApi(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        cart_id = request.query_params.get("cart_id")
+        if cart_id:
+            cart = get_object_or_404(
+                SaleMiniCart.objects.select_related("owner", "customer", "buyer_user")
+                .filter(
+                    id=cart_id,
+                    buyer_user__user=request.user,
+                    is_active=True,
+                )
+            )
+            return Response(_cart_payload(request, cart, cart.owner, cart.customer))
+
         owner_id = request.query_params.get("owner_id")
         if not owner_id:
             return Response(_combined_cart_payload(request))
@@ -2440,17 +2800,35 @@ class SaleMiniOrderPreviewApi(APIView):
         serializer = SaleMiniPreviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        owner = _owner_for_order_payload(request, data)
-        customer, buyer = _customer_for_context(owner, request.user, data)
-        preview, _contexts, _adjustment_specs = _build_order_preview(
-            request,
-            owner,
-            customer,
-            data["lines"],
-            buyer=buyer,
-            adjustment_data=data,
-        )
-        preview["address"] = _fulfillment_preview_payload(owner, customer, data)
+        order_contexts = _order_contexts_for_payload(request, data, auto_create=True)
+        if len(order_contexts) > 1 and _order_has_owner_scoped_adjustments(data):
+            raise ValidationError(
+                {
+                    "adjustments": (
+                        "多包裹订单暂不支持优惠券或积分抵扣，请先不使用优惠后再提交。"
+                    )
+                }
+            )
+
+        group_previews = []
+        for context in order_contexts:
+            owner = context["owner"]
+            customer = context["customer"]
+            buyer = context["buyer"]
+            preview, _contexts, _adjustment_specs = _build_order_preview(
+                request,
+                owner,
+                customer,
+                context["lines"],
+                buyer=buyer,
+                adjustment_data=data,
+            )
+            preview["address"] = _fulfillment_preview_payload(owner, customer, data)
+            group_previews.append({"owner": owner, "preview": preview})
+
+        if len(group_previews) > 1:
+            return Response(_combined_preview_payload(group_previews))
+        preview = group_previews[0]["preview"]
         return Response(preview)
 
 
@@ -2488,7 +2866,7 @@ def _delivery_method(data):
 
 
 def _pickup_ship_to(owner, data):
-    return (data.get("ship_to") or "").strip() or f"客户自提 - {owner.name}"
+    return (data.get("ship_to") or "").strip() or "客户自提"
 
 
 def _fulfillment_preview_payload(owner, customer, data):
@@ -2536,11 +2914,9 @@ def _owner_for_order_payload(request, data):
     configs = list(_public_config_qs().filter(product_id__in=product_ids))
     owner_ids = {config.owner_id for config in configs}
     if len(owner_ids) != 1:
-        raise ValidationError(
-            {"owner_id": "购物车包含多个商家商品，请按商家分别结算。"}
-        )
+        raise ValidationError({"owner_id": "购物车已按配送包裹拆分，可统一提交。"})
     owner = configs[0].owner
-    _customer_for_context(owner, request.user, data)
+    _customer_for_context(owner, request.user, data, auto_create=True)
     return owner
 
 
@@ -2551,10 +2927,7 @@ class SaleMiniOrderListCreateApi(APIView):
     def get(self, request):
         status_param = (request.query_params.get("status") or "").strip()
         search = (request.query_params.get("search") or "").strip()
-        owner_id = request.query_params.get("owner_id")
         bindings = list(_buyer_bindings_for_user(request.user))
-        if owner_id:
-            bindings = [row for row in bindings if str(row.owner_id) == str(owner_id)]
         if not bindings:
             return Response([])
         qs = (
@@ -2575,10 +2948,11 @@ class SaleMiniOrderListCreateApi(APIView):
                 | Q(outbound_order__src_bill_no__icontains=search)
             )
 
+        groups = _order_mapping_groups(list(qs))
         paginator = self.pagination_class()
-        page = paginator.paginate_queryset(qs, request, view=self)
-        mappings = page if page is not None else qs
-        data = [_order_payload(request, mapping) for mapping in mappings]
+        page = paginator.paginate_queryset(groups, request, view=self)
+        mapping_groups = page if page is not None else groups
+        data = [_order_group_payload(request, group) for group in mapping_groups]
         if page is not None:
             return paginator.get_paginated_response(data)
         return Response(data)
@@ -2588,108 +2962,37 @@ class SaleMiniOrderListCreateApi(APIView):
         serializer = SaleMiniPreviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        owner = _owner_for_order_payload(request, data)
-        customer, buyer = _customer_for_context(owner, request.user, data)
-        preview, contexts, adjustment_specs = _build_order_preview(
-            request,
-            owner,
-            customer,
-            data["lines"],
-            strict=True,
-            buyer=buyer,
-            adjustment_data=data,
-        )
-        warehouse = _warehouse_for_user(request.user)
-        delivery_method = _delivery_method(data)
-        contact, contact_phone, ship_to, _address = _fulfillment_for_order_payload(
-            owner, customer, data
-        )
+        order_contexts = _order_contexts_for_payload(request, data, auto_create=True)
+        if len(order_contexts) > 1 and _order_has_owner_scoped_adjustments(data):
+            raise ValidationError(
+                {
+                    "adjustments": (
+                        "多包裹订单暂不支持优惠券或积分抵扣，请先不使用优惠后再提交。"
+                    )
+                }
+            )
 
-        order = OutboundOrder.objects.create(
-            owner=owner,
-            customer=customer,
-            warehouse=warehouse,
-            outbound_type="SALES",
-            delivery_method=delivery_method,
-            submit_status="SUBMITTED",
-            approval_status="OWNER_PENDING",
-            ship_to=ship_to,
-            contact=contact,
-            contact_phone=contact_phone,
-            memo=data.get("remark", ""),
-            biz_date=_business_date(),
-            created_by=request.user,
-            updated_by=request.user,
+        batch_source = (
+            _new_sale_mini_batch_source() if len(order_contexts) > 1 else "sale-mini"
         )
-        order.src_bill_no = f"SALE-MINI-{order.id}"
-        order.save(update_fields=["src_bill_no", "updated_at"])
-        for ctx in contexts:
-            line_kwargs = {
-                "order": order,
-                "product": ctx["product"],
-                "base_qty": ctx["base_qty"],
-                "base_price": ctx["base_price"],
-                "final_line_amount": ctx["line_amount"],
-                "pack_requirement": ctx["product"].pack_requirement,
-                "pack_note": ctx["product"].pack_note or "",
-                "created_by": request.user,
-                "updated_by": request.user,
-            }
-            if ctx["package"]:
-                line_kwargs.update(
-                    {
-                        "aux_qty": ctx["qty"],
-                        "aux_uom": ctx["package"],
-                        "aux_price": ctx["unit_price"],
-                    }
+        mappings = []
+        for context in order_contexts:
+            mappings.append(
+                _create_sale_mini_order_mapping(
+                    request,
+                    context["owner"],
+                    context["customer"],
+                    context["buyer"],
+                    data,
+                    context["lines"],
+                    cart_id=context.get("cart_id"),
+                    adjustment_data=data,
+                    source=batch_source,
                 )
-            OutboundOrderLine.objects.create(**line_kwargs)
-
-        order.final_order_amount = Decimal(preview["goods_amount"])
-        order.save(update_fields=["final_order_amount", "updated_at"])
-        order.owner_approve(by_user=request.user, allow_backorder=False)
-        payment_method = data.get("payment_method") or "OFFLINE"
-        mapping = SaleMiniOrderMapping.objects.create(
-            owner=owner,
-            customer=customer,
-            buyer_user=buyer,
-            outbound_order=order,
-            payment_status=(
-                SaleMiniOrderMapping.PaymentStatus.UNPAID
-                if payment_method == "WECHAT"
-                else SaleMiniOrderMapping.PaymentStatus.OFFLINE
-            ),
-            goods_amount=Decimal(preview["goods_amount"]),
-            adjustment_amount=Decimal(preview["adjustment_amount"]),
-            payable_amount=Decimal(preview["payable_amount"]),
-            pay_deadline_at=_payment_deadline() if payment_method == "WECHAT" else None,
-            created_by=request.user,
-            updated_by=request.user,
-        )
-        lock_adjustments(
-            owner=owner,
-            customer=customer,
-            buyer=buyer,
-            mapping=mapping,
-            specs=adjustment_specs,
-            payment_method=payment_method,
-            by_user=request.user,
-        )
-        create_distribution_record(
-            mapping,
-            referrer_id=data.get("referrer_buyer_id"),
-            by_user=request.user,
-        )
-        _clear_source_cart(
-            request,
-            owner,
-            customer,
-            buyer,
-            data.get("cart_id"),
-            contexts,
-        )
+            )
         return Response(
-            _order_payload(request, mapping), status=status.HTTP_201_CREATED
+            _combined_order_payload(request, mappings),
+            status=status.HTTP_201_CREATED,
         )
 
 
@@ -2962,7 +3265,7 @@ class SaleMiniWechatRefundApi(APIView):
         order = mapping.outbound_order
         fulfillment_status, _name = _fulfillment_status(order)
         if fulfillment_status in {"WAIT_PICK", "COMPLETED"}:
-            raise ValidationError({"status": "订单已进入仓库作业，请走售后流程。"})
+            raise ValidationError({"status": "订单已进入备货阶段，请申请售后。"})
         if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.UNPAID:
             _cancel_unpaid_mapping(mapping, request.user, close_wechat=True)
             return Response(_order_payload(request, mapping))
@@ -3135,9 +3438,6 @@ class SaleMiniAfterSaleListCreateApi(APIView):
 
     def get(self, request):
         bindings = list(_buyer_bindings_for_user(request.user))
-        owner_id = request.query_params.get("owner_id")
-        if owner_id:
-            bindings = [row for row in bindings if str(row.owner_id) == str(owner_id)]
         qs = (
             SaleMiniAfterSaleRequest.objects.filter(buyer_user__in=bindings)
             .select_related("mapping", "mapping__outbound_order")
@@ -3198,8 +3498,8 @@ class SaleMiniOrderDetailApi(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        mapping = _mapping_for_request(request, pk)
-        return Response(_order_payload(request, mapping))
+        mappings = _mapping_group_for_request(request, pk)
+        return Response(_order_group_payload(request, mappings))
 
 
 class SaleMiniOrderCancelApi(APIView):
@@ -3207,21 +3507,22 @@ class SaleMiniOrderCancelApi(APIView):
 
     @transaction.atomic
     def post(self, request, pk):
-        mapping = _mapping_for_request(request, pk, for_update=True)
-        order = mapping.outbound_order
-        if mapping.payment_status in {
-            SaleMiniOrderMapping.PaymentStatus.PAID,
-            SaleMiniOrderMapping.PaymentStatus.REFUNDING,
-            SaleMiniOrderMapping.PaymentStatus.REFUNDED,
-        }:
-            raise ValidationError({"payment": "已支付订单请走退款流程。"})
-        fulfillment_status, _name = _fulfillment_status(order)
-        if fulfillment_status in {"WAIT_PICK", "COMPLETED"}:
-            raise ValidationError({"status": "订单已进入仓库作业，不能由小程序取消。"})
-        if order.approval_status == "CANCELLED":
-            return Response(_order_payload(request, mapping))
-        _cancel_unpaid_mapping(mapping, request.user, close_wechat=True)
-        return Response(_order_payload(request, mapping))
+        mappings = _mapping_group_for_request(request, pk, for_update=True)
+        for mapping in mappings:
+            order = mapping.outbound_order
+            if mapping.payment_status in {
+                SaleMiniOrderMapping.PaymentStatus.PAID,
+                SaleMiniOrderMapping.PaymentStatus.REFUNDING,
+                SaleMiniOrderMapping.PaymentStatus.REFUNDED,
+            }:
+                raise ValidationError({"payment": "已支付订单请走退款流程。"})
+            fulfillment_status, _name = _fulfillment_status(order)
+            if fulfillment_status in {"WAIT_PICK", "COMPLETED"}:
+                raise ValidationError({"status": "订单已进入备货阶段，暂不能取消。"})
+        for mapping in mappings:
+            if mapping.outbound_order.approval_status != "CANCELLED":
+                _cancel_unpaid_mapping(mapping, request.user, close_wechat=True)
+        return Response(_order_group_payload(request, mappings))
 
 
 def _mapping_for_request(request, pk, *, for_update=False):
@@ -3236,3 +3537,23 @@ def _mapping_for_request(request, pk, *, for_update=False):
         "outbound_order__warehouse",
     )
     return get_object_or_404(qs, outbound_order_id=pk)
+
+
+def _mapping_group_for_request(request, pk, *, for_update=False):
+    mapping = _mapping_for_request(request, pk, for_update=for_update)
+    if not _is_sale_mini_batch_source(mapping.source):
+        return [mapping]
+    bindings = list(_buyer_bindings_for_user(request.user))
+    qs = SaleMiniOrderMapping.objects.filter(
+        buyer_user__in=bindings,
+        source=mapping.source,
+    )
+    if for_update:
+        qs = qs.select_for_update()
+    qs = qs.select_related(
+        "outbound_order",
+        "outbound_order__owner",
+        "outbound_order__customer",
+        "outbound_order__warehouse",
+    ).order_by("id")
+    return list(qs)

@@ -14,7 +14,7 @@ function productId(product = {}) {
 }
 
 function keyFor(product = {}) {
-  return [product.owner_id || '', product.config_id || '', productId(product)].join(':')
+  return [product.config_id || '', productId(product)].join(':')
 }
 
 function snapshot(product = {}) {
@@ -23,10 +23,7 @@ function snapshot(product = {}) {
     key: keyFor(product),
     id,
     product_id: id,
-    owner_id: product.owner_id || '',
-    owner_name: product.owner_name || '',
     config_id: product.config_id || '',
-    code: product.code || product.product_code || '',
     name: product.name || product.product_name || '',
     spec: product.spec || product.product_spec || '',
     image_url: product.image_url || '',

@@ -150,6 +150,29 @@ RIBBON_TABS: List[RibbonTab] = [
     ),
 
     RibbonTab(
+        label="商城",
+        groups=[
+            RibbonGroup(
+                label="小程序运营",
+                actions=[
+                    RibbonAction(
+                        "商城上架",
+                        "console:sale_mini_product_listing",
+                        "🛒",
+                        perms_any=[
+                            "salesapp.view_saleproductconfig",
+                            "salesapp.change_saleproductconfig",
+                        ],
+                    ),
+                    RibbonAction("上架配置(Admin)", "admin:salesapp_saleproductconfig_changelist", "🏷️"),
+                    RibbonAction("小程序用户", "admin:salesapp_miniprogramuser_changelist", "👤"),
+                    RibbonAction("首页横幅", "admin:salesapp_saleminibanner_changelist", "🖼️"),
+                ],
+            ),
+        ],
+    ),
+
+    RibbonTab(
         label="计费",
         groups=[
             RibbonGroup(

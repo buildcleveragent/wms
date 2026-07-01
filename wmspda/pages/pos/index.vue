@@ -2,7 +2,7 @@
   <view class="pos-page">
     <view class="topbar">
       <button class="nav-back" @click="goBack">‹</button>
-      <text class="title">POS收银</text>
+      <text class="title">金桥融通仓POS收银</text>
       <view class="nav-spacer"></view>
     </view>
 
@@ -29,6 +29,7 @@
         </view>
         <view class="shift-numbers">
           <text>净销售 {{ money(shiftSummary.net_amount) }}</text>
+          <text>实收 {{ money(shiftSummary.received_amount) }} / 赊账 {{ money(shiftSummary.credit_amount) }} / 还款 {{ money(shiftSummary.repayment_amount) }}</text>
           <text>完成 {{ shiftSummary.completed_count || 0 }} 单 / 退货 {{ shiftSummary.return_count || 0 }} 单 / 作废 {{ shiftSummary.voided_count || 0 }} 单</text>
           <text>退货金额 {{ money(shiftSummary.return_amount) }}</text>
           <text>现金应点 {{ money(shiftSummary.expected_cash_amount) }}</text>
@@ -117,7 +118,7 @@
           class="cart-table-head cart-line-row"
           style="display: flex; flex-direction: row; align-items: center; flex-wrap: nowrap; width: 100%;"
         >
-          <view class="cart-goods-col" style="flex: 1 1 auto; min-width: 0; padding-right: 12rpx; box-sizing: border-box;">商品</view>
+          <view class="cart-goods-col" style="flex: 1 1 auto; min-width: 0; padding-right: 12rpx; text-align: right; box-sizing: border-box;">商品</view>
           <view class="cart-unit-col" style="width: 96rpx; flex: 0 0 96rpx; margin-left: 8rpx; box-sizing: border-box;">单位</view>
           <view class="cart-qty-col" style="width: 130rpx; flex: 0 0 130rpx; margin-left: 8rpx; box-sizing: border-box;">数量</view>
           <view class="cart-price-col" style="width: 150rpx; flex: 0 0 150rpx; margin-left: 8rpx; box-sizing: border-box;">单价</view>
@@ -131,7 +132,7 @@
           class="cart-row cart-line-row"
           style="display: flex; flex-direction: row; align-items: center; flex-wrap: nowrap; width: 100%;"
         >
-          <view class="cart-info cart-goods-col" style="flex: 1 1 auto; min-width: 0; padding-right: 12rpx; box-sizing: border-box;">
+          <view class="cart-info cart-goods-col" style="flex: 1 1 auto; min-width: 0; padding-right: 12rpx; text-align: right; box-sizing: border-box;">
             <text class="cart-goods-line">
               {{ item.name }}　{{ item.code }} / 可售 {{ qtyText(item.available_qty, item) }} {{ item.base_unit_name }} / 基本数量 {{ qtyText(lineBaseQty(item), item) }} {{ item.base_unit_name }}
             </text>
@@ -197,6 +198,18 @@
           @confirm="searchCustomers"
         />
         <button class="primary-btn customer-search-btn" :disabled="customerLoading" @click="searchCustomers">搜索</button>
+        <button class="ghost-btn customer-add-btn" @click="openCustomerCreate">新增</button>
+      </view>
+      <view v-if="customerCreateOpen" class="customer-create-panel">
+        <input class="input customer-create-input" v-model.trim="customerForm.name" placeholder="客户名称" />
+        <input class="input customer-create-input" v-model.trim="customerForm.phone" placeholder="电话" />
+        <input class="input customer-create-input wide" v-model.trim="customerForm.address" placeholder="地址" />
+        <view class="customer-create-actions">
+          <button class="ghost-btn customer-create-btn" @click="cancelCustomerCreate">取消</button>
+          <button class="primary-btn customer-create-btn" :disabled="customerSaving" @click="submitCustomerCreate">
+            保存
+          </button>
+        </view>
       </view>
       <view class="customer-list" v-if="customers.length">
         <view
@@ -212,6 +225,34 @@
           <text class="choice-check" v-if="selectedCustomer && selectedCustomer.id === customer.id">
             已选
           </text>
+        </view>
+      </view>
+      <view v-if="selectedCustomer" class="customer-debt-panel">
+        <view class="customer-debt-head">
+          <text>累计欠款</text>
+          <text class="customer-debt-amount">{{ money(customerDebtBalance) }}</text>
+          <button class="ghost-btn debt-refresh-btn" :disabled="customerDebtLoading" @click="loadCustomerDebt({ force: true })">
+            刷新
+          </button>
+        </view>
+        <view class="repayment-row">
+          <picker
+            class="payment-picker repayment-picker"
+            mode="selector"
+            :range="repaymentMethodLabels"
+            :value="repaymentMethodIndex"
+            @change="changeRepaymentMethod"
+          >
+            <view class="payment-value">{{ selectedRepaymentMethod.label }}</view>
+          </picker>
+          <input class="payment-input repayment-input" type="digit" v-model.trim="repaymentAmount" placeholder="还款金额" />
+          <button class="ghost-btn repayment-fill-btn" @click="fillRepaymentAmount">全额</button>
+        </view>
+        <view class="repayment-row">
+          <input class="bill-input repayment-ref-input" v-model.trim="repaymentReferenceNo" placeholder="参考号/可选" />
+          <button class="primary-btn repayment-submit-btn" :disabled="repaymentSubmitting || customerDebtBalance <= 0" @click="submitCustomerRepayment">
+            收款
+          </button>
         </view>
       </view>
       <view class="doc-info-stack">
@@ -296,6 +337,10 @@
               <text class="amount-label">找零</text>
               <text class="amount-value change-value">{{ money(changeAmount) }}</text>
             </view>
+            <view class="amount-box">
+              <text class="amount-label">本单赊账</text>
+              <text class="amount-value debt-value">{{ money(creditAmount) }}</text>
+            </view>
           </view>
           <view class="summary-sub">
             <text>商品 {{ cartItems.length }} 项</text>
@@ -304,6 +349,9 @@
           </view>
           <view v-if="selectedCustomer && ownerCount > 1" class="owner-warning">
             已选客户仅用于同货主订单，其他货主自动使用散客
+          </view>
+          <view v-if="creditAmount > 0 && !selectedCustomer" class="owner-warning">
+            赊账必须先选择客户
           </view>
           <view class="print-settings">
             <checkbox-group class="print-check-group" @change="onAutoPrintChange">
@@ -322,6 +370,18 @@
                 @change="changeSalePrintMode"
               >
                 <view class="print-mode-value">{{ selectedSalePrintMode.label }}</view>
+              </picker>
+            </view>
+            <view class="print-mode-control receipt-info-control">
+              <text class="print-mode-label">仓库信息</text>
+              <picker
+                class="print-mode-picker"
+                mode="selector"
+                :range="receiptWarehouseInfoLabels"
+                :value="selectedReceiptWarehouseInfoIndex"
+                @change="changeReceiptWarehouseInfo"
+              >
+                <view class="print-mode-value">{{ selectedReceiptWarehouseInfo.name }}</view>
               </picker>
             </view>
           </view>
@@ -350,6 +410,18 @@
           <text class="stats-value">{{ money(statsSummary.net_amount) }}</text>
         </view>
         <view class="stats-card">
+          <text class="stats-label">实收金额</text>
+          <text class="stats-value">{{ money(statsSummary.received_amount) }}</text>
+        </view>
+        <view class="stats-card">
+          <text class="stats-label">赊账金额</text>
+          <text class="stats-value debt-value">{{ money(statsSummary.credit_amount) }}</text>
+        </view>
+        <view class="stats-card">
+          <text class="stats-label">客户还款</text>
+          <text class="stats-value">{{ money(statsSummary.repayment_amount) }}</text>
+        </view>
+        <view class="stats-card">
           <text class="stats-label">完成单</text>
           <text class="stats-value">{{ statsSummary.completed_count || 0 }}</text>
         </view>
@@ -369,7 +441,7 @@
       <view class="stats-payments" v-if="statsPayments.length">
         <view class="stats-payment-row" v-for="row in statsPayments" :key="row.method || row.method_label">
           <text>{{ row.method_label || paymentMethodName(row.method) }}</text>
-          <text>{{ money(row.amount) }} / {{ row.sale_count || 0 }} 单</text>
+          <text>{{ money(row.amount) }} / 销 {{ row.sale_count || 0 }} / 还 {{ row.repayment_count || 0 }}</text>
         </view>
       </view>
     </view>
@@ -388,6 +460,10 @@
           {{ paymentMethodName(lastReceipt.payment?.method) }}
           实收 {{ money(lastReceipt.payment?.amount_received) }}
         </text>
+      </view>
+      <view class="receipt-row">
+        <text>本单赊账 {{ money(lastReceipt.payment?.credit_amount || lastReceipt.credit_amount) }}</text>
+        <text>累计欠款 {{ money(lastReceipt.cumulative_debt) }}</text>
       </view>
       <view class="receipt-row">
         <text>找零 {{ money(lastReceipt.payment?.change_amount) }}</text>
@@ -472,22 +548,18 @@
       <view v-else class="history-list">
         <view class="history-row" v-for="sale in historyPreviewSales" :key="sale.id">
           <view class="history-main">
-            <view class="history-title-row">
+            <view class="history-title-row sale-history-line">
               <text class="history-no">{{ saleDisplayNo(sale) }}</text>
+              <text class="history-money">{{ money(sale.total_amount) }}</text>
+              <text v-if="saleCreditAmount(sale) > 0" class="history-debt">欠 {{ money(saleCreditAmount(sale)) }}</text>
+              <text class="history-order-count">出库单 {{ saleOrderCount(sale) }} 张</text>
               <text :class="['history-status', isVoidedSale(sale) ? 'voided' : 'completed']">
                 {{ saleStatusText(sale.status) }}
               </text>
             </view>
-            <text class="history-meta">
-              {{ saleCreatedText(sale) }} / {{ salePaymentMethod(sale) }} / {{ money(sale.total_amount) }}
-            </text>
-            <text class="history-meta">
-              出库单 {{ saleOrderCount(sale) }} 张 {{ orderNosText(sale.orders) }}
-            </text>
           </view>
-          <view class="history-actions">
+          <view class="history-actions sale-history-actions">
             <button class="ghost-btn history-action-btn" @click="reprintSale(sale)">重打</button>
-            <button class="ghost-btn history-action-btn" @click="backupPrintSale(sale)">备用打印</button>
             <button class="ghost-btn history-action-btn" :disabled="!saleCanReturn(sale)" @click="startReturnSale(sale)">退货</button>
             <button class="danger-btn history-action-btn" :disabled="isVoidedSale(sale)" @click="startVoidSale(sale)">作废</button>
           </view>
@@ -503,22 +575,18 @@
       <view v-if="historyMoreOpen && historyMoreSales.length" class="history-more-panel">
         <view class="history-row" v-for="sale in historyMoreSales" :key="'more-' + sale.id">
           <view class="history-main">
-            <view class="history-title-row">
+            <view class="history-title-row sale-history-line">
               <text class="history-no">{{ saleDisplayNo(sale) }}</text>
+              <text class="history-money">{{ money(sale.total_amount) }}</text>
+              <text v-if="saleCreditAmount(sale) > 0" class="history-debt">欠 {{ money(saleCreditAmount(sale)) }}</text>
+              <text class="history-order-count">出库单 {{ saleOrderCount(sale) }} 张</text>
               <text :class="['history-status', isVoidedSale(sale) ? 'voided' : 'completed']">
                 {{ saleStatusText(sale.status) }}
               </text>
             </view>
-            <text class="history-meta">
-              {{ saleCreatedText(sale) }} / {{ salePaymentMethod(sale) }} / {{ money(sale.total_amount) }}
-            </text>
-            <text class="history-meta">
-              出库单 {{ saleOrderCount(sale) }} 张 {{ orderNosText(sale.orders) }}
-            </text>
           </view>
-          <view class="history-actions">
+          <view class="history-actions sale-history-actions">
             <button class="ghost-btn history-action-btn" @click="reprintSale(sale)">重打</button>
-            <button class="ghost-btn history-action-btn" @click="backupPrintSale(sale)">备用打印</button>
             <button class="ghost-btn history-action-btn" :disabled="!saleCanReturn(sale)" @click="startReturnSale(sale)">退货</button>
             <button class="danger-btn history-action-btn" :disabled="isVoidedSale(sale)" @click="startVoidSale(sale)">作废</button>
           </view>
@@ -544,7 +612,7 @@
               </text>
             </view>
             <text class="history-meta">
-              {{ shift.cashier_username || '-' }} / 净销售 {{ money(shift.summary?.net_amount) }} / {{ shift.summary?.completed_count || 0 }} 单
+              {{ shift.cashier_username || '-' }} / 净销售 {{ money(shift.summary?.net_amount) }} / 赊账 {{ money(shift.summary?.credit_amount) }} / 还款 {{ money(shift.summary?.repayment_amount) }}
             </text>
             <text class="history-meta">
               开班 {{ formatDateTime(shift.opened_at) }} / 交班 {{ shift.closed_at ? formatDateTime(shift.closed_at) : '-' }}
@@ -573,6 +641,13 @@ const customerKeyword = ref('')
 const customers = ref([])
 const selectedCustomer = ref(null)
 const customerLoading = ref(false)
+const customerCreateOpen = ref(false)
+const customerSaving = ref(false)
+const customerForm = ref({
+  name: '',
+  phone: '',
+  address: '',
+})
 
 const productKeyword = ref('')
 const productInputFocus = ref(true)
@@ -612,7 +687,8 @@ const shiftHistory = ref([])
 const shiftHistoryLoading = ref(false)
 const POS_DRAFT_KEY = 'pos_sale_draft_v1'
 const POS_AUTO_PRINT_KEY = 'pos_auto_print_sale_v1'
-const POS_SALE_PRINT_MODE_KEY = 'pos_sale_print_mode_v1'
+const POS_SALE_PRINT_MODE_KEY = 'pos_sale_print_mode_v2'
+const POS_RECEIPT_WAREHOUSE_INFO_KEY = 'pos_receipt_warehouse_info_v1'
 const SALE_PRINT_COMPANY_NAME = '金桥融通仓'
 const SALE_PRINT_SHOP_ADDRESS = ' '
 const SALE_PRINT_SHOP_PHONE = ' '
@@ -623,17 +699,22 @@ const POS_STOCK_QUERY = {
   picking_only: 1,
 }
 const SALE_PRINT_MODES = [
+  { label: '三等分241×93', value: 'dot_241_93' },
   { label: 'A4横向', value: 'a4_landscape' },
   { label: '针式9.5x5.5', value: 'dot_9_5_5' },
   { label: '针式9.5x11', value: 'dot_9_5_11' },
 ]
-const DEFAULT_SALE_PRINT_MODE = SALE_PRINT_MODES[0].value
+const DEFAULT_SALE_PRINT_MODE = 'dot_241_93'
+const SALE_PRINT_METHOD_FRONTEND = 'frontend_html'
+const SALE_PRINT_METHOD_BACKEND = 'backend_html'
+const DEFAULT_SALE_PRINT_METHOD = SALE_PRINT_METHOD_FRONTEND
 
 const paymentMethods = [
   { label: '现金', value: 'CASH' },
   { label: '微信', value: 'WECHAT' },
   { label: '支付宝', value: 'ALIPAY' },
   { label: '银行卡', value: 'BANK_CARD' },
+  { label: '赊账', value: 'CREDIT' },
   { label: '其他', value: 'OTHER' },
 ]
 const paymentMethod = ref('WECHAT')
@@ -641,8 +722,20 @@ const amountReceived = ref('')
 const paymentReferenceNo = ref('')
 const splitPaymentEnabled = ref(false)
 const paymentLines = ref([])
+const customerDebtBalance = ref(0)
+const customerDebtLoading = ref(false)
+const repaymentMethod = ref('CASH')
+const repaymentAmount = ref('')
+const repaymentReferenceNo = ref('')
+const repaymentRemark = ref('')
+const repaymentSubmitting = ref(false)
 const autoPrintSale = ref(true)
 const salePrintMode = ref(DEFAULT_SALE_PRINT_MODE)
+const salePrintMethod = ref(DEFAULT_SALE_PRINT_METHOD)
+const systemSettingsLoading = ref(false)
+const receiptWarehouseInfos = ref([])
+const receiptWarehouseInfosLoading = ref(false)
+const selectedReceiptWarehouseInfoId = ref('')
 const pendingReturnSale = ref(null)
 const returnLines = ref([])
 const returnReason = ref('')
@@ -672,26 +765,63 @@ const ownerCount = computed(() => {
   return new Set(ownerIds).size
 })
 const paymentMethodLabels = computed(() => paymentMethods.map((method) => method.label))
+const repaymentMethods = computed(() => paymentMethods.filter((method) => method.value !== 'CREDIT'))
+const repaymentMethodLabels = computed(() => repaymentMethods.value.map((method) => method.label))
 const paymentMethodIndex = computed(() =>
   Math.max(0, paymentMethods.findIndex((method) => method.value === paymentMethod.value))
 )
 const selectedPaymentMethod = computed(() => paymentMethods[paymentMethodIndex.value] || paymentMethods[0])
+const repaymentMethodIndex = computed(() =>
+  Math.max(0, repaymentMethods.value.findIndex((method) => method.value === repaymentMethod.value))
+)
+const selectedRepaymentMethod = computed(() => repaymentMethods.value[repaymentMethodIndex.value] || repaymentMethods.value[0])
 const salePrintModeLabels = computed(() => SALE_PRINT_MODES.map((mode) => mode.label))
 const salePrintModeIndex = computed(() => {
   const index = SALE_PRINT_MODES.findIndex((mode) => mode.value === salePrintMode.value)
   return index >= 0 ? index : 0
 })
 const selectedSalePrintMode = computed(() => SALE_PRINT_MODES[salePrintModeIndex.value] || SALE_PRINT_MODES[0])
+const useBackendSalePrint = computed(() => salePrintMethod.value === SALE_PRINT_METHOD_BACKEND)
+const fallbackReceiptWarehouseInfo = computed(() => ({
+  id: '',
+  name: '默认仓库信息',
+  address: SALE_PRINT_SHOP_ADDRESS,
+  phone: SALE_PRINT_SHOP_PHONE,
+  bank_account: SALE_PRINT_BANK_ACCOUNT,
+}))
+const receiptWarehouseInfoOptions = computed(() =>
+  receiptWarehouseInfos.value.length ? receiptWarehouseInfos.value : [fallbackReceiptWarehouseInfo.value]
+)
+const receiptWarehouseInfoLabels = computed(() =>
+  receiptWarehouseInfoOptions.value.map((info) => info.name || info.warehouse_name || '未命名仓库信息')
+)
+const selectedReceiptWarehouseInfoIndex = computed(() => {
+  const selectedId = String(selectedReceiptWarehouseInfoId.value || '')
+  const index = receiptWarehouseInfoOptions.value.findIndex((info) => String(info.id || '') === selectedId)
+  return index >= 0 ? index : 0
+})
+const selectedReceiptWarehouseInfo = computed(
+  () => receiptWarehouseInfoOptions.value[selectedReceiptWarehouseInfoIndex.value] || fallbackReceiptWarehouseInfo.value
+)
 const splitPaymentAmount = computed(() =>
   paymentLines.value.reduce((sum, line) => sum + numberFromValue(line.amount, 0), 0)
 )
 const splitPaymentReceivedAmount = computed(() =>
-  paymentLines.value.reduce((sum, line) => sum + numberFromValue(line.amount_received || line.amount, 0), 0)
+  paymentLines.value.reduce((sum, line) => {
+    if (line.method === 'CREDIT') return sum
+    return sum + numberFromValue(line.amount_received || line.amount, 0)
+  }, 0)
 )
 const splitPaymentChangeAmount = computed(() =>
   paymentLines.value.reduce((sum, line) => {
     if (line.method !== 'CASH') return sum
     return sum + Math.max(numberFromValue(line.amount_received, 0) - numberFromValue(line.amount, 0), 0)
+  }, 0)
+)
+const splitPaymentCreditAmount = computed(() =>
+  paymentLines.value.reduce((sum, line) => {
+    if (line.method !== 'CREDIT') return sum
+    return sum + numberFromValue(line.amount, 0)
   }, 0)
 )
 const splitPaymentRemaining = computed(() => Math.max(totalAmount.value - splitPaymentAmount.value, 0))
@@ -702,7 +832,18 @@ const selectedCustomerName = computed(() =>
 )
 const saleDateText = computed(() => formatDateTime(saleDate.value))
 const receivedAmount = computed(() =>
-  splitPaymentEnabled.value ? splitPaymentReceivedAmount.value : Number(amountReceived.value || 0)
+  splitPaymentEnabled.value
+    ? splitPaymentReceivedAmount.value
+    : paymentMethod.value === 'CREDIT'
+      ? 0
+      : Number(amountReceived.value || 0)
+)
+const creditAmount = computed(() =>
+  splitPaymentEnabled.value
+    ? splitPaymentCreditAmount.value
+    : paymentMethod.value === 'CREDIT'
+      ? totalAmount.value
+      : 0
 )
 const changeAmount = computed(() =>
   splitPaymentEnabled.value
@@ -719,8 +860,14 @@ const paymentReady = computed(() => {
       const amount = numberFromValue(line.amount, 0)
       const received = numberFromValue(line.amount_received || line.amount, 0)
       if (amount <= 0) return false
+      if (line.method === 'CREDIT') {
+        return !!selectedCustomer.value && moneyEqual(numberFromValue(line.amount_received, 0), 0)
+      }
       return line.method === 'CASH' ? received >= amount : moneyEqual(received, amount)
     })
+  }
+  if (paymentMethod.value === 'CREDIT') {
+    return !!selectedCustomer.value
   }
   if (paymentMethod.value === 'CASH') {
     return receivedAmount.value >= totalAmount.value
@@ -748,7 +895,7 @@ const historyMoreButtonText = computed(() =>
 )
 const shiftPaymentRows = computed(() => {
   const rows = Array.isArray(shiftSummary.value.payments) ? shiftSummary.value.payments : []
-  return rows.filter((row) => row.method && row.method !== 'CASH')
+  return rows.filter((row) => row.method && row.method !== 'CASH' && row.method !== 'CREDIT')
 })
 const statsSummary = computed(() => posStats.value?.summary || defaultPosStats().summary)
 const statsPayments = computed(() => {
@@ -759,10 +906,13 @@ const statsPayments = computed(() => {
 onMounted(() => {
   restoreAutoPrintPreference()
   restoreSalePrintModePreference()
+  restoreReceiptWarehouseInfoPreference()
   restoreSaleDraft()
   setScanCallback(handleScan)
   initScanner()
   focusProductInput()
+  loadSystemSettings()
+  loadReceiptWarehouseInfos()
   loadCurrentShift()
   loadShiftHistory({ silent: true })
   loadPosSaleHistory({ silent: true })
@@ -771,6 +921,8 @@ onMounted(() => {
 
 onShow(() => {
   focusProductInput()
+  loadSystemSettings({ silent: true })
+  loadReceiptWarehouseInfos({ silent: true })
   refreshCartStock()
   loadCurrentShift()
   loadShiftHistory({ silent: true })
@@ -817,6 +969,19 @@ watch(returnTotalAmount, () => {
     returnRefundAmount.value = plainMoney(returnTotalAmount.value)
   }
 })
+
+watch(
+  () => selectedCustomer.value?.id || '',
+  () => {
+    customerDebtBalance.value = 0
+    repaymentAmount.value = ''
+    repaymentReferenceNo.value = ''
+    repaymentRemark.value = ''
+    if (selectedCustomer.value?.id) {
+      loadCustomerDebt({ silent: true })
+    }
+  }
+)
 
 function makeReceiptNo() {
   const d = new Date()
@@ -893,6 +1058,93 @@ function saveSalePrintModePreference() {
   }
 }
 
+function normalizeSalePrintMethod(value) {
+  return value === SALE_PRINT_METHOD_BACKEND ? SALE_PRINT_METHOD_BACKEND : DEFAULT_SALE_PRINT_METHOD
+}
+
+function applySystemSettings(payload = {}) {
+  const grouped = payload.settings || {}
+  const flat = payload.flat || {}
+  const value =
+    flat['pos.sale_print_method'] ||
+    grouped.pos?.sale_print_method ||
+    DEFAULT_SALE_PRINT_METHOD
+  salePrintMethod.value = normalizeSalePrintMethod(value)
+}
+
+async function loadSystemSettings(options = {}) {
+  if (systemSettingsLoading.value) return
+  systemSettingsLoading.value = true
+  try {
+    applySystemSettings(await api.systemSettings())
+  } catch (e) {
+    salePrintMethod.value = DEFAULT_SALE_PRINT_METHOD
+    if (!options.silent) {
+      console.warn('load system settings failed', e)
+    }
+  } finally {
+    systemSettingsLoading.value = false
+  }
+}
+
+function normalizeReceiptWarehouseInfo(info = {}) {
+  return {
+    id: info.id ?? '',
+    warehouse_id: info.warehouse_id ?? null,
+    warehouse_name: info.warehouse_name || '',
+    name: info.name || info.warehouse_name || '未命名仓库信息',
+    address: info.address || '',
+    phone: info.phone || '',
+    bank_account: info.bank_account || '',
+    is_default: !!info.is_default,
+  }
+}
+
+function restoreReceiptWarehouseInfoPreference() {
+  try {
+    selectedReceiptWarehouseInfoId.value = String(
+      getStorage()?.getStorageSync(POS_RECEIPT_WAREHOUSE_INFO_KEY) || ''
+    )
+  } catch (e) {
+    selectedReceiptWarehouseInfoId.value = ''
+  }
+}
+
+function saveReceiptWarehouseInfoPreference() {
+  try {
+    getStorage()?.setStorageSync(
+      POS_RECEIPT_WAREHOUSE_INFO_KEY,
+      selectedReceiptWarehouseInfoId.value || ''
+    )
+  } catch (e) {
+    console.warn('save POS receipt warehouse info failed', e)
+  }
+}
+
+async function loadReceiptWarehouseInfos(options = {}) {
+  if (receiptWarehouseInfosLoading.value) return
+  receiptWarehouseInfosLoading.value = true
+  try {
+    const rows = normalizePage(await api.posReceiptWarehouseInfos())
+    receiptWarehouseInfos.value = rows.map(normalizeReceiptWarehouseInfo)
+    const currentId = String(selectedReceiptWarehouseInfoId.value || '')
+    const currentExists = receiptWarehouseInfos.value.some((info) => String(info.id || '') === currentId)
+    if (!currentExists) {
+      const defaultInfo = receiptWarehouseInfos.value.find((info) => info.is_default)
+      selectedReceiptWarehouseInfoId.value = defaultInfo?.id
+        ? String(defaultInfo.id)
+        : String(receiptWarehouseInfos.value[0]?.id || '')
+      saveReceiptWarehouseInfoPreference()
+    }
+  } catch (e) {
+    if (!options.silent) {
+      console.warn('load POS receipt warehouse info failed', e)
+    }
+  } finally {
+    receiptWarehouseInfosLoading.value = false
+  }
+}
+
 function onAutoPrintChange(event) {
   const values = Array.isArray(event?.detail?.value) ? event.detail.value : []
   autoPrintSale.value = values.includes('auto')
@@ -903,6 +1155,13 @@ function changeSalePrintMode(event) {
   const index = Number(event?.detail?.value || 0)
   salePrintMode.value = SALE_PRINT_MODES[index]?.value || DEFAULT_SALE_PRINT_MODE
   saveSalePrintModePreference()
+}
+
+function changeReceiptWarehouseInfo(event) {
+  const index = Number(event?.detail?.value || 0)
+  const info = receiptWarehouseInfoOptions.value[index] || fallbackReceiptWarehouseInfo.value
+  selectedReceiptWarehouseInfoId.value = String(info.id || '')
+  saveReceiptWarehouseInfoPreference()
 }
 
 function removeSaleDraft() {
@@ -1115,7 +1374,9 @@ function normalizePaymentLine(index) {
   if (!line) return
   const amount = numberFromValue(line.amount, 0)
   line.amount = amount > 0 ? plainMoney(amount) : ''
-  if (line.method === 'CASH') {
+  if (line.method === 'CREDIT') {
+    line.amount_received = '0.00'
+  } else if (line.method === 'CASH') {
     const received = numberFromValue(line.amount_received || line.amount, amount)
     line.amount_received = received > 0 ? plainMoney(Math.max(received, amount)) : line.amount
   } else {
@@ -1127,13 +1388,19 @@ function syncSplitPaymentLines() {
   if (!splitPaymentEnabled.value) return
   ensurePaymentLines()
   paymentLines.value.forEach((line, index) => {
-    if (line.method !== 'CASH') {
+    if (line.method === 'CREDIT') {
+      line.amount_received = '0.00'
+    } else if (line.method !== 'CASH') {
       const amount = numberFromValue(line.amount, 0)
       if (amount > 0) line.amount_received = plainMoney(amount)
     }
     if (index === 0 && paymentLines.value.length === 1 && totalAmount.value > 0) {
       line.amount = plainMoney(totalAmount.value)
-      if (line.method !== 'CASH') line.amount_received = line.amount
+      if (line.method === 'CREDIT') {
+        line.amount_received = '0.00'
+      } else if (line.method !== 'CASH') {
+        line.amount_received = line.amount
+      }
       if (!line.amount_received) line.amount_received = line.amount
     }
   })
@@ -1153,7 +1420,9 @@ function syncNonCashAmount() {
     syncSplitPaymentLines()
     return
   }
-  if (paymentMethod.value !== 'CASH') {
+  if (paymentMethod.value === 'CREDIT') {
+    amountReceived.value = '0.00'
+  } else if (paymentMethod.value !== 'CASH') {
     amountReceived.value = plainMoney(totalAmount.value)
   }
 }
@@ -1282,6 +1551,10 @@ function buildSalePrintData(response = {}) {
   const receipt = response.receipt || {}
   const sale = response.sale || (response.sale_no || response.id ? response : {})
   const payment = receipt.payment || response.payment || sale.payment || {}
+  const receiptWarehouseInfo = selectedReceiptWarehouseInfo.value || fallbackReceiptWarehouseInfo.value
+  const receiptCompanyName = receiptWarehouseInfo.id
+    ? receiptWarehouseInfo.name || receiptWarehouseInfo.warehouse_name || SALE_PRINT_COMPANY_NAME
+    : SALE_PRINT_COMPANY_NAME
   const orders = Array.isArray(response.orders)
     ? response.orders
     : Array.isArray(receipt.orders)
@@ -1339,14 +1612,17 @@ function buildSalePrintData(response = {}) {
   const total = Number(receipt.total_amount ?? sale.total_amount ?? totalAmount.value ?? 0)
   const amountReceivedValue = numberFromValue(payment.amount_received ?? receivedAmount.value, 0)
   const changeValue = numberFromValue(payment.change_amount ?? changeAmount.value, 0)
-  const unpaidAmount = Math.max(total - amountReceivedValue, 0)
+  const creditAmountValue = numberFromValue(
+    receipt.credit_amount ?? payment.credit_amount ?? sale.credit_amount,
+    creditAmount.value
+  )
   const cumulativeDebtValue = numberFromValue(
     receipt.cumulative_debt ??
       sale.cumulative_debt ??
       response.cumulative_debt ??
       customer.cumulative_debt ??
       customer.debt_balance,
-    unpaidAmount
+    creditAmountValue
   )
   const billNo =
     sale.sale_no ||
@@ -1359,16 +1635,18 @@ function buildSalePrintData(response = {}) {
 
   return {
     saleId: sale.id || receipt.sale_id || response.sale_id || null,
-    companyName: SALE_PRINT_COMPANY_NAME,
+    companyName: receiptCompanyName,
     title: '销售单',
     billNo,
     billDate: dateOnly(sale.created_at || receipt.created_at || saleDate.value),
     customerName: customer.name || customer.code || '散客',
     customerAddress: customer.address || customer.full_address || '',
     customerPhone: customer.phone || customer.mobile || '',
-    shopAddress: SALE_PRINT_SHOP_ADDRESS,
-    shopPhone: SALE_PRINT_SHOP_PHONE,
-    bankAccount: SALE_PRINT_BANK_ACCOUNT,
+    receiptWarehouseInfoId: receiptWarehouseInfo.id || '',
+    receiptWarehouseInfoName: receiptWarehouseInfo.name || '',
+    shopAddress: receiptWarehouseInfo.address || '',
+    shopPhone: receiptWarehouseInfo.phone || '',
+    bankAccount: receiptWarehouseInfo.bank_account || '',
     lines,
     totalQty,
     totalQtyText: plainQty(totalQty),
@@ -1378,6 +1656,8 @@ function buildSalePrintData(response = {}) {
     amountReceived: amountReceivedValue,
     amountReceivedText: plainMoney(amountReceivedValue),
     changeAmount: changeValue,
+    creditAmount: creditAmountValue,
+    creditAmountText: plainMoney(creditAmountValue),
     cumulativeDebt: cumulativeDebtValue,
     cumulativeDebtText: plainMoney(cumulativeDebtValue),
     remark: receipt.remark || sale.remark || remark.value || '',
@@ -1386,7 +1666,7 @@ function buildSalePrintData(response = {}) {
 }
 
 function isDotMatrixPrintMode(printMode) {
-  return printMode === 'dot_9_5_5' || printMode === 'dot_9_5_11'
+  return printMode === 'dot_241_93' || printMode === 'dot_9_5_5' || printMode === 'dot_9_5_11'
 }
 
 function buildSalePrintHtml(data, printMode = salePrintMode.value) {
@@ -1416,22 +1696,22 @@ function buildA4SalePrintHtml(data) {
   <meta charset="utf-8" />
   <title>${escapeHtml(data.companyName)}${escapeHtml(data.title)}</title>
   <style>
-    @page { size: A4 landscape; margin: 8mm; }
+    @page { size: A4 landscape; margin: 0; }
     * { box-sizing: border-box; }
-    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: 15px; }
-    .sheet { width: 90%; margin: 0 auto; padding: 0 4px; }
-    .company { text-align: center; font-size: 28px; font-weight: 700; line-height: 1.05; }
-    .title { text-align: center; font-size: 18px; line-height: 1.05; margin-bottom: 2px; }
-    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 18px; font-size: 15px; line-height: 1.2; margin-bottom: 2px; }
+    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: 22.5px; }
+    .sheet { width: 98%; margin: 0 auto; padding: 1mm 4px 0; }
+    .company { text-align: center; font-size: 42px; font-weight: 700; line-height: 1.05; }
+    .title { text-align: center; font-size: 27px; line-height: 1.05; margin-bottom: 2px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 18px; font-size: 22.5px; line-height: 1.2; margin-bottom: 2px; }
     .meta .wide { grid-column: 1 / -1; }
-    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: 15px; }
+    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: 22.5px; }
     th, td { border: 1px solid #111; padding: 1px 3px; line-height: 1.05; vertical-align: middle; word-break: break-all; }
-    th { text-align: center; font-weight: 400; font-size: 15px; }
+    th { text-align: center; font-weight: 400; font-size: 22.5px; }
     .name { text-align: left; }
     .num { text-align: right; font-variant-numeric: tabular-nums; }
     .summary-name { text-align: left; }
-    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; margin-top: 8px; font-size: 15px; line-height: 1.2; }
-    .footer-line { margin-top: 1px; font-size: 15px; line-height: 1.18; white-space: normal; }
+    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 14px; margin-top: 8px; font-size: 22.5px; line-height: 1.2; }
+    .footer-line { margin-top: 1px; font-size: 22.5px; line-height: 1.18; white-space: normal; }
   </style>
 </head>
 <body>
@@ -1488,6 +1768,7 @@ function buildA4SalePrintHtml(data) {
     <div class="money-row">
       <div>本单应收：${escapeHtml(data.totalAmountText)}</div>
       <div>本单实收：${escapeHtml(data.amountReceivedText)}</div>
+      <div>本单赊账：${escapeHtml(data.creditAmountText)}</div>
       <div>累计欠款：${escapeHtml(data.cumulativeDebtText)}</div>
     </div>
     <div class="footer-line">店铺地址：${escapeHtml(data.shopAddress || '')}　　店铺电话：${escapeHtml(data.shopPhone || '')}</div>
@@ -1499,10 +1780,13 @@ function buildA4SalePrintHtml(data) {
 }
 
 function dotMatrixPageCss(printMode) {
-  if (printMode === 'dot_9_5_11') {
-    return '@page { size: 9.5in 11in; margin: 0.2in; }'
+  if (printMode === 'dot_241_93') {
+    return '@page { size: 241mm 93mm; margin: 0; }'
   }
-  return '@page { size: 9.5in 5.5in; margin: 0.2in; }'
+  if (printMode === 'dot_9_5_11') {
+    return '@page { size: 9.5in 11in; margin: 0; }'
+  }
+  return '@page { size: 9.5in 5.5in; margin: 0; }'
 }
 
 function buildDotMatrixSalePrintHtml(data, printMode) {
@@ -1527,20 +1811,20 @@ function buildDotMatrixSalePrintHtml(data, printMode) {
   <style>
     ${dotMatrixPageCss(printMode)}
     * { box-sizing: border-box; }
-    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: 12px; }
-    .sheet { width: 90%; margin: 0 auto; padding: 0; }
-    .company { text-align: center; font-size: 20px; font-weight: 700; line-height: 1.05; }
-    .title { text-align: center; font-size: 14px; line-height: 1.05; margin-bottom: 2px; }
-    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 8px; font-size: 12px; line-height: 1.15; margin-bottom: 2px; }
+    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: 18px; }
+    .sheet { width: 98%; margin: 0 auto; padding: 1mm 0 0; }
+    .company { text-align: center; font-size: 30px; font-weight: 700; line-height: 1.05; }
+    .title { text-align: center; font-size: 21px; line-height: 1.05; margin-bottom: 2px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 8px; font-size: 18px; line-height: 1.15; margin-bottom: 2px; }
     .meta .wide { grid-column: 1 / -1; }
-    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: 18px; }
     th, td { border: 1px solid #111; padding: 1px 2px; line-height: 1.05; vertical-align: middle; word-break: break-all; }
-    th { text-align: center; font-weight: 400; font-size: 12px; }
+    th { text-align: center; font-weight: 400; font-size: 18px; }
     .name { text-align: left; }
     .num { text-align: right; font-variant-numeric: tabular-nums; }
     .summary-name { text-align: left; }
-    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 5px; font-size: 12px; line-height: 1.15; }
-    .footer-line { margin-top: 1px; font-size: 12px; line-height: 1.12; white-space: normal; }
+    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin-top: 5px; font-size: 18px; line-height: 1.15; }
+    .footer-line { margin-top: 1px; font-size: 18px; line-height: 1.12; white-space: normal; }
   </style>
 </head>
 <body>
@@ -1597,6 +1881,7 @@ function buildDotMatrixSalePrintHtml(data, printMode) {
     <div class="money-row">
       <div>本单应收：${escapeHtml(data.totalAmountText)}</div>
       <div>本单实收：${escapeHtml(data.amountReceivedText)}</div>
+      <div>本单赊账：${escapeHtml(data.creditAmountText)}</div>
       <div>累计欠款：${escapeHtml(data.cumulativeDebtText)}</div>
     </div>
     <div class="footer-line">店铺地址：${escapeHtml(data.shopAddress || '')}　店铺电话：${escapeHtml(data.shopPhone || '')}</div>
@@ -1638,6 +1923,31 @@ function printSaleDocument(data, preparedWindow = null) {
   return true
 }
 
+function printSaleDocumentBackend(data) {
+  const saleId = data?.saleId
+  if (!saleId) {
+    uni.showToast({ title: '销售单缺少ID，无法后端打印', icon: 'none' })
+    return false
+  }
+  openAuthenticatedUrl(api.posSalePrintUrl(saleId))
+  return true
+}
+
+async function printSaleBySystemSetting(
+  data,
+  preparedWindow = null,
+  frontendRemark = '前端HTML打印'
+) {
+  if (useBackendSalePrint.value) {
+    return printSaleDocumentBackend(data)
+  }
+  if (printSaleDocument(data, preparedWindow)) {
+    await recordFrontendSalePrint(data, frontendRemark)
+    return true
+  }
+  return false
+}
+
 async function recordFrontendSalePrint(data, remark = '前端HTML打印') {
   const saleId = data?.saleId
   if (!saleId) return
@@ -1654,9 +1964,7 @@ async function printLastSale() {
     uni.showToast({ title: '没有可打印的销售单', icon: 'none' })
     return
   }
-  if (printSaleDocument(lastSalePrintData.value)) {
-    await recordFrontendSalePrint(lastSalePrintData.value, '最近小票前端打印')
-  }
+  await printSaleBySystemSetting(lastSalePrintData.value, null, '最近小票前端打印')
 }
 
 function normalizePosSaleRows(data) {
@@ -1664,8 +1972,17 @@ function normalizePosSaleRows(data) {
   return data && Array.isArray(data.results) ? data.results : []
 }
 
+function compactPosNo(value) {
+  const text = String(value || '')
+  const oldMatch = text.match(/^POS(\d{4})(\d{2})(\d{2})(\d{6})/)
+  if (oldMatch) {
+    return `P${oldMatch[1].slice(2)}${oldMatch[2]}${oldMatch[3]}${oldMatch[4]}`
+  }
+  return text
+}
+
 function saleDisplayNo(sale = {}) {
-  return sale.src_bill_no || sale.sale_no || String(sale.id || '')
+  return compactPosNo(sale.sale_no || sale.src_bill_no || String(sale.id || ''))
 }
 
 function saleStatusText(status) {
@@ -1680,6 +1997,16 @@ function isVoidedSale(sale = {}) {
 
 function salePaymentMethod(sale = {}) {
   return paymentMethodName(sale.payment?.method || sale.receipt?.payment?.method)
+}
+
+function saleCreditAmount(sale = {}) {
+  return numberFromValue(
+    sale.receipt?.credit_amount ??
+      sale.receipt?.payment?.credit_amount ??
+      sale.payment?.credit_amount ??
+      sale.credit_amount,
+    0
+  )
 }
 
 function saleCreatedText(sale = {}) {
@@ -1735,6 +2062,9 @@ function defaultPosStats() {
       return_amount: '0.00',
       net_amount: '0.00',
       voided_amount: '0.00',
+      received_amount: '0.00',
+      credit_amount: '0.00',
+      repayment_amount: '0.00',
     },
     payments: [],
     owners: [],
@@ -1780,7 +2110,7 @@ function syncShiftActualInputs(shift) {
   const next = {}
   const rows = Array.isArray(summary.payments) ? summary.payments : []
   rows.forEach((row) => {
-    if (row.method && row.method !== 'CASH') {
+    if (row.method && row.method !== 'CASH' && row.method !== 'CREDIT') {
       next[row.method] = plainMoney(row.actual_amount ?? row.expected_amount)
     }
   })
@@ -2000,17 +2330,10 @@ async function reprintSale(sale) {
     const printData = buildSalePrintData(detail)
     lastSalePrintData.value = printData
     lastReceipt.value = detail.receipt || lastReceipt.value
-    if (printSaleDocument(printData)) {
-      await recordFrontendSalePrint(printData, '销售历史前端重打')
-    }
+    await printSaleBySystemSetting(printData, null, '销售历史前端重打')
   } catch (e) {
     showPosError(e, '重打销售单失败')
   }
-}
-
-function backupPrintSale(sale) {
-  if (!sale?.id) return
-  openAuthenticatedUrl(api.posSalePrintUrl(sale.id))
 }
 
 function saleCanReturn(sale = {}) {
@@ -2248,7 +2571,7 @@ function collapseProductResults() {
 async function searchCustomers() {
   customerLoading.value = true
   try {
-    const res = await api.customers(customerKeyword.value || '', 1)
+    const res = await api.posCustomers(customerKeyword.value || '', 1)
     customers.value = normalizePage(res)
     if (!customers.value.length) {
       uni.showToast({ title: '未找到客户', icon: 'none' })
@@ -2260,8 +2583,133 @@ async function searchCustomers() {
   }
 }
 
+function openCustomerCreate() {
+  customerCreateOpen.value = true
+  const keyword = (customerKeyword.value || '').trim()
+  customerForm.value = {
+    name: keyword,
+    phone: '',
+    address: '',
+  }
+}
+
+function cancelCustomerCreate() {
+  customerCreateOpen.value = false
+  customerSaving.value = false
+  customerForm.value = {
+    name: '',
+    phone: '',
+    address: '',
+  }
+}
+
+async function submitCustomerCreate() {
+  if (customerSaving.value) return
+  const payload = {
+    name: (customerForm.value.name || '').trim(),
+    phone: (customerForm.value.phone || '').trim(),
+    address: (customerForm.value.address || '').trim(),
+  }
+  if (!payload.name) {
+    uni.showToast({ title: '请输入客户名称', icon: 'none' })
+    return
+  }
+  customerSaving.value = true
+  try {
+    const customer = await api.posCustomerCreate(payload)
+    customers.value = [customer, ...customers.value.filter((item) => item.id !== customer.id)]
+    selectedCustomer.value = customer
+    customerKeyword.value = customer.name || customer.code || ''
+    customerCreateOpen.value = false
+    customerForm.value = { name: '', phone: '', address: '' }
+    customerDebtBalance.value = 0
+    uni.showToast({ title: '客户已新增', icon: 'none' })
+    loadCustomerDebt({ silent: true })
+  } catch (e) {
+    showPosError(e, '客户新增失败')
+  } finally {
+    customerSaving.value = false
+  }
+}
+
 function selectCustomer(customer) {
   selectedCustomer.value = customer
+  loadCustomerDebt({ silent: true })
+}
+
+async function loadCustomerDebt(options = {}) {
+  const customerId = selectedCustomer.value?.id
+  if (!customerId || customerDebtLoading.value) return
+  customerDebtLoading.value = true
+  try {
+    const res = await api.posCustomerDebt(customerId)
+    customerDebtBalance.value = numberFromValue(res?.debt_balance, 0)
+  } catch (e) {
+    customerDebtBalance.value = 0
+    if (!options.silent) {
+      showPosError(e, '客户欠款加载失败')
+    }
+  } finally {
+    customerDebtLoading.value = false
+  }
+}
+
+function changeRepaymentMethod(event) {
+  const index = Number(event?.detail?.value || 0)
+  repaymentMethod.value = repaymentMethods.value[index]?.value || 'CASH'
+}
+
+function fillRepaymentAmount() {
+  repaymentAmount.value = plainMoney(Math.max(customerDebtBalance.value, 0))
+}
+
+async function submitCustomerRepayment() {
+  if (repaymentSubmitting.value) return
+  if (!selectedCustomer.value?.id) {
+    uni.showToast({ title: '请先选择客户', icon: 'none' })
+    return
+  }
+  if (!isActiveShift(currentShift.value)) {
+    uni.showToast({ title: '请先开班后再收款', icon: 'none' })
+    return
+  }
+  const amount = numberFromValue(repaymentAmount.value, 0)
+  if (amount <= 0) {
+    uni.showToast({ title: '请输入还款金额', icon: 'none' })
+    return
+  }
+  if (amount > customerDebtBalance.value + 0.005) {
+    uni.showToast({ title: '还款金额不能大于累计欠款', icon: 'none' })
+    return
+  }
+  const confirmed = await confirmDialog({
+    title: '确认客户还款',
+    content: `${selectedCustomerName.value} 还款 ${money(amount)}，确认记录？`,
+    confirmText: '收款',
+  })
+  if (!confirmed) return
+
+  repaymentSubmitting.value = true
+  try {
+    const res = await api.posRepaymentCreate({
+      customer_id: selectedCustomer.value.id,
+      method: repaymentMethod.value,
+      amount: plainMoney(amount),
+      reference_no: repaymentReferenceNo.value || '',
+      remark: repaymentRemark.value || '',
+    })
+    customerDebtBalance.value = numberFromValue(res?.debt_after, 0)
+    repaymentAmount.value = ''
+    repaymentReferenceNo.value = ''
+    repaymentRemark.value = ''
+    uni.showToast({ title: '客户还款已记录', icon: 'none' })
+    await loadCurrentShift()
+    await loadPosStats({ force: true, silent: true })
+  } catch (e) {
+    showPosError(e, '客户还款失败')
+  } finally {
+    repaymentSubmitting.value = false
+  }
 }
 
 function handleScan(code) {
@@ -2673,8 +3121,15 @@ function confirmResetSale() {
 function resetSale(options = {}) {
   removeSaleDraft()
   selectedCustomer.value = null
+  customerDebtBalance.value = 0
+  repaymentAmount.value = ''
+  repaymentReferenceNo.value = ''
+  repaymentRemark.value = ''
   customers.value = []
   customerKeyword.value = ''
+  customerCreateOpen.value = false
+  customerSaving.value = false
+  customerForm.value = { name: '', phone: '', address: '' }
   products.value = []
   productKeyword.value = ''
   productSearched.value = false
@@ -2717,10 +3172,12 @@ async function validateBeforeCheckout() {
   }
   if (!paymentReady.value) {
     const message = splitPaymentEnabled.value
-      ? '拆分支付合计必须等于应收，且每行实收规则正确'
+      ? '拆分支付合计必须等于应收，赊账必须选择客户'
       : paymentMethod.value === 'CASH'
         ? '实收金额不足'
-        : '非现金支付实收必须等于应收'
+        : paymentMethod.value === 'CREDIT'
+          ? '赊账必须先选择客户'
+          : '非现金支付实收必须等于应收'
     uni.showToast({ title: message, icon: 'none' })
     return false
   }
@@ -2738,7 +3195,7 @@ async function validateBeforeCheckout() {
 async function checkout() {
   if (!(await validateBeforeCheckout())) return
   submitting.value = true
-  const preparedPrintWindow = autoPrintSale.value ? openSalePrintWindow() : null
+  const preparedPrintWindow = autoPrintSale.value && !useBackendSalePrint.value ? openSalePrintWindow() : null
   try {
     syncNonCashAmount()
     const payload = {
@@ -2790,9 +3247,7 @@ async function checkout() {
         : `结账成功：${res.sale?.sale_no || orders[0]?.order_no || orders[0]?.id || ''}`
     uni.showToast({ title: msg, icon: 'none' })
     if (autoPrintSale.value) {
-      if (printSaleDocument(printData, preparedPrintWindow)) {
-        await recordFrontendSalePrint(printData, '结账后前端自动打印')
-      }
+      await printSaleBySystemSetting(printData, preparedPrintWindow, '结账后前端自动打印')
     }
     resetSale({ keepReceipt: true })
     loadPosSaleHistory({ force: true, silent: true })
@@ -2867,6 +3322,7 @@ function focusProductInput(delay = 80) {
   padding: 6rpx;
   box-sizing: border-box;
   overflow: hidden;
+  font-size: 28rpx;
 }
 
 .topbar {
@@ -2893,7 +3349,7 @@ function focusProductInput(delay = 80) {
   color: #172033;
   background: transparent;
   border: 0;
-  font-size: 34rpx;
+  font-size: 38rpx;
   line-height: 42rpx;
   padding: 0;
 }
@@ -2901,7 +3357,7 @@ function focusProductInput(delay = 80) {
 .title {
   flex: 1;
   color: #172033;
-  font-size: 28rpx;
+  font-size: 32rpx;
   font-weight: 700;
   line-height: 42rpx;
   text-align: center;
@@ -2938,7 +3394,7 @@ function focusProductInput(delay = 80) {
 .shift-refresh-btn {
   width: 96rpx;
   height: 46rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
 }
 
 .shift-card,
@@ -2958,7 +3414,7 @@ function focusProductInput(delay = 80) {
 
 .shift-no {
   color: #172033;
-  font-size: 26rpx;
+  font-size: 30rpx;
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2968,7 +3424,7 @@ function focusProductInput(delay = 80) {
 .shift-meta,
 .shift-hint {
   color: #667085;
-  font-size: 22rpx;
+  font-size: 25rpx;
   line-height: 1.35;
 }
 
@@ -2978,7 +3434,7 @@ function focusProductInput(delay = 80) {
   gap: 18rpx;
   min-width: 0;
   color: #344054;
-  font-size: 23rpx;
+  font-size: 26rpx;
 }
 
 .shift-close-row {
@@ -3002,7 +3458,7 @@ function focusProductInput(delay = 80) {
 .shift-action-btn {
   width: 112rpx;
   height: 52rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
 }
 
 .shift-payment-actuals {
@@ -3017,7 +3473,7 @@ function focusProductInput(delay = 80) {
   gap: 8rpx;
   min-width: 0;
   color: #475467;
-  font-size: 20rpx;
+  font-size: 23rpx;
 }
 
 .shift-payment-name {
@@ -3066,21 +3522,21 @@ function focusProductInput(delay = 80) {
 .toolbar-label {
   flex: 0 0 auto;
   color: #475467;
-  font-size: 22rpx;
+  font-size: 25rpx;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .primary-label {
   color: #172033;
-  font-size: 24rpx;
+  font-size: 28rpx;
 }
 
 .pos-toolbar .scan-input {
   flex: 1 1 520rpx;
   min-width: 0;
   height: 58rpx;
-  font-size: 25rpx;
+  font-size: 29rpx;
 }
 
 .pos-toolbar .scan-btn,
@@ -3088,7 +3544,7 @@ function focusProductInput(delay = 80) {
   flex: 0 0 112rpx;
   width: 112rpx;
   height: 58rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
   padding: 0 12rpx;
   white-space: nowrap;
   line-height: 58rpx;
@@ -3143,7 +3599,7 @@ function focusProductInput(delay = 80) {
   margin-top: 6rpx;
   padding: 0 8rpx;
   border-radius: 6rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
   box-sizing: border-box;
 }
 
@@ -3208,7 +3664,7 @@ function focusProductInput(delay = 80) {
 .doc-label {
   flex: 0 0 auto;
   color: #475467;
-  font-size: 22rpx;
+  font-size: 25rpx;
   font-weight: 600;
   margin-right: 8rpx;
   white-space: nowrap;
@@ -3216,7 +3672,7 @@ function focusProductInput(delay = 80) {
 
 .doc-value {
   color: #172033;
-  font-size: 23rpx;
+  font-size: 26rpx;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3226,7 +3682,7 @@ function focusProductInput(delay = 80) {
   flex: 1;
   min-width: 0;
   height: 42rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
   padding: 0 10rpx;
 }
 
@@ -3247,8 +3703,8 @@ function focusProductInput(delay = 80) {
 }
 
 .pos-right {
-  flex: 0 0 460rpx;
-  width: 460rpx;
+  flex: 0 0 900rpx;
+  width: 900rpx;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -3256,6 +3712,51 @@ function focusProductInput(delay = 80) {
   overflow-y: auto;
   padding-right: 2rpx;
   box-sizing: border-box;
+}
+
+.pos-right .section-title {
+  font-size: 32rpx;
+}
+
+.pos-right .selected-text,
+.pos-right .doc-label,
+.pos-right .doc-value,
+.pos-right .bill-label,
+.pos-right .print-option,
+.pos-right .print-mode-label,
+.pos-right .stats-label,
+.pos-right .history-status,
+.pos-right .history-meta,
+.pos-right .receipt-row,
+.pos-right .amount-label,
+.pos-right .summary-sub,
+.pos-right .owner-warning,
+.pos-right .choice-code {
+  font-size: 26rpx;
+}
+
+.pos-right .input,
+.pos-right .bill-input,
+.pos-right .payment-input,
+.pos-right .payment-value,
+.pos-right .print-mode-value,
+.pos-right .primary-btn,
+.pos-right .ghost-btn,
+.pos-right .danger-btn {
+  font-size: 28rpx;
+}
+
+.pos-right .choice-name,
+.pos-right .history-no,
+.pos-right .stats-value,
+.pos-right .amount-value,
+.pos-right .void-title,
+.pos-right .return-name {
+  font-size: 32rpx;
+}
+
+.pos-right .summary-title {
+  font-size: 64rpx;
 }
 
 .customer-panel {
@@ -3286,10 +3787,112 @@ function focusProductInput(delay = 80) {
   line-height: 52rpx;
 }
 
+.customer-add-btn {
+  flex: 0 0 82rpx;
+  width: 82rpx;
+  height: 52rpx;
+  margin-left: 8rpx;
+  font-size: 22rpx;
+  line-height: 52rpx;
+}
+
+.customer-create-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8rpx;
+  margin-top: 8rpx;
+  padding: 8rpx;
+  border: 1rpx solid #e4e7ec;
+  border-radius: 8rpx;
+  background: #f8fafc;
+}
+
+.customer-create-input {
+  height: 52rpx;
+  min-width: 0;
+  font-size: 24rpx;
+}
+
+.customer-create-input.wide {
+  grid-column: 1 / -1;
+}
+
+.customer-create-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8rpx;
+}
+
+.customer-create-btn {
+  width: 96rpx;
+  height: 50rpx;
+  margin: 0;
+  font-size: 22rpx;
+  line-height: 50rpx;
+}
+
 .customer-panel .customer-list {
   margin-top: 8rpx;
   max-height: 156rpx;
   overflow-y: auto;
+}
+
+.customer-debt-panel {
+  margin-top: 10rpx;
+  border-top: 1rpx solid #edf0f4;
+  padding-top: 10rpx;
+}
+
+.customer-debt-head,
+.repayment-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.customer-debt-head {
+  color: #475467;
+  font-size: 25rpx;
+  margin-bottom: 8rpx;
+}
+
+.customer-debt-amount {
+  color: #9a3412;
+  font-size: 31rpx;
+  font-weight: 700;
+}
+
+.debt-refresh-btn,
+.repayment-fill-btn,
+.repayment-submit-btn {
+  flex: 0 0 82rpx;
+  width: 82rpx;
+  height: 50rpx;
+  font-size: 22rpx;
+  line-height: 50rpx;
+}
+
+.repayment-row + .repayment-row {
+  margin-top: 8rpx;
+}
+
+.repayment-picker {
+  flex: 0 0 120rpx;
+  width: 120rpx;
+}
+
+.repayment-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.repayment-ref-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 52rpx;
+  font-size: 24rpx;
 }
 
 .doc-info-stack {
@@ -3299,8 +3902,8 @@ function focusProductInput(delay = 80) {
 }
 
 .doc-info-stack .doc-label {
-  flex: 0 0 62rpx;
-  width: 62rpx;
+  flex: 0 0 96rpx;
+  width: 96rpx;
   margin-right: 8rpx;
   text-align: left;
 }
@@ -3331,7 +3934,7 @@ function focusProductInput(delay = 80) {
 
 .section-title {
   color: #172033;
-  font-size: 26rpx;
+  font-size: 30rpx;
   font-weight: 700;
 }
 
@@ -3344,7 +3947,7 @@ function focusProductInput(delay = 80) {
 .selected-text,
 .scan-text {
   color: #667085;
-  font-size: 21rpx;
+  font-size: 24rpx;
 }
 
 .search-row {
@@ -3362,12 +3965,12 @@ function focusProductInput(delay = 80) {
   border-radius: 8rpx;
   padding: 0 14rpx;
   box-sizing: border-box;
-  font-size: 25rpx;
+  font-size: 28rpx;
 }
 
 .search-row .input {
   height: 56rpx;
-  font-size: 24rpx;
+  font-size: 27rpx;
 }
 
 .flex-input,
@@ -3378,6 +3981,10 @@ function focusProductInput(delay = 80) {
 button {
   margin: 0;
   line-height: 1;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  word-break: keep-all;
 }
 
 .primary-btn,
@@ -3386,16 +3993,23 @@ button {
 .submit-btn {
   height: 60rpx;
   border-radius: 8rpx;
-  font-size: 24rpx;
+  font-size: 27rpx;
   display: flex;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
+  padding: 0 12rpx;
+  box-sizing: border-box;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  word-break: keep-all;
 }
 
 .search-row .primary-btn,
 .search-row .ghost-btn {
   height: 56rpx;
-  font-size: 24rpx;
+  font-size: 27rpx;
 }
 
 .primary-btn {
@@ -3446,7 +4060,7 @@ button {
 .product-name {
   display: block;
   color: #172033;
-  font-size: 26rpx;
+  font-size: 30rpx;
   font-weight: 600;
 }
 
@@ -3454,24 +4068,49 @@ button {
 .product-meta {
   display: block;
   color: #667085;
-  font-size: 21rpx;
+  font-size: 24rpx;
   margin-top: 3rpx;
 }
 
 .choice-check {
   color: #1677ff;
-  font-size: 24rpx;
+  font-size: 27rpx;
 }
 
 .product-row {
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
+  min-height: 58rpx;
+  padding: 6rpx 0;
 }
 
-.product-main,
-.cart-info {
-  flex: 1;
+.product-main {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 1 auto;
+  gap: 10rpx;
+  margin-left: auto;
+  overflow: hidden;
+  text-align: right;
+}
+
+.product-main .product-name {
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 520rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-main .product-meta {
+  flex: 0 0 auto;
+  margin-top: 0;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .add-btn {
@@ -3482,7 +4121,7 @@ button {
 .empty-tip,
 .empty-cart {
   color: #98a2b3;
-  font-size: 23rpx;
+  font-size: 26rpx;
   padding: 12rpx 0 4rpx;
   text-align: center;
 }
@@ -3506,6 +4145,7 @@ button {
   display: flex !important;
   flex-direction: row !important;
   align-items: center;
+  justify-content: flex-end;
   flex-wrap: nowrap !important;
   width: 100%;
   box-sizing: border-box;
@@ -3514,7 +4154,7 @@ button {
 .cart-table-head {
   height: 38rpx;
   color: #667085;
-  font-size: 22rpx;
+  font-size: 25rpx;
   border-top: 1rpx solid #edf0f4;
   border-bottom: 1rpx solid #edf0f4;
 }
@@ -3529,6 +4169,7 @@ button {
   flex: 1 1 auto;
   min-width: 0;
   padding-right: 12rpx;
+  text-align: right;
   box-sizing: border-box;
 }
 
@@ -3573,7 +4214,8 @@ button {
 
 .cart-info {
   display: block;
-  overflow: hidden;
+  overflow: visible;
+  text-align: right;
 }
 
 .cart-goods-name,
@@ -3581,22 +4223,24 @@ button {
   display: block;
   max-width: 100%;
   color: #172033;
-  font-size: 26rpx;
+  font-size: 30rpx;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-all;
 }
 
 .cart-goods-line {
-  line-height: 50rpx;
+  line-height: 40rpx;
+  text-align: right;
 }
 
 .cart-goods-meta {
   display: block;
   max-width: 100%;
   color: #667085;
-  font-size: 22rpx;
+  font-size: 25rpx;
   margin-left: 0;
   margin-top: 4rpx;
   overflow: hidden;
@@ -3616,7 +4260,7 @@ button {
   border-radius: 8rpx;
   background: #fff;
   color: #172033;
-  font-size: 24rpx;
+  font-size: 27rpx;
   text-align: center;
   box-sizing: border-box;
   overflow: hidden;
@@ -3645,7 +4289,7 @@ button {
 
 .yuan {
   color: #667085;
-  font-size: 24rpx;
+  font-size: 27rpx;
   padding-left: 10rpx;
 }
 
@@ -3665,7 +4309,7 @@ button {
 .line-amount {
   display: block;
   color: #172033;
-  font-size: 25rpx;
+  font-size: 28rpx;
   font-weight: 600;
   text-align: right;
   overflow: hidden;
@@ -3744,7 +4388,7 @@ button {
   flex: 0 1 92rpx;
   min-width: 0;
   height: 52rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
   padding: 0 8rpx;
 }
 
@@ -3752,14 +4396,14 @@ button {
   flex: 1;
   min-width: 0;
   height: 52rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
 }
 
 .split-remove-btn {
   flex: 0 0 54rpx;
   width: 54rpx;
   height: 52rpx;
-  font-size: 20rpx;
+  font-size: 23rpx;
 }
 
 .split-payment-tools {
@@ -3768,14 +4412,14 @@ button {
   justify-content: space-between;
   gap: 8rpx;
   color: #667085;
-  font-size: 20rpx;
+  font-size: 23rpx;
 }
 
 .split-add-btn {
   flex: 0 0 92rpx;
   width: 92rpx;
   height: 44rpx;
-  font-size: 20rpx;
+  font-size: 23rpx;
 }
 
 .reference-row {
@@ -3787,7 +4431,7 @@ button {
   flex: 0 0 auto;
   width: auto;
   color: #475467;
-  font-size: 22rpx;
+  font-size: 25rpx;
   margin-right: 6rpx;
   white-space: nowrap;
 }
@@ -3805,7 +4449,7 @@ button {
   border-radius: 8rpx;
   background: #fff;
   color: #172033;
-  font-size: 22rpx;
+  font-size: 25rpx;
   text-align: center;
 }
 
@@ -3817,7 +4461,7 @@ button {
 .submit-panel .bill-input,
 .submit-panel .payment-input {
   height: 56rpx;
-  font-size: 24rpx;
+  font-size: 27rpx;
   padding: 0 10rpx;
 }
 
@@ -3826,7 +4470,7 @@ button {
   color: #172033;
   background: #fffdf7;
   border-color: #f59e0b;
-  font-size: 34rpx;
+  font-size: 38rpx;
   font-weight: 700;
   text-align: right;
   padding: 0 16rpx;
@@ -3843,7 +4487,7 @@ button {
   align-items: center;
   justify-content: space-between;
   color: #475467;
-  font-size: 24rpx;
+  font-size: 27rpx;
   border-top: 1rpx solid #edf0f4;
   padding-top: 14rpx;
   margin-top: 14rpx;
@@ -3872,7 +4516,7 @@ button {
 .stats-refresh-btn {
   width: 96rpx;
   height: 46rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
 }
 
 .stats-grid {
@@ -3898,7 +4542,7 @@ button {
 .stats-label {
   display: block;
   color: #667085;
-  font-size: 20rpx;
+  font-size: 23rpx;
   line-height: 1.2;
   margin-bottom: 4rpx;
 }
@@ -3906,7 +4550,7 @@ button {
 .stats-value {
   display: block;
   color: #172033;
-  font-size: 26rpx;
+  font-size: 30rpx;
   font-weight: 700;
   line-height: 1.2;
   overflow: hidden;
@@ -3932,7 +4576,7 @@ button {
   justify-content: space-between;
   gap: 8rpx;
   color: #475467;
-  font-size: 21rpx;
+  font-size: 24rpx;
   line-height: 1.35;
   padding-top: 8rpx;
 }
@@ -3953,13 +4597,13 @@ button {
   width: 100%;
   height: 50rpx;
   margin-top: 8rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
 }
 
 .history-refresh-btn {
   width: 96rpx;
   height: 46rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
 }
 
 .history-search-row {
@@ -3976,7 +4620,7 @@ button {
 .history-search-btn {
   width: 104rpx;
   height: 56rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
 }
 
 .history-list {
@@ -3987,7 +4631,7 @@ button {
   width: 100%;
   height: 48rpx;
   margin-top: 8rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
 }
 
 .history-more-panel {
@@ -4027,18 +4671,48 @@ button {
   gap: 8rpx;
 }
 
+.sale-history-line {
+  justify-content: flex-start;
+  gap: 14rpx;
+  min-width: 0;
+  white-space: nowrap;
+}
+
 .history-no {
   color: #172033;
-  font-size: 24rpx;
+  font-size: 28rpx;
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.sale-history-line .history-no {
+  flex: 0 1 auto;
+  max-width: 250rpx;
+}
+
+.history-money,
+.history-order-count {
+  flex: 0 0 auto;
+  color: #667085;
+  font-size: 24rpx;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.history-money {
+  color: #172033;
+  font-weight: 600;
+}
+
+.sale-history-line .history-status {
+  margin-left: auto;
+}
+
 .history-status {
   flex: 0 0 auto;
-  font-size: 20rpx;
+  font-size: 23rpx;
   font-weight: 700;
 }
 
@@ -4057,7 +4731,7 @@ button {
 .history-meta {
   display: block;
   color: #667085;
-  font-size: 21rpx;
+  font-size: 24rpx;
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4071,10 +4745,21 @@ button {
   flex: 0 0 104rpx;
 }
 
+.sale-history-actions {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 6rpx;
+}
+
 .history-action-btn {
   width: 104rpx;
   height: 44rpx;
-  font-size: 19rpx;
+  font-size: 23rpx;
+}
+
+.sale-history-actions .history-action-btn {
+  width: 88rpx;
 }
 
 .void-panel {
@@ -4106,7 +4791,7 @@ button {
 .return-name {
   display: block;
   color: #172033;
-  font-size: 22rpx;
+  font-size: 25rpx;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4127,7 +4812,7 @@ button {
 .void-title {
   display: block;
   color: #9a3412;
-  font-size: 22rpx;
+  font-size: 25rpx;
   font-weight: 700;
   margin-bottom: 8rpx;
 }
@@ -4147,7 +4832,7 @@ button {
 .void-action-btn {
   flex: 1;
   height: 48rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
 }
 
 .receipt-nos {
@@ -4162,7 +4847,7 @@ button {
 .summary-title {
   display: block;
   color: #b42318;
-  font-size: 56rpx;
+  font-size: 62rpx;
   font-weight: 700;
   line-height: 1.05;
   text-align: right;
@@ -4171,7 +4856,7 @@ button {
 .amount-label {
   display: block;
   color: #667085;
-  font-size: 22rpx;
+  font-size: 25rpx;
   font-weight: 600;
   margin-bottom: 4rpx;
 }
@@ -4183,7 +4868,7 @@ button {
 
 .amount-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 8rpx;
 }
 
@@ -4197,7 +4882,7 @@ button {
 .amount-value {
   display: block;
   color: #172033;
-  font-size: 30rpx;
+  font-size: 34rpx;
   font-weight: 700;
 }
 
@@ -4205,12 +4890,17 @@ button {
   color: #b42318;
 }
 
+.debt-value,
+.history-debt {
+  color: #9a3412;
+}
+
 .summary-sub {
   display: flex;
   justify-content: space-between;
   gap: 8rpx;
   color: #667085;
-  font-size: 22rpx;
+  font-size: 25rpx;
   white-space: nowrap;
 }
 
@@ -4220,7 +4910,7 @@ button {
   border: 1rpx solid #fed7aa;
   border-radius: 8rpx;
   padding: 8rpx 10rpx;
-  font-size: 22rpx;
+  font-size: 25rpx;
   line-height: 1.35;
 }
 
@@ -4240,7 +4930,7 @@ button {
   display: flex;
   align-items: center;
   color: #475467;
-  font-size: 22rpx;
+  font-size: 25rpx;
   line-height: 1;
 }
 
@@ -4259,12 +4949,21 @@ button {
 
 .print-mode-label {
   color: #667085;
-  font-size: 22rpx;
+  font-size: 25rpx;
   white-space: nowrap;
 }
 
 .print-mode-picker {
   flex: 0 0 auto;
+}
+
+.receipt-info-control {
+  flex: 1 1 100%;
+}
+
+.receipt-info-control .print-mode-picker {
+  flex: 1;
+  min-width: 0;
 }
 
 .print-mode-value {
@@ -4277,12 +4976,17 @@ button {
   border-radius: 8rpx;
   color: #344054;
   background: #fff;
-  font-size: 22rpx;
+  font-size: 25rpx;
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   box-sizing: border-box;
+}
+
+.receipt-info-control .print-mode-value {
+  max-width: none;
+  text-align: left;
 }
 
 .submit-btn {
@@ -4291,7 +4995,7 @@ button {
   color: #fff;
   background: #0f766e;
   font-weight: 700;
-  font-size: 32rpx;
+  font-size: 36rpx;
 }
 
 .summary-row {

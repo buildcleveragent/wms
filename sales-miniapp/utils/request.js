@@ -46,13 +46,16 @@ function messageFrom(data, fallback = '请求失败') {
 function mallMessage(message) {
   const text = String(message || '')
   if (text.includes('未绑定') && text.includes('客户')) {
-    return '该商家暂未对你的账号开通购买权限，可先浏览或联系商家开通。'
+    return '当前商品暂未对你的账号开通购买权限，可先浏览或联系客服。'
   }
-  if (text.includes('购物车包含多个商家')) {
-    return '购物车有多个商家商品，请在购物车按商家分别结算。'
+  if (text.includes('购买权限')) {
+    return text
   }
-  if (text.includes('未绑定出库仓库')) {
-    return '当前账号暂未完成商城履约配置，请联系商家处理。'
+  if (text.includes('购物车包含多个配送包裹')) {
+    return '购物车已按配送包裹拆分，可统一提交。'
+  }
+  if (text.includes('商城履约配置')) {
+    return text
   }
   return text
 }
@@ -107,7 +110,6 @@ export const api = {
     }),
   saleMiniMe: () => request({ url: '/api/sale-mini/me/', authRedirect: false }),
   saleMiniHome: (params = {}) => request({ url: `/api/sale-mini/home/?${query(params)}` }),
-  saleMiniMerchants: () => request({ url: '/api/sale-mini/merchants/' }),
   saleMiniCategories: (params = {}) => request({ url: `/api/sale-mini/categories/?${query(params)}` }),
   saleMiniBrands: (params = {}) => request({ url: `/api/sale-mini/brands/?${query(params)}` }),
   saleMiniCoupons: (params = {}) => request({ url: `/api/sale-mini/coupons/?${query(params)}` }),

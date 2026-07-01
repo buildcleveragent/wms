@@ -13,7 +13,6 @@ function itemFromServer(line) {
     key: line.key || `${line.cart_id || ''}:${line.product_id}:${line.order_uom}`,
     owner: line.owner || null,
     owner_id: line.owner_id,
-    owner_name: line.owner_name,
     config_id: line.config_id,
     product_id: line.product_id,
     code: line.product_code,
@@ -40,7 +39,6 @@ function groupFromServer(group) {
     cart_id: group.cart_id || group.id || null,
     owner: group.owner || null,
     owner_id: group.owner_id,
-    owner_name: group.owner_name,
     ok: group.ok !== false,
     total_amount: group.total_amount || 0,
     goods_amount: group.goods_amount || 0,
@@ -98,7 +96,6 @@ const cartStore = reactive({
     const amount = Math.max(toNumber(qty), 0)
     if (!amount) return this.lastPreview
     const data = await cartService.add({
-      owner_id: product.owner_id,
       config_id: product.config_id,
       product_id: product.id,
       qty: String(amount),
@@ -164,9 +161,13 @@ const cartStore = reactive({
     const group = ownerId
       ? this.groups.find((item) => Number(item.owner_id) === Number(ownerId))
       : null
+    const cartIds = ownerId
+      ? []
+      : this.groups.map((item) => item.cart_id).filter(Boolean)
     return {
       ...extra,
       ...(group && group.cart_id ? { cart_id: group.cart_id } : this.cartId ? { cart_id: this.cartId } : {}),
+      ...(!ownerId && cartIds.length ? { cart_ids: cartIds } : {}),
       lines,
     }
   },

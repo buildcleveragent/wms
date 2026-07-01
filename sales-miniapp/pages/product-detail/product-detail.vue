@@ -8,15 +8,7 @@
         <view class="name">{{ product.name }}</view>
         <button class="favorite" @click="toggleFavorite">{{ favoriteText }}</button>
       </view>
-      <view class="meta">{{ product.code }} {{ product.spec }}</view>
-      <view v-if="product.owner_name" class="merchant-card" @click="goMerchant">
-        <view class="merchant-avatar">{{ product.owner_name.slice(0, 1) }}</view>
-        <view class="merchant-main">
-          <view class="merchant-name">{{ product.owner_name }}</view>
-          <view class="merchant-sub">查看该商家全部商品</view>
-        </view>
-        <view class="merchant-enter">进店</view>
-      </view>
+      <view v-if="productSubtitle" class="meta">{{ productSubtitle }}</view>
       <view class="price-row">
         <PriceText :value="product.price" />
         <text v-if="product.market_price" class="market">¥{{ money(product.market_price) }}</text>
@@ -35,8 +27,8 @@
           <text v-else>{{ product.order_uom }}</text>
         </view>
         <view class="cell">
-          <text>规则</text>
-          <text>起订 {{ rules.min_order_qty }}，倍数 {{ rules.multiple_qty }}</text>
+          <text>购买</text>
+          <text>起购 {{ rules.min_order_qty }}，按 {{ rules.multiple_qty }} 递增</text>
         </view>
       </view>
 
@@ -45,23 +37,19 @@
         <view class="desc-text">{{ product.description }}</view>
       </view>
       <view class="desc">
-        <view class="section-title">包装要求</view>
-        <view class="desc-text">{{ product.pack_requirement || '无' }} {{ product.pack_note || '' }}</view>
+        <view class="section-title">规格与服务</view>
+        <view class="desc-text">{{ serviceText }}</view>
       </view>
 
-      <view v-if="purchaseNotice" class="purchase-notice">
-        {{ purchaseNotice }}
-      </view>
-
-      <view v-if="sameMerchantProducts.length" class="recommend">
+      <view v-if="relatedProducts.length" class="recommend">
         <view class="section-head">
-          <text>同店热卖</text>
-          <text class="more" @click="goMerchant">进店逛逛</text>
+          <text>相关推荐</text>
+          <text class="more" @click="goRelatedList">查看更多</text>
         </view>
         <view class="recommend-list">
           <ProductCard
-            v-for="item in sameMerchantProducts"
-            :key="`same-${item.id}`"
+            v-for="item in relatedProducts"
+            :key="`related-${item.id}`"
             :product="item"
             @open="openRelatedProduct"
             @add="addRelatedProduct"
@@ -87,76 +75,66 @@ import QuantityStepper from '../../components/QuantityStepper.vue'
 import { productService } from '../../services/product'
 import { useBrowseStore } from '../../stores/browse'
 import { useCartStore } from '../../stores/cart'
-import { useSessionStore } from '../../stores/session'
 import { money } from '../../utils/money'
 import { getToken } from '../../utils/request'
 
 const browse = useBrowseStore()
 const cart = useCartStore()
-const session = useSessionStore()
 const product = ref({})
-const sameMerchantProducts = ref([])
+const relatedProducts = ref([])
 const qty = ref(1)
 const uomIndex = ref(0)
 
 const rules = computed(() => product.value.rules || {})
+const productSubtitle = computed(() => {
+  const current = product.value || {}
+  const parts = [current.spec, current.brand_name || current.brand].filter(Boolean)
+  const uom = current.order_uom || current.base_uom
+  if (!parts.length && uom) parts.push(uom)
+  return parts.join(' · ')
+})
 const productStockLabel = computed(() => {
   const stock = product.value.stock || {}
   return stock.display || stock.text || '-'
 })
+const serviceText = computed(() => {
+  const parts = [
+    product.value.pack_requirement,
+    product.value.pack_note,
+  ].filter(Boolean)
+  return parts.length ? parts.join(' ') : '支持配送或自提，具体以结算页为准。'
+})
 const hasUomOptions = computed(() => Boolean(product.value.uom_options && product.value.uom_options.length))
 const favoriteText = computed(() => (browse.isFavorite(product.value) ? '已收藏' : '收藏'))
 const isOutOfStock = computed(() => product.value.stock && product.value.stock.status === 'OUT')
-const canPurchaseCurrentOwner = computed(() => {
-  if (!getToken() || !product.value.owner_id) return true
-  const profile = session.profile || {}
-  const bindings = Array.isArray(profile.bindings) ? profile.bindings : []
-  if (bindings.length) {
-    return bindings.some((row) => row.owner && Number(row.owner.id) === Number(product.value.owner_id))
-  }
-  return profile.owner && Number(profile.owner.id) === Number(product.value.owner_id)
-})
-const purchaseNotice = computed(() => {
-  if (!getToken() || canPurchaseCurrentOwner.value) return ''
-  return '该商家暂未对你的账号开通购买权限，可先浏览商品或联系商家开通。'
-})
-const actionDisabled = computed(() => isOutOfStock.value || (getToken() && !canPurchaseCurrentOwner.value))
+const actionDisabled = computed(() => isOutOfStock.value)
 
 async function load(id, params = {}) {
-  await ensureProfileBindings()
   const data = await productService.detail(id, params)
   product.value = normalize(data)
   browse.addRecent(product.value)
   qty.value = Number((product.value.rules && product.value.rules.min_order_qty) || 1)
-  await loadSameMerchantProducts(product.value.id)
+  await loadRelatedProducts(product.value.id)
 }
 
-async function loadSameMerchantProducts(currentId) {
-  sameMerchantProducts.value = []
-  if (!product.value.owner_id) return
+async function loadRelatedProducts(currentId) {
+  relatedProducts.value = []
   try {
-    const data = await productService.list({
-      owner_id: product.value.owner_id,
+    const params = {
       ordering: 'hot',
-      page_size: 6,
-    })
+      page_size: 8,
+    }
+    if (product.value.category_id) params.category_id = product.value.category_id
+    const data = await productService.list(params)
     const rows = data.results || data || []
-    sameMerchantProducts.value = rows
-      .filter((item) => String(item.id) !== String(currentId))
+    relatedProducts.value = rows
+      .filter((item) => {
+        if (String(item.config_id || '') === String(product.value.config_id || '')) return false
+        return String(item.id) !== String(currentId)
+      })
       .slice(0, 4)
   } catch (err) {
-    sameMerchantProducts.value = []
-  }
-}
-
-async function ensureProfileBindings() {
-  if (!getToken()) return
-  const profile = session.profile || {}
-  if (Array.isArray(profile.bindings)) return
-  try {
-    await session.fetchProfile()
-  } catch (err) {
-    if (!err || err.statusCode !== 401) throw err
+    relatedProducts.value = []
   }
 }
 
@@ -200,10 +178,6 @@ async function addToCart() {
     uni.showToast({ title: '商品暂时缺货', icon: 'none' })
     return false
   }
-  if (!canPurchaseCurrentOwner.value) {
-    uni.showToast({ title: purchaseNotice.value, icon: 'none' })
-    return false
-  }
   try {
     const data = await cart.addProduct(product.value, qty.value)
     uni.showToast({ title: '已加入购物车', icon: 'none' })
@@ -236,29 +210,25 @@ function openRelatedProduct(item) {
 
 function productDetailParams(item) {
   return {
-    owner_id: item.owner_id || '',
     config_id: item.config_id || '',
   }
 }
 
-function goMerchant() {
-  if (!product.value.owner_id) return
-  uni.navigateTo({ url: `/pages/merchant-detail/merchant-detail?owner_id=${product.value.owner_id}` })
+function goRelatedList() {
+  uni.navigateTo({ url: '/pages/product-list/product-list?ordering=hot' })
 }
 
 async function buyNow() {
   const data = await addToCart()
   if (data) {
-    const ownerId = product.value.owner_id || (data && data.owner_id) || ''
     const cartId = (data && (data.cart_id || data.id)) || ''
-    uni.navigateTo({ url: `/pages/order-confirm/order-confirm?owner_id=${ownerId}&cart_id=${cartId}` })
+    uni.navigateTo({ url: `/pages/order-confirm/order-confirm?cart_id=${cartId}` })
   }
 }
 
 onLoad((query) => {
   if (query.id) {
     load(query.id, {
-      owner_id: query.owner_id || '',
       config_id: query.config_id || '',
     })
   }
@@ -331,64 +301,6 @@ onLoad((query) => {
   font-size: 25rpx;
 }
 
-.merchant-card {
-  margin-top: 16rpx;
-  padding: 18rpx;
-  display: flex;
-  align-items: center;
-  gap: 14rpx;
-  border: 1rpx solid #dfe6ef;
-  border-radius: 8rpx;
-  background: #fff;
-}
-
-.merchant-avatar {
-  width: 58rpx;
-  height: 58rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8rpx;
-  background: #edf8f5;
-  color: #0f766e;
-  font-weight: 900;
-  flex-shrink: 0;
-}
-
-.merchant-main {
-  min-width: 0;
-  flex: 1;
-}
-
-.merchant-name {
-  color: #17202a;
-  font-size: 27rpx;
-  font-weight: 820;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.merchant-sub {
-  margin-top: 6rpx;
-  color: #64748b;
-  font-size: 22rpx;
-}
-
-.merchant-enter {
-  width: 76rpx;
-  height: 50rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8rpx;
-  background: #0f766e;
-  color: #fff;
-  font-size: 23rpx;
-  font-weight: 750;
-  flex-shrink: 0;
-}
-
 .price-row {
   margin-top: 18rpx;
   display: flex;
@@ -449,17 +361,6 @@ onLoad((query) => {
   color: #475569;
   font-size: 25rpx;
   line-height: 1.6;
-}
-
-.purchase-notice {
-  margin-top: 20rpx;
-  padding: 18rpx 20rpx;
-  border: 1rpx solid #fed7aa;
-  border-radius: 8rpx;
-  background: #fff7ed;
-  color: #9a3412;
-  font-size: 24rpx;
-  line-height: 1.45;
 }
 
 .recommend {

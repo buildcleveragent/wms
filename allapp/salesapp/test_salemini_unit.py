@@ -96,9 +96,11 @@ def test_pickup_fulfillment_only_requires_contact_and_phone():
 
     assert contact == "张三"
     assert phone == "13800000000"
-    assert ship_to == "客户自提 - 测试商家"
+    assert ship_to == "客户自提"
+    assert owner.name not in ship_to
     assert address is None
-    assert preview["full_address"] == "客户自提 - 测试商家"
+    assert preview["full_address"] == "客户自提"
+    assert owner.name not in preview["full_address"]
 
 
 def test_delivery_fulfillment_still_requires_shipping_address():

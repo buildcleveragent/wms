@@ -1,13 +1,13 @@
 <template>
   <view class="page cart-page">
     <view v-if="groups.length" class="groups">
-      <view v-for="group in groups" :key="group.owner_id" class="merchant-group">
-        <view class="merchant-head">
+      <view v-for="(group, index) in groups" :key="group.owner_id" class="package-group">
+        <view class="package-head">
           <view>
-            <view class="merchant-name">{{ group.owner_name || '商家' }}</view>
-            <view class="state">{{ group.ok ? '服务端已校验' : '部分商品需处理' }}</view>
+            <view class="package-name">配送包裹 {{ index + 1 }}</view>
+            <view class="state">{{ group.ok ? '价格库存已校验' : '部分商品需处理' }}</view>
           </view>
-          <button class="group-checkout" :loading="loading" @click="goConfirm(group)">结算</button>
+          <view class="package-badge">{{ group.line_count }} 件</view>
         </view>
         <view class="items">
           <view v-for="item in group.items" :key="item.key" class="cart-item">
@@ -18,19 +18,19 @@
                 <view class="name">{{ item.name }}</view>
                 <button class="remove" @click="remove(item)">删</button>
               </view>
-              <view class="meta">{{ item.code }} {{ item.spec }}</view>
+              <view v-if="item.spec || item.order_uom" class="meta">{{ [item.spec, item.order_uom].filter(Boolean).join(' · ') }}</view>
               <view v-if="item.quote_message" class="warn">{{ item.quote_message }}</view>
               <view class="row">
                 <view>
                   <view class="price">¥{{ money(item.unit_price) }} / {{ item.order_uom }}</view>
-                  <view class="base">折合 {{ item.base_qty || baseQty(item) }} {{ item.base_uom }}</view>
+                  <view class="base">{{ item.qty }} {{ item.order_uom }}</view>
                 </view>
                 <QuantityStepper :model-value="item.qty" :min="0" @change="changeQty(item, $event)" />
               </view>
             </view>
           </view>
         </view>
-        <view class="merchant-total">
+        <view class="package-total">
           <text>{{ group.line_count }} 件</text>
           <text>小计 ¥{{ money(group.total_amount) }}</text>
         </view>
@@ -40,12 +40,12 @@
 
     <view v-if="cart.items.length" class="summary">
       <view>
-        <view class="state">{{ groups.length }} 个商家</view>
+        <view class="state">{{ groups.length }} 个配送包裹</view>
         <view class="amount">¥{{ money(cart.totalAmount) }}</view>
       </view>
       <view class="actions">
         <button class="refresh" :loading="loading" @click="refresh">刷新</button>
-        <button class="checkout" :loading="loading" @click="goFirstConfirm">结算</button>
+        <button class="checkout" :loading="loading" @click="goCheckout">统一结算</button>
       </view>
     </view>
   </view>
@@ -58,15 +58,10 @@ import EmptyState from '../../components/EmptyState.vue'
 import QuantityStepper from '../../components/QuantityStepper.vue'
 import { useCartStore } from '../../stores/cart'
 import { money } from '../../utils/money'
-import { qtyText } from '../../utils/qty'
 
 const cart = useCartStore()
 const loading = ref(false)
 const groups = computed(() => cart.groups || [])
-
-function baseQty(item) {
-  return qtyText(Number(item.qty || 0) * Number(item.qty_in_base || 1))
-}
 
 async function refresh() {
   if (loading.value) return
@@ -112,18 +107,18 @@ async function remove(item) {
   }
 }
 
-function goConfirm(group) {
-  if (!group || !group.owner_id) return
-  uni.navigateTo({ url: `/pages/order-confirm/order-confirm?owner_id=${group.owner_id}&cart_id=${group.cart_id || ''}` })
+function goSinglePackageCheckout(group) {
+  if (!group || !group.cart_id) return
+  uni.navigateTo({ url: `/pages/order-confirm/order-confirm?cart_id=${group.cart_id}` })
 }
 
-function goFirstConfirm() {
+function goCheckout() {
   if (!groups.value.length) return
   if (groups.value.length > 1) {
-    uni.showToast({ title: '请按商家分别结算', icon: 'none' })
+    uni.navigateTo({ url: '/pages/order-confirm/order-confirm' })
     return
   }
-  goConfirm(groups.value[0])
+  goSinglePackageCheckout(groups.value[0])
 }
 
 onShow(() => refresh())
@@ -141,53 +136,49 @@ onShow(() => refresh())
   gap: 14rpx;
 }
 
-.merchant-group {
+.package-group {
   padding: 18rpx;
   background: #fff;
   border: 1rpx solid #dfe6ef;
   border-radius: 8rpx;
 }
 
-.merchant-head,
-.merchant-total {
+.package-head,
+.package-total {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16rpx;
 }
 
-.merchant-head {
+.package-head {
   margin-bottom: 14rpx;
 }
 
-.merchant-name {
+.package-name {
   color: #17202a;
   font-size: 29rpx;
   font-weight: 850;
 }
 
-.merchant-total {
+.package-total {
   margin-top: 14rpx;
   color: #334155;
   font-size: 25rpx;
   font-weight: 700;
 }
 
-.group-checkout {
+.package-badge {
   width: 112rpx;
   height: 60rpx;
   line-height: 60rpx;
   padding: 0;
-  border: 0;
+  text-align: center;
   border-radius: 8rpx;
-  background: #0f766e;
-  color: #fff;
+  background: #ecfdf5;
+  color: #0f766e;
   font-size: 24rpx;
   font-weight: 750;
-}
-
-.group-checkout::after {
-  border: 0;
 }
 
 .cart-item {

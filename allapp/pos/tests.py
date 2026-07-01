@@ -25,6 +25,8 @@ from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.pos.accuracy import _parse_params
 from allapp.pos.models import (
     PosAuditLog,
+    PosCustomer,
+    PosCustomerRepayment,
     PosPayment,
     PosPaymentLine,
     PosPrintLog,
@@ -66,9 +68,11 @@ class PosAdminRegistrationTests(SimpleTestCase):
             PosPaymentLine,
             PosShift,
             PosShiftPaymentSummary,
+            PosCustomer,
             PosReturn,
             PosReturnLine,
             PosRefund,
+            PosCustomerRepayment,
             PosSaleOrder,
             PosPrintLog,
             PosAuditLog,
@@ -127,6 +131,14 @@ class PosApiTests(TestCase):
             salesperson=self.user,
             code="POS-OTH-CUS",
             name="POS Other Customer",
+        )
+        self.pos_customer = PosCustomer.objects.create(
+            warehouse=self.warehouse,
+            code="PC-POS-CUS",
+            name="POS Customer",
+            phone="021-10000001",
+            mobile="13800000001",
+            address="POS Customer Address",
         )
         self.uom = ProductUom.objects.create(code="PCS-POS", name="件", is_active=True)
         self.carton_uom = ProductUom.objects.create(
@@ -195,6 +207,35 @@ class PosApiTests(TestCase):
 
     def payment(self, amount, method="CASH"):
         return {"method": method, "amount_received": str(amount)}
+
+    def test_pos_customer_api_creates_free_customer_without_baseinfo_customer(self):
+        baseinfo_count = Customer.objects.count()
+
+        response = self.client.post(
+            "/api/pos/customers/",
+            {
+                "name": "自由赊账客户",
+                "phone": "18900000001",
+                "address": "POS自由客户地址",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(response.data["code"].startswith("PC"))
+        self.assertEqual(response.data["warehouse_id"], self.warehouse.id)
+        self.assertEqual(response.data["name"], "自由赊账客户")
+        self.assertEqual(Customer.objects.count(), baseinfo_count)
+
+        customer = PosCustomer.objects.get(pk=response.data["id"])
+        self.assertEqual(customer.warehouse_id, self.warehouse.id)
+        self.assertEqual(customer.created_by_id, self.user.id)
+
+        search = self.client.get("/api/pos/customers/", {"search": "18900000001"})
+        self.assertEqual(search.status_code, 200, search.data)
+        rows = search.data["results"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], customer.id)
 
     def open_shift(self, user=None, *, opening_cash_amount=Decimal("0.00")):
         user = user or self.user
@@ -399,7 +440,7 @@ class PosApiTests(TestCase):
         response = self.client.post(
             "/api/pos/checkout/",
             {
-                "customer_id": self.customer.id,
+                "customer_id": self.pos_customer.id,
                 "src_bill_no": "POS-RECEIPT-001",
                 "remark": "cashier sale",
                 "idempotency_key": "idem-pos-001",
@@ -417,7 +458,9 @@ class PosApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["sale"]["src_bill_no"], "POS-RECEIPT-001")
-        self.assertEqual(response.data["receipt"]["customer"]["id"], self.customer.id)
+        self.assertEqual(
+            response.data["receipt"]["customer"]["id"], self.pos_customer.id
+        )
         self.assertEqual(response.data["receipt"]["customer"]["name"], "POS Customer")
         self.assertEqual(response.data["receipt"]["customer"]["phone"], "021-10000001")
         self.assertEqual(
@@ -433,7 +476,8 @@ class PosApiTests(TestCase):
         order = OutboundOrder.objects.get(src_bill_no="POS-RECEIPT-001")
         self.assertEqual(order.owner_id, self.owner.id)
         self.assertEqual(order.warehouse_id, self.warehouse.id)
-        self.assertEqual(order.customer_id, self.customer.id)
+        cash_customer = Customer.objects.get(owner=self.owner, code="CASH")
+        self.assertEqual(order.customer_id, cash_customer.id)
         self.assertEqual(order.outbound_type, "SALES")
         self.assertEqual(order.delivery_method, "PICKUP")
         self.assertEqual(order.submit_status, "SUBMITTED")
@@ -448,6 +492,8 @@ class PosApiTests(TestCase):
         self.assertEqual(line.base_price, Decimal("9.0000"))
         sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-001")
         self.assertEqual(sale.total_amount, Decimal("18.00"))
+        self.assertEqual(sale.pos_customer_id, self.pos_customer.id)
+        self.assertIsNone(sale.selected_customer_id)
         self.assertEqual(sale.shift_id, self.shift.id)
         self.assertEqual(sale.payment.amount_received, Decimal("20.00"))
         detail_response = self.client.get(f"/api/pos/sales/{sale.id}/")
@@ -470,7 +516,7 @@ class PosApiTests(TestCase):
         checkout = self.client.post(
             "/api/pos/checkout/",
             {
-                "customer_id": self.customer.id,
+                "customer_id": self.pos_customer.id,
                 "src_bill_no": "POS-ACCURACY-PASS",
                 "idempotency_key": "idem-pos-accuracy-pass",
                 "payment": self.payment("10.00"),
@@ -508,7 +554,7 @@ class PosApiTests(TestCase):
         checkout = self.client.post(
             "/api/pos/checkout/",
             {
-                "customer_id": self.customer.id,
+                "customer_id": self.pos_customer.id,
                 "src_bill_no": "POS-ACCURACY-BAD",
                 "idempotency_key": "idem-pos-accuracy-bad",
                 "payment": self.payment("10.00"),
@@ -543,13 +589,13 @@ class PosApiTests(TestCase):
             InventoryDetail.objects.get(
                 owner=self.owner, product=self.product
             ).available_qty,
-            Decimal("8.0000"),
+            Decimal("9.0000"),
         )
         self.assertEqual(
             InventorySummary.objects.get(
                 owner=self.owner, product=self.product
             ).available_qty,
-            Decimal("8.0000"),
+            Decimal("9.0000"),
         )
 
     def test_payment_line_backfill_migration_copies_legacy_payment_once(self):
@@ -676,7 +722,7 @@ class PosApiTests(TestCase):
         response = self.client.post(
             "/api/pos/checkout/",
             {
-                "customer_id": self.customer.id,
+                "customer_id": self.pos_customer.id,
                 "src_bill_no": "POS-RECEIPT-MULTI",
                 "payment": self.payment("50.00"),
                 "items": [
@@ -713,7 +759,8 @@ class PosApiTests(TestCase):
         )
         self.assertEqual(orders.count(), 2)
         order_by_owner = {order.owner_id: order for order in orders}
-        self.assertEqual(order_by_owner[self.owner.id].customer_id, self.customer.id)
+        cash_customer = Customer.objects.get(owner=self.owner, code="CASH")
+        self.assertEqual(order_by_owner[self.owner.id].customer_id, cash_customer.id)
         cash_customer = Customer.objects.get(owner=self.other_owner, code="CASH")
         self.assertEqual(
             order_by_owner[self.other_owner.id].customer_id, cash_customer.id
@@ -836,6 +883,168 @@ class PosApiTests(TestCase):
         )
         self.assertEqual(
             payments[PosPayment.Method.WECHAT].expected_amount, Decimal("8.00")
+        )
+
+    def test_checkout_allows_customer_credit_and_reports_debt(self):
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "customer_id": self.pos_customer.id,
+                "src_bill_no": "POS-CREDIT-FULL",
+                "payment": {"method": "CREDIT", "amount_received": "0.00"},
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "10.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        sale = PosSale.objects.get(src_bill_no="POS-CREDIT-FULL")
+        self.assertEqual(sale.payment.method, PosPayment.Method.CREDIT)
+        self.assertEqual(sale.payment.amount_received, Decimal("0.00"))
+        self.assertEqual(
+            PosPaymentLine.objects.get(
+                sale=sale, method=PosPayment.Method.CREDIT
+            ).amount,
+            Decimal("10.00"),
+        )
+        self.assertEqual(response.data["receipt"]["credit_amount"], "10.00")
+        self.assertEqual(response.data["receipt"]["cumulative_debt"], "10.00")
+
+        today = timezone.now().date().isoformat()
+        stats = self.client.get(
+            "/api/pos/stats/", {"start_date": today, "end_date": today}
+        )
+        self.assertEqual(stats.status_code, 200, stats.data)
+        self.assertEqual(stats.data["summary"]["credit_amount"], "10.00")
+        self.assertEqual(stats.data["summary"]["received_amount"], "0.00")
+        payments = {row["method"]: row for row in stats.data["payments"]}
+        self.assertEqual(payments[PosPayment.Method.CREDIT]["amount"], "10.00")
+
+    def test_credit_checkout_requires_customer_without_side_effects(self):
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-CREDIT-NO-CUSTOMER",
+                "payment": {"method": "CREDIT", "amount_received": "0.00"},
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "10.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(
+            PosSale.objects.filter(src_bill_no="POS-CREDIT-NO-CUSTOMER").exists()
+        )
+        self.assertEqual(
+            InventoryDetail.objects.get(
+                owner=self.owner, product=self.product
+            ).available_qty,
+            Decimal("10.0000"),
+        )
+
+    def test_partial_credit_and_repayment_reduce_customer_debt_and_shift_cash(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "customer_id": self.pos_customer.id,
+                "src_bill_no": "POS-CREDIT-PARTIAL",
+                "payments": [
+                    {
+                        "method": "WECHAT",
+                        "amount": "4.00",
+                        "amount_received": "4.00",
+                    },
+                    {
+                        "method": "CREDIT",
+                        "amount": "6.00",
+                        "amount_received": "0.00",
+                    },
+                ],
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "10.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        self.assertEqual(checkout.data["receipt"]["credit_amount"], "6.00")
+        self.assertEqual(checkout.data["receipt"]["cumulative_debt"], "6.00")
+
+        debt = self.client.get(f"/api/pos/customer-debts/{self.pos_customer.id}/")
+        self.assertEqual(debt.status_code, 200, debt.data)
+        self.assertEqual(debt.data["debt_balance"], "6.00")
+
+        repayment = self.client.post(
+            "/api/pos/repayments/",
+            {
+                "customer_id": self.pos_customer.id,
+                "method": "CASH",
+                "amount": "2.50",
+                "reference_no": "CASH-REPAY-001",
+                "remark": "customer paid later",
+            },
+            format="json",
+        )
+        self.assertEqual(repayment.status_code, 201, repayment.data)
+        self.assertEqual(repayment.data["debt_before"], "6.00")
+        self.assertEqual(repayment.data["debt_after"], "3.50")
+        self.assertEqual(PosCustomerRepayment.objects.count(), 1)
+
+        today = timezone.now().date().isoformat()
+        stats = self.client.get(
+            "/api/pos/stats/", {"start_date": today, "end_date": today}
+        )
+        self.assertEqual(stats.status_code, 200, stats.data)
+        self.assertEqual(stats.data["summary"]["credit_amount"], "6.00")
+        self.assertEqual(stats.data["summary"]["repayment_amount"], "2.50")
+        self.assertEqual(stats.data["summary"]["received_amount"], "6.50")
+        payment_rows = {row["method"]: row for row in stats.data["payments"]}
+        self.assertEqual(
+            payment_rows[PosPayment.Method.CASH]["repayment_amount"], "2.50"
+        )
+        self.assertEqual(payment_rows[PosPayment.Method.WECHAT]["sale_amount"], "4.00")
+        self.assertEqual(payment_rows[PosPayment.Method.CREDIT]["sale_amount"], "6.00")
+
+        close_response = self.client.post(
+            f"/api/pos/shifts/{self.shift.id}/close/",
+            {
+                "actual_cash_amount": "102.50",
+                "payments": [{"method": "WECHAT", "actual_amount": "4.00"}],
+            },
+            format="json",
+        )
+        self.assertEqual(close_response.status_code, 200, close_response.data)
+        summary = close_response.data["shift"]["summary"]
+        self.assertEqual(summary["expected_cash_amount"], "102.50")
+        self.assertEqual(summary["credit_amount"], "6.00")
+        self.assertEqual(summary["repayment_amount"], "2.50")
+        shift_payments = {
+            row.method: row
+            for row in PosShiftPaymentSummary.objects.filter(shift=self.shift)
+        }
+        self.assertEqual(
+            shift_payments[PosPayment.Method.CASH].repayment_amount,
+            Decimal("2.50"),
+        )
+        self.assertEqual(
+            shift_payments[PosPayment.Method.CREDIT].expected_amount,
+            Decimal("6.00"),
         )
 
     def test_checkout_rejects_unbalanced_split_payments_without_side_effects(self):
@@ -1787,7 +1996,7 @@ class PosApiTests(TestCase):
         response = self.client.post(
             "/api/pos/checkout/",
             {
-                "customer_id": self.customer.id,
+                "customer_id": self.pos_customer.id,
                 "src_bill_no": "POS-RECEIPT-LOW",
                 "payment": self.payment("8.00"),
                 "items": [
@@ -1836,7 +2045,7 @@ class PosApiTests(TestCase):
         response = self.client.post(
             "/api/pos/checkout/",
             {
-                "customer_id": self.customer.id,
+                "customer_id": self.pos_customer.id,
                 "src_bill_no": "POS-RECEIPT-DISCOUNT",
                 "payment": self.payment("89.99"),
                 "items": [
@@ -1871,7 +2080,7 @@ class PosApiTests(TestCase):
         response = self.client.post(
             "/api/pos/checkout/",
             {
-                "customer_id": self.customer.id,
+                "customer_id": self.pos_customer.id,
                 "src_bill_no": "POS-RECEIPT-AGG-STOCK",
                 "payment": self.payment("99.00"),
                 "items": [
@@ -1908,7 +2117,7 @@ class PosApiTests(TestCase):
         response = self.client.post(
             "/api/pos/checkout/",
             {
-                "customer_id": self.customer.id,
+                "customer_id": self.pos_customer.id,
                 "src_bill_no": "POS-RECEIPT-STOCK",
                 "payment": self.payment("99.00"),
                 "items": [

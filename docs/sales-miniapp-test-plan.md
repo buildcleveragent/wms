@@ -1,31 +1,34 @@
 # Sales Miniapp Test Plan
 
-This plan covers `sales-miniapp`, the customer-facing marketplace mini program, and
-its `/api/sale-mini/` backend. The release goal is a normal buyer mall experience:
-public product discovery across all listed owners, category browsing, cart, per-merchant
-checkout, WMS outbound creation, payment, refund, and data-accurate inventory handling.
+This plan covers `sales-miniapp`, the customer-facing unified retail mini program, and
+its `/api/sale-mini/` backend. The release goal is a Walmart-like buyer experience:
+one public seller brand, product discovery across all internally listed consignment owners,
+category browsing, cart, fulfillment-package checkout, WMS outbound creation, payment,
+refund, and data-accurate inventory handling.
 
 ## Quality Gates
 
 - A buyer can browse home, categories, product list, and product detail without logging in.
-- Public catalog returns only active, listed `SaleProductConfig` rows, across all active owners.
-- Home API returns merchant discovery data so buyers can enter an owner's product list directly.
-- Home banners expose buyer-facing campaign entry points and can navigate to products, categories, merchants, searches, product lists, or internal pages.
-- Home `merchants` and `/api/sale-mini/merchants/` use the same active listed goods scope.
-- Merchant filters return only owners with active listed goods; product list and category pages both respect `owner_id`.
-- Product list supports keyword, category, merchant, brand, price, stock, and sort filters without leaking inactive/unlisted goods.
-- Favorites, browse history, and reorder keep `owner_id` and `config_id` context so later cart repricing still uses the correct sale listing.
+- Public catalog returns only active, listed `SaleProductConfig` rows, across all active internal owners.
+- Customer pages must not expose merchant/store/owner discovery; there is one public seller brand.
+- Home banners expose buyer-facing campaign entry points and can navigate to products, categories, searches, product lists, or internal pages.
+- Product list supports keyword, category, brand, price, stock, and sort filters without leaking inactive/unlisted goods.
+- Favorites and browse history keep `config_id` context so later cart repricing still uses the correct sale listing; reorder keeps the server-side fulfillment context from the original order.
 - Hidden products, inactive products, inactive owners, and owner/product mismatches are not exposed.
 - Buyer-facing miniapp pages must not show back-office terms such as WMS, PDA, old sales workbench, or procurement copy.
-- Logged-in buyers can have bindings to multiple owners and can add products from those owners.
-- WeChat login preserves all owner bindings on the frontend, so a multi-merchant buyer is not reduced to a single-owner session.
-- Products from merchants not yet opened for the buyer remain publicly browsable, while purchase actions show buyer-facing guidance instead of back-office permission wording.
-- User-center points/coupon summary and the benefits page both stay scoped to the buyer-selected merchant.
-- Address book can switch between the buyer's opened merchants, while checkout address selection remains locked to the current merchant.
-- Order list and after-sale list can show all merchants or filter by one opened merchant.
-- Cart data is persisted on the server and grouped by owner.
-- A checkout can only create one WMS outbound order for one owner/customer binding.
-- Mixed-owner checkout is rejected with a clear split-checkout message.
+- Logged-in buyers can have bindings to multiple internal owners and can add products from those owners.
+- WeChat login preserves all owner bindings for backend permission checks without exposing them as customer merchant choices.
+- Login and profile APIs must not return top-level `owner` or `warehouse`; owner context stays inside internal `bindings` and fulfillment endpoints.
+- Products from owners not yet opened for the buyer remain publicly browsable, while purchase actions show buyer-facing guidance.
+- User center, benefits, address, order list, and after-sale list must not expose merchant/owner switches.
+- Buyer-visible product, cart checkout, address, and address-edit URLs must not carry `owner_id`; frontend keeps listing or fulfillment context through `config_id`, `cart_id`, or temporary local storage.
+- Public browse APIs for home, products, categories, and brands must not return `owner_id`, `owner`, `owner_name`, `code`, `sku`, `barcodes`, or internal base-price fields; authenticated cart, order, address, coupon, and payment APIs may keep owner/product-code context for fulfillment and data accuracy.
+- Public product search must match retail-facing terms such as product name, spec, category name, or brand name, not internal product codes, SKUs, barcodes, or brand/category codes.
+- Public product detail ignores owner browse filters; `config_id` is the only public listing context.
+- Cart data is persisted on the server and internally grouped by owner as fulfillment packages.
+- A mixed-owner checkout is submitted once by the buyer and split by the backend into one WMS outbound order per owner/customer binding.
+- Multi-package orders are grouped back into one buyer-visible order row and detail response.
+- Multi-package checkout currently uses offline/platform-confirmed payment and does not expose unavailable aggregate WeChat pay, coupon, or point redemption.
 - Order preview and order creation recalculate price, unit conversion, stock, coupon, points, and payable amount server-side.
 - WMS `OutboundOrder` and `OutboundOrderLine` remain the fulfillment source of truth.
 - Miniapp never directly posts inventory deduction.
@@ -43,18 +46,19 @@ checkout, WMS outbound creation, payment, refund, and data-accurate inventory ha
 | --- | --- | --- |
 | One-command quality gate, no DB | Mall structure, Django check, pure unit tests, H5/WeChat builds | `cd sales-miniapp && npm run test:quality` |
 | One-command quality gate, faster local loop | Same as above, but skips H5/WeChat builds | `cd sales-miniapp && npm run test:quality -- --skip-build` |
-| One-command quality gate, full DB | Adds sale-mini API DB tests and live data validator using normal migrations | `cd sales-miniapp && npm run test:quality -- --db` |
-| One-command quality gate, fast DB | Adds sale-mini API DB tests with pytest-django `--no-migrations` plus live data validator | `cd sales-miniapp && npm run test:quality -- --skip-build --db --fast-db` |
+| One-command quality gate, full DB | Adds sale-mini API DB tests, console catalog-management DB tests, and live data validator using normal migrations | `cd sales-miniapp && npm run test:quality -- --db` |
+| One-command quality gate, fast DB | Adds sale-mini API DB tests, console catalog-management DB tests, and live data validator with pytest-django `--no-migrations` | `cd sales-miniapp && npm run test:quality -- --skip-build --db --fast-db` |
 | Django config sanity | Settings, URL imports, model checks load | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py check` |
 | Migration drift | Model changes have migrations | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py makemigrations --check --dry-run salesapp` |
 | Sale-mini pure unit tests | Status mapping, quantity rules, pricing helper behavior, validator rounding/sample counting | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q allapp/salesapp/test_salemini_unit.py allapp/salesapp/test_mobile_api_unit.py allapp/salesapp/test_services_pricing_unit.py` |
-| Sale-mini API and data accuracy | Public catalog, merchant list, brand filters, owner filters, multi-owner cart, split checkout, outbound creation, payments, refunds, expiry | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --disable-warnings allapp/salesapp/tests.py::SaleMiniApiTests` |
+| Sale-mini API and data accuracy | Public catalog, brand filters, internal owner filters, multi-owner cart, unified checkout with backend split, outbound creation, payments, refunds, expiry | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --disable-warnings allapp/salesapp/tests.py::SaleMiniApiTests` |
 | Sale-mini API fast local run | Same API business assertions without replaying migrations | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --no-migrations --disable-warnings allapp/salesapp/tests.py::SaleMiniApiTests` |
 | Sale-mini API with named MySQL test DB | Same API coverage, using an explicitly configured test schema | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost DB_TEST_NAME=<CLEAN_TEST_DB> .venv/bin/python -m pytest -q --reuse-db --disable-warnings allapp/salesapp/tests.py::SaleMiniApiTests` |
+| Sale-mini console catalog management | `/console/sale-mini/products/` listing filters, bulk config creation, listing/unlisting, price/badge updates, public catalog visibility, and inventory non-mutation | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --disable-warnings allapp/console/tests.py` |
 | Sale-mini live data validator | Read-only invariant scan for sale config ownership, server cart, order amounts, payments/refunds, coupons/points, and non-negative available inventory | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py validate_sale_mini_data_accuracy --fail-on-issues --limit 20` |
 | Frontend JSON | `pages.json` and `manifest.json` are valid | `node -e "JSON.parse(require('fs').readFileSync('sales-miniapp/pages.json','utf8')); JSON.parse(require('fs').readFileSync('sales-miniapp/manifest.json','utf8')); console.log('json ok')"` |
 | Mall route shape | Old workbench pages are not registered in `pages.json`; tab bar has mall tabs | inspect `sales-miniapp/pages.json` |
-| Mall structure regression | Public catalog/merchant services, tab navigation, per-owner cart/checkout, and old workbench route exclusions remain intact | `cd sales-miniapp && npm run test:structure` |
+| Mall structure regression | Unified retail pages, no merchant/store route exposure, tab navigation, internal owner cart/checkout, and old workbench route exclusions remain intact | `cd sales-miniapp && npm run test:structure` |
 | H5 build | Uni-app H5 compiles | `cd sales-miniapp && npm run build:h5` |
 | WeChat mini program build | Uni-app WeChat mini program compiles | `cd sales-miniapp && npm run build:mp-weixin` |
 
@@ -66,21 +70,23 @@ Run these after applying migrations and listing at least two owners' products.
    - `python manage.py migrate`
    - `python manage.py bootstrap_sale_mini_catalog --limit 20`
    - `python manage.py bootstrap_sale_mini_catalog --owner-code <OWNER_CODE> --apply --listed`
+   - Or open `/console/sale-mini/products/`, filter by owner/category/stock/price, select saleable goods, then run `创建商城配置` and `上架`.
 2. H5 smoke:
    - Open HBuilderX H5 URL.
    - Confirm home page loads without login.
    - Confirm categories include `全部`.
-   - Search a listed product by name/code/barcode.
-   - Filter products by merchant, category, brand, price, stock, and sort order.
+   - Search a listed product by name, brand, or retail keyword.
+   - Filter products by category, brand, price, stock, and sort order.
    - Open detail, add to cart, then log in when prompted.
-   - Favorite a product, reopen it from 我的收藏, and confirm the same merchant/listing context is preserved.
+   - Favorite a product, reopen it from 我的收藏, and confirm the same listing context is preserved.
    - Open 浏览足迹 and confirm recently viewed products still navigate to the correct product detail.
-3. Multi-owner mall smoke:
+3. Internal multi-owner consignment smoke:
    - List products for two different owners.
    - Add one product from each owner.
-   - Cart shows two merchant groups.
-   - Global checkout refuses mixed-owner checkout.
-   - Merchant-group checkout opens confirm page for that owner only.
+   - Cart shows two delivery packages.
+   - Global checkout opens one confirm page.
+   - Confirm page explains multi-package orders use platform-confirmed payment and temporarily disables aggregate WeChat pay/coupon/points.
+   - Submit creates one buyer-visible order and multiple backend WMS outbound orders.
 4. Order data accuracy:
    - Preview total equals server-calculated line amounts.
    - Change backend sale price, refresh cart, cart reprices from server.
@@ -98,11 +104,13 @@ Run these after applying migrations and listing at least two owners' products.
    - Bottom tabs: 首页, 分类, 购物车, 订单, 我的.
    - Login success returns to 首页 tab.
    - 未登录进入 我的 redirects to login.
+   - Order submit opens 下单结果, not a raw detail page.
+   - 下单结果 supports wait-pay, paid, and offline-payment states with buyer-facing actions.
    - Cart and order pages do not use old sales workbench routes.
 8. Reorder smoke:
    - Open a completed or cancelled order.
    - Tap `再来一单`.
-   - Confirm cart is filled with the original goods under the original merchant group.
+   - Confirm cart is filled with the original goods under the original delivery package.
    - Preview recalculates current price, stock, coupon, and points instead of trusting stale order-line amounts.
 
 ## Current Run Record
@@ -116,10 +124,10 @@ Fill this section after each execution.
 | Pure unit tests | passed | `15 passed`; includes validator rounding/sample-count coverage. Warnings are existing Django 6.0 deprecation warnings for `CheckConstraint.check`. |
 | Sale-mini data validator | passed | `validate_sale_mini_data_accuracy --fail-on-issues --limit 5 --json` returned `ok=true`, `issue_count=0` against the real MySQL connection. |
 | One-command quality gate | passed | `npm run test:quality -- --skip-build`, `npm run test:quality -- --skip-build --data-accuracy`, `npm run test:quality`, and `npm run test:quality -- --skip-build --db --fast-db` passed. The full non-DB gate includes H5 and WeChat builds. The fast DB gate includes API DB tests and live data validation. |
-| Sale-mini API tests | passed in fast DB mode | The dirty `test_wms_db` was explicitly rebuilt. One smoke case then passed after initial table creation: `1 passed` in `674.25s`. Full API business suite passed with `--reuse-db --no-migrations`: `35 passed` in `181.75s`, covering catalog scope, multi-owner cart, split checkout, outbound creation/allocation, payment callbacks, refunds, after-sale, and unpaid expiry release. Standard migration-mode `--db` is still too slow for this local MySQL run and previously failed on the dirty reused test DB before business assertions. |
+| Sale-mini API tests | passed in fast DB mode | Full API business suite passed with `--reuse-db --no-migrations`: `41 passed`, covering catalog scope, multi-owner cart, unified checkout with backend split, buyer-visible combined orders, cancel inventory release, outbound creation/allocation, payment callbacks, refunds, after-sale, and unpaid expiry release. |
 | Frontend JSON | passed | `pages.json` and `manifest.json` parse successfully. |
 | Mall route shape | passed | Old workbench pages are not registered in `pages.json`; tab bar is `首页 / 分类 / 购物车 / 订单 / 我的`. |
-| Mall structure regression | passed | `npm run test:structure` passed and checks tab routes, public catalog/merchant services, home banner navigation, home merchant discovery, category `全部`, product-list and category merchant filters, WeChat multi-owner bindings, product-detail purchase permission notice, user-center benefit merchant switch, multi-merchant address switch, order/after-sale merchant filters, order fulfillment progress, buyer-facing error/copy guard, owner-scoped checkout, split-checkout message, tab navigation APIs, and absence of old sales workbench files/API wrappers. |
+| Mall structure regression | passed | `npm run test:structure` passed and checks tab routes, unified retail pages, absence of merchant/store routes, category `全部`, product-list filters, internal owner bindings, product-detail purchase context, order fulfillment progress, buyer-facing error/copy guard, unified multi-package checkout, combined-order payment notice, tab navigation APIs, and absence of old sales workbench files/API wrappers. |
 | H5 build | passed | `npm run build:h5` completed. Uni compiler printed a uniCloud hosting advertisement; this does not mean the project uses uniCloud. |
 | WeChat build | passed | `npm run build:mp-weixin` completed. Sass legacy API warning is from the toolchain. |
 

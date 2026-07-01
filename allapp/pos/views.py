@@ -26,10 +26,22 @@ from .exports import (
     build_sales_export_workbook,
     build_shift_export_workbook,
 )
-from .models import PosPrintLog, PosReturn, PosSale, PosShift
+from .models import (
+    PosCustomer,
+    PosCustomerRepayment,
+    PosPrintLog,
+    PosReceiptWarehouseInfo,
+    PosReturn,
+    PosSale,
+    PosShift,
+)
 from .serializers import (
     PosCheckoutSerializer,
+    PosCustomerRepaymentCreateSerializer,
+    PosCustomerRepaymentReadSerializer,
+    PosCustomerSerializer,
     PosProductSerializer,
+    PosReceiptWarehouseInfoSerializer,
     PosReturnCreateSerializer,
     PosReturnReadSerializer,
     PosSaleReadSerializer,
@@ -37,9 +49,10 @@ from .serializers import (
     PosShiftOpenSerializer,
     PosShiftReopenSerializer,
     serialize_checkout_result,
+    serialize_repayment_result,
     serialize_return_result,
 )
-from .services import build_receipt, void_pos_sale
+from .services import build_receipt, customer_pos_debt_balance, void_pos_sale
 from .shift_services import (
     close_pos_shift,
     current_shift_for_user,
@@ -80,6 +93,19 @@ class HasPosReturnPermission(BasePermission):
             request.user
             and request.user.has_perm("pos.add_posreturn")
             and request.user.has_perm("pos.add_posrefund")
+        )
+
+
+class HasPosRepaymentPermission(BasePermission):
+    message = "缺少 POS 客户还款权限。"
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and (
+                request.user.has_perm("pos.add_poscustomerrepayment")
+                or request.user.has_perm("pos.add_possale")
+            )
         )
 
 
@@ -175,6 +201,76 @@ class PosProductListApi(generics.ListAPIView):
         return context
 
 
+class PosReceiptWarehouseInfoListApi(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PosReceiptWarehouseInfoSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        queryset = PosReceiptWarehouseInfo.objects.filter(
+            is_active=True
+        ).select_related("warehouse")
+        warehouse_id = getattr(self.request.user, "warehouse_id", None)
+        if warehouse_id:
+            queryset = queryset.filter(
+                Q(warehouse_id=warehouse_id) | Q(warehouse__isnull=True)
+            )
+        else:
+            queryset = queryset.filter(warehouse__isnull=True)
+        return queryset.order_by("warehouse_id", "-is_default", "sort_order", "id")
+
+
+class PosCustomerListCreateApi(generics.ListCreateAPIView):
+    permission_classes = [permissions.IsAuthenticated, HasPosCheckoutPermission]
+    serializer_class = PosCustomerSerializer
+    pagination_class = PosProductPagination
+
+    def get_queryset(self):
+        warehouse_id = getattr(self.request.user, "warehouse_id", None)
+        if not warehouse_id:
+            return PosCustomer.objects.none()
+        queryset = PosCustomer.objects.filter(warehouse_id=warehouse_id)
+        include_inactive = (
+            self.request.query_params.get("include_inactive") or ""
+        ).strip()
+        if include_inactive not in {"1", "true", "TRUE", "yes", "YES"}:
+            queryset = queryset.filter(is_active=True)
+        search = (self.request.query_params.get("search") or "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(code__icontains=search)
+                | Q(name__icontains=search)
+                | Q(contact_person__icontains=search)
+                | Q(phone__icontains=search)
+                | Q(mobile__icontains=search)
+                | Q(address__icontains=search)
+            )
+        return queryset.order_by("code", "id")
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["warehouse_id"] = getattr(self.request.user, "warehouse_id", None)
+        context["user"] = self.request.user
+        return context
+
+
+class PosCustomerDetailApi(generics.RetrieveUpdateAPIView):
+    permission_classes = [permissions.IsAuthenticated, HasPosCheckoutPermission]
+    serializer_class = PosCustomerSerializer
+
+    def get_queryset(self):
+        warehouse_id = getattr(self.request.user, "warehouse_id", None)
+        if not warehouse_id:
+            return PosCustomer.objects.none()
+        return PosCustomer.objects.filter(warehouse_id=warehouse_id)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["warehouse_id"] = getattr(self.request.user, "warehouse_id", None)
+        context["user"] = self.request.user
+        return context
+
+
 class PosCheckoutApi(APIView):
     permission_classes = [permissions.IsAuthenticated, HasPosCheckoutPermission]
 
@@ -204,7 +300,12 @@ def _validation_error_data(exc):
 
 def _sale_queryset_for_user(user):
     queryset = PosSale.objects.select_related(
-        "payment", "cashier", "warehouse", "selected_customer", "shift"
+        "payment",
+        "cashier",
+        "warehouse",
+        "pos_customer",
+        "selected_customer",
+        "shift",
     ).prefetch_related(
         "lines__product",
         "payment_lines",
@@ -225,6 +326,15 @@ def _return_queryset_for_user(user):
         .prefetch_related("lines__product", "refunds")
         .filter(warehouse_id=warehouse_id)
     )
+
+
+def _repayment_queryset_for_user(user):
+    warehouse_id = getattr(user, "warehouse_id", None)
+    if not warehouse_id:
+        return PosCustomerRepayment.objects.none()
+    return PosCustomerRepayment.objects.select_related(
+        "warehouse", "pos_customer", "customer", "shift", "cashier"
+    ).filter(warehouse_id=warehouse_id)
 
 
 def _date_bounds(start_date, end_date):
@@ -497,6 +607,87 @@ class PosReturnDetailApi(APIView):
         return Response(
             {"return": PosReturnReadSerializer(return_order).data},
             status=status.HTTP_200_OK,
+        )
+
+
+class PosCustomerDebtApi(APIView):
+    permission_classes = [permissions.IsAuthenticated, HasPosSaleViewPermission]
+
+    def get(self, request, customer_id):
+        warehouse_id = getattr(request.user, "warehouse_id", None)
+        if not warehouse_id:
+            return Response(
+                {"detail": "当前用户未绑定仓库(warehouse)，无法查询客户欠款。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        customer = get_object_or_404(
+            PosCustomer.objects.filter(warehouse_id=warehouse_id, is_active=True),
+            pk=customer_id,
+        )
+        debt = customer_pos_debt_balance(
+            customer_id=customer.id, warehouse_id=warehouse_id
+        )
+        repayments = (
+            _repayment_queryset_for_user(request.user)
+            .filter(pos_customer_id=customer.id)
+            .order_by("-created_at", "-id")[:10]
+        )
+        return Response(
+            {
+                "customer": {
+                    "id": customer.id,
+                    "code": customer.code or "",
+                    "name": customer.name or "",
+                },
+                "warehouse_id": warehouse_id,
+                "debt_balance": str(debt),
+                "repayments": PosCustomerRepaymentReadSerializer(
+                    repayments, many=True
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class PosCustomerRepaymentListCreateApi(APIView):
+    permission_classes = [permissions.IsAuthenticated, HasPosSaleViewPermission]
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [permissions.IsAuthenticated(), HasPosRepaymentPermission()]
+        return super().get_permissions()
+
+    def get(self, request):
+        queryset = _repayment_queryset_for_user(request.user).order_by(
+            "-created_at", "-id"
+        )
+        customer_id = (request.query_params.get("customer_id") or "").strip()
+        if customer_id:
+            if not customer_id.isdigit():
+                return Response(
+                    {"detail": "customer_id must be an integer id."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            queryset = queryset.filter(pos_customer_id=int(customer_id))
+        paginator = PageNumberPagination()
+        paginator.page_size = 20
+        page = paginator.paginate_queryset(queryset, request)
+        rows = PosCustomerRepaymentReadSerializer(page, many=True).data
+        return paginator.get_paginated_response(rows)
+
+    def post(self, request):
+        serializer = PosCustomerRepaymentCreateSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        try:
+            result = serializer.save()
+        except DjangoValidationError as exc:
+            return Response(
+                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response(
+            serialize_repayment_result(result), status=status.HTTP_201_CREATED
         )
 
 

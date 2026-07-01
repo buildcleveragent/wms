@@ -38,6 +38,7 @@ urlpatterns = [
     path("accounts/login/", RedirectView.as_view(pattern_name="admin:login", query_string=True), name="login"),
     path("api/tasking/", include("allapp.tasking.urls")),
     path("api/reports/", include("allapp.reports.urls_api")),
+    path("api/core/", include("allapp.core.urls")),
     path("api/pos/", include("allapp.pos.urls")),
     path("api/sales/", include("allapp.salesapp.urls")),
     path("api/sale-mini/", include("allapp.salesapp.salemini_urls")),

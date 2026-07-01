@@ -9,9 +9,12 @@ from django.utils.text import Truncator
 
 from .models import (
     PosAuditLog,
+    PosCustomer,
+    PosCustomerRepayment,
     PosPayment,
     PosPaymentLine,
     PosPrintLog,
+    PosReceiptWarehouseInfo,
     PosRefund,
     PosReturn,
     PosReturnLine,
@@ -162,6 +165,8 @@ class PosShiftPaymentSummaryInline(ReadOnlyInlineMixin, admin.TabularInline):
         "refund_count",
         "expected_amount",
         "refund_amount",
+        "repayment_count",
+        "repayment_amount",
         "actual_amount",
         "difference",
     )
@@ -241,6 +246,77 @@ def _metadata_preview(metadata):
     return Truncator(text).chars(160)
 
 
+@admin.register(PosReceiptWarehouseInfo)
+class PosReceiptWarehouseInfoAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "warehouse",
+        "phone",
+        "bank_account",
+        "is_default",
+        "is_active",
+        "sort_order",
+        "updated_at",
+    )
+    list_filter = ("is_active", "is_default", "warehouse")
+    search_fields = ("name", "address", "phone", "bank_account", "remark")
+    list_editable = ("is_default", "is_active", "sort_order")
+    ordering = ("warehouse_id", "-is_default", "sort_order", "id")
+    fields = (
+        "name",
+        "warehouse",
+        "address",
+        "phone",
+        "bank_account",
+        "is_default",
+        "is_active",
+        "sort_order",
+        "remark",
+        "created_at",
+        "updated_at",
+    )
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(PosCustomer)
+class PosCustomerAdmin(admin.ModelAdmin):
+    list_display = (
+        "code",
+        "name",
+        "warehouse",
+        "phone",
+        "mobile",
+        "is_active",
+        "updated_at",
+    )
+    list_select_related = ("warehouse", "created_by", "updated_by")
+    list_filter = ("warehouse", "is_active")
+    search_fields = ("code", "name", "phone", "mobile", "address", "remark")
+    ordering = ("warehouse_id", "code", "id")
+    fields = (
+        "warehouse",
+        "code",
+        "name",
+        "contact_person",
+        "phone",
+        "mobile",
+        "address",
+        "remark",
+        "is_active",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at",
+    )
+    readonly_fields = ("created_by", "updated_by", "created_at", "updated_at")
+
+    def save_model(self, request, obj, form, change):
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
+
+
 @admin.register(PosSale)
 class PosSaleAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     inlines = [
@@ -258,6 +334,7 @@ class PosSaleAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         "warehouse",
         "cashier",
         "shift",
+        "pos_customer",
         "total_amount",
         "payment_method",
         "created_at",
@@ -267,6 +344,7 @@ class PosSaleAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         "warehouse",
         "cashier",
         "shift",
+        "pos_customer",
         "selected_customer",
         "payment",
         "voided_by",
@@ -282,6 +360,10 @@ class PosSaleAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         "sale_no",
         "src_bill_no",
         "payment__reference_no",
+        "pos_customer__name",
+        "pos_customer__code",
+        "pos_customer__phone",
+        "pos_customer__mobile",
         "selected_customer__name",
         "selected_customer__code",
         "cashier__username",
@@ -300,6 +382,7 @@ class PosSaleAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
                     "warehouse",
                     "cashier",
                     "shift",
+                    "pos_customer",
                     "selected_customer",
                 )
             },
@@ -488,6 +571,8 @@ class PosShiftPaymentSummaryAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
         "refund_count",
         "expected_amount",
         "refund_amount",
+        "repayment_count",
+        "repayment_amount",
         "actual_amount",
         "difference",
     )
@@ -495,6 +580,44 @@ class PosShiftPaymentSummaryAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_filter = ("method", "shift__status")
     search_fields = ("shift__shift_no",)
     ordering = ("-shift__opened_at", "method")
+
+
+@admin.register(PosCustomerRepayment)
+class PosCustomerRepaymentAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
+    list_display = (
+        "repayment_no",
+        "pos_customer",
+        "customer",
+        "warehouse",
+        "shift",
+        "cashier",
+        "method",
+        "amount",
+        "status",
+        "created_at",
+    )
+    list_select_related = ("pos_customer", "customer", "warehouse", "shift", "cashier")
+    list_filter = (
+        "method",
+        "status",
+        "warehouse",
+        "shift",
+        ("created_at", admin.DateFieldListFilter),
+    )
+    search_fields = (
+        "repayment_no",
+        "pos_customer__name",
+        "pos_customer__code",
+        "pos_customer__phone",
+        "pos_customer__mobile",
+        "customer__name",
+        "customer__code",
+        "reference_no",
+        "remark",
+        "cashier__username",
+    )
+    date_hierarchy = "created_at"
+    ordering = ("-created_at", "-id")
 
 
 @admin.register(PosReturn)

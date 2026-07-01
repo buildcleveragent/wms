@@ -25,6 +25,7 @@ from allapp.tasking.models import WmsTask
 from .models import (
     Channel,
     CustomerChannel,
+    MiniCustomerAddress,
     MiniProgramUser,
     PriceItem,
     PriceList,
@@ -32,6 +33,7 @@ from .models import (
     PromotionDiscountStep,
     PromotionSpecialPrice,
     SaleMiniAfterSaleRequest,
+    SaleMiniBanner,
     SaleMiniCart,
     SaleMiniCartItem,
     SaleMiniCoupon,
@@ -350,6 +352,16 @@ class SalesMobileApiTests(TestCase):
 
 
 class SaleMiniApiTests(TestCase):
+    def assertPublicProductPayloadHidesInternalFields(self, payload):
+        for field in ("owner_id", "owner", "owner_name"):
+            self.assertNotIn(field, payload)
+        for field in ("code", "sku", "barcodes", "base_unit_price", "qty_in_base"):
+            self.assertNotIn(field, payload)
+
+    def assertPublicTaxonomyPayloadHidesInternalFields(self, payload):
+        for field in ("code", "owner_id", "owner", "owner_name"):
+            self.assertNotIn(field, payload)
+
     def setUp(self):
         self.owner = Owner.objects.create(code="SMINI", name="Sale Mini Owner")
         self.warehouse = Warehouse.objects.create(
@@ -558,14 +570,124 @@ class SaleMiniApiTests(TestCase):
         return other_owner, other_customer, other_buyer, other_product
 
     def test_products_only_return_listed_goods_with_server_stock_and_price(self):
-        response = self.client.get("/api/sale-mini/products/", {"search": "MP"})
+        response = self.client.get(
+            "/api/sale-mini/products/",
+            {"search": "小程序上架"},
+        )
+        code_response = self.client.get(
+            "/api/sale-mini/products/",
+            {"search": "MP001"},
+        )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(code_response.status_code, 200)
         rows = response.data["results"]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["id"], self.product.id)
+        self.assertPublicProductPayloadHidesInternalFields(rows[0])
         self.assertEqual(rows[0]["price"], "9.5000")
         self.assertEqual(rows[0]["stock"]["available_qty"], "10.000")
+        self.assertEqual(code_response.data["results"], [])
+
+    def test_saleable_stock_requires_complete_tracking_fields(self):
+        tracked_product = Product.objects.create(
+            owner=self.owner,
+            code="MP-TRACK",
+            sku="MP-TRACK",
+            name="批次效期商品",
+            base_uom=self.uom,
+            price=Decimal("18.00"),
+            batch_control=True,
+            expiry_control=True,
+            expiry_basis=Product.ExpiryBasis.MFG,
+            shelf_life_days=365,
+            is_active=True,
+        )
+        SaleProductConfig.objects.create(
+            owner=self.owner,
+            product=tracked_product,
+            is_listed=True,
+            sale_price=Decimal("18.0000"),
+            min_order_qty=Decimal("1.000"),
+            multiple_qty=Decimal("1.000"),
+            stock_display=SaleProductConfig.StockDisplay.EXACT,
+        )
+        detail = InventoryDetail.objects.create(
+            owner=self.owner,
+            product=tracked_product,
+            warehouse=self.warehouse,
+            location=self.location,
+            onhand_qty=Decimal("5.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+        )
+        public_client = APIClient()
+
+        response = public_client.get(
+            "/api/sale-mini/products/",
+            {"search": "批次效期"},
+        )
+        self.assertEqual(response.status_code, 200)
+        rows = response.data["results"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["stock"]["available_qty"], "0.000")
+        self.assertEqual(rows[0]["stock"]["status"], "OUT")
+
+        stocked_response = public_client.get(
+            "/api/sale-mini/products/",
+            {"search": "批次效期", "only_stock": "1"},
+        )
+        self.assertEqual(stocked_response.status_code, 200)
+        self.assertEqual(stocked_response.data["results"], [])
+
+        preview = self.client.post(
+            "/api/sale-mini/orders/preview/",
+            {
+                "lines": [
+                    {
+                        "product_id": tracked_product.id,
+                        "qty": "1.000",
+                        "order_uom": "EA-MINI",
+                    }
+                ]
+            },
+            format="json",
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertFalse(preview.data["ok"])
+        self.assertEqual(preview.data["lines"][0]["available_qty"], "0.000")
+        self.assertIn("库存不足", preview.data["lines"][0]["message"])
+
+        detail.batch_no = "LOT-202606"
+        detail.production_date = date(2026, 6, 1)
+        detail.expiry_date = date(2027, 6, 1)
+        detail.save(update_fields=["batch_no", "production_date", "expiry_date"])
+
+        response = public_client.get(
+            "/api/sale-mini/products/",
+            {"search": "批次效期"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"][0]["stock"]["available_qty"], "5.000")
+
+        preview = self.client.post(
+            "/api/sale-mini/orders/preview/",
+            {
+                "lines": [
+                    {
+                        "product_id": tracked_product.id,
+                        "qty": "1.000",
+                        "order_uom": "EA-MINI",
+                    }
+                ]
+            },
+            format="json",
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertTrue(preview.data["ok"])
+        self.assertEqual(preview.data["lines"][0]["available_qty"], "5.000")
 
     def test_public_products_return_listed_goods_from_all_owners(self):
         other_owner = Owner.objects.create(code="SMINI2", name="Sale Mini Owner 2")
@@ -625,7 +747,10 @@ class SaleMiniApiTests(TestCase):
         )
         public_client = APIClient()
 
-        response = public_client.get("/api/sale-mini/products/", {"search": "MP"})
+        response = public_client.get(
+            "/api/sale-mini/products/",
+            {"search": "上架商品"},
+        )
 
         self.assertEqual(response.status_code, 200)
         rows = response.data["results"]
@@ -633,10 +758,59 @@ class SaleMiniApiTests(TestCase):
             {row["id"] for row in rows}, {self.product.id, other_product.id}
         )
         by_id = {row["id"]: row for row in rows}
-        self.assertEqual(by_id[self.product.id]["owner_name"], self.owner.name)
-        self.assertEqual(by_id[other_product.id]["owner_name"], other_owner.name)
+        self.assertPublicProductPayloadHidesInternalFields(by_id[self.product.id])
+        self.assertPublicProductPayloadHidesInternalFields(by_id[other_product.id])
         self.assertEqual(by_id[other_product.id]["price"], "21.0000")
         self.assertEqual(by_id[other_product.id]["stock"]["available_qty"], "7.000")
+
+    def test_public_products_search_matches_brand_across_all_owners(self):
+        shared_brand = Brand.objects.create(code="BR-UNITY", name="统一优选")
+        hidden_product = Product.objects.create(
+            owner=self.owner,
+            code="MP-BRAND-HIDDEN",
+            sku="MP-BRAND-HIDDEN",
+            name="不可售测试品",
+            brand=shared_brand,
+            base_uom=self.uom,
+            price=Decimal("99.00"),
+            expiry_control=False,
+            batch_control=False,
+            is_active=True,
+        )
+        self.product.name = "日用清洁套装"
+        self.product.brand = shared_brand
+        self.product.save(update_fields=["name", "brand", "updated_at"])
+        other_owner, _other_customer, _other_buyer, other_product = (
+            self._create_other_owner_sale_binding()
+        )
+        other_product.name = "厨房补给套装"
+        other_product.brand = shared_brand
+        other_product.save(update_fields=["name", "brand", "updated_at"])
+        public_client = APIClient()
+
+        by_name = public_client.get(
+            "/api/sale-mini/products/",
+            {"search": "统一优选"},
+        )
+        by_internal_code = public_client.get(
+            "/api/sale-mini/products/",
+            {"search": "BR-UNITY"},
+        )
+
+        self.assertEqual(by_name.status_code, 200)
+        self.assertEqual(by_internal_code.status_code, 200)
+        self.assertEqual(
+            {row["id"] for row in by_name.data["results"]},
+            {self.product.id, other_product.id},
+        )
+        self.assertEqual(by_internal_code.data["results"], [])
+        self.assertNotIn(
+            hidden_product.id,
+            {row["id"] for row in by_name.data["results"]},
+        )
+        by_id = {row["id"]: row for row in by_name.data["results"]}
+        self.assertPublicProductPayloadHidesInternalFields(by_id[self.product.id])
+        self.assertPublicProductPayloadHidesInternalFields(by_id[other_product.id])
 
     def test_product_detail_respects_owner_and_config_context(self):
         config = SaleProductConfig.objects.get(owner=self.owner, product=self.product)
@@ -649,17 +823,29 @@ class SaleMiniApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["id"], self.product.id)
-        self.assertEqual(response.data["owner_id"], self.owner.id)
+        self.assertPublicProductPayloadHidesInternalFields(response.data)
         self.assertEqual(response.data["config_id"], config.id)
         self.assertEqual(response.data["price"], "9.5000")
 
+        config_only = public_client.get(
+            f"/api/sale-mini/products/{self.product.id}/",
+            {"config_id": config.id},
+        )
+
+        self.assertEqual(config_only.status_code, 200)
+        self.assertEqual(config_only.data["id"], self.product.id)
+        self.assertPublicProductPayloadHidesInternalFields(config_only.data)
+        self.assertEqual(config_only.data["config_id"], config.id)
+
         other_owner = Owner.objects.create(code="SMINI-DTL", name="其他详情商家")
-        wrong_owner = public_client.get(
+        ignored_owner = public_client.get(
             f"/api/sale-mini/products/{self.product.id}/",
             {"owner_id": other_owner.id},
         )
 
-        self.assertEqual(wrong_owner.status_code, 404)
+        self.assertEqual(ignored_owner.status_code, 200)
+        self.assertEqual(ignored_owner.data["id"], self.product.id)
+        self.assertPublicProductPayloadHidesInternalFields(ignored_owner.data)
 
     def test_pickup_order_uses_pickup_fulfillment_without_ship_to_address(self):
         response = self._create_sale_mini_order(
@@ -675,7 +861,8 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(order.delivery_method, "PICKUP")
         self.assertEqual(order.contact, "李四")
         self.assertEqual(order.contact_phone, "13900000000")
-        self.assertEqual(order.ship_to, f"客户自提 - {self.owner.name}")
+        self.assertEqual(order.ship_to, "客户自提")
+        self.assertNotIn(self.owner.name, response.data["ship_to"])
 
     def test_order_payload_lines_include_sale_config_context_for_reorder(self):
         config = SaleProductConfig.objects.get(owner=self.owner, product=self.product)
@@ -688,10 +875,14 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(line["product_id"], self.product.id)
         self.assertEqual(line["order_uom"], "EA-MINI")
 
-    def test_public_merchants_and_owner_filter_only_use_listed_goods(self):
+    def test_public_home_hides_merchants_and_ignores_owner_browse_filter(self):
         category = ProductCategory.objects.create(code="MINI-CAT", name="小程序分类")
         self.product.category = category
         self.product.save(update_fields=["category", "updated_at"])
+        SaleProductConfig.objects.filter(
+            owner=self.owner,
+            product=self.product,
+        ).update(is_hot=True, is_recommended=True)
         other_owner = Owner.objects.create(code="SMINI3", name="Sale Mini Owner 3")
         hidden_owner = Owner.objects.create(code="SMINI4", name="Sale Mini Owner 4")
         other_product = Product.objects.create(
@@ -723,9 +914,17 @@ class SaleMiniApiTests(TestCase):
             product=other_product,
             is_listed=True,
             is_hot=True,
+            is_recommended=True,
             sale_price=Decimal("16.0000"),
             min_order_qty=Decimal("1.000"),
             multiple_qty=Decimal("1.000"),
+        )
+        SaleMiniBanner.objects.create(
+            owner=other_owner,
+            title="统一商城活动",
+            image_url="https://example.com/banner.png",
+            link_type="PRODUCT",
+            link_value=str(other_product.id),
         )
         public_client = APIClient()
 
@@ -741,31 +940,43 @@ class SaleMiniApiTests(TestCase):
         )
 
         self.assertEqual(home.status_code, 200)
-        self.assertEqual(merchants.status_code, 200)
+        self.assertEqual(merchants.status_code, 404)
         self.assertEqual(products.status_code, 200)
         self.assertEqual(categories.status_code, 200)
-        merchant_ids = {row["id"] for row in merchants.data}
-        home_merchant_ids = {row["id"] for row in home.data["merchants"]}
-        self.assertIn(self.owner.id, merchant_ids)
-        self.assertIn(other_owner.id, merchant_ids)
-        self.assertNotIn(hidden_owner.id, merchant_ids)
-        self.assertIn(self.owner.id, home_merchant_ids)
-        self.assertIn(other_owner.id, home_merchant_ids)
-        self.assertNotIn(hidden_owner.id, home_merchant_ids)
-        by_id = {row["id"]: row for row in merchants.data}
-        self.assertEqual(by_id[other_owner.id]["product_count"], 1)
-        self.assertEqual(by_id[other_owner.id]["hot_count"], 1)
+        self.assertNotIn("merchants", home.data)
+        self.assertEqual(len(home.data["banners"]), 1)
+        self.assertNotIn("owner_id", home.data["banners"][0])
+        for row in home.data["categories"]:
+            self.assertPublicTaxonomyPayloadHidesInternalFields(row)
+        self.assertEqual(
+            {row["id"] for row in home.data["hot_products"]},
+            {self.product.id, other_product.id},
+        )
+        self.assertEqual(
+            {row["id"] for row in home.data["recommend_products"]},
+            {self.product.id, other_product.id},
+        )
+        for row in home.data["hot_products"]:
+            self.assertPublicProductPayloadHidesInternalFields(row)
+        for row in home.data["recommend_products"]:
+            self.assertPublicProductPayloadHidesInternalFields(row)
         self.assertEqual(
             {row["id"] for row in products.data["results"]},
-            {other_product.id},
+            {self.product.id, other_product.id},
         )
+        for row in products.data["results"]:
+            self.assertPublicProductPayloadHidesInternalFields(row)
         self.assertEqual(categories.data[0]["id"], category.id)
+        self.assertPublicTaxonomyPayloadHidesInternalFields(categories.data[0])
 
     def test_public_brands_only_return_listed_goods_and_respect_filters(self):
         category = ProductCategory.objects.create(
             code="MINI-BRAND-CAT", name="品牌分类"
         )
         listed_brand = Brand.objects.create(code="BR-LISTED", name="上架品牌")
+        other_listed_brand = Brand.objects.create(
+            code="BR-LISTED-2", name="跨货主上架品牌"
+        )
         hidden_brand = Brand.objects.create(code="BR-HIDDEN", name="未上架品牌")
         self.product.category = category
         self.product.brand = listed_brand
@@ -773,6 +984,12 @@ class SaleMiniApiTests(TestCase):
         self.hidden_product.category = category
         self.hidden_product.brand = hidden_brand
         self.hidden_product.save(update_fields=["category", "brand", "updated_at"])
+        other_owner, _other_customer, _other_buyer, other_product = (
+            self._create_other_owner_sale_binding()
+        )
+        other_product.category = category
+        other_product.brand = other_listed_brand
+        other_product.save(update_fields=["category", "brand", "updated_at"])
         public_client = APIClient()
 
         brands = public_client.get("/api/sale-mini/brands/")
@@ -788,9 +1005,21 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(brands.status_code, 200)
         self.assertEqual(filtered.status_code, 200)
         self.assertEqual(products.status_code, 200)
-        self.assertEqual({row["id"] for row in brands.data}, {listed_brand.id})
-        self.assertEqual(filtered.data[0]["id"], listed_brand.id)
-        self.assertEqual(filtered.data[0]["product_count"], 1)
+        self.assertEqual(
+            {row["id"] for row in brands.data},
+            {listed_brand.id, other_listed_brand.id},
+        )
+        self.assertEqual(
+            {row["id"] for row in filtered.data},
+            {listed_brand.id, other_listed_brand.id},
+        )
+        by_id = {row["id"]: row for row in filtered.data}
+        for row in brands.data:
+            self.assertPublicTaxonomyPayloadHidesInternalFields(row)
+        for row in filtered.data:
+            self.assertPublicTaxonomyPayloadHidesInternalFields(row)
+        self.assertEqual(by_id[listed_brand.id]["product_count"], 1)
+        self.assertEqual(by_id[other_listed_brand.id]["product_count"], 1)
         self.assertEqual(
             {row["id"] for row in products.data["results"]},
             {self.product.id},
@@ -817,12 +1046,23 @@ class SaleMiniApiTests(TestCase):
         self.assertIn("access", response.data)
         self.assertIn("refresh", response.data)
         self.assertEqual(response.data["customer"]["id"], self.customer.id)
-        self.assertEqual(response.data["warehouse"]["id"], self.warehouse.id)
+        self.assertNotIn("owner", response.data)
+        self.assertNotIn("warehouse", response.data)
+        self.assertNotIn("code", response.data["customer"])
+        self.assertNotIn("name", response.data["customer"])
+        binding = response.data["bindings"][0]
+        self.assertEqual(binding["owner"]["id"], self.owner.id)
+        self.assertNotIn("code", binding["customer"])
+        self.assertNotIn("name", binding["customer"])
 
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access']}")
         me_response = client.get("/api/sale-mini/me/")
         self.assertEqual(me_response.status_code, 200)
         self.assertEqual(me_response.data["customer"]["id"], self.customer.id)
+        self.assertNotIn("owner", me_response.data)
+        self.assertNotIn("warehouse", me_response.data)
+        self.assertNotIn("code", me_response.data["customer"])
+        self.assertNotIn("name", me_response.data["customer"])
 
     @patch("allapp.salesapp.salemini_api._wechat_code_to_session")
     def test_wechat_login_binds_openid_from_existing_unionid(self, mock_session):
@@ -857,7 +1097,7 @@ class SaleMiniApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
-        self.assertIn("未绑定客户", str(response.data))
+        self.assertIn("购买权限", str(response.data))
 
     @patch("allapp.salesapp.salemini_api._wechat_code_to_session")
     def test_wechat_login_rejects_duplicate_openid_binding(self, mock_session):
@@ -891,7 +1131,7 @@ class SaleMiniApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("多个绑定记录", str(response.data))
+        self.assertIn("多个购买权限记录", str(response.data))
 
     @patch("allapp.salesapp.salemini_api._wechat_code_to_session")
     def test_wechat_login_rejects_buyer_user_without_warehouse(self, mock_session):
@@ -922,7 +1162,7 @@ class SaleMiniApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
-        self.assertIn("出库仓库", str(response.data))
+        self.assertIn("商城履约配置", str(response.data))
 
     def test_preview_recalculates_amount_and_rejects_shortage(self):
         response = self.client.post(
@@ -1086,23 +1326,115 @@ class SaleMiniApiTests(TestCase):
             coupon_no="COUPON-OTHER",
         )
         self._earn_points(500)
+        other_owner, other_customer, other_buyer, _other_product = (
+            self._create_other_owner_sale_binding()
+        )
+        other_template = SaleMiniCouponTemplate.objects.create(
+            owner=other_owner,
+            code="MINI-COUPON-OTHER-OWNER",
+            title="跨绑定优惠券",
+            threshold_amount=Decimal("10.00"),
+            discount_amount=Decimal("3.00"),
+            effective_from=date.today() - timedelta(days=1),
+        )
+        SaleMiniCoupon.objects.create(
+            owner=other_owner,
+            customer=other_customer,
+            buyer_user=other_buyer,
+            template=other_template,
+            coupon_no="COUPON-OTHER-OWNER",
+        )
+        SaleMiniPointLedger.objects.create(
+            owner=other_owner,
+            customer=other_customer,
+            buyer_user=other_buyer,
+            tx_no="POINT-EARN-OTHER-OWNER",
+            tx_type=SaleMiniPointLedger.TxType.EARN,
+            points_delta=300,
+        )
 
         coupons = self.client.get(
             "/api/sale-mini/coupons/",
             {"order_amount": "19.00"},
         )
         points = self.client.get("/api/sale-mini/points/")
+        scoped_coupons = self.client.get(
+            "/api/sale-mini/coupons/",
+            {"owner_id": self.owner.id, "order_amount": "19.00"},
+        )
+        scoped_points = self.client.get(
+            "/api/sale-mini/points/",
+            {"owner_id": self.owner.id},
+        )
 
         self.assertEqual(coupons.status_code, 200)
         self.assertEqual(points.status_code, 200)
+        self.assertEqual(scoped_coupons.status_code, 200)
+        self.assertEqual(scoped_points.status_code, 200)
         self.assertEqual(
             {row["coupon_no"] for row in coupons.data},
+            {coupon.coupon_no, "COUPON-GLOBAL", "COUPON-OTHER-OWNER"},
+        )
+        self.assertEqual(
+            {row["coupon_no"] for row in scoped_coupons.data},
             {coupon.coupon_no, "COUPON-GLOBAL"},
         )
         self.assertTrue(all(row["usable"] for row in coupons.data))
-        self.assertEqual(points.data["points"], 500)
+        self.assertEqual(points.data["points"], 800)
         self.assertEqual(points.data["frozen"], 0)
         self.assertEqual(points.data["exchange_rate"], "100.00")
+        self.assertEqual(scoped_points.data["points"], 500)
+        self.assertEqual(scoped_points.data["frozen"], 0)
+
+    def test_address_api_returns_all_bound_addresses_without_owner_filter(self):
+        other_owner, other_customer, other_buyer, _other_product = (
+            self._create_other_owner_sale_binding()
+        )
+        first_address = MiniCustomerAddress.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            buyer_user=self.buyer,
+            contact="张三",
+            phone="13800000000",
+            province="浙江",
+            city="杭州",
+            district="西湖",
+            detail="一号仓",
+            is_default=True,
+        )
+        second_address = MiniCustomerAddress.objects.create(
+            owner=other_owner,
+            customer=other_customer,
+            buyer_user=other_buyer,
+            contact="李四",
+            phone="13900000000",
+            province="上海",
+            city="上海",
+            district="浦东",
+            detail="二号仓",
+            is_default=True,
+        )
+
+        all_addresses = self.client.get("/api/sale-mini/addresses/")
+        scoped_addresses = self.client.get(
+            "/api/sale-mini/addresses/",
+            {"owner_id": self.owner.id},
+        )
+
+        self.assertEqual(all_addresses.status_code, 200)
+        self.assertEqual(scoped_addresses.status_code, 200)
+        self.assertEqual(
+            {row["id"] for row in all_addresses.data},
+            {first_address.id, second_address.id},
+        )
+        self.assertEqual(
+            {row["owner_id"] for row in all_addresses.data},
+            {self.owner.id, other_owner.id},
+        )
+        self.assertEqual(
+            {row["id"] for row in scoped_addresses.data},
+            {first_address.id},
+        )
 
     def test_server_cart_persists_reprices_and_reports_stock_errors(self):
         config = SaleProductConfig.objects.get(owner=self.owner, product=self.product)
@@ -1153,6 +1485,14 @@ class SaleMiniApiTests(TestCase):
         self.assertFalse(response.data["ok"])
         self.assertIn("库存不足", response.data["items"][0]["message"])
 
+        by_cart_id = self.client.get("/api/sale-mini/cart/", {"cart_id": cart_id})
+
+        self.assertEqual(by_cart_id.status_code, 200)
+        self.assertEqual(by_cart_id.data["cart_id"], cart_id)
+        self.assertEqual(by_cart_id.data["owner_id"], self.owner.id)
+        self.assertEqual(by_cart_id.data["line_count"], 1)
+        self.assertEqual(by_cart_id.data["items"][0]["item_id"], item_id)
+
         response = self.client.post(
             "/api/sale-mini/cart/remove/",
             {"item_id": item_id},
@@ -1200,8 +1540,8 @@ class SaleMiniApiTests(TestCase):
             SaleMiniCart.objects.filter(buyer_user__user=self.user).count(), 2
         )
 
-    def test_multi_owner_preview_requires_split_checkout(self):
-        _other_owner, _customer, _buyer, other_product = (
+    def test_multi_owner_preview_returns_combined_packages(self):
+        other_owner, _customer, _buyer, other_product = (
             self._create_other_owner_sale_binding()
         )
 
@@ -1224,8 +1564,242 @@ class SaleMiniApiTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("分别结算", str(response.data))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["ok"])
+        self.assertTrue(response.data["is_combined"])
+        self.assertEqual(response.data["goods_amount"], "14.50")
+        self.assertEqual(response.data["payable_amount"], "14.50")
+        self.assertEqual(response.data["line_count"], 2)
+        self.assertEqual(
+            {group["owner_id"] for group in response.data["groups"]},
+            {self.owner.id, other_owner.id},
+        )
+        self.assertEqual(
+            {line["product_id"] for line in response.data["lines"]},
+            {self.product.id, other_product.id},
+        )
+
+    def test_multi_owner_checkout_splits_orders_and_keeps_inventory_accurate(self):
+        other_owner, other_customer, other_buyer, other_product = (
+            self._create_other_owner_sale_binding()
+        )
+        first_cart = self.client.post(
+            "/api/sale-mini/cart/add/",
+            {
+                "product_id": self.product.id,
+                "qty": "2.000",
+                "order_uom": "EA-MINI",
+            },
+            format="json",
+        )
+        second_cart = self.client.post(
+            "/api/sale-mini/cart/add/",
+            {
+                "product_id": other_product.id,
+                "qty": "1.000",
+                "order_uom": "EA-MINI",
+            },
+            format="json",
+        )
+        self.assertEqual(first_cart.status_code, 200)
+        self.assertEqual(second_cart.status_code, 200)
+
+        response = self.client.post(
+            "/api/sale-mini/orders/",
+            {
+                "cart_ids": [first_cart.data["cart_id"], second_cart.data["cart_id"]],
+                "contact": "张三",
+                "contact_phone": "13800000000",
+                "ship_to": "上海市测试路 1 号",
+                "delivery_method": "OWN_TRUCK",
+                "payment_method": "OFFLINE",
+                "lines": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "2.000",
+                        "order_uom": "EA-MINI",
+                    },
+                    {
+                        "product_id": other_product.id,
+                        "qty": "1.000",
+                        "order_uom": "EA-MINI",
+                    },
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["is_combined"])
+        self.assertEqual(response.data["order_count"], 2)
+        self.assertEqual(response.data["goods_amount"], "24.00")
+        self.assertEqual(response.data["payable_amount"], "24.00")
+        self.assertEqual(response.data["payment_status"], "OFFLINE")
+
+        order_ids = [row["id"] for row in response.data["orders"]]
+        orders = {
+            order.owner_id: order
+            for order in OutboundOrder.objects.filter(id__in=order_ids)
+        }
+        self.assertEqual(set(orders), {self.owner.id, other_owner.id})
+        self.assertEqual(orders[self.owner.id].customer, self.customer)
+        self.assertEqual(orders[other_owner.id].customer, other_customer)
+        self.assertEqual(
+            orders[self.owner.id].final_order_amount,
+            Decimal("19.00"),
+        )
+        self.assertEqual(
+            orders[other_owner.id].final_order_amount,
+            Decimal("5.00"),
+        )
+
+        mappings = {
+            mapping.owner_id: mapping
+            for mapping in SaleMiniOrderMapping.objects.filter(
+                outbound_order_id__in=order_ids
+            )
+        }
+        self.assertEqual(mappings[self.owner.id].buyer_user, self.buyer)
+        self.assertEqual(mappings[other_owner.id].buyer_user, other_buyer)
+        self.assertEqual(mappings[self.owner.id].payable_amount, Decimal("19.00"))
+        self.assertEqual(mappings[other_owner.id].payable_amount, Decimal("5.00"))
+        batch_sources = {mapping.source for mapping in mappings.values()}
+        self.assertEqual(len(batch_sources), 1)
+        self.assertTrue(next(iter(batch_sources)).startswith("sale-mini-batch-"))
+
+        self_line = OutboundOrderLine.objects.get(order=orders[self.owner.id])
+        other_line = OutboundOrderLine.objects.get(order=orders[other_owner.id])
+        self.assertEqual(self_line.base_qty, Decimal("2.000"))
+        self.assertEqual(other_line.base_qty, Decimal("1.000"))
+
+        self_detail = InventoryDetail.objects.get(product=self.product)
+        other_detail = InventoryDetail.objects.get(product=other_product)
+        self.assertEqual(self_detail.allocated_qty, Decimal("2.0000"))
+        self.assertEqual(self_detail.available_qty, Decimal("8.0000"))
+        self.assertEqual(other_detail.allocated_qty, Decimal("1.0000"))
+        self.assertEqual(other_detail.available_qty, Decimal("5.0000"))
+
+        self.assertEqual(
+            WmsTask.objects.filter(
+                task_type=WmsTask.TaskType.PICK,
+                source_pk__in=[str(order_id) for order_id in order_ids],
+            ).count(),
+            2,
+        )
+        self.assertFalse(
+            SaleMiniCartItem.objects.filter(
+                cart_id__in=[first_cart.data["cart_id"], second_cart.data["cart_id"]]
+            ).exists()
+        )
+
+        order_list = self.client.get("/api/sale-mini/orders/")
+        self.assertEqual(order_list.status_code, 200)
+        self.assertEqual(len(order_list.data["results"]), 1)
+        public_order = order_list.data["results"][0]
+        self.assertTrue(public_order["is_combined"])
+        self.assertEqual(public_order["order_count"], 2)
+        self.assertEqual(public_order["line_count"], 2)
+        self.assertEqual(public_order["payable_amount"], "24.00")
+        self.assertTrue(public_order["order_no"].startswith("SC"))
+
+        order_detail = self.client.get(f"/api/sale-mini/orders/{response.data['id']}/")
+        self.assertEqual(order_detail.status_code, 200)
+        self.assertTrue(order_detail.data["is_combined"])
+        self.assertEqual(order_detail.data["order_count"], 2)
+        self.assertEqual(order_detail.data["line_count"], 2)
+        self.assertEqual(
+            {line["product_id"] for line in order_detail.data["lines"]},
+            {self.product.id, other_product.id},
+        )
+
+        cancel = self.client.post(f"/api/sale-mini/orders/{response.data['id']}/cancel/")
+        self.assertEqual(cancel.status_code, 200)
+        self.assertTrue(cancel.data["is_combined"])
+        self.assertEqual(cancel.data["status"], "CANCELLED")
+        self.assertEqual(cancel.data["order_count"], 2)
+        self_detail.refresh_from_db()
+        other_detail.refresh_from_db()
+        self.assertEqual(self_detail.allocated_qty, Decimal("0.0000"))
+        self.assertEqual(self_detail.available_qty, Decimal("10.0000"))
+        self.assertEqual(other_detail.allocated_qty, Decimal("0.0000"))
+        self.assertEqual(other_detail.available_qty, Decimal("6.0000"))
+
+    def test_cart_and_checkout_auto_create_internal_binding_for_new_owner(self):
+        other_owner = Owner.objects.create(code="SMINI-AUTO", name="Sale Mini Auto")
+        other_product = Product.objects.create(
+            owner=other_owner,
+            code="MP-AUTO",
+            sku="MP-AUTO",
+            name="自动绑定商品",
+            base_uom=self.uom,
+            price=Decimal("11.00"),
+            expiry_control=False,
+            batch_control=False,
+            is_active=True,
+        )
+        SaleProductConfig.objects.create(
+            owner=other_owner,
+            product=other_product,
+            is_listed=True,
+            sale_price=Decimal("10.0000"),
+            min_order_qty=Decimal("1.000"),
+            multiple_qty=Decimal("1.000"),
+        )
+        InventoryDetail.objects.create(
+            owner=other_owner,
+            product=other_product,
+            warehouse=self.warehouse,
+            location=self.location,
+            onhand_qty=Decimal("5.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+        )
+
+        cart_response = self.client.post(
+            "/api/sale-mini/cart/add/",
+            {
+                "product_id": other_product.id,
+                "qty": "2.000",
+                "order_uom": "EA-MINI",
+            },
+            format="json",
+        )
+
+        self.assertEqual(cart_response.status_code, 200)
+        buyer = MiniProgramUser.objects.get(owner=other_owner, user=self.user)
+        self.assertEqual(buyer.customer.owner, other_owner)
+        self.assertEqual(buyer.customer.salesperson, self.user)
+        self.assertTrue(buyer.customer.code.startswith("MINI-U"))
+        self.assertEqual(cart_response.data["owner_id"], other_owner.id)
+
+        order_response = self.client.post(
+            "/api/sale-mini/orders/",
+            {
+                "owner_id": other_owner.id,
+                "cart_id": cart_response.data["cart_id"],
+                "contact": "张三",
+                "contact_phone": "13800000000",
+                "ship_to": "上海市测试路 1 号",
+                "delivery_method": "OWN_TRUCK",
+                "lines": [
+                    {
+                        "product_id": other_product.id,
+                        "qty": "2.000",
+                        "order_uom": "EA-MINI",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(order_response.status_code, 201)
+        order = OutboundOrder.objects.get(id=order_response.data["id"])
+        mapping = SaleMiniOrderMapping.objects.get(outbound_order=order)
+        self.assertEqual(order.owner, other_owner)
+        self.assertEqual(order.customer, buyer.customer)
+        self.assertEqual(mapping.buyer_user, buyer)
 
     def test_checkout_can_target_other_owner_binding(self):
         other_owner, other_customer, other_buyer, other_product = (
@@ -1273,6 +1847,87 @@ class SaleMiniApiTests(TestCase):
             SaleMiniCartItem.objects.filter(
                 cart_id=cart_response.data["cart_id"]
             ).exists()
+        )
+
+    def test_order_and_after_sale_lists_ignore_owner_filter_for_unified_mall(self):
+        first_order = self._create_sale_mini_order()
+        other_owner, other_customer, other_buyer, other_product = (
+            self._create_other_owner_sale_binding()
+        )
+        cart_response = self.client.post(
+            "/api/sale-mini/cart/add/",
+            {
+                "product_id": other_product.id,
+                "qty": "2.000",
+                "order_uom": "EA-MINI",
+            },
+            format="json",
+        )
+        self.assertEqual(cart_response.status_code, 200)
+        second_order = self.client.post(
+            "/api/sale-mini/orders/",
+            {
+                "owner_id": other_owner.id,
+                "cart_id": cart_response.data["cart_id"],
+                "contact": "张三",
+                "contact_phone": "13800000000",
+                "ship_to": "上海市测试路 1 号",
+                "delivery_method": "OWN_TRUCK",
+                "lines": [
+                    {
+                        "product_id": other_product.id,
+                        "qty": "2.000",
+                        "order_uom": "EA-MINI",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(second_order.status_code, 201)
+        first_mapping = SaleMiniOrderMapping.objects.get(
+            id=first_order.data["mapping_id"]
+        )
+        second_mapping = SaleMiniOrderMapping.objects.get(
+            id=second_order.data["mapping_id"]
+        )
+        SaleMiniAfterSaleRequest.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            buyer_user=self.buyer,
+            mapping=first_mapping,
+            request_no="AS-UNIFIED-1",
+            request_type=SaleMiniAfterSaleRequest.RequestType.REFUND,
+            amount=Decimal("1.00"),
+            requested_at=timezone.now(),
+        )
+        SaleMiniAfterSaleRequest.objects.create(
+            owner=other_owner,
+            customer=other_customer,
+            buyer_user=other_buyer,
+            mapping=second_mapping,
+            request_no="AS-UNIFIED-2",
+            request_type=SaleMiniAfterSaleRequest.RequestType.REFUND,
+            amount=Decimal("2.00"),
+            requested_at=timezone.now(),
+        )
+
+        orders = self.client.get(
+            "/api/sale-mini/orders/",
+            {"owner_id": other_owner.id},
+        )
+        after_sales = self.client.get(
+            "/api/sale-mini/after-sales/",
+            {"owner_id": other_owner.id},
+        )
+
+        self.assertEqual(orders.status_code, 200)
+        self.assertEqual(after_sales.status_code, 200)
+        order_ids = {row["id"] for row in orders.data["results"]}
+        self.assertIn(first_order.data["id"], order_ids)
+        self.assertIn(second_order.data["id"], order_ids)
+        self.assertEqual(
+            {row["request_no"] for row in after_sales.data},
+            {"AS-UNIFIED-1", "AS-UNIFIED-2"},
         )
 
     def test_server_cart_rejects_unlisted_product_and_conflicting_uom(self):
@@ -1408,6 +2063,8 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(response.data["status"], "WAIT_SHIP")
         self.assertEqual(response.data["status_name"], "待发货")
         self.assertEqual(response.data["total_amount"], "19.00")
+        self.assertEqual(response.data["customer"], {"id": self.customer.id})
+        self.assertEqual(response.data["warehouse"], {"id": self.warehouse.id})
 
         order = OutboundOrder.objects.get(id=response.data["id"])
         mapping = SaleMiniOrderMapping.objects.get(outbound_order=order)
@@ -1772,7 +2429,8 @@ class SaleMiniApiTests(TestCase):
         )
 
         self.assertEqual(refund.status_code, 400)
-        self.assertIn("售后流程", str(refund.data))
+        self.assertIn("备货阶段", str(refund.data))
+        self.assertIn("售后", str(refund.data))
         self.assertEqual(response.status_code, 201)
         self.assertEqual(duplicate.status_code, 400)
         request_row = SaleMiniAfterSaleRequest.objects.get(mapping=mapping)

@@ -1,7 +1,7 @@
 <template>
   <view class="page list-page">
     <view class="search-row">
-      <input class="input search-input" v-model="search" placeholder="商品名称、编码、条码" confirm-type="search" @confirm="doSearch" />
+      <input class="input search-input" v-model="search" placeholder="商品、品牌、关键词" confirm-type="search" @confirm="doSearch" />
       <button v-if="search" class="clear-btn" @click="clearSearch">清</button>
       <button class="search-btn" @click="doSearch">搜</button>
     </view>
@@ -36,20 +36,6 @@
       <button :class="['filter', isPriceOrdering && 'active']" @click="setPriceOrdering">{{ priceLabel }}</button>
       <button :class="['filter', onlyStock && 'active']" @click="toggleStock">有货</button>
     </view>
-
-    <scroll-view v-if="merchants.length" class="merchant-scroll" scroll-x>
-      <view class="merchant-row">
-        <view
-          v-for="merchant in merchants"
-          :key="merchant.id || 'all'"
-          :class="['merchant-chip', String(ownerId) === String(merchant.id) && 'active']"
-          @click="selectMerchant(merchant.id)"
-        >
-          <view class="merchant-name">{{ merchant.name }}</view>
-          <view class="merchant-count">{{ merchant.product_count }} 件</view>
-        </view>
-      </view>
-    </scroll-view>
 
     <scroll-view v-if="brands.length" class="brand-scroll" scroll-x>
       <view class="brand-row">
@@ -95,11 +81,9 @@ const cart = useCartStore()
 const rows = ref([])
 const search = ref('')
 const categoryId = ref('')
-const ownerId = ref('')
 const brandId = ref('')
 const ordering = ref('sort')
 const onlyStock = ref(false)
-const merchants = ref([])
 const brands = ref([])
 const searchHistory = ref([])
 const page = ref(1)
@@ -122,7 +106,6 @@ async function load(reset = true) {
     const data = await productService.list({
       search: search.value,
       category_id: categoryId.value,
-      owner_id: ownerId.value,
       brand_id: brandId.value,
       ordering: ordering.value,
       only_stock: onlyStock.value ? 1 : '',
@@ -137,17 +120,8 @@ async function load(reset = true) {
   }
 }
 
-async function loadMerchants() {
-  const rows = await productService.merchants()
-  merchants.value = [
-    { id: '', name: '全部商家', product_count: rows.reduce((sum, item) => sum + Number(item.product_count || 0), 0) },
-    ...rows,
-  ]
-}
-
 async function loadBrands() {
   const rows = await productService.brands({
-    owner_id: ownerId.value,
     category_id: categoryId.value,
   })
   brands.value = [
@@ -202,14 +176,6 @@ function clearHistory() {
   uni.removeStorageSync(SEARCH_HISTORY_KEY)
 }
 
-async function selectMerchant(id) {
-  ownerId.value = id || ''
-  await loadBrands().catch(() => {
-    brands.value = []
-  })
-  load(true)
-}
-
 function selectBrand(id) {
   brandId.value = id || ''
   load(true)
@@ -239,7 +205,6 @@ function openProduct(product) {
 
 function productDetailUrl(product) {
   const params = [`id=${product.id}`]
-  if (product.owner_id) params.push(`owner_id=${product.owner_id}`)
   if (product.config_id) params.push(`config_id=${product.config_id}`)
   return `/pages/product-detail/product-detail?${params.join('&')}`
 }
@@ -256,11 +221,9 @@ async function init(query = {}) {
   loadSearchHistory()
   search.value = query.search || ''
   categoryId.value = query.category_id || ''
-  ownerId.value = query.owner_id || ''
   brandId.value = query.brand_id || ''
   ordering.value = query.ordering || 'sort'
   onlyStock.value = query.only_stock === '1' || query.only_stock === 'true'
-  loadMerchants().catch(() => {})
   await loadBrands().catch(() => {
     brands.value = []
   })
@@ -380,50 +343,6 @@ onPullDownRefresh(async () => {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 10rpx;
-}
-
-.merchant-scroll {
-  margin: 0 0 16rpx;
-  white-space: nowrap;
-}
-
-.merchant-row {
-  display: flex;
-  gap: 10rpx;
-}
-
-.merchant-chip {
-  min-width: 156rpx;
-  max-width: 240rpx;
-  padding: 12rpx 16rpx;
-  border: 1rpx solid #d7dde8;
-  border-radius: 8rpx;
-  background: #fff;
-  flex-shrink: 0;
-}
-
-.merchant-chip.active {
-  border-color: #0f766e;
-  background: #edf8f5;
-}
-
-.merchant-name {
-  color: #17202a;
-  font-size: 24rpx;
-  font-weight: 750;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.merchant-count {
-  margin-top: 4rpx;
-  color: #64748b;
-  font-size: 21rpx;
-}
-
-.merchant-chip.active .merchant-name {
-  color: #0f766e;
 }
 
 .brand-scroll {

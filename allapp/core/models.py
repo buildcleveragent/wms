@@ -1,9 +1,10 @@
 # core/models/base.py
+import json
+
 from django.conf import settings
 from django.db import models, transaction, IntegrityError
 from django.utils import timezone
 from datetime import date
-
 
 
 class _SkipCleanFlag:
@@ -67,6 +68,84 @@ class BaseModel(UserStampedMixin, TimeStampedMixin, SoftDeleteMixin):
 
     class Meta:
         abstract = True
+
+
+class SystemSetting(TimeStampedMixin):
+    class ValueType(models.TextChoices):
+        STRING = "string", "文本"
+        BOOLEAN = "boolean", "布尔"
+        INTEGER = "integer", "整数"
+        DECIMAL = "decimal", "小数"
+        JSON = "json", "JSON"
+
+    POS_NAMESPACE = "pos"
+    POS_SALE_PRINT_METHOD_KEY = "sale_print_method"
+    POS_SALE_PRINT_FRONTEND = "frontend_html"
+    POS_SALE_PRINT_BACKEND = "backend_html"
+
+    namespace = models.CharField(
+        "命名空间", max_length=50, default="global", db_index=True
+    )
+    key = models.CharField("配置键", max_length=100)
+    name = models.CharField("名称", max_length=100)
+    value_type = models.CharField(
+        "值类型", max_length=20, choices=ValueType.choices, default=ValueType.STRING
+    )
+    value = models.TextField("配置值", blank=True, default="")
+    default_value = models.TextField("默认值", blank=True, default="")
+    description = models.TextField("说明", blank=True, default="")
+    client_visible = models.BooleanField("前端可读取", default=False)
+    is_active = models.BooleanField("启用", default=True)
+    sort_order = models.PositiveIntegerField("排序", default=0)
+    options = models.JSONField("可选项/扩展配置", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "系统设置"
+        verbose_name_plural = "系统设置"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["namespace", "key"], name="uq_system_setting_key"
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["namespace", "is_active", "sort_order"],
+                name="idx_sysset_ns_active",
+            ),
+        ]
+        ordering = ("namespace", "sort_order", "key")
+
+    def __str__(self):
+        return f"{self.namespace}.{self.key}"
+
+    def effective_value(self):
+        raw_value = self.value if self.value not in (None, "") else self.default_value
+        if raw_value in (None, ""):
+            return ""
+        if self.value_type == self.ValueType.BOOLEAN:
+            return str(raw_value).strip().lower() in {"1", "true", "yes", "on", "是"}
+        if self.value_type == self.ValueType.INTEGER:
+            try:
+                return int(raw_value)
+            except (TypeError, ValueError):
+                return 0
+        if self.value_type == self.ValueType.JSON:
+            try:
+                return json.loads(raw_value)
+            except (TypeError, ValueError):
+                return {}
+        return raw_value
+
+    @classmethod
+    def get_value(cls, namespace, key, default=None):
+        setting = cls.objects.filter(
+            namespace=namespace, key=key, is_active=True
+        ).first()
+        if not setting:
+            return default
+        value = setting.effective_value()
+        return default if value in (None, "") else value
+
 
 class AddressMixin(models.Model):
     province = models.CharField("省", max_length=30, blank=True, null=True)

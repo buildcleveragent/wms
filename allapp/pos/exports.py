@@ -6,6 +6,8 @@ from django.db.models import Sum
 from openpyxl import Workbook
 
 from .models import (
+    PosCustomerRepayment,
+    PosPayment,
     PosPaymentLine,
     PosRefund,
     PosReturn,
@@ -29,6 +31,20 @@ def _money(value):
     return Decimal(value or 0)
 
 
+def _sale_customer_name(sale):
+    customer = getattr(sale, "pos_customer", None) or getattr(
+        sale, "selected_customer", None
+    )
+    return getattr(customer, "name", "") if customer else ""
+
+
+def _repayment_customer_name(repayment):
+    customer = getattr(repayment, "pos_customer", None) or getattr(
+        repayment, "customer", None
+    )
+    return getattr(customer, "name", "") if customer else ""
+
+
 def _append_stats_sheet(workbook, title, headers, rows):
     sheet = workbook.create_sheet(title)
     sheet.append(headers)
@@ -43,6 +59,7 @@ def build_sales_export_workbook(sales):
             "warehouse",
             "cashier",
             "shift",
+            "pos_customer",
             "selected_customer",
             "payment",
         ).order_by("-created_at", "-id")
@@ -56,6 +73,16 @@ def build_sales_export_workbook(sales):
         )
         .values("sale_id")
         .annotate(amount=Sum("total_amount"))
+    }
+    credit_amounts = {
+        row["sale_id"]: row["amount"] or Decimal("0.00")
+        for row in PosPaymentLine.objects.filter(
+            sale_id__in=sale_ids,
+            method=PosPayment.Method.CREDIT,
+            status=PosPayment.Status.PAID,
+        )
+        .values("sale_id")
+        .annotate(amount=Sum("amount"))
     }
 
     workbook = Workbook()
@@ -76,6 +103,7 @@ def build_sales_export_workbook(sales):
             "净金额",
             "支付方式",
             "实收金额",
+            "赊账金额",
             "找零",
             "支付参考号",
             "作废时间",
@@ -99,17 +127,14 @@ def build_sales_export_workbook(sales):
                 getattr(sale.warehouse, "name", ""),
                 getattr(sale.shift, "shift_no", "") if sale.shift_id else "",
                 getattr(sale.cashier, "username", "") if sale.cashier_id else "",
-                (
-                    getattr(sale.selected_customer, "name", "")
-                    if sale.selected_customer_id
-                    else ""
-                ),
+                _sale_customer_name(sale),
                 _dt(sale.created_at),
                 _money(sale.total_amount),
                 return_amount,
                 net_amount,
                 payment.method if payment else "",
                 _money(payment.amount_received) if payment else Decimal("0.00"),
+                _money(credit_amounts.get(sale.id, Decimal("0.00"))),
                 _money(payment.change_amount) if payment else Decimal("0.00"),
                 payment.reference_no if payment else "",
                 _dt(sale.voided_at),
@@ -350,8 +375,10 @@ def build_pos_stats_export_workbook(payload):
             "支付方式名称",
             "销售单数",
             "退款单数",
+            "还款单数",
             "销售金额",
             "退款金额",
+            "还款金额",
             "净金额",
         ],
         [
@@ -360,8 +387,10 @@ def build_pos_stats_export_workbook(payload):
                 row.get("method_label", ""),
                 row.get("sale_count", 0),
                 row.get("refund_count", 0),
+                row.get("repayment_count", 0),
                 row.get("sale_amount", row.get("amount", "0.00")),
                 row.get("refund_amount", "0.00"),
+                row.get("repayment_amount", "0.00"),
                 row.get("net_amount", row.get("amount", "0.00")),
             ]
             for row in payload.get("payments", [])
@@ -499,8 +528,10 @@ def build_shift_export_workbook(shift, payload):
             "支付方式名称",
             "销售单数",
             "退款单数",
+            "还款单数",
             "系统金额",
             "退款金额",
+            "还款金额",
             "实点金额",
             "差异",
         ],
@@ -510,8 +541,10 @@ def build_shift_export_workbook(shift, payload):
                 row.get("method_label", ""),
                 row.get("sale_count", 0),
                 row.get("refund_count", 0),
+                row.get("repayment_count", 0),
                 row.get("expected_amount", "0.00"),
                 row.get("refund_amount", "0.00"),
+                row.get("repayment_amount", "0.00"),
                 row.get("actual_amount", "0.00"),
                 row.get("difference", "0.00"),
             ]
@@ -524,4 +557,41 @@ def build_shift_export_workbook(shift, payload):
         copied = workbook.create_sheet(sheet.title)
         for row in sheet.iter_rows(values_only=True):
             copied.append(list(row))
+    repayments = (
+        PosCustomerRepayment.objects.filter(shift=shift)
+        .select_related("pos_customer", "customer", "cashier")
+        .order_by("-created_at", "-id")
+    )
+    repayment_sheet = workbook.create_sheet("Repayments")
+    repayment_sheet.append(
+        [
+            "还款单号",
+            "客户",
+            "收银员",
+            "方式",
+            "金额",
+            "参考号",
+            "状态",
+            "备注",
+            "时间",
+        ]
+    )
+    for repayment in repayments:
+        repayment_sheet.append(
+            [
+                repayment.repayment_no,
+                _repayment_customer_name(repayment),
+                (
+                    getattr(repayment.cashier, "username", "")
+                    if repayment.cashier_id
+                    else ""
+                ),
+                repayment.method,
+                Decimal(repayment.amount),
+                repayment.reference_no,
+                repayment.status,
+                repayment.remark,
+                _dt(repayment.created_at),
+            ]
+        )
     return workbook

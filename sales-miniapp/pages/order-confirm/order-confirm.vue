@@ -5,7 +5,7 @@
       <template v-if="isPickup">
         <view class="pickup-card">
           <view class="pickup-title">{{ pickupTitle }}</view>
-          <view class="pickup-sub">下单后商家会尽快备货，客户到约定地点自提。</view>
+          <view class="pickup-sub">下单后平台会尽快备货，客户到约定地点自提。</view>
         </view>
         <view class="inline-address pickup-fields">
           <input class="input" v-model="inline.contact" placeholder="自提联系人" />
@@ -37,13 +37,17 @@
 
     <view class="section">
       <view class="section-title">支付方式</view>
+      <view v-if="isCombined" class="combined-tip">
+        多包裹订单会统一提交，由平台确认付款和备货；当前暂不使用微信支付、优惠券和积分。
+      </view>
       <view class="pay-switch">
         <button
           v-for="item in paymentOptions"
           :key="item.code"
           class="pay-option"
-          :class="{ active: paymentMethod === item.code }"
-          @click="paymentMethod = item.code"
+          :class="{ active: effectivePaymentMethod === item.code, disabled: isCombined && item.code === 'WECHAT' }"
+          :disabled="isCombined && item.code === 'WECHAT'"
+          @click="selectPayment(item)"
         >
           {{ item.name }}
         </button>
@@ -52,6 +56,9 @@
 
     <view class="section">
       <view class="section-title">优惠</view>
+      <view v-if="isCombined" class="combined-tip">
+        多包裹订单金额由服务端逐包裹校验后合计，优惠权益暂在单包裹订单中使用。
+      </view>
       <picker :range="couponOptions" range-key="label" :value="couponIndex" @change="onCouponChange">
         <view class="picker-line between-line">
           <text>优惠券</text>
@@ -61,7 +68,7 @@
       <view class="point-line">
         <text>积分</text>
         <view class="point-control">
-          <input class="point-input" type="number" v-model="pointsUsed" @blur="onPointsBlur" />
+          <input class="point-input" type="number" v-model="pointsUsed" :disabled="isCombined" @blur="onPointsBlur" />
           <text class="point-balance">/{{ pointInfo.points || 0 }}</text>
         </view>
       </view>
@@ -69,7 +76,6 @@
 
     <view class="section">
       <view class="section-title">商品明细</view>
-      <view v-if="merchantName" class="merchant-line">{{ merchantName }}</view>
       <view v-for="item in cart.items" :key="item.key" class="line">
         <view>
           <view class="line-name">{{ item.name }}</view>
@@ -149,12 +155,10 @@ const paymentOptions = [
 const selectedAddress = computed(() => addresses.value.find((item) => item.id === selectedId.value) || null)
 const selectedDelivery = computed(() => deliveryOptions[deliveryIndex.value] || deliveryOptions[0])
 const isPickup = computed(() => selectedDelivery.value.code === 'PICKUP')
-const merchantName = computed(() => {
-  const group = cart.groups.find((item) => Number(item.owner_id) === Number(ownerId.value))
-  return group && group.owner_name ? group.owner_name : ''
-})
-const pickupTitle = computed(() => (merchantName.value ? `${merchantName.value} 自提` : '商家自提'))
-const submitText = computed(() => (paymentMethod.value === 'WECHAT' ? '提交并支付' : '提交订单'))
+const isCombined = computed(() => !ownerId.value && (cart.groups || []).length > 1)
+const pickupTitle = computed(() => '自提点')
+const effectivePaymentMethod = computed(() => (isCombined.value ? 'OFFLINE' : paymentMethod.value))
+const submitText = computed(() => (effectivePaymentMethod.value === 'WECHAT' ? '提交并支付' : '提交订单'))
 const adjustmentRows = computed(() => (preview.value && preview.value.adjustments) || [])
 const payableAmount = computed(() => {
   const data = preview.value || {}
@@ -166,7 +170,7 @@ const previewGoodsAmount = computed(() => {
 })
 const previewOk = computed(() => Boolean(preview.value && preview.value.ok))
 const couponOptions = computed(() => [
-  { id: null, label: '不使用优惠券' },
+  { id: null, label: isCombined.value ? '多包裹订单暂不使用优惠券' : '不使用优惠券' },
   ...coupons.value.map((item) => ({
     id: item.id,
     label: `${item.title} -¥${money(item.discount_amount)}`,
@@ -178,18 +182,19 @@ const selectedCouponId = computed(() => selectedCoupon.value.id || null)
 
 function orderExtra() {
   const address = isPickup.value ? null : selectedAddress.value
+  const fullAddress = address ? (address.full_address || address.detail || '') : ''
   return {
-    owner_id: ownerId.value,
+    owner_id: ownerId.value || undefined,
     cart_id: cartId.value || undefined,
-    address_id: address ? address.id : null,
+    address_id: address && !isCombined.value ? address.id : null,
     delivery_method: selectedDelivery.value.code,
-    contact: address ? '' : inline.contact,
-    contact_phone: address ? '' : inline.phone,
-    ship_to: isPickup.value ? pickupTitle.value : address ? '' : inline.ship_to,
+    contact: address && isCombined.value ? address.contact : address ? '' : inline.contact,
+    contact_phone: address && isCombined.value ? address.phone : address ? '' : inline.phone,
+    ship_to: isPickup.value ? pickupTitle.value : address && isCombined.value ? fullAddress : address ? '' : inline.ship_to,
     remark: remark.value,
-    payment_method: paymentMethod.value,
-    coupon_id: selectedCouponId.value,
-    points: Number(pointsUsed.value || 0),
+    payment_method: effectivePaymentMethod.value,
+    coupon_id: isCombined.value ? null : selectedCouponId.value,
+    points: isCombined.value ? 0 : Number(pointsUsed.value || 0),
   }
 }
 
@@ -200,7 +205,8 @@ async function payOrder(order) {
 }
 
 async function loadAddresses() {
-  addresses.value = await addressService.list({ owner_id: ownerId.value })
+  const params = ownerId.value ? { owner_id: ownerId.value } : {}
+  addresses.value = await addressService.list(params)
   const selectedExists = addresses.value.some((item) => item.id === selectedId.value)
   if (!selectedId.value || !selectedExists) {
     const defaultAddress = addresses.value.find((item) => item.is_default)
@@ -215,6 +221,13 @@ async function loadAddresses() {
 }
 
 async function loadBenefits() {
+  if (isCombined.value) {
+    coupons.value = []
+    couponIndex.value = 0
+    pointInfo.value = { points: 0, frozen: 0, exchange_rate: '100.00' }
+    pointsUsed.value = ''
+    return
+  }
   const [couponRows, points] = await Promise.all([
     benefitService.coupons({ owner_id: ownerId.value, order_amount: cart.totalAmount }),
     benefitService.points({ owner_id: ownerId.value }),
@@ -261,6 +274,11 @@ async function onDeliveryChange(event) {
   await refreshPreviewQuietly()
 }
 
+function selectPayment(item) {
+  if (!item || (isCombined.value && item.code === 'WECHAT')) return
+  paymentMethod.value = item.code
+}
+
 async function submit() {
   if (loading.value) return
   if (!cart.items.length) {
@@ -270,15 +288,26 @@ async function submit() {
   loading.value = true
   try {
     const order = await cart.checkout(orderExtra())
-    if (paymentMethod.value === 'WECHAT') {
+    const isBatchOrder = order && order.orders && order.orders.length > 1
+    if (isBatchOrder) {
+      uni.setStorageSync('sale_mini_pending_order_status', 'WAIT_SHIP')
+      uni.redirectTo({
+        url: `/pages/order-result/order-result?id=${order.id}&result=batch_offline&count=${order.order_count}&amount=${order.payable_amount}`,
+      })
+      return
+    }
+    let result = effectivePaymentMethod.value === 'OFFLINE' ? 'offline' : 'created'
+    if (effectivePaymentMethod.value === 'WECHAT') {
       try {
         await payOrder(order)
+        result = 'paid'
         uni.showToast({ title: '支付成功', icon: 'none' })
       } catch (payErr) {
+        result = 'wait_pay'
         uni.showToast({ title: '订单已提交，待支付', icon: 'none' })
       }
     }
-    uni.redirectTo({ url: `/pages/order-detail/order-detail?id=${order.id}` })
+    uni.redirectTo({ url: `/pages/order-result/order-result?id=${order.id}&result=${result}` })
   } catch (err) {
     uni.showToast({ title: err.message || '提交失败', icon: 'none' })
   } finally {
@@ -287,7 +316,12 @@ async function submit() {
 }
 
 function goAddress() {
-  uni.navigateTo({ url: `/pages/address/address?select=1&owner_id=${ownerId.value}` })
+  if (ownerId.value) {
+    uni.setStorageSync('sale_mini_address_owner_id', ownerId.value)
+  } else {
+    uni.removeStorageSync('sale_mini_address_owner_id')
+  }
+  uni.navigateTo({ url: '/pages/address/address?select=1' })
 }
 
 function backToCart() {
@@ -295,24 +329,29 @@ function backToCart() {
 }
 
 onLoad((query = {}) => {
-  ownerId.value = query.owner_id || ''
+  ownerId.value = ''
   cartId.value = query.cart_id || ''
 })
 
 onShow(async () => {
   try {
-    if (!ownerId.value) {
+    if (cartId.value && !ownerId.value) {
+      await cart.load({ cart_id: cartId.value })
+      if (cart.groups.length === 1) {
+        ownerId.value = String(cart.groups[0].owner_id)
+      }
+    } else if (!ownerId.value) {
       await cart.load()
       if (cart.groups.length === 1) {
         ownerId.value = String(cart.groups[0].owner_id)
         cartId.value = String(cart.groups[0].cart_id || '')
       }
     }
-    if (!ownerId.value) {
-      backToCart()
-      return
+    const loadParams = cartId.value ? { cart_id: cartId.value } : ownerId.value ? { owner_id: ownerId.value } : {}
+    await cart.load(loadParams)
+    if (!ownerId.value && cart.groups.length === 1) {
+      ownerId.value = String(cart.groups[0].owner_id)
     }
-    await cart.load({ owner_id: ownerId.value })
     if (!cartId.value && cart.cartId) cartId.value = String(cart.cartId)
   } catch (err) {
     uni.showToast({ title: err.message || '购物车同步失败', icon: 'none' })
@@ -451,6 +490,16 @@ onShow(async () => {
   font-size: 24rpx;
 }
 
+.combined-tip {
+  margin-bottom: 14rpx;
+  padding: 14rpx 16rpx;
+  border-radius: 8rpx;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 24rpx;
+  line-height: 1.45;
+}
+
 .pay-switch {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -475,6 +524,11 @@ onShow(async () => {
   color: #0f766e;
 }
 
+.pay-option.disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
 .pay-option::after {
   border: 0;
 }
@@ -486,13 +540,6 @@ onShow(async () => {
   gap: 16rpx;
   padding: 14rpx 0;
   border-bottom: 1rpx solid #eef2f7;
-}
-
-.merchant-line {
-  margin-bottom: 10rpx;
-  color: #0f766e;
-  font-size: 25rpx;
-  font-weight: 750;
 }
 
 .line:last-child {

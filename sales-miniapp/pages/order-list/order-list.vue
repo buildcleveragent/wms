@@ -1,17 +1,5 @@
 <template>
   <view class="page order-list-page">
-    <scroll-view v-if="merchantOptions.length > 2" class="merchant-scroll" scroll-x>
-      <view class="merchant-row">
-        <view
-          v-for="merchant in merchantOptions"
-          :key="merchant.id || 'all'"
-          :class="['merchant-chip', String(ownerId) === String(merchant.id) && 'active']"
-          @click="switchMerchant(merchant.id)"
-        >
-          {{ merchant.name }}
-        </view>
-      </view>
-    </scroll-view>
     <view class="tabs">
       <button v-for="tab in tabs" :key="tab.value" :class="['tab', status === tab.value && 'active']" @click="switchStatus(tab.value)">
         {{ tab.name }}
@@ -23,7 +11,7 @@
           <view class="no">{{ order.order_no }}</view>
           <OrderStatusTag :status="order.status" :text="order.status_name" />
         </view>
-        <view class="meta">{{ order.owner_name || '商家' }} · {{ order.created_at }} · {{ order.delivery_method_name }}</view>
+        <view class="meta">{{ order.created_at }} · {{ order.delivery_method_name }}{{ order.is_combined ? ` · ${order.order_count} 个配送包裹` : '' }}</view>
         <view class="products">
           <text v-for="line in order.lines.slice(0, 2)" :key="line.id">{{ line.product_name }} × {{ line.qty }}</text>
         </view>
@@ -40,7 +28,7 @@
 
 <script setup>
 import { onLoad, onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import EmptyState from '../../components/EmptyState.vue'
 import OrderStatusTag from '../../components/OrderStatusTag.vue'
 import { orderService } from '../../services/order'
@@ -61,24 +49,6 @@ const page = ref(1)
 const hasMore = ref(true)
 const loading = ref(false)
 const loaded = ref(false)
-const ownerId = ref('')
-
-const merchantOptions = computed(() => {
-  const profile = session.profile || {}
-  const bindings = Array.isArray(profile.bindings) ? profile.bindings : []
-  const rows = bindings
-    .map((item) => item.owner)
-    .filter((owner) => owner && owner.id)
-  if (!rows.length && profile.owner && profile.owner.id) rows.push(profile.owner)
-  const seen = new Set()
-  const unique = rows.filter((owner) => {
-    const key = String(owner.id)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-  return [{ id: '', name: '全部商家' }, ...unique]
-})
 
 async function ensureProfile() {
   if (session.profile && Array.isArray(session.profile.bindings)) return
@@ -97,7 +67,6 @@ async function load(reset = true) {
     await ensureProfile()
     const data = await orderService.list({
       status: status.value,
-      owner_id: ownerId.value,
       page: page.value,
     })
     const next = data.results || data || []
@@ -111,11 +80,6 @@ async function load(reset = true) {
 
 function switchStatus(value) {
   status.value = value
-  load(true)
-}
-
-function switchMerchant(id) {
-  ownerId.value = id || ''
   load(true)
 }
 
@@ -153,42 +117,6 @@ onPullDownRefresh(async () => {
 </script>
 
 <style scoped>
-.merchant-scroll {
-  margin-bottom: 16rpx;
-  white-space: nowrap;
-}
-
-.merchant-row {
-  display: flex;
-  gap: 10rpx;
-}
-
-.merchant-chip {
-  min-width: 150rpx;
-  max-width: 260rpx;
-  height: 62rpx;
-  padding: 0 18rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1rpx solid #d7dde8;
-  border-radius: 8rpx;
-  background: #fff;
-  color: #475569;
-  font-size: 24rpx;
-  font-weight: 750;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.merchant-chip.active {
-  border-color: #0f766e;
-  background: #edf8f5;
-  color: #0f766e;
-}
-
 .tabs {
   display: flex;
   gap: 10rpx;

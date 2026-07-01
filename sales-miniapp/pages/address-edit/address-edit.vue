@@ -26,6 +26,7 @@ import { addressService } from '../../services/address'
 const id = ref('')
 const ownerId = ref('')
 const loading = ref(false)
+const EDIT_OWNER_KEY = 'sale_mini_address_edit_owner_id'
 const form = reactive({
   contact: '',
   phone: '',
@@ -37,7 +38,8 @@ const form = reactive({
 })
 
 async function loadAddress(addressId) {
-  const rows = await addressService.list({ owner_id: ownerId.value })
+  const params = ownerId.value ? { owner_id: ownerId.value } : {}
+  const rows = await addressService.list(params)
   const row = rows.find((item) => String(item.id) === String(addressId))
   if (row) {
     Object.assign(form, {
@@ -52,6 +54,12 @@ async function loadAddress(addressId) {
   }
 }
 
+function payload() {
+  const data = { ...form }
+  if (ownerId.value) data.owner_id = ownerId.value
+  return data
+}
+
 async function save() {
   if (!form.contact || !form.phone || !form.detail) {
     uni.showToast({ title: '请填写联系人、电话和地址', icon: 'none' })
@@ -60,9 +68,9 @@ async function save() {
   loading.value = true
   try {
     if (id.value) {
-      await addressService.update(id.value, { ...form, owner_id: ownerId.value })
+      await addressService.update(id.value, payload())
     } else {
-      await addressService.create({ ...form, owner_id: ownerId.value })
+      await addressService.create(payload())
     }
     uni.navigateBack()
   } catch (err) {
@@ -74,7 +82,8 @@ async function save() {
 
 onLoad((query = {}) => {
   id.value = query.id || ''
-  ownerId.value = query.owner_id || ''
+  ownerId.value = uni.getStorageSync(EDIT_OWNER_KEY) || ''
+  uni.removeStorageSync(EDIT_OWNER_KEY)
   if (id.value) loadAddress(id.value)
 })
 </script>

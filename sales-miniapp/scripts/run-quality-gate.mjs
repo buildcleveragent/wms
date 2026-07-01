@@ -97,6 +97,24 @@ if (fs.existsSync(path.join(repoRoot, 'manage.py'))) {
     },
   )
   addStep(
+    'sale-mini console catalog db tests',
+    pythonCommand,
+    [
+      '-m',
+      'pytest',
+      '-q',
+      '--reuse-db',
+      ...(fastDb ? ['--no-migrations'] : []),
+      '--disable-warnings',
+      'allapp/console/tests.py',
+    ],
+    {
+      cwd: repoRoot,
+      env: backendEnv,
+      skip: !runDb,
+    },
+  )
+  addStep(
     'sale-mini data accuracy validation',
     pythonCommand,
     [

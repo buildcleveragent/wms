@@ -12,19 +12,6 @@
     </view>
     <scroll-view class="content" scroll-y @scrolltolower="loadProducts(false)">
       <view class="content-inner">
-        <scroll-view v-if="merchants.length" class="merchant-scroll" scroll-x>
-          <view class="merchant-row">
-            <view
-              v-for="merchant in merchants"
-              :key="merchant.id || 'all'"
-              :class="['merchant-chip', String(ownerId) === String(merchant.id) && 'active']"
-              @click="selectMerchant(merchant.id)"
-            >
-              <view class="merchant-name">{{ merchant.name }}</view>
-              <view class="merchant-count">{{ merchant.product_count }} 件</view>
-            </view>
-          </view>
-        </scroll-view>
         <view class="search" @click="goSearch">搜索当前分类商品</view>
         <ProductCard
           v-for="product in products"
@@ -55,8 +42,6 @@ const cart = useCartStore()
 const categories = ref([])
 const products = ref([])
 const activeId = ref('')
-const ownerId = ref('')
-const merchants = ref([])
 const page = ref(1)
 const hasMore = ref(true)
 const loading = ref(false)
@@ -64,19 +49,11 @@ const requestSeq = ref(0)
 const ALL_CATEGORY_ID = 'all'
 
 async function loadCategories(initialId = '') {
-  const rows = await productService.categories({ owner_id: ownerId.value })
+  const rows = await productService.categories()
   categories.value = [{ id: ALL_CATEGORY_ID, name: '全部' }, ...(rows || [])]
   const hasInitial = categories.value.some((item) => String(item.id) === String(initialId))
   activeId.value = hasInitial ? initialId : ALL_CATEGORY_ID
   loadProducts(true)
-}
-
-async function loadMerchants() {
-  const rows = await productService.merchants()
-  merchants.value = [
-    { id: '', name: '全部商家', product_count: rows.reduce((sum, item) => sum + Number(item.product_count || 0), 0) },
-    ...rows,
-  ]
 }
 
 async function loadProducts(reset = true) {
@@ -93,7 +70,6 @@ async function loadProducts(reset = true) {
   try {
     const data = await productService.list({
       category_id: activeId.value === ALL_CATEGORY_ID ? '' : activeId.value,
-      owner_id: ownerId.value,
       page: page.value,
     })
     if (seq !== requestSeq.value) return
@@ -109,11 +85,6 @@ async function loadProducts(reset = true) {
 function selectCategory(id) {
   activeId.value = id
   loadProducts(true)
-}
-
-function selectMerchant(id) {
-  ownerId.value = id || ''
-  loadCategories(activeId.value)
 }
 
 async function addProduct(product) {
@@ -135,7 +106,6 @@ function openProduct(product) {
 
 function productDetailUrl(product) {
   const params = [`id=${product.id}`]
-  if (product.owner_id) params.push(`owner_id=${product.owner_id}`)
   if (product.config_id) params.push(`config_id=${product.config_id}`)
   return `/pages/product-detail/product-detail?${params.join('&')}`
 }
@@ -143,7 +113,6 @@ function productDetailUrl(product) {
 function goSearch() {
   const params = []
   if (activeId.value !== ALL_CATEGORY_ID) params.push(`category_id=${activeId.value}`)
-  if (ownerId.value) params.push(`owner_id=${ownerId.value}`)
   const suffix = params.length ? `?${params.join('&')}` : ''
   uni.navigateTo({ url: `/pages/product-list/product-list${suffix}` })
 }
@@ -159,8 +128,6 @@ function goCart() {
 onLoad((query = {}) => {
   const pendingCategoryId = uni.getStorageSync('sale_mini_pending_category_id')
   if (pendingCategoryId) uni.removeStorageSync('sale_mini_pending_category_id')
-  ownerId.value = query.owner_id || ''
-  loadMerchants().catch(() => {})
   loadCategories(query.category_id || pendingCategoryId || '')
 })
 
@@ -219,49 +186,6 @@ onShow(() => {
   display: flex;
   flex-direction: column;
   gap: 14rpx;
-}
-
-.merchant-scroll {
-  white-space: nowrap;
-}
-
-.merchant-row {
-  display: flex;
-  gap: 10rpx;
-}
-
-.merchant-chip {
-  min-width: 156rpx;
-  max-width: 240rpx;
-  padding: 12rpx 16rpx;
-  border: 1rpx solid #d7dde8;
-  border-radius: 8rpx;
-  background: #fff;
-  flex-shrink: 0;
-}
-
-.merchant-chip.active {
-  border-color: #0f766e;
-  background: #edf8f5;
-}
-
-.merchant-name {
-  color: #17202a;
-  font-size: 24rpx;
-  font-weight: 750;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.merchant-count {
-  margin-top: 4rpx;
-  color: #64748b;
-  font-size: 21rpx;
-}
-
-.merchant-chip.active .merchant-name {
-  color: #0f766e;
 }
 
 .search {

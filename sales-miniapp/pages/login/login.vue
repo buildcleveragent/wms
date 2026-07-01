@@ -4,7 +4,7 @@
       <view class="brand-mark">悦</view>
       <view>
         <view class="title">博悦商城</view>
-        <view class="subtle">多商家商品选购</view>
+        <view class="subtle">统一商城在线选购</view>
       </view>
     </view>
 

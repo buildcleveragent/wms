@@ -35,7 +35,7 @@ const cart = useCartStore()
 const items = computed(() => browse.recent)
 
 function detailUrl(item) {
-  return `/pages/product-detail/product-detail?id=${item.id}&owner_id=${item.owner_id || ''}&config_id=${item.config_id || ''}`
+  return `/pages/product-detail/product-detail?id=${item.id}&config_id=${item.config_id || ''}`
 }
 
 function openProduct(item) {

@@ -28,10 +28,8 @@ const sessionStore = reactive({
     setToken(data.access, data.refresh)
     this.user = data.user || null
     this.profile = {
-      owner: data.owner,
       buyer: data.buyer,
       customer: data.customer,
-      warehouse: data.warehouse,
       bindings: data.bindings || [],
     }
     uni.setStorageSync('sales_user', this.user)

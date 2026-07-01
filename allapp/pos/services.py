@@ -26,6 +26,8 @@ from allapp.products.models import Product
 
 from .models import (
     PosAuditLog,
+    PosCustomer,
+    PosCustomerRepayment,
     PosPayment,
     PosPaymentLine,
     PosRefund,
@@ -71,8 +73,22 @@ def _price(value):
 
 def _make_sale_no(now=None):
     now = now or timezone.now()
+    if timezone.is_aware(now):
+        now = timezone.localtime(now)
+    prefix = f"P{now:%y%m%d}"
     for _ in range(8):
-        sale_no = f"POS{now:%Y%m%d%H%M%S}{uuid4().hex[:6].upper()}"
+        latest_no = (
+            PosSale.objects.select_for_update()
+            .filter(sale_no__startswith=prefix)
+            .order_by("-sale_no")
+            .values_list("sale_no", flat=True)
+            .first()
+        )
+        latest_seq = 0
+        if latest_no:
+            suffix = str(latest_no)[len(prefix) :]
+            latest_seq = int(suffix) if suffix.isdigit() else 0
+        sale_no = f"{prefix}{latest_seq + 1:05d}"
         if not PosSale.objects.filter(sale_no=sale_no).exists():
             return sale_no
     raise ValidationError("无法生成 POS 销售单号，请重试。")
@@ -85,6 +101,29 @@ def _make_return_no(now=None):
         if not PosReturn.objects.filter(return_no=return_no).exists():
             return return_no
     raise ValidationError("无法生成 POS 退货单号，请重试。")
+
+
+def _make_repayment_no(now=None):
+    now = now or timezone.now()
+    if timezone.is_aware(now):
+        now = timezone.localtime(now)
+    prefix = f"PH{now:%y%m%d}"
+    for _ in range(8):
+        latest_no = (
+            PosCustomerRepayment.objects.select_for_update()
+            .filter(repayment_no__startswith=prefix)
+            .order_by("-repayment_no")
+            .values_list("repayment_no", flat=True)
+            .first()
+        )
+        latest_seq = 0
+        if latest_no:
+            suffix = str(latest_no)[len(prefix) :]
+            latest_seq = int(suffix) if suffix.isdigit() else 0
+        repayment_no = f"{prefix}{latest_seq + 1:05d}"
+        if not PosCustomerRepayment.objects.filter(repayment_no=repayment_no).exists():
+            return repayment_no
+    raise ValidationError("无法生成 POS 客户还款单号，请重试。")
 
 
 def _error(field, message):
@@ -311,7 +350,12 @@ def _normalize_payment(payment, total_amount):
     if method not in valid_methods:
         _error("payment", "请选择有效的支付方式。")
 
-    if method == PosPayment.Method.CASH:
+    if method == PosPayment.Method.CREDIT:
+        received = _money(payment.get("amount_received", ZERO))
+        if received != ZERO:
+            _error("payment", "赊账实收金额必须为 0。")
+        change = ZERO.quantize(MONEY)
+    elif method == PosPayment.Method.CASH:
         received = _money(payment.get("amount_received"))
         if received < total_amount:
             _error("payment", "现金实收金额不能小于应收金额。")
@@ -331,7 +375,7 @@ def _normalize_payment(payment, total_amount):
     }
 
 
-def _normalize_payment_lines(payment, payments, total_amount):
+def _normalize_payment_lines(payment, payments, total_amount, *, allow_credit=False):
     payments = payments or []
     raw_lines = list(payments)
     if not raw_lines:
@@ -355,7 +399,14 @@ def _normalize_payment_lines(payment, payments, total_amount):
         amount = _money(raw.get("amount", raw.get("amount_received")))
         if amount <= 0:
             _error("payments", "支付金额必须大于 0。")
-        if method == PosPayment.Method.CASH:
+        if method == PosPayment.Method.CREDIT:
+            if not allow_credit:
+                _error("customer_id", "赊账必须先选择客户。")
+            received = _money(raw.get("amount_received", ZERO))
+            if received != ZERO:
+                _error("payments", "赊账明细实收金额必须为 0。")
+            change = ZERO.quantize(MONEY)
+        elif method == PosPayment.Method.CASH:
             received = _money(raw.get("amount_received", amount))
             if received < amount:
                 _error("payments", "现金实收金额不能小于现金抵扣金额。")
@@ -734,8 +785,8 @@ def _receipt_customer(customer):
         "mobile": customer.mobile or "",
         "address": customer.address or "",
         "full_address": full_address,
-        "bank_name": customer.bank_name or "",
-        "bank_account": customer.bank_account or "",
+        "bank_name": getattr(customer, "bank_name", "") or "",
+        "bank_account": getattr(customer, "bank_account", "") or "",
     }
 
 
@@ -750,25 +801,68 @@ def _full_address(entity):
     return "".join(part for part in address_parts if part)
 
 
-def _customer_cumulative_debt(sale):
-    if not sale.selected_customer_id:
-        return ZERO
-    totals = (
-        PosSale.objects.filter(
-            selected_customer_id=sale.selected_customer_id,
-            warehouse_id=sale.warehouse_id,
-        )
-        .exclude(status=PosSale.Status.VOIDED)
-        .aggregate(
-            total_amount=Sum("total_amount"),
-            amount_received=Sum("payment__amount_received"),
+def _sum_or_zero(queryset, field="amount"):
+    return _money(queryset.aggregate(value=Sum(field))["value"] or ZERO)
+
+
+def customer_pos_debt_balance(*, customer_id, warehouse_id):
+    if not customer_id or not warehouse_id:
+        return ZERO.quantize(MONEY)
+
+    credit_sales = _sum_or_zero(
+        PosPaymentLine.objects.filter(
+            sale__pos_customer_id=customer_id,
+            sale__warehouse_id=warehouse_id,
+            sale__status=PosSale.Status.COMPLETED,
+            method=PosPayment.Method.CREDIT,
+            status=PosPayment.Status.PAID,
         )
     )
-    return _money((totals["total_amount"] or ZERO) - (totals["amount_received"] or ZERO))
+    credit_refunds = _sum_or_zero(
+        PosRefund.objects.filter(
+            sale__pos_customer_id=customer_id,
+            sale__warehouse_id=warehouse_id,
+            return_order__status=PosReturn.Status.COMPLETED,
+            method=PosPayment.Method.CREDIT,
+            status=PosRefund.Status.REFUNDED,
+        )
+    )
+    repayments = _sum_or_zero(
+        PosCustomerRepayment.objects.filter(
+            pos_customer_id=customer_id,
+            warehouse_id=warehouse_id,
+            status=PosCustomerRepayment.Status.COMPLETED,
+        )
+    )
+    return _money(credit_sales - credit_refunds - repayments)
+
+
+def _sale_credit_amount(sale):
+    return _sum_or_zero(
+        sale.payment_lines.filter(
+            method=PosPayment.Method.CREDIT,
+            status=PosPayment.Status.PAID,
+        )
+    )
+
+
+def _customer_cumulative_debt(sale):
+    if not sale.pos_customer_id:
+        return ZERO.quantize(MONEY)
+    return customer_pos_debt_balance(
+        customer_id=sale.pos_customer_id, warehouse_id=sale.warehouse_id
+    )
+
+
+def _sale_receipt_customer(sale):
+    return getattr(sale, "pos_customer", None) or getattr(
+        sale, "selected_customer", None
+    )
 
 
 def build_receipt(sale):
     payment = getattr(sale, "payment", None)
+    credit_amount = _sale_credit_amount(sale)
     payment_lines = [
         {
             "method": line.method,
@@ -797,22 +891,21 @@ def build_receipt(sale):
             "shift_no": getattr(sale.shift, "shift_no", "") if sale.shift_id else "",
         },
         "cashier": getattr(sale.cashier, "username", "") if sale.cashier_id else "",
-        "customer": _receipt_customer(getattr(sale, "selected_customer", None)),
+        "customer": _receipt_customer(_sale_receipt_customer(sale)),
         "total_amount": str(sale.total_amount),
+        "credit_amount": str(credit_amount),
         "cumulative_debt": str(_customer_cumulative_debt(sale)),
         "payment": {
             "method": payment.method if payment else "",
             "amount_due": str(payment.amount_due) if payment else "0.00",
             "amount_received": str(payment.amount_received) if payment else "0.00",
             "change_amount": str(payment.change_amount) if payment else "0.00",
+            "credit_amount": str(credit_amount),
             "reference_no": payment.reference_no if payment else "",
             "status": payment.status if payment else "",
         },
         "payment_lines": payment_lines,
-        "lines": [
-            _receipt_line(line)
-            for line in sale_lines
-        ],
+        "lines": [_receipt_line(line) for line in sale_lines],
         "orders": [
             {"id": order.id, "order_no": order.order_no, "owner_id": order.owner_id}
             for order in orders
@@ -824,7 +917,12 @@ def build_receipt(sale):
 def result_for_sale(sale):
     sale = (
         PosSale.objects.select_related(
-            "payment", "cashier", "warehouse", "selected_customer", "shift"
+            "payment",
+            "cashier",
+            "warehouse",
+            "pos_customer",
+            "selected_customer",
+            "shift",
         )
         .prefetch_related(
             "lines__product",
@@ -855,6 +953,77 @@ def result_for_return(return_order):
         .get(pk=return_order.pk)
     )
     return {"return": return_order}
+
+
+@transaction.atomic
+def create_customer_repayment(
+    *, user, customer_id, amount, method, reference_no="", remark=""
+):
+    warehouse_id = getattr(user, "warehouse_id", None)
+    if not warehouse_id:
+        raise ValidationError("当前用户未绑定仓库(warehouse)，无法记录客户还款。")
+
+    customer = PosCustomer.objects.filter(
+        id=customer_id, warehouse_id=warehouse_id, is_active=True
+    ).first()
+    if not customer:
+        _error("customer_id", "客户不存在。")
+
+    shift = current_shift_for_user(user, for_update=True)
+    if not shift:
+        raise ValidationError("当前收银员没有进行中的 POS 班次，请先开班。")
+
+    method = (method or "").strip().upper()
+    valid_methods = {choice.value for choice in PosPayment.Method}
+    if method not in valid_methods or method == PosPayment.Method.CREDIT:
+        _error("method", "请选择有效的还款方式。")
+
+    amount = _money(amount)
+    if amount <= ZERO:
+        _error("amount", "还款金额必须大于 0。")
+
+    debt_before = customer_pos_debt_balance(
+        customer_id=customer.id, warehouse_id=warehouse_id
+    )
+    if amount > debt_before:
+        _error("amount", f"还款金额不能大于累计欠款 {debt_before}。")
+
+    repayment = PosCustomerRepayment.objects.create(
+        repayment_no=_make_repayment_no(),
+        warehouse_id=warehouse_id,
+        pos_customer=customer,
+        shift=shift,
+        cashier=user if user and user.is_authenticated else None,
+        method=method,
+        amount=amount,
+        reference_no=(reference_no or "").strip(),
+        remark=(remark or "").strip(),
+        created_by=user if user and user.is_authenticated else None,
+    )
+    debt_after = customer_pos_debt_balance(
+        customer_id=customer.id, warehouse_id=warehouse_id
+    )
+    PosAuditLog.objects.create(
+        action=PosAuditLog.Action.REPAYMENT,
+        shift=shift,
+        actor=user if user and user.is_authenticated else None,
+        metadata={
+            "repayment_id": repayment.id,
+            "repayment_no": repayment.repayment_no,
+            "customer_id": customer.id,
+            "customer_name": customer.name or "",
+            "method": method,
+            "amount": str(amount),
+            "debt_before": str(debt_before),
+            "debt_after": str(debt_after),
+        },
+    )
+    return {
+        "repayment": repayment,
+        "customer": customer,
+        "debt_before": debt_before,
+        "debt_after": debt_after,
+    }
 
 
 @transaction.atomic
@@ -913,15 +1082,18 @@ def create_pos_sale(
     normalized_items, qty_by_product = _validate_prices_and_shape(items, products)
     _validate_stock(qty_by_product, products, warehouse_id, zone_type=stock_zone_type)
 
-    Customer = apps.get_model("baseinfo", "Customer")
     selected_customer = None
     if customer_id:
-        selected_customer = Customer.objects.filter(id=customer_id).first()
+        selected_customer = PosCustomer.objects.filter(
+            id=customer_id, warehouse_id=warehouse_id, is_active=True
+        ).first()
         if not selected_customer:
             _error("customer_id", "客户不存在。")
 
     total_amount = _money(sum((item["amount"] for item in normalized_items), ZERO))
-    payment_lines_data = _normalize_payment_lines(payment, payments, total_amount)
+    payment_lines_data = _normalize_payment_lines(
+        payment, payments, total_amount, allow_credit=bool(selected_customer)
+    )
     payment_data = _payment_summary_from_lines(payment_lines_data, total_amount)
     sale_no = _make_sale_no()
     receipt_no = (src_bill_no or "").strip() or sale_no
@@ -940,12 +1112,9 @@ def create_pos_sale(
     if duplicate_owner_ids:
         _error("src_bill_no", "POS 小票号/外部单号已存在。")
 
-    customers_by_owner = {}
-    for owner_id in owner_ids:
-        if selected_customer and selected_customer.owner_id == owner_id:
-            customers_by_owner[owner_id] = selected_customer
-        else:
-            customers_by_owner[owner_id] = _cash_customer(owner_id, user)
+    customers_by_owner = {
+        owner_id: _cash_customer(owner_id, user) for owner_id in owner_ids
+    }
 
     sale = PosSale.objects.create(
         sale_no=sale_no,
@@ -955,7 +1124,7 @@ def create_pos_sale(
         warehouse_id=warehouse_id,
         shift=shift,
         cashier=user if user and user.is_authenticated else None,
-        selected_customer=selected_customer,
+        pos_customer=selected_customer,
         total_amount=total_amount,
         remark=(remark or "").strip(),
     )

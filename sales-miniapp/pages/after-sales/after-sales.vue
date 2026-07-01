@@ -5,19 +5,6 @@
       <button class="action-btn ghost" @click="load">刷新</button>
     </view>
 
-    <scroll-view v-if="merchantOptions.length > 2" class="merchant-scroll" scroll-x>
-      <view class="merchant-row">
-        <view
-          v-for="merchant in merchantOptions"
-          :key="merchant.id || 'all'"
-          :class="['merchant-chip', String(ownerId) === String(merchant.id) && 'active']"
-          @click="switchMerchant(merchant.id)"
-        >
-          {{ merchant.name }}
-        </view>
-      </view>
-    </scroll-view>
-
     <view v-if="rows.length" class="after-list">
       <view v-for="item in rows" :key="item.id" class="after-card">
         <view class="card-head">
@@ -49,39 +36,14 @@
 
 <script setup>
 import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import EmptyState from '../../components/EmptyState.vue'
 import { orderService } from '../../services/order'
-import { useSessionStore } from '../../stores/session'
 import { money } from '../../utils/money'
 import { getToken } from '../../utils/request'
 
-const session = useSessionStore()
 const rows = ref([])
 const loading = ref(false)
-const ownerId = ref('')
-
-const merchantOptions = computed(() => {
-  const profile = session.profile || {}
-  const bindings = Array.isArray(profile.bindings) ? profile.bindings : []
-  const rows = bindings
-    .map((item) => item.owner)
-    .filter((owner) => owner && owner.id)
-  if (!rows.length && profile.owner && profile.owner.id) rows.push(profile.owner)
-  const seen = new Set()
-  const unique = rows.filter((owner) => {
-    const key = String(owner.id)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-  return [{ id: '', name: '全部商家' }, ...unique]
-})
-
-async function ensureProfile() {
-  if (session.profile && Array.isArray(session.profile.bindings)) return
-  await session.fetchProfile()
-}
 
 function dateText(value) {
   if (!value) return '-'
@@ -102,18 +64,12 @@ async function load() {
   if (loading.value) return
   loading.value = true
   try {
-    await ensureProfile()
-    rows.value = await orderService.afterSales({ owner_id: ownerId.value })
+    rows.value = await orderService.afterSales()
   } catch (err) {
     uni.showToast({ title: err.message || '售后加载失败', icon: 'none' })
   } finally {
     loading.value = false
   }
-}
-
-function switchMerchant(id) {
-  ownerId.value = id || ''
-  load()
 }
 
 function goOrders() {
@@ -143,42 +99,6 @@ onPullDownRefresh(async () => {
   grid-template-columns: 1fr 1fr;
   gap: 12rpx;
   margin-bottom: 18rpx;
-}
-
-.merchant-scroll {
-  margin-bottom: 18rpx;
-  white-space: nowrap;
-}
-
-.merchant-row {
-  display: flex;
-  gap: 10rpx;
-}
-
-.merchant-chip {
-  min-width: 150rpx;
-  max-width: 260rpx;
-  height: 62rpx;
-  padding: 0 18rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1rpx solid #d7dde8;
-  border-radius: 8rpx;
-  background: #fff;
-  color: #475569;
-  font-size: 24rpx;
-  font-weight: 750;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.merchant-chip.active {
-  border-color: #0f766e;
-  background: #edf8f5;
-  color: #0f766e;
 }
 
 .action-btn {

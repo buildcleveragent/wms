@@ -3,7 +3,12 @@ from django.urls import path
 from .views import (
     PosAccuracyApi,
     PosCheckoutApi,
+    PosCustomerDebtApi,
+    PosCustomerDetailApi,
+    PosCustomerListCreateApi,
+    PosCustomerRepaymentListCreateApi,
     PosProductListApi,
+    PosReceiptWarehouseInfoListApi,
     PosReturnDetailApi,
     PosReturnListCreateApi,
     PosSaleDetailApi,
@@ -28,6 +33,17 @@ from .views import (
 
 urlpatterns = [
     path("products/", PosProductListApi.as_view(), name="pos-products"),
+    path("customers/", PosCustomerListCreateApi.as_view(), name="pos-customers"),
+    path(
+        "customers/<int:pk>/",
+        PosCustomerDetailApi.as_view(),
+        name="pos-customer-detail",
+    ),
+    path(
+        "receipt-warehouse-infos/",
+        PosReceiptWarehouseInfoListApi.as_view(),
+        name="pos-receipt-warehouse-infos",
+    ),
     path("checkout/", PosCheckoutApi.as_view(), name="pos-checkout"),
     path("accuracy/", PosAccuracyApi.as_view(), name="pos-accuracy"),
     path("stats/", PosStatsApi.as_view(), name="pos-stats"),
@@ -56,6 +72,16 @@ urlpatterns = [
         "returns/<int:return_id>/",
         PosReturnDetailApi.as_view(),
         name="pos-return-detail",
+    ),
+    path(
+        "customer-debts/<int:customer_id>/",
+        PosCustomerDebtApi.as_view(),
+        name="pos-customer-debt",
+    ),
+    path(
+        "repayments/",
+        PosCustomerRepaymentListCreateApi.as_view(),
+        name="pos-repayment-list-create",
     ),
     path("shifts/", PosShiftListApi.as_view(), name="pos-shift-list"),
     path(

@@ -67,6 +67,8 @@
       <div class="total-line strong"><span>应收</span><span>{{ receipt.total_amount }}</span></div>
       <div class="total-line"><span>支付方式</span><span>{{ receipt.payment.method }}</span></div>
       <div class="total-line"><span>实收</span><span>{{ receipt.payment.amount_received }}</span></div>
+      <div class="total-line"><span>本单赊账</span><span>{{ receipt.payment.credit_amount }}</span></div>
+      <div class="total-line"><span>累计欠款</span><span>{{ receipt.cumulative_debt }}</span></div>
       <div class="total-line"><span>找零</span><span>{{ receipt.payment.change_amount }}</span></div>
       <div>支付参考号：{{ receipt.payment.reference_no|default:"-" }}</div>
       <div>内部出库单：

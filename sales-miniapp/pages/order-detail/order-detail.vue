@@ -5,7 +5,6 @@
         <view>
           <view class="status">{{ order.status_name }}</view>
           <view class="no">{{ order.order_no }}</view>
-          <view class="merchant">{{ order.owner_name || '商家' }}</view>
         </view>
         <OrderStatusTag :status="order.status" :text="order.payment_status_name" />
       </view>
@@ -18,6 +17,7 @@
 
       <view class="section">
         <view class="section-title">配送进度</view>
+        <view v-if="order.is_combined" class="text muted">本次订单包含 {{ order.order_count }} 个配送包裹，平台会统一安排备货。</view>
         <view class="timeline">
           <view v-for="step in fulfillmentSteps" :key="step.title" :class="['step', step.state]">
             <view class="dot"></view>
@@ -35,8 +35,8 @@
           <image v-if="line.image_url" class="thumb" :src="line.image_url" mode="aspectFill" />
           <view class="line-main">
             <view class="line-name">{{ line.product_name }}</view>
-            <view class="muted">{{ line.product_code }} {{ line.product_spec }}</view>
-            <view class="muted">{{ line.qty }} {{ line.order_uom }} · 折合 {{ line.base_qty }} {{ line.base_uom }}</view>
+            <view v-if="line.product_spec" class="muted">{{ line.product_spec }}</view>
+            <view class="muted">{{ line.qty }} {{ line.order_uom }}</view>
           </view>
           <view class="line-amount">¥{{ money(line.line_amount) }}</view>
         </view>
@@ -124,8 +124,8 @@ const fulfillmentSteps = computed(() => {
       state: paid ? 'done' : 'active',
     },
     {
-      title: '商家备货',
-      desc: data.delivery_method_name ? `${data.delivery_method_name} · 正在处理` : '正在处理',
+      title: '备货中',
+      desc: data.delivery_method_name ? `${data.delivery_method_name} · 平台处理中` : '平台处理中',
       state: completed ? 'done' : paid ? 'active' : 'pending',
     },
     {
@@ -151,14 +151,15 @@ const canCancel = computed(
     beforeWarehouseWork.value &&
     !['PAID', 'REFUNDING', 'REFUNDED'].includes(order.value.payment_status),
 )
-const canPay = computed(() => Boolean(order.value) && order.value.payment_status === 'UNPAID' && order.value.status !== 'CANCELLED')
+const canPay = computed(() => Boolean(order.value) && !order.value.is_combined && order.value.payment_status === 'UNPAID' && order.value.status !== 'CANCELLED')
 const canReorder = computed(() => Boolean(order.value && order.value.lines && order.value.lines.length))
 const canRefund = computed(
-  () => Boolean(order.value) && order.value.payment_status === 'PAID' && beforeWarehouseWork.value,
+  () => Boolean(order.value) && !order.value.is_combined && order.value.payment_status === 'PAID' && beforeWarehouseWork.value,
 )
 const canAfterSale = computed(
   () =>
     Boolean(order.value) &&
+    !order.value.is_combined &&
     afterWarehouseWork.value &&
     ['PAID', 'OFFLINE'].includes(order.value.payment_status) &&
     (!order.value.after_sale || order.value.after_sale.status !== 'PENDING'),
@@ -227,7 +228,7 @@ async function reorder() {
         )
         added += 1
       } catch (err) {
-        failures.push(err.message || `${line.product_name || line.product_code} 不可购买`)
+        failures.push(err.message || `${line.product_name || '商品'} 不可购买`)
       }
     }
     if (!added) {
@@ -310,13 +311,6 @@ onLoad((query = {}) => {
   margin-top: 6rpx;
   color: #64748b;
   font-size: 24rpx;
-}
-
-.merchant {
-  margin-top: 6rpx;
-  color: #0f766e;
-  font-size: 24rpx;
-  font-weight: 700;
 }
 
 .section-title {

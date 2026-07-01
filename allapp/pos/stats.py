@@ -11,6 +11,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .models import (
+    PosCustomerRepayment,
     PosPayment,
     PosPaymentLine,
     PosRefund,
@@ -134,23 +135,34 @@ def _base_querysets(*, warehouse_id, start_at, end_at, owner_id=None, cashier_id
         return_order__created_at__lt=end_at,
         return_order__status=PosReturn.Status.COMPLETED,
     )
+    repayment_qs = PosCustomerRepayment.objects.filter(
+        warehouse_id=warehouse_id,
+        created_at__gte=start_at,
+        created_at__lt=end_at,
+        status=PosCustomerRepayment.Status.COMPLETED,
+    )
     if owner_id:
         line_qs = line_qs.filter(owner_id=owner_id)
         return_line_qs = return_line_qs.filter(owner_id=owner_id)
+        # POS 客户不隶属于货主，还款无法准确归属到单一货主。
+        repayment_qs = repayment_qs.none()
     if cashier_id:
         line_qs = line_qs.filter(sale__cashier_id=cashier_id)
         return_line_qs = return_line_qs.filter(return_order__cashier_id=cashier_id)
-    return line_qs, return_line_qs
+        repayment_qs = repayment_qs.filter(cashier_id=cashier_id)
+    return line_qs, return_line_qs, repayment_qs
 
 
-def _payment_rows(line_qs, return_line_qs):
+def _payment_rows(line_qs, return_line_qs, repayment_qs):
     labels = dict(PosPayment.Method.choices)
     rows = defaultdict(
         lambda: {
             "sale_count": set(),
             "refund_count": set(),
+            "repayment_count": 0,
             "sale_amount": ZERO_MONEY,
             "refund_amount": ZERO_MONEY,
+            "repayment_amount": ZERO_MONEY,
         }
     )
 
@@ -216,19 +228,32 @@ def _payment_rows(line_qs, return_line_qs):
         rows[method]["refund_amount"] += allocated
         rows[method]["refund_count"].add(return_id)
 
+    repayments = (
+        repayment_qs.values("method")
+        .annotate(repayment_count=Count("id"), amount=_money_sum("amount"))
+        .order_by("method")
+    )
+    for repayment in repayments:
+        method = repayment["method"] or ""
+        rows[method]["repayment_amount"] += repayment["amount"] or ZERO_MONEY
+        rows[method]["repayment_count"] += repayment["repayment_count"] or 0
+
     payload = []
     for method, row in rows.items():
         sale_amount = _money(row["sale_amount"])
         refund_amount = _money(row["refund_amount"])
-        net_amount = _money(sale_amount - refund_amount)
+        repayment_amount = _money(row["repayment_amount"])
+        net_amount = _money(sale_amount - refund_amount + repayment_amount)
         payload.append(
             {
                 "method": method,
                 "method_label": labels.get(method, "未收款"),
                 "sale_count": len(row["sale_count"]),
                 "refund_count": len(row["refund_count"]),
+                "repayment_count": row["repayment_count"],
                 "sale_amount": _money_text(sale_amount),
                 "refund_amount": _money_text(refund_amount),
+                "repayment_amount": _money_text(repayment_amount),
                 "net_amount": _money_text(net_amount),
                 "amount": _money_text(net_amount),
             }
@@ -527,7 +552,7 @@ def build_pos_stats_payload(*, user, params):
     parsed = parse_pos_stats_params(params)
     start_at, end_at = _date_bounds(parsed["start_date"], parsed["end_date"])
 
-    line_qs, return_line_qs = _base_querysets(
+    line_qs, return_line_qs, repayment_qs = _base_querysets(
         warehouse_id=warehouse_id,
         start_at=start_at,
         end_at=end_at,
@@ -564,6 +589,18 @@ def build_pos_stats_payload(*, user, params):
     return_amount = return_amounts["return_amount"] or ZERO_MONEY
     completed_qty = amounts["completed_qty"] or ZERO_QTY
     return_qty = return_amounts["return_qty"] or ZERO_QTY
+    payment_rows = _payment_rows(line_qs, return_line_qs, repayment_qs)
+    credit_amount = sum(
+        Decimal(row["net_amount"])
+        for row in payment_rows
+        if row["method"] == PosPayment.Method.CREDIT
+    )
+    repayment_amount = sum(Decimal(row["repayment_amount"]) for row in payment_rows)
+    received_amount = sum(
+        Decimal(row["net_amount"])
+        for row in payment_rows
+        if row["method"] != PosPayment.Method.CREDIT
+    )
 
     return {
         "scope": {
@@ -592,8 +629,11 @@ def build_pos_stats_payload(*, user, params):
             "voided_amount": _money_text(amounts["voided_amount"]),
             "return_amount": _money_text(return_amount),
             "net_amount": _money_text(sales_amount - return_amount),
+            "received_amount": _money_text(received_amount),
+            "credit_amount": _money_text(credit_amount),
+            "repayment_amount": _money_text(repayment_amount),
         },
-        "payments": _payment_rows(line_qs, return_line_qs),
+        "payments": payment_rows,
         "owners": _owner_rows(line_qs, return_line_qs),
         "products": _product_rows(line_qs, return_line_qs, top_n=parsed["top_n"]),
         "cashiers": _cashier_rows(line_qs, return_line_qs),

@@ -1,18 +1,5 @@
 <template>
   <view class="page address-page">
-    <scroll-view v-if="showMerchantSwitch" class="merchant-scroll" scroll-x>
-      <view class="merchant-row">
-        <view
-          v-for="merchant in merchantOptions"
-          :key="merchant.id"
-          :class="['merchant-chip', Number(ownerId) === Number(merchant.id) && 'active']"
-          @click="selectMerchant(merchant.id)"
-        >
-          {{ merchant.name }}
-        </view>
-      </view>
-    </scroll-view>
-    <view v-else-if="currentMerchantName" class="merchant-title">{{ currentMerchantName }}</view>
     <view v-if="rows.length" class="list">
       <view v-for="item in rows" :key="item.id" class="row">
         <AddressCard :address="item" @select="selectAddress(item)" />
@@ -26,64 +13,20 @@
 
 <script setup>
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import AddressCard from '../../components/AddressCard.vue'
 import EmptyState from '../../components/EmptyState.vue'
 import { addressService } from '../../services/address'
-import { useSessionStore } from '../../stores/session'
 
-const session = useSessionStore()
 const rows = ref([])
 const selectable = ref(false)
 const ownerId = ref('')
-const merchantOptions = ref([])
-const loadedProfile = ref(false)
-
-const showMerchantSwitch = computed(() => !selectable.value && merchantOptions.value.length > 1)
-const currentMerchantName = computed(() => {
-  const row = merchantOptions.value.find((item) => Number(item.id) === Number(ownerId.value))
-  return row ? `${row.name} 地址` : ''
-})
-
-function bindingsFromProfile(profile) {
-  const current = profile || {}
-  const bindings = Array.isArray(current.bindings) ? current.bindings : []
-  const rows = bindings
-    .map((binding) => binding.owner)
-    .filter((owner) => owner && owner.id)
-  if (!rows.length && current.owner && current.owner.id) rows.push(current.owner)
-  const seen = new Set()
-  return rows.filter((owner) => {
-    const key = String(owner.id)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
-async function loadMerchantOptions() {
-  if (!loadedProfile.value) {
-    await session.fetchProfile()
-    loadedProfile.value = true
-  }
-  merchantOptions.value = bindingsFromProfile(session.profile)
-  if (!ownerId.value && merchantOptions.value.length) {
-    ownerId.value = String(merchantOptions.value[0].id)
-  }
-}
+const CHECKOUT_OWNER_KEY = 'sale_mini_address_owner_id'
+const EDIT_OWNER_KEY = 'sale_mini_address_edit_owner_id'
 
 async function load() {
-  await loadMerchantOptions()
-  rows.value = await addressService.list({ owner_id: ownerId.value })
-}
-
-function selectMerchant(id) {
-  if (Number(ownerId.value) === Number(id)) return
-  ownerId.value = String(id || '')
-  rows.value = []
-  load().catch((err) => {
-    uni.showToast({ title: err.message || '地址加载失败', icon: 'none' })
-  })
+  const params = ownerId.value ? { owner_id: ownerId.value } : {}
+  rows.value = await addressService.list(params)
 }
 
 function selectAddress(item) {
@@ -93,16 +36,27 @@ function selectAddress(item) {
 }
 
 function edit(item) {
-  uni.navigateTo({ url: `/pages/address-edit/address-edit?id=${item.id}&owner_id=${ownerId.value}` })
+  const addressOwnerId = item.owner_id || ownerId.value || ''
+  if (addressOwnerId) {
+    uni.setStorageSync(EDIT_OWNER_KEY, addressOwnerId)
+  } else {
+    uni.removeStorageSync(EDIT_OWNER_KEY)
+  }
+  uni.navigateTo({ url: `/pages/address-edit/address-edit?id=${item.id}` })
 }
 
 function create() {
-  uni.navigateTo({ url: `/pages/address-edit/address-edit?owner_id=${ownerId.value}` })
+  if (ownerId.value) {
+    uni.setStorageSync(EDIT_OWNER_KEY, ownerId.value)
+  } else {
+    uni.removeStorageSync(EDIT_OWNER_KEY)
+  }
+  uni.navigateTo({ url: '/pages/address-edit/address-edit' })
 }
 
 onLoad((query = {}) => {
   selectable.value = query.select === '1'
-  ownerId.value = query.owner_id || ''
+  ownerId.value = selectable.value ? uni.getStorageSync(CHECKOUT_OWNER_KEY) || '' : ''
 })
 
 onShow(() => {
@@ -115,49 +69,6 @@ onShow(() => {
 <style scoped>
 .address-page {
   padding-bottom: 130rpx;
-}
-
-.merchant-scroll {
-  margin-bottom: 18rpx;
-  white-space: nowrap;
-}
-
-.merchant-row {
-  display: flex;
-  gap: 10rpx;
-}
-
-.merchant-chip {
-  min-width: 150rpx;
-  max-width: 260rpx;
-  height: 62rpx;
-  padding: 0 18rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1rpx solid #d7dde8;
-  border-radius: 8rpx;
-  background: #fff;
-  color: #475569;
-  font-size: 24rpx;
-  font-weight: 750;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.merchant-chip.active {
-  border-color: #0f766e;
-  background: #edf8f5;
-  color: #0f766e;
-}
-
-.merchant-title {
-  margin-bottom: 18rpx;
-  color: #17202a;
-  font-size: 30rpx;
-  font-weight: 850;
 }
 
 .list {

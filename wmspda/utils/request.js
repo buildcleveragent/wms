@@ -36,30 +36,49 @@ function isLoginRequest(url = '') {
   return url === '/api/token/' || url.includes('/api/token/')
 }
 
+const HTML_ERROR_MESSAGE = '后端服务错误，请联系管理员查看日志'
+
+function sanitizeMessage(value, fallback = '请求失败') {
+  if (typeof value !== 'string') return fallback
+
+  const text = value.trim()
+  if (!text) return fallback
+
+  if (/^<!doctype\s+html/i.test(text) || /^<html[\s>]/i.test(text)) {
+    return HTML_ERROR_MESSAGE
+  }
+
+  return text.length > 120 ? `${text.slice(0, 117)}...` : text
+}
+
 function getFriendlyMessage(data, fallback = '请求失败') {
   if (!data) return fallback
 
-  if (typeof data === 'string') return data
+  if (typeof data === 'string') return sanitizeMessage(data, fallback)
 
   if (Array.isArray(data)) {
-    return data[0] || fallback
+    return sanitizeMessage(data[0], fallback)
   }
 
-  if (typeof data.detail === 'string') return data.detail
-  if (Array.isArray(data.detail) && data.detail.length) return data.detail[0]
+  if (typeof data.detail === 'string') return sanitizeMessage(data.detail, fallback)
+  if (Array.isArray(data.detail) && data.detail.length) {
+    return sanitizeMessage(data.detail[0], fallback)
+  }
 
-  if (typeof data.message === 'string') return data.message
-  if (Array.isArray(data.message) && data.message.length) return data.message[0]
+  if (typeof data.message === 'string') return sanitizeMessage(data.message, fallback)
+  if (Array.isArray(data.message) && data.message.length) {
+    return sanitizeMessage(data.message[0], fallback)
+  }
 
   if (Array.isArray(data.non_field_errors) && data.non_field_errors.length) {
-    return data.non_field_errors[0]
+    return sanitizeMessage(data.non_field_errors[0], fallback)
   }
 
   // 兜底取第一个字段错误
   for (const key in data) {
     const v = data[key]
-    if (Array.isArray(v) && v.length) return v[0]
-    if (typeof v === 'string') return v
+    if (Array.isArray(v) && v.length) return sanitizeMessage(v[0], fallback)
+    if (typeof v === 'string') return sanitizeMessage(v, fallback)
   }
 
   return fallback
@@ -286,6 +305,11 @@ export const api = {
       method: 'POST',
     }),
 
+  systemSettings: () =>
+    request({
+      url: '/api/core/settings/',
+    }),
+
   posProducts: (params = {}) => {
     const qs = buildQuery({
       ...params,
@@ -298,6 +322,11 @@ export const api = {
       url: `/api/pos/products/?${qs}`,
     })
   },
+
+  posReceiptWarehouseInfos: () =>
+    request({
+      url: '/api/pos/receipt-warehouse-infos/',
+    }),
 
   posCheckout: (payload) =>
     request({
@@ -388,6 +417,48 @@ export const api = {
   posSaleVoid: (id, payload = {}) =>
     request({
       url: `/api/pos/sales/${id}/void/`,
+      method: 'POST',
+      data: payload,
+    }),
+
+  posCustomers: (q = '', page = 1) =>
+    request({
+      url: `/api/pos/customers/?search=${encodeURIComponent(q)}&page=${page}`,
+    }),
+
+  posCustomerCreate: (payload = {}) =>
+    request({
+      url: '/api/pos/customers/',
+      method: 'POST',
+      data: payload,
+    }),
+
+  posCustomerUpdate: (id, payload = {}) =>
+    request({
+      url: `/api/pos/customers/${id}/`,
+      method: 'PATCH',
+      data: payload,
+    }),
+
+  posCustomerDebt: (customerId) =>
+    request({
+      url: `/api/pos/customer-debts/${customerId}/`,
+    }),
+
+  posRepayments: (params = {}) => {
+    const qs = buildQuery({
+      customer_id: params.customer_id || '',
+      page: params.page || 1,
+      page_size: params.page_size || 20,
+    })
+    return request({
+      url: `/api/pos/repayments/?${qs}`,
+    })
+  },
+
+  posRepaymentCreate: (payload = {}) =>
+    request({
+      url: '/api/pos/repayments/',
       method: 'POST',
       data: payload,
     }),

@@ -3,11 +3,8 @@
     <view class="member-head">
       <view>
         <view class="head-title">会员资产</view>
-        <view class="head-sub">{{ merchantName }}</view>
+        <view class="head-sub">博悦商城</view>
       </view>
-      <picker v-if="merchantOptions.length > 1" :range="merchantOptions" range-key="name" :value="merchantIndex" @change="changeMerchant">
-        <view class="switch-btn">切换商家</view>
-      </picker>
     </view>
 
     <view class="asset-grid">
@@ -56,8 +53,8 @@
 </template>
 
 <script setup>
-import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
-import { computed, ref } from 'vue'
+import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
+import { ref } from 'vue'
 import EmptyState from '../../components/EmptyState.vue'
 import { benefitService } from '../../services/benefit'
 import { useSessionStore } from '../../stores/session'
@@ -67,25 +64,7 @@ import { getToken } from '../../utils/request'
 const session = useSessionStore()
 const coupons = ref([])
 const pointInfo = ref({ points: 0, frozen: 0, exchange_rate: '100.00' })
-const merchantIndex = ref(0)
 const loading = ref(false)
-const requestedOwnerId = ref('')
-
-const bindings = computed(() => {
-  const profile = session.profile || {}
-  return Array.isArray(profile.bindings) ? profile.bindings : []
-})
-const merchantOptions = computed(() => {
-  const rows = bindings.value
-    .map((item) => item.owner)
-    .filter((owner) => owner && owner.id)
-  if (rows.length) return rows
-  const profile = session.profile || {}
-  return profile.owner ? [profile.owner] : []
-})
-const merchant = computed(() => merchantOptions.value[merchantIndex.value] || merchantOptions.value[0] || null)
-const merchantName = computed(() => (merchant.value && merchant.value.name) || '当前商家')
-const ownerId = computed(() => (merchant.value && merchant.value.id) || '')
 
 function couponTime(coupon) {
   const end = coupon.expires_at || coupon.effective_to || ''
@@ -102,11 +81,9 @@ async function load() {
   loading.value = true
   try {
     if (!session.profile) await session.fetchProfile()
-    syncRequestedMerchant()
-    const params = ownerId.value ? { owner_id: ownerId.value } : {}
     const [couponRows, points] = await Promise.all([
-      benefitService.coupons(params),
-      benefitService.points(params),
+      benefitService.coupons(),
+      benefitService.points(),
     ])
     coupons.value = couponRows || []
     pointInfo.value = points || { points: 0, frozen: 0, exchange_rate: '100.00' }
@@ -117,28 +94,9 @@ async function load() {
   }
 }
 
-function syncRequestedMerchant() {
-  if (!requestedOwnerId.value) return
-  const index = merchantOptions.value.findIndex((owner) => String(owner.id) === String(requestedOwnerId.value))
-  if (index >= 0) {
-    merchantIndex.value = index
-    requestedOwnerId.value = ''
-  }
-}
-
-async function changeMerchant(event) {
-  merchantIndex.value = Number(event.detail.value)
-  await load()
-}
-
 function goList() {
-  const suffix = ownerId.value ? `?owner_id=${ownerId.value}` : ''
-  uni.navigateTo({ url: `/pages/product-list/product-list${suffix}` })
+  uni.navigateTo({ url: '/pages/product-list/product-list' })
 }
-
-onLoad((query = {}) => {
-  requestedOwnerId.value = query.owner_id || ''
-})
 
 onShow(() => {
   load()
