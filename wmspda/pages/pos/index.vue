@@ -1811,20 +1811,20 @@ function buildDotMatrixSalePrintHtml(data, printMode) {
   <style>
     ${dotMatrixPageCss(printMode)}
     * { box-sizing: border-box; }
-    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: 18px; }
-    .sheet { width: 98%; margin: 0 auto; padding: 1mm 0 0; }
-    .company { text-align: center; font-size: 30px; font-weight: 700; line-height: 1.05; }
-    .title { text-align: center; font-size: 21px; line-height: 1.05; margin-bottom: 2px; }
-    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 8px; font-size: 18px; line-height: 1.15; margin-bottom: 2px; }
+    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: 25px; }
+    .sheet { width: 98%; margin: 0 auto; padding: 6mm 0 0; }
+    .company { text-align: center; font-size: 50px; font-weight: 700; line-height: 1.05; }
+    .title { text-align: center; font-size: 35px; line-height: 1.05; margin-bottom: 2px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 8px; font-size: 25px; line-height: 1.15; margin-bottom: 2px; }
     .meta .wide { grid-column: 1 / -1; }
-    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: 18px; }
+    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: 25px; }
     th, td { border: 1px solid #111; padding: 1px 2px; line-height: 1.05; vertical-align: middle; word-break: break-all; }
-    th { text-align: center; font-weight: 400; font-size: 18px; }
+    th { text-align: center; font-weight: 400; font-size: 25px; }
     .name { text-align: left; }
     .num { text-align: right; font-variant-numeric: tabular-nums; }
     .summary-name { text-align: left; }
-    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin-top: 5px; font-size: 18px; line-height: 1.15; }
-    .footer-line { margin-top: 1px; font-size: 18px; line-height: 1.12; white-space: normal; }
+    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin-top: 5px; font-size: 25px; line-height: 1.15; }
+    .footer-line { margin-top: 1px; font-size: 25px; line-height: 1.12; white-space: normal; }
   </style>
 </head>
 <body>
