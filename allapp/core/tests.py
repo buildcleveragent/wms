@@ -5,21 +5,23 @@ from decimal import Decimal
 from io import StringIO
 from pathlib import Path
 
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
+from rest_framework.test import APIClient
 
 from allapp.baseinfo.models import Owner
-from allapp.core.choices import InvTxType
 from allapp.billing.enums import AccrualStatus, CalcMethod, ChargeType
 from allapp.billing.models import (
     Bill,
-    BillLine,
     BillingAccrual,
     BillingPeriod,
     BillingRule,
+    BillLine,
 )
-from allapp.core.models import DocSequence
+from allapp.core.choices import InvTxType
+from allapp.core.models import DocSequence, PrintConfig, SystemSetting
 from allapp.inventory.models import (
     InventoryDetail,
     InventorySummary,
@@ -49,6 +51,71 @@ class CoreWarehouseScopeTests(TestCase):
         )
         self.assertEqual(next_no, 1)
         self.assertIsNone(seq.warehouse_id)
+
+
+class PrintConfigApiTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="print-config-user",
+            password="pass",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_system_settings_include_pos_sale_print_config(self):
+        response = self.client.get("/api/core/settings/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["flat"]["pos.sale_print_method"],
+            SystemSetting.POS_SALE_PRINT_FRONTEND,
+        )
+        self.assertEqual(
+            response.data["flat"]["pos.sale_print_config"],
+            SystemSetting.POS_DEFAULT_SALE_PRINT_CONFIG,
+        )
+
+    def test_default_print_config_uses_system_setting_code(self):
+        PrintConfig.objects.create(
+            code="pos_test_print_config",
+            name="测试打印配置",
+            module=PrintConfig.Module.POS_SALE,
+            paper_mode="dot_241_93",
+            paper_width="241mm",
+            paper_height="93mm",
+            page_size_css="241mm 93mm",
+            sheet_width="188mm",
+            is_active=True,
+            is_default=False,
+            sort_order=1,
+        )
+        SystemSetting.objects.update_or_create(
+            namespace=SystemSetting.POS_NAMESPACE,
+            key=SystemSetting.POS_SALE_PRINT_CONFIG_KEY,
+            defaults={
+                "name": "POS销售单打印配置",
+                "value_type": SystemSetting.ValueType.STRING,
+                "value": "pos_test_print_config",
+                "default_value": SystemSetting.POS_DEFAULT_SALE_PRINT_CONFIG,
+                "client_visible": True,
+                "is_active": True,
+                "sort_order": 11,
+            },
+        )
+
+        response = self.client.get("/api/core/print-configs/default/?module=pos_sale")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["code"], "pos_test_print_config")
+        self.assertEqual(response.data["page_size"], "241mm 93mm")
+        self.assertEqual(response.data["sheet_width"], "188mm")
+
+    def test_print_config_list_returns_results_and_default(self):
+        response = self.client.get("/api/core/print-configs/?module=pos_sale")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["results"])
+        self.assertEqual(response.data["default"]["code"], "pos_dot_241_93")
 
 
 class DataAccuracyCommandTests(TestCase):
@@ -521,7 +588,9 @@ class DataAccuracyCommandTests(TestCase):
         self.assertEqual(summary.available_qty, Decimal("4.0000"))
         self.assertEqual(bill.total, Decimal("2.50"))
 
-    def test_reconcile_data_accuracy_cleanup_command_skips_summary_rebuild_for_warehouse_scope(self):
+    def test_reconcile_data_accuracy_cleanup_command_skips_summary_rebuild_for_warehouse_scope(
+        self,
+    ):
         self.create_consistent_inventory()
 
         out = StringIO()
@@ -561,11 +630,15 @@ class DataAccuracyCommandTests(TestCase):
             )
 
             self.assertIn(str(output_dir), out.getvalue())
-            scope_payload = json.loads((output_dir / "scope.json").read_text(encoding="utf-8"))
+            scope_payload = json.loads(
+                (output_dir / "scope.json").read_text(encoding="utf-8")
+            )
             self.assertEqual(scope_payload["owner"]["id"], self.owner.id)
             self.assertEqual(scope_payload["warehouse"]["id"], self.warehouse.id)
             self.assertEqual(scope_payload["period"]["id"], self.period.id)
-            self.assertEqual(scope_payload["service_date"], self.period.end_date.isoformat())
+            self.assertEqual(
+                scope_payload["service_date"], self.period.end_date.isoformat()
+            )
             self.assertEqual(scope_payload["shadow_run_days"], 5)
 
             commands = (output_dir / "commands.sh").read_text(encoding="utf-8")
@@ -596,12 +669,19 @@ class DataAccuracyCommandTests(TestCase):
                 .splitlines()
             )
             self.assertEqual(len(daily_record_rows), 10)
-            self.assertIn(f",{self.owner.id},{self.warehouse.id},{self.period.id},", daily_record_rows[1])
+            self.assertIn(
+                f",{self.owner.id},{self.warehouse.id},{self.period.id},",
+                daily_record_rows[1],
+            )
             self.assertTrue(daily_record_rows[1].endswith("Day 0 baseline"))
             self.assertTrue(daily_record_rows[-1].endswith("Day 8 shadow run 5/5"))
 
-    def test_generate_data_accuracy_workpack_command_rejects_period_scope_mismatch(self):
-        other_warehouse = Warehouse.objects.create(code="ACC-WH-02", name="Other Warehouse")
+    def test_generate_data_accuracy_workpack_command_rejects_period_scope_mismatch(
+        self,
+    ):
+        other_warehouse = Warehouse.objects.create(
+            code="ACC-WH-02", name="Other Warehouse"
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             with self.assertRaises(CommandError):

@@ -310,6 +310,20 @@ export const api = {
       url: '/api/core/settings/',
     }),
 
+  printConfigs: (params = {}) => {
+    const qs = buildQuery({
+      module: params.module || '',
+    })
+    return request({
+      url: `/api/core/print-configs/?${qs}`,
+    })
+  },
+
+  defaultPrintConfig: (module = '') =>
+    request({
+      url: `/api/core/print-configs/default/?${buildQuery({ module })}`,
+    }),
+
   posProducts: (params = {}) => {
     const qs = buildQuery({
       ...params,

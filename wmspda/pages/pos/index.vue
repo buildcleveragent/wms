@@ -360,17 +360,25 @@
                 <text>自动打印销售单</text>
               </label>
             </checkbox-group>
-            <view class="print-mode-control">
-              <text class="print-mode-label">纸型</text>
-              <picker
-                class="print-mode-picker"
-                mode="selector"
-                :range="salePrintModeLabels"
-                :value="salePrintModeIndex"
-                @change="changeSalePrintMode"
+            <view class="print-mode-control sale-print-config-control">
+              <text class="print-mode-label">打印配置</text>
+              <view
+                class="print-config-select"
+                @click.stop="toggleSalePrintConfigDropdown"
               >
                 <view class="print-mode-value">{{ selectedSalePrintMode.label }}</view>
-              </picker>
+                <view v-if="salePrintConfigDropdownOpen" class="print-config-dropdown">
+                  <view
+                    v-for="(label, index) in salePrintModeLabels"
+                    :key="`${index}-${label}`"
+                    class="print-config-option"
+                    :class="{ active: index === salePrintModeIndex }"
+                    @click.stop="selectSalePrintConfig(index)"
+                  >
+                    {{ label }}
+                  </view>
+                </view>
+              </view>
             </view>
             <view class="print-mode-control receipt-info-control">
               <text class="print-mode-label">仓库信息</text>
@@ -688,6 +696,7 @@ const shiftHistoryLoading = ref(false)
 const POS_DRAFT_KEY = 'pos_sale_draft_v1'
 const POS_AUTO_PRINT_KEY = 'pos_auto_print_sale_v1'
 const POS_SALE_PRINT_MODE_KEY = 'pos_sale_print_mode_v2'
+const POS_SALE_PRINT_CONFIG_KEY = 'pos_sale_print_config_v1'
 const POS_RECEIPT_WAREHOUSE_INFO_KEY = 'pos_receipt_warehouse_info_v1'
 const SALE_PRINT_COMPANY_NAME = '金桥融通仓'
 const SALE_PRINT_SHOP_ADDRESS = ' '
@@ -698,13 +707,147 @@ const POS_STOCK_QUERY = {
   zone_type: 1,
   picking_only: 1,
 }
-const SALE_PRINT_MODES = [
-  { label: '三等分241×93', value: 'dot_241_93' },
-  { label: 'A4横向', value: 'a4_landscape' },
-  { label: '针式9.5x5.5', value: 'dot_9_5_5' },
-  { label: '针式9.5x11', value: 'dot_9_5_11' },
+const FALLBACK_SALE_PRINT_CONFIGS = [
+  {
+    code: 'pos_dot_241_93',
+    name: 'Epson LQ-635KII 三等分 241mm × 93mm',
+    module: 'pos_sale',
+    print_method: 'frontend_html',
+    printer_type: 'dot_matrix',
+    paper_mode: 'dot_241_93',
+    paper_width: '241mm',
+    paper_height: '93mm',
+    page_size_css: '241mm 93mm',
+    page_margin: '0',
+    sheet_width: '200mm',
+    sheet_padding_top: '3mm',
+    sheet_padding_right: '0',
+    sheet_padding_bottom: '0',
+    sheet_padding_left: '0',
+    body_font_size: '22px',
+    company_font_size: '36px',
+    title_font_size: '24px',
+    meta_font_size: '22px',
+    table_font_size: '22px',
+    table_header_font_size: '22px',
+    money_font_size: '22px',
+    footer_font_size: '22px',
+    body_line_height: '1.15',
+    meta_line_height: '1.15',
+    table_line_height: '1.05',
+    money_line_height: '1.15',
+    footer_line_height: '1.12',
+    table_cell_padding: '1px 2px',
+    money_gap: '6px',
+    money_margin_top: '5px',
+    is_default: true,
+    sort_order: 10,
+  },
+  {
+    code: 'pos_a4_landscape',
+    name: 'A4 激光横向',
+    module: 'pos_sale',
+    print_method: 'frontend_html',
+    printer_type: 'laser',
+    paper_mode: 'a4_landscape',
+    paper_width: 'A4',
+    paper_height: 'landscape',
+    page_size_css: 'A4 landscape',
+    page_margin: '0',
+    sheet_width: '98%',
+    sheet_padding_top: '1mm',
+    sheet_padding_right: '4px',
+    sheet_padding_bottom: '0',
+    sheet_padding_left: '4px',
+    body_font_size: '22.5px',
+    company_font_size: '42px',
+    title_font_size: '27px',
+    meta_font_size: '22.5px',
+    table_font_size: '22.5px',
+    table_header_font_size: '22.5px',
+    money_font_size: '22.5px',
+    footer_font_size: '22.5px',
+    body_line_height: '1.2',
+    meta_line_height: '1.2',
+    table_line_height: '1.05',
+    money_line_height: '1.2',
+    footer_line_height: '1.18',
+    table_cell_padding: '1px 3px',
+    money_gap: '14px',
+    money_margin_top: '8px',
+    sort_order: 20,
+  },
+  {
+    code: 'pos_dot_9_5_5',
+    name: 'Epson LQ-635KII 二等分 241mm × 140mm',
+    module: 'pos_sale',
+    print_method: 'frontend_html',
+    printer_type: 'dot_matrix',
+    paper_mode: 'dot_9_5_5',
+    paper_width: '241mm',
+    paper_height: '140mm',
+    page_size_css: '241mm 140mm',
+    page_margin: '0',
+    sheet_width: '200mm',
+    sheet_padding_top: '3mm',
+    sheet_padding_right: '0',
+    sheet_padding_bottom: '0',
+    sheet_padding_left: '0',
+    body_font_size: '22px',
+    company_font_size: '36px',
+    title_font_size: '24px',
+    meta_font_size: '22px',
+    table_font_size: '22px',
+    table_header_font_size: '22px',
+    money_font_size: '22px',
+    footer_font_size: '22px',
+    body_line_height: '1.15',
+    meta_line_height: '1.15',
+    table_line_height: '1.05',
+    money_line_height: '1.15',
+    footer_line_height: '1.12',
+    table_cell_padding: '1px 2px',
+    money_gap: '6px',
+    money_margin_top: '5px',
+    sort_order: 30,
+  },
+  {
+    code: 'pos_dot_9_5_11',
+    name: 'Epson LQ-635KII 整张 241mm × 279mm',
+    module: 'pos_sale',
+    print_method: 'frontend_html',
+    printer_type: 'dot_matrix',
+    paper_mode: 'dot_9_5_11',
+    paper_width: '241mm',
+    paper_height: '279mm',
+    page_size_css: '241mm 279mm',
+    page_margin: '0',
+    sheet_width: '200mm',
+    sheet_padding_top: '3mm',
+    sheet_padding_right: '0',
+    sheet_padding_bottom: '0',
+    sheet_padding_left: '0',
+    body_font_size: '22px',
+    company_font_size: '36px',
+    title_font_size: '24px',
+    meta_font_size: '22px',
+    table_font_size: '22px',
+    table_header_font_size: '22px',
+    money_font_size: '22px',
+    footer_font_size: '22px',
+    body_line_height: '1.15',
+    meta_line_height: '1.15',
+    table_line_height: '1.05',
+    money_line_height: '1.15',
+    footer_line_height: '1.12',
+    table_cell_padding: '1px 2px',
+    money_gap: '6px',
+    money_margin_top: '5px',
+    sort_order: 40,
+  },
 ]
 const DEFAULT_SALE_PRINT_MODE = 'dot_241_93'
+const DEFAULT_SALE_PRINT_CONFIG_CODE = 'pos_dot_241_93'
 const SALE_PRINT_METHOD_FRONTEND = 'frontend_html'
 const SALE_PRINT_METHOD_BACKEND = 'backend_html'
 const DEFAULT_SALE_PRINT_METHOD = SALE_PRINT_METHOD_FRONTEND
@@ -731,8 +874,13 @@ const repaymentRemark = ref('')
 const repaymentSubmitting = ref(false)
 const autoPrintSale = ref(true)
 const salePrintMode = ref(DEFAULT_SALE_PRINT_MODE)
+const salePrintConfigCode = ref('')
 const salePrintMethod = ref(DEFAULT_SALE_PRINT_METHOD)
+const systemDefaultSalePrintConfigCode = ref(DEFAULT_SALE_PRINT_CONFIG_CODE)
 const systemSettingsLoading = ref(false)
+const salePrintConfigs = ref([])
+const salePrintConfigsLoading = ref(false)
+const salePrintConfigDropdownOpen = ref(false)
 const receiptWarehouseInfos = ref([])
 const receiptWarehouseInfosLoading = ref(false)
 const selectedReceiptWarehouseInfoId = ref('')
@@ -775,12 +923,30 @@ const repaymentMethodIndex = computed(() =>
   Math.max(0, repaymentMethods.value.findIndex((method) => method.value === repaymentMethod.value))
 )
 const selectedRepaymentMethod = computed(() => repaymentMethods.value[repaymentMethodIndex.value] || repaymentMethods.value[0])
-const salePrintModeLabels = computed(() => SALE_PRINT_MODES.map((mode) => mode.label))
+const salePrintConfigOptions = computed(() =>
+  salePrintConfigs.value.length ? salePrintConfigs.value : FALLBACK_SALE_PRINT_CONFIGS
+)
+const salePrintModeLabels = computed(() =>
+  salePrintConfigOptions.value.map((config) => config.name || config.label || config.code || '打印配置')
+)
 const salePrintModeIndex = computed(() => {
-  const index = SALE_PRINT_MODES.findIndex((mode) => mode.value === salePrintMode.value)
+  const selectedCode = String(salePrintConfigCode.value || '')
+  const indexByCode = salePrintConfigOptions.value.findIndex(
+    (config) => selectedCode && String(config.code || '') === selectedCode
+  )
+  if (indexByCode >= 0) return indexByCode
+  const index = salePrintConfigOptions.value.findIndex(
+    (config) => (config.paper_mode || config.value) === salePrintMode.value
+  )
   return index >= 0 ? index : 0
 })
-const selectedSalePrintMode = computed(() => SALE_PRINT_MODES[salePrintModeIndex.value] || SALE_PRINT_MODES[0])
+const selectedSalePrintConfig = computed(
+  () => salePrintConfigOptions.value[salePrintModeIndex.value] || FALLBACK_SALE_PRINT_CONFIGS[0]
+)
+const selectedSalePrintMode = computed(() => ({
+  label: selectedSalePrintConfig.value.name || selectedSalePrintConfig.value.label || '打印配置',
+  value: selectedSalePrintConfig.value.paper_mode || selectedSalePrintConfig.value.value || DEFAULT_SALE_PRINT_MODE,
+}))
 const useBackendSalePrint = computed(() => salePrintMethod.value === SALE_PRINT_METHOD_BACKEND)
 const fallbackReceiptWarehouseInfo = computed(() => ({
   id: '',
@@ -912,6 +1078,7 @@ onMounted(() => {
   initScanner()
   focusProductInput()
   loadSystemSettings()
+  loadSalePrintConfigs()
   loadReceiptWarehouseInfos()
   loadCurrentShift()
   loadShiftHistory({ silent: true })
@@ -922,6 +1089,7 @@ onMounted(() => {
 onShow(() => {
   focusProductInput()
   loadSystemSettings({ silent: true })
+  loadSalePrintConfigs({ silent: true })
   loadReceiptWarehouseInfos({ silent: true })
   refreshCartStock()
   loadCurrentShift()
@@ -1038,20 +1206,149 @@ function saveAutoPrintPreference() {
 }
 
 function isValidSalePrintMode(value) {
-  return SALE_PRINT_MODES.some((mode) => mode.value === value)
+  return salePrintConfigOptions.value.some((config) => (config.paper_mode || config.value) === value)
+}
+
+function fallbackSalePrintConfigFor(config = {}) {
+  const code = String(config.code || '')
+  const paperMode = config.paper_mode || config.value || ''
+  return (
+    FALLBACK_SALE_PRINT_CONFIGS.find((item) => code && item.code === code) ||
+    FALLBACK_SALE_PRINT_CONFIGS.find((item) => paperMode && item.paper_mode === paperMode) ||
+    FALLBACK_SALE_PRINT_CONFIGS[0]
+  )
+}
+
+function normalizeSalePrintConfig(config = {}) {
+  const fallback = fallbackSalePrintConfigFor(config)
+  return {
+    ...fallback,
+    ...config,
+    code: config.code || fallback.code,
+    name: config.name || config.label || fallback.name,
+    paper_mode: config.paper_mode || config.value || fallback.paper_mode,
+    print_method: config.print_method || fallback.print_method || DEFAULT_SALE_PRINT_METHOD,
+    printer_type: config.printer_type || fallback.printer_type || 'laser',
+    page_size_css: config.page_size_css || config.page_size || fallback.page_size_css,
+  }
+}
+
+function selectedPrintConfigForBuild(config = null) {
+  if (typeof config === 'string') {
+    const matched = salePrintConfigOptions.value.find(
+      (item) => item.code === config || item.paper_mode === config || item.value === config
+    )
+    return normalizeSalePrintConfig(matched || { paper_mode: config })
+  }
+  return normalizeSalePrintConfig(config || selectedSalePrintConfig.value)
+}
+
+function safeCssSize(value, fallback) {
+  const text = String(value ?? '').trim()
+  if (/^(0|[0-9]+(?:\.[0-9]+)?(?:px|mm|cm|in|pt|%))$/i.test(text)) {
+    return text
+  }
+  return fallback
+}
+
+function safeCssPadding(value, fallback) {
+  const text = String(value ?? '').trim()
+  const parts = text.split(/\s+/).filter(Boolean)
+  if (parts.length >= 1 && parts.length <= 4) {
+    const safeParts = parts.map((part) => safeCssSize(part, ''))
+    if (safeParts.every(Boolean)) {
+      return safeParts.join(' ')
+    }
+  }
+  return fallback
+}
+
+function safeCssLineHeight(value, fallback) {
+  const text = String(value ?? '').trim()
+  if (/^[0-9]+(?:\.[0-9]+)?$/.test(text)) return text
+  return safeCssSize(text, fallback)
+}
+
+function safeCssPageSize(value, fallback) {
+  const text = String(value ?? '').trim().replace(/[;{}]/g, '')
+  if (/^[a-z0-9.\s]+$/i.test(text)) return text
+  return fallback
+}
+
+function buildSalePrintCss(config, fallbackConfig) {
+  const current = normalizeSalePrintConfig(config)
+  const fallback = normalizeSalePrintConfig(fallbackConfig || current)
+  const pageSize =
+    current.page_size_css ||
+    current.page_size ||
+    `${current.paper_width || fallback.paper_width} ${current.paper_height || fallback.paper_height}`
+  return {
+    pageSizeCss: safeCssPageSize(pageSize, fallback.page_size_css || 'A4 landscape'),
+    pageMargin: safeCssSize(current.page_margin, fallback.page_margin || '0'),
+    sheetWidth: safeCssSize(current.sheet_width, fallback.sheet_width || '98%'),
+    sheetPadding: [
+      safeCssSize(current.sheet_padding_top, fallback.sheet_padding_top || '0'),
+      safeCssSize(current.sheet_padding_right, fallback.sheet_padding_right || '0'),
+      safeCssSize(current.sheet_padding_bottom, fallback.sheet_padding_bottom || '0'),
+      safeCssSize(current.sheet_padding_left, fallback.sheet_padding_left || '0'),
+    ].join(' '),
+    bodyFontSize: safeCssSize(current.body_font_size, fallback.body_font_size || '22px'),
+    companyFontSize: safeCssSize(current.company_font_size, fallback.company_font_size || '36px'),
+    titleFontSize: safeCssSize(current.title_font_size, fallback.title_font_size || '24px'),
+    metaFontSize: safeCssSize(current.meta_font_size, fallback.meta_font_size || '22px'),
+    tableFontSize: safeCssSize(current.table_font_size, fallback.table_font_size || '22px'),
+    tableHeaderFontSize: safeCssSize(
+      current.table_header_font_size,
+      fallback.table_header_font_size || '22px'
+    ),
+    moneyFontSize: safeCssSize(current.money_font_size, fallback.money_font_size || '22px'),
+    footerFontSize: safeCssSize(current.footer_font_size, fallback.footer_font_size || '22px'),
+    bodyLineHeight: safeCssLineHeight(current.body_line_height, fallback.body_line_height || '1.15'),
+    metaLineHeight: safeCssLineHeight(current.meta_line_height, fallback.meta_line_height || '1.15'),
+    tableLineHeight: safeCssLineHeight(current.table_line_height, fallback.table_line_height || '1.05'),
+    moneyLineHeight: safeCssLineHeight(
+      current.money_line_height,
+      fallback.money_line_height || '1.15'
+    ),
+    footerLineHeight: safeCssLineHeight(
+      current.footer_line_height,
+      fallback.footer_line_height || '1.12'
+    ),
+    tableCellPadding: safeCssPadding(
+      current.table_cell_padding,
+      fallback.table_cell_padding || '1px 2px'
+    ),
+    moneyGap: safeCssSize(current.money_gap, fallback.money_gap || '6px'),
+    moneyMarginTop: safeCssSize(current.money_margin_top, fallback.money_margin_top || '5px'),
+  }
+}
+
+function syncSelectedSalePrintMode() {
+  const config = normalizeSalePrintConfig(selectedSalePrintConfig.value)
+  salePrintMode.value = config.paper_mode || DEFAULT_SALE_PRINT_MODE
 }
 
 function restoreSalePrintModePreference() {
   try {
+    const storedConfig = getStorage()?.getStorageSync(POS_SALE_PRINT_CONFIG_KEY)
     const stored = getStorage()?.getStorageSync(POS_SALE_PRINT_MODE_KEY)
+    const hasStoredMode = stored !== undefined && stored !== null && stored !== ''
     salePrintMode.value = isValidSalePrintMode(stored) ? stored : DEFAULT_SALE_PRINT_MODE
+    const fallbackConfig = FALLBACK_SALE_PRINT_CONFIGS.find(
+      (config) => config.paper_mode === salePrintMode.value
+    )
+    salePrintConfigCode.value = storedConfig || (hasStoredMode ? fallbackConfig?.code || '' : '')
   } catch (e) {
+    salePrintConfigCode.value = ''
     salePrintMode.value = DEFAULT_SALE_PRINT_MODE
   }
 }
 
 function saveSalePrintModePreference() {
   try {
+    if (salePrintConfigCode.value) {
+      getStorage()?.setStorageSync(POS_SALE_PRINT_CONFIG_KEY, salePrintConfigCode.value)
+    }
     getStorage()?.setStorageSync(POS_SALE_PRINT_MODE_KEY, salePrintMode.value)
   } catch (e) {
     console.warn('save POS sale print mode failed', e)
@@ -1070,6 +1367,14 @@ function applySystemSettings(payload = {}) {
     grouped.pos?.sale_print_method ||
     DEFAULT_SALE_PRINT_METHOD
   salePrintMethod.value = normalizeSalePrintMethod(value)
+  systemDefaultSalePrintConfigCode.value =
+    flat['pos.sale_print_config'] ||
+    grouped.pos?.sale_print_config ||
+    DEFAULT_SALE_PRINT_CONFIG_CODE
+  if (!salePrintConfigCode.value) {
+    salePrintConfigCode.value = systemDefaultSalePrintConfigCode.value
+    syncSelectedSalePrintMode()
+  }
 }
 
 async function loadSystemSettings(options = {}) {
@@ -1084,6 +1389,35 @@ async function loadSystemSettings(options = {}) {
     }
   } finally {
     systemSettingsLoading.value = false
+  }
+}
+
+async function loadSalePrintConfigs(options = {}) {
+  if (salePrintConfigsLoading.value) return
+  salePrintConfigsLoading.value = true
+  try {
+    const payload = await api.printConfigs({ module: 'pos_sale' })
+    const rows = Array.isArray(payload?.results) ? payload.results : []
+    salePrintConfigs.value = rows.map(normalizeSalePrintConfig)
+    const defaultConfig = payload?.default ? normalizeSalePrintConfig(payload.default) : null
+    if (!salePrintConfigCode.value && defaultConfig?.code) {
+      salePrintConfigCode.value = defaultConfig.code
+    }
+    if (
+      salePrintConfigCode.value &&
+      !salePrintConfigs.value.some((config) => config.code === salePrintConfigCode.value)
+    ) {
+      salePrintConfigCode.value = defaultConfig?.code || salePrintConfigs.value[0]?.code || ''
+    }
+    syncSelectedSalePrintMode()
+  } catch (e) {
+    salePrintConfigs.value = []
+    syncSelectedSalePrintMode()
+    if (!options.silent) {
+      console.warn('load POS print configs failed', e)
+    }
+  } finally {
+    salePrintConfigsLoading.value = false
   }
 }
 
@@ -1153,11 +1487,25 @@ function onAutoPrintChange(event) {
 
 function changeSalePrintMode(event) {
   const index = Number(event?.detail?.value || 0)
-  salePrintMode.value = SALE_PRINT_MODES[index]?.value || DEFAULT_SALE_PRINT_MODE
+  const config = normalizeSalePrintConfig(
+    salePrintConfigOptions.value[index] || FALLBACK_SALE_PRINT_CONFIGS[0]
+  )
+  salePrintConfigCode.value = config.code || ''
+  salePrintMode.value = config.paper_mode || DEFAULT_SALE_PRINT_MODE
   saveSalePrintModePreference()
 }
 
+function toggleSalePrintConfigDropdown() {
+  salePrintConfigDropdownOpen.value = !salePrintConfigDropdownOpen.value
+}
+
+function selectSalePrintConfig(index) {
+  changeSalePrintMode({ detail: { value: index } })
+  salePrintConfigDropdownOpen.value = false
+}
+
 function changeReceiptWarehouseInfo(event) {
+  salePrintConfigDropdownOpen.value = false
   const index = Number(event?.detail?.value || 0)
   const info = receiptWarehouseInfoOptions.value[index] || fallbackReceiptWarehouseInfo.value
   selectedReceiptWarehouseInfoId.value = String(info.id || '')
@@ -1665,18 +2013,32 @@ function buildSalePrintData(response = {}) {
   }
 }
 
-function isDotMatrixPrintMode(printMode) {
-  return printMode === 'dot_241_93' || printMode === 'dot_9_5_5' || printMode === 'dot_9_5_11'
+function isDotMatrixPrintMode(printModeOrConfig) {
+  const config =
+    typeof printModeOrConfig === 'object'
+      ? normalizeSalePrintConfig(printModeOrConfig)
+      : { paper_mode: printModeOrConfig }
+  return (
+    config.printer_type === 'dot_matrix' ||
+    config.paper_mode === 'dot_241_93' ||
+    config.paper_mode === 'dot_9_5_5' ||
+    config.paper_mode === 'dot_9_5_11'
+  )
 }
 
-function buildSalePrintHtml(data, printMode = salePrintMode.value) {
-  if (isDotMatrixPrintMode(printMode)) {
-    return buildDotMatrixSalePrintHtml(data, printMode)
+function buildSalePrintHtml(data, printConfig = selectedSalePrintConfig.value) {
+  const config = selectedPrintConfigForBuild(printConfig)
+  if (isDotMatrixPrintMode(config)) {
+    return buildDotMatrixSalePrintHtml(data, config)
   }
-  return buildA4SalePrintHtml(data)
+  return buildA4SalePrintHtml(data, config)
 }
 
-function buildA4SalePrintHtml(data) {
+function buildA4SalePrintHtml(data, printConfig) {
+  const css = buildSalePrintCss(
+    printConfig,
+    FALLBACK_SALE_PRINT_CONFIGS.find((config) => config.paper_mode === 'a4_landscape')
+  )
   const rows = data.lines.map((line) => `
     <tr>
       <td class="name">${escapeHtml(line.name)}</td>
@@ -1694,26 +2056,26 @@ function buildA4SalePrintHtml(data) {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>${escapeHtml(data.companyName)}${escapeHtml(data.title)}</title>
-  <style>
-    @page { size: A4 landscape; margin: 0; }
-    * { box-sizing: border-box; }
-    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: 22.5px; }
-    .sheet { width: 98%; margin: 0 auto; padding: 1mm 4px 0; }
-    .company { text-align: center; font-size: 42px; font-weight: 700; line-height: 1.05; }
-    .title { text-align: center; font-size: 27px; line-height: 1.05; margin-bottom: 2px; }
-    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 18px; font-size: 22.5px; line-height: 1.2; margin-bottom: 2px; }
-    .meta .wide { grid-column: 1 / -1; }
-    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: 22.5px; }
-    th, td { border: 1px solid #111; padding: 1px 3px; line-height: 1.05; vertical-align: middle; word-break: break-all; }
-    th { text-align: center; font-weight: 400; font-size: 22.5px; }
-    .name { text-align: left; }
-    .num { text-align: right; font-variant-numeric: tabular-nums; }
-    .summary-name { text-align: left; }
-    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 14px; margin-top: 8px; font-size: 22.5px; line-height: 1.2; }
-    .footer-line { margin-top: 1px; font-size: 22.5px; line-height: 1.18; white-space: normal; }
-  </style>
-</head>
+	  <title>${escapeHtml(data.companyName)}${escapeHtml(data.title)}</title>
+	  <style>
+	    @page { size: ${css.pageSizeCss}; margin: ${css.pageMargin}; }
+	    * { box-sizing: border-box; }
+	    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: ${css.bodyFontSize}; line-height: ${css.bodyLineHeight}; }
+	    .sheet { width: ${css.sheetWidth}; margin: 0 auto; padding: ${css.sheetPadding}; }
+	    .company { text-align: center; font-size: ${css.companyFontSize}; font-weight: 700; line-height: 1.05; }
+	    .title { text-align: center; font-size: ${css.titleFontSize}; line-height: 1.05; margin-bottom: 2px; }
+	    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 18px; font-size: ${css.metaFontSize}; line-height: ${css.metaLineHeight}; margin-bottom: 2px; }
+	    .meta .wide { grid-column: 1 / -1; }
+	    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: ${css.tableFontSize}; }
+	    th, td { border: 1px solid #111; padding: ${css.tableCellPadding}; line-height: ${css.tableLineHeight}; vertical-align: middle; word-break: break-all; }
+	    th { text-align: center; font-weight: 400; font-size: ${css.tableHeaderFontSize}; }
+	    .name { text-align: left; }
+	    .num { text-align: right; font-variant-numeric: tabular-nums; }
+	    .summary-name { text-align: left; }
+	    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: ${css.moneyGap}; margin-top: ${css.moneyMarginTop}; font-size: ${css.moneyFontSize}; line-height: ${css.moneyLineHeight}; }
+	    .footer-line { margin-top: 1px; font-size: ${css.footerFontSize}; line-height: ${css.footerLineHeight}; white-space: normal; }
+	  </style>
+	</head>
 <body>
   <div class="sheet">
     <div class="company">${escapeHtml(data.companyName)}</div>
@@ -1775,21 +2137,12 @@ function buildA4SalePrintHtml(data) {
     <div class="footer-line">银行账号：${escapeHtml(data.bankAccount || '')}</div>
     <div class="footer-line">备注：${escapeHtml(data.remark || '无')}</div>
   </div>
-</body>
-</html>`
+	</body>
+	</html>`
 }
 
-function dotMatrixPageCss(printMode) {
-  if (printMode === 'dot_241_93') {
-    return '@page { size: 241mm 93mm; margin: 0; }'
-  }
-  if (printMode === 'dot_9_5_11') {
-    return '@page { size: 9.5in 11in; margin: 0; }'
-  }
-  return '@page { size: 9.5in 5.5in; margin: 0; }'
-}
-
-function buildDotMatrixSalePrintHtml(data, printMode) {
+function buildDotMatrixSalePrintHtml(data, printConfig) {
+  const css = buildSalePrintCss(printConfig, FALLBACK_SALE_PRINT_CONFIGS[0])
   const rows = data.lines.map((line) => `
     <tr>
       <td class="name">${escapeHtml(line.name)}</td>
@@ -1807,25 +2160,25 @@ function buildDotMatrixSalePrintHtml(data, printMode) {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>${escapeHtml(data.companyName)}${escapeHtml(data.title)}</title>
-  <style>
-    ${dotMatrixPageCss(printMode)}
-    * { box-sizing: border-box; }
-    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: 25px; }
-    .sheet { width: 98%; margin: 0 auto; padding: 6mm 0 0; }
-    .company { text-align: center; font-size: 50px; font-weight: 700; line-height: 1.05; }
-    .title { text-align: center; font-size: 35px; line-height: 1.05; margin-bottom: 2px; }
-    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 8px; font-size: 25px; line-height: 1.15; margin-bottom: 2px; }
-    .meta .wide { grid-column: 1 / -1; }
-    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: 25px; }
-    th, td { border: 1px solid #111; padding: 1px 2px; line-height: 1.05; vertical-align: middle; word-break: break-all; }
-    th { text-align: center; font-weight: 400; font-size: 25px; }
-    .name { text-align: left; }
-    .num { text-align: right; font-variant-numeric: tabular-nums; }
-    .summary-name { text-align: left; }
-    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin-top: 5px; font-size: 25px; line-height: 1.15; }
-    .footer-line { margin-top: 1px; font-size: 25px; line-height: 1.12; white-space: normal; }
-  </style>
+	  <title>${escapeHtml(data.companyName)}${escapeHtml(data.title)}</title>
+	  <style>
+	    @page { size: ${css.pageSizeCss}; margin: ${css.pageMargin}; }
+	    * { box-sizing: border-box; }
+	    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: ${css.bodyFontSize}; line-height: ${css.bodyLineHeight}; }
+	    .sheet { width: ${css.sheetWidth}; margin: 0 auto; padding: ${css.sheetPadding}; }
+	    .company { text-align: center; font-size: ${css.companyFontSize}; font-weight: 700; line-height: 1.05; }
+	    .title { text-align: center; font-size: ${css.titleFontSize}; line-height: 1.05; margin-bottom: 2px; }
+	    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 8px; font-size: ${css.metaFontSize}; line-height: ${css.metaLineHeight}; margin-bottom: 2px; }
+	    .meta .wide { grid-column: 1 / -1; }
+	    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: ${css.tableFontSize}; }
+	    th, td { border: 1px solid #111; padding: ${css.tableCellPadding}; line-height: ${css.tableLineHeight}; vertical-align: middle; word-break: break-all; }
+	    th { text-align: center; font-weight: 400; font-size: ${css.tableHeaderFontSize}; }
+	    .name { text-align: left; }
+	    .num { text-align: right; font-variant-numeric: tabular-nums; }
+	    .summary-name { text-align: left; }
+	    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: ${css.moneyGap}; margin-top: ${css.moneyMarginTop}; font-size: ${css.moneyFontSize}; line-height: ${css.moneyLineHeight}; }
+	    .footer-line { margin-top: 1px; font-size: ${css.footerFontSize}; line-height: ${css.footerLineHeight}; white-space: normal; }
+	  </style>
 </head>
 <body>
   <div class="sheet">
@@ -4955,6 +5308,68 @@ button {
 
 .print-mode-picker {
   flex: 0 0 auto;
+}
+
+.sale-print-config-control {
+  display: block;
+  flex: 1 1 100%;
+  position: relative;
+  overflow: visible;
+}
+
+.sale-print-config-control .print-mode-label {
+  display: block;
+  margin-bottom: 6rpx;
+}
+
+.sale-print-config-control .print-mode-picker,
+.print-config-select {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+
+.print-config-select {
+  position: relative;
+}
+
+.sale-print-config-control .print-mode-value {
+  width: 100%;
+  max-width: none;
+  text-align: left;
+}
+
+.print-config-dropdown {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6rpx);
+  z-index: 80;
+  width: 100%;
+  min-width: 100%;
+  max-width: calc(100vw - 32rpx);
+  padding: 8rpx 0;
+  border: 1rpx solid #d0d5dd;
+  border-radius: 8rpx;
+  background: #fff;
+  box-shadow: 0 12rpx 30rpx rgba(16, 24, 40, 0.18);
+  box-sizing: border-box;
+}
+
+.print-config-option {
+  padding: 12rpx 16rpx;
+  color: #344054;
+  font-size: 26rpx;
+  line-height: 1.25;
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
+  box-sizing: border-box;
+}
+
+.print-config-option.active {
+  color: #1677ff;
+  background: #eef4ff;
 }
 
 .receipt-info-control {
