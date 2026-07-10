@@ -5,9 +5,10 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.utils import timezone
-from rest_framework.test import APIClient
+from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from allapp.baseinfo.models import Customer, Owner
 from allapp.inventory.models import InventoryDetail, InventorySummary
@@ -54,8 +55,251 @@ from .services_salemini_adjustments import (
     confirm_distribution,
     point_balance,
 )
+from .views import ChannelViewSet, SalesOrderViewSet
 
 User = get_user_model()
+
+
+class SalesAdminViewSetContractTests(TestCase):
+    def setUp(self):
+        self.owner = Owner.objects.create(code="SVA", name="Sales ViewSet A")
+        self.other_owner = Owner.objects.create(code="SVB", name="Sales ViewSet B")
+        self.user = User.objects.create_user(
+            username="sales-viewset",
+            password="pw",
+            owner=self.owner,
+        )
+        self.other_user = User.objects.create_user(
+            username="sales-viewset-other",
+            password="pw",
+            owner=self.other_owner,
+        )
+        self.no_owner_user = User.objects.create_user(
+            username="sales-no-owner", password="pw"
+        )
+        self.superuser = User.objects.create_superuser(
+            username="sales-super",
+            email="sales-super@example.com",
+            password="pw",
+        )
+        self.customer = Customer.objects.create(
+            owner=self.owner,
+            salesperson=self.user,
+            code="SVA-CUS",
+            name="Sales ViewSet Customer",
+        )
+        self.channel = Channel.objects.create(
+            owner=self.owner, code="SVA-CH", name="Retail"
+        )
+        self.other_channel = Channel.objects.create(
+            owner=self.other_owner,
+            code="SVB-CH",
+            name="Other Retail",
+        )
+        self.factory = APIRequestFactory()
+
+    def _request(self, method, path, user, data=None):
+        request = getattr(self.factory, method)(path, data=data or {}, format="json")
+        force_authenticate(request, user=user)
+        return request
+
+    def _rows(self, response):
+        return (
+            response.data.get("results", response.data)
+            if isinstance(response.data, dict)
+            else response.data
+        )
+
+    def test_simple_viewset_scopes_list_create_and_superuser_access_by_owner(self):
+        list_view = ChannelViewSet.as_view({"get": "list"})
+        response = list_view(self._request("get", "/api/sales/channels/", self.user))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual({row["code"] for row in self._rows(response)}, {"SVA-CH"})
+
+        response = list_view(
+            self._request("get", "/api/sales/channels/", self.no_owner_user)
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self._rows(response), [])
+
+        response = list_view(
+            self._request("get", "/api/sales/channels/", self.superuser)
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {row["code"] for row in self._rows(response)}, {"SVA-CH", "SVB-CH"}
+        )
+
+        create_view = ChannelViewSet.as_view({"post": "create"})
+        response = create_view(
+            self._request(
+                "post",
+                "/api/sales/channels/",
+                self.user,
+                {
+                    "code": "SVA-NEW",
+                    "name": "New Channel",
+                    "owner": self.other_owner.id,
+                },
+            )
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        created = Channel.objects.get(code="SVA-NEW")
+        self.assertEqual(created.owner_id, self.owner.id)
+
+    def test_sales_order_actions_move_statuses_through_review_flow(self):
+        order = SalesOrder.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            order_date=date.today(),
+            status=SalesOrder.Status.DRAFT,
+        )
+
+        submit_view = SalesOrderViewSet.as_view({"post": "submit"})
+        response = submit_view(
+            self._request(
+                "post", f"/api/sales/sales-orders/{order.id}/submit/", self.user
+            ),
+            pk=order.id,
+        )
+        order.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(order.status, SalesOrder.Status.SUBMITTED)
+
+        approve_view = SalesOrderViewSet.as_view({"post": "approve"})
+        with patch(
+            "allapp.salesapp.views.apply_promotions_for_order", return_value=None
+        ):
+            response = approve_view(
+                self._request(
+                    "post", f"/api/sales/sales-orders/{order.id}/approve/", self.user
+                ),
+                pk=order.id,
+            )
+        order.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(order.status, SalesOrder.Status.APPROVED)
+
+        reject_view = SalesOrderViewSet.as_view({"post": "reject"})
+        response = reject_view(
+            self._request(
+                "post", f"/api/sales/sales-orders/{order.id}/reject/", self.user
+            ),
+            pk=order.id,
+        )
+        order.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(order.status, SalesOrder.Status.REJECTED)
+
+    def test_sales_order_batch_actions_only_touch_scoped_orders(self):
+        own_submitted = SalesOrder.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            order_date=date.today(),
+            status=SalesOrder.Status.SUBMITTED,
+        )
+        own_rejected = SalesOrder.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            order_date=date.today(),
+            status=SalesOrder.Status.REJECTED,
+        )
+        other_customer = Customer.objects.create(
+            owner=self.other_owner,
+            salesperson=self.other_user,
+            code="SVB-CUS",
+            name="Other Customer",
+        )
+        other_order = SalesOrder.objects.create(
+            owner=self.other_owner,
+            customer=other_customer,
+            order_date=date.today(),
+            status=SalesOrder.Status.SUBMITTED,
+        )
+
+        batch_approve = SalesOrderViewSet.as_view({"post": "batch_approve"})
+        with patch(
+            "allapp.salesapp.views.apply_promotions_for_order", return_value=None
+        ):
+            response = batch_approve(
+                self._request(
+                    "post",
+                    "/api/sales/sales-orders/batch_approve/",
+                    self.user,
+                    {"ids": [own_submitted.id, own_rejected.id, other_order.id]},
+                )
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.data["approved"]), {own_submitted.id, own_rejected.id}
+        )
+        other_order.refresh_from_db()
+        self.assertEqual(other_order.status, SalesOrder.Status.SUBMITTED)
+
+        batch_reject = SalesOrderViewSet.as_view({"post": "batch_reject"})
+        response = batch_reject(
+            self._request(
+                "post",
+                "/api/sales/sales-orders/batch_reject/",
+                self.user,
+                {"ids": [own_submitted.id, own_rejected.id, other_order.id]},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.data["rejected"]), {own_submitted.id, own_rejected.id}
+        )
+
+
+class SaleMiniCatalogBootstrapCommandTests(TestCase):
+    def setUp(self):
+        self.owner = Owner.objects.create(code="SMBC", name="Sale Mini Bootstrap")
+        self.uom = ProductUom.objects.create(code="SMBC-EA", name="件")
+        self.product = Product.objects.create(
+            owner=self.owner,
+            code="SMBC-P1",
+            sku="SMBC-P1",
+            name="Bootstrap Product",
+            base_uom=self.uom,
+            price=Decimal("6.50"),
+            is_active=True,
+        )
+
+    def test_bootstrap_catalog_dry_run_reports_missing_without_creating_config(self):
+        out = StringIO()
+
+        call_command("bootstrap_sale_mini_catalog", stdout=out)
+
+        self.assertIn("missing_configs=1", out.getvalue())
+        self.assertFalse(
+            SaleProductConfig.objects.filter(product=self.product).exists()
+        )
+
+    def test_bootstrap_catalog_requires_owner_code_when_listing_and_creates_config(
+        self,
+    ):
+        with self.assertRaises(CommandError):
+            call_command(
+                "bootstrap_sale_mini_catalog", "--apply", "--listed", stdout=StringIO()
+            )
+
+        out = StringIO()
+        call_command(
+            "bootstrap_sale_mini_catalog",
+            "--owner-code",
+            self.owner.code,
+            "--apply",
+            "--listed",
+            stdout=out,
+        )
+
+        config = SaleProductConfig.objects.get(product=self.product)
+        self.assertEqual(config.owner_id, self.owner.id)
+        self.assertEqual(config.sale_price, Decimal("6.50"))
+        self.assertTrue(config.is_listed)
+        self.assertIn("created=1 listed=true", out.getvalue())
 
 
 class SalesMobileApiTests(TestCase):
@@ -1712,7 +1956,9 @@ class SaleMiniApiTests(TestCase):
             {self.product.id, other_product.id},
         )
 
-        cancel = self.client.post(f"/api/sale-mini/orders/{response.data['id']}/cancel/")
+        cancel = self.client.post(
+            f"/api/sale-mini/orders/{response.data['id']}/cancel/"
+        )
         self.assertEqual(cancel.status_code, 200)
         self.assertTrue(cancel.data["is_combined"])
         self.assertEqual(cancel.data["status"], "CANCELLED")

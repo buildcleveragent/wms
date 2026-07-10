@@ -9,6 +9,47 @@ from allapp.inventory.models import InventoryDetail
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Brand, Product, ProductCategory, ProductUom
 from allapp.salesapp.models import SaleProductConfig
+from allapp.tasking.models import WmsTask
+
+
+class DashboardSummaryConsoleTests(TestCase):
+    def setUp(self):
+        self.owner = Owner.objects.create(code="DSH", name="仪表盘货主")
+        self.warehouse = Warehouse.objects.create(code="DSHWH", name="仪表盘仓")
+        self.user = get_user_model().objects.create_user(
+            username="dashboard-user",
+            password="pw",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="DSH-PICK-1",
+            task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.COMPLETED,
+        )
+        self.url = reverse("console:dashboard_summary")
+
+    def test_dashboard_summary_requires_login(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/accounts/login/", response["Location"])
+
+    def test_dashboard_summary_returns_expected_json_shape(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        data = payload["data"]
+        self.assertIn("kpi", data)
+        self.assertIn("outbound_ts", data)
+        self.assertIn("eff_pick", data)
+        self.assertEqual(data["kpi"]["pick"]["total"], 1)
 
 
 class SaleMiniProductListingConsoleTests(TestCase):
@@ -88,8 +129,12 @@ class SaleMiniProductListingConsoleTests(TestCase):
         self.assertContains(missing_price_response, "缺价格商品")
         self.assertNotContains(missing_price_response, "可上架商品")
 
-    def test_bulk_list_creates_config_and_public_product_without_changing_inventory(self):
-        before_available = InventoryDetail.objects.get(pk=self.inventory.pk).available_qty
+    def test_bulk_list_creates_config_and_public_product_without_changing_inventory(
+        self,
+    ):
+        before_available = InventoryDetail.objects.get(
+            pk=self.inventory.pk
+        ).available_qty
 
         response = self.client.post(
             self.url,
@@ -144,7 +189,9 @@ class SaleMiniProductListingConsoleTests(TestCase):
             min_order_qty=Decimal("1.000"),
             multiple_qty=Decimal("1.000"),
         )
-        before_available = InventoryDetail.objects.get(pk=self.inventory.pk).available_qty
+        before_available = InventoryDetail.objects.get(
+            pk=self.inventory.pk
+        ).available_qty
 
         self.client.post(
             self.url,

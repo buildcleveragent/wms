@@ -45,8 +45,16 @@ def _current_test_date(now=None):
 class ReportsWarehouseScopeTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Report", code="OWN-RPT")
+        self.warehouse = Warehouse.objects.create(
+            code="WH-RPT", name="Warehouse Report"
+        )
         self.user = get_user_model().objects.create_user(
             username="report-user", password="x"
+        )
+        self.staff_user = get_user_model().objects.create_superuser(
+            username="report-staff",
+            email="report-staff@example.com",
+            password="x",
         )
 
     def test_report_snapshot_requires_explicit_warehouse(self):
@@ -62,6 +70,42 @@ class ReportsWarehouseScopeTests(TestCase):
             )
 
         self.assertIn("warehouse", exc.exception.message_dict)
+
+    def test_dispatch_note_html_renders_task_lines_for_staff_user(self):
+        uom = ProductUom.objects.create(code="PCS-RPT", name="件", is_active=True)
+        product = Product.objects.create(
+            owner=self.owner,
+            code="SKU-RPT-DISP",
+            name="配送单商品",
+            sku="SKU-RPT-DISP",
+            base_uom=uom,
+            volume=Decimal("0.100000"),
+            price=Decimal("10.00"),
+        )
+        task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="DISPATCH-RPT-1",
+            task_type=WmsTask.TaskType.DISPATCH,
+            status=WmsTask.Status.COMPLETED,
+        )
+        task.lines.create(
+            product=product, qty_plan=Decimal("2.000"), qty_done=Decimal("2.000")
+        )
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(f"/reports/dispatch/{task.id}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Owner Report")
+        self.assertContains(response, "配送单商品")
+
+    def test_dispatch_note_html_returns_404_for_missing_task(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get("/reports/dispatch/999999/")
+
+        self.assertEqual(response.status_code, 404)
 
 
 class BossDashboardApiTests(TestCase):

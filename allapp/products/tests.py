@@ -1,13 +1,17 @@
 # allapp/products/tests.py
 # -*- coding: utf-8 -*-
-from decimal import Decimal
+import json
+import os
+import tempfile
 import unittest
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.contrib.contenttypes.models import ContentType
-from django.test import TestCase
+from django.core.management import call_command
+from django.test import RequestFactory, TestCase
+from openpyxl import Workbook
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 # 业务模型
@@ -20,7 +24,11 @@ from .views import ProductViewSet
 
 # 可选：DAL 自动补全视图（存在则测试）
 try:
-    from .autocomplete import ProductUomAutocomplete  # 如果你把视图放在其他模块，请相应调整
+    # 如果你把视图放在其他模块，请相应调整
+    from .autocomplete import (
+        ProductUomAutocomplete,
+    )
+
     DAL_OK = True
 except Exception:
     DAL_OK = False
@@ -29,7 +37,9 @@ except Exception:
 DEPENDENCIES_OK = all([Owner, ProductUom, Product])
 
 
-@unittest.skipUnless(DEPENDENCIES_OK, "缺少 baseinfo/products 依赖模型，跳过 products 测试")
+@unittest.skipUnless(
+    DEPENDENCIES_OK, "缺少 baseinfo/products 依赖模型，跳过 products 测试"
+)
 class ProductViewSetTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -40,14 +50,23 @@ class ProductViewSetTests(TestCase):
 
         # 用户：user_a 属于 owner_a；user_b 属于 owner_b
         User = get_user_model()
-        cls.user_a = User.objects.create_user(username="a", password="a", owner=cls.owner_a, is_staff=True)
-        cls.user_b = User.objects.create_user(username="b", password="b", owner=cls.owner_b, is_staff=True)
+        cls.user_a = User.objects.create_user(
+            username="a", password="a", owner=cls.owner_a, is_staff=True
+        )
+        cls.user_b = User.objects.create_user(
+            username="b", password="b", owner=cls.owner_b, is_staff=True
+        )
 
         # 给两位普通用户授予 Product 的内置增/改/查/删权限（DjangoModelPermissions 需要）。
         ct = ContentType.objects.get_for_model(Product)
         builtin_perms = Permission.objects.filter(
             content_type=ct,
-            codename__in=["add_product", "change_product", "delete_product", "view_product"],
+            codename__in=[
+                "add_product",
+                "change_product",
+                "delete_product",
+                "view_product",
+            ],
         )
         cls.user_a.user_permissions.add(*list(builtin_perms))
         cls.user_b.user_permissions.add(*list(builtin_perms))
@@ -70,15 +89,25 @@ class ProductViewSetTests(TestCase):
         )
         cls.manage_all_user.user_permissions.add(*list(builtin_perms))
         cls.manage_all_user.user_permissions.add(
-            Permission.objects.get(content_type=ct, codename="manage_all_owner_products")
+            Permission.objects.get(
+                content_type=ct, codename="manage_all_owner_products"
+            )
         )
 
         # 现存商品：A/B 各一条
         cls.prod_a = Product.objects.create(
-            owner=cls.owner_a, code="SKU-A", name="商品A", base_uom=cls.uom, is_active=True
+            owner=cls.owner_a,
+            code="SKU-A",
+            name="商品A",
+            base_uom=cls.uom,
+            is_active=True,
         )
         cls.prod_b = Product.objects.create(
-            owner=cls.owner_b, code="SKU-B", name="商品B", base_uom=cls.uom, is_active=True
+            owner=cls.owner_b,
+            code="SKU-B",
+            name="商品B",
+            base_uom=cls.uom,
+            is_active=True,
         )
 
         cls.factory = APIRequestFactory()
@@ -215,13 +244,90 @@ class ProductViewSetTests(TestCase):
         self.assertIn("text/csv", resp._headers.get("content-type", ("", ""))[1])
         self.assertIn("owner_code", resp.content.decode("utf-8"))
 
+    def test_bulk_activate_and_deactivate_are_owner_scoped(self):
+        self.prod_a.is_active = False
+        self.prod_a.save(update_fields=["is_active"])
+        self.prod_b.is_active = False
+        self.prod_b.save(update_fields=["is_active"])
 
-@unittest.skipUnless(DEPENDENCIES_OK and DAL_OK, "缺少依赖（DAL 或模型），跳过 UOM 自动补全测试")
+        activate_view = ProductViewSet.as_view({"post": "bulk_activate"})
+        req = self.factory.post(
+            "/products/bulk-activate/",
+            data={"ids": [self.prod_a.id, self.prod_b.id]},
+            format="json",
+        )
+        force_authenticate(req, user=self.user_a)
+        resp = activate_view(req)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["updated"], 1)
+        self.prod_a.refresh_from_db()
+        self.prod_b.refresh_from_db()
+        self.assertTrue(self.prod_a.is_active)
+        self.assertFalse(self.prod_b.is_active)
+
+        deactivate_view = ProductViewSet.as_view({"post": "bulk_deactivate"})
+        req = self.factory.post(
+            "/products/bulk-deactivate/",
+            data={"ids": [self.prod_a.id, self.prod_b.id]},
+            format="json",
+        )
+        force_authenticate(req, user=self.user_a)
+        resp = deactivate_view(req)
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["updated"], 1)
+        self.prod_a.refresh_from_db()
+        self.prod_b.refresh_from_db()
+        self.assertFalse(self.prod_a.is_active)
+        self.assertFalse(self.prod_b.is_active)
+
+    def test_import_and_export_return_501_when_product_resource_is_missing(self):
+        import_view = ProductViewSet.as_view({"post": "import_file"})
+        req = self.factory.post("/products/import/", data={}, format="multipart")
+        force_authenticate(req, user=self.user_a)
+        import_resp = import_view(req)
+
+        export_view = ProductViewSet.as_view({"get": "export_file"})
+        req = self.factory.get("/products/export/")
+        force_authenticate(req, user=self.user_a)
+        export_resp = export_view(req)
+
+        self.assertEqual(import_resp.status_code, 501)
+        self.assertIn("ProductResource", import_resp.data["detail"])
+        self.assertEqual(export_resp.status_code, 501)
+        self.assertIn("ProductResource", export_resp.data["detail"])
+
+    def test_get_product_details_returns_base_and_package_uoms(self):
+        pack_uom = ProductUom.objects.create(code="CTN", name="箱", is_active=True)
+        self.prod_a.packages.create(uom=pack_uom, qty_in_base=12)
+
+        request = RequestFactory().get(
+            f"/products/get_product_details/{self.prod_a.id}/"
+        )
+        from .views import get_product_details
+
+        response = get_product_details(request, self.prod_a.id)
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content.decode("utf-8"))
+        self.assertEqual(payload["base_uom"], self.uom.name)
+        self.assertEqual(payload["pack_uoms"][0]["uom"], "箱")
+        self.assertEqual(payload["pack_uoms"][0]["pack_qty"], 12)
+
+
+@unittest.skipUnless(
+    DEPENDENCIES_OK and DAL_OK, "缺少依赖（DAL 或模型），跳过 UOM 自动补全测试"
+)
 class ProductUomAutocompleteTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.uom1 = ProductUom.objects.create(code="PCS", name="件", is_active=True, kind="COUNT")
-        cls.uom2 = ProductUom.objects.create(code="KG", name="千克", is_active=True, kind="WEIGHT")
+        cls.uom1 = ProductUom.objects.create(
+            code="PCS", name="件", is_active=True, kind="COUNT"
+        )
+        cls.uom2 = ProductUom.objects.create(
+            code="KG", name="千克", is_active=True, kind="WEIGHT"
+        )
 
     def test_autocomplete_filters_and_forwards(self):
         """
@@ -229,6 +335,7 @@ class ProductUomAutocompleteTests(TestCase):
         DAL 会把 forwarded 参数解析到 view.self.forwarded
         """
         from django.test import RequestFactory
+
         rf = RequestFactory()
         view = ProductUomAutocomplete.as_view()
 
@@ -240,9 +347,64 @@ class ProductUomAutocompleteTests(TestCase):
         self.assertIn("KG", content1)
 
         # 带 forward：only_count=1
-        req2 = rf.get("/autocomplete/uom/?q=&forward=%7B%22only_count%22%3A%20%221%22%7D")
+        req2 = rf.get(
+            "/autocomplete/uom/?q=&forward=%7B%22only_count%22%3A%20%221%22%7D"
+        )
         resp2 = view(req2)
         self.assertEqual(resp2.status_code, 200)
         content2 = resp2.content.decode("utf-8")
-        self.assertIn("PCS", content2)     # COUNT 类
-        self.assertNotIn("KG", content2)   # 非 COUNT 类不应出现
+        self.assertIn("PCS", content2)  # COUNT 类
+        self.assertNotIn("KG", content2)  # 非 COUNT 类不应出现
+
+
+@unittest.skipUnless(
+    DEPENDENCIES_OK, "缺少 baseinfo/products 依赖模型，跳过 products 导入命令测试"
+)
+class ProductImportCommandTests(TestCase):
+    def setUp(self):
+        self.owner = Owner.objects.create(code="PIC", name="Product Import Command")
+
+    def _write_workbook(self, rows):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "sheet1"
+        for row in rows:
+            worksheet.append(row)
+        handle = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        handle.close()
+        workbook.save(handle.name)
+        return handle.name
+
+    def test_import_product_master_sheet_creates_product_and_uom(self):
+        path = self._write_workbook(
+            [
+                ["owner", "code", "sku", "name", "base_uom"],
+                [self.owner.code, "CMD-SKU-1", "CMD-SKU-1", "命令导入商品", "件"],
+            ]
+        )
+
+        try:
+            call_command("import_product_master_sheet", "--file", path)
+        finally:
+            os.unlink(path)
+
+        product = Product.objects.get(owner=self.owner, code="CMD-SKU-1")
+        self.assertEqual(product.name, "命令导入商品")
+        self.assertEqual(product.base_uom.name, "件")
+
+    def test_import_product_master_sheet_dry_run_does_not_persist_product(self):
+        path = self._write_workbook(
+            [
+                ["owner", "code", "sku", "name", "base_uom"],
+                [self.owner.code, "CMD-DRY-1", "CMD-DRY-1", "Dry Run 商品", "件"],
+            ]
+        )
+
+        try:
+            call_command("import_product_master_sheet", "--file", path, "--dry-run")
+        finally:
+            os.unlink(path)
+
+        self.assertFalse(
+            Product.objects.filter(owner=self.owner, code="CMD-DRY-1").exists()
+        )

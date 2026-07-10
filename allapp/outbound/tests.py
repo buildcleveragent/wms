@@ -6,21 +6,27 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
 from django.test import TestCase, TransactionTestCase
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 from allapp.baseinfo.models import Customer, Owner
 from allapp.inventory.models import InventoryDetail
 from allapp.locations.models import Location, Subwarehouse, Warehouse
-from allapp.outbound.models import OutboundOrder
 from allapp.outbound import services as ob_services
+from allapp.outbound.models import OutboundOrder
+from allapp.outbound.views import OutboundOrderViewSet, PickTaskViewSet
 from allapp.products.models import Product, ProductUom
-from allapp.tasking.models import WmsTask
+from allapp.tasking.models import WmsTask, WmsTaskLine
 
 
 class OutboundWarehouseScopeTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Outbound", code="OWN-OUT")
-        self.user = get_user_model().objects.create_user(username="outbound-sales", password="x")
-        self.warehouse = Warehouse.objects.create(code="WH-OUT-1", name="Warehouse Outbound 1")
+        self.user = get_user_model().objects.create_user(
+            username="outbound-sales", password="x"
+        )
+        self.warehouse = Warehouse.objects.create(
+            code="WH-OUT-1", name="Warehouse Outbound 1"
+        )
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="SWOUT1",
@@ -37,7 +43,9 @@ class OutboundWarehouseScopeTests(TestCase):
             code="CUS-OUT",
             name="Customer Outbound",
         )
-        self.base_uom = ProductUom.objects.create(code="PCS-OUT", name="件", is_active=True)
+        self.base_uom = ProductUom.objects.create(
+            code="PCS-OUT", name="件", is_active=True
+        )
         self.product = Product.objects.create(
             owner=self.owner,
             code="SKU-OUT",
@@ -49,6 +57,18 @@ class OutboundWarehouseScopeTests(TestCase):
             batch_control=False,
             expiry_control=False,
         )
+        self.api_user = get_user_model().objects.create_user(
+            username="outbound-api",
+            password="x",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        self.factory = APIRequestFactory()
+
+    def _api_request(self, method, path, data=None):
+        request = getattr(self.factory, method)(path, data=data or {}, format="json")
+        force_authenticate(request, user=self.api_user)
+        return request
 
     def test_outbound_order_requires_explicit_warehouse(self):
         with self.assertRaises(ValidationError) as exc:
@@ -104,12 +124,130 @@ class OutboundWarehouseScopeTests(TestCase):
         self.assertEqual(task.lines.count(), 1)
         self.assertEqual(task.lines.first().qty_plan, Decimal("3.000"))
 
+    def test_outbound_order_api_submit_reject_and_cancel_status_transitions(self):
+        order = OutboundOrder.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            warehouse=self.warehouse,
+            created_by=self.api_user,
+            submit_status="DRAFT",
+            approval_status="OWNER_PENDING",
+        )
+
+        submit_view = OutboundOrderViewSet.as_view({"post": "submit"})
+        response = submit_view(
+            self._api_request("post", f"/api/outbound/orders/{order.id}/submit/"),
+            pk=order.id,
+        )
+        order.refresh_from_db()
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(order.submit_status, "SUBMITTED")
+
+        reject_view = OutboundOrderViewSet.as_view({"post": "owner_reject"})
+        response = reject_view(
+            self._api_request("post", f"/api/outbound/orders/{order.id}/owner-reject/"),
+            pk=order.id,
+        )
+        order.refresh_from_db()
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(order.approval_status, "OWNER_REJECTED")
+        self.assertEqual(order.approved_by_ownermanager_id, self.api_user.id)
+
+        cancel_view = OutboundOrderViewSet.as_view({"post": "cancel"})
+        response = cancel_view(
+            self._api_request("post", f"/api/outbound/orders/{order.id}/cancel/"),
+            pk=order.id,
+        )
+        order.refresh_from_db()
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(order.approval_status, "CANCELLED")
+        self.assertEqual(order.close_reason, "货主管理员取消订单")
+
+    def test_import_drop_ship_template_download_is_available_to_authenticated_user(
+        self,
+    ):
+        view = OutboundOrderViewSet.as_view({"get": "import_drop_ship_template"})
+
+        response = view(
+            self._api_request("get", "/api/outbound/orders/import-drop-ship-template/")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            response["Content-Type"],
+        )
+        self.assertIn("filename*=UTF-8", response["Content-Disposition"])
+
+    def test_pick_task_lines_and_create_review_requires_completed_lines(self):
+        task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="PICK-API-1",
+            task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.RELEASED,
+            review_status=WmsTask.ReviewStatus.NONE,
+            posting_status=WmsTask.PostingStatus.NOT_READY,
+        )
+        line = WmsTaskLine.objects.create(
+            task=task,
+            product=self.product,
+            from_location=self.location,
+            qty_plan=Decimal("2.000"),
+            qty_done=Decimal("1.000"),
+        )
+
+        lines_view = PickTaskViewSet.as_view({"get": "lines"})
+        response = lines_view(
+            self._api_request("get", f"/api/pda/pick-tasks/{task.id}/lines/"),
+            pk=task.id,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["id"], line.id)
+
+        review_view = PickTaskViewSet.as_view({"post": "create_review_task"})
+        response = review_view(
+            self._api_request(
+                "post", f"/api/pda/pick-tasks/{task.id}/create-review-task/"
+            ),
+            pk=task.id,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("未拣完", str(response.data))
+
+    def test_pick_task_post_blocks_picker_from_reviewing_own_task(self):
+        task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="PICK-API-SELF-REVIEW",
+            task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.PENDING,
+            posting_status=WmsTask.PostingStatus.NOT_READY,
+            picked_by=self.api_user,
+        )
+
+        view = PickTaskViewSet.as_view({"post": "post"})
+        response = view(
+            self._api_request("post", f"/api/pda/pick-tasks/{task.id}/post/"),
+            pk=task.id,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("拣货人不能", str(response.data))
+
 
 class OutboundConcurrencyTests(TransactionTestCase):
     def setUp(self):
-        self.owner = Owner.objects.create(name="Owner Outbound Concurrent", code="OWN-OUT-C")
-        self.user = get_user_model().objects.create_user(username="outbound-concurrent-user", password="x")
-        self.warehouse = Warehouse.objects.create(code="WH-OUT-C", name="Warehouse Outbound Concurrent")
+        self.owner = Owner.objects.create(
+            name="Owner Outbound Concurrent", code="OWN-OUT-C"
+        )
+        self.user = get_user_model().objects.create_user(
+            username="outbound-concurrent-user", password="x"
+        )
+        self.warehouse = Warehouse.objects.create(
+            code="WH-OUT-C", name="Warehouse Outbound Concurrent"
+        )
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="SWOUTC",
@@ -126,7 +264,9 @@ class OutboundConcurrencyTests(TransactionTestCase):
             code="CUS-OUT-C",
             name="Customer Outbound Concurrent",
         )
-        self.base_uom = ProductUom.objects.create(code="PCS-OUT-C", name="件", is_active=True)
+        self.base_uom = ProductUom.objects.create(
+            code="PCS-OUT-C", name="件", is_active=True
+        )
         self.product = Product.objects.create(
             owner=self.owner,
             code="SKU-OUT-C",
@@ -173,7 +313,9 @@ class OutboundConcurrencyTests(TransactionTestCase):
             if not reserved_task_entered.is_set():
                 reserved_task_entered.set()
                 if not release_reserved_task.wait(timeout=5):
-                    raise AssertionError("timed out waiting to release outbound concurrent test")
+                    raise AssertionError(
+                        "timed out waiting to release outbound concurrent test"
+                    )
             return real_get_or_create_reserved_task(current_order, by_user=by_user)
 
         def invoke():
@@ -186,7 +328,10 @@ class OutboundConcurrencyTests(TransactionTestCase):
             finally:
                 close_old_connections()
 
-        with mock.patch("allapp.outbound.services._get_or_create_reserved_task", side_effect=fake_get_or_create_reserved_task):
+        with mock.patch(
+            "allapp.outbound.services._get_or_create_reserved_task",
+            side_effect=fake_get_or_create_reserved_task,
+        ):
             thread1 = threading.Thread(target=invoke)
             thread1.start()
             self.assertTrue(reserved_task_entered.wait(timeout=5))

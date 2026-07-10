@@ -83,7 +83,7 @@ jobs:
       fail-fast: false
       matrix:
         django-version: ['5.2.*']
-        test-group: [platform, warehouse, settlement, business-flows]
+        test-group: [platform, warehouse, settlement, pos-sales, business-flows]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -131,6 +131,20 @@ jobs:
           DJANGO_SETTINGS_MODULE: wmsmaster.settings
         run: |
           python manage.py migrate --noinput
+      - name: Verify pytest collection
+        env:
+          DB_NAME: wms_db_test
+          DB_USER: wms_app
+          DB_PASSWORD: testpass123
+          DB_HOST: mysql
+          DB_PORT: 3306
+          REDIS_HOST: redis
+          REDIS_PORT: 6379
+          SECRET_KEY: test-secret-key-for-ci
+          DEBUG: 'False'
+          DJANGO_SETTINGS_MODULE: wmsmaster.settings
+        run: |
+          python -m pytest --collect-only -q allapp
       - name: Run ${{ matrix.test-group }} tests
         env:
           DB_NAME: wms_db_test
@@ -147,26 +161,35 @@ jobs:
           export COVERAGE_FILE=".coverage.${{ matrix.test-group }}"
           if [ "${{ matrix.test-group }}" = "platform" ]; then
             python -m pytest -n auto -q --tb=short --maxfail=1 --cov=allapp --cov-report= \
-              allapp/accounts/tests.py \
-              allapp/baseinfo/tests.py \
-              allapp/core/tests.py \
-              allapp/driverapp/tests.py \
-              allapp/locations/tests.py \
-              allapp/products/tests.py
+              allapp/accounts \
+              allapp/api \
+              allapp/baseinfo \
+              allapp/core \
+              allapp/driverapp \
+              allapp/labeling \
+              allapp/locations \
+              allapp/products \
+              allapp/strategies
           elif [ "${{ matrix.test-group }}" = "warehouse" ]; then
             python -m pytest -n auto -q --tb=short --maxfail=1 --cov=allapp --cov-report= \
-              allapp/inbound/tests.py \
-              allapp/inventory/tests.py \
-              allapp/outbound/tests.py \
-              allapp/tasking/tests.py
+              allapp/inbound \
+              allapp/inventory \
+              allapp/outbound \
+              allapp/tasking
           elif [ "${{ matrix.test-group }}" = "business-flows" ]; then
             python -m pytest -n auto -q --tb=short --maxfail=1 --cov=allapp --cov-report= \
               allapp/test_business_flows.py
+          elif [ "${{ matrix.test-group }}" = "pos-sales" ]; then
+            python -m pytest -n auto -q --tb=short --maxfail=1 --cov=allapp --cov-report= \
+              allapp/pos/tests.py \
+              allapp/salesapp/test_mobile_api_unit.py \
+              allapp/salesapp/test_salemini_unit.py \
+              allapp/salesapp/test_services_pricing_unit.py
           else
             python -m pytest -n auto -q --tb=short --maxfail=1 --cov=allapp --cov-report= \
-              allapp/reports/tests.py \
-              allapp/billing/tests.py \
-              allapp/console/tests.py \
+              allapp/reports \
+              allapp/billing \
+              allapp/console \
               allapp/salesapp/tests.py
           fi
       - name: Upload test & coverage shards

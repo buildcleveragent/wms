@@ -1,27 +1,40 @@
 import threading
+from decimal import Decimal
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from decimal import Decimal
-
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
 from django.test import TestCase, TransactionTestCase
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 from allapp.baseinfo.models import Owner
 from allapp.inventory.models import InventoryDetail, PostingJournal
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product, ProductUom
+from allapp.tasking import views as tasking_views
 from allapp.tasking.counting import create_lines_from_scope
-from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
+from allapp.tasking.models import (
+    TaskAssignment,
+    TaskScanLog,
+    TaskStatusLog,
+    WmsTask,
+    WmsTaskLine,
+)
 from allapp.tasking.services_posting import post_task
+from allapp.tasking.views import WmsTaskLineViewSet, WmsTaskViewSet
 
 
 class TaskingWarehouseScopeTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Tasking", code="OWN-TASK")
-        self.warehouse = Warehouse.objects.create(code="WH-TASK-1", name="Warehouse Tasking 1")
-        self.other_warehouse = Warehouse.objects.create(code="WH-TASK-2", name="Warehouse Tasking 2")
+        self.warehouse = Warehouse.objects.create(
+            code="WH-TASK-1", name="Warehouse Tasking 1"
+        )
+        self.other_warehouse = Warehouse.objects.create(
+            code="WH-TASK-2", name="Warehouse Tasking 2"
+        )
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="SWTASK1",
@@ -184,7 +197,9 @@ class TaskingWarehouseScopeTests(TestCase):
             second = post_task(task.id, by_user=self.superuser, note="second post")
 
         task.refresh_from_db()
-        journal = PostingJournal.objects.get(src_model="WmsTask", src_id=task.id, tx_type="POST")
+        journal = PostingJournal.objects.get(
+            src_model="WmsTask", src_id=task.id, tx_type="POST"
+        )
         self.assertEqual(mocked_handler.call_count, 1)
         self.assertEqual(first["tx_created"], 2)
         self.assertEqual(second["tx_created"], 0)
@@ -193,10 +208,255 @@ class TaskingWarehouseScopeTests(TestCase):
         self.assertEqual(task.posting_status, WmsTask.PostingStatus.POSTED)
 
 
+class TaskingApiContractTests(TestCase):
+    def setUp(self):
+        self.owner = Owner.objects.create(name="Owner Tasking API", code="OWN-TASK-API")
+        self.other_owner = Owner.objects.create(
+            name="Owner Tasking API Other", code="OWN-TASK-API-O"
+        )
+        self.warehouse = Warehouse.objects.create(
+            code="WH-TASK-API", name="Warehouse Tasking API"
+        )
+        self.other_warehouse = Warehouse.objects.create(
+            code="WH-TASK-API-O",
+            name="Warehouse Tasking API Other",
+        )
+        self.user = get_user_model().objects.create_user(
+            username="tasking-api-user",
+            password="x",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        self.assignee = get_user_model().objects.create_user(
+            username="tasking-api-assignee",
+            password="x",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        self.uom = ProductUom.objects.create(
+            code="PCS-TASK-API", name="件", is_active=True
+        )
+        self.product = Product.objects.create(
+            owner=self.owner,
+            code="SKU-TASK-API",
+            name="Tasking API Product",
+            sku="SKU-TASK-API",
+            base_uom=self.uom,
+            volume=Decimal("0.100000"),
+            price=Decimal("10.00"),
+        )
+        self.task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="TASK-API-1",
+            task_type=WmsTask.TaskType.RECEIVE,
+            status=WmsTask.Status.READY,
+        )
+        self.line = WmsTaskLine.objects.create(
+            task=self.task,
+            product=self.product,
+            qty_plan=Decimal("2.000"),
+        )
+        WmsTask.objects.create(
+            owner=self.other_owner,
+            warehouse=self.other_warehouse,
+            task_no="TASK-API-OTHER",
+            task_type=WmsTask.TaskType.RECEIVE,
+        )
+        self.factory = APIRequestFactory()
+
+    def _request(self, method, path, data=None):
+        req = getattr(self.factory, method)(path, data=data or {}, format="json")
+        force_authenticate(req, user=self.user)
+        return req
+
+    def _rows(self, response):
+        return (
+            response.data.get("results", response.data)
+            if isinstance(response.data, dict)
+            else response.data
+        )
+
+    def test_task_list_and_retrieve_are_scoped_by_owner_and_warehouse(self):
+        list_view = WmsTaskViewSet.as_view({"get": "list"})
+        response = list_view(self._request("get", "/api/tasking/tasks/"))
+
+        self.assertEqual(response.status_code, 200)
+        task_nos = {item["task_no"] for item in self._rows(response)}
+        self.assertIn("TASK-API-1", task_nos)
+        self.assertNotIn("TASK-API-OTHER", task_nos)
+
+        detail_view = WmsTaskViewSet.as_view({"get": "retrieve"})
+        response = detail_view(
+            self._request("get", f"/api/tasking/tasks/{self.task.id}/"),
+            pk=self.task.id,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["task_no"], "TASK-API-1")
+
+    def test_task_create_binds_explicit_owner_and_warehouse(self):
+        view = WmsTaskViewSet.as_view({"post": "create"})
+        response = view(
+            self._request(
+                "post",
+                "/api/tasking/tasks/",
+                {
+                    "owner": self.owner.id,
+                    "warehouse": self.warehouse.id,
+                    "task_no": "TASK-API-CREATED",
+                    "task_type": WmsTask.TaskType.RECEIVE,
+                },
+            )
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        created = WmsTask.objects.get(task_no="TASK-API-CREATED")
+        self.assertEqual(created.owner_id, self.owner.id)
+        self.assertEqual(created.warehouse_id, self.warehouse.id)
+
+    def test_task_lifecycle_actions_delegate_to_service_layer(self):
+        action_cases = [
+            ("release", "task_release", {}),
+            ("start", "task_start", {}),
+            ("complete", "task_complete", {}),
+            ("cancel", "task_cancel", {"reason": "bad pick"}),
+        ]
+
+        for action, service_name, payload in action_cases:
+            with self.subTest(action=action), mock.patch.object(
+                tasking_views.task_svc,
+                service_name,
+                return_value={"ok": True},
+                create=True,
+            ) as mocked_service:
+                view = WmsTaskViewSet.as_view({"post": action})
+                response = view(
+                    self._request(
+                        "post", f"/api/tasking/tasks/{self.task.id}/{action}/", payload
+                    ),
+                    pk=self.task.id,
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(mocked_service.called)
+
+    def test_task_assignment_actions_delegate_to_service_layer(self):
+        with mock.patch.object(
+            tasking_views.task_svc,
+            "assign_task",
+            return_value={"ok": True},
+            create=True,
+        ) as mocked_assign:
+            assign_view = WmsTaskViewSet.as_view({"post": "assign"})
+            response = assign_view(
+                self._request(
+                    "post",
+                    f"/api/tasking/tasks/{self.task.id}/assign/",
+                    {"user_id": self.assignee.id},
+                ),
+                pk=self.task.id,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(mocked_assign.called)
+
+        with mock.patch.object(
+            tasking_views.task_svc,
+            "unassign_task",
+            return_value={"ok": True},
+            create=True,
+        ) as mocked_unassign:
+            unassign_view = WmsTaskViewSet.as_view({"post": "unassign"})
+            response = unassign_view(
+                self._request(
+                    "post",
+                    f"/api/tasking/tasks/{self.task.id}/unassign/",
+                    {"user_id": self.assignee.id},
+                ),
+                pk=self.task.id,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(mocked_unassign.called)
+
+    def test_task_scan_and_related_log_endpoints_are_exposed(self):
+        TaskStatusLog.objects.create(
+            task=self.task,
+            old_status=WmsTask.Status.READY,
+            new_status=WmsTask.Status.RELEASED,
+            changed_by=self.user,
+        )
+        TaskAssignment.objects.create(task=self.task, assignee=self.assignee)
+
+        with mock.patch.object(
+            tasking_views.task_svc,
+            "post_scan",
+            return_value={"detail": "scanned", "task_id": self.task.id},
+            create=True,
+        ):
+            scan_view = WmsTaskViewSet.as_view({"post": "scan"})
+            response = scan_view(
+                self._request(
+                    "post",
+                    f"/api/tasking/tasks/{self.task.id}/scan/",
+                    {"barcode": "SKU-TASK-API"},
+                ),
+                pk=self.task.id,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["detail"], "scanned")
+
+        for action in ("status_logs", "assignments", "scan_logs"):
+            view = WmsTaskViewSet.as_view({"get": action})
+            response = view(
+                self._request("get", f"/api/tasking/tasks/{self.task.id}/{action}/"),
+                pk=self.task.id,
+            )
+            self.assertEqual(response.status_code, 200)
+
+    def test_task_line_bind_and_unbind_updates_generic_binding(self):
+        content_type = ContentType.objects.get_for_model(Product)
+
+        bind_view = WmsTaskLineViewSet.as_view({"post": "bind"})
+        response = bind_view(
+            self._request(
+                "post",
+                f"/api/tasking/task-lines/{self.line.id}/bind/",
+                {
+                    "content_type_id": content_type.id,
+                    "object_id": self.product.id,
+                },
+            ),
+            pk=self.line.id,
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.line.refresh_from_db()
+        self.assertEqual(self.line.bound_content_type_id, content_type.id)
+        self.assertEqual(self.line.bound_object_id, self.product.id)
+
+        unbind_view = WmsTaskLineViewSet.as_view({"post": "unbind"})
+        response = unbind_view(
+            self._request("post", f"/api/tasking/task-lines/{self.line.id}/unbind/"),
+            pk=self.line.id,
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.line.refresh_from_db()
+        self.assertIsNone(self.line.bound_content_type_id)
+        self.assertIsNone(self.line.bound_object_id)
+
+
 class TaskPostingConcurrencyTests(TransactionTestCase):
     def setUp(self):
-        self.owner = Owner.objects.create(name="Owner Tasking Concurrent", code="OWN-TASK-C")
-        self.warehouse = Warehouse.objects.create(code="WH-TASK-C", name="Warehouse Tasking Concurrent")
+        self.owner = Owner.objects.create(
+            name="Owner Tasking Concurrent", code="OWN-TASK-C"
+        )
+        self.warehouse = Warehouse.objects.create(
+            code="WH-TASK-C", name="Warehouse Tasking Concurrent"
+        )
         self.superuser = get_user_model().objects.create_superuser(
             username="tasking-concurrent-admin",
             email="tasking-concurrent-admin@example.com",
@@ -227,7 +487,9 @@ class TaskPostingConcurrencyTests(TransactionTestCase):
                 handler_calls += 1
             handler_entered.set()
             if not release_handler.wait(timeout=5):
-                raise AssertionError("timed out waiting to release task posting concurrent test")
+                raise AssertionError(
+                    "timed out waiting to release task posting concurrent test"
+                )
             return 2
 
         def invoke(index, note):
@@ -247,7 +509,9 @@ class TaskPostingConcurrencyTests(TransactionTestCase):
             thread1.start()
             self.assertTrue(handler_entered.wait(timeout=5))
 
-            thread2 = threading.Thread(target=invoke, args=(1, "second concurrent post"))
+            thread2 = threading.Thread(
+                target=invoke, args=(1, "second concurrent post")
+            )
             thread2.start()
 
             release_handler.set()
@@ -260,7 +524,9 @@ class TaskPostingConcurrencyTests(TransactionTestCase):
             raise errors[0]
 
         task.refresh_from_db()
-        journal = PostingJournal.objects.get(src_model="WmsTask", src_id=task.id, tx_type="POST")
+        journal = PostingJournal.objects.get(
+            src_model="WmsTask", src_id=task.id, tx_type="POST"
+        )
         self.assertEqual(handler_calls, 1)
         self.assertEqual(sorted(result["tx_created"] for result in results), [0, 2])
         self.assertEqual(journal.status, "POSTED")
