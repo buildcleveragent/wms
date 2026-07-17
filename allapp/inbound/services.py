@@ -1,15 +1,193 @@
 # allapp/inbound/services.py
 import logging
+from decimal import Decimal
 
-from django.db import transaction
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import models, transaction
+from django.utils import timezone
+
 from allapp.core.models import DocSequence
 from allapp.core.utils.log_context import build_log_payload
-from allapp.tasking.models import WmsTask, WmsTaskLine,ReceiveTaskExtra,ReceiveLineExtra
-from allapp.inventory.models import InventoryDetail, InventoryTransaction
 from allapp.inbound.models import InboundOrder, InboundOrderLine
+from allapp.inventory.models import InventoryDetail, InventoryTransaction
+from allapp.tasking.models import (
+    ReceiveLineExtra,
+    ReceiveTaskExtra,
+    TaskAssignment,
+    TaskStatusLog,
+    WmsTask,
+    WmsTaskLine,
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+@transaction.atomic
+def finalize_receive_line_with_variance(line_id, *, by_user, variance_reason=""):
+    """Finish a RECEIVE line without changing its original planned quantity.
+
+    Full/over receipts keep using the canonical tasking finalizer.  A short or
+    zero receipt is allowed only through this explicit endpoint and must carry
+    a variance reason, preserving plan-vs-actual for reconciliation.
+    """
+
+    line = (
+        WmsTaskLine.objects.select_for_update()
+        .select_related("task")
+        .get(pk=line_id)
+    )
+    task = line.task
+    if task.task_type != WmsTask.TaskType.RECEIVE:
+        raise ValidationError("仅收货任务行支持收货差异结束。")
+    if line.finished_at:
+        return {
+            "line": line.pk,
+            "qty_total": str(line.qty_done or 0),
+            "task_status": task.status,
+            "idempotent": True,
+        }
+    if task.status not in {WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS}:
+        raise ValidationError("任务未处于可执行状态。")
+
+    owns_line = TaskAssignment.objects.select_for_update().filter(
+        task=task,
+        assignee=by_user,
+        finished_at__isnull=True,
+    ).filter(models.Q(line=line) | models.Q(line__isnull=True))
+    if not owns_line.exists():
+        raise PermissionDenied("仅当前任务负责人可以结束收货行。")
+
+    try:
+        extra = ReceiveLineExtra.objects.select_for_update().get(line=line)
+    except ReceiveLineExtra.DoesNotExist as exc:
+        raise ValidationError("缺少收货扩展，无法结束收货行。") from exc
+    total = (
+        Decimal(extra.qty_ok or 0)
+        + Decimal(extra.qty_damage or 0)
+        + Decimal(extra.qty_reject or 0)
+    )
+    plan = Decimal(line.qty_plan or 0)
+    reason = (variance_reason or "").strip()
+    if total != plan and not reason:
+        raise ValidationError("收货数量与计划不一致时必须填写差异原因。")
+
+    now = timezone.now()
+    WmsTaskLine.objects.filter(pk=line.pk).update(
+        qty_done=total,
+        status=WmsTaskLine.Status.COMPLETED,
+        finished_at=now,
+        finished_by=by_user,
+        remark=(reason or line.remark or "")[:200],
+        updated_by=by_user,
+        updated_at=now,
+    )
+    TaskAssignment.objects.filter(
+        line=line,
+        finished_at__isnull=True,
+    ).update(finished_at=now)
+
+    old_status = task.status
+    all_done = not WmsTaskLine.objects.filter(
+        task=task,
+        finished_at__isnull=True,
+    ).exists()
+    task_updates = {"updated_by": by_user, "updated_at": now}
+    if all_done:
+        task_updates.update(
+            status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.PENDING,
+            finished_at=now,
+        )
+    elif task.status == WmsTask.Status.RELEASED:
+        task_updates.update(status=WmsTask.Status.IN_PROGRESS, started_at=task.started_at or now)
+    WmsTask.objects.filter(pk=task.pk).update(**task_updates)
+    task.refresh_from_db()
+    if task.status != old_status:
+        TaskStatusLog.objects.create(
+            task=task,
+            old_status=old_status,
+            new_status=task.status,
+            changed_by=by_user,
+            note=(reason or "收货行完成")[:200],
+        )
+    return {
+        "line": line.pk,
+        "qty_total": str(total),
+        "task_status": task.status,
+        "all_done": all_done,
+        "idempotent": False,
+    }
+
+
+@transaction.atomic
+def close_inbound_order_after_putaway(putaway_task, *, by_user=None):
+    """Close the source ASN only after every derived putaway task is posted."""
+
+    task = WmsTask.objects.select_for_update().get(pk=putaway_task.pk)
+    if task.task_type != WmsTask.TaskType.PUTAWAY:
+        return None
+    if task.posting_status != WmsTask.PostingStatus.POSTED:
+        raise ValidationError("上架任务尚未过账，不能关闭入库单。")
+    if task.source_model != "WmsTask" or not str(task.source_pk).isdigit():
+        return None
+    receive_task = WmsTask.objects.filter(
+        pk=int(task.source_pk),
+        task_type=WmsTask.TaskType.RECEIVE,
+        owner_id=task.owner_id,
+        warehouse_id=task.warehouse_id,
+    ).first()
+    if not receive_task:
+        return None
+    if (
+        receive_task.source_app != "inbound"
+        or receive_task.source_model != "InboundOrder"
+        or not str(receive_task.source_pk).isdigit()
+    ):
+        return None
+
+    unposted_exists = (
+        WmsTask.objects.filter(
+            task_type=WmsTask.TaskType.PUTAWAY,
+            source_app="tasking",
+            source_model="WmsTask",
+            source_pk=str(receive_task.pk),
+        )
+        .exclude(status=WmsTask.Status.CANCELLED)
+        .exclude(posting_status=WmsTask.PostingStatus.POSTED)
+        .exists()
+    )
+    if unposted_exists:
+        return None
+
+    order = (
+        InboundOrder.objects.select_for_update()
+        .filter(
+            pk=int(receive_task.source_pk),
+            owner_id=task.owner_id,
+            warehouse_id=task.warehouse_id,
+        )
+        .first()
+    )
+    if not order or order.is_closed:
+        return order
+    order.is_closed = True
+    order.close_reason = "上架完成并已过账"
+    order.updated_by = by_user
+    order.save(update_fields=["is_closed", "close_reason", "updated_by", "updated_at"])
+
+    from allapp.accounts.audit import record_audit_event
+
+    record_audit_event(
+        action="inbound.order.close_after_putaway",
+        module="inbound",
+        user=by_user,
+        obj=order,
+        before={"is_closed": False},
+        after={"is_closed": True, "close_reason": order.close_reason},
+        metadata={"putaway_task_id": task.pk, "receive_task_id": receive_task.pk},
+    )
+    return order
 
 @transaction.atomic
 def create_receive_task_draft(order, by_user=None):
@@ -50,6 +228,7 @@ def create_receive_task_draft(order, by_user=None):
         source_app="inbound",
         source_model="InboundOrder",
         source_pk=str(order.pk),
+        created_by=by_user,
         remark="系统：仓库确认后自动创建收货任务草稿",
         review_status=WmsTask.ReviewStatus.NOT_READY,
         posting_status=WmsTask.PostingStatus.NOT_READY,

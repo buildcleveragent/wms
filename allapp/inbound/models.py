@@ -11,9 +11,7 @@ from django.db import models, transaction
 from django.urls import reverse
 
 from allapp.core.models import BaseModel,DocSequence
-from allapp.products.models import Product,ProductPackage,ProductUom
-from allapp.baseinfo.models import Owner,Supplier,Vehicle,CarrierCompany
-from allapp.locations.models import Location,Warehouse
+from allapp.products.models import Product
 from allapp.tasking.models import WmsTask
 
 QTY_Q = Decimal("0.0001")  # 数量保留 3 位
@@ -181,21 +179,34 @@ class InboundOrder(BaseModel):
         if self.submit_status != "SUBMITTED" or self.approval_status != "OWNER_PENDING":
             raise ValidationError("仅在【已提交&待货主管理员审核】时可通过。")
         self._allow_status_write = True
-        self.approval_status = "OWNER_APPROVED"  # 或根据你的流转规则改为 "WHS_PENDING"
+        self.approval_status = "WHS_PENDING"
         self.approved_by_ownermanager = user
         self.approved_at_ownermanager = timezone.now()
-        self.save(update_fields=["approval_status", "approved_by_ownermanager", "approved_at_ownermanager"])
+        self.save(
+            update_fields=[
+                "approval_status",
+                "approved_by_ownermanager",
+                "approved_at_ownermanager",
+            ]
+        )
 
     @transaction.atomic
     def owner_reject(self, user):
         if self.submit_status != "SUBMITTED" or self.approval_status != "OWNER_PENDING":
             raise ValidationError("仅在【已提交&待货主管理员审核】时可驳回。")
         self._allow_status_write = True
+        self.submit_status = "DRAFT"
         self.approval_status = "OWNER_REJECTED"
         self.approved_by_ownermanager = user
         self.approved_at_ownermanager = timezone.now()
-        self.save(update_fields=["approval_status", "approved_by_ownermanager", "approved_at_ownermanager"])
-
+        self.save(
+            update_fields=[
+                "submit_status",
+                "approval_status",
+                "approved_by_ownermanager",
+                "approved_at_ownermanager",
+            ]
+        )
 
     def _check_wh_confirmable(self):
         """仓库确认的前置校验；不通过时一次性给出所有原因。"""
@@ -240,13 +251,24 @@ class InboundOrder(BaseModel):
 
     @transaction.atomic
     def wh_reject(self, user):
-        if self.submit_status != "SUBMITTED" or self.approval_status not in ["WHS_PENDING", "OWNER_APPROVED"]:
+        if self.submit_status != "SUBMITTED" or self.approval_status not in [
+            "WHS_PENDING",
+            "OWNER_APPROVED",
+        ]:
             raise ValidationError("仅在【待仓库确认/货主已通过】时可驳回。")
         self._allow_status_write = True
+        self.submit_status = "DRAFT"
         self.approval_status = "WHS_REJECTED"
         self.approved_by_warehouse = user
         self.approved_at_warehouse = timezone.now()
-        self.save(update_fields=["approval_status", "approved_by_warehouse", "approved_at_warehouse"])
+        self.save(
+            update_fields=[
+                "submit_status",
+                "approval_status",
+                "approved_by_warehouse",
+                "approved_at_warehouse",
+            ]
+        )
 
     # —— 提交动作（系统入口；允许从草稿或被货主驳回后重新提交）——
     @transaction.atomic
@@ -256,9 +278,8 @@ class InboundOrder(BaseModel):
         if self.submit_status == "SUBMITTED":
             raise ValidationError("订单已提交。")
 
-        # 允许从 DRAFT 或 OWNER_REJECTED 进入提交；其它状态禁止
-        # if self.approval_status not in ["OWNER_PENDING", "OWNER_REJECTED"]:
-        #     raise ValidationError("当前审核状态不允许提交。")
+        if self.approval_status not in ["NOT_READY", "OWNER_REJECTED", "WHS_REJECTED"]:
+            raise ValidationError("仅草稿或被驳回的订单可以重新提交。")
 
         # 系统动作允许写状态（配合 clean() 的防手改逻辑）
         self._allow_status_write = True
@@ -267,6 +288,7 @@ class InboundOrder(BaseModel):
         self.submit_status = "SUBMITTED"
         self.approval_status = "OWNER_PENDING"
         self.save(update_fields=["submit_status", "approval_status"])
+
 
 class InboundOrderLine(BaseModel):
     order = models.ForeignKey(
@@ -383,7 +405,6 @@ class InboundOrderLine(BaseModel):
             errors["aux_uom"] = "包装单位必须属于所选商品"
 
         # 批/效期控制一致
-        p = self.product
         # if p:
         #     if not p.batch_control and self.lot_no:
         #         errors["lot_no"] = "该商品未启用批次管理，批次号必须留空"
@@ -1135,3 +1156,54 @@ class PdaNoOrderReceive(WmsTask):
         proxy = True
         verbose_name = "PDA无订单收货"
         verbose_name_plural = "PDA无订单收货"
+
+
+class NoOrderReceiveRequest(models.Model):
+    """无订单收货请求的幂等凭据与结果映射。"""
+
+    request_id = models.CharField("请求ID", max_length=64)
+    payload_hash = models.CharField("请求内容摘要", max_length=64)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="请求人",
+        on_delete=models.PROTECT,
+        related_name="no_order_receive_requests",
+    )
+    owner = models.ForeignKey(
+        "baseinfo.Owner",
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="no_order_receive_requests",
+    )
+    warehouse = models.ForeignKey(
+        "locations.Warehouse",
+        verbose_name="仓库",
+        on_delete=models.PROTECT,
+        related_name="no_order_receive_requests",
+    )
+    task = models.OneToOneField(
+        "tasking.WmsTask",
+        verbose_name="收货任务",
+        on_delete=models.PROTECT,
+        related_name="no_order_receive_request",
+        blank=True,
+        null=True,
+    )
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        verbose_name = "无订单收货请求"
+        verbose_name_plural = "无订单收货请求"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["created_by", "request_id"],
+                name="uq_no_order_recv_user_req",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["warehouse", "created_at"],
+                name="ix_no_order_recv_wh_time",
+            ),
+        ]

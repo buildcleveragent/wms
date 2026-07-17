@@ -1,12 +1,17 @@
 import datetime
 from decimal import Decimal
+from io import StringIO
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
+from django.core.management import call_command
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from allapp.accounts.models import UserRoleScope
+from allapp.accounts.roles import ROLE_GROUP_TEMPLATES
 from allapp.baseinfo.models import Customer, Owner, Supplier
 from allapp.billing.enums import AccrualStatus, BillStatus, CalcMethod, ChargeType
 from allapp.billing.models import (
@@ -33,6 +38,16 @@ from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import Product, ProductUom
 from allapp.reports.models import ReportSnapshot
 from allapp.tasking.models import WmsTask
+
+
+def _assign_report_role(user, role, *, owner=None, warehouse=None):
+    user.groups.add(Group.objects.get(name=ROLE_GROUP_TEMPLATES[role].group_name))
+    return UserRoleScope.objects.create(
+        user=user,
+        role=role,
+        owner=owner if role in UserRoleScope.OWNER_ROLES else None,
+        warehouse=warehouse if role in UserRoleScope.WAREHOUSE_ROLES else None,
+    )
 
 
 def _current_test_date(now=None):
@@ -88,6 +103,8 @@ class ReportsWarehouseScopeTests(TestCase):
             task_no="DISPATCH-RPT-1",
             task_type=WmsTask.TaskType.DISPATCH,
             status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.APPROVED,
+            posting_status=WmsTask.PostingStatus.POSTED,
         )
         task.lines.create(
             product=product, qty_plan=Decimal("2.000"), qty_done=Decimal("2.000")
@@ -110,6 +127,7 @@ class ReportsWarehouseScopeTests(TestCase):
 
 class BossDashboardApiTests(TestCase):
     def setUp(self):
+        call_command("sync_wms_role_groups", stdout=StringIO())
         self.today = _current_test_date()
         self.month_start = self.today.replace(day=1)
 
@@ -185,6 +203,11 @@ class BossDashboardApiTests(TestCase):
             password="x",
             warehouse=self.warehouse,
         )
+        _assign_report_role(
+            self.user,
+            UserRoleScope.Role.WAREHOUSE_BOSS,
+            warehouse=self.warehouse,
+        )
         self.client = APIClient()
         self.client.force_authenticate(self.user)
 
@@ -198,7 +221,7 @@ class BossDashboardApiTests(TestCase):
             owner=self.owner, code="SUP-BOSS-A", name="Boss Supplier A"
         )
 
-        InboundOrder.objects.create(
+        inbound_order = InboundOrder.objects.create(
             owner=self.owner,
             supplier=self.supplier,
             warehouse=self.warehouse,
@@ -207,7 +230,53 @@ class BossDashboardApiTests(TestCase):
             submit_status="SUBMITTED",
             approval_status="WHS_APPROVED",
         )
-        OutboundOrder.objects.create(
+        inbound_line = InboundOrderLine.objects.create(
+            order=inbound_order,
+            product=self.product_a,
+            base_uom=self.uom_a.code,
+            base_qty=Decimal("1.000"),
+            base_price=Decimal("1.0000"),
+            line_no=10,
+        )
+        receive_at = timezone.now()
+        receive_task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="TASK-BOSS-RECEIVE-ACTUAL",
+            task_type=WmsTask.TaskType.RECEIVE,
+            status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.APPROVED,
+            posting_status=WmsTask.PostingStatus.POSTED,
+            posted_at=receive_at,
+            finished_at=receive_at,
+            ref_no=inbound_order.order_no,
+            source_app="inbound",
+            source_model="InboundOrder",
+            source_pk=str(inbound_order.pk),
+        )
+        receive_task.lines.create(
+            product=self.product_a,
+            qty_plan=Decimal("1.000"),
+            qty_done=Decimal("1.000"),
+            status=WmsTask.Status.COMPLETED,
+            src_model="InboundOrderLine",
+            src_id=inbound_line.pk,
+        )
+        InventoryTransaction.objects.create(
+            tx_type=InvTxType.RECEIVE,
+            owner=self.owner,
+            product=self.product_a,
+            warehouse=self.warehouse,
+            location=self.location,
+            qty_delta=Decimal("1.000"),
+            src_model="WmsTask",
+            src_id=receive_task.pk,
+            src_line_id=inbound_line.pk,
+            src_no=inbound_order.order_no,
+            posted_at=receive_at,
+            posting_batch="TASK-BOSS-RECEIVE-ACTUAL",
+        )
+        outbound_order = OutboundOrder.objects.create(
             owner=self.owner,
             customer=self.customer,
             warehouse=self.warehouse,
@@ -216,6 +285,38 @@ class BossDashboardApiTests(TestCase):
             submit_status="SUBMITTED",
             approval_status="OWNER_APPROVED",
             created_by=self.user,
+        )
+        outbound_line = OutboundOrderLine.objects.create(
+            order=outbound_order,
+            product=self.product_a,
+            base_uom=self.uom_a,
+            base_qty=Decimal("1.000"),
+            base_price=Decimal("1.0000"),
+            line_no=10,
+        )
+        dispatch_at = timezone.now()
+        dispatch_task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="TASK-BOSS-DISPATCH-ACTUAL",
+            task_type=WmsTask.TaskType.DISPATCH,
+            status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.APPROVED,
+            posting_status=WmsTask.PostingStatus.POSTED,
+            posted_at=dispatch_at,
+            finished_at=dispatch_at,
+            ref_no=outbound_order.order_no,
+            source_app="outbound",
+            source_model="OutboundOrder",
+            source_pk=str(outbound_order.pk),
+        )
+        dispatch_task.lines.create(
+            product=self.product_a,
+            qty_plan=Decimal("1.000"),
+            qty_done=Decimal("1.000"),
+            status=WmsTask.Status.COMPLETED,
+            src_model="OutboundOrderLine",
+            src_id=outbound_line.pk,
         )
 
         WmsTask.objects.create(
@@ -480,7 +581,7 @@ class BossDashboardApiTests(TestCase):
         self.assertEqual(response.data["summary"]["cold_location_count"], 1)
         self.assertEqual(len(response.data["owner_rankings"]), 1)
 
-    def test_boss_inventory_api_falls_back_to_inventory_summary_when_detail_missing(
+    def test_boss_inventory_api_does_not_use_warehouse_less_summary_as_fallback(
         self,
     ):
         InventoryDetail.objects.filter(warehouse=self.warehouse).delete()
@@ -507,17 +608,16 @@ class BossDashboardApiTests(TestCase):
         self.assertEqual(len(response.data["owner_options"]), 2)
         self.assertEqual(
             Decimal(str(response.data["summary"]["current_onhand_qty"])),
-            Decimal("13.0000"),
+            Decimal("0.0000"),
         )
         self.assertEqual(
             Decimal(str(response.data["summary"]["current_available_qty"])),
-            Decimal("12.0000"),
+            Decimal("0.0000"),
         )
-        self.assertEqual(response.data["summary"]["owner_count"], 2)
-        self.assertEqual(len(response.data["owner_rankings"]), 2)
-        self.assertEqual(response.data["owner_rankings"][0]["owner"], self.owner.id)
+        self.assertEqual(response.data["summary"]["owner_count"], 0)
+        self.assertEqual(response.data["owner_rankings"], [])
 
-    def test_boss_home_api_falls_back_to_inventory_summary_when_detail_missing(self):
+    def test_boss_home_api_does_not_use_warehouse_less_summary_as_fallback(self):
         InventoryDetail.objects.filter(warehouse=self.warehouse).delete()
         InventorySummary.objects.create(
             owner=self.owner,
@@ -541,19 +641,24 @@ class BossDashboardApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             Decimal(str(response.data["summary"]["current_onhand_qty"])),
-            Decimal("13.0000"),
+            Decimal("0.0000"),
         )
         self.assertEqual(
             Decimal(str(response.data["summary"]["current_available_qty"])),
-            Decimal("12.0000"),
+            Decimal("0.0000"),
         )
-        self.assertEqual(len(response.data["rankings"]["inventory_top_owners"]), 2)
+        self.assertEqual(response.data["rankings"]["inventory_top_owners"], [])
 
     def test_boss_pages_use_warehouse_scope_even_when_user_is_bound_to_owner(self):
         scoped_user = get_user_model().objects.create_user(
             username="boss-dashboard-owner-bound",
             password="x",
             owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        _assign_report_role(
+            scoped_user,
+            UserRoleScope.Role.WAREHOUSE_BOSS,
             warehouse=self.warehouse,
         )
         client = APIClient()
@@ -583,6 +688,11 @@ class BossDashboardApiTests(TestCase):
             owner=self.owner,
             warehouse=self.warehouse,
         )
+        _assign_report_role(
+            scoped_user,
+            UserRoleScope.Role.WAREHOUSE_BOSS,
+            warehouse=self.warehouse,
+        )
         client = APIClient()
         client.force_authenticate(scoped_user)
 
@@ -595,9 +705,42 @@ class BossDashboardApiTests(TestCase):
         self.assertEqual(response.data["summary"]["owner_count"], 1)
         self.assertEqual(len(response.data["owner_options"]), 2)
 
+    def test_multi_warehouse_boss_owner_options_fail_closed_without_activity(self):
+        """No fact rows must not turn an authorized warehouse list into all owners."""
+
+        empty_warehouse_a = Warehouse.objects.create(
+            code="WHBEMPA", name="Boss Empty Warehouse A"
+        )
+        empty_warehouse_b = Warehouse.objects.create(
+            code="WHBEMPB", name="Boss Empty Warehouse B"
+        )
+        Owner.objects.create(name="Unrelated Owner", code="OWBUNR")
+        scoped_user = get_user_model().objects.create_user(
+            username="boss-dashboard-empty-multi",
+            password="x",
+        )
+        _assign_report_role(
+            scoped_user,
+            UserRoleScope.Role.WAREHOUSE_BOSS,
+            warehouse=empty_warehouse_a,
+        )
+        _assign_report_role(
+            scoped_user,
+            UserRoleScope.Role.WAREHOUSE_BOSS,
+            warehouse=empty_warehouse_b,
+        )
+        client = APIClient()
+        client.force_authenticate(scoped_user)
+
+        response = client.get("/api/reports/boss/home/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["owner_options"], [])
+
 
 class PdaThroughputApiTests(TestCase):
     def setUp(self):
+        call_command("sync_wms_role_groups", stdout=StringIO())
         self.owner = Owner.objects.create(name="Owner PDA Report", code="OWPDA")
         self.other_owner = Owner.objects.create(
             name="Owner PDA Report Other", code="OWPDO"
@@ -648,6 +791,11 @@ class PdaThroughputApiTests(TestCase):
             password="x",
             warehouse=self.warehouse,
         )
+        _assign_report_role(
+            self.user,
+            UserRoleScope.Role.WAREHOUSE_MANAGER,
+            warehouse=self.warehouse,
+        )
         self.customer = Customer.objects.create(
             owner=self.owner,
             salesperson=self.user,
@@ -695,13 +843,14 @@ class PdaThroughputApiTests(TestCase):
             submit_status="SUBMITTED",
             approval_status="OWNER_APPROVED",
         )
-        OutboundOrderLine.objects.create(
+        outbound_line = OutboundOrderLine.objects.create(
             order=outbound_order,
             product=self.product,
             base_qty=Decimal("4.000"),
             base_price=Decimal("2.0000"),
             line_no=10,
         )
+        self._create_dispatch_for_line(outbound_line)
 
         other_warehouse_inbound = InboundOrder.objects.create(
             owner=self.owner,
@@ -845,13 +994,47 @@ class PdaThroughputApiTests(TestCase):
             submit_status="SUBMITTED",
             approval_status="OWNER_APPROVED",
         )
-        return OutboundOrderLine.objects.create(
+        line = OutboundOrderLine.objects.create(
             order=order,
             product=product,
             base_qty=Decimal(str(qty)),
             base_price=Decimal("2.0000"),
             line_no=10,
         )
+        self._create_dispatch_for_line(line)
+        return line
+
+    def _create_dispatch_for_line(self, line):
+        finished_at = datetime.datetime.combine(
+            line.order.biz_date, datetime.time(hour=15)
+        )
+        task = WmsTask.objects.create(
+            owner=line.order.owner,
+            warehouse=line.order.warehouse,
+            task_no=f"DSP-{line.order.order_no}",
+            task_type=WmsTask.TaskType.DISPATCH,
+            status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.APPROVED,
+            posting_status=WmsTask.PostingStatus.POSTED,
+            posted_at=finished_at,
+            finished_at=finished_at,
+            ref_no=line.order.order_no,
+            source_app="outbound",
+            source_model="OutboundOrder",
+            source_pk=str(line.order_id),
+        )
+        task.lines.create(
+            product=line.product,
+            qty_plan=line.base_qty,
+            qty_done=line.base_qty,
+            status=WmsTask.Status.COMPLETED,
+            finished_at=finished_at,
+            finished_by=self.user,
+            src_model="OutboundOrderLine",
+            src_id=line.pk,
+            plan_meta={"lot_no": line.lot_no or ""},
+        )
+        return task
 
     def test_month_throughput_returns_scoped_summary_and_days(self):
         response = self.client.get(
@@ -1242,6 +1425,11 @@ class PdaThroughputApiTests(TestCase):
             owner=self.owner,
             warehouse=self.warehouse,
         )
+        _assign_report_role(
+            owner_bound_user,
+            UserRoleScope.Role.WAREHOUSE_MANAGER,
+            warehouse=self.warehouse,
+        )
         client = APIClient()
         client.force_authenticate(owner_bound_user)
 
@@ -1258,6 +1446,11 @@ class PdaThroughputApiTests(TestCase):
         owner_only_user = get_user_model().objects.create_user(
             username="pda-report-owner-only",
             password="x",
+            owner=self.owner,
+        )
+        _assign_report_role(
+            owner_only_user,
+            UserRoleScope.Role.OWNER_MANAGER,
             owner=self.owner,
         )
         client = APIClient()
@@ -1289,6 +1482,11 @@ class PdaThroughputApiTests(TestCase):
         owner_only_user = get_user_model().objects.create_user(
             username="pda-detail-owner-only",
             password="x",
+            owner=self.owner,
+        )
+        _assign_report_role(
+            owner_only_user,
+            UserRoleScope.Role.OWNER_MANAGER,
             owner=self.owner,
         )
         client = APIClient()

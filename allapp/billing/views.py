@@ -16,6 +16,8 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from allapp.accounts.access import AccessScope
+from allapp.accounts.audit import record_audit_event
 from allapp.locations.models import Warehouse
 
 from .enums import AccrualStatus, BillStatus, PeriodStatus
@@ -62,25 +64,99 @@ def _require_billing_perm(request, perm_codename: str):
         raise PermissionDenied(f"需要 billing.{perm_codename} 权限。")
 
 
+def _require_financial_export_perm(request):
+    if request.user.is_superuser:
+        return
+    if not (
+        request.user.has_perm("reports.export_operations")
+        or request.user.has_perm("accounts.export_operational_reports")
+    ):
+        raise PermissionDenied("需要运营报表导出权限。")
+
+
+def _explicit_billing_scope(user) -> AccessScope:
+    """Return the tenant scope accepted for a state-changing billing request.
+
+    Billing is a financial write surface.  In particular, a legacy ``owner``
+    or ``warehouse`` field on ``User`` is only a migration aid and must never
+    decide where a rule, metric or period is written.  Require a current
+    ``UserRoleScope`` row for every non-superuser mutation.
+    """
+
+    scope = AccessScope.for_user(user)
+    if not scope.is_valid or scope.source != "user_role_scope":
+        raise PermissionDenied("计费写入必须使用有效的显式角色范围授权。")
+    return scope
+
+
+def _scope_id(value):
+    """Return a model instance's primary key without trusting raw input."""
+
+    if value is None:
+        return None
+    return getattr(value, "pk", value)
+
+
+class BillingDataPermission(permissions.DjangoModelPermissions):
+    """Role-aware read access plus Django model permissions for mutations."""
+
+    perms_map = {
+        **permissions.DjangoModelPermissions.perms_map,
+        "GET": [],
+        "HEAD": [],
+        "OPTIONS": [],
+    }
+
+    # DRF maps every custom POST action to ``add_<view-model>`` by default.
+    # Billing actions are semantically different: lock/unlock changes a
+    # period, while invoice creation creates a bill.  Map them explicitly so
+    # a correctly authorized scoped finance user is neither blocked nor given
+    # a broader create permission than the operation needs.
+    action_permissions = {
+        "activate": "billing.change_billingrule",
+        "deactivate": "billing.change_billingrule",
+        "generate_metrics": "billing.change_billingperiod",
+        "accrue_storage": "billing.change_billingperiod",
+        "accrue_orders_posted": "billing.change_billingperiod",
+        "lock": "billing.change_billingperiod",
+        "unlock": "billing.change_billingperiod",
+        "invoice": "billing.add_bill",
+        "generate": "billing.change_billingperiod",
+        "preview_lock": "billing.change_billingperiod",
+    }
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.user.is_superuser:
+            return True
+        scope = AccessScope.for_user(request.user)
+        if request.method in permissions.SAFE_METHODS:
+            return scope.is_valid and (
+                request.user.has_perm("accounts.view_owner_financials")
+                or request.user.has_perm("reports.view_warehouse_finance")
+            )
+        required = self.action_permissions.get(getattr(view, "action", ""))
+        if required:
+            return (
+                scope.is_valid
+                and scope.source == "user_role_scope"
+                and request.user.has_perm(required)
+            )
+        return super().has_permission(request, view)
+
+
 class OwnerWarehouseScopedQuerysetMixin:
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [BillingDataPermission]
 
     def scope_queryset(self, qs: QuerySet):
         request = getattr(self, "request", None)
         user = getattr(request, "user", None)
-        if not user or not user.is_authenticated:
-            return qs.none()
-        if getattr(user, "is_superuser", False):
-            return qs
-
-        owner_id = getattr(user, "owner_id", None)
-        warehouse_id = getattr(user, "warehouse_id", None)
-        model = qs.model
-        if owner_id and hasattr(model, "owner_id"):
-            qs = qs.filter(owner_id=owner_id)
-        if warehouse_id and hasattr(model, "warehouse_id"):
-            qs = qs.filter(warehouse_id=warehouse_id)
-        return qs
+        return AccessScope.for_user(user).filter_queryset(
+            qs,
+            owner_field=getattr(self, "scope_owner_field", "owner_id"),
+            warehouse_field=getattr(self, "scope_warehouse_field", "warehouse_id"),
+        )
 
     def get_queryset(self):  # type: ignore[override]
         qs = super().get_queryset()  # type: ignore[misc]
@@ -88,43 +164,61 @@ class OwnerWarehouseScopedQuerysetMixin:
 
 
 class OwnerWarehouseSaveMixin:
-    def _save_scope_kwargs(self, serializer):
+    """Validate the *final* serializer tenant target before persisting it.
+
+    ``serializer.validated_data`` is authoritative here.  Mutating a payload
+    with the legacy bindings stored on ``User`` both hides the requested
+    target and permits unbound users to choose a tenant.  This mixin is used
+    only by models that carry direct ``owner`` and ``warehouse`` fields.
+    """
+
+    def _final_serializer_scope_ids(self, serializer):
+        instance = getattr(serializer, "instance", None)
+        data = serializer.validated_data
+        owner = data.get("owner", getattr(instance, "owner", None))
+        warehouse = data.get("warehouse", getattr(instance, "warehouse", None))
+        return _scope_id(owner), _scope_id(warehouse)
+
+    def _validate_serializer_write_scope(self, serializer):
+        owner_id, warehouse_id = self._final_serializer_scope_ids(serializer)
+        self._validate_owner_warehouse_write_scope(owner_id, warehouse_id)
+
+    def _validate_owner_warehouse_write_scope(self, owner_id, warehouse_id):
         user = self.request.user
         if getattr(user, "is_superuser", False):
-            return {}
-
-        extra = {}
-        if "owner" in serializer.fields and getattr(user, "owner", None) is not None:
-            extra["owner"] = user.owner
-        if "warehouse" in serializer.fields and getattr(user, "warehouse", None) is not None:
-            extra["warehouse"] = user.warehouse
-        return extra
+            return
+        scope = _explicit_billing_scope(user)
+        if not owner_id or not warehouse_id or not scope.allows(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+        ):
+            raise PermissionDenied("无权写入目标货主或仓库的计费数据。")
 
     def perform_create(self, serializer):
-        serializer.save(**self._save_scope_kwargs(serializer))
+        self._validate_serializer_write_scope(serializer)
+        serializer.save()
 
     def perform_update(self, serializer):
-        serializer.save(**self._save_scope_kwargs(serializer))
+        self._validate_serializer_write_scope(serializer)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._validate_owner_warehouse_write_scope(
+            getattr(instance, "owner_id", None),
+            getattr(instance, "warehouse_id", None),
+        )
+        instance.delete()
 
 
 class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def _scope_dashboard_queryset(self, qs: QuerySet, *, warehouse_boss_mode: bool):
-        user = self.request.user
-        if not user or not user.is_authenticated:
-            return qs.none()
-        if getattr(user, "is_superuser", False):
-            return qs
-
-        warehouse_id = getattr(user, "warehouse_id", None)
-        owner_id = getattr(user, "owner_id", None)
-
-        if warehouse_id and hasattr(qs.model, "warehouse_id"):
-            qs = qs.filter(warehouse_id=warehouse_id)
-        if owner_id and hasattr(qs.model, "owner_id") and not (warehouse_boss_mode and warehouse_id):
-            qs = qs.filter(owner_id=owner_id)
-        return qs
+    def _scope_dashboard_queryset(self, qs: QuerySet, *, scope: AccessScope):
+        return scope.filter_queryset(
+            qs,
+            owner_field="owner_id",
+            warehouse_field="warehouse_id",
+        )
 
     def _resolve_scope_label(self, model_cls, pk):
         if not pk:
@@ -142,8 +236,16 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
         date_from_raw = (request.query_params.get("date_from") or "").strip()
         date_to_raw = (request.query_params.get("date_to") or "").strip()
         recent_limit_raw = (request.query_params.get("recent_limit") or "").strip()
-        scope_mode = (request.query_params.get("scope_mode") or "").strip()
-        warehouse_boss_mode = scope_mode == "warehouse_boss"
+        # The client may choose presentation filters, never the authorization
+        # mode.  The server resolves owner-vs-warehouse access from role scope.
+        scope = AccessScope.for_user(request.user)
+        if not scope.is_valid:
+            raise PermissionDenied("No valid billing data scope.")
+        if not request.user.is_superuser:
+            if scope.warehouse_ids and not request.user.has_perm("reports.view_warehouse_finance"):
+                raise PermissionDenied("No permission to view warehouse financial data.")
+            if scope.owner_ids and not request.user.has_perm("accounts.view_owner_financials"):
+                raise PermissionDenied("No permission to view owner financial data.")
 
         if owner_raw and not owner_raw.isdigit():
             return Response({"detail": "owner must be an integer id."}, status=status.HTTP_400_BAD_REQUEST)
@@ -153,11 +255,9 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
         owner_id = int(owner_raw) if owner_raw else None
         warehouse_id = int(warehouse_raw) if warehouse_raw else None
 
-        user_owner_id = getattr(request.user, "owner_id", None)
-        user_warehouse_id = getattr(request.user, "warehouse_id", None)
-        if user_owner_id and owner_id and owner_id != user_owner_id and not (warehouse_boss_mode and user_warehouse_id):
+        if scope.owner_ids and owner_id and not scope.allows(owner_id=owner_id):
             raise PermissionDenied("No access to other owners in billing dashboard.")
-        if user_warehouse_id and warehouse_id and warehouse_id != user_warehouse_id:
+        if warehouse_id and not scope.allows(warehouse_id=warehouse_id):
             raise PermissionDenied("No access to other warehouses in billing dashboard.")
 
         date_from = parse_date(date_from_raw) if date_from_raw else None
@@ -176,23 +276,23 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
             BillingAccrual.objects.select_related("owner", "warehouse", "period", "rule", "event", "created_by")
             .filter(is_reversal=False)
             .exclude(status=AccrualStatus.VOID),
-            warehouse_boss_mode=warehouse_boss_mode,
+            scope=scope,
         )
         base_bill_qs = self._scope_dashboard_queryset(
             Bill.objects.select_related("owner", "warehouse", "period")
             .prefetch_related("lines")
             .exclude(status=BillStatus.VOID),
-            warehouse_boss_mode=warehouse_boss_mode,
+            scope=scope,
         )
 
         option_period_qs = self._scope_dashboard_queryset(
             BillingPeriod.objects.select_related("owner", "warehouse"),
-            warehouse_boss_mode=warehouse_boss_mode,
+            scope=scope,
         )
         option_accrual_qs = base_accrual_qs
         option_bill_qs = self._scope_dashboard_queryset(
             Bill.objects.select_related("owner", "warehouse").exclude(status=BillStatus.VOID),
-            warehouse_boss_mode=warehouse_boss_mode,
+            scope=scope,
         )
 
         if warehouse_id:
@@ -238,7 +338,9 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
             base_accrual_qs = base_accrual_qs.filter(service_date__lte=date_to)
             base_bill_qs = base_bill_qs.filter(period__start_date__lte=date_to)
 
-        scope_owner_id = owner_id or getattr(request.user, "owner_id", None)
+        scope_owner_id = owner_id or (
+            next(iter(scope.owner_ids)) if len(scope.owner_ids) == 1 else None
+        )
         scope_owner_name = ""
         if scope_owner_id:
             scope_owner_name = owner_options_map.get(scope_owner_id, {}).get("name", "")
@@ -257,10 +359,14 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
         payload["scope"] = {
             "owner": scope_owner_id,
             "owner_name": scope_owner_name,
-            "warehouse": warehouse_id or getattr(request.user, "warehouse_id", None),
+            "warehouse": warehouse_id or (
+                next(iter(scope.warehouse_ids)) if len(scope.warehouse_ids) == 1 else None
+            ),
             "warehouse_name": self._resolve_scope_label(
                 Warehouse,
-                warehouse_id or getattr(request.user, "warehouse_id", None),
+                warehouse_id or (
+                    next(iter(scope.warehouse_ids)) if len(scope.warehouse_ids) == 1 else None
+                ),
             ),
             "date_from": date_from,
             "date_to": date_to,
@@ -292,33 +398,34 @@ class BillingRuleViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMi
     def scope_queryset(self, qs: QuerySet):
         request = getattr(self, "request", None)
         user = getattr(request, "user", None)
-        if not user or not user.is_authenticated:
-            return qs.none()
-        if getattr(user, "is_superuser", False):
-            return qs
-
-        owner_id = getattr(user, "owner_id", None)
-        warehouse_id = getattr(user, "warehouse_id", None)
-        if owner_id:
-            qs = qs.filter(Q(owner_id=owner_id) | Q(owner__isnull=True))
-        if warehouse_id:
-            qs = qs.filter(Q(warehouse_id=warehouse_id) | Q(warehouse__isnull=True))
-        return qs
+        scope = AccessScope.for_user(user)
+        scoped = scope.filter_queryset(
+            qs, owner_field="owner_id", warehouse_field="warehouse_id"
+        )
+        # Global rate cards carry no tenant data. They are intentionally
+        # readable so a scoped finance user can understand which fallback
+        # rule applies, but `_validate_rule_write_scope` still rejects every
+        # mutation of them.
+        if request and request.method in permissions.SAFE_METHODS and scope.is_valid:
+            return qs.filter(
+                Q(owner__isnull=True, warehouse__isnull=True)
+                | Q(pk__in=scoped.values("pk"))
+            )
+        return scoped
 
     def _validate_rule_write_scope(self, rule: BillingRule):
         user = self.request.user
         if getattr(user, "is_superuser", False):
             return
-
-        owner_id = getattr(user, "owner_id", None)
-        warehouse_id = getattr(user, "warehouse_id", None)
-        if owner_id and rule.owner_id != owner_id:
-            raise PermissionDenied("无权修改通用规则或其他货主规则。")
-        if warehouse_id and rule.warehouse_id != warehouse_id:
-            raise PermissionDenied("无权修改通用规则或其他仓库规则。")
+        scope = _explicit_billing_scope(user)
+        if not scope.allows(
+            owner_id=rule.owner_id, warehouse_id=rule.warehouse_id
+        ):
+            raise PermissionDenied("无权修改通用规则或范围外规则。")
 
     def perform_update(self, serializer):
-        self._validate_rule_write_scope(serializer.instance)
+        # The inherited mixin validates the post-patch owner/warehouse pair,
+        # rather than only the row that happened to be retrieved.
         super().perform_update(serializer)
 
     def perform_destroy(self, instance):
@@ -358,28 +465,26 @@ class BillingRuleTierViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelVi
 
     def scope_queryset(self, qs: QuerySet):
         user = getattr(self.request, "user", None)
-        if not user or not user.is_authenticated:
-            return qs.none()
-        if getattr(user, "is_superuser", False):
-            return qs
-
-        owner_id = getattr(user, "owner_id", None)
-        warehouse_id = getattr(user, "warehouse_id", None)
-        if owner_id:
-            qs = qs.filter(Q(rule__owner_id=owner_id) | Q(rule__owner__isnull=True))
-        if warehouse_id:
-            qs = qs.filter(Q(rule__warehouse_id=warehouse_id) | Q(rule__warehouse__isnull=True))
-        return qs
+        scope = AccessScope.for_user(user)
+        scoped = scope.filter_queryset(
+            qs,
+            owner_field="rule__owner_id",
+            warehouse_field="rule__warehouse_id",
+        )
+        if self.request.method in permissions.SAFE_METHODS and scope.is_valid:
+            return qs.filter(
+                Q(rule__owner__isnull=True, rule__warehouse__isnull=True)
+                | Q(pk__in=scoped.values("pk"))
+            )
+        return scoped
 
     def _validate_rule_scope(self, rule):
         user = self.request.user
-        if not user.is_superuser:
-            owner_id = getattr(user, "owner_id", None)
-            warehouse_id = getattr(user, "warehouse_id", None)
-            if owner_id and rule.owner_id != owner_id:
-                raise PermissionDenied("无权操作通用规则或其他货主规则的阶梯。")
-            if warehouse_id and rule.warehouse_id != warehouse_id:
-                raise PermissionDenied("无权操作通用规则或其他仓库规则的阶梯。")
+        if user.is_superuser:
+            return
+        scope = _explicit_billing_scope(user)
+        if not scope.allows(owner_id=rule.owner_id, warehouse_id=rule.warehouse_id):
+            raise PermissionDenied("无权操作通用规则或范围外规则的阶梯。")
 
     def perform_create(self, serializer):
         _require_billing_perm(self.request, "change_billingrule")
@@ -420,18 +525,27 @@ class BillingMetricDailyViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehous
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
 
-        owner_id = data.get("owner") or getattr(request.user, "owner_id", None)
-        warehouse_id = data.get("warehouse") or getattr(request.user, "warehouse_id", None)
+        if request.user.is_superuser:
+            scope = AccessScope.for_user(request.user)
+        else:
+            scope = _explicit_billing_scope(request.user)
+
+        # Defaults may only come from an unambiguous explicit role scope.
+        # Never fall back to User.owner/User.warehouse, which may be stale or
+        # deliberately populated for another application workflow.
+        owner_id = data.get("owner") or (
+            next(iter(scope.owner_ids)) if len(scope.owner_ids) == 1 else None
+        )
+        warehouse_id = data.get("warehouse") or (
+            next(iter(scope.warehouse_ids)) if len(scope.warehouse_ids) == 1 else None
+        )
         if not owner_id or not warehouse_id:
             return Response(
-                {"detail": "必须提供 owner 和 warehouse，或让当前用户绑定 owner/warehouse。"},
+                {"detail": "必须提供 owner 和 warehouse，或由显式角色范围唯一确定。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if not getattr(request.user, "is_superuser", False):
-            if getattr(request.user, "owner_id", None) and owner_id != request.user.owner_id:
-                raise PermissionDenied("无权为其他货主生成计费指标。")
-            if getattr(request.user, "warehouse_id", None) and warehouse_id != request.user.warehouse_id:
-                raise PermissionDenied("无权为其他仓库生成计费指标。")
+        if not scope.allows(owner_id=owner_id, warehouse_id=warehouse_id):
+            raise PermissionDenied("无权为范围外货主或仓库生成计费指标。")
 
         summary = generate_metrics_for_range(
             owner_id,
@@ -783,6 +897,7 @@ class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewS
 
     @action(detail=False, methods=["get"], url_path="export")
     def export_list(self, request):
+        _require_financial_export_perm(request)
         qs = self.filter_queryset(self.get_queryset())
 
         workbook = Workbook()
@@ -826,13 +941,21 @@ class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewS
                 ]
             )
 
-        return self._xlsx_response(
+        response = self._xlsx_response(
             workbook,
             f"billing-bills-{datetime.date.today().isoformat()}.xlsx",
         )
+        record_audit_event(
+            action="EXPORT",
+            module="billing.bill.list",
+            request=request,
+            metadata={"rows": qs.count()},
+        )
+        return response
 
     @action(detail=True, methods=["get"], url_path="export")
     def export_detail(self, request, pk=None):
+        _require_financial_export_perm(request)
         bill = self.get_object()
         workbook = Workbook()
 

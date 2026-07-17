@@ -10,7 +10,7 @@ from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.contrib.auth.models import Group, Permission
 from django.db import models
 
-from .models import SystemLog, User
+from .models import AuditEvent, SystemLog, User, UserRoleScope
 
 
 class PermissionMatrixWidget(forms.SelectMultiple):
@@ -309,6 +309,22 @@ class GroupAdmin(DjangoGroupAdmin):
     filter_horizontal = ()
 
 
+@admin.register(UserRoleScope)
+class UserRoleScopeAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "role",
+        "owner",
+        "warehouse",
+        "is_active",
+        "updated_at",
+    )
+    list_filter = ("role", "is_active", "owner", "warehouse")
+    search_fields = ("user__username", "user__name", "owner__name", "warehouse__name")
+    raw_id_fields = ("user", "owner", "warehouse")
+    readonly_fields = ("created_at", "updated_at")
+
+
 @admin.register(SystemLog)
 class SystemLogAdmin(admin.ModelAdmin):
     list_display = (
@@ -340,7 +356,19 @@ class SystemLogAdmin(admin.ModelAdmin):
         ),
         ("日志相关", {"fields": ("owner", "occurred_at"), "classes": ("collapse",)}),
     )
-    readonly_fields = ("occurred_at",)  # 禁止编辑操作日期
+    readonly_fields = (
+        "occurred_at", "username", "real_name", "log_type", "module", "content",
+        "computer_name", "ip_address", "motherboard_sn", "hdd_sn", "owner",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
     # 展示操作内容的简短摘要（简化展示）
     def get_queryset(self, request):
@@ -348,3 +376,24 @@ class SystemLogAdmin(admin.ModelAdmin):
         return queryset.annotate(
             short_content=models.functions.Substr("content", 1, 50)
         )
+
+
+@admin.register(AuditEvent)
+class AuditEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "occurred_at", "username", "action", "module", "object_type",
+        "object_id", "owner", "warehouse", "succeeded", "request_id",
+    )
+    list_filter = ("action", "module", "succeeded", "occurred_at")
+    search_fields = ("username", "object_type", "object_id", "request_id", "event_hash")
+    date_hierarchy = "occurred_at"
+    readonly_fields = tuple(field.name for field in AuditEvent._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

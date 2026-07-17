@@ -5,6 +5,10 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from allapp.accounts.access import AccessScope
+from allapp.accounts.audit import record_audit_event
+from allapp.accounts.models import UserRoleScope
+
 from .services_boss import (
     build_boss_alert_payload,
     build_boss_home_payload,
@@ -12,8 +16,27 @@ from .services_boss import (
 )
 
 
+class CanViewBossDashboard(permissions.BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        scope = AccessScope.for_user(user)
+        return bool(
+            user
+            and user.is_authenticated
+            and (
+                user.is_superuser
+                or (
+                    scope.is_valid
+                    and UserRoleScope.Role.WAREHOUSE_BOSS in scope.roles
+                    and bool(scope.warehouse_ids)
+                    and user.has_perm("reports.view_boss_dashboard")
+                )
+            )
+        )
+
+
 class BossScopedApiMixin:
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [CanViewBossDashboard]
 
     def _parse_int_param(self, request, name: str):
         raw = (request.query_params.get(name) or "").strip()
@@ -24,11 +47,10 @@ class BossScopedApiMixin:
         return int(raw)
 
     def _validate_scope(self, request, *, owner_id=None, warehouse_id=None):
-        user_owner_id = getattr(request.user, "owner_id", None)
-        user_warehouse_id = getattr(request.user, "warehouse_id", None)
-        if user_owner_id and owner_id and owner_id != user_owner_id and not user_warehouse_id:
+        scope = AccessScope.for_user(request.user)
+        if scope.owner_ids and owner_id and not scope.allows(owner_id=owner_id):
             raise PermissionDenied("No access to other owners in boss dashboard.")
-        if user_warehouse_id and warehouse_id and warehouse_id != user_warehouse_id:
+        if scope.warehouse_ids and warehouse_id and not scope.allows(warehouse_id=warehouse_id):
             raise PermissionDenied("No access to other warehouses in boss dashboard.")
 
 
@@ -43,6 +65,13 @@ class BossHomeApi(BossScopedApiMixin, APIView):
         self._validate_scope(request, owner_id=owner_id, warehouse_id=warehouse_id)
         payload = build_boss_home_payload(
             user=request.user,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+        )
+        record_audit_event(
+            action="QUERY",
+            module="reports.boss.home",
+            request=request,
             owner_id=owner_id,
             warehouse_id=warehouse_id,
         )
@@ -66,6 +95,13 @@ class BossAlertApi(BossScopedApiMixin, APIView):
             warehouse_id=warehouse_id,
             item_limit=item_limit,
         )
+        record_audit_event(
+            action="QUERY",
+            module="reports.boss.alerts",
+            request=request,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+        )
         return Response(payload)
 
 
@@ -85,5 +121,12 @@ class BossInventoryApi(BossScopedApiMixin, APIView):
             owner_id=owner_id,
             warehouse_id=warehouse_id,
             item_limit=item_limit,
+        )
+        record_audit_event(
+            action="QUERY",
+            module="reports.boss.inventory",
+            request=request,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
         )
         return Response(payload)

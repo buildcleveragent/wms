@@ -14,7 +14,7 @@
 		
 		<view class="row" style="gap:16rpx">
 			<button class="btn" @click="goto('/pages/customers/select')">开单</button>
-			<button class="btn-outline" @click="goto('/pages/approval/index')">审核</button>
+			<button v-if="auth.isOwnerManager" class="btn-outline" @click="goto('/pages/approval/index')">审核</button>
 			<button class="btn-outline" @click="goto('/pages/orders/index')">查询</button>
 			<button class="btn-outline" @click="goto('/pages/orders/import_drop_ship')">批量导入一件代发</button>			
 			<button class="btn-outline" @click="downloadDropShipTemplate()">下载一件代发模板</button>					
@@ -27,6 +27,10 @@
 
 <script setup>
 	import { BASE_URL } from '@/utils/request.js'
+	import { useAuth } from '@/store/auth'
+
+	const auth = useAuth()
+	auth.ensureAuth()
 	
 	function goto(url){ uni.navigateTo({ url }) }
 	

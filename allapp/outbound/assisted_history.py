@@ -32,6 +32,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework.exceptions import ValidationError
 
+from allapp.accounts.access import AccessScope
 from allapp.tasking.models import WmsTask
 
 from .models import OutboundOrder, OutboundOrderLine
@@ -146,6 +147,8 @@ def _task_subquery():
 def assisted_history_queryset(user):
     """Return annotated assisted orders for one operator warehouse."""
 
+    scope = AccessScope.for_user(user)
+    warehouse_ids = scope.warehouse_ids if scope.is_valid else frozenset()
     line_count, total_qty = _line_total_subqueries()
     tasks = _task_subquery()
     task_counts = tasks.order_by().values("source_pk").annotate(value=Count("id"))
@@ -153,7 +156,7 @@ def assisted_history_queryset(user):
 
     qs = (
         OutboundOrder.objects.filter(
-            warehouse_id=user.warehouse_id,
+            warehouse_id__in=warehouse_ids,
             processing_mode=OutboundOrder.ProcessingMode.WAREHOUSE_ASSISTED,
         )
         .select_related("owner", "customer", "assisted_by")
@@ -379,8 +382,10 @@ def serialize_history_order(order):
 
 
 def history_options(user):
+    scope = AccessScope.for_user(user)
+    warehouse_ids = scope.warehouse_ids if scope.is_valid else frozenset()
     base = OutboundOrder.objects.filter(
-        warehouse_id=user.warehouse_id,
+        warehouse_id__in=warehouse_ids,
         processing_mode=OutboundOrder.ProcessingMode.WAREHOUSE_ASSISTED,
     )
     owners = list(

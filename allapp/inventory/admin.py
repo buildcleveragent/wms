@@ -26,6 +26,7 @@ from .models import (
 from .services_quick_adjust import QuickAdjustInput, quick_adjust_via_post_task
 
 from allapp.core.formatters import format_product_qty
+from allapp.accounts.access import AccessScope
 from django.utils.html import format_html
 
 # ============== 公共小工具 ==============
@@ -34,9 +35,38 @@ def _safe_fields(model, candidates):
     model_fields = {f.name for f in model._meta.get_fields()}
     return [f for f in candidates if f in model_fields]
 
+
+class ScopedInventoryReadAdmin(admin.ModelAdmin):
+    """Inventory facts are read-only and always tenant scoped in Admin."""
+
+    scope_owner_field = "owner_id"
+    scope_warehouse_field = "warehouse_id"
+
+    def get_queryset(self, request):
+        scope = AccessScope.for_user(request.user)
+        return scope.filter_queryset(
+            super().get_queryset(request),
+            owner_field=self.scope_owner_field,
+            warehouse_field=self.scope_warehouse_field,
+        )
+
+    def has_view_permission(self, request, obj=None):
+        if not AccessScope.for_user(request.user).is_valid:
+            return False
+        return super().has_view_permission(request, obj)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 # ============== 1) 现存量 ==============
 @admin.register(InventoryDetail)
-class InventoryDetailAdmin(admin.ModelAdmin):
+class InventoryDetailAdmin(ScopedInventoryReadAdmin):
     # list_display = _safe_fields(
     #     InventoryDetail,
     #     [
@@ -153,7 +183,8 @@ class InventoryDetailAdmin(admin.ModelAdmin):
 
 # ============== 2) 汇总 ==============
 @admin.register(InventorySummary)
-class InventorySummaryAdmin(admin.ModelAdmin):
+class InventorySummaryAdmin(ScopedInventoryReadAdmin):
+    scope_warehouse_field = None
     # list_display = _safe_fields(
     #     InventorySummary,
     #     [
@@ -235,11 +266,11 @@ class InventorySummaryAdmin(admin.ModelAdmin):
         if "is_active" in {f.name for f in InventorySummary._meta.get_fields()}:
             queryset.update(is_active=False)
 
-    actions = ["action_mark_active", "action_mark_inactive"]
+    actions = []
 
 # ============== 3) 事务流水 ==============
 @admin.register(InventoryTransaction)
-class InventoryTransactionAdmin(admin.ModelAdmin):
+class InventoryTransactionAdmin(ScopedInventoryReadAdmin):
     # list_display = _safe_fields(
     #     InventoryTransaction,
     #     [
@@ -298,7 +329,7 @@ class InventoryTransactionAdmin(admin.ModelAdmin):
 
 
 @admin.register(InventorySnapshotDaily)
-class InventorySnapshotDailyAdmin(admin.ModelAdmin):
+class InventorySnapshotDailyAdmin(ScopedInventoryReadAdmin):
     list_display = (
         "snapshot_date",
         "owner",
@@ -526,6 +557,8 @@ class OutboundQuickAdjustForm(_BaseQuickAdjustForm):
 # ——— 公共的 JSON 端点（按 owner 过滤商品）mixin ———
 class _ProductOptionsMixin:
     def product_options_view(self, request):
+        if not request.user.is_superuser:
+            return HttpResponseForbidden("仅限超级用户使用")
         owner_id = request.GET.get("owner")
         q = (request.GET.get("q") or "").strip()
         qs = Product.objects.none()

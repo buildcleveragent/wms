@@ -203,10 +203,7 @@ export const api = {
     }),
 
   billingWarehouseOverview: (params = {}) => {
-    const qs = buildQuery({
-      ...params,
-      scope_mode: 'warehouse_boss',
-    })
+    const qs = buildQuery(params)
     return request({
       url: qs
         ? `/api/billing/dashboard/warehouse-overview/?${qs}`

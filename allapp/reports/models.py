@@ -82,7 +82,9 @@ class OwnerDim(CreatedMixin, Scd2Mixin):
 
 class WarehouseDim(CreatedMixin, Scd2Mixin):
     warehouse_id = models.BigIntegerField()
-    owner_id = models.BigIntegerField()  # 便于租户裁剪
+    # A physical warehouse is shared by multiple owners in a 3PL WMS.  Tenant
+    # isolation must therefore come from the fact row's owner, not this field.
+    owner_id = models.BigIntegerField(null=True, blank=True)
     code = models.CharField(max_length=40)
     name = models.CharField(max_length=100)
     city = models.CharField(max_length=60, blank=True)
@@ -339,16 +341,25 @@ class FactBilling(models.Model):
     date = models.ForeignKey(DateDim, on_delete=models.PROTECT, to_field="date_key")
 
     fee_type = models.CharField(max_length=30)  # STORAGE/OPERATION/DELIVERY/OUTBOUND_VALUE...
-    amount = models.DecimalField(max_digits=18, decimal_places=2, validators=[MinValueValidator(0)])
+    # Reversals are represented as negative facts so financial reconciliation
+    # remains additive and does not need special-case subtraction.
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
 
     # 幂等去重键（可选：owner+业务事件ID的哈希）
-    dedup_key = models.CharField(max_length=80, blank=True)
+    dedup_key = models.CharField(max_length=160, blank=True)
 
     class Meta:
         verbose_name = "计费事实"
         verbose_name_plural = "计费事实"
         constraints = [
-            CheckConstraint(check=Q(amount__gte=0), name="chk_fee_amt_ge0"),
+            # BillingAccrual.acc_fingerprint is the source event identity.
+            # Keep the dimensional fields in the key so legacy blank keys can
+            # coexist while normal ETL rows are protected against concurrent
+            # duplicate inserts.
+            UniqueConstraint(
+                fields=["owner", "warehouse", "date", "fee_type", "dedup_key"],
+                name="uq_factbilling_dedup",
+            ),
         ]
         indexes = [
             models.Index(fields=["owner", "date"], name="idx_fee_owner_date"),
@@ -437,7 +448,7 @@ class AggBillingDaily(models.Model):
     warehouse = models.ForeignKey(WarehouseDim, on_delete=models.PROTECT, null=True, blank=True)
     fee_type = models.CharField(max_length=30)
 
-    amount = models.DecimalField(max_digits=18, decimal_places=2, validators=[MinValueValidator(0)])
+    amount = models.DecimalField(max_digits=18, decimal_places=2)
     class Meta:
         verbose_name = "计费日汇总"
         verbose_name_plural = "计费日汇总"
@@ -475,10 +486,19 @@ class EtlJobRun(models.Model):
     rows_in = models.IntegerField(default=0)
     rows_out = models.IntegerField(default=0)
     error = models.TextField(blank=True, default="")
+    watermark = models.CharField(max_length=64, blank=True, default="")
+    reconciliation = models.JSONField(default=dict, blank=True)
 
     class Meta:
         verbose_name = "ETL运行日志"
         verbose_name_plural = "ETL运行日志"
+        permissions = [
+            ("view_warehouse_operations", "查看仓库运营报表"),
+            ("view_owner_operations", "查看货主运营报表"),
+            ("view_boss_dashboard", "查看仓库老板经营看板"),
+            ("view_warehouse_finance", "查看仓库经营财务数据"),
+            ("export_operations", "导出运营报表"),
+        ]
         indexes = [
             models.Index(fields=["job_name", "started_at"], name="idx_job_name_time"),
         ]

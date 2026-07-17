@@ -100,7 +100,9 @@ def _is_assisted_task(task) -> bool:
 
 def _task_action_allowed(user, task, *, endpoint: str, manager_allowed: bool = False) -> bool:
     allowed = _is_wh_operator(user) or (manager_allowed and _is_wh_manager(user))
-    if allowed:
+    if allowed and strict_pick_queryset(
+        WmsTask.objects.filter(pk=task.pk), user
+    ).exists():
         return True
     # The compatibility switch never weakens authorization for assisted orders.
     if _is_assisted_task(task):

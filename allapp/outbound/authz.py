@@ -1,7 +1,7 @@
 """Authorization and tenant-scoping helpers for outbound APIs.
 
-Legacy endpoints can be rolled out in ``shadow`` mode.  The assisted-outbound
-API never uses that compatibility switch and is always fail closed.
+Legacy endpoints can still be observed in ``shadow`` mode during an explicit
+rollback, but production defaults to fail-closed enforcement.
 """
 
 from __future__ import annotations
@@ -9,41 +9,53 @@ from __future__ import annotations
 import logging
 
 from django.conf import settings
-from django.db.models import CharField, QuerySet
+from django.db.models import CharField, Exists, OuterRef, Q, QuerySet
 from django.db.models.functions import Cast
 from rest_framework.exceptions import PermissionDenied
+
+from allapp.accounts.access import AccessScope
+from allapp.accounts.models import UserRoleScope
 
 logger = logging.getLogger(__name__)
 
 ASSISTED_PERMISSION = "outbound.process_warehouse_assisted_outbound"
 VIEW_ALL_PERMISSION = "outbound.view_all_outbound_orders"
 TASK_OPERATOR_PERMISSION = "tasking.claim_task_as_wh_operator"
+TASK_MANAGER_PERMISSION = "tasking.taskconfirm_as_wh_manager"
 ORDER_VIEW_PERMISSION = "outbound.view_outboundorder"
 TASK_VIEW_PERMISSION = "tasking.view_wmstask"
 
 
 def legacy_authz_mode() -> str:
-    value = str(getattr(settings, "OUTBOUND_LEGACY_AUTHZ_MODE", "shadow") or "shadow")
-    return value.strip().lower() if value.strip().lower() in {"shadow", "enforce"} else "shadow"
+    value = str(getattr(settings, "OUTBOUND_LEGACY_AUTHZ_MODE", "enforce") or "enforce")
+    return value.strip().lower() if value.strip().lower() in {"shadow", "enforce"} else "enforce"
 
 
 def is_assisted_operator(user) -> bool:
     """Return whether ``user`` satisfies the complete assisted-operator contract."""
 
-    return bool(
+    if not (
         user
         and getattr(user, "is_authenticated", False)
         and getattr(user, "owner_id", None) is None
-        and getattr(user, "warehouse_id", None)
         and user.has_perm(ASSISTED_PERMISSION)
         and user.has_perm(TASK_OPERATOR_PERMISSION)
+    ):
+        return False
+    scope = AccessScope.for_user(user)
+    return bool(
+        scope.is_valid
+        and not scope.is_global
+        and UserRoleScope.Role.WAREHOUSE_OPERATOR in scope.roles
+        and len(scope.warehouse_ids) == 1
     )
 
 
 def require_assisted_operator(user) -> None:
     if not is_assisted_operator(user):
         raise PermissionDenied(
-            "代办出库账号必须未绑定货主、绑定仓库，并同时具有代办出库和仓库操作权限。"
+            "代办出库账号必须无货主绑定、具有单一有效仓库操作员范围，"
+            "并同时具有代办出库和仓库操作权限。"
         )
 
 
@@ -67,24 +79,38 @@ def strict_order_queryset(qs: QuerySet, user) -> QuerySet:
 
     if not user or not getattr(user, "is_authenticated", False):
         return qs.none()
-    if getattr(user, "is_superuser", False) or user.has_perm(VIEW_ALL_PERMISSION):
+    scope = AccessScope.for_user(user)
+    if not scope.is_valid:
+        return qs.none()
+    if scope.is_global:
         return qs
 
-    owner_id = getattr(user, "owner_id", None)
-    warehouse_id = getattr(user, "warehouse_id", None)
-    if owner_id:
-        qs = qs.filter(owner_id=owner_id)
-        return qs.filter(warehouse_id=warehouse_id) if warehouse_id else qs
-
-    if warehouse_id and user.has_perm(ORDER_VIEW_PERMISSION):
-        return qs.filter(warehouse_id=warehouse_id)
-
-    if warehouse_id and is_assisted_operator(user):
-        return qs.filter(
-            warehouse_id=warehouse_id,
-            processing_mode="WAREHOUSE_ASSISTED",
+    can_read_orders = any(
+        user.has_perm(permission)
+        for permission in (
+            ORDER_VIEW_PERMISSION,
+            VIEW_ALL_PERMISSION,
+            "outbound.submit_outbound_as_owner_buyers",
+            "outbound.approve_outbound_as_owner_manager",
+            "outbound.approve_outbound_as_wh_manager",
         )
+    )
+    if can_read_orders:
+        scoped = scope.filter_queryset(
+            qs,
+            owner_field="owner_id",
+            warehouse_field="warehouse_id",
+        )
+        if UserRoleScope.Role.OWNER_SALESPERSON in scope.roles:
+            scoped = scoped.filter(created_by_id=user.pk)
+        return scoped
 
+    if is_assisted_operator(user):
+        return scope.filter_queryset(
+            qs.filter(processing_mode="WAREHOUSE_ASSISTED"),
+            owner_field="owner_id",
+            warehouse_field="warehouse_id",
+        )
     return qs.none()
 
 
@@ -93,27 +119,41 @@ def strict_pick_queryset(qs: QuerySet, user) -> QuerySet:
 
     if not user or not getattr(user, "is_authenticated", False):
         return qs.none()
-    if getattr(user, "is_superuser", False):
+    scope = AccessScope.for_user(user)
+    if not scope.is_valid:
+        return qs.none()
+    if scope.is_global:
         return qs
-
-    owner_id = getattr(user, "owner_id", None)
-    warehouse_id = getattr(user, "warehouse_id", None)
-    if owner_id:
-        qs = qs.filter(owner_id=owner_id)
-        return qs.filter(warehouse_id=warehouse_id) if warehouse_id else qs
-
-    if warehouse_id and user.has_perm(TASK_VIEW_PERMISSION):
-        return qs.filter(warehouse_id=warehouse_id)
-
-    if warehouse_id and is_assisted_operator(user):
-        source_ids = assisted_order_source_ids(warehouse_id=warehouse_id)
-        return qs.filter(
-            warehouse_id=warehouse_id,
-            source_model__in=("outboundorder", "OutboundOrder"),
-            source_pk__in=source_ids,
+    if not any(
+        user.has_perm(permission)
+        for permission in (
+            TASK_VIEW_PERMISSION,
+            TASK_OPERATOR_PERMISSION,
+            TASK_MANAGER_PERMISSION,
         )
+    ):
+        return qs.none()
+    scoped = scope.filter_queryset(
+        qs,
+        owner_field="owner_id",
+        warehouse_field="warehouse_id",
+    )
+    if UserRoleScope.Role.WAREHOUSE_OPERATOR in scope.roles:
+        from allapp.tasking.models import TaskAssignment, WmsTask
 
-    return qs.none()
+        active_assignment = TaskAssignment.objects.filter(
+            task_id=OuterRef("pk"), finished_at__isnull=True
+        )
+        scoped = scoped.annotate(
+            _has_active_assignment=Exists(active_assignment)
+        ).filter(
+            Q(assignments__assignee_id=user.pk)
+            | Q(created_by_id=user.pk)
+            | Q(picked_by_id=user.pk)
+            | Q(posted_by_id=user.pk)
+            | Q(status=WmsTask.Status.RELEASED, _has_active_assignment=False)
+        )
+    return scoped.distinct()
 
 
 def _shadow_has_denied_rows(base_qs: QuerySet, scoped_qs: QuerySet) -> bool:
@@ -124,32 +164,30 @@ def _shadow_has_denied_rows(base_qs: QuerySet, scoped_qs: QuerySet) -> bool:
 
 
 def apply_legacy_scope(*, base_qs: QuerySet, scoped_qs: QuerySet, user, endpoint: str) -> QuerySet:
-    """Enforce a scope, or log the would-deny result in compatibility mode."""
+    """Always enforce scope; ``shadow`` now only preserves rollout telemetry."""
 
-    if legacy_authz_mode() == "enforce":
-        return scoped_qs
-    if _shadow_has_denied_rows(base_qs, scoped_qs):
+    if legacy_authz_mode() == "shadow" and _shadow_has_denied_rows(base_qs, scoped_qs):
         logger.warning(
-            "outbound.authz.would_deny user_id=%s endpoint=%s reason=scope",
+            "outbound.authz.legacy_shadow_enforced user_id=%s endpoint=%s reason=scope",
             getattr(user, "pk", None),
             endpoint,
         )
-    return base_qs
+    return scoped_qs
 
 
 def require_legacy_action(*, user, allowed: bool, endpoint: str, reason: str) -> None:
-    """Gate a legacy write action while supporting a non-blocking shadow rollout."""
+    """Gate a legacy write action; ``shadow`` is telemetry-only and never bypasses."""
 
     if allowed:
         return
-    if legacy_authz_mode() == "enforce":
-        raise PermissionDenied(reason)
-    logger.warning(
-        "outbound.authz.would_deny user_id=%s endpoint=%s reason=%s",
-        getattr(user, "pk", None),
-        endpoint,
-        reason,
-    )
+    if legacy_authz_mode() == "shadow":
+        logger.warning(
+            "outbound.authz.legacy_shadow_action_denied user_id=%s endpoint=%s reason=%s",
+            getattr(user, "pk", None),
+            endpoint,
+            reason,
+        )
+    raise PermissionDenied(reason)
 
 
 def can_use_task_actions(user) -> bool:
@@ -199,6 +237,7 @@ def get_assisted_order_for_task(task, *, for_update: bool = False):
 def can_self_review_assisted_task(user, task) -> bool:
     if not is_assisted_operator(user):
         return False
-    if str(getattr(user, "warehouse_id", "")) != str(getattr(task, "warehouse_id", "")):
+    scope = AccessScope.for_user(user)
+    if not scope.allows(warehouse_id=getattr(task, "warehouse_id", None)):
         return False
     return get_assisted_order_for_task(task) is not None

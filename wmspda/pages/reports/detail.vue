@@ -4,19 +4,19 @@
       <button class="back-btn" @click="goBack">返回</button>
       <view class="header-main">
         <view class="title">{{ titleText }}</view>
-        <view class="subtitle">{{ contextText }}</view>
+        <view class="subtitle">{{ contextText }} · 实绩截至 {{ dataAsOf }}</view>
       </view>
       <button class="refresh-btn" :disabled="loading" @click="loadData">刷新</button>
     </view>
 
     <view :class="['summary-grid', showInbound !== showOutbound ? 'single' : '']">
       <view v-if="showInbound" class="summary-card inbound">
-        <view class="card-label">收货数量</view>
+        <view class="card-label">实际入库（库存过账）</view>
         <view class="card-value">{{ summary.inbound_qty }}</view>
         <view class="card-meta">{{ summary.inbound_orders }} 单 / {{ summary.inbound_lines }} 行</view>
       </view>
       <view v-if="showOutbound" class="summary-card outbound">
-        <view class="card-label">出货数量</view>
+        <view class="card-label">实际出库（已发运）</view>
         <view class="card-value">{{ summary.outbound_qty }}</view>
         <view class="card-meta">{{ summary.outbound_orders }} 单 / {{ summary.outbound_lines }} 行</view>
       </view>
@@ -65,6 +65,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { api } from '../../utils/request'
 
 const loading = ref(false)
+const dataAsOfRaw = ref('')
 const params = ref({
   mode: 'month',
   month: '',
@@ -88,6 +89,9 @@ const summary = ref({
   item_count: 0,
 })
 const items = ref([])
+const dataAsOf = computed(() =>
+  dataAsOfRaw.value ? new Date(dataAsOfRaw.value).toLocaleString() : '-'
+)
 
 const metricText = computed(() => {
   if (params.value.metric === 'inbound') return '收货明细'
@@ -162,6 +166,7 @@ async function loadData() {
   loading.value = true
   try {
     const res = await api.pdaThroughputDetails(params.value)
+    dataAsOfRaw.value = res.data_as_of || ''
     summary.value = res.summary || summary.value
     period.value = res.period || period.value
     ownerOptions.value = res.owner_options || []

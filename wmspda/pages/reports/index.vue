@@ -3,7 +3,7 @@
     <view class="header">
       <view>
         <view class="title">仓库统计</view>
-        <view class="subtitle">{{ periodText }}</view>
+        <view class="subtitle">{{ periodText }} · 实绩截至 {{ dataAsOf }}</view>
       </view>
       <view class="header-actions">
         <button class="secondary-btn" @click="openPosReport">POS销售报表</button>
@@ -54,12 +54,12 @@
 
     <view class="summary-grid">
       <view class="summary-card inbound clickable" @click="openMetricDetail('inbound')">
-        <view class="card-label">收货数量</view>
+        <view class="card-label">实际入库（库存过账）</view>
         <view class="card-value">{{ summary.inbound_qty }}</view>
         <view class="card-meta">{{ summary.inbound_orders }} 单 / {{ summary.inbound_lines }} 行</view>
       </view>
       <view class="summary-card outbound clickable" @click="openMetricDetail('outbound')">
-        <view class="card-label">出货数量</view>
+        <view class="card-label">实际出库（已发运）</view>
         <view class="card-value">{{ summary.outbound_qty }}</view>
         <view class="card-meta">{{ summary.outbound_orders }} 单 / {{ summary.outbound_lines }} 行</view>
       </view>
@@ -127,6 +127,7 @@ const month = ref(fmtMonth(today))
 const startDate = ref(fmtDate(new Date(today.getFullYear(), today.getMonth(), 1)))
 const endDate = ref(fmtDate(today))
 const loading = ref(false)
+const dataAsOfRaw = ref('')
 const selectedOwnerId = ref('')
 const summary = ref({
   inbound_orders: 0,
@@ -140,6 +141,10 @@ const ownerOptions = ref([])
 const byOwner = ref([])
 const days = ref([])
 let loaded = false
+
+const dataAsOf = computed(() =>
+  dataAsOfRaw.value ? new Date(dataAsOfRaw.value).toLocaleString() : '-'
+)
 
 const ownerPickerOptions = computed(() => {
   const rows = ownerOptions.value.map((item) => ({
@@ -262,6 +267,7 @@ async function loadData() {
   loading.value = true
   try {
     const res = await api.pdaThroughputStats(buildParams())
+    dataAsOfRaw.value = res.data_as_of || ''
     summary.value = res.summary || summary.value
     ownerOptions.value = res.owner_options || []
     byOwner.value = res.by_owner || []

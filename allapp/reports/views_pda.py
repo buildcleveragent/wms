@@ -3,6 +3,9 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from allapp.accounts.access import AccessScope
+from allapp.accounts.audit import record_audit_event
+
 from .services_pda import (
     build_pda_throughput_detail_payload,
     build_pda_throughput_payload,
@@ -11,8 +14,22 @@ from .services_pda import (
 )
 
 
+class CanViewThroughput(permissions.BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser:
+            return True
+        scope = AccessScope.for_user(user)
+        return scope.is_valid and (
+            user.has_perm("reports.view_warehouse_operations")
+            or user.has_perm("reports.view_owner_operations")
+        )
+
+
 class PdaThroughputApi(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [CanViewThroughput]
 
     def _parse_int_param(self, request, name):
         raw = (request.query_params.get(name) or "").strip()
@@ -23,16 +40,10 @@ class PdaThroughputApi(APIView):
         return int(raw)
 
     def _validate_scope(self, request, *, owner_id=None, warehouse_id=None):
-        user_owner_id = getattr(request.user, "owner_id", None)
-        user_warehouse_id = getattr(request.user, "warehouse_id", None)
-        if (
-            user_owner_id
-            and owner_id
-            and owner_id != user_owner_id
-            and not user_warehouse_id
-        ):
+        scope = AccessScope.for_user(request.user)
+        if scope.owner_ids and owner_id and not scope.allows(owner_id=owner_id):
             raise PermissionDenied("No access to other owners.")
-        if user_warehouse_id and warehouse_id and warehouse_id != user_warehouse_id:
+        if scope.warehouse_ids and warehouse_id and not scope.allows(warehouse_id=warehouse_id):
             raise PermissionDenied("No access to other warehouses.")
 
     def get(self, request):
@@ -53,6 +64,14 @@ class PdaThroughputApi(APIView):
             end_date=end_date,
             owner_id=owner_id,
             warehouse_id=warehouse_id,
+        )
+        record_audit_event(
+            action="QUERY",
+            module="reports.pda.throughput",
+            request=request,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            metadata={"start_date": str(start_date), "end_date": str(end_date)},
         )
         return Response(payload)
 
@@ -78,5 +97,18 @@ class PdaThroughputDetailApi(PdaThroughputApi):
             metric=metric,
             owner_id=owner_id,
             warehouse_id=warehouse_id,
+        )
+        record_audit_event(
+            action="QUERY_DETAIL",
+            module="reports.pda.throughput",
+            request=request,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            metadata={
+                "start_date": str(start_date),
+                "end_date": str(end_date),
+                "metric": metric,
+                "rows": len(payload.get("items", [])),
+            },
         )
         return Response(payload)

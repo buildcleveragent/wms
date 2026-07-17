@@ -122,7 +122,10 @@ def _is_assisted_task(task) -> bool:
 
 
 def _task_action_allowed(user, task, *, endpoint: str, manager_allowed: bool = False) -> bool:
-    if _is_wh_operator(user) or (manager_allowed and _is_wh_manager(user)):
+    allowed = _is_wh_operator(user) or (manager_allowed and _is_wh_manager(user))
+    if allowed and strict_pick_queryset(
+        WmsTask.objects.filter(pk=task.pk), user
+    ).exists():
         return True
     if _is_assisted_task(task):
         return False

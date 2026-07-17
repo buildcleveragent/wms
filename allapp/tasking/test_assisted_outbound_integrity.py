@@ -7,6 +7,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase, override_settings
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Customer, Owner
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.outbound.models import OutboundOrder
@@ -32,7 +33,7 @@ from allapp.tasking.views import (
 class PickScanIntegrityTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(code="PICK-INT", name="Pick integrity")
-        self.warehouse = Warehouse.objects.create(code="PICK-INT-WH", name="Pick WH")
+        self.warehouse = Warehouse.objects.create(code="PICKWH", name="Pick WH")
         Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="PINT",
@@ -147,9 +148,9 @@ class PickScanIntegrityTests(TestCase):
 class TaskingRelatedScopeTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(code="TASK-SCOPE", name="Task scope")
-        self.warehouse = Warehouse.objects.create(code="TASK-SCOPE-WH", name="Task scope WH")
+        self.warehouse = Warehouse.objects.create(code="TSCOPEWH", name="Task scope WH")
         self.other_warehouse = Warehouse.objects.create(
-            code="TASK-SCOPE-OTHER", name="Task scope other"
+            code="TSCOPEOTH", name="Task scope other"
         )
         self.user = get_user_model().objects.create_user(
             username="task-scope-wh-user", warehouse=self.warehouse
@@ -161,6 +162,16 @@ class TaskingRelatedScopeTests(TestCase):
             username="task-scope-assisted", warehouse=self.warehouse
         )
         self.unbound_user = get_user_model().objects.create_user(username="task-scope-none")
+        UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.WAREHOUSE_MANAGER,
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=self.assisted_user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
         self.task = WmsTask.objects.create(
             owner=self.owner,
             warehouse=self.warehouse,
@@ -177,7 +188,7 @@ class TaskingRelatedScopeTests(TestCase):
         )
         self.line = WmsTaskLine.objects.create(task=self.task)
         self.other_line = WmsTaskLine.objects.create(task=self.other_task)
-        TaskAssignment.objects.create(task=self.task, assignee=self.user)
+        TaskAssignment.objects.create(task=self.task, assignee=self.assisted_user)
         TaskAssignment.objects.create(task=self.other_task, assignee=self.user)
         TaskStatusLog.objects.create(
             task=self.task,
@@ -219,6 +230,12 @@ class TaskingRelatedScopeTests(TestCase):
                     codename=f"view_{model._meta.model_name}",
                 )
             )
+        self.user.user_permissions.add(
+            Permission.objects.get(
+                content_type=ContentType.objects.get_for_model(WmsTask),
+                codename="taskconfirm_as_wh_manager",
+            )
+        )
         self.assisted_user.user_permissions.add(
             Permission.objects.get(
                 content_type__app_label="outbound",
@@ -231,10 +248,14 @@ class TaskingRelatedScopeTests(TestCase):
         )
         self.factory = APIRequestFactory()
 
-    def _ids(self, viewset, user):
+    def _list_response(self, viewset, user):
         request = self.factory.get("/api/tasking/resource/")
         force_authenticate(request, user=user)
-        response = viewset.as_view({"get": "list"})(request)
+        return viewset.as_view({"get": "list"})(request)
+
+    def _ids(self, viewset, user):
+        response = self._list_response(viewset, user)
+        self.assertEqual(response.status_code, 200, response.data)
         rows = (
             response.data.get("results", response.data)
             if isinstance(response.data, dict)
@@ -255,9 +276,13 @@ class TaskingRelatedScopeTests(TestCase):
             with self.subTest(viewset=viewset.__name__):
                 self.assertEqual(self._ids(viewset, self.user), {allowed_id})
                 self.assertEqual(
-                    self._ids(viewset, self.plain_warehouse_user), set()
+                    self._list_response(viewset, self.plain_warehouse_user).status_code,
+                    403,
                 )
-                self.assertEqual(self._ids(viewset, self.unbound_user), set())
+                self.assertEqual(
+                    self._list_response(viewset, self.unbound_user).status_code,
+                    403,
+                )
 
     @override_settings(OUTBOUND_LEGACY_AUTHZ_MODE="enforce")
     def test_complete_assisted_operator_without_view_permissions_sees_only_assisted_source(self):
@@ -268,24 +293,17 @@ class TaskingRelatedScopeTests(TestCase):
             (TaskStatusLogViewSet, TaskStatusLog.objects.get(task=self.task).id),
             (TaskScanLogViewSet, TaskScanLog.objects.get(task=self.task).id),
         )
-        with mock.patch(
-            "allapp.tasking.views.assisted_order_source_ids",
-            return_value=["99"],
-        ):
-            for viewset, allowed_id in cases:
-                with self.subTest(viewset=viewset.__name__):
-                    self.assertEqual(
-                        self._ids(viewset, self.assisted_user),
-                        {allowed_id},
-                    )
+        for viewset, allowed_id in cases:
+            with self.subTest(viewset=viewset.__name__):
+                self.assertEqual(
+                    self._ids(viewset, self.assisted_user),
+                    {allowed_id},
+                )
 
     @override_settings(OUTBOUND_LEGACY_AUTHZ_MODE="shadow")
-    def test_shadow_mode_logs_would_deny_but_keeps_legacy_rows(self):
-        with self.assertLogs("allapp.tasking.views", level="WARNING") as captured:
-            ids = self._ids(WmsTaskLineViewSet, self.unbound_user)
-
-        self.assertEqual(ids, {self.line.id, self.other_line.id})
-        self.assertTrue(any("tasking.authz.would_deny" in line for line in captured.output))
+    def test_shadow_mode_does_not_reenable_task_api_for_unscoped_user(self):
+        response = self._list_response(WmsTaskLineViewSet, self.unbound_user)
+        self.assertEqual(response.status_code, 403)
 
     @override_settings(OUTBOUND_LEGACY_AUTHZ_MODE="shadow")
     def test_shadow_mode_never_exposes_assisted_task_resources(self):
@@ -305,12 +323,14 @@ class TaskingRelatedScopeTests(TestCase):
             source_model="outboundorder", source_pk=str(assisted_order.pk)
         )
 
-        with self.assertLogs("allapp.tasking.views", level="WARNING"):
-            task_ids = self._ids(WmsTaskViewSet, self.unbound_user)
-            line_ids = self._ids(WmsTaskLineViewSet, self.unbound_user)
-
-        self.assertEqual(task_ids, {self.other_task.id})
-        self.assertEqual(line_ids, {self.other_line.id})
+        self.assertEqual(
+            self._list_response(WmsTaskViewSet, self.unbound_user).status_code,
+            403,
+        )
+        self.assertEqual(
+            self._list_response(WmsTaskLineViewSet, self.unbound_user).status_code,
+            403,
+        )
         self.assertEqual(
             self._ids(WmsTaskViewSet, self.assisted_user),
             {self.task.id},
@@ -370,3 +390,193 @@ class TaskingRelatedScopeTests(TestCase):
         self.assertFalse(
             WmsTask.objects.filter(task_no="TASK-SCOPE-CROSS-CREATE").exists()
         )
+
+
+@override_settings(OUTBOUND_LEGACY_AUTHZ_MODE="enforce")
+class TaskingRoleCapabilityApiTests(TestCase):
+    """Raw task APIs are for warehouse operations, not boss/owner roles."""
+
+    def setUp(self):
+        self.owner = Owner.objects.create(code="TASK-ROLE", name="Task role owner")
+        self.warehouse = Warehouse.objects.create(
+            code="TASKROLEWH", name="Task role warehouse"
+        )
+        self.manager = get_user_model().objects.create_user(
+            username="task-role-manager", password="x", warehouse=self.warehouse
+        )
+        self.operator = get_user_model().objects.create_user(
+            username="task-role-operator", password="x", warehouse=self.warehouse
+        )
+        self.other_operator = get_user_model().objects.create_user(
+            username="task-role-other-operator", password="x", warehouse=self.warehouse
+        )
+        self.boss = get_user_model().objects.create_user(
+            username="task-role-boss", password="x", warehouse=self.warehouse
+        )
+        self.owner_manager = get_user_model().objects.create_user(
+            username="task-role-owner-manager", password="x", owner=self.owner
+        )
+        UserRoleScope.objects.create(
+            user=self.manager,
+            role=UserRoleScope.Role.WAREHOUSE_MANAGER,
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=self.operator,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=self.other_operator,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=self.boss,
+            role=UserRoleScope.Role.WAREHOUSE_BOSS,
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=self.owner_manager,
+            role=UserRoleScope.Role.OWNER_MANAGER,
+            owner=self.owner,
+        )
+
+        task_ct = ContentType.objects.get_for_model(WmsTask)
+        self.manager.user_permissions.add(
+            Permission.objects.get(content_type=task_ct, codename="view_wmstask"),
+            Permission.objects.get(content_type=task_ct, codename="add_wmstask"),
+            Permission.objects.get(
+                content_type=task_ct, codename="taskconfirm_as_wh_manager"
+            ),
+        )
+        for user in (self.operator, self.other_operator):
+            user.user_permissions.add(
+                Permission.objects.get(
+                    content_type=task_ct, codename="claim_task_as_wh_operator"
+                )
+            )
+        # A plain model read grant must not turn a boss or owner manager into
+        # an operational task user.
+        self.boss.user_permissions.add(
+            Permission.objects.get(content_type=task_ct, codename="view_wmstask")
+        )
+        self.owner_manager.user_permissions.add(
+            Permission.objects.get(content_type=task_ct, codename="view_wmstask")
+        )
+
+        self.own_task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="TASK-ROLE-OWN",
+            task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.RELEASED,
+        )
+        self.other_task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="TASK-ROLE-OTHER",
+            task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.RELEASED,
+        )
+        self.pool_task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="TASK-ROLE-POOL",
+            task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.RELEASED,
+        )
+        TaskAssignment.objects.create(task=self.own_task, assignee=self.operator)
+        TaskAssignment.objects.create(task=self.other_task, assignee=self.other_operator)
+        self.factory = APIRequestFactory()
+
+    def _request(self, method, path, data=None, *, user):
+        request = getattr(self.factory, method)(path, data=data or {}, format="json")
+        force_authenticate(request, user=user)
+        return request
+
+    @staticmethod
+    def _rows(response):
+        return (
+            response.data.get("results", response.data)
+            if isinstance(response.data, dict)
+            else response.data
+        )
+
+    def test_boss_and_owner_manager_are_denied_raw_task_api_even_with_view_permission(self):
+        view = WmsTaskViewSet.as_view({"get": "list"})
+        for user in (self.boss, self.owner_manager):
+            with self.subTest(user=user.username):
+                response = view(self._request("get", "/api/tasking/tasks/", user=user))
+                self.assertEqual(response.status_code, 403)
+
+    def test_operator_sees_only_own_or_pool_tasks_and_cannot_operate_other_assignment(self):
+        list_view = WmsTaskViewSet.as_view({"get": "list"})
+        response = list_view(
+            self._request("get", "/api/tasking/tasks/", user=self.operator)
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {row["id"] for row in self._rows(response)},
+            {self.own_task.id, self.pool_task.id},
+        )
+
+        scan_view = WmsTaskViewSet.as_view({"post": "scan"})
+        other_response = scan_view(
+            self._request(
+                "post",
+                f"/api/tasking/tasks/{self.other_task.id}/scan/",
+                {"barcode": "blocked"},
+                user=self.operator,
+            ),
+            pk=self.other_task.id,
+        )
+        self.assertEqual(other_response.status_code, 404)
+
+        with mock.patch(
+            "allapp.tasking.views.task_svc.post_scan",
+            return_value={"detail": "scanned"},
+            create=True,
+        ):
+            own_response = scan_view(
+                self._request(
+                    "post",
+                    f"/api/tasking/tasks/{self.own_task.id}/scan/",
+                    {"barcode": "allowed"},
+                    user=self.operator,
+                ),
+                pk=self.own_task.id,
+            )
+        self.assertEqual(own_response.status_code, 200)
+
+    def test_operator_cannot_create_or_release_tasks_with_only_model_permissions(self):
+        task_ct = ContentType.objects.get_for_model(WmsTask)
+        self.operator.user_permissions.add(
+            Permission.objects.get(content_type=task_ct, codename="add_wmstask")
+        )
+        create_view = WmsTaskViewSet.as_view({"post": "create"})
+        create_response = create_view(
+            self._request(
+                "post",
+                "/api/tasking/tasks/",
+                {
+                    "owner": self.owner.id,
+                    "warehouse": self.warehouse.id,
+                    "task_no": "TASK-ROLE-OP-CREATE",
+                    "task_type": WmsTask.TaskType.RECEIVE,
+                },
+                user=self.operator,
+            )
+        )
+        self.assertEqual(create_response.status_code, 403)
+
+        release_view = WmsTaskViewSet.as_view({"post": "release"})
+        release_response = release_view(
+            self._request(
+                "post",
+                f"/api/tasking/tasks/{self.own_task.id}/release/",
+                user=self.operator,
+            ),
+            pk=self.own_task.id,
+        )
+        self.assertEqual(release_response.status_code, 403)
