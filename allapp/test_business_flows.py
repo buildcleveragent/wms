@@ -30,7 +30,13 @@ from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.outbound.services import allocate_inventory, promote_reserved_pick, unallocate_for_order
 from allapp.products.models import Product, ProductUom
 from allapp.tasking.services import _run_posting_handler, approve_task, scan_task
-from allapp.tasking.models import PutawayLineExtra, TaskAssignment, WmsTask, WmsTaskLine
+from allapp.tasking.models import (
+    PutawayLineExtra,
+    TaskAssignment,
+    TaskScanLog,
+    WmsTask,
+    WmsTaskLine,
+)
 from allapp.baseinfo.models import Supplier
 
 
@@ -277,6 +283,19 @@ class BusinessFlowTests(TestCase):
         inbound_order.wh_confirm(self.reviewer_user)
         return inbound_order
 
+    def assert_posting_batch_aligned(self, task):
+        """扫描打点与库存流水必须使用同一过账批次(handlers.py batch/now 统一后的全局保证)。"""
+        scan_batches = set(
+            TaskScanLog.objects.filter(task=task, posted_at__isnull=False)
+            .values_list("posting_batch", flat=True)
+        )
+        tx_batches = set(
+            InventoryTransaction.objects.filter(src_model="WmsTask", src_id=task.id)
+            .values_list("posting_batch", flat=True)
+        )
+        self.assertEqual(len(scan_batches), 1, scan_batches)
+        self.assertEqual(scan_batches, tx_batches)
+
     def complete_formal_receive(self, inbound_order, product, qty, *, operator=None):
         operator = operator or self.reviewer_user
         qty_decimal = Decimal(str(qty))
@@ -308,6 +327,7 @@ class BusinessFlowTests(TestCase):
         approve_task(receive_task.id, by_user=self.superuser, note="formal inbound approve")
         _run_posting_handler(receive_task.id, by_user=self.superuser, note="formal inbound post")
         receive_task.refresh_from_db()
+        self.assert_posting_batch_aligned(receive_task)
         return receive_task
 
     def complete_putaway(self, product, qty, *, to_location, operator=None):
@@ -357,6 +377,7 @@ class BusinessFlowTests(TestCase):
         approve_task(putaway_task.id, by_user=self.superuser, note="putaway approve")
         _run_posting_handler(putaway_task.id, by_user=self.superuser, note="putaway post")
         putaway_task.refresh_from_db()
+        self.assert_posting_batch_aligned(putaway_task)
         return putaway_task
 
     def test_flow_1_receive_without_order_inventory_visible(self):

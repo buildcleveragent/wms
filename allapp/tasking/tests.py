@@ -217,15 +217,15 @@ class TaskingWarehouseScopeTests(TestCase):
 @override_settings(OUTBOUND_LEGACY_AUTHZ_MODE="enforce")
 class TaskingApiContractTests(TestCase):
     def setUp(self):
-        self.owner = Owner.objects.create(name="Owner Tasking API", code="OWN-TASK-API")
+        self.owner = Owner.objects.create(name="Owner Tasking API", code="OWN-TAPI")
         self.other_owner = Owner.objects.create(
-            name="Owner Tasking API Other", code="OWN-TASK-API-O"
+            name="Owner Tasking API Other", code="OWN-TAPI-O"
         )
         self.warehouse = Warehouse.objects.create(
-            code="WH-TASK-API", name="Warehouse Tasking API"
+            code="WH-TAPI", name="Warehouse Tasking API"
         )
         self.other_warehouse = Warehouse.objects.create(
-            code="WH-TASK-API-O",
+            code="WH-TAPI-O",
             name="Warehouse Tasking API Other",
         )
         self.user = get_user_model().objects.create_user(

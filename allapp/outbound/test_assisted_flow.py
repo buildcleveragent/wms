@@ -39,12 +39,12 @@ class AssistedOutboundFlowTests(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
         self.owner = Owner.objects.create(
-            code="ASSIST-FLOW-OWNER",
+            code="AFW-OWN",
             name="Assisted flow owner",
             allow_warehouse_assisted_outbound=True,
         )
         self.warehouse = Warehouse.objects.create(
-            code="ASSIST-FLOW-WH",
+            code="AFW-WH",
             name="Assisted flow warehouse",
         )
         self.subwarehouse = Subwarehouse.objects.create(
@@ -155,7 +155,7 @@ class AssistedOutboundFlowTests(TestCase):
         self.assertEqual(pick_task_print(own_print_request, task.id).status_code, 200)
 
         other_warehouse = Warehouse.objects.create(
-            code="ASSIST-FLOW-PRINT-OTHER", name="Print other warehouse"
+            code="AFW-PRT-O", name="Print other warehouse"
         )
         cross_warehouse_user = get_user_model().objects.create_user(
             username="assisted-flow-print-cross", warehouse=other_warehouse
@@ -452,7 +452,7 @@ class AssistedOutboundFlowTests(TestCase):
 
     def test_rejects_cross_owner_customer_and_cash_without_recipient_fields(self):
         other_owner = Owner.objects.create(
-            code="ASSIST-FLOW-OTHER",
+            code="AFW-OTH",
             name="Other owner",
             allow_warehouse_assisted_outbound=True,
         )

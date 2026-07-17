@@ -8,7 +8,7 @@ from django.apps import apps
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from openpyxl import load_workbook
@@ -16,7 +16,8 @@ from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from allapp.baseinfo.models import Customer, Owner
-from allapp.billing.models import BillingEvent
+from allapp.billing.enums import CalcMethod, ChargeType
+from allapp.billing.models import BillingAccrual, BillingEvent, BillingRule
 from allapp.core.choices import InvTxType, ZoneType
 from allapp.inventory.models import (
     InventoryDetail,
@@ -719,6 +720,97 @@ class PosApiTests(TestCase):
             ).available_qty,
             Decimal("9.0000"),
         )
+
+    def test_checkout_accrues_pick_and_order_processing_fees(self):
+        BillingRule.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.PICK,
+            calc_method=CalcMethod.PER_QTY_ABSDEL,
+            unit_price=Decimal("2.0000"),
+        )
+        BillingRule.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("5.0000"),
+        )
+
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-BILLING-ACCRUAL",
+                "payment": self.payment("18.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "2.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        sale = PosSale.objects.get(src_bill_no="POS-BILLING-ACCRUAL")
+        task = WmsTask.objects.get(source_app="pos", ref_no=sale.sale_no)
+
+        pick_events = BillingEvent.objects.filter(
+            task=task, charge_type=ChargeType.PICK
+        )
+        self.assertEqual(pick_events.count(), 1)
+        self.assertEqual(pick_events.get().quantity, Decimal("2.0000"))
+        pick_accruals = BillingAccrual.objects.filter(
+            owner=self.owner, warehouse=self.warehouse, charge_type=ChargeType.PICK
+        )
+        self.assertEqual(pick_accruals.count(), 1)
+        self.assertEqual(pick_accruals.get().amount, Decimal("4.00"))
+
+        order = OutboundOrder.objects.get(src_bill_no="POS-BILLING-ACCRUAL")
+        order_events = BillingEvent.objects.filter(
+            owner=self.owner, charge_type=ChargeType.DISPATCH
+        )
+        self.assertEqual(order_events.count(), 1)
+        order_accruals = BillingAccrual.objects.filter(
+            owner=self.owner, warehouse=self.warehouse, charge_type=ChargeType.DISPATCH
+        )
+        self.assertEqual(order_accruals.count(), 1)
+        self.assertEqual(order_accruals.get().amount, Decimal("5.00"))
+
+        journal = PostingJournal.objects.get(
+            src_model="WmsTask", src_id=task.id, tx_type="POST"
+        )
+        self.assertNotIn("BILLING_FAILED", journal.message or "")
+        self.assertIsNotNone(order.id)
+
+    def test_pos_cashier_cannot_use_public_posting_service(self):
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-PERM-CHECK",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        sale = PosSale.objects.get(src_bill_no="POS-PERM-CHECK")
+        task = WmsTask.objects.get(source_app="pos", ref_no=sale.sale_no)
+        self.assertEqual(task.posted_by_id, self.user.id)
+        self.assertFalse(self.user.has_perm("tasking.taskconfirm_as_wh_manager"))
+
+        from allapp.tasking.services_posting import post_task as wh_manager_post_task
+
+        with self.assertRaises(PermissionDenied):
+            wh_manager_post_task(task.id, by_user=self.user)
 
     def test_checkout_posts_serial_from_original_inventory_layer(self):
         serial_product = Product.objects.create(
@@ -2641,6 +2733,67 @@ class PosApiTests(TestCase):
         self.assertEqual(receive_tx.src_line_id, first_detail.id)
         self.assertEqual(receive_tx.qty_delta, Decimal("1.0000"))
 
+    def test_two_partial_returns_exhaust_sale_then_third_is_rejected(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-PARTIAL-TWICE",
+                "payment": self.payment("18.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "2.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale = PosSale.objects.get(src_bill_no="POS-PARTIAL-TWICE")
+        sale_line = PosSaleLine.objects.get(sale=sale)
+        detail = InventoryDetail.objects.get(owner=self.owner, product=self.product)
+        self.assertEqual(detail.onhand_qty, Decimal("8.0000"))
+
+        for index in (1, 2):
+            response = self.client.post(
+                "/api/pos/returns/",
+                {
+                    "sale_id": sale.id,
+                    "reason": f"partial return {index}",
+                    "lines": [{"sale_line_id": sale_line.id, "qty": "1.000"}],
+                    "refunds": [{"method": "CASH", "amount": "9.00"}],
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, 201, response.data)
+            detail.refresh_from_db()
+            self.assertEqual(detail.onhand_qty, Decimal(f"{8 + index}.0000"))
+
+        restored = InventoryTransaction.objects.filter(
+            src_model="PosReturnLine",
+            tx_type=InvTxType.RECEIVE,
+            src_line_id=detail.id,
+        )
+        self.assertEqual(restored.count(), 2)
+        self.assertEqual(
+            sum((tx.qty_delta for tx in restored), Decimal("0")), Decimal("2.0000")
+        )
+
+        third = self.client.post(
+            "/api/pos/returns/",
+            {
+                "sale_id": sale.id,
+                "reason": "over return",
+                "lines": [{"sale_line_id": sale_line.id, "qty": "1.000"}],
+                "refunds": [{"method": "CASH", "amount": "9.00"}],
+            },
+            format="json",
+        )
+        self.assertEqual(third.status_code, 400)
+        detail.refresh_from_db()
+        self.assertEqual(detail.onhand_qty, Decimal("10.0000"))
+
     def test_return_never_treats_task_line_id_as_inventory_detail_id(self):
         collision_product = Product.objects.create(
             owner=self.owner,
@@ -3093,6 +3246,41 @@ class PosApiTests(TestCase):
             PosSale.objects.filter(src_bill_no="POS-RECEIPT-ZONE").exists()
         )
 
+        matching_zone = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-RECEIPT-ZONE-OK",
+                "stock_zone_type": ZoneType.PICK,
+                "payment": self.payment("5.00"),
+                "items": [
+                    {
+                        "product_id": zone_product.id,
+                        "qty": "1.000",
+                        "price": "5.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(matching_zone.status_code, 201, matching_zone.data)
+        sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-ZONE-OK")
+        task = WmsTask.objects.get(source_app="pos", ref_no=sale.sale_no)
+        task_line = WmsTaskLine.objects.get(task=task)
+        zone_detail = InventoryDetail.objects.get(
+            owner=self.owner, product=zone_product
+        )
+        self.assertEqual(
+            task_line.plan_meta["source_inventory_detail_id"], zone_detail.id
+        )
+        self.assertEqual(task_line.plan_meta["zone_type"], ZoneType.PICK)
+        issue_tx = InventoryTransaction.objects.get(
+            src_model="WmsTask",
+            src_id=task.id,
+            src_line_id=task_line.id,
+            tx_type=InvTxType.ISSUE,
+        )
+        self.assertEqual(issue_tx.zone_type, ZoneType.PICK)
+
     def test_checkout_fefo_consumes_expiring_stock_before_no_expiry_stock(self):
         fefo_product = Product.objects.create(
             owner=self.owner,
@@ -3151,6 +3339,20 @@ class PosApiTests(TestCase):
         no_expiry_detail.refresh_from_db()
         self.assertEqual(expiring_detail.available_qty, Decimal("1.0000"))
         self.assertEqual(no_expiry_detail.available_qty, Decimal("2.0000"))
+        sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-FEFO")
+        task = WmsTask.objects.get(source_app="pos", ref_no=sale.sale_no)
+        task_line = WmsTaskLine.objects.get(task=task)
+        self.assertEqual(
+            task_line.plan_meta["source_inventory_detail_id"], expiring_detail.id
+        )
+        self.assertEqual(task_line.from_location_id, expiring_detail.location_id)
+        issue_tx = InventoryTransaction.objects.get(
+            src_model="WmsTask",
+            src_id=task.id,
+            src_line_id=task_line.id,
+            tx_type=InvTxType.ISSUE,
+        )
+        self.assertEqual(issue_tx.expiry_date, datetime.date(2026, 1, 1))
 
     def test_sales_list_filters_by_user_warehouse_and_search(self):
         response = self.client.post(

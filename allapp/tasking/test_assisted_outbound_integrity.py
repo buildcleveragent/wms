@@ -32,7 +32,7 @@ from allapp.tasking.views import (
 class PickScanIntegrityTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(code="PICK-INT", name="Pick integrity")
-        self.warehouse = Warehouse.objects.create(code="PICK-INT-WH", name="Pick WH")
+        self.warehouse = Warehouse.objects.create(code="PINT-WH", name="Pick WH")
         Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="PINT",
@@ -147,9 +147,9 @@ class PickScanIntegrityTests(TestCase):
 class TaskingRelatedScopeTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(code="TASK-SCOPE", name="Task scope")
-        self.warehouse = Warehouse.objects.create(code="TASK-SCOPE-WH", name="Task scope WH")
+        self.warehouse = Warehouse.objects.create(code="TSCOPE-WH", name="Task scope WH")
         self.other_warehouse = Warehouse.objects.create(
-            code="TASK-SCOPE-OTHER", name="Task scope other"
+            code="TSCOPE-O", name="Task scope other"
         )
         self.user = get_user_model().objects.create_user(
             username="task-scope-wh-user", warehouse=self.warehouse
