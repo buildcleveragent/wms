@@ -5,21 +5,20 @@ from collections import defaultdict
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from allapp.core.choices import InvTxType
-from allapp.inventory.models import InventoryTransaction
+from allapp.inventory.models import InventoryDetail, InventoryTransaction
 
+from .inventory_trace import resolve_sale_issue_layers
 from .models import (
     PosPayment,
-    PosPaymentLine,
     PosRefund,
     PosReturn,
     PosReturnLine,
     PosSale,
     PosSaleLine,
-    PosSaleOrder,
 )
 
 ZERO = Decimal("0")
@@ -77,10 +76,21 @@ class PosAccuracyCollector:
         self.issue_limit = issue_limit
         self.issues = []
         self.issue_count = 0
+        self.error_count = 0
+        self.warning_count = 0
         self.checks = {}
 
     def register(self, code, label):
-        self.checks.setdefault(code, {"code": code, "label": label, "issue_count": 0})
+        self.checks.setdefault(
+            code,
+            {
+                "code": code,
+                "label": label,
+                "issue_count": 0,
+                "error_count": 0,
+                "warning_count": 0,
+            },
+        )
 
     def add_issue(
         self,
@@ -98,6 +108,12 @@ class PosAccuracyCollector:
         self.register(code, label)
         self.issue_count += 1
         self.checks[code]["issue_count"] += 1
+        if severity == "warning":
+            self.warning_count += 1
+            self.checks[code]["warning_count"] += 1
+        else:
+            self.error_count += 1
+            self.checks[code]["error_count"] += 1
         if len(self.issues) >= self.issue_limit:
             return
         self.issues.append(
@@ -117,10 +133,15 @@ class PosAccuracyCollector:
     def rows(self):
         rows = []
         for row in self.checks.values():
+            status = "passed"
+            if row["error_count"]:
+                status = "failed"
+            elif row["warning_count"]:
+                status = "warning"
             rows.append(
                 {
                     **row,
-                    "status": "failed" if row["issue_count"] else "passed",
+                    "status": status,
                 }
             )
         return rows
@@ -425,40 +446,96 @@ def _check_inventory(sales, returns, collector):
     code = "inventory_flow"
     label = "库存流水"
     collector.register(code, label)
-    for line in PosSaleLine.objects.filter(sale__in=sales).select_related("sale"):
-        sale = line.sale
+    for sale in sales:
         sale_no = _sale_no(sale)
-        issued_qty = _tx_qty(
-            src_model="PosSaleLine", src_id=line.id, tx_type=InvTxType.ISSUE
+        sale_lines = list(
+            sale.lines.select_related(
+                "sale", "product", "outbound_order_line__order"
+            ).order_by("id")
         )
-        if issued_qty != -_qty(line.qty):
+        resolved = None
+        try:
+            resolved = resolve_sale_issue_layers(sale_lines)
+        except ValidationError as exc:
             collector.add_issue(
                 code=code,
                 label=label,
-                object_type="PosSaleLine",
-                object_id=line.id,
+                object_type="PosSale",
+                object_id=sale.id,
                 object_no=sale_no,
-                message="销售库存扣减数量与销售明细数量不一致。",
-                expected=-_qty(line.qty),
-                actual=issued_qty,
+                message=f"销售出库流水无法按新旧来源规则解析：{'; '.join(exc.messages)}",
             )
-        void_restore_qty = _tx_qty(
-            src_model="PosSaleLine", src_id=line.id, tx_type=InvTxType.RECEIVE
-        )
-        expected_restore = (
-            _qty(line.qty) if sale.status == PosSale.Status.VOIDED else ZERO
-        )
-        if void_restore_qty != expected_restore:
-            collector.add_issue(
-                code=code,
-                label=label,
-                object_type="PosSaleLine",
-                object_id=line.id,
-                object_no=sale_no,
-                message="销售作废回补库存数量不正确。",
-                expected=expected_restore,
-                actual=void_restore_qty,
+
+        source_details = {}
+        if resolved is not None:
+            source_detail_ids = {
+                layer.inventory_detail_id
+                for layers in resolved.values()
+                for layer in layers
+            }
+            source_details = InventoryDetail.all_objects.in_bulk(source_detail_ids)
+
+        for line in sale_lines:
+            if resolved is not None:
+                issued_qty = -_qty(
+                    sum((layer.qty for layer in resolved[line.id]), ZERO)
+                )
+                if issued_qty != -_qty(line.qty):
+                    collector.add_issue(
+                        code=code,
+                        label=label,
+                        object_type="PosSaleLine",
+                        object_id=line.id,
+                        object_no=sale_no,
+                        message="销售库存扣减数量与销售明细数量不一致。",
+                        expected=-_qty(line.qty),
+                        actual=issued_qty,
+                    )
+                for detail_id in {
+                    layer.inventory_detail_id for layer in resolved[line.id]
+                }:
+                    detail = source_details.get(detail_id)
+                    if detail is None or detail.is_deleted:
+                        collector.add_issue(
+                            code=code,
+                            label=label,
+                            object_type="InventoryDetail",
+                            object_id=detail_id,
+                            object_no=sale_no,
+                            message="销售出库指向的原库存层不存在或已软删除。",
+                            expected=detail_id,
+                            actual="missing",
+                        )
+                    elif (
+                        detail.owner_id != line.owner_id
+                        or detail.product_id != line.product_id
+                        or detail.warehouse_id != sale.warehouse_id
+                    ):
+                        collector.add_issue(
+                            code=code,
+                            label=label,
+                            object_type="InventoryDetail",
+                            object_id=detail_id,
+                            object_no=sale_no,
+                            message="销售出库指向的原库存层与销售商品归属不一致。",
+                        )
+            void_restore_qty = _tx_qty(
+                src_model="PosSaleLine", src_id=line.id, tx_type=InvTxType.RECEIVE
             )
+            expected_restore = (
+                _qty(line.qty) if sale.status == PosSale.Status.VOIDED else ZERO
+            )
+            if void_restore_qty != expected_restore:
+                collector.add_issue(
+                    code=code,
+                    label=label,
+                    object_type="PosSaleLine",
+                    object_id=line.id,
+                    object_no=sale_no,
+                    message="销售作废回补库存数量不正确。",
+                    expected=expected_restore,
+                    actual=void_restore_qty,
+                )
 
     for line in PosReturnLine.objects.filter(return_order__in=returns).select_related(
         "return_order"
@@ -478,6 +555,57 @@ def _check_inventory(sales, returns, collector):
                 expected=_qty(line.qty),
                 actual=restored_qty,
             )
+
+    inactive_code = "inactive_restore_layer"
+    inactive_label = "停用库存层回补"
+    collector.register(inactive_code, inactive_label)
+    sale_line_ids = list(
+        PosSaleLine.objects.filter(sale__in=sales).values_list("id", flat=True)
+    )
+    return_line_ids = list(
+        PosReturnLine.objects.filter(return_order__in=returns).values_list(
+            "id", flat=True
+        )
+    )
+    restore_filter = Q()
+    if sale_line_ids:
+        restore_filter |= Q(src_model="PosSaleLine", src_id__in=sale_line_ids)
+    if return_line_ids:
+        restore_filter |= Q(src_model="PosReturnLine", src_id__in=return_line_ids)
+    if restore_filter:
+        restore_txs = list(
+            InventoryTransaction.objects.filter(
+                restore_filter,
+                tx_type=InvTxType.RECEIVE,
+            ).order_by("id")
+        )
+        detail_ids = {tx.src_line_id for tx in restore_txs if tx.src_line_id}
+        details = InventoryDetail.all_objects.in_bulk(detail_ids)
+        for tx in restore_txs:
+            detail = details.get(tx.src_line_id)
+            if detail is None or detail.is_deleted:
+                collector.add_issue(
+                    code=code,
+                    label=label,
+                    object_type="InventoryTransaction",
+                    object_id=tx.id,
+                    object_no=tx.src_no,
+                    message="回补流水指向的原库存层不存在或已软删除。",
+                    expected=tx.src_line_id,
+                    actual="missing",
+                )
+            elif not detail.is_active:
+                collector.add_issue(
+                    code=inactive_code,
+                    label=inactive_label,
+                    object_type="InventoryDetail",
+                    object_id=detail.id,
+                    object_no=tx.src_no,
+                    message="销售退货或作废已回补到停用的原库存层。",
+                    expected="is_active=True",
+                    actual="is_active=False",
+                    severity="warning",
+                )
 
 
 def _check_returns(returns, collector):
@@ -595,7 +723,7 @@ def reconcile_pos_accuracy(*, user, params):
     _check_inventory(sales, returns, collector)
     _check_returns(returns, collector)
 
-    status = "passed" if collector.issue_count == 0 else "failed"
+    status = "passed" if collector.error_count == 0 else "failed"
     return {
         "status": status,
         "checked_at": timezone.now().isoformat(),
@@ -609,6 +737,8 @@ def reconcile_pos_accuracy(*, user, params):
             "return_count": len(returns),
             "check_count": len(collector.checks),
             "issue_count": collector.issue_count,
+            "error_count": collector.error_count,
+            "warning_count": collector.warning_count,
             "shown_issue_count": len(collector.issues),
             "truncated": collector.issue_count > len(collector.issues),
         },

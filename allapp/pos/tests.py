@@ -2,11 +2,13 @@ import datetime
 import importlib
 import io
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.apps import apps
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from openpyxl import load_workbook
@@ -14,11 +16,13 @@ from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from allapp.baseinfo.models import Customer, Owner
+from allapp.billing.models import BillingEvent
 from allapp.core.choices import InvTxType, ZoneType
 from allapp.inventory.models import (
     InventoryDetail,
     InventorySummary,
     InventoryTransaction,
+    PostingJournal,
 )
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
@@ -41,6 +45,7 @@ from allapp.pos.models import (
 )
 from allapp.pos.serializers import SafeDateTimeField
 from allapp.products.models import Product, ProductPackage, ProductUom
+from allapp.tasking.models import TaskScanLog, TaskStatusLog, WmsTask, WmsTaskLine
 
 
 class PosAccuracyUtilityTests(SimpleTestCase):
@@ -207,6 +212,44 @@ class PosApiTests(TestCase):
 
     def payment(self, amount, method="CASH"):
         return {"method": method, "amount_received": str(amount)}
+
+    def create_legacy_issue_for_sale_line(self, sale_line, *, remove_task_issue=False):
+        task_line = WmsTaskLine.objects.get(
+            task__source_app="pos",
+            task__ref_no=sale_line.sale.sale_no,
+            plan_meta__pos_sale_line_id=sale_line.id,
+        )
+        task_issue = InventoryTransaction.objects.get(
+            src_model="WmsTask",
+            src_id=task_line.task_id,
+            src_line_id=task_line.id,
+            tx_type=InvTxType.ISSUE,
+        )
+        detail_id = task_line.plan_meta["source_inventory_detail_id"]
+        legacy = InventoryTransaction.objects.create(
+            tx_type=InvTxType.ISSUE,
+            owner_id=task_issue.owner_id,
+            product_id=task_issue.product_id,
+            warehouse_id=task_issue.warehouse_id,
+            location_id=task_issue.location_id,
+            subwarehouse_id=task_issue.subwarehouse_id,
+            zone_type=task_issue.zone_type,
+            batch_no=task_issue.batch_no,
+            production_date=task_issue.production_date,
+            expiry_date=task_issue.expiry_date,
+            serial_no=task_issue.serial_no,
+            qty_delta=task_issue.qty_delta,
+            src_model="PosSaleLine",
+            src_id=sale_line.id,
+            src_line_id=detail_id,
+            src_no=sale_line.sale.sale_no,
+            memo="POS_SALE",
+            posted_at=task_issue.posted_at,
+            posting_batch=sale_line.sale.sale_no[:40],
+        )
+        if remove_task_issue:
+            task_issue.delete()
+        return legacy, detail_id
 
     def test_pos_customer_api_creates_free_customer_without_baseinfo_customer(self):
         baseinfo_count = Customer.objects.count()
@@ -507,9 +550,46 @@ class PosApiTests(TestCase):
         self.assertEqual(
             PosSaleLine.objects.get(sale=sale).outbound_order_line_id, line.id
         )
-        self.assertEqual(
-            InventoryTransaction.objects.get(src_model="PosSaleLine").tx_type,
-            InvTxType.ISSUE,
+        task = WmsTask.objects.get(
+            source_app="pos",
+            source_model="outboundorder",
+            source_pk=str(order.id),
+        )
+        self.assertEqual(task.task_type, WmsTask.TaskType.PICK)
+        self.assertEqual(task.status, WmsTask.Status.COMPLETED)
+        self.assertEqual(task.review_status, WmsTask.ReviewStatus.APPROVED)
+        self.assertEqual(task.posting_status, WmsTask.PostingStatus.POSTED)
+        self.assertEqual(task.posted_by_id, self.user.id)
+        task_line = WmsTaskLine.objects.get(task=task)
+        self.assertEqual(task_line.src_model, "OutboundOrderLine")
+        self.assertEqual(task_line.src_id, line.id)
+        self.assertEqual(task_line.plan_meta["pos_sale_id"], sale.id)
+        scan = TaskScanLog.objects.get(task_line=task_line)
+        issue_tx = InventoryTransaction.objects.get(
+            src_model="WmsTask",
+            src_id=task.id,
+            src_line_id=task_line.id,
+            tx_type=InvTxType.ISSUE,
+        )
+        journal = PostingJournal.objects.get(
+            src_model="WmsTask", src_id=task.id, tx_type="POST"
+        )
+        self.assertEqual(scan.posting_journal_id, journal.id)
+        self.assertIsNotNone(scan.posted_at)
+        self.assertEqual(scan.posting_batch, issue_tx.posting_batch)
+        self.assertEqual(issue_tx.src_no, sale.sale_no)
+        self.assertEqual(issue_tx.memo, "POS_SALE")
+        self.assertTrue(
+            TaskStatusLog.objects.filter(
+                task=task,
+                old_status=WmsTask.Status.RESERVED,
+                new_status=WmsTask.Status.COMPLETED,
+            ).exists()
+        )
+        self.assertFalse(
+            InventoryTransaction.objects.filter(
+                src_model="PosSaleLine", tx_type=InvTxType.ISSUE
+            ).exists()
         )
 
     def test_pos_accuracy_api_reports_pass_for_consistent_sale(self):
@@ -541,6 +621,304 @@ class PosApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["status"], "passed")
         self.assertEqual(response.data["summary"]["issue_count"], 0)
+
+    def test_checkout_keeps_repeated_sale_lines_separate_in_pos_pick(self):
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-REPEATED-LINES",
+                "payment": self.payment("18.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    },
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    },
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        sale = PosSale.objects.get(src_bill_no="POS-REPEATED-LINES")
+        task = WmsTask.objects.get(source_app="pos", ref_no=sale.sale_no)
+        task_lines = list(WmsTaskLine.objects.filter(task=task).order_by("id"))
+        issues = list(
+            InventoryTransaction.objects.filter(
+                src_model="WmsTask",
+                src_id=task.id,
+                tx_type=InvTxType.ISSUE,
+            ).order_by("src_line_id")
+        )
+
+        self.assertEqual(len(task_lines), 2)
+        self.assertEqual(TaskScanLog.objects.filter(task=task).count(), 2)
+        self.assertEqual(len(issues), 2)
+        self.assertEqual(
+            {issue.src_line_id for issue in issues},
+            {line.id for line in task_lines},
+        )
+        self.assertEqual(
+            {line.plan_meta["source_inventory_detail_id"] for line in task_lines},
+            {InventoryDetail.objects.get(owner=self.owner, product=self.product).id},
+        )
+        self.assertFalse(
+            InventoryTransaction.objects.filter(
+                src_model="PosSaleLine", tx_type=InvTxType.ISSUE
+            ).exists()
+        )
+
+    def test_checkout_survives_billing_integrity_error_inside_savepoint(self):
+        def create_real_unique_conflict(*args, **kwargs):
+            sale = PosSale.objects.get(src_bill_no="POS-BILLING-DB-ERROR")
+            PosSale.objects.create(
+                sale_no=sale.sale_no,
+                warehouse=sale.warehouse,
+                total_amount=Decimal("0.00"),
+            )
+
+        with patch.object(
+            BillingEvent.objects,
+            "get_or_create",
+            side_effect=create_real_unique_conflict,
+        ):
+            response = self.client.post(
+                "/api/pos/checkout/",
+                {
+                    "src_bill_no": "POS-BILLING-DB-ERROR",
+                    "payment": self.payment("9.00"),
+                    "items": [
+                        {
+                            "product_id": self.product.id,
+                            "qty": "1.000",
+                            "price": "9.0000",
+                        }
+                    ],
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        sale = PosSale.objects.get(src_bill_no="POS-BILLING-DB-ERROR")
+        self.assertTrue(PosPayment.objects.filter(sale=sale).exists())
+        task = WmsTask.objects.get(source_app="pos", ref_no=sale.sale_no)
+        self.assertEqual(task.posting_status, WmsTask.PostingStatus.POSTED)
+        journal = PostingJournal.objects.get(
+            src_model="WmsTask", src_id=task.id, tx_type="POST"
+        )
+        self.assertIn("BILLING_FAILED", journal.message)
+        self.assertEqual(BillingEvent.objects.filter(task=task).count(), 0)
+        self.assertEqual(
+            InventoryDetail.objects.get(
+                owner=self.owner, product=self.product
+            ).available_qty,
+            Decimal("9.0000"),
+        )
+
+    def test_checkout_posts_serial_from_original_inventory_layer(self):
+        serial_product = Product.objects.create(
+            owner=self.owner,
+            code="POS-SERIAL-SKU",
+            name="POS Serial Product",
+            sku="POS-SERIAL-SKU",
+            unit_barcode="POS-SERIAL-BAR",
+            base_uom=self.uom,
+            price=Decimal("30.00"),
+            min_price=Decimal("1.00"),
+            serial_control=True,
+        )
+        source_detail = InventoryDetail.objects.create(
+            owner=self.owner,
+            product=serial_product,
+            warehouse=self.warehouse,
+            location=self.location,
+            serial_no="POS-SN-0001",
+            onhand_qty=Decimal("1.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+        )
+
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-SERIAL-SALE",
+                "payment": self.payment("30.00"),
+                "items": [
+                    {
+                        "product_id": serial_product.id,
+                        "qty": "1.000",
+                        "price": "30.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        sale = PosSale.objects.get(src_bill_no="POS-SERIAL-SALE")
+        task_line = WmsTaskLine.objects.get(
+            task__source_app="pos", task__ref_no=sale.sale_no
+        )
+        scan = TaskScanLog.objects.get(task_line=task_line)
+        issue = InventoryTransaction.objects.get(
+            src_model="WmsTask",
+            src_line_id=task_line.id,
+            tx_type=InvTxType.ISSUE,
+        )
+        self.assertEqual(
+            task_line.plan_meta["source_inventory_detail_id"], source_detail.id
+        )
+        self.assertEqual(scan.barcode, "POS-SN-0001")
+        self.assertIsNone(scan.label_key)
+        self.assertEqual(issue.serial_no, "POS-SN-0001")
+
+    def test_pos_pick_releases_only_its_own_reservation(self):
+        detail = InventoryDetail.objects.get(owner=self.owner, product=self.product)
+        detail.allocated_qty = Decimal("3.0000")
+        detail.save()
+
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-KEEP-OTHER-ALLOCATION",
+                "payment": self.payment("18.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "2.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        detail.refresh_from_db()
+        summary = InventorySummary.objects.get(owner=self.owner, product=self.product)
+        self.assertEqual(detail.onhand_qty, Decimal("8.0000"))
+        self.assertEqual(detail.allocated_qty, Decimal("3.0000"))
+        self.assertEqual(detail.available_qty, Decimal("5.0000"))
+        self.assertEqual(summary.allocated_qty, Decimal("3.0000"))
+        self.assertEqual(summary.available_qty, Decimal("5.0000"))
+
+    def test_posting_failure_rolls_back_sale_task_scan_and_reservation(self):
+        with patch(
+            "allapp.pos.services.execute_posting_handler",
+            side_effect=ValidationError("forced POS posting failure"),
+        ):
+            response = self.client.post(
+                "/api/pos/checkout/",
+                {
+                    "src_bill_no": "POS-POSTING-ROLLBACK",
+                    "payment": self.payment("9.00"),
+                    "items": [
+                        {
+                            "product_id": self.product.id,
+                            "qty": "1.000",
+                            "price": "9.0000",
+                        }
+                    ],
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertFalse(
+            PosSale.objects.filter(src_bill_no="POS-POSTING-ROLLBACK").exists()
+        )
+        self.assertFalse(
+            OutboundOrder.objects.filter(src_bill_no="POS-POSTING-ROLLBACK").exists()
+        )
+        self.assertFalse(WmsTask.objects.filter(source_app="pos").exists())
+        self.assertFalse(TaskScanLog.objects.exists())
+        self.assertFalse(InventoryTransaction.objects.exists())
+        detail = InventoryDetail.objects.get(owner=self.owner, product=self.product)
+        self.assertEqual(detail.onhand_qty, Decimal("10.0000"))
+        self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
+
+    def test_pos_pick_with_invalid_source_model_never_falls_back_to_generic_posting(self):
+        from allapp.tasking.posting_exec import execute_posting_handler
+
+        def corrupt_source_then_post(task, **kwargs):
+            WmsTask.objects.filter(pk=task.id).update(source_model="broken")
+            task.source_model = "broken"
+            return execute_posting_handler(task, **kwargs)
+
+        with patch(
+            "allapp.pos.services.execute_posting_handler",
+            side_effect=corrupt_source_then_post,
+        ):
+            response = self.client.post(
+                "/api/pos/checkout/",
+                {
+                    "src_bill_no": "POS-INVALID-TASK-SOURCE",
+                    "payment": self.payment("9.00"),
+                    "items": [
+                        {
+                            "product_id": self.product.id,
+                            "qty": "1.000",
+                            "price": "9.0000",
+                        }
+                    ],
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("来源必须为 OutboundOrder", str(response.data))
+        self.assertFalse(
+            PosSale.objects.filter(src_bill_no="POS-INVALID-TASK-SOURCE").exists()
+        )
+        self.assertFalse(WmsTask.objects.filter(source_app="pos").exists())
+        self.assertFalse(InventoryTransaction.objects.exists())
+        detail = InventoryDetail.objects.get(owner=self.owner, product=self.product)
+        self.assertEqual(detail.onhand_qty, Decimal("10.0000"))
+        self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
+
+    def test_payment_failure_rolls_back_already_posted_pos_pick(self):
+        with patch.object(
+            PosPayment.objects,
+            "create",
+            side_effect=RuntimeError("forced POS payment failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "forced POS payment failure"):
+                self.client.post(
+                    "/api/pos/checkout/",
+                    {
+                        "src_bill_no": "POS-PAYMENT-ROLLBACK",
+                        "payment": self.payment("9.00"),
+                        "items": [
+                            {
+                                "product_id": self.product.id,
+                                "qty": "1.000",
+                                "price": "9.0000",
+                            }
+                        ],
+                    },
+                    format="json",
+                )
+
+        self.assertFalse(
+            PosSale.objects.filter(src_bill_no="POS-PAYMENT-ROLLBACK").exists()
+        )
+        self.assertFalse(
+            OutboundOrder.objects.filter(src_bill_no="POS-PAYMENT-ROLLBACK").exists()
+        )
+        self.assertFalse(WmsTask.objects.filter(source_app="pos").exists())
+        self.assertFalse(TaskScanLog.objects.exists())
+        self.assertFalse(PostingJournal.objects.exists())
+        self.assertFalse(InventoryTransaction.objects.exists())
+        detail = InventoryDetail.objects.get(owner=self.owner, product=self.product)
+        self.assertEqual(detail.onhand_qty, Decimal("10.0000"))
+        self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
 
     def test_pos_accuracy_api_uses_safe_default_date(self):
         response = self.client.get("/api/pos/accuracy/")
@@ -791,6 +1169,16 @@ class PosApiTests(TestCase):
         self.assertEqual(sale_order_amounts[self.owner.id], Decimal("9.00"))
         self.assertEqual(sale_order_amounts[self.other_owner.id], Decimal("36.00"))
         self.assertEqual(PosSaleLine.objects.filter(sale=sale).count(), 2)
+        tasks = WmsTask.objects.filter(source_app="pos", ref_no=sale.sale_no)
+        self.assertEqual(tasks.count(), 2)
+        self.assertEqual(
+            set(tasks.values_list("owner_id", flat=True)),
+            {self.owner.id, self.other_owner.id},
+        )
+        self.assertEqual(
+            set(tasks.values_list("posting_status", flat=True)),
+            {WmsTask.PostingStatus.POSTED},
+        )
         self.assertEqual(
             InventoryDetail.objects.get(
                 owner=self.owner, product=self.product
@@ -1202,7 +1590,7 @@ class PosApiTests(TestCase):
         )
         self.assertEqual(
             InventoryTransaction.objects.filter(
-                src_model="PosSaleLine", tx_type=InvTxType.ISSUE
+                src_model="WmsTask", tx_type=InvTxType.ISSUE
             ).count(),
             1,
         )
@@ -1238,7 +1626,7 @@ class PosApiTests(TestCase):
         )
         self.assertEqual(
             InventoryTransaction.objects.filter(
-                src_model="PosSaleLine", tx_type=InvTxType.ISSUE
+                src_model="WmsTask", tx_type=InvTxType.ISSUE
             ).count(),
             1,
         )
@@ -1291,7 +1679,7 @@ class PosApiTests(TestCase):
         )
         self.assertEqual(
             InventoryTransaction.objects.filter(
-                src_model="PosSaleLine", tx_type=InvTxType.ISSUE
+                src_model="WmsTask", tx_type=InvTxType.ISSUE
             ).count(),
             1,
         )
@@ -1408,7 +1796,7 @@ class PosApiTests(TestCase):
         )
         self.assertEqual(
             InventoryTransaction.objects.filter(
-                src_model="PosSaleLine", tx_type=InvTxType.ISSUE
+                src_model="WmsTask", tx_type=InvTxType.ISSUE
             ).count(),
             1,
         )
@@ -1417,6 +1805,252 @@ class PosApiTests(TestCase):
                 src_model="PosSaleLine", tx_type=InvTxType.RECEIVE
             ).count(),
             1,
+        )
+
+    def test_void_restores_inactive_source_layer_and_accuracy_warns(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-INACTIVE-LAYER",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale = PosSale.objects.get(src_bill_no="POS-INACTIVE-LAYER")
+        task_line = WmsTaskLine.objects.get(
+            task__source_app="pos", task__ref_no=sale.sale_no
+        )
+        detail_id = task_line.plan_meta["source_inventory_detail_id"]
+        InventoryDetail.objects.filter(pk=detail_id).update(is_active=False)
+
+        response = self.client.post(
+            f"/api/pos/sales/{sale.id}/void/",
+            {"reason": "restore inactive source"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        detail = InventoryDetail.all_objects.get(pk=detail_id)
+        self.assertFalse(detail.is_active)
+        self.assertEqual(detail.onhand_qty, Decimal("10.0000"))
+        self.assertEqual(detail.available_qty, Decimal("10.0000"))
+        self.assertEqual(
+            InventorySummary.objects.get(
+                owner=self.owner, product=self.product
+            ).available_qty,
+            Decimal("0.0000"),
+        )
+
+        today = timezone.now().date().isoformat()
+        accuracy = self.client.get(
+            "/api/pos/accuracy/",
+            {"start_date": today, "end_date": today},
+        )
+        self.assertEqual(accuracy.status_code, 200, accuracy.data)
+        self.assertEqual(accuracy.data["status"], "passed")
+        self.assertEqual(accuracy.data["summary"]["warning_count"], 1)
+        self.assertTrue(
+            any(
+                issue["code"] == "inactive_restore_layer"
+                and issue["severity"] == "warning"
+                for issue in accuracy.data["issues"]
+            )
+        )
+
+    def test_void_remains_compatible_with_legacy_pos_sale_line_issue(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-LEGACY-VOID",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale = PosSale.objects.get(src_bill_no="POS-LEGACY-VOID")
+        sale_line = PosSaleLine.objects.get(sale=sale)
+        _legacy, detail_id = self.create_legacy_issue_for_sale_line(
+            sale_line,
+            remove_task_issue=True,
+        )
+
+        response = self.client.post(
+            f"/api/pos/sales/{sale.id}/void/",
+            {"reason": "legacy compatibility"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        detail = InventoryDetail.objects.get(pk=detail_id)
+        self.assertEqual(detail.onhand_qty, Decimal("10.0000"))
+        self.assertTrue(
+            InventoryTransaction.objects.filter(
+                src_model="PosSaleLine",
+                src_id=sale_line.id,
+                src_line_id=detail_id,
+                tx_type=InvTxType.RECEIVE,
+            ).exists()
+        )
+
+    def test_mixed_legacy_and_task_issues_are_rejected_and_reported(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-MIXED-ISSUES",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale = PosSale.objects.get(src_bill_no="POS-MIXED-ISSUES")
+        sale_line = PosSaleLine.objects.get(sale=sale)
+        self.create_legacy_issue_for_sale_line(sale_line)
+
+        pos_return = self.client.post(
+            "/api/pos/returns/",
+            {
+                "sale_id": sale.id,
+                "reason": "mixed trace should fail",
+                "lines": [{"sale_line_id": sale_line.id, "qty": "1.000"}],
+                "refunds": [{"method": "CASH", "amount": "9.00"}],
+            },
+            format="json",
+        )
+        void = self.client.post(
+            f"/api/pos/sales/{sale.id}/void/",
+            {"reason": "mixed trace should fail"},
+            format="json",
+        )
+
+        self.assertEqual(pos_return.status_code, 400, pos_return.data)
+        self.assertEqual(void.status_code, 400, void.data)
+        self.assertIn("同时存在新旧出库流水", str(pos_return.data))
+        self.assertIn("同时存在新旧出库流水", str(void.data))
+        self.assertFalse(PosReturn.objects.filter(sale=sale).exists())
+        self.assertFalse(
+            InventoryTransaction.objects.filter(
+                tx_type=InvTxType.RECEIVE,
+                src_model__in=["PosSaleLine", "PosReturnLine"],
+            ).exists()
+        )
+        today = timezone.now().date().isoformat()
+        accuracy = self.client.get(
+            "/api/pos/accuracy/",
+            {"start_date": today, "end_date": today},
+        )
+        self.assertEqual(accuracy.status_code, 200, accuracy.data)
+        self.assertEqual(accuracy.data["status"], "failed")
+        self.assertTrue(
+            any(
+                "同时存在新旧出库流水" in issue["message"]
+                for issue in accuracy.data["issues"]
+            )
+        )
+
+    def test_soft_deleted_source_layer_rejects_return_and_void_without_residue(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-SOFT-DELETED-LAYER",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale = PosSale.objects.get(src_bill_no="POS-SOFT-DELETED-LAYER")
+        sale_line = PosSaleLine.objects.get(sale=sale)
+        task_line = WmsTaskLine.objects.get(
+            task__source_app="pos", task__ref_no=sale.sale_no
+        )
+        detail_id = task_line.plan_meta["source_inventory_detail_id"]
+        InventoryDetail.all_objects.filter(pk=detail_id).update(
+            is_deleted=True,
+            deleted_at=timezone.now(),
+            deleted_by=self.user,
+        )
+
+        pos_return = self.client.post(
+            "/api/pos/returns/",
+            {
+                "sale_id": sale.id,
+                "reason": "soft deleted source",
+                "lines": [{"sale_line_id": sale_line.id, "qty": "1.000"}],
+                "refunds": [{"method": "CASH", "amount": "9.00"}],
+            },
+            format="json",
+        )
+        void = self.client.post(
+            f"/api/pos/sales/{sale.id}/void/",
+            {"reason": "soft deleted source"},
+            format="json",
+        )
+
+        self.assertEqual(pos_return.status_code, 400, pos_return.data)
+        self.assertEqual(void.status_code, 400, void.data)
+        for error_response in (pos_return, void):
+            error_text = str(error_response.data)
+            self.assertIn(sale.sale_no, error_text)
+            self.assertIn(str(detail_id), error_text)
+            self.assertIn("不存在或已软删除", error_text)
+        sale.refresh_from_db()
+        self.assertEqual(sale.status, PosSale.Status.COMPLETED)
+        self.assertEqual(sale.payment.status, PosPayment.Status.PAID)
+        self.assertFalse(PosReturn.objects.filter(sale=sale).exists())
+        self.assertFalse(PosRefund.objects.filter(sale=sale).exists())
+        self.assertFalse(
+            InventoryTransaction.objects.filter(
+                tx_type=InvTxType.RECEIVE,
+                src_model__in=["PosSaleLine", "PosReturnLine"],
+            ).exists()
+        )
+        self.assertFalse(
+            PosAuditLog.objects.filter(
+                sale=sale,
+                action__in=[PosAuditLog.Action.RETURN, PosAuditLog.Action.VOID],
+            ).exists()
+        )
+        today = timezone.now().date().isoformat()
+        accuracy = self.client.get(
+            "/api/pos/accuracy/",
+            {"start_date": today, "end_date": today},
+        )
+        self.assertEqual(accuracy.status_code, 200, accuracy.data)
+        self.assertEqual(accuracy.data["status"], "failed")
+        self.assertTrue(
+            any(
+                str(detail_id) == str(issue["object_id"])
+                and "不存在或已软删除" in issue["message"]
+                for issue in accuracy.data["issues"]
+            )
         )
 
     def test_void_sale_requires_pos_void_permission(self):
@@ -1962,6 +2596,21 @@ class PosApiTests(TestCase):
         self.assertEqual(second_detail.available_qty, Decimal("1.0000"))
         sale = PosSale.objects.get(src_bill_no="POS-RETURN-LAYERS")
         sale_line = PosSaleLine.objects.get(sale=sale)
+        task = WmsTask.objects.get(source_app="pos", ref_no=sale.sale_no)
+        task_lines = list(WmsTaskLine.objects.filter(task=task).order_by("id"))
+        self.assertEqual(len(task_lines), 2)
+        self.assertEqual(
+            {line.plan_meta["source_inventory_detail_id"] for line in task_lines},
+            {first_detail.id, second_detail.id},
+        )
+        self.assertEqual(
+            InventoryTransaction.objects.filter(
+                src_model="WmsTask",
+                src_id=task.id,
+                tx_type=InvTxType.ISSUE,
+            ).count(),
+            2,
+        )
 
         pos_return = self.client.post(
             "/api/pos/returns/",
@@ -1991,6 +2640,194 @@ class PosApiTests(TestCase):
         )
         self.assertEqual(receive_tx.src_line_id, first_detail.id)
         self.assertEqual(receive_tx.qty_delta, Decimal("1.0000"))
+
+    def test_return_never_treats_task_line_id_as_inventory_detail_id(self):
+        collision_product = Product.objects.create(
+            owner=self.owner,
+            code="POS-ID-COLLISION-SKU",
+            name="POS ID Collision Product",
+            sku="POS-ID-COLLISION-SKU",
+            unit_barcode="POS-ID-COLLISION-BAR",
+            base_uom=self.uom,
+            price=Decimal("7.00"),
+            min_price=Decimal("1.00"),
+        )
+        source_detail = InventoryDetail.objects.create(
+            id=1_000_000,
+            owner=self.owner,
+            product=collision_product,
+            warehouse=self.warehouse,
+            location=self.location,
+            onhand_qty=Decimal("1.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+        )
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-ID-COLLISION",
+                "payment": self.payment("7.00"),
+                "items": [
+                    {
+                        "product_id": collision_product.id,
+                        "qty": "1.000",
+                        "price": "7.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale = PosSale.objects.get(src_bill_no="POS-ID-COLLISION")
+        sale_line = PosSaleLine.objects.get(sale=sale)
+        task_line = WmsTaskLine.objects.get(
+            task__source_app="pos", task__ref_no=sale.sale_no
+        )
+        self.assertNotEqual(task_line.id, source_detail.id)
+
+        decoy = InventoryDetail.all_objects.filter(pk=task_line.id).first()
+        if decoy is None:
+            decoy_product = Product.objects.create(
+                owner=self.owner,
+                code="POS-ID-DECOY-SKU",
+                name="POS ID Decoy Product",
+                sku="POS-ID-DECOY-SKU",
+                unit_barcode="POS-ID-DECOY-BAR",
+                base_uom=self.uom,
+                price=Decimal("1.00"),
+                min_price=Decimal("0.10"),
+            )
+            decoy = InventoryDetail.objects.create(
+                id=task_line.id,
+                owner=self.owner,
+                product=decoy_product,
+                warehouse=self.warehouse,
+                location=self.location,
+                onhand_qty=Decimal("4.0000"),
+                allocated_qty=Decimal("0.0000"),
+                locked_qty=Decimal("0.0000"),
+                damaged_qty=Decimal("0.0000"),
+                base_unit=self.uom.code,
+            )
+        decoy_onhand = decoy.onhand_qty
+
+        pos_return = self.client.post(
+            "/api/pos/returns/",
+            {
+                "sale_id": sale.id,
+                "reason": "verify id semantics",
+                "lines": [{"sale_line_id": sale_line.id, "qty": "1.000"}],
+                "refunds": [{"method": "CASH", "amount": "7.00"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(pos_return.status_code, 201, pos_return.data)
+        source_detail.refresh_from_db()
+        decoy.refresh_from_db()
+        self.assertEqual(source_detail.onhand_qty, Decimal("1.0000"))
+        self.assertEqual(decoy.onhand_qty, decoy_onhand)
+        receive = InventoryTransaction.objects.get(
+            src_model="PosReturnLine", tx_type=InvTxType.RECEIVE
+        )
+        self.assertEqual(receive.src_line_id, source_detail.id)
+
+    def test_return_ignores_unrelated_task_with_same_generic_source_pk(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-UNRELATED-TASK-PK",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale = PosSale.objects.get(src_bill_no="POS-UNRELATED-TASK-PK")
+        sale_line = PosSaleLine.objects.get(sale=sale)
+        now = timezone.now()
+        unrelated_task = WmsTask.objects.create(
+            task_no=f"UNRELATED-{sale.id}",
+            task_type=WmsTask.TaskType.PUTAWAY,
+            owner=self.owner,
+            warehouse=self.warehouse,
+            source_app="inbound",
+            source_model="inboundorder",
+            source_pk=str(sale_line.outbound_order_line.order_id),
+            status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.APPROVED,
+            posting_status=WmsTask.PostingStatus.POSTED,
+            released_at=now,
+            started_at=now,
+            finished_at=now,
+            approved_at=now,
+            created_by=self.user,
+        )
+        unrelated_line = WmsTaskLine.objects.create(
+            task=unrelated_task,
+            product=self.product,
+            from_location=self.location,
+            to_location=self.location,
+            qty_plan=Decimal("0.250"),
+            qty_done=Decimal("0.250"),
+            status=WmsTaskLine.Status.COMPLETED,
+            src_model="InboundOrderLine",
+            src_id=sale_line.outbound_order_line_id,
+        )
+        detail = InventoryDetail.objects.get(
+            owner=self.owner,
+            product=self.product,
+            is_active=True,
+        )
+        InventoryTransaction.objects.create(
+            tx_type=InvTxType.ISSUE,
+            owner=self.owner,
+            product=self.product,
+            warehouse=self.warehouse,
+            location=self.location,
+            subwarehouse=detail.subwarehouse,
+            zone_type=detail.zone_type,
+            qty_delta=Decimal("-0.2500"),
+            src_model="WmsTask",
+            src_id=unrelated_task.id,
+            src_line_id=unrelated_line.id,
+            src_no="UNRELATED",
+            memo="UNRELATED",
+            posted_at=now,
+            posting_batch="UNRELATED",
+        )
+
+        pos_return = self.client.post(
+            "/api/pos/returns/",
+            {
+                "sale_id": sale.id,
+                "reason": "ignore unrelated task source pk",
+                "lines": [{"sale_line_id": sale_line.id, "qty": "1.000"}],
+                "refunds": [{"method": "CASH", "amount": "9.00"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(pos_return.status_code, 201, pos_return.data)
+        receive = InventoryTransaction.objects.get(
+            src_model="PosReturnLine",
+            tx_type=InvTxType.RECEIVE,
+        )
+        self.assertEqual(
+            receive.src_line_id,
+            WmsTaskLine.objects.get(
+                task__source_app="pos",
+                plan_meta__pos_sale_line_id=sale_line.id,
+            ).plan_meta["source_inventory_detail_id"],
+        )
 
     def test_checkout_rejects_price_below_min_price(self):
         response = self.client.post(
@@ -2111,6 +2948,68 @@ class PosApiTests(TestCase):
                 owner=self.owner, product=self.product
             ).available_qty,
             Decimal("10.0000"),
+        )
+
+    def test_checkout_does_not_combine_sub_millith_inventory_tails(self):
+        tail_product = Product.objects.create(
+            owner=self.owner,
+            code="POS-TAIL-SKU",
+            name="POS Tail Product",
+            sku="POS-TAIL-SKU",
+            unit_barcode="POS-TAIL-BAR",
+            base_uom=self.uom,
+            price=Decimal("1000.00"),
+            min_price=Decimal("1.00"),
+        )
+        second_location = Location.objects.create(
+            warehouse=self.warehouse,
+            code="SWPOS-01-01-02",
+            name="POS Tail Location",
+        )
+        for location in (self.location, second_location):
+            InventoryDetail.objects.create(
+                owner=self.owner,
+                product=tail_product,
+                warehouse=self.warehouse,
+                location=location,
+                onhand_qty=Decimal("0.0006"),
+                allocated_qty=Decimal("0.0000"),
+                locked_qty=Decimal("0.0000"),
+                damaged_qty=Decimal("0.0000"),
+                base_unit=self.uom.code,
+            )
+
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-SUB-MILLITH-TAILS",
+                "payment": self.payment("1.00"),
+                "items": [
+                    {
+                        "product_id": tail_product.id,
+                        "qty": "0.001",
+                        "price": "1000.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertFalse(
+            PosSale.objects.filter(src_bill_no="POS-SUB-MILLITH-TAILS").exists()
+        )
+        self.assertFalse(WmsTask.objects.filter(source_app="pos").exists())
+        self.assertFalse(
+            InventoryTransaction.objects.filter(product=tail_product).exists()
+        )
+        self.assertEqual(
+            list(
+                InventoryDetail.objects.filter(product=tail_product)
+                .order_by("id")
+                .values_list("available_qty", flat=True)
+            ),
+            [Decimal("0.0006"), Decimal("0.0006")],
         )
 
     def test_checkout_rejects_qty_above_available_stock(self):

@@ -395,7 +395,13 @@ class DefaultPostingHandler(BasePostingHandler):
 
         # ④ 调用库存服务做真实入账
         # result = inv_services.post_task(task=task, user=by_user)
-        result = inv_services.post_task(task=task, user=by_user, scans=scans_ok)
+        result = inv_services.post_task(
+            task=task,
+            user=by_user,
+            scans=scans_ok,
+            now=now_ts,
+            batch_no=batch,
+        )
 
         log.info("tasking.post.inventory_result %s result=%r", ctx_text, result, extra=ctx)
 

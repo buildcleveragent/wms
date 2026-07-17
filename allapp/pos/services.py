@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections import defaultdict
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from uuid import uuid4
 
 from django.apps import apps
@@ -15,15 +15,20 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from allapp.core.choices import InvTxType, ZoneType
+from allapp.core.models import DocSequence
 from allapp.inventory.models import (
     InventoryDetail,
     InventorySummary,
     InventoryTransaction,
 )
+from allapp.inventory.services import lock_active_inventory_details_for_update
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import Product
+from allapp.tasking.models import TaskScanLog, TaskStatusLog, WmsTask, WmsTaskLine
+from allapp.tasking.posting_exec import execute_posting_handler
 
+from .inventory_trace import resolve_sale_issue_layers
 from .models import (
     PosAuditLog,
     PosCustomer,
@@ -611,20 +616,288 @@ def _deduct_stock_for_line(sale_line, warehouse_id, sale_no, now, *, zone_type=N
     _refresh_summaries(touched)
 
 
+def _floor_task_qty(value):
+    return _decimal(value).quantize(QTY3, rounding=ROUND_DOWN)
+
+
+def _pos_pick_scan_fp(*, sale_id, sale_line_id, detail_id, qty):
+    normalized_qty = format(_q3(qty), "f")
+    raw = f"POS_SALE|{sale_id}|{sale_line_id}|{detail_id}|{normalized_qty}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _create_pos_pick_tasks_and_post(
+    *,
+    sale,
+    orders,
+    line_bindings,
+    warehouse_id,
+    zone_type,
+    user,
+    now,
+):
+    """Reserve exact FEFO layers, create POS PICK evidence, and post every owner task."""
+
+    actor = user if user and user.is_authenticated else None
+    pairs = {
+        (binding["sale_line"].owner_id, binding["sale_line"].product_id)
+        for binding in line_bindings
+    }
+    locked_details = lock_active_inventory_details_for_update(pairs)
+    details_by_pair = defaultdict(list)
+    for detail in locked_details:
+        details_by_pair[(detail.owner_id, detail.product_id)].append(detail)
+
+    tasks_by_order = {}
+    for order in sorted(orders, key=lambda value: (value.owner_id, value.id)):
+        task = WmsTask.objects.create(
+            task_no=DocSequence.next_code(
+                doc_type="JH",
+                warehouse=order.warehouse,
+                owner=order.owner,
+                biz_date=order.biz_date,
+            ),
+            task_type=WmsTask.TaskType.PICK,
+            owner_id=order.owner_id,
+            warehouse_id=order.warehouse_id,
+            task_group_no=sale.sale_no,
+            ref_no=sale.sale_no,
+            source_app="pos",
+            source_model=order._meta.model_name,
+            source_pk=str(order.id),
+            status=WmsTask.Status.RESERVED,
+            review_status=WmsTask.ReviewStatus.NOT_READY,
+            posting_status=WmsTask.PostingStatus.NOT_READY,
+            created_by=actor,
+            remark="POS 销售自动出库",
+        )
+        tasks_by_order[order.id] = task
+
+    task_splits = []
+    sorted_bindings = sorted(
+        line_bindings,
+        key=lambda binding: (
+            binding["sale_line"].owner_id,
+            binding["sale_line"].product_id,
+            binding["sale_line"].line_no,
+        ),
+    )
+    for binding in sorted_bindings:
+        sale_line = binding["sale_line"]
+        order_line = binding["order_line"]
+        order = binding["order"]
+        task = tasks_by_order[order.id]
+        remaining = _q3(sale_line.qty)
+        candidates = [
+            detail
+            for detail in details_by_pair[(sale_line.owner_id, sale_line.product_id)]
+            if detail.warehouse_id == warehouse_id
+            and (zone_type is None or detail.zone_type == zone_type)
+        ]
+        candidates.sort(
+            key=lambda detail: (
+                detail.expiry_date is None,
+                detail.expiry_date or date.max,
+                -detail.onhand_qty,
+                detail.id,
+            )
+        )
+
+        for detail in candidates:
+            if remaining <= 0:
+                break
+            allocatable = _floor_task_qty(
+                min(_q4(detail.available_qty), _q4(detail.onhand_qty))
+            )
+            if allocatable <= 0:
+                continue
+            take = _floor_task_qty(min(allocatable, remaining))
+            if take <= 0:
+                continue
+
+            detail.allocated_qty = _q4(detail.allocated_qty + take)
+            detail.save()
+            task_line = WmsTaskLine.objects.create(
+                task=task,
+                product=sale_line.product,
+                from_location_id=detail.location_id,
+                qty_plan=take,
+                qty_done=take,
+                status=WmsTaskLine.Status.COMPLETED,
+                started_at=now,
+                finished_at=now,
+                finished_by=actor,
+                src_model="OutboundOrderLine",
+                src_id=order_line.id,
+                scan_snapshot_rev=0,
+                plan_meta={
+                    "pos_sale_id": sale.id,
+                    "sale_no": sale.sale_no,
+                    "pos_sale_line_id": sale_line.id,
+                    "outbound_order_id": order.id,
+                    "outbound_order_line_id": order_line.id,
+                    "source_inventory_detail_id": detail.id,
+                    "subwarehouse_id": detail.subwarehouse_id,
+                    "zone_type": detail.zone_type,
+                    "serial_no": detail.serial_no or "",
+                    "reserved_qty": format(take, "f"),
+                },
+                created_by=actor,
+            )
+            task_splits.append((task, task_line, sale_line, detail, take))
+            remaining = _q3(remaining - take)
+
+        if remaining > 0:
+            _error(
+                "items",
+                f"{sale_line.product.code} 可售库存不足，缺口 {remaining}。",
+            )
+
+    for task in sorted(
+        tasks_by_order.values(), key=lambda value: (value.owner_id, value.id)
+    ):
+        task.status = WmsTask.Status.COMPLETED
+        task.review_status = WmsTask.ReviewStatus.APPROVED
+        task.posting_status = WmsTask.PostingStatus.PENDING
+        task.released_at = now
+        task.started_at = now
+        task.finished_at = now
+        task.picked_by = actor
+        task.approved_by = actor
+        task.approved_at = now
+        task.approval_note = "POS 销售自动审核"
+        task.updated_by = actor
+        task.save()
+        TaskStatusLog.objects.create(
+            task=task,
+            old_status=WmsTask.Status.RESERVED,
+            new_status=WmsTask.Status.COMPLETED,
+            changed_by=actor,
+            note="POS 销售自动拣货完成",
+        )
+
+    for task, task_line, sale_line, detail, take in task_splits:
+        TaskScanLog.objects.create(
+            owner_id=task.owner_id,
+            warehouse_id=task.warehouse_id,
+            task=task,
+            task_line=task_line,
+            product_id=sale_line.product_id,
+            location_id=detail.location_id,
+            barcode=(detail.serial_no or None),
+            label_key=None,
+            method=TaskScanLog.Method.API,
+            source="API",
+            by_user=actor,
+            code_type="SERIAL" if detail.serial_no else "UNIT",
+            qty_base_delta=take,
+            lot_no=detail.batch_no or None,
+            mfg_date=detail.production_date,
+            exp_date=detail.expiry_date,
+            status=TaskScanLog.ScanStatus.OK,
+            review_status=TaskScanLog.ReviewStatus.APPROVED,
+            reviewed_by=actor,
+            reviewed_at=now,
+            fp=_pos_pick_scan_fp(
+                sale_id=sale.id,
+                sale_line_id=sale_line.id,
+                detail_id=detail.id,
+                qty=take,
+            ),
+            scan_snapshot_rev=0,
+        )
+
+    for task in sorted(
+        tasks_by_order.values(), key=lambda value: (value.owner_id, value.id)
+    ):
+        affected = execute_posting_handler(
+            task,
+            note="POS销售自动出库",
+            by_user=actor,
+        )
+        if affected <= 0:
+            raise ValidationError(f"POS PICK 任务 {task.task_no} 未生成库存流水")
+
+
+def _lock_original_inventory_details(*, sale_no, sale_lines, resolved_layers):
+    """Lock restore scopes first, then lock exact original rows including inactive rows."""
+
+    line_by_id = {line.id: line for line in sale_lines}
+    detail_specs = {}
+    for sale_line_id, layers in resolved_layers.items():
+        sale_line = line_by_id[sale_line_id]
+        for layer in layers:
+            spec = (
+                sale_line.owner_id,
+                sale_line.product_id,
+                sale_line.sale.warehouse_id,
+            )
+            previous = detail_specs.setdefault(layer.inventory_detail_id, spec)
+            if previous != spec:
+                raise ValidationError("原销售库存层被多个货主、商品或仓库错误引用")
+
+    lock_active_inventory_details_for_update(
+        {
+            (owner_id, product_id)
+            for owner_id, product_id, _warehouse_id in detail_specs.values()
+        }
+    )
+    details = {}
+    for detail_id, (owner_id, product_id, warehouse_id) in sorted(
+        detail_specs.items(),
+        key=lambda item: (item[1][0], item[1][1], item[1][2], item[0]),
+    ):
+        try:
+            detail = InventoryDetail.objects.select_for_update().get(pk=detail_id)
+        except InventoryDetail.DoesNotExist as exc:
+            raise ValidationError(
+                f"{sale_no} 原销售库存层 {detail_id} 不存在或已软删除，无法回补"
+            ) from exc
+        if (
+            detail.owner_id != owner_id
+            or detail.product_id != product_id
+            or detail.warehouse_id != warehouse_id
+        ):
+            raise ValidationError(
+                f"{sale_no} 原销售库存层 {detail_id} 与销售商品归属不一致"
+            )
+        details[detail_id] = detail
+    return details
+
+
 def _restore_stock_from_sale(sale, user, reason):
     now = timezone.now()
     batch_no = f"{sale.sale_no}-VOID"
-    line_ids = list(sale.lines.values_list("id", flat=True))
-    issue_txs = (
-        InventoryTransaction.objects.select_for_update()
-        .filter(src_model="PosSaleLine", src_id__in=line_ids, tx_type=InvTxType.ISSUE)
-        .order_by("id")
+    sale_lines = list(
+        sale.lines.select_related(
+            "sale", "product", "outbound_order_line__order"
+        ).order_by("owner_id", "product_id", "line_no", "id")
     )
+    resolved = resolve_sale_issue_layers(sale_lines, for_update=True)
+    details = _lock_original_inventory_details(
+        sale_no=sale.sale_no,
+        sale_lines=sale_lines,
+        resolved_layers=resolved,
+    )
+    line_by_id = {line.id: line for line in sale_lines}
+    entries = [
+        (line_by_id[line_id], layer)
+        for line_id, layers in resolved.items()
+        for layer in layers
+    ]
+    entries.sort(
+        key=lambda item: (
+            item[0].owner_id,
+            item[0].product_id,
+            item[1].inventory_detail_id,
+            item[1].issue_tx_id,
+        )
+    )
+
     touched = set()
-    line_map = {line.id: line for line in sale.lines.select_related("product")}
-    for tx in issue_txs:
-        detail = InventoryDetail.objects.select_for_update().get(pk=tx.src_line_id)
-        qty = _q4(-tx.qty_delta)
+    for sale_line, layer in entries:
+        detail = details[layer.inventory_detail_id]
+        qty = layer.qty
         detail.onhand_qty = _q4(detail.onhand_qty + qty)
         detail.available_qty = _q4(
             detail.onhand_qty
@@ -633,7 +906,6 @@ def _restore_stock_from_sale(sale, user, reason):
             - detail.damaged_qty
         )
         detail.save()
-        sale_line = line_map[tx.src_id]
         InventoryTransaction.objects.create(
             tx_type=InvTxType.RECEIVE,
             owner_id=detail.owner_id,
@@ -671,51 +943,95 @@ def _returned_qty_by_sale_line(sale_line_ids):
     return {row["sale_line_id"]: row["qty"] or ZERO for row in rows}
 
 
-def _restored_qty_by_detail_for_sale_line(sale_line, *, exclude_return_line_id=None):
-    prior_return_lines = PosReturnLine.objects.filter(
-        sale_line=sale_line,
-        return_order__status=PosReturn.Status.COMPLETED,
+def _restore_stock_for_return_lines(return_lines, return_no, now):
+    return_lines = list(return_lines)
+    if not return_lines:
+        return
+    return_order_id = return_lines[0].return_order_id
+    sale_lines = {line.sale_line_id: line.sale_line for line in return_lines}
+    source_sale_no = next(iter(sale_lines.values())).sale.sale_no
+    resolved = resolve_sale_issue_layers(sale_lines.values(), for_update=True)
+    details = _lock_original_inventory_details(
+        sale_no=source_sale_no,
+        sale_lines=sale_lines.values(),
+        resolved_layers=resolved,
     )
-    if exclude_return_line_id:
-        prior_return_lines = prior_return_lines.exclude(pk=exclude_return_line_id)
-    prior_ids = list(prior_return_lines.values_list("id", flat=True))
-    if not prior_ids:
-        return {}
-    rows = (
-        InventoryTransaction.objects.filter(
-            src_model="PosReturnLine",
-            src_id__in=prior_ids,
-            tx_type=InvTxType.RECEIVE,
+
+    prior_return_lines = list(
+        PosReturnLine.objects.filter(
+            sale_line_id__in=sale_lines,
+            return_order__status=PosReturn.Status.COMPLETED,
         )
-        .values("src_line_id")
-        .annotate(qty=Sum("qty_delta"))
+        .exclude(return_order_id=return_order_id)
+        .values_list("id", "sale_line_id")
     )
-    return {row["src_line_id"]: row["qty"] or ZERO for row in rows}
+    prior_line_map = dict(prior_return_lines)
+    restored = defaultdict(lambda: ZERO)
+    if prior_line_map:
+        prior_txs = InventoryTransaction.objects.filter(
+            src_model="PosReturnLine",
+            src_id__in=prior_line_map,
+            tx_type=InvTxType.RECEIVE,
+        ).order_by("id")
+        for tx in prior_txs:
+            if not tx.src_line_id or tx.qty_delta <= 0:
+                raise ValidationError("历史 POS 退货回补流水关系不完整")
+            restored[(prior_line_map[tx.src_id], tx.src_line_id)] += tx.qty_delta
 
+    planned = []
+    for return_line in sorted(
+        return_lines, key=lambda value: (value.line_no, value.id)
+    ):
+        sale_line = sale_lines[return_line.sale_line_id]
+        issued_by_detail = defaultdict(lambda: ZERO)
+        first_issue_id = {}
+        for layer in resolved[sale_line.id]:
+            issued_by_detail[layer.inventory_detail_id] += layer.qty
+            first_issue_id.setdefault(
+                layer.inventory_detail_id,
+                layer.issue_tx_id,
+            )
 
-def _restore_stock_for_return_line(return_line, return_no, now):
-    sale_line = return_line.sale_line
-    issue_txs = (
-        InventoryTransaction.objects.select_for_update()
-        .filter(src_model="PosSaleLine", src_id=sale_line.id, tx_type=InvTxType.ISSUE)
-        .order_by("id")
-    )
-    restored_by_detail = _restored_qty_by_detail_for_sale_line(
-        sale_line, exclude_return_line_id=return_line.id
-    )
-    remaining = _q4(return_line.qty)
+        remaining = _q4(return_line.qty)
+        detail_ids = sorted(
+            issued_by_detail,
+            key=lambda detail_id: (first_issue_id[detail_id], detail_id),
+        )
+        for detail_id in detail_ids:
+            if remaining <= 0:
+                break
+            issued_qty = _q4(issued_by_detail[detail_id])
+            already_restored = _q4(restored[(sale_line.id, detail_id)])
+            restorable = _q4(issued_qty - already_restored)
+            if restorable <= 0:
+                continue
+            take = min(restorable, remaining)
+            planned.append(
+                (
+                    sale_line.owner_id,
+                    sale_line.product_id,
+                    detail_id,
+                    first_issue_id[detail_id],
+                    return_line,
+                    take,
+                )
+            )
+            restored[(sale_line.id, detail_id)] = _q4(already_restored + take)
+            remaining = _q4(remaining - take)
+
+        if remaining > 0:
+            _error(
+                "items",
+                f"{sale_line.product.code} 原扣减库存不足，无法回补 {remaining}。",
+            )
+
     touched = set()
-    for tx in issue_txs:
-        if remaining <= 0:
-            break
-        issued_qty = _q4(-tx.qty_delta)
-        already_restored = _q4(restored_by_detail.get(tx.src_line_id, ZERO))
-        restorable = _q4(issued_qty - already_restored)
-        if restorable <= 0:
-            continue
-        take = min(restorable, remaining)
-        detail = InventoryDetail.objects.select_for_update().get(pk=tx.src_line_id)
-        detail.onhand_qty = _q4(detail.onhand_qty + take)
+    for owner_id, product_id, detail_id, _issue_id, return_line, qty in sorted(
+        planned,
+        key=lambda item: (item[0], item[1], item[2], item[3], item[4].id),
+    ):
+        detail = details[detail_id]
+        detail.onhand_qty = _q4(detail.onhand_qty + qty)
         detail.available_qty = _q4(
             detail.onhand_qty
             - detail.allocated_qty
@@ -735,7 +1051,7 @@ def _restore_stock_for_return_line(return_line, return_no, now):
             production_date=detail.production_date,
             expiry_date=detail.expiry_date,
             serial_no=detail.serial_no or "",
-            qty_delta=take,
+            qty_delta=qty,
             src_model="PosReturnLine",
             src_id=return_line.id,
             src_line_id=detail.id,
@@ -744,13 +1060,7 @@ def _restore_stock_for_return_line(return_line, return_no, now):
             posted_at=now,
             posting_batch=return_no[:40],
         )
-        touched.add((detail.owner_id, detail.product_id))
-        remaining = _q4(remaining - take)
-
-    if remaining > 0:
-        _error(
-            "items", f"{sale_line.product.code} 原扣减库存不足，无法回补 {remaining}。"
-        )
+        touched.add((owner_id, product_id))
     _refresh_summaries(touched)
 
 
@@ -1168,6 +1478,7 @@ def create_pos_sale(
     order_by_owner = {order.owner_id: order for order in orders}
     line_no = 10
     now = timezone.now()
+    line_bindings = []
     for item in normalized_items:
         product = item["product"]
         order = order_by_owner[product.owner_id]
@@ -1188,10 +1499,24 @@ def create_pos_sale(
             price=item["price"],
             amount=item["amount"],
         )
-        _deduct_stock_for_line(
-            sale_line, warehouse_id, sale_no, now, zone_type=stock_zone_type
+        line_bindings.append(
+            {
+                "sale_line": sale_line,
+                "order_line": order_line,
+                "order": order,
+            }
         )
         line_no += 10
+
+    _create_pos_pick_tasks_and_post(
+        sale=sale,
+        orders=orders,
+        line_bindings=line_bindings,
+        warehouse_id=warehouse_id,
+        zone_type=stock_zone_type,
+        user=user,
+        now=now,
+    )
 
     PosPayment.objects.create(sale=sale, **payment_data)
     for line_data in payment_lines_data:
@@ -1266,7 +1591,9 @@ def create_pos_return(
 
     sale_lines = {
         line.id: line
-        for line in sale.lines.select_related("product", "owner").select_for_update()
+        for line in sale.lines.select_related(
+            "sale", "product", "owner", "outbound_order_line__order"
+        ).select_for_update()
     }
     requested_ids = [int(item["sale_line_id"]) for item in lines]
     missing = [line_id for line_id in requested_ids if line_id not in sale_lines]
@@ -1313,6 +1640,7 @@ def create_pos_return(
         idempotency_fingerprint=fingerprint if idempotency_key else "",
     )
     line_no = 10
+    created_return_lines = []
     for line in normalized_lines:
         sale_line = line["sale_line"]
         return_line = PosReturnLine.objects.create(
@@ -1325,8 +1653,14 @@ def create_pos_return(
             price=line["price"],
             amount=line["amount"],
         )
-        _restore_stock_for_return_line(return_line, return_order.return_no, now)
+        created_return_lines.append(return_line)
         line_no += 10
+
+    _restore_stock_for_return_lines(
+        created_return_lines,
+        return_order.return_no,
+        now,
+    )
 
     for refund in refund_lines:
         processed_at = now if refund["status"] == PosRefund.Status.REFUNDED else None

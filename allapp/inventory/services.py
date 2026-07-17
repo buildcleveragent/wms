@@ -369,6 +369,27 @@ def _lock_or_create_summary(owner_id: int, product_id: int) -> InventorySummary:
     return InventorySummary.objects.select_for_update().get(pk=summary.pk)
 
 
+def lock_active_inventory_details_for_update(
+    pairs: Iterable[Tuple[int, int]],
+) -> List[InventoryDetail]:
+    """Lock every active detail in each owner/product scope in a stable pair order."""
+    locked: List[InventoryDetail] = []
+    normalized_pairs = sorted(
+        {(int(owner_id), int(product_id)) for owner_id, product_id in pairs}
+    )
+    for owner_id, product_id in normalized_pairs:
+        locked.extend(
+            InventoryDetail.objects.select_for_update()
+            .filter(
+                owner_id=owner_id,
+                product_id=product_id,
+                is_active=True,
+            )
+            .order_by("warehouse_id", "location_id", "id")
+        )
+    return locked
+
+
 def _lock_inventory_dimensions(
     dimensions: Iterable[Dict[str, Any]],
 ) -> Tuple[Dict[Tuple[Any, ...], InventoryDetail], Dict[Tuple[int, int], InventorySummary]]:
@@ -388,15 +409,7 @@ def _lock_inventory_dimensions(
         return {}, {}
 
     pairs = sorted({(key[0], key[1]) for key in dimensions_by_key})
-    pair_filter = Q()
-    for owner_id, product_id in pairs:
-        pair_filter |= Q(owner_id=owner_id, product_id=product_id)
-
-    existing = list(
-        InventoryDetail.objects.select_for_update()
-        .filter(pair_filter, is_active=True)
-        .order_by("owner_id", "product_id", "warehouse_id", "location_id", "id")
-    )
+    existing = lock_active_inventory_details_for_update(pairs)
     details_by_key = {_detail_key_from_instance(detail): detail for detail in existing}
     existing_pairs = {(detail.owner_id, detail.product_id) for detail in existing}
 
@@ -443,6 +456,9 @@ def _insert_tx(
     pair_id: Optional[str],
     posted_at,
     posting_batch: Optional[str],
+    subwarehouse_id: Optional[int] = None,
+    zone_type: Optional[int] = None,
+    src_no: Optional[str] = None,
 ) -> InventoryTransaction:
     """
     写一条 InventoryTransaction。
@@ -454,6 +470,14 @@ def _insert_tx(
         # 按照常见 WMS 规则，0 数量不应入账；若你要保留，也建议在上层就过滤掉。
         raise ValidationError("qty_delta 不能为 0")
     # 交易幂等由任务级 PostingJournal + 扫描打点保证，这里不做静默去重。
+
+    optional_fields = {}
+    if subwarehouse_id is not None:
+        optional_fields["subwarehouse_id"] = subwarehouse_id
+    if zone_type is not None:
+        optional_fields["zone_type"] = zone_type
+    if src_no is not None:
+        optional_fields["src_no"] = (src_no or "")[:64]
 
     return InventoryTransaction.objects.create(
         tx_type=tx_type,
@@ -473,6 +497,7 @@ def _insert_tx(
         memo=(memo or "")[:255],
         posted_at=posted_at,                                  # 过账打点（若模型有该字段）
         posting_batch=(posting_batch or None)[:40] if posting_batch else None,  # 批次号（若模型有该字段）
+        **optional_fields,
     )
 
 def _refresh_summaries(
@@ -608,11 +633,13 @@ class _AggKey:
     """
     __slots__ = (
         "posting_batch", "task_id", "owner_id", "warehouse_id", "product_id",
-        "location_id", "batch_no", "production_date", "expiry_date", "serial_no", "tx_type"
+        "location_id", "batch_no", "production_date", "expiry_date", "serial_no", "tx_type",
+        "task_line_id", "source_detail_id",
     )
 
     def __init__(self, posting_batch, task_id, owner_id, warehouse_id, product_id,
-                 location_id, batch_no, production_date, expiry_date, serial_no, tx_type):
+                 location_id, batch_no, production_date, expiry_date, serial_no, tx_type,
+                 task_line_id=None, source_detail_id=None):
         self.posting_batch = posting_batch
         self.task_id = task_id
         self.owner_id = owner_id
@@ -624,11 +651,14 @@ class _AggKey:
         self.expiry_date = expiry_date
         self.serial_no = (serial_no or "").upper() or None
         self.tx_type = tx_type
+        self.task_line_id = task_line_id
+        self.source_detail_id = source_detail_id
 
     def as_tuple(self):
         return (
             self.posting_batch, self.task_id, self.owner_id, self.warehouse_id, self.product_id,
-            self.location_id, self.batch_no, self.production_date, self.expiry_date, self.serial_no, self.tx_type
+            self.location_id, self.batch_no, self.production_date, self.expiry_date, self.serial_no, self.tx_type,
+            self.task_line_id, self.source_detail_id,
         )
 
     def __hash__(self):
@@ -642,6 +672,72 @@ class _AggKey:
 # 聚合：收/发/盘（不含 from→to 的简单型）
 # ======================
 
+def _normalized_model_name(value: Optional[str]) -> str:
+    return (value or "").replace("_", "").replace(".", "").lower()
+
+
+def _is_pos_pick(task: WmsTask, tx_type: str) -> bool:
+    return (
+        tx_type == InvTxType.ISSUE
+        and (task.task_type or "").upper() == "PICK"
+        and (task.source_app or "").lower() == "pos"
+    )
+
+
+def _required_pos_meta_int(line: WmsTaskLine, key: str) -> int:
+    try:
+        value = int((line.plan_meta or {})[key])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValidationError(f"POS PICK 任务行 {line.id} 缺少有效的 {key}") from exc
+    if value <= 0:
+        raise ValidationError(f"POS PICK 任务行 {line.id} 的 {key} 无效")
+    return value
+
+
+def _pos_scan_source_details(
+    task: WmsTask, scans: List[TaskScanLog]
+) -> Dict[int, InventoryDetail]:
+    """Resolve each POS scan to its explicit source layer without guessing by primary key."""
+    if _normalized_model_name(task.source_model) != "outboundorder":
+        raise ValidationError(f"POS PICK 任务 {task.id} 来源必须为 OutboundOrder")
+
+    detail_ids_by_scan: Dict[int, int] = {}
+    for scan in scans:
+        line = getattr(scan, "task_line", None)
+        if not line or line.task_id != task.id:
+            raise ValidationError(f"POS PICK 扫描 {scan.id} 缺少所属任务行")
+        if line.status != WmsTaskLine.Status.COMPLETED:
+            raise ValidationError(f"POS PICK 任务行 {line.id} 尚未完成")
+        if _normalized_model_name(line.src_model) != "outboundorderline":
+            raise ValidationError(f"POS PICK 任务行 {line.id} 来源必须为 OutboundOrderLine")
+
+        detail_id = _required_pos_meta_int(line, "source_inventory_detail_id")
+        _required_pos_meta_int(line, "pos_sale_id")
+        _required_pos_meta_int(line, "pos_sale_line_id")
+        order_id = _required_pos_meta_int(line, "outbound_order_id")
+        order_line_id = _required_pos_meta_int(line, "outbound_order_line_id")
+        if line.src_id != order_line_id:
+            raise ValidationError(f"POS PICK 任务行 {line.id} 的出库单行来源不一致")
+        try:
+            task_order_id = int(task.source_pk)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(f"POS PICK 任务 {task.id} 缺少有效的出库单来源") from exc
+        if task_order_id != order_id:
+            raise ValidationError(f"POS PICK 任务行 {line.id} 的出库单来源不一致")
+        if (line.plan_meta or {}).get("sale_no") != task.ref_no:
+            raise ValidationError(f"POS PICK 任务行 {line.id} 的销售单号不一致")
+        detail_ids_by_scan[scan.id] = detail_id
+
+    details = InventoryDetail.objects.in_bulk(set(detail_ids_by_scan.values()))
+    missing = sorted(set(detail_ids_by_scan.values()) - set(details))
+    if missing:
+        raise ValidationError(f"POS PICK 原库存层不存在或已软删除: {missing}")
+    return {
+        scan_id: details[detail_id]
+        for scan_id, detail_id in detail_ids_by_scan.items()
+    }
+
+
 def _group_receive_like(task: WmsTask, scans: List[TaskScanLog], *, now, batch_no: str, tx_type: str) -> Dict[_AggKey, Decimal]:
     """
     针对 RECEIVE/ISSUE（PICK/DISPATCH 等）/COUNT 的聚合过程：
@@ -649,6 +745,8 @@ def _group_receive_like(task: WmsTask, scans: List[TaskScanLog], *, now, batch_n
     - 兜底策略详见注释。
     """
     agg: Dict[_AggKey, Decimal] = defaultdict(lambda: Decimal("0"))
+    is_pos_pick = _is_pos_pick(task, tx_type)
+    source_details = _pos_scan_source_details(task, scans) if is_pos_pick else {}
 
     for s in scans:
         # 1) 商品：scan.product → line.product
@@ -685,7 +783,81 @@ def _group_receive_like(task: WmsTask, scans: List[TaskScanLog], *, now, batch_n
         qty = _qty_for_type(task_type_for_qty, scan=s)
 
 
-        # 4) 组装聚合键
+        # 4) POS uses the exact reserved layer as the authoritative dimension.
+        source_detail = source_details.get(s.id)
+        if source_detail is not None:
+            meta = line.plan_meta or {}
+            if s.owner_id != task.owner_id or s.warehouse_id != task.warehouse_id:
+                raise ValidationError(f"POS PICK 扫描 {s.id} 的货主或仓库归属不一致")
+            if s.qty_base_delta is None or _q4(s.qty_base_delta) <= 0:
+                raise ValidationError(f"POS PICK 扫描 {s.id} 必须记录正数增量")
+            if s.scan_snapshot_rev != line.scan_snapshot_rev:
+                raise ValidationError(f"POS PICK 扫描 {s.id} 的任务行快照版本不一致")
+            if not source_detail.is_active:
+                raise ValidationError(f"POS PICK 原库存层 {source_detail.id} 已停用")
+            if (
+                source_detail.owner_id != task.owner_id
+                or source_detail.warehouse_id != task.warehouse_id
+                or source_detail.product_id != pid
+                or source_detail.location_id != loc_id
+                or line.product_id != pid
+                or line.from_location_id != loc_id
+            ):
+                raise ValidationError(f"POS PICK 任务行 {line.id} 与原库存层归属不一致")
+            if (
+                (source_detail.batch_no or "").upper() != (s.lot_no or "").upper()
+                or source_detail.production_date != s.mfg_date
+                or source_detail.expiry_date != s.exp_date
+                or (source_detail.serial_no or "").upper() != (s.barcode or "").upper()
+            ):
+                raise ValidationError(f"POS PICK 任务行 {line.id} 的跟踪属性与原库存层不一致")
+
+            meta_subwarehouse_id = meta.get("subwarehouse_id")
+            if meta_subwarehouse_id is not None:
+                try:
+                    meta_subwarehouse_id = int(meta_subwarehouse_id)
+                except (TypeError, ValueError) as exc:
+                    raise ValidationError(f"POS PICK 任务行 {line.id} 的子仓快照无效") from exc
+            try:
+                meta_zone_type = int(meta.get("zone_type"))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(f"POS PICK 任务行 {line.id} 的区域快照无效") from exc
+            if (
+                source_detail.subwarehouse_id != meta_subwarehouse_id
+                or source_detail.zone_type != meta_zone_type
+                or (source_detail.serial_no or "").upper()
+                != (meta.get("serial_no") or "").upper()
+            ):
+                raise ValidationError(f"POS PICK 任务行 {line.id} 的库存层快照不一致")
+
+            qty_abs = abs(qty)
+            try:
+                reserved_qty = _q4(meta["reserved_qty"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValidationError(f"POS PICK 任务行 {line.id} 的预占数量无效") from exc
+            if (
+                reserved_qty != qty_abs
+                or _q4(line.qty_plan) != qty_abs
+                or _q4(line.qty_done) != qty_abs
+            ):
+                raise ValidationError(f"POS PICK 任务行 {line.id} 的扫描、完成和预占数量不一致")
+
+            loc_id = source_detail.location_id
+            batch_value = source_detail.batch_no
+            production_date = source_detail.production_date
+            expiry_date = source_detail.expiry_date
+            serial_no = source_detail.serial_no
+            task_line_id = line.id
+            source_detail_id = source_detail.id
+        else:
+            batch_value = getattr(s, "lot_no", "")
+            production_date = getattr(s, "mfg_date", None)
+            expiry_date = getattr(s, "exp_date", None)
+            serial_no = getattr(s, "serial_no", "")
+            task_line_id = None
+            source_detail_id = None
+
+        # 5) 组装聚合键
         key = _AggKey(
             posting_batch=batch_no,
             task_id=task.id,
@@ -693,11 +865,13 @@ def _group_receive_like(task: WmsTask, scans: List[TaskScanLog], *, now, batch_n
             warehouse_id=task.warehouse_id,
             product_id=pid,
             location_id=loc_id,
-            batch_no=getattr(s, "lot_no", ""),
-            production_date=getattr(s, "mfg_date", None),
-            expiry_date=getattr(s, "exp_date", None),
-            serial_no=getattr(s, "serial_no", ""),
+            batch_no=batch_value,
+            production_date=production_date,
+            expiry_date=expiry_date,
+            serial_no=serial_no,
             tx_type=tx_type,
+            task_line_id=task_line_id,
+            source_detail_id=source_detail_id,
         )
 
         agg[key] += qty
@@ -829,7 +1003,11 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
             expiry_date=key.expiry_date,
             serial_no=key.serial_no,
         )
-        return _dimension_sort_key(_detail_dimension_key(values))
+        return (
+            _dimension_sort_key(_detail_dimension_key(values)),
+            key.task_line_id or 0,
+            key.source_detail_id or 0,
+        )
 
     for key, qty in sorted(pending_groups, key=group_sort):
         dimension = _detail_dimension_values(
@@ -843,8 +1021,29 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
             serial_no=key.serial_no,
         )
 
+        locked_detail = details_by_key[_detail_dimension_key(dimension)]
+        is_pos_group = key.task_line_id is not None or key.source_detail_id is not None
+        if is_pos_group:
+            if key.task_line_id is None or key.source_detail_id is None:
+                raise ValidationError("POS PICK 聚合缺少任务行或原库存层")
+            if locked_detail.id != key.source_detail_id:
+                raise ValidationError(
+                    f"POS PICK 原库存层 {key.source_detail_id} 已变化或不再可用"
+                )
+            if not locked_detail.is_active:
+                raise ValidationError(f"POS PICK 原库存层 {locked_detail.id} 已停用")
+            qty_abs = abs(qty)
+            if locked_detail.onhand_qty < qty_abs:
+                raise ValidationError(
+                    f"POS PICK 原库存层 {locked_detail.id} 账面库存不足"
+                )
+            if locked_detail.allocated_qty < qty_abs:
+                raise ValidationError(
+                    f"POS PICK 原库存层 {locked_detail.id} 预占数量不足"
+                )
+
         # 明细增量（出库为负数，进库为正数；COUNT 的 ADJ_* 同理）
-        _upsert_detail(
+        posted_detail = _upsert_detail(
             owner_id=key.owner_id,
             warehouse_id=key.warehouse_id,
             product_id=key.product_id,
@@ -855,7 +1054,7 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
             expiry_date=key.expiry_date,
             serial_no=key.serial_no,
             task_type=task_type,
-            detail=details_by_key[_detail_dimension_key(dimension)],
+            detail=locked_detail,
         )
         # 交易
         _insert_tx(
@@ -871,11 +1070,14 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
             serial_no=key.serial_no,
             src_model="WmsTask",
             src_id=task.id,
-            src_line_id=None,     # 默认不按行聚合；若将来要“按行对账”，可改为 line_id
-            memo=key.tx_type,
+            src_line_id=key.task_line_id if is_pos_group else None,
+            memo="POS_SALE" if is_pos_group else key.tx_type,
             pair_id=None,
             posted_at=now,
             posting_batch=batch_no,
+            subwarehouse_id=(posted_detail.subwarehouse_id if is_pos_group else None),
+            zone_type=(posted_detail.zone_type if is_pos_group else None),
+            src_no=(task.ref_no if is_pos_group else None),
         )
         ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
         logger.info(

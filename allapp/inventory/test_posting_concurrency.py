@@ -22,7 +22,7 @@ from allapp.tasking.models import WmsTask
 class InventoryPostingConcurrencyTests(TransactionTestCase):
     def setUp(self):
         self.owner = Owner.objects.create(code="INV-POST-C", name="Inventory posting C")
-        self.warehouse = Warehouse.objects.create(code="INV-POST-C-WH", name="Inventory posting WH")
+        self.warehouse = Warehouse.objects.create(code="IPC-WH", name="Inventory posting WH")
         Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="IPC",
