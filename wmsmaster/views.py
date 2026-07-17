@@ -29,13 +29,25 @@ def profile_view(request):
     if any(p.startswith("billing.") for p in perms):
         menus.append({"path": "/admin/billing/", "title": "计费", "icon": "el-icon-credit-card"})
 
+    can_process_warehouse_assisted_outbound = (
+        user.owner_id is None
+        and user.warehouse_id is not None
+        and user.has_perm("outbound.process_warehouse_assisted_outbound")
+        and user.has_perm("tasking.claim_task_as_wh_operator")
+    )
+
     return Response({
         "user": {
             "id": user.id,
             "username": user.username,
             "display_name": user.get_full_name() or user.username,
+            "owner_id": user.owner_id,
+            "warehouse_id": user.warehouse_id,
         },
         "perms": perms,
+        "capabilities": {
+            "can_process_warehouse_assisted_outbound": can_process_warehouse_assisted_outbound,
+        },
         "menus": menus  # 返回动态生成的菜单
     })
 

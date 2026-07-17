@@ -177,7 +177,12 @@
         <td class="name-cell nowrap" title="{{ line.product.name }}">{{ line.product.name }}</td>
 
         <td class="nowrap" title="{{ line.product.spec|default_if_none:"" }}">
-          {{ line.product.spec|default_if_none:"" }}
+          {% if line.product.spec %}{{ line.product.spec }}{% endif %}
+          {% if line.aux_uom %}
+            {% if line.product.spec %}<br>{% endif %}
+            {{ line.aux_qty|floatformat:"-3" }} {{ line.aux_uom.uom.name }}
+            （1 {{ line.aux_uom.uom.name }}={{ line.ratio|floatformat:"-3" }} {{ line.base_uom.name }}）
+          {% endif %}
         </td>
 
         <td class="nowrap">

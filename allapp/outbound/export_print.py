@@ -3,13 +3,20 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.db.models import F, Sum, ExpressionWrapper, DecimalField
+from django.db.models import DecimalField, ExpressionWrapper, F, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import AccessToken
 
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+from allapp.outbound.authz import (
+    apply_legacy_scope,
+    assisted_order_source_ids,
+    is_assisted_operator,
+    strict_pick_queryset,
+)
+from allapp.products.permissions import can_manage_all_owner_products
 from allapp.tasking.models import WmsTask
 
 
@@ -89,16 +96,51 @@ def pick_task_print(request, task_id: int):
             if not user_id:
                 return HttpResponse("Unauthorized: invalid token", status=401)
             user = get_user_model().objects.get(id=user_id)
+            if not user.is_active:
+                return HttpResponse("Unauthorized: inactive user", status=401)
             request.user = user
         except Exception:
             return HttpResponse("Unauthorized: invalid token", status=401)
 
-    # 1) 拿拣货任务
-    task = (
-        WmsTask.objects
-        .select_related("owner", "warehouse")
-        .get(id=task_id, task_type=WmsTask.TaskType.PICK)
+    # 1) 拿拣货任务。打印内容包含价格、电话和地址，必须使用与 PDA
+    # 任务详情一致的租户范围；代办来源即使在 shadow 阶段也始终严格隔离。
+    base = WmsTask.objects.select_related("owner", "warehouse").filter(
+        task_type=WmsTask.TaskType.PICK
     )
+    strict = strict_pick_queryset(base, request.user)
+    if is_assisted_operator(request.user):
+        allowed = strict
+    elif request.user.is_superuser:
+        legacy = base
+        allowed = apply_legacy_scope(
+            base_qs=legacy,
+            scoped_qs=strict,
+            user=request.user,
+            endpoint="outbound.pick_tasks.print",
+        )
+    else:
+        warehouse_id = getattr(request.user, "warehouse_id", None)
+        legacy = base.none()
+        if warehouse_id:
+            legacy = base.filter(warehouse_id=warehouse_id)
+            if not can_manage_all_owner_products(request.user):
+                owner_id = getattr(request.user, "owner_id", None)
+                legacy = legacy.filter(owner_id=owner_id) if owner_id else legacy.none()
+            assisted_q = Q(
+                source_model__in=("outboundorder", "OutboundOrder"),
+                source_pk__in=assisted_order_source_ids(warehouse_id=warehouse_id),
+            )
+            legacy = legacy.filter(~assisted_q | Q(pk__in=strict.values("pk")))
+        allowed = apply_legacy_scope(
+            base_qs=legacy,
+            scoped_qs=strict,
+            user=request.user,
+            endpoint="outbound.pick_tasks.print",
+        )
+    try:
+        task = allowed.get(id=task_id)
+    except WmsTask.DoesNotExist:
+        return HttpResponse("Not Found", status=404)
 
     # 2) 通过任务行的 src_id 解析出库单
     tl = (
@@ -129,7 +171,12 @@ def pick_task_print(request, task_id: int):
     lines = (
         OutboundOrderLine.objects
         .filter(order_id=order.id)
-        .select_related("product", "base_uom", "product__base_uom")
+        .select_related(
+            "product",
+            "base_uom",
+            "product__base_uom",
+            "aux_uom__uom",
+        )
         .annotate(amount=amount_expr)
         .order_by("line_no", "id")
     )
@@ -146,11 +193,12 @@ def pick_task_print(request, task_id: int):
     sender_name = getattr(order.owner, "name", "") or ""
     sender_phone = getattr(order.owner, "phone", "") or ""
 
-    # 收货人：客户（退供单 customer 为空时兜底 supplier）
-    receiver_name = ""
-    if order.customer_id:
+    # 收货人优先使用下单时保存的联系人快照。散客/一件代发订单的客户档案
+    # 是共享客户，不能用客户名称覆盖本单实际收件人。
+    receiver_name = (order.contact or "").strip()
+    if not receiver_name and order.customer_id:
         receiver_name = order.customer.name or ""
-    elif order.supplier_id:
+    elif not receiver_name and order.supplier_id:
         receiver_name = order.supplier.name or ""
 
     # 电话/地址：优先用订单快照字段，更可靠
@@ -177,15 +225,6 @@ def pick_task_print(request, task_id: int):
         "total_amount": total_amount,
         "total_amount_upper": total_amount_upper,
     })
-
-
-
-from django.http import HttpResponse
-from django.shortcuts import render
-from django.contrib.auth import get_user_model
-from rest_framework_simplejwt.tokens import AccessToken
-
-from allapp.tasking.models import WmsTask, WmsTaskLine
 #
 # from decimal import Decimal
 # from django.http import HttpResponse

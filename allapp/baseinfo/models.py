@@ -27,6 +27,13 @@ class Owner(BaseModel, AddressMixin):
     wx = models.CharField("微信", max_length=20, blank=True, null=True)
     qq = models.CharField("QQ", max_length=20, blank=True, null=True)
     email = models.EmailField("Email", blank=True, null=True)
+    allow_warehouse_assisted_outbound = models.BooleanField(
+        "允许仓库代办出库",
+        default=False,
+        help_text=(
+            "启用后，具备专用权限的仓库操作员可代该货主新建并完成出库。"
+        ),
+    )
 
     # 证照信息ImageField(upload_to='owner_pictures/', blank=True, null=True)
     business_license = models.CharField("营业执照", max_length=100, blank=True, null=True)

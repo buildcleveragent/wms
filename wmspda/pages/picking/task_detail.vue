@@ -14,12 +14,15 @@
       </view>
       <view class="row-meta">
         <text>状态：{{ task?.status }}</text>
+        <text style="margin-left: 24rpx;">复核：{{ task?.review_status || '-' }}</text>
+        <text style="margin-left: 24rpx;">过账：{{ task?.posting_status || '-' }}</text>
       </view>
+      <view v-if="task?.is_warehouse_assisted" class="assisted-badge">仓库代办出库</view>
     </view>
 
     <!-- 扫码 + 数量 -->
-    <view class="scan-bar">
-      <input
+    <view v-if="isPickable" class="scan-bar">
+			    <input
         class="input flex-input"
         v-model="scanBarcode"
         placeholder="扫描或输入条码"
@@ -31,8 +34,10 @@
         v-model="scanQty"
         @confirm="submitScan()"
       />
-      <button class="btn-outline" @click="handleScan">扫码</button>
-      <button class="btn-outline" @click="submitScan()">录入</button>
+      <button class="btn-outline" :disabled="scanning || adjustingCount > 0" @click="handleScan">扫码</button>
+      <button class="btn-outline" :disabled="scanning || adjustingCount > 0" @click="submitScan()">
+        {{ scanning ? '录入中…' : '录入' }}
+      </button>
     </view>
 
     <!-- 任务行列表 -->
@@ -62,7 +67,8 @@
 		      :value="formatQty(ln.qty_done)"
 		      placeholder=""
 		      @input="(e) => onEditQty(e, ln)"
-			  @blur="applyManualQty(ln)"
+				  @blur="applyManualQty(ln)"
+				  :disabled="!isPickable || scanning || adjustingLineIds.has(ln.id)"
 
 		    />
 		  </view>
@@ -71,10 +77,25 @@
     </view>
 
     <!-- 底部完成按钮 -->
-    <view class="footer">
-      <button class="btn-primary" :disabled="!allDone" @click="createReviewTask">
-        完成拣货，创建复核任务
+    <view class="footer" v-if="task">
+      <button
+        v-if="isPickable"
+        class="btn-primary"
+        :disabled="!allDone || submittingReview || scanning"
+        @click="createReviewTask"
+      >
+        {{ submittingReview ? '正在保存并提交…' : '完成拣货' }}
       </button>
+      <button
+        v-else-if="canSelfReview"
+        class="btn-danger"
+        :disabled="posting || confirmingPost"
+        @click="confirmAndPost"
+      >
+        {{ posting ? '正在复核过账…' : task.review_status === 'APPROVED' ? '重试确认出库' : '复核并确认出库' }}
+      </button>
+      <view v-else-if="isPosted" class="completed-text">本任务已完成复核并过账</view>
+      <view v-else class="completed-text">拣货已提交，等待复核</view>
     </view>
   </view>
 </template>
@@ -84,14 +105,24 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
+import { useAuth } from '@/store/auth'
 
 const taskId = ref<number | null>(null)
+const auth = useAuth()
 const task = ref<any | null>(null)
 const lines = ref<any[]>([])
 
 const scanBarcode = ref('')
 const scanQty = ref<string>('1')
 const loading = ref(false)
+const submittingReview = ref(false)
+const posting = ref(false)
+const confirmingPost = ref(false)
+const scanning = ref(false)
+const adjustingCount = ref(0)
+const adjustingLineIds = new Set<number>()
+const dirtyLineIds = new Set<number>()
+const adjustmentPromises = new Map<number, Promise<boolean>>()
 
 // 扫描钩子
 const { lastScan, quickScan, setScanCallback, initScanner, unRegisterBroadcast } =
@@ -101,6 +132,18 @@ const allDone = computed(() => {
   if (!lines.value.length) return false
   return lines.value.every((ln: any) =>
     Number(ln.qty_done || 0) >= Number(ln.qty_plan || 0)
+  )
+})
+
+const isPickable = computed(() => ['RESERVED', 'RELEASED', 'IN_PROGRESS'].includes(task.value?.status))
+const isPosted = computed(() => task.value?.posting_status === 'POSTED')
+const canSelfReview = computed(() => {
+  if (task.value?.status !== 'COMPLETED' || task.value?.can_self_review !== true) return false
+  const reviewStatus = task.value?.review_status
+  const postingStatus = task.value?.posting_status
+  return (
+    (reviewStatus === 'PENDING' && ['NOT_READY', 'PENDING'].includes(postingStatus)) ||
+    (reviewStatus === 'APPROVED' && ['PENDING', 'FAILED'].includes(postingStatus))
   )
 })
 
@@ -131,6 +174,7 @@ async function loadLines() {
       ...ln,
       _edit_qty_done: ln.qty_done ?? 0,
     }))
+    dirtyLineIds.clear()
   } catch (e) {
     console.error(e)
     uni.showToast({ title: '加载任务行失败', icon: 'none' })
@@ -140,35 +184,70 @@ async function loadLines() {
 }
 
 
-async function applyManualQty(ln: any) {
-  const raw = ln.qty_done          // 你在 v-model 里绑定的那个
+function applyManualQty(ln: any): Promise<boolean> {
+  const lineId = Number(ln?.id)
+  if (!lineId || !taskId.value || !isPickable.value || scanning.value) {
+    return Promise.resolve(false)
+  }
+
+  const existing = adjustmentPromises.get(lineId)
+  if (existing) return existing
+  if (!dirtyLineIds.has(lineId)) return Promise.resolve(true)
+
+  const raw = ln.qty_done
   const val = Number(raw)
-
-  if (Number.isNaN(val) || val < 0) {
+  if (!Number.isFinite(val) || val < 0) {
     uni.showToast({ title: '请输入合法的拣货数量', icon: 'none' })
-    return
+    return Promise.resolve(false)
   }
-  
-  console.log("applyManualQty")
 
-  try {
-    const res: any = await api.adjustPickLineQty(taskId.value, {
-      line_id: ln.id,
-      final_qty_done: val,
-      client_seq: genClientSeq(),
-    })
-    ln.qty_done = res.qty_done    // 后端返回为准
-    ln.edit_qty = res.qty_done
-  } catch (e: any) {
-    const msg = e?.data?.detail || e?.data?.message || '调整拣货数量失败'
-    uni.showToast({ title: String(msg), icon: 'none' })
+  const request = (async (): Promise<boolean> => {
+    adjustingLineIds.add(lineId)
+    adjustingCount.value += 1
+    try {
+      const res: any = await api.adjustPickLineQty(taskId.value, {
+        line_id: lineId,
+        final_qty_done: val,
+        client_seq: genClientSeq(),
+      })
+      ln.qty_done = res.qty_done
+      ln.edit_qty = res.qty_done
+      dirtyLineIds.delete(lineId)
+      return true
+    } catch (e: any) {
+      const msg = e?.data?.detail || e?.data?.message || '调整拣货数量失败'
+      uni.showToast({ title: String(msg), icon: 'none' })
+      await loadLines()
+      return false
+    } finally {
+      adjustingLineIds.delete(lineId)
+      adjustingCount.value = Math.max(0, adjustingCount.value - 1)
+      adjustmentPromises.delete(lineId)
+    }
+  })()
+
+  adjustmentPromises.set(lineId, request)
+  return request
+}
+
+async function flushManualQtyEdits(): Promise<boolean> {
+  for (const ln of lines.value) {
+    const lineId = Number(ln?.id)
+    if (!lineId || (!dirtyLineIds.has(lineId) && !adjustmentPromises.has(lineId))) continue
+    if (!await applyManualQty(ln)) return false
   }
+  const remaining = Array.from(adjustmentPromises.values())
+  if (remaining.length) {
+    const results = await Promise.all(remaining)
+    if (results.some((saved) => !saved)) return false
+  }
+  return adjustmentPromises.size === 0
 }
 
 
 
 async function submitScan(barcodeOverride?: string) {
-  if (!taskId.value) return
+  if (!taskId.value || !isPickable.value || scanning.value || adjustingCount.value > 0) return
   const code = (barcodeOverride || scanBarcode.value || '').trim()
   if (!code) {
     uni.showToast({ title: '请先扫描或输入条码', icon: 'none' })
@@ -176,6 +255,7 @@ async function submitScan(barcodeOverride?: string) {
   }
   const q = Number(scanQty.value) || 1
 
+  scanning.value = true
   try {
     const res: any = await api.scanPick(taskId.value, {
       barcode: code,
@@ -206,11 +286,14 @@ async function submitScan(barcodeOverride?: string) {
     console.error(err)
     const msg = err?.data?.detail || err?.data?.message || '拣货失败'
     uni.showToast({ title: String(msg), icon: 'none' })
+  } finally {
+    scanning.value = false
   }
 }
 
 // 点击“扫码”按钮
 function handleScan() {
+  if (!isPickable.value || scanning.value || adjustingCount.value > 0) return
   quickScan()
 }
 
@@ -221,9 +304,9 @@ setScanCallback((barcode: string) => {
   submitScan(barcode)
 })
 
-// 完成任务并过账
 async function postTask() {
-  if (!taskId.value) return
+  if (!taskId.value || posting.value) return
+  posting.value = true
   try {
     const res: any = await api.postPickTask(taskId.value)
     uni.showToast({
@@ -235,31 +318,67 @@ async function postTask() {
     }, 800)
   } catch (err: any) {
     console.error(err)
+    if (Number(err?.statusCode || err?.code) === 403 && task.value?.is_warehouse_assisted) {
+      auth.invalidateAssistedCapability()
+    }
     const msg = err?.data?.detail || err?.data?.message || '过账失败'
     uni.showToast({ title: String(msg), icon: 'none' })
+  } finally {
+    posting.value = false
   }
 }
 
-async function createReviewTask() {
-  if (!taskId.value) return
-  if (!allDone.value) {
-    uni.showToast({ title: '还有未拣完的行，不能提交复核', icon: 'none' })
-    return
-  }
+function confirmAndPost() {
+  if (!canSelfReview.value || posting.value || confirmingPost.value) return
+  confirmingPost.value = true
+  uni.showModal({
+    title: '确认单人复核并出库',
+    content: '你将以同一仓库操作员身份完成复核和库存过账。请确认商品、数量和库位均已核对无误。',
+    confirmText: '确认出库',
+    confirmColor: '#c62828',
+    success: (result) => {
+      if (result.confirm) postTask()
+    },
+    complete: () => {
+      confirmingPost.value = false
+    },
+  })
+}
 
+async function createReviewTask() {
+  if (
+    !taskId.value ||
+    !isPickable.value ||
+    submittingReview.value ||
+    scanning.value
+  ) return
+
+  submittingReview.value = true
   try {
+    // 点击按钮会先触发当前数量输入框的 blur。等待该保存请求，或者
+    // 主动保存尚未失焦的编辑，避免第一次点击只保存数量、第二次才提交。
+    if (!await flushManualQtyEdits()) return
+    if (!allDone.value) {
+      uni.showToast({ title: '还有未拣完的行，不能提交复核', icon: 'none' })
+      return
+    }
+
     const res: any = await api.createPickReviewTask(taskId.value)
     uni.showToast({
       title: res?.message || '拣货完成，已创建复核任务',
       icon: 'none',
     })
-    setTimeout(() => {
-      uni.navigateBack()
-    }, 800)
+    await loadTask()
+    await loadLines()
   } catch (err: any) {
     console.error(err)
     const msg = err?.data?.detail || err?.data?.message || '提交复核任务失败'
     uni.showToast({ title: String(msg), icon: 'none' })
+    // 请求超时但服务端已成功时，刷新后可直接进入第二阶段。
+    await loadTask()
+    await loadLines()
+  } finally {
+    submittingReview.value = false
   }
 }
 
@@ -304,6 +423,7 @@ function onEditQty(e: any, ln: any) {
 
   // 真正参与业务 / allDone 计算的是 qty_done
   ln.qty_done = val
+  if (ln?.id) dirtyLineIds.add(Number(ln.id))
 }
 
 onLoad((opts: any) => {
@@ -446,5 +566,33 @@ onUnmounted(() => {
 }
 .btn-primary:disabled {
   background: #94a3b8;
+}
+.assisted-badge {
+  display: inline-block;
+  margin-top: 10rpx;
+  padding: 5rpx 12rpx;
+  border-radius: 999rpx;
+  color: #9a3412;
+  background: #ffedd5;
+  font-size: 22rpx;
+}
+.btn-danger {
+  width: 100%;
+  padding: 12rpx 0;
+  border-radius: 12rpx;
+  color: #fff;
+  background: #c62828;
+  text-align: center;
+  font-size: 28rpx;
+}
+.btn-danger:disabled {
+  background: #94a3b8;
+}
+.completed-text {
+  padding: 20rpx;
+  border-radius: 12rpx;
+  color: #475569;
+  background: #f1f5f9;
+  text-align: center;
 }
 </style>

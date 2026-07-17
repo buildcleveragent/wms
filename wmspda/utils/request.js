@@ -12,7 +12,7 @@ const BASE_MAP = {
 // export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
 export const BASE_URL = BASE_MAP.develop
 
-function getToken() {
+export function getToken() {
   try {
     return uni.getStorageSync('access') || ''
   } catch (e) {
@@ -202,6 +202,12 @@ export const api = {
       data: { username, password },
     }),
 
+  profile: () =>
+    request({
+      url: '/api/auth/profile/',
+      method: 'GET',
+    }),
+
   changePassword: (oldPassword, newPassword1, newPassword2) =>
     request({
       url: '/api/auth/password/change/',
@@ -258,6 +264,56 @@ export const api = {
       method: 'POST',
       data: payload,
     }),
+
+  assistedOwners: (q = '', page = 1) =>
+    request({
+      url: `/api/outbound/assisted-orders/owners/?${buildQuery({ search: q, page })}`,
+    }),
+
+  assistedCustomers: (ownerId, q = '', page = 1) =>
+    request({
+      url: `/api/outbound/assisted-orders/customers/?${buildQuery({ owner_id: ownerId, search: q, page })}`,
+    }),
+
+  assistedProducts: (ownerId, q = '', page = 1) =>
+    request({
+      url: `/api/outbound/assisted-orders/products/?${buildQuery({ owner_id: ownerId, search: q, page })}`,
+    }),
+
+  createAssistedOutboundOrder: (payload) =>
+    request({
+      url: '/api/outbound/assisted-orders/',
+      method: 'POST',
+      data: payload,
+    }),
+
+  assistedOutboundHistory: (params = {}) => {
+    const qs = buildQuery({
+      search: params.search || '',
+      start_date: params.start_date || '',
+      end_date: params.end_date || '',
+      owner_id: params.owner_id || '',
+      operator_id: params.operator_id || '',
+      status: params.status || '',
+      page: params.page || 1,
+      page_size: params.page_size || 20,
+    })
+    return request({ url: `/api/outbound/assisted-orders/history/?${qs}` })
+  },
+
+  assistedOutboundHistoryOptions: () =>
+    request({ url: '/api/outbound/assisted-orders/history-options/' }),
+
+  assistedOutboundStats: (params = {}) => {
+    const qs = buildQuery({
+      start_date: params.start_date || '',
+      end_date: params.end_date || '',
+      owner_id: params.owner_id || '',
+      operator_id: params.operator_id || '',
+      top_n: params.top_n || 10,
+    })
+    return request({ url: `/api/outbound/assisted-orders/stats/?${qs}` })
+  },
 
   // 兼容两种调用：
   // 1) api.orders('关键字')

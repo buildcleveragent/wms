@@ -13,7 +13,9 @@ from ..tasking.models import WmsTask
 
 # —— 权限判断：货主业务员（或超管）才允许“提交” —— #
 def _as_owner_buyers(self, request):
-    return request.user.is_superuser or request.user.has_perm("inbound.submit_as_owner_buyers")
+    return request.user.is_superuser or request.user.has_perm(
+        "outbound.submit_outbound_as_owner_buyers"
+    )
 
 # ========= 多租户隔离（非超管仅看自己 owner）的通用混入 =========
 class OwnerScopedAdminMixin(admin.ModelAdmin):
@@ -56,12 +58,13 @@ class OutboundOrderAdmin(admin.ModelAdmin):
     # —— 列表配置 —— #
     list_display = (
         "order_no", "biz_date", "outbound_type", "owner", "warehouse", "customer", "supplier",
-        "submit_status", "approval_status", "delivery_method", "is_closed",
+        "submit_status", "approval_status", "processing_mode", "delivery_method", "is_closed",
         "created_by", "created_at",
     )
     list_select_related = ("owner", "warehouse", "customer", "supplier", "created_by")
     list_filter = (
-        "outbound_type", "submit_status", "approval_status", "delivery_method", "is_closed",
+        "outbound_type", "submit_status", "approval_status", "processing_mode",
+        "delivery_method", "is_closed",
         ("biz_date", admin.DateFieldListFilter), "owner", "warehouse", "customer", "supplier",
     )
     search_fields = (
@@ -72,12 +75,47 @@ class OutboundOrderAdmin(admin.ModelAdmin):
     date_hierarchy = "biz_date"
     show_full_result_count = False
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        user = request.user
+        if user.is_superuser or user.has_perm("outbound.view_all_outbound_orders"):
+            return qs
+        owner_id = getattr(user, "owner_id", None)
+        warehouse_id = getattr(user, "warehouse_id", None)
+        if owner_id:
+            qs = qs.filter(owner_id=owner_id)
+            return qs.filter(warehouse_id=warehouse_id) if warehouse_id else qs
+        if warehouse_id:
+            return qs.filter(warehouse_id=warehouse_id)
+        return qs.none()
+
+    @staticmethod
+    def _in_owner_scope(request, order):
+        if request.user.is_superuser:
+            return True
+        if getattr(request.user, "owner_id", None) != order.owner_id:
+            return False
+        warehouse_id = getattr(request.user, "warehouse_id", None)
+        return not warehouse_id or warehouse_id == order.warehouse_id
+
+    @staticmethod
+    def _in_warehouse_scope(request, order):
+        return bool(
+            request.user.is_superuser
+            or (
+                getattr(request.user, "warehouse_id", None)
+                and request.user.warehouse_id == order.warehouse_id
+            )
+        )
+
     # —— 表单配置 —— #
     autocomplete_fields = ("owner", "warehouse", "customer", "supplier",)
     readonly_fields = (
         "order_no", "created_at", "created_by",
         "approved_by_ownermanager", "approved_at_ownermanager",
         "approved_by_warehouse", "approved_at_warehouse",
+        "processing_mode", "assisted_by", "assisted_at",
+        "assistance_reason", "assistance_request_id",
     )
 
     # 使用简单的 fields（用户此前偏好），避免 fieldsets 造成冗长切分
@@ -87,6 +125,9 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         ("customer", "supplier"),
         ("delivery_method", "etd"),
         ("submit_status", "approval_status"),
+        ("processing_mode", "assistance_reason"),
+        ("assisted_by", "assisted_at"),
+        "assistance_request_id",
         ("is_closed", "close_reason"),
         "src_bill_no",
         ("ship_to",),
@@ -98,7 +139,9 @@ class OutboundOrderAdmin(admin.ModelAdmin):
     )
 
     def _as_owner_mgr(self, request):
-        return request.user.is_superuser or request.user.has_perm("inbound.approve_as_owner_manager")
+        return request.user.is_superuser or request.user.has_perm(
+            "outbound.approve_outbound_as_owner_manager"
+        )
 
     # —— 保存钩子 —— #
     def save_model(self, request, obj: OutboundOrder, form, change):  # type: ignore[override]
@@ -119,6 +162,8 @@ class OutboundOrderAdmin(admin.ModelAdmin):
 
     @admin.action(description="提交")
     def action_submit(self, request, queryset):
+        if not _as_owner_buyers(self, request):
+            raise PermissionDenied("需要货主业务员权限。")
         self._transition_many(
             request,
             queryset,
@@ -129,6 +174,8 @@ class OutboundOrderAdmin(admin.ModelAdmin):
 
     @admin.action(description="撤销提交")
     def action_revert_draft(self, request, queryset):
+        if not _as_owner_buyers(self, request):
+            raise PermissionDenied("需要货主业务员权限。")
         self._transition_many(
             request,
             queryset,
@@ -145,6 +192,8 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         ok, err = 0, []
         for order in queryset.select_related("owner", "warehouse"):
             try:
+                if not self._in_owner_scope(request, order):
+                    raise PermissionDenied("禁止审核其他货主或仓库的订单。")
                 # 统一走模型方法，里面负责：
                 # - approval_status = OWNER_APPROVED
                 # - 记录 approved_by_ownermanager / approved_at_ownermanager
@@ -161,6 +210,9 @@ class OutboundOrderAdmin(admin.ModelAdmin):
 
     @admin.action(description="货主管理员审核驳回")
     def action_owner_reject(self, request, queryset):
+        if not self._as_owner_mgr(request):
+            raise PermissionDenied("需要货主管理员权限。")
+
         def mutate(o: OutboundOrder):
             o.approval_status = "OWNER_REJECTED"
             o.approved_by_ownermanager = request.user
@@ -169,13 +221,18 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         self._transition_many(
             request,
             queryset,
-            allow=lambda o: o.approval_status == "OWNER_PENDING",
+            allow=lambda o: (
+                self._in_owner_scope(request, o)
+                and o.approval_status == "OWNER_PENDING"
+            ),
             mutate=mutate,
             success_msg="已置为:货主管理员审核驳回",
         )
 
     def _as_wh_mgr(self, request):
-        return request.user.is_superuser or request.user.has_perm("inbound.approve_as_wh_manager")
+        return request.user.is_superuser or request.user.has_perm(
+            "outbound.approve_outbound_as_wh_manager"
+        )
 
     @admin.action(description="仓库管理员确认（审核 + 生成拣货任务）")
     def action_whs_approve(self, request, queryset):
@@ -185,17 +242,28 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         ok, err = 0, []
         for order in queryset.select_related("owner", "warehouse"):
             try:
-                if order.approval_status not in {"OWNER_APPROVED", "WHS_PENDING"}:
-                    continue
+                if not self._in_warehouse_scope(request, order):
+                    raise PermissionDenied("禁止确认其他仓库的订单。")
+                with transaction.atomic():
+                    order = type(order).objects.select_for_update().get(pk=order.pk)
+                    if order.approval_status not in {"OWNER_APPROVED", "WHS_PENDING"}:
+                        continue
 
-                # 1) 审核状态更新为 WHS_APPROVED
-                order.approval_status = "WHS_APPROVED"
-                order.approved_by_warehouse = request.user
-                order.approved_at_warehouse = timezone.now()
-                order.save(update_fields=["approval_status", "approved_by_warehouse", "approved_at_warehouse"])
-
-                # 2) 将 RESERVED 拣货任务提升为 DRAFT（生成拣货任务草稿）
-                ob_services.promote_reserved_pick(order, new_status="RELEASED")
+                    order.approval_status = "WHS_APPROVED"
+                    order.approved_by_warehouse = request.user
+                    order.approved_at_warehouse = timezone.now()
+                    order.save(
+                        update_fields=[
+                            "approval_status",
+                            "approved_by_warehouse",
+                            "approved_at_warehouse",
+                        ]
+                    )
+                    ob_services.promote_reserved_pick(
+                        order,
+                        new_status=WmsTask.Status.RELEASED,
+                        by_user=request.user,
+                    )
                 ok += 1
             except Exception as e:
                 err.append(f"{getattr(order, 'order_no', order.pk)}: {e}")
@@ -213,14 +281,21 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         ok, err = 0, []
         for order in queryset:
             try:
-                # 1) 释放冻结 & 取消相关任务
-                ob_services.unallocate_for_order(order)
-
-                # 2) 审核状态更新为 WHS_REJECTED
-                order.approval_status = "WHS_REJECTED"
-                order.approved_by_warehouse = request.user
-                order.approved_at_warehouse = timezone.now()
-                order.save(update_fields=["approval_status", "approved_by_warehouse", "approved_at_warehouse"])
+                if not self._in_warehouse_scope(request, order):
+                    raise PermissionDenied("禁止驳回其他仓库的订单。")
+                with transaction.atomic():
+                    order = type(order).objects.select_for_update().get(pk=order.pk)
+                    ob_services.unallocate_for_order(order)
+                    order.approval_status = "WHS_REJECTED"
+                    order.approved_by_warehouse = request.user
+                    order.approved_at_warehouse = timezone.now()
+                    order.save(
+                        update_fields=[
+                            "approval_status",
+                            "approved_by_warehouse",
+                            "approved_at_warehouse",
+                        ]
+                    )
 
                 ok += 1
             except Exception as e:
@@ -235,10 +310,12 @@ class OutboundOrderAdmin(admin.ModelAdmin):
 
     @admin.action(description="取消订单")
     def action_cancel(self, request, queryset):
+        if not self._as_owner_mgr(request):
+            raise PermissionDenied("需要货主管理员权限。")
         self._transition_many(
             request,
             queryset,
-            allow=lambda o: not o.is_closed,
+            allow=lambda o: self._in_owner_scope(request, o) and not o.is_closed,
             mutate=lambda o: setattr(o, "approval_status", "CANCELLED"),
             success_msg="已取消",
         )
@@ -285,38 +362,22 @@ class OutboundOrderAdmin(admin.ModelAdmin):
             raise PermissionDenied("需要仓库管理员权限。")
 
         ok, err = 0, []
-        # 一把锁住，避免并发下重复 allocate / promote
-        with transaction.atomic():
-            for order in queryset.select_for_update().select_related("owner", "warehouse"):
-                try:
-                    # 1) 若仍在 OWNER_PENDING/OWNER_REJECTED，则代为货主审核（会冻结库存 + 生成 RESERVED 拣货任务）
-                    if order.approval_status in ("OWNER_PENDING"):
-                        # 建议你按前面修正过的 owner_approve 实现：
-                        #   - approval_status = OWNER_APPROVED
-                        #   - 记录 approved_by_ownermanager / approved_at_ownermanager
-                        #   - ob_services.allocate_inventory(...)
-                        order.owner_approve(by_user=request.user, allow_backorder=True)
-
-                    # 2) 仓库审核通过（如果还没 WHS_APPROVED）
-                    if order.approval_status in ("OWNER_APPROVED", "WHS_PENDING"):
-                        order.approval_status = "WHS_APPROVED"
-                        order.approved_by_warehouse = request.user
-                        order.approved_at_warehouse = timezone.now()
-                        order.save(update_fields=[
-                            "approval_status",
-                            "approved_by_warehouse",
-                            "approved_at_warehouse",
-                        ])
-
-                    # 3) 将 RESERVED 拣货任务直接提升为 RELEASED
-                    #    注意：PickTaskViewSet.get_queryset 只看 status in [RELEASED, IN_PROGRESS]
-                    ob_services.promote_reserved_pick(
-                        order, new_status=WmsTask.Status.RELEASED
+        for order in queryset.select_related("owner", "warehouse"):
+            try:
+                if not self._in_warehouse_scope(request, order):
+                    raise PermissionDenied("禁止发布其他仓库的订单。")
+                # Each order owns its transaction: one shortage must not roll
+                # back successful approvals for the rest of the batch.
+                with transaction.atomic():
+                    locked = type(order).objects.select_for_update().get(pk=order.pk)
+                    ob_services.approve_and_release_order(
+                        locked,
+                        by_user=request.user,
+                        allow_backorder=True,
                     )
-
-                    ok += 1
-                except Exception as e:
-                    err.append(f"{getattr(order, 'order_no', order.pk)}: {e}")
+                ok += 1
+            except Exception as e:
+                err.append(f"{getattr(order, 'order_no', order.pk)}: {e}")
 
         if ok:
             self.message_user(

@@ -2,8 +2,8 @@
 # FILE: allapp/tasking/views_console.py
 # 说明：基于 CBV 的任务列表/详情与原子操作端点。严格以基线代码为准，不自创字段。
 # ===============================
-from typing import Any, Dict, Iterable, List, Sequence
 import json
+from typing import Any, Dict, Iterable, List, Sequence
 
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -20,11 +20,20 @@ from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from django.views import View
 from django.views.generic import DetailView, ListView, TemplateView
+from rest_framework.exceptions import PermissionDenied
 
+from allapp.outbound.authz import (
+    apply_legacy_scope,
+    assisted_order_source_ids,
+    get_assisted_order_for_task,
+    is_assisted_operator,
+    legacy_authz_mode,
+    require_legacy_action,
+    strict_pick_queryset,
+)
 from .models import TaskAssignment, WmsTask, WmsTaskLine
 from allapp.inventory import services as inv_services
 from allapp.tasking import services as task_services
-
 
 TASK_TYPE_SLUG_TO_URL = {
     "receive": "tasking_console:task_receive_list",
@@ -46,6 +55,66 @@ def _is_wh_manager(user) -> bool:
     return getattr(user, "is_superuser", False) or user.has_perm(
         "tasking.taskconfirm_as_wh_manager"
     )
+
+
+def _assisted_task_queryset(qs):
+    return qs.filter(
+        source_model__in=("outboundorder", "OutboundOrder"),
+        source_pk__in=assisted_order_source_ids(),
+    )
+
+
+def _scope_task_queryset(qs, user, *, endpoint: str):
+    """Scope console tasks while never shadow-exposing assisted orders."""
+
+    strict_qs = strict_pick_queryset(qs, user)
+    if legacy_authz_mode() == "enforce" or is_assisted_operator(user):
+        return strict_qs
+
+    assisted_base = _assisted_task_queryset(qs)
+    assisted_scoped = strict_pick_queryset(assisted_base, user)
+    standard_base = qs.exclude(pk__in=assisted_base.order_by().values("pk"))
+    standard_scoped = strict_pick_queryset(standard_base, user)
+    visible_standard = apply_legacy_scope(
+        base_qs=standard_base,
+        scoped_qs=standard_scoped,
+        user=user,
+        endpoint=endpoint,
+    )
+    return qs.filter(
+        Q(pk__in=visible_standard.order_by().values("pk"))
+        | Q(pk__in=assisted_scoped.order_by().values("pk"))
+    )
+
+
+def _scope_line_queryset(qs, user, *, endpoint: str):
+    task_ids = _scope_task_queryset(WmsTask.objects.all(), user, endpoint=endpoint).values("pk")
+    return qs.filter(task_id__in=task_ids)
+
+
+def _is_assisted_task(task) -> bool:
+    if get_assisted_order_for_task(task) is not None:
+        return True
+    return _assisted_task_queryset(WmsTask.objects.filter(pk=task.pk)).exists()
+
+
+def _task_action_allowed(user, task, *, endpoint: str, manager_allowed: bool = False) -> bool:
+    allowed = _is_wh_operator(user) or (manager_allowed and _is_wh_manager(user))
+    if allowed:
+        return True
+    # The compatibility switch never weakens authorization for assisted orders.
+    if _is_assisted_task(task):
+        return False
+    try:
+        require_legacy_action(
+            user=user,
+            allowed=False,
+            endpoint=endpoint,
+            reason="需要仓库操作权限",
+        )
+    except PermissionDenied:
+        return False
+    return True
 
 
 class TaskListView(LoginRequiredMixin, ListView):
@@ -81,6 +150,18 @@ class TaskListView(LoginRequiredMixin, ListView):
     def get_queryset(self):
         qs = self.get_base_queryset()
         qs = self.filter_queryset(qs)
+        endpoint = f"tasking.console.{self.__class__.__name__}.list"
+        if hasattr(self, "status_base_queryset"):
+            self.status_base_queryset = _scope_task_queryset(
+                self.status_base_queryset,
+                self.request.user,
+                endpoint=f"{endpoint}.status_summary",
+            )
+        qs = _scope_task_queryset(
+            qs,
+            self.request.user,
+            endpoint=endpoint,
+        )
         self.filtered_queryset = qs
         return qs
 
@@ -190,6 +271,11 @@ class TaskTypeListView(TaskListView):
         base_qs = WmsTask.objects
         if self.task_type_value:
             base_qs = base_qs.filter(task_type=self.task_type_value)
+        base_qs = _scope_task_queryset(
+            base_qs,
+            self.request.user,
+            endpoint=f"tasking.console.{self.__class__.__name__}.warehouse_options",
+        )
         return (
             base_qs.order_by("warehouse__name")
             .values("warehouse_id", "warehouse__name")
@@ -328,11 +414,19 @@ class TaskLineWorkListView(LoginRequiredMixin, TemplateView):
 
     def dispatch(self, request: HttpRequest, *args, **kwargs):  # type: ignore[override]
         if not (_is_wh_operator(request.user) or _is_wh_manager(request.user)):
-            return HttpResponseForbidden("需要仓库操作权限")
+            try:
+                require_legacy_action(
+                    user=request.user,
+                    allowed=False,
+                    endpoint="tasking.console.task_line_work_list",
+                    reason="需要仓库操作权限",
+                )
+            except PermissionDenied:
+                return HttpResponseForbidden("需要仓库操作权限")
         return super().dispatch(request, *args, **kwargs)
 
     def _base_queryset(self):
-        return (
+        qs = (
             WmsTaskLine.objects.select_related(
                 "task",
                 "task__owner",
@@ -341,6 +435,11 @@ class TaskLineWorkListView(LoginRequiredMixin, TemplateView):
                 "from_location",
                 "to_location",
             ).all()
+        )
+        return _scope_line_queryset(
+            qs,
+            self.request.user,
+            endpoint="tasking.console.task_line_work_list",
         )
 
     def _filter_queryset(self, qs):
@@ -415,8 +514,6 @@ class TaskLineWorkView(LoginRequiredMixin, View):
     http_method_names = ["get", "post"]
 
     def dispatch(self, request: HttpRequest, *args, **kwargs):  # type: ignore[override]
-        if not (_is_wh_operator(request.user) or _is_wh_manager(request.user)):
-            return HttpResponseForbidden("需要仓库操作权限")
         return super().dispatch(request, *args, **kwargs)
 
     def _redirect_back(self):
@@ -502,10 +599,23 @@ class TaskLineWorkView(LoginRequiredMixin, View):
         try:
             with transaction.atomic():
                 line = (
-                    WmsTaskLine.objects.select_for_update()
+                    _scope_line_queryset(
+                        WmsTaskLine.objects.select_for_update(),
+                        request.user,
+                        endpoint="tasking.console.task_line_work",
+                    )
                     .select_related("task", "task__owner", "task__warehouse")
                     .get(pk=pk)
                 )
+
+                if not _task_action_allowed(
+                    request.user,
+                    line.task,
+                    endpoint="tasking.console.task_line_work",
+                    manager_allowed=True,
+                ):
+                    messages.error(request, "需要仓库操作权限。")
+                    return self._redirect_back()
 
                 ok = self._ensure_assignment(line=line, user=request.user)
         except WmsTaskLine.DoesNotExist:
@@ -541,8 +651,13 @@ class TaskDetailView(LoginRequiredMixin, DetailView):
     context_object_name = "task"
 
     def get_queryset(self):
-        return WmsTask.objects.select_related(
+        qs = WmsTask.objects.select_related(
             "owner", "warehouse", "created_by", "updated_by"
+        )
+        return _scope_task_queryset(
+            qs,
+            self.request.user,
+            endpoint="tasking.console.task_detail",
         )
 
     def get_context_data(self, **kwargs: Any) -> Dict[str, Any]:
@@ -590,7 +705,22 @@ class TaskPostView(LoginRequiredMixin, View, _JsonMixin):
 
     @transaction.atomic
     def post(self, request: HttpRequest, pk: int):
-        task = get_object_or_404(WmsTask, pk=pk)
+        scoped_tasks = _scope_task_queryset(
+            WmsTask.objects.all(),
+            request.user,
+            endpoint="tasking.console.task_post",
+        )
+        task = get_object_or_404(
+            scoped_tasks.select_for_update(),
+            pk=pk,
+        )
+        if not _task_action_allowed(
+            request.user,
+            task,
+            endpoint="tasking.console.task_post",
+            manager_allowed=True,
+        ):
+            return self._err("需要仓库操作权限", status=403)
         try:
             result = inv_services.post_task(task_id=task.id, by_user=request.user)
             return self._ok({"task_id": task.id, "result": result})
@@ -604,7 +734,21 @@ class TaskClaimView(LoginRequiredMixin, View, _JsonMixin):
 
     @transaction.atomic
     def post(self, request: HttpRequest, pk: int):
-        task = get_object_or_404(WmsTask, pk=pk)
+        scoped_tasks = _scope_task_queryset(
+            WmsTask.objects.all(),
+            request.user,
+            endpoint="tasking.console.task_claim",
+        )
+        task = get_object_or_404(
+            scoped_tasks.select_for_update(),
+            pk=pk,
+        )
+        if not _task_action_allowed(
+            request.user,
+            task,
+            endpoint="tasking.console.task_claim",
+        ):
+            return self._err("需要仓库操作权限", status=403)
         try:
             if hasattr(task_services, "claim_task"):
                 result = task_services.claim_task(task_id=task.id, by_user=request.user)
@@ -621,7 +765,20 @@ class TaskLineSaveSnapshotView(LoginRequiredMixin, View, _JsonMixin):
 
     @transaction.atomic
     def post(self, request: HttpRequest, pk: int):  # pk = line_id
-        line = get_object_or_404(WmsTaskLine, pk=pk)
+        line = get_object_or_404(
+            _scope_line_queryset(
+                WmsTaskLine.objects.select_related("task"),
+                request.user,
+                endpoint="tasking.console.task_line_snapshot",
+            ),
+            pk=pk,
+        )
+        if not _task_action_allowed(
+            request.user,
+            line.task,
+            endpoint="tasking.console.task_line_snapshot",
+        ):
+            return self._err("需要仓库操作权限", status=403)
         try:
             payload = self._json_body(request)
             items = payload.get("items") or []
@@ -653,7 +810,21 @@ class TaskLineFinalizeView(LoginRequiredMixin, View, _JsonMixin):
 
     @transaction.atomic
     def post(self, request: HttpRequest, pk: int):  # pk = line_id
-        line = get_object_or_404(WmsTaskLine, pk=pk)
+        line = get_object_or_404(
+            _scope_line_queryset(
+                WmsTaskLine.objects.select_related("task"),
+                request.user,
+                endpoint="tasking.console.task_line_finalize",
+            ),
+            pk=pk,
+        )
+        if not _task_action_allowed(
+            request.user,
+            line.task,
+            endpoint="tasking.console.task_line_finalize",
+            manager_allowed=True,
+        ):
+            return self._err("需要仓库操作权限", status=403)
         try:
             if hasattr(task_services, "finalize_task_line"):
                 result = task_services.finalize_task_line(line_id=line.id, by_user=request.user)

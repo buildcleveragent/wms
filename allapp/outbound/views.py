@@ -10,12 +10,14 @@ from django.shortcuts import get_object_or_404
 from rest_framework.parsers import MultiPartParser, FormParser
 from openpyxl import load_workbook
 from django.apps import apps
-from datetime import datetime
+from datetime import datetime, timezone as datetime_timezone
+from uuid import UUID
+from django.db import IntegrityError
 from django.db.models import Q, Sum, Prefetch
 import logging
 from ..products.models import ProductPackage
 from django.db.models import F
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 logger = logging.getLogger(__name__)
 from rest_framework import viewsets, mixins, status
 from rest_framework.pagination import PageNumberPagination
@@ -25,8 +27,10 @@ from rest_framework.permissions import IsAuthenticated
 from allapp.tasking.models import WmsTask, WmsTaskLine
 from allapp.tasking import services as task_services
 from allapp.tasking.services import _run_posting_handler, adjust_pick_line_qty
+from allapp.inventory.models import PostingJournal
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -34,7 +38,32 @@ from allapp.billing.enums import PeriodStatus
 from allapp.billing.models import BillingPeriod
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.models import OutboundOrderLine
-from allapp.outbound.serializers import OutboundOrderCreateSerializer,ConfirmPricingSerializer, OutboundOrderReadSerializer
+from allapp.outbound.serializers import (
+    AssistedOutboundOrderCreateSerializer,
+    ConfirmPricingSerializer,
+    OutboundOrderCreateSerializer,
+    OutboundOrderReadSerializer,
+)
+from allapp.outbound import services as outbound_services
+from allapp.outbound.assisted_history import (
+    assisted_history_queryset,
+    build_stats as build_assisted_outbound_stats,
+    filter_history_queryset,
+    history_options as assisted_history_options,
+    serialize_history_order,
+)
+from allapp.outbound.authz import (
+    apply_legacy_scope,
+    assisted_order_source_ids,
+    can_self_review_assisted_task,
+    can_use_task_actions,
+    get_assisted_order_for_task,
+    is_assisted_operator,
+    require_assisted_operator,
+    require_legacy_action,
+    strict_order_queryset,
+    strict_pick_queryset,
+)
 from allapp.products.permissions import can_manage_all_owner_products, can_view_all_owner_products
 from allapp.core.utils.log_context import build_log_payload
 
@@ -105,10 +134,6 @@ def confirm_pricing(self, request, pk=None):
 
 
 
-def _q3(x) -> Decimal:
-    # 你项目里已有的数量标准化函数
-    return _q3_impl(x)
-
 class DefaultPagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = "page_size"
@@ -124,6 +149,18 @@ class ProductPagination(PageNumberPagination):
     page_size = 1000
     page_size_query_param = "page_size"
     max_page_size = 1000
+
+
+class AssistedHistoryPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class IdempotencyConflict(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = "request_id 已用于不同的代办出库请求。"
+    default_code = "idempotency_conflict"
 
 
 def _resolve_product_owner_scope(request, *, param_name="owner", default_to_user_owner=True):
@@ -607,12 +644,447 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         logger.debug("outbound.receive_product_list.response %s count=%s", ctx_text, len(data), extra=ctx)
         return self.get_paginated_response(data)
 
+class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
+    """Strict warehouse-assisted outbound entry and owner-scoped catalogs."""
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = AssistedOutboundOrderCreateSerializer
+    pagination_class = AssistedHistoryPagination
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        require_assisted_operator(request.user)
+
+    def _enabled_owner(self, owner_id):
+        Owner = apps.get_model("baseinfo", "Owner")
+        try:
+            owner_id = int(owner_id)
+        except (TypeError, ValueError):
+            raise ValidationError({"owner_id": "owner_id 必须是有效整数。"})
+        return get_object_or_404(
+            Owner.objects.filter(
+                is_active=True,
+                allow_warehouse_assisted_outbound=True,
+            ),
+            pk=owner_id,
+        )
+
+    @action(detail=False, methods=["get"])
+    def owners(self, request):
+        Owner = apps.get_model("baseinfo", "Owner")
+        qs = Owner.objects.filter(
+            is_active=True,
+            allow_warehouse_assisted_outbound=True,
+        ).order_by("id")
+        search = (request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(Q(code__icontains=search) | Q(name__icontains=search))
+        return Response([{"id": owner.id, "code": owner.code, "name": owner.name} for owner in qs])
+
+    @action(detail=False, methods=["get"])
+    def customers(self, request):
+        owner_id = request.query_params.get("owner_id")
+        if not owner_id:
+            raise ValidationError({"owner_id": "owner_id 参数必填。"})
+        owner = self._enabled_owner(owner_id)
+        Customer = apps.get_model("baseinfo", "Customer")
+        qs = Customer.objects.filter(owner=owner, is_active=True).order_by("id")
+        search = (request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(Q(code__icontains=search) | Q(name__icontains=search))
+        return Response(
+            [
+                {"id": customer.id, "code": customer.code, "name": customer.name}
+                for customer in qs
+            ]
+        )
+
+    @action(detail=False, methods=["get"], url_path="history-options")
+    def history_options(self, request):
+        return Response(assisted_history_options(request.user))
+
+    @action(detail=False, methods=["get"])
+    def history(self, request):
+        qs = assisted_history_queryset(request.user)
+        qs = filter_history_queryset(qs, request.query_params)
+        qs = qs.order_by(F("assisted_at").desc(nulls_last=True), "-id")
+        page = self.paginate_queryset(qs)
+        if page is None:
+            return Response([serialize_history_order(order) for order in qs])
+        return self.get_paginated_response(
+            [serialize_history_order(order) for order in page]
+        )
+
+    @action(detail=False, methods=["get"])
+    def stats(self, request):
+        return Response(build_assisted_outbound_stats(request.user, request.query_params))
+
+    @action(detail=False, methods=["get"])
+    def products(self, request):
+        owner_id = request.query_params.get("owner_id")
+        if not owner_id:
+            raise ValidationError({"owner_id": "owner_id 参数必填。"})
+        owner = self._enabled_owner(owner_id)
+        search = (request.query_params.get("search") or "").strip()
+        if not search:
+            return Response([])
+        Product = apps.get_model("products", "Product")
+        InventoryDetail = apps.get_model("inventory", "InventoryDetail")
+        package_qs = (
+            ProductPackage.objects.filter(is_active=True, uom__is_active=True)
+            .select_related("uom")
+            .order_by("sort_order", "id")
+        )
+        qs = (
+            Product.objects.filter(owner=owner, is_active=True)
+            .select_related("base_uom")
+            .prefetch_related(Prefetch("packages", queryset=package_qs))
+        )
+        qs = qs.filter(
+            Q(code__icontains=search)
+            | Q(sku__icontains=search)
+            | Q(name__icontains=search)
+            | Q(gtin__icontains=search)
+            | Q(unit_barcode__icontains=search)
+            | Q(carton_barcode__icontains=search)
+            | Q(product_package__barcode__icontains=search)
+        ).distinct()
+        qs = qs.order_by("id")
+        product_ids = list(qs.values_list("id", flat=True))
+        available = {
+            row["product_id"]: row["available"] or Decimal("0")
+            for row in (
+                InventoryDetail.objects.filter(
+                    owner=owner,
+                    warehouse_id=request.user.warehouse_id,
+                    product_id__in=product_ids,
+                    is_active=True,
+                )
+                .values("product_id")
+                .annotate(available=Sum("available_qty"))
+            )
+        }
+        data = []
+        for product in qs:
+            price = outbound_services.get_default_product_price(product)
+            available_qty = available.get(product.id, Decimal("0"))
+            base_label = (
+                getattr(product.base_uom, "name", None)
+                or getattr(product.base_uom, "code", None)
+                or "基本单位"
+            )
+            unit_options = [
+                {
+                    "key": "BASE",
+                    "kind": "base",
+                    "label": base_label,
+                    "multiplier": 1,
+                    "package_id": None,
+                    "barcode": getattr(product, "unit_barcode", None),
+                }
+            ]
+            default_package_id = None
+            for package in product.packages.all():
+                package_label = package.uom.name or package.uom.code
+                if package.qty_in_base == 1 and package_label == base_label:
+                    continue
+                unit_options.append(
+                    {
+                        "key": package.id,
+                        "kind": "package",
+                        "label": package_label,
+                        "multiplier": package.qty_in_base,
+                        "package_id": package.id,
+                        "barcode": package.barcode,
+                    }
+                )
+                if package.is_sales_default:
+                    default_package_id = package.id
+            selected_unit_index = next(
+                (
+                    index
+                    for index, option in enumerate(unit_options)
+                    if option["package_id"] == default_package_id
+                ),
+                0,
+            )
+            data.append(
+                {
+                    "id": product.id,
+                    "code": product.code,
+                    "sku": product.sku,
+                    "name": product.name,
+                    "spec": product.spec,
+                    "base_unit": getattr(product.base_uom, "code", None),
+                    "base_unit_name": getattr(product.base_uom, "name", None),
+                    "default_price": price if price > 0 else None,
+                    "price": price if price > 0 else None,
+                    "available_qty": available_qty,
+                    "available": available_qty,
+                    "unitOptions": unit_options,
+                    "selectedUnitIndex": selected_unit_index,
+                }
+            )
+        return Response(data)
+
+    def _response(self, order, task, *, idempotent, http_status):
+        return Response(
+            {
+                "order_id": order.id,
+                "order_no": order.order_no,
+                "task_id": task.id,
+                "task_no": task.task_no,
+                "submit_status": order.submit_status,
+                "approval_status": order.approval_status,
+                "task_status": task.status,
+                "idempotent": idempotent,
+                "replayed": idempotent,
+            },
+            status=http_status,
+        )
+
+    @staticmethod
+    def _canonical_datetime(value):
+        if value in (None, ""):
+            return None
+        parsed = value if isinstance(value, datetime) else parse_datetime(str(value).strip())
+        if parsed is None:
+            return str(value).strip()
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+        parsed = parsed.astimezone(datetime_timezone.utc)
+        return parsed.isoformat()
+
+    @staticmethod
+    def _canonical_qty(value):
+        try:
+            return format(Decimal(str(value)).quantize(Decimal("0.001")), "f")
+        except (ArithmeticError, InvalidOperation, TypeError, ValueError):
+            return "__invalid__"
+
+    @classmethod
+    def _canonical_optional_qty(cls, value):
+        if value in (None, ""):
+            return None
+        return cls._canonical_qty(value)
+
+    def _request_fingerprint(self, payload):
+        raw_items = payload.get("items")
+        if not isinstance(raw_items, (list, tuple)):
+            items = "__invalid__"
+        else:
+            items = sorted(
+                (
+                    str(item.get("product_id")),
+                    self._canonical_qty(item.get("qty")),
+                    str(item.get("package_id"))
+                    if item.get("package_id") not in (None, "")
+                    else None,
+                    self._canonical_optional_qty(item.get("package_qty")),
+                )
+                for item in raw_items
+                if isinstance(item, dict)
+            )
+            if len(items) != len(raw_items):
+                items = "__invalid__"
+        return {
+            "owner_id": str(payload.get("owner_id")),
+            "customer_id": str(payload.get("customer_id")),
+            "items": items,
+            "src_bill_no": (payload.get("src_bill_no") or "").strip(),
+            "delivery_method": payload.get("delivery_method") or None,
+            "etd": self._canonical_datetime(payload.get("etd")),
+            "contact": (payload.get("contact") or "").strip(),
+            "contact_phone": (payload.get("contact_phone") or "").strip(),
+            "ship_to": (payload.get("ship_to") or "").strip(),
+            "remark": (payload.get("remark") or "").strip(),
+            "assistance_reason": (payload.get("assistance_reason") or "").strip(),
+        }
+
+    def _persisted_fingerprint(self, order):
+        return {
+            "owner_id": str(order.owner_id),
+            "customer_id": str(order.customer_id),
+            "items": sorted(
+                (
+                    str(line.product_id),
+                    self._canonical_qty(line.base_qty),
+                    str(getattr(line, "aux_uom_id", None))
+                    if getattr(line, "aux_uom_id", None) is not None
+                    else None,
+                    self._canonical_optional_qty(getattr(line, "aux_qty", None)),
+                )
+                for line in order.lines.filter(is_deleted=False)
+            ),
+            "src_bill_no": (order.src_bill_no or "").strip(),
+            "delivery_method": order.delivery_method or None,
+            "etd": self._canonical_datetime(order.etd),
+            "contact": (order.contact or "").strip(),
+            "contact_phone": (order.contact_phone or "").strip(),
+            "ship_to": (order.ship_to or "").strip(),
+            "remark": (order.memo or "").strip(),
+            "assistance_reason": (order.assistance_reason or "").strip(),
+        }
+
+    @staticmethod
+    def _supplied_prices_match(payload, order):
+        """Compare prices only when the retry explicitly supplies one.
+
+        An omitted price means "use the server default (or zero)", so the raw
+        request cannot reliably reconstruct whether the original request also
+        omitted it.  Explicit prices, however, must always match the persisted
+        order line for the request id to be considered the same business call.
+        """
+
+        supplied_items = [
+            item
+            for item in (payload.get("items") or [])
+            if isinstance(item, dict) and item.get("price") not in (None, "")
+        ]
+        if not supplied_items:
+            return True
+
+        lines = {
+            line.product_id: Decimal(line.base_price or 0)
+            for line in order.lines.filter(is_deleted=False)
+        }
+        for item in supplied_items:
+            try:
+                product_id = int(item.get("product_id"))
+                supplied = Decimal(str(item["price"])).quantize(Decimal("0.0001"))
+                persisted = lines[product_id].quantize(Decimal("0.0001"))
+            except (ArithmeticError, InvalidOperation, KeyError, TypeError, ValueError):
+                return False
+            if supplied != persisted:
+                return False
+        return True
+
+    def _idempotent_result(self, payload, user):
+        request_id = payload.get("request_id")
+        try:
+            request_uuid = UUID(str(request_id))
+        except (TypeError, ValueError, AttributeError):
+            return None
+        order = OutboundOrder.objects.filter(assistance_request_id=request_uuid).first()
+        if order is None:
+            return None
+        if (
+            order.assisted_by_id != user.id
+            or order.warehouse_id != user.warehouse_id
+            or self._request_fingerprint(payload) != self._persisted_fingerprint(order)
+            or not self._supplied_prices_match(payload, order)
+        ):
+            raise IdempotencyConflict()
+        task = (
+            WmsTask.objects.filter(task_type=WmsTask.TaskType.PICK)
+            .filter(outbound_services._task_source_q(order))
+            .order_by("id")
+            .first()
+        )
+        if task is None:
+            raise ValidationError("幂等订单缺少关联拣货任务，请联系管理员。")
+        return order, task
+
+    def create(self, request, *args, **kwargs):
+        existing = self._idempotent_result(request.data, request.user)
+        if existing:
+            return self._response(*existing, idempotent=True, http_status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            order, task = outbound_services.create_warehouse_assisted_order(
+                validated_data=serializer.validated_data,
+                by_user=request.user,
+            )
+        except IntegrityError:
+            existing = self._idempotent_result(request.data, request.user)
+            if existing:
+                return self._response(
+                    *existing,
+                    idempotent=True,
+                    http_status=status.HTTP_200_OK,
+                )
+            raise
+        except DjangoValidationError as exc:
+            raise ValidationError(
+                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+            ) from exc
+        return self._response(
+            order,
+            task,
+            idempotent=False,
+            http_status=status.HTTP_201_CREATED,
+        )
+
+
 class OutboundOrderViewSet(
     mixins.CreateModelMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet
 ):
     queryset = OutboundOrder.objects.all().order_by("-biz_date", "-id")
     permission_classes = [IsAuthenticated]
     pagination_class = DefaultPagination
+
+    def get_queryset(self):
+        base = OutboundOrder.objects.all().order_by("-biz_date", "-id")
+        scoped = strict_order_queryset(base, self.request.user)
+        # Assisted operators are newly introduced, tightly scoped identities;
+        # never grant them historical fail-open visibility in shadow mode.
+        if is_assisted_operator(self.request.user):
+            return scoped
+        # Compatibility applies only to historical STANDARD records.  Newly
+        # introduced assisted data is always visible through the strict scope,
+        # even while the broader legacy rollout remains in shadow mode.
+        permitted_assisted = strict_order_queryset(
+            base.filter(processing_mode="WAREHOUSE_ASSISTED"),
+            self.request.user,
+        )
+        shadow_base = base.filter(
+            Q(processing_mode="STANDARD") | Q(pk__in=permitted_assisted.values("pk"))
+        )
+        return apply_legacy_scope(
+            base_qs=shadow_base,
+            scoped_qs=scoped,
+            user=self.request.user,
+            endpoint=f"outbound.orders.{getattr(self, 'action', 'unknown')}",
+        )
+
+    def _require_owner_buyer(self, endpoint):
+        user = self.request.user
+        allowed = bool(
+            user.is_superuser
+            or (
+                user.has_perm("outbound.submit_outbound_as_owner_buyers")
+                and getattr(user, "owner_id", None)
+                and getattr(user, "warehouse_id", None)
+            )
+        )
+        require_legacy_action(
+            user=user,
+            allowed=allowed,
+            endpoint=endpoint,
+            reason="需要货主业务员权限，并绑定货主和仓库。",
+        )
+
+    def _require_owner_manager(self, order, endpoint):
+        user = self.request.user
+        allowed = bool(
+            user.is_superuser
+            or (
+                user.has_perm("outbound.approve_outbound_as_owner_manager")
+                and getattr(user, "owner_id", None) == order.owner_id
+                and (
+                    not getattr(user, "warehouse_id", None)
+                    or user.warehouse_id == order.warehouse_id
+                )
+            )
+        )
+        require_legacy_action(
+            user=user,
+            allowed=allowed,
+            endpoint=endpoint,
+            reason="需要当前货主的出库审核权限。",
+        )
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -639,19 +1111,24 @@ class OutboundOrderViewSet(
         if approval_status: qs = qs.filter(approval_status=approval_status)
 
         page = self.paginate_queryset(qs)
-        ser = OutboundOrderReadSerializer(page, many=True)
+        ser = OutboundOrderReadSerializer(page, many=True, context={"request": request})
         return self.get_paginated_response(ser.data)
 
     def create(self, request, *args, **kwargs):
+        self._require_owner_buyer("outbound.orders.create")
         ser = OutboundOrderCreateSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
         order = ser.save()
-        return Response(OutboundOrderReadSerializer(order).data, status=status.HTTP_201_CREATED)
+        return Response(
+            OutboundOrderReadSerializer(order, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     # 提交：DRAFT -> SUBMITTED
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
         order = self.get_object()
+        self._require_owner_buyer("outbound.orders.submit")
         if getattr(order, "submit_status", None) != "DRAFT":
             return Response({"detail": "仅 DRAFT 可提交"}, status=400)
         order.submit_status = "SUBMITTED"
@@ -661,6 +1138,7 @@ class OutboundOrderViewSet(
     @action(detail=True, methods=["post"], url_path="owner-approve")
     def owner_approve(self, request, pk=None):
         order = self.get_object()
+        self._require_owner_manager(order, "outbound.orders.owner_approve")
 
         if getattr(order, "approval_status", None) not in ("OWNER_PENDING", "OWNER_REJECTED"):
             return Response(
@@ -686,7 +1164,7 @@ class OutboundOrderViewSet(
     @action(detail=True, methods=["post"], url_path="owner-reject")
     def owner_reject(self, request, pk=None):
         order = self.get_object()
-        print("owner_reject is tabbed")
+        self._require_owner_manager(order, "outbound.orders.owner_reject")
         if getattr(order, "approval_status", None) != "OWNER_PENDING":
             return Response(
                 {"detail": "仅待审核订单可退回修改"},
@@ -728,7 +1206,7 @@ class OutboundOrderViewSet(
         from allapp.outbound import services as ob_services
 
         order = self.get_object()
-        print("1 cancel is tabbed")
+        self._require_owner_manager(order, "outbound.orders.cancel")
 
         if getattr(order, "approval_status", None) == "CANCELLED":
             return Response(
@@ -741,15 +1219,12 @@ class OutboundOrderViewSet(
                 {"detail": "订单已进入仓库处理流程，不能直接取消"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        print("2 cancel is tabbed")
         try:
             with transaction.atomic():
                 order = type(order).objects.select_for_update().get(pk=order.pk)
 
                 if getattr(order, "approval_status", None) in ("OWNER_APPROVED", "WHS_PENDING"):
-                    print("2.1 cancel is tabbed before ob_services.unallocate_for_order")
                     ob_services.unallocate_for_order(order)
-                print("3 cancel is tabbed")
                 order.approval_status = "CANCELLED"
                 # order.is_closed = True
                 if not order.close_reason:
@@ -761,19 +1236,16 @@ class OutboundOrderViewSet(
                     "updated_at",
                 ])
         except DjangoValidationError as e:
-            print("4 cancel is tabbed")
             return Response(
                 {"detail": e.message_dict if hasattr(e, "message_dict") else e.messages},
 
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except Exception as e:
-            print("5 cancel is tabbed")
             return Response(
                 {"detail": f"取消订单失败：{e}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        print("6 cancel is tabbed")
         return Response(
             OutboundOrderReadSerializer(order, context={"request": request}).data,
             status=status.HTTP_200_OK,
@@ -837,18 +1309,8 @@ class OutboundOrderViewSet(
         return " | ".join(parts)
 
     def _get_default_price(self, product):
-        """
-        这份模板没有价格列，先沿用你系统里的商品默认售价逻辑。
-        如果取不到，就按 0 处理。
-        """
-        for attr in ("price", "sale_price", "base_price"):
-            val = getattr(product, attr, None)
-            if val not in (None, ""):
-                try:
-                    return Decimal(str(val))
-                except Exception:
-                    pass
-        return Decimal("0")
+        """Compatibility wrapper for callers outside the importer."""
+        return outbound_services.get_default_product_price(product)
 
     def _find_product_for_import(self, owner_id, row_dict):
         Product = apps.get_model("products", "Product")
@@ -884,6 +1346,7 @@ class OutboundOrderViewSet(
         上传一件代发 Excel，按行生成 OutboundOrder。
         每行 1 单、每单 1 条明细。
         """
+        self._require_owner_buyer("outbound.orders.import_drop_ship_excel")
         file_obj = request.FILES.get("file")
         if not file_obj:
             return Response({"detail": "请上传 Excel 文件，字段名 file"}, status=status.HTTP_400_BAD_REQUEST)
@@ -988,7 +1451,7 @@ class OutboundOrderViewSet(
                     continue
 
                 product = self._find_product_for_import(owner_id, row_dict)
-                price = self._get_default_price(product)
+                price = outbound_services.get_default_product_price(product)
                 remark = self._build_remark(row_dict)
 
                 payload = {
@@ -1082,6 +1545,15 @@ class OutboundOrderViewSet(
 class PickTaskSerializer(serializers.ModelSerializer):
     owner_name = serializers.CharField(source="owner.name", read_only=True)
     warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
+    is_warehouse_assisted = serializers.SerializerMethodField()
+    can_self_review = serializers.SerializerMethodField()
+
+    def get_is_warehouse_assisted(self, obj):
+        return get_assisted_order_for_task(obj) is not None
+
+    def get_can_self_review(self, obj):
+        request = self.context.get("request")
+        return bool(request and can_self_review_assisted_task(request.user, obj))
 
     class Meta:
         model = WmsTask
@@ -1096,6 +1568,10 @@ class PickTaskSerializer(serializers.ModelSerializer):
             "warehouse_name",
             "remark",
             "review_status",
+            "posting_status",
+            "picked_by_id",
+            "is_warehouse_assisted",
+            "can_self_review",
         ]
 
 class PickTaskLineSerializer(serializers.ModelSerializer):
@@ -1139,19 +1615,44 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         user = self.request.user
         if not user or not user.is_authenticated:
             return qs.none()
+        strict = strict_pick_queryset(qs, user)
+        # The new assisted flow is never affected by the legacy compatibility
+        # mode; otherwise preserve today's PDA scope while shadowing the new one.
+        if is_assisted_operator(user):
+            return strict
         if getattr(user, "is_superuser", False):
-            return qs
-
+            legacy = qs
+        else:
+            warehouse_id = getattr(user, "warehouse_id", None)
+            if not warehouse_id:
+                legacy = qs.none()
+            else:
+                legacy = qs.filter(warehouse_id=warehouse_id)
+                if not can_manage_all_owner_products(user):
+                    owner_id = getattr(user, "owner_id", None)
+                    legacy = legacy.filter(owner_id=owner_id) if owner_id else legacy.none()
         warehouse_id = getattr(user, "warehouse_id", None)
-        if not warehouse_id:
-            return qs.none()
-        qs = qs.filter(warehouse_id=warehouse_id)
+        if warehouse_id:
+            assisted_sources = assisted_order_source_ids(warehouse_id=warehouse_id)
+            assisted_task_q = Q(
+                source_model__in=("outboundorder", "OutboundOrder"),
+                source_pk__in=assisted_sources,
+            )
+            legacy = legacy.filter(~assisted_task_q | Q(pk__in=strict.values("pk")))
+        return apply_legacy_scope(
+            base_qs=legacy,
+            scoped_qs=strict,
+            user=user,
+            endpoint=f"outbound.pick_tasks.{getattr(self, 'action', 'unknown')}",
+        )
 
-        if can_manage_all_owner_products(user):
-            return qs
-
-        owner_id = getattr(user, "owner_id", None)
-        return qs.filter(owner_id=owner_id) if owner_id else qs.none()
+    def _require_task_action(self, endpoint):
+        require_legacy_action(
+            user=self.request.user,
+            allowed=can_use_task_actions(self.request.user),
+            endpoint=endpoint,
+            reason="需要仓库任务操作权限。",
+        )
 
     def _get_pick_task_for_update(self, pk):
         qs = self._scope_pick_queryset(
@@ -1166,34 +1667,31 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
         action = getattr(self, "action", None)
 
-        # 1) status 过滤
-        status_list = self.request.query_params.getlist("status")
-        if status_list:
-            qs = qs.filter(status__in=status_list)
-        else:
-            # 只在 list 时应用“默认进行中状态”的过滤
-            if action == "list":
-                qs = qs.filter(
-                    status__in=[
-                        WmsTask.Status.RELEASED,
-                        WmsTask.Status.IN_PROGRESS,
-                        WmsTask.Status.RESERVED,
-                    ]
-                )
-
-        # 2) review_status 过滤（你列表已经传了 ?review_status=PENDING）
-        review_status_list = self.request.query_params.getlist("review_status")
-        if review_status_list:
-            qs = qs.filter(review_status__in=review_status_list)
-
-        # 3) for_review=1 时，进一步强制“已完成 + 待审核”
-        #    （可选，但很直观）
         for_review = self.request.query_params.get("for_review")
         if for_review in ("1", "true", "True"):
             qs = qs.filter(
                 status=WmsTask.Status.COMPLETED,
                 review_status=WmsTask.ReviewStatus.PENDING,
             ).exclude(picked_by=self.request.user)
+            return qs
+
+        # Normal lists retain their default in-progress status filter.  The
+        # review queue above deliberately bypasses it.
+        status_list = self.request.query_params.getlist("status")
+        if status_list:
+            qs = qs.filter(status__in=status_list)
+        elif action == "list":
+            qs = qs.filter(
+                status__in=[
+                    WmsTask.Status.RELEASED,
+                    WmsTask.Status.IN_PROGRESS,
+                    WmsTask.Status.RESERVED,
+                ]
+            )
+
+        review_status_list = self.request.query_params.getlist("review_status")
+        if review_status_list:
+            qs = qs.filter(review_status__in=review_status_list)
 
         return qs
 
@@ -1220,6 +1718,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
         内部调用统一的 scan_task()，根据任务类型 = PICK 处理。
         """
+        self._require_task_action("outbound.pick_tasks.scan")
         payload = request.data or {}
         barcode = (payload.get("barcode") or "").strip()
         qty = payload.get("qty") or 1
@@ -1270,6 +1769,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
               posting_status → NOT_READY
           - 记录 picked_by = 当前用户（拣货人）
         """
+        self._require_task_action("outbound.pick_tasks.submit_review")
         task = (
             self._get_pick_task_for_update(pk)
         )
@@ -1293,7 +1793,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         # 3）流转到“已完成，待审核”
         task.status = WmsTask.Status.COMPLETED
         task.review_status = WmsTask.ReviewStatus.PENDING
-        task.updated_at=datetime.now()
+        task.updated_at = timezone.now()
         # 过账还没到，不要改 posting_status（保持 NOT_READY）
         # 记录拣货人（如果你加了 picked_by 字段）
         if task.picked_by_id is None:
@@ -1325,62 +1825,124 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
     # === 修改：复核通过 + 过账 ==============================================
     @action(methods=["post"], detail=True)
-    @transaction.atomic
     def post(self, request, pk=None):
-        """
-        复核通过并过账：
-          - 仅允许在：
-              status=COMPLETED & review_status=PENDING
-          - 当前登录用户 != 拣货人（picked_by）
-          - 设置：
-              review_status = APPROVED
-              approved_by   = 当前用户
-              approved_at   = now
-              posting_status = PENDING
-          - 然后调用 _run_posting_handler 真正过账
-        """
-        task = (
-            self._get_pick_task_for_update(pk)
-        )
-        ctx, ctx_text = build_log_payload(task=task, user=request.user)
-        logger.info("outbound.pick.post.begin %s", ctx_text, extra=ctx)
-        # 1）必须是“已完成，待审核”
-        if task.status != WmsTask.Status.COMPLETED:
-            raise ValidationError("任务未处于已完成状态，不能过账。")
-        if task.review_status != WmsTask.ReviewStatus.PENDING:
-            raise ValidationError("当前任务不在待审核状态，不能过账。")
-        # 2）禁止拣货人自己复核自己
-        picker = getattr(task, "picked_by", None)
-        if picker and picker.id == request.user.id:
-            logger.warning("outbound.pick.post.self_review_blocked %s", ctx_text, extra=ctx)
-            raise ValidationError("拣货人不能作为本任务的复核人。")
-        # 3）设置审核通过 & 准备过账
-        task.review_status = WmsTask.ReviewStatus.APPROVED
-        task.approved_by = request.user
-        task.approved_at = timezone.now()
-        task.approval_note = (task.approval_note or "") + " PDA拣货复核通过"
+        """Approve/post a PICK with journal-backed idempotent re-entry."""
 
-        task.posting_status = WmsTask.PostingStatus.PENDING
-        task.save(update_fields=[
-            "review_status",
-            "approved_by",
-            "approved_at",
-            "approval_note",
-            "posting_status",
-        ])
+        self._require_task_action("outbound.pick_tasks.post")
+        # Commit review authorization before running the posting handler.  The
+        # handler owns a nested atomic inventory unit and must be able to persist
+        # its FAILED journal/header after that unit rolls back.
+        with transaction.atomic():
+            task = self._get_pick_task_for_update(pk)
+            ctx, ctx_text = build_log_payload(task=task, user=request.user)
+            logger.info("outbound.pick.post.begin %s", ctx_text, extra=ctx)
 
-        # 4）调用统一过账逻辑
+            if task.status != WmsTask.Status.COMPLETED:
+                raise ValidationError("任务未处于已完成状态，不能过账。")
+
+            journal, _ = PostingJournal.objects.get_or_create(
+                src_model="WmsTask",
+                src_id=task.id,
+                tx_type="POST",
+                defaults={"status": "PENDING", "message": "", "attempt_count": 0},
+            )
+            journal = PostingJournal.objects.select_for_update().get(pk=journal.pk)
+            assisted_order = get_assisted_order_for_task(task, for_update=True)
+
+            # The journal is the posting truth.  Repair only missing task-header
+            # fields; never overwrite the original reviewers or posting actor.
+            if journal.status == "POSTED":
+                update_fields = []
+                if task.review_status != WmsTask.ReviewStatus.APPROVED:
+                    logger.error(
+                        "outbound.pick.post.repair_review_status %s old_review_status=%s",
+                        ctx_text,
+                        task.review_status,
+                        extra=ctx,
+                    )
+                    task.review_status = WmsTask.ReviewStatus.APPROVED
+                    update_fields.append("review_status")
+                if task.posting_status != WmsTask.PostingStatus.POSTED:
+                    task.posting_status = WmsTask.PostingStatus.POSTED
+                    update_fields.append("posting_status")
+                if task.posted_at is None:
+                    task.posted_at = timezone.now()
+                    update_fields.append("posted_at")
+                if update_fields:
+                    task.save(update_fields=update_fields)
+                if assisted_order is not None:
+                    outbound_services.close_assisted_order_for_posted_task(task)
+                return Response(
+                    {
+                        "task_id": task.id,
+                        "posted": True,
+                        "idempotent": True,
+                        "affected_tx_count": 0,
+                        "batch_no": journal.message or "",
+                    }
+                )
+
+            if task.review_status == WmsTask.ReviewStatus.PENDING:
+                picker = getattr(task, "picked_by", None)
+                if picker and picker.id == request.user.id and not can_self_review_assisted_task(
+                    request.user, task
+                ):
+                    logger.warning(
+                        "outbound.pick.post.self_review_blocked %s", ctx_text, extra=ctx
+                    )
+                    raise ValidationError("拣货人不能作为本任务的复核人。")
+
+                task.review_status = WmsTask.ReviewStatus.APPROVED
+                task.approved_by = request.user
+                task.approved_at = timezone.now()
+                note = "PDA拣货复核通过"
+                if assisted_order is not None and assisted_order.assistance_reason:
+                    note += f"；代办原因：{assisted_order.assistance_reason}"
+                task.approval_note = " ".join(
+                    part for part in ((task.approval_note or "").strip(), note) if part
+                )[:200]
+                task.posting_status = WmsTask.PostingStatus.PENDING
+                task.save(
+                    update_fields=[
+                        "review_status",
+                        "approved_by",
+                        "approved_at",
+                        "approval_note",
+                        "posting_status",
+                    ]
+                )
+            elif not (
+                task.review_status == WmsTask.ReviewStatus.APPROVED
+                and task.posting_status
+                in {WmsTask.PostingStatus.PENDING, WmsTask.PostingStatus.FAILED}
+            ):
+                raise ValidationError(
+                    f"任务审核/过账状态组合不一致：{task.review_status}/{task.posting_status}。"
+                )
+
         result = _run_posting_handler(
             task_id=int(pk),
             by_user=request.user,
             note="PDA拣货复核通过并过账",
         )
+        with transaction.atomic():
+            task = self._get_pick_task_for_update(pk)
+            journal = PostingJournal.objects.select_for_update().get(
+                src_model="WmsTask", src_id=task.id, tx_type="POST"
+            )
+            if (
+                journal.status != "POSTED"
+                or task.posting_status != WmsTask.PostingStatus.POSTED
+            ):
+                raise ValidationError("过账处理未将任务及日记账确认为 POSTED。")
+            if get_assisted_order_for_task(task, for_update=True) is not None:
+                outbound_services.close_assisted_order_for_posted_task(task)
         logger.info("outbound.pick.post.completed %s", ctx_text, extra=ctx)
-        # 这里假设 _run_posting_handler 内部会把 posting_status / posted_by / posted_at 更新好
 
         return Response({
             "task_id": int(pk),
             "posted": True,
+            "idempotent": bool((result or {}).get("tx_created") == 0),
             **(result or {}),
         })
 
@@ -1391,6 +1953,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
           - 请求体：{ line_id, final_qty_done, client_seq? }
           - 调用 tasking.services.adjust_pick_line_qty
         """
+        self._require_task_action("outbound.pick_tasks.adjust_line_qty")
         ctx, ctx_text = build_log_payload(task_id=pk, user=request.user)
         logger.info("outbound.pick.adjust_line_qty.begin %s", ctx_text, extra=ctx)
         task = self.get_object()

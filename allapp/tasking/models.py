@@ -171,6 +171,10 @@ class WmsTask(BaseModel):
             models.Index(fields=["owner", "warehouse", "status"], name="idx_task_wh_st"),
             models.Index(fields=["task_type", "status"], name="idx_task_tt_st"),
             models.Index(fields=["task_group_no", "status"], name="ix_task_grp_st"),
+            models.Index(
+                fields=["warehouse", "task_type", "source_model", "source_pk"],
+                name="ix_task_wh_type_src",
+            ),
             # 如果确实需要结合 id 的覆盖/排序再加下面这一条；否则可以去掉
             # models.Index(fields=["owner", "warehouse", "task_type", "status", "id"], name="ix_tsk_wh_tt_st_id"),
         ]
@@ -424,11 +428,31 @@ class TaskStatusLog(models.Model):
             # 兜底：两边都必须是合法取值（与 choices 保持一致，使用字面量避免内嵌类作用域问题）
             models.CheckConstraint(
                 name="ck_tlog_old_in_set",
-                check=Q(old_status__in=["DRAFT","READY","RELEASED","IN_PROGRESS","COMPLETED","CANCELLED"]),
+                check=Q(
+                    old_status__in=[
+                        "RESERVED",
+                        "DRAFT",
+                        "READY",
+                        "RELEASED",
+                        "IN_PROGRESS",
+                        "COMPLETED",
+                        "CANCELLED",
+                    ]
+                ),
             ),
             models.CheckConstraint(
                 name="ck_tlog_new_in_set",
-                check=Q(new_status__in=["DRAFT","READY","RELEASED","IN_PROGRESS","COMPLETED","CANCELLED"]),
+                check=Q(
+                    new_status__in=[
+                        "RESERVED",
+                        "DRAFT",
+                        "READY",
+                        "RELEASED",
+                        "IN_PROGRESS",
+                        "COMPLETED",
+                        "CANCELLED",
+                    ]
+                ),
             ),
         ]
 
@@ -2963,8 +2987,6 @@ class ContainerUsage(BaseModel):
 
         self.full_clean()
         return super().save(*args, **kwargs)
-
-
 
 
 

@@ -13,6 +13,7 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from allapp.outbound.enums import PricingStatus
+from allapp.outbound.services import get_default_product_price
 from .models import OutboundOrder, OutboundOrderLine
 
 # 兼容不同字段命名的小工具
@@ -101,6 +102,191 @@ class OutboundOrderLineCreateSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
     )
+
+
+class AssistedOutboundLineSerializer(serializers.Serializer):
+    product_id = serializers.IntegerField(min_value=1)
+    qty = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=3,
+        min_value=Decimal("0.001"),
+    )
+    package_id = serializers.IntegerField(
+        min_value=1,
+        required=False,
+        allow_null=True,
+    )
+    package_qty = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=3,
+        min_value=Decimal("0.001"),
+        required=False,
+        allow_null=True,
+    )
+    price = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=4,
+        min_value=Decimal("0"),
+        required=False,
+        allow_null=True,
+    )
+
+
+class AssistedOutboundOrderCreateSerializer(serializers.Serializer):
+    """Strict input contract for a warehouse-created assisted SALES order."""
+
+    request_id = serializers.UUIDField()
+    owner_id = serializers.IntegerField(min_value=1)
+    customer_id = serializers.IntegerField(min_value=1)
+    items = AssistedOutboundLineSerializer(many=True, allow_empty=False)
+    src_bill_no = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    delivery_method = serializers.ChoiceField(
+        choices=OutboundOrder.DELIVERY_METHOD_CHOICES,
+        required=False,
+        allow_null=True,
+    )
+    etd = serializers.DateTimeField(required=False, allow_null=True)
+    contact = serializers.CharField(required=False, allow_blank=True, max_length=80)
+    contact_phone = serializers.CharField(required=False, allow_blank=True, max_length=40)
+    ship_to = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    remark = serializers.CharField(required=False, allow_blank=True, max_length=100, default="")
+    assistance_reason = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=200,
+        default="",
+    )
+
+    def validate(self, data):
+        Owner = apps.get_model("baseinfo", "Owner")
+        Customer = apps.get_model("baseinfo", "Customer")
+        Product = apps.get_model("products", "Product")
+        ProductPackage = apps.get_model("products", "ProductPackage")
+
+        owner = Owner.objects.filter(
+            pk=data["owner_id"],
+            is_active=True,
+            allow_warehouse_assisted_outbound=True,
+        ).first()
+        if owner is None:
+            raise serializers.ValidationError(
+                {"owner_id": "货主不存在、未启用，或未授权仓库代办出库。"}
+            )
+
+        customer = Customer.objects.filter(
+            pk=data["customer_id"],
+            owner_id=owner.id,
+            is_active=True,
+        ).first()
+        if customer is None:
+            raise serializers.ValidationError(
+                {"customer_id": "客户不存在、未启用，或不属于所选货主。"}
+            )
+
+        product_ids = [item["product_id"] for item in data["items"]]
+        if len(product_ids) != len(set(product_ids)):
+            raise serializers.ValidationError({"items": "同一商品不能重复提交。"})
+        products = {
+            product.id: product
+            for product in Product.objects.filter(
+                id__in=product_ids,
+                owner_id=owner.id,
+                is_active=True,
+            ).select_related("base_uom")
+        }
+        missing = sorted(set(product_ids) - set(products))
+        if missing:
+            raise serializers.ValidationError(
+                {"items": f"商品不存在、未启用，或不属于所选货主：{missing}"}
+            )
+
+        package_ids = {
+            item["package_id"]
+            for item in data["items"]
+            if item.get("package_id") is not None
+        }
+        packages = {
+            package.id: package
+            for package in ProductPackage.objects.filter(
+                id__in=package_ids,
+                is_active=True,
+                uom__is_active=True,
+            ).select_related("uom")
+        }
+
+        for item in data["items"]:
+            product = products[item["product_id"]]
+            package_id = item.get("package_id")
+            package_qty = item.get("package_qty")
+            if (package_id is None) != (package_qty is None):
+                raise serializers.ValidationError(
+                    {"items": f"商品 {product.name} 的包装和包装数量必须同时提供。"}
+                )
+            package = None
+            if package_id is not None:
+                package = packages.get(package_id)
+                if package is None or package.product_id != product.id:
+                    raise serializers.ValidationError(
+                        {"items": f"所选包装不存在、未启用，或不属于商品 {product.name}。"}
+                    )
+                expected_base_qty = (
+                    package_qty * Decimal(package.qty_in_base)
+                ).quantize(Decimal("0.001"))
+                if item["qty"] != expected_base_qty:
+                    raise serializers.ValidationError(
+                        {
+                            "items": (
+                                f"商品 {product.name} 的包装数量换算不一致："
+                                f"{package_qty} {package.uom.name} 应为 "
+                                f"{expected_base_qty} {product.base_uom.name}。"
+                            )
+                        }
+                    )
+                item["qty"] = expected_base_qty
+            item["package"] = package
+            item["package_qty"] = package_qty
+            supplied_price = item.get("price")
+            price = (
+                supplied_price
+                if supplied_price is not None
+                else get_default_product_price(product)
+            )
+            item["product"] = product
+            # 仓库代办出库只负责货物流转：已知价格可由操作员填写，未填则
+            # 使用服务端默认价；货主未提供售价时允许以零价创建订单行。
+            item["price"] = price if price > 0 else Decimal("0")
+
+        for key in ("src_bill_no", "contact", "contact_phone", "ship_to"):
+            data[key] = (data.get(key) or "").strip()
+
+        if data["src_bill_no"]:
+            existing = OutboundOrder.objects.filter(
+                owner_id=owner.id,
+                src_bill_no=data["src_bill_no"],
+            ).first()
+            if existing:
+                raise serializers.ValidationError(
+                    {
+                        "src_bill_no": f"平台单号重复，已存在订单 {existing.order_no}",
+                        "existing_order_id": str(existing.id),
+                    }
+                )
+
+        if (customer.code or "").strip().upper() == "CASH":
+            if not data["contact"]:
+                raise serializers.ValidationError({"contact": "散客代发必须填写收件人。"})
+            if not data["contact_phone"]:
+                raise serializers.ValidationError({"contact_phone": "散客代发必须填写联系电话。"})
+            if not data["ship_to"]:
+                raise serializers.ValidationError({"ship_to": "散客代发必须填写收货地址。"})
+            if len(data["contact_phone"]) < 6 or not any(
+                char.isdigit() for char in data["contact_phone"]
+            ):
+                raise serializers.ValidationError({"contact_phone": "联系电话格式不正确。"})
+
+        data["owner"] = owner
+        data["customer"] = customer
+        return data
 # class OutboundOrderCreateSerializer(serializers.Serializer):
 #     # 不再接收 owner_id / warehouse_id
 #     customer_id     = serializers.IntegerField(required=False, allow_null=True)
@@ -478,6 +664,8 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
 
             "outbound_type", "delivery_method", "etd",
             "owner", "customer", "supplier", "warehouse",
+            "processing_mode", "assisted_by", "assisted_at",
+            "assistance_reason", "assistance_request_id",
             "created_by", "created_by_name",
             "created_at",
             "ship_to", "contact", "contact_phone",

@@ -21,6 +21,10 @@ from allapp.outbound.enums import PricingStatus
 
 # ===================== 订单:出库订单 =====================
 class OutboundOrder(BaseModel):
+    class ProcessingMode(models.TextChoices):
+        STANDARD = "STANDARD", "标准出库"
+        WAREHOUSE_ASSISTED = "WAREHOUSE_ASSISTED", "仓库代办出库"
+
     SUBMIT_CHOICES = [
         ("SUBMITTED", "已提交"), ("DRAFT", "未提交")
     ]
@@ -75,6 +79,29 @@ class OutboundOrder(BaseModel):
 
     submit_status = models.CharField("提交状态", max_length=15, choices=SUBMIT_CHOICES, default="DRAFT", db_index=True)
     approval_status = models.CharField("审核状态", max_length=15, choices=APPROVAL_CHOICES, default="OWNER_PENDING", db_index=True)
+
+    processing_mode = models.CharField(
+        "处理模式",
+        max_length=20,
+        choices=ProcessingMode.choices,
+        default=ProcessingMode.STANDARD,
+        db_index=True,
+    )
+    assisted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="代办操作员",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="warehouse_assisted_outbound_orders",
+    )
+    assisted_at = models.DateTimeField("代办时间", blank=True, null=True)
+    assistance_reason = models.CharField(
+        "代办原因", max_length=200, blank=True, default=""
+    )
+    assistance_request_id = models.UUIDField(
+        "代办请求 ID", blank=True, null=True, unique=True
+    )
 
     ship_to = models.CharField("收货地址", max_length=200, blank=True, null=True)
     contact = models.CharField("联系人", max_length=80, blank=True, null=True)
@@ -141,12 +168,24 @@ class OutboundOrder(BaseModel):
             ("approve_outbound_as_owner_manager", "货主管理员可执行出库审核动作"),
             ("approve_outbound_as_wh_manager",   "仓库管理员可执行出库确认动作"),
             ("submit_outbound_as_owner_buyers", "货主业务员可提交出库订单"),
+            (
+                "process_warehouse_assisted_outbound",
+                "仓库操作员可代货主处理出库",
+            ),
+            (
+                "view_all_outbound_orders",
+                "可查看全部出库订单",
+            ),
         ]
         ordering = ["-biz_date", "-id"]
         indexes = [
             models.Index(fields=["owner", "biz_date", "submit_status"], name="idx_out_owner_date_stat"),
             models.Index(fields=["approval_status"], name="idx_out_appr_stat"),
             models.Index(fields=["customer", "biz_date"], name="idx_out_cust_date"),
+            models.Index(
+                fields=["warehouse", "processing_mode", "assisted_at", "id"],
+                name="ix_out_wh_mode_assist",
+            ),
             # 可按需加：
             # models.Index(fields=["outbound_type", "biz_date"], name="idx_out_type_date"),
             # models.Index(fields=["supplier", "biz_date"], name="idx_out_supp_date"),
@@ -251,12 +290,12 @@ class OutboundOrder(BaseModel):
             raise ValidationError("订单没有可确认的明细行。")
 
         total = Decimal("0.00")
+        allow_zero_price = self.processing_mode == self.ProcessingMode.WAREHOUSE_ASSISTED
         for line in lines:
             qty = Decimal(line.base_qty or 0)
             price = Decimal(line.base_price or 0)
 
-            # 如果你的业务允许 0 元商品，把这里改成 < 0
-            if price <= 0:
+            if price < 0 or (price == 0 and not allow_zero_price):
                 raise ValidationError(f"订单行 {line.line_no} 的价格未填写或不合法。")
 
             line_amount = (qty * price).quantize(Decimal("0.01"))
@@ -278,12 +317,13 @@ class OutboundOrder(BaseModel):
 
         total = Decimal("0.00")
         now_ts = timezone.now()
+        allow_zero_price = self.processing_mode == self.ProcessingMode.WAREHOUSE_ASSISTED
 
         for line in lines:
             qty = Decimal(line.base_qty or 0)
             price = Decimal(line.base_price or 0)
 
-            if price <= 0:
+            if price < 0 or (price == 0 and not allow_zero_price):
                 raise ValidationError(f"订单行 {line.line_no} 的价格未填写或不合法。")
 
             line_total = (qty * price).quantize(Decimal("0.01"))

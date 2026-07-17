@@ -49,6 +49,14 @@ def _csv_env(name, default=None):
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
+def _validated_choice(name, value, allowed):
+    normalized = str(value).strip().lower()
+    if normalized not in allowed:
+        choices = "、".join(sorted(allowed))
+        raise ImproperlyConfigured(f"{name} 必须是 {choices}。")
+    return normalized
+
+
 APP_ENV = _detect_app_env()
 if APP_ENV not in {"development", "test", "production"}:
     raise ImproperlyConfigured("APP_ENV 必须是 development、test 或 production。")
@@ -363,6 +371,11 @@ OUTBOUND_ALLOCATE_ON = "OWNER_APPROVE"  # 何时分配：OWNER_APPROVE / WH_APPR
 OUTBOUND_PICK_TASK_STATUS_ON_APPROVE = "DRAFT"  # 生成的拣货任务初始态
 OUTBOUND_ALLOCATE_FIRM_ON_APPROVE = True  # True：硬分配（allocated 冻结）
 OUTBOUND_AT_DRAFT_VALIDATE_MODE = "warn"  # "warn" | "block"
+OUTBOUND_LEGACY_AUTHZ_MODE = _validated_choice(
+    "OUTBOUND_LEGACY_AUTHZ_MODE",
+    env("OUTBOUND_LEGACY_AUTHZ_MODE", default="shadow"),
+    {"shadow", "enforce"},
+)
 COUNT_MAX_TIMES = 2
 BILLING_TASKLINE_ORDER_RESOLVER = "allapp.billing.resolvers:taskline_to_order_mapping"
 BILLING_METRIC_SCHEDULER_ENABLED = env.bool(

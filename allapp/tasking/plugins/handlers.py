@@ -149,6 +149,16 @@ class DefaultPostingHandler(BasePostingHandler):
             log.exception("tasking.post.failed %s", ctx_text, extra=ctx)
             pj.message = (str(e) or "FAILED")[:255]
             pj.save(update_fields=["status", "message", "updated_at"])
+            failure_note = f"{note or '过账'}失败：{str(e) or '未知错误'}"[:200]
+            task_updates = {
+                "posting_status": WmsTask.PostingStatus.FAILED,
+                "posting_note": failure_note,
+                "updated_at": timezone.now(),
+            }
+            by_user_id = getattr(by_user, "pk", None)
+            if by_user_id is not None:
+                task_updates["posted_by_id"] = by_user_id
+            WmsTask.objects.filter(pk=task.pk).update(**task_updates)
             raise
 
         # 3) 成功：外层非原子写 PJ 成功状态
@@ -197,7 +207,6 @@ class DefaultPostingHandler(BasePostingHandler):
             )
 
             if should_accrue_order_processing:
-                print("should_accrue_order_processing")
                 billing_services.accrue_order_processing_for_task(
                     task,
                     pj,

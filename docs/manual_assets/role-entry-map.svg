@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f4f8ff"/>
+      <stop offset="1" stop-color="#f8fafc"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#163463" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#7890b5"/>
+    </marker>
+    <style>
+      .title{font:700 34px 'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#12213a}
+      .subtitle{font:400 20px 'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#60708a}
+      .role{font:700 24px 'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#14233d}
+      .desc{font:400 17px 'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#53647e}
+      .app{font:700 25px 'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#fff}
+      .appdesc{font:400 17px 'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#eaf1ff}
+      .line{stroke:#7890b5;stroke-width:3;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1400" height="760" rx="36" fill="url(#bg)"/>
+  <text x="70" y="72" class="title">角色与系统入口</text>
+  <text x="70" y="108" class="subtitle">账号可见菜单由所属角色、货主范围和仓库范围共同决定</text>
+
+  <g filter="url(#shadow)">
+    <rect x="60" y="155" width="330" height="110" rx="22" fill="#fff"/>
+    <text x="90" y="197" class="role">仓库操作员</text>
+    <text x="90" y="230" class="desc">移动作业、扫码、库存查询</text>
+    <rect x="60" y="295" width="330" height="110" rx="22" fill="#fff"/>
+    <text x="90" y="337" class="role">仓库管理员</text>
+    <text x="90" y="370" class="desc">单据确认、任务、库存与计费</text>
+    <rect x="60" y="435" width="330" height="110" rx="22" fill="#fff"/>
+    <text x="90" y="477" class="role">系统管理员</text>
+    <text x="90" y="510" class="desc">账号权限、基础资料与日志</text>
+    <rect x="1010" y="155" width="330" height="110" rx="22" fill="#fff"/>
+    <text x="1040" y="197" class="role">货主业务员</text>
+    <text x="1040" y="230" class="desc">客户开单、查询与批量导入</text>
+    <rect x="1010" y="295" width="330" height="110" rx="22" fill="#fff"/>
+    <text x="1040" y="337" class="role">货主管理员</text>
+    <text x="1040" y="370" class="desc">订单审核、库存、账单与报表</text>
+    <rect x="1010" y="435" width="330" height="110" rx="22" fill="#fff"/>
+    <text x="1040" y="477" class="role">老板</text>
+    <text x="1040" y="510" class="desc">经营总览、库容、收入与预警</text>
+  </g>
+
+  <path d="M390 210 C485 210 465 220 550 250" class="line"/>
+  <path d="M390 350 C485 350 465 330 550 315" class="line"/>
+  <path d="M390 490 C485 490 465 440 550 395" class="line"/>
+  <path d="M1010 210 C915 210 935 230 850 270" class="line"/>
+  <path d="M1010 350 C915 350 935 340 850 330" class="line"/>
+  <path d="M1010 490 C915 490 935 430 850 390" class="line"/>
+
+  <g filter="url(#shadow)">
+    <rect x="550" y="170" width="300" height="112" rx="24" fill="#155eef"/>
+    <text x="700" y="216" class="app" text-anchor="middle">仓库 PDA</text>
+    <text x="700" y="251" class="appdesc" text-anchor="middle">wmspda</text>
+    <rect x="550" y="305" width="300" height="112" rx="24" fill="#117864"/>
+    <text x="700" y="351" class="app" text-anchor="middle">货主业务端</text>
+    <text x="700" y="386" class="appdesc" text-anchor="middle">wmsownersale</text>
+    <rect x="550" y="440" width="300" height="112" rx="24" fill="#7c3aed"/>
+    <text x="700" y="486" class="app" text-anchor="middle">经营分析中心</text>
+    <text x="700" y="521" class="appdesc" text-anchor="middle">wmsbossbilling</text>
+    <rect x="550" y="575" width="300" height="112" rx="24" fill="#26364f"/>
+    <text x="700" y="621" class="app" text-anchor="middle">Web 控制台 / Admin</text>
+    <text x="700" y="656" class="appdesc" text-anchor="middle">单据、配置、权限与审计</text>
+  </g>
+
+  <path d="M545 520 C465 560 475 625 545 630" class="line"/>
+  <path d="M855 520 C935 560 925 625 855 630" class="line"/>
+</svg>

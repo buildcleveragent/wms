@@ -11,10 +11,21 @@ from typing import Any, Callable, Dict, List, Tuple
 from django import forms
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpRequest, HttpResponse
+from django.db.models import Q
 from django.shortcuts import get_object_or_404, render
 from django.views import View
 from django.views.generic import ListView, DetailView
+from rest_framework.exceptions import PermissionDenied
 
+from allapp.outbound.authz import (
+    apply_legacy_scope,
+    assisted_order_source_ids,
+    get_assisted_order_for_task,
+    is_assisted_operator,
+    legacy_authz_mode,
+    require_legacy_action,
+    strict_pick_queryset,
+)
 from allapp.tasking.models import WmsTask, WmsTaskLine
 from allapp.tasking import services as tasking_services
 from allapp.inventory import services as inventory_services
@@ -56,6 +67,76 @@ def _session_bucket(request: HttpRequest, task_id: int) -> Dict[str, Any]:
     store = request.session.setdefault(SESSION_KEY, {})
     return store.setdefault(str(task_id), {})
 
+
+def _is_wh_operator(user) -> bool:
+    return bool(
+        getattr(user, "is_superuser", False)
+        or user.has_perm("tasking.claim_task_as_wh_operator")
+    )
+
+
+def _is_wh_manager(user) -> bool:
+    return bool(
+        getattr(user, "is_superuser", False)
+        or user.has_perm("tasking.taskconfirm_as_wh_manager")
+    )
+
+
+def _assisted_task_queryset(qs):
+    return qs.filter(
+        source_model__in=("outboundorder", "OutboundOrder"),
+        source_pk__in=assisted_order_source_ids(),
+    )
+
+
+def _scope_task_queryset(qs, user, *, endpoint: str):
+    strict_qs = strict_pick_queryset(qs, user)
+    if legacy_authz_mode() == "enforce" or is_assisted_operator(user):
+        return strict_qs
+
+    assisted_base = _assisted_task_queryset(qs)
+    assisted_scoped = strict_pick_queryset(assisted_base, user)
+    standard_base = qs.exclude(pk__in=assisted_base.order_by().values("pk"))
+    standard_scoped = strict_pick_queryset(standard_base, user)
+    visible_standard = apply_legacy_scope(
+        base_qs=standard_base,
+        scoped_qs=standard_scoped,
+        user=user,
+        endpoint=endpoint,
+    )
+    return qs.filter(
+        Q(pk__in=visible_standard.order_by().values("pk"))
+        | Q(pk__in=assisted_scoped.order_by().values("pk"))
+    )
+
+
+def _scope_line_queryset(qs, user, *, endpoint: str):
+    task_ids = _scope_task_queryset(WmsTask.objects.all(), user, endpoint=endpoint).values("pk")
+    return qs.filter(task_id__in=task_ids)
+
+
+def _is_assisted_task(task) -> bool:
+    if get_assisted_order_for_task(task) is not None:
+        return True
+    return _assisted_task_queryset(WmsTask.objects.filter(pk=task.pk)).exists()
+
+
+def _task_action_allowed(user, task, *, endpoint: str, manager_allowed: bool = False) -> bool:
+    if _is_wh_operator(user) or (manager_allowed and _is_wh_manager(user)):
+        return True
+    if _is_assisted_task(task):
+        return False
+    try:
+        require_legacy_action(
+            user=user,
+            allowed=False,
+            endpoint=endpoint,
+            reason="需要仓库操作权限",
+        )
+    except PermissionDenied:
+        return False
+    return True
+
 # ---- 工具 ----
 def parse_payload(raw: str) -> Dict[str, Any]:
     """支持：L<line_id>, Q<qty>, LOT:<lot>, EXP:YYYYMMDD, SER:<serial>, LOC:<id>, TOLOC:<id>, FROMLOC:<id>"""
@@ -89,10 +170,31 @@ def parse_payload(raw: str) -> Dict[str, Any]:
             data["location_id"] = int(p[8:])  # 兼容写法：FROMLOC 作为来源库位
     return data
 
-def _get_task_or_404(request: HttpRequest, pk: int) -> WmsTask:
-    task = get_object_or_404(WmsTask, pk=pk)
-    # 如需权限控制/范围过滤（owner/warehouse/assigned_to），可在此加逻辑
-    return task
+def _get_task_or_404(
+    request: HttpRequest,
+    pk: int,
+    *,
+    endpoint: str = "console.op.task_detail",
+) -> WmsTask:
+    return get_object_or_404(
+        _scope_task_queryset(
+            WmsTask.objects.select_related("owner", "warehouse"),
+            request.user,
+            endpoint=endpoint,
+        ),
+        pk=pk,
+    )
+
+
+def _get_line_or_404(request: HttpRequest, line_id: int, *, endpoint: str) -> WmsTaskLine:
+    return get_object_or_404(
+        _scope_line_queryset(
+            WmsTaskLine.objects.select_related("task", "product"),
+            request.user,
+            endpoint=endpoint,
+        ),
+        pk=line_id,
+    )
 
 def _add_to_bucket(task: WmsTask, bucket: Dict[str, Any], payload: Dict[str, Any]) -> Tuple[bool, str]:
     line_id = payload.get("line_id")
@@ -190,7 +292,11 @@ class OpTaskListView(LoginRequiredMixin, ListView):
         if t: qs = qs.filter(task_type=t)
         if w: qs = qs.filter(warehouse_id=w)
         if o: qs = qs.filter(owner_id=o)
-        return qs
+        return _scope_task_queryset(
+            qs,
+            self.request.user,
+            endpoint="console.op.task_list",
+        )
 
 # ---- CBV：通用任务页 ----
 class OpTaskDetailView(LoginRequiredMixin, DetailView):
@@ -221,7 +327,9 @@ class OpTaskDetailView(LoginRequiredMixin, DetailView):
 # ---- 交互端点（HTMX）----
 class OpScanView(LoginRequiredMixin, View):
     def post(self, request: HttpRequest, pk: int) -> HttpResponse:
-        task = _get_task_or_404(request, pk)
+        task = _get_task_or_404(request, pk, endpoint="console.op.scan")
+        if not _task_action_allowed(request.user, task, endpoint="console.op.scan"):
+            return HttpResponseForbidden("需要仓库操作权限")
         f = ScanForm(request.POST); bucket = _session_bucket(request, task.id)
         if f.is_valid():
             payload = parse_payload(f.cleaned_data["payload"])
@@ -234,7 +342,9 @@ class OpScanView(LoginRequiredMixin, View):
 
 class OpManualView(LoginRequiredMixin, View):
     def post(self, request: HttpRequest, pk: int) -> HttpResponse:
-        task = _get_task_or_404(request, pk)
+        task = _get_task_or_404(request, pk, endpoint="console.op.manual")
+        if not _task_action_allowed(request.user, task, endpoint="console.op.manual"):
+            return HttpResponseForbidden("需要仓库操作权限")
         f = ManualForm(request.POST); bucket = _session_bucket(request, task.id)
         if f.is_valid():
             payload = {k: f.cleaned_data.get(k)
@@ -249,7 +359,13 @@ class OpManualView(LoginRequiredMixin, View):
 
 class OpSaveSnapshotView(LoginRequiredMixin, View):
     def post(self, request: HttpRequest, pk: int) -> HttpResponse:
-        task = _get_task_or_404(request, pk)
+        task = _get_task_or_404(request, pk, endpoint="console.op.save_snapshot")
+        if not _task_action_allowed(
+            request.user,
+            task,
+            endpoint="console.op.save_snapshot",
+        ):
+            return HttpResponseForbidden("需要仓库操作权限")
         if not ConfirmForm(request.POST).is_valid():
             bucket = _session_bucket(request, task.id)
             return render(request, "console/op/_session_items.html",
@@ -266,7 +382,14 @@ class OpSaveSnapshotView(LoginRequiredMixin, View):
 
 class OpPostView(LoginRequiredMixin, View):
     def post(self, request: HttpRequest, pk: int) -> HttpResponse:
-        task = _get_task_or_404(request, pk)
+        task = _get_task_or_404(request, pk, endpoint="console.op.post")
+        if not _task_action_allowed(
+            request.user,
+            task,
+            endpoint="console.op.post",
+            manager_allowed=True,
+        ):
+            return HttpResponseForbidden("需要仓库操作权限")
         if not ConfirmForm(request.POST).is_valid():
             bucket = _session_bucket(request, task.id)
             return render(request, "console/op/_session_items.html",
@@ -282,18 +405,20 @@ class OpPostView(LoginRequiredMixin, View):
 
 class OpClearView(LoginRequiredMixin, View):
     def post(self, request: HttpRequest, pk: int) -> HttpResponse:
+        task = _get_task_or_404(request, pk, endpoint="console.op.clear")
+        if not _task_action_allowed(request.user, task, endpoint="console.op.clear"):
+            return HttpResponseForbidden("需要仓库操作权限")
         store = request.session.get(SESSION_KEY, {})
         if str(pk) in store:
             store[str(pk)] = {}
             request.session.modified = True
-        task = _get_task_or_404(request, pk)
         return render(request, "console/op/_session_items.html",
                       {"task": task, "session_items": {}, "message": "已清空暂存", "ok": True})
 
 
 from django.views.generic import TemplateView
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Q, Exists, OuterRef, BooleanField, Value, Case, When
+from django.db.models import Exists, OuterRef, BooleanField, Value, Case, When
 from django.contrib import messages
 from django.shortcuts import redirect
 from django.urls import reverse
@@ -348,6 +473,11 @@ class OpLineListView(LoginRequiredMixin, TemplateView):
             .select_related("task", "product", "from_location", "to_location")
             .filter(task__warehouse_id__in=allowed_wh)
             .exclude(status=WmsTaskLine.Status.CANCELLED)
+        )
+        base = _scope_line_queryset(
+            base,
+            user,
+            endpoint="console.op.line_list",
         )
 
         # 先注入三个布尔注解
@@ -414,7 +544,11 @@ class OpLineDetailRedirectView(LoginRequiredMixin, View):
     将用户带到 op:task_detail，并携带 ?line=<line_id>，以便预填“手工录入”的行号。
     """
     def get(self, request, line_id: int):
-        line = WmsTaskLine.objects.select_related("task").only("id", "task_id").get(pk=line_id)
+        line = _get_line_or_404(
+            request,
+            line_id,
+            endpoint="console.op.line_detail_redirect",
+        )
         url = f"{reverse('op:task_detail', args=[line.task_id])}?line={line.id}"
         return redirect(url)
 
@@ -424,8 +558,10 @@ class OpLineClaimView(LoginRequiredMixin, View):
     def post(self, request, line_id: int):
         user = request.user
         allowed_wh = _allowed_wh_ids_for(user)
-        line = WmsTaskLine.objects.select_related("task").only("id", "task_id").get(pk=line_id)
+        line = _get_line_or_404(request, line_id, endpoint="console.op.line_claim")
         task = line.task
+        if not _task_action_allowed(user, task, endpoint="console.op.line_claim"):
+            return HttpResponseForbidden("需要仓库操作权限")
         try:
             tasking_services.claim_task(task, by_user=user, allowed_wh_ids=allowed_wh,
                                         to_status=WmsTask.Status.IN_PROGRESS)
@@ -440,8 +576,10 @@ class OpLineUnclaimView(LoginRequiredMixin, View):
     def post(self, request, line_id: int):
         user = request.user
         allowed_wh = _allowed_wh_ids_for(user)
-        line = WmsTaskLine.objects.select_related("task").only("id", "task_id").get(pk=line_id)
+        line = _get_line_or_404(request, line_id, endpoint="console.op.line_unclaim")
         task = line.task
+        if not _task_action_allowed(user, task, endpoint="console.op.line_unclaim"):
+            return HttpResponseForbidden("需要仓库操作权限")
         try:
             tasking_services.unclaim_task(task, by_user=user, allowed_wh_ids=allowed_wh,
                                           back_to_status=WmsTask.Status.RELEASED)
@@ -552,10 +690,10 @@ class OpLineEditView(LoginRequiredMixin, View):
         allowed = _allowed_wh_ids_for(user)
         if getattr(user, "is_superuser", False):
             return True
-        return (not allowed) or (line.task.warehouse_id in allowed)
+        return bool(allowed and line.task.warehouse_id in allowed)
 
     def get(self, request, line_id: int):
-        line = get_object_or_404(WmsTaskLine.objects.select_related("task", "product"), pk=line_id)
+        line = _get_line_or_404(request, line_id, endpoint="console.op.line_edit")
         if not self._check_wh(request.user, line):
             return HttpResponseForbidden("无权限")
 
@@ -588,9 +726,16 @@ class OpLineEditView(LoginRequiredMixin, View):
         })
 
     def post(self, request, line_id: int):
-        line = get_object_or_404(WmsTaskLine.objects.select_related("task", "product"), pk=line_id)
+        line = _get_line_or_404(request, line_id, endpoint="console.op.line_edit")
         if not self._check_wh(request.user, line):
             return HttpResponseForbidden("无权限")
+        if not _task_action_allowed(
+            request.user,
+            line.task,
+            endpoint="console.op.line_edit",
+            manager_allowed=True,
+        ):
+            return HttpResponseForbidden("需要仓库操作权限")
 
         # 构建两个表单（同一个 <form> 提交，前缀区分）
         lf = _line_form_fields(line.task.task_type)

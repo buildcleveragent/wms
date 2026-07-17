@@ -26,13 +26,17 @@
 </template>
 
 <script>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { useAuth } from '@/store/auth'
 
 export default {
   name: "WarehouseAdminHome",
   setup() {
+    const auth = useAuth()
     // 响应式数据
-    const actions = ref([
+    const allActions = [
+      { key: "assisted-outbound", title: "代货主出库", emoji: "🚛", desc: "仓库代货主创建并完成出库", path: "/pages/outbound/assisted", requiresAssistedOutbound: true },
       { key: "receiving", title: "收货(有订单)", emoji: "📋", desc: "到货验收/收货登记", op: "receive" },
       { key: "receivewithoutorder", title: "收货(无订单)", emoji: "📥", desc: "到货验收/收货登记", op: "receivewithoutorder",path: "/pages/inbound/createwithoutorder/selectowner" },
       { key: "putaway",   title: "上架", emoji: "📦", desc: "库位分配/上架确认",  op: "putaway" },                                               
@@ -46,8 +50,11 @@ export default {
       { key: "replenish", title: "补货", emoji: "🔀", desc: "从存储区到拣货区",   op: "replenish",path: "/pages/inventory/replenish/index" },
       { key: "move",      title: "移库", emoji: "🔁", desc: "库内移位/合并/分拆", op: "move",path: "/pages/inventory/move/index" },
       { key: "stocktake", title: "盘点", emoji: "🧮", desc: "周期盘点/抽盘/全盘", op: "stocktake",path: "/pages/inventory/stocktake/index" },
-	  { key: "stocktake", title: "查询", emoji: "🧮", desc: "查询", op: "chaxun",path: "/pages/inventory/company" },
-    ])
+	  { key: "query", title: "查询", emoji: "🧮", desc: "查询", op: "chaxun",path: "/pages/inventory/company" },
+    ]
+    const actions = computed(() => allActions.filter(
+      (item) => !item.requiresAssistedOutbound || auth.canProcessAssistedOutbound,
+    ))
     
     const lastScan = ref("")
     const canScan = ref(false)
@@ -138,6 +145,13 @@ export default {
         canScan.value = false
         console.error('初始化扫描功能失败:', e)
       }
+    })
+
+    onShow(() => {
+      // 每次回到工作台都重新确认能力，保证后台撤权能及时生效。
+      auth.loadProfile({ force: true }).catch((error) => {
+        console.warn('权限资料暂不可用，代货主出库入口保持隐藏', error)
+      })
     })
 
     onUnmounted(() => {

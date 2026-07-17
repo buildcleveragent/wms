@@ -3,10 +3,11 @@ from decimal import Decimal
 from unittest import mock
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from allapp.baseinfo.models import Owner
@@ -206,8 +207,14 @@ class TaskingWarehouseScopeTests(TestCase):
         self.assertEqual(journal.status, "POSTED")
         self.assertEqual(journal.attempt_count, 1)
         self.assertEqual(task.posting_status, WmsTask.PostingStatus.POSTED)
+        mocked_handler.assert_called_once_with(
+            task=mock.ANY,
+            note="first post",
+            by_user=self.superuser,
+        )
 
 
+@override_settings(OUTBOUND_LEGACY_AUTHZ_MODE="enforce")
 class TaskingApiContractTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Tasking API", code="OWN-TASK-API")
@@ -226,6 +233,24 @@ class TaskingApiContractTests(TestCase):
             password="x",
             owner=self.owner,
             warehouse=self.warehouse,
+        )
+        self.user.user_permissions.add(
+            Permission.objects.get(
+                content_type=ContentType.objects.get_for_model(WmsTask),
+                codename="add_wmstask",
+            ),
+            Permission.objects.get(
+                content_type=ContentType.objects.get_for_model(WmsTask),
+                codename="claim_task_as_wh_operator",
+            ),
+            Permission.objects.get(
+                content_type=ContentType.objects.get_for_model(WmsTask),
+                codename="taskconfirm_as_wh_manager",
+            ),
+            Permission.objects.get(
+                content_type=ContentType.objects.get_for_model(WmsTaskLine),
+                codename="change_wmstaskline",
+            ),
         )
         self.assignee = get_user_model().objects.create_user(
             username="tasking-api-assignee",
@@ -481,8 +506,9 @@ class TaskPostingConcurrencyTests(TransactionTestCase):
         results = [None, None]
         errors = []
 
-        def fake_execute_posting_handler(*, task, note):
+        def fake_execute_posting_handler(*, task, note, by_user):
             nonlocal handler_calls
+            self.assertEqual(by_user.pk, self.superuser.pk)
             with handler_lock:
                 handler_calls += 1
             handler_entered.set()

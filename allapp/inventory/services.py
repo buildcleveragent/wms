@@ -52,13 +52,12 @@ from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from uuid import uuid4
-from django.db.models import F, Value
+from django.db.models import F, Q, Value
 from django.db.models.functions import Least
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
 from django.utils import timezone
 
 from allapp.core.utils.log_context import build_log_payload
@@ -165,6 +164,7 @@ def _upsert_detail(
     expiry_date=None,
     serial_no: Optional[str] = "",
     task_type: Optional[str] = None,  # 增加任务类型参数
+    detail: Optional[InventoryDetail] = None,
 ) -> InventoryDetail:
     """
     Upsert 库存明细，并把 onhand_qty += qty_delta。
@@ -172,24 +172,26 @@ def _upsert_detail(
     - available_qty 的更新由模型层规则保证（通常是 onhand - allocated - locked - damaged）。
     - batch_no/serial_no 统一大写与空值归一（None 而非 ""），以免同一维度被拆成两条。
     """
-    # serial_no=""
-    # batch_no=""
-    det, created = InventoryDetail.objects.get_or_create(
-        owner_id=owner_id,
-        warehouse_id=warehouse_id,
-        product_id=product_id,
-        location_id=location_id,
-        batch_no=(batch_no or "").strip().upper(),  # 字符串→空串+大写
-        production_date=production_date or None,  # 日期→None 表示无
-        expiry_date=expiry_date or None,
-        serial_no=(serial_no or "").strip().upper(),
-
-        defaults=dict(onhand_qty=Decimal("0"), allocated_qty=Decimal("0"), locked_qty=Decimal("0"), damaged_qty=Decimal("0")),
-        # batch_no=(batch_no or "").upper() or None,
-        # production_date=production_date or None,
-        # expiry_date=expiry_date or None,
-        # serial_no=(serial_no or "").upper() or None,
-    )
+    # 正常过账路径会在进入本函数前按固定顺序锁定所有候选明细。
+    # 保留 detail=None 的兼容入口，但也必须重取行锁，不允许无锁读改写。
+    created = False
+    if detail is None:
+        lookup = _detail_dimension_values(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            product_id=product_id,
+            location_id=location_id,
+            batch_no=batch_no,
+            production_date=production_date,
+            expiry_date=expiry_date,
+            serial_no=serial_no,
+        )
+        detail, created = InventoryDetail.objects.get_or_create(
+            **lookup,
+            defaults=_empty_detail_quantities(),
+        )
+        detail = InventoryDetail.objects.select_for_update().get(pk=detail.pk)
+    det = detail
 
     if created:
         ctx, ctx_text = build_log_payload(
@@ -281,6 +283,147 @@ def _upsert_detail(
     return det
 
 
+def _empty_detail_quantities() -> Dict[str, Decimal]:
+    return {
+        "onhand_qty": Decimal("0"),
+        "allocated_qty": Decimal("0"),
+        "locked_qty": Decimal("0"),
+        "damaged_qty": Decimal("0"),
+    }
+
+
+def _detail_dimension_values(
+    *,
+    owner_id: int,
+    warehouse_id: int,
+    product_id: int,
+    location_id: int,
+    batch_no: Optional[str] = "",
+    production_date=None,
+    expiry_date=None,
+    serial_no: Optional[str] = "",
+) -> Dict[str, Any]:
+    """Return the normalized unique inventory dimension used for locking/upsert."""
+    return {
+        "owner_id": owner_id,
+        "warehouse_id": warehouse_id,
+        "product_id": product_id,
+        "location_id": location_id,
+        "batch_no": (batch_no or "").strip().upper(),
+        "production_date": production_date or None,
+        "expiry_date": expiry_date or None,
+        "serial_no": (serial_no or "").strip().upper(),
+        "is_active": True,
+    }
+
+
+def _detail_dimension_key(values: Dict[str, Any]) -> Tuple[Any, ...]:
+    return (
+        values["owner_id"],
+        values["product_id"],
+        values["warehouse_id"],
+        values["location_id"],
+        values["batch_no"],
+        values["production_date"],
+        values["expiry_date"],
+        values["serial_no"],
+    )
+
+
+def _detail_key_from_instance(detail: InventoryDetail) -> Tuple[Any, ...]:
+    return _detail_dimension_key(
+        _detail_dimension_values(
+            owner_id=detail.owner_id,
+            warehouse_id=detail.warehouse_id,
+            product_id=detail.product_id,
+            location_id=detail.location_id,
+            batch_no=detail.batch_no,
+            production_date=detail.production_date,
+            expiry_date=detail.expiry_date,
+            serial_no=detail.serial_no,
+        )
+    )
+
+
+def _dimension_sort_key(key: Tuple[Any, ...]) -> Tuple[Any, ...]:
+    owner_id, product_id, warehouse_id, location_id, batch, production, expiry, serial = key
+    return (
+        owner_id,
+        product_id,
+        warehouse_id,
+        location_id,
+        batch or "",
+        production.isoformat() if production else "",
+        expiry.isoformat() if expiry else "",
+        serial or "",
+    )
+
+
+def _lock_or_create_summary(owner_id: int, product_id: int) -> InventorySummary:
+    summary, _ = InventorySummary.objects.get_or_create(
+        owner_id=owner_id,
+        product_id=product_id,
+        is_active=True,
+        defaults=_empty_detail_quantities(),
+    )
+    return InventorySummary.objects.select_for_update().get(pk=summary.pk)
+
+
+def _lock_inventory_dimensions(
+    dimensions: Iterable[Dict[str, Any]],
+) -> Tuple[Dict[Tuple[Any, ...], InventoryDetail], Dict[Tuple[int, int], InventorySummary]]:
+    """
+    Lock all inventory rows touched by one posting in a stable order.
+
+    Existing rows are locked for the complete owner/product scope before any mutation.  This
+    both serializes two tasks that touch different dimensions of the same SKU and keeps the
+    subsequent full summary recalculation consistent.  If the scope has no detail yet, its
+    summary row is used as the creation mutex.
+    """
+    dimensions_by_key = {
+        _detail_dimension_key(values): values
+        for values in dimensions
+    }
+    if not dimensions_by_key:
+        return {}, {}
+
+    pairs = sorted({(key[0], key[1]) for key in dimensions_by_key})
+    pair_filter = Q()
+    for owner_id, product_id in pairs:
+        pair_filter |= Q(owner_id=owner_id, product_id=product_id)
+
+    existing = list(
+        InventoryDetail.objects.select_for_update()
+        .filter(pair_filter, is_active=True)
+        .order_by("owner_id", "product_id", "warehouse_id", "location_id", "id")
+    )
+    details_by_key = {_detail_key_from_instance(detail): detail for detail in existing}
+    existing_pairs = {(detail.owner_id, detail.product_id) for detail in existing}
+
+    # With no detail row there is nothing else to lock, so the summary is the pair-level mutex
+    # that prevents concurrent first receipts from creating disjoint, stale summary snapshots.
+    summaries: Dict[Tuple[int, int], InventorySummary] = {}
+    for owner_id, product_id in pairs:
+        if (owner_id, product_id) not in existing_pairs:
+            summaries[(owner_id, product_id)] = _lock_or_create_summary(owner_id, product_id)
+
+    for key in sorted(dimensions_by_key, key=_dimension_sort_key):
+        if key in details_by_key:
+            continue
+        detail, _ = InventoryDetail.objects.get_or_create(
+            **dimensions_by_key[key],
+            defaults=_empty_detail_quantities(),
+        )
+        details_by_key[key] = InventoryDetail.objects.select_for_update().get(pk=detail.pk)
+
+    # Match the established detail -> summary lock order used by other inventory writers.
+    for owner_id, product_id in pairs:
+        if (owner_id, product_id) not in summaries:
+            summaries[(owner_id, product_id)] = _lock_or_create_summary(owner_id, product_id)
+
+    return details_by_key, summaries
+
+
 def _insert_tx(
     *,
     tx_type: str,
@@ -332,40 +475,51 @@ def _insert_tx(
         posting_batch=(posting_batch or None)[:40] if posting_batch else None,  # 批次号（若模型有该字段）
     )
 
-def _refresh_summaries(pairs: Iterable[Tuple[int, int]]):
-    """Recalculate InventorySummary totals for touched (owner, product) pairs."""
+def _refresh_summaries(
+    pairs: Iterable[Tuple[int, int]],
+    *,
+    locked_summaries: Optional[Dict[Tuple[int, int], InventorySummary]] = None,
+    locked_details: Optional[Dict[Tuple[Any, ...], InventoryDetail]] = None,
+):
+    """Recalculate summaries from the current in-memory state of locked detail rows."""
 
     unique_pairs: Set[Tuple[int, int]] = {p for p in pairs if p and all(p)}
     if not unique_pairs:
         return
 
+    if locked_details is None:
+        pair_filter = Q()
+        for owner_id, product_id in sorted(unique_pairs):
+            pair_filter |= Q(owner_id=owner_id, product_id=product_id)
+        current_details = list(
+            InventoryDetail.objects.select_for_update()
+            .filter(pair_filter, is_active=True)
+            .order_by("owner_id", "product_id", "warehouse_id", "location_id", "id")
+        )
+    else:
+        # _lock_inventory_dimensions() returns every active row in each touched owner/product
+        # scope, not only the requested dimensions. Updated rows are the same Python objects.
+        current_details = list(locked_details.values())
+
     for owner_id, product_id in unique_pairs:
-        aggregates = InventoryDetail.objects.filter(
-            owner_id=owner_id,
-            product_id=product_id,
-            is_active=True,
-        ).aggregate(
-            onhand=Sum("onhand_qty"),
-            allocated=Sum("allocated_qty"),
-            locked=Sum("locked_qty"),
-            damaged=Sum("damaged_qty"),
-        )
+        pair_details = [
+            detail
+            for detail in current_details
+            if detail.owner_id == owner_id and detail.product_id == product_id
+        ]
+        onhand = sum((detail.onhand_qty or Decimal("0") for detail in pair_details), Decimal("0"))
+        allocated = sum((detail.allocated_qty or Decimal("0") for detail in pair_details), Decimal("0"))
+        locked = sum((detail.locked_qty or Decimal("0") for detail in pair_details), Decimal("0"))
+        damaged = sum((detail.damaged_qty or Decimal("0") for detail in pair_details), Decimal("0"))
 
-        summary, _ = InventorySummary.objects.get_or_create(
-            owner_id=owner_id,
-            product_id=product_id,
-            defaults=dict(
-                onhand_qty=Decimal("0"),
-                allocated_qty=Decimal("0"),
-                locked_qty=Decimal("0"),
-                damaged_qty=Decimal("0"),
-            ),
-        )
+        summary = (locked_summaries or {}).get((owner_id, product_id))
+        if summary is None:
+            summary = _lock_or_create_summary(owner_id, product_id)
 
-        summary.onhand_qty = _q4(aggregates["onhand"] or Decimal("0"))
-        summary.allocated_qty = _q4(aggregates["allocated"] or Decimal("0"))
-        summary.locked_qty = _q4(aggregates["locked"] or Decimal("0"))
-        summary.damaged_qty = _q4(aggregates["damaged"] or Decimal("0"))
+        summary.onhand_qty = _q4(onhand)
+        summary.allocated_qty = _q4(allocated)
+        summary.locked_qty = _q4(locked)
+        summary.damaged_qty = _q4(damaged)
         summary.save()
 
 
@@ -640,12 +794,54 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
     """
     created = 0
     task_type = task.task_type
-    touched_pairs: Set[Tuple[int, int]] = set()
-    for key, qty in groups.items():
-        qty = _q4(qty)
-        if qty == 0:
-            # 聚合后恰好抵消为 0 的分组不入账
-            continue
+    pending_groups = [
+        (key, _q4(qty))
+        for key, qty in groups.items()
+        if _q4(qty) != 0
+    ]
+    dimensions = [
+        _detail_dimension_values(
+            owner_id=key.owner_id,
+            warehouse_id=key.warehouse_id,
+            product_id=key.product_id,
+            location_id=key.location_id,
+            batch_no=key.batch_no,
+            production_date=key.production_date,
+            expiry_date=key.expiry_date,
+            serial_no=key.serial_no,
+        )
+        for key, _qty in pending_groups
+    ]
+    details_by_key, locked_summaries = _lock_inventory_dimensions(dimensions)
+    touched_pairs: Set[Tuple[int, int]] = {
+        (key.owner_id, key.product_id) for key, _qty in pending_groups
+    }
+
+    def group_sort(item):
+        key, _qty = item
+        values = _detail_dimension_values(
+            owner_id=key.owner_id,
+            warehouse_id=key.warehouse_id,
+            product_id=key.product_id,
+            location_id=key.location_id,
+            batch_no=key.batch_no,
+            production_date=key.production_date,
+            expiry_date=key.expiry_date,
+            serial_no=key.serial_no,
+        )
+        return _dimension_sort_key(_detail_dimension_key(values))
+
+    for key, qty in sorted(pending_groups, key=group_sort):
+        dimension = _detail_dimension_values(
+            owner_id=key.owner_id,
+            warehouse_id=key.warehouse_id,
+            product_id=key.product_id,
+            location_id=key.location_id,
+            batch_no=key.batch_no,
+            production_date=key.production_date,
+            expiry_date=key.expiry_date,
+            serial_no=key.serial_no,
+        )
 
         # 明细增量（出库为负数，进库为正数；COUNT 的 ADJ_* 同理）
         _upsert_detail(
@@ -659,8 +855,8 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
             expiry_date=key.expiry_date,
             serial_no=key.serial_no,
             task_type=task_type,
+            detail=details_by_key[_detail_dimension_key(dimension)],
         )
-        touched_pairs.add((key.owner_id, key.product_id))
         # 交易
         _insert_tx(
             tx_type=key.tx_type,
@@ -692,7 +888,11 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
             extra=ctx,
         )
         created += 1
-    _refresh_summaries(touched_pairs)
+    _refresh_summaries(
+        touched_pairs,
+        locked_summaries=locked_summaries,
+        locked_details=details_by_key,
+    )
     return created
 
 
@@ -704,11 +904,61 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
     """
     created = 0
     task_type = task.task_type
-    touched_pairs: Set[Tuple[int, int]] = set()
-    for (key_out, key_in), qty_pos in groups.items():
-        qty_pos = _q4(qty_pos)
-        if qty_pos == 0:
-            continue
+    pending_groups = [
+        ((key_out, key_in), _q4(qty_pos))
+        for (key_out, key_in), qty_pos in groups.items()
+        if _q4(qty_pos) != 0
+    ]
+
+    dimensions = []
+    for (key_out, key_in), _qty in pending_groups:
+        for key in (key_out, key_in):
+            dimensions.append(
+                _detail_dimension_values(
+                    owner_id=key.owner_id,
+                    warehouse_id=key.warehouse_id,
+                    product_id=key.product_id,
+                    location_id=key.location_id,
+                    batch_no=key.batch_no,
+                    production_date=key.production_date,
+                    expiry_date=key.expiry_date,
+                    serial_no=key.serial_no,
+                )
+            )
+    details_by_key, locked_summaries = _lock_inventory_dimensions(dimensions)
+    touched_pairs: Set[Tuple[int, int]] = {
+        (key_out.owner_id, key_out.product_id)
+        for (key_out, _key_in), _qty in pending_groups
+    }
+
+    def move_sort(item):
+        (key_out, key_in), _qty = item
+        out_values = _detail_dimension_values(
+            owner_id=key_out.owner_id,
+            warehouse_id=key_out.warehouse_id,
+            product_id=key_out.product_id,
+            location_id=key_out.location_id,
+            batch_no=key_out.batch_no,
+            production_date=key_out.production_date,
+            expiry_date=key_out.expiry_date,
+            serial_no=key_out.serial_no,
+        )
+        in_values = _detail_dimension_values(
+            owner_id=key_in.owner_id,
+            warehouse_id=key_in.warehouse_id,
+            product_id=key_in.product_id,
+            location_id=key_in.location_id,
+            batch_no=key_in.batch_no,
+            production_date=key_in.production_date,
+            expiry_date=key_in.expiry_date,
+            serial_no=key_in.serial_no,
+        )
+        return (
+            _dimension_sort_key(_detail_dimension_key(out_values)),
+            _dimension_sort_key(_detail_dimension_key(in_values)),
+        )
+
+    for (key_out, key_in), qty_pos in sorted(pending_groups, key=move_sort):
 
         # 先 OUT（发出库位 onhand -= qty_pos）
         # 这里生成本对 OUT/IN 的 pair_id（字符串，满足 _insert_tx 的类型注解）
@@ -724,7 +974,21 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
             production_date=key_out.production_date,
             expiry_date=key_out.expiry_date,
             serial_no=key_out.serial_no,
-            task_type=task_type
+            task_type=task_type,
+            detail=details_by_key[
+                _detail_dimension_key(
+                    _detail_dimension_values(
+                        owner_id=key_out.owner_id,
+                        warehouse_id=key_out.warehouse_id,
+                        product_id=key_out.product_id,
+                        location_id=key_out.location_id,
+                        batch_no=key_out.batch_no,
+                        production_date=key_out.production_date,
+                        expiry_date=key_out.expiry_date,
+                        serial_no=key_out.serial_no,
+                    )
+                )
+            ],
         )
         _insert_tx(
             tx_type=InvTxType.ISSUE,
@@ -756,9 +1020,22 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
             production_date=key_in.production_date,
             expiry_date=key_in.expiry_date,
             serial_no=key_in.serial_no,
-            task_type=task_type
+            task_type=task_type,
+            detail=details_by_key[
+                _detail_dimension_key(
+                    _detail_dimension_values(
+                        owner_id=key_in.owner_id,
+                        warehouse_id=key_in.warehouse_id,
+                        product_id=key_in.product_id,
+                        location_id=key_in.location_id,
+                        batch_no=key_in.batch_no,
+                        production_date=key_in.production_date,
+                        expiry_date=key_in.expiry_date,
+                        serial_no=key_in.serial_no,
+                    )
+                )
+            ],
         )
-        touched_pairs.add((key_out.owner_id, key_out.product_id))
         _insert_tx(
             tx_type=InvTxType.RECEIVE,
             owner_id=key_in.owner_id,
@@ -790,7 +1067,11 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
             extra=ctx,
         )
         created += 2
-    _refresh_summaries(touched_pairs)
+    _refresh_summaries(
+        touched_pairs,
+        locked_summaries=locked_summaries,
+        locked_details=details_by_key,
+    )
     return created
 
 
@@ -962,5 +1243,3 @@ def _release_allocated_after_issue(owner_id, warehouse_id, product_id, location_
         allocated_qty=F("allocated_qty") - used,
         available_qty=F("available_qty") + used,
     )
-
-

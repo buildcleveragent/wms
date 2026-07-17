@@ -136,50 +136,17 @@ def adjust_pick_line_qty(
         raise
 
 
-    # 6) 准备快照 items（和 scan_task 保持 style）
-    p = Product.objects.only("id").get(id=line.product_id)
-
-    # loc_obj = (
-    #     getattr(line, "from_location", None)
-    #     or getattr(line, "to_location", None)
-    # )
-
-    # 6) 准备快照 items（方向A：拣货一律使用 from_location）
+    # 6) PICK 一律使用 from_location。TaskScanLog 是追加式作业事实，
+    # 不能再调用 save_receiving_snapshot() 覆盖之前的扫描。
     if not line.from_location_id:
         raise ValidationError("拣货行缺少 from_location_id，无法调整拣货数。")
 
-    # line.from_location 未 select_related 也没关系，会自动懒加载
-    loc_obj = getattr(line, "from_location", None)
-    if loc_obj is None:
-        # 保险兜底：按 id 再取一次
-        loc_obj = Location.objects.only("id", "code").get(id=line.from_location_id)
-
-    snap_items = [{
-        "product": p,
-        "location": loc_obj,
-        "qty_ok": diff,             # 调整量
-        "qty_base": float(diff),
-        "qty": float(diff),
-        "lot_no": None,
-        "mfg_date": None,
-        "exp_date": None,
-        "uom_code": None,
-        "pack_qty": None,
-    }]
-
-    rev = save_receiving_snapshot(
-        task_line_id=line.id,
-        items=snap_items,
-        operator=by_user,
-        source="PDA",
-    )
-
     ctx, ctx_text = build_log_payload(task=task, user=by_user)
     logger.info(
-        "tasking.pick.manual_adjust.snapshot_saved %s line_id=%s rev=%s diff=%s",
+        "tasking.pick.manual_adjust.appended %s line_id=%s scan_id=%s diff=%s",
         ctx_text,
         line.id,
-        rev,
+        scan.id,
         diff,
         extra=ctx,
     )
@@ -210,11 +177,7 @@ def adjust_pick_line_qty(
     #     remark="PDA 手工调整拣货数量",
     # )
 
-    # 7) 回填快照版本号（scan 在上面已创建，用于幂等）
-    TaskScanLog.objects.filter(pk=scan.pk).update(scan_snapshot_rev=rev)
-
-
-    # 8) 更新行上的快照数量
+    # 7) 更新行完成数；调整日志本身的 diff 就是可回放事实。
     line.qty_done = final_qty_dec
     line.save(update_fields=["qty_done"])
 
@@ -247,9 +210,16 @@ def build_scan_fp(*, task_id, line_id, product_id, location_id, lot, expiry, ser
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-@transaction.atomic
 def _run_posting_handler(task_id: int, by_user=None, note: str = "过账"):
-    task = WmsTask.objects.select_for_update().get(id=task_id)
+    """Run the handler without wrapping its failure journal in an outer transaction.
+
+    ``DefaultPostingHandler`` owns the atomic inventory unit and deliberately
+    records ``PostingJournal=FAILED`` after that unit rolls back.  An outer
+    atomic block here would roll that failure audit back as well and make an
+    ``APPROVED/FAILED`` retry impossible.
+    """
+
+    task = WmsTask.objects.get(id=task_id)
     scans = list(TaskScanLog.objects.filter(task_id=task.id).order_by("id"))
     # 支持 settings 配字符串或可调用
     ctx, ctx_text = build_log_payload(task=task, user=by_user)
@@ -262,7 +232,14 @@ def _run_posting_handler(task_id: int, by_user=None, note: str = "过账"):
     )
     handler_cfg = getattr(settings, "TASKING_POSTING_HANDLER", "allapp.tasking.plugins.handlers.DefaultPostingHandler")
     handler = import_string(handler_cfg)() if isinstance(handler_cfg, str) else handler_cfg()
-    created = handler.handle(task=task, scans=scans, now=None, batch_no=None, note=note or "")
+    created = handler.handle(
+        task=task,
+        scans=scans,
+        now=None,
+        batch_no=None,
+        note=note or "",
+        by_user=by_user,
+    )
     logger.info(
         "tasking.posting.run.completed %s scans=%s created=%s",
         ctx_text,
@@ -349,10 +326,58 @@ def scan_task(
     else:
         label_key = raw_label_key
 
-    # 3) 锁行（RECEIVE/COUNT 可自动建行）
-    line = (WmsTaskLine.objects.select_for_update()
-            .filter(task_id=task.id, product_id=product_id)
-            .order_by("id").first())
+    # PICK 在选下一条未完成行前先识别客户端重试。否则首行恰好扫满后，
+    # 同一请求的重放会被错误地应用到第二库位。
+    if task.task_type == WmsTask.TaskType.PICK:
+        retry_lines = WmsTaskLine.objects.filter(
+            task_id=task.id,
+            product_id=product_id,
+        )
+        if location_id is not None:
+            retry_lines = retry_lines.filter(from_location_id=location_id)
+        retry_fps = [
+            _compute_fp(
+                task.id,
+                barcode,
+                _q3(qty),
+                from_location_id,
+                user_id,
+                client_seq,
+            )
+            for from_location_id in retry_lines.values_list("from_location_id", flat=True)
+        ]
+        prior_scan = (
+            TaskScanLog.objects.filter(
+                task_id=task.id,
+                fp__in=retry_fps,
+                status=TaskScanLog.ScanStatus.OK,
+            )
+            .order_by("id")
+            .first()
+        )
+        if prior_scan and prior_scan.task_line_id:
+            prior_line = WmsTaskLine.objects.select_for_update().get(pk=prior_scan.task_line_id)
+            return {
+                "idempotent": True,
+                "line_id": prior_line.id,
+                "qty_done": prior_line.qty_done,
+                "scan_id": prior_scan.id,
+            }
+
+    # 3) 锁行（RECEIVE/COUNT 可自动建行）。PICK 同商品可能按库位拆成多行：
+    #    - 传了库位时只能命中相同 from_location；
+    #    - 只在未完成行中选择，未传库位时按行顺序延续。
+    line_qs = WmsTaskLine.objects.select_for_update().filter(
+        task_id=task.id,
+        product_id=product_id,
+    )
+    if task.task_type == WmsTask.TaskType.PICK:
+        line_qs = line_qs.filter(qty_done__lt=F("qty_plan")).exclude(
+            status__in=[WmsTaskLine.Status.COMPLETED, WmsTaskLine.Status.CANCELLED]
+        )
+        if location_id is not None:
+            line_qs = line_qs.filter(from_location_id=location_id)
+    line = line_qs.order_by("id").first()
     if not line and task.task_type in ("RECEIVE", "COUNT"):
         line = WmsTaskLine.objects.create(task_id=task.id, product_id=product_id,
                                           qty_plan=Decimal("0"), qty_done=Decimal("0"))
@@ -363,13 +388,10 @@ def scan_task(
     qty = _q3(qty)
     if task.task_type == "RECEIVE":
         inc_qty = _q3(qty * Decimal(str(pack_qty)))
-        loc_for_fp = location_id
     elif task.task_type == "COUNT":
         inc_qty = _q3(qty)  # 实盘总数
-        loc_for_fp = location_id
     else:
         inc_qty = _q3(qty)
-        loc_for_fp = location_id if task.task_type != "PUTAWAY" else (location_id or getattr(line, "to_location_id", None))
 
     # ---- 关键：统一出库扣减库位 ----
     task_type_u = (task.task_type or "").upper()
@@ -461,6 +483,16 @@ def scan_task(
         plan = getattr(line, "qty_plan", Decimal("0"))
         if line.qty_done > plan:
             raise ValidationError(f"{task.task_type} 不允许超量：{line.qty_done} > 计划 {plan}")
+
+    # PICK 扫码日志是追加式作业事实，直接返回；不得调用收货快照
+    # 覆盖旧日志，否则过账只能看到最后一次增量。
+    if task.task_type == WmsTask.TaskType.PICK:
+        return {
+            "idempotent": False,
+            "line_id": line.id,
+            "qty_done": line.qty_done,
+            "scan_id": scan.id,
+        }
 
     # （在循环前）先生成收货快照版本号
 

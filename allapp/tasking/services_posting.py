@@ -2,8 +2,7 @@
 from django.db import transaction, IntegrityError
 from django.utils import timezone
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db.models import Q
-from allapp.tasking.models import WmsTask, WmsTaskLine, PostingJournal
+from allapp.tasking.models import PostingJournal, WmsTask
 from allapp.tasking.posting_exec import execute_posting_handler
 
 TX_POST = "POST"        # 过账
@@ -82,7 +81,11 @@ def post_task(task_id: int, *, by_user=None, note: str = "过账"):
         j.message = (note or "")[:255]
         j.save(update_fields=["attempt_count", "status", "message", "updated_at"])
 
-        created = execute_posting_handler(task=task, note=note or "过账")
+        created = execute_posting_handler(
+            task=task,
+            note=note or "过账",
+            by_user=by_user,
+        )
 
         j.status = STATUS_POSTED
         j.message = f"OK: created={created}"[:255]

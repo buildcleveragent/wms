@@ -3,17 +3,48 @@ from django.contrib import admin
 
 from allapp.core.admin_mixins import HideAuditFieldsMixin
 from allapp.core.admin_base import BaseReadonlyAdmin
-from .models import Owner,Customer, Employee, CarrierCompany, Supplier, Driver, Vehicle, Route, DictCategory, DictItem
+from .models import (
+    CarrierCompany,
+    Customer,
+    DictCategory,
+    DictItem,
+    Driver,
+    Employee,
+    Owner,
+    Route,
+    Supplier,
+    Vehicle,
+)
 
 # ========== Owner ==========
 @admin.register(Owner)
 class OwnerAdmin(HideAuditFieldsMixin,BaseReadonlyAdmin):
     model = "Owner"
     admin_priority = 1
-    fields = ("name","code","contact_person","phone","sms_mobile","bank_account","wx","qq","email","business_license","tax_registration","organization_code")
-    list_display = ("name", "code", "contact_person", "phone",)
+    fields = (
+        "name",
+        "code",
+        "contact_person",
+        "phone",
+        "sms_mobile",
+        "bank_account",
+        "wx",
+        "qq",
+        "email",
+        "business_license",
+        "tax_registration",
+        "organization_code",
+        "allow_warehouse_assisted_outbound",
+    )
+    list_display = (
+        "name",
+        "code",
+        "contact_person",
+        "phone",
+        "allow_warehouse_assisted_outbound",
+    )
     search_fields = ("name", "code", "contact_person", "phone", "email")
-    list_filter = ("name", "code", "contact_person")
+    list_filter = ("allow_warehouse_assisted_outbound", "name", "code", "contact_person")
 
     class Media:
         css = {

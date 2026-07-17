@@ -4,6 +4,16 @@
 </view>
 </template>
 <script setup>
+import { onLaunch } from '@dcloudio/uni-app'
+import { useAuth } from '@/store/auth'
+
+onLaunch(() => {
+  const auth = useAuth()
+  if (!auth.access) return
+  auth.loadProfile({ force: true }).catch((error) => {
+    console.warn('启动时权限资料暂不可用，代办出库入口保持隐藏', error)
+  })
+})
 </script>
 <style>
 .app{flex:1;width:100%;background-color:#f6f7fb;color:#111}

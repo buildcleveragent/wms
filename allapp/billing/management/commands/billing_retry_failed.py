@@ -58,20 +58,30 @@ class Command(BaseCommand):
                 continue
 
             try:
-                billing_services.accrue_for_posting(task, pj, by_user=None)
+                actor = task.posted_by
+                billing_services.accrue_for_posting(task, pj, by_user=actor)
 
-                if task.task_type == WmsTask.TaskType.REVIEW:
+                should_accrue_order_processing = (
+                    task.task_type == WmsTask.TaskType.REVIEW
+                    or (
+                        task.task_type == WmsTask.TaskType.PICK
+                        and task.review_status == WmsTask.ReviewStatus.APPROVED
+                    )
+                )
+                if should_accrue_order_processing:
                     billing_services.accrue_order_processing_for_task(
-                        task, pj, by_user=None,
+                        task,
+                        pj,
+                        by_user=actor,
                         allowed_methods=AUTO_REVIEW_ORDER_PROCESSING_METHODS,
                     )
 
-                # 清除失败标记（确保 BILLING_RETRIED 不被截断）
-                new_msg = pj.message.replace(BILLING_FAILED_MARKER, "BILLING_RETRIED")
-                if len(new_msg) > 255:
-                    # 保留末尾的 marker 完整，截断前面的内容
-                    new_msg = new_msg[:252] + "..."
-                pj.message = new_msg
+                # 移除失败详情，并在长消息下也始终保留完整的成功尾标。
+                failed_at = pj.message.find(BILLING_FAILED_MARKER)
+                base_message = pj.message[:failed_at].rstrip("|: ")
+                retried_marker = "|BILLING_RETRIED"
+                base_message = base_message[: 255 - len(retried_marker)]
+                pj.message = f"{base_message}{retried_marker}"
                 pj.save(update_fields=["message", "updated_at"])
                 retried += 1
                 self.stdout.write(f"  OK PJ#{pj.id}: task={task.task_no}")

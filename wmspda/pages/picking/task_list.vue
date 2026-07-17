@@ -24,7 +24,7 @@
 	      <text class="task-no">任务号：{{ t.task_no }}</text>
 	      <view class="right">
 	        <text class="status">{{ t.status }}</text>
-	        <button class="btn-print" @click.stop="printPickList(t)">打印清单</button>
+	        <button class="btn-print" @click.stop="printPickList(t)">打印出库单</button>
 	      </view>
 	    </view>
 	  
@@ -44,7 +44,7 @@
 import { ref } from 'vue'
 import { onLoad,onShow} from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
-import { BASE_URL } from '@/utils/request'
+import { openOutboundPrintPage } from '@/utils/outboundPrint'
 
 
 const loading = ref(false)
@@ -72,23 +72,7 @@ function openTask(t: any) {
 }
 
 function printPickList(t: any) {
-  const token = uni.getStorageSync('access') || ''
-  if (!token) {
-    uni.showToast({ title: '未登录或缺少token', icon: 'none' })
-    return
-  }
-
-  // 你后端新增的打印接口：/api/pda/pick-tasks/<id>/print/?token=...
-  // 这里需要 BASE_URL。最简单：在 utils/request.js 里把 BASE_URL export 出来（下面有后端配套说明）
-  const url = `${BASE_URL}/api/pda/pick-tasks/${t.id}/print/?token=${encodeURIComponent(token)}`
-
-  // #ifdef H5
-  window.open(url)
-  // #endif
-
-  // #ifdef APP-PLUS
-  plus.runtime.openURL(url)
-  // #endif
+  if (t?.id) openOutboundPrintPage(t.id)
 }
 
 

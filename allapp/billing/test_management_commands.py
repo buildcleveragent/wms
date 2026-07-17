@@ -3,6 +3,7 @@ from io import StringIO
 from unittest import mock
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
 
@@ -20,6 +21,10 @@ class BillingManagementCommandTests(TestCase):
         self.warehouse = Warehouse.objects.create(
             code="BMC-WH",
             name="Billing Command Warehouse",
+        )
+        self.user = get_user_model().objects.create_user(
+            username="billing-command-user",
+            warehouse=self.warehouse,
         )
 
     def test_billing_accrue_storage_scopes_owner_warehouse_and_reports_totals(self):
@@ -123,6 +128,10 @@ class BillingManagementCommandTests(TestCase):
             warehouse=self.warehouse,
             task_no="BMC-RETRY-OK",
             task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.APPROVED,
+            posting_status=WmsTask.PostingStatus.POSTED,
+            posted_by=self.user,
         )
         journal = PostingJournal.objects.create(
             src_model="WmsTask",
@@ -135,11 +144,45 @@ class BillingManagementCommandTests(TestCase):
 
         with mock.patch(
             "allapp.billing.management.commands.billing_retry_failed.billing_services.accrue_for_posting"
-        ) as mocked_accrue:
+        ) as mocked_accrue, mock.patch(
+            "allapp.billing.management.commands.billing_retry_failed.billing_services.accrue_order_processing_for_task"
+        ) as mocked_order_processing:
             call_command("billing_retry_failed", stdout=out)
 
-        mocked_accrue.assert_called_once()
+        mocked_accrue.assert_called_once_with(task, journal, by_user=self.user)
+        mocked_order_processing.assert_called_once_with(
+            task,
+            journal,
+            by_user=self.user,
+            allowed_methods=mock.ANY,
+        )
         journal.refresh_from_db()
         self.assertIn("BILLING_RETRIED", journal.message)
         self.assertNotIn("BILLING_FAILED", journal.message)
         self.assertIn("found=1 retried=1 errors=0", out.getvalue())
+
+    def test_billing_retry_failed_keeps_complete_retried_marker_for_long_message(self):
+        task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="BMC-RETRY-LONG",
+            task_type=WmsTask.TaskType.RECEIVE,
+            posted_by=self.user,
+        )
+        journal = PostingJournal.objects.create(
+            src_model="WmsTask",
+            src_id=task.id,
+            tx_type="POST",
+            status="POSTED",
+            message=f"{'x' * 225}|BILLING_FAILED:timeout",
+        )
+
+        with mock.patch(
+            "allapp.billing.management.commands.billing_retry_failed.billing_services.accrue_for_posting"
+        ):
+            call_command("billing_retry_failed")
+
+        journal.refresh_from_db()
+        self.assertLessEqual(len(journal.message), 255)
+        self.assertTrue(journal.message.endswith("|BILLING_RETRIED"))
+        self.assertNotIn("BILLING_FAILED", journal.message)

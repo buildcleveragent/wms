@@ -1,12 +1,26 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ProductViewSet, CustomerViewSet, OutboundOrderViewSet,OwnerViewSet,SupplierViewSet,ReceiveProductViewSet,PickTaskViewSet
+from .views import (
+    AssistedOutboundOrderViewSet,
+    CustomerViewSet,
+    OutboundOrderViewSet,
+    OwnerViewSet,
+    PickTaskViewSet,
+    ProductViewSet,
+    ReceiveProductViewSet,
+    SupplierViewSet,
+)
 from .export_print import pick_task_print
 
 router = DefaultRouter()
 router.register(r"catalog/products", ProductViewSet, basename="ob-product")
 router.register(r"catalog/customers", CustomerViewSet, basename="ob-customer")
 router.register(r"outbound/orders", OutboundOrderViewSet, basename="ob-order")
+router.register(
+    r"outbound/assisted-orders",
+    AssistedOutboundOrderViewSet,
+    basename="assisted-outbound-order",
+)
 
 router.register(r"catalog/owners", OwnerViewSet, basename="ob-Owner")
 
@@ -14,7 +28,6 @@ router.register(r"catalog/suppliers", SupplierViewSet, basename="ob-Supplier")
 
 router.register(r"catalog/receive_products", ReceiveProductViewSet, basename="ob-receive_products")
 router.register(r"pda/pick-tasks", PickTaskViewSet, basename="pda-pick-task")
-router.register("outbound/orders", OutboundOrderViewSet, basename="outbound-order")
 
 urlpatterns = [
     path("", include(router.urls)),
