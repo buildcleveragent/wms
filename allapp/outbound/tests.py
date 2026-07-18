@@ -3,11 +3,13 @@ from decimal import Decimal
 from unittest import mock
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
 from django.test import TestCase, TransactionTestCase
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Customer, Owner
 from allapp.inventory.models import InventoryDetail
 from allapp.locations.models import Location, Subwarehouse, Warehouse
@@ -63,11 +65,54 @@ class OutboundWarehouseScopeTests(TestCase):
             owner=self.owner,
             warehouse=self.warehouse,
         )
+        self.api_user.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="outbound",
+                codename="submit_outbound_as_owner_buyers",
+            )
+        )
+        UserRoleScope.objects.create(
+            user=self.api_user,
+            role=UserRoleScope.Role.OWNER_SALESPERSON,
+            owner=self.owner,
+        )
+        self.owner_manager = get_user_model().objects.create_user(
+            username="outbound-owner-manager",
+            password="x",
+            owner=self.owner,
+        )
+        self.owner_manager.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="outbound",
+                codename="approve_outbound_as_owner_manager",
+            )
+        )
+        UserRoleScope.objects.create(
+            user=self.owner_manager,
+            role=UserRoleScope.Role.OWNER_MANAGER,
+            owner=self.owner,
+        )
+        self.operator = get_user_model().objects.create_user(
+            username="outbound-operator",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        self.operator.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="tasking",
+                codename="claim_task_as_wh_operator",
+            )
+        )
+        UserRoleScope.objects.create(
+            user=self.operator,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
         self.factory = APIRequestFactory()
 
-    def _api_request(self, method, path, data=None):
+    def _api_request(self, method, path, data=None, *, user=None):
         request = getattr(self.factory, method)(path, data=data or {}, format="json")
-        force_authenticate(request, user=self.api_user)
+        force_authenticate(request, user=user or self.api_user)
         return request
 
     def test_outbound_order_requires_explicit_warehouse(self):
@@ -145,17 +190,25 @@ class OutboundWarehouseScopeTests(TestCase):
 
         reject_view = OutboundOrderViewSet.as_view({"post": "owner_reject"})
         response = reject_view(
-            self._api_request("post", f"/api/outbound/orders/{order.id}/owner-reject/"),
+            self._api_request(
+                "post",
+                f"/api/outbound/orders/{order.id}/owner-reject/",
+                user=self.owner_manager,
+            ),
             pk=order.id,
         )
         order.refresh_from_db()
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(order.approval_status, "OWNER_REJECTED")
-        self.assertEqual(order.approved_by_ownermanager_id, self.api_user.id)
+        self.assertEqual(order.approved_by_ownermanager_id, self.owner_manager.id)
 
         cancel_view = OutboundOrderViewSet.as_view({"post": "cancel"})
         response = cancel_view(
-            self._api_request("post", f"/api/outbound/orders/{order.id}/cancel/"),
+            self._api_request(
+                "post",
+                f"/api/outbound/orders/{order.id}/cancel/",
+                user=self.owner_manager,
+            ),
             pk=order.id,
         )
         order.refresh_from_db()
@@ -199,7 +252,11 @@ class OutboundWarehouseScopeTests(TestCase):
 
         lines_view = PickTaskViewSet.as_view({"get": "lines"})
         response = lines_view(
-            self._api_request("get", f"/api/pda/pick-tasks/{task.id}/lines/"),
+            self._api_request(
+                "get",
+                f"/api/pda/pick-tasks/{task.id}/lines/",
+                user=self.operator,
+            ),
             pk=task.id,
         )
         self.assertEqual(response.status_code, 200)
@@ -208,7 +265,9 @@ class OutboundWarehouseScopeTests(TestCase):
         review_view = PickTaskViewSet.as_view({"post": "create_review_task"})
         response = review_view(
             self._api_request(
-                "post", f"/api/pda/pick-tasks/{task.id}/create-review-task/"
+                "post",
+                f"/api/pda/pick-tasks/{task.id}/create-review-task/",
+                user=self.operator,
             ),
             pk=task.id,
         )
@@ -224,12 +283,16 @@ class OutboundWarehouseScopeTests(TestCase):
             status=WmsTask.Status.COMPLETED,
             review_status=WmsTask.ReviewStatus.PENDING,
             posting_status=WmsTask.PostingStatus.NOT_READY,
-            picked_by=self.api_user,
+            picked_by=self.operator,
         )
 
         view = PickTaskViewSet.as_view({"post": "post"})
         response = view(
-            self._api_request("post", f"/api/pda/pick-tasks/{task.id}/post/"),
+            self._api_request(
+                "post",
+                f"/api/pda/pick-tasks/{task.id}/post/",
+                user=self.operator,
+            ),
             pk=task.id,
         )
 

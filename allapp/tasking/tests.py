@@ -10,6 +10,7 @@ from django.db import close_old_connections
 from django.test import TestCase, TransactionTestCase, override_settings
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Owner
 from allapp.inventory.models import InventoryDetail, PostingJournal
 from allapp.locations.models import Location, Subwarehouse, Warehouse
@@ -217,21 +218,35 @@ class TaskingWarehouseScopeTests(TestCase):
 @override_settings(OUTBOUND_LEGACY_AUTHZ_MODE="enforce")
 class TaskingApiContractTests(TestCase):
     def setUp(self):
-        self.owner = Owner.objects.create(name="Owner Tasking API", code="OWN-TAPI")
+        self.owner = Owner.objects.create(name="Owner Tasking API", code="OTASKAPI")
         self.other_owner = Owner.objects.create(
-            name="Owner Tasking API Other", code="OWN-TAPI-O"
+            name="Owner Tasking API Other", code="OTASKAPIO"
         )
         self.warehouse = Warehouse.objects.create(
-            code="WH-TAPI", name="Warehouse Tasking API"
+            code="WTASKAPI", name="Warehouse Tasking API"
         )
         self.other_warehouse = Warehouse.objects.create(
-            code="WH-TAPI-O",
+            code="WTASKAPIO",
             name="Warehouse Tasking API Other",
         )
         self.user = get_user_model().objects.create_user(
             username="tasking-api-user",
             password="x",
-            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        self.operator = get_user_model().objects.create_user(
+            username="tasking-api-operator",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.WAREHOUSE_MANAGER,
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=self.operator,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
             warehouse=self.warehouse,
         )
         self.user.user_permissions.add(
@@ -241,7 +256,7 @@ class TaskingApiContractTests(TestCase):
             ),
             Permission.objects.get(
                 content_type=ContentType.objects.get_for_model(WmsTask),
-                codename="claim_task_as_wh_operator",
+                codename="view_wmstask",
             ),
             Permission.objects.get(
                 content_type=ContentType.objects.get_for_model(WmsTask),
@@ -250,6 +265,12 @@ class TaskingApiContractTests(TestCase):
             Permission.objects.get(
                 content_type=ContentType.objects.get_for_model(WmsTaskLine),
                 codename="change_wmstaskline",
+            ),
+        )
+        self.operator.user_permissions.add(
+            Permission.objects.get(
+                content_type=ContentType.objects.get_for_model(WmsTask),
+                codename="claim_task_as_wh_operator",
             ),
         )
         self.assignee = get_user_model().objects.create_user(
@@ -282,6 +303,7 @@ class TaskingApiContractTests(TestCase):
             product=self.product,
             qty_plan=Decimal("2.000"),
         )
+        TaskAssignment.objects.create(task=self.task, assignee=self.operator)
         WmsTask.objects.create(
             owner=self.other_owner,
             warehouse=self.other_warehouse,
@@ -290,9 +312,9 @@ class TaskingApiContractTests(TestCase):
         )
         self.factory = APIRequestFactory()
 
-    def _request(self, method, path, data=None):
+    def _request(self, method, path, data=None, *, user=None):
         req = getattr(self.factory, method)(path, data=data or {}, format="json")
-        force_authenticate(req, user=self.user)
+        force_authenticate(req, user=user or self.user)
         return req
 
     def _rows(self, response):
@@ -349,6 +371,7 @@ class TaskingApiContractTests(TestCase):
         ]
 
         for action, service_name, payload in action_cases:
+            actor = self.user if action == "release" else self.operator
             with self.subTest(action=action), mock.patch.object(
                 tasking_views.task_svc,
                 service_name,
@@ -358,7 +381,10 @@ class TaskingApiContractTests(TestCase):
                 view = WmsTaskViewSet.as_view({"post": action})
                 response = view(
                     self._request(
-                        "post", f"/api/tasking/tasks/{self.task.id}/{action}/", payload
+                        "post",
+                        f"/api/tasking/tasks/{self.task.id}/{action}/",
+                        payload,
+                        user=actor,
                     ),
                     pk=self.task.id,
                 )
@@ -426,6 +452,7 @@ class TaskingApiContractTests(TestCase):
                     "post",
                     f"/api/tasking/tasks/{self.task.id}/scan/",
                     {"barcode": "SKU-TASK-API"},
+                    user=self.operator,
                 ),
                 pk=self.task.id,
             )

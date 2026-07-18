@@ -115,6 +115,35 @@ function buildQuery(params = {}) {
   return qs
 }
 
+/**
+ * Create a client request identifier suitable for an idempotent PDA write.
+ *
+ * The inbound PDA endpoints retain this identifier together with a payload
+ * fingerprint.  A caller must keep the value when retrying the same write,
+ * and create a new one only after a successful response or when the entered
+ * data changes.
+ */
+export function createIdempotencyUuid() {
+  const bytes = new Uint8Array(16)
+  const cryptoApi = typeof globalThis !== 'undefined' ? globalThis.crypto : null
+
+  if (cryptoApi && typeof cryptoApi.getRandomValues === 'function') {
+    cryptoApi.getRandomValues(bytes)
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256)
+    }
+  }
+
+  // RFC 4122 version 4 / variant bits.  The server only requires a safe,
+  // stable identifier, but a conventional UUID also makes support tracing
+  // much easier.
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 export function withAuthToken(url) {
   const token = getToken()
   if (!token) return url
@@ -253,6 +282,55 @@ export const api = {
   submitReceiveWithoutOrder: (payload) =>
     request({
       url: '/api/inbound/receive_without_order/',
+      method: 'POST',
+      data: payload,
+    }),
+
+  // Ordered inbound PDA tasks.  These endpoints deliberately use the server
+  // scope inferred from the logged-in operator; do not accept owner or
+  // warehouse IDs from the page.
+  inboundPdaTasks: (params = {}) =>
+    request({
+      url: `/api/inbound/pda/tasks/?${buildQuery({
+        task_type: params.task_type || '',
+        search: params.search || '',
+        status: params.status || '',
+        page: params.page || 1,
+      })}`,
+    }),
+
+  inboundPdaTask: (taskId) =>
+    request({
+      url: `/api/inbound/pda/tasks/${taskId}/`,
+    }),
+
+  claimInboundPdaTask: (taskId) =>
+    request({
+      url: `/api/inbound/pda/tasks/${taskId}/claim/`,
+      method: 'POST',
+    }),
+
+  startInboundPdaTask: (taskId) =>
+    request({
+      url: `/api/inbound/pda/tasks/${taskId}/start/`,
+      method: 'POST',
+    }),
+
+  inboundPdaLocations: (taskId, search = '') =>
+    request({
+      url: `/api/inbound/pda/tasks/${taskId}/locations/?${buildQuery({ search })}`,
+    }),
+
+  recordInboundReceipt: (taskId, payload) =>
+    request({
+      url: `/api/inbound/pda/tasks/${taskId}/record-receipt/`,
+      method: 'POST',
+      data: payload,
+    }),
+
+  recordInboundPutaway: (taskId, payload) =>
+    request({
+      url: `/api/inbound/pda/tasks/${taskId}/record-putaway/`,
       method: 'POST',
       data: payload,
     }),

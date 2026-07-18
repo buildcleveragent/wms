@@ -3,20 +3,17 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.db.models import DecimalField, ExpressionWrapper, F, Q, Sum
+from django.db.models import DecimalField, ExpressionWrapper, F, Sum
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import AccessToken
 
+from allapp.accounts.audit import record_audit_event
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.outbound.authz import (
-    apply_legacy_scope,
-    assisted_order_source_ids,
-    is_assisted_operator,
     strict_pick_queryset,
 )
-from allapp.products.permissions import can_manage_all_owner_products
 from allapp.tasking.models import WmsTask
 
 
@@ -102,41 +99,21 @@ def pick_task_print(request, task_id: int):
         except Exception:
             return HttpResponse("Unauthorized: invalid token", status=401)
 
-    # 1) 拿拣货任务。打印内容包含价格、电话和地址，必须使用与 PDA
-    # 任务详情一致的租户范围；代办来源即使在 shadow 阶段也始终严格隔离。
+    can_print = bool(
+        request.user.is_superuser
+        or request.user.has_perm("tasking.view_wmstask")
+        or request.user.has_perm("tasking.claim_task_as_wh_operator")
+        or request.user.has_perm("tasking.taskconfirm_as_wh_manager")
+    )
+    if not can_print:
+        return HttpResponse("Forbidden", status=403)
+
+    # 1) 拿拣货任务。打印内容包含价格、电话和地址，因此无论兼容开关
+    # 如何配置，打印端点都始终使用 fail-closed 的任务范围。
     base = WmsTask.objects.select_related("owner", "warehouse").filter(
         task_type=WmsTask.TaskType.PICK
     )
-    strict = strict_pick_queryset(base, request.user)
-    if is_assisted_operator(request.user):
-        allowed = strict
-    elif request.user.is_superuser:
-        legacy = base
-        allowed = apply_legacy_scope(
-            base_qs=legacy,
-            scoped_qs=strict,
-            user=request.user,
-            endpoint="outbound.pick_tasks.print",
-        )
-    else:
-        warehouse_id = getattr(request.user, "warehouse_id", None)
-        legacy = base.none()
-        if warehouse_id:
-            legacy = base.filter(warehouse_id=warehouse_id)
-            if not can_manage_all_owner_products(request.user):
-                owner_id = getattr(request.user, "owner_id", None)
-                legacy = legacy.filter(owner_id=owner_id) if owner_id else legacy.none()
-            assisted_q = Q(
-                source_model__in=("outboundorder", "OutboundOrder"),
-                source_pk__in=assisted_order_source_ids(warehouse_id=warehouse_id),
-            )
-            legacy = legacy.filter(~assisted_q | Q(pk__in=strict.values("pk")))
-        allowed = apply_legacy_scope(
-            base_qs=legacy,
-            scoped_qs=strict,
-            user=request.user,
-            endpoint="outbound.pick_tasks.print",
-        )
+    allowed = strict_pick_queryset(base, request.user)
     try:
         task = allowed.get(id=task_id)
     except WmsTask.DoesNotExist:
@@ -211,6 +188,13 @@ def pick_task_print(request, task_id: int):
     ship_time = order.approved_at_warehouse or order.etd or timezone.now()
 
     total_amount_upper = _money_to_rmb_upper(total_amount)
+    record_audit_event(
+        action="outbound.pick.print",
+        module="outbound",
+        request=request,
+        obj=task,
+        metadata={"order_id": order.id},
+    )
 
     return render(request, "outbound/print/pick_task.html", {
         "object": order,            # ✅ 模板里 object 现在就是 OutboundOrder

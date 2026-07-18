@@ -54,6 +54,7 @@ from django.utils import timezone
 from allapp.baseinfo.models import Owner
 from allapp.tasking.models import WmsTask  # 确保导入你的模型
 from allapp.core.utils.log_context import build_log_payload
+from allapp.accounts.access import AccessScope
 
 def get_line_extra_generic(tl):
     """
@@ -766,8 +767,13 @@ class WmsTaskAdmin(admin.ModelAdmin):
             _qty_plan=Sum("lines__qty_plan"),
             _qty_done=Sum("lines__qty_done"),
         ))
+        qs = AccessScope.for_user(request.user).filter_queryset(
+            qs,
+            owner_field="owner_id",
+            warehouse_field="warehouse_id",
+        )
 
-        # ② 管理员看全量（保留聚合后的 qs）
+        # ② 管理员查看其明确授权仓库（保留聚合后的 qs）
         if is_wh_manager(request.user):
             return qs
         # 非仓库操作员无权查看
@@ -927,7 +933,17 @@ class WmsTaskAdmin(admin.ModelAdmin):
 
     @admin.action(description="取消所选的任务")
     def action_cancel(self, request, queryset):
-        self._bulk_transition(request, queryset, "CANCELLED")
+        ok, failures = 0, []
+        for task in queryset:
+            try:
+                svc.task_cancel(request=request, task=task, reason="Admin 取消任务")
+                ok += 1
+            except Exception as exc:  # noqa: BLE001 - show actionable admin error
+                failures.append(f"{task.task_no}: {exc}")
+        if ok:
+            self.message_user(request, f"已安全取消 {ok} 条任务。", messages.SUCCESS)
+        if failures:
+            self.message_user(request, "；".join(failures)[:2000], messages.ERROR)
 
     # ===== 单条操作按钮 =====
     def get_urls(self):

@@ -1,34 +1,23 @@
 # inbound/admin.py
 import logging
 
-from django.urls import reverse
+from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
-from django.db import transaction
-from django.utils.html import format_html
-from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import PermissionDenied, ValidationError
-
-from allapp.core.admin_base import AdvancedAdminBase, BaseReadonlyAdmin
-from allapp.core.formatters import format_product_qty
-from allapp.products.models import Product
-
-from .models import (
-    InboundOrder, InboundOrderLine,
-    InboundReceipt, InboundReceiptLine,
-    ReturnInspection,InboundOrderReturnInfo, Lot, PdaNoOrderReceive,
-)
-
-# === 顶部 import（补充） ===
-from django.contrib import admin
-from django import forms
+from django.db import transaction
+from django.db import models as dj_models
 from django.http import JsonResponse
 from django.urls import path, reverse
-from django.core.exceptions import ValidationError
-from django.db import models as dj_models
+from django.utils import timezone
+from django.utils.html import format_html
+from django.utils.translation import gettext_lazy as _
 
+from allapp.accounts.access import AccessScope
+from allapp.accounts.audit import record_audit_event
 from allapp.baseinfo.models import Supplier
+from allapp.core.admin_base import AdvancedAdminBase, BaseReadonlyAdmin
+from allapp.core.formatters import format_product_qty
 from allapp.inbound.constants import (
     PDA_NO_ORDER_RECEIVE_NOTE,
     PDA_NO_ORDER_RECEIVE_SOURCE_APP,
@@ -36,9 +25,35 @@ from allapp.inbound.constants import (
 )
 from allapp.products.models import Product
 from allapp.tasking.models import WmsTask, WmsTaskLine
-from .models import InboundOrder, InboundOrderLine
+
+from .models import (
+    InboundOrder,
+    InboundOrderLine,
+    InboundOrderReturnInfo,
+    InboundReceipt,
+    InboundReceiptLine,
+    Lot,
+    PdaNoOrderReceive,
+    ReturnInspection,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _request_scope_allows(request, *, owner_id=None, warehouse_id=None):
+    warehouse_id = (
+        warehouse_id
+        or getattr(request, "_inbound_warehouse_id", None)
+        or request.POST.get("warehouse")
+        or request.GET.get("warehouse")
+        or request.GET.get("warehouse__id__exact")
+        or getattr(request.user, "warehouse_id", None)
+    )
+    return AccessScope.for_user(request.user).allows(
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+    )
+
 
 # === Admin 表单：一次性加载联动 JS ===
 class InboundOrderAdminForm(forms.ModelForm):
@@ -102,28 +117,31 @@ class InboundOrderLineInline(admin.TabularInline):
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "product":
             # 从主 Admin 挂载的 request._inbound_owner_id 取 owner
-            owner_id = getattr(request, "_inbound_owner_id", None) \
-                       or request.POST.get("owner") \
-                       or request.GET.get("owner") \
-                       or request.GET.get("owner__id__exact")
+            owner_id = (
+                getattr(request, "_inbound_owner_id", None)
+                or request.POST.get("owner")
+                or request.GET.get("owner")
+                or request.GET.get("owner__id__exact")
+            )
 
-            if owner_id:
+            if owner_id and _request_scope_allows(request, owner_id=owner_id):
                 kwargs["queryset"] = Product.objects.filter(owner_id=owner_id)
             else:
                 kwargs["queryset"] = Product.objects.none()
 
             # 为前端 JS 注入数据源 URL + 统一 class 标记
-            widget = (kwargs.get("widget") or db_field.formfield().widget)
+            widget = kwargs.get("widget") or db_field.formfield().widget
             try:
                 url = reverse("admin:inbound_inboundorder_product_options")
                 widget.attrs["data-source-url"] = url
-                widget.attrs["class"] = (widget.attrs.get("class", "") + " vProductByOwner").strip()
+                widget.attrs["class"] = (
+                    widget.attrs.get("class", "") + " vProductByOwner"
+                ).strip()
                 kwargs["widget"] = widget
             except Exception:
                 pass
 
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
 
 
 class InboundOrderLineAdmin(admin.ModelAdmin):
@@ -132,12 +150,23 @@ class InboundOrderLineAdmin(admin.ModelAdmin):
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "product":
             # 获取当前的 InboundOrder 对象
-            inbound_order_id = request.GET.get("inbound_order")  # 获取 URL 中的 inbound_order_id
+            inbound_order_id = request.GET.get(
+                "inbound_order"
+            )  # 获取 URL 中的 inbound_order_id
             if inbound_order_id:
-                inbound_order = InboundOrder.objects.get(id=inbound_order_id)
+                inbound_order = (
+                    AccessScope.for_user(request.user)
+                    .filter_queryset(
+                        InboundOrder.objects.all(),
+                        owner_field="owner_id",
+                        warehouse_field="warehouse_id",
+                    )
+                    .get(id=inbound_order_id)
+                )
                 owner_id = inbound_order.owner_id
                 kwargs["queryset"] = Product.objects.filter(owner_id=owner_id)
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
 
 USE_SKIP_LOCKED = True
 
@@ -177,6 +206,57 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     # 使用 `ordering` 进行默认排序
     ordering = ("-biz_date", "-id")
 
+    @staticmethod
+    def _scope_orders(request, queryset):
+        scope = AccessScope.for_user(request.user)
+        queryset = scope.filter_queryset(
+            queryset,
+            owner_field="owner_id",
+            warehouse_field="warehouse_id",
+        )
+        if not request.user.is_superuser and "owner_salesperson" in scope.roles:
+            queryset = queryset.filter(created_by=request.user)
+        return queryset
+
+    def get_queryset(self, request):
+        return self._scope_orders(request, super().get_queryset(request))
+
+    def _allowed_action_count(self, request, pks):
+        return self._scope_orders(
+            request,
+            InboundOrder.objects.filter(pk__in=pks),
+        ).count()
+
+    def _locked_action_rows(self, request, pks, *, skip_locked=False):
+        queryset = InboundOrder.objects.select_for_update(
+            skip_locked=skip_locked,
+        ).filter(pk__in=pks)
+        return list(self._scope_orders(request, queryset))
+
+    def _message_unauthorized(self, request, selected_count, allowed_count):
+        unauthorized = selected_count - allowed_count
+        if unauthorized > 0:
+            self.message_user(
+                request,
+                _(f"{unauthorized} 条记录超出当前货主/仓库范围，未执行。"),
+                level=messages.ERROR,
+            )
+
+    @staticmethod
+    def _audit_order_action(request, obj, action, before):
+        record_audit_event(
+            action=action,
+            module="inbound",
+            request=request,
+            obj=obj,
+            before=before,
+            after={
+                "submit_status": obj.submit_status,
+                "approval_status": obj.approval_status,
+                "is_closed": obj.is_closed,
+            },
+        )
+
     def _as_owner_mgr(self, request):
         return request.user.is_superuser or request.user.has_perm("inbound.approve_as_owner_manager")
 
@@ -213,19 +293,32 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         ok, fail = 0, 0
         # 先取 pk，避免 queryset 在进入事务前被评估
         pks = list(queryset.values_list("pk", flat=True))
+        allowed_count = self._allowed_action_count(request, pks)
 
         with transaction.atomic():
             # 注意：select_for_update 必须在事务里
-            qs = InboundOrder.objects.select_for_update().filter(pk__in=pks)
-            for obj in qs:
+            rows = self._locked_action_rows(request, pks)
+            for obj in rows:
                 try:
+                    before = {
+                        "submit_status": obj.submit_status,
+                        "approval_status": obj.approval_status,
+                    }
                     obj.owner_approve(request.user)
+                    self._audit_order_action(
+                        request, obj, "inbound.order.owner_approve", before
+                    )
                     ok += 1
                 except ValidationError:
                     fail += 1
 
-        if ok:   self.message_user(request, _(f"已通过 {ok} 条。"), level=messages.SUCCESS)
-        if fail: self.message_user(request, _(f"{fail} 条不在可审核状态，已跳过。"), level=messages.WARNING)
+        if ok:
+            self.message_user(request, _(f"已通过 {ok} 条。"), level=messages.SUCCESS)
+        if fail:
+            self.message_user(
+                request, _(f"{fail} 条不在可审核状态，已跳过。"), level=messages.WARNING
+            )
+        self._message_unauthorized(request, len(pks), allowed_count)
 
     @admin.action(description="货主管理员：驳回")
     def action_owner_reject(self, request, queryset):
@@ -233,28 +326,40 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
             raise PermissionDenied
 
         pks = list(queryset.values_list("pk", flat=True))
+        allowed_count = self._allowed_action_count(request, pks)
         ok = fail = 0
 
         with transaction.atomic():
-            qs = InboundOrder.objects.select_for_update(
-                skip_locked=USE_SKIP_LOCKED
-            ).filter(pk__in=pks)
-
-            locked_count = qs.count()  # 统计拿到锁的数量（便于提示被跳过的行）
-            for obj in qs:
+            rows = self._locked_action_rows(request, pks, skip_locked=USE_SKIP_LOCKED)
+            locked_count = len(rows)
+            for obj in rows:
                 try:
+                    before = {
+                        "submit_status": obj.submit_status,
+                        "approval_status": obj.approval_status,
+                    }
                     obj.owner_reject(request.user)
+                    self._audit_order_action(
+                        request, obj, "inbound.order.owner_reject", before
+                    )
                     ok += 1
                 except ValidationError:
                     fail += 1
 
-        skipped = len(pks) - locked_count
+        skipped = allowed_count - locked_count
         if ok:
             self.message_user(request, _(f"已驳回 {ok} 条。"), level=messages.SUCCESS)
         if fail:
-            self.message_user(request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING)
+            self.message_user(
+                request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING
+            )
         if skipped > 0:
-            self.message_user(request, _(f"{skipped} 条记录被其他事务锁定，已跳过。"), level=messages.INFO)
+            self.message_user(
+                request,
+                _(f"{skipped} 条记录被其他事务锁定，已跳过。"),
+                level=messages.INFO,
+            )
+        self._message_unauthorized(request, len(pks), allowed_count)
 
     @admin.action(description="仓库管理员：确认通过")
     def action_wh_confirm(self, request, queryset):
@@ -262,27 +367,34 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
             raise PermissionDenied
 
         pks = list(queryset.values_list("pk", flat=True))
+        allowed_count = self._allowed_action_count(request, pks)
         ok = fail = 0
         fail_details = []  # 逐条记录失败原因
 
         with transaction.atomic():
-            qs = InboundOrder.objects.select_for_update(
-                skip_locked=USE_SKIP_LOCKED
-            ).filter(pk__in=pks)
-
-            locked_count = qs.count()
-            for obj in qs:
+            rows = self._locked_action_rows(request, pks, skip_locked=USE_SKIP_LOCKED)
+            locked_count = len(rows)
+            for obj in rows:
                 try:
+                    before = {
+                        "submit_status": obj.submit_status,
+                        "approval_status": obj.approval_status,
+                    }
                     obj.wh_confirm(request.user)
+                    self._audit_order_action(
+                        request, obj, "inbound.order.warehouse_confirm", before
+                    )
                     ok += 1
                 except ValidationError as e:
                     fail += 1
                     # e.messages 是list，拼成一句；带上单号更直观
                     fail_details.append(f"{obj.order_no}：{'；'.join(e.messages)}")
 
-        skipped = len(pks) - locked_count
+        skipped = allowed_count - locked_count
         if ok:
-            self.message_user(request, _(f"已确认通过 {ok} 条。"), level=messages.SUCCESS)
+            self.message_user(
+                request, _(f"已确认通过 {ok} 条。"), level=messages.SUCCESS
+            )
         # if fail:
         #     self.message_user(request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING)
 
@@ -291,10 +403,19 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
             for msg in fail_details[:20]:  # 避免一次消息过长，必要时截断
                 self.message_user(request, msg, level=messages.ERROR)
             if len(fail_details) > 20:
-                self.message_user(request, f"还有 {len(fail_details) - 20} 条失败原因已省略。", level=messages.WARNING)
+                self.message_user(
+                    request,
+                    f"还有 {len(fail_details) - 20} 条失败原因已省略。",
+                    level=messages.WARNING,
+                )
 
         if skipped > 0:
-            self.message_user(request, _(f"{skipped} 条记录被其他事务锁定，已跳过。"), level=messages.INFO)
+            self.message_user(
+                request,
+                _(f"{skipped} 条记录被其他事务锁定，已跳过。"),
+                level=messages.INFO,
+            )
+        self._message_unauthorized(request, len(pks), allowed_count)
 
     @admin.action(description="仓库管理员：驳回")
     def action_wh_reject(self, request, queryset):
@@ -302,28 +423,40 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
             raise PermissionDenied
 
         pks = list(queryset.values_list("pk", flat=True))
+        allowed_count = self._allowed_action_count(request, pks)
         ok = fail = 0
 
         with transaction.atomic():
-            qs = InboundOrder.objects.select_for_update(
-                skip_locked=USE_SKIP_LOCKED
-            ).filter(pk__in=pks)
-
-            locked_count = qs.count()
-            for obj in qs:
+            rows = self._locked_action_rows(request, pks, skip_locked=USE_SKIP_LOCKED)
+            locked_count = len(rows)
+            for obj in rows:
                 try:
+                    before = {
+                        "submit_status": obj.submit_status,
+                        "approval_status": obj.approval_status,
+                    }
                     obj.wh_reject(request.user)
+                    self._audit_order_action(
+                        request, obj, "inbound.order.warehouse_reject", before
+                    )
                     ok += 1
                 except ValidationError:
                     fail += 1
 
-        skipped = len(pks) - locked_count
+        skipped = allowed_count - locked_count
         if ok:
             self.message_user(request, _(f"已驳回 {ok} 条。"), level=messages.SUCCESS)
         if fail:
-            self.message_user(request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING)
+            self.message_user(
+                request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING
+            )
         if skipped > 0:
-            self.message_user(request, _(f"{skipped} 条记录被其他事务锁定，已跳过。"), level=messages.INFO)
+            self.message_user(
+                request,
+                _(f"{skipped} 条记录被其他事务锁定，已跳过。"),
+                level=messages.INFO,
+            )
+        self._message_unauthorized(request, len(pks), allowed_count)
 
     @admin.action(description="提交（货主业务员）")
     def action_owner_buyers_submit(self, request, queryset):
@@ -331,31 +464,49 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
             raise PermissionDenied
 
         pks = list(queryset.values_list("pk", flat=True))
+        allowed_count = self._allowed_action_count(request, pks)
         ok = fail = 0
 
         with transaction.atomic():
-            qs = InboundOrder.objects.select_for_update(
-                skip_locked=USE_SKIP_LOCKED
-            ).filter(pk__in=pks)
-
-            locked_count = qs.count()
-            for obj in qs:
+            rows = self._locked_action_rows(request, pks, skip_locked=USE_SKIP_LOCKED)
+            locked_count = len(rows)
+            for obj in rows:
                 try:
+                    before = {
+                        "submit_status": obj.submit_status,
+                        "approval_status": obj.approval_status,
+                    }
                     obj.submit_by_owner_buyers(request.user)
+                    self._audit_order_action(
+                        request, obj, "inbound.order.submit", before
+                    )
                     ok += 1
-                except ValidationError as e:
+                except ValidationError:
                     fail += 1
 
-        skipped = len(pks) - locked_count
+        skipped = allowed_count - locked_count
         if ok:
             self.message_user(request, _(f"已提交 {ok} 条。"), level=messages.SUCCESS)
         if fail:
-            self.message_user(request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING)
+            self.message_user(
+                request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING
+            )
         if skipped > 0:
-            self.message_user(request, _(f"{skipped} 条记录被其他事务锁定，已跳过。"), level=messages.INFO)
+            self.message_user(
+                request,
+                _(f"{skipped} 条记录被其他事务锁定，已跳过。"),
+                level=messages.INFO,
+            )
+        self._message_unauthorized(request, len(pks), allowed_count)
 
     # 自定义保存行为
     def save_model(self, request, obj, form, change):
+        if not AccessScope.for_user(request.user).allows(
+            owner_id=obj.owner_id,
+            warehouse_id=obj.warehouse_id,
+        ):
+            raise PermissionDenied("无权在指定货主或仓库下保存入库订单。")
+
         if not obj.pk:
             # 创建时触发生成订单号
             obj.save()
@@ -394,7 +545,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     def get_changeform_initial_data(self, request):
         initial = super().get_changeform_initial_data(request)
         owner_id = request.GET.get("owner") or request.GET.get("owner__id__exact")
-        if owner_id:
+        if owner_id and _request_scope_allows(request, owner_id=owner_id):
             initial["owner"] = owner_id
         return initial
 
@@ -404,10 +555,25 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         owner_id = None
         if obj and getattr(obj, "owner_id", None):
             owner_id = obj.owner_id
+            warehouse_id = obj.warehouse_id
         else:
-            owner_id = (request.POST.get("owner")
-                        or request.GET.get("owner")
-                        or request.GET.get("owner__id__exact"))
+            owner_id = (
+                request.POST.get("owner")
+                or request.GET.get("owner")
+                or request.GET.get("owner__id__exact")
+            )
+            warehouse_id = (
+                request.POST.get("warehouse")
+                or request.GET.get("warehouse")
+                or request.GET.get("warehouse__id__exact")
+            )
+        request._inbound_warehouse_id = warehouse_id
+        if owner_id and not _request_scope_allows(
+            request,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+        ):
+            owner_id = None
         # 给 Inline 读取
         request._inbound_owner_id = owner_id
 
@@ -423,7 +589,9 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
                     )
                     # 初始收窄：未知 owner 则不给选项，避免误选
                     if owner_id:
-                        self.fields["supplier"].queryset = Supplier.objects.filter(owner_id=owner_id)
+                        self.fields["supplier"].queryset = Supplier.objects.filter(
+                            owner_id=owner_id
+                        )
                     else:
                         self.fields["supplier"].queryset = Supplier.objects.none()
 
@@ -455,7 +623,12 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         q = (request.GET.get("q") or "").strip()
 
         qs = Supplier.objects.none()
-        if owner_id:
+        warehouse_id = request.GET.get("warehouse")
+        if owner_id and _request_scope_allows(
+            request,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+        ):
             qs = Supplier.objects.filter(owner_id=owner_id)
         if q:
             qs = qs.filter(name__icontains=q)
@@ -472,19 +645,22 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         q = (request.GET.get("q") or "").strip()
 
         qs = Product.objects.none()
-        if owner_id:
+        warehouse_id = request.GET.get("warehouse")
+        if owner_id and _request_scope_allows(
+            request,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+        ):
             qs = Product.objects.filter(owner_id=owner_id)
         if q:
             qs = qs.filter(
-                dj_models.Q(name__icontains=q) |
-                dj_models.Q(sku__icontains=q) |
-                dj_models.Q(gtin__icontains=q)
+                dj_models.Q(name__icontains=q)
+                | dj_models.Q(sku__icontains=q)
+                | dj_models.Q(gtin__icontains=q)
             )
         qs = qs.order_by("name")[:200]
 
         return JsonResponse({"results": [{"id": p.pk, "text": str(p)} for p in qs]})
-
-
 
     # 服务器端兜底：行商品必须隶属该货主
     def save_formset(self, request, form, formset, change):
@@ -512,6 +688,27 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         统一在这里收窄 supplier 与注入 data-source-url。
         即使 get_form 的包装类未执行，也能保证前端联动拿到接口。
         """
+        scope = AccessScope.for_user(request.user)
+        if db_field.name == "owner":
+            queryset = (
+                kwargs.get("queryset") or db_field.remote_field.model.objects.all()
+            )
+            if not scope.is_valid:
+                queryset = queryset.none()
+            elif scope.owner_ids:
+                queryset = queryset.filter(pk__in=scope.owner_ids)
+            kwargs["queryset"] = queryset
+
+        if db_field.name == "warehouse":
+            queryset = (
+                kwargs.get("queryset") or db_field.remote_field.model.objects.all()
+            )
+            if not scope.is_valid:
+                queryset = queryset.none()
+            elif scope.warehouse_ids:
+                queryset = queryset.filter(pk__in=scope.warehouse_ids)
+            kwargs["queryset"] = queryset
+
         # —— 供应商下拉：按 owner 收窄 + 注入数据源 URL ——
         if db_field.name == "supplier":
             owner_id = (
@@ -520,7 +717,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
                 or request.GET.get("owner")
                 or request.GET.get("owner__id__exact")
             )
-            if owner_id:
+            if owner_id and _request_scope_allows(request, owner_id=owner_id):
                 kwargs["queryset"] = Supplier.objects.filter(owner_id=owner_id)
             else:
                 kwargs["queryset"] = Supplier.objects.none()
@@ -528,7 +725,9 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
             # 注入给前端 JS 的数据源 URL
             widget = kwargs.get("widget") or db_field.formfield().widget
             try:
-                widget.attrs["data-source-url"] = reverse("admin:inbound_inboundorder_supplier_options")
+                widget.attrs["data-source-url"] = reverse(
+                    "admin:inbound_inboundorder_supplier_options"
+                )
             except Exception:
                 pass
             kwargs["widget"] = widget
@@ -698,7 +897,7 @@ class PdaNoOrderReceiveAdmin(admin.ModelAdmin):
     )
 
     def get_queryset(self, request):
-        return (
+        queryset = (
             super()
             .get_queryset(request)
             .filter(pda_no_order_receive_q())
@@ -707,6 +906,11 @@ class PdaNoOrderReceiveAdmin(admin.ModelAdmin):
                 _line_count=dj_models.Count("lines", distinct=True),
                 _qty_done=dj_models.Sum("lines__qty_done"),
             )
+        )
+        return AccessScope.for_user(request.user).filter_queryset(
+            queryset,
+            owner_field="owner_id",
+            warehouse_field="warehouse_id",
         )
 
     def has_module_permission(self, request):
@@ -759,52 +963,114 @@ class InboundReceiptLineInline(admin.TabularInline):
     extra = 0
 
 @admin.register(InboundReceipt)
-class InboundReceiptAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
-    admin_priority =3
-    list_display = ("receipt_no", "biz_date", "owner", "warehouse", "supplier", "submit_status", "approved_by", "approved_at")
+class InboundReceiptAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
+    admin_priority = 3
+    list_display = (
+        "receipt_no",
+        "biz_date",
+        "owner",
+        "warehouse",
+        "supplier",
+        "submit_status",
+        "approved_by",
+        "approved_at",
+    )
     list_filter = ("submit_status", "owner", "warehouse", "supplier")
-    search_fields = ("receipt_no", "order_no", "src_bill_no")
+    search_fields = (
+        "receipt_no",
+        "order__order_no",
+        "order__src_bill_no",
+        "order_no_snap",
+        "owner__name",
+        "supplier__name",
+    )
     inlines = [InboundReceiptLineInline]
     readonly_fields = ("approved_at",)
 
+    def get_queryset(self, request):
+        return AccessScope.for_user(request.user).filter_queryset(
+            super().get_queryset(request),
+            owner_field="owner_id",
+            warehouse_field="warehouse_id",
+        )
+
+
 @admin.register(Lot)
-class LotAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
-    admin_priority =10
-    list_display = ("owner", "product_code", "lot_no", "supplier", "mfg_date", "exp_date")
+class LotAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
+    admin_priority = 10
+    list_display = (
+        "owner",
+        "product_code",
+        "lot_no",
+        "supplier",
+        "mfg_date",
+        "exp_date",
+    )
     list_filter = ("owner",)
     search_fields = ("product_code", "lot_no")
+
+    def get_queryset(self, request):
+        return (
+            AccessScope.for_user(request.user)
+            .filter_queryset(
+                super().get_queryset(request),
+                owner_field="owner_id",
+                warehouse_field="warehouses__warehouse_id",
+            )
+            .distinct()
+        )
+
 
 # ========= InboundOrderReturnInfo =========
 
 @admin.register(InboundOrderReturnInfo)
-class InboundOrderReturnInfoAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
-    admin_priority =5
+class InboundOrderReturnInfoAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
+    admin_priority = 5
     list_display = (
-        "order", "rma_no", "source_channel",
-        "orig_outbound_order_no", "reason_code",
-        "photos_required", "refund_amount", "refund_status",
-        "created_at", "updated_at",
+        "order",
+        "rma_no",
+        "source_channel",
+        "orig_outbound_order_no",
+        "reason_code",
+        "photos_required",
+        "refund_amount",
+        "refund_status",
+        "created_at",
+        "updated_at",
     )
     list_select_related = ("order",)
     list_filter = ("source_channel", "refund_status", "photos_required")
     search_fields = (
-        "rma_no", "orig_outbound_order_no", "reason_code",
-        "order__order_no", "order__external_ref",
+        "rma_no",
+        "orig_outbound_order_no",
+        "reason_code",
+        "order__order_no",
+        "order__src_bill_no",
     )
     autocomplete_fields = ("order",)
     readonly_fields = ("created_at", "updated_at")
     fieldsets = (
         ("关联", {"fields": ("order",)}),
-        ("退货信息", {
-            "fields": (
-                ("rma_no", "source_channel"),
-                ("orig_outbound_order_no", "reason_code"),
-                ("photos_required",),
-            )
-        }),
+        (
+            "退货信息",
+            {
+                "fields": (
+                    ("rma_no", "source_channel"),
+                    ("orig_outbound_order_no", "reason_code"),
+                    ("photos_required",),
+                )
+            },
+        ),
         ("退款", {"fields": (("refund_amount", "refund_status"),)}),
         ("系统", {"fields": (("created_at", "updated_at"),)}),
     )
+
+    def get_queryset(self, request):
+        return AccessScope.for_user(request.user).filter_queryset(
+            super().get_queryset(request),
+            owner_field="order__owner_id",
+            warehouse_field="order__warehouse_id",
+        )
 
 
 # ========= ReturnInspection =========

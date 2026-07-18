@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from openpyxl import load_workbook
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.db.models import Sum
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -12,7 +13,6 @@ from rest_framework.test import APIClient
 
 from allapp.baseinfo.models import Customer, Owner
 from allapp.inbound.models import InboundOrder, InboundOrderLine
-from allapp.inbound.services import create_receive_task_draft
 from allapp.billing.enums import AccrualStatus, CalcMethod, ChargeType, MetricType
 from allapp.billing.models import Bill, BillingAccrual, BillingJobRun, BillingMetricDaily, BillingRule
 from allapp.billing.services import (
@@ -345,7 +345,7 @@ class BusinessFlowTests(TestCase):
             .first()
         )
         self.assertIsNotNone(putaway_task)
-        self.assertEqual(putaway_task.status, WmsTask.Status.DRAFT)
+        self.assertEqual(putaway_task.status, WmsTask.Status.READY)
 
         putaway_task.release()
         putaway_line = putaway_task.lines.get(product=product)
@@ -382,11 +382,18 @@ class BusinessFlowTests(TestCase):
 
     def test_flow_1_receive_without_order_inventory_visible(self):
         product = self.create_product("RCVSKU")
+        self.owner_user.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="accounts",
+                codename="receive_without_order",
+            )
+        )
         client = self.api_client_for(self.owner_user)
 
         response = client.post(
             "/api/inbound/receive_without_order/",
             {
+                "request_id": "flow-receive-0001",
                 "owner_id": self.owner.id,
                 "warehouse_id": self.warehouse.id,
                 "location_id": self.receive_location.id,

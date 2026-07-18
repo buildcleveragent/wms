@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import datetime
+from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, Q, QuerySet, Sum, Value
-from django.db.models.functions import Coalesce
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, QuerySet, Sum
 from django.utils import timezone
 
+from allapp.accounts.access import AccessScope
 from allapp.baseinfo.models import Owner
 from allapp.billing.enums import AccrualStatus, BillStatus
 from allapp.billing.models import Bill, BillingAccrual, BillingJobRun
@@ -16,12 +17,18 @@ from allapp.locations.models import Location, Warehouse
 from allapp.outbound.models import OutboundOrder
 from allapp.tasking.models import WmsTask
 
+from .services_operations import (
+    OperationFilters,
+    build_operations_detail_rows,
+    build_operations_summary,
+)
+
 ZERO_MONEY = Decimal("0.00")
 ZERO_QTY = Decimal("0.0000")
 
 
 def _prefer_warehouse_scope(user) -> bool:
-    return bool(getattr(user, "warehouse_id", None))
+    return bool(AccessScope.for_user(user).warehouse_ids)
 
 
 def _decimal_or_zero(value, default=ZERO_MONEY):
@@ -74,14 +81,9 @@ def _hotspot_level(rate: Decimal | None):
 
 def _inventory_summary_fallback_queryset(*, user, owner_id: int | None = None):
     qs = InventorySummary.objects.select_related("owner", "product").filter(is_active=True)
-    if not user or not user.is_authenticated:
-        return qs.none()
-    if (
-        not getattr(user, "is_superuser", False)
-        and getattr(user, "owner_id", None)
-        and not _prefer_warehouse_scope(user)
-    ):
-        qs = qs.filter(owner_id=user.owner_id)
+    qs = AccessScope.for_user(user).filter_queryset(
+        qs, owner_field="owner_id", warehouse_field=None
+    )
     if owner_id:
         qs = qs.filter(owner_id=owner_id)
     return qs
@@ -324,25 +326,11 @@ def scope_queryset_for_user(
     owner_field: str | None = "owner_id",
     warehouse_field: str | None = "warehouse_id",
 ):
-    if not user or not user.is_authenticated:
-        return qs.none()
-    if getattr(user, "is_superuser", False):
-        return qs
-
-    owner_id = getattr(user, "owner_id", None)
-    warehouse_id = getattr(user, "warehouse_id", None)
-
-    if owner_id and owner_field and not warehouse_id:
-        qs = qs.filter(**{owner_field: owner_id})
-    elif owner_id and owner_field is None and (warehouse_field is None or not warehouse_id):
-        return qs.none()
-
-    if warehouse_id and warehouse_field:
-        qs = qs.filter(**{warehouse_field: warehouse_id})
-    elif warehouse_id and warehouse_field is None:
-        return qs.none()
-
-    return qs
+    return AccessScope.for_user(user).filter_queryset(
+        qs,
+        owner_field=owner_field,
+        warehouse_field=warehouse_field,
+    )
 
 
 def _apply_scope_filter(
@@ -390,11 +378,20 @@ def _collect_owner_options(*querysets: QuerySet):
 
 
 def _build_owner_options(*, user, warehouse_id: int | None = None):
-    if getattr(user, "owner_id", None) and not _prefer_warehouse_scope(user):
-        owner_name = getattr(getattr(user, "owner", None), "name", "") or f"Owner #{user.owner_id}"
-        return [{"id": user.owner_id, "name": owner_name}]
+    scope = AccessScope.for_user(user)
+    # Filter option lists with the same tenant boundary as the dashboard data.
+    # In particular, an empty fact table is not permission to fall back to the
+    # global Owner table: that used to expose every tenant to a multi-warehouse
+    # boss before any activity had been recorded in the selected warehouses.
+    if not scope.is_valid:
+        return []
+    if scope.owner_ids:
+        return list(
+            Owner.objects.filter(id__in=scope.owner_ids)
+            .values("id", "name")
+            .order_by("name", "id")
+        )
 
-    base_kwargs = {"warehouse_id": warehouse_id} if warehouse_id else {}
     inbound_qs = _apply_scope_filter(
         scope_queryset_for_user(InboundOrder.objects.all(), user),
         warehouse_id=warehouse_id,
@@ -431,12 +428,20 @@ def _build_owner_options(*, user, warehouse_id: int | None = None):
         return options
 
     owner_qs = Owner.objects.all()
-    if base_kwargs:
+    if scope.is_global:
+        allowed_warehouse_ids = {warehouse_id} if warehouse_id else None
+    elif scope.warehouse_ids:
+        if warehouse_id and warehouse_id not in scope.warehouse_ids:
+            return []
+        allowed_warehouse_ids = {warehouse_id} if warehouse_id else set(scope.warehouse_ids)
+    else:
+        return []
+    if allowed_warehouse_ids:
         owner_qs = owner_qs.filter(
-            Q(inbound_orders__warehouse_id=warehouse_id)
-            | Q(outbound_orders__warehouse_id=warehouse_id)
-            | Q(tasks__warehouse_id=warehouse_id)
-            | Q(inventorydetail__warehouse_id=warehouse_id)
+            Q(inbound_orders__warehouse_id__in=allowed_warehouse_ids)
+            | Q(outbound_orders__warehouse_id__in=allowed_warehouse_ids)
+            | Q(tasks__warehouse_id__in=allowed_warehouse_ids)
+            | Q(inventorydetail__warehouse_id__in=allowed_warehouse_ids)
         ).distinct()
     owner_rows = [{"id": owner.id, "name": owner.name} for owner in owner_qs.order_by("name", "id")]
     if owner_rows:
@@ -449,13 +454,20 @@ def _build_owner_options(*, user, warehouse_id: int | None = None):
 
 
 def _build_scope_payload(*, user, owner_id: int | None, warehouse_id: int | None, owner_options):
+    access_scope = AccessScope.for_user(user)
     owner_name_map = {item["id"]: item["name"] for item in owner_options}
-    scope_owner_id = owner_id or getattr(user, "owner_id", None)
+    scope_owner_id = owner_id or (
+        next(iter(access_scope.owner_ids)) if len(access_scope.owner_ids) == 1 else None
+    )
     scope_owner_name = owner_name_map.get(scope_owner_id, "")
     if not scope_owner_name and scope_owner_id and getattr(user, "owner_id", None) == scope_owner_id:
         scope_owner_name = getattr(getattr(user, "owner", None), "name", "") or f"Owner #{scope_owner_id}"
 
-    scope_warehouse_id = warehouse_id or getattr(user, "warehouse_id", None)
+    scope_warehouse_id = warehouse_id or (
+        next(iter(access_scope.warehouse_ids))
+        if len(access_scope.warehouse_ids) == 1
+        else None
+    )
     return {
         "owner": scope_owner_id,
         "owner_name": scope_owner_name,
@@ -567,7 +579,46 @@ def build_boss_home_payload(*, user, owner_id: int | None = None, warehouse_id: 
     month_start = today.replace(day=1)
     trend_start = today - datetime.timedelta(days=6)
 
-    owner_options = _build_owner_options(user=user, warehouse_id=warehouse_id or getattr(user, "warehouse_id", None))
+    resolved_scope = AccessScope.for_user(user)
+    default_warehouse_id = (
+        next(iter(resolved_scope.warehouse_ids))
+        if len(resolved_scope.warehouse_ids) == 1
+        else None
+    )
+    owner_options = _build_owner_options(
+        user=user, warehouse_id=warehouse_id or default_warehouse_id
+    )
+
+    today_operations = build_operations_summary(
+        user=user,
+        filters=OperationFilters(
+            start_date=today,
+            end_date=today,
+            direction="all",
+            metric_basis="actual",
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+        ),
+    )
+    trend_filters = OperationFilters(
+        start_date=trend_start,
+        end_date=today,
+        direction="all",
+        metric_basis="actual",
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+    )
+    trend_operations = build_operations_summary(user=user, filters=trend_filters)
+    trend_details = build_operations_detail_rows(user=user, filters=trend_filters)
+    daily_order_keys = defaultdict(lambda: {"inbound": set(), "outbound": set()})
+    for item in trend_details:
+        event_at = item.get("event_at") or ""
+        day = event_at[:10]
+        if not day:
+            continue
+        order_key = item.get("order_id") or item.get("task_id")
+        if order_key:
+            daily_order_keys[day][item["direction"]].add(order_key)
 
     inbound_qs = _apply_scope_filter(
         scope_queryset_for_user(InboundOrder.objects.select_related("owner", "warehouse"), user),
@@ -752,8 +803,12 @@ def build_boss_home_payload(*, user, owner_id: int | None = None, warehouse_id: 
     today_accrual_subtotal = _decimal_or_zero(today_accrual["subtotal"])
     today_accrual_tax = _decimal_or_zero(today_accrual["tax_total"])
     summary = {
-        "today_inbound_orders": inbound_qs.filter(biz_date=today).count(),
-        "today_outbound_orders": outbound_qs.filter(biz_date=today).count(),
+        "metric_basis": "actual",
+        "data_as_of": today_operations["data_as_of"],
+        "today_inbound_orders": today_operations["summary"]["inbound"]["orders"],
+        "today_inbound_qty": today_operations["summary"]["inbound"]["qty"],
+        "today_outbound_orders": today_operations["summary"]["outbound"]["orders"],
+        "today_outbound_qty": today_operations["summary"]["outbound"]["qty"],
         "current_onhand_qty": _decimal_or_zero(inventory_summary["onhand_qty"], ZERO_QTY),
         "current_available_qty": _decimal_or_zero(inventory_summary["available_qty"], ZERO_QTY),
         "current_locked_qty": _decimal_or_zero(inventory_summary["locked_qty"], ZERO_QTY),
@@ -770,6 +825,23 @@ def build_boss_home_payload(*, user, owner_id: int | None = None, warehouse_id: 
         "open_alert_count": sum(alert_counts.values()),
     }
 
+    trend_rows = _build_trend_payload(
+        inbound_qs=inbound_qs,
+        outbound_qs=outbound_qs,
+        accrual_qs=accrual_qs,
+        start_date=trend_start,
+        end_date=today,
+    )
+    actual_trend = {row["date"]: row for row in trend_operations["trend"]}
+    for row in trend_rows:
+        day_key = row["date"].isoformat()
+        operation_row = actual_trend.get(day_key, {})
+        row["inbound_orders"] = len(daily_order_keys[day_key]["inbound"])
+        row["outbound_orders"] = len(daily_order_keys[day_key]["outbound"])
+        row["inbound_qty"] = operation_row.get("inbound_qty", "0")
+        row["outbound_qty"] = operation_row.get("outbound_qty", "0")
+        row["metric_basis"] = "actual"
+
     return {
         "scope": _build_scope_payload(
             user=user,
@@ -784,13 +856,7 @@ def build_boss_home_payload(*, user, owner_id: int | None = None, warehouse_id: 
             "revenue_top_owners": revenue_top_owners,
             "inventory_top_owners": inventory_top_owners,
         },
-        "trend_7d": _build_trend_payload(
-            inbound_qs=inbound_qs,
-            outbound_qs=outbound_qs,
-            accrual_qs=accrual_qs,
-            start_date=trend_start,
-            end_date=today,
-        ),
+        "trend_7d": trend_rows,
         "attention_items": attention_items[:5],
     }
 
@@ -805,7 +871,15 @@ def build_boss_alert_payload(
     now = timezone.now()
     today = _current_date(now)
 
-    owner_options = _build_owner_options(user=user, warehouse_id=warehouse_id or getattr(user, "warehouse_id", None))
+    access_scope = AccessScope.for_user(user)
+    default_warehouse_id = (
+        next(iter(access_scope.warehouse_ids))
+        if len(access_scope.warehouse_ids) == 1
+        else None
+    )
+    owner_options = _build_owner_options(
+        user=user, warehouse_id=warehouse_id or default_warehouse_id
+    )
 
     task_qs = _apply_scope_filter(
         scope_queryset_for_user(WmsTask.objects.select_related("owner", "warehouse"), user),
@@ -1055,9 +1129,15 @@ def build_boss_inventory_payload(
     expiring_cutoff = today + datetime.timedelta(days=7)
     stale_cutoff = now - datetime.timedelta(days=30)
 
+    access_scope = AccessScope.for_user(user)
+    default_warehouse_id = (
+        next(iter(access_scope.warehouse_ids))
+        if len(access_scope.warehouse_ids) == 1
+        else None
+    )
     owner_options = _build_owner_options(
         user=user,
-        warehouse_id=warehouse_id or getattr(user, "warehouse_id", None),
+        warehouse_id=warehouse_id or default_warehouse_id,
     )
     inventory_qs = _apply_scope_filter(
         scope_queryset_for_user(

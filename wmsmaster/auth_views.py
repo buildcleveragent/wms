@@ -1,5 +1,11 @@
+import logging
+
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+
+from allapp.accounts.audit import record_audit_event
+
+logger = logging.getLogger(__name__)
 
 class LoginSerializer(TokenObtainPairSerializer):
     @classmethod
@@ -18,6 +24,15 @@ class LoginSerializer(TokenObtainPairSerializer):
             data["access"] = str(refresh.access_token)
         # 顺便回传点基础用户信息
         data["user"] = {"id": self.user.id, "username": self.user.username}
+        try:
+            record_audit_event(
+                action="LOGIN",
+                module="authentication",
+                request=self.context.get("request"),
+                user=self.user,
+            )
+        except Exception:
+            logger.exception("audit.login.write_failed user_id=%s", self.user.id)
         return data
 
 class LoginView(TokenObtainPairView):

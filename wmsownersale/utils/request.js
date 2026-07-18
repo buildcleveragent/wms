@@ -176,6 +176,11 @@ export const api = {
       data: { username, password },
     }),
 
+  authProfile: () =>
+    request({
+      url: '/api/auth/profile/',
+    }),
+
   changePassword: (oldPassword, newPassword1, newPassword2) =>
     request({
       url: '/api/auth/password/change/',
@@ -260,6 +265,24 @@ export const api = {
     const qs = buildQuery(params)
     return request({
       url: qs ? `/api/billing/accruals/?${qs}` : '/api/billing/accruals/',
+    })
+  },
+
+  operationsSummary: (params = {}) => {
+    const qs = buildQuery(params)
+    return request({
+      url: qs
+        ? `/api/reports/v2/operations/summary/?${qs}`
+        : '/api/reports/v2/operations/summary/',
+    })
+  },
+
+  operationsDetails: (params = {}) => {
+    const qs = buildQuery(params)
+    return request({
+      url: qs
+        ? `/api/reports/v2/operations/details/?${qs}`
+        : '/api/reports/v2/operations/details/',
     })
   },
 

@@ -7,14 +7,9 @@ from rest_framework import serializers
 from .models import OutboundOrder, OutboundOrderLine
 
 
-# 合并到 allapp/outbound/serializers.py
-
-from decimal import Decimal
-from rest_framework import serializers
-
+from allapp.accounts.access import AccessScope
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.services import get_default_product_price
-from .models import OutboundOrder, OutboundOrderLine
 
 # 兼容不同字段命名的小工具
 def _get(obj, names, default=None):
@@ -475,11 +470,12 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         # 从登录用户获取 owner / warehouse（不再走前端）
         req = self.context.get("request")
         user = getattr(req, "user", None)
-        owner_id = getattr(user, "owner_id", None)
+        scope = AccessScope.for_user(user)
+        owner_id = next(iter(scope.owner_ids)) if len(scope.owner_ids) == 1 else None
         warehouse_id = getattr(user, "warehouse_id", None)
 
         if not owner_id:
-            raise serializers.ValidationError("当前用户未绑定货主（owner），请联系管理员。")
+            raise serializers.ValidationError("当前用户没有单一有效货主角色范围，请联系管理员。")
         if not warehouse_id:
             raise serializers.ValidationError("当前用户未绑定仓库（warehouse），请联系管理员。")
 

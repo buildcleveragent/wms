@@ -227,57 +227,88 @@ class DefaultPostingHandler(BasePostingHandler):
 
     def _create_putaway_task(self, receive_task: WmsTask, by_user, now_ts):
         """
-        自动创建上架任务草稿
+        按已过账收货流水幂等创建一张待发布上架任务。
         """
-        # 创建上架任务草稿
-        # 生成任务号（用你项目已有的 DocSequence）
-        from allapp.tasking.models import WmsTask
         # 保险：非收货任务不派生上架任务
         if receive_task.task_type != WmsTask.TaskType.RECEIVE:
-            return 0
+            return None
+
+        source = {
+            "source_app": "tasking",
+            "source_model": "WmsTask",
+            "source_pk": str(receive_task.pk),
+        }
+        existing = (
+            WmsTask.objects.filter(
+                task_type=WmsTask.TaskType.PUTAWAY,
+                **source,
+            )
+            .exclude(status=WmsTask.Status.CANCELLED)
+            .first()
+        )
+        if existing:
+            return existing
+
+        transactions = list(
+            InventoryTransaction.objects.filter(
+                src_model="WmsTask",
+                src_id=receive_task.id,
+                tx_type="RECEIVE",
+                qty_delta__gt=0,
+            )
+            .select_related("product", "location")
+            .order_by("id")
+        )
+        if not transactions:
+            log.warning(
+                "tasking.putaway_task.skipped_no_transactions receive_task_id=%s",
+                receive_task.id,
+            )
+            return None
+
         task_no = DocSequence.next_code(
             doc_type="SJ",
             warehouse=receive_task.warehouse,
             owner=receive_task.owner,
-            biz_date=timezone.now(),  # You can use the current date for business date
+            biz_date=now_ts.date(),
         )
 
         putaway_task = WmsTask.objects.create(
             task_no=task_no,
-            task_type=WmsTask.TaskType.PUTAWAY,  # 设置为上架任务
+            task_type=WmsTask.TaskType.PUTAWAY,
             owner_id=receive_task.owner_id,
             warehouse_id=receive_task.warehouse_id,
-            status=WmsTask.Status.DRAFT,  # 设置为草稿状态
+            status=WmsTask.Status.READY,
             created_by=by_user,
             created_at=now_ts,
             updated_at=now_ts,
-            # review_status=WmsTask.ReviewStatus.NOT_READY,
-            # posting_status=WmsTask.PostingStatus.NOT_READY,
-            posting_note="由收货任务自动生成的上架任务草稿",
+            ref_no=(receive_task.task_no or "")[:60],
+            review_status=WmsTask.ReviewStatus.NOT_READY,
+            posting_status=WmsTask.PostingStatus.NOT_READY,
+            posting_note="由收货任务自动生成，待仓库管理员分配目标库位并发布",
+            **source,
         )
         putaway_ctx, putaway_text = build_log_payload(task=putaway_task, user=by_user)
         receive_ctx, receive_text = build_log_payload(task=receive_task, user=by_user)
-        log.info("tasking.putaway_task.created %s source_task_id=%s", putaway_text, receive_task.id, extra=putaway_ctx)
-
-        # 获取过账数据：从 InventoryTransaction 获取已过账商品及数量
-        transactions = InventoryTransaction.objects.filter(
-            src_model="WmsTask", src_id=receive_task.id, tx_type="RECEIVE"
+        log.info(
+            "tasking.putaway_task.created %s source_task_id=%s",
+            putaway_text,
+            receive_task.id,
+            extra=putaway_ctx,
         )
 
         # 遍历所有相关的库存事务，创建对应的上架任务行
         line_count = 0
         for tx in transactions:
-            product_id = tx.product_id  # 获取商品ID
-            qty = tx.qty_delta  # 获取过账数量（即收货数量）
-            location_id = tx.location_id  # 获取库位ID（从事务中获取）
-            # 创建上架任务行
             WmsTaskLine.objects.create(
                 task=putaway_task,
-                product_id=product_id,
-                qty_plan=qty,  # 上架数量等同于收货数量
-                from_location_id=location_id,  # 从收货库位出发
-                to_location=None,  # 上架目标库位待补充，可能根据策略计算
-                status=WmsTaskLine.Status.DRAFT,  # 初始状态为待处理
+                product_id=tx.product_id,
+                qty_plan=tx.qty_delta,
+                from_location_id=tx.location_id,
+                to_location=None,
+                status=WmsTaskLine.Status.READY,
+                src_model="inventory.InventoryTransaction",
+                src_id=tx.pk,
             )
             line_count += 1
         log.info(
@@ -287,7 +318,27 @@ class DefaultPostingHandler(BasePostingHandler):
             line_count,
             extra=putaway_ctx,
         )
-        log.info("tasking.post.receive_to_putaway_linked %s putaway_task_id=%s", receive_text, putaway_task.id, extra=receive_ctx)
+        log.info(
+            "tasking.post.receive_to_putaway_linked %s putaway_task_id=%s",
+            receive_text,
+            putaway_task.id,
+            extra=receive_ctx,
+        )
+        from allapp.accounts.audit import record_audit_event
+
+        record_audit_event(
+            action="inbound.putaway.create",
+            module="inbound",
+            user=by_user,
+            obj=putaway_task,
+            before={},
+            after={
+                "status": putaway_task.status,
+                "source_receive_task_id": receive_task.pk,
+            },
+            metadata={"line_count": line_count},
+        )
+        return putaway_task
 
     @transaction.atomic
     def _handle_atomic(
@@ -459,5 +510,27 @@ class DefaultPostingHandler(BasePostingHandler):
         if getattr(task, "task_type", None) == WmsTask.TaskType.RECEIVE and affected > 0:
             log.info("tasking.post.putaway_task_triggered %s affected=%s", ctx_text, affected, extra=ctx)
             self._create_putaway_task(task, by_user, now_ts)
+
+        audit_action = {
+            WmsTask.TaskType.RECEIVE: "inbound.receive.post",
+            WmsTask.TaskType.PUTAWAY: "inbound.putaway.post",
+        }.get(getattr(task, "task_type", None))
+        if audit_action:
+            from allapp.accounts.audit import record_audit_event
+
+            record_audit_event(
+                action=audit_action,
+                module="inbound",
+                user=by_user,
+                obj=task,
+                before={"posting_status": WmsTask.PostingStatus.PENDING},
+                after={"posting_status": task.posting_status},
+                metadata={"affected_transactions": affected},
+            )
+
+        if getattr(task, "task_type", None) == WmsTask.TaskType.PUTAWAY:
+            from allapp.inbound.services import close_inbound_order_after_putaway
+
+            close_inbound_order_after_putaway(task, by_user=by_user)
 
         return affected

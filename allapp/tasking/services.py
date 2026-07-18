@@ -20,7 +20,7 @@ from django.conf import settings
 import hashlib
 import json
 from django.core.exceptions import ValidationError, PermissionDenied
-from allapp.tasking.models import WmsTask, WmsTaskLine, ReceiveLineExtra, PutawayLineExtra, TaskAssignment, TaskScanLog, \
+from allapp.tasking.models import WmsTask, WmsTaskLine, ReceiveLineExtra, PutawayLineExtra, TaskAssignment, TaskStatusLog, TaskScanLog, \
     RelocLineExtra, CountLineExtra, PickLineExtra, ReplenishLineExtra, DispatchLineExtra
 
 from django.db import transaction
@@ -628,6 +628,203 @@ def _assert_can_release(t: WmsTask) -> None:
         raise ValidationError("任务无明细，不能发布。")
     if not t.lines.filter(qty_plan__gt=0).exists():
         raise ValidationError("所有任务行计划数量为 0，不能发布。")
+    if (
+        t.task_type == WmsTask.TaskType.PICK
+        and (t.source_model or "").lower() == "outboundorder"
+    ):
+        from allapp.outbound.models import OutboundOrder
+        from allapp.outbound.services import allocation_shortfalls
+
+        try:
+            order = OutboundOrder.objects.get(pk=int(t.source_pk))
+        except (TypeError, ValueError, OutboundOrder.DoesNotExist) as exc:
+            raise ValidationError("拣货任务无法解析对应的出库订单。") from exc
+        if order.approval_status != "WHS_APPROVED":
+            raise ValidationError("出库订单尚未完成仓库确认，禁止发布。")
+        shortages = allocation_shortfalls(order, task=t)
+        if shortages:
+            raise ValidationError("出库订单存在分配缺口，禁止发布拣货任务。")
+
+
+def _request_actor(request):
+    user = getattr(request, "user", None)
+    return user if getattr(user, "is_authenticated", False) else None
+
+
+@transaction.atomic
+def task_release(*, request, task):
+    """Release a task through the shared validation and assignment service."""
+
+    locked = WmsTask.objects.select_for_update().get(pk=task.pk)
+    publish_task(locked)
+    return locked
+
+
+@transaction.atomic
+def task_start(*, request, task):
+    """Start a released task and keep its status transition auditable."""
+
+    locked = WmsTask.objects.select_for_update().get(pk=task.pk)
+    if locked.status == WmsTask.Status.IN_PROGRESS:
+        return locked
+    if locked.status != WmsTask.Status.RELEASED:
+        raise ValidationError("仅已发布任务可以开始。")
+    now = timezone.now()
+    locked.status = WmsTask.Status.IN_PROGRESS
+    locked.started_at = locked.started_at or now
+    locked.updated_by = _request_actor(request)
+    locked.save(
+        update_fields=["status", "started_at", "updated_by", "updated_at"]
+    )
+    WmsTaskLine.objects.filter(task=locked, status=WmsTaskLine.Status.RELEASED).update(
+        status=WmsTaskLine.Status.IN_PROGRESS,
+        started_at=now,
+        updated_at=now,
+        updated_by=_request_actor(request),
+    )
+    TaskStatusLog.objects.create(
+        task=locked,
+        old_status=WmsTask.Status.RELEASED,
+        new_status=WmsTask.Status.IN_PROGRESS,
+        changed_by=_request_actor(request),
+        note="任务开始",
+    )
+    return locked
+
+
+@transaction.atomic
+def task_complete(*, request, task):
+    """Complete PACK/DISPATCH work and advance the standard outbound chain."""
+
+    locked = WmsTask.objects.select_for_update().get(pk=task.pk)
+    if locked.status == WmsTask.Status.COMPLETED:
+        return locked
+    if locked.status not in {WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS}:
+        raise ValidationError("仅已发布或执行中的任务可以完成。")
+    if locked.task_type not in {WmsTask.TaskType.PACK, WmsTask.TaskType.DISPATCH}:
+        raise ValidationError("该任务类型必须通过专用业务接口完成，不能直接完工。")
+
+    lines = WmsTaskLine.objects.select_for_update().filter(task=locked).exclude(
+        status=WmsTaskLine.Status.CANCELLED
+    )
+    if not lines.exists():
+        raise ValidationError("任务没有有效明细，不能完成。")
+    if lines.filter(qty_done__lt=F("qty_plan")).exists():
+        raise ValidationError("仍有未完成的任务行。")
+
+    now = timezone.now()
+    actor = _request_actor(request)
+    lines.update(
+        status=WmsTaskLine.Status.COMPLETED,
+        finished_at=now,
+        finished_by=actor,
+        updated_at=now,
+        updated_by=actor,
+    )
+    old_status = locked.status
+    locked.status = WmsTask.Status.COMPLETED
+    locked.review_status = WmsTask.ReviewStatus.APPROVED
+    locked.posting_status = WmsTask.PostingStatus.POSTED
+    locked.approved_by = actor
+    locked.approved_at = now
+    locked.posted_by = actor
+    locked.posted_at = now
+    locked.finished_at = now
+    locked.updated_by = actor
+    locked.save(
+        update_fields=[
+            "status",
+            "review_status",
+            "posting_status",
+            "approved_by",
+            "approved_at",
+            "posted_by",
+            "posted_at",
+            "finished_at",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    TaskStatusLog.objects.create(
+        task=locked,
+        old_status=old_status,
+        new_status=WmsTask.Status.COMPLETED,
+        changed_by=actor,
+        note="任务完成",
+    )
+
+    if locked.task_type in {WmsTask.TaskType.PACK, WmsTask.TaskType.DISPATCH}:
+        from allapp.accounts.audit import record_audit_event
+        from allapp.outbound import services as outbound_services
+
+        if locked.task_type == WmsTask.TaskType.PACK:
+            downstream = outbound_services.create_dispatch_from_pack(
+                locked,
+                by_user=actor,
+            )
+            action = "outbound.pack.complete"
+            metadata = {"dispatch_task_id": downstream.id}
+        else:
+            order = outbound_services.close_order_after_dispatch(
+                locked,
+                by_user=actor,
+            )
+            action = "outbound.dispatch.complete"
+            metadata = {"order_id": order.id, "order_closed": order.is_closed}
+        record_audit_event(
+            action=action,
+            module="outbound",
+            request=request,
+            obj=locked,
+            before={"status": old_status},
+            after={"status": locked.status},
+            metadata=metadata,
+        )
+    return locked
+
+
+@transaction.atomic
+def task_cancel(*, request, task, reason=None):
+    """Cancel only untouched tasks; outbound PICK cancellation goes via its order."""
+
+    locked = WmsTask.objects.select_for_update().get(pk=task.pk)
+    if locked.status == WmsTask.Status.CANCELLED:
+        return locked
+    if locked.status == WmsTask.Status.COMPLETED:
+        raise ValidationError("已完成任务不能取消。")
+    if locked.lines.filter(qty_done__gt=0).exists():
+        raise ValidationError("任务已有执行数量，不能取消。")
+    if (
+        locked.task_type == WmsTask.TaskType.PICK
+        and (locked.source_model or "").lower() == "outboundorder"
+    ):
+        raise ValidationError("出库拣货任务必须通过取消出库订单释放库存。")
+
+    now = timezone.now()
+    actor = _request_actor(request)
+    old_status = locked.status
+    locked.lines.exclude(status=WmsTaskLine.Status.CANCELLED).update(
+        status=WmsTaskLine.Status.CANCELLED,
+        updated_at=now,
+        updated_by=actor,
+    )
+    locked.status = WmsTask.Status.CANCELLED
+    locked.finished_at = now
+    locked.remark = " ".join(
+        part for part in ((locked.remark or "").strip(), (reason or "").strip()) if part
+    )[:200]
+    locked.updated_by = actor
+    locked.save(
+        update_fields=["status", "finished_at", "remark", "updated_by", "updated_at"]
+    )
+    TaskStatusLog.objects.create(
+        task=locked,
+        old_status=old_status,
+        new_status=WmsTask.Status.CANCELLED,
+        changed_by=actor,
+        note=(reason or "取消任务")[:200],
+    )
+    return locked
 
 
 def _finish_other_head_assignments(task: WmsTask, keep_assignee) -> int:

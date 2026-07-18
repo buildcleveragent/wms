@@ -373,9 +373,18 @@ OUTBOUND_ALLOCATE_FIRM_ON_APPROVE = True  # True：硬分配（allocated 冻结�
 OUTBOUND_AT_DRAFT_VALIDATE_MODE = "warn"  # "warn" | "block"
 OUTBOUND_LEGACY_AUTHZ_MODE = _validated_choice(
     "OUTBOUND_LEGACY_AUTHZ_MODE",
-    env("OUTBOUND_LEGACY_AUTHZ_MODE", default="shadow"),
+    env("OUTBOUND_LEGACY_AUTHZ_MODE", default="enforce"),
     {"shadow", "enforce"},
 )
+# Explicit UserRoleScope rows are mandatory by default.  This switch exists only
+# for a time-bounded migration rollback and must never be enabled in production.
+WMS_ACCESS_SCOPE_LEGACY_FALLBACK = env.bool(
+    "WMS_ACCESS_SCOPE_LEGACY_FALLBACK", default=False
+)
+if IS_PRODUCTION and WMS_ACCESS_SCOPE_LEGACY_FALLBACK:
+    raise ImproperlyConfigured(
+        "生产环境禁止启用 WMS_ACCESS_SCOPE_LEGACY_FALLBACK。"
+    )
 COUNT_MAX_TIMES = 2
 BILLING_TASKLINE_ORDER_RESOLVER = "allapp.billing.resolvers:taskline_to_order_mapping"
 BILLING_METRIC_SCHEDULER_ENABLED = env.bool(

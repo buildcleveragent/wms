@@ -15,6 +15,7 @@
         <text>{{ operatorName }}</text>
         <text>{{ warehouseName }}</text>
         <text>{{ ownerScopeText }}</text>
+        <text>实绩截至 {{ summary.dataAsOf }}</text>
       </view>
     </view>
 
@@ -46,9 +47,9 @@
     <template v-else>
       <view class="kpi-grid">
         <view class="kpi-card blue">
-          <view class="kpi-label">今日入库单</view>
-          <view class="kpi-value">{{ summary.todayInboundOrders }}</view>
-          <view class="kpi-sub">今日出库 {{ summary.todayOutboundOrders }} 单</view>
+          <view class="kpi-label">今日实际收发量</view>
+          <view class="kpi-value">{{ qty(summary.todayInboundQty) }}</view>
+          <view class="kpi-sub">入库 {{ summary.todayInboundOrders }} 单 · 发运 {{ qty(summary.todayOutboundQty) }} / {{ summary.todayOutboundOrders }} 单</view>
         </view>
         <view class="kpi-card gold">
           <view class="kpi-label">当前在库量</view>
@@ -134,7 +135,7 @@
       <view class="section">
         <view class="section-head">
           <view class="section-title">近 7 天趋势</view>
-          <view class="section-desc">看订单和计费有没有突然抬头或掉下去。</view>
+          <view class="section-desc">按库存过账与实际发运时间查看实绩趋势。</view>
         </view>
         <view v-for="row in trendRows" :key="row.date" class="trend-row">
           <view class="trend-date">{{ row.date }}</view>
@@ -147,7 +148,7 @@
             </view>
           </view>
           <view class="trend-side">
-            <text>{{ row.inboundOrders }}/{{ row.outboundOrders }}</text>
+            <text>收 {{ qty(row.inboundQty) }} / 发 {{ qty(row.outboundQty) }}</text>
             <text>{{ money(row.accrualTotal) }}</text>
           </view>
         </view>
@@ -211,8 +212,11 @@ const ownerPickerIndex = computed(() => {
 const summary = computed(() => {
   const source = payload.value?.summary || {}
   return {
+    dataAsOf: source.data_as_of ? new Date(source.data_as_of).toLocaleString() : '-',
     todayInboundOrders: Number(source.today_inbound_orders || 0),
+    todayInboundQty: toNumber(source.today_inbound_qty),
     todayOutboundOrders: Number(source.today_outbound_orders || 0),
+    todayOutboundQty: toNumber(source.today_outbound_qty),
     currentOnhandQty: toNumber(source.current_onhand_qty),
     currentAvailableQty: toNumber(source.current_available_qty),
     currentLockedQty: toNumber(source.current_locked_qty),
@@ -274,14 +278,16 @@ const trendRows = computed(() => {
     date: row.date,
     inboundOrders: Number(row.inbound_orders || 0),
     outboundOrders: Number(row.outbound_orders || 0),
+    inboundQty: toNumber(row.inbound_qty),
+    outboundQty: toNumber(row.outbound_qty),
     accrualTotal: toNumber(row.accrual_total),
   }))
-  const inboundMax = Math.max(1, ...rows.map((row) => row.inboundOrders))
-  const outboundMax = Math.max(1, ...rows.map((row) => row.outboundOrders))
+  const inboundMax = Math.max(1, ...rows.map((row) => row.inboundQty))
+  const outboundMax = Math.max(1, ...rows.map((row) => row.outboundQty))
   return rows.map((row) => ({
     ...row,
-    inboundWidth: Math.max(8, (row.inboundOrders / inboundMax) * 100),
-    outboundWidth: Math.max(8, (row.outboundOrders / outboundMax) * 100),
+    inboundWidth: Math.max(8, (row.inboundQty / inboundMax) * 100),
+    outboundWidth: Math.max(8, (row.outboundQty / outboundMax) * 100),
   }))
 })
 

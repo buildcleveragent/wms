@@ -82,6 +82,7 @@ import { BASE_URL } from '@/utils/request'
 
 const cart = useCart()
 const canSubmit = computed(()=> !!cart.customer && cart.items.length>0 )
+let receiveRequestId = ''
 console.log("cart vue111111111111111",cart.items)
 
 // 数字格式化为两位小数
@@ -194,6 +195,13 @@ function compactReceiveItem(it) {
   return item
 }
 
+function currentReceiveRequestId() {
+  if (!receiveRequestId) {
+    receiveRequestId = `pda-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  }
+  return receiveRequestId
+}
+
 
 async function submitOrder(){
   // 提交前兜底校验：不允许低于
@@ -214,6 +222,7 @@ async function submitOrder(){
     }
 
     const payload = {
+      request_id: currentReceiveRequestId(),
       owner_id: cart.owner?.id,
       remark: '仓库操作员入库',
    //    items: cart.items.map(it=> ({
@@ -310,6 +319,7 @@ async function submitOrder(){
 	console.log("2 printReceiveTask printReceiveTask ")
 	
     cart.clear()
+    receiveRequestId = ''
     uni.switchTab({ url:'/pages/index/index' })
   }catch(e){
     console.error(e)

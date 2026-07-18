@@ -88,7 +88,8 @@
           <th>行号</th>
           <th>商品编码</th>
           <th>商品名称</th>
-          <th>收货数量(基本单位)</th>
+          <th>计划数量(基本单位)</th>
+          <th>实际收货数量(基本单位)</th>
         </tr>
       </thead>
       <tbody>
@@ -98,6 +99,7 @@
             <td>{{ line.product.sku }}</td>
             <td>{{ line.product.name }}</td>
             <td>{{ line.qty_plan }}</td>
+            <td>{{ line.qty_done }}</td>
           </tr>
         {% endfor %}
       </tbody>

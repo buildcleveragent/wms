@@ -12,6 +12,7 @@
 		{"path": "pages/features/index","style": { "navigationBarTitleText": "功能" } },
 	    {"path":"pages/approval/approvedetail","style":{"navigationBarTitleText":"出库审核详情"}},
 		{"path":"pages/reports/index","style":{"navigationBarTitleText":"报表"}},
+		{"path":"pages/reports/operations","style":{"navigationBarTitleText":"入出库履约"}},
 		{"path":"pages/billing/overview","style":{"navigationBarTitleText":"计费总览"}},
 		{"path":"pages/billing/bill_detail","style":{"navigationBarTitleText":"账单详情"}},
 		{"path":"pages/me/index","style":{"navigationBarTitleText":"我的"}},

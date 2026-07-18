@@ -10,10 +10,19 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F, Q, Sum
 
+from allapp.accounts.access import AccessScope
 from allapp.core.models import DocSequence
 from allapp.core.utils.log_context import build_log_payload
 from allapp.inventory.models import InventoryDetail
-from allapp.tasking.models import TaskStatusLog, WmsTask, WmsTaskLine
+from allapp.tasking.models import (
+    DispatchTaskExtra,
+    PackTaskExtra,
+    ReviewLineExtra,
+    ReviewTaskExtra,
+    TaskStatusLog,
+    WmsTask,
+    WmsTaskLine,
+)
 
 
 TASK_TYPE_PICK = getattr(WmsTask.TaskType, "PICK", "PICK")
@@ -21,6 +30,25 @@ logger = logging.getLogger(__name__)
 
 ASSISTED_PROCESSING_MODE = "WAREHOUSE_ASSISTED"
 ASSISTED_CLOSE_REASON = "仓库代办出库完成"
+
+
+def validate_owner_approval_preconditions(order) -> None:
+    """Validate the business state required before a owner approval.
+
+    Keeping this check in the service layer lets every UI entry point use the
+    same rule instead of relying on which buttons happen to be visible.  It is
+    deliberately separate from authorization: callers must still prove the
+    approving user's tenant scope before invoking it.
+    """
+
+    if order.submit_status != "SUBMITTED":
+        raise ValidationError("仅已提交订单可由货主管理员审核。")
+    if order.is_closed:
+        raise ValidationError("已关闭订单不能执行货主管理员审核。")
+    if order.approval_status not in {"OWNER_PENDING", "OWNER_REJECTED"}:
+        raise ValidationError(
+            f"订单审核状态 {order.approval_status} 不允许货主管理员审核。"
+        )
 
 
 def get_default_product_price(product) -> Decimal:
@@ -182,20 +210,22 @@ def allocate_inventory(order, by_user=None, allow_backorder=True):
         .filter(task=task)
         .exclude(status=WmsTaskLine.Status.CANCELLED)
     )
-    if existing_lines.exists():
-        task_ctx, task_text = build_log_payload(order=order, task=task, user=by_user)
-        logger.info(
-            "outbound.allocate_inventory.skip_existing %s line_count=%s",
-            task_text,
-            existing_lines.count(),
-            extra=task_ctx,
-        )
-        return task
+    allocated_by_line = {
+        row["src_id"]: Decimal(row["qty"] or 0)
+        for row in existing_lines.values("src_id").annotate(qty=Sum("qty_plan"))
+    }
     demands = _compute_line_demands(order)
     if not demands:
         raise ValidationError("出库单没有有效需求行。")
     for d in demands:
-        remaining = d["demand"]
+        already_allocated = allocated_by_line.get(d["line_id"], Decimal("0"))
+        if already_allocated > d["demand"]:
+            raise ValidationError(
+                f"订单行 {d['line_id']} 已分配数量超过需求，禁止继续分配。"
+            )
+        remaining = d["demand"] - already_allocated
+        if remaining <= 0:
+            continue
         qs = _fefo_details_qs(order.owner_id, order.warehouse_id, d["product_id"])
         for det in qs:
             if remaining <= 0:
@@ -244,6 +274,7 @@ def allocate_inventory(order, by_user=None, allow_backorder=True):
                 src_id=d["line_id"],
                 rule_key="FEFO",
                 status="RESERVED",
+                plan_meta={"inventory_detail_id": det.id},
             )
             task_ctx, task_text = build_log_payload(order=order, task=task, user=by_user)
             logger.info(
@@ -278,6 +309,45 @@ def allocate_inventory(order, by_user=None, allow_backorder=True):
     return task
 
 
+def allocation_shortfalls(order, task=None) -> list[dict]:
+    """Return order-line shortages against the active reserved PICK allocation."""
+
+    task = task or (
+        WmsTask.objects.filter(task_type=TASK_TYPE_PICK)
+        .filter(_task_source_q(order))
+        .exclude(status=WmsTask.Status.CANCELLED)
+        .order_by("id")
+        .first()
+    )
+    allocated_by_line = {}
+    if task is not None:
+        allocated_by_line = {
+            row["src_id"]: Decimal(row["qty"] or 0)
+            for row in (
+                WmsTaskLine.objects.filter(task=task)
+                .exclude(status=WmsTaskLine.Status.CANCELLED)
+                .values("src_id")
+                .annotate(qty=Sum("qty_plan"))
+            )
+        }
+
+    shortages = []
+    for demand in _compute_line_demands(order):
+        allocated = allocated_by_line.get(demand["line_id"], Decimal("0"))
+        shortage = demand["demand"] - allocated
+        if shortage > 0:
+            shortages.append(
+                {
+                    "line_id": demand["line_id"],
+                    "product_id": demand["product_id"],
+                    "demand": demand["demand"],
+                    "allocated": allocated,
+                    "shortage": shortage,
+                }
+            )
+    return shortages
+
+
 # 仓库管理员确认：严格将保留态任务发布，不再重新切分
 @transaction.atomic
 def promote_reserved_pick(
@@ -295,6 +365,8 @@ def promote_reserved_pick(
 
     if new_status != WmsTask.Status.RELEASED:
         raise ValidationError("保留拣货任务仅允许发布为 RELEASED。")
+    if order.approval_status != "WHS_APPROVED":
+        raise ValidationError("订单尚未完成仓库确认，禁止发布拣货任务。")
 
     candidates = list(
         WmsTask.objects.select_for_update()
@@ -318,6 +390,13 @@ def promote_reserved_pick(
         return task
     if task.status != WmsTask.Status.RESERVED:
         raise ValidationError(f"任务状态为 {task.status}，仅 RESERVED 可发布。")
+
+    shortages = allocation_shortfalls(order, task=task)
+    if shortages:
+        detail = "；".join(
+            f"订单行 {row['line_id']} 缺口 {row['shortage']}" for row in shortages[:10]
+        )
+        raise ValidationError(f"订单尚未完整分配，禁止发布拣货任务：{detail}")
 
     old_status = task.status
     now = timezone.now()
@@ -352,14 +431,25 @@ def promote_reserved_pick(
 
 @transaction.atomic
 def approve_and_release_order(order, *, by_user, allow_backorder=True) -> WmsTask:
-    """Perform owner approval, warehouse approval and PICK publication atomically."""
+    """Publish a warehouse-assisted order after its controlled approval flow.
+
+    Standard orders deliberately cannot use this convenience routine.  Their
+    owner approval and warehouse confirmation are separate, auditable duties;
+    allowing a Django Admin action to call this routine for a standard order
+    would let a warehouse manager impersonate the owner approval step.
+    """
 
     Order = type(order)
     order = Order.objects.select_for_update().select_related("owner", "warehouse").get(pk=order.pk)
 
-    if order.submit_status != "SUBMITTED":
-        raise ValidationError("仅已提交订单可执行确认发布。")
+    if order.processing_mode != ASSISTED_PROCESSING_MODE:
+        raise ValidationError(
+            "标准出库必须先由货主管理员审核，再由仓库管理员确认发布。"
+        )
+    if order.is_closed:
+        raise ValidationError("已关闭订单不能执行确认发布。")
     if order.approval_status in {"OWNER_PENDING", "OWNER_REJECTED"}:
+        validate_owner_approval_preconditions(order)
         order.owner_approve(by_user=by_user, allow_backorder=allow_backorder)
         order.refresh_from_db()
     elif order.approval_status not in {"OWNER_APPROVED", "WHS_PENDING", "WHS_APPROVED"}:
@@ -391,6 +481,10 @@ def approve_and_release_order(order, *, by_user, allow_backorder=True) -> WmsTas
 def create_warehouse_assisted_order(*, validated_data, by_user):
     """Create, fully allocate, approve and release one assisted SALES order."""
 
+    scope = AccessScope.for_user(by_user)
+    if not scope.is_valid or len(scope.warehouse_ids) != 1:
+        raise ValidationError("代办出库必须具有单一有效仓库操作范围。")
+    warehouse_id = next(iter(scope.warehouse_ids))
     OutboundOrder = get_outbound_order_model()
     OutboundOrderLine = OutboundOrder._meta.apps.get_model("outbound", "OutboundOrderLine")
     owner = validated_data["owner"]
@@ -400,7 +494,7 @@ def create_warehouse_assisted_order(*, validated_data, by_user):
 
     order = OutboundOrder.objects.create(
         owner=owner,
-        warehouse_id=by_user.warehouse_id,
+        warehouse_id=warehouse_id,
         customer=customer,
         supplier=None,
         outbound_type="SALES",
@@ -497,21 +591,538 @@ def close_assisted_order_for_posted_task(task):
         order.save(update_fields=update_fields)
     return order
 
+
+def _order_for_outbound_task(task, *, for_update=False):
+    """Resolve the standard outbound order carried by a workflow task."""
+
+    OutboundOrder = get_outbound_order_model()
+    source_model = (getattr(task, "source_model", "") or "").lower()
+    source_pk = getattr(task, "source_pk", None)
+    if source_model == "outboundorder":
+        qs = OutboundOrder.objects
+        if for_update:
+            qs = qs.select_for_update()
+        try:
+            return qs.filter(
+                pk=int(source_pk),
+                owner_id=task.owner_id,
+                warehouse_id=task.warehouse_id,
+            ).first()
+        except (TypeError, ValueError):
+            return None
+    if source_model == "wmstask":
+        try:
+            parent = WmsTask.objects.get(pk=int(source_pk))
+        except (TypeError, ValueError, WmsTask.DoesNotExist):
+            return None
+        return _order_for_outbound_task(parent, for_update=for_update)
+    return None
+
+
+def get_review_task_for_pick(pick_task, *, for_update=False):
+    """Return the single active REVIEW derived from a PICK, failing on ambiguity."""
+
+    qs = WmsTask.objects.filter(
+        task_type=WmsTask.TaskType.REVIEW,
+        source_model="WmsTask",
+        source_pk=str(pick_task.pk),
+        owner_id=pick_task.owner_id,
+        warehouse_id=pick_task.warehouse_id,
+    ).exclude(status=WmsTask.Status.CANCELLED)
+    if for_update:
+        qs = qs.select_for_update()
+    tasks = list(qs.order_by("id")[:2])
+    if len(tasks) > 1:
+        raise ValidationError("拣货任务关联了多个有效复核任务，禁止继续处理。")
+    return tasks[0] if tasks else None
+
+
+@transaction.atomic
+def create_review_task_for_pick(pick_task, *, by_user=None):
+    """Idempotently complete a fully picked PICK and create a real REVIEW task."""
+
+    pick_task = WmsTask.objects.select_for_update().get(pk=pick_task.pk)
+    if pick_task.task_type != WmsTask.TaskType.PICK:
+        raise ValidationError("仅 PICK 任务可以创建复核任务。")
+    if pick_task.status not in {
+        WmsTask.Status.RESERVED,
+        WmsTask.Status.RELEASED,
+        WmsTask.Status.IN_PROGRESS,
+        WmsTask.Status.COMPLETED,
+    }:
+        raise ValidationError(f"当前任务状态为 {pick_task.status}，不能提交复核。")
+
+    lines = list(
+        WmsTaskLine.objects.select_for_update()
+        .filter(task=pick_task)
+        .exclude(status=WmsTaskLine.Status.CANCELLED)
+        .order_by("id")
+    )
+    if not lines:
+        raise ValidationError("拣货任务没有有效明细，不能提交复核。")
+    if any(Decimal(line.qty_done or 0) < Decimal(line.qty_plan or 0) for line in lines):
+        raise ValidationError("还有未拣完的明细，不能提交复核。")
+
+    existing = get_review_task_for_pick(pick_task, for_update=True)
+    if existing is not None:
+        return existing
+
+    now = timezone.now()
+    order = _order_for_outbound_task(pick_task)
+    review_task = WmsTask.objects.create(
+        task_no=DocSequence.next_code(
+            doc_type="FH",
+            warehouse=pick_task.warehouse,
+            owner=pick_task.owner,
+            biz_date=date.today(),
+        ),
+        task_type=WmsTask.TaskType.REVIEW,
+        status=WmsTask.Status.RELEASED,
+        owner=pick_task.owner,
+        warehouse=pick_task.warehouse,
+        released_at=now,
+        ref_no=getattr(order, "order_no", "") or pick_task.task_no,
+        task_group_no=pick_task.task_no,
+        source_app="tasking",
+        source_model="WmsTask",
+        source_pk=str(pick_task.pk),
+        created_by=by_user or pick_task.created_by,
+        updated_by=by_user,
+    )
+    ReviewTaskExtra.objects.create(
+        task=review_task,
+        review_mode="PDA",
+        review_date=date.today(),
+    )
+    for pick_line in lines:
+        review_line = WmsTaskLine.objects.create(
+            task=review_task,
+            product_id=pick_line.product_id,
+            from_location_id=pick_line.from_location_id,
+            to_location_id=pick_line.to_location_id,
+            qty_plan=pick_line.qty_done,
+            status=WmsTaskLine.Status.RELEASED,
+            src_model="WmsTaskLine",
+            src_id=pick_line.id,
+            plan_meta={
+                "outbound_order_line_id": pick_line.src_id,
+                "pick_task_id": pick_task.id,
+            },
+            created_by=by_user,
+            updated_by=by_user,
+        )
+        ReviewLineExtra.objects.create(
+            line=review_line,
+            from_location_id=pick_line.from_location_id,
+            qty_plan_origin=pick_line.qty_plan,
+            qty_picked_origin=pick_line.qty_done,
+        )
+
+    old_status = pick_task.status
+    pick_task.status = WmsTask.Status.COMPLETED
+    pick_task.review_status = WmsTask.ReviewStatus.PENDING
+    pick_task.finished_at = pick_task.finished_at or now
+    pick_task.picked_by = pick_task.picked_by or by_user
+    pick_task.updated_by = by_user
+    pick_task.save(
+        update_fields=[
+            "status",
+            "review_status",
+            "finished_at",
+            "picked_by",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    if old_status != WmsTask.Status.COMPLETED:
+        TaskStatusLog.objects.create(
+            task=pick_task,
+            old_status=old_status,
+            new_status=WmsTask.Status.COMPLETED,
+            changed_by=by_user,
+            note=f"提交真实复核任务 {review_task.task_no}",
+        )
+    return review_task
+
+
+@transaction.atomic
+def approve_review_task_for_pick(pick_task, *, by_user):
+    """Record an approved physical REVIEW and ready the source PICK for posting."""
+
+    pick_task = WmsTask.objects.select_for_update().get(pk=pick_task.pk)
+    order = _order_for_outbound_task(pick_task)
+    if (
+        order is not None
+        and order.processing_mode != ASSISTED_PROCESSING_MODE
+        and pick_task.picked_by_id
+        and pick_task.picked_by_id == getattr(by_user, "pk", None)
+    ):
+        raise ValidationError("标准出库必须由不同于拣货人的操作员独立复核。")
+    review_task = get_review_task_for_pick(pick_task, for_update=True)
+    if review_task is None:
+        raise ValidationError("缺少实际复核任务，请先提交拣货复核。")
+    if pick_task.status != WmsTask.Status.COMPLETED:
+        raise ValidationError("拣货任务尚未完成，不能复核。")
+    if review_task.status == WmsTask.Status.COMPLETED:
+        if review_task.review_status != WmsTask.ReviewStatus.APPROVED:
+            raise ValidationError("复核任务已结束但未审核通过。")
+        return review_task
+    if review_task.status not in {
+        WmsTask.Status.RELEASED,
+        WmsTask.Status.IN_PROGRESS,
+    }:
+        raise ValidationError(f"复核任务状态 {review_task.status} 不允许审核。")
+
+    now = timezone.now()
+    review_lines = WmsTaskLine.objects.select_for_update().filter(task=review_task)
+    if not review_lines.exists():
+        raise ValidationError("复核任务没有明细。")
+    review_lines.update(
+        qty_done=F("qty_plan"),
+        status=WmsTaskLine.Status.COMPLETED,
+        finished_at=now,
+        finished_by=by_user,
+        updated_at=now,
+        updated_by=by_user,
+    )
+    for line in review_lines:
+        ReviewLineExtra.objects.filter(line=line).update(
+            qty_reviewed=line.qty_plan,
+            qty_discrepancy_plan=Decimal("0"),
+            qty_discrepancy_picked=Decimal("0"),
+            review_status_rev=ReviewLineExtra.REVIEW_Status.REVIEWED,
+        )
+
+    old_review_status = review_task.status
+    review_task.status = WmsTask.Status.COMPLETED
+    review_task.review_status = WmsTask.ReviewStatus.APPROVED
+    review_task.posting_status = WmsTask.PostingStatus.PENDING
+    review_task.approved_by = by_user
+    review_task.approved_at = now
+    review_task.finished_at = now
+    review_task.updated_by = by_user
+    review_task.save(
+        update_fields=[
+            "status",
+            "review_status",
+            "posting_status",
+            "approved_by",
+            "approved_at",
+            "finished_at",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    TaskStatusLog.objects.create(
+        task=review_task,
+        old_status=old_review_status,
+        new_status=WmsTask.Status.COMPLETED,
+        changed_by=by_user,
+        note="PDA 实物复核通过",
+    )
+
+    pick_task.review_status = WmsTask.ReviewStatus.APPROVED
+    pick_task.posting_status = WmsTask.PostingStatus.PENDING
+    pick_task.approved_by = by_user
+    pick_task.approved_at = now
+    pick_task.updated_by = by_user
+    pick_task.save(
+        update_fields=[
+            "review_status",
+            "posting_status",
+            "approved_by",
+            "approved_at",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    return review_task
+
+
+def _review_workflow_payload(review_task):
+    """Return normalized reviewed quantities tied to original order lines."""
+
+    payload = []
+    for review_line in review_task.lines.select_related("product").order_by("id"):
+        order_line_id = (review_line.plan_meta or {}).get("outbound_order_line_id")
+        if not order_line_id and review_line.src_id:
+            order_line_id = WmsTaskLine.objects.filter(pk=review_line.src_id).values_list(
+                "src_id", flat=True
+            ).first()
+        qty = Decimal(review_line.qty_done or review_line.qty_plan or 0)
+        if order_line_id and qty > 0:
+            payload.append(
+                {
+                    "order_line_id": int(order_line_id),
+                    "product_id": review_line.product_id,
+                    "qty": qty,
+                    "from_location_id": review_line.to_location_id
+                    or review_line.from_location_id,
+                }
+            )
+    return payload
+
+
+def _create_workflow_task(
+    *,
+    task_type,
+    order,
+    payload,
+    group_no,
+    by_user,
+):
+    existing = (
+        WmsTask.objects.filter(
+            task_type=task_type,
+            source_model="outboundorder",
+            source_pk=str(order.pk),
+            task_group_no=group_no,
+        )
+        .exclude(status=WmsTask.Status.CANCELLED)
+        .first()
+    )
+    if existing is not None:
+        return existing
+    doc_type = "PKG" if task_type == WmsTask.TaskType.PACK else "FY"
+    now = timezone.now()
+    task = WmsTask.objects.create(
+        task_no=DocSequence.next_code(
+            doc_type=doc_type,
+            warehouse=order.warehouse,
+            owner=order.owner,
+            biz_date=date.today(),
+        ),
+        task_type=task_type,
+        status=WmsTask.Status.RELEASED,
+        owner=order.owner,
+        warehouse=order.warehouse,
+        released_at=now,
+        ref_no=order.order_no,
+        task_group_no=group_no,
+        source_app="outbound",
+        source_model="outboundorder",
+        source_pk=str(order.pk),
+        created_by=by_user,
+        updated_by=by_user,
+    )
+    if task_type == WmsTask.TaskType.PACK:
+        PackTaskExtra.objects.create(task=task)
+    else:
+        DispatchTaskExtra.objects.create(task=task)
+    for item in payload:
+        WmsTaskLine.objects.create(
+            task=task,
+            product_id=item["product_id"],
+            from_location_id=item.get("from_location_id"),
+            qty_plan=item["qty"],
+            status=WmsTaskLine.Status.RELEASED,
+            src_model="OutboundOrderLine",
+            src_id=item["order_line_id"],
+            created_by=by_user,
+            updated_by=by_user,
+        )
+    return task
+
+
+@transaction.atomic
+def create_followups_from_review(review_task, *, by_user=None):
+    """Create released PACK/DISPATCH work from a posted standard review."""
+
+    review_task = WmsTask.objects.select_for_update().get(pk=review_task.pk)
+    if review_task.task_type != WmsTask.TaskType.REVIEW:
+        raise ValidationError("仅 REVIEW 任务可以派生后续任务。")
+    if review_task.review_status != WmsTask.ReviewStatus.APPROVED:
+        raise ValidationError("复核任务未通过，不能派生后续任务。")
+    order = _order_for_outbound_task(review_task, for_update=True)
+    if order is None:
+        raise ValidationError("复核任务无法解析对应的出库订单。")
+    if order.processing_mode == ASSISTED_PROCESSING_MODE:
+        return {}
+
+    OutboundOrderLine = order.lines.model
+    order_lines = {
+        line.id: line
+        for line in OutboundOrderLine.objects.filter(order=order, is_deleted=False)
+    }
+    pack_payload, dispatch_payload = [], []
+    for item in _review_workflow_payload(review_task):
+        order_line = order_lines.get(item["order_line_id"])
+        if order_line is None:
+            raise ValidationError("复核行无法匹配原出库订单行。")
+        if order_line.pack_requirement != "NONE":
+            pack_payload.append(item)
+        else:
+            dispatch_payload.append(item)
+
+    created = {}
+    if pack_payload:
+        created["pack_task"] = _create_workflow_task(
+            task_type=WmsTask.TaskType.PACK,
+            order=order,
+            payload=pack_payload,
+            group_no=review_task.task_no,
+            by_user=by_user,
+        )
+    if dispatch_payload:
+        created["dispatch_task"] = _create_workflow_task(
+            task_type=WmsTask.TaskType.DISPATCH,
+            order=order,
+            payload=dispatch_payload,
+            group_no=review_task.task_no,
+            by_user=by_user,
+        )
+    if not created:
+        raise ValidationError("复核任务没有可派生的有效数量。")
+    return created
+
+
+@transaction.atomic
+def finalize_review_after_pick_post(review_task, *, by_user):
+    """Mark the REVIEW posted only after source PICK inventory posting succeeds."""
+
+    review_task = WmsTask.objects.select_for_update().get(pk=review_task.pk)
+    if review_task.status != WmsTask.Status.COMPLETED:
+        raise ValidationError("复核任务未完成。")
+    if review_task.review_status != WmsTask.ReviewStatus.APPROVED:
+        raise ValidationError("复核任务未审核通过。")
+    try:
+        pick_task = WmsTask.objects.select_for_update().get(
+            pk=int(review_task.source_pk),
+            task_type=WmsTask.TaskType.PICK,
+        )
+    except (TypeError, ValueError, WmsTask.DoesNotExist) as exc:
+        raise ValidationError("复核任务无法解析来源拣货任务。") from exc
+    if pick_task.posting_status != WmsTask.PostingStatus.POSTED:
+        raise ValidationError("来源拣货任务尚未成功过账，不能完成复核。")
+    review_task.posting_status = WmsTask.PostingStatus.POSTED
+    review_task.posted_by = review_task.posted_by or by_user
+    review_task.posted_at = review_task.posted_at or timezone.now()
+    review_task.updated_by = by_user
+    review_task.save(
+        update_fields=[
+            "posting_status",
+            "posted_by",
+            "posted_at",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    return create_followups_from_review(review_task, by_user=by_user)
+
+
+@transaction.atomic
+def create_dispatch_from_pack(pack_task, *, by_user=None):
+    """Idempotently create a released DISPATCH after a PACK is complete."""
+
+    pack_task = WmsTask.objects.select_for_update().get(pk=pack_task.pk)
+    if pack_task.task_type != WmsTask.TaskType.PACK:
+        raise ValidationError("仅 PACK 任务可以派生发运任务。")
+    if pack_task.status != WmsTask.Status.COMPLETED:
+        raise ValidationError("打包任务未完成，不能创建发运任务。")
+    order = _order_for_outbound_task(pack_task, for_update=True)
+    if order is None:
+        raise ValidationError("打包任务无法解析对应的出库订单。")
+    payload = [
+        {
+            "order_line_id": line.src_id,
+            "product_id": line.product_id,
+            "qty": Decimal(line.qty_done or line.qty_plan or 0),
+            "from_location_id": line.to_location_id or line.from_location_id,
+        }
+        for line in pack_task.lines.exclude(status=WmsTaskLine.Status.CANCELLED)
+        if line.src_id and Decimal(line.qty_done or line.qty_plan or 0) > 0
+    ]
+    if not payload:
+        raise ValidationError("打包任务没有可发运数量。")
+    return _create_workflow_task(
+        task_type=WmsTask.TaskType.DISPATCH,
+        order=order,
+        payload=payload,
+        group_no=pack_task.task_no,
+        by_user=by_user,
+    )
+
+
+@transaction.atomic
+def close_order_after_dispatch(dispatch_task, *, by_user=None):
+    """Close a standard order only after all released dispatch work is complete."""
+
+    dispatch_task = WmsTask.objects.select_for_update().get(pk=dispatch_task.pk)
+    if dispatch_task.task_type != WmsTask.TaskType.DISPATCH:
+        raise ValidationError("仅 DISPATCH 任务可以触发订单关闭。")
+    if dispatch_task.status != WmsTask.Status.COMPLETED:
+        raise ValidationError("发运任务未完成，不能关闭订单。")
+    order = _order_for_outbound_task(dispatch_task, for_update=True)
+    if order is None:
+        raise ValidationError("发运任务无法解析对应的出库订单。")
+
+    dispatch_tasks = WmsTask.objects.select_for_update().filter(
+        task_type=WmsTask.TaskType.DISPATCH,
+        source_model="outboundorder",
+        source_pk=str(order.pk),
+    ).exclude(status=WmsTask.Status.CANCELLED)
+    if not dispatch_tasks.exists() or dispatch_tasks.exclude(
+        status=WmsTask.Status.COMPLETED
+    ).exists():
+        return order
+
+    dispatched_by_line = {
+        row["src_id"]: Decimal(row["qty"] or 0)
+        for row in (
+            WmsTaskLine.objects.filter(task__in=dispatch_tasks)
+            .exclude(status=WmsTaskLine.Status.CANCELLED)
+            .values("src_id")
+            .annotate(qty=Sum("qty_done"))
+        )
+    }
+    shortages = []
+    for line in order.lines.filter(is_deleted=False):
+        dispatched = dispatched_by_line.get(line.id, Decimal("0"))
+        if dispatched < Decimal(line.base_qty or 0):
+            shortages.append(f"订单行 {line.id} 尚差 {line.base_qty - dispatched}")
+    if shortages:
+        raise ValidationError("发运数量未覆盖订单需求：" + "；".join(shortages[:10]))
+
+    if not order.is_closed:
+        order.is_closed = True
+        order.close_reason = "全部发运完成"
+        order.updated_by = by_user
+        order.save(
+            update_fields=["is_closed", "close_reason", "updated_by", "updated_at"]
+        )
+    return order
+
 # 仓库管理员拒绝：释放已冻结的库存并取消任务
 @transaction.atomic
-def unallocate_for_order(order) -> Decimal:
-    """仓库拒绝：释放库存（allocated_qty -= qty_plan），取消相关任务"""
+def _validate_allocation_can_be_released(order) -> None:
+    tasks = (
+        WmsTask.objects.select_for_update()
+        .filter(task_type=TASK_TYPE_PICK)
+        .filter(_task_source_q(order))
+        .exclude(status=WmsTask.Status.CANCELLED)
+    )
+    blocked = tasks.filter(
+        status__in=[WmsTask.Status.IN_PROGRESS, WmsTask.Status.COMPLETED]
+    ).first()
+    if blocked is not None:
+        raise ValidationError(
+            f"拣货任务 {blocked.task_no} 已开始或完成，禁止取消/撤回订单。"
+        )
+    started_line = WmsTaskLine.objects.filter(
+        task__in=tasks,
+        qty_done__gt=0,
+    ).first()
+    if started_line is not None:
+        raise ValidationError("拣货任务已有执行数量，禁止释放库存分配。")
+
+
+@transaction.atomic
+def unallocate_for_order(order, *, by_user=None) -> Decimal:
+    """Release frozen inventory and retain cancelled task lines as audit evidence."""
     released = Decimal("0")
     ctx, ctx_text = build_log_payload(order=order)
     logger.info("outbound.unallocate.begin %s", ctx_text, extra=ctx)
-    # key = _task_source_key(order)
-    # tasks = (
-    #     WmsTask.objects
-    #     .select_for_update()
-    #     .filter(task_type=TASK_TYPE_PICK, **key)
-    #     .exclude(status__in=["CANCELLED", "COMPLETED"])
-    # )
-
+    _validate_allocation_can_be_released(order)
     tasks = (
         WmsTask.objects
         .select_for_update()
@@ -521,38 +1132,140 @@ def unallocate_for_order(order) -> Decimal:
     )
 
     for task in tasks:
-        for tl in WmsTaskLine.objects.filter(task=task):
-            qty = tl.qty_plan
-            # 释放已冻结的 allocated_qty
-            InventoryDetail.objects.filter(
+        lines = WmsTaskLine.objects.select_for_update().filter(task=task).exclude(
+            status=WmsTaskLine.Status.CANCELLED
+        )
+        for tl in lines:
+            remaining = Decimal(tl.qty_plan or 0)
+            detail_id = (tl.plan_meta or {}).get("inventory_detail_id")
+            details = InventoryDetail.objects.select_for_update().filter(
                 owner_id=task.owner_id,
                 warehouse_id=task.warehouse_id,
                 product_id=tl.product_id,
                 location_id=tl.from_location_id,
-                allocated_qty__gte=qty,
-            ).update(
-                allocated_qty=F("allocated_qty") - qty,
-                available_qty=F("available_qty") + qty,
+                allocated_qty__gt=0,
             )
-            released += qty
+            if detail_id:
+                details = details.filter(pk=detail_id)
+            for detail in details.order_by("id"):
+                if remaining <= 0:
+                    break
+                qty = min(Decimal(detail.allocated_qty or 0), remaining)
+                if qty <= 0:
+                    continue
+                updated = InventoryDetail.objects.filter(
+                    pk=detail.pk,
+                    allocated_qty__gte=qty,
+                ).update(
+                    allocated_qty=F("allocated_qty") - qty,
+                    available_qty=F("available_qty") + qty,
+                )
+                if updated != 1:
+                    raise ValidationError("释放冻结库存时发生并发冲突，请重试。")
+                remaining -= qty
+                released += qty
+            if remaining > 0:
+                raise ValidationError(
+                    f"任务行 {tl.id} 的冻结库存不足，尚差 {remaining}，禁止取消。"
+                )
             task_ctx, task_text = build_log_payload(order=order, task=task)
             logger.info(
                 "outbound.unallocate.line_released %s product_id=%s location_id=%s qty=%s",
                 task_text,
                 tl.product_id,
                 tl.from_location_id,
-                qty,
+                tl.qty_plan,
                 extra=task_ctx,
             )
 
-        # 取消任务
-        WmsTaskLine.objects.filter(task=task).delete()
-        task.status = "CANCELLED"
-        task.save(update_fields=["status"])
+        now = timezone.now()
+        lines.update(
+            status=WmsTaskLine.Status.CANCELLED,
+            updated_at=now,
+            updated_by=by_user,
+        )
+        old_status = task.status
+        task.status = WmsTask.Status.CANCELLED
+        task.finished_at = now
+        task.updated_by = by_user
+        task.save(update_fields=["status", "finished_at", "updated_by", "updated_at"])
+        TaskStatusLog.objects.create(
+            task=task,
+            old_status=old_status,
+            new_status=WmsTask.Status.CANCELLED,
+            changed_by=by_user,
+            note="订单取消/撤回，释放库存分配",
+        )
         task_ctx, task_text = build_log_payload(order=order, task=task)
         logger.info("outbound.unallocate.task_cancelled %s", task_text, extra=task_ctx)
     logger.info("outbound.unallocate.completed %s released_qty=%s", ctx_text, released, extra=ctx)
     return released
+
+
+@transaction.atomic
+def cancel_order(order, *, by_user, reason="货主管理员取消订单"):
+    """Cancel an unstarted order and release every outstanding allocation."""
+
+    Order = type(order)
+    order = Order.objects.select_for_update().get(pk=order.pk)
+    if order.approval_status == "CANCELLED":
+        raise ValidationError("订单已取消，请勿重复操作。")
+    if order.is_closed:
+        raise ValidationError("已关闭订单不能取消。")
+    _validate_allocation_can_be_released(order)
+    unallocate_for_order(order, by_user=by_user)
+    order.approval_status = "CANCELLED"
+    order.close_reason = (reason or "取消订单").strip()[:50]
+    order.updated_by = by_user
+    order.save(
+        update_fields=["approval_status", "close_reason", "updated_by", "updated_at"]
+    )
+    return order
+
+
+@transaction.atomic
+def withdraw_order(order, *, by_user, reason="撤销提交"):
+    """Return an unstarted submitted order to editable draft state."""
+
+    Order = type(order)
+    order = Order.objects.select_for_update().get(pk=order.pk)
+    if order.submit_status != "SUBMITTED":
+        raise ValidationError("仅已提交订单可以撤回。")
+    if order.approval_status == "CANCELLED" or order.is_closed:
+        raise ValidationError("已取消或已关闭订单不能撤回。")
+    _validate_allocation_can_be_released(order)
+    unallocate_for_order(order, by_user=by_user)
+
+    order.submit_status = "DRAFT"
+    order.approval_status = "OWNER_PENDING"
+    order.approved_by_ownermanager = None
+    order.approved_at_ownermanager = None
+    order.approved_by_warehouse = None
+    order.approved_at_warehouse = None
+    order.pricing_status = "PENDING"
+    order.priced_at = None
+    order.priced_by = None
+    order.final_order_amount = Decimal("0.00")
+    order.close_reason = (reason or "撤销提交").strip()[:50]
+    order.updated_by = by_user
+    order.save(
+        update_fields=[
+            "submit_status",
+            "approval_status",
+            "approved_by_ownermanager",
+            "approved_at_ownermanager",
+            "approved_by_warehouse",
+            "approved_at_warehouse",
+            "pricing_status",
+            "priced_at",
+            "priced_by",
+            "final_order_amount",
+            "close_reason",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    return order
 
 # 生成拣货任务草稿：把 RESERVE 任务升级为 DRAFT/READY
 @transaction.atomic

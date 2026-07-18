@@ -6,11 +6,11 @@ from rest_framework.pagination import PageNumberPagination
 from .models import InventorySummary
 from .serializers import OwnerInventorySummarySerializer
 
-from django.db.models import Q, Sum
-from rest_framework import mixins, viewsets
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.pagination import PageNumberPagination
+from django.db.models import Sum
 from rest_framework.exceptions import PermissionDenied, ValidationError
+
+from allapp.accounts.access import AccessScope
+from allapp.accounts.audit import record_audit_event
 
 from .models import InventoryDetail
 from .serializers import (
@@ -36,15 +36,20 @@ class OwnerInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericViewSe
 
     def get_queryset(self):
         user = self.request.user
-        owner_id = getattr(user, "owner_id", None)
-
-        # 未绑定货主，直接返回空
-        if not owner_id:
-            return InventorySummary.objects.none()
+        scope = AccessScope.for_user(user)
+        qs = scope.filter_queryset(
+            InventorySummary.objects.filter(is_active=True),
+            owner_field="owner_id",
+            warehouse_field=None,
+        )
+        if scope.is_global:
+            owner_id = (self.request.query_params.get("owner_id") or "").strip()
+            if not owner_id:
+                return InventorySummary.objects.none()
+            qs = qs.filter(owner_id=owner_id)
 
         qs = (
-            InventorySummary.objects
-            .filter(owner_id=owner_id, is_active=True)
+            qs
             .select_related("product")
             .order_by("product_id")
         )
@@ -59,6 +64,17 @@ class OwnerInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericViewSe
             )
 
         return qs
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        record_audit_event(
+            action="QUERY",
+            module="inventory.owner_summary",
+            request=request,
+            owner_id=next(iter(AccessScope.for_user(request.user).owner_ids), None),
+            metadata={"search": request.query_params.get("search", "")},
+        )
+        return response
 
 
 
@@ -78,23 +94,21 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
     pagination_class = DefaultPagination
 
     def _check_company_level_permission(self, user):
-        """
-        这里是占位逻辑，请按你真实的用户体系改。
-        例如：
-        - user.is_superuser
-        - user.groups.filter(name='warehouse_boss').exists()
-        - user.role == 'COMPANY_ADMIN'
-        """
         if user.is_superuser:
-            return
-
-        # 仓库操作员 / 仓库管理员：
-        # 只要用户绑定了 warehouse，认为是仓库端用户，允许查看公司级库存汇总
-        if getattr(user, "warehouse_id", None):
-            return
-
-        # 货主端用户通常只有 owner，没有 warehouse，不允许查看
-        raise PermissionDenied("无权查看公司级库存汇总")
+            return AccessScope.for_user(user)
+        scope = AccessScope.for_user(user)
+        allowed = any(
+            user.has_perm(code)
+            for code in (
+                "accounts.access_warehouse_operations",
+                "accounts.access_warehouse_management",
+                "reports.view_warehouse_operations",
+                "reports.view_boss_dashboard",
+            )
+        )
+        if not scope.is_valid or not scope.warehouse_ids or not allowed:
+            raise PermissionDenied("无权查看仓库库存汇总")
+        return scope
 
     def get_serializer_class(self):
         mode = (self.request.query_params.get("mode") or "warehouse").strip().lower()
@@ -104,7 +118,7 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
 
     def get_queryset(self):
         user = self.request.user
-        self._check_company_level_permission(user)
+        scope = self._check_company_level_permission(user)
 
         mode = (self.request.query_params.get("mode") or "warehouse").strip().lower()
         if mode not in {"warehouse", "all"}:
@@ -114,12 +128,16 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
         owner_id = (self.request.query_params.get("owner_id") or "").strip()
         search = (self.request.query_params.get("search") or "").strip()
 
-        qs = InventoryDetail.objects.select_related(
-            "warehouse", "owner", "product"
+        qs = scope.filter_queryset(
+            InventoryDetail.objects.select_related("warehouse", "owner", "product"),
+            owner_field="owner_id",
+            warehouse_field="warehouse_id",
         )
 
         # 可选过滤：按仓库
         if warehouse_id:
+            if not scope.allows(warehouse_id=warehouse_id):
+                raise PermissionDenied("无权查看所请求的仓库")
             qs = qs.filter(warehouse_id=warehouse_id)
 
         # 可选过滤：按货主
@@ -236,6 +254,20 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
         serializer = self.get_serializer(data, many=True)
 
         if page is not None:
-            return self.get_paginated_response(serializer.data)
-        from rest_framework.response import Response
-        return Response(serializer.data)
+            response = self.get_paginated_response(serializer.data)
+        else:
+            from rest_framework.response import Response
+            response = Response(serializer.data)
+        record_audit_event(
+            action="QUERY",
+            module="inventory.company_summary",
+            request=request,
+            owner_id=int(request.query_params["owner_id"])
+            if (request.query_params.get("owner_id") or "").isdigit()
+            else None,
+            warehouse_id=int(request.query_params["warehouse_id"])
+            if (request.query_params.get("warehouse_id") or "").isdigit()
+            else None,
+            metadata={"mode": mode, "search": request.query_params.get("search", "")},
+        )
+        return response

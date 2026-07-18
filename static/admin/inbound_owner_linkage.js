@@ -34,7 +34,12 @@
   }
 
   // ——— supplier 下拉（单一） ———
-  function refreshSupplier(ownerId) {
+  function scopeQuery(ownerId, warehouseId) {
+    return '?owner=' + encodeURIComponent(ownerId)
+      + '&warehouse=' + encodeURIComponent(warehouseId || '');
+  }
+
+  function refreshSupplier(ownerId, warehouseId) {
     var supplier = document.getElementById('id_supplier');
     if (!supplier) return;
     var src = supplier.getAttribute('data-source-url');
@@ -44,18 +49,18 @@
     clearSelect(supplier);
     if (!ownerId) return;
 
-    fetchOptions(src + '?owner=' + encodeURIComponent(ownerId), function (list) {
+    fetchOptions(src + scopeQuery(ownerId, warehouseId), function (list) {
       fillSelect(supplier, list, keep);
     });
   }
 
   // ——— product 下拉（多行 Inline） ———
-  function refreshAllProducts(ownerId) {
+  function refreshAllProducts(ownerId, warehouseId) {
     var selects = document.querySelectorAll('select.vProductByOwner');
-    selects.forEach(function (sel) { refreshOneProductSelect(sel, ownerId); });
+    selects.forEach(function (sel) { refreshOneProductSelect(sel, ownerId, warehouseId); });
   }
 
-  function refreshOneProductSelect(sel, ownerId) {
+  function refreshOneProductSelect(sel, ownerId, warehouseId) {
     var src = sel.getAttribute('data-source-url');
     if (!src) return;
 
@@ -63,7 +68,7 @@
     clearSelect(sel);
     if (!ownerId) return;
 
-    fetchOptions(src + '?owner=' + encodeURIComponent(ownerId), function (list) {
+    fetchOptions(src + scopeQuery(ownerId, warehouseId), function (list) {
       fillSelect(sel, list, keep);
     });
   }
@@ -72,17 +77,19 @@
     // Django admin 触发的事件
     document.addEventListener('formset:added', function (e) {
       var owner = document.getElementById('id_owner');
+      var warehouse = document.getElementById('id_warehouse');
       if (!owner) return;
       var container = e.target || (e.detail && e.detail.formset);
       if (!container) return;
 
       var sel = container.querySelector && container.querySelector('select.vProductByOwner');
-      if (sel) refreshOneProductSelect(sel, owner.value);
+      if (sel) refreshOneProductSelect(sel, owner.value, warehouse && warehouse.value);
     });
 
     // 兜底：MutationObserver（个别主题可能不触发上面的事件）
     var mo = new MutationObserver(function (mutations) {
       var owner = document.getElementById('id_owner');
+      var warehouse = document.getElementById('id_warehouse');
       if (!owner) return;
       mutations.forEach(function (m) {
         m.addedNodes.forEach(function (node) {
@@ -90,7 +97,7 @@
           var sel = node.matches && node.matches('select.vProductByOwner')
             ? node
             : (node.querySelector && node.querySelector('select.vProductByOwner'));
-          if (sel) refreshOneProductSelect(sel, owner.value);
+          if (sel) refreshOneProductSelect(sel, owner.value, warehouse && warehouse.value);
         });
       });
     });
@@ -100,17 +107,25 @@
   // ——— entry ———
   ready(function () {
     var owner = document.getElementById('id_owner');
+    var warehouse = document.getElementById('id_warehouse');
     if (!owner) return;
 
     // 初次进入，根据 owner 初始化
-    refreshSupplier(owner.value);
-    refreshAllProducts(owner.value);
+    refreshSupplier(owner.value, warehouse && warehouse.value);
+    refreshAllProducts(owner.value, warehouse && warehouse.value);
 
     // owner 改变 → 两类下拉都联动刷新
     owner.addEventListener('change', function () {
-      refreshSupplier(owner.value);
-      refreshAllProducts(owner.value);
+      refreshSupplier(owner.value, warehouse && warehouse.value);
+      refreshAllProducts(owner.value, warehouse && warehouse.value);
     });
+
+    if (warehouse) {
+      warehouse.addEventListener('change', function () {
+        refreshSupplier(owner.value, warehouse.value);
+        refreshAllProducts(owner.value, warehouse.value);
+      });
+    }
 
     // 监听新增行
     watchNewInlines();

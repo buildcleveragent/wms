@@ -15,11 +15,12 @@ from django.core.management.base import CommandError
 from django.db import close_old_connections
 from django.db.utils import IntegrityError
 from django.db import models
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from django.urls import reverse
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
+from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Customer, Owner
 from allapp.core.choices import InvTxType
 from allapp.billing.enums import (
@@ -1962,12 +1963,68 @@ class BillingApiTests(TestCase):
             owner=self.owner,
             warehouse=self.warehouse,
         )
+        # Billing APIs are fail-closed. Keep the legacy warehouse binding for
+        # service fixture compatibility, but grant the actor one explicit
+        # owner-manager scope so it cannot broaden to other owners.
+        UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.OWNER_MANAGER,
+            owner=self.owner,
+        )
         self.user.user_permissions.add(
             Permission.objects.get(codename="change_billingperiod"),
             Permission.objects.get(codename="add_bill"),
+            Permission.objects.get(
+                content_type__app_label="accounts",
+                codename="view_owner_financials",
+            ),
+            Permission.objects.get(
+                content_type__app_label="reports",
+                codename="export_operations",
+            ),
         )
         self.client = APIClient()
         self.client.force_authenticate(self.user)
+
+    def _warehouse_boss(self, username, *, owner=None):
+        user = get_user_model().objects.create_user(
+            username=username,
+            password="x",
+            owner=owner,
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=user,
+            role=UserRoleScope.Role.WAREHOUSE_BOSS,
+            warehouse=self.warehouse,
+        )
+        user.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="reports",
+                codename="view_warehouse_finance",
+            )
+        )
+        return user
+
+    def _owner_finance_user(self, username):
+        user = get_user_model().objects.create_user(
+            username=username,
+            password="x",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=user,
+            role=UserRoleScope.Role.OWNER_MANAGER,
+            owner=self.owner,
+        )
+        user.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="accounts",
+                codename="view_owner_financials",
+            )
+        )
+        return user
 
     def _create_rule(self, *, owner=None, calc_method=CalcMethod.PER_ORDER, unit_price="10.00"):
         return BillingRule.objects.create(
@@ -2018,7 +2075,7 @@ class BillingApiTests(TestCase):
             unit_price=Decimal("8.00"),
         )
         self._create_rule(owner=self.other_owner, unit_price="20.00")
-        BillingRule.objects.create(
+        other_warehouse_rule = BillingRule.objects.create(
             owner=self.owner,
             warehouse=Warehouse.objects.create(code="WHAPIX", name="Warehouse API X"),
             charge_type=ChargeType.DISPATCH,
@@ -2031,7 +2088,7 @@ class BillingApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             sorted(item["id"] for item in response.data),
-            sorted([own_rule.id, generic_rule.id]),
+            sorted([own_rule.id, generic_rule.id, other_warehouse_rule.id]),
         )
 
     def test_rule_tiers_list_includes_scoped_and_generic_rules(self):
@@ -2319,11 +2376,7 @@ class BillingApiTests(TestCase):
         self.assertEqual(response.data["warehouse"], other_warehouse.id)
 
     def test_warehouse_dashboard_overview_aggregates_multiple_owners_in_same_warehouse(self):
-        boss = get_user_model().objects.create_user(
-            username="billing-warehouse-boss",
-            password="x",
-            warehouse=self.warehouse,
-        )
+        boss = self._warehouse_boss("billing-warehouse-boss")
         client = APIClient()
         client.force_authenticate(boss)
 
@@ -2388,11 +2441,7 @@ class BillingApiTests(TestCase):
         )
 
     def test_warehouse_dashboard_overview_owner_filter_narrows_results(self):
-        boss = get_user_model().objects.create_user(
-            username="billing-warehouse-boss-filter",
-            password="x",
-            warehouse=self.warehouse,
-        )
+        boss = self._warehouse_boss("billing-warehouse-boss-filter")
         client = APIClient()
         client.force_authenticate(boss)
 
@@ -2437,12 +2486,7 @@ class BillingApiTests(TestCase):
         self.assertEqual(response.data["by_owner"][0]["owner"], self.owner.id)
 
     def test_owner_scoped_dashboard_rejects_other_owner_query(self):
-        boss = get_user_model().objects.create_user(
-            username="billing-owner-boss-filter",
-            password="x",
-            owner=self.owner,
-            warehouse=self.warehouse,
-        )
+        boss = self._owner_finance_user("billing-owner-boss-filter")
         client = APIClient()
         client.force_authenticate(boss)
 
@@ -2454,11 +2498,8 @@ class BillingApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_warehouse_boss_scope_mode_keeps_multi_owner_view_for_owner_bound_user(self):
-        boss = get_user_model().objects.create_user(
-            username="billing-owner-bound-warehouse-boss",
-            password="x",
-            owner=self.owner,
-            warehouse=self.warehouse,
+        boss = self._warehouse_boss(
+            "billing-owner-bound-warehouse-boss", owner=self.owner
         )
         client = APIClient()
         client.force_authenticate(boss)
@@ -2505,11 +2546,7 @@ class BillingApiTests(TestCase):
         )
 
     def test_warehouse_dashboard_scope_owner_name_does_not_leak_unscoped_owner(self):
-        boss = get_user_model().objects.create_user(
-            username="billing-warehouse-boss-scope",
-            password="x",
-            warehouse=self.warehouse,
-        )
+        boss = self._warehouse_boss("billing-warehouse-boss-scope")
         client = APIClient()
         client.force_authenticate(boss)
 
@@ -2523,6 +2560,194 @@ class BillingApiTests(TestCase):
         self.assertEqual(response.data["scope"]["owner_name"], "")
 
 
+class BillingWriteScopeTests(TestCase):
+    """State-changing endpoints must use final serializer tenant values."""
+
+    def setUp(self):
+        self.owner = Owner.objects.create(name="Billing Write Owner", code="BILWOWN")
+        self.other_owner = Owner.objects.create(
+            name="Billing Write Other Owner", code="BILWOTH"
+        )
+        self.warehouse = Warehouse.objects.create(
+            code="BILWWH", name="Billing Write Warehouse"
+        )
+        self.other_warehouse = Warehouse.objects.create(
+            code="BILWWH2", name="Billing Write Other Warehouse"
+        )
+        # Keep legacy bindings deliberately populated.  The API must preserve
+        # a valid final target from UserRoleScope instead of silently replacing
+        # it with these fields.
+        self.user = get_user_model().objects.create_user(
+            username="billing-write-scoped",
+            password="x",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.OWNER_MANAGER,
+            owner=self.owner,
+        )
+        self.user.user_permissions.add(
+            Permission.objects.get(codename="add_billingrule"),
+            Permission.objects.get(codename="add_billingperiod"),
+            Permission.objects.get(codename="change_billingperiod"),
+            Permission.objects.get(codename="add_billingmetricdaily"),
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_rule_create_uses_final_scope_not_legacy_warehouse_binding(self):
+        response = self.client.post(
+            "/api/billing/rules/",
+            {
+                "owner": self.owner.id,
+                "warehouse": self.other_warehouse.id,
+                "charge_type": ChargeType.DISPATCH,
+                "calc_method": CalcMethod.PER_ORDER,
+                "unit_price": "12.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        rule = BillingRule.objects.get(pk=response.data["id"])
+        self.assertEqual(rule.owner_id, self.owner.id)
+        self.assertEqual(rule.warehouse_id, self.other_warehouse.id)
+
+        cross_owner = self.client.post(
+            "/api/billing/rules/",
+            {
+                "owner": self.other_owner.id,
+                "warehouse": self.warehouse.id,
+                "charge_type": ChargeType.DISPATCH,
+                "calc_method": CalcMethod.PER_ORDER,
+                "unit_price": "12.00",
+            },
+            format="json",
+        )
+        self.assertEqual(cross_owner.status_code, 403)
+
+    def test_period_patch_rejects_cross_owner_final_serializer_target(self):
+        period = BillingPeriod.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            label="2026-07-WRITE-SCOPE",
+            start_date=datetime.date(2026, 7, 1),
+            end_date=datetime.date(2026, 7, 31),
+        )
+        # No legacy bindings on this actor: older save logic would persist the
+        # malicious owner because there was nothing to overwrite it with.
+        unbound_scoped = get_user_model().objects.create_user(
+            username="billing-write-unbound-scoped", password="x"
+        )
+        UserRoleScope.objects.create(
+            user=unbound_scoped,
+            role=UserRoleScope.Role.OWNER_MANAGER,
+            owner=self.owner,
+        )
+        unbound_scoped.user_permissions.add(
+            Permission.objects.get(codename="change_billingperiod")
+        )
+        client = APIClient()
+        client.force_authenticate(unbound_scoped)
+
+        response = client.patch(
+            f"/api/billing/periods/{period.id}/",
+            {"owner": self.other_owner.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        period.refresh_from_db()
+        self.assertEqual(period.owner_id, self.owner.id)
+
+    def test_metric_write_rejects_legacy_binding_without_explicit_scope(self):
+        legacy_user = get_user_model().objects.create_user(
+            username="billing-write-legacy-only",
+            password="x",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        legacy_user.user_permissions.add(
+            Permission.objects.get(codename="add_billingmetricdaily")
+        )
+        client = APIClient()
+        client.force_authenticate(legacy_user)
+
+        response = client.post(
+            "/api/billing/metrics/",
+            {
+                "owner": self.owner.id,
+                "warehouse": self.warehouse.id,
+                "service_date": "2026-07-01",
+                "metric_type": MetricType.ORDER_AMT,
+                "value": "1.0000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(BillingMetricDaily.objects.exists())
+
+    @override_settings(WMS_ACCESS_SCOPE_LEGACY_FALLBACK=True)
+    def test_metric_delete_rejects_legacy_scope_even_when_legacy_reads_are_enabled(self):
+        metric = BillingMetricDaily.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            service_date=datetime.date(2026, 7, 2),
+            metric_type=MetricType.ORDER_AMT,
+            value=Decimal("2.0000"),
+        )
+        legacy_user = get_user_model().objects.create_user(
+            username="billing-write-legacy-delete",
+            password="x",
+            owner=self.owner,
+        )
+        legacy_user.user_permissions.add(
+            Permission.objects.get(codename="delete_billingmetricdaily")
+        )
+        client = APIClient()
+        client.force_authenticate(legacy_user)
+
+        response = client.delete(f"/api/billing/metrics/{metric.id}/")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(BillingMetricDaily.objects.filter(pk=metric.id).exists())
+
+    def test_metric_generate_does_not_default_to_legacy_bindings(self):
+        missing_target = self.client.post(
+            "/api/billing/metrics/generate/",
+            {"service_date": "2026-07-01"},
+            format="json",
+        )
+        self.assertEqual(missing_target.status_code, 400)
+
+        with mock.patch(
+            "allapp.billing.views.generate_metrics_for_range",
+            return_value={"created": 1, "updated": 0},
+        ) as generate:
+            response = self.client.post(
+                "/api/billing/metrics/generate/",
+                {
+                    "service_date": "2026-07-01",
+                    "warehouse": self.warehouse.id,
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        generate.assert_called_once_with(
+            self.owner.id,
+            self.warehouse.id,
+            datetime.date(2026, 7, 1),
+            datetime.date(2026, 7, 1),
+            metric_types=None,
+            overwrite=False,
+            allow_area_fallback=False,
+        )
+
+
 class BillingMetricGenerationTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Metrics", code="OWMET")
@@ -2532,6 +2757,11 @@ class BillingMetricGenerationTests(TestCase):
             password="x",
             owner=self.owner,
             warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.OWNER_MANAGER,
+            owner=self.owner,
         )
         self.user.user_permissions.add(Permission.objects.get(codename="change_billingperiod"))
         self.client = APIClient()

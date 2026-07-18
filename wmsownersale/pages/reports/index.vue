@@ -3,7 +3,7 @@
     <view class="hero">
       <view class="hero-badge">Reports</view>
       <view class="section-title">报表与查询</view>
-      <view class="hero-desc">先把领导最关心的库存和计费结果放到这里，少配置、多看结果。</view>
+      <view class="hero-desc">计划、实际收发、库存与对账均按当前货主范围展示。</view>
     </view>
 
     <view
@@ -23,7 +23,19 @@
 </template>
 
 <script setup>
-const cards = [
+import { computed } from 'vue'
+import { useAuth } from '@/store/auth'
+
+const auth = useAuth()
+auth.ensureAuth()
+
+const baseCards = [
+  {
+    title: '入出库履约',
+    desc: '按计划量、库存过账和发运实绩查看订单进度与差异',
+    path: '/pages/reports/operations',
+    icon: '📈',
+  },
   {
     title: '实时库存',
     desc: '查看当前货主名下商品库存汇总',
@@ -35,8 +47,13 @@ const cards = [
     desc: '查看账期金额、费用构成、每日趋势和当前账单',
     path: '/pages/billing/overview',
     icon: '💳',
+    managerOnly: true,
   },
 ]
+
+const cards = computed(() =>
+  baseCards.filter((card) => !card.managerOnly || auth.isOwnerManager)
+)
 
 function go(path) {
   uni.navigateTo({ url: path })

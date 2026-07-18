@@ -1,6 +1,5 @@
 # allapp/outbound/views.py  或  allapp/outbound/api_views.py
 from django.core.exceptions import ValidationError as DjangoValidationError
-from rest_framework.permissions import AllowAny
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import quote
@@ -13,7 +12,8 @@ from django.apps import apps
 from datetime import datetime, timezone as datetime_timezone
 from uuid import UUID
 from django.db import IntegrityError
-from django.db.models import Q, Sum, Prefetch
+from django.db.models import CharField, Q, Sum, Prefetch
+from django.db.models.functions import Cast
 import logging
 from ..products.models import ProductPackage
 from django.db.models import F
@@ -30,8 +30,7 @@ from allapp.tasking.services import _run_posting_handler, adjust_pick_line_qty
 from allapp.inventory.models import PostingJournal
 from django.db import transaction
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
-from rest_framework import status
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from allapp.billing.enums import PeriodStatus
@@ -64,8 +63,11 @@ from allapp.outbound.authz import (
     strict_order_queryset,
     strict_pick_queryset,
 )
-from allapp.products.permissions import can_manage_all_owner_products, can_view_all_owner_products
+from allapp.products.permissions import can_manage_all_owner_products
 from allapp.core.utils.log_context import build_log_payload
+from allapp.accounts.access import AccessScope
+from allapp.accounts.audit import record_audit_event
+from allapp.accounts.models import UserRoleScope
 
 
 # 放到 OutboundOrderViewSet 类中
@@ -163,26 +165,96 @@ class IdempotencyConflict(APIException):
     default_code = "idempotency_conflict"
 
 
+def _catalog_scope(request):
+    scope = AccessScope.for_user(request.user)
+    if not scope.is_valid:
+        raise PermissionDenied("账号没有有效的角色数据范围。")
+    return scope
+
+
+def _warehouse_owner_ids(scope):
+    """Resolve owners that have business facts in the authorized warehouses."""
+
+    if not scope.is_valid or not scope.warehouse_ids:
+        return frozenset()
+    warehouse_ids = tuple(scope.warehouse_ids)
+    InventoryDetail = apps.get_model("inventory", "InventoryDetail")
+    InboundOrder = apps.get_model("inbound", "InboundOrder")
+    owner_ids = set(
+        InventoryDetail.objects.filter(warehouse_id__in=warehouse_ids)
+        .values_list("owner_id", flat=True)
+        .distinct()
+    )
+    owner_ids.update(
+        OutboundOrder.objects.filter(warehouse_id__in=warehouse_ids)
+        .values_list("owner_id", flat=True)
+        .distinct()
+    )
+    owner_ids.update(
+        InboundOrder.objects.filter(warehouse_id__in=warehouse_ids)
+        .values_list("owner_id", flat=True)
+        .distinct()
+    )
+    owner_ids.update(
+        WmsTask.objects.filter(warehouse_id__in=warehouse_ids)
+        .values_list("owner_id", flat=True)
+        .distinct()
+    )
+    return frozenset(int(owner_id) for owner_id in owner_ids if owner_id)
+
+
+def _catalog_owner_ids(scope):
+    if scope.is_global:
+        return None
+    if scope.owner_ids:
+        return scope.owner_ids
+    return _warehouse_owner_ids(scope)
+
+
+def _parse_catalog_id(value, field_name):
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValidationError({field_name: "必须是有效整数。"})
+
+
 def _resolve_product_owner_scope(request, *, param_name="owner", default_to_user_owner=True):
-    requested_owner = request.query_params.get(param_name)
-    user_owner = getattr(request.user, "owner_id", None)
-    if can_view_all_owner_products(request.user):
+    scope = _catalog_scope(request)
+    requested_owner = _parse_catalog_id(request.query_params.get(param_name), param_name)
+    allowed_owner_ids = _catalog_owner_ids(scope)
+    if scope.is_global:
         if requested_owner:
             return requested_owner
+        user_owner = getattr(request.user, "owner_id", None)
         return user_owner if default_to_user_owner else None
-    if requested_owner and str(requested_owner) != str(user_owner):
-        raise PermissionDenied("无权查看其他货主商品")
-    return user_owner
+    if requested_owner is not None and requested_owner not in allowed_owner_ids:
+        raise PermissionDenied("无权查看该货主档案或商品。")
+    if requested_owner is not None:
+        return requested_owner
+    if scope.owner_ids:
+        return next(iter(scope.owner_ids))
+    return None
 
 
 def _resolve_inventory_warehouse_scope(request):
-    requested_wh = request.query_params.get("warehouse_id")
-    if getattr(request.user, "is_superuser", False):
-        return requested_wh
+    scope = _catalog_scope(request)
+    requested_wh = _parse_catalog_id(
+        request.query_params.get("warehouse_id"), "warehouse_id"
+    )
+    if scope.is_global:
+        return frozenset({requested_wh}) if requested_wh else None
+    if scope.warehouse_ids:
+        if requested_wh is not None and requested_wh not in scope.warehouse_ids:
+            raise PermissionDenied("无权查看该仓库库存。")
+        return frozenset({requested_wh}) if requested_wh else scope.warehouse_ids
+    # Owner roles may inspect only their own owner's stock.  A warehouse filter
+    # narrows that owner-safe view but never widens the owner boundary.
+    if requested_wh:
+        return frozenset({requested_wh})
     user_wh = getattr(request.user, "warehouse_id", None)
-    if requested_wh and str(requested_wh) != str(user_wh):
-        raise PermissionDenied("无权查看其他仓库库存")
-    return user_wh or None
+    return frozenset({int(user_wh)}) if user_wh else None
 
 class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
@@ -191,13 +263,15 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     def list(self, request, *args, **kwargs):
         Product   = apps.get_model("products", "Product")
         InvDetail = apps.get_model("inventory", "InventoryDetail")
+        scope = _catalog_scope(request)
+        allowed_owner_ids = _catalog_owner_ids(scope)
 
         owner_id = _resolve_product_owner_scope(
             request,
             param_name="owner",
             default_to_user_owner=False,
         )
-        if not owner_id and not can_view_all_owner_products(request.user):
+        if not owner_id and allowed_owner_ids is not None and not allowed_owner_ids:
             ctx, ctx_text = build_log_payload(
                 user=request.user,
                 warehouse_id=request.query_params.get("warehouse_id"),
@@ -222,7 +296,10 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         qs = Product.objects.all()
         if owner_id:
             qs = qs.filter(owner_id=owner_id)
+        elif allowed_owner_ids is not None:
+            qs = qs.filter(owner_id__in=allowed_owner_ids)
         qs = (qs.select_related("base_uom", "replenish_uom",)
+              .prefetch_related(Prefetch("packages", queryset=pkg_qs))
               .only("id", "owner_id", "code", "name", "sku", "spec","product_image","gtin","min_price","max_discount",
                     "base_uom__code","base_uom__name", "replenish_uom__code", "replenish_uom__name","replenish_uom_id")
               .order_by("id"))
@@ -243,12 +320,14 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             return self.get_paginated_response([])
 
         pid_list = [p.id for p in page]
-        wh_id = _resolve_inventory_warehouse_scope(request)
+        warehouse_ids = _resolve_inventory_warehouse_scope(request)
         inv_filter = {"product_id__in": pid_list}
         if owner_id:
             inv_filter["owner_id"] = owner_id
-        if wh_id:
-            inv_filter["warehouse_id"] = int(wh_id)
+        elif allowed_owner_ids is not None:
+            inv_filter["owner_id__in"] = allowed_owner_ids
+        if warehouse_ids is not None:
+            inv_filter["warehouse_id__in"] = warehouse_ids
 
         rows = (InvDetail.objects
                 .filter(**inv_filter)
@@ -333,7 +412,6 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             packaging = product_packaging(p)
             unit_opts = build_unit_options(p, packaging)  # ← 基本单位 + 包装
             sel_idx = default_selected_index(packaging, unit_opts)
-            sel_unit = unit_opts[sel_idx] if unit_opts else None
 
 
             carton_unit, carton_conv = carton_info(p)
@@ -383,10 +461,31 @@ class CustomerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     def get_queryset(self):
         Customer = apps.get_model("baseinfo", "Customer")
         user = self.request.user
-
-        qs = Customer.objects.filter(salesperson=user)
-        if getattr(user, "owner_id", None):
-            qs = qs.filter(owner_id=user.owner_id)
+        scope = _catalog_scope(self.request)
+        qs = Customer.objects.all()
+        if not scope.is_global:
+            if scope.owner_ids:
+                qs = qs.filter(owner_id__in=scope.owner_ids)
+                if UserRoleScope.Role.OWNER_MANAGER not in scope.roles:
+                    qs = qs.filter(salesperson=user)
+            else:
+                param_name = (
+                    "owner_id"
+                    if self.request.query_params.get("owner_id") is not None
+                    else "owner"
+                )
+                owner_id = _resolve_product_owner_scope(
+                    self.request,
+                    param_name=param_name,
+                    default_to_user_owner=False,
+                )
+                qs = qs.filter(owner_id=owner_id) if owner_id else qs.none()
+        else:
+            requested_owner = self.request.query_params.get("owner_id") or self.request.query_params.get("owner")
+            if requested_owner:
+                qs = qs.filter(
+                    owner_id=_parse_catalog_id(requested_owner, "owner_id")
+                )
 
         q = self.request.query_params.get("search")
         if q:
@@ -407,14 +506,11 @@ class OwnerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
     def get_queryset(self):
         Owner = apps.get_model("baseinfo", "Owner")
-        user = self.request.user
-
+        scope = _catalog_scope(self.request)
         qs = Owner.objects.all()
-        if not can_view_all_owner_products(user):
-            if getattr(user, "owner_id", None):
-                qs = qs.filter(id=user.owner_id)
-            else:
-                qs = qs.none()
+        allowed_owner_ids = _catalog_owner_ids(scope)
+        if allowed_owner_ids is not None:
+            qs = qs.filter(id__in=allowed_owner_ids)
 
         q = self.request.query_params.get("search")
         if q:
@@ -435,11 +531,7 @@ class SupplierViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
     def get_queryset(self):
         Supplier = apps.get_model("baseinfo", "Supplier")
-        user = self.request.user
-
         qs = Supplier.objects.all()
-        # if getattr(user, "owner_id", None):
-        #     qs = qs.filter(owner_id=user.owner_id)
 
         q = self.request.query_params.get("search")
         o = _resolve_product_owner_scope(self.request, param_name="owner")
@@ -601,7 +693,6 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             packaging = product_packaging(p)
             unit_opts = build_unit_options(p, packaging)  # ← 基本单位 + 包装
             sel_idx = default_selected_index(packaging, unit_opts)
-            sel_unit = unit_opts[sel_idx] if unit_opts else None
 
             carton_unit, carton_conv = carton_info(p)
 
@@ -661,10 +752,15 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
             owner_id = int(owner_id)
         except (TypeError, ValueError):
             raise ValidationError({"owner_id": "owner_id 必须是有效整数。"})
+        scope = _catalog_scope(self.request)
+        allowed_owner_ids = _warehouse_owner_ids(scope)
+        if owner_id not in allowed_owner_ids:
+            raise PermissionDenied("该货主未关联当前授权仓库。")
         return get_object_or_404(
             Owner.objects.filter(
                 is_active=True,
                 allow_warehouse_assisted_outbound=True,
+                pk__in=allowed_owner_ids,
             ),
             pk=owner_id,
         )
@@ -672,9 +768,11 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=["get"])
     def owners(self, request):
         Owner = apps.get_model("baseinfo", "Owner")
+        allowed_owner_ids = _warehouse_owner_ids(_catalog_scope(request))
         qs = Owner.objects.filter(
             is_active=True,
             allow_warehouse_assisted_outbound=True,
+            pk__in=allowed_owner_ids,
         ).order_by("id")
         search = (request.query_params.get("search") or "").strip()
         if search:
@@ -725,6 +823,7 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         if not owner_id:
             raise ValidationError({"owner_id": "owner_id 参数必填。"})
         owner = self._enabled_owner(owner_id)
+        scope = _catalog_scope(request)
         search = (request.query_params.get("search") or "").strip()
         if not search:
             return Response([])
@@ -756,7 +855,7 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
             for row in (
                 InventoryDetail.objects.filter(
                     owner=owner,
-                    warehouse_id=request.user.warehouse_id,
+                    warehouse_id__in=scope.warehouse_ids,
                     product_id__in=product_ids,
                     is_active=True,
                 )
@@ -968,9 +1067,16 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         order = OutboundOrder.objects.filter(assistance_request_id=request_uuid).first()
         if order is None:
             return None
+        scope = AccessScope.for_user(user)
+        warehouse_id = (
+            next(iter(scope.warehouse_ids))
+            if scope.is_valid and len(scope.warehouse_ids) == 1
+            else None
+        )
         if (
             order.assisted_by_id != user.id
-            or order.warehouse_id != user.warehouse_id
+            or warehouse_id is None
+            or order.warehouse_id != warehouse_id
             or self._request_fingerprint(payload) != self._persisted_fingerprint(order)
             or not self._supplied_prices_match(payload, order)
         ):
@@ -1010,6 +1116,18 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
             raise ValidationError(
                 exc.message_dict if hasattr(exc, "message_dict") else exc.messages
             ) from exc
+        record_audit_event(
+            action="outbound.assisted.create_release",
+            module="outbound",
+            request=request,
+            obj=order,
+            after={
+                "submit_status": order.submit_status,
+                "approval_status": order.approval_status,
+                "task_id": task.id,
+                "task_status": task.status,
+            },
+        )
         return self._response(
             order,
             task,
@@ -1051,11 +1169,13 @@ class OutboundOrderViewSet(
 
     def _require_owner_buyer(self, endpoint):
         user = self.request.user
+        scope = AccessScope.for_user(user)
         allowed = bool(
             user.is_superuser
             or (
                 user.has_perm("outbound.submit_outbound_as_owner_buyers")
-                and getattr(user, "owner_id", None)
+                and scope.is_valid
+                and scope.owner_ids
                 and getattr(user, "warehouse_id", None)
             )
         )
@@ -1068,14 +1188,15 @@ class OutboundOrderViewSet(
 
     def _require_owner_manager(self, order, endpoint):
         user = self.request.user
+        scope = AccessScope.for_user(user)
         allowed = bool(
             user.is_superuser
             or (
                 user.has_perm("outbound.approve_outbound_as_owner_manager")
-                and getattr(user, "owner_id", None) == order.owner_id
-                and (
-                    not getattr(user, "warehouse_id", None)
-                    or user.warehouse_id == order.warehouse_id
+                and scope.owner_ids
+                and scope.allows(
+                    owner_id=order.owner_id,
+                    warehouse_id=order.warehouse_id,
                 )
             )
         )
@@ -1094,23 +1215,102 @@ class OutboundOrderViewSet(
     def list(self, request, *args, **kwargs):
         qs = self.get_queryset()
         q = request.query_params.get("search")
+        product_q = request.query_params.get("product") or request.query_params.get("sku")
         owner_id = request.query_params.get("owner_id")
         warehouse_id = request.query_params.get("warehouse_id")
         submit_status = request.query_params.get("submit_status")
         approval_status = request.query_params.get("approval_status")
+        outbound_type = request.query_params.get("outbound_type")
+        delivery_method = request.query_params.get("delivery_method")
+        source_no = request.query_params.get("src_bill_no")
+        task_no = request.query_params.get("task_no")
+        task_status = request.query_params.get("task_status")
+        waybill_no = request.query_params.get("waybill_no")
 
         if q:
             qs = qs.filter(
                 Q(order_no__icontains=q) |
+                Q(src_bill_no__icontains=q) |
+                Q(contact__icontains=q) | Q(contact_phone__icontains=q) |
                 Q(customer__name__icontains=q) | Q(customer__code__icontains=q) |
-                Q(supplier__name__icontains=q)
+                Q(supplier__name__icontains=q) |
+                Q(lines__product__name__icontains=q) |
+                Q(lines__product__code__icontains=q) |
+                Q(lines__product__sku__icontains=q) |
+                Q(lines__product__gtin__icontains=q) |
+                Q(lines__product__unit_barcode__icontains=q) |
+                Q(lines__product__carton_barcode__icontains=q) |
+                Q(lines__product__product_package__barcode__icontains=q)
+            )
+        if product_q:
+            qs = qs.filter(
+                Q(lines__product__name__icontains=product_q)
+                | Q(lines__product__code__icontains=product_q)
+                | Q(lines__product__sku__icontains=product_q)
+                | Q(lines__product__gtin__icontains=product_q)
+                | Q(lines__product__unit_barcode__icontains=product_q)
+                | Q(lines__product__carton_barcode__icontains=product_q)
+                | Q(lines__product__product_package__barcode__icontains=product_q)
             )
         if owner_id:      qs = qs.filter(owner_id=owner_id)
         if warehouse_id:  qs = qs.filter(warehouse_id=warehouse_id)
         if submit_status: qs = qs.filter(submit_status=submit_status)
         if approval_status: qs = qs.filter(approval_status=approval_status)
+        if outbound_type:
+            qs = qs.filter(outbound_type=outbound_type)
+        if delivery_method:
+            qs = qs.filter(delivery_method=delivery_method)
+        if source_no:
+            qs = qs.filter(src_bill_no__icontains=source_no)
 
-        page = self.paginate_queryset(qs)
+        date_from = request.query_params.get("date_from") or request.query_params.get(
+            "biz_date_from"
+        )
+        date_to = request.query_params.get("date_to") or request.query_params.get(
+            "biz_date_to"
+        )
+        if date_from:
+            parsed = parse_date(date_from)
+            if parsed is None:
+                raise ValidationError({"date_from": "日期格式必须为 YYYY-MM-DD。"})
+            qs = qs.filter(biz_date__gte=parsed)
+        if date_to:
+            parsed = parse_date(date_to)
+            if parsed is None:
+                raise ValidationError({"date_to": "日期格式必须为 YYYY-MM-DD。"})
+            qs = qs.filter(biz_date__lte=parsed)
+
+        closed = request.query_params.get("is_closed")
+        if closed is not None:
+            if closed.lower() not in {"1", "0", "true", "false"}:
+                raise ValidationError({"is_closed": "必须为 true/false 或 1/0。"})
+            qs = qs.filter(is_closed=closed.lower() in {"1", "true"})
+        overdue = request.query_params.get("overdue")
+        if overdue is not None:
+            if overdue.lower() not in {"1", "0", "true", "false"}:
+                raise ValidationError({"overdue": "必须为 true/false 或 1/0。"})
+            overdue_q = Q(etd__lt=timezone.now(), is_closed=False) & ~Q(
+                approval_status="CANCELLED"
+            )
+            qs = qs.filter(overdue_q) if overdue.lower() in {"1", "true"} else qs.exclude(overdue_q)
+
+        if task_no or task_status or waybill_no:
+            task_qs = WmsTask.objects.filter(
+                source_model__in=("outboundorder", "OutboundOrder"),
+            )
+            if task_no:
+                task_qs = task_qs.filter(task_no__icontains=task_no)
+            if task_status:
+                task_qs = task_qs.filter(status=task_status)
+            if waybill_no:
+                task_qs = task_qs.filter(
+                    lines__dispatchlineextra__waybill_no__icontains=waybill_no
+                )
+            qs = qs.annotate(
+                _order_pk_text=Cast("pk", output_field=CharField())
+            ).filter(_order_pk_text__in=task_qs.values("source_pk"))
+
+        page = self.paginate_queryset(qs.distinct())
         ser = OutboundOrderReadSerializer(page, many=True, context={"request": request})
         return self.get_paginated_response(ser.data)
 
@@ -1119,6 +1319,13 @@ class OutboundOrderViewSet(
         ser = OutboundOrderCreateSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
         order = ser.save()
+        record_audit_event(
+            action="outbound.order.create",
+            module="outbound",
+            request=request,
+            obj=order,
+            after={"submit_status": order.submit_status, "approval_status": order.approval_status},
+        )
         return Response(
             OutboundOrderReadSerializer(order, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
@@ -1131,8 +1338,17 @@ class OutboundOrderViewSet(
         self._require_owner_buyer("outbound.orders.submit")
         if getattr(order, "submit_status", None) != "DRAFT":
             return Response({"detail": "仅 DRAFT 可提交"}, status=400)
+        before = {"submit_status": order.submit_status}
         order.submit_status = "SUBMITTED"
         order.save(update_fields=["submit_status"])
+        record_audit_event(
+            action="outbound.order.submit",
+            module="outbound",
+            request=request,
+            obj=order,
+            before=before,
+            after={"submit_status": order.submit_status},
+        )
         return Response(OutboundOrderReadSerializer(order).data)
 
     @action(detail=True, methods=["post"], url_path="owner-approve")
@@ -1146,6 +1362,7 @@ class OutboundOrderViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        before = {"approval_status": order.approval_status}
         try:
             order.owner_approve(by_user=request.user, allow_backorder=True)
         except DjangoValidationError as e:
@@ -1159,6 +1376,15 @@ class OutboundOrderViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        order.refresh_from_db()
+        record_audit_event(
+            action="outbound.order.owner_approve",
+            module="outbound",
+            request=request,
+            obj=order,
+            before=before,
+            after={"approval_status": order.approval_status},
+        )
         return Response(OutboundOrderReadSerializer(order, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="owner-reject")
@@ -1171,6 +1397,7 @@ class OutboundOrderViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        before = {"approval_status": order.approval_status}
         try:
             with transaction.atomic():
                 order = type(order).objects.select_for_update().get(pk=order.pk)
@@ -1196,45 +1423,63 @@ class OutboundOrderViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        record_audit_event(
+            action="outbound.order.owner_reject",
+            module="outbound",
+            request=request,
+            obj=order,
+            before=before,
+            after={"approval_status": order.approval_status},
+        )
         return Response(
             OutboundOrderReadSerializer(order, context={"request": request}).data,
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["post"], url_path="withdraw")
+    def withdraw(self, request, pk=None):
+        order = self.get_object()
+        self._require_owner_buyer("outbound.orders.withdraw")
+        before = {
+            "submit_status": order.submit_status,
+            "approval_status": order.approval_status,
+        }
+        try:
+            order = outbound_services.withdraw_order(
+                order,
+                by_user=request.user,
+                reason=(request.data or {}).get("reason") or "货主业务员撤销提交",
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(
+                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+            ) from exc
+        record_audit_event(
+            action="outbound.order.withdraw",
+            module="outbound",
+            request=request,
+            obj=order,
+            before=before,
+            after={
+                "submit_status": order.submit_status,
+                "approval_status": order.approval_status,
+            },
+        )
+        return Response(
+            OutboundOrderReadSerializer(order, context={"request": request}).data
+        )
+
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
-        from allapp.outbound import services as ob_services
-
         order = self.get_object()
         self._require_owner_manager(order, "outbound.orders.cancel")
-
-        if getattr(order, "approval_status", None) == "CANCELLED":
-            return Response(
-                {"detail": "订单已取消，请勿重复操作"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if getattr(order, "approval_status", None) == "WHS_APPROVED":
-            return Response(
-                {"detail": "订单已进入仓库处理流程，不能直接取消"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        before = {"approval_status": order.approval_status}
         try:
-            with transaction.atomic():
-                order = type(order).objects.select_for_update().get(pk=order.pk)
-
-                if getattr(order, "approval_status", None) in ("OWNER_APPROVED", "WHS_PENDING"):
-                    ob_services.unallocate_for_order(order)
-                order.approval_status = "CANCELLED"
-                # order.is_closed = True
-                if not order.close_reason:
-                    order.close_reason = "货主管理员取消订单"
-
-                order.save(update_fields=[
-                    "approval_status",
-                    "close_reason",
-                    "updated_at",
-                ])
+            order = outbound_services.cancel_order(
+                order,
+                by_user=request.user,
+                reason=(request.data or {}).get("reason") or "货主管理员取消订单",
+            )
         except DjangoValidationError as e:
             return Response(
                 {"detail": e.message_dict if hasattr(e, "message_dict") else e.messages},
@@ -1246,6 +1491,14 @@ class OutboundOrderViewSet(
                 {"detail": f"取消订单失败：{e}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        record_audit_event(
+            action="outbound.order.cancel",
+            module="outbound",
+            request=request,
+            obj=order,
+            before=before,
+            after={"approval_status": order.approval_status},
+        )
         return Response(
             OutboundOrderReadSerializer(order, context={"request": request}).data,
             status=status.HTTP_200_OK,
@@ -1352,11 +1605,15 @@ class OutboundOrderViewSet(
             return Response({"detail": "请上传 Excel 文件，字段名 file"}, status=status.HTTP_400_BAD_REQUEST)
 
         user = request.user
-        owner_id = getattr(user, "owner_id", None)
+        scope = AccessScope.for_user(user)
+        owner_id = next(iter(scope.owner_ids)) if len(scope.owner_ids) == 1 else None
         warehouse_id = getattr(user, "warehouse_id", None)
 
         if not owner_id:
-            return Response({"detail": "当前用户未绑定货主(owner)"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "当前用户没有单一有效货主角色范围"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if not warehouse_id:
             return Response({"detail": "当前用户未绑定仓库(warehouse)"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1495,36 +1752,10 @@ class OutboundOrderViewSet(
         return Response(result, status=status.HTTP_200_OK)
 
 
-    @action(detail=False, methods=["get"], url_path="import-drop-ship-template")
-    def import_drop_ship_template(self, request):
-        """
-        下载一件代发 Excel 模板
-        """
-        template_path = Path(settings.BASE_DIR) / "allapp" / "outbound" / "resources" / "一件代发.xlsx"
-
-        if not template_path.exists():
-            raise Http404("模板文件不存在，请联系管理员。")
-
-        filename = "一件代发.xlsx"
-        response = FileResponse(
-            open(template_path, "rb"),
-            as_attachment=True,
-            filename=filename,
-            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-
-        # 兼容中文文件名下载
-        response["Content-Disposition"] = (
-            f"attachment; filename*=UTF-8''{quote(filename)}"
-        )
-        return response
-
     @action(
         detail=False,
         methods=["get"],
         url_path="import-drop-ship-template",
-        permission_classes=[AllowAny],
-        authentication_classes=[],
     )
     def import_drop_ship_template(self, request):
         template_path = Path(settings.BASE_DIR) / "allapp" / "outbound" / "resources" / "yi-jian-dai-fa-mo-ban.xlsx"
@@ -1760,63 +1991,43 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
     @action(methods=["post"], detail=True, url_path="create-review-task")
     @transaction.atomic
     def create_review_task(self, request, pk=None):
-        """
-        拣货完成，不直接过账：
-          - 校验所有明细 qty_done >= qty_plan
-          - 状态流转：
-              status         → COMPLETED
-              review_status  → PENDING
-              posting_status → NOT_READY
-          - 记录 picked_by = 当前用户（拣货人）
-        """
+        """Complete the PICK and idempotently create a real REVIEW task."""
         self._require_task_action("outbound.pick_tasks.submit_review")
-        task = (
-            self._get_pick_task_for_update(pk)
-        )
+        task = self._get_pick_task_for_update(pk)
         ctx, ctx_text = build_log_payload(task=task, user=request.user)
         logger.info("outbound.pick.create_review.begin %s", ctx_text, extra=ctx)
-        # 1）必须是进行中或已发布等“可完成”的状态
-        if task.status not in (
-            WmsTask.Status.RELEASED,
-            WmsTask.Status.IN_PROGRESS,
-            WmsTask.Status.RESERVED,
-        ):
-            raise ValidationError(f"当前任务状态为 {task.status}，不能提交复核。")
-        # 2）检查是否还有未拣完的明细
-        has_undone = WmsTaskLine.objects.filter(
-            task_id=task.id,
-            qty_done__lt=F("qty_plan"),
-        ).exists()
-        if has_undone:
-            logger.warning("outbound.pick.create_review.pending_lines %s", ctx_text, extra=ctx)
-            raise ValidationError("还有未拣完的明细，不能提交复核。")
-        # 3）流转到“已完成，待审核”
-        task.status = WmsTask.Status.COMPLETED
-        task.review_status = WmsTask.ReviewStatus.PENDING
-        task.updated_at = timezone.now()
-        # 过账还没到，不要改 posting_status（保持 NOT_READY）
-        # 记录拣货人（如果你加了 picked_by 字段）
-        if task.picked_by_id is None:
-            task.picked_by = request.user
-
-        task.finished_at = task.finished_at or timezone.now()
-        task.save(update_fields=[
-            "status",
-            "review_status",
-            "finished_at",
-            "picked_by",
-            "updated_at",
-        ])
+        try:
+            review_task = outbound_services.create_review_task_for_pick(
+                task,
+                by_user=request.user,
+            )
+        except DjangoValidationError as exc:
+            logger.warning("outbound.pick.create_review.rejected %s", ctx_text, extra=ctx)
+            raise ValidationError(
+                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+            ) from exc
+        task.refresh_from_db()
+        record_audit_event(
+            action="outbound.pick.submit_review",
+            module="outbound",
+            request=request,
+            obj=task,
+            before={"status": WmsTask.Status.RELEASED},
+            after={"status": task.status, "review_status": task.review_status},
+            metadata={"review_task_id": review_task.id},
+        )
         logger.info(
-            "outbound.pick.create_review.completed %s status=%s review_status=%s posting_status=%s",
+            "outbound.pick.create_review.completed %s review_task_id=%s status=%s",
             ctx_text,
+            review_task.id,
             task.status,
-            task.review_status,
-            task.posting_status,
             extra=ctx,
         )
         return Response({
             "task_id": task.id,
+            "review_task_id": review_task.id,
+            "review_task_no": review_task.task_no,
+            "review_task_status": review_task.status,
             "status": task.status,
             "review_status": task.review_status,
             "posting_status": task.posting_status,
@@ -1826,12 +2037,10 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
     # === 修改：复核通过 + 过账 ==============================================
     @action(methods=["post"], detail=True)
     def post(self, request, pk=None):
-        """Approve/post a PICK with journal-backed idempotent re-entry."""
+        """Approve the actual REVIEW, then journal-post its source PICK."""
 
         self._require_task_action("outbound.pick_tasks.post")
-        # Commit review authorization before running the posting handler.  The
-        # handler owns a nested atomic inventory unit and must be able to persist
-        # its FAILED journal/header after that unit rolls back.
+        review_task = None
         with transaction.atomic():
             task = self._get_pick_task_for_update(pk)
             ctx, ctx_text = build_log_payload(task=task, user=request.user)
@@ -1848,9 +2057,11 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             )
             journal = PostingJournal.objects.select_for_update().get(pk=journal.pk)
             assisted_order = get_assisted_order_for_task(task, for_update=True)
+            review_task = outbound_services.get_review_task_for_pick(
+                task,
+                for_update=True,
+            )
 
-            # The journal is the posting truth.  Repair only missing task-header
-            # fields; never overwrite the original reviewers or posting actor.
             if journal.status == "POSTED":
                 update_fields = []
                 if task.review_status != WmsTask.ReviewStatus.APPROVED:
@@ -1870,6 +2081,11 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                     update_fields.append("posted_at")
                 if update_fields:
                     task.save(update_fields=update_fields)
+                if review_task is not None:
+                    outbound_services.finalize_review_after_pick_post(
+                        review_task,
+                        by_user=request.user,
+                    )
                 if assisted_order is not None:
                     outbound_services.close_assisted_order_for_posted_task(task)
                 return Response(
@@ -1882,36 +2098,28 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                     }
                 )
 
-            if task.review_status == WmsTask.ReviewStatus.PENDING:
-                picker = getattr(task, "picked_by", None)
-                if picker and picker.id == request.user.id and not can_self_review_assisted_task(
-                    request.user, task
-                ):
-                    logger.warning(
-                        "outbound.pick.post.self_review_blocked %s", ctx_text, extra=ctx
-                    )
-                    raise ValidationError("拣货人不能作为本任务的复核人。")
-
-                task.review_status = WmsTask.ReviewStatus.APPROVED
-                task.approved_by = request.user
-                task.approved_at = timezone.now()
-                note = "PDA拣货复核通过"
-                if assisted_order is not None and assisted_order.assistance_reason:
-                    note += f"；代办原因：{assisted_order.assistance_reason}"
-                task.approval_note = " ".join(
-                    part for part in ((task.approval_note or "").strip(), note) if part
-                )[:200]
-                task.posting_status = WmsTask.PostingStatus.PENDING
-                task.save(
-                    update_fields=[
-                        "review_status",
-                        "approved_by",
-                        "approved_at",
-                        "approval_note",
-                        "posting_status",
-                    ]
+            picker = getattr(task, "picked_by", None)
+            if picker and picker.id == request.user.id and not can_self_review_assisted_task(
+                request.user, task
+            ):
+                logger.warning(
+                    "outbound.pick.post.self_review_blocked %s", ctx_text, extra=ctx
                 )
-            elif not (
+                raise ValidationError("拣货人不能作为本任务的复核人。")
+            if review_task is None:
+                raise ValidationError("缺少实际 REVIEW 任务，不能复核过账。")
+
+            try:
+                review_task = outbound_services.approve_review_task_for_pick(
+                    task,
+                    by_user=request.user,
+                )
+            except DjangoValidationError as exc:
+                raise ValidationError(
+                    exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+                ) from exc
+            task.refresh_from_db()
+            if not (
                 task.review_status == WmsTask.ReviewStatus.APPROVED
                 and task.posting_status
                 in {WmsTask.PostingStatus.PENDING, WmsTask.PostingStatus.FAILED}
@@ -1935,9 +2143,29 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 or task.posting_status != WmsTask.PostingStatus.POSTED
             ):
                 raise ValidationError("过账处理未将任务及日记账确认为 POSTED。")
+            if review_task is None:
+                raise ValidationError("复核任务不存在，不能完成出库链。")
+            outbound_services.finalize_review_after_pick_post(
+                review_task,
+                by_user=request.user,
+            )
             if get_assisted_order_for_task(task, for_update=True) is not None:
                 outbound_services.close_assisted_order_for_posted_task(task)
         logger.info("outbound.pick.post.completed %s", ctx_text, extra=ctx)
+
+        task.refresh_from_db()
+        record_audit_event(
+            action="outbound.review.approve_post",
+            module="outbound",
+            request=request,
+            obj=task,
+            after={
+                "status": task.status,
+                "review_status": task.review_status,
+                "posting_status": task.posting_status,
+            },
+            metadata={"review_task_id": review_task.id if review_task else None},
+        )
 
         return Response({
             "task_id": int(pk),

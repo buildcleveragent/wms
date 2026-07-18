@@ -16,7 +16,7 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db.models import Q, QuerySet
+from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.shortcuts import get_object_or_404
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
@@ -24,11 +24,9 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
-from allapp.outbound.authz import (
-    assisted_order_source_ids,
-    get_assisted_order_for_task,
-    is_assisted_operator,
-)
+from allapp.accounts.access import AccessScope
+from allapp.accounts.models import UserRoleScope
+from allapp.outbound.authz import get_assisted_order_for_task
 
 from .models import (
     WmsTask, WmsTaskLine, TaskAssignment, TaskStatusLog, TaskScanLog,
@@ -49,6 +47,46 @@ User = get_user_model()
 logger = logging.getLogger(__name__)
 
 
+_TASKING_OPERATOR_ROLE = UserRoleScope.Role.WAREHOUSE_OPERATOR
+_TASKING_MANAGER_ROLE = UserRoleScope.Role.WAREHOUSE_MANAGER
+_TASKING_OPERATOR_PERMISSION = "tasking.claim_task_as_wh_operator"
+_TASKING_MANAGER_PERMISSION = "tasking.taskconfirm_as_wh_manager"
+
+
+def _tasking_role_has_capability(user, scope: AccessScope | None = None) -> bool:
+    """Return whether a five-role account may use raw task operations.
+
+    The generic task APIs are intentionally a warehouse-operations surface:
+    only warehouse operators and warehouse managers belong here.  A warehouse
+    boss consumes the read-only reports API, and owner roles consume order
+    lifecycle APIs.  Checking both the explicit role scope and the matching
+    capability prevents an accidentally assigned Django permission from
+    turning either of those roles into an operational user.
+    """
+
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    scope = scope or AccessScope.for_user(user)
+    if not scope.is_valid:
+        return False
+    if _TASKING_MANAGER_ROLE in scope.roles:
+        return user.has_perm(_TASKING_MANAGER_PERMISSION)
+    if _TASKING_OPERATOR_ROLE in scope.roles:
+        return user.has_perm(_TASKING_OPERATOR_PERMISSION)
+    return False
+
+
+class TaskingOperationalPermission(permissions.BasePermission):
+    """Allow only explicitly-scoped warehouse operational roles."""
+
+    message = "仅仓库操作员或仓库管理员可访问原始任务操作接口。"
+
+    def has_permission(self, request, view):
+        return _tasking_role_has_capability(request.user)
+
+
 # ------------------------- 通用 Mixin：按用户范围过滤 -------------------------
 class OwnerWarehouseScopedQuerysetMixin:
     """Resolve owner/warehouse scope for task resources, with legacy shadow mode."""
@@ -64,8 +102,6 @@ class OwnerWarehouseScopedQuerysetMixin:
     def _resolved_scope(self, qs: QuerySet, user):
         if not user or not user.is_authenticated:
             return qs.none(), "unauthenticated"
-        if getattr(user, "is_superuser", False):
-            return qs, "superuser"
 
         fields = self.scope_fields.get(qs.model)
         if fields is None:
@@ -73,35 +109,52 @@ class OwnerWarehouseScopedQuerysetMixin:
             return qs.none(), "unsupported_model"
 
         owner_field, warehouse_field, task_prefix = fields
-        owner_id = getattr(user, "owner_id", None)
-        warehouse_id = getattr(user, "warehouse_id", None)
-        if owner_id:
-            scoped = qs.filter(**{owner_field: owner_id})
-            if warehouse_id:
-                scoped = scoped.filter(**{warehouse_field: warehouse_id})
-                return scoped, "owner_and_warehouse"
-            return scoped, "owner"
-        model_view_permission = (
-            f"{qs.model._meta.app_label}.view_{qs.model._meta.model_name}"
+        scope = AccessScope.for_user(user)
+        if not scope.is_valid:
+            return qs.none(), scope.denial_reason or "invalid_access_scope"
+        if not _tasking_role_has_capability(user, scope):
+            return qs.none(), "missing_tasking_role_capability"
+        if scope.is_global:
+            return qs, "superuser"
+        scoped = scope.filter_queryset(
+            qs,
+            owner_field=owner_field,
+            warehouse_field=warehouse_field,
         )
-        if warehouse_id and user.has_perm(model_view_permission):
-            return qs.filter(**{warehouse_field: warehouse_id}), "warehouse"
+        if UserRoleScope.Role.WAREHOUSE_OPERATOR in scope.roles:
+            scoped = self._operator_queryset(scoped, user, task_prefix)
+        return scoped, scope.source
 
-        if warehouse_id and is_assisted_operator(user):
-            source_ids = assisted_order_source_ids(warehouse_id=warehouse_id)
-            return qs.filter(
-                **{
-                    warehouse_field: warehouse_id,
-                    f"{task_prefix}source_model__in": (
-                        "outboundorder",
-                        "OutboundOrder",
-                    ),
-                    f"{task_prefix}source_pk__in": source_ids,
-                }
-            ), "warehouse_assisted"
-        if warehouse_id:
-            return qs.none(), "warehouse_without_view_or_assisted_permission"
-        return qs.none(), "missing_owner_and_warehouse"
+    @staticmethod
+    def _operator_queryset(qs: QuerySet, user, task_prefix: str) -> QuerySet:
+        """Limit operators to their work and the unclaimed released pool.
+
+        A task is personal when the operator created, picked, posted or was
+        assigned to it.  Released tasks remain discoverable only while they
+        have no active assignment, so direct-ID access follows the same rule
+        as list access.
+        """
+
+        active_assignment = TaskAssignment.objects.filter(
+            task_id=OuterRef("pk"),
+            finished_at__isnull=True,
+        )
+        visible_task_ids = (
+            WmsTask.objects.annotate(_has_active_assignment=Exists(active_assignment))
+            .filter(
+                Q(assignments__assignee_id=user.pk)
+                | Q(created_by_id=user.pk)
+                | Q(picked_by_id=user.pk)
+                | Q(posted_by_id=user.pk)
+                | Q(status=WmsTask.Status.RELEASED, _has_active_assignment=False)
+            )
+            .values("pk")
+        )
+        lookup = "pk__in" if qs.model is WmsTask else f"{task_prefix}id__in"
+        scoped = qs.filter(**{lookup: visible_task_ids})
+        if qs.model is TaskAssignment:
+            scoped = scoped.filter(assignee_id=user.pk)
+        return scoped.distinct()
 
     def _log_shadow_denial(self, qs: QuerySet, scoped: QuerySet, reason: str, user) -> None:
         try:
@@ -134,27 +187,16 @@ class OwnerWarehouseScopedQuerysetMixin:
         scoped, reason = self._resolved_scope(qs, user)
         if reason in {"superuser", "unauthenticated"}:
             return scoped
-        if is_assisted_operator(user):
-            return scoped
-
         mode = str(
             getattr(settings, "OUTBOUND_LEGACY_AUTHZ_MODE", "enforce")
         ).strip().lower()
         if mode == "shadow":
             self._log_shadow_denial(qs, scoped, reason, user)
-            # Shadow compatibility is only for historical tasks.  Newly
-            # introduced assisted-outbound tasks remain strictly isolated.
-            _, _, task_prefix = self.scope_fields[qs.model]
-            assisted_q = Q(
-                **{
-                    f"{task_prefix}source_model__in": (
-                        "outboundorder",
-                        "OutboundOrder",
-                    ),
-                    f"{task_prefix}source_pk__in": assisted_order_source_ids(),
-                }
+            logger.warning(
+                "tasking.authz.legacy_shadow_enforced user_id=%s model=%s",
+                getattr(user, "pk", None),
+                qs.model._meta.label_lower,
             )
-            return qs.filter(~assisted_q | Q(pk__in=scoped.values("pk")))
         return scoped
 
     def get_queryset(self):  # type: ignore[override]
@@ -187,6 +229,18 @@ class OwnerWarehouseScopedQuerysetMixin:
         if user.is_superuser:
             return True, "superuser"
 
+        scope = AccessScope.for_user(user)
+        # Task masters and their generic lines are manager-controlled data.
+        # An operator may operate an assigned task through the dedicated
+        # lifecycle and scan actions, but cannot manufacture or edit task
+        # definitions merely by receiving a Django model permission.
+        if (
+            not scope.is_valid
+            or _TASKING_MANAGER_ROLE not in scope.roles
+            or not user.has_perm(_TASKING_MANAGER_PERMISSION)
+        ):
+            return False, "missing_warehouse_manager_capability"
+
         permission = f"{model._meta.app_label}.{operation}_{model._meta.model_name}"
         if not user.has_perm(permission):
             return False, f"missing_{operation}_permission"
@@ -196,21 +250,9 @@ class OwnerWarehouseScopedQuerysetMixin:
             validated_data or {},
             instance=instance,
         )
-        user_owner_id = getattr(user, "owner_id", None)
-        user_warehouse_id = getattr(user, "warehouse_id", None)
-        if user_owner_id:
-            if owner_id != user_owner_id:
-                return False, "owner_mismatch"
-            if user_warehouse_id and warehouse_id != user_warehouse_id:
-                return False, "warehouse_mismatch"
-            return True, "owner_scope"
-        if user_warehouse_id:
-            return (
-                (True, "warehouse_scope")
-                if warehouse_id == user_warehouse_id
-                else (False, "warehouse_mismatch")
-            )
-        return False, "missing_owner_and_warehouse"
+        if scope.allows(owner_id=owner_id, warehouse_id=warehouse_id):
+            return True, scope.source
+        return False, "target_outside_access_scope"
 
     def _gate_generic_write(self, *, operation, model, validated_data=None, instance=None):
         allowed, reason = self._check_generic_write(
@@ -235,40 +277,56 @@ class OwnerWarehouseScopedQuerysetMixin:
         )
         if self._legacy_mode() == "shadow" and not is_assisted:
             logger.warning(
-                "tasking.authz.would_deny user_id=%s model=%s action=%s reason=%s",
+                "tasking.authz.legacy_shadow_action_denied user_id=%s model=%s action=%s reason=%s",
                 getattr(user, "pk", None),
                 model._meta.label_lower,
                 operation,
                 reason,
             )
-            return
         raise PermissionDenied("无权在当前货主/仓库范围内执行该操作。")
 
-    def _gate_task_action(self, task, *, permission):
+    def _gate_task_action(
+        self,
+        task,
+        *,
+        permission,
+        required_role: str,
+        require_active_assignment: bool = False,
+    ):
         user = getattr(getattr(self, "request", None), "user", None)
         if user and user.is_authenticated and user.is_superuser:
             return
+        scope = AccessScope.for_user(user)
         scoped, reason = self._resolved_scope(
             WmsTask.objects.filter(pk=task.pk), user
         )
         allowed = bool(
             user
             and user.is_authenticated
+            and scope.is_valid
+            and required_role in scope.roles
             and user.has_perm(permission)
             and scoped.exists()
         )
+        if allowed and require_active_assignment:
+            allowed = TaskAssignment.objects.filter(
+                task_id=task.pk,
+                assignee_id=user.pk,
+                finished_at__isnull=True,
+            ).exists()
+            if not allowed:
+                reason = "task_not_actively_assigned_to_operator"
         if allowed:
             return
         is_assisted = get_assisted_order_for_task(task) is not None
         if self._legacy_mode() == "shadow" and not is_assisted:
             logger.warning(
-                "tasking.authz.would_deny user_id=%s model=tasking.wmstask "
+                "tasking.authz.legacy_shadow_action_denied user_id=%s model=tasking.wmstask "
                 "action=%s reason=%s",
                 getattr(user, "pk", None),
                 getattr(self, "action", "task_action"),
                 "missing_permission" if user and not user.has_perm(permission) else reason,
             )
-            return
         raise PermissionDenied("无权在当前货主/仓库范围内执行该任务操作。")
 
     def perform_create(self, serializer):
@@ -308,7 +366,7 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
     create/update/partial_update -> 标准（WmsTaskSerializer）
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [TaskingOperationalPermission]
     queryset = (
         WmsTask.objects.select_related("owner", "warehouse", "created_by", "updated_by")
         .all()
@@ -360,7 +418,9 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
     def release(self, request, pk=None):
         task = self.get_object()
         self._gate_task_action(
-            task, permission="tasking.taskconfirm_as_wh_manager"
+            task,
+            permission=_TASKING_MANAGER_PERMISSION,
+            required_role=_TASKING_MANAGER_ROLE,
         )
         res = self._svc_or_501("task_release", request=request, task=task)
         if isinstance(res, Response):
@@ -372,7 +432,10 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
     def start(self, request, pk=None):
         task = self.get_object()
         self._gate_task_action(
-            task, permission="tasking.claim_task_as_wh_operator"
+            task,
+            permission=_TASKING_OPERATOR_PERMISSION,
+            required_role=_TASKING_OPERATOR_ROLE,
+            require_active_assignment=True,
         )
         res = self._svc_or_501("task_start", request=request, task=task)
         if isinstance(res, Response):
@@ -384,7 +447,10 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
     def complete(self, request, pk=None):
         task = self.get_object()
         self._gate_task_action(
-            task, permission="tasking.claim_task_as_wh_operator"
+            task,
+            permission=_TASKING_OPERATOR_PERMISSION,
+            required_role=_TASKING_OPERATOR_ROLE,
+            require_active_assignment=True,
         )
         res = self._svc_or_501("task_complete", request=request, task=task)
         if isinstance(res, Response):
@@ -396,7 +462,10 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
     def cancel(self, request, pk=None):
         task = self.get_object()
         self._gate_task_action(
-            task, permission="tasking.claim_task_as_wh_operator"
+            task,
+            permission=_TASKING_OPERATOR_PERMISSION,
+            required_role=_TASKING_OPERATOR_ROLE,
+            require_active_assignment=True,
         )
         reason = request.data.get("reason")
         res = self._svc_or_501("task_cancel", request=request, task=task, reason=reason)
@@ -410,7 +479,9 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
         """指派任务给用户（body: {"user_id": <id>}）。"""
         task = self.get_object()
         self._gate_task_action(
-            task, permission="tasking.taskconfirm_as_wh_manager"
+            task,
+            permission=_TASKING_MANAGER_PERMISSION,
+            required_role=_TASKING_MANAGER_ROLE,
         )
         user_id = request.data.get("user_id")
         assignee = get_object_or_404(User, pk=user_id)
@@ -423,7 +494,9 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
     def unassign(self, request, pk=None):
         task = self.get_object()
         self._gate_task_action(
-            task, permission="tasking.taskconfirm_as_wh_manager"
+            task,
+            permission=_TASKING_MANAGER_PERMISSION,
+            required_role=_TASKING_MANAGER_ROLE,
         )
         user_id = request.data.get("user_id")
         assignee = get_object_or_404(User, pk=user_id) if user_id else None
@@ -462,7 +535,10 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
     def scan(self, request, pk=None):
         task = self.get_object()
         self._gate_task_action(
-            task, permission="tasking.claim_task_as_wh_operator"
+            task,
+            permission=_TASKING_OPERATOR_PERMISSION,
+            required_role=_TASKING_OPERATOR_ROLE,
+            require_active_assignment=True,
         )
         # 如果实现了 services.post_scan，优先调用以保证幂等与形态约束
         if task_svc and hasattr(task_svc, "post_scan"):
@@ -480,7 +556,7 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
 
 
 class WmsTaskLineViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [TaskingOperationalPermission]
     serializer_class = WmsTaskLineSerializer
     queryset = (
         WmsTaskLine.objects.select_related("task", "product", "from_location", "to_location")
@@ -528,7 +604,7 @@ class WmsTaskLineViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSe
 
 # ---- 附属资源（如需要单独路由暴露） ----
 class TaskAssignmentViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [TaskingOperationalPermission]
     serializer_class = TaskAssignmentSerializer
     queryset = TaskAssignment.objects.select_related("task", "assignee").all()
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
@@ -538,7 +614,7 @@ class TaskAssignmentViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnly
 
 
 class TaskStatusLogViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [TaskingOperationalPermission]
     serializer_class = TaskStatusLogSerializer
     queryset = TaskStatusLog.objects.select_related("task", "changed_by").all()
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
@@ -548,7 +624,7 @@ class TaskStatusLogViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyM
 
 
 class TaskScanLogViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [TaskingOperationalPermission]
     serializer_class = TaskScanLogSerializer
     queryset = TaskScanLog.objects.select_related("task", "task_line", "product", "location", "by_user").all()
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]

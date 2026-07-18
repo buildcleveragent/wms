@@ -6,13 +6,21 @@ from decimal import Decimal
 
 from django.db.models import Count, DecimalField, Sum, Value
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
+from allapp.accounts.access import AccessScope
 from allapp.baseinfo.models import Owner
 from allapp.core.choices import InvTxType
 from allapp.inbound.constants import PDA_NO_ORDER_RECEIVE_SOURCE_MODEL
 from allapp.inventory.models import InventoryTransaction
-from allapp.outbound.models import OutboundOrderLine
+from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.tasking.models import WmsTask
+
+from .services_operations import (
+    OperationFilters,
+    build_operations_detail_rows,
+    build_operations_summary,
+)
 
 ZERO_QTY = Decimal("0.000")
 DETAIL_METRICS = {"all", "inbound", "outbound"}
@@ -48,6 +56,8 @@ def parse_pda_throughput_range(params):
             raise ValueError("start_date and end_date must use YYYY-MM-DD format.")
         if end_date < start_date:
             raise ValueError("end_date must be greater than or equal to start_date.")
+        if (end_date - start_date).days > 366:
+            raise ValueError("date range cannot exceed 367 days.")
         return "range", start_date, end_date
 
     raise ValueError("mode must be month or range.")
@@ -463,82 +473,164 @@ def _detail_sort_key(item):
     )
 
 
+def _scope_owner_options(access_scope):
+    """List owners inside the effective role boundary, before report filters.
+
+    This keeps selector options useful without allowing an owner filter to
+    reveal tenants outside an authorized warehouse (or outside an owner role).
+    """
+
+    if not access_scope.is_valid:
+        return []
+    if access_scope.owner_ids:
+        owners = Owner.objects.filter(id__in=access_scope.owner_ids)
+    elif access_scope.warehouse_ids:
+        owner_ids = set(
+            WmsTask.objects.filter(warehouse_id__in=access_scope.warehouse_ids)
+            .values_list("owner_id", flat=True)
+            .distinct()
+        )
+        owner_ids.update(
+            InventoryTransaction.objects.filter(
+                warehouse_id__in=access_scope.warehouse_ids
+            )
+            .values_list("owner_id", flat=True)
+            .distinct()
+        )
+        owner_ids.update(
+            OutboundOrderLine.objects.filter(
+                order__warehouse_id__in=access_scope.warehouse_ids
+            )
+            .values_list("order__owner_id", flat=True)
+            .distinct()
+        )
+        owners = Owner.objects.filter(id__in=owner_ids)
+    else:
+        return []
+    return [
+        {"id": owner.id, "name": owner.name}
+        for owner in owners.order_by("name", "id")
+    ]
+
+
 def build_pda_throughput_payload(
     *, user, mode, start_date, end_date, owner_id=None, warehouse_id=None
 ):
-    scoped_owner_id, scoped_warehouse_id = _scoped_owner_warehouse(
-        user=user,
-        owner_id=owner_id,
-        warehouse_id=warehouse_id,
+    access_scope = AccessScope.for_user(user)
+    scoped_owner_id = owner_id or (
+        next(iter(access_scope.owner_ids)) if len(access_scope.owner_ids) == 1 else None
     )
-
-    owner_options = _collect_owner_options(
-        warehouse_id=scoped_warehouse_id,
-        user=user,
+    scoped_warehouse_id = warehouse_id or (
+        next(iter(access_scope.warehouse_ids))
+        if len(access_scope.warehouse_ids) == 1
+        else None
     )
-
-    outbound_lines = _outbound_lines(
+    filters = OperationFilters(
         start_date=start_date,
         end_date=end_date,
+        direction="all",
+        metric_basis="actual",
         owner_id=scoped_owner_id,
         warehouse_id=scoped_warehouse_id,
     )
-
-    inbound_transactions = _posted_receive_transactions(
-        start_date=start_date,
-        end_date=end_date,
-        owner_id=scoped_owner_id,
-        warehouse_id=scoped_warehouse_id,
-    )
-
-    inbound_summary = _tx_summary(inbound_transactions)
-    outbound_summary = _summary(outbound_lines)
-    inbound_daily = _tx_daily_map(inbound_transactions)
-    outbound_daily = _daily_map(outbound_lines, date_field="order__biz_date")
-    by_owner = _owner_rows(
-        inbound_transactions=inbound_transactions,
-        outbound_lines=outbound_lines,
-        owner_options=owner_options,
-    )
-
-    days = []
-    current = start_date
-    while current <= end_date:
-        day_key = current.isoformat()
-        inbound = inbound_daily.get(day_key, {"orders": 0, "lines": 0, "qty": ZERO_QTY})
-        outbound = outbound_daily.get(
-            day_key, {"orders": 0, "lines": 0, "qty": ZERO_QTY}
-        )
-        days.append(
+    operations = build_operations_summary(user=user, filters=filters)
+    details = build_operations_detail_rows(user=user, filters=filters)
+    owner_map = {}
+    owner_buckets = {}
+    day_buckets = {}
+    for item in details:
+        owner = item["owner"]
+        owner_map[owner["id"]] = {"id": owner["id"], "name": owner["name"]}
+        bucket = owner_buckets.setdefault(
+            owner["id"],
             {
-                "date": day_key,
-                "inbound_orders": inbound["orders"],
-                "inbound_lines": inbound["lines"],
-                "inbound_qty": _decimal_to_text(inbound["qty"]),
-                "outbound_orders": outbound["orders"],
-                "outbound_lines": outbound["lines"],
-                "outbound_qty": _decimal_to_text(outbound["qty"]),
+                "owner": owner["id"],
+                "owner_name": owner["name"],
+                "inbound_orders_set": set(),
+                "inbound_lines": 0,
+                "inbound_qty": ZERO_QTY,
+                "outbound_orders_set": set(),
+                "outbound_lines": 0,
+                "outbound_qty": ZERO_QTY,
+            },
+        )
+        direction = item["direction"]
+        key = item.get("order_id") or item.get("task_id")
+        if key:
+            bucket[f"{direction}_orders_set"].add(key)
+        bucket[f"{direction}_lines"] += 1
+        bucket[f"{direction}_qty"] += Decimal(item["actual_qty"])
+
+        day_key = (item.get("event_at") or "")[:10]
+        if day_key:
+            day = day_buckets.setdefault(
+                day_key,
+                {
+                    "inbound_orders": set(), "inbound_lines": 0,
+                    "outbound_orders": set(), "outbound_lines": 0,
+                },
+            )
+            if key:
+                day[f"{direction}_orders"].add(key)
+            day[f"{direction}_lines"] += 1
+
+    owner_options = _scope_owner_options(access_scope)
+    by_owner = []
+    for bucket in owner_buckets.values():
+        by_owner.append(
+            {
+                "owner": bucket["owner"],
+                "owner_name": bucket["owner_name"],
+                "inbound_orders": len(bucket["inbound_orders_set"]),
+                "inbound_lines": bucket["inbound_lines"],
+                "inbound_qty": _decimal_to_text(bucket["inbound_qty"]),
+                "outbound_orders": len(bucket["outbound_orders_set"]),
+                "outbound_lines": bucket["outbound_lines"],
+                "outbound_qty": _decimal_to_text(bucket["outbound_qty"]),
             }
         )
-        current += datetime.timedelta(days=1)
+    by_owner.sort(
+        key=lambda row: (-(Decimal(row["inbound_qty"]) + Decimal(row["outbound_qty"])), row["owner_name"])
+    )
+    days = []
+    for trend in operations["trend"]:
+        day = day_buckets.get(trend["date"], {})
+        days.append(
+            {
+                "date": trend["date"],
+                "inbound_orders": len(day.get("inbound_orders", set())),
+                "inbound_lines": day.get("inbound_lines", 0),
+                "inbound_qty": _decimal_to_text(
+                    Decimal(trend.get("inbound_qty", "0"))
+                ),
+                "outbound_orders": len(day.get("outbound_orders", set())),
+                "outbound_lines": day.get("outbound_lines", 0),
+                "outbound_qty": _decimal_to_text(
+                    Decimal(trend.get("outbound_qty", "0"))
+                ),
+            }
+        )
 
     return {
-        "scope": {
-            "owner": scoped_owner_id,
-            "warehouse": scoped_warehouse_id,
-        },
+        "scope": {"owner": scoped_owner_id, "warehouse": scoped_warehouse_id},
         "period": {
             "mode": mode,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
         },
+        "metric_basis": "actual",
+        "data_as_of": operations["data_as_of"],
         "summary": {
-            "inbound_orders": inbound_summary["orders"] or 0,
-            "inbound_lines": inbound_summary["lines"] or 0,
-            "inbound_qty": _decimal_to_text(inbound_summary["qty"]),
-            "outbound_orders": outbound_summary["orders"] or 0,
-            "outbound_lines": outbound_summary["lines"] or 0,
-            "outbound_qty": _decimal_to_text(outbound_summary["qty"]),
+            "inbound_orders": operations["summary"]["inbound"]["orders"],
+            "inbound_lines": operations["summary"]["inbound"]["lines"],
+            "inbound_qty": _decimal_to_text(
+                Decimal(operations["summary"]["inbound"]["qty"])
+            ),
+            "outbound_orders": operations["summary"]["outbound"]["orders"],
+            "outbound_lines": operations["summary"]["outbound"]["lines"],
+            "outbound_qty": _decimal_to_text(
+                Decimal(operations["summary"]["outbound"]["qty"])
+            ),
         },
         "owner_options": owner_options,
         "by_owner": by_owner,
@@ -557,45 +649,90 @@ def build_pda_throughput_detail_payload(
     warehouse_id=None,
 ):
     metric = normalize_pda_throughput_metric(metric)
-    scoped_owner_id, scoped_warehouse_id = _scoped_owner_warehouse(
-        user=user,
-        owner_id=owner_id,
-        warehouse_id=warehouse_id,
+    access_scope = AccessScope.for_user(user)
+    scoped_owner_id = owner_id or (
+        next(iter(access_scope.owner_ids)) if len(access_scope.owner_ids) == 1 else None
     )
-
-    owner_options = _collect_owner_options(
+    scoped_warehouse_id = warehouse_id or (
+        next(iter(access_scope.warehouse_ids))
+        if len(access_scope.warehouse_ids) == 1
+        else None
+    )
+    filters = OperationFilters(
+        start_date=start_date,
+        end_date=end_date,
+        direction=metric,
+        metric_basis="actual",
+        owner_id=scoped_owner_id,
         warehouse_id=scoped_warehouse_id,
-        user=user,
     )
-
-    inbound_transactions = InventoryTransaction.objects.none()
-    inbound_summary = _empty_summary()
-    inbound_items = []
-    if metric in {"all", "inbound"}:
-        inbound_transactions = _posted_receive_transactions(
-            start_date=start_date,
-            end_date=end_date,
-            owner_id=scoped_owner_id,
-            warehouse_id=scoped_warehouse_id,
+    rows = build_operations_detail_rows(user=user, filters=filters)
+    tasks = WmsTask.objects.in_bulk(
+        {row["task_id"] for row in rows if row.get("task_id")}
+    )
+    outbound_orders = OutboundOrder.objects.select_related("customer").in_bulk(
+        {
+            row["order_id"]
+            for row in rows
+            if row["direction"] == "outbound" and row.get("order_id")
+        }
+    )
+    owner_map = {}
+    items = []
+    order_sets = {"inbound": set(), "outbound": set()}
+    quantities = {"inbound": ZERO_QTY, "outbound": ZERO_QTY}
+    line_counts = {"inbound": 0, "outbound": 0}
+    for row in rows:
+        direction = row["direction"]
+        task = tasks.get(row.get("task_id"))
+        owner_map[row["owner"]["id"]] = row["owner"]
+        key = row.get("order_id") or row.get("task_id")
+        if key:
+            order_sets[direction].add(key)
+        line_counts[direction] += 1
+        quantities[direction] += Decimal(row["actual_qty"])
+        location = row.get("location") or {}
+        if direction == "inbound":
+            source_type = _receive_source_type(task)
+            source_no = row["order_no"] or row["task_no"]
+        else:
+            # The fact is a completed dispatch task, but the business source
+            # shown to operators remains the outbound order reference.
+            source_type = "出库订单"
+            source_no = row["order_no"] or row["task_no"]
+        outbound_order = outbound_orders.get(row.get("order_id"))
+        items.append(
+            {
+                "id": f"{direction}-{row.get('task_id') or row.get('order_id')}-{row['product']['id']}",
+                "kind": direction,
+                "kind_label": "收货" if direction == "inbound" else "发运",
+                "source_type": source_type,
+                "source_no": source_no,
+                "task_no": row["task_no"],
+                "ref_no": row["source_no"],
+                "date": (row.get("event_at") or "")[:10],
+                "posted_at": row.get("event_at") or "",
+                "owner": row["owner"]["id"],
+                "owner_name": row["owner"]["name"],
+                "warehouse": row["warehouse"]["id"],
+                "warehouse_name": row["warehouse"]["name"],
+                "product": row["product"]["id"],
+                "product_code": row["product"]["code"],
+                "product_name": row["product"]["name"],
+                "product_sku": row["product"]["sku"],
+                "base_uom": row.get("base_uom") or "",
+                "location": location.get("id"),
+                "location_code": location.get("code") or "",
+                "line_no": None,
+                "qty": _decimal_to_text(Decimal(row["actual_qty"])),
+                "counterparty_name": (
+                    getattr(getattr(outbound_order, "customer", None), "name", "")
+                    if direction == "outbound"
+                    else ""
+                ),
+                "memo": row["exception_type"],
+            }
         )
-        inbound_summary = _tx_summary(inbound_transactions)
-        inbound_items = _receive_detail_items(inbound_transactions)
-
-    outbound_lines = OutboundOrderLine.objects.none()
-    outbound_summary = _empty_summary()
-    outbound_items = []
-    if metric in {"all", "outbound"}:
-        outbound_lines = _outbound_lines(
-            start_date=start_date,
-            end_date=end_date,
-            owner_id=scoped_owner_id,
-            warehouse_id=scoped_warehouse_id,
-        )
-        outbound_summary = _summary(outbound_lines)
-        outbound_items = _outbound_detail_items(outbound_lines)
-
-    items = inbound_items + outbound_items
-    items.sort(key=_detail_sort_key, reverse=True)
 
     return {
         "scope": {
@@ -608,15 +745,17 @@ def build_pda_throughput_detail_payload(
             "end_date": end_date.isoformat(),
         },
         "metric": metric,
+        "metric_basis": "actual",
+        "data_as_of": timezone.now().isoformat(),
         "summary": {
-            "inbound_orders": inbound_summary["orders"] or 0,
-            "inbound_lines": inbound_summary["lines"] or 0,
-            "inbound_qty": _decimal_to_text(inbound_summary["qty"]),
-            "outbound_orders": outbound_summary["orders"] or 0,
-            "outbound_lines": outbound_summary["lines"] or 0,
-            "outbound_qty": _decimal_to_text(outbound_summary["qty"]),
+            "inbound_orders": len(order_sets["inbound"]),
+            "inbound_lines": line_counts["inbound"],
+            "inbound_qty": _decimal_to_text(quantities["inbound"]),
+            "outbound_orders": len(order_sets["outbound"]),
+            "outbound_lines": line_counts["outbound"],
+            "outbound_qty": _decimal_to_text(quantities["outbound"]),
             "item_count": len(items),
         },
-        "owner_options": owner_options,
+        "owner_options": _scope_owner_options(access_scope),
         "items": items,
     }
