@@ -9,6 +9,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.models import UserRoleScope
+from allapp.products.excel_import import can_import_products
 
 
 @api_view(["GET"])
@@ -57,32 +58,34 @@ def profile_view(request):
     )
     is_boss = UserRoleScope.Role.WAREHOUSE_BOSS in access_scope.roles
 
-    return Response({
-        "user": {
-            "id": user.id,
-            "username": user.username,
-            "display_name": user.get_full_name() or user.username,
-            "owner_id": user.owner_id,
-            "warehouse_id": user.warehouse_id,
-            "roles": sorted(access_scope.roles),
-            "scopes": access_scope.as_dict(),
-        },
-        "perms": perms,
-        "capabilities": {
-            "can_process_warehouse_assisted_outbound": can_process_warehouse_assisted_outbound,
-            "can_view_warehouse_operations": is_warehouse_role
-            and user.has_perm("reports.view_warehouse_operations"),
-            "can_view_owner_operations": is_owner_role
-            and user.has_perm("reports.view_owner_operations"),
-            "can_view_boss_dashboard": is_boss
-            and user.has_perm("reports.view_boss_dashboard"),
-            "can_view_warehouse_finance": is_boss
-            and user.has_perm("reports.view_warehouse_finance"),
-            "can_export_operations": access_scope.is_valid
-            and user.has_perm("reports.export_operations"),
-        },
-        "menus": menus  # 返回动态生成的菜单
-    })
+    return Response(
+        {
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "display_name": user.get_full_name() or user.username,
+                "owner_id": user.owner_id,
+                "warehouse_id": user.warehouse_id,
+                "roles": sorted(access_scope.roles),
+                "scopes": access_scope.as_dict(),
+            },
+            "perms": perms,
+            "capabilities": {
+                "can_process_warehouse_assisted_outbound": can_process_warehouse_assisted_outbound,
+                "can_view_warehouse_operations": is_warehouse_role
+                and user.has_perm("reports.view_warehouse_operations"),
+                "can_view_owner_operations": is_owner_role
+                and user.has_perm("reports.view_owner_operations"),
+                "can_view_boss_dashboard": is_boss and user.has_perm("reports.view_boss_dashboard"),
+                "can_view_warehouse_finance": is_boss
+                and user.has_perm("reports.view_warehouse_finance"),
+                "can_export_operations": access_scope.is_valid
+                and user.has_perm("reports.export_operations"),
+                "can_import_products": can_import_products(user),
+            },
+            "menus": menus,  # 返回动态生成的菜单
+        }
+    )
 
 
 @api_view(["POST"])

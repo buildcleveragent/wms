@@ -1,17 +1,18 @@
-# allapp/products/views.py  可直接覆盖版
-import io
-import tablib
-from django.db import transaction
-from django.http import HttpResponse
+import logging
+
+from django.http import HttpResponse, JsonResponse
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, DjangoModelPermissions, SAFE_METHODS
 from django_filters.rest_framework import DjangoFilterBackend
 
-from .models import Product
+from .models import Product, ProductPackage
 from .permissions import can_manage_all_owner_products, can_view_all_owner_products
 from .serializers import ProductSerializer
+from .excel_import import ProductImportConflictError, ProductImportFileError
+from .views_excel import import_product_file, product_template_response
 
 # ✅ 补上资源导入（若资源缺失则统一给出 501 提示，避免 NameError）
 try:
@@ -86,22 +87,36 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
         updated = self.get_queryset().filter(id__in=ids).update(is_active=False)
         return Response({"updated": updated})
 
-    # 模板下载（CSV表头）
+    # 模板下载（默认 Excel；保留 ?format=csv 兼容旧调用方）
     @action(methods=["GET"], detail=False, url_path="template")
     def template(self, request):
+        if request.query_params.get("format", "xlsx").lower() != "csv":
+            return product_template_response(request.user)
         headers = [
             "owner_code",  # 货主编码（必要）
-            "code", "name", "spec",
-            "unit_barcode", "carton_barcode", "external_code",
-            "base_unit", "aux_unit", "unit_ratio",
-            "volume", "weight", "aux_volume", "aux_weight",
-            "min_stock", "max_stock",
-            "batch_control", "expiry_control",
-            "shelf_life_days", "inbound_valid_days", "expiry_warning_days",
+            "code",
+            "name",
+            "spec",
+            "unit_barcode",
+            "carton_barcode",
+            "external_code",
+            "base_unit",
+            "aux_unit",
+            "unit_ratio",
+            "volume",
+            "weight",
+            "aux_volume",
+            "aux_weight",
+            "min_stock",
+            "max_stock",
+            "batch_control",
+            "expiry_control",
+            "shelf_life_days",
+            "inbound_valid_days",
+            "expiry_warning_days",
             "is_active",
         ]
-        dataset = tablib.Dataset(headers=headers)
-        content = dataset.export("csv")
+        content = ",".join(headers) + "\r\n"
         resp = HttpResponse(content, content_type="text/csv; charset=utf-8")
         resp["Content-Disposition"] = 'attachment; filename="product_import_template.csv"'
         # Backward-compatible for old tests still reading HttpResponse._headers.
@@ -111,50 +126,31 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
         }
         return resp
 
-    # 导入（支持 csv/xls/xlsx）
-    @action(methods=["POST"], detail=False, url_path="import")
+    # 导入（统一使用 PDA 的 XLSX 导入服务）
+    @action(
+        methods=["POST"],
+        detail=False,
+        url_path="import",
+        parser_classes=[MultiPartParser, FormParser],
+    )
     def import_file(self, request):
-        """
-        前端以 multipart/form-data 上传文件，字段名：file
-        依赖 .resources.ProductResource 完成字段映射与校验
-        """
-        if ProductResource is None:
-            return Response(
-                {"detail": "未找到 ProductResource，请在 allapp/products/resources.py 中定义并确保可导入"},
-                status=status.HTTP_501_NOT_IMPLEMENTED,
-            )
-
         f = request.FILES.get("file")
         if not f:
             return Response({"detail": "缺少文件 file"}, status=status.HTTP_400_BAD_REQUEST)
-
-        ext = (f.name.split(".")[-1] or "").lower()
-        data = f.read()
         try:
-            dataset = tablib.Dataset().load(data, format=ext)
-        except Exception:
-            try:
-                dataset = tablib.Dataset().load(data.decode("utf-8"), format="csv")
-            except Exception as e:
-                return Response({"detail": f"无法解析文件: {e}"}, status=status.HTTP_400_BAD_REQUEST)
-
-        resource = ProductResource()
-        # 试运行
-        result = resource.import_data(dataset, dry_run=True, raise_errors=False)
-        if result.has_errors() or result.has_validation_errors():
-            errors = []
-            for row in getattr(result, "invalid_rows", []):
-                errors.append({"row": row.number, "error": str(row.error)})
-            for row in getattr(result, "rows", []):
-                if getattr(row, "import_type", "") == "error":
-                    errors.append({"row": row.number, "error": str(row.error)})
-            return Response({"detail": "导入校验失败", "errors": errors}, status=400)
-
-        # 真正导入
-        with transaction.atomic():
-            resource.import_data(dataset, dry_run=False, raise_errors=True)
-
-        return Response({"imported": len(dataset)})
+            result = import_product_file(
+                uploaded_file=f,
+                user=request.user,
+                request=request,
+            )
+        except ProductImportConflictError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except ProductImportFileError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            result,
+            status=(status.HTTP_400_BAD_REQUEST if result["error_count"] else status.HTTP_200_OK),
+        )
 
     # 导出（支持 csv/xls/xlsx）
     @action(methods=["GET"], detail=False, url_path="export")
@@ -211,12 +207,6 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
         return Response({"type": "zpl", "content": zpl})
 
 
-# allapp/products/views.py
-import logging
-
-from django.http import JsonResponse
-from allapp.products.models import Product, ProductPackage
-
 logger = logging.getLogger(__name__)
 
 
@@ -229,14 +219,16 @@ def get_product_details(request, product_id):
         base_uom = product.base_uom.name  # 获取商品的基本单位
 
         # 获取商品所有的包装单位及其换算数量
-        product_packages = ProductPackage.objects.filter(product=product)  # 获取与商品关联的所有包装单位
+        product_packages = ProductPackage.objects.filter(
+            product=product
+        )  # 获取与商品关联的所有包装单位
 
         # 打包单位列表
         pack_uoms = [
             {
                 "uom": package.uom.name,  # 包装单位名称
                 "pack_qty": package.qty_in_base,  # 换算数量，使用 qty_in_base 字段
-                "unit": package.uom.name  # 计量单位
+                "unit": package.uom.name,  # 计量单位
             }
             for package in product_packages
         ]
@@ -245,9 +237,6 @@ def get_product_details(request, product_id):
             product.id,
             len(pack_uoms),
         )
-        return JsonResponse({
-            "base_uom": base_uom,
-            "pack_uoms": pack_uoms
-        })
+        return JsonResponse({"base_uom": base_uom, "pack_uoms": pack_uoms})
     except Product.DoesNotExist:
         return JsonResponse({"error": "Product not found"}, status=404)
