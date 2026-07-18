@@ -56,7 +56,10 @@ def _seconds(start: datetime | None, end: datetime | None) -> int | None:
 @transaction.atomic
 def sync_dimensions() -> dict[str, int]:
     counts = defaultdict(int)
-    for owner in Owner.objects.all().iterator(chunk_size=1000):
+    # Facts are an immutable history.  A master record can be soft-deleted
+    # after a posted transaction or order was created, but that must not make
+    # the historical fact disappear or become unreconcilable.
+    for owner in Owner.all_objects.all().iterator(chunk_size=1000):
         _, changed = upsert_scd2(
             OwnerDim,
             {"owner_id": owner.pk},
@@ -64,7 +67,7 @@ def sync_dimensions() -> dict[str, int]:
         )
         counts["owners"] += int(changed)
 
-    for warehouse in Warehouse.objects.all().iterator(chunk_size=1000):
+    for warehouse in Warehouse.all_objects.all().iterator(chunk_size=1000):
         _, changed = upsert_scd2(
             WarehouseDim,
             {"warehouse_id": warehouse.pk},
@@ -77,7 +80,9 @@ def sync_dimensions() -> dict[str, int]:
         )
         counts["warehouses"] += int(changed)
 
-    for product in Product.objects.select_related("base_uom").all().iterator(chunk_size=1000):
+    for product in Product.all_objects.select_related("base_uom").all().iterator(
+        chunk_size=1000
+    ):
         _, changed = upsert_scd2(
             ProductDim,
             {"product_id": product.pk},
@@ -94,7 +99,7 @@ def sync_dimensions() -> dict[str, int]:
         )
         counts["products"] += int(changed)
 
-    for customer in Customer.objects.all().iterator(chunk_size=1000):
+    for customer in Customer.all_objects.all().iterator(chunk_size=1000):
         _, changed = upsert_scd2(
             CustomerDim,
             {"customer_id": customer.pk},
@@ -107,7 +112,7 @@ def sync_dimensions() -> dict[str, int]:
         )
         counts["customers"] += int(changed)
 
-    for supplier in Supplier.objects.all().iterator(chunk_size=1000):
+    for supplier in Supplier.all_objects.all().iterator(chunk_size=1000):
         _, changed = upsert_scd2(
             SupplierDim,
             {"supplier_id": supplier.pk},

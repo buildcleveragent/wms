@@ -158,7 +158,7 @@ class InboundOrderLineInputSerializer(serializers.Serializer):
 
 
 class InboundOrderCreateSerializer(serializers.Serializer):
-    """Create a draft ASN for the authenticated owner's configured warehouse."""
+    """Create a draft ASN for the authenticated owner and selected warehouse."""
 
     owner_id = serializers.IntegerField(required=False, min_value=1)
     warehouse_id = serializers.IntegerField(min_value=1)
@@ -201,16 +201,6 @@ class InboundOrderCreateSerializer(serializers.Serializer):
             supplied_owner_id = attrs.get("owner_id")
             if supplied_owner_id and int(supplied_owner_id) != owner_id:
                 raise serializers.ValidationError({"owner_id": "不能为其他货主创建入库单。"})
-
-            configured_warehouse_id = getattr(user, "warehouse_id", None)
-            if not configured_warehouse_id:
-                raise serializers.ValidationError(
-                    {"warehouse_id": "当前账号未配置入库仓库，请联系管理员绑定仓库。"}
-                )
-            if int(attrs["warehouse_id"]) != int(configured_warehouse_id):
-                raise serializers.ValidationError(
-                    {"warehouse_id": "只能向当前账号配置的仓库创建入库单。"}
-                )
 
         try:
             owner = Owner.objects.get(pk=owner_id)

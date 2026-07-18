@@ -377,6 +377,44 @@ class OperationsEtlTests(TestCase):
         self.assertEqual(FactInventoryTxn.objects.count(), 2)
         self.assertEqual(EtlJobRun.objects.filter(job_name="etl_full_reports", ok=True).count(), 2)
 
+    def test_full_etl_keeps_posted_transactions_for_soft_deleted_products(self):
+        archived_product = Product.objects.create(
+            owner=self.owner,
+            code="ETL-ARCHIVED",
+            sku="ETL-ARCHIVED-SKU",
+            name="Archived ETL Product",
+            base_uom=self.product.base_uom,
+            shelf_life_days=365,
+        )
+        transaction_row = InventoryTransaction.objects.create(
+            tx_type=InvTxType.RECEIVE,
+            owner=self.owner,
+            product=archived_product,
+            warehouse=self.warehouse,
+            location=self.location,
+            qty_delta=Decimal("3"),
+            batch_no="ETL-ARCHIVED-LOT",
+            src_model="LegacyReceipt",
+            src_id=90001,
+            src_line_id=90001,
+            src_no="ETL-ARCHIVED-1",
+            posted_at=datetime.datetime(2026, 7, 14, 13, 0),
+            posting_batch="ETL-ARCHIVED-1",
+        )
+        Product.objects.filter(pk=archived_product.pk).update(is_deleted=True)
+
+        self._full()
+
+        self.assertTrue(
+            ProductDim.objects.filter(product_id=archived_product.pk, is_current=True).exists()
+        )
+        fact = FactInventoryTxn.objects.get(txn_id=transaction_row.pk)
+        self.assertEqual(fact.product.product_id, archived_product.pk)
+        self.assertEqual(fact.qty_delta, Decimal("3"))
+        run = EtlJobRun.objects.get(job_name="etl_full_reports")
+        self.assertTrue(run.reconciliation["ok"])
+        self.assertFalse(run.reconciliation["differences"])
+
     def test_etl_excludes_putaway_move_receive_and_cancelled_dispatch(self):
         """Internal moves and cancelled work must not inflate actual receipts/shipments."""
 

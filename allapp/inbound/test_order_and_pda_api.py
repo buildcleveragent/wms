@@ -147,7 +147,6 @@ class InboundOrderAndPdaApiTests(TestCase):
         salesperson = self.owner_user(
             "api-salesperson",
             UserRoleScope.Role.OWNER_SALESPERSON,
-            warehouse=self.warehouse,
         )
         colleague = self.owner_user(
             "api-colleague",
@@ -180,6 +179,7 @@ class InboundOrderAndPdaApiTests(TestCase):
         )
 
         client = self.client_for(salesperson)
+        self.assertIsNone(salesperson.warehouse_id)
         created = client.post(
             "/api/inbound/orders/",
             {

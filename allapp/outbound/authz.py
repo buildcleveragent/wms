@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from django.conf import settings
-from django.db.models import CharField, Exists, OuterRef, Q, QuerySet
+from django.db.models import BigIntegerField, Exists, OuterRef, Q, QuerySet
 from django.db.models.functions import Cast
 from rest_framework.exceptions import PermissionDenied
 
@@ -59,18 +59,28 @@ def require_assisted_operator(user) -> None:
         )
 
 
-def assisted_order_source_ids(*, warehouse_id=None):
-    """A text-typed subquery suitable for matching ``WmsTask.source_pk``."""
+def assisted_task_queryset(qs: QuerySet, *, warehouse_id=None) -> QuerySet:
+    """Return assisted outbound tasks without comparing text collations.
+
+    ``WmsTask.source_pk`` is a generic text field.  Casting outbound integer
+    primary keys to text makes MySQL use the connection collation, which may
+    differ from the field collation and fail with error 1267.  Cast the task
+    source key to an integer instead so the comparison remains collation-free.
+    """
 
     from .models import OutboundOrder
 
     orders = OutboundOrder.objects.filter(processing_mode="WAREHOUSE_ASSISTED")
     if warehouse_id is not None:
         orders = orders.filter(warehouse_id=warehouse_id)
-    return (
-        orders
-        .annotate(source_pk_text=Cast("id", output_field=CharField()))
-        .values("source_pk_text")
+    return qs.annotate(
+        _assisted_outbound_order_id=Cast(
+            "source_pk",
+            output_field=BigIntegerField(),
+        )
+    ).filter(
+        source_model__in=("outboundorder", "OutboundOrder"),
+        _assisted_outbound_order_id__in=orders.values("pk"),
     )
 
 
@@ -195,6 +205,21 @@ def can_use_task_actions(user) -> bool:
         user
         and getattr(user, "is_authenticated", False)
         and (getattr(user, "is_superuser", False) or user.has_perm(TASK_OPERATOR_PERMISSION))
+    )
+
+
+def can_review_task_actions(user) -> bool:
+    """Allow a warehouse manager to perform the independent REVIEW step."""
+
+    if can_use_task_actions(user):
+        return True
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    scope = AccessScope.for_user(user)
+    return bool(
+        scope.is_valid
+        and UserRoleScope.Role.WAREHOUSE_MANAGER in scope.roles
+        and user.has_perm(TASK_MANAGER_PERMISSION)
     )
 
 
