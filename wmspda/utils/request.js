@@ -222,6 +222,118 @@ export function request(opts = {}) {
   })
 }
 
+export function downloadProductImportTemplate() {
+  const token = getToken()
+  const url = `${BASE_URL}/api/products/import-template/`
+
+  // #ifdef H5
+  if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+    return window.fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }).then(async (response) => {
+      if (response.status === 401) {
+        redirectToLogin()
+        throw { statusCode: 401, message: '登录已超时，需要重新登录' }
+      }
+      if (!response.ok) {
+        let data = null
+        try {
+          data = await response.json()
+        } catch (e) {}
+        throw {
+          statusCode: response.status,
+          data,
+          message:
+            response.status === 403
+              ? '无商品导入权限'
+              : getFriendlyMessage(data, '模板下载失败'),
+        }
+      }
+      const blob = await response.blob()
+      const objectUrl = window.URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = '商品批量导入模板.xlsx'
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      window.URL.revokeObjectURL(objectUrl)
+      return { opened: true, tempFilePath: '' }
+    })
+  }
+  // #endif
+
+  return new Promise((resolve, reject) => {
+    uni.downloadFile({
+      url,
+      header: token ? { Authorization: `Bearer ${token}` } : {},
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve({ tempFilePath: res.tempFilePath || '', opened: false })
+          return
+        }
+        if (res.statusCode === 401) redirectToLogin()
+        reject({
+          statusCode: res.statusCode,
+          data: res.data,
+          message:
+            res.statusCode === 403
+              ? '无商品导入权限'
+              : getFriendlyMessage(res.data, '模板下载失败'),
+        })
+      },
+      fail: (error) => reject({ statusCode: 0, data: error, message: '模板下载失败' }),
+    })
+  })
+}
+
+export function uploadProductImportExcel(filePath) {
+  const token = getToken()
+  return new Promise((resolve, reject) => {
+    uni.uploadFile({
+      url: `${BASE_URL}/api/products/import-excel/`,
+      filePath,
+      name: 'file',
+      header: token ? { Authorization: `Bearer ${token}` } : {},
+      success: (res) => {
+        let data = res.data
+        try {
+          data = typeof data === 'string' ? JSON.parse(data) : data
+        } catch (error) {
+          reject({
+            statusCode: res.statusCode,
+            data,
+            message:
+              res.statusCode >= 500
+                ? '服务器异常，请稍后重试'
+                : '服务器返回了无法识别的结果',
+          })
+          return
+        }
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(data)
+          return
+        }
+        if (res.statusCode === 401) redirectToLogin()
+        reject({
+          statusCode: res.statusCode,
+          data,
+          message:
+            res.statusCode === 403
+              ? '无商品导入权限'
+              : getFriendlyMessage(data, '商品导入失败'),
+        })
+      },
+      fail: (error) =>
+        reject({
+          statusCode: 0,
+          data: error,
+          message: '网络异常，请稍后重试',
+        }),
+    })
+  })
+}
+
 export const api = {
   // Auth
   login: (username, password) =>
@@ -247,6 +359,9 @@ export const api = {
         new_password2: newPassword2,
       },
     }),
+
+  downloadProductImportTemplate,
+  importProductsExcel: uploadProductImportExcel,
 
   // Catalog
   customers: (q = '', page = 1) =>

@@ -16,7 +16,12 @@ from allapp.outbound import services as outbound_services
 from allapp.outbound.admin import OutboundOrderAdmin
 from allapp.outbound.authz import apply_legacy_scope, strict_order_queryset
 from allapp.outbound.models import OutboundOrder
-from allapp.outbound.views import CustomerViewSet, OwnerViewSet, ProductViewSet
+from allapp.outbound.views import (
+    CustomerViewSet,
+    OutboundOrderViewSet,
+    OwnerViewSet,
+    ProductViewSet,
+)
 from allapp.products.models import Product, ProductUom
 from allapp.tasking import services as task_services
 from allapp.tasking.models import TaskAssignment, WmsTask, WmsTaskLine
@@ -132,6 +137,83 @@ class OutboundProductionRemediationTests(TestCase):
             damaged_qty=Decimal("0.0000"),
             base_unit=self.uom.code,
         )
+
+    def test_salesperson_without_legacy_warehouse_can_select_warehouse(self):
+        self.salesperson.warehouse = None
+        self.salesperson.save(update_fields=["warehouse"])
+        request = APIRequestFactory().post(
+            "/api/outbound/orders/",
+            {
+                "warehouse_id": self.warehouse.pk,
+                "customer_id": self.customer.pk,
+                "src_bill_no": "REMED-NO-LEGACY-WH",
+                "items": [
+                    {
+                        "product_id": self.product.pk,
+                        "qty": "3.000",
+                        "price": "10.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        force_authenticate(request, user=self.salesperson)
+
+        response = OutboundOrderViewSet.as_view({"post": "create"})(request)
+
+        self.assertEqual(response.status_code, 201, response.data)
+        order = OutboundOrder.objects.get(pk=response.data["id"])
+        self.assertEqual(order.owner_id, self.owner.pk)
+        self.assertEqual(order.warehouse_id, self.warehouse.pk)
+
+    @override_settings(USE_TZ=False, TIME_ZONE="Asia/Shanghai")
+    def test_offset_etd_is_persisted_as_local_business_time(self):
+        request = APIRequestFactory().post(
+            "/api/outbound/orders/",
+            {
+                "warehouse_id": self.warehouse.pk,
+                "customer_id": self.customer.pk,
+                "src_bill_no": "REMED-LOCAL-ETD",
+                "etd": "2026-07-18T16:00:00+08:00",
+                "items": [
+                    {
+                        "product_id": self.product.pk,
+                        "qty": "3.000",
+                        "price": "10.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        force_authenticate(request, user=self.salesperson)
+
+        response = OutboundOrderViewSet.as_view({"post": "create"})(request)
+
+        self.assertEqual(response.status_code, 201, response.data)
+        order = OutboundOrder.objects.get(pk=response.data["id"])
+        self.assertEqual(order.etd.hour, 16)
+
+    def test_task_number_filter_does_not_compare_text_collations(self):
+        order, _ = self._order()
+        task = WmsTask.objects.create(
+            task_no="REMED-FILTER-TASK",
+            task_type=WmsTask.TaskType.PICK,
+            owner=self.owner,
+            warehouse=self.warehouse,
+            source_app="outbound",
+            source_model="outboundorder",
+            source_pk=str(order.pk),
+        )
+        request = APIRequestFactory().get(
+            "/api/outbound/orders/",
+            {"task_no": task.task_no},
+        )
+        force_authenticate(request, user=self.salesperson)
+
+        response = OutboundOrderViewSet.as_view({"get": "list"})(request)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual([row["id"] for row in response.data["results"]], [order.pk])
 
     @override_settings(OUTBOUND_LEGACY_AUTHZ_MODE="shadow")
     def test_shadow_value_is_telemetry_only_and_never_expands_scope(self):
@@ -671,6 +753,42 @@ class OutboundAdminHardeningTests(TestCase):
                 source_pk=str(order.pk),
             ).exists()
         )
+
+    def test_warehouse_manager_confirms_owner_approved_order_via_api(self):
+        order = self._order()
+        InventoryDetail.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            subwarehouse=self.subwarehouse,
+            location=self.location,
+            product=self.product,
+            onhand_qty=Decimal("10.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+        )
+        order.owner_approve(by_user=self.owner_manager, allow_backorder=False)
+        request = APIRequestFactory().post(
+            f"/api/outbound/orders/{order.pk}/warehouse-confirm/",
+            {},
+            format="json",
+        )
+        force_authenticate(request, user=self.warehouse_manager)
+
+        response = OutboundOrderViewSet.as_view(
+            {"post": "warehouse_confirm"}
+        )(request, pk=order.pk)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        order.refresh_from_db()
+        self.assertEqual(order.approval_status, "WHS_APPROVED")
+        pick = WmsTask.objects.get(
+            task_type=WmsTask.TaskType.PICK,
+            source_model="outboundorder",
+            source_pk=str(order.pk),
+        )
+        self.assertEqual(pick.status, WmsTask.Status.RELEASED)
 
     def test_owner_approval_requires_submitted_open_order_and_owner_scope(self):
         draft = self._order(submit_status="DRAFT")

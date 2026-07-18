@@ -19,7 +19,7 @@ from rest_framework.exceptions import PermissionDenied
 
 from allapp.outbound.authz import (
     apply_legacy_scope,
-    assisted_order_source_ids,
+    assisted_task_queryset,
     get_assisted_order_for_task,
     is_assisted_operator,
     legacy_authz_mode,
@@ -83,10 +83,7 @@ def _is_wh_manager(user) -> bool:
 
 
 def _assisted_task_queryset(qs):
-    return qs.filter(
-        source_model__in=("outboundorder", "OutboundOrder"),
-        source_pk__in=assisted_order_source_ids(),
-    )
+    return assisted_task_queryset(qs)
 
 
 def _scope_task_queryset(qs, user, *, endpoint: str):

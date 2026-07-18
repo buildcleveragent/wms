@@ -22,6 +22,9 @@ export const useAuth = defineStore('auth', {
     canProcessAssistedOutbound: (state) =>
       state.profileLoaded === true &&
       state.profile?.capabilities?.can_process_warehouse_assisted_outbound === true,
+    canImportProducts: (state) =>
+      state.profileLoaded === true &&
+      state.profile?.capabilities?.can_import_products === true,
   },
 
   actions: {

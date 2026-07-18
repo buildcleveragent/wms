@@ -1,15 +1,21 @@
 from datetime import date
 from decimal import Decimal
 import logging
+from zoneinfo import ZoneInfo
+
 from django.apps import apps
-logger = logging.getLogger(__name__)
+from django.conf import settings
+from django.utils.dateparse import parse_datetime
 from rest_framework import serializers
+
 from .models import OutboundOrder, OutboundOrderLine
 
 
 from allapp.accounts.access import AccessScope
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.services import get_default_product_price
+
+logger = logging.getLogger(__name__)
 
 # 兼容不同字段命名的小工具
 def _get(obj, names, default=None):
@@ -412,7 +418,8 @@ class AssistedOutboundOrderCreateSerializer(serializers.Serializer):
 #         return order
 
 class OutboundOrderCreateSerializer(serializers.Serializer):
-    # 不再接收 owner_id / warehouse_id
+    # owner 永远从显式货主角色范围解析；warehouse 可由货主业务员选择。
+    warehouse_id   = serializers.IntegerField(min_value=1, required=False)
     customer_id     = serializers.IntegerField(required=False, allow_null=True)
     supplier_id     = serializers.IntegerField(required=False, allow_null=True)
     outbound_type   = serializers.CharField(required=False, default="SALES")
@@ -467,17 +474,36 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         if not data.get("items"):
             raise serializers.ValidationError("至少需要一条明细。")
 
-        # 从登录用户获取 owner / warehouse（不再走前端）
+        # owner 只能来自服务端角色范围。仓库优先使用本次显式选择，
+        # 兼容仍有旧 warehouse 绑定的历史账号。
         req = self.context.get("request")
         user = getattr(req, "user", None)
         scope = AccessScope.for_user(user)
         owner_id = next(iter(scope.owner_ids)) if len(scope.owner_ids) == 1 else None
-        warehouse_id = getattr(user, "warehouse_id", None)
+        warehouse_id = data.get("warehouse_id") or getattr(user, "warehouse_id", None)
 
         if not owner_id:
             raise serializers.ValidationError("当前用户没有单一有效货主角色范围，请联系管理员。")
         if not warehouse_id:
-            raise serializers.ValidationError("当前用户未绑定仓库（warehouse），请联系管理员。")
+            raise serializers.ValidationError({"warehouse_id": "请选择出库仓库。"})
+        Warehouse = apps.get_model("locations", "Warehouse")
+        if not Warehouse.objects.filter(pk=warehouse_id, is_active=True).exists():
+            raise serializers.ValidationError({"warehouse_id": "仓库不存在或已停用。"})
+
+        # With USE_TZ=False DRF normalizes offset-aware input to naive UTC.
+        # WMS business timestamps are local warehouse time, so preserve the
+        # represented instant as a local naive value before persisting it.
+        raw_etd = (
+            self.initial_data.get("etd")
+            if hasattr(self.initial_data, "get")
+            else None
+        )
+        if not settings.USE_TZ and isinstance(raw_etd, str):
+            parsed_etd = parse_datetime(raw_etd)
+            if parsed_etd is not None and parsed_etd.tzinfo is not None:
+                data["etd"] = parsed_etd.astimezone(
+                    ZoneInfo(settings.TIME_ZONE)
+                ).replace(tzinfo=None)
 
         # 出库类型 / 配送方式 choices 校验（若模型定义了）
         ot = data.get("outbound_type", "SALES")

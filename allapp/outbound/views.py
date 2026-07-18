@@ -12,7 +12,7 @@ from django.apps import apps
 from datetime import datetime, timezone as datetime_timezone
 from uuid import UUID
 from django.db import IntegrityError
-from django.db.models import CharField, Q, Sum, Prefetch
+from django.db.models import BigIntegerField, Q, Sum, Prefetch
 from django.db.models.functions import Cast
 import logging
 from ..products.models import ProductPackage
@@ -53,8 +53,9 @@ from allapp.outbound.assisted_history import (
 )
 from allapp.outbound.authz import (
     apply_legacy_scope,
-    assisted_order_source_ids,
+    assisted_task_queryset,
     can_self_review_assisted_task,
+    can_review_task_actions,
     can_use_task_actions,
     get_assisted_order_for_task,
     is_assisted_operator,
@@ -1176,14 +1177,14 @@ class OutboundOrderViewSet(
                 user.has_perm("outbound.submit_outbound_as_owner_buyers")
                 and scope.is_valid
                 and scope.owner_ids
-                and getattr(user, "warehouse_id", None)
+                and UserRoleScope.Role.OWNER_SALESPERSON in scope.roles
             )
         )
         require_legacy_action(
             user=user,
             allowed=allowed,
             endpoint=endpoint,
-            reason="需要货主业务员权限，并绑定货主和仓库。",
+            reason="需要单一有效货主范围的货主业务员权限。",
         )
 
     def _require_owner_manager(self, order, endpoint):
@@ -1205,6 +1206,28 @@ class OutboundOrderViewSet(
             allowed=allowed,
             endpoint=endpoint,
             reason="需要当前货主的出库审核权限。",
+        )
+
+    def _require_warehouse_manager(self, order, endpoint):
+        user = self.request.user
+        scope = AccessScope.for_user(user)
+        allowed = bool(
+            user.is_superuser
+            or (
+                user.has_perm("outbound.approve_outbound_as_wh_manager")
+                and scope.is_valid
+                and UserRoleScope.Role.WAREHOUSE_MANAGER in scope.roles
+                and scope.allows(
+                    owner_id=order.owner_id,
+                    warehouse_id=order.warehouse_id,
+                )
+            )
+        )
+        require_legacy_action(
+            user=user,
+            allowed=allowed,
+            endpoint=endpoint,
+            reason="需要当前仓库的仓库管理员权限。",
         )
 
     def get_serializer_class(self):
@@ -1306,9 +1329,13 @@ class OutboundOrderViewSet(
                 task_qs = task_qs.filter(
                     lines__dispatchlineextra__waybill_no__icontains=waybill_no
                 )
-            qs = qs.annotate(
-                _order_pk_text=Cast("pk", output_field=CharField())
-            ).filter(_order_pk_text__in=task_qs.values("source_pk"))
+            task_order_ids = task_qs.annotate(
+                _source_order_id=Cast(
+                    "source_pk",
+                    output_field=BigIntegerField(),
+                )
+            ).values("_source_order_id")
+            qs = qs.filter(pk__in=task_order_ids)
 
         page = self.paginate_queryset(qs.distinct())
         ser = OutboundOrderReadSerializer(page, many=True, context={"request": request})
@@ -1434,6 +1461,54 @@ class OutboundOrderViewSet(
         return Response(
             OutboundOrderReadSerializer(order, context={"request": request}).data,
             status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="warehouse-confirm")
+    @transaction.atomic
+    def warehouse_confirm(self, request, pk=None):
+        """Confirm a fully allocated standard order and release its PICK task."""
+
+        order = self.get_object()
+        self._require_warehouse_manager(order, "outbound.orders.warehouse_confirm")
+        if order.is_closed or order.approval_status not in {"OWNER_APPROVED", "WHS_PENDING"}:
+            return Response(
+                {"detail": "仅货主审核通过且未关闭的订单可由仓库确认。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        before = {"approval_status": order.approval_status}
+        order.approval_status = "WHS_APPROVED"
+        order.approved_by_warehouse = request.user
+        order.approved_at_warehouse = timezone.now()
+        order.updated_by = request.user
+        order.save(
+            update_fields=[
+                "approval_status",
+                "approved_by_warehouse",
+                "approved_at_warehouse",
+                "updated_by",
+                "updated_at",
+            ]
+        )
+        try:
+            task = outbound_services.promote_reserved_pick(
+                order,
+                by_user=request.user,
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(
+                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+            ) from exc
+        record_audit_event(
+            action="outbound.order.warehouse_confirm",
+            module="outbound",
+            request=request,
+            obj=order,
+            before=before,
+            after={"approval_status": order.approval_status},
+            metadata={"pick_task_id": task.pk},
+        )
+        return Response(
+            OutboundOrderReadSerializer(order, context={"request": request}).data
         )
 
     @action(detail=True, methods=["post"], url_path="withdraw")
@@ -1864,12 +1939,13 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                     legacy = legacy.filter(owner_id=owner_id) if owner_id else legacy.none()
         warehouse_id = getattr(user, "warehouse_id", None)
         if warehouse_id:
-            assisted_sources = assisted_order_source_ids(warehouse_id=warehouse_id)
-            assisted_task_q = Q(
-                source_model__in=("outboundorder", "OutboundOrder"),
-                source_pk__in=assisted_sources,
+            assisted_task_ids = assisted_task_queryset(
+                qs,
+                warehouse_id=warehouse_id,
+            ).values("pk")
+            legacy = legacy.filter(
+                ~Q(pk__in=assisted_task_ids) | Q(pk__in=strict.values("pk"))
             )
-            legacy = legacy.filter(~assisted_task_q | Q(pk__in=strict.values("pk")))
         return apply_legacy_scope(
             base_qs=legacy,
             scoped_qs=strict,
@@ -1877,10 +1953,14 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             endpoint=f"outbound.pick_tasks.{getattr(self, 'action', 'unknown')}",
         )
 
-    def _require_task_action(self, endpoint):
+    def _require_task_action(self, endpoint, *, manager_allowed=False):
         require_legacy_action(
             user=self.request.user,
-            allowed=can_use_task_actions(self.request.user),
+            allowed=(
+                can_review_task_actions(self.request.user)
+                if manager_allowed
+                else can_use_task_actions(self.request.user)
+            ),
             endpoint=endpoint,
             reason="需要仓库任务操作权限。",
         )
@@ -2039,7 +2119,10 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
     def post(self, request, pk=None):
         """Approve the actual REVIEW, then journal-post its source PICK."""
 
-        self._require_task_action("outbound.pick_tasks.post")
+        self._require_task_action(
+            "outbound.pick_tasks.post",
+            manager_allowed=True,
+        )
         review_task = None
         with transaction.atomic():
             task = self._get_pick_task_for_update(pk)
