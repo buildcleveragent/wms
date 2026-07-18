@@ -1,17 +1,22 @@
 import logging
 
 from django.http import HttpResponse, JsonResponse
-from rest_framework import viewsets, status, filters
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.permissions import (
+    SAFE_METHODS,
+    DjangoModelPermissions,
+    IsAuthenticated,
+)
+from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, DjangoModelPermissions, SAFE_METHODS
-from django_filters.rest_framework import DjangoFilterBackend
 
+from .excel_import import ProductImportConflictError, ProductImportFileError
 from .models import Product, ProductPackage
 from .permissions import can_manage_all_owner_products, can_view_all_owner_products
 from .serializers import ProductSerializer
-from .excel_import import ProductImportConflictError, ProductImportFileError
 from .views_excel import import_product_file, product_template_response
 
 # ✅ 补上资源导入（若资源缺失则统一给出 501 提示，避免 NameError）
@@ -19,6 +24,28 @@ try:
     from .resources import ProductResource
 except Exception:  # pragma: no cover
     ProductResource = None
+
+
+class CSVTemplateRenderer(BaseRenderer):
+    """Allow DRF's reserved ``?format=csv`` query parameter for this action."""
+
+    media_type = "text/csv"
+    format = "csv"
+    charset = "utf-8"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return data if isinstance(data, (bytes, str)) else b""
+
+
+class XLSXTemplateRenderer(BaseRenderer):
+    """Allow callers that explicitly request ``?format=xlsx``."""
+
+    media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    format = "xlsx"
+    charset = None
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return data if isinstance(data, bytes) else b""
 
 
 # ===== 多租户隔离：非超管仅看自己 owner =====
@@ -34,13 +61,19 @@ class OwnerScopedMixin:
 
     def get_queryset(self):
         qs = super().get_queryset()  # type: ignore[attr-defined]
-        user = getattr(self, "request", None).user if getattr(self, "request", None) else None
+        user = (
+            getattr(self, "request", None).user
+            if getattr(self, "request", None)
+            else None
+        )
         if not user or not user.is_authenticated:
             return qs.none()
         if self.has_all_owner_scope():
             return qs
         owner_id = getattr(user, "owner_id", None)
-        return qs.filter(**{f"{self.owner_path}_id": owner_id}) if owner_id else qs.none()
+        return (
+            qs.filter(**{f"{self.owner_path}_id": owner_id}) if owner_id else qs.none()
+        )
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -60,7 +93,11 @@ class OwnerScopedMixin:
 class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
     queryset = Product.objects.all().select_related("owner")
     serializer_class = ProductSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_fields = {
         "owner": ["exact"],
         "code": ["exact", "icontains"],
@@ -72,6 +109,18 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
     search_fields = ("code", "name", "unit_barcode", "carton_barcode", "external_code")
     ordering_fields = ("owner", "code", "name", "updated_at")
     ordering = ("owner", "code")
+
+    def get_renderers(self):
+        # The router applies action-specific renderer classes automatically.
+        # Direct ``as_view`` callers (including legacy integrations and tests)
+        # do not, so keep the reserved ?format=csv/xlsx parameters working here.
+        if getattr(self, "action", None) == "template":
+            return [
+                JSONRenderer(),
+                CSVTemplateRenderer(),
+                XLSXTemplateRenderer(),
+            ]
+        return super().get_renderers()
 
     # 批量启用
     @action(methods=["POST"], detail=False, url_path="bulk-activate")
@@ -88,7 +137,12 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
         return Response({"updated": updated})
 
     # 模板下载（默认 Excel；保留 ?format=csv 兼容旧调用方）
-    @action(methods=["GET"], detail=False, url_path="template")
+    @action(
+        methods=["GET"],
+        detail=False,
+        url_path="template",
+        renderer_classes=[JSONRenderer, CSVTemplateRenderer, XLSXTemplateRenderer],
+    )
     def template(self, request):
         if request.query_params.get("format", "xlsx").lower() != "csv":
             return product_template_response(request.user)
@@ -118,7 +172,9 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
         ]
         content = ",".join(headers) + "\r\n"
         resp = HttpResponse(content, content_type="text/csv; charset=utf-8")
-        resp["Content-Disposition"] = 'attachment; filename="product_import_template.csv"'
+        resp["Content-Disposition"] = (
+            'attachment; filename="product_import_template.csv"'
+        )
         # Backward-compatible for old tests still reading HttpResponse._headers.
         resp._headers = {  # type: ignore[attr-defined]
             "content-type": ("Content-Type", resp["Content-Type"]),
@@ -136,7 +192,9 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
     def import_file(self, request):
         f = request.FILES.get("file")
         if not f:
-            return Response({"detail": "缺少文件 file"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "缺少文件 file"}, status=status.HTTP_400_BAD_REQUEST
+            )
         try:
             result = import_product_file(
                 uploaded_file=f,
@@ -149,7 +207,11 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
             result,
-            status=(status.HTTP_400_BAD_REQUEST if result["error_count"] else status.HTTP_200_OK),
+            status=(
+                status.HTTP_400_BAD_REQUEST
+                if result["error_count"]
+                else status.HTTP_200_OK
+            ),
         )
 
     # 导出（支持 csv/xls/xlsx）
@@ -191,7 +253,9 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
     def barcode(self, request, pk=None):
         product = self.get_object()
         # 与产品模型对齐：用 base_uom.code；单位比例可按需从 package 推导，这里先省略
-        base_unit_code = getattr(getattr(product, "base_uom", None), "code", "") or "PCS"
+        base_unit_code = (
+            getattr(getattr(product, "base_uom", None), "code", "") or "PCS"
+        )
         data_code = product.unit_barcode or product.carton_barcode or product.code
         zpl = f"""
 ^XA

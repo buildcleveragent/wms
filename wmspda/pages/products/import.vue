@@ -25,7 +25,7 @@
           <text v-if="selectedFile.path && !busy" class="clear-link" @click="resetFile">清除</text>
         </view>
         <button class="primary-btn outline-btn" :disabled="busy || !canImport" @click="selectFile">
-          选择 Excel
+          {{ selecting ? '正在打开文件…' : '选择 Excel' }}
         </button>
       </view>
 
@@ -102,13 +102,14 @@ import { chooseExcelFile } from '@/utils/excelFilePicker'
 const MAX_FILE_SIZE = 5 * 1024 * 1024
 const auth = useAuth()
 const downloading = ref(false)
+const selecting = ref(false)
 const uploading = ref(false)
 const result = ref(null)
 const selectedFile = reactive({ path: '', name: '', size: 0 })
 
 const profileReady = computed(() => auth.profileLoaded)
 const canImport = computed(() => auth.canImportProducts)
-const busy = computed(() => downloading.value || uploading.value)
+const busy = computed(() => downloading.value || selecting.value || uploading.value)
 
 onShow(() => {
   auth.loadProfile({ force: true }).catch((error) => {
@@ -159,6 +160,7 @@ async function downloadTemplate() {
 
 async function selectFile() {
   if (busy.value) return
+  selecting.value = true
   try {
     const file = await chooseExcelFile()
     const name = file?.name || ''
@@ -179,6 +181,8 @@ async function selectFile() {
     if (!message.includes('取消') && !message.includes('cancel')) {
       uni.showToast({ title: message || '选择文件失败', icon: 'none' })
     }
+  } finally {
+    selecting.value = false
   }
 }
 

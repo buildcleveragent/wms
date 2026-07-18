@@ -70,7 +70,7 @@ function copyAndroidContentUri(activity, uri) {
   const cacheDir = plus.android.invoke(activity, 'getCacheDir')
   const target = new File(cacheDir, `product-import-${Date.now()}.xlsx`)
   const output = new FileOutputStream(target)
-  const buffer = plus.android.newObject('[B', 8192)
+  const buffer = plus.android.newObject('byte[]', 8192)
   try {
     let length = plus.android.invoke(input, 'read', buffer)
     while (length > 0) {
@@ -95,15 +95,18 @@ function chooseWithAndroidDocument() {
       reject(new Error('当前设备不支持系统文件选择'))
       return
     }
+    let activity = null
+    let previousHandler = null
     try {
-      const activity = plus.android.runtimeMainActivity()
+      activity = plus.android.runtimeMainActivity()
       const Intent = plus.android.importClass('android.content.Intent')
       const intent = new Intent('android.intent.action.OPEN_DOCUMENT')
       intent.addCategory('android.intent.category.OPENABLE')
+      intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       intent.setType(XLSX_MIME)
 
       const requestCode = 43127
-      const previousHandler = activity.onActivityResult
+      previousHandler = activity.onActivityResult
       activity.onActivityResult = (code, resultCode, data) => {
         if (code !== requestCode) {
           if (typeof previousHandler === 'function') previousHandler(code, resultCode, data)
@@ -123,6 +126,7 @@ function chooseWithAndroidDocument() {
       }
       activity.startActivityForResult(intent, requestCode)
     } catch (error) {
+      if (activity) activity.onActivityResult = previousHandler
       reject(error)
     }
   })

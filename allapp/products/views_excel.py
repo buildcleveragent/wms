@@ -23,8 +23,10 @@ TEMPLATE_FILENAME = "商品批量导入模板.xlsx"
 def product_template_response(user):
     content = build_product_import_template(user)
     response = HttpResponse(content, content_type=XLSX_CONTENT_TYPE)
+    encoded_filename = quote(TEMPLATE_FILENAME)
     response["Content-Disposition"] = (
-        f"attachment; filename=product_import_template.xlsx; filename*=UTF-8''{quote(TEMPLATE_FILENAME)}"
+        "attachment; filename=product_import_template.xlsx; "
+        f"filename*=UTF-8''{encoded_filename}"
     )
     response["Cache-Control"] = "private, no-store"
     return response

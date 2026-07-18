@@ -1,17 +1,19 @@
 # allapp/products/tests.py
 # -*- coding: utf-8 -*-
-import json
 import io
+import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.contrib.contenttypes.models import ContentType
-from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
+from django.db import IntegrityError
 from django.test import RequestFactory, TestCase
 from openpyxl import Workbook, load_workbook
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
@@ -25,6 +27,7 @@ from .views import ProductViewSet
 Owner = apps.get_model("baseinfo", "Owner")
 ProductUom = apps.get_model("products", "ProductUom")
 Product = apps.get_model("products", "Product")
+Warehouse = apps.get_model("locations", "Warehouse")
 
 # 可选：DAL 自动补全视图（存在则测试）
 try:
@@ -41,7 +44,9 @@ except Exception:
 DEPENDENCIES_OK = all([Owner, ProductUom, Product])
 
 
-@unittest.skipUnless(DEPENDENCIES_OK, "缺少 baseinfo/products 依赖模型，跳过 products 测试")
+@unittest.skipUnless(
+    DEPENDENCIES_OK, "缺少 baseinfo/products 依赖模型，跳过 products 测试"
+)
 class ProductViewSetTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -91,7 +96,9 @@ class ProductViewSetTests(TestCase):
         )
         cls.manage_all_user.user_permissions.add(*list(builtin_perms))
         cls.manage_all_user.user_permissions.add(
-            Permission.objects.get(content_type=ct, codename="manage_all_owner_products")
+            Permission.objects.get(
+                content_type=ct, codename="manage_all_owner_products"
+            )
         )
 
         for user, owner in (
@@ -330,7 +337,9 @@ class ProductViewSetTests(TestCase):
         pack_uom = ProductUom.objects.create(code="CTN", name="箱", is_active=True)
         self.prod_a.packages.create(uom=pack_uom, qty_in_base=12)
 
-        request = RequestFactory().get(f"/products/get_product_details/{self.prod_a.id}/")
+        request = RequestFactory().get(
+            f"/products/get_product_details/{self.prod_a.id}/"
+        )
         from .views import get_product_details
 
         response = get_product_details(request, self.prod_a.id)
@@ -342,12 +351,18 @@ class ProductViewSetTests(TestCase):
         self.assertEqual(payload["pack_uoms"][0]["pack_qty"], 12)
 
 
-@unittest.skipUnless(DEPENDENCIES_OK and DAL_OK, "缺少依赖（DAL 或模型），跳过 UOM 自动补全测试")
+@unittest.skipUnless(
+    DEPENDENCIES_OK and DAL_OK, "缺少依赖（DAL 或模型），跳过 UOM 自动补全测试"
+)
 class ProductUomAutocompleteTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.uom1 = ProductUom.objects.create(code="PCS", name="件", is_active=True, kind="COUNT")
-        cls.uom2 = ProductUom.objects.create(code="KG", name="千克", is_active=True, kind="WEIGHT")
+        cls.uom1 = ProductUom.objects.create(
+            code="PCS", name="件", is_active=True, kind="COUNT"
+        )
+        cls.uom2 = ProductUom.objects.create(
+            code="KG", name="千克", is_active=True, kind="WEIGHT"
+        )
 
     def test_autocomplete_filters_and_forwards(self):
         """
@@ -367,7 +382,9 @@ class ProductUomAutocompleteTests(TestCase):
         self.assertIn("KG", content1)
 
         # 带 forward：only_count=1
-        req2 = rf.get("/autocomplete/uom/?q=&forward=%7B%22only_count%22%3A%20%221%22%7D")
+        req2 = rf.get(
+            "/autocomplete/uom/?q=&forward=%7B%22only_count%22%3A%20%221%22%7D"
+        )
         resp2 = view(req2)
         self.assertEqual(resp2.status_code, 200)
         content2 = resp2.content.decode("utf-8")
@@ -375,14 +392,20 @@ class ProductUomAutocompleteTests(TestCase):
         self.assertNotIn("KG", content2)  # 非 COUNT 类不应出现
 
 
-@unittest.skipUnless(DEPENDENCIES_OK, "缺少 baseinfo/products 依赖模型，跳过商品 Excel 导入测试")
+@unittest.skipUnless(
+    DEPENDENCIES_OK, "缺少 baseinfo/products 依赖模型，跳过商品 Excel 导入测试"
+)
 class ProductExcelImportApiTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.owner = Owner.objects.create(code="PXIA", name="Product Excel Owner A")
-        cls.other_owner = Owner.objects.create(code="PXIB", name="Product Excel Owner B")
+        cls.other_owner = Owner.objects.create(
+            code="PXIB", name="Product Excel Owner B"
+        )
         cls.uom = ProductUom.objects.create(code="EA-X", name="个", is_active=True)
-        cls.carton_uom = ProductUom.objects.create(code="CTN-X", name="箱", is_active=True)
+        cls.carton_uom = ProductUom.objects.create(
+            code="CTN-X", name="箱", is_active=True
+        )
         cls.category = apps.get_model("products", "ProductCategory").objects.create(
             code="FOOD-X", name="食品", is_active=True
         )
@@ -391,7 +414,9 @@ class ProductExcelImportApiTests(TestCase):
         )
 
         User = get_user_model()
-        cls.user = User.objects.create_user(username="product-excel-owner", password="x")
+        cls.user = User.objects.create_user(
+            username="product-excel-owner", password="x"
+        )
         cls.cross_owner_user = User.objects.create_user(
             username="product-excel-global", password="x"
         )
@@ -405,9 +430,32 @@ class ProductExcelImportApiTests(TestCase):
                 owner=cls.owner,
             )
 
+        cls.warehouse = Warehouse.objects.create(
+            code="PXWH",
+            name="Product Excel Warehouse",
+        )
+        cls.warehouse_user = User.objects.create_user(
+            username="product-excel-warehouse-global",
+            password="x",
+        )
+        cls.warehouse_denied_user = User.objects.create_user(
+            username="product-excel-warehouse-denied",
+            password="x",
+        )
+        for user in (cls.warehouse_user, cls.warehouse_denied_user):
+            UserRoleScope.objects.create(
+                user=user,
+                role=UserRoleScope.Role.WAREHOUSE_MANAGER,
+                warehouse=cls.warehouse,
+            )
+
         product_ct = ContentType.objects.get_for_model(Product)
-        add_permission = Permission.objects.get(content_type=product_ct, codename="add_product")
-        view_permission = Permission.objects.get(content_type=product_ct, codename="view_product")
+        add_permission = Permission.objects.get(
+            content_type=product_ct, codename="add_product"
+        )
+        view_permission = Permission.objects.get(
+            content_type=product_ct, codename="view_product"
+        )
         cls.user.user_permissions.add(add_permission, view_permission)
         cls.cross_owner_user.user_permissions.add(add_permission, view_permission)
         cls.cross_owner_user.user_permissions.add(
@@ -416,6 +464,14 @@ class ProductExcelImportApiTests(TestCase):
                 codename="manage_all_owner_products",
             )
         )
+        cls.warehouse_user.user_permissions.add(add_permission, view_permission)
+        cls.warehouse_user.user_permissions.add(
+            Permission.objects.get(
+                content_type=product_ct,
+                codename="manage_all_owner_products",
+            )
+        )
+        cls.warehouse_denied_user.user_permissions.add(add_permission, view_permission)
 
     def setUp(self):
         self.client = APIClient()
@@ -460,6 +516,10 @@ class ProductExcelImportApiTests(TestCase):
         response = self.client.get("/api/products/import-template/")
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
         self.assertIn("filename*=UTF-8", response["Content-Disposition"])
         workbook = load_workbook(io.BytesIO(response.content))
         self.assertEqual(
@@ -476,6 +536,15 @@ class ProductExcelImportApiTests(TestCase):
         self.assertIn(self.owner.code, owner_codes)
         self.assertNotIn(self.other_owner.code, owner_codes)
         self.assertIn("ProductImportUomCodes", workbook.defined_names)
+        code_column = HEADERS.index("商品编号") + 1
+        barcode_column = HEADERS.index("GTIN") + 1
+        self.assertEqual(
+            workbook[IMPORT_SHEET_NAME].cell(2, code_column).number_format, "@"
+        )
+        self.assertEqual(
+            workbook[IMPORT_SHEET_NAME].cell(2, barcode_column).number_format,
+            "@",
+        )
 
     def test_happy_path_creates_product_package_and_audit_event(self):
         response = self._post_rows(
@@ -504,6 +573,9 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(product.sku, "PDA-SKU-HAPPY")
         self.assertEqual(product.created_by_id, self.user.id)
         self.assertFalse(product.expiry_control)
+        self.assertFalse(product.serial_control)
+        self.assertTrue(product.batch_control)
+        self.assertTrue(product.is_active)
         package = product.packages.get()
         self.assertEqual(package.uom_id, self.carton_uom.id)
         self.assertEqual(package.qty_in_base, 12)
@@ -526,7 +598,9 @@ class ProductExcelImportApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400, response.data)
         self.assertEqual(response.data["created_count"], 0)
-        self.assertTrue(any(error["field"] == "货主编码" for error in response.data["errors"]))
+        self.assertTrue(
+            any(error["field"] == "货主编码" for error in response.data["errors"])
+        )
         self.assertFalse(Product.objects.filter(code="PDA-OWN-A").exists())
 
     def test_cross_owner_permission_can_import_for_other_owner(self):
@@ -538,7 +612,38 @@ class ProductExcelImportApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertTrue(Product.objects.filter(owner=self.other_owner, code="PDA-GLOBAL").exists())
+        self.assertTrue(
+            Product.objects.filter(owner=self.other_owner, code="PDA-GLOBAL").exists()
+        )
+
+    def test_warehouse_scope_requires_explicit_cross_owner_permission(self):
+        denied_client = APIClient()
+        denied_client.force_authenticate(self.warehouse_denied_user)
+        denied = denied_client.get("/api/products/import-template/")
+
+        allowed_client = APIClient()
+        allowed_client.force_authenticate(self.warehouse_user)
+        missing_owner = self._post_rows(
+            [self._valid_row("PDA-WAREHOUSE-GLOBAL")],
+            client=allowed_client,
+        )
+
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(missing_owner.status_code, 400, missing_owner.data)
+        self.assertTrue(
+            any(error["field"] == "货主编码" for error in missing_owner.data["errors"])
+        )
+
+        allowed = self._post_rows(
+            [
+                self._valid_row(
+                    "PDA-WAREHOUSE-GLOBAL",
+                    **{"货主编码": self.owner.code},
+                )
+            ],
+            client=allowed_client,
+        )
+        self.assertEqual(allowed.status_code, 200, allowed.data)
 
     def test_existing_product_is_skipped_without_update(self):
         existing = Product.objects.create(
@@ -551,13 +656,68 @@ class ProductExcelImportApiTests(TestCase):
             expiry_basis=None,
         )
 
-        response = self._post_rows([self._valid_row("PDA-EXISTING", **{"商品名称": "不应覆盖"})])
+        response = self._post_rows(
+            [
+                self._valid_row(
+                    "PDA-EXISTING",
+                    **{"商品名称": "", "基本单位编码": "NO-UOM"},
+                )
+            ]
+        )
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["created_count"], 0)
         self.assertEqual(response.data["skipped_count"], 1)
+        self.assertEqual(response.data["skipped"][0]["name"], "原商品名称")
+        self.assertEqual(response.data["skipped"][0]["owner_code"], self.owner.code)
         existing.refresh_from_db()
         self.assertEqual(existing.name, "原商品名称")
+
+    def test_soft_deleted_product_is_skipped_with_recovery_guidance(self):
+        product = Product.objects.create(
+            owner=self.owner,
+            code="PDA-DELETED",
+            sku="PDA-DELETED",
+            name="已删除商品",
+            base_uom=self.uom,
+            expiry_control=False,
+            expiry_basis=None,
+        )
+        Product.all_objects.filter(pk=product.pk).update(is_deleted=True)
+
+        response = self._post_rows([self._valid_row("PDA-DELETED")])
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["skipped_count"], 1)
+        self.assertIn("恢复旧商品", response.data["skipped"][0]["reason"])
+        self.assertTrue(Product.all_objects.get(pk=product.pk).is_deleted)
+
+    def test_identifier_owned_by_other_product_is_an_error(self):
+        Product.objects.create(
+            owner=self.owner,
+            code="PDA-IDENTIFIER-OLD",
+            sku="PDA-IDENTIFIER-OLD",
+            name="占用标识的商品",
+            base_uom=self.uom,
+            external_code="SHARED-EXTERNAL",
+            expiry_control=False,
+            expiry_basis=None,
+        )
+
+        response = self._post_rows(
+            [
+                self._valid_row(
+                    "PDA-IDENTIFIER-NEW",
+                    **{"外部系统编码": "SHARED-EXTERNAL"},
+                )
+            ]
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertTrue(
+            any(error["field"] == "外部系统编码" for error in response.data["errors"])
+        )
+        self.assertFalse(Product.objects.filter(code="PDA-IDENTIFIER-NEW").exists())
 
     def test_invalid_row_makes_whole_batch_atomic(self):
         response = self._post_rows(
@@ -582,11 +742,166 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(response.status_code, 400, response.data)
         self.assertTrue(
             any(
-                error["row"] == 3 and error["field"] == "SKU编码" and "第 2 行" in error["message"]
+                error["row"] == 3
+                and error["field"] == "SKU编码"
+                and "第 2 行" in error["message"]
                 for error in response.data["errors"]
             )
         )
         self.assertFalse(Product.objects.filter(code__startswith="PDA-DUP").exists())
+
+    def test_file_duplicates_are_checked_even_when_existing_rows_are_skipped(self):
+        Product.objects.create(
+            owner=self.owner,
+            code="PDA-DUP-EXISTING",
+            sku="PDA-DUP-EXISTING",
+            name="已存在商品",
+            base_uom=self.uom,
+            expiry_control=False,
+            expiry_basis=None,
+        )
+
+        response = self._post_rows(
+            [
+                self._valid_row("PDA-DUP-EXISTING"),
+                self._valid_row("PDA-DUP-EXISTING"),
+            ]
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(response.data["created_count"], 0)
+        self.assertTrue(
+            any(
+                error["row"] == 3 and error["field"] == "商品编号"
+                for error in response.data["errors"]
+            )
+        )
+
+    def test_defaults_and_both_expiry_bases(self):
+        response = self._post_rows(
+            [
+                self._valid_row(
+                    "PDA-MFG",
+                    **{
+                        "SKU编码": "",
+                        "批次管理": "",
+                        "序列号管理": "",
+                        "启用": "",
+                        "保质期管理": "是",
+                        "效期基准": "MFG",
+                        "保质期天数": 365,
+                        "效期预警天数": 30,
+                    },
+                ),
+                self._valid_row(
+                    "PDA-INBOUND",
+                    **{
+                        "保质期管理": "true",
+                        "效期基准": "INBOUND",
+                        "入库有效天数": 90,
+                        "效期预警天数": 10,
+                        "FEFO": "1",
+                    },
+                ),
+            ]
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        mfg = Product.objects.get(code="PDA-MFG")
+        inbound = Product.objects.get(code="PDA-INBOUND")
+        self.assertEqual(mfg.sku, "PDA-MFG")
+        self.assertTrue(mfg.batch_control)
+        self.assertFalse(mfg.serial_control)
+        self.assertTrue(mfg.is_active)
+        self.assertEqual(mfg.shelf_life_days, 365)
+        self.assertEqual(inbound.inbound_valid_days, 90)
+        self.assertTrue(inbound.fefo_required)
+
+    def test_dictionary_and_model_validation_errors_are_all_reported(self):
+        inactive_uom = ProductUom.objects.create(
+            code="INACTIVE-X",
+            name="停用单位",
+            is_active=False,
+        )
+        rows = [
+            self._valid_row("PDA-BAD-UOM", **{"基本单位编码": "NO-UOM"}),
+            self._valid_row(
+                "PDA-BAD-INACTIVE-UOM",
+                **{"基本单位编码": inactive_uom.code},
+            ),
+            self._valid_row("PDA-BAD-CATEGORY", **{"分类编码": "NO-CATEGORY"}),
+            self._valid_row("PDA-BAD-BRAND", **{"品牌编码": "NO-BRAND"}),
+            self._valid_row("PDA-BAD-STOCK", **{"最低库存": 10, "最高库存": 5}),
+            self._valid_row("PDA-BAD-GTIN", **{"GTIN": "123"}),
+            self._valid_row(
+                "PDA-BAD-BOOLEAN",
+                **{"批次管理": "不确定"},
+            ),
+            self._valid_row(
+                "PDA-BAD-EXPIRY",
+                **{"保质期管理": "是", "效期基准": "MFG"},
+            ),
+            self._valid_row(
+                "PDA-BAD-PACKAGE",
+                **{
+                    "包装单位编码": self.uom.code,
+                    "包装换算数量": 2,
+                },
+            ),
+            self._valid_row(
+                "PDA-BAD-PACKAGE-MODEL",
+                **{
+                    "包装单位编码": self.carton_uom.code,
+                    "包装换算数量": 2,
+                    "包装条码": "12",
+                },
+            ),
+            self._valid_row(
+                "PDA-BAD-PACKAGE-UOM",
+                **{
+                    "包装单位编码": "NO-PACKAGE-UOM",
+                    "包装换算数量": 2,
+                },
+            ),
+            self._valid_row(
+                "PDA-BAD-PACKAGE-PARTIAL",
+                **{"采购默认": "是"},
+            ),
+        ]
+
+        response = self._post_rows(rows)
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(response.data["created_count"], 0)
+        fields = {error["field"] for error in response.data["errors"]}
+        self.assertTrue(
+            {
+                "基本单位编码",
+                "分类编码",
+                "品牌编码",
+                "最低库存",
+                "GTIN",
+                "保质期天数",
+                "包装换算数量",
+                "包装条码",
+                "包装单位编码",
+            }.issubset(fields),
+            response.data,
+        )
+        self.assertFalse(Product.objects.filter(code__startswith="PDA-BAD-").exists())
+        self.assertTrue(
+            any(
+                error["field"] == "基本单位编码"
+                and inactive_uom.code in error["message"]
+                for error in response.data["errors"]
+            )
+        )
+        self.assertTrue(
+            any(
+                error["field"] == "批次管理" and "true/false" in error["message"]
+                for error in response.data["errors"]
+            )
+        )
 
     def test_formula_cell_is_rejected(self):
         response = self._post_rows(
@@ -608,12 +923,30 @@ class ProductExcelImportApiTests(TestCase):
         self.assertTrue(allowed_profile.data["capabilities"]["can_import_products"])
         self.assertFalse(denied_profile.data["capabilities"]["can_import_products"])
 
+    def test_anonymous_and_missing_scope_are_denied(self):
+        anonymous = APIClient().get("/api/products/import-template/")
+        User = get_user_model()
+        unscoped_user = User.objects.create_user(username="product-excel-unscoped")
+        product_ct = ContentType.objects.get_for_model(Product)
+        unscoped_user.user_permissions.add(
+            Permission.objects.get(content_type=product_ct, codename="add_product")
+        )
+        unscoped_client = APIClient()
+        unscoped_client.force_authenticate(unscoped_user)
+
+        unscoped = unscoped_client.get("/api/products/import-template/")
+
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(unscoped.status_code, 403)
+
     def test_invalid_extension_and_oversized_file_are_rejected(self):
         wrong_type = SimpleUploadedFile("products.xls", b"not-xlsx")
         wrong_response = self.client.post(
             "/api/products/import-excel/", {"file": wrong_type}, format="multipart"
         )
-        oversized = SimpleUploadedFile("products.xlsx", b"x" * (MAX_IMPORT_FILE_SIZE + 1))
+        oversized = SimpleUploadedFile(
+            "products.xlsx", b"x" * (MAX_IMPORT_FILE_SIZE + 1)
+        )
         oversized_response = self.client.post(
             "/api/products/import-excel/", {"file": oversized}, format="multipart"
         )
@@ -622,6 +955,60 @@ class ProductExcelImportApiTests(TestCase):
         self.assertIn(".xlsx", wrong_response.data["detail"])
         self.assertEqual(oversized_response.status_code, 400)
         self.assertIn("5 MB", oversized_response.data["detail"])
+
+    def test_empty_corrupt_and_header_errors_are_rejected(self):
+        empty_response = self.client.post(
+            "/api/products/import-excel/",
+            {"file": SimpleUploadedFile("products.xlsx", b"")},
+            format="multipart",
+        )
+        corrupt_response = self.client.post(
+            "/api/products/import-excel/",
+            {"file": SimpleUploadedFile("products.xlsx", b"not-a-zip")},
+            format="multipart",
+        )
+        no_rows_response = self._post_rows([])
+        missing_headers = tuple(header for header in HEADERS if header != "商品名称")
+        missing_header_response = self._post_rows(
+            [self._valid_row("PDA-MISSING-HEADER")],
+            headers=missing_headers,
+        )
+        duplicate_header_response = self._post_rows(
+            [self._valid_row("PDA-DUP-HEADER")],
+            headers=HEADERS + ("商品编号",),
+        )
+
+        self.assertEqual(empty_response.status_code, 400)
+        self.assertIn("为空", empty_response.data["detail"])
+        self.assertEqual(corrupt_response.status_code, 400)
+        self.assertIn("无法解析", corrupt_response.data["detail"])
+        self.assertEqual(no_rows_response.status_code, 400)
+        self.assertIn("没有数据行", no_rows_response.data["detail"])
+        self.assertEqual(missing_header_response.status_code, 400)
+        self.assertIn("缺少必要表头", missing_header_response.data["detail"])
+        self.assertEqual(duplicate_header_response.status_code, 400)
+        self.assertIn("表头重复", duplicate_header_response.data["detail"])
+
+    def test_more_than_one_thousand_rows_are_rejected(self):
+        rows = [self._valid_row(f"PDA-LIMIT-{index}") for index in range(1001)]
+
+        response = self._post_rows(rows)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("最多导入 1000", response.data["detail"])
+        self.assertFalse(Product.objects.filter(code__startswith="PDA-LIMIT-").exists())
+
+    @patch(
+        "allapp.products.excel_import.ProductExcelImporter._persist",
+        side_effect=IntegrityError("duplicate key"),
+    )
+    def test_concurrent_unique_conflict_returns_409(self, mocked_persist):
+        response = self._post_rows([self._valid_row("PDA-CONCURRENT")])
+
+        self.assertTrue(mocked_persist.called)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("整批已回滚", response.data["detail"])
+        self.assertFalse(Product.objects.filter(code="PDA-CONCURRENT").exists())
 
     def test_legacy_import_action_uses_same_service(self):
         response = self._post_rows(
@@ -633,7 +1020,9 @@ class ProductExcelImportApiTests(TestCase):
         self.assertTrue(Product.objects.filter(code="PDA-LEGACY-ACTION").exists())
 
 
-@unittest.skipUnless(DEPENDENCIES_OK, "缺少 baseinfo/products 依赖模型，跳过 products 导入命令测试")
+@unittest.skipUnless(
+    DEPENDENCIES_OK, "缺少 baseinfo/products 依赖模型，跳过 products 导入命令测试"
+)
 class ProductImportCommandTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(code="PIC", name="Product Import Command")
@@ -679,4 +1068,6 @@ class ProductImportCommandTests(TestCase):
         finally:
             os.unlink(path)
 
-        self.assertFalse(Product.objects.filter(owner=self.owner, code="CMD-DRY-1").exists())
+        self.assertFalse(
+            Product.objects.filter(owner=self.owner, code="CMD-DRY-1").exists()
+        )

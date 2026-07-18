@@ -164,7 +164,9 @@ class ParsedProductRow:
 def resolve_product_import_access(user) -> ProductImportAccess:
     if not user or not getattr(user, "is_authenticated", False):
         raise PermissionDenied("请先登录。")
-    if not (getattr(user, "is_superuser", False) or user.has_perm("products.add_product")):
+    if not (
+        getattr(user, "is_superuser", False) or user.has_perm("products.add_product")
+    ):
         raise PermissionDenied("当前账号没有新增商品权限。")
 
     scope = AccessScope.for_user(user)
@@ -202,12 +204,20 @@ def build_product_import_template(user) -> bytes:
     access = resolve_product_import_access(user)
     owners = list(_owner_queryset_for_access(access).values_list("code", "name"))
     uoms = list(
-        ProductUom.objects.filter(is_active=True).order_by("code").values_list("code", "name")
+        ProductUom.objects.filter(is_active=True)
+        .order_by("code")
+        .values_list("code", "name")
     )
     categories = list(
-        ProductCategory.objects.filter(is_active=True).order_by("code").values_list("code", "name")
+        ProductCategory.objects.filter(is_active=True)
+        .order_by("code")
+        .values_list("code", "name")
     )
-    brands = list(Brand.objects.filter(is_active=True).order_by("code").values_list("code", "name"))
+    brands = list(
+        Brand.objects.filter(is_active=True)
+        .order_by("code")
+        .values_list("code", "name")
+    )
 
     workbook = Workbook()
     instructions = workbook.active
@@ -231,7 +241,12 @@ def build_product_import_template(user) -> bytes:
 
 def _write_instruction_sheet(sheet, access: ProductImportAccess) -> None:
     sheet.append(["商品批量导入模板", f"模板版本：{TEMPLATE_VERSION}"])
-    sheet.append(["使用步骤", "下载模板 → 填写“商品导入” → 在 wmspda 上传导入。"])
+    sheet.append(
+        [
+            "使用步骤",
+            _joined_text("下载模板 → 填写“商品导入” → ", "在 wmspda 上传导入。"),  # noqa: E501
+        ]
+    )
     sheet.append(["必填字段", "商品编号、商品名称、基本单位编码。"])
     owner_rule = (
         "跨货主账号必须填写货主编码。"
@@ -239,15 +254,63 @@ def _write_instruction_sheet(sheet, access: ProductImportAccess) -> None:
         else "货主编码可留空，系统会绑定当前账号的唯一货主。"
     )
     sheet.append(["货主规则", owner_rule])
-    sheet.append(["SKU规则", "SKU编码留空时自动使用商品编号；编码会去空格并转为大写。"])
-    sheet.append(["布尔值", "填写 是/否、1/0、true/false；批次默认是，序列号默认否，启用默认是。"])
-    sheet.append(["效期规则", "保质期管理留空默认否；启用时效期基准可填 MFG/INBOUND。"])
-    sheet.append(["包装规则", "包装单位与包装换算数量必须同时填写；第一版每个商品只支持一层包装。"])
-    sheet.append(["重复规则", "已有商品编号会跳过；其他 SKU/条码冲突会使整批不写入。"])
-    sheet.append(["注意", "编码和条码请按文本填写以保留前导零；不要在业务单元格使用公式。"])
+    sheet.append(
+        [
+            "SKU规则",
+            _joined_text("SKU编码留空时自动使用商品编号；", "编码会去空格并转为大写。"),  # noqa: E501
+        ]
+    )
+    sheet.append(
+        [
+            "布尔值",
+            _joined_text(
+                "填写 是/否、1/0、true/false；批次默认是，",
+                "序列号默认否，启用默认是。",
+            ),
+        ]
+    )
+    sheet.append(
+        [
+            "效期规则",
+            _joined_text("保质期管理留空默认否；", "启用时效期基准可填 MFG/INBOUND。"),  # noqa: E501
+        ]
+    )
+    sheet.append(
+        [
+            "包装规则",
+            _joined_text(
+                "包装单位与包装换算数量必须同时填写；",
+                "第一版每个商品只支持一层包装。",
+            ),
+        ]
+    )
+    sheet.append(
+        [
+            "重复规则",
+            _joined_text("已有商品编号会跳过；", "其他 SKU/条码冲突会使整批不写入。"),  # noqa: E501
+        ]
+    )
+    sheet.append(
+        [
+            "注意",
+            _joined_text(
+                "编码和条码请按文本填写以保留前导零；",
+                "不要在业务单元格使用公式。",
+            ),
+        ]
+    )
     sheet.append([])
     sheet.append(["示例（仅说明，不会导入）"])
-    sheet.append(["商品编号", "SKU编码", "商品名称", "基本单位编码", "批次管理", "保质期管理"])
+    sheet.append(
+        [
+            "商品编号",
+            "SKU编码",
+            "商品名称",
+            "基本单位编码",
+            "批次管理",
+            "保质期管理",
+        ]
+    )
     sheet.append(["SKU-001", "SKU-001", "示例商品", "PCS", "是", "否"])
     sheet["A1"].font = Font(size=16, bold=True, color="FFFFFF")
     sheet["A1"].fill = PatternFill("solid", fgColor="2563EB")
@@ -267,8 +330,14 @@ def _write_import_sheet(sheet, access: ProductImportAccess) -> None:
         cell = sheet.cell(row=1, column=index)
         cell.font = Font(color="FFFFFF", bold=True)
         cell.fill = required_fill if header in REQUIRED_HEADERS else header_fill
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        width = 18 if header in {"商品名称", "描述"} else max(12, min(len(header) * 2 + 4, 18))
+        cell.alignment = Alignment(
+            horizontal="center", vertical="center", wrap_text=True
+        )
+        width = (
+            18
+            if header in {"商品名称", "描述"}
+            else max(12, min(len(header) * 2 + 4, 18))
+        )
         sheet.column_dimensions[get_column_letter(index)].width = width
         if header in TEXT_HEADERS:
             sheet.column_dimensions[get_column_letter(index)].number_format = "@"
@@ -291,7 +360,9 @@ def _write_reference_sheet(sheet, owners, uoms, categories, brands) -> None:
         sheet.cell(row=1, column=start_col + 1, value=name_header)
         for column in (start_col, start_col + 1):
             sheet.cell(row=1, column=column).font = Font(color="FFFFFF", bold=True)
-            sheet.cell(row=1, column=column).fill = PatternFill("solid", fgColor="475569")
+            sheet.cell(row=1, column=column).fill = PatternFill(
+                "solid", fgColor="475569"
+            )
             sheet.column_dimensions[get_column_letter(column)].width = 22
         for row_number, (code, name) in enumerate(rows, start=2):
             sheet.cell(row=row_number, column=start_col, value=code)
@@ -306,7 +377,9 @@ def _write_meta_sheet(sheet) -> None:
     sheet.append(["max_rows", MAX_IMPORT_ROWS])
 
 
-def _add_template_validations(workbook, data_sheet, owners, uoms, categories, brands) -> None:
+def _add_template_validations(
+    workbook, data_sheet, owners, uoms, categories, brands
+) -> None:
     end_row = MAX_IMPORT_ROWS + 1
 
     def add_list(header: str, formula: str) -> None:
@@ -370,9 +443,11 @@ class ProductExcelImporter:
         try:
             created = self._persist(rows, getattr(uploaded_file, "name", ""))
         except IntegrityError as exc:
-            raise ProductImportConflictError(
-                "导入期间发生唯一性冲突，整批已回滚；请重新下载数据或检查并发导入。"
-            ) from exc
+            message = _joined_text(
+                "导入期间发生唯一性冲突，整批已回滚；",
+                "请重新下载数据或检查并发导入。",
+            )
+            raise ProductImportConflictError(message) from exc
         except DjangoValidationError as exc:
             raise ProductImportFileError(
                 f"导入校验失败，整批已回滚：{_validation_text(exc)}"
@@ -396,14 +471,18 @@ class ProductExcelImporter:
                 entries = archive.infolist()
                 if len(entries) > MAX_XLSX_ENTRIES:
                     raise ProductImportFileError("Excel 文件结构异常。")
-                if sum(entry.file_size for entry in entries) > MAX_XLSX_UNCOMPRESSED_SIZE:
+                if (
+                    sum(entry.file_size for entry in entries)
+                    > MAX_XLSX_UNCOMPRESSED_SIZE
+                ):
                     raise ProductImportFileError("Excel 解压后内容过大。")
                 if archive.testzip() is not None:
                     raise ProductImportFileError("Excel 文件已损坏。")
         except ProductImportFileError:
             raise
         except (zipfile.BadZipFile, OSError) as exc:
-            raise ProductImportFileError("无法解析 Excel 文件，请使用系统模板重新保存。") from exc
+            message = "无法解析 Excel 文件，请使用系统模板重新保存。"
+            raise ProductImportFileError(message) from exc
         try:
             return load_workbook(io.BytesIO(data), data_only=False, read_only=False)
         except Exception as exc:
@@ -417,18 +496,28 @@ class ProductExcelImporter:
         raw_headers = [_text(cell.value) for cell in header_cells]
         nonempty_headers = [header for header in raw_headers if header]
         duplicates = sorted(
-            {header for header in nonempty_headers if nonempty_headers.count(header) > 1}
+            {
+                header
+                for header in nonempty_headers
+                if nonempty_headers.count(header) > 1
+            }
         )
         if duplicates:
             raise ProductImportFileError(f"Excel 表头重复：{', '.join(duplicates)}。")
         unknown = [header for header in nonempty_headers if header not in HEADERS]
         if unknown:
-            raise ProductImportFileError(f"Excel 包含不支持的表头：{', '.join(unknown)}。")
-        missing = [header for header in REQUIRED_HEADERS if header not in nonempty_headers]
+            message = f"Excel 包含不支持的表头：{', '.join(unknown)}。"
+            raise ProductImportFileError(message)
+        missing = [
+            header for header in REQUIRED_HEADERS if header not in nonempty_headers
+        ]
         if missing:
-            raise ProductImportFileError(f"Excel 缺少必要表头：{', '.join(sorted(missing))}。")
+            message = f"Excel 缺少必要表头：{', '.join(sorted(missing))}。"
+            raise ProductImportFileError(message)
 
-        column_by_header = {header: index + 1 for index, header in enumerate(raw_headers) if header}
+        column_by_header = {
+            header: index + 1 for index, header in enumerate(raw_headers) if header
+        }
         raw_rows: list[tuple[int, dict[str, Any]]] = []
         for row_number in range(2, sheet.max_row + 1):
             values = {
@@ -456,24 +545,26 @@ class ProductExcelImporter:
             raise ProductImportFileError("“商品导入”工作表没有数据行。")
 
         parsed: list[ParsedProductRow] = []
-        seen: dict[tuple[int, str, str], int] = {}
+        seen: dict[tuple[object, str, str], int] = {}
         for row_number, values in raw_rows:
             row = self._parse_row(row_number, values)
-            if row is None:
-                continue
-            self._check_file_duplicates(row, seen)
-            parsed.append(row)
+            self._check_file_duplicates(row_number, values, seen)
+            if row is not None:
+                parsed.append(row)
         return parsed
 
-    def _parse_row(self, row_number: int, values: dict[str, Any]) -> ParsedProductRow | None:
+    def _parse_row(
+        self, row_number: int, values: dict[str, Any]
+    ) -> ParsedProductRow | None:
         before_error_count = len(self.errors)
         owner = self._resolve_owner(row_number, values.get("货主编码"))
-        code = self._required_code(row_number, "商品编号", values.get("商品编号"), max_length=50)
-        name = self._required_text(row_number, "商品名称", values.get("商品名称"), max_length=200)
-        base_uom = self._resolve_uom(
-            row_number, "基本单位编码", values.get("基本单位编码"), required=True
+        code = self._required_code(
+            row_number,
+            "商品编号",
+            values.get("商品编号"),
+            max_length=50,
         )
-        if owner is None or not code or not name or base_uom is None:
+        if owner is None or not code:
             return None
 
         existing = Product.all_objects.filter(owner=owner, code__iexact=code).first()
@@ -484,18 +575,47 @@ class ProductExcelImporter:
                     "row": row_number,
                     "code": code,
                     "product_id": existing.pk,
-                    "reason": f"商品编号{state}，未修改原商品。",
+                    "owner_code": owner.code,
+                    "name": existing.name,
+                    "is_deleted": existing.is_deleted,
+                    "reason": (
+                        "商品编号已软删除，请恢复旧商品或更换编号。"
+                        if existing.is_deleted
+                        else f"商品编号{state}，未修改原商品。"
+                    ),
                 }
             )
             return None
 
+        name = self._required_text(
+            row_number,
+            "商品名称",
+            values.get("商品名称"),
+            max_length=200,
+        )
+        base_uom = self._resolve_uom(
+            row_number, "基本单位编码", values.get("基本单位编码"), required=True
+        )
+        if not name or base_uom is None:
+            return None
+
         sku = (
-            self._optional_code(row_number, "SKU编码", values.get("SKU编码"), max_length=50) or code
+            self._optional_code(
+                row_number,
+                "SKU编码",
+                values.get("SKU编码"),
+                max_length=50,
+            )
+            or code
         )
         category = self._resolve_category(row_number, values.get("分类编码"))
         brand = self._resolve_brand(row_number, values.get("品牌编码"))
+        package_uom_value = values.get("包装单位编码")
         package_uom = self._resolve_uom(
-            row_number, "包装单位编码", values.get("包装单位编码"), required=False
+            row_number,
+            "包装单位编码",
+            package_uom_value,
+            required=False,
         )
 
         product = Product(
@@ -503,12 +623,21 @@ class ProductExcelImporter:
             code=code,
             sku=sku,
             name=name,
-            spec=self._optional_text(row_number, "规格", values.get("规格"), max_length=200),
+            spec=self._optional_text(
+                row_number, "规格", values.get("规格"), max_length=200
+            ),
             category=category,
             brand=brand,
             base_uom=base_uom,
-            gtin=self._optional_text(row_number, "GTIN", values.get("GTIN"), max_length=20),
-            unit_barcode=self._optional_text(row_number, "零码", values.get("零码"), max_length=50),
+            gtin=self._optional_text(
+                row_number, "GTIN", values.get("GTIN"), max_length=20
+            ),
+            unit_barcode=self._optional_text(
+                row_number,
+                "零码",
+                values.get("零码"),
+                max_length=50,
+            ),
             carton_barcode=self._optional_text(
                 row_number, "箱码", values.get("箱码"), max_length=50
             ),
@@ -528,12 +657,24 @@ class ProductExcelImporter:
                 minimum=Decimal("0"),
                 maximum=Decimal("100"),
             ),
-            weight=self._decimal(row_number, "重量kg", values.get("重量kg"), minimum=Decimal("0")),
-            volume=self._decimal(row_number, "体积m³", values.get("体积m³"), minimum=Decimal("0")),
+            weight=self._decimal(
+                row_number,
+                "重量kg",
+                values.get("重量kg"),
+                minimum=Decimal("0"),
+            ),
+            volume=self._decimal(
+                row_number,
+                "体积m³",
+                values.get("体积m³"),
+                minimum=Decimal("0"),
+            ),
             net_content=self._decimal(
                 row_number, "净含量g", values.get("净含量g"), minimum=Decimal("0")
             ),
-            vender=self._optional_text(row_number, "厂家", values.get("厂家"), max_length=50),
+            vender=self._optional_text(
+                row_number, "厂家", values.get("厂家"), max_length=50
+            ),
             material_quality=self._optional_text(
                 row_number, "材质", values.get("材质"), max_length=20
             ),
@@ -544,13 +685,28 @@ class ProductExcelImporter:
             max_stock=self._decimal(
                 row_number, "最高库存", values.get("最高库存"), minimum=Decimal("0")
             ),
-            serial_control=self._boolean(row_number, "序列号管理", values.get("序列号管理"), False),
-            batch_control=self._boolean(row_number, "批次管理", values.get("批次管理"), True),
+            serial_control=self._boolean(
+                row_number,
+                "序列号管理",
+                values.get("序列号管理"),
+                False,
+            ),
+            batch_control=self._boolean(
+                row_number,
+                "批次管理",
+                values.get("批次管理"),
+                True,
+            ),
             is_active=self._boolean(row_number, "启用", values.get("启用"), True),
             created_by=self.user,
             updated_by=self.user,
         )
-        expiry_control = self._boolean(row_number, "保质期管理", values.get("保质期管理"), False)
+        expiry_control = self._boolean(
+            row_number,
+            "保质期管理",
+            values.get("保质期管理"),
+            False,
+        )
         product.expiry_control = expiry_control
         if expiry_control:
             basis = (_text(values.get("效期基准")) or "MFG").upper()
@@ -566,7 +722,9 @@ class ProductExcelImporter:
             product.expiry_warning_days = self._integer(
                 row_number, "效期预警天数", values.get("效期预警天数"), minimum=1
             )
-            product.fefo_required = self._boolean(row_number, "FEFO", values.get("FEFO"), True)
+            product.fefo_required = self._boolean(
+                row_number, "FEFO", values.get("FEFO"), True
+            )
         else:
             product.expiry_basis = None
             product.shelf_life_days = None
@@ -574,22 +732,44 @@ class ProductExcelImporter:
             product.expiry_warning_days = None
             product.fefo_required = False
 
+        package_qty_value = values.get("包装换算数量")
         package_qty = self._integer(
-            row_number, "包装换算数量", values.get("包装换算数量"), minimum=1
+            row_number,
+            "包装换算数量",
+            package_qty_value,
+            minimum=1,
         )
         package_barcode = self._optional_text(
             row_number, "包装条码", values.get("包装条码"), max_length=50
         )
         package_data = None
         package_requested = (
-            package_uom is not None or package_qty is not None or package_barcode is not None
+            bool(_text(package_uom_value))
+            or bool(_text(package_qty_value))
+            or package_barcode is not None
+            or bool(_text(values.get("采购默认")))
+            or bool(_text(values.get("销售默认")))
         )
         if package_requested:
-            if package_uom is None:
-                self._error(row_number, "包装单位编码", "填写包装信息时包装单位不能为空。")
-            if package_qty is None:
-                self._error(row_number, "包装换算数量", "填写包装信息时换算数量不能为空。")
+            if package_uom is None and not _text(package_uom_value):
+                self._error(
+                    row_number,
+                    "包装单位编码",
+                    "填写包装信息时包装单位不能为空。",
+                )
+            if package_qty is None and not _text(package_qty_value):
+                self._error(
+                    row_number,
+                    "包装换算数量",
+                    "填写包装信息时换算数量不能为空。",
+                )
             if package_uom is not None and package_qty is not None:
+                if package_uom.pk == base_uom.pk and package_qty != 1:
+                    self._error(
+                        row_number,
+                        "包装换算数量",
+                        "包装单位与基本单位相同时，换算数量必须为 1。",
+                    )
                 package_data = {
                     "uom": package_uom,
                     "qty_in_base": package_qty,
@@ -608,14 +788,26 @@ class ProductExcelImporter:
                 product.full_clean()
             except DjangoValidationError as exc:
                 self._add_validation_errors(row_number, exc)
+        if len(self.errors) == before_error_count and package_data:
+            package = ProductPackage(product=product, **package_data)
+            try:
+                package.full_clean(
+                    exclude={"product"},
+                )
+            except DjangoValidationError as exc:
+                self._add_validation_errors(row_number, exc)
         if len(self.errors) != before_error_count:
             return None
-        return ParsedProductRow(row_number=row_number, product=product, package_data=package_data)
+        return ParsedProductRow(
+            row_number=row_number, product=product, package_data=package_data
+        )
 
     def _resolve_owner(self, row_number: int, value) -> Owner | None:
         code = _text(value).upper()
         if not code and self.access.default_owner_id:
-            owner = Owner.objects.filter(pk=self.access.default_owner_id, is_active=True).first()
+            owner = Owner.objects.filter(
+                pk=self.access.default_owner_id, is_active=True
+            ).first()
             if owner:
                 return owner
         if not code:
@@ -750,25 +942,33 @@ class ProductExcelImporter:
         self._error(row, field, "只能填写 是/否、1/0 或 true/false。")
         return None
 
-    def _check_file_duplicates(self, row: ParsedProductRow, seen) -> None:
-        product = row.product
-        values = (
-            ("商品编号", product.code),
-            ("SKU编码", product.sku),
-            ("GTIN", product.gtin),
-            ("零码", product.unit_barcode),
-            ("箱码", product.carton_barcode),
-            ("外部系统编码", product.external_code),
+    def _check_file_duplicates(self, row_number: int, row_values, seen) -> None:
+        owner_code = _text(row_values.get("货主编码")).upper()
+        owner = self._owner_cache.get(owner_code) if owner_code else None
+        owner_key: object = (
+            owner.pk
+            if owner is not None
+            else owner_code or self.access.default_owner_id or "missing-owner"
         )
-        for field, value in values:
+        code = _text(row_values.get("商品编号")).upper()
+        sku = _text(row_values.get("SKU编码")).upper() or code
+        identifiers = (
+            ("商品编号", code),
+            ("SKU编码", sku),
+            ("GTIN", _text(row_values.get("GTIN"))),
+            ("零码", _text(row_values.get("零码"))),
+            ("箱码", _text(row_values.get("箱码"))),
+            ("外部系统编码", _text(row_values.get("外部系统编码"))),
+        )
+        for field, value in identifiers:
             if not value:
                 continue
-            key = (product.owner_id, field, str(value).upper())
+            key = (owner_key, field, str(value).upper())
             previous = seen.get(key)
             if previous:
-                self._error(row.row_number, field, f"与第 {previous} 行重复。")
+                self._error(row_number, field, f"与第 {previous} 行重复。")
             else:
-                seen[key] = row.row_number
+                seen[key] = row_number
 
     def _add_validation_errors(self, row_number, exc: DjangoValidationError) -> None:
         if hasattr(exc, "message_dict"):
@@ -783,7 +983,9 @@ class ProductExcelImporter:
     def _error(self, row, field, message):
         self.errors.append({"row": row, "field": field, "message": message})
 
-    def _persist(self, rows: list[ParsedProductRow], filename: str) -> list[dict[str, Any]]:
+    def _persist(
+        self, rows: list[ParsedProductRow], filename: str
+    ) -> list[dict[str, Any]]:
         created = []
         with transaction.atomic():
             for row in rows:
@@ -846,10 +1048,15 @@ def _text(value) -> str:
     return str(value).strip()
 
 
+def _joined_text(*parts: str) -> str:
+    return "".join(parts)
+
+
 def _validation_text(exc: DjangoValidationError) -> str:
     if hasattr(exc, "message_dict"):
         return "; ".join(
-            f"{MODEL_FIELD_LABELS.get(field, field)}: {', '.join(str(message) for message in messages)}"
+            f"{MODEL_FIELD_LABELS.get(field, field)}: "
+            f"{', '.join(str(message) for message in messages)}"
             for field, messages in exc.message_dict.items()
         )
     return "; ".join(str(message) for message in exc.messages)

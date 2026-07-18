@@ -243,7 +243,10 @@ export function downloadProductImportTemplate() {
         throw {
           statusCode: response.status,
           data,
-          message: getFriendlyMessage(data, '模板下载失败'),
+          message:
+            response.status === 403
+              ? '无商品导入权限'
+              : getFriendlyMessage(data, '模板下载失败'),
         }
       }
       const blob = await response.blob()
@@ -273,7 +276,10 @@ export function downloadProductImportTemplate() {
         reject({
           statusCode: res.statusCode,
           data: res.data,
-          message: getFriendlyMessage(res.data, '模板下载失败'),
+          message:
+            res.statusCode === 403
+              ? '无商品导入权限'
+              : getFriendlyMessage(res.data, '模板下载失败'),
         })
       },
       fail: (error) => reject({ statusCode: 0, data: error, message: '模板下载失败' }),
@@ -294,7 +300,14 @@ export function uploadProductImportExcel(filePath) {
         try {
           data = typeof data === 'string' ? JSON.parse(data) : data
         } catch (error) {
-          reject({ statusCode: res.statusCode, data, message: '服务器返回了无法识别的结果' })
+          reject({
+            statusCode: res.statusCode,
+            data,
+            message:
+              res.statusCode >= 500
+                ? '服务器异常，请稍后重试'
+                : '服务器返回了无法识别的结果',
+          })
           return
         }
         if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -305,10 +318,18 @@ export function uploadProductImportExcel(filePath) {
         reject({
           statusCode: res.statusCode,
           data,
-          message: getFriendlyMessage(data, '商品导入失败'),
+          message:
+            res.statusCode === 403
+              ? '无商品导入权限'
+              : getFriendlyMessage(data, '商品导入失败'),
         })
       },
-      fail: (error) => reject({ statusCode: 0, data: error, message: '网络异常，请稍后重试' }),
+      fail: (error) =>
+        reject({
+          statusCode: 0,
+          data: error,
+          message: '网络异常，请稍后重试',
+        }),
     })
   })
 }
