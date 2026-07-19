@@ -45,19 +45,23 @@
     <view v-else-if="!history.length" class="empty">暂无代办出库记录</view>
     <view v-else class="history-list">
       <view v-for="row in history" :key="row.id" class="history-row">
-        <view class="history-title-line">
-          <text class="order-no">{{ row.order_no }}</text>
-          <text :class="['status-tag', statusClass(row.business_status)]">
-            {{ row.business_status_label }}
-          </text>
-        </view>
-        <view class="history-meta">
+        <text class="order-no" :title="row.order_no">{{ row.order_no }}</text>
+        <text
+          class="history-meta"
+          :title="`${row.owner?.name || '-'} · ${row.receiver_name || row.customer?.name || '-'}`"
+        >
           {{ row.owner?.name || '-' }} · {{ row.receiver_name || row.customer?.name || '-' }}
-        </view>
-        <view class="history-meta">
+        </text>
+        <text
+          class="history-meta"
+          :title="`${dateTimeText(row.assisted_at)} · ${row.line_count || 0} 种 · 基本数量 ${qtyText(row.total_base_qty)}`"
+        >
           {{ dateTimeText(row.assisted_at) }} · {{ row.line_count || 0 }} 种 · 基本数量
           {{ qtyText(row.total_base_qty) }}
-        </view>
+        </text>
+        <text :class="['status-tag', statusClass(row.business_status)]">
+          {{ row.business_status_label }}
+        </text>
         <view class="history-actions">
           <button
             class="action-button"
@@ -67,15 +71,16 @@
             查看任务
           </button>
           <button
-            class="action-button print-button"
-            :disabled="!row.can_reprint"
+            :class="[
+              'action-button',
+              'print-button',
+              { 'is-unavailable': !row.can_reprint || !row.task?.id },
+            ]"
+            :aria-disabled="!row.can_reprint || !row.task?.id"
             @click="reprint(row)"
           >
             重打出库单
           </button>
-        </view>
-        <view v-if="!row.can_reprint && row.reprint_unavailable_reason" class="disabled-reason">
-          {{ row.reprint_unavailable_reason }}
         </view>
       </view>
     </view>
@@ -198,9 +203,9 @@ onMounted(() => refresh())
 
 <style scoped>
 .history-panel { margin-top: 18rpx; padding: 18rpx; border-radius: 16rpx; background: #fff; box-shadow: 0 4rpx 16rpx rgba(0,0,0,.04); }
-.panel-head, .section-head, .history-title-line, .history-actions, .navigation-row { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; }
+.panel-head, .section-head, .navigation-row { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; }
 .panel-title { font-size: 28rpx; font-weight: 700; }
-.panel-subtitle, .recent-count, .history-meta, .workload-line, .disabled-reason { color: #697386; font-size: 21rpx; }
+.panel-subtitle, .recent-count, .history-meta, .workload-line { color: #697386; font-size: 21rpx; }
 .small-button, .retry-button, .action-button, .navigation-button { margin: 0; padding: 0 16rpx; height: 54rpx; line-height: 54rpx; font-size: 21rpx; }
 .small-button, .action-button, .navigation-button { color: #1677ff; background: #eef5ff; }
 .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10rpx; margin-top: 16rpx; }
@@ -213,17 +218,17 @@ onMounted(() => refresh())
 .summary-value { display: block; margin-top: 5rpx; font-size: 31rpx; font-weight: 700; }
 .workload-line { margin-top: 10rpx; text-align: right; }
 .recent-head { margin-top: 24rpx; padding-bottom: 10rpx; border-bottom: 1rpx solid #e5e7eb; }
-.history-row { padding: 14rpx 0; border-bottom: 1rpx solid #edf0f4; }
+.history-row { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .9fr) minmax(0, 1.2fr) auto auto; align-items: center; gap: 10rpx; min-width: 0; padding: 8rpx 0; border-bottom: 1rpx solid #edf0f4; white-space: nowrap; }
 .order-no { overflow: hidden; min-width: 0; font-size: 23rpx; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.status-tag { flex: none; padding: 4rpx 10rpx; border-radius: 999rpx; font-size: 19rpx; }
+.status-tag { padding: 4rpx 10rpx; border-radius: 999rpx; font-size: 19rpx; white-space: nowrap; }
 .status-tag.completed { color: #237804; background: #f0f9e8; }
 .status-tag.pending { color: #ad6800; background: #fff7e6; }
 .status-tag.exception, .status-tag.cancelled { color: #b42318; background: #fff1f0; }
-.history-meta { margin-top: 7rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.history-actions { justify-content: flex-end; margin-top: 10rpx; }
+.history-meta { overflow: hidden; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
+.history-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8rpx; white-space: nowrap; }
 .print-button { color: #fff; background: #1677ff; }
 .action-button[disabled] { opacity: .45; }
-.disabled-reason { margin-top: 7rpx; text-align: right; }
+.print-button.is-unavailable { color: #8a94a6; background: #e5e7eb; opacity: .65; }
 .navigation-row { margin-top: 18rpx; }
 .navigation-button { flex: 1; }
 .empty { padding: 30rpx 0; color: #8a94a6; text-align: center; }

@@ -30,7 +30,7 @@ MAX_IMPORT_ROWS = 1000
 MAX_XLSX_UNCOMPRESSED_SIZE = 50 * 1024 * 1024
 MAX_XLSX_ENTRIES = 300
 IMPORT_SHEET_NAME = "商品导入"
-TEMPLATE_VERSION = "1"
+TEMPLATE_VERSION = "2"
 
 
 HEADERS = (
@@ -73,7 +73,9 @@ HEADERS = (
     "销售默认",
 )
 
-REQUIRED_HEADERS = frozenset({"商品编号", "商品名称", "基本单位编码"})
+REQUIRED_HEADERS = frozenset(
+    {"货主编码", "商品编号", "商品名称", "基本单位编码"}
+)
 TEXT_HEADERS = frozenset(
     {
         "货主编码",
@@ -144,11 +146,6 @@ class ProductImportConflictError(ProductImportFileError):
 @dataclass(frozen=True)
 class ProductImportAccess:
     allowed_owner_ids: frozenset[int] | None
-    default_owner_id: int | None
-
-    @property
-    def is_cross_owner(self) -> bool:
-        return self.allowed_owner_ids is None
 
     def allows_owner(self, owner_id: int) -> bool:
         return self.allowed_owner_ids is None or owner_id in self.allowed_owner_ids
@@ -171,17 +168,14 @@ def resolve_product_import_access(user) -> ProductImportAccess:
 
     scope = AccessScope.for_user(user)
     if getattr(user, "is_superuser", False):
-        return ProductImportAccess(allowed_owner_ids=None, default_owner_id=None)
+        return ProductImportAccess(allowed_owner_ids=None)
     if not scope.is_valid:
         raise PermissionDenied("当前账号没有有效的角色数据范围。")
     if can_manage_all_owner_products(user):
-        return ProductImportAccess(allowed_owner_ids=None, default_owner_id=None)
+        return ProductImportAccess(allowed_owner_ids=None)
     if len(scope.owner_ids) == 1:
         owner_id = next(iter(scope.owner_ids))
-        return ProductImportAccess(
-            allowed_owner_ids=frozenset({owner_id}),
-            default_owner_id=owner_id,
-        )
+        return ProductImportAccess(allowed_owner_ids=frozenset({owner_id}))
     raise PermissionDenied("当前账号没有单一货主范围或跨货主管理权限。")
 
 
@@ -226,8 +220,8 @@ def build_product_import_template(user) -> bytes:
     refs = workbook.create_sheet("基础资料")
     meta = workbook.create_sheet("_meta")
 
-    _write_instruction_sheet(instructions, access)
-    _write_import_sheet(data_sheet, access)
+    _write_instruction_sheet(instructions)
+    _write_import_sheet(data_sheet)
     _write_reference_sheet(refs, owners, uoms, categories, brands)
     _write_meta_sheet(meta)
     _add_template_validations(workbook, data_sheet, owners, uoms, categories, brands)
@@ -239,7 +233,7 @@ def build_product_import_template(user) -> bytes:
     return output.getvalue()
 
 
-def _write_instruction_sheet(sheet, access: ProductImportAccess) -> None:
+def _write_instruction_sheet(sheet) -> None:
     sheet.append(["商品批量导入模板", f"模板版本：{TEMPLATE_VERSION}"])
     sheet.append(
         [
@@ -247,13 +241,10 @@ def _write_instruction_sheet(sheet, access: ProductImportAccess) -> None:
             _joined_text("下载模板 → 填写“商品导入” → ", "在 wmspda 上传导入。"),  # noqa: E501
         ]
     )
-    sheet.append(["必填字段", "商品编号、商品名称、基本单位编码。"])
-    owner_rule = (
-        "跨货主账号必须填写货主编码。"
-        if access.is_cross_owner
-        else "货主编码可留空，系统会绑定当前账号的唯一货主。"
+    sheet.append(["必填字段", "货主编码、商品编号、商品名称、基本单位编码。"])
+    sheet.append(
+        ["货主规则", "货主编码必须填写，且只能填写“基础资料”中当前账号有权使用的编码。"]
     )
-    sheet.append(["货主规则", owner_rule])
     sheet.append(
         [
             "SKU规则",
@@ -264,8 +255,8 @@ def _write_instruction_sheet(sheet, access: ProductImportAccess) -> None:
         [
             "布尔值",
             _joined_text(
-                "填写 是/否、1/0、true/false；批次默认是，",
-                "序列号默认否，启用默认是。",
+                "填写 是/否、1/0、true/false；批次、序列号和保质期管理默认否，",
+                "启用默认是。",
             ),
         ]
     )
@@ -287,7 +278,10 @@ def _write_instruction_sheet(sheet, access: ProductImportAccess) -> None:
     sheet.append(
         [
             "重复规则",
-            _joined_text("已有商品编号会跳过；", "其他 SKU/条码冲突会使整批不写入。"),  # noqa: E501
+            _joined_text(
+                "商品编号、SKU、条码或外部系统编码与已有商品冲突，",
+                "或 Excel 内部重复，都会使整批不写入。",
+            ),
         ]
     )
     sheet.append(
@@ -303,6 +297,7 @@ def _write_instruction_sheet(sheet, access: ProductImportAccess) -> None:
     sheet.append(["示例（仅说明，不会导入）"])
     sheet.append(
         [
+            "货主编码",
             "商品编号",
             "SKU编码",
             "商品名称",
@@ -311,7 +306,9 @@ def _write_instruction_sheet(sheet, access: ProductImportAccess) -> None:
             "保质期管理",
         ]
     )
-    sheet.append(["SKU-001", "SKU-001", "示例商品", "PCS", "是", "否"])
+    sheet.append(
+        ["OWNER-001", "SKU-001", "SKU-001", "示例商品", "PCS", "否", "否"]
+    )
     sheet["A1"].font = Font(size=16, bold=True, color="FFFFFF")
     sheet["A1"].fill = PatternFill("solid", fgColor="2563EB")
     sheet["B1"].fill = PatternFill("solid", fgColor="2563EB")
@@ -322,7 +319,7 @@ def _write_instruction_sheet(sheet, access: ProductImportAccess) -> None:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
 
 
-def _write_import_sheet(sheet, access: ProductImportAccess) -> None:
+def _write_import_sheet(sheet) -> None:
     sheet.append(list(HEADERS))
     header_fill = PatternFill("solid", fgColor="1D4ED8")
     required_fill = PatternFill("solid", fgColor="DC2626")
@@ -569,22 +566,12 @@ class ProductExcelImporter:
 
         existing = Product.all_objects.filter(owner=owner, code__iexact=code).first()
         if existing:
-            state = "已软删除" if existing.is_deleted else "已存在"
-            self.skipped.append(
-                {
-                    "row": row_number,
-                    "code": code,
-                    "product_id": existing.pk,
-                    "owner_code": owner.code,
-                    "name": existing.name,
-                    "is_deleted": existing.is_deleted,
-                    "reason": (
-                        "商品编号已软删除，请恢复旧商品或更换编号。"
-                        if existing.is_deleted
-                        else f"商品编号{state}，未修改原商品。"
-                    ),
-                }
+            message = (
+                "商品编号命中已软删除商品，请恢复旧商品或更换编号；整批不会写入。"
+                if existing.is_deleted
+                else "商品编号已存在；整批不会写入。"
             )
+            self._error(row_number, "商品编号", message)
             return None
 
         name = self._required_text(
@@ -695,7 +682,7 @@ class ProductExcelImporter:
                 row_number,
                 "批次管理",
                 values.get("批次管理"),
-                True,
+                False,
             ),
             is_active=self._boolean(row_number, "启用", values.get("启用"), True),
             created_by=self.user,
@@ -804,14 +791,8 @@ class ProductExcelImporter:
 
     def _resolve_owner(self, row_number: int, value) -> Owner | None:
         code = _text(value).upper()
-        if not code and self.access.default_owner_id:
-            owner = Owner.objects.filter(
-                pk=self.access.default_owner_id, is_active=True
-            ).first()
-            if owner:
-                return owner
         if not code:
-            self._error(row_number, "货主编码", "跨货主导入时货主编码不能为空。")
+            self._error(row_number, "货主编码", "不能为空。")
             return None
         if code not in self._owner_cache:
             self._owner_cache[code] = Owner.objects.filter(
@@ -948,7 +929,7 @@ class ProductExcelImporter:
         owner_key: object = (
             owner.pk
             if owner is not None
-            else owner_code or self.access.default_owner_id or "missing-owner"
+            else owner_code or "missing-owner"
         )
         code = _text(row_values.get("商品编号")).upper()
         sku = _text(row_values.get("SKU编码")).upper() or code

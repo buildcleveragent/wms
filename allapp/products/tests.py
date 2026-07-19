@@ -501,13 +501,14 @@ class ProductExcelImportApiTests(TestCase):
 
     def _valid_row(self, code="PDA-XLSX-1", **overrides):
         row = {
+            "货主编码": self.owner.code,
             "商品编号": code,
             "商品名称": f"导入商品 {code}",
             "基本单位编码": self.uom.code,
             "分类编码": self.category.code,
             "品牌编码": self.brand.code,
-            "批次管理": "是",
-            "保质期管理": "否",
+            "批次管理": "",
+            "保质期管理": "",
         }
         row.update(overrides)
         return row
@@ -527,8 +528,17 @@ class ProductExcelImportApiTests(TestCase):
             ["填写说明", "商品导入", "基础资料", "_meta"],
         )
         self.assertEqual(workbook["_meta"].sheet_state, "hidden")
+        self.assertEqual(workbook["_meta"]["B2"].value, "2")
         headers = [cell.value for cell in workbook[IMPORT_SHEET_NAME][1]]
         self.assertEqual(tuple(headers), HEADERS)
+        instructions = {
+            row[0].value: row[1].value
+            for row in workbook["填写说明"].iter_rows(min_col=1, max_col=2)
+            if row[0].value and row[1].value
+        }
+        self.assertIn("货主编码", instructions["必填字段"])
+        self.assertIn("批次、序列号和保质期管理默认否", instructions["布尔值"])
+        self.assertIn("整批不写入", instructions["重复规则"])
         owner_codes = {
             workbook["基础资料"].cell(row=row, column=1).value
             for row in range(2, workbook["基础资料"].max_row + 1)
@@ -537,7 +547,12 @@ class ProductExcelImportApiTests(TestCase):
         self.assertNotIn(self.other_owner.code, owner_codes)
         self.assertIn("ProductImportUomCodes", workbook.defined_names)
         code_column = HEADERS.index("商品编号") + 1
+        owner_column = HEADERS.index("货主编码") + 1
         barcode_column = HEADERS.index("GTIN") + 1
+        self.assertEqual(
+            workbook[IMPORT_SHEET_NAME].cell(1, owner_column).fill.fgColor.rgb,
+            workbook[IMPORT_SHEET_NAME].cell(1, code_column).fill.fgColor.rgb,
+        )
         self.assertEqual(
             workbook[IMPORT_SHEET_NAME].cell(2, code_column).number_format, "@"
         )
@@ -574,7 +589,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(product.created_by_id, self.user.id)
         self.assertFalse(product.expiry_control)
         self.assertFalse(product.serial_control)
-        self.assertTrue(product.batch_control)
+        self.assertFalse(product.batch_control)
         self.assertTrue(product.is_active)
         package = product.packages.get()
         self.assertEqual(package.uom_id, self.carton_uom.id)
@@ -603,6 +618,21 @@ class ProductExcelImportApiTests(TestCase):
         )
         self.assertFalse(Product.objects.filter(code="PDA-OWN-A").exists())
 
+    def test_owner_code_is_required_even_for_single_owner_scope(self):
+        response = self._post_rows(
+            [self._valid_row("PDA-OWNER-REQUIRED", **{"货主编码": ""})]
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(response.data["created_count"], 0)
+        self.assertTrue(
+            any(
+                error["field"] == "货主编码" and "不能为空" in error["message"]
+                for error in response.data["errors"]
+            )
+        )
+        self.assertFalse(Product.objects.filter(code="PDA-OWNER-REQUIRED").exists())
+
     def test_cross_owner_permission_can_import_for_other_owner(self):
         client = APIClient()
         client.force_authenticate(self.cross_owner_user)
@@ -624,7 +654,7 @@ class ProductExcelImportApiTests(TestCase):
         allowed_client = APIClient()
         allowed_client.force_authenticate(self.warehouse_user)
         missing_owner = self._post_rows(
-            [self._valid_row("PDA-WAREHOUSE-GLOBAL")],
+            [self._valid_row("PDA-WAREHOUSE-GLOBAL", **{"货主编码": ""})],
             client=allowed_client,
         )
 
@@ -645,7 +675,7 @@ class ProductExcelImportApiTests(TestCase):
         )
         self.assertEqual(allowed.status_code, 200, allowed.data)
 
-    def test_existing_product_is_skipped_without_update(self):
+    def test_existing_product_code_rejects_whole_batch_without_update(self):
         existing = Product.objects.create(
             owner=self.owner,
             code="PDA-EXISTING",
@@ -658,22 +688,30 @@ class ProductExcelImportApiTests(TestCase):
 
         response = self._post_rows(
             [
+                self._valid_row("PDA-NEW-BEFORE-CONFLICT"),
                 self._valid_row(
                     "PDA-EXISTING",
-                    **{"商品名称": "", "基本单位编码": "NO-UOM"},
+                    **{"商品名称": "尝试修改原商品"},
                 )
             ]
         )
 
-        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.status_code, 400, response.data)
         self.assertEqual(response.data["created_count"], 0)
-        self.assertEqual(response.data["skipped_count"], 1)
-        self.assertEqual(response.data["skipped"][0]["name"], "原商品名称")
-        self.assertEqual(response.data["skipped"][0]["owner_code"], self.owner.code)
+        self.assertEqual(response.data["skipped_count"], 0)
+        self.assertTrue(
+            any(
+                error["field"] == "商品编号" and "已存在" in error["message"]
+                for error in response.data["errors"]
+            )
+        )
+        self.assertFalse(
+            Product.objects.filter(code="PDA-NEW-BEFORE-CONFLICT").exists()
+        )
         existing.refresh_from_db()
         self.assertEqual(existing.name, "原商品名称")
 
-    def test_soft_deleted_product_is_skipped_with_recovery_guidance(self):
+    def test_soft_deleted_product_code_rejects_batch_with_recovery_guidance(self):
         product = Product.objects.create(
             owner=self.owner,
             code="PDA-DELETED",
@@ -687,9 +725,14 @@ class ProductExcelImportApiTests(TestCase):
 
         response = self._post_rows([self._valid_row("PDA-DELETED")])
 
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["skipped_count"], 1)
-        self.assertIn("恢复旧商品", response.data["skipped"][0]["reason"])
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(response.data["skipped_count"], 0)
+        self.assertTrue(
+            any(
+                error["field"] == "商品编号" and "恢复旧商品" in error["message"]
+                for error in response.data["errors"]
+            )
+        )
         self.assertTrue(Product.all_objects.get(pk=product.pk).is_deleted)
 
     def test_identifier_owned_by_other_product_is_an_error(self):
@@ -750,7 +793,7 @@ class ProductExcelImportApiTests(TestCase):
         )
         self.assertFalse(Product.objects.filter(code__startswith="PDA-DUP").exists())
 
-    def test_file_duplicates_are_checked_even_when_existing_rows_are_skipped(self):
+    def test_file_duplicates_are_checked_even_with_existing_code_conflict(self):
         Product.objects.create(
             owner=self.owner,
             code="PDA-DUP-EXISTING",
@@ -810,7 +853,7 @@ class ProductExcelImportApiTests(TestCase):
         mfg = Product.objects.get(code="PDA-MFG")
         inbound = Product.objects.get(code="PDA-INBOUND")
         self.assertEqual(mfg.sku, "PDA-MFG")
-        self.assertTrue(mfg.batch_control)
+        self.assertFalse(mfg.batch_control)
         self.assertFalse(mfg.serial_control)
         self.assertTrue(mfg.is_active)
         self.assertEqual(mfg.shelf_life_days, 365)

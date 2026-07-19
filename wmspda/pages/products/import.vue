@@ -32,7 +32,7 @@
       <view class="card">
         <view class="card-title">3. 上传并导入</view>
         <view class="tips">
-          系统会先校验整份文件。待新增行只要有一条错误，本批次就不会写入；已存在的商品编号会安全跳过。
+          系统会先校验整份文件。货主编码必须填写；商品编号、SKU 或条码与已有商品冲突，或任一行存在错误，整批都不会写入。
         </view>
         <button
           class="primary-btn"
