@@ -10,7 +10,48 @@ from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.contrib.auth.models import Group, Permission
 from django.db import models
 
+from .audit import record_audit_event
 from .models import AuditEvent, SystemLog, User, UserRoleScope
+from .roles import CANONICAL_ROLE_GROUP_NAMES
+
+CANONICAL_GROUP_WARNING = (
+    "这是 WMS 规范角色组：名称和角色身份固定，"
+    "但超级管理员可以调整功能权限。修改权限不会改变 UserRoleScope 的货主/仓库数据范围；"
+    "删除权限可能关闭 PDA 菜单"
+    "或业务操作，增加权限可能开放敏感操作。"
+)
+
+
+def _permission_codes(manager):
+    return sorted(
+        f"{app_label}.{codename}"
+        for app_label, codename in manager.select_related("content_type").values_list(
+            "content_type__app_label",
+            "codename",
+        )
+    )
+
+
+def _group_authorization_snapshot(group):
+    return {
+        "name": group.name,
+        "permissions": _permission_codes(group.permissions),
+    }
+
+
+def _user_authorization_snapshot(user):
+    return {
+        "is_superuser": bool(user.is_superuser),
+        "groups": sorted(user.groups.values_list("name", flat=True)),
+        "user_permissions": _permission_codes(user.user_permissions),
+    }
+
+
+def _authorization_diff(before, after, key):
+    return {
+        "added": sorted(set(after.get(key, ())) - set(before.get(key, ()))),
+        "removed": sorted(set(before.get(key, ())) - set(after.get(key, ()))),
+    }
 
 
 class PermissionMatrixWidget(forms.SelectMultiple):
@@ -222,6 +263,20 @@ class WmsGroupAdminForm(PermissionMatrixMixin, forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._apply_permission_matrix()
+        if self.instance.pk and self.instance.name in CANONICAL_ROLE_GROUP_NAMES:
+            self.fields["name"].disabled = True
+            self.fields["name"].help_text = "规范角色组名称固定，不能修改。"
+            self.fields["permissions"].help_text = CANONICAL_GROUP_WARNING
+
+    def clean_name(self):
+        name = self.cleaned_data["name"]
+        if (
+            self.instance.pk
+            and self.instance.name in CANONICAL_ROLE_GROUP_NAMES
+            and name != self.instance.name
+        ):
+            raise forms.ValidationError("WMS 规范角色组名称固定，不能修改。")
+        return name
 
 
 @admin.register(User)
@@ -296,6 +351,43 @@ class UserAdmin(DjangoUserAdmin):
 
     filter_horizontal = ("groups",)
 
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj))
+        if not request.user.is_superuser:
+            readonly.extend(("is_superuser", "groups", "user_permissions"))
+        return tuple(dict.fromkeys(readonly))
+
+    def save_model(self, request, obj, form, change):
+        request._wms_user_auth_before = (
+            _user_authorization_snapshot(type(obj).objects.get(pk=obj.pk))
+            if change and obj.pk
+            else {"is_superuser": False, "groups": [], "user_permissions": []}
+        )
+        super().save_model(request, obj, form, change)
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        before = getattr(request, "_wms_user_auth_before", {})
+        after = _user_authorization_snapshot(form.instance)
+        if before == after:
+            return
+        record_audit_event(
+            action="USER_AUTHORIZATION_UPDATE",
+            module="accounts.authorization",
+            request=request,
+            obj=form.instance,
+            before=before,
+            after=after,
+            metadata={
+                "groups": _authorization_diff(before, after, "groups"),
+                "user_permissions": _authorization_diff(
+                    before,
+                    after,
+                    "user_permissions",
+                ),
+            },
+        )
+
 
 try:
     admin.site.unregister(Group)
@@ -307,6 +399,70 @@ except NotRegistered:
 class GroupAdmin(DjangoGroupAdmin):
     form = WmsGroupAdminForm
     filter_horizontal = ()
+
+    def has_module_permission(self, request):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    def has_view_permission(self, request, obj=None):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    def has_add_permission(self, request):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    def has_change_permission(self, request, obj=None):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    def has_delete_permission(self, request, obj=None):
+        if not request.user.is_active or not request.user.is_superuser:
+            return False
+        return obj is None or obj.name not in CANONICAL_ROLE_GROUP_NAMES
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+    def save_model(self, request, obj, form, change):
+        request._wms_group_auth_before = (
+            _group_authorization_snapshot(Group.objects.get(pk=obj.pk))
+            if change and obj.pk
+            else {}
+        )
+        super().save_model(request, obj, form, change)
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        before = getattr(request, "_wms_group_auth_before", {})
+        after = _group_authorization_snapshot(form.instance)
+        if before == after:
+            return
+        record_audit_event(
+            action="ROLE_GROUP_UPDATE" if change else "ROLE_GROUP_CREATE",
+            module="accounts.authorization",
+            request=request,
+            obj=form.instance,
+            before=before,
+            after=after,
+            metadata={
+                "canonical": form.instance.name in CANONICAL_ROLE_GROUP_NAMES,
+                "permissions": _authorization_diff(before, after, "permissions"),
+            },
+        )
+
+    def delete_model(self, request, obj):
+        before = _group_authorization_snapshot(obj)
+        group_id = obj.pk
+        group_name = obj.name
+        super().delete_model(request, obj)
+        deleted_group = Group(pk=group_id, name=group_name)
+        record_audit_event(
+            action="ROLE_GROUP_DELETE",
+            module="accounts.authorization",
+            request=request,
+            obj=deleted_group,
+            before=before,
+            metadata={"canonical": False},
+        )
 
 
 @admin.register(UserRoleScope)
@@ -357,8 +513,17 @@ class SystemLogAdmin(admin.ModelAdmin):
         ("日志相关", {"fields": ("owner", "occurred_at"), "classes": ("collapse",)}),
     )
     readonly_fields = (
-        "occurred_at", "username", "real_name", "log_type", "module", "content",
-        "computer_name", "ip_address", "motherboard_sn", "hdd_sn", "owner",
+        "occurred_at",
+        "username",
+        "real_name",
+        "log_type",
+        "module",
+        "content",
+        "computer_name",
+        "ip_address",
+        "motherboard_sn",
+        "hdd_sn",
+        "owner",
     )
 
     def has_add_permission(self, request):
@@ -381,8 +546,16 @@ class SystemLogAdmin(admin.ModelAdmin):
 @admin.register(AuditEvent)
 class AuditEventAdmin(admin.ModelAdmin):
     list_display = (
-        "occurred_at", "username", "action", "module", "object_type",
-        "object_id", "owner", "warehouse", "succeeded", "request_id",
+        "occurred_at",
+        "username",
+        "action",
+        "module",
+        "object_type",
+        "object_id",
+        "owner",
+        "warehouse",
+        "succeeded",
+        "request_id",
     )
     list_filter = ("action", "module", "succeeded", "occurred_at")
     search_fields = ("username", "object_type", "object_id", "request_id", "event_hash")

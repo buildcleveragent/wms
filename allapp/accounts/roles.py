@@ -101,6 +101,11 @@ ROLE_GROUP_ALIASES = {
 }
 
 
+CANONICAL_ROLE_GROUP_NAMES = frozenset(
+    template.group_name for template in ROLE_GROUP_TEMPLATES.values()
+)
+
+
 # Shared report permissions are intentionally absent: they cannot distinguish a
 # manager from a boss.  These markers are unique role capabilities or legacy
 # action permissions, and are used only to resolve the boundary for old users
@@ -145,13 +150,32 @@ ROLE_PERMISSION_MARKERS = {
 }
 
 
-def infer_user_roles(user) -> frozenset[str]:
-    """Infer legacy role intent from canonical groups and distinctive permissions."""
+def infer_user_group_roles(user) -> frozenset[str]:
+    """Resolve role identities represented by canonical or legacy role groups."""
 
     if not user or not getattr(user, "is_authenticated", False) or not user.pk:
         return frozenset()
 
     group_names = set(user.groups.values_list("name", flat=True))
+    return frozenset(
+        role
+        for role, aliases in ROLE_GROUP_ALIASES.items()
+        if group_names.intersection(aliases)
+    )
+
+
+def infer_legacy_user_roles(user) -> frozenset[str]:
+    """Infer old account role intent from role groups and permission markers.
+
+    Permission-based inference is deliberately restricted to migration audits and
+    the opt-in legacy access fallback.  It must never redefine an explicit
+    ``UserRoleScope``.
+    """
+
+    if not user or not getattr(user, "is_authenticated", False) or not user.pk:
+        return frozenset()
+
+    roles = set(infer_user_group_roles(user))
     # ``get_all_permissions`` caches its answer on the User instance.  Role
     # resolution is a security boundary and must immediately reflect a group or
     # direct-permission change within the current request/transaction.
@@ -163,14 +187,16 @@ def infer_user_roles(user) -> frozenset[str]:
         .values_list("content_type__app_label", "codename")
         .distinct()
     }
-    roles = set()
-    for role, aliases in ROLE_GROUP_ALIASES.items():
-        if group_names.intersection(aliases):
-            roles.add(role)
-            continue
+    for role in ROLE_GROUP_ALIASES:
         if permissions.intersection(ROLE_PERMISSION_MARKERS[role]):
             roles.add(role)
     return frozenset(roles)
+
+
+def infer_user_roles(user) -> frozenset[str]:
+    """Backward-compatible alias for legacy migration tooling."""
+
+    return infer_legacy_user_roles(user)
 
 
 def role_group_name(role: str) -> str:

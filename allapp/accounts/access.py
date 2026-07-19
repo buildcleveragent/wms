@@ -9,7 +9,7 @@ from django.conf import settings
 from django.db.models import QuerySet
 
 from .models import UserRoleScope
-from .roles import infer_user_roles
+from .roles import infer_legacy_user_roles, infer_user_group_roles
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,12 +49,18 @@ class AccessScope:
                 "role", "owner_id", "warehouse_id"
             )
         )
-        inferred_roles = infer_user_roles(user)
         if rows:
-            return cls._from_explicit_rows(rows, inferred_roles=inferred_roles)
+            return cls._from_explicit_rows(
+                rows,
+                group_roles=infer_user_group_roles(user),
+            )
+
+        inferred_roles = infer_legacy_user_roles(user)
         if not getattr(settings, "WMS_ACCESS_SCOPE_LEGACY_FALLBACK", False):
-            if inferred_roles or getattr(user, "owner_id", None) or getattr(
-                user, "warehouse_id", None
+            if (
+                inferred_roles
+                or getattr(user, "owner_id", None)
+                or getattr(user, "warehouse_id", None)
             ):
                 return cls._denied(
                     "missing_explicit_role_scope",
@@ -68,15 +74,15 @@ class AccessScope:
         cls,
         rows: list[dict[str, Any]],
         *,
-        inferred_roles: frozenset[str],
+        group_roles: frozenset[str],
     ) -> "AccessScope":
         roles = frozenset(row["role"] for row in rows)
         if len(roles) != 1:
             return cls._denied("conflicting_explicit_roles", roles=roles)
-        if inferred_roles and inferred_roles != roles:
+        if group_roles and group_roles != roles:
             return cls._denied(
                 "role_scope_and_group_conflict",
-                roles=roles | inferred_roles,
+                roles=roles | group_roles,
             )
 
         role = next(iter(roles))

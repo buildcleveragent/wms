@@ -2,17 +2,44 @@
 
 import logging
 
-from django.contrib.auth.signals import user_logged_in, user_logged_out, user_login_failed
-from django.db.models.signals import post_save
+from django.contrib.auth.models import Group
+from django.contrib.auth.signals import (
+    user_logged_in,
+    user_logged_out,
+    user_login_failed,
+)
+from django.core.exceptions import ValidationError
+from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
 from allapp.inventory.models import InventoryTransaction
 from allapp.tasking.models import TaskStatusLog
 
 from .audit import record_audit_event
-
+from .roles import CANONICAL_ROLE_GROUP_NAMES
 
 logger = logging.getLogger(__name__)
+
+
+@receiver(pre_save, sender=Group, dispatch_uid="protect_canonical_role_group_name")
+def protect_canonical_role_group_name(sender, instance, **kwargs):
+    """Prevent a canonical role group from being renamed through the ORM."""
+
+    if not instance.pk:
+        return
+    previous_name = (
+        sender.objects.filter(pk=instance.pk).values_list("name", flat=True).first()
+    )
+    if previous_name in CANONICAL_ROLE_GROUP_NAMES and instance.name != previous_name:
+        raise ValidationError("WMS 规范角色组名称固定，不能修改。")
+
+
+@receiver(pre_delete, sender=Group, dispatch_uid="protect_canonical_role_group_delete")
+def protect_canonical_role_group_delete(sender, instance, **kwargs):
+    """Prevent canonical role groups from being deleted through the ORM."""
+
+    if instance.name in CANONICAL_ROLE_GROUP_NAMES:
+        raise ValidationError("WMS 规范角色组不能删除。")
 
 
 def _safe_auth_audit(**kwargs):
@@ -75,7 +102,9 @@ def audit_task_status_log(sender, instance, created, **kwargs):
     )
 
 
-@receiver(post_save, sender=InventoryTransaction, dispatch_uid="audit_inventory_transaction")
+@receiver(
+    post_save, sender=InventoryTransaction, dispatch_uid="audit_inventory_transaction"
+)
 def audit_inventory_transaction(sender, instance, created, **kwargs):
     if not created:
         return

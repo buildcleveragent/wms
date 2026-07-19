@@ -17,34 +17,60 @@ class Command(BaseCommand):
             help="只校验并显示计划，不修改数据库。",
         )
         parser.add_argument(
+            "--ensure-defaults",
+            action="store_true",
+            help=("为已有规范组补充缺失的模板权限，并保留人工配置的额外权限。"),
+        )
+        parser.add_argument(
             "--prune",
             action="store_true",
-            help="删除模板之外的组权限；默认保留人工追加权限。",
+            help="将规范组权限精确恢复为模板，删除人工调整的额外权限。",
         )
 
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
+        ensure_defaults = options["ensure_defaults"]
         prune = options["prune"]
+        if ensure_defaults and prune:
+            raise CommandError("--ensure-defaults 与 --prune 不能同时使用。")
         resolved = self._resolve_permissions()
 
         if dry_run:
             for role, template in ROLE_GROUP_TEMPLATES.items():
-                state = "更新" if Group.objects.filter(name=template.group_name).exists() else "创建"
-                self.stdout.write(
-                    f"[dry-run] {state} {template.group_name} ({role})，"
-                    f"模板权限 {len(resolved[role])} 项"
-                )
+                group = Group.objects.filter(name=template.group_name).first()
+                if group is None:
+                    state = f"创建并初始化 {len(resolved[role])} 项模板权限"
+                else:
+                    current_ids = set(group.permissions.values_list("id", flat=True))
+                    template_ids = {permission.pk for permission in resolved[role]}
+                    if prune:
+                        state = (
+                            f"恢复模板，新增 {len(template_ids - current_ids)} 项，"
+                            f"删除 {len(current_ids - template_ids)} 项"
+                        )
+                    elif ensure_defaults:
+                        state = f"补充 {len(template_ids - current_ids)} 项模板权限"
+                    else:
+                        state = f"保留现有 {len(current_ids)} 项权限"
+                self.stdout.write(f"[dry-run] {template.group_name} ({role})：{state}")
             return
 
         with transaction.atomic():
             for role, template in ROLE_GROUP_TEMPLATES.items():
                 group, created = Group.objects.get_or_create(name=template.group_name)
                 permission_ids = {permission.pk for permission in resolved[role]}
-                if prune:
+                if created or prune:
                     group.permissions.set(permission_ids)
-                else:
+                elif ensure_defaults:
                     group.permissions.add(*permission_ids)
-                action = "已创建" if created else "已同步"
+                if created:
+                    action = "已创建并初始化"
+                elif prune:
+                    action = "已恢复模板"
+                elif ensure_defaults:
+                    action = "已补充模板权限"
+                else:
+                    action = "已保留现有配置"
                 self.stdout.write(
                     self.style.SUCCESS(
                         f"{action} {template.group_name} ({role})，"

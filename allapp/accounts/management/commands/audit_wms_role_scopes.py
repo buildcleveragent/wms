@@ -7,8 +7,7 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
 from allapp.accounts.access import AccessScope
-from allapp.accounts.roles import infer_user_roles
-
+from allapp.accounts.roles import infer_legacy_user_roles, infer_user_group_roles
 
 FIELDS = (
     "user_id",
@@ -17,7 +16,8 @@ FIELDS = (
     "owner_id",
     "warehouse_id",
     "explicit_roles",
-    "inferred_roles",
+    "group_roles",
+    "legacy_inferred_roles",
     "scope_owner_ids",
     "scope_warehouse_ids",
     "is_valid",
@@ -70,7 +70,9 @@ class Command(BaseCommand):
             )
         )
         explicit_roles = frozenset(row["role"] for row in explicit_rows)
-        inferred_roles = infer_user_roles(user)
+        group_roles = infer_user_group_roles(user)
+        legacy_inferred_roles = infer_legacy_user_roles(user)
+        permission_inferred_roles = legacy_inferred_roles - group_roles
         scope = AccessScope.for_user(user)
         risk_codes = []
 
@@ -80,10 +82,16 @@ class Command(BaseCommand):
             risk_codes.append("MISSING_EXPLICIT_SCOPE")
         if (
             len(explicit_roles) > 1
-            or len(inferred_roles) > 1
-            or (explicit_roles and inferred_roles and explicit_roles != inferred_roles)
+            or len(group_roles) > 1
+            or (explicit_roles and group_roles and explicit_roles != group_roles)
         ):
             risk_codes.append("ROLE_GROUP_CONFLICT")
+        if (
+            explicit_roles
+            and permission_inferred_roles
+            and not permission_inferred_roles.issubset(explicit_roles)
+        ):
+            risk_codes.append("LEGACY_PERMISSION_ROLE_CONFLICT")
         if not scope.is_valid:
             risk_codes.append("INVALID_ACCESS_SCOPE")
 
@@ -94,8 +102,11 @@ class Command(BaseCommand):
             "owner_id": user.owner_id or "",
             "warehouse_id": user.warehouse_id or "",
             "explicit_roles": "|".join(sorted(explicit_roles)),
-            "inferred_roles": "|".join(sorted(inferred_roles)),
-            "scope_owner_ids": "|".join(str(value) for value in sorted(scope.owner_ids)),
+            "group_roles": "|".join(sorted(group_roles)),
+            "legacy_inferred_roles": "|".join(sorted(legacy_inferred_roles)),
+            "scope_owner_ids": "|".join(
+                str(value) for value in sorted(scope.owner_ids)
+            ),
             "scope_warehouse_ids": "|".join(
                 str(value) for value in sorted(scope.warehouse_ids)
             ),
@@ -118,7 +129,8 @@ class Command(BaseCommand):
         for row in rows:
             self.stdout.write(
                 "user_id={user_id} username={username} risks={risk_codes} "
-                "explicit={explicit_roles} inferred={inferred_roles} "
+                "explicit={explicit_roles} groups={group_roles} "
+                "legacy_inferred={legacy_inferred_roles} "
                 "valid={is_valid} reason={denial_reason}".format(**row)
             )
         self.stdout.write(f"共发现 {len(rows)} 个需复核账号。")

@@ -13,7 +13,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from allapp.accounts.models import SystemLog
+from allapp.accounts.models import SystemLog, UserRoleScope
 from allapp.baseinfo.models import Customer, Owner
 from allapp.locations.models import Warehouse
 from allapp.outbound.models import OutboundOrder
@@ -112,6 +112,11 @@ class AssistedOutboundProfileTests(TestCase):
         user = get_user_model().objects.create_user(
             username="assisted-operator",
             password="x",
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
             warehouse=self.warehouse,
         )
         user.user_permissions.add(self.assisted_permission, self.task_permission)
