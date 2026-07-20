@@ -64,13 +64,14 @@
 		    <input
 		      class="line-qty-input"
 		      type="number"
-		      :value="formatQty(ln.qty_done)"
+		      :value="ln._edit_qty_done"
 		      placeholder=""
 		      @input="(e) => onEditQty(e, ln)"
 				  @blur="applyManualQty(ln)"
-				  :disabled="!isPickable || scanning || adjustingLineIds.has(ln.id)"
+				  :disabled="!isPickable || scanning || isAdjustingLine(ln)"
 
 		    />
+		    <text v-if="isAdjustingLine(ln)" class="qty-saving">保存中…</text>
 		  </view>
         </view>
       </view>
@@ -101,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
@@ -119,8 +120,8 @@ const submittingReview = ref(false)
 const posting = ref(false)
 const confirmingPost = ref(false)
 const scanning = ref(false)
-const adjustingCount = ref(0)
-const adjustingLineIds = new Set<number>()
+const adjustingLineIds = reactive(new Set<number>())
+const adjustingCount = computed(() => adjustingLineIds.size)
 const dirtyLineIds = new Set<number>()
 const adjustmentPromises = new Map<number, Promise<boolean>>()
 
@@ -172,7 +173,7 @@ async function loadLines() {
     // ✅ 初始化每行的可编辑拣货数
     lines.value = list.map((ln: any) => ({
       ...ln,
-      _edit_qty_done: ln.qty_done ?? 0,
+      _edit_qty_done: formatQty(ln.qty_done),
     }))
     dirtyLineIds.clear()
   } catch (e) {
@@ -181,6 +182,36 @@ async function loadLines() {
   } finally {
     loading.value = false
   }
+}
+
+function isAdjustingLine(ln: any): boolean {
+  return adjustingLineIds.has(Number(ln?.id))
+}
+
+function restoreConfirmedQty(ln: any) {
+  ln._edit_qty_done = formatQty(ln.qty_done)
+  if (ln?.id) dirtyLineIds.delete(Number(ln.id))
+}
+
+async function refreshConfirmedLine(lineId: number, fallbackLine: any) {
+  let confirmedQty = fallbackLine?.qty_done
+  try {
+    const res: any = await api.pickTaskLines(taskId.value)
+    const list = Array.isArray(res) ? res : (res?.results || [])
+    const serverLine = list.find((item: any) => Number(item?.id) === lineId)
+    if (serverLine && typeof serverLine.qty_done !== 'undefined') {
+      confirmedQty = serverLine.qty_done
+    }
+  } catch (refreshError) {
+    console.error('刷新拣货行数量失败', refreshError)
+  }
+
+  const currentLine = lines.value.find((item: any) => Number(item?.id) === lineId)
+  if (currentLine) {
+    currentLine.qty_done = confirmedQty
+    currentLine._edit_qty_done = formatQty(confirmedQty)
+  }
+  dirtyLineIds.delete(lineId)
 }
 
 
@@ -194,16 +225,27 @@ function applyManualQty(ln: any): Promise<boolean> {
   if (existing) return existing
   if (!dirtyLineIds.has(lineId)) return Promise.resolve(true)
 
-  const raw = ln.qty_done
+  const raw = String(ln?._edit_qty_done ?? '').trim()
+  if (!raw) {
+    uni.showToast({ title: '拣货数量不能为空', icon: 'none' })
+    restoreConfirmedQty(ln)
+    return Promise.resolve(false)
+  }
+
   const val = Number(raw)
   if (!Number.isFinite(val) || val < 0) {
     uni.showToast({ title: '请输入合法的拣货数量', icon: 'none' })
+    restoreConfirmedQty(ln)
     return Promise.resolve(false)
+  }
+
+  if (val === Number(ln.qty_done ?? 0)) {
+    restoreConfirmedQty(ln)
+    return Promise.resolve(true)
   }
 
   const request = (async (): Promise<boolean> => {
     adjustingLineIds.add(lineId)
-    adjustingCount.value += 1
     try {
       const res: any = await api.adjustPickLineQty(taskId.value, {
         line_id: lineId,
@@ -211,17 +253,16 @@ function applyManualQty(ln: any): Promise<boolean> {
         client_seq: genClientSeq(),
       })
       ln.qty_done = res.qty_done
-      ln.edit_qty = res.qty_done
+      ln._edit_qty_done = formatQty(res.qty_done)
       dirtyLineIds.delete(lineId)
       return true
     } catch (e: any) {
       const msg = e?.data?.detail || e?.data?.message || '调整拣货数量失败'
       uni.showToast({ title: String(msg), icon: 'none' })
-      await loadLines()
+      await refreshConfirmedLine(lineId, ln)
       return false
     } finally {
       adjustingLineIds.delete(lineId)
-      adjustingCount.value = Math.max(0, adjustingCount.value - 1)
       adjustmentPromises.delete(lineId)
     }
   })()
@@ -247,7 +288,9 @@ async function flushManualQtyEdits(): Promise<boolean> {
 
 
 async function submitScan(barcodeOverride?: string) {
-  if (!taskId.value || !isPickable.value || scanning.value || adjustingCount.value > 0) return
+  if (!taskId.value || !isPickable.value || scanning.value) return
+  if (!await flushManualQtyEdits()) return
+  if (!isPickable.value || scanning.value) return
   const code = (barcodeOverride || scanBarcode.value || '').trim()
   if (!code) {
     uni.showToast({ title: '请先扫描或输入条码', icon: 'none' })
@@ -277,6 +320,7 @@ async function submitScan(barcodeOverride?: string) {
       if (ln && !Number.isNaN(newQtyDone as number)) {
         ln.qty_done = newQtyDone
         ln._edit_qty_done = formatQty(newQtyDone) // ✅ 同步到输入框
+        dirtyLineIds.delete(Number(ln.id))
       }
     }
 
@@ -292,8 +336,9 @@ async function submitScan(barcodeOverride?: string) {
 }
 
 // 点击“扫码”按钮
-function handleScan() {
-  if (!isPickable.value || scanning.value || adjustingCount.value > 0) return
+async function handleScan() {
+  if (!isPickable.value || scanning.value) return
+  if (!await flushManualQtyEdits()) return
   quickScan()
 }
 
@@ -413,16 +458,8 @@ function formatQty(value) {
 function onEditQty(e: any, ln: any) {
   // uni-app 的 input 事件里，值在 e.detail.value
   const raw = e?.detail?.value ?? e?.target?.value ?? ''
-  const val = Number(raw)
-
-  if (Number.isNaN(val) || val < 0) {
-    uni.showToast({ title: '请输入合法的拣货数量', icon: 'none' })
-    // 输入非法时，可以归零或保持原值，这里我保持原值：
-    return
-  }
-
-  // 真正参与业务 / allDone 计算的是 qty_done
-  ln.qty_done = val
+  // 输入过程中保留原始字符串（包括空字符串），只在失焦/提交时转成数值。
+  ln._edit_qty_done = String(raw)
   if (ln?.id) dirtyLineIds.add(Number(ln.id))
 }
 
@@ -550,6 +587,15 @@ onUnmounted(() => {
   padding: 4rpx 8rpx;
   background: #fff;
   text-align: center;
+}
+.line-qty-input[disabled] {
+  color: #64748b;
+  background: #f1f5f9;
+}
+.qty-saving {
+  margin-left: 10rpx;
+  color: #64748b;
+  font-size: 22rpx;
 }
 
 .footer {

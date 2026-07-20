@@ -144,6 +144,46 @@ class PickScanIntegrityTests(TestCase):
         self.line_2.refresh_from_db()
         self.assertEqual(self.line_1.qty_done + self.line_2.qty_done, Decimal("2.000"))
 
+    def test_manual_pick_quantity_can_be_corrected_after_saving_zero(self):
+        services.adjust_pick_line_qty(
+            self.task.id,
+            self.line_1.id,
+            Decimal("1.000"),
+            by_user=self.user,
+            client_seq="manual-correction-1",
+        )
+        zeroed = services.adjust_pick_line_qty(
+            self.task.id,
+            self.line_1.id,
+            Decimal("0.000"),
+            by_user=self.user,
+            client_seq="manual-correction-2",
+        )
+        corrected = services.adjust_pick_line_qty(
+            self.task.id,
+            self.line_1.id,
+            Decimal("1.000"),
+            by_user=self.user,
+            client_seq="manual-correction-3",
+        )
+
+        self.line_1.refresh_from_db()
+        self.assertEqual(zeroed["qty_done"], Decimal("0.000"))
+        self.assertEqual(corrected["qty_done"], Decimal("1.000"))
+        self.assertEqual(self.line_1.qty_done, Decimal("1.000"))
+        self.assertEqual(
+            list(
+                TaskScanLog.objects.filter(
+                    task=self.task,
+                    task_line=self.line_1,
+                    reason_code="MANUAL_ADJUST",
+                )
+                .order_by("id")
+                .values_list("qty_base_delta", flat=True)
+            ),
+            [Decimal("1.000000"), Decimal("-1.000000"), Decimal("1.000000")],
+        )
+
 
 class TaskingRelatedScopeTests(TestCase):
     def setUp(self):

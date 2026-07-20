@@ -910,6 +910,7 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
                     "id": product.id,
                     "code": product.code,
                     "sku": product.sku,
+                    "gtin": product.gtin,
                     "name": product.name,
                     "spec": product.spec,
                     "base_unit": getattr(product.base_uom, "code", None),

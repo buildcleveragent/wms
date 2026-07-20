@@ -9,6 +9,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Customer, Owner
 from allapp.inventory.models import (
     InventoryDetail,
@@ -297,8 +298,14 @@ class AssistedOutboundFlowTests(TestCase):
         self.assertEqual(second_detail.allocated_qty, Decimal("3.0000"))
 
     def test_package_catalog_and_server_validated_base_quantity_conversion(self):
+        UserRoleScope.objects.create(
+            user=self.operator,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
+        self.product.gtin = "6901234567890"
         self.product.unit_barcode = "ASSIST-FLOW-UNIT-BARCODE"
-        self.product.save(update_fields=["unit_barcode"])
+        self.product.save(update_fields=["gtin", "unit_barcode"])
         carton_uom = ProductUom.objects.create(
             code="ASSIST-FLOW-CTN",
             name="箱",
@@ -345,6 +352,7 @@ class AssistedOutboundFlowTests(TestCase):
 
         self.assertEqual(catalog.status_code, 200, catalog.data)
         product_data = next(row for row in catalog.data if row["id"] == self.product.id)
+        self.assertEqual(product_data["gtin"], self.product.gtin)
         package_option = next(
             option
             for option in product_data["unitOptions"]
@@ -362,6 +370,7 @@ class AssistedOutboundFlowTests(TestCase):
         for search_term in (
             self.product.name,
             self.product.code,
+            self.product.gtin,
             self.product.unit_barcode,
             package.barcode,
         ):

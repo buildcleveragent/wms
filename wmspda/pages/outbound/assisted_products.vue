@@ -87,6 +87,7 @@
                 ]"
               >
                 <view class="product-identity">
+                  <text v-if="product.gtin" class="product-gtin">{{ product.gtin }} · </text>
                   <text class="product-name">{{ product.name }}</text>
                   <text class="identity-meta"> · {{ product.sku || product.code || '-' }}</text>
                   <text v-if="product.spec" class="identity-meta"> · {{ product.spec }}</text>
@@ -908,11 +909,12 @@ onUnload(stopResizeListener)
 .result-row.selected { background: #f0f7ff; }
 .result-row.no-stock, .result-row.no-stock.odd { color: #8993a3; background: #f3f5f7; }
 .result-row.no-stock.selected { background: #edf2f7; box-shadow: inset 3rpx 0 0 #8aa4c2; }
-.result-row.no-stock .product-name, .result-row.no-stock .identity-meta { color: #788394; }
+.result-row.no-stock .product-gtin, .result-row.no-stock .product-name, .result-row.no-stock .identity-meta { color: #788394; }
 .result-row.no-stock .picker-field, .result-row.no-stock .value-input { color: #98a1af; background: #e9edf2; }
 .no-stock-label { color: #d46b08; font-weight: 600; white-space: normal; }
 .selected-row.highlighted { position: relative; z-index: 1; background: #fff7d6; box-shadow: inset 0 0 0 2rpx #f6ad24; }
-.product-identity { min-width: 0; }
+.product-identity { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.product-gtin { color: #697386; font-size: 22rpx; }
 .product-name { font-size: 27rpx; font-weight: 700; }
 .identity-meta, .stock-cell { color: #697386; font-size: 22rpx; }
 .stock-cell, .unit-cell, .input-cell, .base-qty-cell { margin-top: 10rpx; }
