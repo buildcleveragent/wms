@@ -460,8 +460,10 @@ def _build_scope_payload(*, user, owner_id: int | None, warehouse_id: int | None
         next(iter(access_scope.owner_ids)) if len(access_scope.owner_ids) == 1 else None
     )
     scope_owner_name = owner_name_map.get(scope_owner_id, "")
-    if not scope_owner_name and scope_owner_id and getattr(user, "owner_id", None) == scope_owner_id:
-        scope_owner_name = getattr(getattr(user, "owner", None), "name", "") or f"Owner #{scope_owner_id}"
+    if not scope_owner_name and scope_owner_id and (
+        access_scope.is_global or scope_owner_id in access_scope.owner_ids
+    ):
+        scope_owner_name = _resolve_scope_label(Owner, scope_owner_id)
 
     scope_warehouse_id = warehouse_id or (
         next(iter(access_scope.warehouse_ids))

@@ -41,15 +41,16 @@ logger = logging.getLogger(__name__)
 
 
 def _request_scope_allows(request, *, owner_id=None, warehouse_id=None):
+    scope = AccessScope.for_user(request.user)
     warehouse_id = (
         warehouse_id
         or getattr(request, "_inbound_warehouse_id", None)
         or request.POST.get("warehouse")
         or request.GET.get("warehouse")
         or request.GET.get("warehouse__id__exact")
-        or getattr(request.user, "warehouse_id", None)
+        or scope.single_warehouse_id
     )
-    return AccessScope.for_user(request.user).allows(
+    return scope.allows(
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )

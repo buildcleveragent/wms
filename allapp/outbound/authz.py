@@ -37,7 +37,6 @@ def is_assisted_operator(user) -> bool:
     if not (
         user
         and getattr(user, "is_authenticated", False)
-        and getattr(user, "owner_id", None) is None
         and user.has_perm(ASSISTED_PERMISSION)
         and user.has_perm(TASK_OPERATOR_PERMISSION)
     ):
@@ -54,7 +53,7 @@ def is_assisted_operator(user) -> bool:
 def require_assisted_operator(user) -> None:
     if not is_assisted_operator(user):
         raise PermissionDenied(
-            "代办出库账号必须无货主绑定、具有单一有效仓库操作员范围，"
+            "代办出库账号必须具有单一有效仓库操作员范围，"
             "并同时具有代办出库和仓库操作权限。"
         )
 

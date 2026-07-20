@@ -33,7 +33,7 @@ class OwnerScopedAdminMixin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         if request.user.is_superuser:
             return qs
-        owner_id = getattr(request.user, "owner_id", None)
+        owner_id = AccessScope.for_user(request.user).single_owner_id
         if not owner_id:
             return qs.none()
         return qs.filter(**{f"{self.owner_path}_id": owner_id})

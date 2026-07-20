@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Owner
 from allapp.inventory.models import InventoryDetail
 from allapp.locations.models import Location, Subwarehouse, Warehouse
@@ -22,12 +23,18 @@ class DashboardSummaryConsoleTests(TestCase):
             owner=self.owner,
             warehouse=self.warehouse,
         )
+        UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
         WmsTask.objects.create(
             owner=self.owner,
             warehouse=self.warehouse,
             task_no="DSH-PICK-1",
             task_type=WmsTask.TaskType.PICK,
             status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.PENDING,
         )
         self.url = reverse("console:dashboard_summary")
 
@@ -38,6 +45,18 @@ class DashboardSummaryConsoleTests(TestCase):
         self.assertIn("/accounts/login/", response["Location"])
 
     def test_dashboard_summary_returns_expected_json_shape(self):
+        other_owner = Owner.objects.create(code="DSH-OTHER", name="其他货主")
+        other_warehouse = Warehouse.objects.create(
+            code="DSHWH-OTHER",
+            name="其他仓库",
+        )
+        WmsTask.objects.create(
+            owner=other_owner,
+            warehouse=other_warehouse,
+            task_no="DSH-PICK-OUT-OF-SCOPE",
+            task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.READY,
+        )
         self.client.force_login(self.user)
 
         response = self.client.get(self.url)
@@ -50,6 +69,19 @@ class DashboardSummaryConsoleTests(TestCase):
         self.assertIn("outbound_ts", data)
         self.assertIn("eff_pick", data)
         self.assertEqual(data["kpi"]["pick"]["total"], 1)
+
+    def test_legacy_user_fields_do_not_authorize_dashboard(self):
+        legacy_user = get_user_model().objects.create_user(
+            username="legacy-dashboard-user",
+            password="pw",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        self.client.force_login(legacy_user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
 
 
 class SaleMiniProductListingConsoleTests(TestCase):

@@ -3,16 +3,20 @@
 # 说明：仪表盘首页（CBV）+ 数据汇总 API（容错不自创字段）
 # ===============================
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+
 from datetime import timedelta
+from typing import Any, Dict, List, Optional
 
 from django.apps import apps
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
-from django.http import JsonResponse, HttpRequest
+from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
 from django.views.generic import TemplateView, View
+
+from allapp.accounts.access import AccessScope
 
 
 # ---------- 工具：安全获取 model/字段 ----------
@@ -39,14 +43,14 @@ FINISHED_VALUES = ["DONE", "FINISHED", "COMPLETED", "CLOSED", "POSTED", "SHIPPED
 
 
 # ---------- 数据提供（存在即算；否则返回空） ----------
-def tasks_overview() -> Dict[str, Any]:
+def tasks_overview(scope: AccessScope) -> Dict[str, Any]:
     WmsTask = get_model("tasking", "WmsTask")
     data = {"putaway": {"total": 0, "done": 0}, "pick": {"total": 0, "done": 0}}
     if not WmsTask:
         return data
 
     # 基于你项目里已用过的字段：task_type / status（若不存在就回退为总数0）
-    q_all = getattr(WmsTask.objects, "all", lambda: [])()
+    q_all = scope.filter_queryset(WmsTask.objects.all())
     # putaway
     try:
         data["putaway"]["total"] = q_all.filter(task_type="PUTAWAY").count()
@@ -63,7 +67,12 @@ def tasks_overview() -> Dict[str, Any]:
         pass
     return data
 
-def orders_timeseries(app_label: str, model_name: str, days: int = 60) -> Dict[str, Any]:
+def orders_timeseries(
+    app_label: str,
+    model_name: str,
+    scope: AccessScope,
+    days: int = 60,
+) -> Dict[str, Any]:
     """返回 {dates:[...], total:[...], finished:[...]}，按天统计。字段名自动探测。"""
     M = get_model(app_label, model_name)
     if not M:
@@ -77,7 +86,9 @@ def orders_timeseries(app_label: str, model_name: str, days: int = 60) -> Dict[s
     end = timezone.now().date()
     start = end - timedelta(days=days-1)
 
-    base = M.objects.filter(**{f"{date_field}__date__range": (start, end)})
+    base = scope.filter_queryset(
+        M.objects.filter(**{f"{date_field}__date__range": (start, end)})
+    )
     qs_total = base.annotate(d=TruncDate(date_field)).values("d").annotate(c=Count("id")).order_by("d")
     total_map = {x["d"]: x["c"] for x in qs_total}
 
@@ -99,13 +110,17 @@ def orders_timeseries(app_label: str, model_name: str, days: int = 60) -> Dict[s
         cur += timedelta(days=1)
     return {"dates": dates, "total": total, "finished": finished}
 
-def backlog_by_status(app_label: str, model_name: str) -> Dict[str, Any]:
+def backlog_by_status(
+    app_label: str,
+    model_name: str,
+    scope: AccessScope,
+) -> Dict[str, Any]:
     """未完成订单状态分布：若无法识别完成状态，就给出全量状态分布。"""
     M = get_model(app_label, model_name)
     if not M or not has_field(M, "status"):
         return {"labels": [], "values": []}
 
-    qs = M.objects.all()
+    qs = scope.filter_queryset(M.objects.all())
     try:
         qdone = Q()
         for v in FINISHED_VALUES:
@@ -118,7 +133,7 @@ def backlog_by_status(app_label: str, model_name: str) -> Dict[str, Any]:
     values = [int(r["c"]) for r in rows]
     return {"labels": labels, "values": values}
 
-def efficiency_ranking(task_type: str) -> Dict[str, Any]:
+def efficiency_ranking(task_type: str, scope: AccessScope) -> Dict[str, Any]:
     """
     当日人效排名（可选）：
       尝试用 WmsTask 的 operator/assignee/owner 等常见字段之一 + 今天创建/完成量统计。
@@ -139,7 +154,7 @@ def efficiency_ranking(task_type: str) -> Dict[str, Any]:
         return {"labels": [], "values": []}
 
     today = timezone.now().date()
-    qs = WmsTask.objects.filter(task_type=task_type)
+    qs = scope.filter_queryset(WmsTask.objects.filter(task_type=task_type))
     qs = qs.filter(**{f"{date_field}__date": today})
     rows = qs.values(assignee_field).annotate(c=Count("id")).order_by("-c")[:10]
     labels = [str(r[assignee_field]) for r in rows]
@@ -155,14 +170,25 @@ class DashboardHomeView(LoginRequiredMixin, TemplateView):
 class DashboardSummaryApi(LoginRequiredMixin, View):
     """统一返回 homepage 所需全部数据（GET）"""
     def get(self, request: HttpRequest):
+        scope = AccessScope.for_user(request.user)
+        if not scope.is_valid:
+            raise PermissionDenied("当前账号没有有效的 WMS 数据范围。")
         data = {
-            "kpi": tasks_overview(),
-            "inbound_ts": orders_timeseries("inbound", "InboundOrder", days=60),
-            "outbound_ts": orders_timeseries("outbound", "OutboundOrder", days=60),
-            "inbound_backlog": backlog_by_status("inbound", "InboundOrder"),
-            "outbound_backlog": backlog_by_status("outbound", "OutboundOrder"),
-            "eff_putaway": efficiency_ranking("PUTAWAY"),
-            "eff_pick": efficiency_ranking("PICK"),
-            "eff_pack": efficiency_ranking("PACK"),
+            "kpi": tasks_overview(scope),
+            "inbound_ts": orders_timeseries(
+                "inbound", "InboundOrder", scope, days=60
+            ),
+            "outbound_ts": orders_timeseries(
+                "outbound", "OutboundOrder", scope, days=60
+            ),
+            "inbound_backlog": backlog_by_status(
+                "inbound", "InboundOrder", scope
+            ),
+            "outbound_backlog": backlog_by_status(
+                "outbound", "OutboundOrder", scope
+            ),
+            "eff_putaway": efficiency_ranking("PUTAWAY", scope),
+            "eff_pick": efficiency_ranking("PICK", scope),
+            "eff_pack": efficiency_ranking("PACK", scope),
         }
         return JsonResponse({"ok": True, "data": data})

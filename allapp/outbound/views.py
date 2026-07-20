@@ -64,7 +64,6 @@ from allapp.outbound.authz import (
     strict_order_queryset,
     strict_pick_queryset,
 )
-from allapp.products.permissions import can_manage_all_owner_products
 from allapp.core.utils.log_context import build_log_payload
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
@@ -228,8 +227,7 @@ def _resolve_product_owner_scope(request, *, param_name="owner", default_to_user
     if scope.is_global:
         if requested_owner:
             return requested_owner
-        user_owner = getattr(request.user, "owner_id", None)
-        return user_owner if default_to_user_owner else None
+        return None
     if requested_owner is not None and requested_owner not in allowed_owner_ids:
         raise PermissionDenied("无权查看该货主档案或商品。")
     if requested_owner is not None:
@@ -254,8 +252,7 @@ def _resolve_inventory_warehouse_scope(request):
     # narrows that owner-safe view but never widens the owner boundary.
     if requested_wh:
         return frozenset({requested_wh})
-    user_wh = getattr(request.user, "warehouse_id", None)
-    return frozenset({int(user_wh)}) if user_wh else None
+    return None
 
 class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
@@ -1681,8 +1678,16 @@ class OutboundOrderViewSet(
 
         user = request.user
         scope = AccessScope.for_user(user)
-        owner_id = next(iter(scope.owner_ids)) if len(scope.owner_ids) == 1 else None
-        warehouse_id = getattr(user, "warehouse_id", None)
+        owner_id = scope.single_owner_id
+        raw_warehouse_id = request.data.get("warehouse_id")
+        try:
+            warehouse_id = (
+                int(raw_warehouse_id)
+                if raw_warehouse_id
+                else scope.single_warehouse_id
+            )
+        except (TypeError, ValueError):
+            warehouse_id = None
 
         if not owner_id:
             return Response(
@@ -1690,10 +1695,24 @@ class OutboundOrderViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if not warehouse_id:
-            return Response({"detail": "当前用户未绑定仓库(warehouse)"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    "detail": (
+                        "必须提供有效的 warehouse_id；"
+                        "仅单一仓库范围账号可自动确定仓库"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         Customer = apps.get_model("baseinfo", "Customer")
         OutboundOrder = apps.get_model("outbound", "OutboundOrder")
+        Warehouse = apps.get_model("locations", "Warehouse")
+        if not Warehouse.objects.filter(pk=warehouse_id, is_active=True).exists():
+            return Response(
+                {"detail": "warehouse_id 对应的仓库不存在或已停用"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         cash_customer = Customer.objects.filter(owner_id=owner_id, code="CASH").order_by("id").first()
         if not cash_customer:
@@ -1926,18 +1945,12 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         # mode; otherwise preserve today's PDA scope while shadowing the new one.
         if is_assisted_operator(user):
             return strict
-        if getattr(user, "is_superuser", False):
+        access_scope = AccessScope.for_user(user)
+        if access_scope.is_global:
             legacy = qs
         else:
-            warehouse_id = getattr(user, "warehouse_id", None)
-            if not warehouse_id:
-                legacy = qs.none()
-            else:
-                legacy = qs.filter(warehouse_id=warehouse_id)
-                if not can_manage_all_owner_products(user):
-                    owner_id = getattr(user, "owner_id", None)
-                    legacy = legacy.filter(owner_id=owner_id) if owner_id else legacy.none()
-        warehouse_id = getattr(user, "warehouse_id", None)
+            legacy = access_scope.filter_queryset(qs)
+        warehouse_id = access_scope.single_warehouse_id
         if warehouse_id:
             assisted_task_ids = assisted_task_queryset(
                 qs,

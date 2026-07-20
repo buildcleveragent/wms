@@ -83,58 +83,6 @@ def _datetime_to_text(value):
     return value.isoformat() if value else ""
 
 
-def _scoped_owner_warehouse(*, user, owner_id=None, warehouse_id=None):
-    user_warehouse_id = getattr(user, "warehouse_id", None)
-    scoped_warehouse_id = user_warehouse_id or warehouse_id
-    if user_warehouse_id:
-        scoped_owner_id = owner_id
-    else:
-        scoped_owner_id = getattr(user, "owner_id", None) or owner_id
-    return scoped_owner_id, scoped_warehouse_id
-
-
-def _owner_name(owner_id):
-    if not owner_id:
-        return ""
-    owner = Owner.objects.filter(pk=owner_id).only("name").first()
-    return getattr(owner, "name", "") or f"Owner #{owner_id}"
-
-
-def _collect_owner_options(*, warehouse_id, user):
-    user_owner_id = getattr(user, "owner_id", None)
-    user_warehouse_id = getattr(user, "warehouse_id", None)
-    if user_owner_id and not user_warehouse_id:
-        return [{"id": user_owner_id, "name": _owner_name(user_owner_id)}]
-
-    receive_tasks = WmsTask.objects.filter(
-        task_type=WmsTask.TaskType.RECEIVE,
-        posting_status=WmsTask.PostingStatus.POSTED,
-    )
-    outbound_lines = OutboundOrderLine.objects.select_related("order__owner")
-    if warehouse_id:
-        receive_tasks = receive_tasks.filter(warehouse_id=warehouse_id)
-        outbound_lines = outbound_lines.filter(order__warehouse_id=warehouse_id)
-
-    owner_map = {}
-    for row in receive_tasks.values("owner_id", "owner__name").distinct():
-        owner_id = row["owner_id"]
-        if owner_id:
-            owner_map[owner_id] = {
-                "id": owner_id,
-                "name": row["owner__name"] or f"Owner #{owner_id}",
-            }
-    for row in outbound_lines.values(
-        "order__owner_id", "order__owner__name"
-    ).distinct():
-        owner_id = row["order__owner_id"]
-        if owner_id:
-            owner_map[owner_id] = {
-                "id": owner_id,
-                "name": row["order__owner__name"] or f"Owner #{owner_id}",
-            }
-    return sorted(owner_map.values(), key=lambda item: (item["name"], item["id"]))
-
-
 def _daily_map(queryset, *, date_field):
     rows = (
         queryset.values(date_field)

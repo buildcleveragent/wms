@@ -3656,6 +3656,11 @@ class BillingConsolePageTests(TestCase):
             Permission.objects.get(codename="view_billingperiod"),
             Permission.objects.get(codename="view_billingaccrual"),
         )
+        UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.WAREHOUSE_MANAGER,
+            warehouse=self.warehouse,
+        )
         self.client.force_login(self.user)
 
         self.period = BillingPeriod.objects.create(

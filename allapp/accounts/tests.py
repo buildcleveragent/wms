@@ -14,6 +14,10 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from allapp.accounts.access import AccessScope, scope_queryset_for_user
 from allapp.accounts.admin import PermissionMatrixWidget
 from allapp.accounts.models import AuditEvent, UserRoleScope
+from allapp.accounts.role_memberships import (
+    ROLE_GROUP_NAMES,
+    sync_user_role_membership,
+)
 from allapp.accounts.roles import ROLE_GROUP_TEMPLATES, role_group_name
 from allapp.baseinfo.models import Owner
 from allapp.locations.models import Warehouse
@@ -211,6 +215,49 @@ class GroupAdminPermissionMatrixTests(TestCase):
         self.assertIn("user_permissions", readonly)
         self.assertIn("is_superuser", readonly)
 
+    def test_user_admin_hides_role_groups_and_syncs_them_from_inline_scope(self):
+        call_command("sync_wms_role_groups", stdout=StringIO())
+        target = get_user_model().objects.create_user(username="admin-scope-target")
+        warehouse = Warehouse.objects.create(code="ADMWH", name="Admin Scope WH")
+        auxiliary = Group.objects.create(name="Admin Auxiliary")
+        UserRoleScope.objects.create(
+            user=target,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=warehouse,
+        )
+        user_admin = admin.site._registry[get_user_model()]
+        request = RequestFactory().post(f"/admin/accounts/user/{target.pk}/change/")
+        request.user = self.request.user
+
+        form_class = user_admin.get_form(request, target)
+        rendered_form = form_class(instance=target)
+        available_groups = set(
+            rendered_form.fields["groups"].queryset.values_list("name", flat=True)
+        )
+        self.assertIn(auxiliary.name, available_groups)
+        self.assertTrue(available_groups.isdisjoint(ROLE_GROUP_NAMES))
+
+        form = SimpleNamespace(
+            instance=target,
+            save_m2m=lambda: target.groups.add(auxiliary),
+        )
+        user_admin.save_model(request, target, form, change=True)
+        user_admin.save_related(request, form, [], change=True)
+
+        self.assertTrue(
+            target.groups.filter(
+                name=role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR)
+            ).exists()
+        )
+        self.assertTrue(target.groups.filter(pk=auxiliary.pk).exists())
+        event = AuditEvent.objects.get(
+            action="USER_AUTHORIZATION_UPDATE", object_id=str(target.pk)
+        )
+        self.assertEqual(
+            event.metadata["canonical_group_sync"]["desired_group"],
+            role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR),
+        )
+
 
 class UserRoleScopeModelTests(TestCase):
     def setUp(self):
@@ -291,6 +338,124 @@ class UserRoleScopeModelTests(TestCase):
                 role=UserRoleScope.Role.OWNER_SALESPERSON,
                 owner=self.owner,
             )
+
+
+class RoleMembershipSyncTests(TestCase):
+    def setUp(self):
+        call_command("sync_wms_role_groups", stdout=StringIO())
+        self.owner = Owner.objects.create(name="Membership Owner", code="MEMOWNER")
+        self.warehouse = Warehouse.objects.create(code="MEMWH1", name="Membership WH 1")
+        self.other_warehouse = Warehouse.objects.create(
+            code="MEMWH2", name="Membership WH 2"
+        )
+        self.user = get_user_model().objects.create_user(username="membership-user")
+        self.auxiliary_group = Group.objects.create(name="Membership Auxiliary")
+        self.user.groups.add(self.auxiliary_group)
+
+    def role_group_names(self):
+        return set(
+            self.user.groups.filter(name__in=ROLE_GROUP_NAMES).values_list(
+                "name", flat=True
+            )
+        )
+
+    def test_scope_syncs_canonical_group_and_preserves_auxiliary_configuration(self):
+        extra_permission = Permission.objects.get(
+            content_type__app_label="auth", codename="view_group"
+        )
+        self.user.user_permissions.add(extra_permission)
+        UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
+
+        change = sync_user_role_membership(self.user)
+
+        expected = role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR)
+        self.assertEqual(self.role_group_names(), {expected})
+        self.assertTrue(self.user.groups.filter(pk=self.auxiliary_group.pk).exists())
+        self.assertTrue(self.user.user_permissions.filter(pk=extra_permission.pk).exists())
+        self.assertEqual(change.added, (expected,))
+
+    def test_role_change_replaces_only_recognized_role_groups(self):
+        scope = UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
+        old_legacy_group = Group.objects.create(name="仓库操作员")
+        self.user.groups.add(old_legacy_group)
+        sync_user_role_membership(self.user)
+
+        scope.role = UserRoleScope.Role.WAREHOUSE_MANAGER
+        scope.save()
+        sync_user_role_membership(self.user)
+
+        self.assertEqual(
+            self.role_group_names(),
+            {role_group_name(UserRoleScope.Role.WAREHOUSE_MANAGER)},
+        )
+        self.assertTrue(self.user.groups.filter(pk=self.auxiliary_group.pk).exists())
+
+    def test_last_inactive_scope_removes_role_group(self):
+        scope = UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.OWNER_MANAGER,
+            owner=self.owner,
+        )
+        sync_user_role_membership(self.user)
+
+        scope.is_active = False
+        scope.save()
+        change = sync_user_role_membership(self.user)
+
+        self.assertFalse(self.role_group_names())
+        self.assertTrue(change.removed)
+
+    def test_warehouse_boss_keeps_group_until_last_scope_is_deleted(self):
+        first = UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.WAREHOUSE_BOSS,
+            warehouse=self.warehouse,
+        )
+        second = UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.WAREHOUSE_BOSS,
+            warehouse=self.other_warehouse,
+        )
+        expected = role_group_name(UserRoleScope.Role.WAREHOUSE_BOSS)
+        legacy_supervisor = Group.objects.create(name="仓库主管")
+        self.user.groups.add(legacy_supervisor)
+        sync_user_role_membership(self.user)
+        self.assertFalse(self.user.groups.filter(pk=legacy_supervisor.pk).exists())
+
+        first.delete()
+        sync_user_role_membership(self.user)
+        self.assertEqual(self.role_group_names(), {expected})
+
+        second.delete()
+        sync_user_role_membership(self.user)
+        self.assertFalse(self.role_group_names())
+
+    def test_sync_does_not_change_owner_customized_group_permissions(self):
+        group = Group.objects.get(
+            name=role_group_name(UserRoleScope.Role.OWNER_SALESPERSON)
+        )
+        extra_permission = Permission.objects.get(
+            content_type__app_label="auth", codename="view_group"
+        )
+        group.permissions.add(extra_permission)
+        before = set(group.permissions.values_list("pk", flat=True))
+        UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.OWNER_SALESPERSON,
+            owner=self.owner,
+        )
+
+        sync_user_role_membership(self.user)
+
+        self.assertEqual(set(group.permissions.values_list("pk", flat=True)), before)
 
 
 class AccessScopeTests(TestCase):
@@ -446,6 +611,27 @@ class AccessScopeTests(TestCase):
             [UserRoleScope.Role.WAREHOUSE_OPERATOR],
         )
         self.assertTrue(response.data["capabilities"]["can_import_products"])
+
+    def test_profile_compatibility_ids_are_derived_from_explicit_scope(self):
+        user = get_user_model().objects.create_user(
+            username="scope-profile-derived",
+            owner=self.other_owner,
+            warehouse=self.other_warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=user,
+            role=UserRoleScope.Role.OWNER_SALESPERSON,
+            owner=self.owner,
+        )
+        request = APIRequestFactory().get(reverse("auth_profile"))
+        force_authenticate(request, user=user)
+
+        response = profile_view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["user"]["owner_id"], self.owner.id)
+        self.assertIsNone(response.data["user"]["warehouse_id"])
+        self.assertEqual(response.data["user"]["scopes"]["owner_ids"], [self.owner.id])
 
     def test_explicit_owner_role_filters_owner_and_ignores_legacy_warehouse(self):
         user = get_user_model().objects.create_user(
@@ -661,6 +847,88 @@ class SyncWmsRoleGroupsCommandTests(TestCase):
                 prune=True,
                 stdout=StringIO(),
             )
+
+
+class SyncWmsUserRoleMembershipsCommandTests(TestCase):
+    def setUp(self):
+        call_command("sync_wms_role_groups", stdout=StringIO())
+        self.owner = Owner.objects.create(name="Command Owner", code="CMDOWNER")
+        self.warehouse = Warehouse.objects.create(code="CMDWH", name="Command WH")
+
+    def test_dry_run_is_read_only_and_apply_is_idempotent_and_audited(self):
+        user = get_user_model().objects.create_user(username="command-member")
+        UserRoleScope.objects.create(
+            user=user,
+            role=UserRoleScope.Role.OWNER_MANAGER,
+            owner=self.owner,
+        )
+        output = StringIO()
+
+        call_command(
+            "sync_wms_user_role_memberships", dry_run=True, stdout=output
+        )
+        self.assertFalse(user.groups.filter(name__in=ROLE_GROUP_NAMES).exists())
+        self.assertIn("未写入", output.getvalue())
+
+        call_command("sync_wms_user_role_memberships", stdout=StringIO())
+        self.assertTrue(
+            user.groups.filter(
+                name=role_group_name(UserRoleScope.Role.OWNER_MANAGER)
+            ).exists()
+        )
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="USER_ROLE_GROUP_SYNC", object_id=str(user.pk)
+            ).exists()
+        )
+        event_count = AuditEvent.objects.filter(action="USER_ROLE_GROUP_SYNC").count()
+
+        call_command("sync_wms_user_role_memberships", stdout=StringIO())
+        self.assertEqual(
+            AuditEvent.objects.filter(action="USER_ROLE_GROUP_SYNC").count(),
+            event_count,
+        )
+
+    def test_unscoped_user_loses_only_recognized_role_group(self):
+        user = get_user_model().objects.create_user(username="command-unscoped")
+        role_group = Group.objects.get(
+            name=role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR)
+        )
+        auxiliary = Group.objects.create(name="Command Auxiliary")
+        user.groups.add(role_group, auxiliary)
+
+        call_command("sync_wms_user_role_memberships", stdout=StringIO())
+
+        self.assertFalse(user.groups.filter(pk=role_group.pk).exists())
+        self.assertTrue(user.groups.filter(pk=auxiliary.pk).exists())
+
+    def test_invalid_explicit_roles_abort_without_partial_membership_changes(self):
+        valid_user = get_user_model().objects.create_user(username="command-valid")
+        invalid_user = get_user_model().objects.create_user(username="command-invalid")
+        UserRoleScope.objects.create(
+            user=valid_user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.bulk_create(
+            [
+                UserRoleScope(
+                    user=invalid_user,
+                    role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+                    warehouse=self.warehouse,
+                ),
+                UserRoleScope(
+                    user=invalid_user,
+                    role=UserRoleScope.Role.OWNER_MANAGER,
+                    owner=self.owner,
+                ),
+            ]
+        )
+
+        with self.assertRaisesMessage(CommandError, "校验失败"):
+            call_command("sync_wms_user_role_memberships", stdout=StringIO())
+
+        self.assertFalse(valid_user.groups.filter(name__in=ROLE_GROUP_NAMES).exists())
 
 
 class AuditWmsRoleScopesCommandTests(TestCase):

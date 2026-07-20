@@ -28,6 +28,18 @@ class AccessScope:
     source: str = "none"
     denial_reason: str = ""
 
+    @property
+    def single_owner_id(self) -> int | None:
+        """Return the only scoped owner, or ``None`` for zero/many/global scopes."""
+
+        return next(iter(self.owner_ids)) if len(self.owner_ids) == 1 else None
+
+    @property
+    def single_warehouse_id(self) -> int | None:
+        """Return the only scoped warehouse, or ``None`` for zero/many/global scopes."""
+
+        return next(iter(self.warehouse_ids)) if len(self.warehouse_ids) == 1 else None
+
     @classmethod
     def for_user(cls, user) -> "AccessScope":
         """Resolve explicit role scopes, then a conservative legacy fallback."""

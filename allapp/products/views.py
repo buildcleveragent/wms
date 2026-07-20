@@ -4,6 +4,7 @@ from django.http import HttpResponse, JsonResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import (
     SAFE_METHODS,
@@ -12,6 +13,8 @@ from rest_framework.permissions import (
 )
 from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
+
+from allapp.accounts.access import AccessScope
 
 from .excel_import import ProductImportConflictError, ProductImportFileError
 from .models import Product, ProductPackage
@@ -70,7 +73,7 @@ class OwnerScopedMixin:
             return qs.none()
         if self.has_all_owner_scope():
             return qs
-        owner_id = getattr(user, "owner_id", None)
+        owner_id = AccessScope.for_user(user).single_owner_id
         return (
             qs.filter(**{f"{self.owner_path}_id": owner_id}) if owner_id else qs.none()
         )
@@ -80,14 +83,20 @@ class OwnerScopedMixin:
         if self.has_all_owner_scope():
             serializer.save()
             return
-        serializer.save(owner=getattr(user, "owner", None))
+        owner_id = AccessScope.for_user(user).single_owner_id
+        if not owner_id:
+            raise PermissionDenied("当前账号没有单一有效货主范围。")
+        serializer.save(owner_id=owner_id)
 
     def perform_update(self, serializer):
         user = self.request.user
         if self.has_all_owner_scope():
             serializer.save()
             return
-        serializer.save(owner=getattr(user, "owner", None))
+        owner_id = AccessScope.for_user(user).single_owner_id
+        if not owner_id:
+            raise PermissionDenied("当前账号没有单一有效货主范围。")
+        serializer.save(owner_id=owner_id)
 
 
 class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):

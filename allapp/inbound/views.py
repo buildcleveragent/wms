@@ -74,11 +74,11 @@ class ReceiveGoodsWithoutOrder(APIView):
         payload_owner_id = int(payload["owner_id"])
         payload_warehouse_id = payload.get("warehouse_id")
 
-        warehouse_id = payload_warehouse_id or getattr(user, "warehouse_id", None)
-        if not warehouse_id:
-            raise ValidationError("必须提供 warehouse_id 或为当前用户绑定 warehouse")
-
         scope = AccessScope.for_user(user)
+        warehouse_id = payload_warehouse_id or scope.single_warehouse_id
+        if not warehouse_id:
+            raise ValidationError("必须提供 warehouse_id；仅单一仓库范围账号可自动确定仓库")
+
         if not scope.allows(owner_id=payload_owner_id, warehouse_id=warehouse_id):
             raise PermissionDenied("无权处理指定货主或仓库")
         return payload_owner_id, warehouse_id

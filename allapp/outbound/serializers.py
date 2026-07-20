@@ -338,8 +338,7 @@ class AssistedOutboundOrderCreateSerializer(serializers.Serializer):
 #         # 从登录用户获取 owner / warehouse（不再走前端）
 #         req = self.context.get("request")
 #         user = getattr(req, "user", None)
-#         owner_id = getattr(user, "owner_id", None)
-#         warehouse_id = getattr(user, "warehouse_id", None)
+#         owner_id 和 warehouse_id 应从显式 AccessScope 解析。
 #         if not owner_id:
 #             raise serializers.ValidationError("当前用户未绑定货主（owner），请联系管理员。")
 #         if not warehouse_id:
@@ -474,13 +473,12 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         if not data.get("items"):
             raise serializers.ValidationError("至少需要一条明细。")
 
-        # owner 只能来自服务端角色范围。仓库优先使用本次显式选择，
-        # 兼容仍有旧 warehouse 绑定的历史账号。
+        # owner 只能来自服务端角色范围；货主角色必须显式选择目标仓库。
         req = self.context.get("request")
         user = getattr(req, "user", None)
         scope = AccessScope.for_user(user)
-        owner_id = next(iter(scope.owner_ids)) if len(scope.owner_ids) == 1 else None
-        warehouse_id = data.get("warehouse_id") or getattr(user, "warehouse_id", None)
+        owner_id = scope.single_owner_id
+        warehouse_id = data.get("warehouse_id") or scope.single_warehouse_id
 
         if not owner_id:
             raise serializers.ValidationError("当前用户没有单一有效货主角色范围，请联系管理员。")

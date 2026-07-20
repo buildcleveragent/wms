@@ -95,8 +95,16 @@ ROLE_GROUP_TEMPLATES = {
 }
 
 
+LEGACY_ROLE_GROUP_NAMES = {
+    UserRoleScope.Role.WAREHOUSE_BOSS: frozenset({"仓库主管"}),
+}
+
+
 ROLE_GROUP_ALIASES = {
-    role: frozenset({template.group_name, str(UserRoleScope.Role(role).label), role})
+    role: (
+        frozenset({template.group_name, str(UserRoleScope.Role(role).label), role})
+        | LEGACY_ROLE_GROUP_NAMES.get(role, frozenset())
+    )
     for role, template in ROLE_GROUP_TEMPLATES.items()
 }
 

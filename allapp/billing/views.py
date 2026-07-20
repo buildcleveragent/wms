@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
+from allapp.baseinfo.models import Owner
 from allapp.locations.models import Warehouse
 
 from .enums import AccrualStatus, BillStatus, PeriodStatus
@@ -344,12 +345,15 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
         scope_owner_name = ""
         if scope_owner_id:
             scope_owner_name = owner_options_map.get(scope_owner_id, {}).get("name", "")
-            if (
-                not scope_owner_name
-                and scope_owner_id == getattr(request.user, "owner_id", None)
-                and getattr(request.user, "owner", None) is not None
+            if not scope_owner_name and (
+                scope.is_global or scope_owner_id in scope.owner_ids
             ):
-                scope_owner_name = request.user.owner.name
+                scope_owner_name = (
+                    Owner.objects.filter(pk=scope_owner_id)
+                    .values_list("name", flat=True)
+                    .first()
+                    or ""
+                )
 
         payload = build_warehouse_overview_payload(
             accrual_qs=base_accrual_qs,

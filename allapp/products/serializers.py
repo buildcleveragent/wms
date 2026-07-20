@@ -1,5 +1,6 @@
 # apps/products/serializers.py  可直接覆盖版
 from rest_framework import serializers
+from allapp.accounts.access import AccessScope
 from .models import Product, ProductPackage  # ProductUom 未使用可移除
 from .permissions import can_manage_all_owner_products
 
@@ -47,14 +48,14 @@ class ProductSerializer(serializers.ModelSerializer):
         )
         if authed_non_superuser:
             can_manage_all = can_manage_all_owner_products(user)
-            owner_id = getattr(user, "owner_id", None)
+            owner_id = AccessScope.for_user(user).single_owner_id
             if self.instance is None:
                 if owner_id and (not can_manage_all or "owner" not in data):
                     data["owner"] = owner_id
             elif not can_manage_all:
                 data["owner"] = self.instance.owner_id
         elif self.instance is None and "owner" not in data:
-            owner_id = getattr(user, "owner_id", None)
+            owner_id = AccessScope.for_user(user).single_owner_id if user else None
             if owner_id:
                 data["owner"] = owner_id
         if not data.get("sku") and data.get("code"):

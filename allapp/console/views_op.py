@@ -17,6 +17,7 @@ from django.views import View
 from django.views.generic import ListView, DetailView
 from rest_framework.exceptions import PermissionDenied
 
+from allapp.accounts.access import AccessScope
 from allapp.outbound.authz import (
     apply_legacy_scope,
     assisted_task_queryset,
@@ -431,7 +432,7 @@ from allapp.tasking import services as tasking_services
 def _allowed_wh_ids_for(user) -> set[int]:
     if getattr(user, "is_superuser", False):
         return set(Warehouse.objects.values_list("id", flat=True))
-    return {user.warehouse_id} if getattr(user, "warehouse_id", None) else set()
+    return set(AccessScope.for_user(user).warehouse_ids)
 
 
 class OpLineListView(LoginRequiredMixin, TemplateView):

@@ -64,8 +64,10 @@ def profile_view(request):
                 "id": user.id,
                 "username": user.username,
                 "display_name": user.get_full_name() or user.username,
-                "owner_id": user.owner_id,
-                "warehouse_id": user.warehouse_id,
+                # Compatibility scalar fields are derived from the authoritative
+                # explicit scope. Multi-scope users consume ``scopes`` below.
+                "owner_id": access_scope.single_owner_id,
+                "warehouse_id": access_scope.single_warehouse_id,
                 "roles": sorted(access_scope.roles),
                 "scopes": access_scope.as_dict(),
             },

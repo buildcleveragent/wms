@@ -11,6 +11,7 @@ from django.urls import reverse
 from django.utils.dateparse import parse_date
 from django.views.generic import TemplateView
 
+from allapp.accounts.access import AccessScope
 from allapp.baseinfo.models import Owner
 from allapp.billing.enums import AccrualStatus, BillStatus, ChargeType, PeriodStatus
 from allapp.billing.models import Bill, BillingAccrual, BillingPeriod
@@ -68,16 +69,10 @@ class BillingConsoleBaseView(LoginRequiredMixin, TemplateView):
         return bool(getattr(user, "is_superuser", False) or user.has_perm("billing.view_bill"))
 
     def _scoped_owner_id(self):
-        user = self.request.user
-        if getattr(user, "is_superuser", False):
-            return None
-        return getattr(user, "owner_id", None)
+        return AccessScope.for_user(self.request.user).single_owner_id
 
     def _scoped_warehouse_id(self):
-        user = self.request.user
-        if getattr(user, "is_superuser", False):
-            return None
-        return getattr(user, "warehouse_id", None)
+        return AccessScope.for_user(self.request.user).single_warehouse_id
 
     def _validate_scoped_param(self, param_name: str, scoped_value):
         raw_value = self.request.GET.get(param_name)
@@ -87,31 +82,46 @@ class BillingConsoleBaseView(LoginRequiredMixin, TemplateView):
             value = int(raw_value)
         except (TypeError, ValueError):
             return None
-        if scoped_value and value != scoped_value:
-            raise PermissionDenied("无权查看其他货主或仓库的计费数据。")
+        scope = AccessScope.for_user(self.request.user)
+        if not scope.is_valid:
+            raise PermissionDenied("当前账号没有有效的 WMS 数据范围。")
+        if param_name == "owner" and scope.owner_ids:
+            if value not in scope.owner_ids:
+                raise PermissionDenied("无权查看其他货主的计费数据。")
+        elif param_name == "warehouse" and scope.warehouse_ids:
+            if value not in scope.warehouse_ids:
+                raise PermissionDenied("无权查看其他仓库的计费数据。")
         return value
 
-    def _scope_queryset(self, qs, *, owner_field: str = "owner_id", warehouse_field: str = "warehouse_id"):
-        owner_id = self._scoped_owner_id()
-        warehouse_id = self._scoped_warehouse_id()
-        if owner_id:
-            qs = qs.filter(**{owner_field: owner_id})
-        if warehouse_id:
-            qs = qs.filter(**{warehouse_field: warehouse_id})
-        return qs
+    def _scope_queryset(
+        self,
+        qs,
+        *,
+        owner_field: str = "owner_id",
+        warehouse_field: str = "warehouse_id",
+    ):
+        return AccessScope.for_user(self.request.user).filter_queryset(
+            qs,
+            owner_field=owner_field,
+            warehouse_field=warehouse_field,
+        )
 
     def _owner_queryset(self):
         qs = Owner.objects.order_by("name", "id")
-        owner_id = self._scoped_owner_id()
-        if owner_id:
-            qs = qs.filter(id=owner_id)
+        scope = AccessScope.for_user(self.request.user)
+        if not scope.is_valid:
+            return qs.none()
+        if not scope.is_global and scope.owner_ids:
+            qs = qs.filter(id__in=scope.owner_ids)
         return qs
 
     def _warehouse_queryset(self):
         qs = Warehouse.objects.order_by("code", "id")
-        warehouse_id = self._scoped_warehouse_id()
-        if warehouse_id:
-            qs = qs.filter(id=warehouse_id)
+        scope = AccessScope.for_user(self.request.user)
+        if not scope.is_valid:
+            return qs.none()
+        if not scope.is_global and scope.warehouse_ids:
+            qs = qs.filter(id__in=scope.warehouse_ids)
         return qs
 
 
