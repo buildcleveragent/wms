@@ -173,6 +173,30 @@ class GroupAdminPermissionMatrixTests(TestCase):
             ).exists()
         )
 
+    def test_group_change_page_uses_object_delete_url_and_can_delete_legacy_group(self):
+        legacy_group = Group.objects.create(name="系统管理员")
+        legacy_group_id = legacy_group.pk
+        self.client.force_login(self.request.user)
+        change_url = reverse("admin:auth_group_change", args=(legacy_group_id,))
+        delete_url = reverse("admin:auth_group_delete", args=(legacy_group_id,))
+
+        response = self.client.get(change_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'href="{delete_url}"')
+        self.assertNotContains(response, 'href="delete/"')
+
+        response = self.client.post(delete_url, {"post": "yes"})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Group.objects.filter(pk=legacy_group_id).exists())
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action="ROLE_GROUP_DELETE",
+                object_id=str(legacy_group_id),
+            ).exists()
+        )
+
     def test_user_group_and_direct_permission_changes_are_superuser_only_and_audited(
         self,
     ):
