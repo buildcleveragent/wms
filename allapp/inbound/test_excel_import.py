@@ -122,6 +122,7 @@ class NoOrderReceiveExcelImportTests(TestCase):
             [cell.value for cell in workbook["无订单收货"][1]],
             [
                 "商品编号",
+                "商品名称",
                 "收货数量",
                 "收货单位代码",
                 "批次号",
@@ -154,19 +155,20 @@ class NoOrderReceiveExcelImportTests(TestCase):
         )
 
     def test_preview_converts_package_quantity_without_writing_inventory(self):
-        response = self._preview([["EXSKU1", "2", "CS", "", "", ""]])
+        response = self._preview([["EXSKU1", "仅供核对的名称", "2", "CS", "", "", ""]])
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["total_rows"], 1)
         self.assertEqual(response.data["product_count"], 1)
         self.assertEqual(response.data["rows"][0]["base_qty"], "24")
+        self.assertEqual(response.data["rows"][0]["product_name"], "Excel Product")
         self.assertEqual(response.data["items"][0]["qty"], "24")
         self.assertTrue(response.data["preview_token"])
         self.assertFalse(InventoryDetail.objects.exists())
         self.assertFalse(WmsTask.objects.exists())
 
     def test_serial_controlled_product_rejects_the_whole_file(self):
-        response = self._preview([["SERIAL1", "1", "EA", "", "", ""]])
+        response = self._preview([["SERIAL1", "Serial Product", "1", "EA", "", "", ""]])
 
         self.assertEqual(response.status_code, 400, response.data)
         self.assertTrue(
@@ -178,7 +180,9 @@ class NoOrderReceiveExcelImportTests(TestCase):
         self.assertFalse(WmsTask.objects.exists())
 
     def test_formula_cells_are_rejected(self):
-        response = self._preview([['=CONCAT("EX","SKU1")', "1", "EA", "", "", ""]])
+        response = self._preview(
+            [['=CONCAT("EX","SKU1")', "Excel Product", "1", "EA", "", "", ""]]
+        )
 
         self.assertEqual(response.status_code, 400, response.data)
         self.assertTrue(
@@ -203,7 +207,7 @@ class NoOrderReceiveExcelImportTests(TestCase):
             ]
         )
 
-        response = self._preview([["EXSKU1", "1", "EA", "", "", ""]])
+        response = self._preview([["EXSKU1", "Excel Product", "1", "EA", "", "", ""]])
 
         self.assertEqual(response.status_code, 400, response.data)
         messages = {error["message"] for error in response.data["errors"]}
@@ -223,7 +227,7 @@ class NoOrderReceiveExcelImportTests(TestCase):
 
         template = self._template_response()
         workbook = load_workbook(io.BytesIO(template.content))
-        workbook["无订单收货"].delete_cols(6)
+        workbook["无订单收货"].delete_cols(7)
         output = io.BytesIO()
         workbook.save(output)
         missing_column = SimpleUploadedFile("无订单收货.xlsx", output.getvalue())
@@ -237,7 +241,7 @@ class NoOrderReceiveExcelImportTests(TestCase):
 
     def test_template_for_another_owner_is_rejected(self):
         response = self._preview(
-            [["EXSKU1", "1", "EA", "", "", ""]],
+            [["EXSKU1", "Excel Product", "1", "EA", "", "", ""]],
             owner=self.owner,
             template_owner=self.other_owner,
         )
@@ -246,7 +250,7 @@ class NoOrderReceiveExcelImportTests(TestCase):
         self.assertIn("模板所属货主", response.data["detail"])
 
     def test_tampered_preview_items_are_rejected(self):
-        preview = self._preview([["EXSKU1", "2", "CS", "", "", ""]])
+        preview = self._preview([["EXSKU1", "错误名称也应忽略", "2", "CS", "", "", ""]])
         items = [dict(item) for item in preview.data["items"]]
         items[0]["qty"] = "25"
 
@@ -265,7 +269,7 @@ class NoOrderReceiveExcelImportTests(TestCase):
         self.assertFalse(InventoryDetail.objects.exists())
 
     def test_confirm_posts_inventory_and_retry_is_idempotent(self):
-        preview = self._preview([["EXSKU1", "2", "CS", "", "", ""]])
+        preview = self._preview([["EXSKU1", "Excel Product", "2", "CS", "", "", ""]])
         payload = {
             "preview_token": preview.data["preview_token"],
             "request_id": preview.data["request_id"],

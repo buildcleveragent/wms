@@ -27,6 +27,7 @@ XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml
 
 HEADERS = (
     "商品编号",
+    "商品名称",
     "收货数量",
     "收货单位代码",
     "批次号",
@@ -34,6 +35,8 @@ HEADERS = (
     "有效截止日期",
 )
 REQUIRED_VALUE_HEADERS = frozenset({"商品编号", "收货数量", "收货单位代码"})
+IGNORED_VALUE_HEADERS = frozenset({"商品名称"})
+REQUIRED_TEMPLATE_HEADERS = frozenset(HEADERS) - IGNORED_VALUE_HEADERS
 
 
 class InboundExcelFileError(Exception):
@@ -82,6 +85,10 @@ def _write_instructions(sheet, owner):
         ("使用步骤", "填写“无订单收货”工作表，在 wmspda 上传校验，确认后一次性入库。"),
         ("商品编号", "必须填写“商品单位参考”中的商品编号，只匹配当前货主的已有商品。"),
         (
+            "商品名称",
+            "仅供人工核对，可留空；系统导入时忽略此列，仅按商品编号识别商品。",
+        ),
+        (
             "数量与单位",
             "收货数量必须大于 0；单位代码必须是该商品的基本单位或包装单位。",
         ),
@@ -116,11 +123,15 @@ def _write_data_sheet(sheet):
             fgColor="DC2626" if header in REQUIRED_VALUE_HEADERS else "1D4ED8",
         )
         cell.alignment = Alignment(horizontal="center", vertical="center")
-        sheet.column_dimensions[get_column_letter(index)].width = 18
+        sheet.column_dimensions[get_column_letter(index)].width = (
+            30 if header == "商品名称" else 18
+        )
     for row_number in range(2, MAX_IMPORT_ROWS + 2):
-        for column in (1, 3, 4):
+        for header in ("商品编号", "商品名称", "收货单位代码", "批次号"):
+            column = HEADERS.index(header) + 1
             sheet.cell(row=row_number, column=column).number_format = "@"
-        for column in (5, 6):
+        for header in ("生产日期", "有效截止日期"):
+            column = HEADERS.index(header) + 1
             sheet.cell(row=row_number, column=column).number_format = "yyyy-mm-dd"
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = f"A1:{get_column_letter(len(HEADERS))}1"
@@ -333,7 +344,7 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
     unknown_headers = [header for header in nonempty_headers if header not in HEADERS]
     if unknown_headers:
         raise InboundExcelFileError(f"模板存在未知列：{unknown_headers}")
-    missing_headers = sorted(set(HEADERS) - set(nonempty_headers))
+    missing_headers = sorted(REQUIRED_TEMPLATE_HEADERS - set(nonempty_headers))
     if missing_headers:
         raise InboundExcelFileError(f"模板缺少必要列：{missing_headers}")
     header_columns = {
@@ -352,12 +363,17 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
             header: sheet.cell(excel_row, column)
             for header, column in header_columns.items()
         }
-        if all(_text(cell.value) == "" for cell in cells.values()):
+        import_cells = {
+            header: cell
+            for header, cell in cells.items()
+            if header not in IGNORED_VALUE_HEADERS
+        }
+        if all(_text(cell.value) == "" for cell in import_cells.values()):
             continue
         nonempty_count += 1
         if nonempty_count > MAX_IMPORT_ROWS:
             raise InboundExcelFileError(f"一次最多导入 {MAX_IMPORT_ROWS} 条明细。")
-        for header, cell in cells.items():
+        for header, cell in import_cells.items():
             if cell.data_type == "f":
                 _row_error(errors, excel_row, header, "不允许使用公式")
 
