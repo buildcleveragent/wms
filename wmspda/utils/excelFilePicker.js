@@ -1,7 +1,7 @@
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
-function normalizeChosenFile(path, file = {}) {
-  const name = file.name || (path || '').split('/').pop() || '商品导入.xlsx'
+function normalizeChosenFile(path, file = {}, fallbackName = 'Excel导入.xlsx') {
+  const name = file.name || (path || '').split('/').pop() || fallbackName
   return {
     path: path || file.path || '',
     name,
@@ -9,7 +9,7 @@ function normalizeChosenFile(path, file = {}) {
   }
 }
 
-function chooseWithUniFile() {
+function chooseWithUniFile(fallbackName) {
   return new Promise((resolve, reject) => {
     uni.chooseFile({
       count: 1,
@@ -20,14 +20,14 @@ function chooseWithUniFile() {
           reject(new Error('没有取得所选文件路径'))
           return
         }
-        resolve(normalizeChosenFile(path, res?.tempFiles?.[0] || {}))
+        resolve(normalizeChosenFile(path, res?.tempFiles?.[0] || {}, fallbackName))
       },
       fail: reject,
     })
   })
 }
 
-function chooseWithWechat() {
+function chooseWithWechat(fallbackName) {
   return new Promise((resolve, reject) => {
     uni.chooseMessageFile({
       count: 1,
@@ -39,7 +39,7 @@ function chooseWithWechat() {
           reject(new Error('没有取得所选文件路径'))
           return
         }
-        resolve(normalizeChosenFile(file.path, file))
+        resolve(normalizeChosenFile(file.path, file, fallbackName))
       },
       fail: reject,
     })
@@ -60,7 +60,7 @@ function androidDisplayName(resolver, uri) {
   }
 }
 
-function copyAndroidContentUri(activity, uri) {
+function copyAndroidContentUri(activity, uri, fallbackName, cachePrefix) {
   const resolver = plus.android.invoke(activity, 'getContentResolver')
   const input = plus.android.invoke(resolver, 'openInputStream', uri)
   if (!input) throw new Error('无法读取所选文件')
@@ -68,7 +68,8 @@ function copyAndroidContentUri(activity, uri) {
   const File = plus.android.importClass('java.io.File')
   const FileOutputStream = plus.android.importClass('java.io.FileOutputStream')
   const cacheDir = plus.android.invoke(activity, 'getCacheDir')
-  const target = new File(cacheDir, `product-import-${Date.now()}.xlsx`)
+  const safePrefix = String(cachePrefix || 'excel-import').replace(/[^a-z0-9_-]/gi, '-')
+  const target = new File(cacheDir, `${safePrefix}-${Date.now()}.xlsx`)
   const output = new FileOutputStream(target)
   const buffer = plus.android.newObject('byte[]', 8192)
   try {
@@ -85,11 +86,11 @@ function copyAndroidContentUri(activity, uri) {
   return {
     path: plus.android.invoke(target, 'getAbsolutePath'),
     size: Number(plus.android.invoke(target, 'length') || 0),
-    name: androidDisplayName(resolver, uri) || '商品导入.xlsx',
+    name: androidDisplayName(resolver, uri) || fallbackName,
   }
 }
 
-function chooseWithAndroidDocument() {
+function chooseWithAndroidDocument(fallbackName, cachePrefix) {
   return new Promise((resolve, reject) => {
     if (typeof plus === 'undefined' || !plus.android) {
       reject(new Error('当前设备不支持系统文件选择'))
@@ -119,7 +120,7 @@ function chooseWithAndroidDocument() {
         }
         try {
           const uri = plus.android.invoke(data, 'getData')
-          resolve(copyAndroidContentUri(activity, uri))
+          resolve(copyAndroidContentUri(activity, uri, fallbackName, cachePrefix))
         } catch (error) {
           reject(error)
         }
@@ -132,17 +133,19 @@ function chooseWithAndroidDocument() {
   })
 }
 
-export function chooseExcelFile() {
+export function chooseExcelFile(options = {}) {
+  const fallbackName = options.fallbackName || 'Excel导入.xlsx'
+  const cachePrefix = options.cachePrefix || 'excel-import'
   // #ifdef APP-PLUS
-  return chooseWithAndroidDocument()
+  return chooseWithAndroidDocument(fallbackName, cachePrefix)
   // #endif
 
   // #ifdef MP-WEIXIN
-  return chooseWithWechat()
+  return chooseWithWechat(fallbackName)
   // #endif
 
   // #ifdef H5
-  return chooseWithUniFile()
+  return chooseWithUniFile(fallbackName)
   // #endif
 
   return Promise.reject(new Error('当前平台暂不支持选择 Excel 文件'))

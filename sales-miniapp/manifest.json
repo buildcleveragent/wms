@@ -1,7 +1,7 @@
 {
-  "name": "博悦商城",
+  "name": "金桥融通商城",
   "appid": "__UNI__WMS_SALES",
-  "description": "博悦商城商品选购小程序",
+  "description": "金桥融通商城商品选购小程序",
   "versionName": "0.1.0",
   "versionCode": "100",
   "transformPx": false,
@@ -18,7 +18,7 @@
     "usingComponents": true
   },
   "h5": {
-    "title": "博悦商城"
+    "title": "金桥融通商城"
   },
   "uniStatistics": {
     "enable": false

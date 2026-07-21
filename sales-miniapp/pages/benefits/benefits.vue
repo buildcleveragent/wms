@@ -3,7 +3,7 @@
     <view class="member-head">
       <view>
         <view class="head-title">会员资产</view>
-        <view class="head-sub">博悦商城</view>
+        <view class="head-sub">金桥融通商城</view>
       </view>
     </view>
 

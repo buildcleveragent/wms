@@ -133,12 +133,12 @@ for (const [index, page] of expectedTabPages.entries()) {
 
 assert(manifest.vueVersion === '3', 'sales miniapp must stay on Vue 3 uni-app')
 assert(!Object.prototype.hasOwnProperty.call(manifest, 'uniCloud'), 'sales miniapp must not configure uniCloud')
-assert(manifest.name === '博悦商城', 'manifest app name must be buyer-facing')
-assert(manifest.description === '博悦商城商品选购小程序', 'manifest description must be buyer-facing')
+assert(manifest.name === '金桥融通商城', 'manifest app name must be buyer-facing')
+assert(manifest.description === '金桥融通商城商品选购小程序', 'manifest description must be buyer-facing')
 assertNotIncludes(manifest.description, '多商家', 'manifest description')
-assert(manifest.h5 && manifest.h5.title === '博悦商城', 'h5 title must be buyer-facing')
-assert(pagesJson.globalStyle.navigationBarTitleText === '博悦商城', 'global title must be buyer-facing')
-assert(pagesJson.pages[0].style.navigationBarTitleText === '博悦商城', 'home title must be buyer-facing')
+assert(manifest.h5 && manifest.h5.title === '金桥融通商城', 'h5 title must be buyer-facing')
+assert(pagesJson.globalStyle.navigationBarTitleText === '金桥融通商城', 'global title must be buyer-facing')
+assert(pagesJson.pages[0].style.navigationBarTitleText === '金桥融通商城', 'home title must be buyer-facing')
 
 const request = readText('utils/request.js')
 assertIncludes(request, '/api/sale-mini/home/', 'request API')
@@ -195,7 +195,7 @@ assertNotIncludes(productCard, 'merchant', 'product card must not use merchant w
 const indexPage = readText('pages/index/index.vue')
 assertIncludes(indexPage, 'productService.home()', 'home page')
 assertIncludes(indexPage, '@click="openBanner(banner)"', 'home banner navigation')
-assertIncludes(indexPage, "const profileName = computed(() => '博悦商城')", 'home unified retail brand')
+assertIncludes(indexPage, "const profileName = computed(() => '金桥融通商城')", 'home unified retail brand')
 assertIncludes(indexPage, 'brandTagline', 'home retail tagline naming')
 assertNotIncludes(indexPage, 'warehouseName', 'home must not use warehouse naming for retail tagline')
 assertIncludes(indexPage, '搜索商品、品牌、关键词', 'home retail search placeholder')
@@ -223,7 +223,7 @@ assertNotIncludes(indexPage, '/pages/merchants/merchants', 'home must not expose
 assertNotIncludes(indexPage, '/pages/merchant-detail/merchant-detail', 'home must not expose merchant detail route')
 
 const loginPage = readText('pages/login/login.vue')
-assertIncludes(loginPage, '博悦商城', 'login buyer-facing copy')
+assertIncludes(loginPage, '金桥融通商城', 'login buyer-facing copy')
 assertIncludes(loginPage, '统一商城在线选购', 'login buyer-facing copy')
 assertNotIncludes(loginPage, '客户采购小程序', 'login buyer-facing copy')
 
@@ -393,7 +393,7 @@ assertNotIncludes(resultPage, 'owner_name', 'order result must not show owner na
 assertNotIncludes(resultPage, 'batch_wait_pay', 'order result must not expose unavailable aggregate wechat pay')
 
 const benefitPage = readText('pages/benefits/benefits.vue')
-assertIncludes(benefitPage, '博悦商城', 'benefit unified retail copy')
+assertIncludes(benefitPage, '金桥融通商城', 'benefit unified retail copy')
 assertIncludes(benefitPage, 'benefitService.coupons()', 'benefit page aggregate coupons')
 assertIncludes(benefitPage, 'benefitService.points()', 'benefit page aggregate points')
 assertNotIncludes(benefitPage, 'query.owner_id', 'benefit page must not accept owner context from URL')

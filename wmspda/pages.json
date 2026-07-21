@@ -1,7 +1,8 @@
 {
 	"pages": [ //pages数组中第一项表示应用启动页，参考：https://uniapp.dcloud.io/collocation/pages
 		{"path": "pages/login","style":{"navigationBarTitleText":"登录"}},
-		{"path": "pages/inbound/createwithoutorder/selectowner","style": {"navigationBarTitleText": "无订单入库"}},	
+			{"path": "pages/inbound/createwithoutorder/selectowner","style": {"navigationBarTitleText": "无订单入库"}},
+			{"path": "pages/inbound/createwithoutorder/excel_import","style": {"navigationBarTitleText": "Excel批量入库"}},
 		{"path": "pages/inbound/selectsupplier","style": {"navigationBarTitleText": "无订单入库"}},
 		{"path": "pages/products/search","style": {"navigationBarTitleText": "录入产品"}},
 		{"path": "pages/products/import","style": {"navigationBarTitleText": "商品批量导入"}},

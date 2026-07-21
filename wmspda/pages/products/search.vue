@@ -1,10 +1,11 @@
 <template>
   <view class="container">
-    <view class="card-first">
-      <view class="row-first">
-        <view class="font-bold">货主：{{ cart.owner?.name || '未选择' }} </view>
-      </view>
-    </view>
+	    <view class="card-first">
+	      <view class="row-first">
+	        <view class="font-bold">货主：{{ cart.owner?.name || '未选择' }} </view>
+	        <button class="excel-entry-btn" @click="goExcelImport">Excel批量入库</button>
+	      </view>
+	    </view>
   
     <view class="bar">
       <input class="input flex-input" v-model="q" placeholder="名称/编码/条码 可输入部分内容"  @confirm="search" />
@@ -483,6 +484,10 @@ function add(p: any) {
 
 function goCart(){
   uni.navigateTo({ url:'/pages/orders/cart' })
+}
+
+function goExcelImport(){
+  uni.navigateTo({ url:'/pages/inbound/createwithoutorder/excel_import' })
 }
 
 // =========================
@@ -1268,8 +1273,22 @@ function getBatch(pid: number): string {
 .row-first {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   width: 100%;
   height: 60rpx;   /* ✅ 去掉 60rpx */
+}
+
+.excel-entry-btn {
+  width: auto;
+  height: 48rpx;
+  line-height: 44rpx;
+  margin: 0 12rpx 0 0;
+  padding: 0 18rpx;
+  border: 1rpx solid #2563eb;
+  border-radius: 10rpx;
+  color: #2563eb;
+  background: #eff6ff;
+  font-size: 23rpx;
 }
 
 

@@ -138,7 +138,7 @@ class ReceiveWithoutOrderPayloadSerializer(serializers.Serializer):
     warehouse_id = serializers.IntegerField(required=False, allow_null=True)
     location_id = serializers.IntegerField(required=False, allow_null=True)
     remark = serializers.CharField(required=False, allow_blank=True, default="")
-    items = ReceiveWithoutOrderItemSerializer(many=True, required=True)
+    items = ReceiveWithoutOrderItemSerializer(many=True, required=True, allow_empty=False)
 
 
 class InboundOrderLineInputSerializer(serializers.Serializer):

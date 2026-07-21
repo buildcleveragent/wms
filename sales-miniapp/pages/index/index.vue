@@ -135,7 +135,7 @@ const home = reactive({
 })
 
 const profile = computed(() => session.profile)
-const profileName = computed(() => '博悦商城')
+const profileName = computed(() => '金桥融通商城')
 const brandTagline = computed(() => {
   return '品质好货 · 在线选购'
 })

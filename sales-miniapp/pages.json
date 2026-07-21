@@ -3,7 +3,7 @@
     {
       "path": "pages/index/index",
       "style": {
-        "navigationBarTitleText": "博悦商城",
+        "navigationBarTitleText": "金桥融通商城",
         "enablePullDownRefresh": true
       }
     },
@@ -150,7 +150,7 @@
   },
   "globalStyle": {
     "navigationBarTextStyle": "black",
-    "navigationBarTitleText": "博悦商城",
+    "navigationBarTitleText": "金桥融通商城",
     "navigationBarBackgroundColor": "#ffffff",
     "backgroundColor": "#f4f6f8"
   }

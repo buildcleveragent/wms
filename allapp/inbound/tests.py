@@ -421,8 +421,8 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
             "items": [{"product_id": self.product.pk, "qty": "2.0000"}],
         }
 
-        with mock.patch("allapp.inbound.views.save_receiving_snapshot"), mock.patch(
-            "allapp.inbound.views._run_posting_handler",
+        with mock.patch("allapp.inbound.services.save_receiving_snapshot"), mock.patch(
+            "allapp.inbound.services._run_posting_handler",
             return_value={"affected_tx_count": 1},
         ):
             created = client.post(

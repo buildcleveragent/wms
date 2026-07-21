@@ -1,8 +1,6 @@
 import hashlib
 import json
 import logging
-from collections import defaultdict
-from datetime import date
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -20,15 +18,10 @@ from rest_framework.views import APIView
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 from allapp.accounts.models import UserRoleScope
-from allapp.baseinfo.models import Owner
-from allapp.core.models import DocSequence
-from allapp.core.utils.log_context import build_log_payload
 from allapp.inbound.constants import (
     PDA_NO_ORDER_RECEIVE_NOTE,
-    PDA_NO_ORDER_RECEIVE_SOURCE_APP,
-    PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
 )
-from allapp.inbound.models import InboundOrder, NoOrderReceiveRequest
+from allapp.inbound.models import InboundOrder
 from allapp.inbound.permissions import (
     CanReceiveWithoutOrder,
     can_operate_inbound_tasks,
@@ -43,9 +36,12 @@ from allapp.inbound.serializers import (
     ReceiptRecordSerializer,
     ReceiveWithoutOrderPayloadSerializer,
 )
-from allapp.inbound.services import finalize_receive_line_with_variance
-from allapp.locations.models import Location, Warehouse
-from allapp.products.models import Product
+from allapp.inbound.services import (
+    NoOrderReceiveConflict,
+    finalize_receive_line_with_variance,
+    receive_goods_without_order,
+)
+from allapp.locations.models import Location
 from allapp.tasking import services as task_services
 from allapp.tasking.models import (
     PutawayLineExtra,
@@ -55,7 +51,7 @@ from allapp.tasking.models import (
     WmsTask,
     WmsTaskLine,
 )
-from allapp.tasking.services import _run_posting_handler, save_receiving_snapshot
+from allapp.tasking.services import save_receiving_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -77,71 +73,15 @@ class ReceiveGoodsWithoutOrder(APIView):
         scope = AccessScope.for_user(user)
         warehouse_id = payload_warehouse_id or scope.single_warehouse_id
         if not warehouse_id:
-            raise ValidationError("必须提供 warehouse_id；仅单一仓库范围账号可自动确定仓库")
+            raise ValidationError(
+                "必须提供 warehouse_id；仅单一仓库范围账号可自动确定仓库"
+            )
 
         if not scope.allows(owner_id=payload_owner_id, warehouse_id=warehouse_id):
             raise PermissionDenied("无权处理指定货主或仓库")
         return payload_owner_id, warehouse_id
 
-    @staticmethod
-    def _payload_hash(*, owner_id, warehouse_id, location_id, remark, items):
-        normalized_items = sorted(
-            (
-                {
-                    "product_id": int(item["product_id"]),
-                    "qty": format(Decimal(item["qty"]), "f"),
-                    "lot_no": (item.get("lot_no") or "").strip().upper(),
-                    "mfg_date": (
-                        item.get("mfg_date").isoformat()
-                        if item.get("mfg_date")
-                        else None
-                    ),
-                    "exp_date": (
-                        item.get("exp_date").isoformat()
-                        if item.get("exp_date")
-                        else None
-                    ),
-                }
-                for item in items
-            ),
-            key=lambda item: (
-                item["product_id"],
-                item["lot_no"],
-                item["mfg_date"] or "",
-                item["exp_date"] or "",
-                item["qty"],
-            ),
-        )
-        canonical = json.dumps(
-            {
-                "owner_id": int(owner_id),
-                "warehouse_id": int(warehouse_id),
-                "location_id": int(location_id) if location_id else None,
-                "remark": remark,
-                "items": normalized_items,
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def _idempotent_response(task):
-        return Response(
-            {
-                "task_id": task.id,
-                "task_no": task.task_no,
-                "posted": task.posting_status == WmsTask.PostingStatus.POSTED,
-                "idempotent": True,
-                "message": "该请求已处理，返回原收货结果",
-            },
-            status=status.HTTP_200_OK,
-        )
-
-    @transaction.atomic
     def post(self, request):
-        # allapp/inbound/views.py（关键片段）
         raw_payload = request.data.copy()
         if not raw_payload.get("request_id"):
             header_request_id = request.headers.get("Idempotency-Key")
@@ -150,328 +90,26 @@ class ReceiveGoodsWithoutOrder(APIView):
         s = ReceiveWithoutOrderPayloadSerializer(data=raw_payload)
         s.is_valid(raise_exception=True)
         payload = s.validated_data
-        request_id = payload["request_id"]
-        owner_id, wid = self._resolve_scope(request, payload)
-        items = payload["items"]
-        remark = (payload.get("remark") or PDA_NO_ORDER_RECEIVE_NOTE).strip()
-
+        owner_id, warehouse_id = self._resolve_scope(request, payload)
         try:
-            wh = Warehouse.objects.only('id').get(id=wid)
-        except Warehouse.DoesNotExist:
-            raise ValidationError(f"warehouse_id 不存在：{wid}")
-
-        try:
-            owner = Owner.objects.only('id').get(id=owner_id)
-        except Owner.DoesNotExist:
-            raise ValidationError(f"owner_id 不存在：{owner_id}")
-
-        product_ids = {int(item["product_id"]) for item in items}
-        product_map = {
-            product.id: product
-            for product in Product.objects.only("id", "owner_id").filter(id__in=product_ids)
-        }
-        missing_product_ids = sorted(product_ids - set(product_map))
-        if missing_product_ids:
-            raise ValidationError({"items": f"product_id 不存在：{missing_product_ids}"})
-        bad_product_ids = sorted(
-            product_id
-            for product_id, product in product_map.items()
-            if product.owner_id != owner_id
-        )
-        if bad_product_ids:
-            raise PermissionDenied(f"存在不属于当前货主的商品：{bad_product_ids}")
-
-        location = None
-        location_id = payload.get("location_id")
-        if location_id:
-            try:
-                location = Location.objects.only("id", "warehouse_id").get(id=location_id)
-            except Location.DoesNotExist:
-                raise ValidationError(f"location_id 不存在：{location_id}")
-            if location.warehouse_id != wh.id:
-                raise ValidationError("location_id 必须属于当前 warehouse")
-
-        payload_hash = self._payload_hash(
-            owner_id=owner_id,
-            warehouse_id=wh.id,
-            location_id=location_id,
-            remark=remark,
-            items=items,
-        )
-        request_record = (
-            NoOrderReceiveRequest.objects.select_for_update()
-            .filter(created_by=request.user, request_id=request_id)
-            .select_related("task")
-            .first()
-        )
-        if request_record is None:
-            try:
-                with transaction.atomic():
-                    request_record = NoOrderReceiveRequest.objects.create(
-                        request_id=request_id,
-                        payload_hash=payload_hash,
-                        created_by=request.user,
-                        owner=owner,
-                        warehouse=wh,
-                    )
-            except IntegrityError:
-                request_record = (
-                    NoOrderReceiveRequest.objects.select_for_update()
-                    .select_related("task")
-                    .get(created_by=request.user, request_id=request_id)
-                )
-
-        if (
-            request_record.payload_hash != payload_hash
-            or request_record.owner_id != owner_id
-            or request_record.warehouse_id != wh.id
-        ):
-            raise IdempotencyConflict()
-        if request_record.task_id:
-            return self._idempotent_response(request_record.task)
-
-        task_no = DocSequence.next_code(
-            doc_type="RK",
-            warehouse=wh,
-            owner=owner,
-            biz_date=date.today(),
-        )
-
-        # 1) 任务头
-        task = WmsTask.objects.create(
-            task_no=task_no,
-            task_type=WmsTask.TaskType.RECEIVE,
-            owner_id=owner_id,
-            warehouse_id=wh.id,
-            created_by=request.user,
-            created_at=timezone.now(),
-            source_app=PDA_NO_ORDER_RECEIVE_SOURCE_APP,
-            source_model=PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
-            remark=remark,
-            posting_note=PDA_NO_ORDER_RECEIVE_NOTE,
-
-            status=WmsTask.Status.RELEASED,
-            review_status=WmsTask.ReviewStatus.NOT_READY,
-            posting_status=WmsTask.PostingStatus.NOT_READY,
-        )
-
-        # # 2) 聚合数量
-        # grouped = defaultdict(Decimal)
-        # for it in items:
-        #     pid = int(it["product_id"])
-        #     q = Decimal(str(it["qty"]))
-        #     if q <= 0:
-        #         raise ValidationError(f"产品 {pid} 的数量必须 > 0")
-        #     grouped[pid] += q
-
-        # 2) 聚合数量，同时保留批次/生产日期/有效期维度生成扫描快照。
-        # grouped = defaultdict(Decimal)
-        # snapshot_grouped = defaultdict(Decimal)
-        # for it in items:
-        #     pid = int(it["product_id"])
-        #     q = Decimal(str(it["qty"]))
-        #     if q <= 0:
-        #         raise ValidationError(f"产品 {pid} 的数量必须 > 0")
-        #     grouped[pid] += q
-        #     snapshot_grouped[
-        #         (
-        #             pid,
-        #             (it.get("lot_no") or "").strip().upper(),
-        #             it.get("mfg_date"),
-        #             it.get("exp_date"),
-        #         )
-        #     ] += q
-
-        # # 3) 行 + 快照（快照会直接生成 TaskScanLog）
-        # for pid, total_qty in grouped.items():
-        #     line = (WmsTaskLine.objects
-        #             .filter(task_id=task.id, product_id=pid)
-        #             .order_by("id").first())
-        #     if not line:
-        #         line = WmsTaskLine.objects.create(
-        #             task_id=task.id,
-        #             product_id=pid,
-        #             status=WmsTaskLine.Status.RELEASED,
-        #             qty_plan=total_qty,   # 可选：计划=本次合计，便于对账
-        #         )
-        #
-        #     p = Product.objects.only("id").get(id=pid)
-        #     snap_items = [{
-        #         "product": p,                 # 关键：用 product 实例
-        #         "qty_ok": total_qty,          # 关键：你的函数要的是 qty_ok
-        #         "location": location,
-        #         # 可选：批次/效期/库位等： "lot_no": "...", "expiry_date": date(...)
-        #     }]
-        #     save_receiving_snapshot(
-        #         task_line_id=line.id,
-        #         items=snap_items,
-        #         operator=request.user,
-        #         source="PDA",
-        #     )
-        # task.status = WmsTask.Status.COMPLETED
-        # task.review_status = WmsTask.ReviewStatus.APPROVED
-        # task.posting_status = WmsTask.PostingStatus.PENDING
-        #
-        # task.save(update_fields=["status", "review_status", "posting_status"])
-        #
-        # task.refresh_from_db()
-        # ctx, ctx_text = build_log_payload(task=task, user=request.user, owner=owner, warehouse=wh)
-        # logger.debug(
-        #     "task after save in DB: id=%s status=%s review_status=%s posting_status=%s",
-        #     task.id,
-        #     task.status,
-        #     task.review_status,
-        #     task.posting_status,
-        # )
-
-
-        # 2) 聚合数量，同时保留批次/生产日期/有效期维度生成扫描快照。
-        grouped = defaultdict(Decimal)
-        snapshot_grouped = defaultdict(Decimal)
-        received_items = []
-        for it in items:
-            pid = int(it["product_id"])
-            q = Decimal(str(it["qty"]))
-            if q <= 0:
-                raise ValidationError(f"产品 {pid} 的数量必须 > 0")
-            lot_no = (it.get("lot_no") or "").strip().upper()
-            mfg_date = it.get("mfg_date")
-            exp_date = it.get("exp_date")
-            grouped[pid] += q
-            snapshot_grouped[(pid, lot_no, mfg_date, exp_date)] += q
-            received_items.append({
-                "product_id": pid,
-                "qty": str(q),
-                "lot_no": lot_no,
-                "mfg_date": str(mfg_date) if mfg_date else None,
-                "exp_date": str(exp_date) if exp_date else None,
-            })
-
-        logger.info(
-            "inbound.receive_without_order.normalized_items owner_id=%s warehouse_id=%s items=%s",
-            owner_id,
-            wh.id,
-            received_items,
-        )
-
-        ctx, ctx_text = build_log_payload(task=task, user=request.user, owner=owner, warehouse=wh)
-
-        # 3) 行 + 快照（快照会直接生成 TaskScanLog）
-        for pid, total_qty in grouped.items():
-            line = (WmsTaskLine.objects
-                    .filter(task_id=task.id, product_id=pid)
-                    .order_by("id").first())
-            if not line:
-                line = WmsTaskLine.objects.create(
-                    task_id=task.id,
-                    product_id=pid,
-                    status=WmsTaskLine.Status.RELEASED,
-                    qty_plan=total_qty,   # 可选：计划=本次合计，便于对账
-                )
-
-            p = product_map[pid]
-            snap_items = []
-            for (item_pid, lot_no, mfg_date, exp_date), item_qty in snapshot_grouped.items():
-                if item_pid != pid:
-                    continue
-                snap_items.append({
-                    "product": p,                 # 关键：用 product 实例
-                    "qty_ok": item_qty,           # 关键：你的函数要的是 qty_ok
-                    "location": location,
-                    "lot_no": lot_no,
-                    "mfg_date": mfg_date,
-                    "exp_date": exp_date,
-                })
-            save_receiving_snapshot(
-                task_line_id=line.id,
-                items=snap_items,
-                operator=request.user,
-                source="PDA",
+            result = receive_goods_without_order(
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                location_id=payload.get("location_id"),
+                items=payload["items"],
+                request_id=payload["request_id"],
+                by_user=request.user,
+                remark=payload.get("remark") or PDA_NO_ORDER_RECEIVE_NOTE,
+                request=request,
             )
-
-            scan_mfg_backfilled = 0
-            for snap in snap_items:
-                mfg_date = snap.get("mfg_date")
-                if not mfg_date:
-                    continue
-                scan_mfg_backfilled += TaskScanLog.objects.filter(
-                    task_id=task.id,
-                    task_line_id=line.id,
-                    product_id=pid,
-                    lot_no=(snap.get("lot_no") or None),
-                    exp_date=snap.get("exp_date"),
-                    mfg_date__isnull=True,
-                    posted_at__isnull=True,
-                ).update(mfg_date=mfg_date)
-
-            if scan_mfg_backfilled:
-                logger.info(
-                    "inbound.receive_without_order.scan_mfg_backfilled %s line_id=%s rows=%s",
-                    ctx_text,
-                    line.id,
-                    scan_mfg_backfilled,
-                    extra=ctx,
-                )
-
-
-        task.status = WmsTask.Status.COMPLETED
-        task.review_status = WmsTask.ReviewStatus.APPROVED
-        task.posting_status = WmsTask.PostingStatus.PENDING
-
-        task.save(update_fields=["status", "review_status", "posting_status"])
-
-        task.refresh_from_db()
-        ctx, ctx_text = build_log_payload(task=task, user=request.user, owner=owner, warehouse=wh)
-        logger.debug(
-            "task after save in DB: id=%s status=%s review_status=%s posting_status=%s",
-            task.id,
-            task.status,
-            task.review_status,
-            task.posting_status,
+        except DjangoValidationError as exc:
+            raise _drf_validation_error(exc) from exc
+        except NoOrderReceiveConflict as exc:
+            raise IdempotencyConflict from exc
+        response_status = (
+            status.HTTP_200_OK if result["idempotent"] else status.HTTP_201_CREATED
         )
-
-
-        # 4) 过账
-        logger.info(
-            "inbound.receive_without_order.posting.begin %s item_count=%s",
-            ctx_text,
-            len(grouped),
-            extra=ctx,
-        )
-        result = _run_posting_handler(
-            task_id=task.id,
-            by_user=request.user,
-            note=PDA_NO_ORDER_RECEIVE_NOTE,
-        )
-        request_record.task = task
-        request_record.save(update_fields=["task", "updated_at"])
-        record_audit_event(
-            action="inbound.receive_without_order.post",
-            module="inbound",
-            request=request,
-            obj=task,
-            before={},
-            after={
-                "status": task.status,
-                "review_status": task.review_status,
-                "posting_status": task.posting_status,
-            },
-            metadata={"request_id": request_id, "item_count": len(items)},
-        )
-        logger.info(
-            "inbound.receive_without_order.posting.completed %s", ctx_text, extra=ctx
-        )
-        return Response(
-            {
-                "task_id": task.id,
-                "task_no": getattr(task, "task_no", None),
-                "posted": True,
-                "idempotent": False,
-                "message": "收货成功",
-                **(result or {}),
-            },
-            status=status.HTTP_201_CREATED,
-        )
+        return Response(result, status=response_status)
 
 
 class InboundOrderPagination(PageNumberPagination):
@@ -557,7 +195,9 @@ class InboundOrderViewSet(
                 | Q(lines__product__sku__icontains=query)
                 | Q(lines__product__name__icontains=query)
             ).distinct()
-        approval_status = (self.request.query_params.get("approval_status") or "").strip()
+        approval_status = (
+            self.request.query_params.get("approval_status") or ""
+        ).strip()
         if approval_status:
             queryset = queryset.filter(approval_status=approval_status)
         submit_status = (self.request.query_params.get("submit_status") or "").strip()
@@ -627,7 +267,9 @@ class InboundOrderViewSet(
 
     def _action_response(self, request, order):
         order.refresh_from_db()
-        return Response(InboundOrderReadSerializer(order, context={"request": request}).data)
+        return Response(
+            InboundOrderReadSerializer(order, context={"request": request}).data
+        )
 
     @action(detail=True, methods=["post"], url_path="submit")
     @transaction.atomic
@@ -661,8 +303,12 @@ class InboundOrderViewSet(
         )
         return self._action_response(request, order)
 
-    def _review_action(self, request, pk, *, permission, role, method_name, audit_action):
-        if not (request.user.has_perm(permission) and self._has_role(request.user, role)):
+    def _review_action(
+        self, request, pk, *, permission, role, method_name, audit_action
+    ):
+        if not (
+            request.user.has_perm(permission) and self._has_role(request.user, role)
+        ):
             raise PermissionDenied("没有执行该审核动作的权限。")
         order = self._locked_scoped_order(pk)
         before = {
@@ -736,7 +382,9 @@ class InboundOrderViewSet(
 
 
 def _canonical_hash(payload):
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    raw = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -883,7 +531,9 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             is_frozen=False,
         )
         if query:
-            queryset = queryset.filter(Q(code__icontains=query) | Q(name__icontains=query))
+            queryset = queryset.filter(
+                Q(code__icontains=query) | Q(name__icontains=query)
+            )
         data = [
             {"id": row.pk, "code": row.code, "name": row.name or "", "label": row.code}
             for row in queryset.order_by("code")[:100]
@@ -891,7 +541,9 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(data)
 
     @staticmethod
-    def _idempotency_marker(*, task, user, request_id, payload_hash, product=None, location=None):
+    def _idempotency_marker(
+        *, task, user, request_id, payload_hash, product=None, location=None
+    ):
         marker_fp = hashlib.sha256(
             f"inbound-receipt:{task.pk}:{user.pk}:{request_id}".encode("utf-8")
         ).hexdigest()
@@ -963,11 +615,17 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             location=location,
         ):
             task.refresh_from_db()
-            return Response({"idempotent": True, "task": self.get_serializer(task).data})
+            return Response(
+                {"idempotent": True, "task": self.get_serializer(task).data}
+            )
 
         if processed_total > planned_total and not variance_reason:
             raise ValidationError("超收必须填写差异原因。")
-        if payload.get("finalize") and processed_total != planned_total and not variance_reason:
+        if (
+            payload.get("finalize")
+            and processed_total != planned_total
+            and not variance_reason
+        ):
             raise ValidationError("结束差异收货行时必须填写差异原因。")
         self._require_owned(task, line=line)
         if task.status not in {WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS}:
@@ -1052,7 +710,9 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
         if task.task_type != WmsTask.TaskType.PUTAWAY:
             raise ValidationError("该任务不是上架任务。")
         line = get_object_or_404(
-            WmsTaskLine.objects.select_for_update().select_related("product", "from_location"),
+            WmsTaskLine.objects.select_for_update().select_related(
+                "product", "from_location"
+            ),
             pk=payload["line_id"],
             task=task,
         )
@@ -1068,7 +728,9 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             raise ValidationError("目标库位不能与来源库位相同。")
         payload_hash = _canonical_hash(payload)
         scan_fp = hashlib.sha256(
-            f"inbound-putaway:{task.pk}:{request.user.pk}:{payload['request_id']}".encode("utf-8")
+            f"inbound-putaway:{task.pk}:{request.user.pk}:{payload['request_id']}".encode(
+                "utf-8"
+            )
         ).hexdigest()
         expected_remark = f"IDEMPOTENCY:{payload_hash}"
         existing = TaskScanLog.objects.filter(fp=scan_fp).first()
@@ -1076,7 +738,9 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             if existing.remark != expected_remark:
                 raise IdempotencyConflict()
             task.refresh_from_db()
-            return Response({"idempotent": True, "task": self.get_serializer(task).data})
+            return Response(
+                {"idempotent": True, "task": self.get_serializer(task).data}
+            )
 
         self._require_owned(task, line=line)
         if task.status not in {WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS}:
@@ -1117,7 +781,9 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             if existing.remark != expected_remark:
                 raise IdempotencyConflict()
             task.refresh_from_db()
-            return Response({"idempotent": True, "task": self.get_serializer(task).data})
+            return Response(
+                {"idempotent": True, "task": self.get_serializer(task).data}
+            )
 
         extra, _ = PutawayLineExtra.objects.select_for_update().get_or_create(line=line)
         if extra.to_location_id and extra.to_location_id != location.pk:
