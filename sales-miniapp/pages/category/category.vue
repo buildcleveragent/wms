@@ -73,14 +73,12 @@
       </view>
     </view>
 
-    <CartBar :count="cart.items.length" :amount="cart.totalAmount" @checkout="goCart" />
   </view>
 </template>
 
 <script setup>
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
-import CartBar from '../../components/CartBar.vue'
 import EmptyState from '../../components/EmptyState.vue'
 import ProductCard from '../../components/ProductCard.vue'
 import { productService } from '../../services/product'
@@ -257,14 +255,6 @@ function goSearch() {
   if (ordering.value !== 'sort') params.push(`ordering=${ordering.value}`)
   if (onlyStock.value) params.push('only_stock=1')
   uni.navigateTo({ url: `/pages/product-list/product-list${params.length ? `?${params.join('&')}` : ''}` })
-}
-
-function goCart() {
-  if (!getToken()) {
-    uni.navigateTo({ url: '/pages/login/login' })
-    return
-  }
-  uni.switchTab({ url: '/pages/cart/cart' })
 }
 
 onLoad((query = {}) => {
@@ -497,7 +487,7 @@ onShow(() => {
 }
 
 .product-list {
-  padding: 14rpx 12rpx 300rpx;
+  padding: 14rpx 12rpx 140rpx;
   display: flex;
   flex-direction: column;
   gap: 12rpx;

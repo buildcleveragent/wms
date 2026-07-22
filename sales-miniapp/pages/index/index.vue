@@ -1,122 +1,87 @@
 <template>
-  <view class="page index-page">
-    <view class="topbar">
-      <view>
-        <view class="shop-name">{{ profileName }}</view>
-        <view class="shop-sub">{{ brandTagline }}</view>
+  <view class="index-page">
+    <view class="search-wrap">
+      <view class="search-row">
+        <input
+          class="search-input"
+          v-model="searchKeyword"
+          confirm-type="search"
+          placeholder="搜索商品、品牌、关键词"
+          @confirm="doSearch"
+        />
+        <button class="search-button" @click="doSearch">搜索</button>
       </view>
-      <button class="icon-btn" @click="goUser">我</button>
     </view>
 
-    <view class="search" @click="goSearch">
-      <text>搜索商品、品牌、关键词</text>
-    </view>
-
-    <view class="fulfillment">
-      <view class="fulfillment-main" @click="goAddress">
-        <view class="fulfillment-title">配送到</view>
-        <view class="fulfillment-text">{{ deliveryText }}</view>
-      </view>
-      <view class="fulfillment-meta">
-        <text>支持配送</text>
-        <text>门店自提</text>
+    <view class="category-panel">
+      <view class="category-grid">
+        <view
+          v-for="item in home.categories"
+          :key="item.id"
+          class="category-item"
+          @click="goCategory(item.id)"
+        >
+          <image
+            v-if="item.image_url"
+            class="category-image"
+            :src="item.image_url"
+            mode="aspectFill"
+          />
+          <view v-else class="category-image category-placeholder">
+            {{ item.name.slice(0, 1) }}
+          </view>
+          <view class="category-name">{{ item.name }}</view>
+        </view>
       </view>
     </view>
 
     <swiper v-if="home.banners.length" class="banner" indicator-dots autoplay circular>
       <swiper-item v-for="banner in home.banners" :key="banner.id">
-        <image class="banner-img" :src="banner.image_url" mode="aspectFill" @click="openBanner(banner)" />
+        <image
+          class="banner-image"
+          :src="banner.image_url"
+          mode="aspectFill"
+          @click="openBanner(banner)"
+        />
       </swiper-item>
     </swiper>
-    <view v-else class="banner fallback">
-      <view>
-        <view class="fallback-title">严选好货</view>
-        <view class="fallback-sub">统一精选 · 安心下单</view>
+    <view v-else class="banner banner-fallback">
+      <view class="fallback-title">每日精选</view>
+      <view class="fallback-subtitle">品质好货，安心选购</view>
+    </view>
+
+    <view class="feed-tabs">
+      <view
+        v-for="tab in feedTabs"
+        :key="tab.key"
+        :class="['feed-tab', activeFeed === tab.key && 'active']"
+        @click="selectFeed(tab.key)"
+      >
+        {{ tab.label }}
       </view>
     </view>
 
-    <view class="channel-grid">
-      <view class="channel" @click="goCategory()">
-        <view class="channel-icon">类</view>
-        <view class="channel-text">全部分类</view>
-      </view>
-      <view class="channel" @click="goList('sort')">
-        <view class="channel-icon selected">优</view>
-        <view class="channel-text">品质优选</view>
-      </view>
-      <view class="channel" @click="goList('hot')">
-        <view class="channel-icon hot">爆</view>
-        <view class="channel-text">热卖榜</view>
-      </view>
-      <view class="channel" @click="goStockedList">
-        <view class="channel-icon stock">货</view>
-        <view class="channel-text">有货商品</view>
-      </view>
-      <view class="channel" @click="goBenefits">
-        <view class="channel-icon coupon">券</view>
-        <view class="channel-text">领券中心</view>
-      </view>
-      <view class="channel" @click="goBenefits">
-        <view class="channel-icon point">积</view>
-        <view class="channel-text">会员积分</view>
-      </view>
-      <view class="channel" @click="goOrders">
-        <view class="channel-icon order">单</view>
-        <view class="channel-text">我的订单</view>
-      </view>
-      <view class="channel" @click="goAfterSales">
-        <view class="channel-icon service">售</view>
-        <view class="channel-text">售后服务</view>
-      </view>
-    </view>
-
-    <scroll-view v-if="home.categories.length" class="category-scroll" scroll-x>
-      <view class="category-row">
-        <view v-for="item in home.categories" :key="item.id" class="category" @click="goCategory(item.id)">
-          <image v-if="item.image_url" class="category-mark category-image" :src="item.image_url" mode="aspectFill" />
-          <view v-else class="category-mark">{{ item.name.slice(0, 1) }}</view>
-          <view class="category-name">{{ item.name }}</view>
-        </view>
-      </view>
-    </scroll-view>
-
-    <view class="section-head">
-      <text>热卖商品</text>
-      <text class="more" @click="goList('hot')">更多</text>
-    </view>
-    <view class="product-list">
+    <view v-if="products.length" class="product-grid">
       <ProductCard
-        v-for="product in hotProducts"
-        :key="`hot-${product.id}`"
+        v-for="product in products"
+        :key="`${activeFeed}-${product.config_id || product.id}`"
         :product="product"
+        variant="grid"
         @open="openProduct"
         @add="addProduct"
       />
     </view>
+    <EmptyState v-else :text="productLoading ? '商品加载中' : emptyFeedText" />
 
-    <view class="section-head">
-      <text>为你推荐</text>
-      <text class="more" @click="goList('sort')">更多</text>
+    <view v-if="products.length" class="load-more">
+      {{ productLoading ? '加载中' : hasMore ? '继续上拉加载' : '已经到底了' }}
     </view>
-    <view v-if="recommendProducts.length" class="product-list">
-      <ProductCard
-        v-for="product in recommendProducts"
-        :key="`rec-${product.id}`"
-        :product="product"
-        @open="openProduct"
-        @add="addProduct"
-      />
-    </view>
-    <EmptyState v-else text="暂无上架商品" />
-
-    <CartBar :count="cart.items.length" :amount="cart.totalAmount" @checkout="goCart" />
   </view>
 </template>
 
 <script setup>
-import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
+import { onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import { computed, reactive, ref } from 'vue'
-import CartBar from '../../components/CartBar.vue'
 import EmptyState from '../../components/EmptyState.vue'
 import ProductCard from '../../components/ProductCard.vue'
 import { productService } from '../../services/product'
@@ -126,55 +91,105 @@ import { getToken } from '../../utils/request'
 
 const cart = useCartStore()
 const session = useSessionStore()
-const loading = ref(false)
+const searchKeyword = ref('')
+const homeLoading = ref(false)
+const productLoading = ref(false)
+const initialized = ref(false)
+const products = ref([])
+const activeFeed = ref('hot')
+const page = ref(1)
+const hasMore = ref(true)
+const productRequestSeq = ref(0)
+const feedTabs = [
+  { key: 'hot', label: '热卖' },
+  { key: 'new', label: '新品' },
+  { key: 'recommended', label: '推荐' },
+]
 const home = reactive({
   banners: [],
   categories: [],
-  recommend_products: [],
-  hot_products: [],
-  new_products: [],
 })
 
-const profile = computed(() => session.profile)
-const profileName = computed(() => '金桥融通商城')
-const brandTagline = computed(() => {
-  return '品质好货 · 在线选购'
+const activeFeedLabel = computed(() => {
+  const tab = feedTabs.find((item) => item.key === activeFeed.value)
+  return tab ? tab.label : '商品'
 })
-const deliveryText = computed(() => {
-  if (getToken()) return '请选择收货地址'
-  return '登录后管理收货地址'
-})
-const hotProducts = computed(() => home.hot_products.length ? home.hot_products : home.new_products)
-const recommendProducts = computed(() => home.recommend_products.length ? home.recommend_products : home.hot_products)
+const emptyFeedText = computed(() => `暂无${activeFeedLabel.value}商品`)
 
-async function load() {
-  if (loading.value) return
-  loading.value = true
-  try {
-    if (getToken() && !session.profile) {
-      try {
-        await session.fetchProfile()
-      } catch (err) {
-        if (!err || err.statusCode !== 401) throw err
-      }
+async function loadSessionContext() {
+  if (!getToken()) return
+  if (!session.profile) {
+    try {
+      await session.fetchProfile()
+    } catch (err) {
+      if (!err || err.statusCode !== 401) throw err
+      return
     }
-    if (getToken() && session.profile && session.profile.customer) await cart.load()
-    const data = await productService.home()
-    Object.assign(home, {
-      banners: data.banners || [],
-      categories: data.categories || [],
-      recommend_products: data.recommend_products || [],
-      hot_products: data.hot_products || [],
-      new_products: data.new_products || [],
-    })
-  } finally {
-    loading.value = false
   }
+  if (session.profile && session.profile.customer) await cart.load()
+}
+
+async function loadHome() {
+  if (homeLoading.value) return
+  homeLoading.value = true
+  try {
+    const data = await productService.home()
+    home.banners = data.banners || []
+    home.categories = data.categories || []
+  } finally {
+    homeLoading.value = false
+  }
+}
+
+async function loadProducts(reset = true) {
+  if (!reset && (productLoading.value || !hasMore.value)) return
+  if (reset) {
+    page.value = 1
+    hasMore.value = true
+  }
+  const requestSeq = productRequestSeq.value + 1
+  productRequestSeq.value = requestSeq
+  const requestedTag = activeFeed.value
+  const requestedPage = page.value
+  productLoading.value = true
+  try {
+    const data = await productService.list({
+      tag: requestedTag,
+      ordering: requestedTag === 'hot' ? 'hot' : 'sort',
+      page: requestedPage,
+      page_size: 20,
+    })
+    if (requestSeq !== productRequestSeq.value || requestedTag !== activeFeed.value) return
+    const next = data.results || data || []
+    products.value = reset ? next : products.value.concat(next)
+    hasMore.value = Boolean(data.next)
+    page.value = requestedPage + 1
+  } finally {
+    if (requestSeq === productRequestSeq.value) productLoading.value = false
+  }
+}
+
+async function refresh() {
+  await loadSessionContext()
+  await Promise.all([loadHome(), loadProducts(true)])
 }
 
 function handleLoadError(err) {
   if (err && err.statusCode === 401) return
   uni.showToast({ title: (err && err.message) || '首页加载失败', icon: 'none' })
+}
+
+function selectFeed(tag) {
+  if (tag === activeFeed.value) return
+  activeFeed.value = tag
+  products.value = []
+  loadProducts(true).catch(handleLoadError)
+}
+
+function doSearch() {
+  const keyword = searchKeyword.value.trim()
+  const query = keyword ? `?search=${encodeURIComponent(keyword)}` : ''
+  uni.navigateTo({ url: `/pages/product-list/product-list${query}` })
 }
 
 async function addProduct(product) {
@@ -253,69 +268,26 @@ function goCategory(id) {
   uni.switchTab({ url: '/pages/category/category' })
 }
 
-function goSearch() {
-  uni.navigateTo({ url: '/pages/product-list/product-list' })
-}
-
-function goList(ordering) {
-  uni.navigateTo({ url: `/pages/product-list/product-list?ordering=${ordering}` })
-}
-
-function goStockedList() {
-  uni.navigateTo({ url: '/pages/product-list/product-list?only_stock=1' })
-}
-
-function requireLoginPage(url) {
-  if (!getToken()) {
-    uni.navigateTo({ url: '/pages/login/login' })
-    return
-  }
-  uni.navigateTo({ url })
-}
-
-function goBenefits() {
-  requireLoginPage('/pages/benefits/benefits')
-}
-
-function goAfterSales() {
-  requireLoginPage('/pages/after-sales/after-sales')
-}
-
-function goAddress() {
-  requireLoginPage('/pages/address/address')
-}
-
-function goOrders() {
-  if (!getToken()) {
-    uni.navigateTo({ url: '/pages/login/login' })
-    return
-  }
-  uni.switchTab({ url: '/pages/order-list/order-list' })
-}
-
-function goCart() {
-  if (!getToken()) {
-    uni.navigateTo({ url: '/pages/login/login' })
-    return
-  }
-  uni.switchTab({ url: '/pages/cart/cart' })
-}
-
-function goUser() {
-  if (!getToken()) {
-    uni.navigateTo({ url: '/pages/login/login' })
-    return
-  }
-  uni.switchTab({ url: '/pages/user/user' })
-}
-
 onShow(() => {
-  load().catch(handleLoadError)
+  if (!initialized.value) {
+    refresh()
+      .then(() => {
+        initialized.value = true
+      })
+      .catch(handleLoadError)
+    return
+  }
+  loadSessionContext().catch(handleLoadError)
+})
+
+onReachBottom(() => {
+  loadProducts(false).catch(handleLoadError)
 })
 
 onPullDownRefresh(async () => {
   try {
-    await load()
+    await refresh()
+    initialized.value = true
   } catch (err) {
     handleLoadError(err)
   } finally {
@@ -326,120 +298,122 @@ onPullDownRefresh(async () => {
 
 <style scoped>
 .index-page {
-  padding-bottom: 268rpx;
+  min-height: 100vh;
+  padding: 18rpx 18rpx 140rpx;
+  background: #f4f6f8;
 }
 
-.topbar {
-  height: 92rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.shop-name {
-  max-width: 560rpx;
-  color: #17202a;
-  font-size: 34rpx;
-  font-weight: 850;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shop-sub {
-  margin-top: 4rpx;
-  color: #64748b;
-  font-size: 23rpx;
-}
-
-.icon-btn {
-  width: 64rpx;
-  height: 64rpx;
-  line-height: 64rpx;
-  border: 1rpx solid #d7dde8;
+.search-wrap {
+  padding: 10rpx;
+  border: 3rpx solid #2563eb;
   border-radius: 8rpx;
   background: #fff;
-  color: #17202a;
-  padding: 0;
-  font-size: 24rpx;
 }
 
-.icon-btn::after {
-  border: 0;
+.search-row {
+  height: 74rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
 }
 
-.search {
-  height: 78rpx;
+.search-input {
+  min-width: 0;
+  height: 74rpx;
   padding: 0 24rpx;
-  display: flex;
-  align-items: center;
+  flex: 1;
   border: 1rpx solid #d7dde8;
   border-radius: 8rpx;
-  background: #fff;
-  color: #64748b;
+  background: #f8fafc;
+  color: #17202a;
   font-size: 26rpx;
 }
 
-.fulfillment {
-  margin-top: 14rpx;
-  padding: 18rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18rpx;
-  border: 1rpx solid #dfe6ef;
+.search-button {
+  width: 132rpx;
+  height: 74rpx;
+  line-height: 74rpx;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8rpx;
+  background: #2563eb;
+  color: #fff;
+  font-size: 27rpx;
+  font-weight: 800;
+}
+
+.search-button::after {
+  border: 0;
+}
+
+.category-panel {
+  margin-top: 18rpx;
+  padding: 22rpx 10rpx 10rpx;
+  border: 1rpx solid #e1e7ef;
   border-radius: 8rpx;
   background: #fff;
 }
 
-.fulfillment-main {
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  row-gap: 22rpx;
+}
+
+.category-item {
   min-width: 0;
-  flex: 1;
+  text-align: center;
 }
 
-.fulfillment-title {
+.category-image {
+  width: 90rpx;
+  height: 90rpx;
+  margin: 0 auto;
+  border-radius: 8rpx;
+  background: #eef2f7;
+}
+
+.category-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e6f7f3;
   color: #0f766e;
-  font-size: 24rpx;
-  font-weight: 800;
+  font-size: 34rpx;
+  font-weight: 900;
 }
 
-.fulfillment-text {
-  margin-top: 6rpx;
+.category-name {
+  margin-top: 9rpx;
+  padding: 0 4rpx;
   color: #17202a;
-  font-size: 27rpx;
-  font-weight: 760;
+  font-size: 22rpx;
+  line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.fulfillment-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-  color: #64748b;
-  font-size: 22rpx;
-  text-align: right;
-  flex-shrink: 0;
-}
-
 .banner {
-  height: 240rpx;
+  width: 100%;
+  height: 286rpx;
   margin-top: 18rpx;
   border-radius: 8rpx;
   overflow: hidden;
 }
 
-.banner-img {
+.banner-image {
   width: 100%;
-  height: 240rpx;
+  height: 286rpx;
 }
 
-.fallback {
-  padding: 32rpx;
+.banner-fallback {
+  padding: 34rpx;
   display: flex;
-  align-items: flex-end;
-  background: linear-gradient(135deg, #0f766e 0%, #2563eb 100%);
+  flex-direction: column;
+  justify-content: flex-end;
+  background: #0f766e;
   color: #fff;
 }
 
@@ -448,151 +422,62 @@ onPullDownRefresh(async () => {
   font-weight: 900;
 }
 
-.fallback-sub {
+.fallback-subtitle {
   margin-top: 10rpx;
   font-size: 25rpx;
-  opacity: 0.9;
 }
 
-.channel-grid {
+.feed-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  height: 92rpx;
   margin-top: 18rpx;
-  padding: 18rpx 12rpx;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10rpx;
+  padding: 0 24rpx;
+  display: flex;
+  align-items: stretch;
   border: 1rpx solid #e1e7ef;
-  border-radius: 8rpx;
+  border-radius: 8rpx 8rpx 0 0;
   background: #fff;
 }
 
-.channel {
-  min-width: 0;
-  text-align: center;
-}
-
-.channel-icon {
-  width: 52rpx;
-  height: 52rpx;
-  margin: 0 auto;
+.feed-tab {
+  position: relative;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8rpx;
-  background: #edf8f5;
+  color: #475569;
+  font-size: 28rpx;
+  font-weight: 700;
+}
+
+.feed-tab.active {
   color: #0f766e;
-  font-size: 24rpx;
-  font-weight: 900;
 }
 
-.channel-icon.hot {
-  background: #fff1f2;
-  color: #b42318;
+.feed-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 28%;
+  right: 28%;
+  bottom: 8rpx;
+  height: 6rpx;
+  border-radius: 3rpx;
+  background: #0f766e;
 }
 
-.channel-icon.selected {
-  background: #ecfeff;
-  color: #0e7490;
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12rpx;
+  padding-top: 12rpx;
 }
 
-.channel-icon.stock {
-  background: #f0fdf4;
-  color: #15803d;
-}
-
-.channel-icon.coupon {
-  background: #fff7ed;
-  color: #b45309;
-}
-
-.channel-icon.point {
-  background: #eff6ff;
-  color: #2563eb;
-}
-
-.channel-icon.order {
-  background: #f5f3ff;
-  color: #6d28d9;
-}
-
-.channel-icon.service {
-  background: #f8fafc;
-  color: #334155;
-}
-
-.channel-text {
-  margin-top: 8rpx;
-  color: #334155;
-  font-size: 21rpx;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.category-scroll {
-  margin-top: 18rpx;
-  white-space: nowrap;
-}
-
-.category-row {
-  display: flex;
-  gap: 14rpx;
-}
-
-.category {
-  width: 128rpx;
-  padding: 14rpx 8rpx;
-  background: #fff;
-  border: 1rpx solid #e1e7ef;
-  border-radius: 8rpx;
-  text-align: center;
-  flex-shrink: 0;
-}
-
-.category-mark {
-  width: 54rpx;
-  height: 54rpx;
-  margin: 0 auto;
-  line-height: 54rpx;
-  border-radius: 8rpx;
-  background: #edf7ff;
-  color: #2563eb;
-  font-weight: 850;
-}
-
-.category-image {
-  display: block;
-  line-height: normal;
-  object-fit: cover;
-}
-
-.category-name {
-  margin-top: 8rpx;
-  color: #334155;
+.load-more {
+  padding: 30rpx 0 10rpx;
+  color: #64748b;
   font-size: 23rpx;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.section-head {
-  margin: 26rpx 0 14rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: #17202a;
-  font-size: 31rpx;
-  font-weight: 800;
-}
-
-.more {
-  color: #0f766e;
-  font-size: 24rpx;
-  font-weight: 600;
-}
-
-.product-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14rpx;
+  text-align: center;
 }
 </style>

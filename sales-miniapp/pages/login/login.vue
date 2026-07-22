@@ -10,10 +10,6 @@
 
     <view class="panel form">
       <view class="field">
-        <text class="label">服务地址</text>
-        <input class="input" v-model="serverUrl" placeholder="http://192.168.1.6:8001" />
-      </view>
-      <view class="field">
         <text class="label">账号</text>
         <input class="input" v-model="username" placeholder="请输入账号" />
       </view>
@@ -29,11 +25,9 @@
 
 <script setup>
 import { ref } from 'vue'
-import { getBaseUrl } from '../../utils/request'
 import { useSessionStore } from '../../stores/session'
 
 const session = useSessionStore()
-const serverUrl = ref(getBaseUrl())
 const username = ref('')
 const password = ref('')
 const loading = ref(false)
@@ -47,7 +41,7 @@ async function doLogin() {
   }
   loading.value = true
   try {
-    await session.login(username.value, password.value, serverUrl.value)
+    await session.login(username.value, password.value)
     uni.switchTab({ url: '/pages/index/index' })
   } catch (err) {
     uni.showToast({ title: err.message || '登录失败', icon: 'none' })
@@ -74,7 +68,7 @@ async function doWechatLogin() {
     if (!loginRes.code) {
       throw new Error('微信登录未返回 code')
     }
-    await session.wechatLogin(loginRes.code, serverUrl.value)
+    await session.wechatLogin(loginRes.code)
     uni.switchTab({ url: '/pages/index/index' })
   } catch (err) {
     uni.showToast({ title: err.message || '微信登录失败', icon: 'none' })

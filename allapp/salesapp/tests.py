@@ -1464,7 +1464,7 @@ class SaleMiniApiTests(TestCase):
             self.assertPublicTaxonomyPayloadHidesInternalFields(row)
         self.assertEqual(
             {row["id"] for row in home.data["categories"]},
-            {category.id},
+            {self.category.id, category.id},
         )
         self.assertEqual(
             {row["id"] for row in home.data["hot_products"]},
@@ -1489,6 +1489,108 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(category_rows[self.category.id]["product_count"], 0)
         self.assertPublicTaxonomyPayloadHidesInternalFields(
             category_rows[category.id]
+        )
+
+    def test_public_product_tags_are_strict_and_paginated(self):
+        base_config = SaleProductConfig.objects.get(
+            owner=self.owner,
+            product=self.product,
+        )
+        base_config.is_hot = True
+        base_config.save(update_fields=["is_hot", "updated_at"])
+
+        def create_tagged_product(code, **flags):
+            product = Product.objects.create(
+                owner=self.owner,
+                code=code,
+                sku=code,
+                name=f"标签商品 {code}",
+                category=self.category,
+                base_uom=self.uom,
+                price=Decimal("8.00"),
+                expiry_control=False,
+                batch_control=False,
+                is_active=True,
+            )
+            SaleProductConfig.objects.create(
+                owner=self.owner,
+                product=product,
+                is_listed=True,
+                sale_price=Decimal("8.0000"),
+                **flags,
+            )
+            return product
+
+        second_hot = create_tagged_product("MP-HOT-2", is_hot=True)
+        new_product = create_tagged_product("MP-NEW-1", is_new=True)
+        recommended_product = create_tagged_product(
+            "MP-REC-1", is_recommended=True
+        )
+        public_client = APIClient()
+
+        hot = public_client.get(
+            "/api/sale-mini/products/", {"tag": "hot", "page_size": 1}
+        )
+        new = public_client.get("/api/sale-mini/products/", {"tag": "new"})
+        recommended = public_client.get(
+            "/api/sale-mini/products/", {"tag": "recommended"}
+        )
+        invalid = public_client.get(
+            "/api/sale-mini/products/", {"tag": "not-supported"}
+        )
+
+        self.assertEqual(hot.status_code, 200)
+        self.assertEqual(hot.data["count"], 2)
+        self.assertEqual(len(hot.data["results"]), 1)
+        self.assertTrue(hot.data["next"])
+        self.assertIn(
+            hot.data["results"][0]["id"],
+            {self.product.id, second_hot.id},
+        )
+        self.assertEqual(new.status_code, 200)
+        self.assertEqual(
+            {row["id"] for row in new.data["results"]}, {new_product.id}
+        )
+        self.assertEqual(recommended.status_code, 200)
+        self.assertEqual(
+            {row["id"] for row in recommended.data["results"]},
+            {recommended_product.id},
+        )
+        self.assertEqual(invalid.status_code, 400)
+
+    def test_public_home_returns_every_listed_root_category(self):
+        expected_ids = {self.category.id}
+        for index in range(13):
+            category = ProductCategory.objects.create(
+                code=f"MINI-HOME-{index:02d}",
+                name=f"首页大类 {index:02d}",
+                sort_order=index + 1,
+            )
+            product = Product.objects.create(
+                owner=self.owner,
+                code=f"MP-HOME-{index:02d}",
+                sku=f"MP-HOME-{index:02d}",
+                name=f"首页分类商品 {index:02d}",
+                category=category,
+                base_uom=self.uom,
+                price=Decimal("6.00"),
+                expiry_control=False,
+                batch_control=False,
+                is_active=True,
+            )
+            SaleProductConfig.objects.create(
+                owner=self.owner,
+                product=product,
+                is_listed=True,
+                sale_price=Decimal("6.0000"),
+            )
+            expected_ids.add(category.id)
+
+        response = APIClient().get("/api/sale-mini/home/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {row["id"] for row in response.data["categories"]}, expected_ids
         )
 
     def test_public_brands_only_return_listed_goods_and_respect_filters(self):

@@ -2206,7 +2206,7 @@ class SaleMiniHomeApi(APIView):
             .select_related("owner")
             .order_by("sort_order", "id")[:8]
         ]
-        categories = _category_rows(request=request, roots_only=True)[:12]
+        categories = _category_rows(request=request, roots_only=True)
         products_qs = _public_config_qs()
 
         def take(flag_name, limit, *, fallback=False):
@@ -2287,7 +2287,7 @@ def _category_rows(request=None, owner=None, owner_id=None, *, roots_only=False)
     rows = []
     for category in categories:
         product_count = subtree_counts[category.id]
-        if roots_only and (category.parent_id is not None or product_count <= 0):
+        if roots_only and category.parent_id is not None:
             continue
         rows.append(
             {
@@ -2503,8 +2503,19 @@ class SaleMiniProductListApi(APIView):
         brand_id = request.query_params.get("brand_id")
         only_stock = request.query_params.get("only_stock") in {"1", "true", "True"}
         ordering = request.query_params.get("ordering") or "sort"
+        tag = (request.query_params.get("tag") or "").strip().lower()
 
         qs = _public_config_qs()
+        tag_filters = {
+            "hot": "is_hot",
+            "new": "is_new",
+            "recommended": "is_recommended",
+        }
+        if tag:
+            flag_name = tag_filters.get(tag)
+            if flag_name is None:
+                raise ValidationError({"tag": "商品标签仅支持 hot、new、recommended。"})
+            qs = qs.filter(**{flag_name: True})
         if search:
             qs = qs.filter(
                 Q(product__name__icontains=search)

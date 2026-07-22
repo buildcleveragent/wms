@@ -1,5 +1,5 @@
 <template>
-  <view class="product-card" @click="$emit('open', product)">
+  <view :class="['product-card', variant]" @click="$emit('open', product)">
     <view class="media">
       <image v-if="product.image_url" class="thumb" :src="product.image_url" mode="aspectFill" />
       <view v-else class="thumb placeholder">货</view>
@@ -37,6 +37,10 @@ const props = defineProps({
   product: {
     type: Object,
     required: true,
+  },
+  variant: {
+    type: String,
+    default: 'list',
   },
 })
 
@@ -212,5 +216,58 @@ const subtitle = computed(() => {
 .add[disabled] {
   background: #cbd5e1;
   color: #f8fafc;
+}
+
+.product-card.grid {
+  min-width: 0;
+  min-height: 430rpx;
+  padding: 0;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+}
+
+.grid .media,
+.grid .thumb {
+  width: 100%;
+  height: 286rpx;
+  border-radius: 0;
+}
+
+.grid .main {
+  width: 100%;
+  min-height: 194rpx;
+  padding: 14rpx;
+}
+
+.grid .name {
+  min-height: 76rpx;
+  font-size: 26rpx;
+}
+
+.grid .subtitle {
+  font-size: 21rpx;
+}
+
+.grid .badges {
+  min-height: 34rpx;
+  margin-top: 8rpx;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.grid .badge {
+  flex-shrink: 0;
+}
+
+.grid .foot {
+  margin-top: 10rpx;
+}
+
+.grid .add {
+  width: 84rpx;
+  height: 52rpx;
+  line-height: 52rpx;
+  font-size: 22rpx;
 }
 </style>
