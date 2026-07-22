@@ -1,0 +1,12 @@
+{% extends "admin/change_list.html" %}
+
+{% block search %}
+  {{ block.super }}
+  {% if export_filtered_excel_url %}
+    <div style="display:flex; justify-content:flex-end; margin:0 0 10px;">
+      <a class="button" href="{{ export_filtered_excel_url }}">
+        导出当前筛选结果（Excel）
+      </a>
+    </div>
+  {% endif %}
+{% endblock %}

@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.core.validators import MaxValueValidator, RegexValidator,MinValueValidator
 from django.db.models import Q, F
 from decimal import Decimal, ROUND_HALF_UP
-from django.db import models
+from django.db import models, transaction
 from django.core.exceptions import ValidationError
 
 from allapp.core.models import BaseModel
@@ -43,19 +43,30 @@ def _gtin_mod10_is_valid(num: str) -> bool:
 # =========================
 class ProductCategory(BaseModel):
     """
-    商品分类（自引用形成树形层级）
+    商品分类（自引用形成最多三级的商城分类树）。
     """
+    MAX_DEPTH = 3
+    LEVEL_NAMES = {1: "大类", 2: "中类", 3: "小类"}
+
     code = models.CharField("分类编码", max_length=50, help_text="分类唯一编码")
     name = models.CharField("分类名称", max_length=50, db_index=True)
     parent = models.ForeignKey(
         "self", verbose_name="上级分类",
         null=True, blank=True, on_delete=models.PROTECT, related_name="children"
     )
+    sort_order = models.PositiveIntegerField("商城排序", default=0, db_index=True)
+    image = models.ImageField(
+        "分类图片",
+        upload_to="product_categories/",
+        null=True,
+        blank=True,
+        help_text="主要用于商城顶部大类图标；未上传时显示分类名称首字。",
+    )
 
     class Meta:
         verbose_name = "商品分类"
         verbose_name_plural = "商品分类"
-        ordering = ["code"]
+        ordering = ["sort_order", "code"]
         constraints = [
             models.UniqueConstraint(fields=["code"], name="uniq_category_code"),
             models.CheckConstraint(check=~Q(code=""), name="chk_category_code_not_empty"),
@@ -71,6 +82,60 @@ class ProductCategory(BaseModel):
 
     def __str__(self):
         return f"{self.code} - {self.name}"
+
+    def save(self, *args, **kwargs):
+        # Category writes are infrequent; enforcing the tree rules here also covers
+        # scripts and APIs that do not use a ModelForm.
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def ancestor_chain(self, *, include_self=True):
+        """Return the root-to-node chain and remain safe against dirty cyclic data."""
+        chain = []
+        seen = set()
+        node = self if include_self else self.parent
+        while node is not None and node.pk not in seen:
+            if node.pk is not None:
+                seen.add(node.pk)
+            chain.append(node)
+            node = node.parent
+        return list(reversed(chain))
+
+    @property
+    def depth(self):
+        return len(self.ancestor_chain())
+
+    @property
+    def level_name(self):
+        return self.LEVEL_NAMES.get(self.depth, "未知层级")
+
+    @property
+    def full_path(self):
+        return " > ".join(node.name for node in self.ancestor_chain())
+
+    def has_active_path(self):
+        return all(
+            node.is_active and not node.is_deleted for node in self.ancestor_chain()
+        )
+
+    def descendant_ids(self, *, include_self=True):
+        """Collect descendant ids without a tree dependency; depth is capped at three."""
+        if not self.pk:
+            return []
+        found = {self.pk} if include_self else set()
+        frontier = {self.pk}
+        visited = set()
+        while frontier:
+            visited.update(frontier)
+            children = set(
+                type(self).objects.filter(parent_id__in=frontier).values_list(
+                    "id", flat=True
+                )
+            )
+            children -= visited
+            found.update(children)
+            frontier = children
+        return sorted(found)
 
     # 简易递归（大量数据建议 MPTT/treebeard 或预取）
     def get_all_children(self):
@@ -88,26 +153,78 @@ class ProductCategory(BaseModel):
         return node
 
     def clean(self):
+        super().clean()
         # 规范化
         if isinstance(self.code, str):
             self.code = self.code.strip().upper()
         if isinstance(self.name, str):
             self.name = self.name.strip()
 
+        errors = {}
         if not self.code:
-            raise ValidationError({"code": "分类编码不能为空"})
+            errors["code"] = "分类编码不能为空"
+        if not self.name:
+            errors["name"] = "分类名称不能为空"
+
+        if self.name:
+            siblings = type(self).objects.filter(
+                parent_id=self.parent_id,
+                name__iexact=self.name,
+            )
+            if self.pk:
+                siblings = siblings.exclude(pk=self.pk)
+            if siblings.exists():
+                errors["name"] = "同一上级分类下不能存在同名分类"
 
         # 应用层防环：不能把 parent 设为自己或子孙
-        if self.pk and self.parent_id:
-            if self.parent_id == self.pk:
-                raise ValidationError({"parent": "上级分类不能是自身"})
-            # 向上追溯父链，若遇到自己则成环
-            p = self.parent
-            # 建议在调用端 select_related("parent") 以节省查询
-            while p is not None:
-                if p.pk == self.pk:
-                    raise ValidationError({"parent": "上级分类不能是自身的子孙（会形成环）"})
-                p = p.parent
+        parent_depth = 0
+        seen = {self.pk} if self.pk else set()
+        node = self.parent
+        while node is not None:
+            if node.pk in seen:
+                errors["parent"] = "上级分类不能是自身或自身的子孙（会形成环）"
+                break
+            if node.pk is not None:
+                seen.add(node.pk)
+            parent_depth += 1
+            node = node.parent
+
+        depth = parent_depth + 1
+        if depth > self.MAX_DEPTH:
+            errors["parent"] = "商品分类最多三级：大类、中类、小类"
+
+        if self.parent_id and self.is_active and not self.parent.has_active_path():
+            errors["parent"] = "启用分类不能挂在停用或已删除的上级分类下"
+
+        if (
+            self.pk
+            and not self.is_active
+            and type(self).objects.filter(parent_id=self.pk, is_active=True).exists()
+        ):
+            errors["is_active"] = "停用前请先停用所有直接下级分类"
+
+        # Moving a populated subtree must not push any descendant beyond level three.
+        if self.pk and "parent" not in errors:
+            frontier = {self.pk}
+            visited = {self.pk}
+            descendant_distance = 0
+            while frontier:
+                children = set(
+                    type(self).objects.filter(parent_id__in=frontier).values_list(
+                        "id", flat=True
+                    )
+                )
+                children -= visited
+                if not children:
+                    break
+                descendant_distance += 1
+                visited.update(children)
+                frontier = children
+            if depth + descendant_distance > self.MAX_DEPTH:
+                errors["parent"] = "移动后会使下级分类超过三级"
+
+        if errors:
+            raise ValidationError(errors)
 
 class Brand(BaseModel):
     code = models.CharField("品牌编码", max_length=50, help_text="全局唯一")
@@ -288,7 +405,12 @@ class Product(BaseModel):
     code = models.CharField("商品编号", max_length=50, help_text="货主内唯一")
     name = models.CharField("商品名称", max_length=200)
     spec = models.CharField("规格", max_length=200, blank=True, null=True)
-    sku = models.CharField("SKU编码", max_length=50, help_text="货主内（有值时）唯一")
+    sku = models.CharField(
+        "SKU编码",
+        max_length=50,
+        blank=True,
+        help_text="系统按“货主编码-序号”自动生成，货主内唯一",
+    )
     category = models.ForeignKey(ProductCategory, on_delete=models.PROTECT, null=True, blank=True, verbose_name="分类", related_name="products")
     brand = models.ForeignKey(Brand, on_delete=models.PROTECT, null=True, blank=True, verbose_name="品牌", related_name="products")
     temperature_zone = models.ForeignKey(TemperatureZone, on_delete=models.PROTECT, null=True, blank=True, verbose_name="温度区域",
@@ -464,6 +586,31 @@ class Product(BaseModel):
     def __str__(self):
         return f"{self.code} - {self.name}"
 
+    def save(self, *args, **kwargs):
+        """为新商品原子地分配货主范围内永不回退的 SKU 序号。"""
+        if not self._state.adding:
+            return super().save(*args, **kwargs)
+
+        if not self.owner_id:
+            raise ValueError("新建商品时必须指定货主。")
+
+        with transaction.atomic():
+            owner = (
+                Owner.all_objects.select_for_update()
+                .only("id", "code", "next_sku_sequence")
+                .get(pk=self.owner_id)
+            )
+            sequence = owner.next_sku_sequence
+            self.sku = f"{owner.code}-{sequence}"
+            result = super().save(*args, **kwargs)
+            Owner.all_objects.filter(pk=owner.pk).update(
+                next_sku_sequence=F("next_sku_sequence") + 1
+            )
+            owner.next_sku_sequence = sequence + 1
+            if "owner" in self._state.fields_cache:
+                self._state.fields_cache["owner"] = owner
+            return result
+
     # 便捷：首选拣配包装
     # @property
     # def primary_pick_package(self) -> Optional["ProductPackage"]:
@@ -487,8 +634,26 @@ class Product(BaseModel):
         if not self.code:
             errors["code"] = "商品编号不能为空"
 
-        if self.sku:
-            self.sku = self.sku.strip().upper()
+        if self._state.adding and not self.category_id:
+            errors["category"] = "新建商品时至少需要选择一个大类"
+        elif self.pk:
+            original_category_id = (
+                type(self).all_objects.filter(pk=self.pk)
+                .values_list("category_id", flat=True)
+                .first()
+            )
+            if original_category_id and not self.category_id:
+                errors["category"] = "已分类商品不能清空分类"
+
+        if self.category_id and not self.category.has_active_path():
+            errors["category"] = "商品只能选择分类链全部启用的分类"
+
+        # 新商品的 SKU 由 save() 统一分配，忽略任何调用方传入的临时值。
+        # 已有商品只去除两端空白，避免货主代码含小写时更新其他字段误改 SKU。
+        if self._state.adding:
+            self.sku = ""
+        elif self.sku:
+            self.sku = self.sku.strip()
 
         for f in ["gtin", "unit_barcode", "carton_barcode", "external_code"]:
             v = getattr(self, f, None)

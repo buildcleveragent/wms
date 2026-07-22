@@ -24,6 +24,7 @@ class OwnerAdmin(HideAuditFieldsMixin,BaseReadonlyAdmin):
     fields = (
         "name",
         "code",
+        "next_sku_sequence",
         "contact_person",
         "phone",
         "sms_mobile",
@@ -39,12 +40,14 @@ class OwnerAdmin(HideAuditFieldsMixin,BaseReadonlyAdmin):
     list_display = (
         "name",
         "code",
+        "next_sku_sequence",
         "contact_person",
         "phone",
         "allow_warehouse_assisted_outbound",
     )
     search_fields = ("name", "code", "contact_person", "phone", "email")
     list_filter = ("allow_warehouse_assisted_outbound", "name", "code", "contact_person")
+    readonly_fields = ("next_sku_sequence",)
 
     class Media:
         css = {

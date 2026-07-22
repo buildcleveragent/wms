@@ -154,6 +154,29 @@ class Command(BaseCommand):
                 config_id=row["id"],
                 product_id=row["product_id"],
             )
+        for row in public_qs.filter(product__category__isnull=True).values(
+            "id", "product_id"
+        ):
+            issues.add(
+                "listed_config_uncategorized_product",
+                "Listed product must have a category.",
+                config_id=row["id"],
+                product_id=row["product_id"],
+            )
+        invalid_category_ids = [
+            row.id
+            for row in public_qs.select_related(
+                "product__category__parent__parent"
+            )
+            if row.product.category_id
+            and not row.product.category.has_active_path()
+        ]
+        for config_id in invalid_category_ids:
+            issues.add(
+                "listed_config_inactive_category_path",
+                "Listed product category path must be active.",
+                config_id=config_id,
+            )
 
     def _check_cart_items(self, issues, owner_id):
         qs = SaleMiniCartItem.objects.filter(is_active=True).select_related(

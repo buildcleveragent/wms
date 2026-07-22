@@ -47,7 +47,7 @@ class DashboardSummaryConsoleTests(TestCase):
     def test_dashboard_summary_returns_expected_json_shape(self):
         other_owner = Owner.objects.create(code="DSH-OTHER", name="其他货主")
         other_warehouse = Warehouse.objects.create(
-            code="DSHWH-OTHER",
+            code="DSHWH2",
             name="其他仓库",
         )
         WmsTask.objects.create(

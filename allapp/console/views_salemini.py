@@ -11,7 +11,6 @@ from django.db import transaction
 from django.db.models import (
     DecimalField,
     Exists,
-    F,
     OuterRef,
     Q,
     Subquery,
@@ -27,7 +26,10 @@ from allapp.baseinfo.models import Owner
 from allapp.inventory.models import InventoryDetail
 from allapp.products.models import Brand, Product, ProductCategory
 from allapp.salesapp.models import SaleProductConfig
-from allapp.salesapp.salemini_api import _saleable_inventory_detail_filter
+from allapp.salesapp.salemini_api import (
+    _category_subtree_ids,
+    _saleable_inventory_detail_filter,
+)
 
 
 @dataclass
@@ -131,7 +133,7 @@ def _product_queryset(params):
         qs = qs.filter(owner_id=owner_id)
     category_id = params.get("category")
     if category_id:
-        qs = qs.filter(category_id=category_id)
+        qs = qs.filter(category_id__in=_category_subtree_ids(category_id))
     brand_id = params.get("brand")
     if brand_id:
         qs = qs.filter(brand_id=brand_id)
@@ -204,6 +206,10 @@ def _row_for_product(product, config):
         warnings.append("货主停用")
     if not product.is_active:
         warnings.append("商品停用")
+    if not product.category_id:
+        warnings.append("未分类")
+    elif not product.category.has_active_path():
+        warnings.append("分类链停用")
     if getattr(product, "has_mismatched_config", False):
         warnings.append("存在货主不匹配配置")
     if not config:
@@ -224,6 +230,8 @@ def _row_for_product(product, config):
         and config.owner_id == product.owner_id
         and config.is_active
         and config.is_listed
+        and product.category_id
+        and product.category.has_active_path()
     )
     return CatalogRow(
         product=product,
@@ -258,6 +266,10 @@ def _validate_listable(product, config):
         raise ValidationError("货主已停用，不能上架。")
     if not product.is_active:
         raise ValidationError("商品已停用，不能上架。")
+    if not product.category_id:
+        raise ValidationError("商品未分类，不能上架。")
+    if not product.category.has_active_path():
+        raise ValidationError("商品分类链存在停用分类，不能上架。")
     if not config.is_active:
         raise ValidationError("商城配置已停用，不能上架。")
     if config.sale_price is None and product.price is None:
@@ -319,7 +331,9 @@ class SaleMiniProductListingView(LoginRequiredMixin, View):
             "page_obj": page_obj,
             "paginator": paginator,
             "owners": Owner.objects.order_by("code"),
-            "categories": ProductCategory.objects.filter(is_active=True).order_by("code"),
+            "categories": ProductCategory.objects.filter(is_active=True).order_by(
+                "sort_order", "code"
+            ),
             "brands": Brand.objects.filter(is_active=True).order_by("code"),
             "stock_display_choices": SaleProductConfig.StockDisplay.choices,
             "filters": request.GET,

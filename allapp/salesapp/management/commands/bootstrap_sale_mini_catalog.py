@@ -114,6 +114,17 @@ class Command(BaseCommand):
             raise CommandError(
                 "Refusing to list all owners at once. Provide --owner-code when using --listed."
             )
+        if listed:
+            invalid = [
+                product.code
+                for product in create_rows
+                if not product.category_id or not product.category.has_active_path()
+            ]
+            if invalid:
+                sample = ", ".join(invalid[:20])
+                raise CommandError(
+                    f"Refusing to list uncategorized or inactive-category products: {sample}"
+                )
 
         rows = []
         for product in create_rows:

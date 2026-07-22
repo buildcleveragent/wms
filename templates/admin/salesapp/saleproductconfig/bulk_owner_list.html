@@ -1,0 +1,124 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{{ changelist_url }}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; {{ title }}
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+  .bulk-owner-card{
+    max-width:920px;
+    background:var(--body-bg);
+    border:1px solid var(--border-color);
+    border-radius:8px;
+    padding:18px;
+  }
+  .bulk-owner-grid{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:14px 18px;
+  }
+  .bulk-owner-field label{
+    display:block;
+    font-weight:600;
+    margin-bottom:5px;
+  }
+  .bulk-owner-field input,
+  .bulk-owner-field select{
+    width:100%;
+    max-width:100%;
+    box-sizing:border-box;
+  }
+  .bulk-owner-checks{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:8px 16px;
+    margin:14px 0;
+  }
+  .bulk-owner-help{
+    margin:12px 0;
+    padding:10px 12px;
+    background:#fff7e6;
+    border:1px solid #f4d17a;
+    border-radius:6px;
+    color:#7a4b00;
+  }
+  .bulk-owner-errors{
+    color:var(--error-fg);
+    margin:4px 0 0;
+  }
+  @media(max-width:800px){
+    .bulk-owner-grid,.bulk-owner-checks{grid-template-columns:1fr;}
+  }
+</style>
+
+<h1>{{ title }}</h1>
+
+<div class="bulk-owner-card">
+  <p>
+    这里用于把某个货主的 WMS 商品批量创建为商城货架配置，并可一次性上架到小程序。
+    已有配置仍然可以在列表页逐个编辑、上架或下架。
+  </p>
+  <div class="bulk-owner-help">
+    批量上架不会修改库存数量，也不会直接修改商品主数据。缺价格、无有效分类、停用商品等不满足规则的商品会被跳过并在结果消息中提示。
+  </div>
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+      <div class="bulk-owner-errors">{{ form.non_field_errors }}</div>
+    {% endif %}
+    <div class="bulk-owner-grid">
+      <div class="bulk-owner-field">
+        {{ form.owner.label_tag }}
+        {{ form.owner }}
+        {% if form.owner.errors %}<div class="bulk-owner-errors">{{ form.owner.errors }}</div>{% endif %}
+      </div>
+      <div class="bulk-owner-field">
+        {{ form.operation.label_tag }}
+        {{ form.operation }}
+        {% if form.operation.errors %}<div class="bulk-owner-errors">{{ form.operation.errors }}</div>{% endif %}
+      </div>
+      <div class="bulk-owner-field">
+        {{ form.stock_display.label_tag }}
+        {{ form.stock_display }}
+        {% if form.stock_display.errors %}<div class="bulk-owner-errors">{{ form.stock_display.errors }}</div>{% endif %}
+      </div>
+      <div></div>
+      <div class="bulk-owner-field">
+        {{ form.min_order_qty.label_tag }}
+        {{ form.min_order_qty }}
+        {% if form.min_order_qty.errors %}<div class="bulk-owner-errors">{{ form.min_order_qty.errors }}</div>{% endif %}
+      </div>
+      <div class="bulk-owner-field">
+        {{ form.multiple_qty.label_tag }}
+        {{ form.multiple_qty }}
+        {% if form.multiple_qty.errors %}<div class="bulk-owner-errors">{{ form.multiple_qty.errors }}</div>{% endif %}
+      </div>
+      <div class="bulk-owner-field">
+        {{ form.max_order_qty.label_tag }}
+        {{ form.max_order_qty }}
+        {% if form.max_order_qty.errors %}<div class="bulk-owner-errors">{{ form.max_order_qty.errors }}</div>{% endif %}
+      </div>
+    </div>
+
+    <div class="bulk-owner-checks">
+      <label>{{ form.only_active_products }} {{ form.only_active_products.label }}</label>
+      <label>{{ form.skip_missing_price }} {{ form.skip_missing_price.label }}</label>
+      <label>{{ form.sync_sale_price }} {{ form.sync_sale_price.label }}</label>
+      <label>{{ form.overwrite_existing }} {{ form.overwrite_existing.label }}</label>
+    </div>
+
+    <div class="submit-row">
+      <input type="submit" class="default" value="执行批量处理">
+      <a class="button cancel-link" href="{{ changelist_url }}">返回列表</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

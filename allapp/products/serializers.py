@@ -58,14 +58,31 @@ class ProductSerializer(serializers.ModelSerializer):
             owner_id = AccessScope.for_user(user).single_owner_id if user else None
             if owner_id:
                 data["owner"] = owner_id
-        if not data.get("sku") and data.get("code"):
-            data["sku"] = data["code"]
         return super().to_internal_value(data)
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        if not attrs.get("sku") and attrs.get("code"):
-            attrs["sku"] = attrs["code"]
+        category = attrs.get(
+            "category",
+            self.instance.category if self.instance is not None else None,
+        )
+        if self.instance is None and category is None:
+            raise serializers.ValidationError(
+                {"category": "新建商品时至少需要选择一个大类。"}
+            )
+        if (
+            self.instance is not None
+            and self.instance.category_id
+            and "category" in attrs
+            and category is None
+        ):
+            raise serializers.ValidationError(
+                {"category": "已分类商品不能清空分类。"}
+            )
+        if category is not None and not category.has_active_path():
+            raise serializers.ValidationError(
+                {"category": "商品只能选择分类链全部启用的分类。"}
+            )
         return attrs
 
     class Meta:
@@ -89,8 +106,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "extra",
             "packages", "price", "min_price", "max_discount",
         ]
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = ("id", "sku", "created_at", "updated_at")
         extra_kwargs = {
             "owner": {"required": False},
-            "sku": {"required": False, "allow_blank": True},
         }

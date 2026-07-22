@@ -74,7 +74,7 @@ HEADERS = (
 )
 
 REQUIRED_HEADERS = frozenset(
-    {"货主编码", "商品编号", "商品名称", "基本单位编码"}
+    {"货主编码", "商品编号", "商品名称", "分类编码", "基本单位编码"}
 )
 TEXT_HEADERS = frozenset(
     {
@@ -241,14 +241,16 @@ def _write_instruction_sheet(sheet) -> None:
             _joined_text("下载模板 → 填写“商品导入” → ", "在 wmspda 上传导入。"),  # noqa: E501
         ]
     )
-    sheet.append(["必填字段", "货主编码、商品编号、商品名称、基本单位编码。"])
+    sheet.append(
+        ["必填字段", "货主编码、商品编号、商品名称、分类编码、基本单位编码。"]
+    )
     sheet.append(
         ["货主规则", "货主编码必须填写，且只能填写“基础资料”中当前账号有权使用的编码。"]
     )
     sheet.append(
         [
             "SKU规则",
-            _joined_text("SKU编码留空时自动使用商品编号；", "编码会去空格并转为大写。"),  # noqa: E501
+            "SKU编码无需填写，系统按“货主编码-货主下一个SKU序号”自动生成。",
         ]
     )
     sheet.append(
@@ -279,7 +281,7 @@ def _write_instruction_sheet(sheet) -> None:
         [
             "重复规则",
             _joined_text(
-                "商品编号、SKU、条码或外部系统编码与已有商品冲突，",
+                "商品编号、条码或外部系统编码与已有商品冲突，",
                 "或 Excel 内部重复，都会使整批不写入。",
             ),
         ]
@@ -586,15 +588,6 @@ class ProductExcelImporter:
         if not name or base_uom is None:
             return None
 
-        sku = (
-            self._optional_code(
-                row_number,
-                "SKU编码",
-                values.get("SKU编码"),
-                max_length=50,
-            )
-            or code
-        )
         category = self._resolve_category(row_number, values.get("分类编码"))
         brand = self._resolve_brand(row_number, values.get("品牌编码"))
         package_uom_value = values.get("包装单位编码")
@@ -608,7 +601,7 @@ class ProductExcelImporter:
         product = Product(
             owner=owner,
             code=code,
-            sku=sku,
+            sku="",
             name=name,
             spec=self._optional_text(
                 row_number, "规格", values.get("规格"), max_length=200
@@ -825,6 +818,7 @@ class ProductExcelImporter:
     def _resolve_category(self, row_number, value):
         code = _text(value).upper()
         if not code:
+            self._error(row_number, "分类编码", "不能为空；新商品至少需要选择一个大类。")
             return None
         if code not in self._category_cache:
             self._category_cache[code] = ProductCategory.objects.filter(
@@ -833,6 +827,9 @@ class ProductExcelImporter:
         category = self._category_cache[code]
         if category is None:
             self._error(row_number, "分类编码", f"找不到启用的分类：{code}。")
+        elif not category.has_active_path():
+            self._error(row_number, "分类编码", f"分类链存在停用分类：{code}。")
+            return None
         return category
 
     def _resolve_brand(self, row_number, value):
@@ -932,10 +929,8 @@ class ProductExcelImporter:
             else owner_code or "missing-owner"
         )
         code = _text(row_values.get("商品编号")).upper()
-        sku = _text(row_values.get("SKU编码")).upper() or code
         identifiers = (
             ("商品编号", code),
-            ("SKU编码", sku),
             ("GTIN", _text(row_values.get("GTIN"))),
             ("零码", _text(row_values.get("零码"))),
             ("箱码", _text(row_values.get("箱码"))),

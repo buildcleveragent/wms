@@ -20,6 +20,12 @@ class Owner(BaseModel, AddressMixin):
     # —— 基本档案 ——
     name = models.CharField("货主名称", max_length=30, unique=True)
     code = models.CharField("货主代码", max_length=10, unique=True)
+    next_sku_sequence = models.PositiveBigIntegerField(
+        "下一个SKU序号",
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="新建商品时使用该序号生成SKU，成功创建后自动加1。",
+    )
     contact_person = models.CharField("联系人", max_length=10, blank=True, null=True)
     phone = models.CharField("联系电话", max_length=20, blank=True, null=True)
     sms_mobile = models.CharField("短信接收号码", max_length=20, blank=True, null=True)

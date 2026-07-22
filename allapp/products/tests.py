@@ -11,6 +11,7 @@ from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import IntegrityError
@@ -20,12 +21,18 @@ from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from allapp.accounts.models import AuditEvent, UserRoleScope
 
+from .category_backfill import (
+    CategoryBackfillError,
+    build_category_backfill_workbook,
+    import_category_backfill,
+)
 from .excel_import import HEADERS, IMPORT_SHEET_NAME, MAX_IMPORT_FILE_SIZE
 from .views import ProductViewSet
 
 # 业务模型
 Owner = apps.get_model("baseinfo", "Owner")
 ProductUom = apps.get_model("products", "ProductUom")
+ProductCategory = apps.get_model("products", "ProductCategory")
 Product = apps.get_model("products", "Product")
 Warehouse = apps.get_model("locations", "Warehouse")
 
@@ -44,6 +51,143 @@ except Exception:
 DEPENDENCIES_OK = all([Owner, ProductUom, Product])
 
 
+class ProductCategoryHierarchyTests(TestCase):
+    def setUp(self):
+        self.root = ProductCategory.objects.create(
+            code="FRESH", name="生鲜", sort_order=1
+        )
+        self.middle = ProductCategory.objects.create(
+            code="FRESH-FRUIT", name="水果", parent=self.root
+        )
+        self.small = ProductCategory.objects.create(
+            code="FRESH-BERRY", name="莓果", parent=self.middle
+        )
+
+    def test_levels_path_and_descendants_are_derived_from_parent_tree(self):
+        self.assertEqual(self.root.depth, 1)
+        self.assertEqual(self.middle.level_name, "中类")
+        self.assertEqual(self.small.level_name, "小类")
+        self.assertEqual(self.small.full_path, "生鲜 > 水果 > 莓果")
+        self.assertEqual(
+            set(self.root.descendant_ids()),
+            {self.root.id, self.middle.id, self.small.id},
+        )
+
+    def test_fourth_level_duplicate_sibling_and_cycle_are_rejected(self):
+        with self.assertRaises(ValidationError):
+            ProductCategory.objects.create(
+                code="FRESH-BERRY-RED", name="红莓", parent=self.small
+            )
+        with self.assertRaises(ValidationError):
+            ProductCategory.objects.create(
+                code="FRESH-FRUIT-2", name="水果", parent=self.root
+            )
+        self.root.parent = self.small
+        with self.assertRaises(ValidationError):
+            self.root.save()
+
+    def test_reparenting_subtree_too_deep_and_inactive_parent_are_rejected(self):
+        another_root = ProductCategory.objects.create(code="FOOD", name="食品")
+        self.root.parent = another_root
+        with self.assertRaises(ValidationError):
+            self.root.save()
+
+        with self.assertRaises(ValidationError):
+            ProductCategory.objects.create(
+                code="DISABLED-CHILD",
+                name="停用父类的子类",
+                parent=ProductCategory.objects.create(
+                    code="DISABLED", name="停用分类", is_active=False
+                ),
+            )
+
+    def test_new_product_requires_category_but_legacy_blank_can_converge(self):
+        owner = Owner.objects.create(code="CAT-OWNER", name="分类货主")
+        uom = ProductUom.objects.create(code="CAT-EA", name="个")
+        product = Product(
+            owner=owner,
+            code="CAT-P1",
+            name="新商品",
+            base_uom=uom,
+            expiry_control=False,
+        )
+        with self.assertRaises(ValidationError):
+            product.full_clean()
+
+        legacy = Product.objects.create(
+            owner=owner,
+            code="CAT-LEGACY",
+            name="历史商品",
+            base_uom=uom,
+            expiry_control=False,
+        )
+        legacy.full_clean()
+        legacy.category = self.root
+        legacy.full_clean()
+        legacy.save(update_fields=["category", "updated_at"])
+        legacy.category = None
+        with self.assertRaises(ValidationError):
+            legacy.full_clean()
+
+
+class ProductCategoryBackfillTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            username="category-backfill-admin",
+            password="x",
+            email="admin@example.com",
+        )
+        self.owner = Owner.objects.create(code="BACKFILL", name="补录货主")
+        self.uom = ProductUom.objects.create(code="BACKFILL-EA", name="件")
+        self.category = ProductCategory.objects.create(
+            code="BACKFILL-FOOD", name="食品"
+        )
+        self.product = Product.objects.create(
+            owner=self.owner,
+            code="BACKFILL-P1",
+            name="待补录商品",
+            base_uom=self.uom,
+        )
+
+    def _upload(self, workbook):
+        output = io.BytesIO()
+        workbook.save(output)
+        return SimpleUploadedFile(
+            "商品分类补录.xlsx",
+            output.getvalue(),
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        )
+
+    def test_export_and_atomic_import_only_update_category(self):
+        content = build_category_backfill_workbook(Product.objects.filter(pk=self.product.pk))
+        workbook = load_workbook(io.BytesIO(content))
+        workbook["商品分类补录"]["E2"] = self.category.code
+
+        result = import_category_backfill(self._upload(workbook), user=self.user)
+
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.category_id, self.category.id)
+        self.assertEqual(result, {"row_count": 1, "changed_count": 1})
+        self.assertTrue(
+            AuditEvent.objects.filter(action="products.category_backfill").exists()
+        )
+
+    def test_invalid_row_rolls_back_every_valid_row(self):
+        content = build_category_backfill_workbook(Product.objects.filter(pk=self.product.pk))
+        workbook = load_workbook(io.BytesIO(content))
+        sheet = workbook["商品分类补录"]
+        sheet["E2"] = self.category.code
+        sheet.append([self.owner.code, "MISSING", "不存在", "未分类", self.category.code])
+
+        with self.assertRaises(CategoryBackfillError):
+            import_category_backfill(self._upload(workbook), user=self.user)
+
+        self.product.refresh_from_db()
+        self.assertIsNone(self.product.category_id)
+
+
 @unittest.skipUnless(
     DEPENDENCIES_OK, "缺少 baseinfo/products 依赖模型，跳过 products 测试"
 )
@@ -54,6 +198,9 @@ class ProductViewSetTests(TestCase):
         cls.owner_a = Owner.objects.create(code="OA", name="Owner-A")
         cls.owner_b = Owner.objects.create(code="OB", name="Owner-B")
         cls.uom = ProductUom.objects.create(code="PCS", name="件", is_active=True)
+        cls.category = ProductCategory.objects.create(
+            code="VIEWSET-CAT", name="接口商品"
+        )
 
         # 用户：user_a 属于 owner_a；user_b 属于 owner_b
         User = get_user_model()
@@ -153,6 +300,7 @@ class ProductViewSetTests(TestCase):
             "code": "SKU-NEW",
             "name": "新商品",
             "base_uom": self.uom.id,
+            "category": self.category.id,
             "is_active": True,
         }
         req = self.factory.post("/products/", data=payload, format="json")
@@ -176,6 +324,7 @@ class ProductViewSetTests(TestCase):
             "code": "SKU-LOCKED",
             "name": "锁回当前货主",
             "base_uom": self.uom.id,
+            "category": self.category.id,
             "is_active": True,
         }
         req = self.factory.post("/products/", data=payload, format="json")
@@ -537,6 +686,7 @@ class ProductExcelImportApiTests(TestCase):
             if row[0].value and row[1].value
         }
         self.assertIn("货主编码", instructions["必填字段"])
+        self.assertIn("系统按", instructions["SKU规则"])
         self.assertIn("批次、序列号和保质期管理默认否", instructions["布尔值"])
         self.assertIn("整批不写入", instructions["重复规则"])
         owner_codes = {
@@ -585,7 +735,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["created_count"], 1)
         product = Product.objects.get(owner=self.owner, code="PDA-XLSX-HAPPY")
-        self.assertEqual(product.sku, "PDA-SKU-HAPPY")
+        self.assertEqual(product.sku, "PXIA-1")
         self.assertEqual(product.created_by_id, self.user.id)
         self.assertFalse(product.expiry_control)
         self.assertFalse(product.serial_control)
@@ -774,7 +924,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(response.data["created_count"], 0)
         self.assertFalse(Product.objects.filter(code="PDA-ATOMIC-OK").exists())
 
-    def test_duplicate_identifiers_inside_file_are_reported(self):
+    def test_supplied_skus_are_ignored_and_generated_sequentially(self):
         response = self._post_rows(
             [
                 self._valid_row("PDA-DUP-1", **{"SKU编码": "SAME-SKU"}),
@@ -782,16 +932,13 @@ class ProductExcelImportApiTests(TestCase):
             ]
         )
 
-        self.assertEqual(response.status_code, 400, response.data)
-        self.assertTrue(
-            any(
-                error["row"] == 3
-                and error["field"] == "SKU编码"
-                and "第 2 行" in error["message"]
-                for error in response.data["errors"]
-            )
+        self.assertEqual(response.status_code, 200, response.data)
+        products = list(
+            Product.objects.filter(code__startswith="PDA-DUP")
+            .order_by("code")
+            .values_list("sku", flat=True)
         )
-        self.assertFalse(Product.objects.filter(code__startswith="PDA-DUP").exists())
+        self.assertEqual(products, ["PXIA-1", "PXIA-2"])
 
     def test_file_duplicates_are_checked_even_with_existing_code_conflict(self):
         Product.objects.create(
@@ -852,7 +999,8 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         mfg = Product.objects.get(code="PDA-MFG")
         inbound = Product.objects.get(code="PDA-INBOUND")
-        self.assertEqual(mfg.sku, "PDA-MFG")
+        self.assertEqual(mfg.sku, "PXIA-1")
+        self.assertEqual(inbound.sku, "PXIA-2")
         self.assertFalse(mfg.batch_control)
         self.assertFalse(mfg.serial_control)
         self.assertTrue(mfg.is_active)
@@ -1069,6 +1217,9 @@ class ProductExcelImportApiTests(TestCase):
 class ProductImportCommandTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(code="PIC", name="Product Import Command")
+        self.category = ProductCategory.objects.create(
+            code="PIC-CAT", name="命令导入分类"
+        )
 
     def _write_workbook(self, rows):
         workbook = Workbook()
@@ -1084,8 +1235,14 @@ class ProductImportCommandTests(TestCase):
     def test_import_product_master_sheet_creates_product_and_uom(self):
         path = self._write_workbook(
             [
-                ["owner", "code", "sku", "name", "base_uom"],
-                [self.owner.code, "CMD-SKU-1", "CMD-SKU-1", "命令导入商品", "件"],
+                ["owner", "code", "name", "base_uom", "category"],
+                [
+                    self.owner.code,
+                    "CMD-SKU-1",
+                    "命令导入商品",
+                    "件",
+                    self.category.code,
+                ],
             ]
         )
 
@@ -1095,14 +1252,21 @@ class ProductImportCommandTests(TestCase):
             os.unlink(path)
 
         product = Product.objects.get(owner=self.owner, code="CMD-SKU-1")
+        self.assertEqual(product.sku, "PIC-1")
         self.assertEqual(product.name, "命令导入商品")
         self.assertEqual(product.base_uom.name, "件")
 
     def test_import_product_master_sheet_dry_run_does_not_persist_product(self):
         path = self._write_workbook(
             [
-                ["owner", "code", "sku", "name", "base_uom"],
-                [self.owner.code, "CMD-DRY-1", "CMD-DRY-1", "Dry Run 商品", "件"],
+                ["owner", "code", "name", "base_uom", "category"],
+                [
+                    self.owner.code,
+                    "CMD-DRY-1",
+                    "Dry Run 商品",
+                    "件",
+                    self.category.code,
+                ],
             ]
         )
 

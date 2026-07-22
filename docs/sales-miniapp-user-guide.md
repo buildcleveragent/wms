@@ -779,6 +779,20 @@ SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/pytho
 - 设置推荐、热卖、新品标签。
 - 设置起购数量、购买倍数、最大购买量和排序。
 
+如果运营需要先把某个货主的合格商品整批铺到商城，也可以进入 Django Admin：
+
+```text
+/admin/salesapp/saleproductconfig/
+```
+
+在列表页点击“按货主批量上架”，选择货主后可执行：
+
+- 创建缺失配置并上架该货主全部合格商品。
+- 仅创建缺失配置，不立即上架。
+- 下架该货主全部已配置商品。
+
+这个入口会保留原有单个商品的编辑、上架和下架能力。默认不会覆盖已有商品的商城售价、库存展示和购买规则；只有勾选“覆盖已有配置的价格、库存展示和购买规则”时，才会按表单值改写已有配置。批量上架时，缺价格、无有效分类、停用商品等不满足规则的商品会被跳过，并在执行结果里显示原因。
+
 这个页面只维护商城货架配置，不修改库存数量，不直接修改 `Product` 主数据。执行“上架”时会校验：
 
 - `SaleProductConfig.owner_id == Product.owner_id`。
@@ -903,9 +917,9 @@ validate_sale_mini_data_accuracy: ok, issue_count=0
 npm run test:structure: passed
 npm run test:quality -- --skip-build: passed
 npm run test:quality -- --skip-build --data-accuracy: passed
-npm run test:quality -- --skip-build --db --fast-db: passed, including 35 SaleMiniApiTests and live data validation
+npm run test:quality -- --skip-build --db --fast-db: passed, including 43 SaleMiniApiTests, console catalog tests, Admin owner bulk-listing tests, and live data validation
 npm run test:quality: passed, including build:mp-weixin and build:h5
-SaleMiniApiTests fast DB mode: 35 passed
+SaleMiniApiTests fast DB mode: 43 passed
 ```
 
 ## 14. 常见问题
@@ -948,6 +962,11 @@ SaleMiniApiTests fast DB mode: 35 passed
 - `SaleProductConfig.owner_id` 是否等于 `Product.owner_id`。
 - 货主 `Owner.is_active=True`。
 - 如果列表使用了“只看有货”，检查是否有可售 `InventoryDetail.available_qty > 0`；普通商品列表不要求有库存才展示。
+
+图形界面上架入口：
+
+- 精细运营：打开 `/console/sale-mini/products/`，按货主、分类、库存、价格等条件筛选后勾选商品，再执行创建配置、上架或下架。
+- 整货主批量：打开 `/admin/salesapp/saleproductconfig/`，点击“按货主批量上架”，选择货主后执行批量创建并上架。
 
 可先运行 dry-run 诊断，不会写库：
 

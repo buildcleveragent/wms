@@ -73,7 +73,8 @@
     <scroll-view v-if="home.categories.length" class="category-scroll" scroll-x>
       <view class="category-row">
         <view v-for="item in home.categories" :key="item.id" class="category" @click="goCategory(item.id)">
-          <view class="category-mark">{{ item.name.slice(0, 1) }}</view>
+          <image v-if="item.image_url" class="category-mark category-image" :src="item.image_url" mode="aspectFill" />
+          <view v-else class="category-mark">{{ item.name.slice(0, 1) }}</view>
           <view class="category-name">{{ item.name }}</view>
         </view>
       </view>
@@ -556,6 +557,12 @@ onPullDownRefresh(async () => {
   background: #edf7ff;
   color: #2563eb;
   font-weight: 850;
+}
+
+.category-image {
+  display: block;
+  line-height: normal;
+  object-fit: cover;
 }
 
 .category-name {

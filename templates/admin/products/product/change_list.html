@@ -1,0 +1,8 @@
+{% extends "admin/change_list.html" %}
+
+{% block object-tools-items %}
+  {% if category_backfill_url %}
+    <li><a href="{{ category_backfill_url }}">商品分类批量补录</a></li>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}

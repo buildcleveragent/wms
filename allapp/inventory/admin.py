@@ -7,13 +7,17 @@ from .models import (
 
 )
 from decimal import Decimal
+from tempfile import SpooledTemporaryFile
 
 from django import forms
 from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied
 from django.db import models as dj_models
-from django.http import JsonResponse, HttpResponseForbidden
+from django.http import FileResponse, JsonResponse, HttpResponseForbidden
 from django.shortcuts import render, redirect
 from django.urls import path, reverse
+from django.utils import timezone
+from openpyxl import Workbook
 
 from allapp.baseinfo.models import Owner
 from allapp.products.models import Product
@@ -34,6 +38,95 @@ def _safe_fields(model, candidates):
     """仅返回当前模型真实存在的字段名，避免因为基类差异报错。"""
     model_fields = {f.name for f in model._meta.get_fields()}
     return [f for f in candidates if f in model_fields]
+
+
+INVENTORY_DETAIL_EXPORT_HEADERS = (
+    "库存明细ID",
+    "货主代码",
+    "货主名称",
+    "仓库编号",
+    "仓库名称",
+    "子仓编号",
+    "子仓名称",
+    "区域类型",
+    "库位编码",
+    "库位名称",
+    "商品编号",
+    "SKU",
+    "商品名称",
+    "规格",
+    "批次号",
+    "生产日期",
+    "有效期至",
+    "序列号",
+    "基本单位",
+    "账面库存",
+    "已分配数量",
+    "锁定数量",
+    "损坏数量",
+    "可用数量",
+    "启用状态",
+)
+
+
+def _xlsx_text(value):
+    """Return safe text for Excel without allowing formula execution."""
+    text = "" if value is None else str(value)
+    return f"'{text}" if text.startswith(("=", "+", "-", "@")) else text
+
+
+def _inventory_detail_export_row(detail):
+    product = detail.product
+    owner = detail.owner
+    warehouse = detail.warehouse
+    subwarehouse = detail.subwarehouse
+    location = detail.location
+    return (
+        detail.pk,
+        _xlsx_text(owner.code),
+        _xlsx_text(owner.name),
+        _xlsx_text(warehouse.code),
+        _xlsx_text(warehouse.name),
+        _xlsx_text(subwarehouse.code if subwarehouse else ""),
+        _xlsx_text(subwarehouse.name if subwarehouse else ""),
+        detail.get_zone_type_display(),
+        _xlsx_text(location.code),
+        _xlsx_text(location.name),
+        _xlsx_text(product.code),
+        _xlsx_text(product.sku),
+        _xlsx_text(product.name),
+        _xlsx_text(product.spec),
+        _xlsx_text(detail.batch_no),
+        detail.production_date,
+        detail.expiry_date,
+        _xlsx_text(detail.serial_no),
+        _xlsx_text(detail.base_unit),
+        detail.onhand_qty,
+        detail.allocated_qty,
+        detail.locked_qty,
+        detail.damaged_qty,
+        detail.available_qty,
+        "是" if detail.is_active else "否",
+    )
+
+
+def _inventory_detail_export_response(queryset):
+    workbook = Workbook(write_only=True)
+    sheet = workbook.create_sheet("库存现存量")
+    sheet.append(INVENTORY_DETAIL_EXPORT_HEADERS)
+    for detail in queryset.iterator(chunk_size=2000):
+        sheet.append(_inventory_detail_export_row(detail))
+
+    output = SpooledTemporaryFile(max_size=10 * 1024 * 1024, suffix=".xlsx")
+    workbook.save(output)
+    output.seek(0)
+    filename = f"库存现存量-{timezone.now():%Y%m%d-%H%M%S}.xlsx"
+    return FileResponse(
+        output,
+        as_attachment=True,
+        filename=filename,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 class ScopedInventoryReadAdmin(admin.ModelAdmin):
@@ -67,27 +160,19 @@ class ScopedInventoryReadAdmin(admin.ModelAdmin):
 # ============== 1) 现存量 ==============
 @admin.register(InventoryDetail)
 class InventoryDetailAdmin(ScopedInventoryReadAdmin):
-    # list_display = _safe_fields(
-    #     InventoryDetail,
-    #     [
-    #         "owner", "product", "product_spec","subwarehouse","zone_type", "location",
-    #         "batch_no", "production_date", "expiry_date", "serial_no",
-    #         "onhand_qty", "allocated_qty", "locked_qty", "damaged_qty", "available_qty",
-    #         "is_active",
-    #     ],
-    # )
 
-    # list_display = (
-    #         "owner", "product", "product_spec","subwarehouse","zone_type", "location",
-    #         "batch_no", "production_date", "expiry_date", "serial_no",
-    #         "onhand_qty", "allocated_qty", "locked_qty", "damaged_qty", "available_qty",
-    #         "is_active",
-    #         )
+    change_list_template = "admin/inventory/inventorydetail/change_list.html"
 
     list_display = (
         "owner",
         "product",
+        "product_sku",
         "product_spec",
+        "onhand_qty_display",
+        "allocated_qty_display",
+        "locked_qty_display",
+        "damaged_qty_display",
+        "available_qty_display",
         "subwarehouse",
         "zone_type",
         "location",
@@ -95,11 +180,7 @@ class InventoryDetailAdmin(ScopedInventoryReadAdmin):
         "production_date",
         "expiry_date",
         "serial_no",
-        "onhand_qty_display",
-        "allocated_qty_display",
-        "locked_qty_display",
-        "damaged_qty_display",
-        "available_qty_display",
+
         "is_active",
     )
 
@@ -113,19 +194,55 @@ class InventoryDetailAdmin(ScopedInventoryReadAdmin):
         "product__code", "product__name",
         "owner__code", "owner__name",
         "subwarehouse__code", "subwarehouse__name",
-        "location__code", "location__name",
+        "location__code", "location__name","product__sku",
     ]
-    # autocomplete_fields = _safe_fields(
-    #     InventoryDetail,
-    #     ["owner", "product",  "location", "lot"],
-    # )
+
     ordering = _safe_fields(InventoryDetail, ["expiry_date", "owner", "product"])
     list_per_page = 50
     list_select_related = ("owner", "product", "warehouse", "subwarehouse", "location")
 
+    def get_urls(self):
+        custom_urls = [
+            path(
+                "export-filtered-excel/",
+                self.admin_site.admin_view(self.export_filtered_excel_view),
+                name="inventory_inventorydetail_export_filtered_excel",
+            )
+        ]
+        return custom_urls + super().get_urls()
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        export_url = reverse(
+            "admin:inventory_inventorydetail_export_filtered_excel"
+        )
+        query_string = request.GET.urlencode()
+        if query_string:
+            export_url = f"{export_url}?{query_string}"
+        extra_context["export_filtered_excel_url"] = export_url
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def export_filtered_excel_view(self, request):
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+        queryset = self.get_changelist_instance(request).queryset.select_related(
+            "owner",
+            "warehouse",
+            "subwarehouse",
+            "location",
+            "product",
+        )
+        return _inventory_detail_export_response(queryset)
+
+
+
     @admin.display(description="规格")
     def product_spec(self,obj):
         return getattr(obj.product,"spec","") if obj.product else ""
+
+    @admin.display(description="SKU", ordering="product__sku")
+    def product_sku(self, obj):
+        return obj.product.sku if obj.product else ""
 
     @admin.display(description="账面库存")
     def onhand_qty_display(self, obj):
@@ -271,15 +388,7 @@ class InventorySummaryAdmin(ScopedInventoryReadAdmin):
 # ============== 3) 事务流水 ==============
 @admin.register(InventoryTransaction)
 class InventoryTransactionAdmin(ScopedInventoryReadAdmin):
-    # list_display = _safe_fields(
-    #     InventoryTransaction,
-    #     [
-    #         "tx_type", "owner", "product", "subwarehouse", "location",
-    #         "qty_delta", "batch_no", "production_date", "expiry_date", "serial_no",
-    #         "src_model", "src_id", "src_line_id", "src_no",
-    #         "pair_id",
-    #     ],
-    # )
+
 
     list_display = (
         "tx_type",

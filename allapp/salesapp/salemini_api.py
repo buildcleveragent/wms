@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from collections import Counter
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from urllib import error as url_error
@@ -741,6 +742,41 @@ def _available_map(owner, product_ids, warehouse=None):
     return {row["product_id"]: Decimal(row["available_qty"] or 0) for row in rows}
 
 
+def _active_category_path_q(prefix="product__category"):
+    """Require the assigned category and every possible ancestor to be active."""
+    current = Q(
+        **{
+            f"{prefix}__isnull": False,
+            f"{prefix}__is_active": True,
+            f"{prefix}__is_deleted": False,
+        }
+    )
+    parent = Q(**{f"{prefix}__parent__isnull": True}) | Q(
+        **{
+            f"{prefix}__parent__is_active": True,
+            f"{prefix}__parent__is_deleted": False,
+        }
+    )
+    grandparent = Q(**{f"{prefix}__parent__parent__isnull": True}) | Q(
+        **{
+            f"{prefix}__parent__parent__is_active": True,
+            f"{prefix}__parent__parent__is_deleted": False,
+        }
+    )
+    return current & parent & grandparent
+
+
+def _category_subtree_ids(category_id):
+    try:
+        category_id = int(category_id)
+    except (TypeError, ValueError):
+        return []
+    category = ProductCategory.objects.filter(pk=category_id, is_active=True).first()
+    if category is None or not category.has_active_path():
+        return []
+    return category.descendant_ids()
+
+
 def _config_qs(owner):
     return (
         SaleProductConfig.objects.filter(
@@ -750,6 +786,7 @@ def _config_qs(owner):
             is_listed=True,
             product__is_active=True,
         )
+        .filter(_active_category_path_q())
         .select_related(
             "product", "product__base_uom", "product__category", "product__brand"
         )
@@ -767,6 +804,7 @@ def _public_config_qs():
             is_listed=True,
             product__is_active=True,
         )
+        .filter(_active_category_path_q())
         .select_related(
             "owner",
             "product",
@@ -2144,7 +2182,7 @@ class SaleMiniHomeApi(APIView):
             .select_related("owner")
             .order_by("sort_order", "id")[:8]
         ]
-        categories = _category_rows()[:12]
+        categories = _category_rows(request=request, roots_only=True)[:12]
         products_qs = _public_config_qs()
 
         def take(flag_name, limit, *, fallback=False):
@@ -2175,37 +2213,73 @@ class SaleMiniHomeApi(APIView):
         )
 
 
-def _category_rows(owner=None, owner_id=None):
-    filters = {
-        "products__sale_mini_configs__is_active": True,
-        "products__sale_mini_configs__is_listed": True,
-        "products__sale_mini_configs__owner__is_active": True,
-        "products__owner__is_active": True,
-        "products__is_active": True,
-        "is_active": True,
-    }
+def _category_image_url(request, category):
+    if not category.image:
+        return ""
+    try:
+        url = category.image.url
+    except (ValueError, OSError):
+        return ""
+    return request.build_absolute_uri(url) if request is not None else url
+
+
+def _category_rows(request=None, owner=None, owner_id=None, *, roots_only=False):
+    """Return the flat active tree with subtree-aggregated listed product counts."""
     if owner is not None:
         owner_id = owner.id
+    configs = _public_config_qs()
     if owner_id:
-        filters["products__owner_id"] = owner_id
-        filters["products__sale_mini_configs__owner_id"] = owner_id
-    else:
-        filters["products__sale_mini_configs__owner_id"] = F("products__owner_id")
-    qs = (
-        ProductCategory.objects.filter(**filters)
-        .annotate(product_count=Count("products__sale_mini_configs", distinct=True))
-        .distinct()
-        .order_by("code")
-    )
-    return [
-        {
-            "id": category.id,
-            "name": category.name,
-            "parent_id": category.parent_id,
-            "product_count": category.product_count or 0,
-        }
-        for category in qs
+        configs = configs.filter(owner_id=owner_id)
+    direct_counts = {
+        row["product__category_id"]: row["product_count"]
+        for row in configs.order_by()
+        .values("product__category_id")
+        .annotate(product_count=Count("id", distinct=True))
+    }
+    categories = [
+        category
+        for category in (
+            ProductCategory.objects.filter(is_active=True)
+            .select_related("parent", "parent__parent")
+            .order_by("sort_order", "code", "id")
+        )
+        if category.has_active_path()
     ]
+    by_id = {category.id: category for category in categories}
+    subtree_counts = Counter()
+    for category_id, count in direct_counts.items():
+        node = by_id.get(category_id)
+        seen = set()
+        while node is not None and node.id not in seen:
+            seen.add(node.id)
+            subtree_counts[node.id] += count
+            node = by_id.get(node.parent_id)
+
+    parent_ids = {
+        category.parent_id
+        for category in categories
+        if category.parent_id in by_id
+    }
+    rows = []
+    for category in categories:
+        product_count = subtree_counts[category.id]
+        if roots_only and (category.parent_id is not None or product_count <= 0):
+            continue
+        rows.append(
+            {
+                "id": category.id,
+                "name": category.name,
+                "parent_id": category.parent_id,
+                "level": category.depth,
+                "level_name": category.level_name,
+                "path": category.full_path,
+                "image_url": _category_image_url(request, category),
+                "sort_order": category.sort_order,
+                "has_children": category.id in parent_ids,
+                "product_count": product_count,
+            }
+        )
+    return rows
 
 
 def _brand_rows(owner_id=None, category_id=None):
@@ -2224,9 +2298,13 @@ def _brand_rows(owner_id=None, category_id=None):
     else:
         filters["products__sale_mini_configs__owner_id"] = F("products__owner_id")
     if category_id:
-        filters["products__category_id"] = category_id
+        category_ids = _category_subtree_ids(category_id)
+        if not category_ids:
+            return []
+        filters["products__category_id__in"] = category_ids
     qs = (
         Brand.objects.filter(**filters)
+        .filter(_active_category_path_q("products__category"))
         .annotate(product_count=Count("products__sale_mini_configs", distinct=True))
         .distinct()
         .order_by("code")
@@ -2270,7 +2348,7 @@ class SaleMiniCategoryApi(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        return Response(_category_rows())
+        return Response(_category_rows(request=request))
 
 
 class SaleMiniBrandApi(APIView):
@@ -2411,7 +2489,8 @@ class SaleMiniProductListApi(APIView):
                 | Q(product__category__name__icontains=search)
             )
         if category_id:
-            qs = qs.filter(product__category_id=category_id)
+            category_ids = _category_subtree_ids(category_id)
+            qs = qs.filter(product__category_id__in=category_ids)
         if brand_id:
             qs = qs.filter(product__brand_id=brand_id)
         if only_stock:

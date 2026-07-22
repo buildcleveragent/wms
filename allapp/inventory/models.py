@@ -26,9 +26,7 @@ class InventoryDetail(BaseModel):
     product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
     warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
     subwarehouse = models.ForeignKey("locations.Subwarehouse", on_delete=models.PROTECT, verbose_name="子仓",null=True, blank=True,)
-    zone_type = models.PositiveSmallIntegerField(
-        _("区域类型"), choices=ZoneType.choices, default=ZoneType.STORAGE, db_index=True
-    )
+    zone_type = models.PositiveSmallIntegerField(_("区域类型"), choices=ZoneType.choices, default=ZoneType.STORAGE, db_index=True)
     location = models.ForeignKey("locations.Location", on_delete=models.PROTECT, verbose_name="库位")
 
     # （可选但强烈建议）批次外键；仍保留批次快照字段方便打印/兼容

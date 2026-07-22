@@ -13,7 +13,7 @@ from django.db import IntegrityError, transaction
 from openpyxl import load_workbook
 
 from allapp.baseinfo.models import Owner
-from allapp.products.models import Product, ProductUom
+from allapp.products.models import Product, ProductCategory, ProductUom
 
 
 UOM_CODE_MAP = {
@@ -245,6 +245,17 @@ class Command(BaseCommand):
 
         return uom
 
+    def get_category(self, value: Any) -> ProductCategory:
+        code = _norm_str(value).upper()
+        if not code:
+            raise ValueError("category 不能为空")
+        category = ProductCategory.objects.filter(
+            code__iexact=code, is_active=True
+        ).first()
+        if category is None or not category.has_active_path():
+            raise ValueError(f"找不到分类链全部启用的分类：{code}")
+        return category
+
     def parse_headers(self, ws) -> Dict[str, int]:
         header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
 
@@ -293,7 +304,7 @@ class Command(BaseCommand):
         BASE_UOM_KEYS = ("base_uom", "基本单位", "基础单位", "单位")
         EXTRA_KEYS = ("extra", "扩展属性", "扩展信息", "备注")
         CODE_KEYS = ("code", "商品编号", "商品编码")
-        SKU_KEYS = ("sku", "sku编码", "SKU", "SKU编码")
+        CATEGORY_KEYS = ("category", "category_code", "分类编码", "商品分类")
         EXPIRY_CONTROL_KEYS = ("expiry_control", "保质期管理", "效期管理")
         SHELF_LIFE_DAYS_KEYS = ("shelf_life_days", "保质期天数", "保质期")
 
@@ -302,7 +313,7 @@ class Command(BaseCommand):
             "name": NAME_KEYS,
             "base_uom": BASE_UOM_KEYS,
             "code": CODE_KEYS,
-            "sku": SKU_KEYS,
+            "category": CATEGORY_KEYS,
         }
 
         missing = []
@@ -342,7 +353,7 @@ class Command(BaseCommand):
                         base_uom_raw = _pick_first(row, BASE_UOM_KEYS)
                         extra_raw = _pick_first(row, EXTRA_KEYS)
                         code_raw = _pick_first(row, CODE_KEYS)
-                        sku_raw = _pick_first(row, SKU_KEYS)
+                        category_raw = _pick_first(row, CATEGORY_KEYS)
                         expiry_control_raw = _pick_first(row, EXPIRY_CONTROL_KEYS)
                         shelf_life_days_raw = _pick_first(row, SHELF_LIFE_DAYS_KEYS)
 
@@ -353,7 +364,7 @@ class Command(BaseCommand):
                         base_uom = self.get_or_create_uom(base_uom_raw)
                         extra_val = _as_json_dict(extra_raw)
                         code_val = _norm_code(code_raw, "code")
-                        sku_val = _norm_code(sku_raw, "sku")
+                        category = self.get_category(category_raw)
 
                         if not name_val:
                             raise ValueError("name 不能为空")
@@ -393,22 +404,6 @@ class Command(BaseCommand):
                             code=code_val,
                         ).first()
 
-                        sku_conflict_qs = Product.all_objects.filter(
-                            owner=owner,
-                            sku=sku_val,
-                        )
-
-                        if existing:
-                            sku_conflict_qs = sku_conflict_qs.exclude(pk=existing.pk)
-
-                        sku_conflict = sku_conflict_qs.first()
-
-                        if sku_conflict:
-                            raise ValueError(
-                                f"SKU 冲突：同一货主下 sku={sku_val} "
-                                f"已被商品 code={sku_conflict.code}, name={sku_conflict.name} 使用"
-                            )
-
                         if gtin_val:
                             gtin_conflict_qs = Product.all_objects.filter(
                                 owner=owner,
@@ -437,12 +432,6 @@ class Command(BaseCommand):
                                 skipped += 1
                                 continue
 
-                            if existing.sku and existing.sku != sku_val:
-                                raise ValueError(
-                                    f"已有商品 code={code_val} 的 sku 是 {existing.sku}，"
-                                    f"Excel 中是 {sku_val}。当前模型禁止修改 sku，请新建商品或先处理旧商品。"
-                                )
-
                             if gtin_val and existing.gtin and existing.gtin != gtin_val:
                                 raise ValueError(
                                     f"已有商品 code={code_val} 的 gtin 是 {existing.gtin}，"
@@ -459,6 +448,7 @@ class Command(BaseCommand):
                             existing.name = name_val
                             existing.spec = spec_val
                             existing.base_uom = base_uom
+                            existing.category = category
                             existing.extra = extra_val
                             existing.expiry_control = expiry_control_val
                             existing.expiry_basis = expiry_basis_val
@@ -477,9 +467,10 @@ class Command(BaseCommand):
                                 name=name_val,
                                 spec=spec_val,
                                 base_uom=base_uom,
+                                category=category,
                                 extra=extra_val,
                                 code=code_val,
-                                sku=sku_val,
+                                sku="",
                                 expiry_control=expiry_control_val,
                                 expiry_basis=expiry_basis_val,
                                 shelf_life_days=shelf_life_days_val,

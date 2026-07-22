@@ -1,6 +1,6 @@
 # salesapp/models.py
-from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from allapp.baseinfo.models import Customer, Owner
@@ -234,6 +234,20 @@ class SaleProductConfig(BaseModel):
 
     def __str__(self):
         return f"{self.owner_id}/{self.product_id}"
+
+    def clean(self):
+        super().clean()
+        if not self.is_listed:
+            return
+        errors = {}
+        if self.product_id and self.owner_id != self.product.owner_id:
+            errors["owner"] = "上架配置货主必须等于商品货主"
+        if self.product_id and not self.product.category_id:
+            errors["product"] = "商品未分类，不能上架"
+        elif self.product_id and not self.product.category.has_active_path():
+            errors["product"] = "商品分类链存在停用分类，不能上架"
+        if errors:
+            raise ValidationError(errors)
 
 
 class SaleMiniCart(BaseModel):

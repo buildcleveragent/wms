@@ -31,7 +31,11 @@ def _client_ip(request):
     if request is None:
         return None
     forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    return (forwarded.split(",", 1)[0].strip() if forwarded else request.META.get("REMOTE_ADDR")) or None
+    return (
+        forwarded.split(",", 1)[0].strip()
+        if forwarded
+        else request.META.get("REMOTE_ADDR")
+    ) or None
 
 
 def record_audit_event(
@@ -47,6 +51,7 @@ def record_audit_event(
     before=None,
     after=None,
     metadata=None,
+    using=None,
 ) -> AuditEvent:
     actor = user or getattr(request, "user", None)
     if not getattr(actor, "is_authenticated", False):
@@ -78,10 +83,13 @@ def record_audit_event(
         "after": after or {},
         "metadata": event_metadata,
     }
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=_json_default).encode()
+    raw = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), default=_json_default
+    ).encode()
     key = settings.SECRET_KEY.encode()
     event_hash = hmac.new(key, raw, hashlib.sha256).hexdigest()
-    return AuditEvent.objects.create(
+    manager = AuditEvent.objects.using(using) if using else AuditEvent.objects
+    return manager.create(
         actor=actor,
         username=payload["username"],
         action=action,

@@ -1,0 +1,39 @@
+{% extends "admin/base_site.html" %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">首页</a>
+  &rsaquo; <a href="{% url 'admin:products_product_changelist' %}">商品</a>
+  &rsaquo; 分类批量补录
+</div>
+{% endblock %}
+
+{% block content %}
+  <div id="content-main">
+    <div class="module aligned">
+      <h2>第一步：下载未分类商品模板</h2>
+      <div class="form-row">
+        <p>模板仅包含当前账号有权管理的未分类商品，并附带有效分类编码下拉列表。</p>
+        <a class="button" href="{{ export_url }}">下载分类补录 Excel</a>
+      </div>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+      <div class="module aligned">
+        <h2>第二步：上传填写后的模板</h2>
+        {{ form.non_field_errors }}
+        <div class="form-row">
+          {{ form.file.errors }}
+          {{ form.file.label_tag }}
+          {{ form.file }}
+          {% if form.file.help_text %}<p class="help">{{ form.file.help_text }}</p>{% endif %}
+        </div>
+      </div>
+      <div class="submit-row">
+        <input type="submit" value="校验并导入" class="default">
+        <a class="button cancel-link" href="{% url 'admin:products_product_changelist' %}">返回商品列表</a>
+      </div>
+    </form>
+  </div>
+{% endblock %}

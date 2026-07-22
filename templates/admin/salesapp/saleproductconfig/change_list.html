@@ -1,0 +1,12 @@
+{% extends "admin/change_list.html" %}
+
+{% block search %}
+  {{ block.super }}
+  {% if bulk_owner_list_url %}
+    <div style="display:flex;justify-content:flex-end;margin:0 0 10px;">
+      <a class="button" href="{{ bulk_owner_list_url }}">
+        按货主批量上架
+      </a>
+    </div>
+  {% endif %}
+{% endblock %}

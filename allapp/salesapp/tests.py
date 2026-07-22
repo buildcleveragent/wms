@@ -4,6 +4,7 @@ from io import StringIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
@@ -640,11 +641,15 @@ class SaleMiniApiTests(TestCase):
             nickname="采购员",
         )
         self.uom = ProductUom.objects.create(code="EA-MINI", name="件")
+        self.category = ProductCategory.objects.create(
+            code="MINI-DEFAULT-CAT", name="默认大类"
+        )
         self.product = Product.objects.create(
             owner=self.owner,
             code="MP001",
             sku="MP001",
             name="小程序上架商品",
+            category=self.category,
             base_uom=self.uom,
             price=Decimal("12.50"),
             expiry_control=False,
@@ -656,6 +661,7 @@ class SaleMiniApiTests(TestCase):
             code="MP999",
             sku="MP999",
             name="未上架商品",
+            category=self.category,
             base_uom=self.uom,
             price=Decimal("99.00"),
             expiry_control=False,
@@ -786,6 +792,7 @@ class SaleMiniApiTests(TestCase):
             code="MP-X",
             sku="MP-X",
             name="跨商家商品",
+            category=self.category,
             base_uom=self.uom,
             price=Decimal("6.00"),
             expiry_control=False,
@@ -839,6 +846,7 @@ class SaleMiniApiTests(TestCase):
             code="MP-TRACK",
             sku="MP-TRACK",
             name="批次效期商品",
+            category=self.category,
             base_uom=self.uom,
             price=Decimal("18.00"),
             batch_control=True,
@@ -957,6 +965,7 @@ class SaleMiniApiTests(TestCase):
             code="MP002",
             sku="MP002",
             name="其他货主上架商品",
+            category=self.category,
             base_uom=self.uom,
             price=Decimal("22.00"),
             expiry_control=False,
@@ -1193,6 +1202,10 @@ class SaleMiniApiTests(TestCase):
         for row in home.data["categories"]:
             self.assertPublicTaxonomyPayloadHidesInternalFields(row)
         self.assertEqual(
+            {row["id"] for row in home.data["categories"]},
+            {category.id},
+        )
+        self.assertEqual(
             {row["id"] for row in home.data["hot_products"]},
             {self.product.id, other_product.id},
         )
@@ -1210,8 +1223,12 @@ class SaleMiniApiTests(TestCase):
         )
         for row in products.data["results"]:
             self.assertPublicProductPayloadHidesInternalFields(row)
-        self.assertEqual(categories.data[0]["id"], category.id)
-        self.assertPublicTaxonomyPayloadHidesInternalFields(categories.data[0])
+        category_rows = {row["id"]: row for row in categories.data}
+        self.assertEqual(category_rows[category.id]["product_count"], 2)
+        self.assertEqual(category_rows[self.category.id]["product_count"], 0)
+        self.assertPublicTaxonomyPayloadHidesInternalFields(
+            category_rows[category.id]
+        )
 
     def test_public_brands_only_return_listed_goods_and_respect_filters(self):
         category = ProductCategory.objects.create(
@@ -1267,6 +1284,73 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(
             {row["id"] for row in products.data["results"]},
             {self.product.id},
+        )
+
+    def test_public_category_tree_aggregates_subtrees_and_filters_descendants(self):
+        middle = ProductCategory.objects.create(
+            code="MINI-FRUIT", name="水果", parent=self.category, sort_order=1
+        )
+        small = ProductCategory.objects.create(
+            code="MINI-BERRY", name="莓果", parent=middle, sort_order=1
+        )
+        self.product.category = small
+        self.product.save(update_fields=["category", "updated_at"])
+        _owner, _customer, _buyer, other_product = self._create_other_owner_sale_binding()
+        other_product.category = middle
+        other_product.save(update_fields=["category", "updated_at"])
+        public_client = APIClient()
+
+        categories = public_client.get("/api/sale-mini/categories/")
+        root_products = public_client.get(
+            "/api/sale-mini/products/", {"category_id": self.category.id}
+        )
+        small_products = public_client.get(
+            "/api/sale-mini/products/", {"category_id": small.id}
+        )
+
+        self.assertEqual(categories.status_code, 200)
+        by_id = {row["id"]: row for row in categories.data}
+        self.assertEqual(by_id[self.category.id]["product_count"], 2)
+        self.assertEqual(by_id[middle.id]["product_count"], 2)
+        self.assertEqual(by_id[small.id]["product_count"], 1)
+        self.assertEqual(by_id[small.id]["level_name"], "小类")
+        self.assertEqual(by_id[small.id]["path"], "默认大类 > 水果 > 莓果")
+        self.assertTrue(by_id[self.category.id]["has_children"])
+        self.assertEqual(
+            {row["id"] for row in root_products.data["results"]},
+            {self.product.id, other_product.id},
+        )
+        self.assertEqual(
+            {row["id"] for row in small_products.data["results"]},
+            {self.product.id},
+        )
+
+    def test_listed_product_requires_an_active_category_path(self):
+        uncategorized = Product.objects.create(
+            owner=self.owner,
+            code="MP-NO-CAT",
+            name="未分类待治理商品",
+            base_uom=self.uom,
+            price=Decimal("5.00"),
+            expiry_control=False,
+            batch_control=False,
+            is_active=True,
+        )
+        config = SaleProductConfig(
+            owner=self.owner,
+            product=uncategorized,
+            is_listed=True,
+            sale_price=Decimal("5.00"),
+        )
+        with self.assertRaises(DjangoValidationError):
+            config.full_clean()
+
+        # Legacy/direct writes are still prevented from leaking through public APIs.
+        config.save()
+        response = APIClient().get("/api/sale-mini/products/")
+        self.assertNotIn(
+            uncategorized.id,
+            {row["id"] for row in response.data["results"]},
         )
 
     @patch("allapp.salesapp.salemini_api._wechat_code_to_session")
@@ -1977,6 +2061,7 @@ class SaleMiniApiTests(TestCase):
             code="MP-AUTO",
             sku="MP-AUTO",
             name="自动绑定商品",
+            category=self.category,
             base_uom=self.uom,
             price=Decimal("11.00"),
             expiry_control=False,

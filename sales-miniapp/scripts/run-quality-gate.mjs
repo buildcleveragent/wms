@@ -115,6 +115,24 @@ if (fs.existsSync(path.join(repoRoot, 'manage.py'))) {
     },
   )
   addStep(
+    'sale-mini admin owner bulk listing db tests',
+    pythonCommand,
+    [
+      '-m',
+      'pytest',
+      '-q',
+      '--reuse-db',
+      ...(fastDb ? ['--no-migrations'] : []),
+      '--disable-warnings',
+      'allapp/salesapp/test_admin_bulk_listing.py',
+    ],
+    {
+      cwd: repoRoot,
+      env: backendEnv,
+      skip: !runDb,
+    },
+  )
+  addStep(
     'sale-mini data accuracy validation',
     pythonCommand,
     [

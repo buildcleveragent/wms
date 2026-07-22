@@ -12,7 +12,7 @@ from django.db import IntegrityError, transaction
 from openpyxl import load_workbook
 
 from allapp.baseinfo.models import Owner
-from allapp.products.models import Product, ProductUom
+from allapp.products.models import Product, ProductCategory, ProductUom
 
 
 def _norm_str(x: Any) -> str:
@@ -181,7 +181,7 @@ class Command(BaseCommand):
         SPEC_KEYS = ("规格", "spec", "规格型号")
         UOM_KEYS = ("单位", "基本单位", "base_uom", "基础单位")
         CODE_KEYS = ("code", "商品编号", "商品编码")
-        SKU_KEYS = ("sku", "SKU", "SKU编码", "sku编码")
+        CATEGORY_KEYS = ("分类编码", "商品分类", "category", "category_code")
         PRICE_KEYS = ("价格", "单价", "售价", "price")
 
         # 效期相关（可选列；如果都没提供，则自动关闭 expiry_control）
@@ -194,6 +194,7 @@ class Command(BaseCommand):
 
         owner_cache: Dict[str, Owner] = {}
         uom_cache: Dict[str, ProductUom] = {}
+        category_cache: Dict[str, ProductCategory] = {}
 
         def get_owner(owner_val: str) -> Optional[Owner]:
             key = owner_val.strip()
@@ -253,6 +254,20 @@ class Command(BaseCommand):
             uom_cache[key] = u
             return u
 
+        def get_category(category_val: str) -> Optional[ProductCategory]:
+            key = category_val.strip().upper()
+            if not key:
+                return None
+            if key not in category_cache:
+                category = ProductCategory.objects.filter(
+                    code__iexact=key, is_active=True
+                ).first()
+                if category and category.has_active_path():
+                    category_cache[key] = category
+                else:
+                    return None
+            return category_cache[key]
+
         created = 0
         updated = 0
         restored = 0
@@ -266,14 +281,14 @@ class Command(BaseCommand):
                 spec_val = _norm_str(_pick_first(row, SPEC_KEYS)) or None
                 uom_val = _norm_str(_pick_first(row, UOM_KEYS))
                 code_val = _norm_str(_pick_first(row, CODE_KEYS))
-                sku_val = _norm_str(_pick_first(row, SKU_KEYS)) or code_val
+                category_val = _norm_str(_pick_first(row, CATEGORY_KEYS))
 
                 price_raw = _pick_first(row, PRICE_KEYS)
                 price_val = _as_decimal(price_raw, default_price)
 
-                if not owner_val or not name_val or not uom_val or not code_val:
+                if not owner_val or not name_val or not uom_val or not code_val or not category_val:
                     raise ValueError(
-                        f"必填缺失：货主/商品名称/单位/code 必须有值（货主={owner_val} 名称={name_val} 单位={uom_val} code={code_val}）"
+                        "必填缺失：货主/商品名称/单位/code/分类编码必须有值"
                     )
 
                 owner = get_owner(owner_val)
@@ -283,6 +298,9 @@ class Command(BaseCommand):
                 base_uom = get_uom(uom_val)
                 if not base_uom:
                     raise ValueError(f"找不到单位：{uom_val}（dry-run 不创建单位；或请先建 ProductUom）")
+                category = get_category(category_val)
+                if not category:
+                    raise ValueError(f"找不到分类链全部启用的分类：{category_val}")
 
                 # ====== 关键：效期字段自动决策 ======
                 expiry_control_in = _as_bool(_pick_first(row, EXPIRY_CONTROL_KEYS))
@@ -328,15 +346,6 @@ class Command(BaseCommand):
                 # 先用 all_objects 防软删撞唯一
                 existing = Product.all_objects.filter(owner=owner, code=code_val).first()
 
-                # sku 冲突检查（同货主下唯一）
-                sku_conflict = (
-                    Product.all_objects.filter(owner=owner, sku=sku_val)
-                    .exclude(code=code_val)
-                    .first()
-                )
-                if sku_conflict and not existing:
-                    raise ValueError(f"SKU 冲突：同货主下 sku={sku_val} 已被 code={sku_conflict.code} 使用")
-
                 with transaction.atomic():
                     if existing:
                         if getattr(existing, "is_deleted", False):
@@ -350,6 +359,7 @@ class Command(BaseCommand):
                             existing.name = name_val
                             existing.spec = spec_val
                             existing.base_uom = base_uom
+                            existing.category = category
                             existing.price = price_val
 
                             # ✅ 如果 Excel 没提供效期信息，则不覆盖现有；如果提供了（或明确给了保质期管理），才更新
@@ -381,8 +391,9 @@ class Command(BaseCommand):
                             code=code_val,
                             name=name_val,
                             spec=spec_val,
-                            sku=sku_val,
+                            sku="",
                             base_uom=base_uom,
+                            category=category,
                             price=price_val,
 
                             # ✅ 关键：无保质期商品自动关闭
