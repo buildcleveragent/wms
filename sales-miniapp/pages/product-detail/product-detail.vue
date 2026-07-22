@@ -4,10 +4,7 @@
     <view v-else class="hero-img placeholder">货</view>
 
     <view class="info">
-      <view class="title-row">
-        <view class="name">{{ product.name }}</view>
-        <button class="favorite" @click="toggleFavorite">{{ favoriteText }}</button>
-      </view>
+      <view class="name">{{ product.name }}</view>
       <view v-if="productSubtitle" class="meta">{{ productSubtitle }}</view>
       <view class="price-row">
         <PriceText :value="product.price" />
@@ -22,11 +19,11 @@
         <view class="cell" @click="openUomPicker">
           <text>单位</text>
           <picker v-if="hasUomOptions" :range="product.uom_options" range-key="name" :value="uomIndex" @change="changeUom">
-            <view>{{ product.order_uom }}</view>
+            <view>{{ product.order_uom_name }}</view>
           </picker>
-          <text v-else>{{ product.order_uom }}</text>
+          <text v-else>{{ product.order_uom_name }}</text>
         </view>
-        <view class="cell">
+        <view v-if="rules.enabled" class="cell">
           <text>购买</text>
           <text>起购 {{ rules.min_order_qty }}，按 {{ rules.multiple_qty }} 递增</text>
         </view>
@@ -36,7 +33,7 @@
         <view class="section-title">商品详情</view>
         <view class="desc-text">{{ product.description }}</view>
       </view>
-      <view class="desc">
+      <view v-if="serviceText" class="desc">
         <view class="section-title">规格与服务</view>
         <view class="desc-text">{{ serviceText }}</view>
       </view>
@@ -59,9 +56,24 @@
     </view>
 
     <view class="bottom">
-      <QuantityStepper v-model="qty" :min="Number(rules.min_order_qty || 1)" :step="Number(rules.multiple_qty || 1)" />
-      <button class="ghost" :disabled="actionDisabled" @click="addToCart">加入购物车</button>
-      <button class="buy" :disabled="actionDisabled" @click="buyNow">立即购买</button>
+      <view class="purchase-panel">
+        <view class="purchase-row">
+          <text class="purchase-label">数量</text>
+          <QuantityStepper v-model="qty" :min="purchaseMin" :step="purchaseStep" />
+        </view>
+        <view class="purchase-row total-row">
+          <text class="purchase-label">商品合计</text>
+          <text class="total-price">¥{{ lineTotal }}</text>
+        </view>
+      </view>
+      <view class="bottom-actions">
+        <button class="favorite-action" @click="toggleFavorite">
+          <text class="heart">{{ isFavorite ? '♥' : '♡' }}</text>
+          <text>{{ favoriteText }}</text>
+        </button>
+        <button class="ghost" :disabled="actionDisabled" @click="addToCart">加入购物车</button>
+        <button class="buy" :disabled="actionDisabled" @click="buyNow">立即购买</button>
+      </view>
     </view>
   </view>
 </template>
@@ -86,11 +98,12 @@ const qty = ref(1)
 const uomIndex = ref(0)
 
 const rules = computed(() => product.value.rules || {})
+const purchaseMin = computed(() => (rules.value.enabled ? Number(rules.value.min_order_qty || 1) : 1))
+const purchaseStep = computed(() => (rules.value.enabled ? Number(rules.value.multiple_qty || 1) : 1))
+const lineTotal = computed(() => money(Number(product.value.price || 0) * Number(qty.value || 0)))
 const productSubtitle = computed(() => {
   const current = product.value || {}
   const parts = [current.spec, current.brand_name || current.brand].filter(Boolean)
-  const uom = current.order_uom || current.base_uom
-  if (!parts.length && uom) parts.push(uom)
   return parts.join(' · ')
 })
 const productStockLabel = computed(() => {
@@ -102,9 +115,10 @@ const serviceText = computed(() => {
     product.value.pack_requirement,
     product.value.pack_note,
   ].filter(Boolean)
-  return parts.length ? parts.join(' ') : '支持配送或自提，具体以结算页为准。'
+  return parts.join(' ')
 })
 const hasUomOptions = computed(() => Boolean(product.value.uom_options && product.value.uom_options.length))
+const isFavorite = computed(() => browse.isFavorite(product.value))
 const favoriteText = computed(() => (browse.isFavorite(product.value) ? '已收藏' : '收藏'))
 const isOutOfStock = computed(() => product.value.stock && product.value.stock.status === 'OUT')
 const actionDisabled = computed(() => isOutOfStock.value)
@@ -113,7 +127,7 @@ async function load(id, params = {}) {
   const data = await productService.detail(id, params)
   product.value = normalize(data)
   browse.addRecent(product.value)
-  qty.value = Number((product.value.rules && product.value.rules.min_order_qty) || 1)
+  qty.value = purchaseMin.value
   await loadRelatedProducts(product.value.id)
 }
 
@@ -146,6 +160,7 @@ function normalize(data) {
   return {
     ...data,
     order_uom: selected.code || data.order_uom,
+    order_uom_name: selected.name || data.order_uom_name || data.order_uom,
     qty_in_base: selected.qty_in_base || data.qty_in_base,
     price: selected.unit_price || data.price,
   }
@@ -157,6 +172,7 @@ function changeUom(event) {
   if (!selected) return
   uomIndex.value = index
   product.value.order_uom = selected.code
+  product.value.order_uom_name = selected.name || selected.code
   product.value.qty_in_base = selected.qty_in_base
   product.value.price = selected.unit_price || product.value.price
 }
@@ -194,7 +210,8 @@ async function addRelatedProduct(item) {
     return
   }
   try {
-    await cart.addProduct(item, Number((item.rules && item.rules.min_order_qty) || 1))
+    const itemRules = item.rules || {}
+    await cart.addProduct(item, itemRules.enabled ? Number(itemRules.min_order_qty || 1) : 1)
     uni.showToast({ title: '已加入购物车', icon: 'none' })
   } catch (err) {
     uni.showToast({ title: err.message || '加入失败', icon: 'none' })
@@ -239,7 +256,7 @@ onLoad((query) => {
 .detail-page {
   min-height: 100vh;
   background: #f4f6f8;
-  padding-bottom: 136rpx;
+  padding-bottom: 310rpx;
 }
 
 .hero-img {
@@ -266,33 +283,6 @@ onLoad((query) => {
   font-size: 36rpx;
   font-weight: 850;
   line-height: 1.35;
-}
-
-.title-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 18rpx;
-}
-
-.title-row .name {
-  flex: 1;
-}
-
-.favorite {
-  min-width: 116rpx;
-  height: 60rpx;
-  line-height: 60rpx;
-  padding: 0 16rpx;
-  border: 1rpx solid #b6d8d2;
-  border-radius: 8rpx;
-  background: #ecfdf5;
-  color: #0f766e;
-  font-size: 24rpx;
-  font-weight: 750;
-}
-
-.favorite::after {
-  border: 0;
 }
 
 .meta {
@@ -394,18 +384,72 @@ onLoad((query) => {
   left: 0;
   right: 0;
   bottom: 0;
-  min-height: 112rpx;
-  padding: 18rpx 24rpx;
+  padding: 16rpx 24rpx 20rpx;
   display: flex;
-  align-items: center;
-  gap: 12rpx;
+  flex-direction: column;
+  gap: 14rpx;
   border-top: 1rpx solid #dfe6ef;
   background: #fff;
 }
 
+.purchase-panel {
+  width: 100%;
+}
+
+.purchase-row {
+  min-height: 68rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.total-row {
+  padding-top: 8rpx;
+  border-top: 1rpx solid #eef2f7;
+}
+
+.purchase-label {
+  color: #475569;
+  font-size: 25rpx;
+}
+
+.total-price {
+  color: #b42318;
+  font-size: 32rpx;
+  font-weight: 850;
+}
+
+.bottom-actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 104rpx minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12rpx;
+}
+
+.favorite-action {
+  height: 76rpx;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8rpx;
+  background: #fff;
+  color: #475569;
+  font-size: 20rpx;
+  line-height: 1.15;
+}
+
+.heart {
+  color: #b42318;
+  font-size: 32rpx;
+  line-height: 1;
+}
+
 .ghost,
 .buy {
-  flex: 1;
   height: 76rpx;
   line-height: 76rpx;
   padding: 0;
@@ -426,7 +470,8 @@ onLoad((query) => {
 }
 
 .ghost::after,
-.buy::after {
+.buy::after,
+.favorite-action::after {
   border: 0;
 }
 

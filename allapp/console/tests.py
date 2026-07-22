@@ -252,3 +252,42 @@ class SaleMiniProductListingConsoleTests(TestCase):
             InventoryDetail.objects.get(pk=self.inventory.pk).available_qty,
             before_available,
         )
+
+    def test_bulk_quantity_rules_require_explicit_enable_switch(self):
+        config = SaleProductConfig.objects.create(
+            owner=self.owner,
+            product=self.product,
+            sale_price=Decimal("12.5000"),
+            min_order_qty=Decimal("2.000"),
+            multiple_qty=Decimal("3.000"),
+        )
+
+        self.client.post(
+            self.url,
+            {
+                "bulk_action": "set_rules",
+                "product_ids": [str(self.product.id)],
+                "min_order_qty": "2.000",
+                "multiple_qty": "3.000",
+                "max_order_qty": "",
+            },
+        )
+        config.refresh_from_db()
+        self.assertFalse(config.enable_qty_rules)
+
+        self.client.post(
+            self.url,
+            {
+                "bulk_action": "set_rules",
+                "product_ids": [str(self.product.id)],
+                "enable_qty_rules": "1",
+                "min_order_qty": "2.000",
+                "multiple_qty": "3.000",
+                "max_order_qty": "20.000",
+            },
+        )
+        config.refresh_from_db()
+        self.assertTrue(config.enable_qty_rules)
+        self.assertEqual(config.min_order_qty, Decimal("2.000"))
+        self.assertEqual(config.multiple_qty, Decimal("3.000"))
+        self.assertEqual(config.max_order_qty, Decimal("20.000"))

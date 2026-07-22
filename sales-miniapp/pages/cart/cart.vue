@@ -18,14 +18,19 @@
                 <view class="name">{{ item.name }}</view>
                 <button class="remove" @click="remove(item)">删</button>
               </view>
-              <view v-if="item.spec || item.order_uom" class="meta">{{ [item.spec, item.order_uom].filter(Boolean).join(' · ') }}</view>
+              <view v-if="item.spec || item.order_uom_name" class="meta">{{ [item.spec, item.order_uom_name].filter(Boolean).join(' · ') }}</view>
               <view v-if="item.quote_message" class="warn">{{ item.quote_message }}</view>
               <view class="row">
                 <view>
-                  <view class="price">¥{{ money(item.unit_price) }} / {{ item.order_uom }}</view>
-                  <view class="base">{{ item.qty }} {{ item.order_uom }}</view>
+                  <view class="price">¥{{ money(item.unit_price) }} / {{ item.order_uom_name }}</view>
+                  <view class="base">{{ item.qty }} {{ item.order_uom_name }}</view>
                 </view>
-                <QuantityStepper :model-value="item.qty" :min="0" @change="changeQty(item, $event)" />
+                <QuantityStepper
+                  :model-value="item.qty"
+                  :min="quantityMin(item)"
+                  :step="quantityStep(item)"
+                  @change="changeQty(item, $event)"
+                />
               </view>
             </view>
           </view>
@@ -62,6 +67,14 @@ import { money } from '../../utils/money'
 const cart = useCartStore()
 const loading = ref(false)
 const groups = computed(() => cart.groups || [])
+
+function quantityMin(item) {
+  return item.rules && item.rules.enabled ? Number(item.rules.min_order_qty || 1) : 1
+}
+
+function quantityStep(item) {
+  return item.rules && item.rules.enabled ? Number(item.rules.multiple_qty || 1) : 1
+}
 
 async function refresh() {
   if (loading.value) return

@@ -52,7 +52,13 @@ const stockClass = computed(() => {
   return 'stock-ok'
 })
 const addText = computed(() => (isOutOfStock.value ? '缺货' : '加购'))
-const unitText = computed(() => props.product.order_uom || props.product.base_uom || '')
+const unitText = computed(() => (
+  props.product.order_uom_name
+  || props.product.order_uom
+  || props.product.base_uom_name
+  || props.product.base_uom
+  || ''
+))
 const subtitle = computed(() => {
   const product = props.product || {}
   const parts = [product.spec, product.brand_name || product.brand].filter(Boolean)

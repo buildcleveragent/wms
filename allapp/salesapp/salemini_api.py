@@ -27,7 +27,7 @@ from allapp.baseinfo.models import Customer
 from allapp.inventory.models import InventoryDetail
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.outbound.services import unallocate_for_order
-from allapp.products.models import Brand, Product, ProductCategory
+from allapp.products.models import Brand, ProductCategory
 
 from .mobile_api import (
     MONEY_QUANT,
@@ -707,35 +707,15 @@ def _bound_wechat_buyer(data, session_data):
     return buyer
 
 
-def _saleable_inventory_detail_filter():
-    batch_ready = Q(product__batch_control=False) | (
-        Q(product__batch_control=True) & ~Q(batch_no="")
-    )
-    expiry_ready = Q(product__expiry_control=False) | (
-        Q(product__expiry_control=True)
-        & Q(expiry_date__isnull=False)
-        & (
-            Q(product__expiry_basis=Product.ExpiryBasis.INBOUND)
-            | (
-                Q(product__expiry_basis=Product.ExpiryBasis.MFG)
-                & Q(production_date__isnull=False)
-            )
-        )
-    )
-    serial_ready = Q(product__serial_control=False) | (
-        Q(product__serial_control=True) & Q(serial_no_norm__isnull=False)
-    )
-    return batch_ready & expiry_ready & serial_ready
-
-
 def _available_map(owner, product_ids, warehouse=None):
+    # Tracking gaps remain reconciliation warnings; they do not reduce mall stock.
     if not product_ids:
         return {}
     qs = InventoryDetail.objects.filter(
         owner=owner,
         product_id__in=product_ids,
         is_active=True,
-    ).filter(_saleable_inventory_detail_filter())
+    )
     if warehouse:
         qs = qs.filter(warehouse=warehouse)
     rows = qs.values("product_id").annotate(available_qty=Sum("available_qty"))
@@ -829,7 +809,6 @@ def _available_map_for_configs(configs):
             product_id__in=product_ids,
             is_active=True,
         )
-        .filter(_saleable_inventory_detail_filter())
         .values("owner_id", "product_id")
         .annotate(available_qty=Sum("available_qty"))
     )
@@ -848,6 +827,7 @@ def _base_price(owner, customer, product, order_date, channel, config):
 def _stock_payload(config, product, available_qty):
     available_qty = Decimal(available_qty or 0)
     base_code = getattr(product.base_uom, "code", "")
+    base_name = getattr(product.base_uom, "name", "") or base_code
     if available_qty <= 0:
         status_code = "OUT"
         status_text = "缺货"
@@ -859,7 +839,7 @@ def _stock_payload(config, product, available_qty):
         status_text = "有货"
 
     if config.stock_display == SaleProductConfig.StockDisplay.EXACT:
-        display = f"{_str(available_qty, QTY_QUANT)} {base_code}"
+        display = f"{_str(available_qty, QTY_QUANT)} {base_name}"
     elif config.stock_display == SaleProductConfig.StockDisplay.HIDDEN:
         display = ""
     else:
@@ -871,6 +851,7 @@ def _stock_payload(config, product, available_qty):
         "display": display,
         "available_qty": _str(available_qty, QTY_QUANT),
         "base_uom": base_code,
+        "base_uom_name": base_name,
     }
 
 
@@ -887,7 +868,24 @@ def _package_for_uom(product, order_uom):
     return None
 
 
+def _uom_name(product, uom_code):
+    uom_code = (uom_code or "").strip()
+    base_uom = getattr(product, "base_uom", None)
+    if uom_code in {
+        (getattr(base_uom, "code", "") or "").strip(),
+        (getattr(base_uom, "name", "") or "").strip(),
+    }:
+        return getattr(base_uom, "name", "") or uom_code
+    package = _package_for_uom(product, uom_code)
+    if package:
+        uom = getattr(package, "uom", None)
+        return getattr(uom, "name", "") or getattr(uom, "code", "") or uom_code
+    return uom_code
+
+
 def _effective_rules(product, config, policy, qty_in_base):
+    if not config.enable_qty_rules:
+        return Decimal("1"), Decimal("1")
     min_qty = max(
         Decimal(config.min_order_qty or 0),
         Decimal(policy.get("min_order_qty") or 0),
@@ -908,10 +906,10 @@ def _effective_rules(product, config, policy, qty_in_base):
     return min_qty, multiple_qty
 
 
-def _is_multiple(qty, multiple):
+def _is_multiple(qty, multiple, origin=Decimal("0")):
     if not multiple:
         return True
-    quotient = qty / multiple
+    quotient = (qty - origin) / multiple
     return quotient == quotient.to_integral_value()
 
 
@@ -953,6 +951,7 @@ def _product_payload(
             _str(config.market_price, PRICE_QUANT) if config.market_price else ""
         ),
         "order_uom": order_uom,
+        "order_uom_name": _uom_name(product, order_uom),
         "uom_options": uom_options,
         "stock": _stock_payload(config, product, available_qty),
         "badges": {
@@ -961,6 +960,7 @@ def _product_payload(
             "new": config.is_new,
         },
         "rules": {
+            "enabled": config.enable_qty_rules,
             "min_order_qty": _str(min_order_qty, QTY_QUANT),
             "multiple_qty": _str(multiple_qty, QTY_QUANT),
             "max_order_qty": (
@@ -974,7 +974,11 @@ def _product_payload(
         payload.update(
             {
                 "description": product.description or "",
-                "pack_requirement": product.get_pack_requirement_display(),
+                "pack_requirement": (
+                    product.get_pack_requirement_display()
+                    if product.pack_requirement != "NONE"
+                    else ""
+                ),
                 "pack_note": product.pack_note or "",
             }
         )
@@ -996,10 +1000,12 @@ def _line_quote_payload(
         "product_spec": product.spec or "",
         "image_url": "",
         "order_uom": order_uom,
+        "order_uom_name": _uom_name(product, order_uom),
         "qty": _str(qty, QTY_QUANT),
         "qty_in_base": _str(qty_in_base, QTY_QUANT),
         "base_qty": _str(base_qty, QTY_QUANT),
         "base_uom": getattr(product.base_uom, "code", ""),
+        "base_uom_name": getattr(product.base_uom, "name", ""),
         "unit_price": _str(unit_price, PRICE_QUANT),
         "base_unit_price": _str(base_price, PRICE_QUANT),
         "line_amount": _str(_money(unit_price * qty), MONEY_QUANT),
@@ -1072,7 +1078,14 @@ def _build_order_preview(
 
         try:
             _validate_order_uom(product, order_uom)
-            validate_order_line_rules(owner, customer.id, product, order_uom, qty)
+            validate_order_line_rules(
+                owner,
+                customer.id,
+                product,
+                order_uom,
+                qty,
+                enforce_quantity_rules=False,
+            )
         except (OrderRuleError, ValidationError) as exc:
             line_ok = False
             message = _error_message(exc)
@@ -1080,7 +1093,7 @@ def _build_order_preview(
         qty_in_base = _qty_in_base_for_uom(product, order_uom) or Decimal("1")
         min_qty, multiple_qty = _effective_rules(product, config, policy, qty_in_base)
         product_name = _buyer_product_name(product)
-        if qty < min_qty:
+        if config.enable_qty_rules and qty < min_qty:
             line_ok = False
             message = (
                 f"{product_name} 起订量为 {_str(min_qty, QTY_QUANT)} {order_uom}。"
@@ -1088,7 +1101,7 @@ def _build_order_preview(
         if config.max_order_qty and qty > config.max_order_qty:
             line_ok = False
             message = f"{product_name} 超过限购数量 {_str(config.max_order_qty, QTY_QUANT)} {order_uom}。"
-        if not _is_multiple(qty, multiple_qty):
+        if config.enable_qty_rules and not _is_multiple(qty, multiple_qty, min_qty):
             line_ok = False
             message = f"{product_name} 购买数量需按 {_str(multiple_qty, QTY_QUANT)} {order_uom} 递增。"
         if (
@@ -1126,6 +1139,11 @@ def _build_order_preview(
         payload["ok"] = line_ok
         payload["message"] = message
         payload["image_url"] = _image_url(request, product)
+        payload["rules"] = {
+            "enabled": config.enable_qty_rules,
+            "min_order_qty": _str(min_qty, QTY_QUANT),
+            "multiple_qty": _str(multiple_qty, QTY_QUANT),
+        }
         preview_lines.append(payload)
         contexts.append(
             {
@@ -1586,10 +1604,12 @@ def _cart_invalid_line(request, item, message):
         "product_spec": product.spec or "",
         "image_url": _image_url(request, product),
         "order_uom": item.order_uom,
+        "order_uom_name": _uom_name(product, item.order_uom),
         "qty": _str(qty, QTY_QUANT),
         "qty_in_base": _str(qty_in_base, QTY_QUANT),
         "base_qty": _str(base_qty, QTY_QUANT),
         "base_uom": getattr(product.base_uom, "code", ""),
+        "base_uom_name": getattr(product.base_uom, "name", ""),
         "unit_price": _str(Decimal("0"), PRICE_QUANT),
         "base_unit_price": _str(Decimal("0"), PRICE_QUANT),
         "line_amount": _str(Decimal("0"), MONEY_QUANT),
@@ -1997,10 +2017,12 @@ def _order_line_payload(request, line, config_id=None):
     product = line.product
     if line.aux_uom_id:
         order_uom = getattr(line.aux_uom.uom, "code", "")
+        order_uom_name = getattr(line.aux_uom.uom, "name", "") or order_uom
         qty = Decimal(line.aux_qty or 0)
         unit_price = Decimal(line.aux_price or 0)
     else:
         order_uom = getattr(product.base_uom, "code", "")
+        order_uom_name = getattr(product.base_uom, "name", "") or order_uom
         qty = Decimal(line.base_qty or 0)
         unit_price = Decimal(line.base_price or 0)
     return {
@@ -2013,9 +2035,11 @@ def _order_line_payload(request, line, config_id=None):
         "product_spec": product.spec or "",
         "image_url": _image_url(request, product),
         "order_uom": order_uom,
+        "order_uom_name": order_uom_name,
         "qty": _str(qty, QTY_QUANT),
         "base_qty": _str(line.base_qty, QTY_QUANT),
         "base_uom": getattr(product.base_uom, "code", ""),
+        "base_uom_name": getattr(product.base_uom, "name", ""),
         "unit_price": _str(unit_price, PRICE_QUANT),
         "base_unit_price": _str(line.base_price, PRICE_QUANT),
         "line_amount": _str(line.final_line_amount, MONEY_QUANT),

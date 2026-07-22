@@ -90,13 +90,16 @@
         {{ form.stock_display }}
         {% if form.stock_display.errors %}<div class="bulk-owner-errors">{{ form.stock_display.errors }}</div>{% endif %}
       </div>
-      <div></div>
       <div class="bulk-owner-field">
+        <label>{{ form.enable_qty_rules }} {{ form.enable_qty_rules.label }}</label>
+        {% if form.enable_qty_rules.errors %}<div class="bulk-owner-errors">{{ form.enable_qty_rules.errors }}</div>{% endif %}
+      </div>
+      <div class="bulk-owner-field quantity-rule-field">
         {{ form.min_order_qty.label_tag }}
         {{ form.min_order_qty }}
         {% if form.min_order_qty.errors %}<div class="bulk-owner-errors">{{ form.min_order_qty.errors }}</div>{% endif %}
       </div>
-      <div class="bulk-owner-field">
+      <div class="bulk-owner-field quantity-rule-field">
         {{ form.multiple_qty.label_tag }}
         {{ form.multiple_qty }}
         {% if form.multiple_qty.errors %}<div class="bulk-owner-errors">{{ form.multiple_qty.errors }}</div>{% endif %}
@@ -121,4 +124,16 @@
     </div>
   </form>
 </div>
+<script>
+  (function () {
+    const toggle = document.getElementById("id_enable_qty_rules");
+    const fields = document.querySelectorAll(".quantity-rule-field");
+    if (!toggle) return;
+    const syncVisibility = function () {
+      fields.forEach(function (field) { field.hidden = !toggle.checked; });
+    };
+    toggle.addEventListener("change", syncVisibility);
+    syncVisibility();
+  })();
+</script>
 {% endblock %}

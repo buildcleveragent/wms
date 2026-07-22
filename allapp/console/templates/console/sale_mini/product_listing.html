@@ -165,8 +165,11 @@
           {% endfor %}
         </select>
       </div>
-      <div><label>起购</label><input name="min_order_qty" placeholder="1"></div>
-      <div><label>倍数</label><input name="multiple_qty" placeholder="1"></div>
+      <div>
+        <label><input id="enable-qty-rules" type="checkbox" name="enable_qty_rules" value="1"> 启用起购及递增限制</label>
+      </div>
+      <div class="quantity-rule-field"><label>起购</label><input name="min_order_qty" placeholder="1"></div>
+      <div class="quantity-rule-field"><label>递增</label><input name="multiple_qty" placeholder="1"></div>
       <div><label>最大量</label><input name="max_order_qty" placeholder="可空"></div>
       <div><label>排序</label><input name="sort_order" placeholder="0"></div>
     </div>
@@ -238,7 +241,11 @@
             </td>
             <td>
               {% if row.config %}
-                起购 {{ row.config.min_order_qty }} / 倍数 {{ row.config.multiple_qty }}
+                {% if row.config.enable_qty_rules %}
+                  起购 {{ row.config.min_order_qty }} / 递增 {{ row.config.multiple_qty }}
+                {% else %}
+                  起购及递增不限制
+                {% endif %}
                 {% if row.config.max_order_qty %}<br>最大 {{ row.config.max_order_qty }}{% endif %}
               {% else %}
                 -
@@ -266,6 +273,18 @@
     </table>
   </div>
 </form>
+<script>
+  (function () {
+    const toggle = document.getElementById("enable-qty-rules");
+    const fields = document.querySelectorAll(".quantity-rule-field");
+    if (!toggle) return;
+    const syncVisibility = function () {
+      fields.forEach(function (field) { field.hidden = !toggle.checked; });
+    };
+    toggle.addEventListener("change", syncVisibility);
+    syncVisibility();
+  })();
+</script>
 
 <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0;">
   <div style="color:var(--muted);">第 {{ page_obj.number }} / {{ paginator.num_pages }} 页，共 {{ paginator.count }} 条</div>

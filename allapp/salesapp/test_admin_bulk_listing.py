@@ -116,6 +116,149 @@ class SaleProductConfigAdminBulkOwnerTests(TestCase):
         self.assertContains(response, "按货主批量上架")
         self.assertContains(response, self.bulk_url)
 
+    def test_sale_product_config_admin_uses_chinese_names_and_field_labels(self):
+        config = SaleProductConfig.objects.create(
+            owner=self.owner,
+            product=self.product_a,
+            sale_price=Decimal("10.0000"),
+            is_listed=True,
+            min_order_qty=Decimal("1.000"),
+            multiple_qty=Decimal("1.000"),
+        )
+
+        response = self.client.get(
+            reverse("admin:salesapp_saleproductconfig_change", args=[config.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "admin/js/sale_product_config.js")
+        hidden_fields = {
+            "is_deleted",
+            "deleted_at",
+            "deleted_by",
+            "created_by",
+            "updated_by",
+            "is_active",
+        }
+        self.assertTrue(
+            hidden_fields.isdisjoint(response.context["adminform"].form.fields)
+        )
+        form_fields = response.context["adminform"].form.fields
+        self.assertEqual(list(form_fields)[-1], "remark")
+        self.assertEqual(form_fields["owner"].widget.widget.__class__.__name__, "Select")
+        self.assertEqual(
+            form_fields["product"].widget.widget.__class__.__name__,
+            "AutocompleteSelect",
+        )
+        for text in (
+            "商城销售管理",
+            "修改 商城商品配置",
+            "小程序用户",
+            "小程序收货地址",
+            "商城轮播图",
+            "商城商品配置",
+            "商城购物车",
+            "商城购物车商品",
+            "商城订单映射",
+            "商城优惠券模板",
+            "商城优惠券",
+            "商城订单调整",
+            "商城积分流水",
+            "商城分销记录",
+            "商城支付单",
+            "商城退款单",
+            "商城售后申请",
+            "商城支付回调事件",
+            "货主:",
+            "商品:",
+            "商城售价:",
+            "划线价:",
+            "已上架",
+            "推荐商品",
+            "热销商品",
+            "新品",
+            "库存展示方式:",
+            "启用起购及递增限制",
+            "起购数量:",
+            "最大购买量:",
+            "购买递增量:",
+            "排序:",
+        ):
+            self.assertContains(response, text)
+
+    def test_sale_product_config_admin_stamps_audit_users_on_save(self):
+        add_url = reverse("admin:salesapp_saleproductconfig_add")
+        response = self.client.post(
+            add_url,
+            {
+                "owner": str(self.owner.pk),
+                "product": str(self.product_a.pk),
+                "sale_price": "10.0000",
+                "market_price": "",
+                "is_listed": "on",
+                "stock_display": SaleProductConfig.StockDisplay.STATUS,
+                "min_order_qty": "1.000",
+                "max_order_qty": "",
+                "multiple_qty": "1.000",
+                "sort_order": "0",
+                "remark": "后台新增测试",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        config = SaleProductConfig.objects.get(
+            owner=self.owner,
+            product=self.product_a,
+        )
+        self.assertEqual(config.created_by, self.user)
+        self.assertEqual(config.updated_by, self.user)
+        self.assertTrue(config.is_active)
+        self.assertFalse(config.is_deleted)
+        self.assertFalse(config.enable_qty_rules)
+
+    def test_sale_product_config_admin_can_enable_quantity_rules(self):
+        response = self.client.post(
+            reverse("admin:salesapp_saleproductconfig_add"),
+            {
+                "owner": str(self.owner.pk),
+                "product": str(self.product_a.pk),
+                "sale_price": "10.0000",
+                "market_price": "",
+                "is_listed": "on",
+                "stock_display": SaleProductConfig.StockDisplay.STATUS,
+                "enable_qty_rules": "on",
+                "min_order_qty": "2.000",
+                "max_order_qty": "",
+                "multiple_qty": "3.000",
+                "sort_order": "0",
+                "remark": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        config = SaleProductConfig.objects.get(
+            owner=self.owner,
+            product=self.product_a,
+        )
+        self.assertTrue(config.enable_qty_rules)
+        self.assertEqual(config.min_order_qty, Decimal("2.000"))
+        self.assertEqual(config.multiple_qty, Decimal("3.000"))
+
+    def test_product_autocomplete_searches_in_current_admin_page(self):
+        response = self.client.get(
+            reverse("admin:autocomplete"),
+            {
+                "app_label": "salesapp",
+                "model_name": "saleproductconfig",
+                "field_name": "product",
+                "term": "ABULK-001",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        result_ids = {item["id"] for item in response.json()["results"]}
+        self.assertIn(str(self.product_a.pk), result_ids)
+
     def test_owner_bulk_listing_creates_and_lists_valid_products_only(self):
         before_available = InventoryDetail.objects.get(pk=self.inventory.pk).available_qty
 

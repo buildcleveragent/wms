@@ -20,16 +20,19 @@ function itemFromServer(line) {
     spec: line.product_spec,
     image_url: line.image_url,
     order_uom: line.order_uom,
+    order_uom_name: line.order_uom_name || line.order_uom,
     qty: toNumber(line.qty),
     qty_in_base: line.qty_in_base,
     base_qty: line.base_qty,
     base_uom: line.base_uom,
+    base_uom_name: line.base_uom_name || line.base_uom,
     unit_price: line.unit_price,
     base_unit_price: line.base_unit_price,
     line_amount: line.line_amount,
     available_qty: line.available_qty,
     quote_ok: line.ok,
     quote_message: line.message,
+    rules: line.rules || {},
   }
 }
 
@@ -184,12 +187,15 @@ const cartStore = reactive({
         qty_in_base: line.qty_in_base,
         base_qty: line.base_qty,
         base_uom: line.base_uom,
+        base_uom_name: line.base_uom_name || line.base_uom,
+        order_uom_name: line.order_uom_name || line.order_uom,
         unit_price: line.unit_price,
         base_unit_price: line.base_unit_price,
         line_amount: line.line_amount,
         available_qty: line.available_qty,
         quote_ok: line.ok,
         quote_message: line.message,
+        rules: line.rules || {},
       }
     })
     this.groups = this.groups.map((group) => ({

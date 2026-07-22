@@ -16,6 +16,8 @@ from allapp.salesapp.salemini_api import (
     _fulfillment_for_order_payload,
     _fulfillment_preview_payload,
     _is_multiple,
+    _stock_payload,
+    _uom_name,
 )
 
 
@@ -60,7 +62,11 @@ def test_display_status_q_uses_database_filter_conditions():
 
 def test_effective_rules_merge_config_policy_and_pick_multiple():
     product = SimpleNamespace(min_pick_multiple=6)
-    config = SimpleNamespace(min_order_qty=Decimal("2"), multiple_qty=Decimal("1"))
+    config = SimpleNamespace(
+        enable_qty_rules=True,
+        min_order_qty=Decimal("2"),
+        multiple_qty=Decimal("1"),
+    )
     policy = {
         "min_order_qty": Decimal("3"),
         "multiple_qty": Decimal("0"),
@@ -77,9 +83,55 @@ def test_effective_rules_merge_config_policy_and_pick_multiple():
     assert multiple_qty == Decimal("3.000")
 
 
+def test_effective_rules_default_to_unrestricted_when_switch_is_disabled():
+    product = SimpleNamespace(min_pick_multiple=1000)
+    config = SimpleNamespace(
+        enable_qty_rules=False,
+        min_order_qty=Decimal("1000"),
+        multiple_qty=Decimal("1000"),
+    )
+    policy = {
+        "min_order_qty": Decimal("500"),
+        "multiple_qty": Decimal("500"),
+    }
+
+    min_qty, multiple_qty = _effective_rules(
+        product,
+        config,
+        policy,
+        Decimal("1"),
+    )
+
+    assert min_qty == Decimal("1")
+    assert multiple_qty == Decimal("1")
+
+
 def test_is_multiple_accepts_exact_decimal_multiples():
     assert _is_multiple(Decimal("6.000"), Decimal("3.000"))
     assert not _is_multiple(Decimal("5.000"), Decimal("3.000"))
+    assert _is_multiple(Decimal("2.000"), Decimal("3.000"), Decimal("2.000"))
+    assert _is_multiple(Decimal("5.000"), Decimal("3.000"), Decimal("2.000"))
+    assert not _is_multiple(Decimal("3.000"), Decimal("3.000"), Decimal("2.000"))
+
+
+def test_buyer_payload_uses_chinese_uom_name_without_changing_code():
+    class EmptyPackages:
+        def all(self):
+            return []
+
+    product = SimpleNamespace(
+        base_uom=SimpleNamespace(code="PING", name="瓶"),
+        packages=EmptyPackages(),
+        min_pick_multiple=1,
+    )
+    config = SimpleNamespace(stock_display="EXACT")
+
+    stock = _stock_payload(config, product, Decimal("552"))
+
+    assert _uom_name(product, "PING") == "瓶"
+    assert stock["display"] == "552.000 瓶"
+    assert stock["base_uom"] == "PING"
+    assert stock["base_uom_name"] == "瓶"
 
 
 def test_pickup_fulfillment_only_requires_contact_and_phone():

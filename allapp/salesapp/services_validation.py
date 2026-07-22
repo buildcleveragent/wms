@@ -5,7 +5,15 @@ from .models import ChannelProductPolicy, CustomerChannel, CustomerProductPolicy
 class OrderRuleError(Exception):
     pass
 
-def validate_order_line_rules(owner, customer_id, product, order_uom, qty):
+def validate_order_line_rules(
+    owner,
+    customer_id,
+    product,
+    order_uom,
+    qty,
+    *,
+    enforce_quantity_rules=True,
+):
     """
     规则优先级：客户商品策略 > 渠道商品策略
     校验内容：订货单位、最小订量、倍数
@@ -22,10 +30,11 @@ def validate_order_line_rules(owner, customer_id, product, order_uom, qty):
     if cp:
         if cp.order_uom and order_uom != cp.order_uom:
             raise OrderRuleError(f"订货单位必须为 {cp.order_uom}")
-        if qty < cp.min_order_qty:
-            raise OrderRuleError(f"最小订量为 {cp.min_order_qty}")
-        if cp.multiple_qty and (qty % cp.multiple_qty != 0):
-            raise OrderRuleError(f"下单数量须为 {cp.multiple_qty} 的整数倍")
+        if enforce_quantity_rules:
+            if qty < cp.min_order_qty:
+                raise OrderRuleError(f"最小订量为 {cp.min_order_qty}")
+            if cp.multiple_qty and (qty % cp.multiple_qty != 0):
+                raise OrderRuleError(f"下单数量须为 {cp.multiple_qty} 的整数倍")
         return True
 
     # 渠道策略
@@ -34,6 +43,6 @@ def validate_order_line_rules(owner, customer_id, product, order_uom, qty):
         if chp:
             if chp.order_uom and order_uom != chp.order_uom:
                 raise OrderRuleError(f"订货单位必须为 {chp.order_uom}")
-            if qty < chp.min_order_qty:
+            if enforce_quantity_rules and qty < chp.min_order_qty:
                 raise OrderRuleError(f"最小订量为 {chp.min_order_qty}")
     return True

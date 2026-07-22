@@ -26,10 +26,7 @@ from allapp.baseinfo.models import Owner
 from allapp.inventory.models import InventoryDetail
 from allapp.products.models import Brand, Product, ProductCategory
 from allapp.salesapp.models import SaleProductConfig
-from allapp.salesapp.salemini_api import (
-    _category_subtree_ids,
-    _saleable_inventory_detail_filter,
-)
+from allapp.salesapp.salemini_api import _category_subtree_ids
 
 
 @dataclass
@@ -83,13 +80,13 @@ def _positive_decimal(value, field_name):
 
 
 def _available_qty_subquery():
+    # Keep catalog operations on the same available-quantity policy as the mall APIs.
     rows = (
         InventoryDetail.objects.filter(
             owner_id=OuterRef("owner_id"),
             product_id=OuterRef("pk"),
             is_active=True,
         )
-        .filter(_saleable_inventory_detail_filter())
         .values("owner_id", "product_id")
         .annotate(qty=Sum("available_qty"))
         .values("qty")[:1]
@@ -425,19 +422,22 @@ class SaleMiniProductListingView(LoginRequiredMixin, View):
             config.is_hot = request.POST.get("is_hot") == "1"
             config.is_new = request.POST.get("is_new") == "1"
         elif action == "set_rules":
-            min_order_qty = _positive_decimal(
-                request.POST.get("min_order_qty"), "min_order_qty"
-            )
-            multiple_qty = _positive_decimal(
-                request.POST.get("multiple_qty"), "multiple_qty"
-            )
+            enable_qty_rules = request.POST.get("enable_qty_rules") == "1"
             max_order_qty = _decimal_or_none(
                 request.POST.get("max_order_qty"), "max_order_qty"
             )
-            if max_order_qty is not None and max_order_qty < min_order_qty:
-                raise ValidationError("最大购买量不能小于起购数量。")
-            config.min_order_qty = min_order_qty
-            config.multiple_qty = multiple_qty
+            if enable_qty_rules:
+                min_order_qty = _positive_decimal(
+                    request.POST.get("min_order_qty"), "min_order_qty"
+                )
+                multiple_qty = _positive_decimal(
+                    request.POST.get("multiple_qty"), "multiple_qty"
+                )
+                if max_order_qty is not None and max_order_qty < min_order_qty:
+                    raise ValidationError("最大购买量不能小于起购数量。")
+                config.min_order_qty = min_order_qty
+                config.multiple_qty = multiple_qty
+            config.enable_qty_rules = enable_qty_rules
             config.max_order_qty = max_order_qty
         elif action == "set_sort_order":
             sort_order = request.POST.get("sort_order")

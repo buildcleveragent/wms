@@ -88,6 +88,11 @@ class SaleProductOwnerBulkForm(forms.Form):
         choices=SaleProductConfig.StockDisplay.choices,
         initial=SaleProductConfig.StockDisplay.STATUS,
     )
+    enable_qty_rules = forms.BooleanField(
+        label="启用起购及递增限制",
+        required=False,
+        initial=False,
+    )
     min_order_qty = forms.DecimalField(
         label="起购数量",
         max_digits=12,
@@ -96,7 +101,7 @@ class SaleProductOwnerBulkForm(forms.Form):
         initial=Decimal("1.000"),
     )
     multiple_qty = forms.DecimalField(
-        label="购买倍数",
+        label="购买递增量",
         max_digits=12,
         decimal_places=3,
         min_value=Decimal("0.001"),
@@ -115,7 +120,8 @@ class SaleProductOwnerBulkForm(forms.Form):
         min_order_qty = cleaned.get("min_order_qty")
         max_order_qty = cleaned.get("max_order_qty")
         if (
-            min_order_qty is not None
+            cleaned.get("enable_qty_rules")
+            and min_order_qty is not None
             and max_order_qty is not None
             and max_order_qty < min_order_qty
         ):
@@ -134,7 +140,6 @@ def _owner_bulk_product_queryset(owner, *, only_active_products):
 
 def _apply_owner_bulk_listing(form, user):
     owner = form.cleaned_data["owner"]
-    operation = form.cleaned_data["operation"]
     products = list(
         _owner_bulk_product_queryset(
             owner,
@@ -215,6 +220,7 @@ def _apply_owner_bulk_to_product(form, user, product, config):
     sync_sale_price = form.cleaned_data["sync_sale_price"]
     if created or overwrite:
         config.stock_display = form.cleaned_data["stock_display"]
+        config.enable_qty_rules = form.cleaned_data["enable_qty_rules"]
         config.min_order_qty = form.cleaned_data["min_order_qty"]
         config.multiple_qty = form.cleaned_data["multiple_qty"]
         config.max_order_qty = form.cleaned_data["max_order_qty"]
@@ -287,6 +293,31 @@ class SaleMiniBannerAdmin(admin.ModelAdmin):
 class SaleProductConfigAdmin(admin.ModelAdmin):
     change_list_template = "admin/salesapp/saleproductconfig/change_list.html"
     actions = ("mark_listed", "mark_unlisted")
+    fields = (
+        "owner",
+        "product",
+        "sale_price",
+        "market_price",
+        "is_listed",
+        "is_recommended",
+        "is_hot",
+        "is_new",
+        "stock_display",
+        "enable_qty_rules",
+        "min_order_qty",
+        "max_order_qty",
+        "multiple_qty",
+        "sort_order",
+        "remark",
+    )
+    exclude = (
+        "is_deleted",
+        "deleted_at",
+        "deleted_by",
+        "created_by",
+        "updated_by",
+        "is_active",
+    )
     list_display = (
         "id",
         "owner",
@@ -308,7 +339,16 @@ class SaleProductConfigAdmin(admin.ModelAdmin):
         "stock_display",
     )
     search_fields = ("product__code", "product__sku", "product__name")
-    raw_id_fields = ("owner", "product")
+    autocomplete_fields = ("product",)
+
+    class Media:
+        js = ("admin/js/sale_product_config.js",)
+
+    def save_model(self, request, obj, form, change):
+        if not change and not obj.created_by_id:
+            obj.created_by = request.user
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
 
     def get_urls(self):
         custom_urls = [

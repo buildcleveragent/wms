@@ -30,6 +30,7 @@ function snapshot(product = {}) {
     price: product.price || product.unit_price || '',
     market_price: product.market_price || '',
     order_uom: product.order_uom || '',
+    order_uom_name: product.order_uom_name || product.order_uom || '',
     stock: product.stock || null,
     badges: product.badges || {},
     rules: product.rules || {},

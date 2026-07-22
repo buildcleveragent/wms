@@ -22,7 +22,7 @@ from allapp.products.models import (
     ProductPackage,
     ProductUom,
 )
-from allapp.tasking.models import WmsTask
+from allapp.tasking.models import WmsTask, WmsTaskLine
 
 from .models import (
     Channel,
@@ -838,9 +838,162 @@ class SaleMiniApiTests(TestCase):
         self.assertPublicProductPayloadHidesInternalFields(rows[0])
         self.assertEqual(rows[0]["price"], "9.5000")
         self.assertEqual(rows[0]["stock"]["available_qty"], "10.000")
+        self.assertEqual(rows[0]["stock"]["display"], "10.000 件")
+        self.assertEqual(rows[0]["stock"]["base_uom_name"], "件")
+        self.assertEqual(rows[0]["order_uom"], "EA-MINI")
+        self.assertEqual(rows[0]["order_uom_name"], "件")
         self.assertEqual(code_response.data["results"], [])
 
-    def test_saleable_stock_requires_complete_tracking_fields(self):
+    def test_quantity_rules_are_hidden_and_not_enforced_by_default(self):
+        config = SaleProductConfig.objects.get(
+            owner=self.owner,
+            product=self.product,
+        )
+        config.min_order_qty = Decimal("2.000")
+        config.multiple_qty = Decimal("3.000")
+        config.enable_qty_rules = False
+        config.save(
+            update_fields=[
+                "enable_qty_rules",
+                "min_order_qty",
+                "multiple_qty",
+                "updated_at",
+            ]
+        )
+
+        detail = self.client.get(
+            f"/api/sale-mini/products/{self.product.id}/",
+            {"config_id": config.id},
+        )
+        preview = self.client.post(
+            "/api/sale-mini/orders/preview/",
+            {
+                "lines": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "0.500",
+                        "order_uom": "EA-MINI",
+                    }
+                ]
+            },
+            format="json",
+        )
+        cart = self.client.post(
+            "/api/sale-mini/cart/add/",
+            {
+                "config_id": config.id,
+                "product_id": self.product.id,
+                "qty": "0.500",
+                "order_uom": "EA-MINI",
+            },
+            format="json",
+        )
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertFalse(detail.data["rules"]["enabled"])
+        self.assertEqual(detail.data["rules"]["min_order_qty"], "1.000")
+        self.assertEqual(detail.data["rules"]["multiple_qty"], "1.000")
+        self.assertEqual(preview.status_code, 200)
+        self.assertTrue(preview.data["ok"])
+        self.assertEqual(cart.status_code, 200)
+        self.assertFalse(cart.data["lines"][0]["rules"]["enabled"])
+        self.assertEqual(cart.data["lines"][0]["order_uom_name"], "件")
+
+    def test_enabled_quantity_rules_match_frontend_increment_sequence(self):
+        config = SaleProductConfig.objects.get(
+            owner=self.owner,
+            product=self.product,
+        )
+        config.enable_qty_rules = True
+        config.min_order_qty = Decimal("2.000")
+        config.multiple_qty = Decimal("3.000")
+        config.save(
+            update_fields=[
+                "enable_qty_rules",
+                "min_order_qty",
+                "multiple_qty",
+                "updated_at",
+            ]
+        )
+
+        detail = self.client.get(
+            f"/api/sale-mini/products/{self.product.id}/",
+            {"config_id": config.id},
+        )
+        valid = self.client.post(
+            "/api/sale-mini/orders/preview/",
+            {
+                "lines": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "5.000",
+                        "order_uom": "EA-MINI",
+                    }
+                ]
+            },
+            format="json",
+        )
+        invalid = self.client.post(
+            "/api/sale-mini/orders/preview/",
+            {
+                "lines": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "3.000",
+                        "order_uom": "EA-MINI",
+                    }
+                ]
+            },
+            format="json",
+        )
+        cart = self.client.post(
+            "/api/sale-mini/cart/add/",
+            {
+                "config_id": config.id,
+                "product_id": self.product.id,
+                "qty": "5.000",
+                "order_uom": "EA-MINI",
+            },
+            format="json",
+        )
+        order = self.client.post(
+            "/api/sale-mini/orders/",
+            {
+                "payment_method": "OFFLINE",
+                "contact": "张三",
+                "contact_phone": "13800000000",
+                "ship_to": "上海市测试路 1 号",
+                "delivery_method": "OWN_TRUCK",
+                "lines": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "5.000",
+                        "order_uom": "EA-MINI",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertTrue(detail.data["rules"]["enabled"])
+        self.assertEqual(detail.data["rules"]["min_order_qty"], "2.000")
+        self.assertEqual(detail.data["rules"]["multiple_qty"], "3.000")
+        self.assertTrue(valid.data["ok"])
+        self.assertTrue(valid.data["lines"][0]["rules"]["enabled"])
+        self.assertFalse(invalid.data["ok"])
+        self.assertIn("递增", invalid.data["lines"][0]["message"])
+        self.assertEqual(cart.status_code, 200)
+        self.assertTrue(cart.data["lines"][0]["rules"]["enabled"])
+        self.assertEqual(order.status_code, 201)
+        self.assertEqual(order.data["lines"][0]["order_uom_name"], "件")
+        order_line = OutboundOrderLine.objects.get(order_id=order.data["id"])
+        self.assertEqual(order_line.base_qty, Decimal("5.000"))
+        inventory = InventoryDetail.objects.get(product=self.product)
+        self.assertEqual(inventory.allocated_qty, Decimal("5.0000"))
+        self.assertEqual(inventory.available_qty, Decimal("5.0000"))
+
+    def test_saleable_stock_counts_incomplete_tracking_fields_and_allocates(self):
         tracked_product = Product.objects.create(
             owner=self.owner,
             code="MP-TRACK",
@@ -864,16 +1017,52 @@ class SaleMiniApiTests(TestCase):
             multiple_qty=Decimal("1.000"),
             stock_display=SaleProductConfig.StockDisplay.EXACT,
         )
-        detail = InventoryDetail.objects.create(
+        incomplete_detail = InventoryDetail.objects.create(
             owner=self.owner,
             product=tracked_product,
             warehouse=self.warehouse,
             location=self.location,
-            onhand_qty=Decimal("5.0000"),
+            onhand_qty=Decimal("10.0000"),
+            allocated_qty=Decimal("2.0000"),
+            locked_qty=Decimal("1.0000"),
+            damaged_qty=Decimal("1.0000"),
+            base_unit=self.uom.code,
+        )
+        complete_location = Location.objects.create(
+            warehouse=self.warehouse,
+            code="SWSMI-01-01-02",
+            name="Sale Mini Complete Tracking Location",
+        )
+        InventoryDetail.objects.create(
+            owner=self.owner,
+            product=tracked_product,
+            warehouse=self.warehouse,
+            location=complete_location,
+            batch_no="LOT-202606",
+            production_date=date(2026, 6, 1),
+            expiry_date=date(2027, 6, 1),
+            onhand_qty=Decimal("2.0000"),
             allocated_qty=Decimal("0.0000"),
             locked_qty=Decimal("0.0000"),
             damaged_qty=Decimal("0.0000"),
             base_unit=self.uom.code,
+        )
+        inactive_location = Location.objects.create(
+            warehouse=self.warehouse,
+            code="SWSMI-01-01-03",
+            name="Sale Mini Inactive Inventory Location",
+        )
+        InventoryDetail.objects.create(
+            owner=self.owner,
+            product=tracked_product,
+            warehouse=self.warehouse,
+            location=inactive_location,
+            onhand_qty=Decimal("9.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+            is_active=False,
         )
         public_client = APIClient()
 
@@ -884,15 +1073,25 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         rows = response.data["results"]
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["stock"]["available_qty"], "0.000")
-        self.assertEqual(rows[0]["stock"]["status"], "OUT")
+        self.assertEqual(rows[0]["stock"]["available_qty"], "8.000")
+        self.assertEqual(rows[0]["stock"]["status"], "IN")
+
+        detail_response = public_client.get(
+            f"/api/sale-mini/products/{tracked_product.id}/"
+        )
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.data["stock"]["available_qty"], "8.000")
 
         stocked_response = public_client.get(
             "/api/sale-mini/products/",
             {"search": "批次效期", "only_stock": "1"},
         )
         self.assertEqual(stocked_response.status_code, 200)
-        self.assertEqual(stocked_response.data["results"], [])
+        self.assertEqual(len(stocked_response.data["results"]), 1)
+        self.assertEqual(
+            stocked_response.data["results"][0]["stock"]["available_qty"],
+            "8.000",
+        )
 
         preview = self.client.post(
             "/api/sale-mini/orders/preview/",
@@ -900,37 +1099,7 @@ class SaleMiniApiTests(TestCase):
                 "lines": [
                     {
                         "product_id": tracked_product.id,
-                        "qty": "1.000",
-                        "order_uom": "EA-MINI",
-                    }
-                ]
-            },
-            format="json",
-        )
-        self.assertEqual(preview.status_code, 200)
-        self.assertFalse(preview.data["ok"])
-        self.assertEqual(preview.data["lines"][0]["available_qty"], "0.000")
-        self.assertIn("库存不足", preview.data["lines"][0]["message"])
-
-        detail.batch_no = "LOT-202606"
-        detail.production_date = date(2026, 6, 1)
-        detail.expiry_date = date(2027, 6, 1)
-        detail.save(update_fields=["batch_no", "production_date", "expiry_date"])
-
-        response = public_client.get(
-            "/api/sale-mini/products/",
-            {"search": "批次效期"},
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["results"][0]["stock"]["available_qty"], "5.000")
-
-        preview = self.client.post(
-            "/api/sale-mini/orders/preview/",
-            {
-                "lines": [
-                    {
-                        "product_id": tracked_product.id,
-                        "qty": "1.000",
+                        "qty": "4.000",
                         "order_uom": "EA-MINI",
                     }
                 ]
@@ -939,7 +1108,99 @@ class SaleMiniApiTests(TestCase):
         )
         self.assertEqual(preview.status_code, 200)
         self.assertTrue(preview.data["ok"])
-        self.assertEqual(preview.data["lines"][0]["available_qty"], "5.000")
+        self.assertEqual(preview.data["lines"][0]["available_qty"], "8.000")
+
+        order_response = self.client.post(
+            "/api/sale-mini/orders/",
+            {
+                "payment_method": "OFFLINE",
+                "contact": "张三",
+                "contact_phone": "13800000000",
+                "ship_to": "上海市测试路 1 号",
+                "delivery_method": "OWN_TRUCK",
+                "lines": [
+                    {
+                        "product_id": tracked_product.id,
+                        "qty": "4.000",
+                        "order_uom": "EA-MINI",
+                    }
+                ]
+            },
+            format="json",
+        )
+        self.assertEqual(order_response.status_code, 201)
+        incomplete_detail.refresh_from_db()
+        self.assertEqual(incomplete_detail.onhand_qty, Decimal("10.0000"))
+        self.assertEqual(incomplete_detail.allocated_qty, Decimal("6.0000"))
+        self.assertEqual(incomplete_detail.locked_qty, Decimal("1.0000"))
+        self.assertEqual(incomplete_detail.damaged_qty, Decimal("1.0000"))
+        self.assertEqual(incomplete_detail.available_qty, Decimal("2.0000"))
+        self.assertEqual(
+            incomplete_detail.onhand_qty,
+            incomplete_detail.allocated_qty
+            + incomplete_detail.locked_qty
+            + incomplete_detail.damaged_qty
+            + incomplete_detail.available_qty,
+        )
+        pick_line = WmsTaskLine.objects.get(
+            task__task_type=WmsTask.TaskType.PICK,
+            product=tracked_product,
+        )
+        self.assertEqual(pick_line.qty_plan, Decimal("4.0000"))
+        self.assertEqual(
+            pick_line.plan_meta["inventory_detail_id"], incomplete_detail.id
+        )
+
+    def test_saleable_stock_counts_serial_controlled_inventory_without_serial(self):
+        serial_product = Product.objects.create(
+            owner=self.owner,
+            code="MP-SERIAL-GAP",
+            sku="MP-SERIAL-GAP",
+            name="缺序列号商品",
+            category=self.category,
+            base_uom=self.uom,
+            price=Decimal("28.00"),
+            batch_control=False,
+            expiry_control=False,
+            serial_control=True,
+            is_active=True,
+        )
+        SaleProductConfig.objects.create(
+            owner=self.owner,
+            product=serial_product,
+            is_listed=True,
+            sale_price=Decimal("28.0000"),
+            min_order_qty=Decimal("1.000"),
+            multiple_qty=Decimal("1.000"),
+            stock_display=SaleProductConfig.StockDisplay.EXACT,
+        )
+        serial_detail = InventoryDetail.objects.create(
+            owner=self.owner,
+            product=serial_product,
+            warehouse=self.warehouse,
+            location=self.location,
+            serial_no="SERIAL-GAP-1",
+            onhand_qty=Decimal("1.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+        )
+        InventoryDetail.objects.filter(pk=serial_detail.pk).update(
+            serial_no="",
+            serial_no_norm=None,
+        )
+
+        response = APIClient().get(
+            "/api/sale-mini/products/",
+            {"search": "缺序列号", "only_stock": "1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertEqual(
+            response.data["results"][0]["stock"]["available_qty"], "1.000"
+        )
 
     def test_public_products_return_listed_goods_from_all_owners(self):
         other_owner = Owner.objects.create(code="SMINI2", name="Sale Mini Owner 2")

@@ -30,6 +30,8 @@ refund, and data-accurate inventory handling.
 - Multi-package orders are grouped back into one buyer-visible order row and detail response.
 - Multi-package checkout currently uses offline/platform-confirmed payment and does not expose unavailable aggregate WeChat pay, coupon, or point redemption.
 - Order preview and order creation recalculate price, unit conversion, stock, coupon, points, and payable amount server-side.
+- Minimum-order and quantity-increment rules are opt-in per sale listing. Disabled rules are hidden and not enforced; enabled rules use the same `minimum + N * increment` sequence in product detail, cart, preview, and checkout.
+- Saleable stock sums active `InventoryDetail.available_qty` even when batch, production, expiry, or serial tracking values are missing; tracking gaps remain visible in the core data-accuracy report.
 - WMS `OutboundOrder` and `OutboundOrderLine` remain the fulfillment source of truth.
 - Miniapp never directly posts inventory deduction.
 - Payment callback, refund, cancel, and unpaid-expiry handling are idempotent and release or confirm related resources correctly.
@@ -51,7 +53,7 @@ refund, and data-accurate inventory handling.
 | Django config sanity | Settings, URL imports, model checks load | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py check` |
 | Migration drift | Model changes have migrations | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py makemigrations --check --dry-run salesapp` |
 | Sale-mini pure unit tests | Status mapping, quantity rules, pricing helper behavior, validator rounding/sample counting | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q allapp/salesapp/test_salemini_unit.py allapp/salesapp/test_mobile_api_unit.py allapp/salesapp/test_services_pricing_unit.py` |
-| Sale-mini API and data accuracy | Public catalog, brand filters, internal owner filters, multi-owner cart, unified checkout with backend split, outbound creation, payments, refunds, expiry | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --disable-warnings allapp/salesapp/tests.py::SaleMiniApiTests` |
+| Sale-mini API and data accuracy | Public catalog, tracking-incomplete stock, brand filters, internal owner filters, multi-owner cart, unified checkout with backend split, outbound creation/allocation, payments, refunds, expiry | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --disable-warnings allapp/salesapp/tests.py::SaleMiniApiTests` |
 | Sale-mini API fast local run | Same API business assertions without replaying migrations | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --no-migrations --disable-warnings allapp/salesapp/tests.py::SaleMiniApiTests` |
 | Sale-mini API with named MySQL test DB | Same API coverage, using an explicitly configured test schema | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost DB_TEST_NAME=<CLEAN_TEST_DB> .venv/bin/python -m pytest -q --reuse-db --disable-warnings allapp/salesapp/tests.py::SaleMiniApiTests` |
 | Sale-mini console catalog management | `/console/sale-mini/products/` listing filters, bulk config creation, listing/unlisting, price/badge updates, public catalog visibility, and inventory non-mutation | `SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --disable-warnings allapp/console/tests.py` |
@@ -92,7 +94,10 @@ Run these after applying migrations and listing at least two owners' products.
 4. Order data accuracy:
    - Preview total equals server-calculated line amounts.
    - Change backend sale price, refresh cart, cart reprices from server.
+   - Confirm positive `available_qty` remains saleable when batch, production, expiry, or serial tracking values are blank; the core reconciliation report should still flag those gaps.
    - Set quantity above available stock, preview/order rejects with stock error.
+   - Leave `启用起购及递增限制` off and confirm the product detail hides the purchase-rule row and preview accepts any positive quantity within stock.
+   - Enable it with minimum `2` and increment `3`; confirm the detail and cart show the rule, quantities `2/5/8` pass, and `3/4/6` fail.
    - Successful order creates `OutboundOrder` and allocation/task state through WMS rules.
 5. Payment and refund smoke:
    - WeChat prepay returns miniapp pay params when payment config is present.
@@ -126,7 +131,8 @@ Fill this section after each execution.
 | Pure unit tests | passed | `15 passed`; includes validator rounding/sample-count coverage. Warnings are existing Django 6.0 deprecation warnings for `CheckConstraint.check`. |
 | Sale-mini data validator | passed | `validate_sale_mini_data_accuracy --fail-on-issues --limit 5 --json` returned `ok=true`, `issue_count=0` against the real MySQL connection. |
 | One-command quality gate | passed | `npm run test:quality -- --skip-build`, `npm run test:quality -- --skip-build --data-accuracy`, `npm run test:quality`, and `npm run test:quality -- --skip-build --db --fast-db` passed. The full non-DB gate includes H5 and WeChat builds. The fast DB gate includes API DB tests, console catalog DB tests, Admin owner bulk-listing DB tests, and live data validation. |
-| Sale-mini API tests | passed in fast DB mode | Full API business suite passed with `--reuse-db --no-migrations`: `43 passed`, covering catalog scope, multi-owner cart, unified checkout with backend split, buyer-visible combined orders, cancel inventory release, outbound creation/allocation, payment callbacks, refunds, after-sale, and unpaid expiry release. |
+| Sale-mini API tests | passed in fast DB mode | Full API business suite passed with `--reuse-db --no-migrations`: `44 passed`, covering tracking-incomplete saleable stock, allocation quantity conservation, catalog scope, multi-owner cart, unified checkout with backend split, buyer-visible combined orders, cancel inventory release, payment callbacks, refunds, after-sale, and unpaid expiry release. |
+| Core tracking-gap warning | passed in fast DB mode | The targeted core reconciliation test still reports missing batch, production/expiry, and serial tracking fields after the mall stock policy was relaxed. |
 | Sale-mini Admin owner bulk listing | passed in fast DB mode | `4 passed`, covering the changelist button, owner-level create-and-list, invalid product skipping, single-product price preservation, owner-level unlist, public catalog visibility, and inventory non-mutation. |
 | Frontend JSON | passed | `pages.json` and `manifest.json` parse successfully. |
 | Mall route shape | passed | Old workbench pages are not registered in `pages.json`; tab bar is `首页 / 分类 / 购物车 / 订单 / 我的`. |

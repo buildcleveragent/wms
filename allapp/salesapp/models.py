@@ -105,6 +105,8 @@ class MiniProgramUser(BaseModel):
     phone = models.CharField(max_length=32, blank=True, default="")
 
     class Meta:
+        verbose_name = "小程序用户"
+        verbose_name_plural = "小程序用户"
         indexes = [
             models.Index(fields=["owner", "customer"]),
             models.Index(fields=["openid"]),
@@ -146,6 +148,8 @@ class MiniCustomerAddress(BaseModel):
     is_default = models.BooleanField(default=False)
 
     class Meta:
+        verbose_name = "小程序收货地址"
+        verbose_name_plural = "小程序收货地址"
         indexes = [
             models.Index(fields=["owner", "customer", "is_default"]),
             models.Index(fields=["buyer_user", "is_default"]),
@@ -170,6 +174,8 @@ class SaleMiniBanner(BaseModel):
     sort_order = models.PositiveIntegerField(default=0)
 
     class Meta:
+        verbose_name = "商城轮播图"
+        verbose_name_plural = "商城轮播图"
         ordering = ["sort_order", "id"]
         indexes = [models.Index(fields=["owner", "is_active", "sort_order"])]
 
@@ -184,34 +190,48 @@ class SaleProductConfig(BaseModel):
         HIDDEN = "HIDDEN", "不展示库存"
 
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_product_configs"
+        Owner,
+        on_delete=models.PROTECT,
+        related_name="sale_product_configs",
+        verbose_name="货主",
     )
     product = models.ForeignKey(
-        Product, on_delete=models.PROTECT, related_name="sale_mini_configs"
+        Product,
+        on_delete=models.PROTECT,
+        related_name="sale_mini_configs",
+        verbose_name="商品",
     )
     sale_price = models.DecimalField(
-        max_digits=12, decimal_places=4, null=True, blank=True
+        "商城售价", max_digits=12, decimal_places=4, null=True, blank=True
     )
     market_price = models.DecimalField(
-        max_digits=12, decimal_places=4, null=True, blank=True
+        "划线价", max_digits=12, decimal_places=4, null=True, blank=True
     )
-    is_listed = models.BooleanField(default=False)
-    is_recommended = models.BooleanField(default=False)
-    is_hot = models.BooleanField(default=False)
-    is_new = models.BooleanField(default=False)
+    is_listed = models.BooleanField("已上架", default=False)
+    is_recommended = models.BooleanField("推荐商品", default=False)
+    is_hot = models.BooleanField("热销商品", default=False)
+    is_new = models.BooleanField("新品", default=False)
     stock_display = models.CharField(
+        "库存展示方式",
         max_length=12,
         choices=StockDisplay.choices,
         default=StockDisplay.STATUS,
     )
-    min_order_qty = models.DecimalField(max_digits=12, decimal_places=3, default=1)
-    max_order_qty = models.DecimalField(
-        max_digits=12, decimal_places=3, null=True, blank=True
+    enable_qty_rules = models.BooleanField("启用起购及递增限制", default=False)
+    min_order_qty = models.DecimalField(
+        "起购数量", max_digits=12, decimal_places=3, default=1
     )
-    multiple_qty = models.DecimalField(max_digits=12, decimal_places=3, default=1)
-    sort_order = models.PositiveIntegerField(default=0)
+    max_order_qty = models.DecimalField(
+        "最大购买量", max_digits=12, decimal_places=3, null=True, blank=True
+    )
+    multiple_qty = models.DecimalField(
+        "购买递增量", max_digits=12, decimal_places=3, default=1
+    )
+    sort_order = models.PositiveIntegerField("排序", default=0)
 
     class Meta:
+        verbose_name = "商城商品配置"
+        verbose_name_plural = "商城商品配置"
         ordering = ["sort_order", "product__code"]
         indexes = [
             models.Index(fields=["owner", "is_listed", "is_active"]),
@@ -266,6 +286,8 @@ class SaleMiniCart(BaseModel):
     )
 
     class Meta:
+        verbose_name = "商城购物车"
+        verbose_name_plural = "商城购物车"
         indexes = [
             models.Index(fields=["owner", "customer", "is_active"]),
             models.Index(fields=["buyer_user", "is_active"]),
@@ -292,6 +314,8 @@ class SaleMiniCartItem(BaseModel):
     qty = models.DecimalField(max_digits=12, decimal_places=3)
 
     class Meta:
+        verbose_name = "商城购物车商品"
+        verbose_name_plural = "商城购物车商品"
         ordering = ["id"]
         indexes = [
             models.Index(fields=["cart", "product"]),
@@ -357,6 +381,8 @@ class SaleMiniOrderMapping(BaseModel):
     paid_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        verbose_name = "商城订单映射"
+        verbose_name_plural = "商城订单映射"
         indexes = [
             models.Index(fields=["owner", "customer", "created_at"]),
             models.Index(fields=["payment_status"]),
@@ -391,6 +417,8 @@ class SaleMiniCouponTemplate(BaseModel):
     is_stackable = models.BooleanField(default=True)
 
     class Meta:
+        verbose_name = "商城优惠券模板"
+        verbose_name_plural = "商城优惠券模板"
         indexes = [
             models.Index(fields=["owner", "code"]),
             models.Index(fields=["owner", "effective_from", "effective_to"]),
@@ -461,6 +489,8 @@ class SaleMiniCoupon(BaseModel):
     expires_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        verbose_name = "商城优惠券"
+        verbose_name_plural = "商城优惠券"
         indexes = [
             models.Index(fields=["owner", "customer", "status"]),
             models.Index(fields=["buyer_user", "status"]),
@@ -525,6 +555,8 @@ class SaleMiniOrderAdjustment(BaseModel):
     released_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        verbose_name = "商城订单调整"
+        verbose_name_plural = "商城订单调整"
         indexes = [
             models.Index(fields=["owner", "customer", "adjustment_type"]),
             models.Index(fields=["mapping", "status"]),
@@ -572,6 +604,8 @@ class SaleMiniPointLedger(BaseModel):
     note = models.CharField(max_length=200, blank=True, default="")
 
     class Meta:
+        verbose_name = "商城积分流水"
+        verbose_name_plural = "商城积分流水"
         indexes = [
             models.Index(fields=["owner", "customer", "created_at"]),
             models.Index(fields=["buyer_user", "created_at"]),
@@ -624,6 +658,8 @@ class SaleMiniDistributionRecord(BaseModel):
     reversed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        verbose_name = "商城分销记录"
+        verbose_name_plural = "商城分销记录"
         indexes = [
             models.Index(fields=["owner", "referrer", "status"]),
             models.Index(fields=["mapping", "status"]),
@@ -685,6 +721,8 @@ class SaleMiniPayment(BaseModel):
     closed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        verbose_name = "商城支付单"
+        verbose_name_plural = "商城支付单"
         indexes = [
             models.Index(fields=["owner", "status", "created_at"]),
             models.Index(fields=["mapping", "status"]),
@@ -738,6 +776,8 @@ class SaleMiniRefund(BaseModel):
     success_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        verbose_name = "商城退款单"
+        verbose_name_plural = "商城退款单"
         indexes = [
             models.Index(fields=["owner", "status", "created_at"]),
             models.Index(fields=["payment", "status"]),
@@ -793,6 +833,8 @@ class SaleMiniAfterSaleRequest(BaseModel):
     review_note = models.CharField(max_length=300, blank=True, default="")
 
     class Meta:
+        verbose_name = "商城售后申请"
+        verbose_name_plural = "商城售后申请"
         indexes = [
             models.Index(fields=["owner", "customer", "status"]),
             models.Index(fields=["mapping", "status"]),
@@ -839,6 +881,8 @@ class SaleMiniPaymentEvent(BaseModel):
     processed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        verbose_name = "商城支付回调事件"
+        verbose_name_plural = "商城支付回调事件"
         indexes = [
             models.Index(fields=["event_type", "created_at"]),
             models.Index(fields=["out_trade_no"]),

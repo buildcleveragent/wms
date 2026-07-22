@@ -79,7 +79,7 @@
       <view v-for="item in cart.items" :key="item.key" class="line">
         <view>
           <view class="line-name">{{ item.name }}</view>
-          <view class="line-meta">{{ item.qty }} {{ item.order_uom }} × ¥{{ money(item.unit_price) }}</view>
+          <view class="line-meta">{{ item.qty }} {{ item.order_uom_name || item.order_uom }} × ¥{{ money(item.unit_price) }}</view>
           <view v-if="item.quote_message" class="warn">{{ item.quote_message }}</view>
         </view>
         <view class="line-amount">¥{{ money(item.line_amount || Number(item.qty) * Number(item.unit_price)) }}</view>
