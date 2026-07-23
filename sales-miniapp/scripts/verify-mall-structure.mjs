@@ -403,6 +403,8 @@ assertIncludes(cartPage, ':step="quantityStep(item)"', 'cart effective quantity 
 assertIncludes(cartPage, '配送包裹', 'cart split fulfillment copy')
 assertIncludes(cartPage, '@click.stop="cart.toggleSelection(item)"', 'cart item checkbox must toggle independently')
 assertIncludes(cartPage, ':class="{ selected: cart.isSelected(item) }"', 'cart item checkbox must show selected state')
+assertIncludes(cartPage, 'class="check-mark"', 'cart checkbox must use a stable graphical check mark')
+assertIncludes(cartPage, 'transform: translateY(-2rpx) rotate(45deg)', 'cart graphical check mark must stay centered')
 assertIncludes(cartPage, 'cart.allSelected ? \'取消全选\' : \'全选商品\'', 'cart all-selection toggle must be accessible')
 assertIncludes(cartPage, 'if (cart.allSelected) cart.selectNone()', 'cart all-selection control must toggle off')
 assertIncludes(cartPage, 'else cart.selectAll()', 'cart all-selection control must toggle on')

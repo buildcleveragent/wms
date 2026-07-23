@@ -19,7 +19,7 @@
               :aria-label="cart.isSelected(item) ? `取消选择${item.name}` : `选择${item.name}`"
               @click.stop="cart.toggleSelection(item)"
             >
-              <text v-if="cart.isSelected(item)" aria-hidden="true">✓</text>
+              <view v-if="cart.isSelected(item)" class="check-mark" aria-hidden="true" />
             </view>
             <view class="product-content">
               <image v-if="item.image_url" class="thumb" :src="item.image_url" mode="aspectFill" />
@@ -65,7 +65,7 @@
           @click="toggleAll"
         >
           <view class="select-control" :class="{ selected: cart.allSelected }">
-            <text v-if="cart.allSelected" aria-hidden="true">✓</text>
+            <view v-if="cart.allSelected" class="check-mark" aria-hidden="true" />
           </view>
           <text>全选</text>
         </view>
@@ -271,6 +271,16 @@ onShow(() => refresh())
 .select-control.selected {
   border-color: #1677ff;
   background: #1677ff;
+}
+
+.check-mark {
+  width: 10rpx;
+  height: 18rpx;
+  box-sizing: border-box;
+  border-right: 4rpx solid #fff;
+  border-bottom: 4rpx solid #fff;
+  transform: translateY(-2rpx) rotate(45deg);
+  transform-origin: center;
 }
 
 .product-content {
