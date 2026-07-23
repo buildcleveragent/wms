@@ -11,46 +11,71 @@
         </view>
         <view class="items">
           <view v-for="item in group.items" :key="item.key" class="cart-item">
-            <image v-if="item.image_url" class="thumb" :src="item.image_url" mode="aspectFill" />
-            <view v-else class="thumb placeholder">货</view>
-            <view class="main">
-              <view class="between">
-                <view class="name">{{ item.name }}</view>
-                <button class="remove" @click="remove(item)">删</button>
-              </view>
-              <view v-if="item.spec || item.order_uom_name" class="meta">{{ [item.spec, item.order_uom_name].filter(Boolean).join(' · ') }}</view>
-              <view v-if="item.quote_message" class="warn">{{ item.quote_message }}</view>
-              <view class="row">
-                <view>
-                  <view class="price">¥{{ money(item.unit_price) }} / {{ item.order_uom_name }}</view>
-                  <view class="base">{{ item.qty }} {{ item.order_uom_name }}</view>
+            <view
+              class="select-control"
+              :class="{ selected: cart.isSelected(item) }"
+              role="checkbox"
+              :aria-checked="cart.isSelected(item)"
+              :aria-label="cart.isSelected(item) ? `取消选择${item.name}` : `选择${item.name}`"
+              @click.stop="cart.toggleSelection(item)"
+            >
+              <text v-if="cart.isSelected(item)" aria-hidden="true">✓</text>
+            </view>
+            <view class="product-content">
+              <image v-if="item.image_url" class="thumb" :src="item.image_url" mode="aspectFill" />
+              <view v-else class="thumb placeholder">货</view>
+              <view class="main">
+                <view class="between">
+                  <view class="name">{{ item.name }}</view>
+                  <button class="remove" @click="remove(item)">删</button>
                 </view>
-                <QuantityStepper
-                  :model-value="item.qty"
-                  :min="quantityMin(item)"
-                  :step="quantityStep(item)"
-                  @change="changeQty(item, $event)"
-                />
+                <view v-if="item.spec || item.order_uom_name" class="meta">{{ [item.spec, item.order_uom_name].filter(Boolean).join(' · ') }}</view>
+                <view v-if="item.quote_message" class="warn">{{ item.quote_message }}</view>
+                <view class="row">
+                  <view>
+                    <view class="price">¥{{ money(item.unit_price) }} / {{ item.order_uom_name }}</view>
+                    <view class="base">{{ item.qty }} {{ item.order_uom_name }}</view>
+                  </view>
+                  <QuantityStepper
+                    :model-value="item.qty"
+                    :min="quantityMin(item)"
+                    :step="quantityStep(item)"
+                    @change="changeQty(item, $event)"
+                  />
+                </view>
               </view>
             </view>
           </view>
         </view>
         <view class="package-total">
-          <text>{{ group.line_count }} 件</text>
-          <text>小计 ¥{{ money(group.total_amount) }}</text>
+          <text>已选 {{ groupSelectedCount(group) }}/{{ group.line_count }} 件</text>
+          <text>已选小计 ¥{{ money(groupSelectedAmount(group)) }}</text>
         </view>
       </view>
     </view>
     <EmptyState v-else text="购物车为空" />
 
     <view v-if="cart.items.length" class="summary">
-      <view>
-        <view class="state">{{ groups.length }} 个配送包裹</view>
-        <view class="amount">¥{{ money(cart.totalAmount) }}</view>
-      </view>
-      <view class="actions">
-        <button class="refresh" :loading="loading" @click="refresh">刷新</button>
-        <button class="checkout" :loading="loading" @click="goCheckout">统一结算</button>
+      <view class="summary-main">
+        <view
+          class="all-toggle"
+          role="checkbox"
+          :aria-checked="cart.allSelected"
+          :aria-label="cart.allSelected ? '取消全选' : '全选商品'"
+          @click="toggleAll"
+        >
+          <view class="select-control" :class="{ selected: cart.allSelected }">
+            <text v-if="cart.allSelected" aria-hidden="true">✓</text>
+          </view>
+          <text>全选</text>
+        </view>
+        <view class="summary-amount">
+          <view class="state">已选 {{ cart.selectedItemCount }} 件 · {{ cart.selectedGroups.length }} 个配送包裹</view>
+          <view class="amount">合计 ¥{{ money(cart.selectedTotalAmount) }}</view>
+        </view>
+        <button class="checkout" :disabled="cart.noneSelected" :loading="loading" @click="goCheckout">
+          结算{{ cart.selectedItemCount ? `(${cart.selectedItemCount})` : '' }}
+        </button>
       </view>
     </view>
   </view>
@@ -120,18 +145,32 @@ async function remove(item) {
   }
 }
 
-function goSinglePackageCheckout(group) {
-  if (!group || !group.cart_id) return
-  uni.navigateTo({ url: `/pages/order-confirm/order-confirm?cart_id=${group.cart_id}` })
+function groupSelectedItems(group) {
+  return group.items.filter((item) => cart.isSelected(item))
+}
+
+function groupSelectedCount(group) {
+  return groupSelectedItems(group).length
+}
+
+function groupSelectedAmount(group) {
+  return groupSelectedItems(group).reduce(
+    (sum, item) => sum + Number(item.line_amount || Number(item.qty) * Number(item.unit_price) || 0),
+    0,
+  )
+}
+
+function toggleAll() {
+  if (cart.allSelected) cart.selectNone()
+  else cart.selectAll()
 }
 
 function goCheckout() {
-  if (!groups.value.length) return
-  if (groups.value.length > 1) {
-    uni.navigateTo({ url: '/pages/order-confirm/order-confirm' })
+  if (cart.noneSelected) {
+    uni.showToast({ title: '请先选择需要结算的商品', icon: 'none' })
     return
   }
-  goSinglePackageCheckout(groups.value[0])
+  uni.navigateTo({ url: '/pages/order-confirm/order-confirm' })
 }
 
 onShow(() => refresh())
@@ -139,7 +178,7 @@ onShow(() => refresh())
 
 <style scoped>
 .cart-page {
-  padding-bottom: 270rpx;
+  padding-bottom: 240rpx;
 }
 
 .groups,
@@ -196,6 +235,7 @@ onShow(() => refresh())
 
 .cart-item {
   display: flex;
+  align-items: center;
   gap: 16rpx;
   padding: 16rpx 0;
   border-top: 1rpx solid #eef2f7;
@@ -209,6 +249,36 @@ onShow(() => refresh())
 
 .cart-item:last-child {
   padding-bottom: 0;
+}
+
+.select-control {
+  width: 44rpx;
+  height: 44rpx;
+  box-sizing: border-box;
+  flex: 0 0 44rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2rpx solid #94a3b8;
+  border-radius: 50%;
+  background: #fff;
+  color: #fff;
+  font-size: 29rpx;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.select-control.selected {
+  border-color: #1677ff;
+  background: #1677ff;
+}
+
+.product-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
 }
 
 .thumb {
@@ -308,10 +378,35 @@ onShow(() => refresh())
   border-radius: 8rpx;
   background: #fff;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 16rpx;
   box-shadow: 0 10rpx 30rpx rgba(15, 23, 42, 0.08);
+}
+
+.summary-main {
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.all-toggle {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  color: #475569;
+  font-size: 24rpx;
+}
+
+.summary-main {
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.summary-amount {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
 }
 
 .amount {
@@ -321,16 +416,12 @@ onShow(() => refresh())
   font-weight: 900;
 }
 
-.actions {
-  display: flex;
-  gap: 10rpx;
-}
-
-.refresh,
 .checkout {
-  width: 128rpx;
+  width: 176rpx;
   height: 76rpx;
   line-height: 76rpx;
+  flex: 0 0 176rpx;
+  margin: 0;
   padding: 0;
   border: 0;
   border-radius: 8rpx;
@@ -338,17 +429,16 @@ onShow(() => refresh())
   font-weight: 750;
 }
 
-.refresh {
-  background: #eef2f7;
-  color: #334155;
-}
-
 .checkout {
   background: #0f766e;
   color: #fff;
 }
 
-.refresh::after,
+.checkout[disabled] {
+  background: #cbd5e1;
+  color: #fff;
+}
+
 .checkout::after {
   border: 0;
 }

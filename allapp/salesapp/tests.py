@@ -2930,6 +2930,92 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertFalse(SaleMiniCartItem.objects.filter(cart_id=cart_id).exists())
 
+    def test_checkout_clears_selected_cart_item_and_keeps_unselected_item(self):
+        remaining_product = Product.objects.create(
+            owner=self.owner,
+            code="MP002",
+            sku="MP002",
+            name="购物车未选商品",
+            category=self.category,
+            base_uom=self.uom,
+            price=Decimal("8.00"),
+            expiry_control=False,
+            batch_control=False,
+            is_active=True,
+        )
+        SaleProductConfig.objects.create(
+            owner=self.owner,
+            product=remaining_product,
+            is_listed=True,
+            sale_price=Decimal("8.0000"),
+            stock_display=SaleProductConfig.StockDisplay.EXACT,
+        )
+        InventoryDetail.objects.create(
+            owner=self.owner,
+            product=remaining_product,
+            warehouse=self.warehouse,
+            location=self.location,
+            onhand_qty=Decimal("10.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+        )
+        first_add = self.client.post(
+            "/api/sale-mini/cart/add/",
+            {
+                "product_id": self.product.id,
+                "qty": "2.000",
+                "order_uom": "EA-MINI",
+            },
+            format="json",
+        )
+        second_add = self.client.post(
+            "/api/sale-mini/cart/add/",
+            {
+                "product_id": remaining_product.id,
+                "qty": "3.000",
+                "order_uom": "EA-MINI",
+            },
+            format="json",
+        )
+        self.assertEqual(first_add.status_code, 200)
+        self.assertEqual(second_add.status_code, 200)
+        cart_id = first_add.data["id"]
+        self.assertEqual(SaleMiniCartItem.objects.filter(cart_id=cart_id).count(), 2)
+
+        response = self.client.post(
+            "/api/sale-mini/orders/",
+            {
+                "cart_id": cart_id,
+                "contact": "张三",
+                "contact_phone": "13800000000",
+                "ship_to": "上海市测试路 1 号",
+                "delivery_method": "OWN_TRUCK",
+                "lines": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "2.000",
+                        "order_uom": "EA-MINI",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(
+            SaleMiniCartItem.objects.filter(
+                cart_id=cart_id,
+                product=self.product,
+            ).exists()
+        )
+        remaining_item = SaleMiniCartItem.objects.get(
+            cart_id=cart_id,
+            product=remaining_product,
+        )
+        self.assertEqual(remaining_item.qty, Decimal("3.000"))
+
     def test_create_order_generates_outbound_and_allocates_inventory(self):
         response = self.client.post(
             "/api/sale-mini/orders/",

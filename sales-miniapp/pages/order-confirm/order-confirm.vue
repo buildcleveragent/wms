@@ -76,7 +76,7 @@
 
     <view class="section">
       <view class="section-title">商品明细</view>
-      <view v-for="item in cart.items" :key="item.key" class="line">
+      <view v-for="item in cart.selectedItems" :key="item.key" class="line">
         <view>
           <view class="line-name">{{ item.name }}</view>
           <view class="line-meta">{{ item.qty }} {{ item.order_uom_name || item.order_uom }} × ¥{{ money(item.unit_price) }}</view>
@@ -155,18 +155,18 @@ const paymentOptions = [
 const selectedAddress = computed(() => addresses.value.find((item) => item.id === selectedId.value) || null)
 const selectedDelivery = computed(() => deliveryOptions[deliveryIndex.value] || deliveryOptions[0])
 const isPickup = computed(() => selectedDelivery.value.code === 'PICKUP')
-const isCombined = computed(() => !ownerId.value && (cart.groups || []).length > 1)
+const isCombined = computed(() => !ownerId.value && cart.selectedGroups.length > 1)
 const pickupTitle = computed(() => '自提点')
 const effectivePaymentMethod = computed(() => (isCombined.value ? 'OFFLINE' : paymentMethod.value))
 const submitText = computed(() => (effectivePaymentMethod.value === 'WECHAT' ? '提交并支付' : '提交订单'))
 const adjustmentRows = computed(() => (preview.value && preview.value.adjustments) || [])
 const payableAmount = computed(() => {
   const data = preview.value || {}
-  return data.payable_amount || data.total_amount || cart.totalAmount
+  return data.payable_amount || data.total_amount || cart.selectedTotalAmount
 })
 const previewGoodsAmount = computed(() => {
   const data = preview.value || {}
-  return data.goods_amount === undefined || data.goods_amount === null ? cart.totalAmount : data.goods_amount
+  return data.goods_amount === undefined || data.goods_amount === null ? cart.selectedTotalAmount : data.goods_amount
 })
 const previewOk = computed(() => Boolean(preview.value && preview.value.ok))
 const couponOptions = computed(() => [
@@ -229,7 +229,7 @@ async function loadBenefits() {
     return
   }
   const [couponRows, points] = await Promise.all([
-    benefitService.coupons({ owner_id: ownerId.value, order_amount: cart.totalAmount }),
+    benefitService.coupons({ owner_id: ownerId.value, order_amount: cart.selectedTotalAmount }),
     benefitService.points({ owner_id: ownerId.value }),
   ])
   coupons.value = couponRows || []
@@ -241,7 +241,7 @@ async function loadBenefits() {
 }
 
 async function refreshPreview() {
-  if (!cart.items.length) return
+  if (!cart.selectedItems.length) return
   preview.value = await cart.preview(orderExtra())
 }
 
@@ -281,8 +281,8 @@ function selectPayment(item) {
 
 async function submit() {
   if (loading.value) return
-  if (!cart.items.length) {
-    uni.showToast({ title: '购物车为空', icon: 'none' })
+  if (!cart.selectedItems.length) {
+    uni.showToast({ title: '请先选择需要结算的商品', icon: 'none' })
     return
   }
   loading.value = true
@@ -335,28 +335,21 @@ onLoad((query = {}) => {
 
 onShow(async () => {
   try {
-    if (cartId.value && !ownerId.value) {
-      await cart.load({ cart_id: cartId.value })
-      if (cart.groups.length === 1) {
-        ownerId.value = String(cart.groups[0].owner_id)
-      }
-    } else if (!ownerId.value) {
-      await cart.load()
-      if (cart.groups.length === 1) {
-        ownerId.value = String(cart.groups[0].owner_id)
-        cartId.value = String(cart.groups[0].cart_id || '')
-      }
-    }
-    const loadParams = cartId.value ? { cart_id: cartId.value } : ownerId.value ? { owner_id: ownerId.value } : {}
+    const loadParams = cartId.value ? { cart_id: cartId.value } : {}
     await cart.load(loadParams)
-    if (!ownerId.value && cart.groups.length === 1) {
-      ownerId.value = String(cart.groups[0].owner_id)
+    if (cart.selectedGroups.length === 1) {
+      const selectedGroup = cart.selectedGroups[0]
+      ownerId.value = String(selectedGroup.owner_id)
+      cartId.value = String(selectedGroup.cart_id || '')
+    } else {
+      ownerId.value = ''
+      cartId.value = ''
     }
-    if (!cartId.value && cart.cartId) cartId.value = String(cart.cartId)
   } catch (err) {
     uni.showToast({ title: err.message || '购物车同步失败', icon: 'none' })
   }
-  if (!cart.items.length) {
+  if (!cart.selectedItems.length) {
+    uni.showToast({ title: '请先选择需要结算的商品', icon: 'none' })
     backToCart()
     return
   }

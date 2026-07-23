@@ -55,6 +55,7 @@ const cartStore = reactive({
   cartId: uni.getStorageSync('sale_mini_cart_id') || null,
   items: uni.getStorageSync('sale_mini_cart_items') || [],
   groups: uni.getStorageSync('sale_mini_cart_groups') || [],
+  selection: uni.getStorageSync('sale_mini_cart_selection') || {},
   lastPreview: null,
   synced: false,
   get totalQty() {
@@ -66,18 +67,63 @@ const cartStore = reactive({
       0,
     )
   },
+  get selectedItems() {
+    return this.items.filter((item) => this.selection[item.key] === true)
+  },
+  get selectedItemCount() {
+    return this.selectedItems.length
+  },
+  get selectedTotalQty() {
+    return this.selectedItems.reduce((sum, item) => sum + toNumber(item.qty), 0)
+  },
+  get selectedTotalAmount() {
+    return this.selectedItems.reduce(
+      (sum, item) => sum + toNumber(item.line_amount || toNumber(item.qty) * toNumber(item.unit_price)),
+      0,
+    )
+  },
+  get selectedGroups() {
+    return this.groups
+      .map((group) => {
+        const items = group.items.filter((item) => this.selection[item.key] === true)
+        return {
+          ...group,
+          items,
+          line_count: items.length,
+          total_amount: items.reduce(
+            (sum, item) => sum + toNumber(item.line_amount || toNumber(item.qty) * toNumber(item.unit_price)),
+            0,
+          ),
+        }
+      })
+      .filter((group) => group.items.length)
+  },
+  get allSelected() {
+    return Boolean(this.items.length) && this.selectedItemCount === this.items.length
+  },
+  get noneSelected() {
+    return this.selectedItemCount === 0
+  },
   persist() {
     uni.setStorageSync('sale_mini_cart_id', this.cartId || '')
     uni.setStorageSync('sale_mini_cart_items', this.items)
     uni.setStorageSync('sale_mini_cart_groups', this.groups)
+    uni.setStorageSync('sale_mini_cart_selection', this.selection)
   },
   applyServerCart(data) {
+    const previousSelection = this.selection || {}
     const hasGroups = data.groups && data.groups.length
     const groups = hasGroups
       ? data.groups.map(groupFromServer)
       : ((data.items && data.items.length) || (data.lines && data.lines.length) ? [groupFromServer(data)] : [])
     this.groups = groups
     this.items = groups.reduce((all, group) => all.concat(group.items), [])
+    this.selection = this.items.reduce((next, item) => {
+      next[item.key] = Object.prototype.hasOwnProperty.call(previousSelection, item.key)
+        ? previousSelection[item.key] === true
+        : true
+      return next
+    }, {})
     this.cartId = data.id || data.cart_id || (groups.length === 1 ? groups[0].cart_id : null)
     this.lastPreview = data
     this.synced = true
@@ -86,6 +132,7 @@ const cartStore = reactive({
   clearLocal() {
     this.items = []
     this.groups = []
+    this.selection = {}
     this.lastPreview = null
     this.synced = true
     this.persist()
@@ -105,6 +152,16 @@ const cartStore = reactive({
       order_uom: product.order_uom,
     })
     await this.load()
+    const addedItem = this.items.find((item) => {
+      if (product.config_id && item.config_id) {
+        return Number(item.config_id) === Number(product.config_id)
+      }
+      return (
+        Number(item.product_id) === Number(product.id) &&
+        (!product.order_uom || item.order_uom === product.order_uom)
+      )
+    })
+    if (addedItem) this.setSelected(addedItem, true)
     return data
   },
   findIndexForItem(target) {
@@ -152,9 +209,34 @@ const cartStore = reactive({
     this.applyServerCart(data)
     return data
   },
+  isSelected(item) {
+    return Boolean(item && this.selection[item.key] === true)
+  },
+  setSelected(item, selected) {
+    if (!item || !item.key) return
+    this.selection = { ...this.selection, [item.key]: Boolean(selected) }
+    this.persist()
+  },
+  toggleSelection(item) {
+    this.setSelected(item, !this.isSelected(item))
+  },
+  selectAll() {
+    this.selection = this.items.reduce((next, item) => {
+      next[item.key] = true
+      return next
+    }, {})
+    this.persist()
+  },
+  selectNone() {
+    this.selection = this.items.reduce((next, item) => {
+      next[item.key] = false
+      return next
+    }, {})
+    this.persist()
+  },
   payload(extra = {}) {
     const ownerId = extra.owner_id
-    const lines = this.items
+    const lines = this.selectedItems
       .filter((item) => !ownerId || Number(item.owner_id) === Number(ownerId))
       .map((item) => ({
         product_id: item.product_id,
@@ -162,11 +244,11 @@ const cartStore = reactive({
         order_uom: item.order_uom,
       }))
     const group = ownerId
-      ? this.groups.find((item) => Number(item.owner_id) === Number(ownerId))
+      ? this.selectedGroups.find((item) => Number(item.owner_id) === Number(ownerId))
       : null
     const cartIds = ownerId
       ? []
-      : this.groups.map((item) => item.cart_id).filter(Boolean)
+      : this.selectedGroups.map((item) => item.cart_id).filter(Boolean)
     return {
       ...extra,
       ...(group && group.cart_id ? { cart_id: group.cart_id } : this.cartId ? { cart_id: this.cartId } : {}),
@@ -176,7 +258,7 @@ const cartStore = reactive({
   },
   async preview(extra = {}) {
     const payload = this.payload(extra)
-    if (!payload.lines.length) throw new Error('购物车为空')
+    if (!payload.lines.length) throw new Error('请先选择需要结算的商品')
     const preview = await cartService.preview(payload)
     this.items = this.items.map((item) => {
       const line = preview.lines.find((row) => row.product_id === item.product_id && row.order_uom === item.order_uom)

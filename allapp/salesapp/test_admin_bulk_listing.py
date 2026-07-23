@@ -116,6 +116,14 @@ class SaleProductConfigAdminBulkOwnerTests(TestCase):
         self.assertContains(response, "按货主批量上架")
         self.assertContains(response, self.bulk_url)
 
+    def test_owner_bulk_quantity_rules_checkbox_uses_inline_layout(self):
+        response = self.client.get(self.bulk_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="bulk-owner-checkbox-label"')
+        self.assertContains(response, 'input:not([type="checkbox"])')
+        self.assertContains(response, "启用起购及递增限制")
+
     def test_sale_product_config_admin_uses_chinese_names_and_field_labels(self):
         config = SaleProductConfig.objects.create(
             owner=self.owner,

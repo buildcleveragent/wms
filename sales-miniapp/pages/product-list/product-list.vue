@@ -63,7 +63,7 @@
     </view>
     <EmptyState v-else :text="loading ? '加载中' : '没有找到商品'" />
 
-    <CartBar :count="cart.items.length" :amount="cart.totalAmount" @checkout="goCart" />
+    <CartBar :count="cart.selectedItemCount" :amount="cart.selectedTotalAmount" @checkout="goCart" />
   </view>
 </template>
 
