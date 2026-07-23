@@ -143,6 +143,9 @@ assert(pagesJson.globalStyle.navigationBarTitleText === '金桥融通商城', 'g
 assert(pagesJson.pages[0].style.navigationBarTitleText === '金桥融通商城', 'home title must be buyer-facing')
 
 const request = readText('utils/request.js')
+assertIncludes(request, 'function isDebugPage(message)', '请求封装必须识别后端调试页')
+assertIncludes(request, "statusCode >= 500", '请求封装必须屏蔽 500 调试详情')
+assertIncludes(request, 'notified: true', '请求错误必须标记已向用户提示')
 assertIncludes(request, '/api/sale-mini/home/', 'request API')
 assertIncludes(request, '/api/sale-mini/categories/', 'request API')
 assertIncludes(request, '/api/sale-mini/brands/', 'request API')

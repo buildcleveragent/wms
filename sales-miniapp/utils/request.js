@@ -39,8 +39,23 @@ function firstMessage(value) {
   return String(value)
 }
 
-function messageFrom(data, fallback = '请求失败') {
-  return mallMessage(firstMessage(data) || fallback)
+function isDebugPage(message) {
+  const text = String(message || '').toLowerCase()
+  return (
+    text.includes('<!doctype html') ||
+    text.includes('<html') ||
+    text.includes('<body') ||
+    text.includes('traceback') ||
+    text.includes('django/db/backends')
+  )
+}
+
+function messageFrom(data, fallback = '请求失败', statusCode = 0) {
+  if (statusCode >= 500) return '服务器处理失败，请稍后重试'
+  const raw = firstMessage(data)
+  if (!raw || isDebugPage(raw)) return fallback
+  const message = mallMessage(raw.replace(/\s+/g, ' ').trim())
+  return message.length > 120 ? `${message.slice(0, 117)}...` : message
 }
 
 function mallMessage(message) {
@@ -77,7 +92,7 @@ export function request({ url, method = 'GET', data, header = {}, authRedirect =
           resolve(res.data)
           return
         }
-        const msg = messageFrom(res.data)
+        const msg = messageFrom(res.data, '请求失败', res.statusCode)
         if (res.statusCode === 401) {
           clearToken()
           if (authRedirect) {
@@ -85,11 +100,11 @@ export function request({ url, method = 'GET', data, header = {}, authRedirect =
           }
         }
         uni.showToast({ title: msg, icon: 'none' })
-        reject({ statusCode: res.statusCode, message: msg, data: res.data })
+        reject({ statusCode: res.statusCode, message: msg, data: res.data, notified: true })
       },
       fail(err) {
         uni.showToast({ title: '网络异常，请检查服务地址', icon: 'none' })
-        reject({ statusCode: 0, message: '网络异常', data: err })
+        reject({ statusCode: 0, message: '网络异常', data: err, notified: true })
       },
     })
   })
@@ -117,17 +132,17 @@ export function uploadFile({ url, filePath, name = 'image', formData = {} }) {
           resolve(data)
           return
         }
-        const msg = messageFrom(data)
+        const msg = messageFrom(data, '图片上传失败', res.statusCode)
         if (res.statusCode === 401) {
           clearToken()
           uni.reLaunch({ url: '/pages/login/login' })
         }
         uni.showToast({ title: msg, icon: 'none' })
-        reject({ statusCode: res.statusCode, message: msg, data })
+        reject({ statusCode: res.statusCode, message: msg, data, notified: true })
       },
       fail(err) {
         uni.showToast({ title: '图片上传失败，请检查网络', icon: 'none' })
-        reject({ statusCode: 0, message: '图片上传失败', data: err })
+        reject({ statusCode: 0, message: '图片上传失败', data: err, notified: true })
       },
     })
   })

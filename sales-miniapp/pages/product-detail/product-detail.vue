@@ -139,6 +139,11 @@ const favoriteText = computed(() => (browse.isFavorite(product.value) ? '已收�
 const isOutOfStock = computed(() => product.value.stock && product.value.stock.status === 'OUT')
 const actionDisabled = computed(() => isOutOfStock.value)
 
+function showUnhandledError(err, fallback) {
+  if (err && err.notified) return
+  uni.showToast({ title: (err && err.message) || fallback, icon: 'none' })
+}
+
 async function load(id, params = {}) {
   const data = await productService.detail(id, params)
   product.value = normalize(data)
@@ -215,7 +220,7 @@ async function addToCart() {
     uni.showToast({ title: '已加入购物车', icon: 'none' })
     return data || true
   } catch (err) {
-    uni.showToast({ title: err.message || '加入失败', icon: 'none' })
+    showUnhandledError(err, '加入失败')
     return false
   }
 }
@@ -230,14 +235,14 @@ async function addRelatedProduct(item) {
     await cart.addProduct(item, itemRules.enabled ? Number(itemRules.min_order_qty || 1) : 1)
     uni.showToast({ title: '已加入购物车', icon: 'none' })
   } catch (err) {
-    uni.showToast({ title: err.message || '加入失败', icon: 'none' })
+    showUnhandledError(err, '加入失败')
   }
 }
 
 function openRelatedProduct(item) {
   if (!item || !item.id) return
   load(item.id, productDetailParams(item)).catch((err) => {
-    uni.showToast({ title: err.message || '商品加载失败', icon: 'none' })
+    showUnhandledError(err, '商品加载失败')
   })
 }
 
@@ -269,6 +274,8 @@ onLoad((query) => {
   if (query.id) {
     load(query.id, {
       config_id: query.config_id || '',
+    }).catch((err) => {
+      showUnhandledError(err, '商品加载失败')
     })
   }
 })
