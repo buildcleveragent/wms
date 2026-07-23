@@ -3,11 +3,26 @@
     <view class="category-head">
       <view class="search" @click="goSearch">搜索当前分类商品</view>
       <view class="major-bar">
-        <scroll-view class="major-scroll" scroll-x :show-scrollbar="false">
+        <scroll-view
+          class="major-scroll"
+          scroll-x
+          enhanced
+          enable-flex
+          :show-scrollbar="false"
+          :scroll-left="majorScrollLeft"
+          :scroll-into-view="majorScrollTarget"
+          @scroll="handleMajorScroll"
+          @wheel="handleMajorWheel"
+          @mousedown="startMajorDrag"
+          @mousemove="moveMajorDrag"
+          @mouseup="stopMajorDrag"
+          @mouseleave="stopMajorDrag"
+        >
           <view class="major-row">
             <view
               v-for="item in majorCategories"
               :key="item.id"
+              :id="majorItemId(item.id)"
               :class="['major-item', sameId(item.id, activeMajorId) && 'active']"
               @click="selectMajor(item.id)"
             >
@@ -17,10 +32,36 @@
             </view>
           </view>
         </scroll-view>
-        <view :class="['all-major', activeMajorId === ALL_CATEGORY_ID && 'active']" @click="selectMajor(ALL_CATEGORY_ID)">
+        <view :class="['all-major', majorPanelOpen && 'active']" @click="openMajorPanel">
           <text>全部</text>
           <text class="menu-icon">☰</text>
         </view>
+      </view>
+    </view>
+
+    <view v-if="majorPanelOpen" class="major-overlay" @click="closeMajorPanel">
+      <view class="major-panel" @click.stop>
+        <view class="major-panel-head">
+          <text class="major-panel-title">全部大类</text>
+          <button class="collapse-button" @click="closeMajorPanel">
+            <text>收起</text>
+            <text class="collapse-icon">⌃</text>
+          </button>
+        </view>
+        <scroll-view class="major-grid-scroll" scroll-y :show-scrollbar="false">
+          <view class="major-grid">
+            <view
+              v-for="item in majorCategories"
+              :key="`panel-${item.id}`"
+              :class="['major-grid-item', sameId(item.id, activeMajorId) && 'active']"
+              @click="selectMajorFromPanel(item.id)"
+            >
+              <image v-if="item.image_url" class="major-grid-image" :src="item.image_url" mode="aspectFill" />
+              <view v-else class="major-grid-image major-placeholder">{{ item.name.slice(0, 1) }}</view>
+              <text class="major-grid-name">{{ item.name }}</text>
+            </view>
+          </view>
+        </scroll-view>
       </view>
     </view>
 
@@ -78,7 +119,7 @@
 
 <script setup>
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import EmptyState from '../../components/EmptyState.vue'
 import ProductCard from '../../components/ProductCard.vue'
 import { productService } from '../../services/product'
@@ -97,6 +138,13 @@ const page = ref(1)
 const hasMore = ref(true)
 const loading = ref(false)
 const requestSeq = ref(0)
+const majorPanelOpen = ref(false)
+const majorScrollLeft = ref(0)
+const majorScrollTarget = ref('')
+const majorDragging = ref(false)
+const majorDragMoved = ref(false)
+const majorDragStartX = ref(0)
+const majorDragStartLeft = ref(0)
 const ALL_CATEGORY_ID = 'all'
 const ALL_MIDDLE_ID = 'all-middle'
 const ALL_SMALL_ID = 'all-small'
@@ -125,6 +173,67 @@ const activeCategoryId = computed(() => {
 })
 const isPriceOrdering = computed(() => ordering.value === 'price_asc' || ordering.value === 'price_desc')
 const priceLabel = computed(() => (ordering.value === 'price_desc' ? '价格↓' : ordering.value === 'price_asc' ? '价格↑' : '价格'))
+
+const majorItemId = (id) => `major-${id}`
+
+function eventClientX(event) {
+  const touch = event && event.touches && event.touches[0]
+  if (touch) return Number(touch.clientX || touch.pageX || 0)
+  return Number((event && (event.clientX || event.pageX)) || 0)
+}
+
+function handleMajorScroll(event) {
+  const detail = (event && event.detail) || {}
+  majorScrollLeft.value = Number(detail.scrollLeft || 0)
+}
+
+function handleMajorWheel(event) {
+  const detail = (event && event.detail) || {}
+  const delta = Number(
+    (event && (event.deltaY || event.deltaX))
+    || detail.deltaY
+    || detail.deltaX
+    || 0
+  )
+  if (!delta) return
+  majorScrollLeft.value = Math.max(0, majorScrollLeft.value + delta)
+  if (event && typeof event.preventDefault === 'function') event.preventDefault()
+}
+
+function startMajorDrag(event) {
+  majorDragging.value = true
+  majorDragMoved.value = false
+  majorDragStartX.value = eventClientX(event)
+  majorDragStartLeft.value = majorScrollLeft.value
+}
+
+function moveMajorDrag(event) {
+  if (!majorDragging.value) return
+  const distance = eventClientX(event) - majorDragStartX.value
+  if (Math.abs(distance) > 4) majorDragMoved.value = true
+  majorScrollLeft.value = Math.max(0, majorDragStartLeft.value - distance)
+  if (event && typeof event.preventDefault === 'function') event.preventDefault()
+}
+
+function stopMajorDrag() {
+  majorDragging.value = false
+}
+
+function scrollMajorIntoView(id) {
+  majorScrollTarget.value = ''
+  nextTick(() => {
+    majorScrollTarget.value = majorItemId(id)
+  })
+}
+
+function openMajorPanel() {
+  majorPanelOpen.value = true
+  stopMajorDrag()
+}
+
+function closeMajorPanel() {
+  majorPanelOpen.value = false
+}
 
 function categoryChain(categoryId) {
   const byId = new Map(categories.value.map((item) => [String(item.id), item]))
@@ -168,8 +277,21 @@ function applyCategorySelection(categoryId) {
 }
 
 function selectMajor(id) {
+  if (majorDragMoved.value) {
+    majorDragMoved.value = false
+    return
+  }
+  closeMajorPanel()
+  scrollMajorIntoView(id)
   if (sameId(id, activeMajorId.value)) return
   applyCategorySelection(id)
+}
+
+function selectMajorFromPanel(id) {
+  majorDragMoved.value = false
+  closeMajorPanel()
+  scrollMajorIntoView(id)
+  if (!sameId(id, activeMajorId.value)) applyCategorySelection(id)
 }
 
 function selectMiddle(id) {
@@ -277,6 +399,7 @@ onShow(() => {
 
 <style scoped>
 .category-page {
+  position: relative;
   height: 100vh;
   overflow: hidden;
   background: #f4f6f8;
@@ -310,6 +433,9 @@ onShow(() => {
   flex: 1;
   width: 0;
   white-space: nowrap;
+  cursor: grab;
+  user-select: none;
+  touch-action: pan-x;
 }
 
 .major-row {
@@ -385,6 +511,112 @@ onShow(() => {
 .menu-icon {
   margin-top: 6rpx;
   font-size: 23rpx;
+}
+
+.major-overlay {
+  position: absolute;
+  top: 88rpx;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  background: rgba(15, 23, 42, 0.48);
+}
+
+.major-panel {
+  width: 100%;
+  max-height: 680rpx;
+  padding: 18rpx 16rpx 22rpx;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-top: 1rpx solid #e2e8f0;
+  border-bottom: 1rpx solid #d7dde8;
+}
+
+.major-panel-head {
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.major-panel-title {
+  color: #17202a;
+  font-size: 29rpx;
+  font-weight: 850;
+}
+
+.collapse-button {
+  width: 116rpx;
+  height: 58rpx;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  border: 0;
+  background: transparent;
+  color: #334155;
+  font-size: 24rpx;
+}
+
+.collapse-button::after {
+  border: 0;
+}
+
+.collapse-icon {
+  color: #0f766e;
+  font-size: 28rpx;
+  font-weight: 900;
+}
+
+.major-grid-scroll {
+  max-height: 574rpx;
+}
+
+.major-grid {
+  padding-top: 8rpx;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  row-gap: 24rpx;
+}
+
+.major-grid-item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #334155;
+}
+
+.major-grid-image {
+  width: 92rpx;
+  height: 92rpx;
+  border: 4rpx solid transparent;
+  border-radius: 50%;
+  background: #edf8f5;
+}
+
+.major-grid-name {
+  width: 120rpx;
+  margin-top: 7rpx;
+  overflow: hidden;
+  color: inherit;
+  font-size: 22rpx;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.major-grid-item.active {
+  color: #0f766e;
+  font-weight: 800;
+}
+
+.major-grid-item.active .major-grid-image {
+  border-color: #0f766e;
 }
 
 .category-body {
