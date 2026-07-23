@@ -1,14 +1,16 @@
 from datetime import date, timedelta
 from decimal import Decimal
-from io import StringIO
+from io import BytesIO, StringIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from PIL import Image
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from allapp.baseinfo.models import Customer, Owner
@@ -46,6 +48,8 @@ from .models import (
     SaleMiniPayment,
     SaleMiniPaymentEvent,
     SaleMiniPointLedger,
+    SaleMiniProductReview,
+    SaleMiniProductReviewImage,
     SaleMiniRefund,
     SaleProductConfig,
     SalesOrder,
@@ -716,6 +720,33 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         return response
 
+    def _completed_order_line(self):
+        response = self._create_sale_mini_order()
+        order = OutboundOrder.objects.get(pk=response.data["id"])
+        order.is_closed = True
+        order.save(update_fields=["is_closed", "updated_at"])
+        mapping = SaleMiniOrderMapping.objects.get(outbound_order=order)
+        return mapping, order.lines.get()
+
+    def _review_draft(self, line, **overrides):
+        payload = {
+            "order_line_id": line.id,
+            "quality_score": 5,
+            "delivery_score": 4,
+            "overall_score": 5,
+            "content": "商品质量很好，配送及时。",
+            "is_anonymous": True,
+        }
+        payload.update(overrides)
+        return self.client.post(
+            "/api/sale-mini/reviews/drafts/", payload, format="json"
+        )
+
+    def _review_image(self, name="review.png"):
+        content = BytesIO()
+        Image.new("RGB", (24, 18), color=(22, 119, 255)).save(content, format="PNG")
+        return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
+
     def _create_discount_step(self, *, threshold="10.00", discount="3.00"):
         promo = Promotion.objects.create(
             owner=self.owner,
@@ -819,6 +850,177 @@ class SaleMiniApiTests(TestCase):
             base_unit=self.uom.code,
         )
         return other_owner, other_customer, other_buyer, other_product
+
+    def test_review_requires_completed_owned_purchase_and_valid_payment(self):
+        order_response = self._create_sale_mini_order()
+        order = OutboundOrder.objects.get(pk=order_response.data["id"])
+        line = order.lines.get()
+
+        not_completed = self._review_draft(line)
+        self.assertEqual(not_completed.status_code, 400)
+        self.assertIn("订单完成后", str(not_completed.data))
+
+        order.is_closed = True
+        order.save(update_fields=["is_closed", "updated_at"])
+        mapping = SaleMiniOrderMapping.objects.get(outbound_order=order)
+        mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.REFUNDED
+        mapping.save(update_fields=["payment_status", "updated_at"])
+        refunded = self._review_draft(line)
+        self.assertEqual(refunded.status_code, 400)
+        self.assertIn("付款状态", str(refunded.data))
+
+        other_user = User.objects.create_user(
+            username="review-other",
+            password="pw",
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        MiniProgramUser.objects.create(
+            owner=self.owner,
+            user=other_user,
+            customer=self.customer,
+            nickname="其他买家",
+        )
+        self.client.force_authenticate(other_user)
+        forbidden = self._review_draft(line)
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_review_draft_is_idempotent_and_order_payload_tracks_status(self):
+        mapping, line = self._completed_order_line()
+        first = self._review_draft(line)
+        second = self._review_draft(line, content="更新后的评价")
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.data["id"], second.data["id"])
+        self.assertEqual(
+            SaleMiniProductReview.objects.filter(order_line=line).count(), 1
+        )
+        detail = self.client.get(f"/api/sale-mini/orders/{mapping.outbound_order_id}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertFalse(detail.data["lines"][0]["review"]["eligible"])
+        self.assertEqual(detail.data["lines"][0]["review"]["status"], "DRAFT")
+
+    def test_pending_review_is_private_until_published_and_can_be_hidden(self):
+        mapping, line = self._completed_order_line()
+        draft = self._review_draft(line, is_anonymous=False)
+        submit = self.client.post(
+            f"/api/sale-mini/reviews/{draft.data['id']}/submit/", {}, format="json"
+        )
+        config = SaleProductConfig.objects.get(product=self.product)
+
+        self.assertEqual(submit.status_code, 200)
+        self.assertEqual(submit.data["status"], "PENDING")
+        hidden_list = self.client.get(
+            f"/api/sale-mini/products/{self.product.id}/reviews/",
+            {"config_id": config.id},
+        )
+        self.assertEqual(hidden_list.status_code, 200)
+        self.assertEqual(hidden_list.data["count"], 0)
+
+        review = SaleMiniProductReview.objects.get(pk=draft.data["id"])
+        review.status = SaleMiniProductReview.Status.PUBLISHED
+        review.published_at = timezone.now()
+        review.save(update_fields=["status", "published_at", "updated_at"])
+        public_list = self.client.get(
+            f"/api/sale-mini/products/{self.product.id}/reviews/",
+            {"config_id": config.id},
+        )
+        product_detail = self.client.get(
+            f"/api/sale-mini/products/{self.product.id}/",
+            {"config_id": config.id},
+        )
+        self.assertEqual(public_list.data["count"], 1)
+        self.assertEqual(public_list.data["results"][0]["display_name"], "采购员")
+        self.assertNotIn("buyer_user", public_list.data["results"][0])
+        self.assertNotIn("order_line_id", public_list.data["results"][0])
+        self.assertEqual(product_detail.data["review_summary"]["count"], 1)
+        self.assertEqual(product_detail.data["review_preview"]["id"], review.id)
+
+        review.status = SaleMiniProductReview.Status.HIDDEN
+        review.save(update_fields=["status", "updated_at"])
+        hidden_again = self.client.get(
+            f"/api/sale-mini/products/{self.product.id}/reviews/",
+            {"config_id": config.id},
+        )
+        self.assertEqual(hidden_again.data["count"], 0)
+
+    def test_review_summary_averages_filters_and_anonymous_privacy_are_exact(self):
+        config = SaleProductConfig.objects.get(product=self.product)
+        published = []
+        for score, anonymous in ((5, True), (3, False)):
+            _mapping, line = self._completed_order_line()
+            draft = self._review_draft(
+                line,
+                quality_score=score,
+                delivery_score=score,
+                overall_score=score,
+                is_anonymous=anonymous,
+            )
+            row = SaleMiniProductReview.objects.get(pk=draft.data["id"])
+            row.status = SaleMiniProductReview.Status.PUBLISHED
+            row.published_at = timezone.now()
+            row.save(update_fields=["status", "published_at", "updated_at"])
+            published.append(row)
+
+        response = self.client.get(
+            f"/api/sale-mini/products/{self.product.id}/reviews/",
+            {"config_id": config.id},
+        )
+        five_star = self.client.get(
+            f"/api/sale-mini/products/{self.product.id}/reviews/",
+            {"config_id": config.id, "score": 5},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["summary"]["count"], 2)
+        self.assertEqual(response.data["summary"]["average_overall"], "4.0")
+        self.assertEqual(response.data["summary"]["score_counts"]["5"], 1)
+        self.assertEqual(response.data["summary"]["score_counts"]["3"], 1)
+        self.assertEqual(five_star.data["count"], 1)
+        anonymous = next(row for row in response.data["results"] if row["is_anonymous"])
+        self.assertEqual(anonymous["display_name"], "匿名用户")
+        self.assertEqual(anonymous["avatar_url"], "")
+
+    @override_settings(MEDIA_ROOT="/tmp/wms-sale-mini-review-tests")
+    def test_review_image_upload_validates_content_limit_and_owner(self):
+        _mapping, line = self._completed_order_line()
+        draft = self._review_draft(line)
+        review_id = draft.data["id"]
+
+        invalid = self.client.post(
+            f"/api/sale-mini/reviews/{review_id}/images/",
+            {"image": SimpleUploadedFile("bad.jpg", b"not-an-image", "image/jpeg")},
+            format="multipart",
+        )
+        self.assertEqual(invalid.status_code, 400)
+
+        for index in range(6):
+            upload = self.client.post(
+                f"/api/sale-mini/reviews/{review_id}/images/",
+                {"image": self._review_image(f"review-{index}.png")},
+                format="multipart",
+            )
+            self.assertEqual(upload.status_code, 201)
+        self.assertEqual(
+            SaleMiniProductReviewImage.objects.filter(review_id=review_id).count(), 6
+        )
+        seventh = self.client.post(
+            f"/api/sale-mini/reviews/{review_id}/images/",
+            {"image": self._review_image("seventh.png")},
+            format="multipart",
+        )
+        self.assertEqual(seventh.status_code, 400)
+
+        image_id = (
+            SaleMiniProductReviewImage.objects.filter(review_id=review_id).first().id
+        )
+        removed = self.client.delete(
+            f"/api/sale-mini/reviews/{review_id}/images/{image_id}/"
+        )
+        self.assertEqual(removed.status_code, 204)
+        self.assertEqual(
+            SaleMiniProductReviewImage.objects.filter(review_id=review_id).count(), 5
+        )
 
     def test_products_only_return_listed_goods_with_server_stock_and_price(self):
         response = self.client.get(
@@ -1124,7 +1326,7 @@ class SaleMiniApiTests(TestCase):
                         "qty": "4.000",
                         "order_uom": "EA-MINI",
                     }
-                ]
+                ],
             },
             format="json",
         )
@@ -1198,9 +1400,7 @@ class SaleMiniApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data["results"]), 1)
-        self.assertEqual(
-            response.data["results"][0]["stock"]["available_qty"], "1.000"
-        )
+        self.assertEqual(response.data["results"][0]["stock"]["available_qty"], "1.000")
 
     def test_public_products_return_listed_goods_from_all_owners(self):
         other_owner = Owner.objects.create(code="SMINI2", name="Sale Mini Owner 2")
@@ -1487,9 +1687,7 @@ class SaleMiniApiTests(TestCase):
         category_rows = {row["id"]: row for row in categories.data}
         self.assertEqual(category_rows[category.id]["product_count"], 2)
         self.assertEqual(category_rows[self.category.id]["product_count"], 0)
-        self.assertPublicTaxonomyPayloadHidesInternalFields(
-            category_rows[category.id]
-        )
+        self.assertPublicTaxonomyPayloadHidesInternalFields(category_rows[category.id])
 
     def test_public_product_tags_are_strict_and_paginated(self):
         base_config = SaleProductConfig.objects.get(
@@ -1523,9 +1721,7 @@ class SaleMiniApiTests(TestCase):
 
         second_hot = create_tagged_product("MP-HOT-2", is_hot=True)
         new_product = create_tagged_product("MP-NEW-1", is_new=True)
-        recommended_product = create_tagged_product(
-            "MP-REC-1", is_recommended=True
-        )
+        recommended_product = create_tagged_product("MP-REC-1", is_recommended=True)
         public_client = APIClient()
 
         hot = public_client.get(
@@ -1548,9 +1744,7 @@ class SaleMiniApiTests(TestCase):
             {self.product.id, second_hot.id},
         )
         self.assertEqual(new.status_code, 200)
-        self.assertEqual(
-            {row["id"] for row in new.data["results"]}, {new_product.id}
-        )
+        self.assertEqual({row["id"] for row in new.data["results"]}, {new_product.id})
         self.assertEqual(recommended.status_code, 200)
         self.assertEqual(
             {row["id"] for row in recommended.data["results"]},
@@ -1658,7 +1852,9 @@ class SaleMiniApiTests(TestCase):
         )
         self.product.category = small
         self.product.save(update_fields=["category", "updated_at"])
-        _owner, _customer, _buyer, other_product = self._create_other_owner_sale_binding()
+        _owner, _customer, _buyer, other_product = (
+            self._create_other_owner_sale_binding()
+        )
         other_product.category = middle
         other_product.save(update_fields=["category", "updated_at"])
         public_client = APIClient()

@@ -57,6 +57,7 @@ from .models import (
     SaleMiniOrderMapping,
     SaleMiniPayment,
     SaleMiniPaymentEvent,
+    SaleMiniProductReview,
     SaleMiniRefund,
     SaleProductConfig,
 )
@@ -70,6 +71,11 @@ from .services_salemini_adjustments import (
     point_balance,
     release_adjustments,
     reverse_distribution,
+)
+from .services_salemini_reviews import (
+    public_review_payload,
+    published_reviews,
+    review_summary,
 )
 from .services_validation import OrderRuleError, validate_order_line_rules
 from .services_wechat_pay import (
@@ -971,6 +977,13 @@ def _product_payload(
         },
     }
     if detail:
+        preview_review = (
+            published_reviews(config)
+            .select_related("buyer_user")
+            .prefetch_related("images")
+            .order_by("-published_at", "-id")
+            .first()
+        )
         payload.update(
             {
                 "description": product.description or "",
@@ -980,6 +993,12 @@ def _product_payload(
                     else ""
                 ),
                 "pack_note": product.pack_note or "",
+                "review_summary": review_summary(config),
+                "review_preview": (
+                    public_review_payload(request, preview_review)
+                    if preview_review
+                    else None
+                ),
             }
         )
     return payload
@@ -1524,11 +1543,7 @@ def _combined_order_payload(request, mappings):
             for adjustment in order.get("adjustments", [])
         ],
         "line_count": sum(order["line_count"] for order in orders),
-        "lines": [
-            line
-            for order in orders
-            for line in order.get("lines", [])
-        ],
+        "lines": [line for order in orders for line in order.get("lines", [])],
     }
 
 
@@ -2013,7 +2028,9 @@ def _display_status_q(status_code):
     return Q()
 
 
-def _order_line_payload(request, line, config_id=None):
+def _order_line_payload(
+    request, line, config_id=None, *, review=None, review_eligible=False
+):
     product = line.product
     if line.aux_uom_id:
         order_uom = getattr(line.aux_uom.uom, "code", "")
@@ -2025,6 +2042,13 @@ def _order_line_payload(request, line, config_id=None):
         order_uom_name = getattr(product.base_uom, "name", "") or order_uom
         qty = Decimal(line.base_qty or 0)
         unit_price = Decimal(line.base_price or 0)
+    review_payload = {
+        "eligible": bool(review_eligible and not review),
+        "id": review.id if review else None,
+        "status": review.status if review else "",
+        "status_name": review.get_status_display() if review else "",
+        "rejection_reason": review.rejection_reason if review else "",
+    }
     return {
         "id": line.id,
         "owner_id": line.order.owner_id,
@@ -2043,6 +2067,7 @@ def _order_line_payload(request, line, config_id=None):
         "unit_price": _str(unit_price, PRICE_QUANT),
         "base_unit_price": _str(line.base_price, PRICE_QUANT),
         "line_amount": _str(line.final_line_amount, MONEY_QUANT),
+        "review": review_payload,
     }
 
 
@@ -2084,6 +2109,21 @@ def _order_payload(request, mapping):
             product_id__in=[line.product_id for line in lines],
         ).values_list("product_id", "id")
     }
+    reviews_by_line = {
+        review.order_line_id: review
+        for review in SaleMiniProductReview.objects.filter(
+            order_line_id__in=[line.id for line in lines],
+            buyer_user=mapping.buyer_user,
+        )
+    }
+    review_order_eligible = (
+        display_status == "COMPLETED"
+        and mapping.payment_status
+        in {
+            SaleMiniOrderMapping.PaymentStatus.PAID,
+            SaleMiniOrderMapping.PaymentStatus.OFFLINE,
+        }
+    )
     return {
         "id": order.id,
         "mapping_id": mapping.id,
@@ -2137,7 +2177,13 @@ def _order_payload(request, mapping):
         ],
         "line_count": len(lines),
         "lines": [
-            _order_line_payload(request, line, config_ids.get(line.product_id))
+            _order_line_payload(
+                request,
+                line,
+                config_ids.get(line.product_id),
+                review=reviews_by_line.get(line.id),
+                review_eligible=review_order_eligible,
+            )
             for line in lines
         ],
     }
@@ -2280,9 +2326,7 @@ def _category_rows(request=None, owner=None, owner_id=None, *, roots_only=False)
             node = by_id.get(node.parent_id)
 
     parent_ids = {
-        category.parent_id
-        for category in categories
-        if category.parent_id in by_id
+        category.parent_id for category in categories if category.parent_id in by_id
     }
     rows = []
     for category in categories:
@@ -2743,8 +2787,9 @@ class SaleMiniCartApi(APIView):
         cart_id = request.query_params.get("cart_id")
         if cart_id:
             cart = get_object_or_404(
-                SaleMiniCart.objects.select_related("owner", "customer", "buyer_user")
-                .filter(
+                SaleMiniCart.objects.select_related(
+                    "owner", "customer", "buyer_user"
+                ).filter(
                     id=cart_id,
                     buyer_user__user=request.user,
                     is_active=True,

@@ -27,6 +27,19 @@
       }
     },
     {
+      "path": "pages/reviews/reviews",
+      "style": {
+        "navigationBarTitleText": "全部评价",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/review-edit/review-edit",
+      "style": {
+        "navigationBarTitleText": "发表评价"
+      }
+    },
+    {
       "path": "pages/cart/cart",
       "style": {
         "navigationBarTitleText": "购物车"

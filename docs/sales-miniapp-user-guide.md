@@ -681,6 +681,21 @@ WMS 内部的货主审核、仓库确认、拣货等状态不会直接展示给�
 
 售后列表同样展示为统一商城售后记录，不提供商家筛选。
 
+### 8.10 商品评价
+
+只有已完成且付款状态为已付款或线下付款的订单商品可以评价。每条订单明细只能评价一次，重复购买产生新的订单明细后可以再次评价。
+
+在订单详情点击“评价”后可以：
+
+- 为商品质量、配送/自提服务、综合满意度分别打 1 至 5 星。
+- 填写最多 1000 字评价。
+- 上传最多 6 张 JPEG、PNG 或 WebP 图片，单图最大 5MB。
+- 选择匿名评价，默认开启。
+
+提交后状态为“待审核”，不会立即出现在商品页。运营人员在 Django Admin 的“商城商品评价”中执行审核通过、驳回或隐藏；只有“已发布”评价计入评价数量、平均分和星级统计。
+
+评价图片保存在 `MEDIA_ROOT/sale-mini/reviews/`，生产环境必须正确提供 `MEDIA_URL`。部署本功能需要应用 `salesapp` 的 `0010` 迁移。
+
 ## 9. 商城结构测试
 
 项目提供一个不依赖数据库和浏览器的结构测试，用来防止旧销售工作台页面重新混入商城小程序：
@@ -820,6 +835,8 @@ SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/pytho
 - 积分流水：`SaleMiniPointLedger`
 - 分销记录：`SaleMiniDistributionRecord`
 - 售后申请：`SaleMiniAfterSaleRequest`
+- 商品评价：`SaleMiniProductReview`
+- 评价图片：`SaleMiniProductReviewImage`
 
 ## 12. 数据准确性说明
 

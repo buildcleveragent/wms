@@ -27,6 +27,14 @@ from .salemini_api import (
     SaleMiniWechatRefundApi,
     SaleMiniWechatRefundCallbackApi,
 )
+from .salemini_review_api import (
+    SaleMiniProductReviewListApi,
+    SaleMiniReviewDraftCreateApi,
+    SaleMiniReviewDraftDetailApi,
+    SaleMiniReviewImageCreateApi,
+    SaleMiniReviewImageDeleteApi,
+    SaleMiniReviewSubmitApi,
+)
 
 urlpatterns = [
     path(
@@ -45,6 +53,36 @@ urlpatterns = [
         "products/<int:pk>/",
         SaleMiniProductDetailApi.as_view(),
         name="sale-mini-product-detail",
+    ),
+    path(
+        "products/<int:pk>/reviews/",
+        SaleMiniProductReviewListApi.as_view(),
+        name="sale-mini-product-reviews",
+    ),
+    path(
+        "reviews/drafts/",
+        SaleMiniReviewDraftCreateApi.as_view(),
+        name="sale-mini-review-draft-create",
+    ),
+    path(
+        "reviews/<int:pk>/draft/",
+        SaleMiniReviewDraftDetailApi.as_view(),
+        name="sale-mini-review-draft-detail",
+    ),
+    path(
+        "reviews/<int:pk>/images/",
+        SaleMiniReviewImageCreateApi.as_view(),
+        name="sale-mini-review-image-create",
+    ),
+    path(
+        "reviews/<int:pk>/images/<int:image_id>/",
+        SaleMiniReviewImageDeleteApi.as_view(),
+        name="sale-mini-review-image-delete",
+    ),
+    path(
+        "reviews/<int:pk>/submit/",
+        SaleMiniReviewSubmitApi.as_view(),
+        name="sale-mini-review-submit",
     ),
     path("cart/", SaleMiniCartApi.as_view(), name="sale-mini-cart"),
     path("cart/add/", SaleMiniCartAddApi.as_view(), name="sale-mini-cart-add"),

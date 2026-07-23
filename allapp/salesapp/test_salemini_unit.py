@@ -1,7 +1,10 @@
 from decimal import Decimal
+from io import BytesIO
 from types import SimpleNamespace
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models import Q
+from PIL import Image
 from rest_framework.exceptions import ValidationError
 
 from allapp.salesapp.management.commands.validate_sale_mini_data_accuracy import (
@@ -18,6 +21,10 @@ from allapp.salesapp.salemini_api import (
     _is_multiple,
     _stock_payload,
     _uom_name,
+)
+from allapp.salesapp.salemini_review_api import (
+    SaleMiniReviewDraftSerializer,
+    _validate_uploaded_image,
 )
 
 
@@ -189,3 +196,55 @@ def test_sale_mini_accuracy_issue_collector_counts_all_and_limits_samples():
     assert issues.total == 3
     assert issues.by_code == {"alpha": 2, "beta": 1}
     assert len(issues.items) == 2
+
+
+def test_review_scores_and_content_are_strictly_validated():
+    valid = SaleMiniReviewDraftSerializer(
+        data={
+            "order_line_id": 1,
+            "quality_score": 5,
+            "delivery_score": 4,
+            "overall_score": 3,
+            "content": "真实购买评价",
+            "is_anonymous": True,
+        }
+    )
+    invalid = SaleMiniReviewDraftSerializer(
+        data={
+            "order_line_id": 1,
+            "quality_score": 0,
+            "delivery_score": 6,
+            "overall_score": 5,
+            "content": "评" * 1001,
+        }
+    )
+
+    assert valid.is_valid(), valid.errors
+    assert not invalid.is_valid()
+    assert set(invalid.errors) == {"quality_score", "delivery_score", "content"}
+
+
+def test_review_image_validation_reads_real_image_content():
+    content = BytesIO()
+    Image.new("RGB", (32, 24), color=(22, 119, 255)).save(content, format="PNG")
+    uploaded = SimpleUploadedFile(
+        "claimed.jpg", content.getvalue(), content_type="image/jpeg"
+    )
+
+    width, height = _validate_uploaded_image(uploaded)
+
+    assert (width, height) == (32, 24)
+    assert uploaded.name == "review.png"
+
+
+def test_review_image_validation_rejects_fake_image():
+    uploaded = SimpleUploadedFile(
+        "fake.jpg", b"not-an-image", content_type="image/jpeg"
+    )
+
+    try:
+        _validate_uploaded_image(uploaded)
+    except ValidationError as exc:
+        assert "损坏" in str(exc.detail)
+    else:
+        raise AssertionError("fake review image must be rejected")

@@ -38,6 +38,20 @@
         <view class="desc-text">{{ serviceText }}</view>
       </view>
 
+      <view class="reviews-section">
+        <view class="section-head">
+          <text>用户评价（{{ reviewSummary.count || 0 }}）</text>
+          <text v-if="reviewSummary.count" class="more" @click="goReviews">查看全部</text>
+        </view>
+        <view v-if="reviewSummary.count" class="review-score">
+          <text class="review-score-value">{{ reviewSummary.average_overall }}</text>
+          <text>分</text>
+          <text class="review-dimensions">质量 {{ reviewSummary.average_quality }} · 配送 {{ reviewSummary.average_delivery }}</text>
+        </view>
+        <ReviewCard v-if="product.review_preview" :review="product.review_preview" />
+        <view v-else class="review-empty">暂无评价</view>
+      </view>
+
       <view v-if="relatedProducts.length" class="recommend">
         <view class="section-head">
           <text>相关推荐</text>
@@ -84,6 +98,7 @@ import { computed, ref } from 'vue'
 import PriceText from '../../components/PriceText.vue'
 import ProductCard from '../../components/ProductCard.vue'
 import QuantityStepper from '../../components/QuantityStepper.vue'
+import ReviewCard from '../../components/ReviewCard.vue'
 import { productService } from '../../services/product'
 import { useBrowseStore } from '../../stores/browse'
 import { useCartStore } from '../../stores/cart'
@@ -98,6 +113,7 @@ const qty = ref(1)
 const uomIndex = ref(0)
 
 const rules = computed(() => product.value.rules || {})
+const reviewSummary = computed(() => product.value.review_summary || {})
 const purchaseMin = computed(() => (rules.value.enabled ? Number(rules.value.min_order_qty || 1) : 1))
 const purchaseStep = computed(() => (rules.value.enabled ? Number(rules.value.multiple_qty || 1) : 1))
 const lineTotal = computed(() => money(Number(product.value.price || 0) * Number(qty.value || 0)))
@@ -235,6 +251,12 @@ function goRelatedList() {
   uni.navigateTo({ url: '/pages/product-list/product-list?ordering=hot' })
 }
 
+function goReviews() {
+  uni.navigateTo({
+    url: `/pages/reviews/reviews?product_id=${product.value.id}&config_id=${product.value.config_id}`,
+  })
+}
+
 async function buyNow() {
   const data = await addToCart()
   if (data) {
@@ -355,6 +377,41 @@ onLoad((query) => {
 
 .recommend {
   margin-top: 24rpx;
+}
+
+.reviews-section {
+  margin-top: 22rpx;
+  padding: 22rpx;
+  border: 1rpx solid #dfe6ef;
+  border-radius: 8rpx;
+  background: #fff;
+}
+
+.review-score {
+  display: flex;
+  align-items: baseline;
+  gap: 6rpx;
+  padding-bottom: 14rpx;
+  border-bottom: 1rpx solid #eef2f7;
+  color: #64748b;
+  font-size: 23rpx;
+}
+
+.review-score-value {
+  color: #b42318;
+  font-size: 42rpx;
+  font-weight: 900;
+}
+
+.review-dimensions {
+  margin-left: 16rpx;
+}
+
+.review-empty {
+  padding: 28rpx 0 8rpx;
+  color: #94a3b8;
+  font-size: 24rpx;
+  text-align: center;
 }
 
 .section-head {

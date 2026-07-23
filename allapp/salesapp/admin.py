@@ -7,6 +7,8 @@ from django.db import transaction
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils import timezone
+from django.utils.html import format_html
 
 from allapp.baseinfo.models import Owner
 from allapp.products.models import Product
@@ -26,6 +28,8 @@ from .models import (
     SaleMiniPayment,
     SaleMiniPaymentEvent,
     SaleMiniPointLedger,
+    SaleMiniProductReview,
+    SaleMiniProductReviewImage,
     SaleMiniRefund,
     SaleProductConfig,
 )
@@ -423,9 +427,7 @@ class SaleProductConfigAdmin(admin.ModelAdmin):
                 config.save()
                 ok += 1
             except ValidationError as exc:
-                errors.append(
-                    f"{config.product.code}: {_format_validation_error(exc)}"
-                )
+                errors.append(f"{config.product.code}: {_format_validation_error(exc)}")
         if ok:
             self.message_user(request, f"已上架 {ok} 个商品配置。", messages.SUCCESS)
         if errors:
@@ -545,6 +547,158 @@ class SaleMiniAfterSaleRequestAdmin(admin.ModelAdmin):
         "customer__name",
     )
     raw_id_fields = ("owner", "customer", "buyer_user", "mapping")
+
+
+class SaleMiniProductReviewImageInline(admin.TabularInline):
+    model = SaleMiniProductReviewImage
+    extra = 0
+    can_delete = False
+    fields = ("sort_order", "image_preview", "width", "height", "size_bytes")
+    readonly_fields = fields
+
+    @admin.display(description="图片")
+    def image_preview(self, obj):
+        if not obj.pk or not obj.image:
+            return "-"
+        return format_html(
+            '<a href="{}" target="_blank"><img src="{}" style="max-width:120px;max-height:120px"></a>',
+            obj.image.url,
+            obj.image.url,
+        )
+
+
+@admin.register(SaleMiniProductReview)
+class SaleMiniProductReviewAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "product",
+        "buyer_user",
+        "quality_score",
+        "delivery_score",
+        "overall_score",
+        "status",
+        "is_anonymous",
+        "submitted_at",
+    )
+    list_filter = ("owner", "status", "overall_score", "is_anonymous")
+    search_fields = (
+        "product__code",
+        "product__name",
+        "buyer_user__nickname",
+        "mapping__outbound_order__order_no",
+        "content",
+    )
+    raw_id_fields = (
+        "owner",
+        "customer",
+        "buyer_user",
+        "mapping",
+        "order_line",
+        "product",
+        "product_config",
+        "reviewed_by",
+    )
+    readonly_fields = (
+        "owner",
+        "customer",
+        "buyer_user",
+        "mapping",
+        "order_line",
+        "product",
+        "product_config",
+        "quality_score",
+        "delivery_score",
+        "overall_score",
+        "content",
+        "is_anonymous",
+        "status",
+        "submitted_at",
+        "reviewed_at",
+        "reviewed_by",
+        "published_at",
+        "created_at",
+        "updated_at",
+    )
+    fields = (
+        "owner",
+        "customer",
+        "buyer_user",
+        "mapping",
+        "order_line",
+        "product",
+        "product_config",
+        "quality_score",
+        "delivery_score",
+        "overall_score",
+        "content",
+        "is_anonymous",
+        "status",
+        "rejection_reason",
+        "submitted_at",
+        "reviewed_at",
+        "reviewed_by",
+        "published_at",
+        "created_at",
+        "updated_at",
+    )
+    inlines = [SaleMiniProductReviewImageInline]
+    actions = ("publish_reviews", "reject_reviews", "hide_reviews")
+
+    def has_add_permission(self, request):
+        return False
+
+    @admin.action(description="审核通过并发布选中的评价")
+    def publish_reviews(self, request, queryset):
+        now = timezone.now()
+        count = 0
+        with transaction.atomic():
+            for review in queryset.select_for_update().filter(
+                status=SaleMiniProductReview.Status.PENDING
+            ):
+                review.status = SaleMiniProductReview.Status.PUBLISHED
+                review.reviewed_at = now
+                review.reviewed_by = request.user
+                review.published_at = now
+                review.rejection_reason = ""
+                review.updated_by = request.user
+                review.save()
+                count += 1
+        self.message_user(request, f"已发布 {count} 条评价。", messages.SUCCESS)
+
+    @admin.action(description="驳回选中的待审核评价")
+    def reject_reviews(self, request, queryset):
+        now = timezone.now()
+        count = 0
+        with transaction.atomic():
+            for review in queryset.select_for_update().filter(
+                status=SaleMiniProductReview.Status.PENDING
+            ):
+                review.status = SaleMiniProductReview.Status.REJECTED
+                review.reviewed_at = now
+                review.reviewed_by = request.user
+                review.published_at = None
+                if not review.rejection_reason:
+                    review.rejection_reason = "评价未通过审核，请修改后重新提交。"
+                review.updated_by = request.user
+                review.save()
+                count += 1
+        self.message_user(request, f"已驳回 {count} 条评价。", messages.SUCCESS)
+
+    @admin.action(description="隐藏选中的已发布评价")
+    def hide_reviews(self, request, queryset):
+        now = timezone.now()
+        count = 0
+        with transaction.atomic():
+            for review in queryset.select_for_update().filter(
+                status=SaleMiniProductReview.Status.PUBLISHED
+            ):
+                review.status = SaleMiniProductReview.Status.HIDDEN
+                review.reviewed_at = now
+                review.reviewed_by = request.user
+                review.updated_by = request.user
+                review.save()
+                count += 1
+        self.message_user(request, f"已隐藏 {count} 条评价。", messages.SUCCESS)
 
 
 @admin.register(SaleMiniPaymentEvent)

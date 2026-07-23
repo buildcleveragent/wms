@@ -1,6 +1,10 @@
 # salesapp/models.py
+import uuid
+from pathlib import Path
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from allapp.baseinfo.models import Customer, Owner
@@ -10,6 +14,13 @@ from allapp.products.models import Product  # 你现有商品模型
 # 如有 Warehouse / UOM 模型，也可在此引入
 
 User = get_user_model()
+
+
+def sale_mini_review_image_path(instance, filename):
+    suffix = Path(filename or "").suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+        suffix = ".jpg"
+    return f"sale-mini/reviews/{instance.review_id}/{uuid.uuid4().hex}{suffix}"
 
 
 # —— 组织 / 集团架构（数据隔离）——
@@ -843,6 +854,136 @@ class SaleMiniAfterSaleRequest(BaseModel):
 
     def __str__(self):
         return self.request_no
+
+
+class SaleMiniProductReview(BaseModel):
+    class Status(models.TextChoices):
+        DRAFT = "DRAFT", "草稿"
+        PENDING = "PENDING", "待审核"
+        PUBLISHED = "PUBLISHED", "已发布"
+        REJECTED = "REJECTED", "已驳回"
+        HIDDEN = "HIDDEN", "已隐藏"
+
+    owner = models.ForeignKey(
+        Owner, on_delete=models.PROTECT, related_name="sale_mini_product_reviews"
+    )
+    customer = models.ForeignKey(
+        Customer, on_delete=models.PROTECT, related_name="sale_mini_product_reviews"
+    )
+    buyer_user = models.ForeignKey(
+        MiniProgramUser,
+        on_delete=models.PROTECT,
+        related_name="product_reviews",
+    )
+    mapping = models.ForeignKey(
+        SaleMiniOrderMapping,
+        on_delete=models.PROTECT,
+        related_name="product_reviews",
+    )
+    order_line = models.OneToOneField(
+        "outbound.OutboundOrderLine",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_review",
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name="sale_mini_reviews"
+    )
+    product_config = models.ForeignKey(
+        SaleProductConfig,
+        on_delete=models.PROTECT,
+        related_name="reviews",
+    )
+    quality_score = models.PositiveSmallIntegerField(
+        "商品质量评分",
+        default=5,
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+    )
+    delivery_score = models.PositiveSmallIntegerField(
+        "配送服务评分",
+        default=5,
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+    )
+    overall_score = models.PositiveSmallIntegerField(
+        "综合满意度",
+        default=5,
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+    )
+    content = models.TextField("评价内容", max_length=1000, blank=True, default="")
+    is_anonymous = models.BooleanField("匿名评价", default=True)
+    status = models.CharField(
+        "审核状态", max_length=16, choices=Status.choices, default=Status.DRAFT
+    )
+    rejection_reason = models.CharField(
+        "驳回原因", max_length=300, blank=True, default=""
+    )
+    submitted_at = models.DateTimeField("提交时间", null=True, blank=True)
+    reviewed_at = models.DateTimeField("审核时间", null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        User,
+        verbose_name="审核人",
+        on_delete=models.PROTECT,
+        related_name="reviewed_sale_mini_product_reviews",
+        null=True,
+        blank=True,
+    )
+    published_at = models.DateTimeField("发布时间", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "商城商品评价"
+        verbose_name_plural = "商城商品评价"
+        ordering = ["-published_at", "-id"]
+        indexes = [
+            models.Index(fields=["product_config", "status", "published_at"]),
+            models.Index(fields=["product", "status", "published_at"]),
+            models.Index(fields=["buyer_user", "status", "created_at"]),
+            models.Index(fields=["owner", "status", "created_at"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(quality_score__range=(1, 5)),
+                name="ck_sale_review_quality_1_5",
+            ),
+            models.CheckConstraint(
+                check=models.Q(delivery_score__range=(1, 5)),
+                name="ck_sale_review_delivery_1_5",
+            ),
+            models.CheckConstraint(
+                check=models.Q(overall_score__range=(1, 5)),
+                name="ck_sale_review_overall_1_5",
+            ),
+        ]
+
+    def __str__(self):
+        return f"review:{self.order_line_id}/{self.get_status_display()}"
+
+
+class SaleMiniProductReviewImage(BaseModel):
+    review = models.ForeignKey(
+        SaleMiniProductReview, on_delete=models.CASCADE, related_name="images"
+    )
+    image = models.ImageField("评价图片", upload_to=sale_mini_review_image_path)
+    sort_order = models.PositiveSmallIntegerField("排序", default=0)
+    size_bytes = models.PositiveIntegerField("文件大小", default=0)
+    width = models.PositiveIntegerField("宽度", default=0)
+    height = models.PositiveIntegerField("高度", default=0)
+
+    class Meta:
+        verbose_name = "商城评价图片"
+        verbose_name_plural = "商城评价图片"
+        ordering = ["sort_order", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["review", "sort_order"],
+                name="ux_sale_review_image_order",
+            ),
+            models.CheckConstraint(
+                check=models.Q(sort_order__lt=6),
+                name="ck_sale_review_image_order_lt_6",
+            ),
+        ]
+
+    def __str__(self):
+        return f"review-image:{self.review_id}/{self.sort_order}"
 
 
 class SaleMiniPaymentEvent(BaseModel):

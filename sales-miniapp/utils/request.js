@@ -95,6 +95,44 @@ export function request({ url, method = 'GET', data, header = {}, authRedirect =
   })
 }
 
+export function uploadFile({ url, filePath, name = 'image', formData = {} }) {
+  const token = getToken()
+  return new Promise((resolve, reject) => {
+    uni.uploadFile({
+      url: `${getBaseUrl()}${url}`,
+      filePath,
+      name,
+      formData,
+      header: token ? { Authorization: `Bearer ${token}` } : {},
+      success(res) {
+        let data = res.data
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data)
+          } catch (err) {
+            data = { detail: data }
+          }
+        }
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(data)
+          return
+        }
+        const msg = messageFrom(data)
+        if (res.statusCode === 401) {
+          clearToken()
+          uni.reLaunch({ url: '/pages/login/login' })
+        }
+        uni.showToast({ title: msg, icon: 'none' })
+        reject({ statusCode: res.statusCode, message: msg, data })
+      },
+      fail(err) {
+        uni.showToast({ title: '图片上传失败，请检查网络', icon: 'none' })
+        reject({ statusCode: 0, message: '图片上传失败', data: err })
+      },
+    })
+  })
+}
+
 export const api = {
   login: (username, password) =>
     request({
@@ -117,6 +155,16 @@ export const api = {
   saleMiniAfterSales: (params = {}) => request({ url: `/api/sale-mini/after-sales/?${query(params)}` }),
   saleMiniProducts: (params = {}) => request({ url: `/api/sale-mini/products/?${query(params)}` }),
   saleMiniProduct: (id, params = {}) => request({ url: `/api/sale-mini/products/${id}/?${query(params)}` }),
+  saleMiniProductReviews: (id, params = {}) => request({ url: `/api/sale-mini/products/${id}/reviews/?${query(params)}` }),
+  createSaleMiniReviewDraft: (payload) =>
+    request({ url: '/api/sale-mini/reviews/drafts/', method: 'POST', data: payload }),
+  saleMiniReviewDraft: (id) => request({ url: `/api/sale-mini/reviews/${id}/draft/` }),
+  updateSaleMiniReviewDraft: (id, payload) =>
+    request({ url: `/api/sale-mini/reviews/${id}/draft/`, method: 'PUT', data: payload }),
+  deleteSaleMiniReviewImage: (reviewId, imageId) =>
+    request({ url: `/api/sale-mini/reviews/${reviewId}/images/${imageId}/`, method: 'DELETE', data: {} }),
+  submitSaleMiniReview: (id) =>
+    request({ url: `/api/sale-mini/reviews/${id}/submit/`, method: 'POST', data: {} }),
   saleMiniCart: (params = {}) => request({ url: `/api/sale-mini/cart/?${query(params)}` }),
   addSaleMiniCart: (payload) =>
     request({

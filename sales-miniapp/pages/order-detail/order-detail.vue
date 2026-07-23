@@ -38,7 +38,17 @@
             <view v-if="line.product_spec" class="muted">{{ line.product_spec }}</view>
             <view class="muted">{{ line.qty }} {{ line.order_uom_name || line.order_uom }}</view>
           </view>
-          <view class="line-amount">¥{{ money(line.line_amount) }}</view>
+          <view class="line-side">
+            <view class="line-amount">¥{{ money(line.line_amount) }}</view>
+            <button
+              v-if="showReviewAction(line)"
+              class="review-action"
+              :disabled="reviewActionDisabled(line)"
+              @click="handleReview(line)"
+            >
+              {{ reviewActionText(line) }}
+            </button>
+          </view>
         </view>
       </view>
 
@@ -74,7 +84,7 @@
 </template>
 
 <script setup>
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import EmptyState from '../../components/EmptyState.vue'
 import OrderStatusTag from '../../components/OrderStatusTag.vue'
@@ -274,9 +284,52 @@ async function afterSale() {
   }
 }
 
+function showReviewAction(line) {
+  const state = line.review || {}
+  return Boolean(state.eligible || state.id)
+}
+
+function reviewActionText(line) {
+  const state = line.review || {}
+  if (state.eligible) return '评价'
+  const labels = {
+    DRAFT: '继续评价',
+    REJECTED: '修改评价',
+    PENDING: '审核中',
+    PUBLISHED: '查看评价',
+    HIDDEN: '评价已隐藏',
+  }
+  return labels[state.status] || state.status_name || '评价'
+}
+
+function reviewActionDisabled(line) {
+  return ['PENDING', 'HIDDEN'].includes((line.review || {}).status)
+}
+
+function handleReview(line) {
+  const state = line.review || {}
+  if (reviewActionDisabled(line)) return
+  if (state.status === 'PUBLISHED') {
+    uni.navigateTo({
+      url: `/pages/reviews/reviews?product_id=${line.product_id}&config_id=${line.config_id || ''}`,
+    })
+    return
+  }
+  const query = [
+    `line_id=${line.id}`,
+    `delivery_method=${order.value.delivery_method || ''}`,
+  ]
+  if (state.id) query.push(`review_id=${state.id}`)
+  uni.navigateTo({ url: `/pages/review-edit/review-edit?${query.join('&')}` })
+}
+
 onLoad((query = {}) => {
   id.value = query.id
   load()
+})
+
+onShow(() => {
+  if (id.value && order.value) load()
 })
 </script>
 
@@ -414,6 +467,36 @@ onLoad((query = {}) => {
 .line-main {
   flex: 1;
   min-width: 0;
+}
+
+.line-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10rpx;
+  flex-shrink: 0;
+}
+
+.review-action {
+  min-width: 108rpx;
+  height: 52rpx;
+  margin: 0;
+  padding: 0 14rpx;
+  border: 1rpx solid #1677ff;
+  border-radius: 8rpx;
+  background: #fff;
+  color: #1677ff;
+  font-size: 22rpx;
+  line-height: 50rpx;
+}
+
+.review-action::after {
+  border: 0;
+}
+
+.review-action[disabled] {
+  border-color: #cbd5e1;
+  color: #94a3b8;
 }
 
 .line-name {

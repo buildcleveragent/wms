@@ -56,6 +56,8 @@ const expectedTabTexts = ['首页', '分类', '购物车', '订单', '我的']
 const expectedTabIcons = ['home', 'category', 'cart', 'order', 'user']
 const expectedMallPages = [
   'pages/order-result/order-result',
+  'pages/reviews/reviews',
+  'pages/review-edit/review-edit',
   'pages/benefits/benefits',
   'pages/after-sales/after-sales',
   'pages/favorites/favorites',
@@ -148,6 +150,10 @@ assertIncludes(request, '/api/sale-mini/coupons/', 'request API')
 assertIncludes(request, '/api/sale-mini/points/', 'request API')
 assertIncludes(request, '/api/sale-mini/after-sales/', 'request API')
 assertIncludes(request, '/api/sale-mini/products/', 'request API')
+assertIncludes(request, '/reviews/?', 'review list API')
+assertIncludes(request, '/api/sale-mini/reviews/drafts/', 'review draft API')
+assertIncludes(request, '/submit/', 'review submit API')
+assertIncludes(request, 'uni.uploadFile', 'review image upload')
 assertIncludes(request, 'authRedirect: false', 'profile request')
 assertIncludes(request, '当前商品暂未对你的账号开通购买权限', 'buyer-facing error copy')
 assertIncludes(request, '购物车已按配送包裹拆分，可统一提交。', 'buyer-facing combined checkout copy')
@@ -167,6 +173,12 @@ assertIncludes(productService, 'api.saleMiniProducts', 'product service')
 assertNotIncludes(productService, 'saleMiniMerchants', 'product service')
 assertNotIncludes(productService, 'sales/mobile', 'product service')
 
+const reviewService = readText('services/review.js')
+assertIncludes(reviewService, 'saleMiniProductReviews', 'review list service')
+assertIncludes(reviewService, 'createSaleMiniReviewDraft', 'review draft service')
+assertIncludes(reviewService, 'uploadImage', 'review image service')
+assertIncludes(reviewService, 'submitSaleMiniReview', 'review submit service')
+
 const cartStore = readText('stores/cart.js')
 assertIncludes(cartStore, 'config_id: product.config_id', 'cart add product config context')
 assertIncludes(cartStore, 'cart_ids: cartIds', 'cart checkout must submit source cart ids for combined packages')
@@ -184,9 +196,16 @@ assertNotIncludes(browseStore, 'product.code || product.product_code', 'browse s
 
 const productCard = readText('components/ProductCard.vue')
 assertIncludes(productCard, 'stockLabel', 'product card retail stock badge')
-assertIncludes(productCard, 'addText', 'product card retail add button')
-assertIncludes(productCard, '加购', 'product card retail add button copy')
-assertIncludes(productCard, '缺货', 'product card retail out-of-stock copy')
+assertIncludes(productCard, ':aria-label="addAriaLabel"', 'product card add button accessible label')
+assertIncludes(productCard, '加入购物车', 'product card add button accessible copy')
+assertIncludes(productCard, '商品缺货', 'product card out-of-stock accessible copy')
+assertIncludes(productCard, 'class="add-icon"', 'product card graphical add icon')
+assertIncludes(productCard, 'aria-hidden="true">+</text>', 'product card plus icon')
+assertIncludes(productCard, 'border-radius: 50%', 'product card circular add button')
+assertIncludes(productCard, 'background: #1677ff', 'product card retail blue add button')
+assertIncludes(productCard, ':disabled="isOutOfStock"', 'product card disabled out-of-stock add button')
+assertNotIncludes(productCard, 'addText', 'product card must not use textual add state')
+assertNotIncludes(productCard, '>加购</button>', 'product card must not render textual add button')
 assertIncludes(productCard, 'subtitle', 'product card retail subtitle')
 assertIncludes(productCard, "default: 'list'", 'product card list layout default')
 assertIncludes(productCard, '.product-card.grid', 'product card home grid layout')
@@ -225,6 +244,30 @@ assertNotIncludes(indexPage, 'product-list/product-list?owner_id=', 'home must n
 assertNotIncludes(indexPage, 'owner_id=${banner.owner_id}', 'home product banner must not expose owner id in URL')
 assertNotIncludes(indexPage, '/pages/merchants/merchants', 'home must not expose merchant route')
 assertNotIncludes(indexPage, '/pages/merchant-detail/merchant-detail', 'home must not expose merchant detail route')
+
+const productDetail = readText('pages/product-detail/product-detail.vue')
+assertIncludes(productDetail, '用户评价（', 'product detail review summary')
+assertIncludes(productDetail, 'product.review_preview', 'product detail review preview')
+assertIncludes(productDetail, '/pages/reviews/reviews?', 'product detail all reviews navigation')
+
+const reviewsPage = readText('pages/reviews/reviews.vue')
+assertIncludes(reviewsPage, '<ReviewCard', 'all reviews cards')
+assertIncludes(reviewsPage, "{ key: 'images', label: '有图' }", 'all reviews image filter')
+assertIncludes(reviewsPage, "{ key: 'highest', label: '高分' }", 'all reviews ordering')
+assertIncludes(reviewsPage, 'onReachBottom', 'all reviews pagination')
+
+const reviewEditPage = readText('pages/review-edit/review-edit.vue')
+assertIncludes(reviewEditPage, '商品质量', 'review quality score')
+assertIncludes(reviewEditPage, '配送服务', 'review delivery score')
+assertIncludes(reviewEditPage, '综合满意度', 'review overall score')
+assertIncludes(reviewEditPage, 'uni.chooseImage', 'review image selection')
+assertIncludes(reviewEditPage, '评价已提交审核', 'review moderation submission')
+assertIncludes(reviewEditPage, 'is_anonymous: true', 'review anonymous default')
+
+const orderDetail = readText('pages/order-detail/order-detail.vue')
+assertIncludes(orderDetail, 'line.review', 'order line review state')
+assertIncludes(orderDetail, '继续评价', 'order draft review action')
+assertIncludes(orderDetail, '审核中', 'order pending review state')
 
 const loginPage = readText('pages/login/login.vue')
 assertIncludes(loginPage, '金桥融通商城', 'login buyer-facing copy')

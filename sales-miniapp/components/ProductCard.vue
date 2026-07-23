@@ -20,9 +20,10 @@
         <button
           class="add"
           :disabled="isOutOfStock"
+          :aria-label="addAriaLabel"
           @click.stop="$emit('add', product)"
         >
-          {{ addText }}
+          <text class="add-icon" aria-hidden="true">+</text>
         </button>
       </view>
     </view>
@@ -55,7 +56,7 @@ const stockClass = computed(() => {
   if (status === 'LOW') return 'stock-low'
   return 'stock-ok'
 })
-const addText = computed(() => (isOutOfStock.value ? '缺货' : '加购'))
+const addAriaLabel = computed(() => (isOutOfStock.value ? '商品缺货' : '加入购物车'))
 const unitText = computed(() => (
   props.product.order_uom_name
   || props.product.order_uom
@@ -197,16 +198,19 @@ const subtitle = computed(() => {
 }
 
 .add {
-  width: 104rpx;
+  width: 56rpx;
   height: 56rpx;
-  line-height: 56rpx;
+  min-width: 56rpx;
   padding: 0;
   border: 0;
-  border-radius: 8rpx;
-  background: #0f766e;
+  border-radius: 50%;
+  background: #1677ff;
   color: #fff;
-  font-size: 24rpx;
-  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
 }
 
 .add::after {
@@ -216,6 +220,14 @@ const subtitle = computed(() => {
 .add[disabled] {
   background: #cbd5e1;
   color: #f8fafc;
+}
+
+.add-icon {
+  display: block;
+  color: inherit;
+  font-size: 42rpx;
+  font-weight: 500;
+  line-height: 1;
 }
 
 .product-card.grid {
@@ -265,9 +277,12 @@ const subtitle = computed(() => {
 }
 
 .grid .add {
-  width: 84rpx;
+  width: 52rpx;
   height: 52rpx;
-  line-height: 52rpx;
-  font-size: 22rpx;
+  min-width: 52rpx;
+}
+
+.grid .add-icon {
+  font-size: 38rpx;
 }
 </style>
