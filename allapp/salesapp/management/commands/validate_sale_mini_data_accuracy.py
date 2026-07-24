@@ -2,7 +2,7 @@ import json
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.core.management.base import BaseCommand, CommandError
-from django.db.models import F, Sum
+from django.db.models import F, Q, Sum
 from django.utils import timezone
 
 from allapp.inventory.models import InventoryDetail, InventorySummary
@@ -15,6 +15,7 @@ from allapp.salesapp.models import (
     SaleMiniRefund,
     SaleProductConfig,
 )
+from allapp.tasking.models import WmsTask
 
 MONEY_QUANT = Decimal("0.01")
 
@@ -165,11 +166,8 @@ class Command(BaseCommand):
             )
         invalid_category_ids = [
             row.id
-            for row in public_qs.select_related(
-                "product__category__parent__parent"
-            )
-            if row.product.category_id
-            and not row.product.category.has_active_path()
+            for row in public_qs.select_related("product__category__parent__parent")
+            if row.product.category_id and not row.product.category.has_active_path()
         ]
         for config_id in invalid_category_ids:
             issues.add(
@@ -284,6 +282,54 @@ class Command(BaseCommand):
                     order_id=order.id,
                     pay_deadline_at=mapping.pay_deadline_at.isoformat(),
                 )
+            if (
+                mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.UNPAID
+                and order.approval_status == "WHS_APPROVED"
+            ):
+                issues.add(
+                    "unpaid_order_warehouse_approved",
+                    "Unpaid sale-mini order must not be warehouse approved.",
+                    mapping_id=mapping.id,
+                    order_id=order.id,
+                )
+            active_tasks = WmsTask.objects.filter(
+                task_type=WmsTask.TaskType.PICK,
+                source_pk=str(order.pk),
+            ).filter(
+                Q(source_model__iexact="outboundorder")
+                | Q(source_model__iexact="outbound.outboundorder")
+            )
+            if (
+                mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.UNPAID
+                and active_tasks.filter(
+                    status__in=[
+                        WmsTask.Status.RELEASED,
+                        WmsTask.Status.IN_PROGRESS,
+                        WmsTask.Status.COMPLETED,
+                    ]
+                ).exists()
+            ):
+                issues.add(
+                    "unpaid_order_task_executable",
+                    "Unpaid sale-mini order has a released or executable PICK task.",
+                    mapping_id=mapping.id,
+                    order_id=order.id,
+                )
+            if (
+                order.approval_status == "CANCELLED"
+                and active_tasks.exclude(
+                    status__in=[
+                        WmsTask.Status.CANCELLED,
+                        WmsTask.Status.COMPLETED,
+                    ]
+                ).filter(lines__qty_plan__gt=0).exists()
+            ):
+                issues.add(
+                    "cancelled_order_inventory_still_reserved",
+                    "Cancelled sale-mini order still has an active allocated PICK task.",
+                    mapping_id=mapping.id,
+                    order_id=order.id,
+                )
 
     def _check_payments_and_refunds(self, issues, owner_id):
         payments = SaleMiniPayment.objects.select_related(
@@ -292,6 +338,7 @@ class Command(BaseCommand):
         if owner_id:
             payments = payments.filter(owner_id=owner_id)
         for payment in payments:
+            mapping = payment.mapping
             if payment.owner_id != payment.mapping.owner_id:
                 issues.add(
                     "payment_owner_mismatch",
@@ -317,6 +364,7 @@ class Command(BaseCommand):
                 )
             if (
                 payment.status == SaleMiniPayment.Status.PAID
+                and payment.channel == SaleMiniPayment.Channel.WECHAT_JSAPI
                 and not payment.transaction_id
             ):
                 issues.add(
@@ -324,6 +372,58 @@ class Command(BaseCommand):
                     "Paid payment should have a WeChat transaction id.",
                     payment_id=payment.id,
                     mapping_id=payment.mapping_id,
+                )
+            if (
+                mapping.outbound_order.approval_status == "CANCELLED"
+                and payment.status
+                in {
+                    SaleMiniPayment.Status.PAID,
+                    SaleMiniPayment.Status.REFUNDING,
+                }
+                and not payment.refunds.exclude(
+                    status=SaleMiniRefund.Status.CLOSED
+                ).exists()
+            ):
+                issues.add(
+                    "cancelled_paid_order_missing_refund",
+                    "Cancelled paid order must have an active refund record.",
+                    payment_id=payment.id,
+                    mapping_id=mapping.id,
+                )
+            if (
+                not payment.requires_manual_action
+                and payment.status
+                in {
+                    SaleMiniPayment.Status.CREATED,
+                    SaleMiniPayment.Status.PREPAY,
+                }
+                and payment.next_reconcile_at
+                and payment.next_reconcile_at < timezone.now()
+            ):
+                issues.add(
+                    "overdue_payment_reconciliation",
+                    "Payment intent reconciliation is overdue.",
+                    payment_id=payment.id,
+                    mapping_id=mapping.id,
+                    next_reconcile_at=payment.next_reconcile_at.isoformat(),
+                )
+            if (
+                mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.REFUNDING
+                and payment.status == SaleMiniPayment.Status.REFUNDING
+                and not payment.refunds.filter(
+                    status__in=[
+                        SaleMiniRefund.Status.CREATED,
+                        SaleMiniRefund.Status.PROCESSING,
+                        SaleMiniRefund.Status.FAILED,
+                        SaleMiniRefund.Status.ABNORMAL,
+                    ]
+                ).exists()
+            ):
+                issues.add(
+                    "refunding_order_missing_refund",
+                    "Refunding order must have a refund record.",
+                    payment_id=payment.id,
+                    mapping_id=mapping.id,
                 )
 
         refunds = SaleMiniRefund.objects.select_related("payment", "payment__mapping")
@@ -361,6 +461,43 @@ class Command(BaseCommand):
                     "Successful refund should have a success timestamp.",
                     refund_id=refund.id,
                     payment_id=payment.id,
+                )
+            if (
+                refund.status == SaleMiniRefund.Status.SUCCESS
+                and refund.payment.mapping.payment_status
+                != SaleMiniOrderMapping.PaymentStatus.REFUNDED
+                and not refund.payment.mapping.payments.exclude(
+                    pk=refund.payment_id
+                ).filter(
+                    status__in=[
+                        SaleMiniPayment.Status.PAID,
+                        SaleMiniPayment.Status.REFUNDING,
+                        SaleMiniPayment.Status.REFUNDED,
+                    ]
+                ).exists()
+            ):
+                issues.add(
+                    "successful_refund_order_not_refunded",
+                    "Successful refund must mark its order mapping as refunded.",
+                    refund_id=refund.id,
+                    mapping_id=refund.payment.mapping_id,
+                )
+            if (
+                not refund.requires_manual_action
+                and refund.status
+                in {
+                    SaleMiniRefund.Status.CREATED,
+                    SaleMiniRefund.Status.PROCESSING,
+                    SaleMiniRefund.Status.FAILED,
+                }
+                and refund.next_retry_at
+                and refund.next_retry_at < timezone.now()
+            ):
+                issues.add(
+                    "overdue_refund_reconciliation",
+                    "Refund reconciliation is overdue.",
+                    refund_id=refund.id,
+                    next_retry_at=refund.next_retry_at.isoformat(),
                 )
 
     def _check_coupons_and_adjustments(self, issues, owner_id):

@@ -1,0 +1,13 @@
+[Unit]
+Description=WMS sale-mini expired payment reconciliation
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wms
+Group=wms
+WorkingDirectory=/wms
+EnvironmentFile=-/etc/default/wms
+ExecStart=/usr/bin/flock -n /run/lock/wms-sale-mini-payments.lock /wms/.venv/bin/python /wms/manage.py expire_sale_mini_orders --limit 200
+

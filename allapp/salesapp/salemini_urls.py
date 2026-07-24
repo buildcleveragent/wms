@@ -23,6 +23,7 @@ from .salemini_api import (
     SaleMiniProfileApi,
     SaleMiniWechatLoginApi,
     SaleMiniWechatPaymentCallbackApi,
+    SaleMiniWechatPaymentQueryApi,
     SaleMiniWechatPrepayApi,
     SaleMiniWechatRefundApi,
     SaleMiniWechatRefundCallbackApi,
@@ -107,6 +108,11 @@ urlpatterns = [
         "payments/wechat/prepay/",
         SaleMiniWechatPrepayApi.as_view(),
         name="sale-mini-wechat-prepay",
+    ),
+    path(
+        "payments/wechat/query/",
+        SaleMiniWechatPaymentQueryApi.as_view(),
+        name="sale-mini-wechat-query",
     ),
     path(
         "payments/wechat/callback/",

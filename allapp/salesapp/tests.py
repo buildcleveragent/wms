@@ -1,14 +1,18 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO, StringIO
+from threading import Barrier
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase, override_settings
+from django.db import close_old_connections, connection
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from PIL import Image
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
@@ -16,6 +20,7 @@ from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 from allapp.baseinfo.models import Customer, Owner
 from allapp.inventory.models import InventoryDetail, InventorySummary
 from allapp.locations.models import Location, Subwarehouse, Warehouse
+from allapp.outbound import services as outbound_services
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import (
     Brand,
@@ -60,6 +65,8 @@ from .services_salemini_adjustments import (
     confirm_distribution,
     point_balance,
 )
+from .services_salemini_payments import get_or_create_full_refund
+from .salemini_api import _prepare_wechat_prepay
 from .views import ChannelViewSet, SalesOrderViewSet
 
 User = get_user_model()
@@ -600,6 +607,12 @@ class SalesMobileApiTests(TestCase):
         self.assertFalse(SalesOrder.objects.exists())
 
 
+@override_settings(
+    WECHAT_MINI_APPID="wx-test-app",
+    WECHAT_PAY_MCH_ID="1900000001",
+    WECHAT_PAY_NOTIFY_URL="https://pay.example.test/callback/",
+    WECHAT_PAY_REFUND_NOTIFY_URL="https://pay.example.test/refund-callback/",
+)
 class SaleMiniApiTests(TestCase):
     def assertPublicProductPayloadHidesInternalFields(self, payload):
         for field in ("owner_id", "owner", "owner_name"):
@@ -724,7 +737,8 @@ class SaleMiniApiTests(TestCase):
         response = self._create_sale_mini_order()
         order = OutboundOrder.objects.get(pk=response.data["id"])
         order.is_closed = True
-        order.save(update_fields=["is_closed", "updated_at"])
+        order.close_reason = "测试订单已完成"
+        order.save(update_fields=["is_closed", "close_reason", "updated_at"])
         mapping = SaleMiniOrderMapping.objects.get(outbound_order=order)
         return mapping, order.lines.get()
 
@@ -861,7 +875,8 @@ class SaleMiniApiTests(TestCase):
         self.assertIn("订单完成后", str(not_completed.data))
 
         order.is_closed = True
-        order.save(update_fields=["is_closed", "updated_at"])
+        order.close_reason = "测试订单已完成"
+        order.save(update_fields=["is_closed", "close_reason", "updated_at"])
         mapping = SaleMiniOrderMapping.objects.get(outbound_order=order)
         mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.REFUNDED
         mapping.save(update_fields=["payment_status", "updated_at"])
@@ -3170,6 +3185,115 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(payment.amount, Decimal("16.00"))
         self.assertEqual(payment.amount_cents, 1600)
 
+    def test_zero_payable_order_uses_internal_settlement_and_zero_refund(self):
+        coupon = self._create_coupon(discount="19.00")
+        order_response = self._create_sale_mini_order(
+            payment_method="WECHAT",
+            extra={"coupon_id": coupon.id},
+        )
+        mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
+        payment = SaleMiniPayment.objects.get(mapping=mapping)
+
+        self.assertEqual(order_response.data["payable_amount"], "0.00")
+        self.assertEqual(
+            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.PAID
+        )
+        self.assertEqual(payment.channel, SaleMiniPayment.Channel.INTERNAL_ZERO)
+        self.assertEqual(payment.amount, Decimal("0.00"))
+        self.assertEqual(payment.amount_cents, 0)
+        self.assertIsNone(payment.transaction_id)
+
+        prepay = self.client.post(
+            "/api/sale-mini/payments/wechat/prepay/",
+            {"order_id": order_response.data["id"]},
+            format="json",
+        )
+        self.assertEqual(prepay.status_code, 200)
+        self.assertTrue(prepay.data["paid"])
+        self.assertIsNone(prepay.data["pay_params"])
+        self.assertEqual(prepay.data["settlement_channel"], "INTERNAL_ZERO")
+
+        refunded = self.client.post(
+            "/api/sale-mini/payments/wechat/refund/",
+            {"order_id": order_response.data["id"], "reason": "零元退款测试"},
+            format="json",
+        )
+        self.assertEqual(refunded.status_code, 200)
+        mapping.refresh_from_db()
+        payment.refresh_from_db()
+        coupon.refresh_from_db()
+        refund = SaleMiniRefund.objects.get(payment=payment)
+        detail = InventoryDetail.objects.get(product=self.product)
+        self.assertEqual(
+            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDED
+        )
+        self.assertEqual(payment.status, SaleMiniPayment.Status.REFUNDED)
+        self.assertEqual(refund.status, SaleMiniRefund.Status.SUCCESS)
+        self.assertEqual(refund.amount_cents, 0)
+        self.assertEqual(coupon.status, SaleMiniCoupon.Status.AVAILABLE)
+        self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
+        self.assertEqual(detail.available_qty, Decimal("10.0000"))
+
+    def test_unpaid_sale_mini_order_cannot_release_pick_task(self):
+        order_response = self._create_sale_mini_order(payment_method="WECHAT")
+        mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
+        order = mapping.outbound_order
+        order.approval_status = "WHS_APPROVED"
+        order.save(update_fields=["approval_status", "updated_at"])
+
+        with self.assertRaises(DjangoValidationError):
+            outbound_services.promote_reserved_pick(order, by_user=self.user)
+
+        task = WmsTask.objects.get(
+            task_type=WmsTask.TaskType.PICK,
+            source_model=order._meta.model_name,
+            source_pk=str(order.pk),
+        )
+        self.assertEqual(task.status, WmsTask.Status.RESERVED)
+
+        mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.PAID
+        mapping.save(update_fields=["payment_status", "updated_at"])
+        released = outbound_services.promote_reserved_pick(order, by_user=self.user)
+        self.assertEqual(released.status, WmsTask.Status.RELEASED)
+
+    @patch("allapp.salesapp.services_salemini_payments.query_jsapi_payment")
+    def test_payment_query_endpoint_confirms_success(self, mock_query):
+        order_response = self._create_sale_mini_order(payment_method="WECHAT")
+        mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
+        payment = SaleMiniPayment.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            buyer_user=self.buyer,
+            mapping=mapping,
+            payment_no="SMP-QUERY",
+            out_trade_no="SMT-QUERY",
+            status=SaleMiniPayment.Status.PREPAY,
+            amount=Decimal("19.00"),
+            amount_cents=1900,
+        )
+        mock_query.return_value = {
+            "out_trade_no": payment.out_trade_no,
+            "appid": settings.WECHAT_MINI_APPID,
+            "mchid": settings.WECHAT_PAY_MCH_ID,
+            "transaction_id": "wx-query-success",
+            "trade_state": "SUCCESS",
+            "amount": {"total": 1900, "currency": "CNY"},
+        }
+
+        response = self.client.post(
+            "/api/sale-mini/payments/wechat/query/",
+            {"order_id": order_response.data["id"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["confirmed"])
+        self.assertEqual(response.data["payment_status"], "PAID")
+        mapping.refresh_from_db()
+        self.assertEqual(
+            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.PAID
+        )
+
     @patch("allapp.salesapp.salemini_api.decrypt_resource")
     @patch("allapp.salesapp.salemini_api.verify_callback_signature")
     def test_wechat_payment_callback_marks_paid_idempotently(
@@ -3191,6 +3315,8 @@ class SaleMiniApiTests(TestCase):
         mock_verify.return_value = True
         mock_decrypt.return_value = {
             "out_trade_no": payment.out_trade_no,
+            "appid": settings.WECHAT_MINI_APPID,
+            "mchid": settings.WECHAT_PAY_MCH_ID,
             "transaction_id": "wx-transaction-1",
             "trade_state": "SUCCESS",
             "amount": {"total": 1900, "currency": "CNY"},
@@ -3198,7 +3324,7 @@ class SaleMiniApiTests(TestCase):
         payload = {
             "id": "evt-pay-1",
             "event_type": "TRANSACTION.SUCCESS",
-            "resource": {},
+            "resource": {"algorithm": "AEAD_AES_256_GCM"},
         }
 
         response = APIClient().post(
@@ -3223,6 +3349,64 @@ class SaleMiniApiTests(TestCase):
         )
         self.assertEqual(
             SaleMiniPaymentEvent.objects.filter(event_id="evt-pay-1").count(), 1
+        )
+
+    @patch(
+        "allapp.salesapp.services_salemini_payments.confirm_adjustments",
+        side_effect=RuntimeError("adjustment confirmation failed"),
+    )
+    @patch("allapp.salesapp.salemini_api.decrypt_resource")
+    @patch("allapp.salesapp.salemini_api.verify_callback_signature")
+    def test_payment_callback_rolls_back_all_business_state_on_failure(
+        self,
+        mock_verify,
+        mock_decrypt,
+        mock_confirm,
+    ):
+        order_response = self._create_sale_mini_order(payment_method="WECHAT")
+        mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
+        payment = SaleMiniPayment.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            buyer_user=self.buyer,
+            mapping=mapping,
+            payment_no="SMP-CALLBACK-ROLLBACK",
+            out_trade_no="SMT-CALLBACK-ROLLBACK",
+            status=SaleMiniPayment.Status.PREPAY,
+            amount=Decimal("19.00"),
+            amount_cents=1900,
+        )
+        mock_verify.return_value = True
+        mock_decrypt.return_value = {
+            "out_trade_no": payment.out_trade_no,
+            "appid": settings.WECHAT_MINI_APPID,
+            "mchid": settings.WECHAT_PAY_MCH_ID,
+            "transaction_id": "wx-rollback",
+            "trade_state": "SUCCESS",
+            "amount": {"total": 1900, "currency": "CNY"},
+        }
+
+        response = APIClient().post(
+            "/api/sale-mini/payments/wechat/callback/",
+            {
+                "id": "evt-pay-rollback",
+                "event_type": "TRANSACTION.SUCCESS",
+                "resource": {"algorithm": "AEAD_AES_256_GCM"},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payment.refresh_from_db()
+        mapping.refresh_from_db()
+        event = SaleMiniPaymentEvent.objects.get(event_id="evt-pay-rollback")
+        self.assertEqual(payment.status, SaleMiniPayment.Status.PREPAY)
+        self.assertIsNone(payment.transaction_id)
+        self.assertEqual(
+            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.UNPAID
+        )
+        self.assertEqual(
+            event.process_status, SaleMiniPaymentEvent.ProcessStatus.FAILED
         )
 
     @override_settings(SALE_MINI_DISTRIBUTION_COMMISSION_RATE="0.10")
@@ -3257,6 +3441,8 @@ class SaleMiniApiTests(TestCase):
         mock_verify.return_value = True
         mock_decrypt.return_value = {
             "out_trade_no": payment.out_trade_no,
+            "appid": settings.WECHAT_MINI_APPID,
+            "mchid": settings.WECHAT_PAY_MCH_ID,
             "transaction_id": "wx-transaction-adj",
             "trade_state": "SUCCESS",
             "amount": {"total": 1400, "currency": "CNY"},
@@ -3264,7 +3450,11 @@ class SaleMiniApiTests(TestCase):
 
         response = APIClient().post(
             "/api/sale-mini/payments/wechat/callback/",
-            {"id": "evt-pay-adj", "event_type": "TRANSACTION.SUCCESS", "resource": {}},
+            {
+                "id": "evt-pay-adj",
+                "event_type": "TRANSACTION.SUCCESS",
+                "resource": {"algorithm": "AEAD_AES_256_GCM"},
+            },
             format="json",
         )
 
@@ -3308,6 +3498,8 @@ class SaleMiniApiTests(TestCase):
         mock_verify.return_value = True
         mock_decrypt.return_value = {
             "out_trade_no": payment.out_trade_no,
+            "appid": settings.WECHAT_MINI_APPID,
+            "mchid": settings.WECHAT_PAY_MCH_ID,
             "transaction_id": "wx-transaction-2",
             "trade_state": "SUCCESS",
             "amount": {"total": 1800, "currency": "CNY"},
@@ -3315,7 +3507,11 @@ class SaleMiniApiTests(TestCase):
 
         response = APIClient().post(
             "/api/sale-mini/payments/wechat/callback/",
-            {"id": "evt-pay-bad", "event_type": "TRANSACTION.SUCCESS", "resource": {}},
+            {
+                "id": "evt-pay-bad",
+                "event_type": "TRANSACTION.SUCCESS",
+                "resource": {"algorithm": "AEAD_AES_256_GCM"},
+            },
             format="json",
         )
 
@@ -3331,7 +3527,65 @@ class SaleMiniApiTests(TestCase):
             event.process_status, SaleMiniPaymentEvent.ProcessStatus.FAILED
         )
 
-    @patch("allapp.salesapp.salemini_api.request_refund")
+    @patch("allapp.salesapp.salemini_api.decrypt_resource")
+    @patch("allapp.salesapp.salemini_api.verify_callback_signature")
+    def test_late_payment_queues_one_refund_without_restoring_inventory(
+        self, mock_verify, mock_decrypt
+    ):
+        order_response = self._create_sale_mini_order(payment_method="WECHAT")
+        mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
+        cancelled = self.client.post(
+            f"/api/sale-mini/orders/{order_response.data['id']}/cancel/"
+        )
+        self.assertEqual(cancelled.status_code, 200)
+        payment = SaleMiniPayment.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            buyer_user=self.buyer,
+            mapping=mapping,
+            payment_no="SMP-LATE-1",
+            out_trade_no="SMT-LATE-1",
+            status=SaleMiniPayment.Status.PREPAY,
+            amount=Decimal("19.00"),
+            amount_cents=1900,
+        )
+        mock_verify.return_value = True
+        mock_decrypt.return_value = {
+            "out_trade_no": payment.out_trade_no,
+            "appid": settings.WECHAT_MINI_APPID,
+            "mchid": settings.WECHAT_PAY_MCH_ID,
+            "transaction_id": "wx-late-1",
+            "trade_state": "SUCCESS",
+            "amount": {"total": 1900, "currency": "CNY"},
+        }
+        anonymous = APIClient()
+        for event_id in ["evt-late-1", "evt-late-2"]:
+            response = anonymous.post(
+                "/api/sale-mini/payments/wechat/callback/",
+                {
+                    "id": event_id,
+                    "event_type": "TRANSACTION.SUCCESS",
+                    "resource": {"algorithm": "AEAD_AES_256_GCM"},
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, 200)
+
+        mapping.refresh_from_db()
+        payment.refresh_from_db()
+        detail = InventoryDetail.objects.get(product=self.product)
+        refund = SaleMiniRefund.objects.get(payment=payment)
+        self.assertEqual(
+            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDING
+        )
+        self.assertEqual(payment.status, SaleMiniPayment.Status.REFUNDING)
+        self.assertEqual(refund.source, SaleMiniRefund.Source.LATE_PAYMENT)
+        self.assertEqual(SaleMiniRefund.objects.filter(payment=payment).count(), 1)
+        self.assertEqual(mapping.outbound_order.approval_status, "CANCELLED")
+        self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
+        self.assertEqual(detail.available_qty, Decimal("10.0000"))
+
+    @patch("allapp.salesapp.services_salemini_payments.request_refund")
     def test_wechat_refund_request_cancels_order_and_releases_inventory(
         self, mock_refund
     ):
@@ -3353,9 +3607,14 @@ class SaleMiniApiTests(TestCase):
             amount_cents=1900,
             paid_at=timezone.now(),
         )
-        mock_refund.return_value = (
-            {"out_refund_no": "SMRF-1"},
-            {"refund_id": "wx-refund-1", "status": "PROCESSING"},
+        mock_refund.side_effect = lambda refund, **_kwargs: (
+            {"out_refund_no": refund.out_refund_no},
+            {
+                "out_refund_no": refund.out_refund_no,
+                "refund_id": "wx-refund-1",
+                "status": "PROCESSING",
+                "amount": {"refund": 1900, "total": 1900, "currency": "CNY"},
+            },
         )
 
         response = self.client.post(
@@ -3415,7 +3674,7 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(request_row.reason, "已开始作业")
 
     @override_settings(SALE_MINI_DISTRIBUTION_COMMISSION_RATE="0.10")
-    @patch("allapp.salesapp.salemini_api.request_refund")
+    @patch("allapp.salesapp.services_salemini_payments.request_refund")
     def test_successful_refund_reverses_confirmed_adjustments_and_distribution(
         self, mock_refund
     ):
@@ -3449,9 +3708,14 @@ class SaleMiniApiTests(TestCase):
             amount_cents=1400,
             paid_at=timezone.now(),
         )
-        mock_refund.return_value = (
-            {"out_refund_no": "SMRF-SUCCESS"},
-            {"refund_id": "wx-refund-success", "status": "SUCCESS"},
+        mock_refund.side_effect = lambda refund, **_kwargs: (
+            {"out_refund_no": refund.out_refund_no},
+            {
+                "out_refund_no": refund.out_refund_no,
+                "refund_id": "wx-refund-success",
+                "status": "SUCCESS",
+                "amount": {"refund": 1400, "total": 1400, "currency": "CNY"},
+            },
         )
 
         response = self.client.post(
@@ -3519,15 +3783,21 @@ class SaleMiniApiTests(TestCase):
         )
         mock_verify.return_value = True
         mock_decrypt.return_value = {
+            "mchid": settings.WECHAT_PAY_MCH_ID,
             "out_trade_no": payment.out_trade_no,
             "out_refund_no": refund.out_refund_no,
             "refund_id": "wx-refund-cb",
             "refund_status": "SUCCESS",
+            "amount": {"refund": 1900, "total": 1900, "currency": "CNY"},
         }
 
         response = APIClient().post(
             "/api/sale-mini/payments/wechat/refund-callback/",
-            {"id": "evt-refund-1", "event_type": "REFUND.SUCCESS", "resource": {}},
+            {
+                "id": "evt-refund-1",
+                "event_type": "REFUND.SUCCESS",
+                "resource": {"algorithm": "AEAD_AES_256_GCM"},
+            },
             format="json",
         )
 
@@ -3540,6 +3810,72 @@ class SaleMiniApiTests(TestCase):
         )
         self.assertEqual(payment.status, SaleMiniPayment.Status.REFUNDED)
         self.assertEqual(refund.status, SaleMiniRefund.Status.SUCCESS)
+
+    @patch("allapp.salesapp.salemini_api.decrypt_resource")
+    @patch("allapp.salesapp.salemini_api.verify_callback_signature")
+    def test_abnormal_refund_keeps_order_cancelled_and_requires_manual_action(
+        self, mock_verify, mock_decrypt
+    ):
+        order_response = self._create_sale_mini_order(payment_method="WECHAT")
+        mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
+        mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.REFUNDING
+        mapping.outbound_order.approval_status = "CANCELLED"
+        mapping.outbound_order.save(update_fields=["approval_status", "updated_at"])
+        mapping.save(update_fields=["payment_status"])
+        payment = SaleMiniPayment.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            buyer_user=self.buyer,
+            mapping=mapping,
+            payment_no="SMP-REFUND-ABNORMAL",
+            out_trade_no="SMT-REFUND-ABNORMAL",
+            status=SaleMiniPayment.Status.REFUNDING,
+            amount=Decimal("19.00"),
+            amount_cents=1900,
+        )
+        refund = SaleMiniRefund.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            buyer_user=self.buyer,
+            payment=payment,
+            refund_no="SMR-ABNORMAL",
+            out_refund_no="SMRF-ABNORMAL",
+            status=SaleMiniRefund.Status.PROCESSING,
+            amount=Decimal("19.00"),
+            amount_cents=1900,
+            total_amount_cents=1900,
+        )
+        mock_verify.return_value = True
+        mock_decrypt.return_value = {
+            "mchid": settings.WECHAT_PAY_MCH_ID,
+            "out_trade_no": payment.out_trade_no,
+            "out_refund_no": refund.out_refund_no,
+            "refund_id": "wx-refund-abnormal",
+            "refund_status": "ABNORMAL",
+            "amount": {"refund": 1900, "total": 1900, "currency": "CNY"},
+        }
+
+        response = APIClient().post(
+            "/api/sale-mini/payments/wechat/refund-callback/",
+            {
+                "id": "evt-refund-abnormal",
+                "event_type": "REFUND.ABNORMAL",
+                "resource": {"algorithm": "AEAD_AES_256_GCM"},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mapping.refresh_from_db()
+        payment.refresh_from_db()
+        refund.refresh_from_db()
+        self.assertEqual(
+            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDING
+        )
+        self.assertEqual(payment.status, SaleMiniPayment.Status.REFUNDING)
+        self.assertEqual(mapping.outbound_order.approval_status, "CANCELLED")
+        self.assertTrue(refund.requires_manual_action)
+        self.assertEqual(refund.status, SaleMiniRefund.Status.ABNORMAL)
 
     def test_expire_unpaid_wechat_order_releases_inventory(self):
         coupon = self._create_coupon(discount="4.00")
@@ -3567,3 +3903,169 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(point_balance(self.owner, self.customer, self.buyer), (500, 0))
         self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
         self.assertEqual(detail.available_qty, Decimal("10.0000"))
+
+    @patch("allapp.salesapp.services_salemini_payments.query_jsapi_payment")
+    def test_expire_userpaying_order_keeps_inventory_reserved(self, mock_query):
+        order_response = self._create_sale_mini_order(payment_method="WECHAT")
+        mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
+        mapping.pay_deadline_at = timezone.now() - timedelta(minutes=1)
+        mapping.save(update_fields=["pay_deadline_at"])
+        payment = SaleMiniPayment.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            buyer_user=self.buyer,
+            mapping=mapping,
+            payment_no="SMP-USERPAYING",
+            out_trade_no="SMT-USERPAYING",
+            status=SaleMiniPayment.Status.PREPAY,
+            amount=Decimal("19.00"),
+            amount_cents=1900,
+        )
+        mock_query.return_value = {
+            "out_trade_no": payment.out_trade_no,
+            "appid": settings.WECHAT_MINI_APPID,
+            "mchid": settings.WECHAT_PAY_MCH_ID,
+            "trade_state": "USERPAYING",
+            "amount": {"total": 1900, "currency": "CNY"},
+        }
+
+        call_command("expire_sale_mini_orders", stdout=StringIO())
+
+        mapping.refresh_from_db()
+        detail = InventoryDetail.objects.get(product=self.product)
+        self.assertEqual(
+            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.UNPAID
+        )
+        self.assertNotEqual(mapping.outbound_order.approval_status, "CANCELLED")
+        self.assertEqual(detail.allocated_qty, Decimal("2.0000"))
+        self.assertEqual(detail.available_qty, Decimal("8.0000"))
+
+    @patch("allapp.salesapp.services_salemini_payments.close_jsapi_payment")
+    @patch("allapp.salesapp.services_salemini_payments.query_jsapi_payment")
+    def test_expire_notpay_order_closes_wechat_before_releasing_inventory(
+        self, mock_query, mock_close
+    ):
+        order_response = self._create_sale_mini_order(payment_method="WECHAT")
+        mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
+        mapping.pay_deadline_at = timezone.now() - timedelta(minutes=1)
+        mapping.save(update_fields=["pay_deadline_at"])
+        payment = SaleMiniPayment.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            buyer_user=self.buyer,
+            mapping=mapping,
+            payment_no="SMP-NOTPAY",
+            out_trade_no="SMT-NOTPAY",
+            status=SaleMiniPayment.Status.PREPAY,
+            amount=Decimal("19.00"),
+            amount_cents=1900,
+        )
+        mock_query.return_value = {
+            "out_trade_no": payment.out_trade_no,
+            "appid": settings.WECHAT_MINI_APPID,
+            "mchid": settings.WECHAT_PAY_MCH_ID,
+            "trade_state": "NOTPAY",
+            "amount": {"total": 1900, "currency": "CNY"},
+        }
+        mock_close.return_value = {}
+
+        call_command("expire_sale_mini_orders", stdout=StringIO())
+
+        mapping.refresh_from_db()
+        payment.refresh_from_db()
+        detail = InventoryDetail.objects.get(product=self.product)
+        mock_close.assert_called_once()
+        self.assertEqual(
+            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.CANCELLED
+        )
+        self.assertEqual(payment.status, SaleMiniPayment.Status.CLOSED)
+        self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
+        self.assertEqual(detail.available_qty, Decimal("10.0000"))
+
+
+@override_settings(
+    WECHAT_MINI_APPID="wx-test-app",
+    WECHAT_PAY_MCH_ID="1900000001",
+    WECHAT_PAY_NOTIFY_URL="https://pay.example.test/callback/",
+    WECHAT_PAY_REFUND_NOTIFY_URL="https://pay.example.test/refund-callback/",
+)
+class SaleMiniPaymentConcurrencyTests(TransactionTestCase):
+    reset_sequences = True
+
+    setUp = SaleMiniApiTests.setUp
+    _create_sale_mini_order = SaleMiniApiTests._create_sale_mini_order
+
+    def _run_concurrently(self, callback):
+        if connection.vendor != "mysql":
+            self.skipTest("Payment concurrency guarantees are verified on MySQL.")
+        barrier = Barrier(2)
+
+        def runner():
+            close_old_connections()
+            try:
+                barrier.wait(timeout=10)
+                return callback()
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            return list(executor.map(lambda _index: runner(), range(2)))
+
+    def test_concurrent_prepay_creates_one_effective_payment_intent(self):
+        self.buyer.openid = "wx-concurrent-prepay"
+        self.buyer.save(update_fields=["openid"])
+        order_response = self._create_sale_mini_order(payment_method="WECHAT")
+        mapping_id = order_response.data["mapping_id"]
+        buyer_id = self.buyer.id
+        user_id = self.user.id
+
+        def prepare():
+            buyer = MiniProgramUser.objects.get(pk=buyer_id)
+            user = User.objects.get(pk=user_id)
+            return _prepare_wechat_prepay(mapping_id, buyer, user)["payment"].pk
+
+        payment_ids = self._run_concurrently(prepare)
+
+        self.assertEqual(len(set(payment_ids)), 1)
+        self.assertEqual(
+            SaleMiniPayment.objects.filter(mapping_id=mapping_id).count(),
+            1,
+        )
+
+    def test_concurrent_full_refund_creates_one_idempotent_record(self):
+        order_response = self._create_sale_mini_order(payment_method="WECHAT")
+        mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
+        mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.PAID
+        mapping.save(update_fields=["payment_status", "updated_at"])
+        payment = SaleMiniPayment.objects.create(
+            owner=self.owner,
+            customer=self.customer,
+            buyer_user=self.buyer,
+            mapping=mapping,
+            payment_no="SMP-CONCURRENT-REFUND",
+            out_trade_no="SMT-CONCURRENT-REFUND",
+            transaction_id="wx-concurrent-refund",
+            status=SaleMiniPayment.Status.PAID,
+            amount=Decimal("19.00"),
+            amount_cents=1900,
+            paid_at=timezone.now(),
+        )
+        payment_id = payment.id
+        user_id = self.user.id
+
+        def create_refund():
+            current_payment = SaleMiniPayment.objects.get(pk=payment_id)
+            user = User.objects.get(pk=user_id)
+            refund, _created = get_or_create_full_refund(
+                current_payment,
+                by_user=user,
+            )
+            return refund.pk
+
+        refund_ids = self._run_concurrently(create_refund)
+
+        self.assertEqual(len(set(refund_ids)), 1)
+        self.assertEqual(
+            SaleMiniRefund.objects.filter(payment_id=payment_id).count(),
+            1,
+        )

@@ -5,6 +5,7 @@ import time
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from urllib import error as url_error
+from urllib import parse as url_parse
 from urllib import request as url_request
 
 from django.conf import settings
@@ -15,7 +16,15 @@ class WechatPayConfigError(Exception):
 
 
 class WechatPayRequestError(Exception):
-    pass
+    def __init__(self, message, *, http_status=None, code="", response=None):
+        super().__init__(message)
+        self.http_status = http_status
+        self.code = code or ""
+        self.response = response or {}
+
+    @property
+    def is_network_error(self):
+        return self.http_status is None
 
 
 def money_to_cents(amount) -> int:
@@ -46,13 +55,32 @@ def _private_key_pem() -> bytes:
     return value.replace("\\n", "\n").encode("utf-8")
 
 
-def _platform_public_key_pem() -> bytes:
-    if settings.WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH:
-        return Path(settings.WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH).read_bytes()
-    value = settings.WECHAT_PAY_PLATFORM_PUBLIC_KEY
+def _key_material_bytes(value) -> bytes:
     if not value:
-        raise WechatPayConfigError("微信支付平台公钥/证书未配置，无法验签回调。")
-    return value.replace("\\n", "\n").encode("utf-8")
+        raise WechatPayConfigError("微信支付平台公钥内容为空。")
+    normalized = str(value).replace("\\n", "\n")
+    if "-----BEGIN " in normalized:
+        return normalized.encode("utf-8")
+    path = Path(normalized)
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        raise WechatPayConfigError(f"无法读取微信支付公钥文件：{path}。") from exc
+
+
+def _platform_public_key_pem(serial: str) -> bytes:
+    key_map = getattr(settings, "WECHAT_PAY_PLATFORM_KEYS", {}) or {}
+    if serial and serial in key_map:
+        return _key_material_bytes(key_map[serial])
+    if key_map:
+        raise WechatPayRequestError(f"未知的微信支付平台公钥序列号：{serial or '空'}。")
+    if getattr(settings, "IS_PRODUCTION", False):
+        raise WechatPayConfigError("生产环境必须配置 WECHAT_PAY_PLATFORM_KEYS。")
+    if settings.WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH:
+        return _key_material_bytes(settings.WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH)
+    if settings.WECHAT_PAY_PLATFORM_PUBLIC_KEY:
+        return _key_material_bytes(settings.WECHAT_PAY_PLATFORM_PUBLIC_KEY)
+    raise WechatPayConfigError("微信支付平台公钥/证书未配置，无法验签。")
 
 
 def _ensure_base_config():
@@ -103,6 +131,57 @@ def _authorization_header(
     )
 
 
+def _load_platform_public_key(serial: str):
+    x509, _invalid, _hashes, serialization, _padding, _aes = _require_crypto()
+    key_data = _platform_public_key_pem(serial)
+    if b"BEGIN CERTIFICATE" in key_data:
+        return x509.load_pem_x509_certificate(key_data).public_key()
+    return serialization.load_pem_public_key(key_data)
+
+
+def _verify_wechat_signature(timestamp, nonce, signature, serial, raw_body: bytes):
+    _x509, InvalidSignature, hashes, _serialization, padding, _aes = _require_crypto()
+    if not timestamp or not nonce or not signature:
+        raise WechatPayRequestError("微信支付响应缺少验签头。")
+    message = timestamp.encode("utf-8") + b"\n" + nonce.encode("utf-8") + b"\n"
+    message += raw_body + b"\n"
+    try:
+        _load_platform_public_key(serial).verify(
+            base64.b64decode(signature),
+            message,
+            padding.PKCS1v15(),
+            hashes.SHA256(),
+        )
+    except (InvalidSignature, ValueError) as exc:
+        raise WechatPayRequestError("微信支付响应验签失败。") from exc
+
+
+def _response_header(headers, name):
+    return headers.get(name) or headers.get(name.lower()) or headers.get(name.title())
+
+
+def verify_wechat_response(headers, raw_body: bytes):
+    if not settings.WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE:
+        return True
+    _verify_wechat_signature(
+        _response_header(headers, "Wechatpay-Timestamp"),
+        _response_header(headers, "Wechatpay-Nonce"),
+        _response_header(headers, "Wechatpay-Signature"),
+        _response_header(headers, "Wechatpay-Serial"),
+        raw_body,
+    )
+    return True
+
+
+def _decoded_json(raw: bytes):
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return {"raw": raw.decode("utf-8", errors="replace")}
+
+
 def _wechat_request(method: str, path: str, payload=None):
     _ensure_base_config()
     body = _json_body(payload)
@@ -124,13 +203,26 @@ def _wechat_request(method: str, path: str, payload=None):
     )
     try:
         with url_request.urlopen(request, timeout=10) as response:
-            raw = response.read().decode("utf-8")
-            return json.loads(raw) if raw else {}
+            raw = response.read()
+            verify_wechat_response(response.headers, raw)
+            return _decoded_json(raw)
     except url_error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")
-        raise WechatPayRequestError(f"微信支付请求失败：HTTP {exc.code} {raw}") from exc
+        raw = exc.read()
+        verify_wechat_response(exc.headers, raw)
+        response = _decoded_json(raw)
+        code = response.get("code", "") if isinstance(response, dict) else ""
+        message = response.get("message", "") if isinstance(response, dict) else ""
+        raise WechatPayRequestError(
+            f"微信支付请求失败：HTTP {exc.code} {code} {message}".strip(),
+            http_status=exc.code,
+            code=code,
+            response=response,
+        ) from exc
     except (OSError, ValueError, url_error.URLError) as exc:
-        raise WechatPayRequestError("微信支付服务请求失败，请稍后重试。") from exc
+        raise WechatPayRequestError(
+            "微信支付服务请求失败，请稍后重试。",
+            response={"error": str(exc)},
+        ) from exc
 
 
 def sign_jsapi_pay_params(prepay_id: str):
@@ -151,11 +243,11 @@ def sign_jsapi_pay_params(prepay_id: str):
     }
 
 
-def create_jsapi_prepay(payment, openid: str, description: str):
+def build_jsapi_prepay_payload(payment, openid: str, description: str):
     notify_url = settings.WECHAT_PAY_NOTIFY_URL
     if not notify_url:
         raise WechatPayConfigError("WECHAT_PAY_NOTIFY_URL 未配置。")
-    payload = {
+    return {
         "appid": settings.WECHAT_MINI_APPID,
         "mchid": settings.WECHAT_PAY_MCH_ID,
         "description": description[:127] or "销售小程序订单",
@@ -164,6 +256,10 @@ def create_jsapi_prepay(payment, openid: str, description: str):
         "amount": {"total": payment.amount_cents, "currency": payment.currency},
         "payer": {"openid": openid},
     }
+
+
+def create_jsapi_prepay(payment, openid: str, description: str, *, payload=None):
+    payload = payload or build_jsapi_prepay_payload(payment, openid, description)
     response = _wechat_request("POST", "/v3/pay/transactions/jsapi", payload)
     prepay_id = response.get("prepay_id")
     if not prepay_id:
@@ -179,7 +275,16 @@ def close_jsapi_payment(payment):
     return _wechat_request("POST", path, payload)
 
 
-def request_refund(refund):
+def query_jsapi_payment(payment):
+    if not payment.out_trade_no:
+        raise WechatPayRequestError("支付单缺少微信商户订单号。")
+    out_trade_no = url_parse.quote(payment.out_trade_no, safe="")
+    mchid = url_parse.quote(settings.WECHAT_PAY_MCH_ID, safe="")
+    path = f"/v3/pay/transactions/out-trade-no/{out_trade_no}?mchid={mchid}"
+    return _wechat_request("GET", path)
+
+
+def build_refund_request_payload(refund):
     notify_url = settings.WECHAT_PAY_REFUND_NOTIFY_URL or settings.WECHAT_PAY_NOTIFY_URL
     if not notify_url:
         raise WechatPayConfigError("WECHAT_PAY_REFUND_NOTIFY_URL 未配置。")
@@ -198,7 +303,20 @@ def request_refund(refund):
     if payment.transaction_id:
         payload["transaction_id"] = payment.transaction_id
         payload.pop("out_trade_no", None)
+    return payload
+
+
+def request_refund(refund, *, payload=None):
+    payload = payload or build_refund_request_payload(refund)
     return payload, _wechat_request("POST", "/v3/refund/domestic/refunds", payload)
+
+
+def query_refund(refund):
+    if not refund.out_refund_no:
+        raise WechatPayRequestError("退款单缺少商户退款单号。")
+    out_refund_no = url_parse.quote(refund.out_refund_no, safe="")
+    path = f"/v3/refund/domestic/refunds/{out_refund_no}"
+    return _wechat_request("GET", path)
 
 
 def decrypt_resource(resource):
@@ -218,7 +336,6 @@ def decrypt_resource(resource):
 def verify_callback_signature(headers, raw_body: bytes):
     if not settings.WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE:
         return True
-    _x509, InvalidSignature, hashes, serialization, padding, _aes = _require_crypto()
     timestamp = headers.get("Wechatpay-Timestamp") or headers.get(
         "HTTP_WECHATPAY_TIMESTAMP"
     )
@@ -226,23 +343,20 @@ def verify_callback_signature(headers, raw_body: bytes):
     signature = headers.get("Wechatpay-Signature") or headers.get(
         "HTTP_WECHATPAY_SIGNATURE"
     )
+    serial = headers.get("Wechatpay-Serial") or headers.get(
+        "HTTP_WECHATPAY_SERIAL"
+    )
     if not timestamp or not nonce or not signature:
         raise WechatPayRequestError("微信支付回调缺少验签头。")
-    key_data = _platform_public_key_pem()
-    if b"BEGIN CERTIFICATE" in key_data:
-        cert = _x509.load_pem_x509_certificate(key_data)
-        public_key = cert.public_key()
-    else:
-        public_key = serialization.load_pem_public_key(key_data)
-    message = timestamp.encode("utf-8") + b"\n" + nonce.encode("utf-8") + b"\n"
-    message += raw_body + b"\n"
     try:
-        public_key.verify(
-            base64.b64decode(signature),
-            message,
-            padding.PKCS1v15(),
-            hashes.SHA256(),
-        )
-    except (InvalidSignature, ValueError) as exc:
-        raise WechatPayRequestError("微信支付回调验签失败。") from exc
+        timestamp_value = int(timestamp)
+    except (TypeError, ValueError) as exc:
+        raise WechatPayRequestError("微信支付回调时间戳无效。") from exc
+    max_age = max(
+        int(getattr(settings, "WECHAT_PAY_CALLBACK_MAX_AGE_SECONDS", 300)),
+        1,
+    )
+    if abs(int(time.time()) - timestamp_value) > max_age:
+        raise WechatPayRequestError("微信支付回调时间戳已过期。")
+    _verify_wechat_signature(timestamp, nonce, signature, serial, raw_body)
     return True

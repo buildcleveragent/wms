@@ -1,9 +1,17 @@
+import base64
+import json
 from decimal import Decimal
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import patch
 
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models import Q
+from django.test import override_settings
 from PIL import Image
 from rest_framework.exceptions import ValidationError
 
@@ -12,6 +20,7 @@ from allapp.salesapp.management.commands.validate_sale_mini_data_accuracy import
     cents,
     money,
 )
+from allapp.salesapp.checks import check_wechat_pay_production_configuration
 from allapp.salesapp.salemini_api import (
     _display_status,
     _display_status_q,
@@ -25,6 +34,17 @@ from allapp.salesapp.salemini_api import (
 from allapp.salesapp.salemini_review_api import (
     SaleMiniReviewDraftSerializer,
     _validate_uploaded_image,
+)
+from allapp.salesapp.services_salemini_payments import (
+    payable_amount,
+    validate_payment_result,
+)
+from allapp.salesapp.services_wechat_pay import (
+    WechatPayRequestError,
+    _platform_public_key_pem,
+    decrypt_resource,
+    money_to_cents,
+    verify_callback_signature,
 )
 
 
@@ -184,6 +204,19 @@ def test_sale_mini_accuracy_money_and_cents_rounding():
     assert money(None) == Decimal("0.00")
     assert cents("1.005") == 101
     assert cents(Decimal("0.004")) == 0
+    assert money_to_cents(Decimal("0.005")) == 1
+
+
+def test_authoritative_payable_amount_preserves_zero_and_rejects_negative():
+    assert payable_amount(SimpleNamespace(payable_amount=Decimal("0.00"))) == Decimal(
+        "0.00"
+    )
+    try:
+        payable_amount(SimpleNamespace(payable_amount=Decimal("-0.01")))
+    except DjangoValidationError as exc:
+        assert "不能小于零" in str(exc)
+    else:
+        raise AssertionError("negative payable amount must be rejected")
 
 
 def test_sale_mini_accuracy_issue_collector_counts_all_and_limits_samples():
@@ -248,3 +281,203 @@ def test_review_image_validation_rejects_fake_image():
         assert "损坏" in str(exc.detail)
     else:
         raise AssertionError("fake review image must be rejected")
+
+
+@override_settings(WECHAT_MINI_APPID="wx-app", WECHAT_PAY_MCH_ID="mch-1")
+def test_payment_result_rejects_identity_currency_and_amount_mismatch():
+    payment = SimpleNamespace(
+        out_trade_no="trade-1",
+        amount_cents=100,
+        currency="CNY",
+    )
+    valid = {
+        "out_trade_no": "trade-1",
+        "appid": "wx-app",
+        "mchid": "mch-1",
+        "amount": {"total": 100, "currency": "CNY"},
+    }
+    validate_payment_result(payment, valid)
+
+    invalid = dict(valid, mchid="another-merchant")
+    try:
+        validate_payment_result(payment, invalid)
+    except DjangoValidationError as exc:
+        assert "商户号" in str(exc)
+    else:
+        raise AssertionError("mismatched merchant must be rejected")
+
+
+def test_wechat_request_error_preserves_structured_context():
+    error = WechatPayRequestError(
+        "failed",
+        http_status=409,
+        code="ORDERPAID",
+        response={"code": "ORDERPAID"},
+    )
+
+    assert error.http_status == 409
+    assert error.code == "ORDERPAID"
+    assert error.response == {"code": "ORDERPAID"}
+    assert not error.is_network_error
+
+
+@override_settings(
+    WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=True,
+    WECHAT_PAY_CALLBACK_MAX_AGE_SECONDS=300,
+)
+@patch("allapp.salesapp.services_wechat_pay.time.time", return_value=2000)
+@patch("allapp.salesapp.services_wechat_pay._verify_wechat_signature")
+def test_callback_rejects_stale_timestamp(mock_verify, mock_time):
+    headers = {
+        "Wechatpay-Timestamp": "1000",
+        "Wechatpay-Nonce": "nonce",
+        "Wechatpay-Signature": "signature",
+    }
+
+    try:
+        verify_callback_signature(headers, b"{}")
+    except WechatPayRequestError as exc:
+        assert "过期" in str(exc)
+    else:
+        raise AssertionError("stale callback timestamp must be rejected")
+    mock_verify.assert_not_called()
+
+
+@override_settings(
+    WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=True,
+    WECHAT_PAY_CALLBACK_MAX_AGE_SECONDS=300,
+)
+@patch("allapp.salesapp.services_wechat_pay.time.time", return_value=2000)
+@patch("allapp.salesapp.services_wechat_pay._verify_wechat_signature")
+def test_callback_selects_platform_key_by_serial(mock_verify, mock_time):
+    headers = {
+        "Wechatpay-Timestamp": "2000",
+        "Wechatpay-Nonce": "nonce",
+        "Wechatpay-Signature": "signature",
+        "Wechatpay-Serial": "platform-serial-new",
+    }
+
+    verify_callback_signature(headers, b"{}")
+
+    mock_verify.assert_called_once_with(
+        "2000",
+        "nonce",
+        "signature",
+        "platform-serial-new",
+        b"{}",
+    )
+
+
+@override_settings(
+    WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=True,
+    WECHAT_PAY_CALLBACK_MAX_AGE_SECONDS=300,
+)
+@patch("allapp.salesapp.services_wechat_pay.time.time", return_value=2000)
+def test_callback_verifies_real_rsa_signature_for_selected_serial(mock_time):
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    timestamp = "2000"
+    nonce = "callback-nonce"
+    raw_body = b'{"id":"event-1"}'
+    message = (
+        timestamp.encode("utf-8")
+        + b"\n"
+        + nonce.encode("utf-8")
+        + b"\n"
+        + raw_body
+        + b"\n"
+    )
+    signature = base64.b64encode(
+        private_key.sign(message, padding.PKCS1v15(), hashes.SHA256())
+    ).decode("ascii")
+    headers = {
+        "Wechatpay-Timestamp": timestamp,
+        "Wechatpay-Nonce": nonce,
+        "Wechatpay-Signature": signature,
+        "Wechatpay-Serial": "platform-serial-real",
+    }
+
+    with override_settings(
+        WECHAT_PAY_PLATFORM_KEYS={"platform-serial-real": public_key_pem.decode()}
+    ):
+        assert verify_callback_signature(headers, raw_body)
+        headers["Wechatpay-Signature"] = base64.b64encode(b"invalid").decode("ascii")
+        try:
+            verify_callback_signature(headers, raw_body)
+        except WechatPayRequestError as exc:
+            assert "验签失败" in str(exc)
+        else:
+            raise AssertionError("invalid RSA callback signature must be rejected")
+
+
+@override_settings(
+    WECHAT_MINI_APPID="wx-test-app",
+    WECHAT_PAY_MCH_ID="test-merchant",
+    WECHAT_PAY_MCH_SERIAL_NO="merchant-serial",
+    WECHAT_PAY_APIV3_KEY="0123456789abcdef0123456789abcdef",
+)
+def test_callback_resource_uses_real_aes_gcm_decryption():
+    plaintext = json.dumps(
+        {
+            "appid": "wx-test-app",
+            "mchid": "test-merchant",
+            "out_trade_no": "PAY-TEST-1",
+        }
+    ).encode("utf-8")
+    nonce = b"123456789012"
+    associated_data = b"transaction"
+    ciphertext = AESGCM(b"0123456789abcdef0123456789abcdef").encrypt(
+        nonce,
+        plaintext,
+        associated_data,
+    )
+    resource = {
+        "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
+        "nonce": nonce.decode("ascii"),
+        "associated_data": associated_data.decode("ascii"),
+    }
+
+    result = decrypt_resource(resource)
+
+    assert result["appid"] == "wx-test-app"
+    assert result["mchid"] == "test-merchant"
+    assert result["out_trade_no"] == "PAY-TEST-1"
+
+
+@override_settings(
+    IS_PRODUCTION=True,
+    WECHAT_PAY_PLATFORM_KEYS={"known": "unused"},
+)
+def test_unknown_platform_key_serial_is_rejected_in_production():
+    try:
+        _platform_public_key_pem("unknown")
+    except WechatPayRequestError as exc:
+        assert "未知" in str(exc)
+    else:
+        raise AssertionError("unknown WeChat Pay serial must be rejected")
+
+
+@override_settings(
+    IS_PRODUCTION=True,
+    WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=False,
+    WECHAT_PAY_PLATFORM_PUBLIC_KEY="",
+    WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH="",
+    WECHAT_PAY_PLATFORM_KEYS={},
+    WECHAT_MINI_APPID="",
+    WECHAT_PAY_MCH_ID="",
+    WECHAT_PAY_MCH_SERIAL_NO="",
+    WECHAT_PAY_APIV3_KEY="",
+    WECHAT_PAY_NOTIFY_URL="",
+    WECHAT_PAY_REFUND_NOTIFY_URL="",
+)
+def test_production_check_rejects_unsafe_wechat_configuration():
+    errors = check_wechat_pay_production_configuration(None)
+
+    assert {error.id for error in errors} == {
+        "salesapp.E001",
+        "salesapp.E002",
+        "salesapp.E003",
+    }

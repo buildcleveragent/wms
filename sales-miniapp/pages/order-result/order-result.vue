@@ -26,9 +26,11 @@
       </view>
     </view>
 
-    <view v-if="waitPay" class="section notice">
+    <view v-if="waitPay || confirming" class="section notice">
       <view class="section-title">待付款提醒</view>
-      <view class="notice-text">{{ deadlineText }}</view>
+      <view class="notice-text">
+        {{ confirming ? '支付结果正在由后台确认，请稍后在订单详情查看。' : deadlineText }}
+      </view>
     </view>
 
     <view class="actions">
@@ -60,7 +62,13 @@ const payableAmount = computed(() => {
   return data.payable_amount === undefined || data.payable_amount === null ? data.total_amount : data.payable_amount
 })
 const isBatch = computed(() => batchCount.value > 1 || result.value === 'batch_offline')
-const waitPay = computed(() => !isBatch.value && (result.value === 'wait_pay' || order.value.payment_status === 'UNPAID'))
+const confirming = computed(() => result.value === 'confirming')
+const waitPay = computed(
+  () =>
+    !isBatch.value &&
+    !confirming.value &&
+    (result.value === 'wait_pay' || order.value.payment_status === 'UNPAID'),
+)
 const resultState = computed(() => {
   if (isBatch.value) {
     return {
@@ -69,6 +77,15 @@ const resultState = computed(() => {
       title: '订单已提交',
       desc: `已生成 ${batchCount.value || 0} 个配送包裹，平台会按包裹安排备货。`,
       payText: '已提交',
+    }
+  }
+  if (confirming.value) {
+    return {
+      icon: '待',
+      tone: 'warn',
+      title: '支付结果确认中',
+      desc: '请勿重复支付，后台正在向微信确认最终结果。',
+      payText: '确认中',
     }
   }
   if (waitPay.value) {
@@ -126,13 +143,13 @@ async function pay() {
   if (payLoading.value || !id.value) return
   payLoading.value = true
   try {
-    const prepay = await paymentService.prepay(id.value)
-    if (!prepay.paid) {
-      await paymentService.requestPayment(prepay.pay_params)
-    }
-    result.value = 'paid'
+    const confirmation = await paymentService.payAndConfirm(id.value)
+    result.value = confirmation.confirmed ? 'paid' : 'confirming'
     await load()
-    uni.showToast({ title: '支付成功', icon: 'none' })
+    uni.showToast({
+      title: confirmation.confirmed ? '支付成功' : '支付结果确认中',
+      icon: 'none',
+    })
   } catch (err) {
     uni.showToast({ title: err.message || '支付未完成', icon: 'none' })
   } finally {

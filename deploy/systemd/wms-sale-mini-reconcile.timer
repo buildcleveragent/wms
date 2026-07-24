@@ -1,0 +1,11 @@
+[Unit]
+Description=Run sale-mini payment and refund reconciliation every five minutes
+
+[Timer]
+OnCalendar=*-*-* *:0/5:00
+Persistent=true
+AccuracySec=1s
+Unit=wms-sale-mini-reconcile.service
+
+[Install]
+WantedBy=timers.target

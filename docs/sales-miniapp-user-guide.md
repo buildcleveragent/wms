@@ -314,9 +314,13 @@ WECHAT_PAY_NOTIFY_URL=
 WECHAT_PAY_REFUND_NOTIFY_URL=
 WECHAT_PAY_PLATFORM_PUBLIC_KEY=
 WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH=
+WECHAT_PAY_PLATFORM_KEYS={}
 WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=False
+WECHAT_PAY_CALLBACK_MAX_AGE_SECONDS=300
 
 SALE_MINI_PAY_TIMEOUT_MINUTES=30
+SALE_MINI_REFUND_MAX_RETRIES=6
+SALE_MINI_REFUND_QUERY_INTERVAL_MINUTES=5
 SALE_MINI_POINT_EXCHANGE_RATE=100
 SALE_MINI_DISTRIBUTION_COMMISSION_RATE=0
 ```
@@ -326,9 +330,16 @@ SALE_MINI_DISTRIBUTION_COMMISSION_RATE=0
 - 开发阶段可以先用账号登录和线下付款。
 - 真正使用微信登录必须配置 `WECHAT_MINI_APPID / WECHAT_MINI_SECRET`。
 - 真正使用微信支付必须配置商户号、证书序列号、私钥、APIv3 key、回调地址。
+- 生产环境必须用 `WECHAT_PAY_PLATFORM_KEYS` 配置
+  `Wechatpay-Serial -> 公钥 PEM/文件路径` 的 JSON 映射，以支持平台公钥轮换。
 - `WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=False` 只适合开发和测试环境，生产环境应开启签名校验。
+- 生产环境若关闭验签、缺少序列号公钥映射、密钥不可解析或回调不是 HTTPS，
+  `manage.py check` 会直接报错。
 
 ### 5.2 应用数据库迁移
+
+先备份 `wms_db`，再执行迁移。支付可靠性修复需要连续应用 `salesapp 0011` 和
+`0012`；未完成迁移前不要开放微信预支付和退款接口。
 
 ```bash
 cd /wms
@@ -340,6 +351,24 @@ SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/pytho
 ```bash
 SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py migrate --check
 ```
+
+### 5.3 支付与退款对账调度
+
+仓库提供了 systemd 模板：
+
+```bash
+sudo cp deploy/systemd/wms-sale-mini-* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now \
+  wms-sale-mini-expire.timer \
+  wms-sale-mini-reconcile.timer
+```
+
+部署目录或运行用户不是 `/wms`、`wms:wms` 时，先修改 service 文件。两个任务共用
+同一把 `flock` 锁：超时订单每分钟检查，支付和退款每 5 分钟对账，不会重叠运行。
+
+退款网络失败会使用同一个商户退款单号重试；退款异常或重试耗尽后转人工处理，
+订单继续保持取消，库存不会重新分配。
 
 查看销售小程序迁移：
 
@@ -587,8 +616,15 @@ POST /api/sale-mini/orders/
 3. 后端锁定优惠券和积分。
 4. 前端请求 `/api/sale-mini/payments/wechat/prepay/`。
 5. 前端调用 `uni.requestPayment`。
-6. 微信异步回调 `/api/sale-mini/payments/wechat/callback/`。
-7. 回调确认支付、优惠券、积分、分销记录。
+6. 前端立即调用 `/api/sale-mini/payments/wechat/query/`，按 1、2、3、5 秒确认。
+7. 微信异步回调 `/api/sale-mini/payments/wechat/callback/`。
+8. 后端在单一事务内确认支付、优惠券、积分和分销记录。
+
+只有后端查单或回调确认 `PAID` 后，前端才显示“支付成功”。客户端返回成功但后端
+暂未确认时显示“支付结果确认中”，不能据此发布仓库任务。
+
+应付金额为 `0.00` 时使用 `INTERNAL_ZERO` 内部结算，生成零元支付流水并确认优惠
+权益，不调用微信；零元退款同样只走本地原子退款。
 
 支付完成、支付中断或选择线下付款后，前端会进入：
 
@@ -609,6 +645,9 @@ pages/order-result/order-result
 - 不调用微信支付。
 - 前端进入下单结果页，提示按约定完成线下付款。
 - 适合货到付款、月结、人工确认付款等场景。
+
+微信待付款订单可以冻结库存，但仓库确认、任务发布、认领和开始拣货都会再次校验
+支付状态。只有 `PAID` 或 `OFFLINE` 可以进入仓库执行。
 
 ### 8.7 查看订单
 
@@ -752,13 +791,15 @@ npm run test:quality -- --skip-build --data-accuracy
 npm run test:quality -- --db
 ```
 
-本地快速 DB 门禁，跳过迁移回放但保留 API 业务断言和真实库只读数据准确性校验：
+本地快速 DB 门禁，跳过迁移回放但保留 API 业务断言：
 
 ```bash
 npm run test:quality -- --skip-build --db --fast-db
 ```
 
-注意：标准 `--db` 会回放完整迁移，需要干净的 Django MySQL 测试库，当前本机 MySQL 初始化整套 WMS 测试库较慢。已经验证过的快速 DB 模式使用 pytest-django `--no-migrations` 建表并通过 `SaleMiniApiTests`。
+`--db` 门禁强制使用 `DB_TEST_NAME`（默认 `test_wms_db`），不会把普通管理命令指向
+正式 `wms_db`。标准模式会回放完整迁移；`--fast-db` 使用 pytest-django
+`--no-migrations` 快速建表，但不能替代正式迁移回放。
 
 ## 10. 超时订单处理
 
@@ -769,13 +810,8 @@ cd /wms
 SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py expire_sale_mini_orders
 ```
 
-如果要尝试关闭微信支付单：
-
-```bash
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py expire_sale_mini_orders --close-wechat
-```
-
-建议生产环境用 cron、supervisor、celery beat 或其他调度器定期执行。
+命令始终先查询微信状态，只在微信确认未支付并关单成功后释放库存。
+`--close-wechat` 仅为旧脚本兼容参数，不能跳过安全查单。
 
 ## 11. 管理后台常用维护项
 
@@ -1037,6 +1073,7 @@ SaleMiniApiTests fast DB mode: 43 passed
 - `WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=True`。
 - 微信支付和退款回调地址可公网访问。
 - 已配置订单超时取消定时任务。
+- 已配置每 5 分钟一次的支付退款对账任务。
 - 已配置至少一个测试客户、测试买家、测试仓库、测试商品、测试库存。
 - 上架商品只包含允许对外销售的商品。
 - 已用测试账号跑通：登录、浏览、加购、预览、下单、支付、取消、退款、售后。

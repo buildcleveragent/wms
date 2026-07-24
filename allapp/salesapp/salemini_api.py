@@ -26,7 +26,6 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from allapp.baseinfo.models import Customer
 from allapp.inventory.models import InventoryDetail
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
-from allapp.outbound.services import unallocate_for_order
 from allapp.products.models import Brand, ProductCategory
 
 from .mobile_api import (
@@ -64,13 +63,21 @@ from .models import (
 from .services_pricing import compute_price_for_line
 from .services_salemini_adjustments import (
     build_adjustment_preview,
-    confirm_adjustments,
-    confirm_distribution,
     create_distribution_record,
     lock_adjustments,
     point_balance,
-    release_adjustments,
-    reverse_distribution,
+)
+from .services_salemini_payments import (
+    apply_payment_success,
+    apply_refund_result,
+    get_or_create_full_refund,
+    mark_refunding,
+    payable_amount,
+    query_and_apply_payment,
+    refund_internal_zero_payment,
+    safely_cancel_unpaid_mapping,
+    settle_internal_zero,
+    submit_refund,
 )
 from .services_salemini_reviews import (
     public_review_payload,
@@ -81,11 +88,11 @@ from .services_validation import OrderRuleError, validate_order_line_rules
 from .services_wechat_pay import (
     WechatPayConfigError,
     WechatPayRequestError,
+    build_jsapi_prepay_payload,
     close_jsapi_payment,
     create_jsapi_prepay,
     decrypt_resource,
     money_to_cents,
-    request_refund,
     sign_jsapi_pay_params,
     verify_callback_signature,
 )
@@ -150,6 +157,14 @@ def _payment_payload(payment):
         "prepay_id": payment.prepay_id,
         "expires_at": payment.expires_at.isoformat() if payment.expires_at else "",
         "paid_at": payment.paid_at.isoformat() if payment.paid_at else "",
+        "retry_count": payment.retry_count,
+        "next_reconcile_at": (
+            payment.next_reconcile_at.isoformat()
+            if payment.next_reconcile_at
+            else ""
+        ),
+        "last_error": payment.last_error,
+        "requires_manual_action": payment.requires_manual_action,
     }
 
 
@@ -181,10 +196,27 @@ def _refund_payload(refund):
         "refund_id": refund.refund_id,
         "status": refund.status,
         "status_name": refund.get_status_display(),
+        "source": refund.source,
+        "source_name": refund.get_source_display(),
         "amount": _str(refund.amount, MONEY_QUANT),
         "reason": refund.reason,
         "requested_at": refund.requested_at.isoformat() if refund.requested_at else "",
         "success_at": refund.success_at.isoformat() if refund.success_at else "",
+        "queued": bool(
+            refund.status
+            in {
+                SaleMiniRefund.Status.CREATED,
+                SaleMiniRefund.Status.PROCESSING,
+                SaleMiniRefund.Status.FAILED,
+            }
+            and not refund.requires_manual_action
+        ),
+        "retry_count": refund.retry_count,
+        "next_retry_at": (
+            refund.next_retry_at.isoformat() if refund.next_retry_at else ""
+        ),
+        "last_error": refund.last_error,
+        "requires_manual_action": refund.requires_manual_action,
     }
 
 
@@ -209,66 +241,8 @@ def _after_sale_payload(row):
     }
 
 
-def _close_active_payment(mapping):
-    payment = _active_payment(mapping)
-    if not payment:
-        return None
-    try:
-        close_jsapi_payment(payment)
-    except (WechatPayConfigError, WechatPayRequestError) as exc:
-        _handle_wechat_pay_error(exc)
-    payment.status = SaleMiniPayment.Status.CLOSED
-    payment.closed_at = timezone.now()
-    payment.save(update_fields=["status", "closed_at", "updated_at"])
-    return payment
-
-
 def _cancel_unpaid_mapping(mapping, by_user=None, *, close_wechat=False):
-    if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.PAID:
-        raise ValidationError({"payment": "订单已支付，请走退款流程。"})
-    if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.REFUNDING:
-        raise ValidationError({"payment": "订单正在退款中，请勿重复取消。"})
-    if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.REFUNDED:
-        raise ValidationError({"payment": "订单已退款。"})
-    if close_wechat:
-        _close_active_payment(mapping)
-    order = mapping.outbound_order
-    if order.approval_status != "CANCELLED":
-        unallocate_for_order(order)
-        order.approval_status = "CANCELLED"
-        order.updated_by = by_user
-        order.save(update_fields=["approval_status", "updated_by", "updated_at"])
-    release_adjustments(
-        mapping,
-        by_user=by_user,
-        reverse_confirmed=(
-            mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.OFFLINE
-        ),
-    )
-    reverse_distribution(mapping)
-    mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.CANCELLED
-    mapping.updated_by = by_user
-    mapping.save(update_fields=["payment_status", "updated_by", "updated_at"])
-    return mapping
-
-
-def _cancel_order_after_refund_request(mapping, by_user=None):
-    order = mapping.outbound_order
-    if order.approval_status != "CANCELLED":
-        unallocate_for_order(order)
-        order.approval_status = "CANCELLED"
-        order.updated_by = by_user
-        order.save(update_fields=["approval_status", "updated_by", "updated_at"])
-
-
-def _finalize_successful_refund(mapping, payment, by_user=None):
-    payment.status = SaleMiniPayment.Status.REFUNDED
-    payment.save(update_fields=["status", "updated_at"])
-    mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.REFUNDED
-    mapping.updated_by = by_user
-    mapping.save(update_fields=["payment_status", "updated_by", "updated_at"])
-    release_adjustments(mapping, by_user=by_user, reverse_confirmed=True)
-    reverse_distribution(mapping)
+    return safely_cancel_unpaid_mapping(mapping, by_user=by_user)
 
 
 class SaleMiniLineInputSerializer(serializers.Serializer):
@@ -1444,6 +1418,8 @@ def _create_sale_mini_order_mapping(
         referrer_id=data.get("referrer_buyer_id"),
         by_user=request.user,
     )
+    if payment_method == "WECHAT" and payable_amount(mapping) == Decimal("0.00"):
+        settle_internal_zero(mapping, by_user=request.user)
     _clear_source_cart(
         request,
         owner,
@@ -1920,6 +1896,11 @@ def _fulfillment_status(order):
 
 def _display_status(order, mapping=None):
     fulfillment_status, fulfillment_name = _fulfillment_status(order)
+    if mapping:
+        if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.REFUNDING:
+            return "REFUNDING", "退款中"
+        if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.REFUNDED:
+            return "REFUNDED", "已退款"
     if fulfillment_status == "CANCELLED" or (
         mapping
         and mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.CANCELLED
@@ -1928,10 +1909,6 @@ def _display_status(order, mapping=None):
     if fulfillment_status == "REJECTED":
         return "CANCELLED", "已关闭"
     if mapping:
-        if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.REFUNDING:
-            return "REFUNDING", "退款中"
-        if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.REFUNDED:
-            return "REFUNDED", "已退款"
         if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.UNPAID:
             return "WAIT_PAY", "待付款"
     if fulfillment_status == "COMPLETED":
@@ -2158,19 +2135,10 @@ def _order_payload(request, mapping):
         "contact_phone": order.contact_phone or "",
         "ship_to": order.ship_to or "",
         "remark": order.memo or "",
-        "goods_amount": _str(
-            mapping.goods_amount or order.final_order_amount,
-            MONEY_QUANT,
-        ),
+        "goods_amount": _str(mapping.goods_amount, MONEY_QUANT),
         "adjustment_amount": _str(mapping.adjustment_amount, MONEY_QUANT),
-        "payable_amount": _str(
-            mapping.payable_amount or order.final_order_amount,
-            MONEY_QUANT,
-        ),
-        "total_amount": _str(
-            mapping.payable_amount or order.final_order_amount,
-            MONEY_QUANT,
-        ),
+        "payable_amount": _str(payable_amount(mapping), MONEY_QUANT),
+        "total_amount": _str(payable_amount(mapping), MONEY_QUANT),
         "adjustments": [
             _order_adjustment_payload(adjustment)
             for adjustment in mapping.adjustments.order_by("id")
@@ -3155,125 +3123,352 @@ class SaleMiniOrderListCreateApi(APIView):
         )
 
 
+@transaction.atomic
+def _prepare_wechat_prepay(mapping_id, buyer, by_user):
+    mapping = (
+        SaleMiniOrderMapping.objects.select_for_update()
+        .select_related("outbound_order")
+        .get(pk=mapping_id)
+    )
+    order = mapping.outbound_order
+    if order.approval_status == "CANCELLED":
+        mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.CANCELLED
+        mapping.save(update_fields=["payment_status", "updated_at"])
+        raise ValidationError({"order": "订单已取消，不能支付。"})
+    if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.PAID:
+        return {"state": "paid", "mapping": mapping, "payment": _latest_payment(mapping)}
+    if mapping.payment_status in {
+        SaleMiniOrderMapping.PaymentStatus.REFUNDING,
+        SaleMiniOrderMapping.PaymentStatus.REFUNDED,
+        SaleMiniOrderMapping.PaymentStatus.CANCELLED,
+    }:
+        raise ValidationError({"payment": "当前订单状态不能发起支付。"})
+    amount = payable_amount(mapping)
+    if amount == Decimal("0.00"):
+        payment = settle_internal_zero(mapping, by_user=by_user)
+        mapping.refresh_from_db()
+        return {"state": "zero", "mapping": mapping, "payment": payment}
+
+    now = timezone.now()
+    if not mapping.pay_deadline_at:
+        mapping.pay_deadline_at = _payment_deadline()
+    mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.UNPAID
+    mapping.updated_by = by_user
+    mapping.save(
+        update_fields=[
+            "payment_status",
+            "pay_deadline_at",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    payment = (
+        mapping.payments.select_for_update()
+        .filter(
+            channel=SaleMiniPayment.Channel.WECHAT_JSAPI,
+            status__in=[
+                SaleMiniPayment.Status.CREATED,
+                SaleMiniPayment.Status.PREPAY,
+            ],
+        )
+        .order_by("-created_at", "-id")
+        .first()
+    )
+    if payment:
+        if (
+            payment.prepay_id
+            and payment.expires_at
+            and payment.expires_at > now
+        ):
+            return {"state": "reuse", "mapping": mapping, "payment": payment}
+        return {"state": "resolve", "mapping": mapping, "payment": payment}
+
+    amount_cents = money_to_cents(amount)
+    if amount_cents <= 0:
+        raise ValidationError({"amount": "微信支付金额必须大于零。"})
+    payment = SaleMiniPayment.objects.create(
+        owner=mapping.owner,
+        customer=mapping.customer,
+        buyer_user=buyer,
+        mapping=mapping,
+        payment_no=_payment_code("SMP"),
+        out_trade_no=_payment_code("SMT"),
+        amount=amount,
+        amount_cents=amount_cents,
+        expires_at=mapping.pay_deadline_at,
+        retry_count=1,
+        next_reconcile_at=now + timedelta(minutes=1),
+        created_by=by_user,
+        updated_by=by_user,
+    )
+    payload = build_jsapi_prepay_payload(
+        payment,
+        buyer.openid,
+        f"销售订单 {order.order_no}",
+    )
+    payment.request_payload = payload
+    payment.save(update_fields=["request_payload", "updated_at"])
+    return {
+        "state": "create",
+        "mapping": mapping,
+        "payment": payment,
+        "payload": payload,
+    }
+
+
+@transaction.atomic
+def _record_prepay_success(payment_id, prepay_id, raw_response, params):
+    payment = SaleMiniPayment.objects.select_for_update().get(pk=payment_id)
+    if payment.status in {
+        SaleMiniPayment.Status.PAID,
+        SaleMiniPayment.Status.REFUNDING,
+        SaleMiniPayment.Status.REFUNDED,
+    }:
+        return payment
+    payment.status = SaleMiniPayment.Status.PREPAY
+    payment.prepay_id = prepay_id
+    payment.prepay_response = raw_response
+    payment.client_pay_params = params
+    payment.next_reconcile_at = timezone.now() + timedelta(minutes=1)
+    payment.last_error = ""
+    payment.requires_manual_action = False
+    payment.save(
+        update_fields=[
+            "status",
+            "prepay_id",
+            "prepay_response",
+            "client_pay_params",
+            "next_reconcile_at",
+            "last_error",
+            "requires_manual_action",
+            "updated_at",
+        ]
+    )
+    return payment
+
+
+@transaction.atomic
+def _record_prepay_failure(payment_id, exc, *, terminal=False):
+    payment = SaleMiniPayment.objects.select_for_update().get(pk=payment_id)
+    payment.last_error = str(exc)[:300]
+    payment.trade_state_desc = str(exc)[:200]
+    if terminal:
+        payment.status = SaleMiniPayment.Status.FAILED
+        payment.requires_manual_action = True
+        payment.next_reconcile_at = None
+    else:
+        payment.next_reconcile_at = timezone.now() + timedelta(minutes=1)
+    payment.save(
+        update_fields=[
+            "status",
+            "last_error",
+            "trade_state_desc",
+            "requires_manual_action",
+            "next_reconcile_at",
+            "updated_at",
+        ]
+    )
+    return payment
+
+
+@transaction.atomic
+def _close_payment_for_replacement(payment_id, *, failed=False):
+    payment = SaleMiniPayment.objects.select_for_update().get(pk=payment_id)
+    if payment.status in {
+        SaleMiniPayment.Status.PAID,
+        SaleMiniPayment.Status.REFUNDING,
+        SaleMiniPayment.Status.REFUNDED,
+    }:
+        return payment
+    payment.status = (
+        SaleMiniPayment.Status.FAILED if failed else SaleMiniPayment.Status.CLOSED
+    )
+    payment.closed_at = None if failed else timezone.now()
+    payment.next_reconcile_at = None
+    payment.save(
+        update_fields=["status", "closed_at", "next_reconcile_at", "updated_at"]
+    )
+    return payment
+
+
+def _paid_prepay_response(request, mapping, payment, settlement_channel):
+    return Response(
+        {
+            "paid": True,
+            "settlement_channel": settlement_channel,
+            "payment": _payment_payload(payment),
+            "pay_params": None,
+            "order": _order_payload(request, mapping),
+        }
+    )
+
+
 class SaleMiniWechatPrepayApi(APIView):
     permission_classes = [IsAuthenticated]
 
-    @transaction.atomic
     def post(self, request):
         serializer = SaleMiniWechatPrepaySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         mapping = _mapping_for_request(
             request,
             serializer.validated_data["order_id"],
-            for_update=True,
         )
-        order = mapping.outbound_order
-        if order.approval_status == "CANCELLED":
-            mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.CANCELLED
-            mapping.save(update_fields=["payment_status", "updated_at"])
-            raise ValidationError({"order": "订单已取消，不能支付。"})
-        if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.PAID:
-            return Response({"paid": True, "order": _order_payload(request, mapping)})
-        if mapping.payment_status in {
-            SaleMiniOrderMapping.PaymentStatus.REFUNDING,
-            SaleMiniOrderMapping.PaymentStatus.REFUNDED,
-            SaleMiniOrderMapping.PaymentStatus.CANCELLED,
-        }:
-            raise ValidationError({"payment": "当前订单状态不能发起支付。"})
-
-        now = timezone.now()
-        if mapping.pay_deadline_at and mapping.pay_deadline_at <= now:
-            _cancel_unpaid_mapping(mapping, request.user, close_wechat=True)
+        if mapping.pay_deadline_at and mapping.pay_deadline_at <= timezone.now():
+            cancel_result = _cancel_unpaid_mapping(mapping, request.user)
+            mapping = cancel_result["mapping"]
+            if cancel_result["result"] in {"paid", "late_payment_refund_queued"}:
+                return Response(
+                    {
+                        "paid": cancel_result["result"] == "paid",
+                        "settlement_channel": "WECHAT_JSAPI",
+                        "pay_params": None,
+                        "order": _order_payload(request, mapping),
+                    }
+                )
+            if cancel_result["result"] in {"pending", "unknown"}:
+                raise WechatPayUnavailable(
+                    cancel_result.get("error") or "微信支付状态尚未确认，请稍后重试。"
+                )
             raise ValidationError({"payment": "订单已超时取消，请重新下单。"})
 
+        amount = payable_amount(mapping)
         buyer = mapping.buyer_user or _buyer_for_user(mapping.owner, request.user)
-        if not buyer or not buyer.openid:
+        if amount > 0 and (not buyer or not buyer.openid):
             raise ValidationError(
                 {"openid": "当前小程序用户未绑定 openid，不能微信支付。"}
             )
-
-        if not mapping.pay_deadline_at:
-            mapping.pay_deadline_at = _payment_deadline()
-        mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.UNPAID
-        mapping.updated_by = request.user
-        mapping.save(
-            update_fields=[
-                "payment_status",
-                "pay_deadline_at",
-                "updated_by",
-                "updated_at",
-            ]
-        )
-
-        payment = _active_payment(mapping)
-        if (
-            payment
-            and payment.prepay_id
-            and payment.expires_at
-            and payment.expires_at > now
-        ):
+        prepared = _prepare_wechat_prepay(mapping.pk, buyer, request.user)
+        mapping = prepared["mapping"]
+        payment = prepared["payment"]
+        if prepared["state"] == "paid":
+            return _paid_prepay_response(
+                request, mapping, payment, payment.channel if payment else ""
+            )
+        if prepared["state"] == "zero":
+            return _paid_prepay_response(
+                request,
+                mapping,
+                payment,
+                SaleMiniPayment.Channel.INTERNAL_ZERO,
+            )
+        if prepared["state"] == "reuse":
             try:
                 params = sign_jsapi_pay_params(payment.prepay_id)
             except (WechatPayConfigError, WechatPayRequestError) as exc:
                 _handle_wechat_pay_error(exc)
-            payment.client_pay_params = params
-            payment.save(update_fields=["client_pay_params", "updated_at"])
+            payment = _record_prepay_success(
+                payment.pk,
+                payment.prepay_id,
+                payment.prepay_response,
+                params,
+            )
             return Response(
                 {
                     "paid": False,
+                    "settlement_channel": SaleMiniPayment.Channel.WECHAT_JSAPI,
                     "payment": _payment_payload(payment),
                     "pay_params": params,
                     "order": _order_payload(request, mapping),
                 }
             )
+        if prepared["state"] == "resolve":
+            try:
+                query_result = query_and_apply_payment(payment, by_user=request.user)
+            except WechatPayRequestError as exc:
+                if exc.code in {"ORDER_NOT_EXIST", "ORDERNOTEXIST"}:
+                    _close_payment_for_replacement(payment.pk, failed=True)
+                    prepared = _prepare_wechat_prepay(mapping.pk, buyer, request.user)
+                    payment = prepared["payment"]
+                else:
+                    raise WechatPayUnavailable(
+                        "上一笔微信预支付状态正在确认，请稍后重试。"
+                    ) from exc
+            except (WechatPayConfigError, ValidationError) as exc:
+                raise WechatPayUnavailable(
+                    "上一笔微信预支付状态正在确认，请稍后重试。"
+                ) from exc
+            else:
+                if query_result["trade_state"] == "SUCCESS":
+                    mapping.refresh_from_db()
+                    return _paid_prepay_response(
+                        request,
+                        mapping,
+                        SaleMiniPayment.objects.get(pk=payment.pk),
+                        SaleMiniPayment.Channel.WECHAT_JSAPI,
+                    )
+                if query_result["trade_state"] == "USERPAYING":
+                    raise WechatPayUnavailable("微信支付处理中，请稍后确认结果。")
+                if query_result["trade_state"] == "NOTPAY":
+                    try:
+                        close_jsapi_payment(payment)
+                    except WechatPayRequestError as exc:
+                        if exc.code in {"ORDERPAID", "ORDER_PAID"}:
+                            query_and_apply_payment(payment, by_user=request.user)
+                            mapping.refresh_from_db()
+                            return _paid_prepay_response(
+                                request,
+                                mapping,
+                                SaleMiniPayment.objects.get(pk=payment.pk),
+                                SaleMiniPayment.Channel.WECHAT_JSAPI,
+                            )
+                        raise WechatPayUnavailable(
+                            "上一笔微信预支付状态正在确认，请稍后重试。"
+                        ) from exc
+                    _close_payment_for_replacement(payment.pk)
+                elif query_result["trade_state"] in {
+                    "CLOSED",
+                    "REVOKED",
+                    "PAYERROR",
+                }:
+                    _close_payment_for_replacement(
+                        payment.pk,
+                        failed=query_result["trade_state"] == "PAYERROR",
+                    )
+                else:
+                    raise WechatPayUnavailable(
+                        "上一笔微信预支付状态正在确认，请稍后重试。"
+                    )
+                prepared = _prepare_wechat_prepay(mapping.pk, buyer, request.user)
+                payment = prepared["payment"]
 
-        amount = Decimal(
-            mapping.payable_amount or order.final_order_amount or 0
-        ).quantize(MONEY_QUANT)
-        amount_cents = money_to_cents(amount)
-        if amount_cents <= 0:
-            raise ValidationError({"amount": "订单金额必须大于 0 才能微信支付。"})
-        payment = SaleMiniPayment.objects.create(
-            owner=mapping.owner,
-            customer=mapping.customer,
-            buyer_user=buyer,
-            mapping=mapping,
-            payment_no=_payment_code("SMP"),
-            out_trade_no=_payment_code("SMT"),
-            amount=amount,
-            amount_cents=amount_cents,
-            expires_at=mapping.pay_deadline_at,
-            created_by=request.user,
-            updated_by=request.user,
-        )
+        payload = prepared["payload"]
         try:
             prepay_id, raw_response, params = create_jsapi_prepay(
                 payment,
                 buyer.openid,
-                f"销售订单 {order.order_no}",
+                f"销售订单 {mapping.outbound_order.order_no}",
+                payload=payload,
             )
-        except (WechatPayConfigError, WechatPayRequestError) as exc:
-            payment.status = SaleMiniPayment.Status.FAILED
-            payment.trade_state_desc = str(exc)[:200]
-            payment.save(update_fields=["status", "trade_state_desc", "updated_at"])
-            _handle_wechat_pay_error(exc)
-
-        payment.status = SaleMiniPayment.Status.PREPAY
-        payment.prepay_id = prepay_id
-        payment.prepay_response = raw_response
-        payment.client_pay_params = params
-        payment.save(
-            update_fields=[
-                "status",
-                "prepay_id",
-                "prepay_response",
-                "client_pay_params",
-                "updated_at",
-            ]
+        except WechatPayConfigError as exc:
+            payment = _record_prepay_failure(payment.pk, exc, terminal=True)
+            return Response(
+                {
+                    "detail": str(exc),
+                    "payment": _payment_payload(payment),
+                    "order": _order_payload(request, mapping),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except WechatPayRequestError as exc:
+            payment = _record_prepay_failure(payment.pk, exc)
+            return Response(
+                {
+                    "detail": "微信预支付结果暂未确认，请稍后重试。",
+                    "payment": _payment_payload(payment),
+                    "order": _order_payload(request, mapping),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        payment = _record_prepay_success(
+            payment.pk,
+            prepay_id,
+            raw_response,
+            params,
         )
         return Response(
             {
                 "paid": False,
+                "settlement_channel": SaleMiniPayment.Channel.WECHAT_JSAPI,
                 "payment": _payment_payload(payment),
                 "pay_params": params,
                 "order": _order_payload(request, mapping),
@@ -3281,6 +3476,61 @@ class SaleMiniWechatPrepayApi(APIView):
         )
 
 
+class SaleMiniWechatPaymentQueryApi(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = SaleMiniWechatPrepaySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        mapping = _mapping_for_request(
+            request,
+            serializer.validated_data["order_id"],
+        )
+        payment = _latest_payment(mapping)
+        if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.PAID:
+            return Response(
+                {
+                    "confirmed": True,
+                    "payment_status": mapping.payment_status,
+                    "trade_state": getattr(payment, "trade_state", "SUCCESS"),
+                    "retryable": False,
+                    "payment": _payment_payload(payment),
+                    "order": _order_payload(request, mapping),
+                }
+            )
+        if not payment or payment.channel != SaleMiniPayment.Channel.WECHAT_JSAPI:
+            return Response(
+                {
+                    "confirmed": False,
+                    "payment_status": mapping.payment_status,
+                    "trade_state": "NOT_CREATED",
+                    "retryable": mapping.payment_status
+                    == SaleMiniOrderMapping.PaymentStatus.UNPAID,
+                    "payment": _payment_payload(payment),
+                    "order": _order_payload(request, mapping),
+                }
+            )
+        try:
+            result = query_and_apply_payment(payment, by_user=request.user)
+        except (WechatPayConfigError, WechatPayRequestError, ValidationError) as exc:
+            raise WechatPayUnavailable("微信支付结果暂未确认，请稍后重试。") from exc
+        mapping.refresh_from_db()
+        payment.refresh_from_db()
+        confirmed = mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.PAID
+        return Response(
+            {
+                "confirmed": confirmed,
+                "payment_status": mapping.payment_status,
+                "trade_state": result["trade_state"],
+                "retryable": not confirmed
+                and result["trade_state"] in {"NOTPAY", "PAYERROR", ""},
+                "payment": _payment_payload(payment),
+                "order": _order_payload(request, mapping),
+            }
+        )
+
+
+@transaction.atomic
 def _callback_event(payload, raw_body, decrypted):
     event_id = payload.get("id") or hashlib.sha256(raw_body).hexdigest()
     event, created = SaleMiniPaymentEvent.objects.get_or_create(
@@ -3297,6 +3547,26 @@ def _callback_event(payload, raw_body, decrypted):
     return event, created
 
 
+def _validate_callback_envelope(payload, expected_event_types):
+    event_type = payload.get("event_type") or ""
+    if event_type not in expected_event_types:
+        raise WechatPayRequestError(f"不支持的微信支付回调事件：{event_type or '空'}。")
+    resource = payload.get("resource") or {}
+    if resource.get("algorithm") != "AEAD_AES_256_GCM":
+        raise WechatPayRequestError("微信支付回调加密算法无效。")
+    return resource
+
+
+@transaction.atomic
+def _mark_callback_event_failed(event_id, exc):
+    SaleMiniPaymentEvent.objects.filter(pk=event_id).update(
+        process_status=SaleMiniPaymentEvent.ProcessStatus.FAILED,
+        error_message=_error_message(exc)[:300],
+        processed_at=timezone.now(),
+        updated_at=timezone.now(),
+    )
+
+
 def _wechat_callback_ok():
     return Response({"code": "SUCCESS", "message": "成功"})
 
@@ -3309,13 +3579,16 @@ class SaleMiniWechatPaymentCallbackApi(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
-    @transaction.atomic
     def post(self, request):
         raw_body = request.body
         try:
             verify_callback_signature(request.headers, raw_body)
             payload = json.loads(raw_body.decode("utf-8"))
-            decrypted = decrypt_resource(payload.get("resource") or {})
+            resource = _validate_callback_envelope(
+                payload,
+                {"TRANSACTION.SUCCESS"},
+            )
+            decrypted = decrypt_resource(resource)
         except (ValueError, WechatPayConfigError, WechatPayRequestError) as exc:
             return _wechat_callback_fail(str(exc))
 
@@ -3327,175 +3600,113 @@ class SaleMiniWechatPaymentCallbackApi(APIView):
             return _wechat_callback_ok()
 
         try:
-            payment = (
-                SaleMiniPayment.objects.select_for_update()
-                .select_related("mapping", "mapping__outbound_order")
-                .get(out_trade_no=decrypted.get("out_trade_no", ""))
-            )
-            amount = decrypted.get("amount") or {}
-            total_cents = int(amount.get("total") or 0)
-            if total_cents != payment.amount_cents:
-                raise ValidationError(
-                    {"amount": "微信回调金额与本地支付流水金额不一致。"}
+            with transaction.atomic():
+                event = SaleMiniPaymentEvent.objects.select_for_update().get(
+                    pk=event.pk
                 )
-            trade_state = decrypted.get("trade_state") or ""
-            mapping = (
-                SaleMiniOrderMapping.objects.select_for_update()
-                .select_related("outbound_order")
-                .get(pk=payment.mapping_id)
-            )
-            payment.callback_payload = decrypted
-            payment.trade_state = trade_state
-            payment.trade_state_desc = decrypted.get("trade_state_desc") or ""
-            payment.transaction_id = (
-                decrypted.get("transaction_id") or payment.transaction_id
-            )
-            if trade_state == "SUCCESS":
-                paid_at = timezone.now()
-                payment.status = SaleMiniPayment.Status.PAID
-                payment.paid_at = paid_at
-                if mapping.outbound_order.approval_status == "CANCELLED":
-                    mapping.payment_status = (
-                        SaleMiniOrderMapping.PaymentStatus.REFUNDING
-                    )
-                    mapping.paid_at = paid_at
-                else:
-                    mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.PAID
-                    mapping.paid_at = paid_at
-                    confirm_adjustments(mapping)
-                    confirm_distribution(mapping)
-                mapping.save(update_fields=["payment_status", "paid_at", "updated_at"])
-            elif trade_state in {"CLOSED", "REVOKED"}:
-                payment.status = SaleMiniPayment.Status.CLOSED
-                payment.closed_at = timezone.now()
-            elif trade_state in {"PAYERROR", "NOTPAY"}:
-                payment.status = SaleMiniPayment.Status.FAILED
-            payment.save(
-                update_fields=[
-                    "status",
-                    "trade_state",
-                    "trade_state_desc",
-                    "transaction_id",
-                    "callback_payload",
-                    "paid_at",
-                    "closed_at",
-                    "updated_at",
-                ]
-            )
-            event.payment = payment
-            event.process_status = SaleMiniPaymentEvent.ProcessStatus.PROCESSED
-            event.processed_at = timezone.now()
-            event.save(
-                update_fields=[
-                    "payment",
-                    "process_status",
-                    "processed_at",
-                    "updated_at",
-                ]
-            )
+                if (
+                    event.process_status
+                    == SaleMiniPaymentEvent.ProcessStatus.PROCESSED
+                ):
+                    return _wechat_callback_ok()
+                payment = (
+                    SaleMiniPayment.objects.select_for_update()
+                    .select_related("mapping", "mapping__outbound_order")
+                    .get(out_trade_no=decrypted.get("out_trade_no", ""))
+                )
+                if decrypted.get("trade_state") != "SUCCESS":
+                    raise ValidationError({"trade_state": "支付成功回调状态无效。"})
+                apply_payment_success(payment, decrypted)
+                event.payment = payment
+                event.process_status = SaleMiniPaymentEvent.ProcessStatus.PROCESSED
+                event.error_message = ""
+                event.processed_at = timezone.now()
+                event.save(
+                    update_fields=[
+                        "payment",
+                        "process_status",
+                        "error_message",
+                        "processed_at",
+                        "updated_at",
+                    ]
+                )
         except Exception as exc:
-            event.process_status = SaleMiniPaymentEvent.ProcessStatus.FAILED
-            event.error_message = _error_message(exc)[:300]
-            event.processed_at = timezone.now()
-            event.save(
-                update_fields=[
-                    "process_status",
-                    "error_message",
-                    "processed_at",
-                    "updated_at",
-                ]
-            )
-            return _wechat_callback_fail(event.error_message)
+            _mark_callback_event_failed(event.pk, exc)
+            return _wechat_callback_fail(_error_message(exc)[:300])
         return _wechat_callback_ok()
 
 
 class SaleMiniWechatRefundApi(APIView):
     permission_classes = [IsAuthenticated]
 
-    @transaction.atomic
     def post(self, request):
         serializer = SaleMiniWechatRefundSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         mapping = _mapping_for_request(
             request,
             serializer.validated_data["order_id"],
-            for_update=True,
         )
         order = mapping.outbound_order
         fulfillment_status, _name = _fulfillment_status(order)
         if fulfillment_status in {"WAIT_PICK", "COMPLETED"}:
             raise ValidationError({"status": "订单已进入备货阶段，请申请售后。"})
         if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.UNPAID:
-            _cancel_unpaid_mapping(mapping, request.user, close_wechat=True)
-            return Response(_order_payload(request, mapping))
-        if mapping.payment_status not in {
-            SaleMiniOrderMapping.PaymentStatus.PAID,
-            SaleMiniOrderMapping.PaymentStatus.REFUNDING,
-        }:
-            raise ValidationError({"payment": "当前订单状态不能退款。"})
+            cancel_result = _cancel_unpaid_mapping(
+                mapping, request.user, close_wechat=True
+            )
+            mapping = cancel_result["mapping"]
+            if cancel_result["result"] in {"pending", "unknown"}:
+                raise WechatPayUnavailable(
+                    cancel_result.get("error") or "微信支付状态尚未确认，请稍后重试。"
+                )
+            if cancel_result["result"] == "cancelled":
+                return Response(_order_payload(request, mapping))
+        with transaction.atomic():
+            mapping = (
+                SaleMiniOrderMapping.objects.select_for_update()
+                .select_related("outbound_order")
+                .get(pk=mapping.pk)
+            )
+            if mapping.payment_status not in {
+                SaleMiniOrderMapping.PaymentStatus.PAID,
+                SaleMiniOrderMapping.PaymentStatus.REFUNDING,
+            }:
+                raise ValidationError({"payment": "当前订单状态不能退款。"})
+            payment = (
+                mapping.payments.select_for_update()
+                .filter(
+                    status__in=[
+                        SaleMiniPayment.Status.PAID,
+                        SaleMiniPayment.Status.REFUNDING,
+                    ]
+                )
+                .order_by("-paid_at", "-id")
+                .first()
+            )
+            if not payment:
+                raise ValidationError({"payment": "未找到可退款的成功支付流水。"})
+            if payment.refunds.filter(status=SaleMiniRefund.Status.SUCCESS).exists():
+                raise ValidationError({"refund": "该支付流水已退款。"})
+            refund, _created = get_or_create_full_refund(
+                payment,
+                source=SaleMiniRefund.Source.USER_REQUEST,
+                reason=(serializer.validated_data.get("reason") or "用户申请退款"),
+                by_user=request.user,
+            )
+            mark_refunding(mapping, payment, refund, request.user)
 
-        payment = (
-            mapping.payments.select_for_update()
-            .filter(status=SaleMiniPayment.Status.PAID)
-            .order_by("-paid_at", "-id")
-            .first()
-        )
-        if not payment:
-            raise ValidationError({"payment": "未找到可退款的成功支付流水。"})
-        if payment.refunds.filter(status=SaleMiniRefund.Status.SUCCESS).exists():
-            raise ValidationError({"refund": "该支付流水已退款。"})
-
-        refund = SaleMiniRefund.objects.create(
-            owner=payment.owner,
-            customer=payment.customer,
-            buyer_user=payment.buyer_user,
-            payment=payment,
-            refund_no=_payment_code("SMR"),
-            out_refund_no=_payment_code("SMRF"),
-            amount=payment.amount,
-            amount_cents=payment.amount_cents,
-            total_amount_cents=payment.amount_cents,
-            reason=(serializer.validated_data.get("reason") or "用户申请退款"),
-            requested_at=timezone.now(),
-            created_by=request.user,
-            updated_by=request.user,
-        )
-        try:
-            request_payload, raw_response = request_refund(refund)
-        except (WechatPayConfigError, WechatPayRequestError) as exc:
-            refund.status = SaleMiniRefund.Status.FAILED
-            refund.response_payload = {"error": str(exc)}
-            refund.save(update_fields=["status", "response_payload", "updated_at"])
-            _handle_wechat_pay_error(exc)
-
-        refund.request_payload = request_payload
-        refund.response_payload = raw_response
-        refund.refund_id = raw_response.get("refund_id", "")
-        refund_status = raw_response.get("status") or SaleMiniRefund.Status.PROCESSING
-        if refund_status not in SaleMiniRefund.Status.values:
-            refund_status = SaleMiniRefund.Status.PROCESSING
-        refund.status = refund_status
-        if refund.status == SaleMiniRefund.Status.SUCCESS:
-            refund.success_at = timezone.now()
-        refund.save(
-            update_fields=[
-                "request_payload",
-                "response_payload",
-                "refund_id",
-                "status",
-                "success_at",
-                "updated_at",
-            ]
-        )
-        _cancel_order_after_refund_request(mapping, request.user)
-        if refund.status == SaleMiniRefund.Status.SUCCESS:
-            _finalize_successful_refund(mapping, payment, by_user=request.user)
-        else:
-            payment.status = SaleMiniPayment.Status.REFUNDING
-            payment.save(update_fields=["status", "updated_at"])
-            mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.REFUNDING
-            mapping.updated_by = request.user
-            mapping.save(update_fields=["payment_status", "updated_by", "updated_at"])
+        if payment.channel == SaleMiniPayment.Channel.INTERNAL_ZERO:
+            refund = refund_internal_zero_payment(
+                payment,
+                by_user=request.user,
+                reason=refund.reason,
+            )
+        elif (
+            refund.status != SaleMiniRefund.Status.PROCESSING
+            and not refund.requires_manual_action
+        ):
+            refund = submit_refund(refund)
+        mapping.refresh_from_db()
         return Response(
             {
                 "order": _order_payload(request, mapping),
@@ -3508,13 +3719,16 @@ class SaleMiniWechatRefundCallbackApi(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
-    @transaction.atomic
     def post(self, request):
         raw_body = request.body
         try:
             verify_callback_signature(request.headers, raw_body)
             payload = json.loads(raw_body.decode("utf-8"))
-            decrypted = decrypt_resource(payload.get("resource") or {})
+            resource = _validate_callback_envelope(
+                payload,
+                {"REFUND.SUCCESS", "REFUND.ABNORMAL", "REFUND.CLOSED"},
+            )
+            decrypted = decrypt_resource(resource)
         except (ValueError, WechatPayConfigError, WechatPayRequestError) as exc:
             return _wechat_callback_fail(str(exc))
 
@@ -3526,69 +3740,40 @@ class SaleMiniWechatRefundCallbackApi(APIView):
             return _wechat_callback_ok()
 
         try:
-            refund = (
-                SaleMiniRefund.objects.select_for_update()
-                .select_related("payment", "payment__mapping")
-                .get(out_refund_no=decrypted.get("out_refund_no", ""))
-            )
-            payment = refund.payment
-            mapping = SaleMiniOrderMapping.objects.select_for_update().get(
-                pk=payment.mapping_id
-            )
-            refund.callback_payload = decrypted
-            refund.refund_id = decrypted.get("refund_id") or refund.refund_id
-            status_value = (
-                decrypted.get("refund_status") or decrypted.get("status") or ""
-            )
-            if status_value in SaleMiniRefund.Status.values:
-                refund.status = status_value
-            if refund.status == SaleMiniRefund.Status.SUCCESS:
-                refund.success_at = timezone.now()
-                _finalize_successful_refund(mapping, payment)
-            elif refund.status in {
-                SaleMiniRefund.Status.ABNORMAL,
-                SaleMiniRefund.Status.CLOSED,
-                SaleMiniRefund.Status.FAILED,
-            }:
-                payment.status = SaleMiniPayment.Status.PAID
-                mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.PAID
-                payment.save(update_fields=["status", "updated_at"])
-                mapping.save(update_fields=["payment_status", "updated_at"])
-            refund.save(
-                update_fields=[
-                    "callback_payload",
-                    "refund_id",
-                    "status",
-                    "success_at",
-                    "updated_at",
-                ]
-            )
-            event.refund = refund
-            event.payment = payment
-            event.process_status = SaleMiniPaymentEvent.ProcessStatus.PROCESSED
-            event.processed_at = timezone.now()
-            event.save(
-                update_fields=[
-                    "refund",
-                    "payment",
-                    "process_status",
-                    "processed_at",
-                    "updated_at",
-                ]
-            )
+            with transaction.atomic():
+                event = SaleMiniPaymentEvent.objects.select_for_update().get(
+                    pk=event.pk
+                )
+                if (
+                    event.process_status
+                    == SaleMiniPaymentEvent.ProcessStatus.PROCESSED
+                ):
+                    return _wechat_callback_ok()
+                refund = (
+                    SaleMiniRefund.objects.select_for_update()
+                    .select_related("payment", "payment__mapping")
+                    .get(out_refund_no=decrypted.get("out_refund_no", ""))
+                )
+                payment = refund.payment
+                apply_refund_result(refund, decrypted, from_callback=True)
+                event.refund = refund
+                event.payment = payment
+                event.process_status = SaleMiniPaymentEvent.ProcessStatus.PROCESSED
+                event.error_message = ""
+                event.processed_at = timezone.now()
+                event.save(
+                    update_fields=[
+                        "refund",
+                        "payment",
+                        "process_status",
+                        "error_message",
+                        "processed_at",
+                        "updated_at",
+                    ]
+                )
         except Exception as exc:
-            event.process_status = SaleMiniPaymentEvent.ProcessStatus.FAILED
-            event.error_message = _error_message(exc)[:300]
-            event.processed_at = timezone.now()
-            event.save(
-                update_fields=[
-                    "process_status",
-                    "error_message",
-                    "processed_at",
-                    "updated_at",
-                ]
-            )
-            return _wechat_callback_fail(event.error_message)
+            _mark_callback_event_failed(event.pk, exc)
+            return _wechat_callback_fail(_error_message(exc)[:300])
         return _wechat_callback_ok()
 
 
@@ -3636,7 +3821,7 @@ class SaleMiniAfterSaleListCreateApi(APIView):
             raise ValidationError({"after_sale": "该订单已有待处理售后申请。"})
         amount = data.get("amount")
         if amount is None:
-            amount = mapping.payable_amount or mapping.outbound_order.final_order_amount
+            amount = payable_amount(mapping)
         row = SaleMiniAfterSaleRequest.objects.create(
             owner=owner,
             customer=customer,
@@ -3680,7 +3865,27 @@ class SaleMiniOrderCancelApi(APIView):
                 raise ValidationError({"status": "订单已进入备货阶段，暂不能取消。"})
         for mapping in mappings:
             if mapping.outbound_order.approval_status != "CANCELLED":
-                _cancel_unpaid_mapping(mapping, request.user, close_wechat=True)
+                cancel_result = _cancel_unpaid_mapping(
+                    mapping, request.user, close_wechat=True
+                )
+                if cancel_result["result"] in {
+                    "paid",
+                    "late_payment_refund_queued",
+                    "refund_in_progress",
+                }:
+                    return Response(
+                        {"payment": "订单已支付或正在退款，不能按未付款订单取消。"},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                if cancel_result["result"] in {"pending", "unknown"}:
+                    return Response(
+                        {
+                            "payment": cancel_result.get("error")
+                            or "微信支付状态尚未确认，请稍后重试。"
+                        },
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    )
+        mappings = _mapping_group_for_request(request, pk, for_update=True)
         return Response(_order_group_payload(request, mappings))
 
 

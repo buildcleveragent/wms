@@ -33,6 +33,10 @@ from .models import (
     SaleMiniRefund,
     SaleProductConfig,
 )
+from .services_salemini_payments import (
+    query_and_apply_payment,
+    reconcile_refund,
+)
 
 
 def _format_validation_error(exc):
@@ -499,7 +503,31 @@ class SaleMiniPaymentAdmin(admin.ModelAdmin):
         "mapping__outbound_order__order_no",
     )
     raw_id_fields = ("owner", "customer", "buyer_user", "mapping")
-    readonly_fields = ("client_pay_params", "prepay_response", "callback_payload")
+    readonly_fields = (
+        "request_payload",
+        "client_pay_params",
+        "prepay_response",
+        "callback_payload",
+    )
+    actions = ("query_wechat_status",)
+
+    @admin.action(description="查询微信支付状态")
+    def query_wechat_status(self, request, queryset):
+        success = 0
+        failed = 0
+        for payment_id in queryset.values_list("id", flat=True):
+            try:
+                payment = SaleMiniPayment.objects.get(pk=payment_id)
+                query_and_apply_payment(payment, by_user=request.user)
+                success += 1
+            except Exception as exc:
+                failed += 1
+                self.message_user(request, str(exc), level=messages.ERROR)
+        self.message_user(
+            request,
+            f"微信支付状态查询完成：成功 {success}，失败 {failed}。",
+            level=messages.SUCCESS if not failed else messages.WARNING,
+        )
 
 
 @admin.register(SaleMiniRefund)
@@ -510,12 +538,15 @@ class SaleMiniRefundAdmin(admin.ModelAdmin):
         "out_refund_no",
         "owner",
         "customer",
+        "source",
         "status",
         "amount",
         "refund_id",
+        "retry_count",
+        "requires_manual_action",
         "created_at",
     )
-    list_filter = ("owner", "status")
+    list_filter = ("owner", "source", "status", "requires_manual_action")
     search_fields = (
         "refund_no",
         "out_refund_no",
@@ -524,6 +555,43 @@ class SaleMiniRefundAdmin(admin.ModelAdmin):
     )
     raw_id_fields = ("owner", "customer", "buyer_user", "payment")
     readonly_fields = ("request_payload", "response_payload", "callback_payload")
+    actions = ("retry_wechat_refund",)
+
+    @admin.action(description="查询微信状态或立即重试退款")
+    def retry_wechat_refund(self, request, queryset):
+        success = 0
+        failed = 0
+        for refund_id in queryset.values_list("id", flat=True):
+            try:
+                with transaction.atomic():
+                    refund = (
+                        SaleMiniRefund.objects.select_for_update()
+                        .select_related("payment", "payment__mapping")
+                        .get(pk=refund_id)
+                    )
+                    if refund.status == SaleMiniRefund.Status.SUCCESS:
+                        continue
+                    refund.requires_manual_action = False
+                    refund.next_retry_at = timezone.now()
+                    refund.updated_by = request.user
+                    refund.save(
+                        update_fields=[
+                            "requires_manual_action",
+                            "next_retry_at",
+                            "updated_by",
+                            "updated_at",
+                        ]
+                    )
+                reconcile_refund(refund)
+                success += 1
+            except Exception as exc:
+                failed += 1
+                self.message_user(request, str(exc), level=messages.ERROR)
+        self.message_user(
+            request,
+            f"退款处理完成：成功受理 {success}，失败 {failed}。",
+            level=messages.SUCCESS if not failed else messages.WARNING,
+        )
 
 
 @admin.register(SaleMiniAfterSaleRequest)

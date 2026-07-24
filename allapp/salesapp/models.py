@@ -400,6 +400,12 @@ class SaleMiniOrderMapping(BaseModel):
             models.Index(fields=["payment_status", "pay_deadline_at"]),
             models.Index(fields=["owner", "payable_amount"]),
         ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(payable_amount__gte=0),
+                name="ck_sale_mini_mapping_payable_nonneg",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.source}:{self.outbound_order_id}"
@@ -683,6 +689,7 @@ class SaleMiniDistributionRecord(BaseModel):
 class SaleMiniPayment(BaseModel):
     class Channel(models.TextChoices):
         WECHAT_JSAPI = "WECHAT_JSAPI", "微信小程序支付"
+        INTERNAL_ZERO = "INTERNAL_ZERO", "内部零元结算"
 
     class Status(models.TextChoices):
         CREATED = "CREATED", "已创建"
@@ -721,15 +728,26 @@ class SaleMiniPayment(BaseModel):
     amount_cents = models.PositiveIntegerField()
     currency = models.CharField(max_length=8, default="CNY")
     prepay_id = models.CharField(max_length=128, blank=True, default="")
-    transaction_id = models.CharField(max_length=128, blank=True, default="")
+    transaction_id = models.CharField(
+        max_length=128,
+        blank=True,
+        null=True,
+        unique=True,
+        default=None,
+    )
     trade_state = models.CharField(max_length=40, blank=True, default="")
     trade_state_desc = models.CharField(max_length=200, blank=True, default="")
+    request_payload = models.JSONField(default=dict, blank=True)
     client_pay_params = models.JSONField(default=dict, blank=True)
     prepay_response = models.JSONField(default=dict, blank=True)
     callback_payload = models.JSONField(default=dict, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
+    retry_count = models.PositiveSmallIntegerField(default=0)
+    next_reconcile_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=300, blank=True, default="")
+    requires_manual_action = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = "商城支付单"
@@ -737,7 +755,16 @@ class SaleMiniPayment(BaseModel):
         indexes = [
             models.Index(fields=["owner", "status", "created_at"]),
             models.Index(fields=["mapping", "status"]),
-            models.Index(fields=["transaction_id"]),
+            models.Index(
+                fields=["status", "next_reconcile_at"],
+                name="salesapp_sa_status_2d5c52_idx",
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gte=0),
+                name="ck_sale_mini_payment_amount_nonneg",
+            ),
         ]
 
     def __str__(self):
@@ -745,6 +772,10 @@ class SaleMiniPayment(BaseModel):
 
 
 class SaleMiniRefund(BaseModel):
+    class Source(models.TextChoices):
+        USER_REQUEST = "USER_REQUEST", "用户申请"
+        LATE_PAYMENT = "LATE_PAYMENT", "延迟到账自动退款"
+
     class Status(models.TextChoices):
         CREATED = "CREATED", "已创建"
         PROCESSING = "PROCESSING", "处理中"
@@ -769,6 +800,17 @@ class SaleMiniRefund(BaseModel):
     payment = models.ForeignKey(
         SaleMiniPayment, on_delete=models.PROTECT, related_name="refunds"
     )
+    source = models.CharField(
+        max_length=24,
+        choices=Source.choices,
+        default=Source.USER_REQUEST,
+    )
+    idempotency_key = models.CharField(
+        max_length=128,
+        unique=True,
+        null=True,
+        blank=True,
+    )
     refund_no = models.CharField(max_length=64, unique=True)
     out_refund_no = models.CharField(max_length=64, unique=True)
     refund_id = models.CharField(max_length=128, blank=True, default="")
@@ -785,6 +827,10 @@ class SaleMiniRefund(BaseModel):
     callback_payload = models.JSONField(default=dict, blank=True)
     requested_at = models.DateTimeField(null=True, blank=True)
     success_at = models.DateTimeField(null=True, blank=True)
+    retry_count = models.PositiveSmallIntegerField(default=0)
+    next_retry_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=300, blank=True, default="")
+    requires_manual_action = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = "商城退款单"
@@ -793,6 +839,14 @@ class SaleMiniRefund(BaseModel):
             models.Index(fields=["owner", "status", "created_at"]),
             models.Index(fields=["payment", "status"]),
             models.Index(fields=["refund_id"]),
+            models.Index(fields=["status", "next_retry_at"]),
+            models.Index(fields=["requires_manual_action", "updated_at"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gte=0),
+                name="ck_sale_mini_refund_amount_nonneg",
+            ),
         ]
 
     def __str__(self):

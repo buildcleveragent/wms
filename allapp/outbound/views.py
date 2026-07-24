@@ -1473,6 +1473,12 @@ class OutboundOrderViewSet(
                 {"detail": "仅货主审核通过且未关闭的订单可由仓库确认。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        try:
+            outbound_services.validate_sale_mini_payment_for_fulfillment(order)
+        except DjangoValidationError as exc:
+            raise ValidationError(
+                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+            ) from exc
         before = {"approval_status": order.approval_status}
         order.approval_status = "WHS_APPROVED"
         order.approved_by_warehouse = request.user

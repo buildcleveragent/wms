@@ -250,6 +250,12 @@ export const api = {
       method: 'POST',
       data: payload,
     }),
+  querySaleMiniWechat: (payload) =>
+    request({
+      url: '/api/sale-mini/payments/wechat/query/',
+      method: 'POST',
+      data: payload,
+    }),
   refundSaleMiniWechat: (payload) =>
     request({
       url: '/api/sale-mini/payments/wechat/refund/',

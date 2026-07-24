@@ -12,10 +12,14 @@ black==25.1.0
     # via -r requirements/dev.in
 cfgv==3.4.0
     # via pre-commit
+cffi==1.17.1
+    # via cryptography
 click==8.2.1
     # via black
 coverage==7.10.4
     # via -r requirements/dev.in
+cryptography==43.0.3
+    # via -r requirements/requirements.in
 decorator==5.2.1
     # via ipython
 distlib==0.4.0
@@ -85,6 +89,8 @@ ptyprocess==0.7.0
     # via pexpect
 pure-eval==0.2.3
     # via stack-data
+pycparser==2.22
+    # via cffi
 pygments==2.19.2
     # via
     #   ipython

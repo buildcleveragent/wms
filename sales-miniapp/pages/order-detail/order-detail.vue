@@ -71,6 +71,15 @@
         <view class="row"><text>金额</text><text>¥{{ money(order.after_sale.amount) }}</text></view>
       </view>
 
+      <view v-if="order.refund" class="section">
+        <view class="section-title">退款进度</view>
+        <view class="row"><text>退款单号</text><text>{{ order.refund.refund_no }}</text></view>
+        <view class="row"><text>状态</text><text>{{ refundStatusText }}</text></view>
+        <view v-if="order.refund.next_retry_at && !order.refund.requires_manual_action" class="row">
+          <text>下次处理</text><text>{{ dateText(order.refund.next_retry_at) }}</text>
+        </view>
+      </view>
+
       <view class="actions">
         <button v-if="canPay" class="pay" :loading="payLoading" @click="pay">继续支付</button>
         <button v-if="canReorder" class="reorder" :loading="reorderLoading" @click="reorder">再来一单</button>
@@ -119,9 +128,14 @@ const fulfillmentSteps = computed(() => {
     ]
   }
   if (['REFUNDING', 'REFUNDED'].includes(data.payment_status)) {
+    const manual = Boolean(data.refund && data.refund.requires_manual_action)
     return [
       { title: '订单已提交', desc: dateText(data.created_at), state: 'done' },
-      { title: data.payment_status === 'REFUNDED' ? '退款完成' : '退款处理中', desc: '退款进度以审核结果为准', state: 'bad' },
+      {
+        title: data.payment_status === 'REFUNDED' ? '退款完成' : manual ? '退款异常' : '退款处理中',
+        desc: manual ? '退款异常，请等待平台人工处理' : '退款进度以微信支付结果为准',
+        state: 'bad',
+      },
     ]
   }
   const paid = ['PAID', 'OFFLINE'].includes(data.payment_status)
@@ -144,6 +158,13 @@ const fulfillmentSteps = computed(() => {
       state: completed ? 'done' : 'pending',
     },
   ]
+})
+const refundStatusText = computed(() => {
+  const refund = (order.value || {}).refund
+  if (!refund) return ''
+  if (refund.requires_manual_action) return '退款异常，请等待处理'
+  if (refund.status === 'SUCCESS') return '退款成功'
+  return '退款处理中'
 })
 const beforeWarehouseWork = computed(
   () =>
@@ -206,12 +227,12 @@ async function pay() {
   if (payLoading.value || !order.value) return
   payLoading.value = true
   try {
-    const prepay = await paymentService.prepay(order.value.id)
-    if (!prepay.paid) {
-      await paymentService.requestPayment(prepay.pay_params)
-    }
+    const confirmation = await paymentService.payAndConfirm(order.value.id)
     await load()
-    uni.showToast({ title: '支付成功', icon: 'none' })
+    uni.showToast({
+      title: confirmation.confirmed ? '支付成功' : '支付结果确认中',
+      icon: 'none',
+    })
   } catch (err) {
     uni.showToast({ title: err.message || '支付未完成', icon: 'none' })
   } finally {

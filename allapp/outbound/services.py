@@ -32,6 +32,44 @@ ASSISTED_PROCESSING_MODE = "WAREHOUSE_ASSISTED"
 ASSISTED_CLOSE_REASON = "仓库代办出库完成"
 
 
+def validate_sale_mini_payment_for_fulfillment(order) -> None:
+    """Block sale-mini fulfillment until its settlement is authoritative."""
+
+    from allapp.salesapp.models import SaleMiniOrderMapping
+
+    mappings = SaleMiniOrderMapping.objects.filter(outbound_order_id=order.pk)
+    if transaction.get_connection().in_atomic_block:
+        mappings = mappings.select_for_update()
+    mapping = mappings.first()
+    if not mapping:
+        return
+    allowed = {
+        SaleMiniOrderMapping.PaymentStatus.PAID,
+        SaleMiniOrderMapping.PaymentStatus.OFFLINE,
+    }
+    if mapping.payment_status not in allowed:
+        raise ValidationError(
+            f"商城订单支付状态为 {mapping.get_payment_status_display()}，"
+            "付款确认前禁止仓库履约。"
+        )
+
+
+def validate_pick_task_sale_mini_payment(task) -> None:
+    """Apply the sale-mini payment gate to a PICK task from an outbound order."""
+
+    source_model = (task.source_model or "").lower()
+    if task.task_type != TASK_TYPE_PICK or not source_model.endswith(
+        "outboundorder"
+    ):
+        return
+    OutboundOrder = get_outbound_order_model()
+    try:
+        order = OutboundOrder.objects.get(pk=int(task.source_pk))
+    except (TypeError, ValueError, OutboundOrder.DoesNotExist) as exc:
+        raise ValidationError("拣货任务无法解析对应的出库订单。") from exc
+    validate_sale_mini_payment_for_fulfillment(order)
+
+
 def validate_owner_approval_preconditions(order) -> None:
     """Validate the business state required before a owner approval.
 
@@ -367,6 +405,7 @@ def promote_reserved_pick(
         raise ValidationError("保留拣货任务仅允许发布为 RELEASED。")
     if order.approval_status != "WHS_APPROVED":
         raise ValidationError("订单尚未完成仓库确认，禁止发布拣货任务。")
+    validate_sale_mini_payment_for_fulfillment(order)
 
     candidates = list(
         WmsTask.objects.select_for_update()

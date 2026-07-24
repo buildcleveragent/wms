@@ -18,7 +18,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: '3.12'
-  NODE_VERSION: '18'
+  NODE_VERSION: '20'
   MYSQL_VERSION: '8.0'
 
 jobs:
@@ -200,6 +200,66 @@ jobs:
           path: |
             ./.pytest_cache
             ./.coverage.*
+
+  sale-mini-payment-gate:
+    name: Sale Mini Payment Release Gate
+    runs-on: ubuntu-latest
+    needs: lint
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: wms_db_test
+          MYSQL_USER: wms_app
+          MYSQL_PASSWORD: testpass123
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -prootpassword || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+          --health-start-period=30s
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd="redis-cli ping || exit 1"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: requirements/*.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: sales-miniapp/package-lock.json
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmysqlclient-dev
+          python -m pip install --upgrade pip
+          pip install -r requirements/test.txt
+          npm ci --prefix sales-miniapp
+      - name: Run mandatory payment release gate
+        env:
+          APP_ENV: test
+          DB_NAME: wms_db_test
+          DB_TEST_NAME: wms_db_test
+          DB_USER: wms_app
+          DB_PASSWORD: testpass123
+          DB_HOST: mysql
+          DB_PORT: 3306
+          REDIS_HOST: redis
+          REDIS_PORT: 6379
+          SECRET_KEY: test-secret-key-for-ci
+          DEBUG: 'False'
+          DJANGO_SETTINGS_MODULE: wmsmaster.settings
+        run: npm --prefix sales-miniapp run test:release
 
   coverage-aggregate:
     name: Combine Coverage

@@ -35,7 +35,12 @@ const pythonCommand = process.env.PYTHON || firstExisting([
 
 const backendEnv = {
   ...process.env,
+  APP_ENV: 'test',
   SECRET_KEY: process.env.SECRET_KEY || 'test-secret-key',
+  DB_TEST_NAME: process.env.DB_TEST_NAME || 'test_wms_db',
+  ...(runDb
+    ? { DB_NAME: process.env.DB_TEST_NAME || 'test_wms_db' }
+    : {}),
   CORS_ALLOWED_ORIGINS:
     process.env.CORS_ALLOWED_ORIGINS || 'http://localhost,http://127.0.0.1',
 }
@@ -89,6 +94,7 @@ if (fs.existsSync(path.join(repoRoot, 'manage.py'))) {
       ...(fastDb ? ['--no-migrations'] : []),
       '--disable-warnings',
       'allapp/salesapp/tests.py::SaleMiniApiTests',
+      'allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests',
     ],
     {
       cwd: repoRoot,

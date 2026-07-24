@@ -40,15 +40,19 @@ def adjust_pick_line_qty(
     user_id = getattr(by_user, "id", None)
 
     # 1) 锁任务，校验类型 & 状态
-    task = (
-        WmsTask.objects
-        .select_for_update()
-        .get(id=task_id, task_type=WmsTask.TaskType.PICK)
+    task_scope = WmsTask.objects.get(
+        id=task_id,
+        task_type=WmsTask.TaskType.PICK,
     )
+    from allapp.outbound.services import validate_pick_task_sale_mini_payment
+
+    validate_pick_task_sale_mini_payment(task_scope)
+    task = WmsTask.objects.select_for_update().get(pk=task_scope.pk)
     if task.status in ("CANCELLED", "COMPLETED"):
         raise ValidationError("任务当前状态不允许调整拣货数。")
     if task.status not in ("RELEASED", "IN_PROGRESS", "RESERVED"):
         raise ValidationError(f"状态 {task.status} 不允许调整拣货数。")
+    validate_pick_task_sale_mini_payment(task)
 
     # 2) 锁这一行
     line = (
@@ -220,6 +224,10 @@ def _run_posting_handler(task_id: int, by_user=None, note: str = "过账"):
     """
 
     task = WmsTask.objects.get(id=task_id)
+    if task.task_type == WmsTask.TaskType.PICK:
+        from allapp.outbound.services import validate_pick_task_sale_mini_payment
+
+        validate_pick_task_sale_mini_payment(task)
     scans = list(TaskScanLog.objects.filter(task_id=task.id).order_by("id"))
     # 支持 settings 配字符串或可调用
     ctx, ctx_text = build_log_payload(task=task, user=by_user)
@@ -286,11 +294,18 @@ def scan_task(
     user_id = getattr(by_user, "id", None)
 
     # 1) 锁任务并校验状态
+    task_scope = WmsTask.objects.get(id=task_id)
+    if task_scope.task_type == WmsTask.TaskType.PICK:
+        from allapp.outbound.services import validate_pick_task_sale_mini_payment
+
+        validate_pick_task_sale_mini_payment(task_scope)
     task = WmsTask.objects.select_for_update().get(id=task_id)
     if task.status in ("CANCELLED", "COMPLETED"):
         raise ValidationError("任务当前状态不允许扫码。")
     if task.status not in ("RELEASED", "IN_PROGRESS","RESERVED"):
         raise ValidationError(f"状态 {task.status} 不允许扫码。")
+    if task.task_type == WmsTask.TaskType.PICK:
+        validate_pick_task_sale_mini_payment(task)
 
     # 2) 解析条码
     resolve = _resolver()
@@ -552,14 +567,18 @@ def claim_task(task, *, by_user, allowed_wh_ids: set[int], to_status: str | None
         raise ValidationError("非本人所属仓库，不能认领。")
     if task.status != WmsTask.Status.RELEASED:
         raise ValidationError(f"状态为 {task.status}，仅 RELEASED 可认领。")
+    from allapp.outbound.services import validate_pick_task_sale_mini_payment
+
+    validate_pick_task_sale_mini_payment(task)
 
     with transaction.atomic():
+        validate_pick_task_sale_mini_payment(task)
         # 锁任务行，避免并发
-        locked = (type(task).objects.select_for_update().only("id", "status")
-                  .get(pk=task.pk))
+        locked = type(task).objects.select_for_update().get(pk=task.pk)
         # 再次确认状态
         if locked.status != WmsTask.Status.RELEASED:
             raise ValidationError("该任务已被他人操作。")
+        validate_pick_task_sale_mini_payment(locked)
 
         # 是否已有“未完成”的指派（任何人）
         has_active = (TaskAssignment.objects
@@ -633,7 +652,10 @@ def _assert_can_release(t: WmsTask) -> None:
         and (t.source_model or "").lower() == "outboundorder"
     ):
         from allapp.outbound.models import OutboundOrder
-        from allapp.outbound.services import allocation_shortfalls
+        from allapp.outbound.services import (
+            allocation_shortfalls,
+            validate_sale_mini_payment_for_fulfillment,
+        )
 
         try:
             order = OutboundOrder.objects.get(pk=int(t.source_pk))
@@ -641,6 +663,7 @@ def _assert_can_release(t: WmsTask) -> None:
             raise ValidationError("拣货任务无法解析对应的出库订单。") from exc
         if order.approval_status != "WHS_APPROVED":
             raise ValidationError("出库订单尚未完成仓库确认，禁止发布。")
+        validate_sale_mini_payment_for_fulfillment(order)
         shortages = allocation_shortfalls(order, task=t)
         if shortages:
             raise ValidationError("出库订单存在分配缺口，禁止发布拣货任务。")
@@ -655,6 +678,9 @@ def _request_actor(request):
 def task_release(*, request, task):
     """Release a task through the shared validation and assignment service."""
 
+    from allapp.outbound.services import validate_pick_task_sale_mini_payment
+
+    validate_pick_task_sale_mini_payment(task)
     locked = WmsTask.objects.select_for_update().get(pk=task.pk)
     publish_task(locked)
     return locked
@@ -664,11 +690,15 @@ def task_release(*, request, task):
 def task_start(*, request, task):
     """Start a released task and keep its status transition auditable."""
 
+    from allapp.outbound.services import validate_pick_task_sale_mini_payment
+
+    validate_pick_task_sale_mini_payment(task)
     locked = WmsTask.objects.select_for_update().get(pk=task.pk)
     if locked.status == WmsTask.Status.IN_PROGRESS:
         return locked
     if locked.status != WmsTask.Status.RELEASED:
         raise ValidationError("仅已发布任务可以开始。")
+    validate_pick_task_sale_mini_payment(locked)
     now = timezone.now()
     locked.status = WmsTask.Status.IN_PROGRESS
     locked.started_at = locked.started_at or now
@@ -914,6 +944,9 @@ def publish_task(
     }
 
     with transaction.atomic():
+        from allapp.outbound.services import validate_pick_task_sale_mini_payment
+
+        validate_pick_task_sale_mini_payment(task)
         # 锁任务，防并发
         t = (WmsTask.objects
              .select_for_update()

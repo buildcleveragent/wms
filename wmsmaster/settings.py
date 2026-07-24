@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import json
 import os
 import sys
 from datetime import timedelta
@@ -170,11 +171,33 @@ WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH = env(
     "WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH",
     default="",
 ).strip()
+try:
+    WECHAT_PAY_PLATFORM_KEYS = json.loads(
+        env("WECHAT_PAY_PLATFORM_KEYS", default="{}")
+    )
+except (TypeError, ValueError) as exc:
+    raise ImproperlyConfigured(
+        "WECHAT_PAY_PLATFORM_KEYS 必须是序列号到 PEM 或文件路径的 JSON 对象。"
+    ) from exc
+if not isinstance(WECHAT_PAY_PLATFORM_KEYS, dict):
+    raise ImproperlyConfigured("WECHAT_PAY_PLATFORM_KEYS 必须是 JSON 对象。")
 WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE = env.bool(
     "WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE",
     default=IS_PRODUCTION,
 )
+WECHAT_PAY_CALLBACK_MAX_AGE_SECONDS = env.int(
+    "WECHAT_PAY_CALLBACK_MAX_AGE_SECONDS",
+    default=300,
+)
 SALE_MINI_PAY_TIMEOUT_MINUTES = env.int("SALE_MINI_PAY_TIMEOUT_MINUTES", default=30)
+SALE_MINI_REFUND_MAX_RETRIES = env.int(
+    "SALE_MINI_REFUND_MAX_RETRIES",
+    default=6,
+)
+SALE_MINI_REFUND_QUERY_INTERVAL_MINUTES = env.int(
+    "SALE_MINI_REFUND_QUERY_INTERVAL_MINUTES",
+    default=5,
+)
 SALE_MINI_POINT_EXCHANGE_RATE = env("SALE_MINI_POINT_EXCHANGE_RATE", default="100")
 SALE_MINI_DISTRIBUTION_COMMISSION_RATE = env(
     "SALE_MINI_DISTRIBUTION_COMMISSION_RATE",
@@ -382,9 +405,7 @@ WMS_ACCESS_SCOPE_LEGACY_FALLBACK = env.bool(
     "WMS_ACCESS_SCOPE_LEGACY_FALLBACK", default=False
 )
 if IS_PRODUCTION and WMS_ACCESS_SCOPE_LEGACY_FALLBACK:
-    raise ImproperlyConfigured(
-        "生产环境禁止启用 WMS_ACCESS_SCOPE_LEGACY_FALLBACK。"
-    )
+    raise ImproperlyConfigured("生产环境禁止启用 WMS_ACCESS_SCOPE_LEGACY_FALLBACK。")
 COUNT_MAX_TIMES = 2
 BILLING_TASKLINE_ORDER_RESOLVER = "allapp.billing.resolvers:taskline_to_order_mapping"
 BILLING_METRIC_SCHEDULER_ENABLED = env.bool(

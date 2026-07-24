@@ -199,9 +199,7 @@ function orderExtra() {
 }
 
 async function payOrder(order) {
-  const prepay = await paymentService.prepay(order.id)
-  if (prepay.paid) return
-  await paymentService.requestPayment(prepay.pay_params)
+  return paymentService.payAndConfirm(order.id)
 }
 
 async function loadAddresses() {
@@ -299,12 +297,17 @@ async function submit() {
     let result = effectivePaymentMethod.value === 'OFFLINE' ? 'offline' : 'created'
     if (effectivePaymentMethod.value === 'WECHAT') {
       try {
-        await payOrder(order)
-        result = 'paid'
-        uni.showToast({ title: '支付成功', icon: 'none' })
+        const confirmation = await payOrder(order)
+        if (confirmation.confirmed) {
+          result = 'paid'
+          uni.showToast({ title: '支付成功', icon: 'none' })
+        } else {
+          result = 'confirming'
+          uni.showToast({ title: '支付结果确认中', icon: 'none' })
+        }
       } catch (payErr) {
         result = 'wait_pay'
-        uni.showToast({ title: '订单已提交，待支付', icon: 'none' })
+        uni.showToast({ title: '支付未完成，可在订单中继续支付', icon: 'none' })
       }
     }
     uni.redirectTo({ url: `/pages/order-result/order-result?id=${order.id}&result=${result}` })
