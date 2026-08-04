@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<title>金桥融通WMS系统管理员操作手册</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 16mm 19mm 16mm;
+  @top-left { content: string(document-title); color: #667085; font-size: 8.2pt; }
+  @top-right { content: "V2.0 · 2026-08"; color: #667085; font-size: 8.2pt; }
+  @bottom-center { content: "第 " counter(page) " 页 / 共 " counter(pages) " 页"; color: #7a8493; font-size: 8.2pt; }
+}
+@page cover {
+  margin: 0;
+  @top-left { content: none; }
+  @top-right { content: none; }
+  @bottom-center { content: none; }
+}
+* { box-sizing: border-box; }
+html { font-family: "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; color: #172033; }
+body { margin: 0; font-size: 10pt; line-height: 1.7; }
+.cover {
+  page: cover;
+  page-break-after: always;
+  height: 297mm;
+  padding: 43mm 26mm 25mm;
+  color: white;
+  background: linear-gradient(150deg, #0f2f68 0%, #155eef 58%, #65a5ff 100%);
+  position: relative;
+}
+.cover::after {
+  content: "";
+  position: absolute;
+  right: -44mm;
+  bottom: -42mm;
+  width: 150mm;
+  height: 150mm;
+  border-radius: 50%;
+  background: rgba(255,255,255,.10);
+}
+.cover-logo { width: 23mm; height: 23mm; object-fit: contain; margin-bottom: 25mm; }
+.cover h1 { string-set: document-title content(); font-size: 27pt; line-height: 1.28; margin: 0 0 12mm; color: white; }
+.cover .lead { font-size: 14pt; color: #e8f1ff; margin-bottom: 28mm; }
+.cover-meta { border-top: 1px solid rgba(255,255,255,.45); padding-top: 9mm; width: 125mm; }
+.cover-meta div { margin: 2.2mm 0; font-size: 10.5pt; }
+.cover-foot { position: absolute; left: 26mm; right: 26mm; bottom: 25mm; color: #eaf2ff; font-size: 9pt; }
+.toc { page-break-after: always; }
+.toc h1 { color: #0f2f68; font-size: 23pt; border-bottom: 3px solid #155eef; padding-bottom: 4mm; }
+.toc ul { margin: 0; padding-left: 0; list-style: none; }
+.toc li { margin: 1.6mm 0; }
+.toc li.level-3 { margin-left: 7mm; color: #4d5c73; font-size: 9.2pt; }
+.toc a { color: inherit; text-decoration: none; }
+h2 { page-break-before: always; font-size: 19pt; color: #0f2f68; margin: 0 0 7mm; border-bottom: 2px solid #bfd2f6; padding-bottom: 3mm; }
+h2.first-section { page-break-before: auto; }
+h3 { font-size: 13.5pt; color: #174a98; margin: 8mm 0 3mm; page-break-after: avoid; }
+h4 { font-size: 11.5pt; color: #243b63; margin: 5mm 0 2mm; page-break-after: avoid; }
+p { margin: 2.4mm 0; orphans: 3; widows: 3; }
+ul, ol { margin: 2.2mm 0 3mm; padding-left: 7mm; }
+li { margin: 1.2mm 0; }
+strong { color: #122c57; }
+code { font-family: "Noto Sans Mono CJK SC", monospace; background: #eef3fb; padding: .2mm 1mm; border-radius: 1mm; }
+blockquote { margin: 4mm 0; padding: 3.5mm 5mm; border-left: 4px solid #3274dd; background: #f2f6fd; color: #35445d; }
+blockquote p { margin: 0; }
+hr { border: 0; border-top: 1px solid #d7dee9; margin: 7mm 0; }
+table { width: 100%; border-collapse: collapse; margin: 4mm 0 6mm; font-size: 8.5pt; page-break-inside: auto; }
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; }
+th { background: #eaf1fd; color: #143a75; font-weight: 700; }
+th, td { border: 1px solid #bdc9da; padding: 2.2mm 2.4mm; vertical-align: top; }
+img { display: block; max-width: 100%; height: auto; margin: 5mm auto 7mm; page-break-inside: avoid; }
+img.role-map { width: 96%; }
+img.mobile-shot { width: 62mm; border: 1px solid #ccd5e2; border-radius: 3mm; box-shadow: 0 2mm 7mm rgba(20,40,80,.10); }
+img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rgba(20,40,80,.10); }
+.caption { text-align: center; color: #68758a; font-size: 8.5pt; margin-top: -5mm; margin-bottom: 6mm; }
+.document-note { margin: 0 0 7mm; padding: 3mm 4mm; color: #34445d; background: #f6f8fb; border: 1px solid #d8e0eb; }
+.checkbox { font-family: "Noto Sans Symbols 2", "Noto Sans CJK SC", sans-serif; }
+</style>
+</head>
+<body>
+<section class="cover" style="page-break-after:always; min-height:900px; padding:70px 60px; color:#17355f; background-color:#eef4ff; position:relative;">
+<img alt="金桥融通" class="cover-logo" src="file:///wms/static/img/aaa.png" style="width:280px; height:auto;" width="280"/>
+<h1>金桥融通WMS系统管理员操作手册</h1>
+<div class="lead">岗位操作 · 权限边界 · 异常处理</div>
+<div class="cover-meta">
+<div>文档版本：V2.0</div>
+<div>适用基线：2026-08-04 当前工作区</div>
+<div>文档状态：交付版</div>
+<div>主要读者：系统管理员</div>
+</div>
+<div class="cover-foot">实际菜单和数据范围以账号角色、权限及显式货主/仓库范围为准</div>
+</section>
+<section class="toc"><h1>目录</h1><ul><li class="level-2"><a href="#section-1-使用范围">使用范围</a></li><li class="level-2"><a href="#section-2-登录-账号与通用安全">登录、账号与通用安全</a></li><li class="level-3"><a href="#section-3-首次登录">首次登录</a></li><li class="level-3"><a href="#section-4-账号和数据范围">账号和数据范围</a></li><li class="level-3"><a href="#section-5-通用操作原则">通用操作原则</a></li><li class="level-3"><a href="#section-6-修改密码与退出">修改密码与退出</a></li><li class="level-2"><a href="#section-7-角色定位与权限边界">角色定位与权限边界</a></li><li class="level-2"><a href="#section-8-用户和角色范围管理">用户和角色范围管理</a></li><li class="level-3"><a href="#section-9-新建用户">新建用户</a></li><li class="level-3"><a href="#section-10-范围规则">范围规则</a></li><li class="level-2"><a href="#section-11-规范角色组与-仓库主管-说明">规范角色组与“仓库主管”说明</a></li><li class="level-2"><a href="#section-12-额外权限管理">额外权限管理</a></li><li class="level-2"><a href="#section-13-基础资料维护顺序">基础资料维护顺序</a></li><li class="level-2"><a href="#section-14-Excel-导入与批量配置">Excel 导入与批量配置</a></li><li class="level-2"><a href="#section-15-商城-POS-与计费管理边界">商城、POS 与计费管理边界</a></li><li class="level-2"><a href="#section-16-审计-账号安全与故障处理">审计、账号安全与故障处理</a></li><li class="level-2"><a href="#section-17-用户开通验收表">用户开通验收表</a></li><li class="level-2"><a href="#section-18-常见状态与控制点">常见状态与控制点</a></li><li class="level-2"><a href="#section-19-异常处理与问题上报">异常处理与问题上报</a></li><li class="level-3"><a href="#section-20-无法登录或菜单缺失">无法登录或菜单缺失</a></li><li class="level-3"><a href="#section-21-数据为空或范围不正确">数据为空或范围不正确</a></li><li class="level-3"><a href="#section-22-网络超时或重复提交提示">网络超时或重复提交提示</a></li><li class="level-3"><a href="#section-23-库存-任务或账单不一致">库存、任务或账单不一致</a></li><li class="level-3"><a href="#section-24-问题上报模板">问题上报模板</a></li><li class="level-2"><a href="#section-25-日常自检与培训验收">日常自检与培训验收</a></li><li class="level-2"><a href="#section-26-专项手册与边界">专项手册与边界</a></li><li class="level-2"><a href="#section-27-文档修订记录">文档修订记录</a></li></ul></section>
+<div class="document-note">本手册仅描述当前代码中具有有效权限、页面和业务闭环的功能。</div>
+<p><strong>文档版本：</strong> V2.0</p>
+<p><strong>适用系统版本：</strong> 2026-08-04 当前工作区业务基线</p>
+<p><strong>适用对象：</strong> 系统管理员</p>
+<p><strong>正式权限组：</strong> <code>超级管理员或经过审批的后台管理权限组</code></p>
+<p><strong>主要入口：</strong> Web 控制台 / Django Admin</p>
+<p><strong>文档状态：</strong> 交付版</p>
+<blockquote>
+<p>本手册按当前业务代码、权限校验、客户端页面和自动化测试契约编写。实际菜单由角色、权限和显式数据范围共同决定。</p>
+</blockquote>
+<h2 class="first-section" id="section-1-使用范围">使用范围</h2>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>本角色要求</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>角色</td>
+<td>系统管理员</td>
+</tr>
+<tr>
+<td>正式权限组</td>
+<td><code>超级管理员或经过审批的后台管理权限组</code></td>
+</tr>
+<tr>
+<td>主要入口</td>
+<td>Web 控制台 / Django Admin</td>
+</tr>
+<tr>
+<td>数据范围</td>
+<td>超级管理员为全局范围；普通后台账号仍受显式角色范围和权限限制</td>
+</tr>
+</tbody>
+</table>
+<p>本册可独立用于培训和日常操作，不要求先阅读合订版。涉及其他岗位时，只说明交接点，不授权本角色代替其他岗位操作。</p>
+<h2 id="section-2-登录-账号与通用安全">登录、账号与通用安全</h2>
+<h3 id="section-3-首次登录">首次登录</h3>
+<ol>
+<li>从系统管理员处取得正式入口、用户名和初始密码。</li>
+<li>打开本岗位对应的应用或 Web 地址，输入用户名和密码。</li>
+<li>登录后核对显示姓名、业务角色以及货主或仓库范围。</li>
+<li>首次登录立即进入“我的 → 修改密码”或 Web 右上角密码修改入口。</li>
+<li>如果能够登录但没有菜单，不要借用其他账号，记录用户名、入口和页面截图并联系系统管理员。</li>
+</ol>
+<h3 id="section-4-账号和数据范围">账号和数据范围</h3>
+<ul>
+<li>一人一号，不得共用账号或把密码留在 PDA、电脑旁。</li>
+<li>角色决定能够执行什么操作；显式角色范围决定能够操作哪个货主或仓库的数据。</li>
+<li>普通 WMS 用户只能启用一种业务角色。除仓库老板可授权多个仓库外，其他角色只能有一个活动范围。</li>
+<li>超级管理员使用全局权限，不设置业务角色范围；超级管理员账号不得用于日常开单、审批和现场作业。</li>
+<li>离职、调岗、合作终止或设备丢失后，应立即停用账号并保留审计记录。</li>
+</ul>
+<h3 id="section-5-通用操作原则">通用操作原则</h3>
+<ol>
+<li>操作前核对货主、仓库、客户、商品、批次、库位和单据号。</li>
+<li>扫码后必须核对系统命中的商品名称和规格，不能只凭提示音继续。</li>
+<li>审核、复核、过账、取消和库存调整会改变业务状态或库存，提交前必须再次确认。</li>
+<li>系统提示成功后再离开页面；网络中断时先查询原单状态，确认未成功后才重试。</li>
+<li>禁止通过直接修改库存明细来代替正常收货、上架、拣货、复核、盘点或调整流程。</li>
+<li>页面入口可见不代表账号一定有执行权限；最终以服务器返回的角色、权限和数据范围校验为准。</li>
+</ol>
+<h3 id="section-6-修改密码与退出">修改密码与退出</h3>
+<ol>
+<li>修改密码时输入原密码、新密码和确认密码；新密码必须通过系统安全校验。</li>
+<li>修改成功后退出，并用新密码重新登录验证。</li>
+<li>当班结束或共用设备交接前必须从“我的”或用户菜单执行退出，不能只关闭屏幕或浏览器。</li>
+</ol>
+<hr/>
+<p><img alt="Web 管理后台登录界面" class="web-shot" src="file:///wms/docs/manual_assets/web-login-word.png" style="width:600px; height:auto;" width="600"/><p class="caption">图：Web 管理后台登录界面</p></p>
+<h2 id="section-7-角色定位与权限边界">角色定位与权限边界</h2>
+<p>系统管理员是后台管理职责，不是 <code>UserRoleScope</code> 中的业务角色。超级管理员通过 Django <code>is_superuser</code> 获得全局访问；其他后台账号仍必须通过职员状态、显式业务角色范围、规范角色组和经过审批的辅助权限组合授权。</p>
+<p>系统管理员负责账号、角色范围、基础资料、配置和审计，不代替业务员开单、货主管理员审核、仓库管理员确认或操作员现场作业。</p>
+<h2 id="section-8-用户和角色范围管理">用户和角色范围管理</h2>
+<h3 id="section-9-新建用户">新建用户</h3>
+<ol>
+<li>进入“系统 → 用户”新增账号，设置唯一用户名、姓名、联系方式和初始密码。</li>
+<li>设置账号为有效；只有需要登录 Web 后台的账号才启用职员状态。</li>
+<li>普通业务用户不要勾选超级用户。</li>
+<li>在“用户角色范围”新增一条活动范围，选择业务角色及对应货主或仓库。</li>
+<li>保存后系统自动同步对应规范角色组，检查“系统规范角色组”显示是否正确。</li>
+<li>使用该角色测试账号验证入口、菜单、允许操作和数据隔离，再安全交付初始密码。</li>
+</ol>
+<h3 id="section-10-范围规则">范围规则</h3>
+<ul>
+<li>仓库操作员、仓库管理员只能配置一个活动仓库范围。</li>
+<li>货主业务员、货主管理员只能配置一个活动货主范围。</li>
+<li>仓库老板可以为同一角色配置多个活动仓库范围。</li>
+<li>同一普通用户不能同时启用多个业务角色。</li>
+<li>超级管理员使用全局范围，不得再配置业务角色范围。</li>
+<li>用户模型中的旧 <code>owner</code>、<code>warehouse</code> 字段仅供 POS、商城等兼容模块使用，不决定 WMS 角色和数据范围。</li>
+</ul>
+<h2 id="section-11-规范角色组与-仓库主管-说明">规范角色组与“仓库主管”说明</h2>
+<p>系统规范角色组包括：</p>
+<ul>
+<li><code>WMS::仓库操作员</code></li>
+<li><code>WMS::仓库管理员</code></li>
+<li><code>WMS::仓库老板</code></li>
+<li><code>WMS::货主管理员</code></li>
+<li><code>WMS::货主业务员</code></li>
+</ul>
+<p>规范角色组名称固定，由角色范围自动同步，不应手工改名或删除。需要调整规范权限模板时应通过代码、迁移和测试发布，不能在生产环境临时修改后不留记录。</p>
+<p>“仓库主管”是旧兼容组名，当前会识别为仓库老板角色。企业内部的作业主管若要确认单据、管理任务，应配置 <code>WMS::仓库管理员</code>，不能创建或沿用名为“仓库主管”的组。</p>
+<h2 id="section-12-额外权限管理">额外权限管理</h2>
+<ul>
+<li>商品 Excel 导入、POS、计费、报表导出、商城运营等不一定属于规范角色默认权限，应使用经过审批的辅助权限组。</li>
+<li>优先使用权限组，不给个人账号长期追加零散权限。</li>
+<li>删除、直接库存调整、计费规则、退款、支付状态、批量导入和用户授权属于高风险权限。</li>
+<li>每次权限变化后检查审计事件，并使用边界数据验证不能访问其他货主或仓库。</li>
+<li>不得用额外权限绕过显式角色范围；权限授予能力，角色范围限制能够触达的数据。</li>
+</ul>
+<h2 id="section-13-基础资料维护顺序">基础资料维护顺序</h2>
+<p>建议按以下顺序建档：</p>
+<ol>
+<li>货主。</li>
+<li>仓库、子仓、库位及货主—仓库授权关系。</li>
+<li>商品分类、品牌、商品、基本单位、辅助单位和包装换算。</li>
+<li>客户、供应商、承运商、司机和车辆。</li>
+<li>入库、出库、分配、拣货和效期策略。</li>
+<li>计费规则、阶梯和账期。</li>
+<li>用户、显式角色范围及必要的辅助权限。</li>
+</ol>
+<p>商品编码、SKU、GTIN 和条码应唯一稳定；基本单位是库存记账单位。修改包装换算、批次/效期控制或停用商品前，必须确认没有未完成单据、任务和库存影响。</p>
+<h2 id="section-14-Excel-导入与批量配置">Excel 导入与批量配置</h2>
+<ul>
+<li>使用系统当前页面下载的模板，不复用历史模板。</li>
+<li>商品导入按权限和数据范围校验，整批原子处理；任意错误会阻止整批写入。</li>
+<li>公式、重复标识、其他货主数据、无效扩展名和超限文件会被拒绝。</li>
+<li>SKU 由系统规则生成时，用户模板中的 SKU 不作为覆盖依据。</li>
+<li>无订单批量入库、一件代发导入与商品主数据导入用途不同，禁止混用模板。</li>
+<li>导入后保存结果、审计记录和抽查样本，不能只依据前端提示判断成功。</li>
+</ul>
+<h2 id="section-15-商城-POS-与计费管理边界">商城、POS 与计费管理边界</h2>
+<ul>
+<li>POS 权限、打印配置、撤销和退款按专项 POS 手册管理；POS 销售通过统一任务和过账链路影响库存。</li>
+<li>商城上架、支付、退款、评价审核和批量配置按商城专项指南管理；商城买家不配置 WMS 业务角色。</li>
+<li>计费规则、账期锁定、开票和解锁属于高风险财务操作，应保留审批依据和审计记录。</li>
+<li>系统管理员可以维护配置和排查异常，但不能代替货主或仓库确认业务事实。</li>
+</ul>
+<h2 id="section-16-审计-账号安全与故障处理">审计、账号安全与故障处理</h2>
+<ol>
+<li>在审计事件和 Admin 日志中按用户名、时间、模块和操作类型查询。</li>
+<li>发现异常新增、修改、删除、导入、导出或授权时，先停用可疑账号并保留日志。</li>
+<li>遗忘密码走重置流程；管理员不得读取、传播或在群聊中发送明文密码。</li>
+<li>角色范围冲突、缺失规范组或范围与组不一致时，账号应保持拒绝访问，修正配置后再验证。</li>
+<li>库存、订单、支付和账单异常应先保全事实记录，不直接改数据库或删除流水。</li>
+</ol>
+<p>服务器部署、数据库备份恢复、域名证书、服务启停和版本回滚属于独立运维流程，本手册不授权在生产服务器直接操作。</p>
+<h2 id="section-17-用户开通验收表">用户开通验收表</h2>
+<ul>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>用户名唯一，姓名和联系方式正确。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>账号有效，职员/超级用户状态符合用途。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>只有一种业务角色，货主或仓库范围正确。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>规范角色组已自动同步，没有无关高权限组。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>老板多仓范围逐仓验证，其他角色没有多活动范围。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>登录入口、菜单和岗位一致。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>不能查看其他货主或仓库数据。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>高风险按钮只对授权人员可见且服务端会再次校验。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>初始密码已安全交付并要求首次修改。</li>
+</ul>
+<h2 id="section-18-常见状态与控制点">常见状态与控制点</h2>
+<table>
+<thead>
+<tr>
+<th>状态</th>
+<th>含义</th>
+<th>操作要求</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>草稿 / DRAFT</td>
+<td>单据尚未正式提交</td>
+<td>原创建人可在权限允许时修改、提交或删除未生效内容</td>
+</tr>
+<tr>
+<td>待货主审核 / OWNER_PENDING</td>
+<td>业务员已经提交</td>
+<td>等待货主管理员通过、退回或取消</td>
+</tr>
+<tr>
+<td>货主已通过 / OWNER_APPROVED</td>
+<td>商业条件已确认，库存可能已冻结</td>
+<td>等待仓库管理员确认并发布任务</td>
+</tr>
+<tr>
+<td>待仓库确认 / WHS_PENDING</td>
+<td>等待仓库接单</td>
+<td>仓库管理员检查仓库、库存和履约条件</td>
+</tr>
+<tr>
+<td>仓库已确认 / WHS_APPROVED</td>
+<td>已进入仓库履约</td>
+<td>不得随意修改原订单</td>
+</tr>
+<tr>
+<td>保留 / RESERVED</td>
+<td>任务已因货主审核创建但尚未发布</td>
+<td>仓库确认前不得现场执行</td>
+</tr>
+<tr>
+<td>待发布 / READY</td>
+<td>任务具备发布条件</td>
+<td>由仓库管理员发布</td>
+</tr>
+<tr>
+<td>已发布 / RELEASED</td>
+<td>操作员可以领取或执行</td>
+<td>按任务逐行扫描作业</td>
+</tr>
+<tr>
+<td>执行中 / IN_PROGRESS</td>
+<td>已发生现场作业记录</td>
+<td>继续完成剩余任务行，不得另建重复任务</td>
+</tr>
+<tr>
+<td>已完成 / COMPLETED</td>
+<td>作业数量已经完成</td>
+<td>等待复核、审核或过账</td>
+</tr>
+<tr>
+<td>待审核 / PENDING</td>
+<td>需要复核或管理确认</td>
+<td>核对实物、数量、批次和库位</td>
+</tr>
+<tr>
+<td>已过账 / POSTED</td>
+<td>库存影响已正式生效</td>
+<td>错误只能通过规范冲销或批准的调整处理</td>
+</tr>
+<tr>
+<td>过账失败 / FAILED</td>
+<td>库存写入没有成功完成</td>
+<td>保留原任务号和错误信息，交管理员处理</td>
+</tr>
+<tr>
+<td>已驳回 / REJECTED</td>
+<td>审核未通过</td>
+<td>查看原因并按流程修改、重提或终止</td>
+</tr>
+<tr>
+<td>已取消 / CANCELLED</td>
+<td>单据或任务终止</td>
+<td>核对冻结库存是否释放、现场实物是否隔离</td>
+</tr>
+</tbody>
+</table>
+<p>关键控制点：</p>
+<ul>
+<li>货主管理员审核是商业确认，仓库管理员确认是履约确认，两者不能互相替代。</li>
+<li>标准出库必须先完成货主审核，再由仓库管理员确认发布；系统已停用仓库端代替货主审批的一键流程。</li>
+<li>拣货完成不等于库存已经扣减；以任务过账状态 <code>POSTED</code> 和库存流水为准。</li>
+<li>取消、撤回或驳回涉及已冻结库存时，必须核对分配量已经释放；任务已开始或已有执行数量时，系统会阻止直接取消。</li>
+</ul>
+<hr/>
+<h2 id="section-19-异常处理与问题上报">异常处理与问题上报</h2>
+<h3 id="section-20-无法登录或菜单缺失">无法登录或菜单缺失</h3>
+<p>按“网络 → 入口 → 用户名和密码 → 账号启用状态 → 职员状态 → 角色范围 → 规范角色组 → 额外权限”的顺序检查。连续失败后停止尝试，由系统管理员查看账号和审计日志。</p>
+<h3 id="section-21-数据为空或范围不正确">数据为空或范围不正确</h3>
+<p>先清除筛选并刷新，再核对当前角色和货主/仓库范围。看到不属于本范围的数据时立即停止操作并上报，不得导出或转发。</p>
+<h3 id="section-22-网络超时或重复提交提示">网络超时或重复提交提示</h3>
+<p>不要连续点击。先回到列表按单号、任务号或平台单号查询；带幂等保护的操作可以使用同一请求重试，但不能改动内容后继续使用原请求标识。</p>
+<h3 id="section-23-库存-任务或账单不一致">库存、任务或账单不一致</h3>
+<p>保留页面截图和原始单号，按“业务单据 → 任务 → 扫描记录 → 过账状态 → 库存流水/计费来源”逐层核对。禁止通过删除记录或直接改汇总数掩盖差异。</p>
+<h3 id="section-24-问题上报模板">问题上报模板</h3>
+<ul>
+<li>上报人、角色、用户名：</li>
+<li>发生时间和系统入口：</li>
+<li>货主、仓库、客户：</li>
+<li>订单号、任务号、平台单号或账期：</li>
+<li>商品编码、批次、库位和数量：</li>
+<li>当前状态、期望结果和实际结果：</li>
+<li>完整错误提示：</li>
+<li>是否发生实物移动、收付款或打印：</li>
+<li>已执行的查询和重试：</li>
+<li>截图或导出文件：</li>
+</ul>
+<h2 id="section-25-日常自检与培训验收">日常自检与培训验收</h2>
+<ul>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能使用本人账号登录、修改密码并正确退出。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能说明本角色的数据范围和禁止事项。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能完成本手册列出的核心业务流程。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能识别会改变库存或业务状态的高风险按钮。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>遇到网络中断时会先查询原单，不重复建单。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能使用问题模板提交可追踪的异常信息。</li>
+</ul>
+<h2 id="section-26-专项手册与边界">专项手册与边界</h2>
+<ul>
+<li>POS 收银、退款、交班和 POS 对账参见 <code>docs/pos_user_manual.md</code>；只有取得相应 POS 权限的账号才能使用。</li>
+<li>面向终端客户的商城参见 <code>docs/sales-miniapp-user-guide.md</code>；商城买家不是本手册六类 WMS 后台角色。</li>
+<li>服务器部署、数据库备份恢复、域名证书、服务启停和版本回滚不属于普通用户手册。</li>
+<li>没有已注册页面、有效权限和可验证业务闭环的功能，不作为正式可用能力发布。</li>
+</ul>
+<h2 id="section-27-文档修订记录">文档修订记录</h2>
+<table>
+<thead>
+<tr>
+<th>版本</th>
+<th>日期</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>V2.0</td>
+<td>2026-08-04</td>
+<td>按当前代码、权限和客户端契约拆分角色手册并修订业务流程</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>

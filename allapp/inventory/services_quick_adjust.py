@@ -36,7 +36,10 @@ class QuickAdjustInput:
 
 @transaction.atomic
 def quick_adjust_via_post_task(data: QuickAdjustInput) -> dict:
-    if not data.qty_base_delta or Decimal(data.qty_base_delta) == 0:
+    if data.qty_base_delta is None:
+        raise ValueError("数量变动不能为 0")
+    qty_base_delta = Decimal(data.qty_base_delta)
+    if qty_base_delta == 0:
         raise ValueError("数量变动不能为 0")
 
     # 解析默认库位和仓库
@@ -77,7 +80,8 @@ def quick_adjust_via_post_task(data: QuickAdjustInput) -> dict:
         product=data.product,
         from_location=location,
         to_location=None,
-        qty_plan=Decimal(data.qty_base_delta),  # 使用 qty_plan 代替 qty_base
+        # 任务行计划量保持非负；调整方向仅由扫描的 signed delta 表达。
+        qty_plan=abs(qty_base_delta),
     )
 
     # 创建 TaskScanLog 实例（用于记录扫描日志）
@@ -93,7 +97,7 @@ def quick_adjust_via_post_task(data: QuickAdjustInput) -> dict:
         # 确保 fp 唯一：使用 UUID 或其他唯一标识
         fp=f"task-{task.id}-line-{task_line.id}",
         scan_snapshot_rev=1,  # 设置扫描快照版本号
-        qty_base_delta=Decimal(data.qty_base_delta),  # 确保数量传递
+        qty_base_delta=qty_base_delta,
     )
 
     # 设置 TaskScanLog 的审核状态为 "APPROVED"，表示已通过审核

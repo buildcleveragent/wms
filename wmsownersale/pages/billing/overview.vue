@@ -202,7 +202,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
-import { api } from '@/utils/request'
+import { api, fetchAllPages } from '@/utils/request'
 
 const CHARGE_TYPE_LABELS = {
   RECEIVE: '收货',
@@ -472,8 +472,8 @@ async function loadSelectedPeriodData() {
     const period = selectedPeriod.value
     const [previewRes, billsRes, accrualsRes] = await Promise.all([
       api.billingPeriodPreview(period.id),
-      api.billingBills({ period: period.id }),
-      api.billingAccruals(buildAccrualParams(period)),
+      api.billingBills({ period: period.id, page: 1, page_size: 1 }),
+      api.billingAccruals({ ...buildAccrualParams(period), page: 1, page_size: 10 }),
     ])
 
     preview.value = previewRes || null
@@ -492,7 +492,7 @@ async function loadSelectedPeriodData() {
 async function refreshAll() {
   loading.value = true
   try {
-    const list = asList(await api.billingPeriods())
+    const list = await fetchAllPages(api.billingPeriods)
     periods.value = list
 
     if (selectedOwnerId.value && !ownerPickerOptions.value.some((item) => String(item.id) === String(selectedOwnerId.value))) {

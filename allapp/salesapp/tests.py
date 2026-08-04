@@ -15,10 +15,10 @@ from django.db import close_old_connections, connection
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from PIL import Image
-from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
+from rest_framework.test import APIClient
 
 from allapp.baseinfo.models import Customer, Owner
-from allapp.inventory.models import InventoryDetail, InventorySummary
+from allapp.inventory.models import InventoryDetail
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.outbound import services as outbound_services
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
@@ -32,15 +32,10 @@ from allapp.products.models import (
 from allapp.tasking.models import WmsTask, WmsTaskLine
 
 from .models import (
-    Channel,
-    CustomerChannel,
     MiniCustomerAddress,
     MiniProgramUser,
-    PriceItem,
-    PriceList,
     Promotion,
     PromotionDiscountStep,
-    PromotionSpecialPrice,
     SaleMiniAfterSaleRequest,
     SaleMiniBanner,
     SaleMiniCart,
@@ -57,8 +52,6 @@ from .models import (
     SaleMiniProductReviewImage,
     SaleMiniRefund,
     SaleProductConfig,
-    SalesOrder,
-    SalesOrderLine,
 )
 from .services_salemini_adjustments import (
     confirm_adjustments,
@@ -67,213 +60,24 @@ from .services_salemini_adjustments import (
 )
 from .services_salemini_payments import get_or_create_full_refund
 from .salemini_api import _prepare_wechat_prepay
-from .views import ChannelViewSet, SalesOrderViewSet
 
 User = get_user_model()
-
-
-class SalesAdminViewSetContractTests(TestCase):
-    def setUp(self):
-        self.owner = Owner.objects.create(code="SVA", name="Sales ViewSet A")
-        self.other_owner = Owner.objects.create(code="SVB", name="Sales ViewSet B")
-        self.user = User.objects.create_user(
-            username="sales-viewset",
-            password="pw",
-            owner=self.owner,
-        )
-        self.other_user = User.objects.create_user(
-            username="sales-viewset-other",
-            password="pw",
-            owner=self.other_owner,
-        )
-        self.no_owner_user = User.objects.create_user(
-            username="sales-no-owner", password="pw"
-        )
-        self.superuser = User.objects.create_superuser(
-            username="sales-super",
-            email="sales-super@example.com",
-            password="pw",
-        )
-        self.customer = Customer.objects.create(
-            owner=self.owner,
-            salesperson=self.user,
-            code="SVA-CUS",
-            name="Sales ViewSet Customer",
-        )
-        self.channel = Channel.objects.create(
-            owner=self.owner, code="SVA-CH", name="Retail"
-        )
-        self.other_channel = Channel.objects.create(
-            owner=self.other_owner,
-            code="SVB-CH",
-            name="Other Retail",
-        )
-        self.factory = APIRequestFactory()
-
-    def _request(self, method, path, user, data=None):
-        request = getattr(self.factory, method)(path, data=data or {}, format="json")
-        force_authenticate(request, user=user)
-        return request
-
-    def _rows(self, response):
-        return (
-            response.data.get("results", response.data)
-            if isinstance(response.data, dict)
-            else response.data
-        )
-
-    def test_simple_viewset_scopes_list_create_and_superuser_access_by_owner(self):
-        list_view = ChannelViewSet.as_view({"get": "list"})
-        response = list_view(self._request("get", "/api/sales/channels/", self.user))
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual({row["code"] for row in self._rows(response)}, {"SVA-CH"})
-
-        response = list_view(
-            self._request("get", "/api/sales/channels/", self.no_owner_user)
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(self._rows(response), [])
-
-        response = list_view(
-            self._request("get", "/api/sales/channels/", self.superuser)
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            {row["code"] for row in self._rows(response)}, {"SVA-CH", "SVB-CH"}
-        )
-
-        create_view = ChannelViewSet.as_view({"post": "create"})
-        response = create_view(
-            self._request(
-                "post",
-                "/api/sales/channels/",
-                self.user,
-                {
-                    "code": "SVA-NEW",
-                    "name": "New Channel",
-                    "owner": self.other_owner.id,
-                },
-            )
-        )
-        self.assertEqual(response.status_code, 201, response.data)
-        created = Channel.objects.get(code="SVA-NEW")
-        self.assertEqual(created.owner_id, self.owner.id)
-
-    def test_sales_order_actions_move_statuses_through_review_flow(self):
-        order = SalesOrder.objects.create(
-            owner=self.owner,
-            customer=self.customer,
-            order_date=date.today(),
-            status=SalesOrder.Status.DRAFT,
-        )
-
-        submit_view = SalesOrderViewSet.as_view({"post": "submit"})
-        response = submit_view(
-            self._request(
-                "post", f"/api/sales/sales-orders/{order.id}/submit/", self.user
-            ),
-            pk=order.id,
-        )
-        order.refresh_from_db()
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(order.status, SalesOrder.Status.SUBMITTED)
-
-        approve_view = SalesOrderViewSet.as_view({"post": "approve"})
-        with patch(
-            "allapp.salesapp.views.apply_promotions_for_order", return_value=None
-        ):
-            response = approve_view(
-                self._request(
-                    "post", f"/api/sales/sales-orders/{order.id}/approve/", self.user
-                ),
-                pk=order.id,
-            )
-        order.refresh_from_db()
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(order.status, SalesOrder.Status.APPROVED)
-
-        reject_view = SalesOrderViewSet.as_view({"post": "reject"})
-        response = reject_view(
-            self._request(
-                "post", f"/api/sales/sales-orders/{order.id}/reject/", self.user
-            ),
-            pk=order.id,
-        )
-        order.refresh_from_db()
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(order.status, SalesOrder.Status.REJECTED)
-
-    def test_sales_order_batch_actions_only_touch_scoped_orders(self):
-        own_submitted = SalesOrder.objects.create(
-            owner=self.owner,
-            customer=self.customer,
-            order_date=date.today(),
-            status=SalesOrder.Status.SUBMITTED,
-        )
-        own_rejected = SalesOrder.objects.create(
-            owner=self.owner,
-            customer=self.customer,
-            order_date=date.today(),
-            status=SalesOrder.Status.REJECTED,
-        )
-        other_customer = Customer.objects.create(
-            owner=self.other_owner,
-            salesperson=self.other_user,
-            code="SVB-CUS",
-            name="Other Customer",
-        )
-        other_order = SalesOrder.objects.create(
-            owner=self.other_owner,
-            customer=other_customer,
-            order_date=date.today(),
-            status=SalesOrder.Status.SUBMITTED,
-        )
-
-        batch_approve = SalesOrderViewSet.as_view({"post": "batch_approve"})
-        with patch(
-            "allapp.salesapp.views.apply_promotions_for_order", return_value=None
-        ):
-            response = batch_approve(
-                self._request(
-                    "post",
-                    "/api/sales/sales-orders/batch_approve/",
-                    self.user,
-                    {"ids": [own_submitted.id, own_rejected.id, other_order.id]},
-                )
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            set(response.data["approved"]), {own_submitted.id, own_rejected.id}
-        )
-        other_order.refresh_from_db()
-        self.assertEqual(other_order.status, SalesOrder.Status.SUBMITTED)
-
-        batch_reject = SalesOrderViewSet.as_view({"post": "batch_reject"})
-        response = batch_reject(
-            self._request(
-                "post",
-                "/api/sales/sales-orders/batch_reject/",
-                self.user,
-                {"ids": [own_submitted.id, own_rejected.id, other_order.id]},
-            )
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            set(response.data["rejected"]), {own_submitted.id, own_rejected.id}
-        )
 
 
 class SaleMiniCatalogBootstrapCommandTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(code="SMBC", name="Sale Mini Bootstrap")
         self.uom = ProductUom.objects.create(code="SMBC-EA", name="件")
+        self.category = ProductCategory.objects.create(
+            code="SMBC-CAT",
+            name="Bootstrap Category",
+        )
         self.product = Product.objects.create(
             owner=self.owner,
             code="SMBC-P1",
             sku="SMBC-P1",
             name="Bootstrap Product",
+            category=self.category,
             base_uom=self.uom,
             price=Decimal("6.50"),
             is_active=True,
@@ -312,299 +116,6 @@ class SaleMiniCatalogBootstrapCommandTests(TestCase):
         self.assertEqual(config.sale_price, Decimal("6.50"))
         self.assertTrue(config.is_listed)
         self.assertIn("created=1 listed=true", out.getvalue())
-
-
-class SalesMobileApiTests(TestCase):
-    def setUp(self):
-        self.owner = Owner.objects.create(code="SMA", name="Sales Mobile A")
-        self.other_owner = Owner.objects.create(code="SMB", name="Sales Mobile B")
-        self.user = User.objects.create_user(
-            username="seller", password="pw", owner=self.owner
-        )
-        self.other_user = User.objects.create_user(
-            username="other", password="pw", owner=self.other_owner
-        )
-        self.customer = Customer.objects.create(
-            owner=self.owner,
-            salesperson=self.user,
-            code="C001",
-            name="第一终端",
-        )
-        self.uom = ProductUom.objects.create(code="EA", name="件")
-        self.product = Product.objects.create(
-            owner=self.owner,
-            code="P001",
-            sku="P001",
-            name="测试商品",
-            base_uom=self.uom,
-            price=Decimal("12.50"),
-            expiry_control=False,
-            is_active=True,
-        )
-        self.other_product = Product.objects.create(
-            owner=self.other_owner,
-            code="P999",
-            sku="P999",
-            name="其他货主商品",
-            base_uom=self.uom,
-            price=Decimal("99.00"),
-            expiry_control=False,
-            is_active=True,
-        )
-        InventorySummary.objects.create(
-            owner=self.owner,
-            product=self.product,
-            base_unit="EA",
-            onhand_qty=Decimal("10.0000"),
-            allocated_qty=Decimal("0.0000"),
-            locked_qty=Decimal("0.0000"),
-            damaged_qty=Decimal("0.0000"),
-            available_qty=Decimal("10.0000"),
-            is_active=True,
-        )
-        InventorySummary.objects.create(
-            owner=self.other_owner,
-            product=self.other_product,
-            base_unit="EA",
-            onhand_qty=Decimal("8.0000"),
-            allocated_qty=Decimal("0.0000"),
-            locked_qty=Decimal("0.0000"),
-            damaged_qty=Decimal("0.0000"),
-            available_qty=Decimal("8.0000"),
-            is_active=True,
-        )
-        self.client = APIClient()
-        self.client.force_authenticate(self.user)
-
-    def test_catalog_is_owner_scoped_and_returns_server_price_and_stock(self):
-        response = self.client.get(
-            "/api/sales/mobile/catalog/",
-            {"customer_id": self.customer.id, "search": "P"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        rows = response.data["results"]
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["id"], self.product.id)
-        self.assertEqual(rows[0]["unit_price"], "12.5000")
-        self.assertEqual(rows[0]["available_qty"], "10.000")
-
-    def test_catalog_prices_package_uom_from_base_unit_price(self):
-        carton = ProductUom.objects.create(code="CTN", name="箱")
-        ProductPackage.objects.create(
-            product=self.product,
-            uom=carton,
-            qty_in_base=12,
-            is_sales_default=True,
-        )
-
-        response = self.client.get(
-            "/api/sales/mobile/catalog/",
-            {"customer_id": self.customer.id, "search": "P001"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        product = response.data["results"][0]
-        self.assertEqual(product["order_uom"], "CTN")
-        self.assertEqual(product["qty_in_base"], "12.000")
-        self.assertEqual(product["unit_price"], "150.0000")
-
-    def test_create_order_reprices_package_uom_from_base_unit_price(self):
-        carton = ProductUom.objects.create(code="CTN", name="箱")
-        ProductPackage.objects.create(
-            product=self.product,
-            uom=carton,
-            qty_in_base=12,
-            is_sales_default=True,
-        )
-
-        response = self.client.post(
-            "/api/sales/mobile/orders/",
-            {
-                "customer_id": self.customer.id,
-                "submit": True,
-                "lines": [
-                    {
-                        "product_id": self.product.id,
-                        "qty": "1.000",
-                        "order_uom": "CTN",
-                    }
-                ],
-            },
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("stock", response.data)
-
-        InventorySummary.objects.filter(owner=self.owner, product=self.product).update(
-            onhand_qty=Decimal("20.0000"),
-            available_qty=Decimal("20.0000"),
-        )
-        response = self.client.post(
-            "/api/sales/mobile/orders/",
-            {
-                "customer_id": self.customer.id,
-                "submit": True,
-                "lines": [
-                    {
-                        "product_id": self.product.id,
-                        "qty": "1.000",
-                        "order_uom": "CTN",
-                    }
-                ],
-            },
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data["total_amount"], "150.00")
-        self.assertEqual(response.data["lines"][0]["unit_price"], "150.0000")
-
-    def test_catalog_ignores_channel_price_when_customer_has_no_channel(self):
-        channel = Channel.objects.create(owner=self.owner, code="KA", name="KA")
-        price_list = PriceList.objects.create(
-            owner=self.owner,
-            code="KA-ONLY",
-            name="KA 专属价",
-            channel=channel,
-            effective_from=date(2020, 1, 1),
-            is_default=False,
-        )
-        PriceItem.objects.create(
-            owner=self.owner,
-            price_list=price_list,
-            product=self.product,
-            price=Decimal("5.0000"),
-        )
-
-        response = self.client.get(
-            "/api/sales/mobile/catalog/",
-            {"customer_id": self.customer.id, "search": "P001"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["results"][0]["unit_price"], "12.5000")
-
-    def test_catalog_uses_channel_pricelist_before_default_pricelist(self):
-        channel = Channel.objects.create(owner=self.owner, code="RT", name="零售")
-        CustomerChannel.objects.create(
-            owner=self.owner, customer=self.customer, channel=channel
-        )
-        default_list = PriceList.objects.create(
-            owner=self.owner,
-            code="DEFAULT",
-            name="通用默认价",
-            effective_from=date(2020, 1, 1),
-            is_default=True,
-        )
-        channel_list = PriceList.objects.create(
-            owner=self.owner,
-            code="RT",
-            name="零售渠道价",
-            channel=channel,
-            effective_from=date(2020, 1, 1),
-            is_default=False,
-        )
-        PriceItem.objects.create(
-            owner=self.owner,
-            price_list=default_list,
-            product=self.product,
-            price=Decimal("30.0000"),
-        )
-        PriceItem.objects.create(
-            owner=self.owner,
-            price_list=channel_list,
-            product=self.product,
-            price=Decimal("20.0000"),
-        )
-
-        response = self.client.get(
-            "/api/sales/mobile/catalog/",
-            {"customer_id": self.customer.id, "search": "P001"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["results"][0]["unit_price"], "20.0000")
-
-    def test_catalog_ignores_promotion_special_price_for_other_customer(self):
-        other_customer = Customer.objects.create(
-            owner=self.owner,
-            salesperson=self.user,
-            code="C002",
-            name="第二终端",
-        )
-        promotion = Promotion.objects.create(
-            owner=self.owner,
-            code="C002-SP",
-            name="第二终端特价",
-            promo_type=Promotion.PromoType.SPECIAL_PRICE,
-            customer=other_customer,
-            effective_from=date(2020, 1, 1),
-        )
-        PromotionSpecialPrice.objects.create(
-            owner=self.owner,
-            promotion=promotion,
-            product=self.product,
-            special_price=Decimal("1.0000"),
-        )
-
-        response = self.client.get(
-            "/api/sales/mobile/catalog/",
-            {"customer_id": self.customer.id, "search": "P001"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["results"][0]["unit_price"], "12.5000")
-
-    def test_create_order_calculates_amount_from_server_price(self):
-        response = self.client.post(
-            "/api/sales/mobile/orders/",
-            {
-                "customer_id": self.customer.id,
-                "submit": True,
-                "lines": [
-                    {
-                        "product_id": self.product.id,
-                        "qty": "2.000",
-                        "order_uom": "EA",
-                    }
-                ],
-            },
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data["status"], SalesOrder.Status.SUBMITTED)
-        self.assertEqual(response.data["total_amount"], "25.00")
-
-        order = SalesOrder.objects.get(id=response.data["id"])
-        line = SalesOrderLine.objects.get(order=order)
-        self.assertEqual(order.owner, self.owner)
-        self.assertEqual(order.customer, self.customer)
-        self.assertEqual(order.total_amount, Decimal("25.00"))
-        self.assertEqual(line.unit_price, Decimal("12.5000"))
-        self.assertEqual(line.line_amount, Decimal("25.00"))
-
-    def test_create_order_rejects_insufficient_stock(self):
-        response = self.client.post(
-            "/api/sales/mobile/orders/",
-            {
-                "customer_id": self.customer.id,
-                "lines": [
-                    {
-                        "product_id": self.product.id,
-                        "qty": "11.000",
-                        "order_uom": "EA",
-                    }
-                ],
-            },
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("stock", response.data)
-        self.assertFalse(SalesOrder.objects.exists())
 
 
 @override_settings(

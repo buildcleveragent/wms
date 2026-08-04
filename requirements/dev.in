@@ -1,5 +1,6 @@
 # dev.in
 -r requirements.in
+-c requirements.txt
 
 # 交互调试
 ipython
@@ -17,4 +18,3 @@ ruff
 
 # Git hooks
 pre-commit
-

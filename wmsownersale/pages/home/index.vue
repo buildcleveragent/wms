@@ -10,40 +10,63 @@
 		</view> -->
 	
 		<view class="card">
-<!-- 		<view class="font-bold" style="margin-bottom:8rpx">快捷入口</view> -->
-		
-		<view class="row" style="gap:16rpx">
-			<button class="btn" @click="goto('/pages/customers/select')">开单</button>
-			<button v-if="auth.isOwnerManager" class="btn-outline" @click="goto('/pages/approval/index')">审核</button>
-			<button class="btn-outline" @click="goto('/pages/orders/index')">查询</button>
-			<button class="btn-outline" @click="goto('/pages/orders/import_drop_ship')">批量导入一件代发</button>			
-			<button class="btn-outline" @click="downloadDropShipTemplate()">下载一件代发模板</button>					
+		<view v-if="quickItems.length" class="quick-grid">
+			<button
+				v-for="item in quickItems"
+				:key="item.key"
+				:class="item.key === 'order_create' ? 'btn' : 'btn-outline'"
+				@click="openItem(item)"
+			>{{ item.text }}</button>
 		</view>
-		
-
+		<view v-else class="empty-access">当前账号没有货主端功能权限</view>
 		</view>
 	</view>
 </template>
 
 <script setup>
-	import { BASE_URL } from '@/utils/request.js'
+	import { computed } from 'vue'
+	import { downloadAuthenticatedFile } from '@/utils/request.js'
 	import { useAuth } from '@/store/auth'
+	import { buildOwnerMenu } from '@/utils/ownerAccess'
 
 	const auth = useAuth()
 	auth.ensureAuth()
 	
-	function goto(url){ uni.navigateTo({ url }) }
+	const menu = computed(() => buildOwnerMenu({
+		roles: auth.roles,
+		capabilities: auth.capabilities,
+	}))
+	const quickItems = computed(() => [
+		...menu.value.orders,
+		...menu.value.reports,
+		...menu.value.administration,
+	])
+
+	function navigationFailed() {
+		uni.showToast({ title: '页面暂时无法打开，请稍后重试', icon: 'none' })
+	}
+
+	function openItem(item) {
+		if (item.action === 'download_template') return downloadDropShipTemplate()
+		const options = { url: item.path, fail: navigationFailed }
+		if (item.navigation === 'tab') return uni.switchTab(options)
+		return uni.navigateTo(options)
+	}
 	
-	function downloadDropShipTemplate() {
-	  const url = `${BASE_URL}/api/outbound/orders/import-drop-ship-template/`
-	
-	  if (typeof window !== 'undefined') {
-	    window.open(url, '_blank')
-	    return
+	async function downloadDropShipTemplate() {
+	  try {
+	    await downloadAuthenticatedFile(
+	      '/api/outbound/orders/import-drop-ship-template/',
+	      '一件代发导入模板.xlsx',
+	    )
+	  } catch (error) {
+	    uni.showToast({ title: error?.message || '模板下载失败', icon: 'none' })
 	  }
-	
-	  // #ifdef APP-PLUS
-	  plus.runtime.openURL(url)
-	  // #endif
 	}
 </script>
+
+<style scoped>
+.quick-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16rpx; }
+.quick-grid button { width: 100%; margin: 0; }
+.empty-access { padding: 32rpx 0; color: #6b7280; text-align: center; }
+</style>

@@ -23,8 +23,8 @@
 import { ref } from 'vue'
 import { useAuth } from '@/store/auth'
 
-const username = ref('ay1')
-const password = ref('qwezxc123')
+const username = ref('')
+const password = ref('')
 const showPassword = ref(false)
 
 const auth = useAuth()

@@ -5,8 +5,22 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Iterable
 
-from django.db.models import Count, F, Q, Sum
-from django.db.models.functions import Abs, Coalesce, TruncDate
+from django.db.models import (
+    BigIntegerField,
+    Case,
+    CharField,
+    Count,
+    DateTimeField,
+    DecimalField,
+    F,
+    OuterRef,
+    Q,
+    Subquery,
+    Sum,
+    Value,
+    When,
+)
+from django.db.models.functions import Abs, Cast, Coalesce, Collate, TruncDate
 from django.utils import timezone
 
 from allapp.accounts.access import AccessScope
@@ -55,7 +69,9 @@ class OperationFilters:
         if self.direction not in VALID_DIRECTIONS:
             raise ValueError("direction must be inbound, outbound or all.")
         if self.metric_basis not in VALID_BASES:
-            raise ValueError("metric_basis must be actual, plan, inventory or shipment.")
+            raise ValueError(
+                "metric_basis must be actual, plan, inventory or shipment."
+            )
         if self.exception_type not in VALID_EXCEPTIONS:
             raise ValueError("exception_type must be overdue, shortage or difference.")
         if self.end_date < self.start_date:
@@ -63,7 +79,9 @@ class OperationFilters:
         if self.end_date - self.start_date > timedelta(days=366):
             raise ValueError("The maximum date range is 367 days.")
         if self.metric_basis == "shipment" and self.direction != "outbound":
-            raise ValueError("shipment basis is only available with direction=outbound.")
+            raise ValueError(
+                "shipment basis is only available with direction=outbound."
+            )
 
 
 def _decimal_text(value) -> str:
@@ -84,7 +102,9 @@ def _scope_filter(scope: AccessScope, qs, owner_field: str, warehouse_field: str
     )
 
 
-def _apply_requested_scope(scope: AccessScope, qs, filters, owner_field, warehouse_field):
+def _apply_requested_scope(
+    scope: AccessScope, qs, filters, owner_field, warehouse_field
+):
     qs = _scope_filter(scope, qs, owner_field, warehouse_field)
     if filters.owner_id:
         # Owner-bound roles must stay on their explicit owner. Warehouse-bound
@@ -279,7 +299,8 @@ def _inventory_transactions(
         # Stock transactions are posted facts; workflow exceptions are represented by tasks.
         if filters.exception_type == "overdue":
             overdue_ids = tasks.filter(
-                planned_end__lt=timezone.now(), status__in=["DRAFT", "READY", "RELEASED", "IN_PROGRESS"]
+                planned_end__lt=timezone.now(),
+                status__in=["DRAFT", "READY", "RELEASED", "IN_PROGRESS"],
             ).values_list("id", flat=True)
             qs = qs.filter(src_model__iexact="WmsTask", src_id__in=overdue_ids)
         else:
@@ -317,7 +338,9 @@ def _actual_basis(direction: str, requested: str) -> str:
     return "inventory" if direction == "inbound" else "shipment"
 
 
-def _summary_for(direction: str, filters: OperationFilters, scope: AccessScope, user) -> dict:
+def _summary_for(
+    direction: str, filters: OperationFilters, scope: AccessScope, user
+) -> dict:
     basis = _actual_basis(direction, filters.metric_basis)
     if basis == "plan":
         qs = _plan_lines(direction, filters, scope, user)
@@ -328,7 +351,9 @@ def _summary_for(direction: str, filters: OperationFilters, scope: AccessScope, 
         )
     elif basis == "inventory":
         qs = _inventory_transactions(direction, filters, scope, user)
-        values = qs.aggregate(lines=Count("id"), qty=Coalesce(Sum(Abs("qty_delta")), ZERO))
+        values = qs.aggregate(
+            lines=Count("id"), qty=Coalesce(Sum(Abs("qty_delta")), ZERO)
+        )
         task_ids = set(
             qs.filter(src_model__iexact="WmsTask").values_list("src_id", flat=True)
         )
@@ -336,9 +361,11 @@ def _summary_for(direction: str, filters: OperationFilters, scope: AccessScope, 
             "id", "source_model", "source_pk"
         )
         task_keys = {
-            (row["source_model"], row["source_pk"])
-            if row["source_pk"]
-            else ("WmsTask", str(row["id"]))
+            (
+                (row["source_model"], row["source_pk"])
+                if row["source_pk"]
+                else ("WmsTask", str(row["id"]))
+            )
             for row in tasks
         }
         direct_keys = set(
@@ -400,7 +427,9 @@ def _trend_for(
 def build_operations_summary(*, user, filters: OperationFilters) -> dict:
     filters.validate()
     scope = AccessScope.for_user(user)
-    directions = ["inbound", "outbound"] if filters.direction == "all" else [filters.direction]
+    directions = (
+        ["inbound", "outbound"] if filters.direction == "all" else [filters.direction]
+    )
     summaries = {
         direction: _summary_for(direction, filters, scope, user)
         for direction in directions
@@ -414,7 +443,9 @@ def build_operations_summary(*, user, filters: OperationFilters) -> dict:
     while current <= filters.end_date:
         row = {"date": current.isoformat()}
         for direction in directions:
-            row[f"{direction}_qty"] = _decimal_text(trends[direction].get(current, ZERO))
+            row[f"{direction}_qty"] = _decimal_text(
+                trends[direction].get(current, ZERO)
+            )
         rows.append(row)
         current += timedelta(days=1)
     scope_payload = scope.as_dict()
@@ -425,7 +456,10 @@ def build_operations_summary(*, user, filters: OperationFilters) -> dict:
         "metric_basis": filters.metric_basis,
         "data_as_of": timezone.now().isoformat(),
         "scope": scope_payload,
-        "range": {"start": filters.start_date.isoformat(), "end": filters.end_date.isoformat()},
+        "range": {
+            "start": filters.start_date.isoformat(),
+            "end": filters.end_date.isoformat(),
+        },
         "summary": summaries,
         "trend": rows,
     }
@@ -453,24 +487,37 @@ def _plan_row(direction: str, line, basis: str) -> dict:
         },
         "lot_no": line.lot_no or "",
         "status": order.approval_status,
-        "operator": getattr(order.created_by, "username", "") if order.created_by_id else "",
+        "operator": (
+            getattr(order.created_by, "username", "") if order.created_by_id else ""
+        ),
         "planned_qty": _decimal_text(line.base_qty),
         "actual_qty": "0",
-        "exception_type": "overdue" if (
-            getattr(order, "eta" if direction == "inbound" else "etd", None)
-            and getattr(order, "eta" if direction == "inbound" else "etd").date() < _today()
-            and not order.is_closed
-        ) else "",
+        "exception_type": (
+            "overdue"
+            if (
+                getattr(order, "eta" if direction == "inbound" else "etd", None)
+                and getattr(order, "eta" if direction == "inbound" else "etd").date()
+                < _today()
+                and not order.is_closed
+            )
+            else ""
+        ),
     }
 
 
-def _task_map_for_transactions(transactions: Iterable[InventoryTransaction]) -> dict[int, WmsTask]:
+def _task_map_for_transactions(
+    transactions: Iterable[InventoryTransaction],
+) -> dict[int, WmsTask]:
     task_ids = {
-        tx.src_id for tx in transactions if (tx.src_model or "").lower() == "wmstask" and tx.src_id
+        tx.src_id
+        for tx in transactions
+        if (tx.src_model or "").lower() == "wmstask" and tx.src_id
     }
     return {
         task.id: task
-        for task in WmsTask.objects.select_related("created_by", "picked_by", "posted_by").filter(id__in=task_ids)
+        for task in WmsTask.objects.select_related(
+            "created_by", "picked_by", "posted_by"
+        ).filter(id__in=task_ids)
     }
 
 
@@ -486,8 +533,14 @@ def _inventory_rows(direction: str, qs, basis: str) -> list[dict]:
                 "direction": direction,
                 "metric_basis": basis,
                 "event_at": tx.posted_at.isoformat() if tx.posted_at else None,
-                "order_id": int(task.source_pk) if task and str(task.source_pk).isdigit() else None,
-                "order_no": (task.ref_no or tx.src_no or task.task_no) if task else tx.src_no,
+                "order_id": (
+                    int(task.source_pk)
+                    if task and str(task.source_pk).isdigit()
+                    else None
+                ),
+                "order_no": (
+                    (task.ref_no or tx.src_no or task.task_no) if task else tx.src_no
+                ),
                 "source_no": tx.src_no or "",
                 "task_id": task.id if task else None,
                 "task_no": task.task_no if task else "",
@@ -542,7 +595,9 @@ def _shipment_row(line, basis: str) -> dict:
         },
         "lot_no": (line.plan_meta or {}).get("lot_no", ""),
         "status": task.status,
-        "operator": getattr(line.finished_by, "username", "") if line.finished_by_id else "",
+        "operator": (
+            getattr(line.finished_by, "username", "") if line.finished_by_id else ""
+        ),
         "planned_qty": _decimal_text(line.qty_plan),
         "actual_qty": _decimal_text(line.qty_done),
         "exception_type": "shortage" if line.qty_done < line.qty_plan else "",
@@ -552,7 +607,9 @@ def _shipment_row(line, basis: str) -> dict:
 def build_operations_detail_rows(*, user, filters: OperationFilters) -> list[dict]:
     filters.validate()
     scope = AccessScope.for_user(user)
-    directions = ["inbound", "outbound"] if filters.direction == "all" else [filters.direction]
+    directions = (
+        ["inbound", "outbound"] if filters.direction == "all" else [filters.direction]
+    )
     rows: list[dict] = []
     for direction in directions:
         basis = _actual_basis(direction, filters.metric_basis)
@@ -584,3 +641,311 @@ def build_operations_detail_rows(*, user, filters: OperationFilters) -> list[dic
         reverse=True,
     )
     return rows
+
+
+_DETAIL_VALUE_FIELDS = (
+    "_detail_kind",
+    "_detail_pk",
+    "_direction",
+    "_metric_basis",
+    "_event_at",
+    "_order_pk",
+    "_sort_order_id",
+    "_order_no",
+    "_source_no",
+    "_task_id",
+    "_task_no",
+    "_owner_id",
+    "_owner_name",
+    "_warehouse_id",
+    "_warehouse_name",
+    "_product_id",
+    "_product_code",
+    "_product_sku",
+    "_product_name",
+    "_location_id",
+    "_location_code",
+    "_location_name",
+    "_base_uom",
+    "_lot_no",
+    "_status",
+    "_operator",
+    "_planned_qty",
+    "_actual_qty",
+    "_exception_type",
+)
+
+
+def _text(value=""):
+    return _string(Value(value, output_field=CharField()))
+
+
+def _string(expression):
+    """Normalize all UNION text columns to one explicit MySQL collation."""
+
+    return Collate(Cast(expression, CharField()), "utf8mb4_unicode_ci")
+
+
+def _integer(value=0):
+    return Value(value, output_field=BigIntegerField())
+
+
+def _quantity(value=ZERO):
+    return Value(value, output_field=DecimalField(max_digits=24, decimal_places=4))
+
+
+def _plan_detail_branch(direction, basis, filters, scope, user):
+    deadline = "order__eta" if direction == "inbound" else "order__etd"
+    return (
+        _plan_lines(direction, filters, scope, user)
+        .order_by()
+        .annotate(
+            _detail_kind=_text(f"plan:{direction}"),
+            _detail_pk=F("id"),
+            _direction=_text(direction),
+            _metric_basis=_text(basis),
+            _event_at=Cast("order__biz_date", DateTimeField()),
+            _order_pk=_string("order_id"),
+            _sort_order_id=F("order_id"),
+            _order_no=_string("order__order_no"),
+            _source_no=_string(Coalesce("order__src_bill_no", _text())),
+            _task_id=_integer(),
+            _task_no=_text(),
+            _owner_id=F("order__owner_id"),
+            _owner_name=_string("order__owner__name"),
+            _warehouse_id=F("order__warehouse_id"),
+            _warehouse_name=_string("order__warehouse__name"),
+            _product_id=F("product_id"),
+            _product_code=_string("product__code"),
+            _product_sku=_string(Coalesce("product__sku", _text())),
+            _product_name=_string("product__name"),
+            _location_id=_integer(),
+            _location_code=_text(),
+            _location_name=_text(),
+            _base_uom=_text(),
+            _lot_no=_string(Coalesce("lot_no", _text())),
+            _status=_string("order__approval_status"),
+            _operator=_string(Coalesce("order__created_by__username", _text())),
+            _planned_qty=F("base_qty"),
+            _actual_qty=_quantity(),
+            _exception_type=_string(
+                Case(
+                    When(
+                        **{
+                            f"{deadline}__date__lt": _today(),
+                            "order__is_closed": False,
+                        },
+                        then=_text("overdue"),
+                    ),
+                    default=_text(),
+                    output_field=CharField(),
+                ),
+            ),
+        )
+        .values(*_DETAIL_VALUE_FIELDS)
+    )
+
+
+def _inventory_detail_branch(direction, basis, filters, scope, user):
+    task_rows = WmsTask.objects.filter(pk=OuterRef("src_id"))
+    task_source_pk = task_rows.values("source_pk")[:1]
+    task_id = task_rows.values("id")[:1]
+    return (
+        _inventory_transactions(direction, filters, scope, user)
+        .order_by()
+        .annotate(
+            _detail_kind=_text("inventory"),
+            _detail_pk=F("id"),
+            _direction=_text(direction),
+            _metric_basis=_text(basis),
+            _event_at=F("posted_at"),
+            _order_pk=_string(Coalesce(Subquery(task_source_pk), _text())),
+            _sort_order_id=Cast(
+                Coalesce(Subquery(task_source_pk), _text("0")),
+                BigIntegerField(),
+            ),
+            _order_no=_string(
+                Coalesce(
+                    Subquery(task_rows.values("ref_no")[:1]),
+                    "src_no",
+                    _text(),
+                )
+            ),
+            _source_no=_string(Coalesce("src_no", _text())),
+            _task_id=Coalesce(Subquery(task_id), _integer()),
+            _task_no=_string(
+                Coalesce(Subquery(task_rows.values("task_no")[:1]), _text())
+            ),
+            _owner_id=F("owner_id"),
+            _owner_name=_string("owner__name"),
+            _warehouse_id=F("warehouse_id"),
+            _warehouse_name=_string("warehouse__name"),
+            _product_id=F("product_id"),
+            _product_code=_string("product__code"),
+            _product_sku=_string(Coalesce("product__sku", _text())),
+            _product_name=_string("product__name"),
+            _location_id=F("location_id"),
+            _location_code=_string(Coalesce("location__code", _text())),
+            _location_name=_string(Coalesce("location__name", _text())),
+            _base_uom=_string(Coalesce("product__base_uom__code", _text())),
+            _lot_no=_string(Coalesce("batch_no", _text())),
+            _status=_string(
+                Coalesce(Subquery(task_rows.values("status")[:1]), _text("POSTED"))
+            ),
+            _operator=_string(
+                Coalesce(
+                    Subquery(task_rows.values("posted_by__username")[:1]),
+                    _text(),
+                )
+            ),
+            _planned_qty=_quantity(),
+            _actual_qty=Abs("qty_delta"),
+            _exception_type=_text(),
+        )
+        .values(*_DETAIL_VALUE_FIELDS)
+    )
+
+
+def _shipment_detail_branch(basis, filters, scope, user):
+    return (
+        _shipment_lines(filters, scope, user)
+        .order_by()
+        .annotate(
+            _detail_kind=_text("shipment"),
+            _detail_pk=F("id"),
+            _direction=_text("outbound"),
+            _metric_basis=_text(basis),
+            _event_at=F("task__finished_at"),
+            _order_pk=_string("task__source_pk"),
+            _sort_order_id=Cast("task__source_pk", BigIntegerField()),
+            _order_no=_string(Coalesce("task__ref_no", _text())),
+            _source_no=_text(),
+            _task_id=F("task_id"),
+            _task_no=_string("task__task_no"),
+            _owner_id=F("task__owner_id"),
+            _owner_name=_string("task__owner__name"),
+            _warehouse_id=F("task__warehouse_id"),
+            _warehouse_name=_string("task__warehouse__name"),
+            _product_id=F("product_id"),
+            _product_code=_string("product__code"),
+            _product_sku=_string(Coalesce("product__sku", _text())),
+            _product_name=_string("product__name"),
+            _location_id=_integer(),
+            _location_code=_text(),
+            _location_name=_text(),
+            _base_uom=_text(),
+            _lot_no=_string(
+                Coalesce(
+                    Cast("plan_meta__lot_no", CharField()),
+                    _text(),
+                    output_field=CharField(),
+                )
+            ),
+            _status=_string("task__status"),
+            _operator=_string(Coalesce("finished_by__username", _text())),
+            _planned_qty=F("qty_plan"),
+            _actual_qty=F("qty_done"),
+            _exception_type=_string(
+                Case(
+                    When(qty_done__lt=F("qty_plan"), then=_text("shortage")),
+                    default=_text(),
+                    output_field=CharField(),
+                )
+            ),
+        )
+        .values(*_DETAIL_VALUE_FIELDS)
+    )
+
+
+def operations_detail_queryset(*, user, filters: OperationFilters):
+    """Return normalized operations facts as one lazy UNION ALL queryset."""
+
+    filters.validate()
+    scope = AccessScope.for_user(user)
+    directions = (
+        ["inbound", "outbound"] if filters.direction == "all" else [filters.direction]
+    )
+    branches = []
+    for direction in directions:
+        basis = _actual_basis(direction, filters.metric_basis)
+        if basis == "plan":
+            branches.append(_plan_detail_branch(direction, basis, filters, scope, user))
+        elif basis == "inventory":
+            branches.append(
+                _inventory_detail_branch(direction, basis, filters, scope, user)
+            )
+        elif basis == "shipment" and direction == "outbound":
+            branches.append(_shipment_detail_branch(basis, filters, scope, user))
+    if not branches:
+        return None
+    combined = branches[0]
+    for branch in branches[1:]:
+        combined = combined.union(branch, all=True)
+    return combined.order_by(
+        "-_event_at", "-_task_id", "-_sort_order_id", "-_detail_pk"
+    )
+
+
+def _database_detail_row(row):
+    order_pk = row["_order_pk"] or ""
+    order_id = int(order_pk) if str(order_pk).isdigit() else None
+    task_id = int(row["_task_id"] or 0) or None
+    event_at = row["_event_at"]
+    payload = {
+        "detail_id": f'{row["_detail_kind"]}:{row["_detail_pk"]}',
+        "direction": row["_direction"],
+        "metric_basis": row["_metric_basis"],
+        "event_at": event_at.isoformat() if event_at else None,
+        "order_id": order_id,
+        "order_no": row["_order_no"] or "",
+        "source_no": row["_source_no"] or "",
+        "task_id": task_id,
+        "task_no": row["_task_no"] or "",
+        "owner": {"id": row["_owner_id"], "name": row["_owner_name"]},
+        "warehouse": {"id": row["_warehouse_id"], "name": row["_warehouse_name"]},
+        "product": {
+            "id": row["_product_id"],
+            "code": row["_product_code"] or "",
+            "sku": row["_product_sku"] or "",
+            "name": row["_product_name"] or "",
+        },
+        "lot_no": row["_lot_no"] or "",
+        "status": row["_status"] or "",
+        "operator": row["_operator"] or "",
+        "planned_qty": _decimal_text(row["_planned_qty"]),
+        "actual_qty": _decimal_text(row["_actual_qty"]),
+        "exception_type": row["_exception_type"] or "",
+    }
+    if row["_location_id"]:
+        payload["location"] = {
+            "id": row["_location_id"],
+            "code": row["_location_code"] or "",
+            "name": row["_location_name"] or "",
+        }
+    if row["_base_uom"]:
+        payload["base_uom"] = row["_base_uom"]
+    return payload
+
+
+def paginate_operations_details(*, user, filters, page, page_size):
+    queryset = operations_detail_queryset(user=user, filters=filters)
+    if queryset is None:
+        return 0, []
+    count = queryset.count()
+    start = (page - 1) * page_size
+    rows = [_database_detail_row(row) for row in queryset[start : start + page_size]]
+    return count, rows
+
+
+def iter_operations_details(*, user, filters, chunk_size=1000):
+    queryset = operations_detail_queryset(user=user, filters=filters)
+    if queryset is None:
+        return iter(())
+    return (
+        _database_detail_row(row) for row in queryset.iterator(chunk_size=chunk_size)
+    )
+
+
+def count_operations_details(*, user, filters):
+    queryset = operations_detail_queryset(user=user, filters=filters)
+    return queryset.count() if queryset is not None else 0

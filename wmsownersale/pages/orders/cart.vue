@@ -4,7 +4,11 @@
     <view class="card-first">
       <view class="row-first">
         <view class="font-bold">客户：{{ cart.customer?.name || '未选择' }} </view>
+        <view class="font-bold">仓库：{{ cart.warehouse_name || '未选择' }} </view>
+        <button v-if="cart.editing_order_id" class="btn-link" @click="changeWarehouse">更换仓库</button>
+        <button v-if="cart.editing_order_id" class="btn-link" @click="changeCustomer">更换客户</button>
       </view>
+      <view v-if="cart.owner_reject_reason" class="reject-reason">最近退回原因：{{ cart.owner_reject_reason }}</view>
     </view>
 
     <!-- 明细 -->
@@ -131,93 +135,64 @@
 
     <view class="button-row">
       <button class="btn-outline" @click="backToProducts">继续选品</button>
-      <button class="btn" :disabled="!canSubmit" @click="submitOrder">提交订单</button>
+      <button
+        v-if="cart.editing_order_id"
+        class="btn-outline"
+        :disabled="!canSubmit"
+        :loading="submitting"
+        @click="saveDraft(false)"
+      >保存草稿</button>
+      <button
+        class="btn"
+        :disabled="!canSubmit"
+        :loading="submitting"
+        @click="submitOrder"
+      >{{ submitting ? '提交中' : (cart.editing_order_id ? '保存并重新提交' : '提交订单') }}</button>
     </view>
   </view>
 </view>
 </template>
 
 <script setup>
-import { computed, onMounted,reactive } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
+import { useAuth } from '@/store/auth'
 import { useCart } from '@/store/cart'
 import { api } from '@/utils/request'
-
-const form = reactive({
-  src_bill_no: '',
-  contact: '',
-  contact_phone: '',
-  ship_to: '',
-})
-
-const isCashCustomer = computed(() => {
-  const code = String(cart.customer?.code || '').toUpperCase()
-  const name = String(cart.customer?.name || '')
-  return code === 'CASH' || name.includes('一件代发')
-})
+import { isCashCustomer as isCashCustomerRecord } from '@/utils/customer'
+import { enforceMinimumPrice, initializePriceGuard, isPriceAllowed } from '@/utils/pricing'
 
 const cart = useCart()
-const canSubmit = computed(()=> !!cart.customer && cart.items.length>0 )
+const auth = useAuth()
+const submitting = ref(false)
+
+const form = cart.order_header
+
+const isCashCustomer = computed(() => isCashCustomerRecord(cart.customer))
+
+const canSubmit = computed(() => (
+  !submitting.value &&
+  !!cart.warehouse_id &&
+  !!cart.customer &&
+  cart.items.length > 0
+))
 
 // 数字格式化为两位小数
 const fmt = (n)=> Number(n||0).toFixed(2)
 
 
 
-// 兼容老数据：补齐原价与最低价
-function ensureItemGuard(it){
-  // 原价：优先使用已有字段，其次用当前价兜底
-  if (typeof it.orig_price !== 'number' || !(it.orig_price >= 0)) {
-    const orig = Number(it.price ?? 0)
-    it.orig_price = Number.isFinite(orig) ? orig : 0
-  }
-  
-    // 确保 max_discount 和 product_min_price 是有效的数字
-    const product_min_price = +Number(it.product_min_price || 0);
-    const max_discount = +Number(it.max_discount || 0); // 默认最大折扣为0
-    const orig_price = it.orig_price;
-  
-    // 输出中间值
-    console.log("orig_price:", orig_price);
-    console.log("product_min_price:", product_min_price);
-    console.log("max_discount:", max_discount);
-  
-  
-  // 最低可售价 = 原价 * 0.9（保留两位）
- //    const product_min_price=+Number(it.product_min_price || 0)
-	// const max_discount=+Number(it.max_discount || 1)
-	const min=Math.max(product_min_price,max_discount*it.orig_price)
-	
-	
-  if (typeof it.min_price !== 'number' || !(it.min_price >= 0)) {
-		
-    it.min_price = +min.toFixed(2)
-  }
-}
-
-// 把用户输入价钳制到 >= 最低价，并统一两位小数
 function enforceMin(it){
-  ensureItemGuard(it)
-  const val = Number(it.price)
-  const min = Number(it.min_price || 0)
-
-  
-  if (!Number.isFinite(val)) {
-    it.price = min
-    return
-  }
-  
-  if (val < min) {
-    it.price = min
-    uni.showToast({ title:`单价不得低于 ¥${fmt(min)}`, icon:'none' })
-  } else {
-    it.price = +val.toFixed(2)
+  const result = enforceMinimumPrice(it)
+  if (!result.valid) {
+    uni.showToast({ title: result.error, icon:'none' })
   }
 }
 
 
 // 数量不能大于可用库存
 function enforceAvailable(it){
-  ensureItemGuard(it)
+  initializePriceGuard(it)
   const val = Number(it.qty)
   const  max_available = Number(it.available || 0)
   
@@ -238,92 +213,180 @@ function enforceAvailable(it){
 
 
 onMounted(()=>{
-  // 页面加载时给每一行补齐 orig_price/min_price
-  cart.items.forEach(ensureItemGuard)
+  cart.items.forEach(initializePriceGuard)
+})
+
+onLoad(() => {
+  auth.ensureAuth()
+  if (!cart.hasContextForUser(auth.user?.id, auth.user?.owner_id)) {
+    cart.resetOrder()
+    uni.redirectTo({ url: '/pages/warehouses/select' })
+    return
+  }
+  cart.ensureIdempotencyKey()
 })
 
 function backToProducts(){ uni.navigateTo({ url:'/pages/products/search' }) }
 
-async function submitOrder() {
+function changeWarehouse(){
+  uni.navigateTo({ url:'/pages/warehouses/select?edit=1' })
+}
+
+function changeCustomer(){
+  uni.navigateTo({ url:'/pages/customers/select' })
+}
+
+function buildPayload({ includeVersion = false } = {}) {
+  const payload = {
+    warehouse_id: cart.warehouse_id,
+    customer_id: cart.customer?.id,
+    outbound_type: 'SALES',
+    delivery_method: form.delivery_method || null,
+    etd: form.etd || null,
+    remark: String(form.remark || '业务员下单').trim(),
+    src_bill_no: String(form.src_bill_no || '').trim(),
+    contact: String(form.contact || '').trim(),
+    contact_phone: String(form.contact_phone || '').trim(),
+    ship_to: String(form.ship_to || '').trim(),
+    items: cart.items.map(it => ({
+      product_id: it.product_id,
+      qty: Number(it.qty || 0),
+      price: Number(it.price || 0),
+    })),
+  }
+  if (includeVersion) payload.expected_updated_at = cart.editing_updated_at
+  return payload
+}
+
+async function saveDraft(resubmit = false) {
+  if (submitting.value || !cart.editing_order_id) return false
+  if (!validateOrder()) return false
+  if (!cart.editing_updated_at) {
+    uni.showModal({
+      title: '编辑上下文已失效',
+      content: '请返回订单详情后重新进入编辑。',
+      showCancel: false,
+    })
+    return false
+  }
+  submitting.value = true
+  try {
+    const updated = await api.updateOutboundOrder(
+      cart.editing_order_id,
+      buildPayload({ includeVersion: true }),
+    )
+    cart.setEditingUpdatedAt(updated?.updated_at)
+    if (!resubmit) {
+      uni.showToast({ title: '草稿已保存', icon: 'none' })
+      return true
+    }
+    const result = await api.submitOutboundOrder(cart.editing_order_id)
+    const orderId = cart.editing_order_id
+    cart.resetOrder()
+    uni.showToast({ title: '已重新提交', icon: 'none' })
+    setTimeout(() => {
+      uni.redirectTo({ url: `/pages/orders/detail?id=${result?.id || orderId}` })
+    }, 200)
+    return true
+  } catch (e) {
+    const data = e?.data || {}
+    if (
+      Number(e?.statusCode || e?.code) === 409 &&
+      String(data?.code || '') === 'stale_order_edit'
+    ) {
+      const orderId = cart.editing_order_id
+      uni.showModal({
+        title: '订单已被修改',
+        content: data?.detail || '订单已被其他会话修改，请重新加载。',
+        showCancel: false,
+        success: () => {
+          cart.resetOrder()
+          uni.redirectTo({ url: `/pages/orders/detail?id=${orderId}` })
+        },
+      })
+      return false
+    }
+    uni.showToast({ title: e?.message || e?.data?.detail || '保存订单失败', icon: 'none' })
+    return false
+  } finally {
+    submitting.value = false
+  }
+}
+
+function validateOrder() {
+  if (!cart.warehouse_id) {
+    uni.showToast({ title: '请先选择出库仓库', icon: 'none' })
+    return false
+  }
   if (!cart.customer?.id) {
     uni.showToast({ title: '请先选择客户', icon: 'none' })
-    return
+    return false
   }
-
   if (!cart.items?.length) {
     uni.showToast({ title: '请先添加商品', icon: 'none' })
-    return
+    return false
   }
-
-  // 提交前兜底校验：不允许低于最低价
-  const bad = cart.items.find(it => {
-    ensureItemGuard(it)
-    return typeof it.orig_price === 'number' && it.price < it.min_price
-  })
+  const bad = cart.items.find(it => !isPriceAllowed(it))
   if (bad) {
     uni.showToast({ title: '存在价格低于系统最低价的商品，请修正后再提交', icon: 'none' })
-    return
+    return false
   }
-
-  // 一件代发客户：收件信息必填
   if (isCashCustomer.value) {
     if (!String(form.contact || '').trim()) {
       uni.showToast({ title: '请填写收件人', icon: 'none' })
-      return
+      return false
     }
     const phone = String(form.contact_phone || '').trim()
     if (!phone) {
       uni.showToast({ title: '请填写联系电话', icon: 'none' })
-      return
+      return false
     }
     if (phone.length < 6 || !/\d/.test(phone)) {
       uni.showToast({ title: '联系电话格式不正确', icon: 'none' })
-      return
+      return false
     }
     if (!String(form.ship_to || '').trim()) {
       uni.showToast({ title: '请填写收货地址', icon: 'none' })
-      return
+      return false
     }
   }
+  return true
+}
 
+async function submitOrder() {
+  if (submitting.value) return
+  if (cart.editing_order_id) return saveDraft(true)
+  if (!validateOrder()) return
+
+  submitting.value = true
   try {
-    const payload = {
-      customer_id: cart.customer?.id,
-      remark: '业务员下单',
-      src_bill_no: String(form.src_bill_no || '').trim(),
-      contact: String(form.contact || '').trim(),
-      contact_phone: String(form.contact_phone || '').trim(),
-      ship_to: String(form.ship_to || '').trim(),
-      // items: cart.items.map(it => ({
-      //   product_id: it.product_id,
-      //   qty: it.qty,
-      //   price: it.price
-      // }))
-	  items: cart.items.map(it => ({
-	    product_id: it.product_id,
-	    qty: Number(it.qty || 0),
-	    price: Number(it.price || 0),
-	  }))
-    }
+    const payload = buildPayload()
     console.log('createOutboundOrder payload=', payload)
-    const res = await api.createOutboundOrder(payload)
+    const res = await api.createOutboundOrder(
+      payload,
+      cart.ensureIdempotencyKey(),
+    )
 
     uni.showToast({
       title: '已创建：' + (res?.order_no || res?.id),
       icon: 'none'
     })
 
-    cart.clear()
-    form.src_bill_no = ''
-    form.contact = ''
-    form.contact_phone = ''
-    form.ship_to = ''
+    cart.resetOrder()
 
     uni.switchTab({ url: '/pages/features/index' })
  } catch (e) {
   console.error(e)
 
   const data = e?.data || {}
+  if (Number(e?.statusCode || e?.code) === 409) {
+    uni.showModal({
+      title: '提交内容冲突',
+      content: '本次提交内容已变化，请返回并重新开单。',
+      showCancel: false,
+    })
+    return
+  }
   const duplicateMsg =
     data?.src_bill_no ||
     data?.message ||
@@ -357,6 +420,8 @@ async function submitOrder() {
     title: e?.message || data?.detail || data?.message || '创建订单失败',
     icon: 'none'
   })
+} finally {
+  submitting.value = false
 }
 }
 
@@ -374,6 +439,8 @@ async function submitOrder() {
   margin-left:2rpx;
    margin-right:2rpx;
 }
+.reject-reason { margin-top: 12rpx; padding: 12rpx; color: #9a3412; background: #fff7ed; }
+.btn-link { padding: 4rpx 10rpx; font-size: 22rpx; }
 
 /* 顶部固定 */
 .card-first {

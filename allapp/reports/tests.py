@@ -21,6 +21,7 @@ from allapp.billing.models import (
     BillingPeriod,
     BillingRule,
 )
+from allapp.billing.services import unlock_period
 from allapp.core.choices import InvTxType
 from allapp.inbound.constants import (
     PDA_NO_ORDER_RECEIVE_SOURCE_APP,
@@ -516,6 +517,69 @@ class BossDashboardApiTests(TestCase):
         )
         attention_keys = [item["key"] for item in response.data["attention_items"]]
         self.assertIn("overdue_tasks", attention_keys)
+
+    def test_boss_home_uses_signed_reversal_net_and_excludes_positive_void(self):
+        original = BillingAccrual.objects.get(acc_fingerprint="boss-home-acc-a")
+        original.status = AccrualStatus.INVOICED
+        original.save(update_fields=["status"])
+        self.period_a.status = "INVOICED"
+        self.period_a.save(update_fields=["status"])
+
+        BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            period=self.period_a,
+            charge_type=ChargeType.DISPATCH,
+            rule=self.rule_a,
+            service_date=self.today,
+            currency="CNY",
+            quantity=Decimal("1.0000"),
+            unit_price=Decimal("999.0000"),
+            amount=Decimal("999.00"),
+            tax_amount=Decimal("99.00"),
+            status=AccrualStatus.VOID,
+            is_reversal=True,
+            reversal_of=original,
+            acc_fingerprint="boss-home-positive-dedup",
+            created_by=self.user,
+        )
+
+        unlock_period(self.period_a, by_user=self.user, reason="boss net test")
+
+        response = self.client.get(
+            "/api/reports/boss/home/", {"owner": self.owner.id}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            Decimal(str(response.data["summary"]["today_accrual_total"])),
+            Decimal("0.00"),
+        )
+        self.assertEqual(
+            Decimal(str(response.data["summary"]["month_billed_total"])),
+            Decimal("0.00"),
+        )
+        self.assertEqual(
+            Decimal(str(response.data["summary"]["overdue_receivable_total"])),
+            Decimal("0.00"),
+        )
+        today_trend = next(
+            row
+            for row in response.data["trend_7d"]
+            if str(row["date"]) == self.today.isoformat()
+        )
+        self.assertEqual(
+            Decimal(str(today_trend["accrual_total"])), Decimal("0.00")
+        )
+        owner_ranking = next(
+            row
+            for row in response.data["rankings"]["revenue_top_owners"]
+            if row["owner"] == self.owner.id
+        )
+        self.assertEqual(Decimal(str(owner_ranking["subtotal"])), Decimal("0.00"))
+        self.assertEqual(Decimal(str(owner_ranking["tax_total"])), Decimal("0.00"))
+        self.assertEqual(Decimal(str(owner_ranking["total"])), Decimal("0.00"))
+        self.assertEqual(owner_ranking["accrual_count"], 1)
 
     def test_boss_alert_api_respects_owner_filter(self):
         response = self.client.get(

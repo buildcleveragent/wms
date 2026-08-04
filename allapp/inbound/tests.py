@@ -30,7 +30,7 @@ from allapp.inbound.models import (
     NoOrderReceiveRequest,
     PdaNoOrderReceive,
 )
-from allapp.inbound.services import create_receive_task_draft
+from allapp.inbound.services import create_receive_task_draft, receive_goods_without_order
 from allapp.inventory.models import InventoryTransaction
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product, ProductUom
@@ -460,6 +460,92 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         self.assertEqual(
             WmsTask.objects.filter(
                 task_type=WmsTask.TaskType.RECEIVE,
+                source_app=PDA_NO_ORDER_RECEIVE_SOURCE_APP,
+                source_model=PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
+            ).count(),
+            1,
+        )
+
+    def test_receive_without_order_rejects_foreign_owner_product_without_writes(self):
+        foreign_product = Product.objects.create(
+            owner=self.other_owner,
+            code="INBSKU-FOREIGN",
+            name="Inbound Foreign Product",
+            sku="INBSKU-FOREIGN",
+            base_uom=self.base_uom,
+            volume="0.100000",
+            price="10.00",
+        )
+        user = self.user_model.objects.create_user(
+            username="inbound-no-order-foreign-product",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
+        user.user_permissions.add(self._permission("accounts", "receive_without_order"))
+        client = APIClient()
+        client.force_authenticate(user)
+
+        response = client.post(
+            "/api/inbound/receive_without_order/",
+            {
+                "request_id": "receive-foreign-product-0001",
+                "owner_id": self.owner.pk,
+                "warehouse_id": self.warehouse.pk,
+                "location_id": self.location.pk,
+                "items": [{"product_id": foreign_product.pk, "qty": "2.0000"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertFalse(NoOrderReceiveRequest.objects.exists())
+        self.assertFalse(
+            WmsTask.objects.filter(
+                source_app=PDA_NO_ORDER_RECEIVE_SOURCE_APP,
+                source_model=PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
+            ).exists()
+        )
+
+    def test_receive_without_order_posting_failure_rolls_back_and_can_retry(self):
+        user = self.user_model.objects.create_user(
+            username="inbound-no-order-retry",
+            password="x",
+        )
+        kwargs = {
+            "owner_id": self.owner.pk,
+            "warehouse_id": self.warehouse.pk,
+            "location_id": self.location.pk,
+            "items": [{"product_id": self.product.pk, "qty": "2.0000"}],
+            "request_id": "receive-posting-retry-0001",
+            "by_user": user,
+        }
+
+        with mock.patch("allapp.inbound.services.save_receiving_snapshot"), mock.patch(
+            "allapp.inbound.services._run_posting_handler",
+            side_effect=[RuntimeError("posting unavailable"), {"affected_tx_count": 1}],
+        ):
+            with self.assertRaisesMessage(RuntimeError, "posting unavailable"):
+                receive_goods_without_order(**kwargs)
+
+            self.assertFalse(NoOrderReceiveRequest.objects.exists())
+            self.assertFalse(
+                WmsTask.objects.filter(
+                    source_app=PDA_NO_ORDER_RECEIVE_SOURCE_APP,
+                    source_model=PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
+                ).exists()
+            )
+
+            retried = receive_goods_without_order(**kwargs)
+
+        self.assertFalse(retried["idempotent"])
+        self.assertEqual(NoOrderReceiveRequest.objects.count(), 1)
+        self.assertEqual(
+            WmsTask.objects.filter(
                 source_app=PDA_NO_ORDER_RECEIVE_SOURCE_APP,
                 source_model=PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
             ).count(),

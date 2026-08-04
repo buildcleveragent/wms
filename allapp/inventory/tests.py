@@ -15,12 +15,21 @@ from django.test import TestCase, TransactionTestCase
 
 from allapp.baseinfo.models import Owner
 from allapp.core.choices import InvTxType
+from allapp.inventory import services as inventory_services
 from allapp.inventory import snapshot_services as inventory_snapshot_services
-from allapp.inventory.models import InventoryDetail, InventorySnapshotDaily, InventoryTransaction, ReviewDifference
+from allapp.inventory.models import (
+    InventoryDetail,
+    InventorySnapshotDaily,
+    InventorySummary,
+    InventoryTransaction,
+    PostingJournal,
+    ReviewDifference,
+)
 from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_date
 from allapp.inventory.services_quick_adjust import QuickAdjustInput, quick_adjust_via_post_task
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product, ProductUom
+from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
 
 
 class InventoryWarehouseScopeTests(TestCase):
@@ -147,6 +156,98 @@ class InventoryWarehouseScopeTests(TestCase):
                     location=self.location,
                 )
             )
+
+    def test_multi_location_pick_failure_rolls_back_every_inventory_write(self):
+        second_location = Location.objects.create(
+            warehouse=self.warehouse,
+            code="SWINV1-01-01-02",
+            name="Inventory Location 2",
+        )
+        first_detail = InventoryDetail.objects.create(
+            owner=self.owner,
+            product=self.product,
+            location=self.location,
+            onhand_qty=Decimal("3.0000"),
+            allocated_qty=Decimal("2.0000"),
+            locked_qty=Decimal("0"),
+            damaged_qty=Decimal("0"),
+        )
+        second_detail = InventoryDetail.objects.create(
+            owner=self.owner,
+            product=self.product,
+            location=second_location,
+            onhand_qty=Decimal("1.0000"),
+            allocated_qty=Decimal("0"),
+            locked_qty=Decimal("0"),
+            damaged_qty=Decimal("0"),
+        )
+        task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="INV-ROLLBACK-PICK",
+            task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.APPROVED,
+            posting_status=WmsTask.PostingStatus.PENDING,
+        )
+        first_line = WmsTaskLine.objects.create(
+            task=task,
+            product=self.product,
+            from_location=self.location,
+            qty_plan=Decimal("2.000"),
+            qty_done=Decimal("2.000"),
+            status=WmsTaskLine.Status.COMPLETED,
+        )
+        second_line = WmsTaskLine.objects.create(
+            task=task,
+            product=self.product,
+            from_location=second_location,
+            qty_plan=Decimal("2.000"),
+            qty_done=Decimal("2.000"),
+            status=WmsTaskLine.Status.COMPLETED,
+        )
+        scans = [
+            TaskScanLog.objects.create(
+                owner=self.owner,
+                task=task,
+                task_line=line,
+                product=self.product,
+                location=location,
+                qty_base_delta=Decimal("2.000000"),
+                fp=f"inventory-rollback-{index}",
+                scan_snapshot_rev=0,
+            )
+            for index, (line, location) in enumerate(
+                ((first_line, self.location), (second_line, second_location)),
+                start=1,
+            )
+        ]
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "库存不足：出库数量超出当前账面库存",
+        ):
+            inventory_services.post_task(
+                task=task,
+                user=self.user,
+                scans=scans,
+                batch_no="INV-ROLLBACK",
+            )
+
+        first_detail.refresh_from_db()
+        second_detail.refresh_from_db()
+        task.refresh_from_db()
+        self.assertEqual(first_detail.onhand_qty, Decimal("3.0000"))
+        self.assertEqual(first_detail.allocated_qty, Decimal("2.0000"))
+        self.assertEqual(second_detail.onhand_qty, Decimal("1.0000"))
+        self.assertEqual(second_detail.allocated_qty, Decimal("0.0000"))
+        self.assertEqual(task.posting_status, WmsTask.PostingStatus.PENDING)
+        self.assertFalse(InventoryTransaction.objects.filter(src_id=task.pk).exists())
+        self.assertFalse(InventorySummary.objects.filter(owner=self.owner).exists())
+        self.assertFalse(PostingJournal.objects.filter(src_id=task.pk).exists())
+        self.assertFalse(
+            TaskScanLog.objects.filter(task=task, posted_at__isnull=False).exists()
+        )
 
     def test_tracking_repair_commands_export_and_apply_csv(self):
         tracked_product = Product.objects.create(

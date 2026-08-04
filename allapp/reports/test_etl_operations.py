@@ -9,10 +9,17 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from allapp.baseinfo.models import Customer, Owner, Supplier
+from allapp.billing.enums import AccrualStatus, CalcMethod, ChargeType
+from allapp.billing.models import BillingAccrual, BillingRule
+from allapp.billing.services import (
+    generate_invoice_for_period,
+    lock_period,
+    unlock_period,
+)
 from allapp.core.choices import InvTxType
 from allapp.inbound.models import InboundOrder, InboundOrderLine
 from allapp.inventory.models import InventoryTransaction
@@ -20,9 +27,11 @@ from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import Product, ProductUom
 from allapp.reports.models import (
+    AggBillingDaily,
     AggThroughputDaily,
     EtlJobRun,
     EtlWatermark,
+    FactBilling,
     FactInboundLine,
     FactInventoryTxn,
     FactOutboundLine,
@@ -30,6 +39,7 @@ from allapp.reports.models import (
     ProductDim,
     WarehouseDim,
 )
+from allapp.reports.etl_operations import source_reconciliation
 from allapp.tasking.models import ReceiveLineExtra, WmsTask
 
 
@@ -376,6 +386,287 @@ class OperationsEtlTests(TestCase):
         self.assertEqual(FactOutboundLine.objects.count(), 1)
         self.assertEqual(FactInventoryTxn.objects.count(), 2)
         self.assertEqual(EtlJobRun.objects.filter(job_name="etl_full_reports", ok=True).count(), 2)
+
+    def test_billing_facts_follow_amount_updates_and_voids_idempotently(self):
+        rule = BillingRule.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("12.3400"),
+        )
+        accrual = BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            rule=rule,
+            service_date=self.day,
+            currency="CNY",
+            quantity=Decimal("1.0000"),
+            unit_price=Decimal("12.3400"),
+            amount=Decimal("12.34"),
+            tax_amount=Decimal("0.00"),
+            status=AccrualStatus.OPEN,
+            acc_fingerprint="etl-billing-active",
+        )
+        BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            rule=rule,
+            service_date=self.day,
+            currency="CNY",
+            quantity=Decimal("1.0000"),
+            unit_price=Decimal("99.0000"),
+            amount=Decimal("99.00"),
+            tax_amount=Decimal("0.00"),
+            status=AccrualStatus.VOID,
+            acc_fingerprint="etl-billing-void",
+        )
+
+        self._full()
+        self._full()
+
+        self.assertEqual(FactBilling.objects.count(), 1)
+        fact = FactBilling.objects.get(dedup_key=accrual.acc_fingerprint)
+        self.assertEqual(fact.amount, Decimal("12.34"))
+        aggregate = AggBillingDaily.objects.get(
+            date__date=self.day,
+            owner__owner_id=self.owner.id,
+            warehouse__warehouse_id=self.warehouse.id,
+            fee_type=ChargeType.DISPATCH,
+        )
+        self.assertEqual(aggregate.amount, Decimal("12.34"))
+
+        BillingAccrual.objects.filter(pk=accrual.pk).update(
+            unit_price=Decimal("7.8900"),
+            amount=Decimal("7.89"),
+        )
+        self._incremental(since="1970-01-01T00:00:00")
+
+        self.assertEqual(FactBilling.objects.count(), 1)
+        self.assertEqual(
+            FactBilling.objects.get(dedup_key=accrual.acc_fingerprint).amount,
+            Decimal("7.89"),
+        )
+        updated_aggregate = AggBillingDaily.objects.get(
+            date__date=self.day,
+            owner__owner_id=self.owner.id,
+            warehouse__warehouse_id=self.warehouse.id,
+            fee_type=ChargeType.DISPATCH,
+        )
+        self.assertEqual(updated_aggregate.amount, Decimal("7.89"))
+
+        # SCD2 维度换版不得让同一业务指纹遗留新旧两条事实。
+        self.owner.name = "ETL Owner Renamed"
+        self.owner.save(update_fields=["name"])
+        self.warehouse.name = "ETL Warehouse Renamed"
+        self.warehouse.save(update_fields=["name"])
+        self._incremental(since="1970-01-01T00:00:00")
+
+        self.assertEqual(
+            FactBilling.objects.filter(dedup_key=accrual.acc_fingerprint).count(),
+            1,
+        )
+        canonical_fact = FactBilling.objects.get(
+            dedup_key=accrual.acc_fingerprint
+        )
+        self.assertEqual(canonical_fact.owner.name, "ETL Owner Renamed")
+        self.assertEqual(canonical_fact.warehouse.name, "ETL Warehouse Renamed")
+        self.assertTrue(source_reconciliation()["ok"])
+
+        BillingAccrual.objects.filter(pk=accrual.pk).update(status=AccrualStatus.VOID)
+        self._incremental(since="1970-01-01T00:00:00")
+
+        self.assertEqual(FactBilling.objects.count(), 0)
+        self.assertFalse(
+            AggBillingDaily.objects.filter(
+                date__date=self.day,
+                owner__owner_id=self.owner.id,
+                warehouse__warehouse_id=self.warehouse.id,
+                fee_type=ChargeType.DISPATCH,
+            ).exists()
+        )
+
+    @override_settings(
+        BILLING_RECONCILIATION_GATE_LOCK_ENABLED=False,
+        BILLING_RECONCILIATION_GATE_INVOICE_ENABLED=False,
+    )
+    def test_invoiced_reversal_is_net_zero_in_full_and_incremental_etl(self):
+        rule = BillingRule.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("100.0000"),
+        )
+        original = BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            rule=rule,
+            service_date=self.day,
+            currency="CNY",
+            quantity=Decimal("1.0000"),
+            unit_price=Decimal("100.0000"),
+            amount=Decimal("100.00"),
+            tax_amount=Decimal("10.00"),
+            status=AccrualStatus.OPEN,
+            acc_fingerprint="etl-billing-reversal-original",
+        )
+
+        period = lock_period(
+            self.owner.id,
+            self.warehouse.id,
+            "ETL-REVERSAL",
+            self.day,
+            self.day,
+        )
+        bill = generate_invoice_for_period(
+            period,
+            invoice_no="ETL-REVERSAL-INVOICE",
+            issue_date=self.day,
+            due_date=self.day,
+        )
+
+        self._full()
+        self.assertEqual(
+            FactBilling.objects.get(dedup_key=original.acc_fingerprint).amount,
+            Decimal("100.00"),
+        )
+        self.assertEqual(
+            AggBillingDaily.objects.get(
+                date__date=self.day,
+                owner__owner_id=self.owner.id,
+                warehouse__warehouse_id=self.warehouse.id,
+                fee_type=ChargeType.DISPATCH,
+            ).amount,
+            Decimal("100.00"),
+        )
+
+        unlock_period(period, by_user=self.actor, reason="ETL reversal test")
+        bill.refresh_from_db()
+        period.refresh_from_db()
+        original.refresh_from_db()
+        reversal = BillingAccrual.objects.get(reversal_of=original)
+
+        self.assertEqual(reversal.status, AccrualStatus.VOID)
+        self.assertTrue(reversal.is_reversal)
+        self.assertEqual(reversal.amount, Decimal("-100.00"))
+        self.assertEqual(reversal.tax_amount, Decimal("-10.00"))
+        self.assertEqual(reversal.acc_fingerprint, f"{original.acc_fingerprint}|REV")
+        self.assertIsNone(original.period_id)
+        self.assertIsNone(reversal.period_id)
+        self.assertEqual(bill.status, "VOID")
+        self.assertEqual(period.status, "OPEN")
+
+        self._incremental(since="1970-01-01T00:00:00")
+        self._incremental(since="1970-01-01T00:00:00")
+
+        self.assertEqual(FactBilling.objects.count(), 2)
+        self.assertEqual(
+            {
+                row.dedup_key: row.amount
+                for row in FactBilling.objects.order_by("dedup_key")
+            },
+            {
+                original.acc_fingerprint: Decimal("100.00"),
+                reversal.acc_fingerprint: Decimal("-100.00"),
+            },
+        )
+        self.assertEqual(
+            AggBillingDaily.objects.get(
+                date__date=self.day,
+                owner__owner_id=self.owner.id,
+                warehouse__warehouse_id=self.warehouse.id,
+                fee_type=ChargeType.DISPATCH,
+            ).amount,
+            Decimal("0.00"),
+        )
+        reconciliation = source_reconciliation()
+        self.assertTrue(reconciliation["ok"])
+        self.assertEqual(reconciliation["source"]["billing_rows"], "2")
+        self.assertEqual(reconciliation["facts"]["billing_rows"], "2")
+        self.assertEqual(
+            Decimal(reconciliation["source"]["billing_amount"]), Decimal("0.00")
+        )
+        self.assertEqual(
+            Decimal(reconciliation["facts"]["billing_amount"]), Decimal("0.00")
+        )
+
+        self._full()
+        self._full()
+        self.assertEqual(FactBilling.objects.count(), 2)
+        self.assertEqual(
+            AggBillingDaily.objects.get(
+                date__date=self.day,
+                owner__owner_id=self.owner.id,
+                warehouse__warehouse_id=self.warehouse.id,
+                fee_type=ChargeType.DISPATCH,
+            ).amount,
+            Decimal("0.00"),
+        )
+
+        FactBilling.objects.filter(dedup_key=reversal.acc_fingerprint).delete()
+        failed_reconciliation = source_reconciliation()
+        self.assertFalse(failed_reconciliation["ok"])
+        self.assertIn("billing_rows", failed_reconciliation["differences"])
+        self.assertIn("billing_amount", failed_reconciliation["differences"])
+
+    def test_positive_void_dedup_is_not_loaded_as_financial_reversal(self):
+        rule = BillingRule.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            unit_price=Decimal("12.0000"),
+        )
+        active = BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            rule=rule,
+            service_date=self.day,
+            currency="CNY",
+            quantity=Decimal("1.0000"),
+            unit_price=Decimal("12.0000"),
+            amount=Decimal("12.00"),
+            tax_amount=Decimal("0.00"),
+            status=AccrualStatus.OPEN,
+            acc_fingerprint="etl-billing-dedup-active",
+        )
+        BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            rule=rule,
+            service_date=self.day,
+            currency="CNY",
+            quantity=Decimal("1.0000"),
+            unit_price=Decimal("99.0000"),
+            amount=Decimal("99.00"),
+            tax_amount=Decimal("0.00"),
+            status=AccrualStatus.VOID,
+            is_reversal=True,
+            reversal_of=active,
+            acc_fingerprint="etl-billing-positive-dedup",
+        )
+
+        self._full()
+        self._incremental(since="1970-01-01T00:00:00")
+
+        self.assertEqual(FactBilling.objects.count(), 1)
+        self.assertEqual(FactBilling.objects.get().dedup_key, active.acc_fingerprint)
+        self.assertEqual(FactBilling.objects.get().amount, Decimal("12.00"))
+        self.assertEqual(
+            AggBillingDaily.objects.get(
+                date__date=self.day,
+                owner__owner_id=self.owner.id,
+                warehouse__warehouse_id=self.warehouse.id,
+                fee_type=ChargeType.DISPATCH,
+            ).amount,
+            Decimal("12.00"),
+        )
 
     def test_full_etl_keeps_posted_transactions_for_soft_deleted_products(self):
         archived_product = Product.objects.create(

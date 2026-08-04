@@ -11,9 +11,11 @@ from django.db import transaction
 from django.db.models import F, Q, Sum
 
 from allapp.accounts.access import AccessScope
+from allapp.accounts.models import UserRoleScope
 from allapp.core.models import DocSequence
 from allapp.core.utils.log_context import build_log_payload
 from allapp.inventory.models import InventoryDetail
+from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
 from allapp.tasking.models import (
     DispatchTaskExtra,
     PackTaskExtra,
@@ -83,10 +85,196 @@ def validate_owner_approval_preconditions(order) -> None:
         raise ValidationError("仅已提交订单可由货主管理员审核。")
     if order.is_closed:
         raise ValidationError("已关闭订单不能执行货主管理员审核。")
-    if order.approval_status not in {"OWNER_PENDING", "OWNER_REJECTED"}:
+    if order.approval_status != "OWNER_PENDING":
         raise ValidationError(
             f"订单审核状态 {order.approval_status} 不允许货主管理员审核。"
         )
+
+
+def can_edit_standard_draft(order, user, *, scope=None) -> bool:
+    """Return whether ``user`` is the original salesperson for this draft."""
+
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if order.processing_mode != "STANDARD" or order.is_closed:
+        return False
+    if order.submit_status != "DRAFT" or order.approval_status not in {
+        "OWNER_PENDING",
+        "OWNER_REJECTED",
+    }:
+        return False
+    if order.created_by_id != user.id:
+        return False
+    scope = scope or AccessScope.for_user(user)
+    return bool(
+        user.has_perm("outbound.submit_outbound_as_owner_buyers")
+        and scope.is_valid
+        and UserRoleScope.Role.OWNER_SALESPERSON in scope.roles
+        and order.owner_id in scope.owner_ids
+    )
+
+
+def validate_standard_draft_edit_preconditions(order, user) -> None:
+    if not can_edit_standard_draft(order, user):
+        raise ValidationError("仅原创建业务员可修改或重新提交可编辑的标准草稿订单。")
+
+
+@transaction.atomic
+def approve_owner_order(order, *, by_user, allow_backorder=True):
+    """Lock, revalidate and approve one owner order atomically."""
+
+    Order = type(order)
+    locked = Order.objects.select_for_update().get(pk=order.pk)
+    validate_owner_approval_preconditions(locked)
+    locked._apply_owner_approval(
+        by_user=by_user,
+        allow_backorder=allow_backorder,
+    )
+    locked.refresh_from_db()
+    return locked
+
+
+@transaction.atomic
+def reject_owner_order(order, *, by_user, reason):
+    """Return a submitted pending order to its creator as an editable draft."""
+
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValidationError({"reason": "请填写退回原因。"})
+    if len(reason) > 200:
+        raise ValidationError({"reason": "退回原因不能超过 200 个字符。"})
+
+    Order = type(order)
+    locked = Order.objects.select_for_update().get(pk=order.pk)
+    validate_owner_approval_preconditions(locked)
+    _validate_allocation_can_be_released(locked)
+    unallocate_for_order(locked, by_user=by_user)
+    locked.submit_status = "DRAFT"
+    locked.approval_status = "OWNER_REJECTED"
+    locked.owner_reject_reason = reason
+    locked.approved_by_ownermanager = by_user
+    locked.approved_at_ownermanager = timezone.now()
+    locked.updated_by = by_user
+    locked.save(
+        update_fields=[
+            "submit_status",
+            "approval_status",
+            "owner_reject_reason",
+            "approved_by_ownermanager",
+            "approved_at_ownermanager",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    return locked
+
+
+@transaction.atomic
+def submit_owner_draft(order, *, by_user):
+    """Submit an editable draft while preserving the latest reject reason."""
+
+    Order = type(order)
+    locked = Order.objects.select_for_update().get(pk=order.pk)
+    validate_standard_draft_edit_preconditions(locked, by_user)
+    locked.submit_status = "SUBMITTED"
+    locked.approval_status = "OWNER_PENDING"
+    locked.approved_by_ownermanager = None
+    locked.approved_at_ownermanager = None
+    locked.approved_by_warehouse = None
+    locked.approved_at_warehouse = None
+    locked.pricing_status = "PENDING"
+    locked.priced_at = None
+    locked.priced_by = None
+    locked.final_order_amount = Decimal("0.00")
+    locked.close_reason = None
+    locked.updated_by = by_user
+    locked.save(
+        update_fields=[
+            "submit_status",
+            "approval_status",
+            "approved_by_ownermanager",
+            "approved_at_ownermanager",
+            "approved_by_warehouse",
+            "approved_at_warehouse",
+            "pricing_status",
+            "priced_at",
+            "priced_by",
+            "final_order_amount",
+            "close_reason",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    return locked
+
+
+@transaction.atomic
+def confirm_warehouse_order(order, *, by_user):
+    """Lock and confirm a still-submitted owner-approved standard order."""
+
+    Order = type(order)
+    locked = Order.objects.select_for_update().get(pk=order.pk)
+    if (
+        locked.submit_status != "SUBMITTED"
+        or locked.is_closed
+        or locked.approval_status not in {"OWNER_APPROVED", "WHS_PENDING"}
+    ):
+        raise ValidationError("仅已提交、货主审核通过且未关闭的订单可由仓库确认。")
+
+    validate_sale_mini_payment_for_fulfillment(locked)
+    locked.approval_status = "WHS_APPROVED"
+    locked.approved_by_warehouse = by_user
+    locked.approved_at_warehouse = timezone.now()
+    locked.updated_by = by_user
+    locked.save(
+        update_fields=[
+            "approval_status",
+            "approved_by_warehouse",
+            "approved_at_warehouse",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    task = promote_reserved_pick(locked, by_user=by_user)
+    return locked, task
+
+
+def validate_standard_order_sale_prices(order) -> None:
+    """Reject unsafe line prices before a standard sales order is approved."""
+
+    if order.processing_mode != "STANDARD" or order.outbound_type != "SALES":
+        return
+
+    errors = []
+    lines = order.lines.filter(is_deleted=False).select_related("product")
+    for line in lines:
+        product = line.product
+        label = product.code or product.sku or str(product.pk)
+        price = Decimal(line.base_price or 0)
+
+        if product.owner_id != order.owner_id or not product.is_active:
+            errors.append(f"订单行 {line.line_no} 的商品 {label} 不可用。")
+            continue
+        if price <= 0:
+            errors.append(f"订单行 {line.line_no} 的商品 {label} 成交价必须大于 0。")
+            continue
+
+        try:
+            lowest = minimum_sale_price(
+                base_price=product.price,
+                min_price=product.min_price,
+                max_discount=product.max_discount,
+            )
+        except InvalidSalePriceRule as exc:
+            errors.append(f"商品 {label} 价格配置错误：{exc}")
+            continue
+        if lowest is not None and price < lowest:
+            errors.append(
+                f"订单行 {line.line_no} 的商品 {label} 成交价不能低于 {lowest}。"
+            )
+
+    if errors:
+        raise ValidationError({"lines": errors})
 
 
 def get_default_product_price(product) -> Decimal:

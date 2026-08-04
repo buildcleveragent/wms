@@ -14,7 +14,12 @@
     </view>
 
 
-	<view class="content">
+	<scroll-view
+		class="content"
+		scroll-y
+		:lower-threshold="120"
+		@scrolltolower="loadProducts"
+	>
 			<view v-for="(p,i) in rows" :key="p?.id ?? i"  :class="['row item', { 'odd': i % 2 === 0 }]">
 				
 			  <view class="col-image">
@@ -85,7 +90,7 @@
 				<view class="col-label-qty">
 				  <text class="label-text">基本数量</text>
 				  <!-- <input class="input qty-input" type="number" :value="qtyMap[p.id] ?? 0" @input="(e) => setQty(p.id, e?.detail?.value ?? e?.target?.value)" min="0" /> -->
-				  <text class="qty-input-text" type="number" >{{ (p.unitOptions[p.selectedUnitIndex].multiplier * qtyMap[p.id])||0}}</text>
+				  <text class="qty-input-text">{{ baseQtyPreview(p) }}</text>
 				</view>
 					  
 					  
@@ -112,14 +117,16 @@
                     <!-- 金额 -->
                     <view class="col-label-last">
                       <text class="label-text">金额</text>
-                      <view class="amount-text">¥ {{ fmt( ((p.unitOptions[p.selectedUnitIndex].multiplier * qtyMap[p.id])||0)* (p.price || 0)) }}</view>
+					  <view class="amount-text">¥ {{ fmt(baseQtyPreview(p) * (p.price || 0)) }}</view>
                     </view>
                   			
                   </view>
 				  
 				</view>
 			  </view>	
-	</view>
+		<view v-if="loading" class="text-gray">加载中…</view>
+		<view v-else-if="!list.next && rows.length" class="text-gray">已加载全部商品</view>
+	</scroll-view>
 	
     <view class="footer">
       <button class="btn-outline" @click="goCart">
@@ -132,93 +139,77 @@
 
 <script setup lang="ts">
 // import { ref, computed } from 'vue'
-import { ref, computed, onMounted, onUnmounted, watch,reactive } from 'vue'
+import { ref, computed, reactive } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
+import { enforceMinimumPrice, initializePriceGuard } from '@/utils/pricing'
 import { scanOne } from '@/utils/scan'
+import { useAuth } from '@/store/auth'
 import { useCart } from '@/store/cart'
+import { previewBaseQuantity, validateDesiredQuantity } from '@/utils/quantity'
 
 const qtyInputRefs = reactive<Record<string | number, any>>({})
-const lastQtyMap = reactive<Record<string | number, string>>({})
 
 const q = ref('')
 const list = ref<{count:number; next:string|null; previous:string|null; results:any[]}>({ count:0, next:null, previous:null, results:[] })
 const rows = computed(()=> list.value.results || [])
+const loading = ref(false)
+const currentPage = ref(0)
+let searchGeneration = 0
 const cart = useCart()
+const auth = useAuth()
 const fmt = (n)=> Number(n||0).toFixed(2)
 
-// 兼容老数据：补齐原价与最低价
-function ensureItemGuard(it){
-  // 原价：优先使用已有字段，其次用当前价兜底
-  if (typeof it.orig_price !== 'number' || !(it.orig_price >= 0)) {
-    const orig = Number(it.price ?? 0)
-    it.orig_price = Number.isFinite(orig) ? orig : 0
-  }
-  
-    // 确保 max_discount 和 product_min_price 是有效的数字
-    const product_min_price = +Number(it.product_min_price || 0);
-    const max_discount = +Number(it.max_discount || 0); // 默认最大折扣为0
-    const orig_price = it.orig_price;
-  
-    // 输出中间值
-    console.log("orig_price:", orig_price);
-    console.log("product_min_price:", product_min_price);
-    console.log("max_discount:", max_discount);
-  
-  
-  // 最低可售价 = 原价 * 0.9（保留两位）
- //    const product_min_price=+Number(it.product_min_price || 0)
-	// const max_discount=+Number(it.max_discount || 1)
-	const min=Math.max(product_min_price,max_discount*it.orig_price)
-	
-	
-  if (typeof it.min_price !== 'number' || !(it.min_price >= 0)) {
-		
-    it.min_price = +min.toFixed(2)
-  }
-}
-
-// 把用户输入价钳制到 >= 最低价，并统一两位小数
 function enforceMin(it){
-  ensureItemGuard(it)
-  const val = Number(it.price)
-  const min = Number(it.min_price || 0)
-
-  
-  if (!Number.isFinite(val)) {
-    it.price = min
-    return
-  }
-  
-  if (val < min) {
-    it.price = min
-    uni.showToast({ title:`单价不得低于 ¥${fmt(min)}`, icon:'none' })
-  } else {
-    it.price = +val.toFixed(2)
+  const result = enforceMinimumPrice(it)
+  if (!result.valid) {
+    uni.showToast({ title: result.error, icon:'none' })
   }
 }
 
 
 
-// 数量输入：按商品 id 记录期望数量（默认 1）
-const qtyMap = ref<Record<number, number>>({})
+// 保留输入原文，空值和非法值必须由加入动作显式拒绝。
+const qtyMap = ref<Record<number, string>>({})
 function setQty(pid:number, v:any){
-  const n = Math.max(0, Number(v) || 0)
-  qtyMap.value = { ...qtyMap.value, [pid]: n }
+  qtyMap.value = { ...qtyMap.value, [pid]: v == null ? '' : String(v) }
 }
-function getDesiredQty(pid:number){
-  const n = Number(qtyMap.value[pid])
-  return Number.isFinite(n) && n > 0 ? n : 1
+function baseQtyPreview(p){
+  return previewBaseQuantity(
+    qtyMap.value[p.id],
+    getSelectedUnit(p).multiplier,
+  )
 }
 
-async function search(){
-  // 注：后端按登录用户的 owner 限定；如需按仓库收窄，可继续传 warehouse_id
-  const res = await api.products(q.value, 1, cart.warehouse_id||undefined)
-  console.log("res=",res)
-  list.value = Array.isArray(res)
-    ? { count: res.length, next:null, previous:null, results: res }
-    : (res?.results ? res : { count:0, next:null, previous:null, results:[] })
+async function loadProducts({ reset = false } = {}){
+  if (!reset && loading.value) return
+  if (!reset && currentPage.value > 0 && !list.value.next) return
+  const generation = reset ? ++searchGeneration : searchGeneration
+  const page = reset ? 1 : currentPage.value + 1
+  if (reset) {
+    list.value = { count: 0, next: null, previous: null, results: [] }
+    currentPage.value = 0
+  }
+  loading.value = true
+  try {
+    const res = await api.products(q.value, page, cart.warehouse_id||undefined)
+    if (generation !== searchGeneration) return
+    const normalized = Array.isArray(res)
+      ? { count: res.length, next:null, previous:null, results: res }
+      : (res?.results ? res : { count:0, next:null, previous:null, results:[] })
+    normalized.results.forEach(initializePriceGuard)
+    const merged = reset ? normalized.results : [...list.value.results, ...normalized.results]
+    list.value = {
+      ...normalized,
+      results: Array.from(new Map(merged.map(item => [String(item.id), item])).values()),
+    }
+    currentPage.value = page
+  } finally {
+    if (generation === searchGeneration) loading.value = false
+  }
 }
+
+function search(){ return loadProducts({ reset: true }) }
 
 const unitSelIndexMap = reactive({}) 
 
@@ -286,13 +277,18 @@ function goCart(){ uni.navigateTo({ url:'/pages/orders/cart' }) }
 async function scanAdd(){ const code = await scanOne(); if(!code) return; q.value = code; await search() }
 
 onLoad(()=>{
+  auth.ensureAuth()
+  if(!cart.hasContextForUser(auth.user?.id, auth.user?.owner_id)){
+    cart.resetOrder()
+    uni.redirectTo({ url: '/pages/warehouses/select' })
+    return
+  }
   if(!cart.customer){
     uni.redirectTo({ url: '/pages/customers/select' })
     return
   }
   search()
 })
-
 
 function handleTap(id: string | number) {
   const wrapper = qtyInputRefs[id]
@@ -309,20 +305,6 @@ function handleTap(id: string | number) {
   }
   // #endif
 
-  // APP 端：退而求其次，清空，让用户直接输入新值，相当于“全选后覆盖”
-  // #ifdef APP-PLUS
-  lastQtyMap[id] = String(qtyMap[id] ?? '')
-  qtyMap[id] = ''   // 清空
-  // #endif
-}
-
-// 选做：如果失焦时还是空的，就恢复原值
-const handleBlur = (id: string | number) => {
-  // #ifdef APP-PLUS
-  if (!qtyMap[id] && lastQtyMap[id] != null) {
-    qtyMap[id] = lastQtyMap[id]
-  }
-  // #endif
 }
 
 
@@ -341,10 +323,13 @@ function getSelectedUnit(p) {
 function add(p) {
   if (!p?.id) return
 
-  const saleQty = getDesiredQty(p.id)   // 用户输入：出货单位数量
   const { idx: selectedIdx, label, multiplier } = getSelectedUnit(p)
-
-  const baseDesired = +(saleQty * multiplier).toFixed(3)   // 真正要下单的基本数量
+  const quantity = validateDesiredQuantity(qtyMap.value[p.id], multiplier)
+  if (!quantity.valid) {
+    uni.showToast({ title: quantity.error, icon: 'none' })
+    return
+  }
+  const { saleQty, baseQty: baseDesired } = quantity
   const rowIdx = cart.items.findIndex(x => x.product_id === p.id)
   const curBaseQty = rowIdx > -1 ? Number(cart.items[rowIdx].qty || 0) : 0
   const available = Number(p.available || 0)
@@ -366,14 +351,16 @@ function add(p) {
       name: p.name,
 	  spec: p.spec,
       price: Number(p.price || 0), // 基本单价
+      orig_price: Number(p.orig_price ?? p.price ?? 0),
+      min_price: p.min_price,
       qty: baseDesired,            // 统一：这里存基本数量
       product_image_url: p.product_image_url,
       gtin: p.gtin,
       base_unit_name: p.base_unit_name,
       aux_uom_name: p.aux_uom_name,
       aux_qty_in_base: p.aux_qty_in_base,
-      product_min_price: Number(p.product_min_price || 0),
-      max_discount: Number(p.max_discount || 0),
+      product_min_price: p.product_min_price,
+      max_discount: p.max_discount,
       available: available,
       unitOptions: p.unitOptions,
       selectedUnitIndex: selectedIdx,
@@ -638,7 +625,7 @@ padding: 20rpx;
 /* 中间可滚动区域 */
 .content {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
   padding-top: 110rpx; /* 为顶部固定区域留出空间 */
   padding-bottom: 80rpx; /* 为底部footer留出空间 */
   padding-left: 2rpx;

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import date
-from io import BytesIO
+from tempfile import SpooledTemporaryFile
 
-from django.http import HttpResponse
+from django.http import FileResponse
 from django.utils import timezone
 from openpyxl import Workbook
 from rest_framework import permissions, status
@@ -15,8 +15,11 @@ from allapp.accounts.audit import record_audit_event
 
 from .services_operations import (
     OperationFilters,
-    build_operations_detail_rows,
+    build_operations_detail_rows,  # noqa: F401 - compatibility for older test patches
     build_operations_summary,
+    count_operations_details,
+    iter_operations_details,
+    paginate_operations_details,
 )
 
 
@@ -37,7 +40,9 @@ class CanViewOperations(permissions.BasePermission):
         if user.is_superuser:
             return True
         scope = AccessScope.for_user(user)
-        return bool(scope.is_valid and any(user.has_perm(code) for code in VIEW_PERMISSIONS))
+        return bool(
+            scope.is_valid and any(user.has_perm(code) for code in VIEW_PERMISSIONS)
+        )
 
 
 class CanExportOperations(CanViewOperations):
@@ -45,7 +50,8 @@ class CanExportOperations(CanViewOperations):
 
     def has_permission(self, request, view):
         return super().has_permission(request, view) and (
-            request.user.is_superuser or request.user.has_perm("reports.export_operations")
+            request.user.is_superuser
+            or request.user.has_perm("reports.export_operations")
         )
 
 
@@ -79,10 +85,16 @@ def parse_operation_filters(request) -> OperationFilters:
     today = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
     month_start = today.replace(day=1)
     filters = OperationFilters(
-        start_date=_parse_date(_value(request, "start_date", month_start.isoformat()), "start_date"),
-        end_date=_parse_date(_value(request, "end_date", today.isoformat()), "end_date"),
+        start_date=_parse_date(
+            _value(request, "start_date", month_start.isoformat()), "start_date"
+        ),
+        end_date=_parse_date(
+            _value(request, "end_date", today.isoformat()), "end_date"
+        ),
         direction=str(_value(request, "direction", "all") or "all").strip().lower(),
-        metric_basis=str(_value(request, "metric_basis", "actual") or "actual").strip().lower(),
+        metric_basis=str(_value(request, "metric_basis", "actual") or "actual")
+        .strip()
+        .lower(),
         owner_id=_parse_optional_int(_value(request, "owner"), "owner"),
         warehouse_id=_parse_optional_int(_value(request, "warehouse"), "warehouse"),
         status=str(_value(request, "status") or "").strip().upper(),
@@ -97,7 +109,9 @@ def parse_operation_filters(request) -> OperationFilters:
     filters.validate()
     scope = AccessScope.for_user(request.user)
     if "warehouse_operator" in scope.roles and filters.metric_basis == "plan":
-        raise PermissionError("Warehouse operators may view only their own actual work facts.")
+        raise PermissionError(
+            "Warehouse operators may view only their own actual work facts."
+        )
     if filters.owner_id and scope.owner_ids and filters.owner_id not in scope.owner_ids:
         raise PermissionError("No access to the requested owner.")
     if (
@@ -116,9 +130,13 @@ class OperationsApiMixin:
         try:
             return parse_operation_filters(request), None
         except PermissionError as exc:
-            return None, Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+            return None, Response(
+                {"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN
+            )
         except ValueError as exc:
-            return None, Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return None, Response(
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 class OperationsSummaryApi(OperationsApiMixin, APIView):
@@ -133,7 +151,10 @@ class OperationsSummaryApi(OperationsApiMixin, APIView):
             request=request,
             owner_id=filters.owner_id,
             warehouse_id=filters.warehouse_id,
-            metadata={"direction": filters.direction, "metric_basis": filters.metric_basis},
+            metadata={
+                "direction": filters.direction,
+                "metric_basis": filters.metric_basis,
+            },
         )
         return Response(payload)
 
@@ -151,8 +172,12 @@ class OperationsDetailsApi(OperationsApiMixin, APIView):
                 {"detail": "page and page_size must be integers."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        rows = build_operations_detail_rows(user=request.user, filters=filters)
-        count = len(rows)
+        count, rows = paginate_operations_details(
+            user=request.user,
+            filters=filters,
+            page=page,
+            page_size=page_size,
+        )
         start = (page - 1) * page_size
         end = start + page_size
         record_audit_event(
@@ -161,11 +186,17 @@ class OperationsDetailsApi(OperationsApiMixin, APIView):
             request=request,
             owner_id=filters.owner_id,
             warehouse_id=filters.warehouse_id,
-            metadata={"count": count, "direction": filters.direction, "metric_basis": filters.metric_basis},
+            metadata={
+                "count": count,
+                "direction": filters.direction,
+                "metric_basis": filters.metric_basis,
+            },
         )
         scope_payload = AccessScope.for_user(request.user).as_dict()
         scope_payload["actor_only"] = bool(
-            {"warehouse_operator", "owner_salesperson"}.intersection(scope_payload["roles"])
+            {"warehouse_operator", "owner_salesperson"}.intersection(
+                scope_payload["roles"]
+            )
         )
         return Response(
             {
@@ -181,7 +212,7 @@ class OperationsDetailsApi(OperationsApiMixin, APIView):
                 "page_size": page_size,
                 "next": page + 1 if end < count else None,
                 "previous": page - 1 if page > 1 else None,
-                "results": rows[start:end],
+                "results": rows,
             }
         )
 
@@ -194,38 +225,69 @@ class OperationsExportApi(OperationsApiMixin, APIView):
         filters, error = self._filters_or_response(request)
         if error:
             return error
-        rows = build_operations_detail_rows(user=request.user, filters=filters)
-        if len(rows) > self.max_rows:
+        count = count_operations_details(user=request.user, filters=filters)
+        if count > self.max_rows:
             return Response(
-                {"detail": f"Export is limited to {self.max_rows} rows; narrow the filters."},
+                {
+                    "detail": f"Export is limited to {self.max_rows} rows; narrow the filters."
+                },
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             )
 
         wb = Workbook(write_only=True)
         ws = wb.create_sheet("operations")
         headers = [
-            "direction", "metric_basis", "event_at", "order_no", "source_no",
-            "task_no", "owner", "warehouse", "product_code", "sku", "product_name",
-            "lot_no", "status", "operator", "planned_qty", "actual_qty", "exception_type",
+            "direction",
+            "metric_basis",
+            "event_at",
+            "order_no",
+            "source_no",
+            "task_no",
+            "owner",
+            "warehouse",
+            "product_code",
+            "sku",
+            "product_name",
+            "lot_no",
+            "status",
+            "operator",
+            "planned_qty",
+            "actual_qty",
+            "exception_type",
         ]
         ws.append(headers)
-        for row in rows:
+        for row in iter_operations_details(user=request.user, filters=filters):
             ws.append(
                 [
-                    row["direction"], row["metric_basis"], row["event_at"], row["order_no"],
-                    row["source_no"], row["task_no"], row["owner"]["name"],
-                    row["warehouse"]["name"], row["product"]["code"], row["product"]["sku"],
-                    row["product"]["name"], row["lot_no"], row["status"], row["operator"],
-                    row["planned_qty"], row["actual_qty"], row["exception_type"],
+                    row["direction"],
+                    row["metric_basis"],
+                    row["event_at"],
+                    row["order_no"],
+                    row["source_no"],
+                    row["task_no"],
+                    row["owner"]["name"],
+                    row["warehouse"]["name"],
+                    row["product"]["code"],
+                    row["product"]["sku"],
+                    row["product"]["name"],
+                    row["lot_no"],
+                    row["status"],
+                    row["operator"],
+                    row["planned_qty"],
+                    row["actual_qty"],
+                    row["exception_type"],
                 ]
             )
-        output = BytesIO()
+        output = SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
         wb.save(output)
-        response = HttpResponse(
-            output.getvalue(),
+        output.seek(0)
+        response = FileResponse(
+            output,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        response["Content-Disposition"] = 'attachment; filename="operations-report.xlsx"'
+        response["Content-Disposition"] = (
+            'attachment; filename="operations-report.xlsx"'
+        )
         response["X-Report-Data-As-Of"] = timezone.now().isoformat()
         response["X-Report-Metric-Basis"] = filters.metric_basis
         record_audit_event(
@@ -234,6 +296,10 @@ class OperationsExportApi(OperationsApiMixin, APIView):
             request=request,
             owner_id=filters.owner_id,
             warehouse_id=filters.warehouse_id,
-            metadata={"rows": len(rows), "direction": filters.direction, "metric_basis": filters.metric_basis},
+            metadata={
+                "rows": count,
+                "direction": filters.direction,
+                "metric_basis": filters.metric_basis,
+            },
         )
         return response

@@ -1,6 +1,8 @@
 from decimal import Decimal
+from unittest import mock
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.test import TestCase
 from django.urls import reverse
 
@@ -82,6 +84,65 @@ class DashboardSummaryConsoleTests(TestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 403)
+
+
+class OperationConsoleScopeTests(TestCase):
+    def setUp(self):
+        self.owner = Owner.objects.create(code="OP-SCOPE", name="作业台货主")
+        self.warehouse = Warehouse.objects.create(code="OPSCOPEWH", name="授权仓")
+        self.other_warehouse = Warehouse.objects.create(
+            code="OPSCOPEOT",
+            name="未授权仓",
+        )
+        self.user = get_user_model().objects.create_user(
+            username="op-scope-user",
+            password="pw",
+        )
+        UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
+        self.user.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="tasking",
+                codename="claim_task_as_wh_operator",
+            )
+        )
+        self.task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.other_warehouse,
+            task_no="OP-SCOPE-OUT-1",
+            task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.RELEASED,
+        )
+        self.line = self.task.lines.create(
+            qty_plan=Decimal("2.000"),
+            status=WmsTask.Status.RELEASED,
+        )
+        self.client.force_login(self.user)
+
+    def test_direct_mutation_urls_hide_out_of_scope_task_and_line(self):
+        scan_response = self.client.post(
+            reverse("op:scan", args=[self.task.id]),
+            {"payload": f"L{self.line.id};Q1"},
+        )
+        line_response = self.client.post(
+            reverse("op:line_detail", args=[self.line.id]),
+            {"line-qty_done": "1.000", "line-remark": "cross warehouse"},
+        )
+        with mock.patch(
+            "allapp.console.views_op.inventory_services.post_task"
+        ) as mocked_post:
+            post_response = self.client.post(
+                reverse("op:post", args=[self.task.id]),
+                {"confirm": "on"},
+            )
+
+        self.assertEqual(scan_response.status_code, 404)
+        self.assertEqual(line_response.status_code, 404)
+        self.assertEqual(post_response.status_code, 404)
+        mocked_post.assert_not_called()
 
 
 class SaleMiniProductListingConsoleTests(TestCase):

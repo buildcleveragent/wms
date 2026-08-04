@@ -1,5 +1,12 @@
 import { defineStore } from 'pinia'
-import { api, setToken } from '@/utils/request'
+import {
+  api,
+  clearSessionStorage,
+  getAccessToken,
+  getRefreshToken,
+  setTokens,
+} from '@/utils/request'
+import { useCart } from '@/store/cart'
 
 function storedUser() {
   try {
@@ -10,11 +17,7 @@ function storedUser() {
 }
 
 function storedAccess() {
-  try {
-    return uni.getStorageSync('access') || ''
-  } catch (error) {
-    return ''
-  }
+  return getAccessToken()
 }
 
 function persistUser(user) {
@@ -26,6 +29,7 @@ export const useAuth = defineStore('auth', {
   state: () => ({
     user: storedUser(),
     access: storedAccess(),
+    refresh: getRefreshToken(),
     capabilities: storedUser()?.capabilities || {},
   }),
   getters: {
@@ -40,15 +44,35 @@ export const useAuth = defineStore('auth', {
   actions: {
     ensureAuth() {
       this.access = storedAccess()
+      this.refresh = getRefreshToken()
       this.user = storedUser()
       this.capabilities = this.user?.capabilities || {}
       return !!this.access
     },
+    async bootstrap() {
+      this.ensureAuth()
+      if (!this.access && !this.refresh) return { status: 'anonymous' }
+      try {
+        const profile = await api.authProfile()
+        this.access = getAccessToken()
+        this.refresh = getRefreshToken()
+        this.capabilities = profile?.capabilities || {}
+        this.user = { ...(profile?.user || {}), capabilities: this.capabilities }
+        persistUser(this.user)
+        return { status: 'authenticated' }
+      } catch (error) {
+        if (error?.statusCode === 0) return { status: 'offline', error }
+        this.clearLocalSession()
+        return { status: 'anonymous', error }
+      }
+    },
     async login(username, password) {
       const res = await api.login(username, password)
       this.access = res?.access || ''
-      setToken(this.access)
+      this.refresh = res?.refresh || ''
+      setTokens(this.access, this.refresh)
       const profile = await api.authProfile()
+      useCart().resetOrder()
       this.capabilities = profile?.capabilities || {}
       this.user = {
         ...(profile?.user || { username }),
@@ -57,12 +81,24 @@ export const useAuth = defineStore('auth', {
       persistUser(this.user)
       return this.user
     },
-    logout() {
+    clearLocalSession() {
+      useCart().resetOrder()
       this.user = null
       this.access = ''
+      this.refresh = ''
       this.capabilities = {}
-      setToken('')
+      clearSessionStorage()
       persistUser(null)
+    },
+    async logout() {
+      const refresh = getRefreshToken()
+      try {
+        if (refresh) await api.logout()
+      } catch (error) {
+        // Local logout must always complete even when the network is down.
+      } finally {
+        this.clearLocalSession()
+      }
     },
   },
 })

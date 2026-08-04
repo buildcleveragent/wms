@@ -1,0 +1,4 @@
+-r dev.in
+-c requirements.txt
+
+pytest-cov>=6.0,<7.0

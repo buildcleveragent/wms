@@ -22,6 +22,21 @@ env:
   MYSQL_VERSION: '8.0'
 
 jobs:
+  owner-sale-client:
+    name: Owner Sale Client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: wmsownersale/package-lock.json
+      - run: npm ci
+        working-directory: wmsownersale
+      - run: npm run test:quality
+        working-directory: wmsownersale
+
   lint:
     name: Code Quality Checks
     runs-on: ubuntu-latest
@@ -181,16 +196,13 @@ jobs:
               allapp/test_business_flows.py
           elif [ "${{ matrix.test-group }}" = "pos-sales" ]; then
             python -m pytest -n auto -q --tb=short --maxfail=1 --cov=allapp --cov-report= \
-              allapp/pos/tests.py \
-              allapp/salesapp/test_mobile_api_unit.py \
-              allapp/salesapp/test_salemini_unit.py \
-              allapp/salesapp/test_services_pricing_unit.py
+              allapp/pos
           else
             python -m pytest -n auto -q --tb=short --maxfail=1 --cov=allapp --cov-report= \
               allapp/reports \
               allapp/billing \
               allapp/console \
-              allapp/salesapp/tests.py
+              allapp/salesapp
           fi
       - name: Upload test & coverage shards
         if: always()

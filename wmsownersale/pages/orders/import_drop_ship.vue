@@ -11,6 +11,25 @@
         <view>1. 每行 1 个订单</view>
         <view>2. 优先填写“商家编码”匹配系统 SKU</view>
         <view>3. “订单编号”建议必填，用于防重复</view>
+        <view>4. 仅支持 .xlsx 格式</view>
+        <view>5. 文件最大 5 MB，最多 1000 个非空业务行</view>
+      </view>
+
+      <view class="file-box">
+        <view class="label">出库仓库</view>
+        <view v-if="warehouseLoading" class="file-name">正在加载可用仓库…</view>
+        <view v-else-if="warehouseError" class="warehouse-error">{{ warehouseError }}</view>
+        <picker
+          v-else-if="warehouses.length > 1"
+          :range="warehouses"
+          range-key="name"
+          @change="onWarehouseChange"
+        >
+          <view class="warehouse-picker">
+            {{ warehouseName || '请选择出库仓库' }}
+          </view>
+        </picker>
+        <view v-else class="file-name">{{ warehouseName || '暂无可用仓库' }}</view>
       </view>
 
       <view class="file-box">
@@ -22,7 +41,7 @@
         <button class="btn btn-outline" @click="chooseExcel" :disabled="uploading">
           选择 Excel
         </button>
-        <button class="btn" @click="uploadExcel" :disabled="!filePath || uploading">
+        <button class="btn" @click="uploadExcel" :disabled="!filePath || !warehouseId || uploading">
           {{ uploading ? '上传中...' : '上传并导入' }}
         </button>
       </view>
@@ -76,23 +95,71 @@
 
 <script setup>
 import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/utils/request.js'
 
 const filePath = ref('')
 const fileName = ref('')
 const uploading = ref(false)
 const result = ref(null)
+const warehouses = ref([])
+const warehouseId = ref(null)
+const warehouseName = ref('')
+const warehouseLoading = ref(true)
+const warehouseError = ref('')
+
+function selectWarehouse(warehouse) {
+  warehouseId.value = warehouse?.id || null
+  warehouseName.value = warehouse?.name || ''
+}
+
+function onWarehouseChange(event) {
+  const index = Number(event?.detail?.value)
+  selectWarehouse(warehouses.value[index])
+}
+
+async function loadWarehouses() {
+  warehouseLoading.value = true
+  warehouseError.value = ''
+  try {
+    const response = await api.warehouses()
+    warehouses.value = Array.isArray(response) ? response : []
+    if (warehouses.value.length === 1) {
+      selectWarehouse(warehouses.value[0])
+    } else if (!warehouses.value.length) {
+      warehouseError.value = '当前货主未配置可用出库仓库，请联系管理员'
+    }
+  } catch (error) {
+    warehouseError.value = error?.message || '加载可用仓库失败，请稍后重试'
+  } finally {
+    warehouseLoading.value = false
+  }
+}
 
 function chooseExcel() {
   uni.chooseFile({
     count: 1,
-    extension: ['.xlsx', '.xls'],
+    extension: ['.xlsx'],
     success: (res) => {
       const path = res?.tempFilePaths?.[0] || ''
       const file = res?.tempFiles?.[0] || {}
 
+      const selectedName = file.name || path.split('/').pop() || ''
+      if (!selectedName.toLowerCase().endsWith('.xlsx')) {
+        filePath.value = ''
+        fileName.value = ''
+        uni.showToast({ title: '仅支持 .xlsx 格式', icon: 'none' })
+        return
+      }
+      if (Number(file.size || 0) > 5 * 1024 * 1024) {
+        filePath.value = ''
+        fileName.value = ''
+        uni.showToast({ title: 'Excel 文件不能超过 5 MB', icon: 'none' })
+        return
+      }
+
       filePath.value = path
-      fileName.value = file.name || path.split('/').pop() || '已选择文件'
+      fileName.value = selectedName
     },
     fail: (err) => {
       console.error('chooseFile fail', err)
@@ -102,6 +169,11 @@ function chooseExcel() {
 }
 
 async function uploadExcel() {
+  if (!warehouseId.value) {
+    uni.showToast({ title: '请先选择出库仓库', icon: 'none' })
+    return
+  }
+
   if (!filePath.value) {
     uni.showToast({ title: '请先选择 Excel 文件', icon: 'none' })
     return
@@ -111,7 +183,7 @@ async function uploadExcel() {
     uploading.value = true
     result.value = null
 
-    const res = await api.importDropShipExcel(filePath.value)
+    const res = await api.importDropShipExcel(filePath.value, warehouseId.value)
     result.value = res
 
     uni.showToast({
@@ -122,6 +194,7 @@ async function uploadExcel() {
     console.error('import excel fail', e)
     const msg =
       e?.data?.detail ||
+      e?.message ||
       e?.errMsg ||
       '导入失败'
     uni.showToast({ title: msg, icon: 'none' })
@@ -129,6 +202,8 @@ async function uploadExcel() {
     uploading.value = false
   }
 }
+
+onLoad(loadWarehouses)
 </script>
 
 <style scoped>
@@ -188,6 +263,17 @@ async function uploadExcel() {
   font-size: 28rpx;
   color: #111827;
   word-break: break-all;
+}
+
+.warehouse-picker {
+  padding: 12rpx 0;
+  font-size: 28rpx;
+  color: #2563eb;
+}
+
+.warehouse-error {
+  font-size: 26rpx;
+  color: #b91c1c;
 }
 
 .btn-row {

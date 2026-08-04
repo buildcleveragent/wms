@@ -1,3 +1,5 @@
+import { useCart } from '@/store/cart'
+
 const ENV =
   (uni.getAccountInfoSync && uni.getAccountInfoSync().miniProgram?.envVersion) ||
   'develop'
@@ -13,7 +15,7 @@ const BASE_MAP = {
 // export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
 export const BASE_URL = BASE_MAP.develop
 
-function getToken() {
+export function getAccessToken() {
   try {
     return uni.getStorageSync('access') || ''
   } catch (e) {
@@ -21,13 +23,28 @@ function getToken() {
   }
 }
 
-export function setToken(t) {
-  uni.setStorageSync('access', t || '')
+export function getRefreshToken() {
+  try {
+    return uni.getStorageSync('refresh') || ''
+  } catch (e) {
+    return ''
+  }
 }
 
-export function clearToken() {
+export function setTokens(access, refresh) {
+  uni.setStorageSync('access', access || '')
+  if (refresh !== undefined) uni.setStorageSync('refresh', refresh || '')
+}
+
+// Kept for old callers while making the two-token contract explicit.
+export function setToken(access) {
+  setTokens(access)
+}
+
+export function clearSessionStorage() {
   try {
     uni.removeStorageSync('access')
+    uni.removeStorageSync('refresh')
     uni.removeStorageSync('user')
   } catch (e) {}
 }
@@ -35,7 +52,7 @@ export function clearToken() {
 let redirectingToLogin = false
 
 function isLoginRequest(url = '') {
-  return url === '/api/token/' || url.includes('/api/token/')
+  return url.includes('/api/token/') || url.includes('/api/auth/login/') || url.includes('/api/auth/refresh/')
 }
 
 function getFriendlyMessage(data, fallback = '请求失败') {
@@ -66,17 +83,21 @@ function getFriendlyMessage(data, fallback = '请求失败') {
   return fallback
 }
 
-function redirectToLogin() {
+export function expireLocalSession({ notify = true } = {}) {
   if (redirectingToLogin) return
   redirectingToLogin = true
 
-  clearToken()
+  clearSessionStorage()
 
-  uni.showToast({
-    title: '登录已超时，需要重新登录',
-    icon: 'none',
-    duration: 1500,
-  })
+  try { useCart().resetOrder() } catch (e) {}
+
+  if (notify) {
+    uni.showToast({
+      title: '登录已超时，需要重新登录',
+      icon: 'none',
+      duration: 1500,
+    })
+  }
 
   setTimeout(() => {
     try {
@@ -96,18 +117,17 @@ function buildQuery(params = {}) {
     .join('&')
 }
 
-export function request(opts = {}) {
-  const token = getToken()
-
+function rawRequest(opts = {}, access = '') {
   return new Promise((resolve, reject) => {
     uni.request({
       url: BASE_URL + (opts.url || ''),
       method: opts.method || 'GET',
-      data: opts.data || {},
+      data: typeof opts.data === 'function' ? opts.data() : (opts.data || {}),
+      responseType: opts.responseType || 'text',
       header: {
         'Content-Type': 'application/json',
         ...(opts.header || {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(access ? { Authorization: `Bearer ${access}` } : {}),
       },
 
       success: (res) => {
@@ -119,26 +139,11 @@ export function request(opts = {}) {
           return
         }
 
-        // 登录接口自己的 401，不做“超时跳登录”处理
-        if (statusCode === 401 && !isLoginRequest(opts.url)) {
-          const err = {
-            code: 401,
-            statusCode,
-            message: '登录已超时，需要重新登录',
-            data,
-          }
-
-          redirectToLogin()
-          reject(err)
-          return
-        }
-
         const message = getFriendlyMessage(data, '请求失败')
 
-        uni.showToast({
-          title: message,
-          icon: 'none',
-        })
+        if (!opts.silent && statusCode !== 401) {
+          uni.showToast({ title: message, icon: 'none' })
+        }
 
         reject({
           code: statusCode,
@@ -151,10 +156,7 @@ export function request(opts = {}) {
       fail: (err) => {
         const message = '网络异常，请稍后重试'
 
-        uni.showToast({
-          title: message,
-          icon: 'none',
-        })
+        if (!opts.silent) uni.showToast({ title: message, icon: 'none' })
 
         reject({
           code: 0,
@@ -165,6 +167,167 @@ export function request(opts = {}) {
       },
     })
   })
+}
+
+let refreshPromise = null
+
+export function refreshSession() {
+  if (refreshPromise) return refreshPromise
+  const refresh = getRefreshToken()
+  if (!refresh) {
+    return Promise.reject({ statusCode: 401, message: '缺少刷新令牌' })
+  }
+  refreshPromise = rawRequest({
+    url: '/api/auth/refresh/',
+    method: 'POST',
+    data: { refresh },
+    silent: true,
+  }).then((data) => {
+    if (!data?.access) throw { statusCode: 401, message: '刷新令牌无效' }
+    setTokens(data.access, data.refresh || refresh)
+    return data.access
+  }).finally(() => {
+    refreshPromise = null
+  })
+  return refreshPromise
+}
+
+export async function request(opts = {}) {
+  try {
+    return await rawRequest(opts, getAccessToken())
+  } catch (error) {
+    if (error?.statusCode !== 401 || isLoginRequest(opts.url) || opts._retried) throw error
+    try {
+      const access = await refreshSession()
+      return await rawRequest({ ...opts, _retried: true }, access)
+    } catch (refreshError) {
+      // Offline refresh failures keep the session so the startup page can
+      // offer an explicit retry instead of destroying a valid login.
+      if (refreshError?.statusCode !== 0) expireLocalSession()
+      throw refreshError
+    }
+  }
+}
+
+export async function fetchAllPages(fetchPage, params = {}) {
+  const all = []
+  let page = 1
+  while (true) {
+    const response = await fetchPage({ ...params, page })
+    const rows = Array.isArray(response) ? response : (response?.results || [])
+    all.push(...rows)
+    if (Array.isArray(response) || !response?.next) return all
+    page += 1
+  }
+}
+
+function rawDownload(url, access) {
+  return new Promise((resolve, reject) => {
+    uni.downloadFile({
+      url: BASE_URL + url,
+      header: access ? { Authorization: `Bearer ${access}` } : {},
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.tempFilePath)
+        else reject({ statusCode: res.statusCode, message: '下载失败' })
+      },
+      fail: (error) => reject({ statusCode: 0, message: '网络异常，请稍后重试', data: error }),
+    })
+  })
+}
+
+export async function downloadAuthenticatedFile(url, filename) {
+  // #ifdef H5
+  const data = await request({ url, responseType: 'arraybuffer', silent: true })
+  const blob = new Blob([data])
+  const objectUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(objectUrl)
+  return
+  // #endif
+
+  // #ifndef H5
+  let path
+  try {
+    path = await rawDownload(url, getAccessToken())
+  } catch (error) {
+    if (error?.statusCode !== 401) throw error
+    const access = await refreshSession().catch((refreshError) => {
+      if (refreshError?.statusCode !== 0) expireLocalSession()
+      throw refreshError
+    })
+    path = await rawDownload(url, access)
+  }
+  return new Promise((resolve, reject) => {
+    uni.openDocument({ filePath: path, showMenu: true, success: resolve, fail: reject })
+  })
+  // #endif
+}
+
+function rawUpload(opts, access = '') {
+  return new Promise((resolve, reject) => {
+    uni.uploadFile({
+      url: BASE_URL + opts.url,
+      filePath: opts.filePath,
+      name: opts.name || 'file',
+      formData: opts.formData || {},
+      header: {
+        ...(opts.header || {}),
+        ...(access ? { Authorization: `Bearer ${access}` } : {}),
+      },
+      success: (response) => {
+        let data = response.data
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data)
+          } catch (error) {
+            data = { detail: data || '上传响应格式不正确' }
+          }
+        }
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          resolve(data)
+          return
+        }
+        reject({
+          code: response.statusCode,
+          statusCode: response.statusCode,
+          message: getFriendlyMessage(data, '上传失败'),
+          data,
+        })
+      },
+      fail: (error) => reject({
+        code: 0,
+        statusCode: 0,
+        message: '网络异常，请稍后重试',
+        data: error,
+      }),
+    })
+  })
+}
+
+export async function uploadAuthenticatedFile(opts) {
+  try {
+    return await rawUpload(opts, getAccessToken())
+  } catch (error) {
+    if (error?.statusCode !== 401) throw error
+  }
+
+  let access
+  try {
+    access = await refreshSession()
+  } catch (refreshError) {
+    if (refreshError?.statusCode !== 0) expireLocalSession()
+    throw refreshError
+  }
+
+  try {
+    return await rawUpload(opts, access)
+  } catch (retryError) {
+    if (retryError?.statusCode === 401) expireLocalSession()
+    throw retryError
+  }
 }
 
 export const api = {
@@ -180,6 +343,15 @@ export const api = {
     request({
       url: '/api/auth/profile/',
     }),
+
+  logout: () => request({
+    url: '/api/auth/logout/',
+    method: 'POST',
+    // Evaluate on every attempt so a refresh-token rotation during a 401 retry
+    // cannot leave the newly issued token unblacklisted.
+    data: () => ({ refresh: getRefreshToken() }),
+    silent: true,
+  }),
 
   changePassword: (oldPassword, newPassword1, newPassword2) =>
     request({
@@ -214,6 +386,11 @@ export const api = {
       url: `/api/catalog/owners/?${qs}`,
     })
   },
+
+  warehouses: () =>
+    request({
+      url: '/api/catalog/warehouses/',
+    }),
 
   products: (q = '', page = 1, warehouse_id) => {
     const qs = buildQuery({
@@ -287,12 +464,21 @@ export const api = {
   },
 
   // 出库单创建
-  createOutboundOrder: (payload) =>
-    request({
+  createOutboundOrder: (payload, idempotencyKey) => {
+    const key = String(idempotencyKey || '').trim()
+    if (!key) {
+      return Promise.reject({
+        code: 'MISSING_IDEMPOTENCY_KEY',
+        message: '缺少订单幂等键，请重新进入开单流程',
+      })
+    }
+    return request({
       url: '/api/outbound/orders/',
       method: 'POST',
       data: payload,
-    }),
+      header: { 'Idempotency-Key': key },
+    })
+  },
 
   // 兼容两种调用：
   // 1) api.orders('关键字')
@@ -315,6 +501,22 @@ export const api = {
       url: `/api/outbound/orders/${id}/`,
     }),
 
+  orderEditContext: (id) =>
+    request({ url: `/api/outbound/orders/${id}/edit-context/` }),
+
+  updateOutboundOrder: (id, payload) =>
+    request({
+      url: `/api/outbound/orders/${id}/`,
+      method: 'PUT',
+      data: payload,
+    }),
+
+  submitOutboundOrder: (id) =>
+    request({
+      url: `/api/outbound/orders/${id}/submit/`,
+      method: 'POST',
+    }),
+
   pendingOrders: (page = 1, search = '') =>
     request({
       url: `/api/outbound/orders?approval_status=OWNER_PENDING&page=${page}${
@@ -329,10 +531,11 @@ export const api = {
     }),
 	
   // 这两个接口如果你后端还没实现，会返回后端错误
-  ownerReject: (id) =>
+  ownerReject: (id, reason) =>
     request({
       url: `/api/outbound/orders/${id}/owner-reject/`,
       method: 'POST',
+	  data: { reason: String(reason || '').trim() },
     }),
 
   cancelOrder: (id) =>
@@ -342,29 +545,14 @@ export const api = {
     }),
 	
   // 上传一件代发 Excel
-  importDropShipExcel(filePath) {
-    const access = uni.getStorageSync('access') || ''
-
-    return new Promise((resolve, reject) => {
-      uni.uploadFile({
-        url: `${BASE_URL}/api/outbound/orders/import-drop-ship-excel/`,
-        filePath,
-        name: 'file',
-        header: access ? { Authorization: `Bearer ${access}` } : {},
-        success: (res) => {
-          try {
-            const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
-            if (res.statusCode >= 200 && res.statusCode < 300) {
-              resolve(data)
-            } else {
-              reject({ statusCode: res.statusCode, data })
-            }
-          } catch (e) {
-            reject(e)
-          }
-        },
-        fail: (err) => reject(err),
-      })
+  importDropShipExcel(filePath, warehouseId) {
+    return uploadAuthenticatedFile({
+      url: '/api/outbound/orders/import-drop-ship-excel/',
+      filePath,
+      name: 'file',
+      formData: {
+        warehouse_id: String(warehouseId || ''),
+      },
     })
   },
 }

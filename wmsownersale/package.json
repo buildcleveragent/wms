@@ -1,0 +1,27 @@
+{
+  "name": "wms-owner-sale",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test:contracts": "node scripts/verify-owner-client.mjs",
+    "test:unit": "vitest run",
+    "build:h5": "CI=1 UNI_INPUT_DIR=$PWD uni build -p h5",
+    "build:mp-weixin": "CI=1 UNI_INPUT_DIR=$PWD uni build -p mp-weixin",
+    "test:quality": "npm run test:contracts && npm run test:unit && npm run build:h5 && npm run build:mp-weixin"
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "3.0.0-alpha-1000920260626810",
+    "@dcloudio/uni-h5": "3.0.0-alpha-1000920260626810",
+    "@dcloudio/uni-mp-weixin": "3.0.0-alpha-1000920260626810",
+    "pinia": "2.3.1",
+    "vue": "3.5.39"
+  },
+  "devDependencies": {
+    "@dcloudio/vite-plugin-uni": "3.0.0-alpha-1000920260626810",
+    "@vue/test-utils": "^2.4.6",
+    "jsdom": "^26.1.0",
+    "sass": "1.77.8",
+    "vite": "8.1.0",
+    "vitest": "^3.2.4"
+  }
+}

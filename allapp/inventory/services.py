@@ -70,6 +70,20 @@ from allapp.inventory.models import (InvTxType,
 from allapp.locations.models import Location
 from allapp.tasking.models import WmsTask, WmsTaskLine, TaskScanLog
 logger = logging.getLogger(__name__)
+
+
+_POSTING_FAMILY_BY_TASK_TYPE = {
+    "RECEIVE": "RECEIVE",
+    "PUTAWAY": "MOVE",
+    "RELOC": "MOVE",
+    "PICK": "ISSUE",
+    "LOAD": "ISSUE",
+    "DISPATCH": "ISSUE",
+    "COUNT": "COUNT",
+    "ADJUST": "ADJUST",
+}
+
+
 # ======================
 # 小工具：统一数量精度/安全
 # ======================
@@ -106,6 +120,60 @@ def _lock_journal(src_model: str, src_id: int, tx_type: str) -> PostingJournal:
         defaults=dict(status="PENDING", attempt_count=0, message=""),
     )
     return PostingJournal.objects.select_for_update().get(pk=j.pk)
+
+
+def _lock_and_validate_scans(
+    *, task: WmsTask, scans: Optional[Iterable[TaskScanLog]]
+) -> List[TaskScanLog]:
+    """Re-read and lock the exact scan set accepted for this posting attempt."""
+    supplied = [] if scans is None else list(scans)
+    if not supplied:
+        raise ValidationError("无可过账扫描（必须显式提供至少一条扫描）。")
+
+    scan_ids = []
+    for scan in supplied:
+        scan_id = getattr(scan, "pk", None)
+        if scan_id is None:
+            raise ValidationError("过账扫描必须是已持久化的 TaskScanLog。")
+        scan_ids.append(scan_id)
+
+    if len(scan_ids) != len(set(scan_ids)):
+        raise ValidationError("过账扫描包含重复记录。")
+
+    # 与标准处理器保持相同锁序：task -> journal -> task lines -> scans。
+    valid_line_ids = set(
+        WmsTaskLine.objects.select_for_update()
+        .filter(task_id=task.id)
+        .order_by("id")
+        .values_list("id", flat=True)
+    )
+    locked_scans = list(
+        TaskScanLog.objects.select_for_update()
+        .filter(pk__in=scan_ids, task_id=task.id)
+        .order_by("id")
+    )
+    if len(locked_scans) != len(scan_ids):
+        raise ValidationError("部分过账扫描不存在或不属于当前任务。")
+
+    status_ok = getattr(TaskScanLog.ScanStatus, "OK", "OK")
+    rejected = getattr(TaskScanLog.ReviewStatus, "REJECTED", "REJECTED")
+    for scan in locked_scans:
+        if scan.task_id != task.id:
+            raise ValidationError(f"扫描 {scan.id} 不属于任务 {task.id}。")
+        if scan.owner_id != task.owner_id or scan.warehouse_id != task.warehouse_id:
+            raise ValidationError(f"扫描 {scan.id} 的货主或仓库与任务不一致。")
+        if scan.task_line_id and scan.task_line_id not in valid_line_ids:
+            raise ValidationError(f"扫描 {scan.id} 的任务行不属于任务 {task.id}。")
+        if scan.status != status_ok:
+            raise ValidationError(f"扫描 {scan.id} 状态不是 OK，不能过账。")
+        if scan.review_status == rejected:
+            raise ValidationError(f"扫描 {scan.id} 已被拒绝，不能过账。")
+        if scan.posted_at is not None:
+            raise ValidationError(f"扫描 {scan.id} 已过账，不能重复处理。")
+        if scan.posting_journal_id is not None or scan.posting_batch is not None:
+            raise ValidationError(f"扫描 {scan.id} 已存在过账标记，拒绝覆盖。")
+
+    return locked_scans
 
 
 def _ensure_same_wh(*, task: WmsTask, location_id: int):
@@ -172,6 +240,10 @@ def _upsert_detail(
     - available_qty 的更新由模型层规则保证（通常是 onhand - allocated - locked - damaged）。
     - batch_no/serial_no 统一大写与空值归一（None 而非 ""），以免同一维度被拆成两条。
     """
+    posting_family = _POSTING_FAMILY_BY_TASK_TYPE.get(task_type or "")
+    if posting_family is None:
+        raise ValidationError(f"不支持的库存过账任务类型：{task_type or '<空>'}")
+
     # 正常过账路径会在进入本函数前按固定顺序锁定所有候选明细。
     # 保留 detail=None 的兼容入口，但也必须重取行锁，不允许无锁读改写。
     created = False
@@ -209,13 +281,10 @@ def _upsert_detail(
             extra=ctx,
         )
 
-    if not task_type:
-        raise ValidationError(f"未知任务类型: {task_type}")
-
     base_onhand = det.onhand_qty or Decimal("0")
     base_alloc = det.allocated_qty or Decimal("0")
 
-    if task_type in ["PICK", "SHIP", "DISPATCH", "LOAD"]:
+    if posting_family == "ISSUE":
         # 对拣货/发运任务：qty_delta 一般为负数（ISSUE）
         det.onhand_qty = base_onhand + qty_delta
 
@@ -227,17 +296,8 @@ def _upsert_detail(
             # 理论上不会走到这里（除非将来支持“反冲销”），先保持不动
             det.allocated_qty = base_alloc
     else:
-        # RECEIVE / ADJ_GAIN / ADJ_LOSS / COUNT 等，沿用原来的 onhand 逻辑
+        # RECEIVE / MOVE / COUNT / ADJUST 只调整 onhand，不释放出库预占。
         det.onhand_qty = base_onhand + qty_delta
-
-    #
-    #
-    # # 根据任务类型更新库存
-    # if task_type in ["PICK","SHIP","DISPATCH"]:  # 收货，增加库存
-    #     det.onhand_qty = (det.onhand_qty or Decimal("0")) + qty_delta
-    #     det.allocated_qty = (det.allocated_qty or Decimal("0")) + qty_delta
-    # else:
-    #     det.onhand_qty = (det.onhand_qty or Decimal("0")) + qty_delta
 
     # 防御性校验，避免 onhand 被减成负数时直接 500
     if det.onhand_qty < 0:
@@ -570,9 +630,9 @@ def _can_post(task: WmsTask) -> Tuple[bool, str]:
 # ======================
 # 严格按任务类型取数量；不做兜底、不混用字段
 def _scan_qty_for_type(task_type: str, s: TaskScanLog) -> Decimal:
-    t = (task_type or "").upper()
+    t = task_type or ""
 
-    if t in ("RECEIVE", "PUTAWAY", "RELOC", "PICK", "DISPATCH", "LOAD", "SHIP"):
+    if t in ("RECEIVE", "PUTAWAY", "RELOC", "PICK", "DISPATCH", "LOAD", "ADJUST"):
         # 这些任务只允许用 qty_base_delta
         if getattr(s, "qty_base_delta", None) is None:
             raise ValidationError(f"{task_type} 需要 qty_base_delta（缺失）")
@@ -586,10 +646,7 @@ def _scan_qty_for_type(task_type: str, s: TaskScanLog) -> Decimal:
         q = Decimal(str(s.qty_base))
         return _q4(q)
 
-    # 未知类型：保底按 delta 口径（也可改成 raise 更严格）
-    if getattr(s, "qty_base_delta", None) is None:
-        raise ValidationError(f"{task_type} 需要 qty_base_delta（缺失）")
-    return _q4(Decimal(str(s.qty_base_delta)))
+    raise ValidationError(f"不支持的库存过账任务类型：{t or '<空>'}")
 
 
 
@@ -597,10 +654,11 @@ def _qty_for_type(task_type: str, scan: TaskScanLog) -> Decimal:
     """
     方向归一规则：
     - RECEIVE / PUTAWAY / RELOC：>0
-    - PICK / DISPATCH / LOAD / SHIP：<0（若取到正数则转为负）
+    - PICK / DISPATCH / LOAD：<0（若取到正数则转为负）
     - COUNT：可正可负（0=无差异，不入账）
+    - ADJUST：可正可负，但不可为 0
     """
-    t = (task_type or "").upper()
+    t = task_type or ""
     q = _scan_qty_for_type(t, scan)  # 严格来源
 
     if t in ("RECEIVE", "PUTAWAY", "RELOC"):
@@ -608,15 +666,23 @@ def _qty_for_type(task_type: str, scan: TaskScanLog) -> Decimal:
             raise ValidationError(f"{task_type} 需要 qty_base_delta > 0")
         return _q4(q)
 
-    if t in ("PICK", "DISPATCH", "LOAD", "SHIP"):
+    if t in ("PICK", "DISPATCH", "LOAD"):
         if q == 0:
             raise ValidationError(f"{task_type} 需要非零 qty_base_delta")
         if q > 0:
             q = -q
         return _q4(q)
 
-    # COUNT：保留正负，0 代表无差异
-    return _q4(q)
+    if t == "COUNT":
+        # COUNT：保留正负，0 代表无差异
+        return _q4(q)
+
+    if t == "ADJUST":
+        if q == 0:
+            raise ValidationError("ADJUST 需要非零 qty_base_delta")
+        return _q4(q)
+
+    raise ValidationError(f"不支持的库存过账任务类型：{t or '<空>'}")
 
 
 # ======================
@@ -679,7 +745,7 @@ def _normalized_model_name(value: Optional[str]) -> str:
 def _is_pos_pick(task: WmsTask, tx_type: str) -> bool:
     return (
         tx_type == InvTxType.ISSUE
-        and (task.task_type or "").upper() == "PICK"
+        and task.task_type == WmsTask.TaskType.PICK
         and (task.source_app or "").lower() == "pos"
     )
 
@@ -738,7 +804,15 @@ def _pos_scan_source_details(
     }
 
 
-def _group_receive_like(task: WmsTask, scans: List[TaskScanLog], *, now, batch_no: str, tx_type: str) -> Dict[_AggKey, Decimal]:
+def _group_receive_like(
+    task: WmsTask,
+    scans: List[TaskScanLog],
+    *,
+    now,
+    batch_no: str,
+    tx_type: str,
+    qty_task_type: str,
+) -> Dict[_AggKey, Decimal]:
     """
     针对 RECEIVE/ISSUE（PICK/DISPATCH 等）/COUNT 的聚合过程：
     - 核心是把每条扫描映射到聚合键，然后把数量累加到该键上。
@@ -769,18 +843,8 @@ def _group_receive_like(task: WmsTask, scans: List[TaskScanLog], *, now, batch_n
             raise ValidationError(f"{tx_type} 缺少库位")
         _ensure_same_wh(task=task, location_id=loc_id)
 
-        # 3) 数量方向归一
-        # 把tx_type = ADJ_GAIN / ADJ_LOSS # 误当成“任务类型”传给取量函数了，导致落入“增量口径”而去要求qty_base_delta
-        # qty = _qty_for_type(task_type=tx_type if tx_type != InvTxType.ISSUE else "PICK", scan=s)
-        # 修正：明确映射交易类型 -> 取量口径的“任务类型”
-        if tx_type in (InvTxType.ADJ_GAIN, InvTxType.ADJ_LOSS):
-            task_type_for_qty = "COUNT"
-        elif tx_type == InvTxType.ISSUE:
-            task_type_for_qty = "PICK"
-        else:  # InvTxType.RECEIVE
-            task_type_for_qty = "RECEIVE"
-
-        qty = _qty_for_type(task_type_for_qty, scan=s)
+        # 3) 数量方向归一。数量口径由调用方显式指定，不从交易类型猜测。
+        qty = _qty_for_type(qty_task_type, scan=s)
 
 
         # 4) POS uses the exact reserved layer as the authoritative dimension.
@@ -898,7 +962,14 @@ def _group_receive_like(task: WmsTask, scans: List[TaskScanLog], *, now, batch_n
 # 聚合：PUTAWAY/RELOC（需要 from→to 成对的复杂型）
 # ======================
 
-def _group_putaway(task: WmsTask, scans: List[TaskScanLog], *, now, batch_no: str) -> Dict[Tuple[_AggKey, _AggKey], Decimal]:
+def _group_putaway(
+    task: WmsTask,
+    scans: List[TaskScanLog],
+    *,
+    now,
+    batch_no: str,
+    qty_task_type: str,
+) -> Dict[Tuple[_AggKey, _AggKey], Decimal]:
     """
     上架/移库的聚合：
     - 需要成对 from→to，所以返回结构是 { (key_out, key_in, pair_id) : qty_sum }
@@ -922,7 +993,7 @@ def _group_putaway(task: WmsTask, scans: List[TaskScanLog], *, now, batch_no: st
         _ensure_same_wh(task=task, location_id=s_from)
         _ensure_same_wh(task=task, location_id=s_to)
 
-        qty_pos = _qty_for_type("PUTAWAY", s)  # >0
+        qty_pos = _qty_for_type(qty_task_type, s)  # >0
         # pair = uuid4().hex[:16]                # 一对交易的关联 id
         # pair = uuid4() 每条扫描都产出一对 MOVE（语义还说自己是“聚合”😅）
 
@@ -1295,122 +1366,192 @@ def post_task(
     统一任务过账入口（Scan-Only + 批内聚合）
 
     流程概览：
-    1) 锁任务（WmsTask）→ 校验可过账（审核状态、posting_status）。
-    2) 锁/建 任务级 PostingJournal(src="WmsTask", id=task.id, tx="POST")，若已 POSTED → 直接返回。
-    3) 过滤扫描：只处理 status=OK & posted_at IS NULL（避免重复）。
-    4) 按任务类型，把扫描聚合为分组（RECEIVE/ISSUE/ADJ_*；PUTAWAY 为 OUT+IN 成对）。
-    5) 逐分组入账：先更新 InventoryDetail，再写 InventoryTransaction。
-    6) 批量回写扫描打点（posted_at / posting_batch / posting_journal）。
-    7) 回填任务 posting_status=POSTED；PJ 置 POSTED 并记录 message=批号。
+    1) 依次锁任务、任务级 PostingJournal，并在锁内校验幂等状态。
+    2) 解析显式任务类型策略；未支持类型直接失败。
+    3) 按传入 ID 重取并锁定扫描，严格校验归属与可过账状态。
+    4) 聚合并写 InventoryDetail / InventoryTransaction。
+    5) 精确打点扫描；更新数量不一致则回滚。
+    6) 回填任务 posting_status=POSTED；PJ 置 POSTED 并记录批号。
     """
-    # 1) 任务 + 可过账
+    # 1) 任务 + PJ：统一锁序并在锁内判定幂等/状态一致性
     task = _lock_task(task.id)
-    ctx, ctx_text = build_log_payload(task=task, user=user)
+    pj = _lock_journal("WmsTask", task.id, "POST")
+    ctx, ctx_text = build_log_payload(task=task, user=user, journal=pj)
     logger.info("inventory.post_task.begin %s", ctx_text, extra=ctx)
+
+    posted_status = getattr(
+        getattr(WmsTask, "PostingStatus", None), "POSTED", "POSTED"
+    )
+    task_is_posted = task.posting_status == posted_status
+    journal_is_posted = pj.status == "POSTED"
+    if task_is_posted and journal_is_posted:
+        logger.info("inventory.post_task.already_posted %s", ctx_text, extra=ctx)
+        return {
+            "ok": True,
+            "affected_tx_count": 0,
+            "batch_no": pj.message or "",
+            "message": "already POSTED",
+        }
+    if task.posting_status != pj.status:
+        logger.warning(
+            "inventory.post_task.inconsistent_posting_state %s task_status=%s journal_status=%s",
+            ctx_text,
+            task.posting_status,
+            pj.status,
+            extra=ctx,
+        )
+        raise ValidationError("任务与过账日记账状态不一致，拒绝继续过账。")
+
+    retryable_statuses = {
+        getattr(WmsTask.PostingStatus, "PENDING", "PENDING"),
+        getattr(WmsTask.PostingStatus, "FAILED", "FAILED"),
+    }
+    if task.posting_status not in retryable_statuses:
+        raise ValidationError(
+            f"过账状态 {task.posting_status} 不允许执行库存过账。"
+        )
+
     ok, why = _can_post(task)
     if not ok:
         raise ValidationError(why)
 
-    # 2) PJ 幂等锚点
-    pj = _lock_journal("WmsTask", task.id, "POST")
-    if pj.status == "POSTED":
-        # 说明之前一次已完成；直接返回幂等成功
-        pj_ctx, pj_text = build_log_payload(task=task, user=user, journal=pj)
-        logger.info("inventory.post_task.already_posted %s", pj_text, extra=pj_ctx)
-        return {"ok": True, "affected_tx_count": 0, "batch_no": pj.message or "", "message": "already POSTED"}
+    # 2) 任务类型必须命中显式库存策略
+    task_type = getattr(task, "task_type", "") or ""
+    posting_family = _POSTING_FAMILY_BY_TASK_TYPE.get(task_type)
+    if posting_family is None:
+        logger.warning(
+            "inventory.post_task.unsupported_task_type %s task_type=%s",
+            ctx_text,
+            task_type or "<empty>",
+            extra=ctx,
+        )
+        raise ValidationError(
+            f"不支持的库存过账任务类型：{task_type or '<空>'}"
+        )
 
-    # 3) 过滤扫描
+    # 3) 重取并锁定调用方明确提供的扫描
     now_ts = now or timezone.now()
     batch = batch_no or now_ts.strftime("%Y%m%d-%H%M%S")
-    status_ok = getattr(TaskScanLog.ScanStatus, "OK", "OK")
-    scans = [s for s in (scans or []) if getattr(s, "status", None) == status_ok and getattr(s, "posted_at", None) is None]
     pj_ctx, pj_text = build_log_payload(task=task, user=user, journal=pj, posting_batch=batch)
-    logger.info("inventory.post_task.scans_loaded %s scan_count=%s", pj_text, len(scans), extra=pj_ctx)
-    if not scans:
-        logger.warning("inventory.post_task.no_pending_scans %s", pj_text, extra=pj_ctx)
+    try:
+        scans = _lock_and_validate_scans(task=task, scans=scans)
+    except ValidationError:
+        logger.warning("inventory.post_task.invalid_scans %s", pj_text, extra=pj_ctx)
+        raise
+    logger.info(
+        "inventory.post_task.scans_loaded %s scan_count=%s",
+        pj_text,
+        len(scans),
+        extra=pj_ctx,
+    )
 
-    # 4) 任务类型映射
-    t = (getattr(task, "task_type", "") or "").upper()
-    if hasattr(WmsTask, "TaskType"):
-        try:
-            t_enum = WmsTask.TaskType
-            t_map = {
-                "RECEIVE": getattr(t_enum, "RECEIVE", "RECEIVE"),
-                "PUTAWAY": getattr(t_enum, "PUTAWAY", "PUTAWAY"),
-                "RELOC": "RELOC",
-                "PICK": getattr(t_enum, "PICK", "PICK"),
-                "LOAD": getattr(t_enum, "LOAD", "LOAD"),
-                "DISPATCH": getattr(t_enum, "DISPATCH", "DISPATCH"),
-                "COUNT": getattr(t_enum, "COUNT", "COUNT"),
-            }
-        except Exception:
-            t_map = {}
-    else:
-        t_map = {}
-
-    # 5) 聚合 + 入账
+    # 4) 聚合 + 入账
     affected = 0
-    if t in ("RECEIVE", t_map.get("RECEIVE", "RECEIVE")):
-        groups = _group_receive_like(task, scans, now=now_ts, batch_no=batch, tx_type=InvTxType.RECEIVE)
+    if posting_family == "RECEIVE":
+        groups = _group_receive_like(
+            task,
+            scans,
+            now=now_ts,
+            batch_no=batch,
+            tx_type=InvTxType.RECEIVE,
+            qty_task_type=task_type,
+        )
         affected = _apply_receive_like(task, groups, now=now_ts, batch_no=batch)
 
-    elif t in ("PUTAWAY", t_map.get("PUTAWAY", "PUTAWAY"), "RELOC"):
-        groups = _group_putaway(task, scans, now=now_ts, batch_no=batch)
+    elif posting_family == "MOVE":
+        groups = _group_putaway(
+            task,
+            scans,
+            now=now_ts,
+            batch_no=batch,
+            qty_task_type=task_type,
+        )
         affected = _apply_putaway(task, groups, now=now_ts, batch_no=batch)
 
-    elif t in ("PICK", t_map.get("PICK", "PICK")):
-        groups = _group_receive_like(task, scans, now=now_ts, batch_no=batch, tx_type=InvTxType.ISSUE)
+    elif posting_family == "ISSUE":
+        groups = _group_receive_like(
+            task,
+            scans,
+            now=now_ts,
+            batch_no=batch,
+            tx_type=InvTxType.ISSUE,
+            qty_task_type=task_type,
+        )
         affected = _apply_receive_like(task, groups, now=now_ts, batch_no=batch)
 
-    elif t in ("DISPATCH", "SHIP", "LOAD", t_map.get("DISPATCH", "DISPATCH"), t_map.get("LOAD", "LOAD")):
-        groups = _group_receive_like(task, scans, now=now_ts, batch_no=batch, tx_type=InvTxType.ISSUE)
-        affected = _apply_receive_like(task, groups, now=now_ts, batch_no=batch)
-
-    elif t in ("COUNT", t_map.get("COUNT", "COUNT")):
-        # COUNT：只读 qty_base；正→ADJ_GAIN，负→ADJ_LOSS，0 不入账
+    elif posting_family in ("COUNT", "ADJUST"):
+        # COUNT 读取 qty_base；ADJUST 读取 qty_base_delta。两者均按符号分录。
         pos_scans = []
         neg_scans = []
         for s in scans:
-            q = _qty_for_type("COUNT", s)  # 严格：缺少 qty_base 会直接抛 ValidationError
+            q = _qty_for_type(task_type, s)
             if q > 0:
                 pos_scans.append(s)
             elif q < 0:
                 neg_scans.append(s)
-            # q == 0 则忽略（无差异）
+            # 仅 COUNT 允许 q == 0，表示无差异。
 
         if pos_scans:
-            groups_pos = _group_receive_like(task, pos_scans, now=now_ts, batch_no=batch, tx_type=InvTxType.ADJ_GAIN)
-            affected += _apply_receive_like(task, groups_pos, now=now_ts, batch_no=batch)
+            groups_pos = _group_receive_like(
+                task,
+                pos_scans,
+                now=now_ts,
+                batch_no=batch,
+                tx_type=InvTxType.ADJ_GAIN,
+                qty_task_type=task_type,
+            )
+            affected += _apply_receive_like(
+                task, groups_pos, now=now_ts, batch_no=batch
+            )
         if neg_scans:
-            groups_neg = _group_receive_like(task, neg_scans, now=now_ts, batch_no=batch, tx_type=InvTxType.ADJ_LOSS)
-            affected += _apply_receive_like(task, groups_neg, now=now_ts, batch_no=batch)
+            groups_neg = _group_receive_like(
+                task,
+                neg_scans,
+                now=now_ts,
+                batch_no=batch,
+                tx_type=InvTxType.ADJ_LOSS,
+                qty_task_type=task_type,
+            )
+            affected += _apply_receive_like(
+                task, groups_neg, now=now_ts, batch_no=batch
+            )
 
-    else:
-        # 未知类型：保底按 RECEIVE 规则处理，或改为 raise ValidationError 更严格
-        logger.warning("inventory.post_task.unknown_task_type_fallback %s task_type=%s", pj_text, t, extra=pj_ctx)
-        groups = _group_receive_like(task, scans, now=now_ts, batch_no=batch, tx_type=InvTxType.RECEIVE)
-        affected = _apply_receive_like(task, groups, now=now_ts, batch_no=batch)
+    if affected <= 0 and posting_family != "COUNT":
+        raise ValidationError("库存过账未生成任何交易，拒绝提交成功状态。")
 
-    # 6) 扫描批量打点（posted_at / posting_batch / posting_journal）
-    ids = [s.id for s in scans if getattr(s, "id", None)]
-    if ids:
-        TaskScanLog.objects.filter(pk__in=ids, posted_at__isnull=True).update(
+    # 5) 扫描精确打点；任何并发状态变化都必须使整笔过账回滚
+    scan_ids = [scan.id for scan in scans]
+    status_ok = getattr(TaskScanLog.ScanStatus, "OK", "OK")
+    rejected = getattr(TaskScanLog.ReviewStatus, "REJECTED", "REJECTED")
+    updated_scan_count = (
+        TaskScanLog.objects.filter(
+            pk__in=scan_ids,
+            task_id=task.id,
+            status=status_ok,
+            posted_at__isnull=True,
+            posting_journal_id__isnull=True,
+            posting_batch__isnull=True,
+        )
+        .exclude(review_status=rejected)
+        .update(
             posted_at=now_ts,
             posting_batch=batch,
-            posting_journal_id=pj.id if hasattr(TaskScanLog, "posting_journal") else None,
+            posting_journal_id=pj.id,
         )
+    )
+    if updated_scan_count != len(scan_ids):
+        raise ValidationError("扫描打点数量与锁定候选数量不一致，过账已回滚。")
 
-    # 7) 回填任务状态 & 提交 PJ
-    posted = getattr(getattr(WmsTask, "PostingStatus", None), "POSTED", "POSTED")
+    # 6) 回填任务状态 & 提交 PJ
     try:
-        task.posting_status = posted
+        task.posting_status = posted_status
         task.save(update_fields=["posting_status"])
     except Exception:
         logger.exception("inventory.post_task.task_status_update_failed %s", pj_text, extra=pj_ctx)
         raise  # 重新抛出异常，让事务回滚
 
     pj.status = "POSTED"
-    pj.message = f"{batch}"                         # 把批号记入 message，便于追查
+    pj.message = f"{batch}"
     pj.attempt_count = (pj.attempt_count or 0) + 1
     pj.save(update_fields=["status", "message", "attempt_count"])
     logger.info("inventory.post_task.completed %s affected_tx_count=%s", pj_text, affected, extra=pj_ctx)

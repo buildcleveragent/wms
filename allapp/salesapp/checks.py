@@ -2,7 +2,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from django.conf import settings
-from django.core.checks import Error, register
+from django.core.checks import Error, Tags, register
+from django.urls import get_resolver
 
 
 def _payment_error(message, code):
@@ -14,6 +15,42 @@ def _key_bytes(value):
     if "-----BEGIN " in normalized:
         return normalized.encode("utf-8")
     return Path(normalized).read_bytes()
+
+
+def _iter_registered_routes(patterns, prefix=""):
+    """Yield flattened route strings without resolving any request."""
+
+    for entry in patterns:
+        route = f"{prefix}{entry.pattern}"
+        children = getattr(entry, "url_patterns", None)
+        if children is None:
+            yield route
+        else:
+            yield from _iter_registered_routes(children, route)
+
+
+@register(Tags.urls)
+def check_legacy_sales_api_not_registered(app_configs, **kwargs):
+    """Fail deployment checks if the retired generic sales API returns."""
+
+    legacy_route = next(
+        (
+            route
+            for route in _iter_registered_routes(get_resolver().url_patterns)
+            if route.lstrip("^").startswith("api/sales/")
+        ),
+        None,
+    )
+    if not legacy_route:
+        return []
+    return [
+        Error(
+            "高风险遗留接口 /api/sales/* 已退役，禁止重新注册；"
+            "如需销售 API，必须使用新的显式权限和字段契约。",
+            hint=f"检测到路由：{legacy_route}",
+            id="salesapp.E008",
+        )
+    ]
 
 
 @register()
@@ -30,7 +67,9 @@ def check_wechat_pay_production_configuration(app_configs, **kwargs):
         )
     platform_keys = getattr(settings, "WECHAT_PAY_PLATFORM_KEYS", {}) or {}
     if not platform_keys:
-        errors.append(_payment_error("生产环境必须配置平台公钥序列号映射。", "salesapp.E002"))
+        errors.append(
+            _payment_error("生产环境必须配置平台公钥序列号映射。", "salesapp.E002")
+        )
     required = [
         "WECHAT_MINI_APPID",
         "WECHAT_PAY_MCH_ID",

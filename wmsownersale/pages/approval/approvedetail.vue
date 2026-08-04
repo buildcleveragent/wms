@@ -16,6 +16,10 @@
       <view class="text-gray">提交状态：{{ order.submit_status_name || order.submit_status || '—' }}</view>
       <view class="text-gray">审核状态：{{ order.approval_status_name || order.approval_status_display || order.approval_status || '—' }}</view>
       <view class="text-gray" v-if="order.memo">备注：{{ order.memo }}</view>
+      <view class="reject-box" v-if="canReview">
+        <view class="font-bold">退回原因（必填）</view>
+        <textarea v-model="rejectReason" maxlength="200" class="reject-input" placeholder="请说明需要业务员修改的内容" />
+      </view>
       <view class="text-gray" style="margin-top:8rpx">
         汇总：数量 {{ order.total_qty ?? '—' }} · 金额 ¥ {{ money(order.total_amount) }}
       </view>
@@ -83,6 +87,7 @@ import { useOrderReviewActions } from '@/utils/useOrderReviewActions'
 const id = ref(0)
 const order = ref(null)
 const loading = ref(false)
+const rejectReason = ref('')
 
 const lines = computed(() => {
   const o = order.value || {}
@@ -158,7 +163,7 @@ async function approve() {
 }
 
 async function reject() {
-  await rejectOrder()
+  await rejectOrder(undefined, rejectReason.value)
 }
 
 async function cancel() {
@@ -170,3 +175,8 @@ onLoad(async (query) => {
   await loadDetail()
 })
 </script>
+
+<style scoped>
+.reject-box { margin-top: 20rpx; }
+.reject-input { width: 100%; min-height: 140rpx; margin-top: 12rpx; padding: 16rpx; border: 1rpx solid #d1d5db; border-radius: 10rpx; box-sizing: border-box; }
+</style>

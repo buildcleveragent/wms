@@ -29,7 +29,7 @@
       <view class="row mt-2">
         <template v-if="tab === 'PENDING'">
           <button class="btn btn-sm" :disabled="reviewing" @click.stop="approve(o.id)">审核通过</button>
-          <button class="btn btn-sm" :disabled="reviewing" @click.stop="reject(o.id)">退回修改</button>
+          <button class="btn btn-sm" :disabled="reviewing" @click.stop="goApproveDetail(o)">填写原因并退回</button>
           <button class="btn btn-sm" :disabled="reviewing" @click.stop="cancel(o.id)">取消订单</button>
         </template>
         <template v-else>
@@ -100,6 +100,7 @@ function queryParams(pageNo = 1) {
     page: pageNo,
     search: q.value || '',
     ...(status ? { approval_status: status } : {}),
+    ...(tab.value === TAB.PENDING ? { submit_status: 'SUBMITTED' } : {}),
   }
 }
 
@@ -162,10 +163,6 @@ function statusText(o) {
 
 async function approve(orderId) {
   await approveOrder(orderId)
-}
-
-async function reject(orderId) {
-  await rejectOrder(orderId)
 }
 
 async function cancel(orderId) {

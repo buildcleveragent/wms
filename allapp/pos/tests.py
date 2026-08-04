@@ -35,6 +35,7 @@ from allapp.pos.models import (
     PosPayment,
     PosPaymentLine,
     PosPrintLog,
+    PosReceiptWarehouseInfo,
     PosRefund,
     PosReturn,
     PosReturnLine,
@@ -4103,3 +4104,101 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_receipt_warehouse_info_list_keeps_global_and_current_warehouse_only(self):
+        other_warehouse = Warehouse.objects.create(
+            code="WHPOSR2",
+            name="Other Receipt Warehouse",
+        )
+        global_info = PosReceiptWarehouseInfo.objects.create(
+            name="Global Receipt Header",
+            is_default=True,
+        )
+        own_info = PosReceiptWarehouseInfo.objects.create(
+            warehouse=self.warehouse,
+            name="Own Receipt Header",
+            is_default=True,
+        )
+        PosReceiptWarehouseInfo.objects.create(
+            warehouse=other_warehouse,
+            name="Other Receipt Header",
+            is_default=True,
+        )
+        PosReceiptWarehouseInfo.objects.create(
+            warehouse=self.warehouse,
+            name="Inactive Receipt Header",
+            is_active=False,
+        )
+
+        response = self.client.get("/api/pos/receipt-warehouse-infos/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            {row["id"] for row in response.data},
+            {global_info.id, own_info.id},
+        )
+
+    def test_customer_detail_is_warehouse_scoped_and_warehouse_is_immutable(self):
+        other_warehouse = Warehouse.objects.create(
+            code="WHPOSC2",
+            name="Other Customer Warehouse",
+        )
+        other_customer = PosCustomer.objects.create(
+            warehouse=other_warehouse,
+            code="PC-OTHER-WH",
+            name="Other Warehouse Customer",
+        )
+
+        hidden = self.client.get(f"/api/pos/customers/{other_customer.id}/")
+        updated = self.client.patch(
+            f"/api/pos/customers/{self.pos_customer.id}/",
+            {
+                "name": "Updated Current Customer",
+                "warehouse_id": other_warehouse.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(hidden.status_code, 404)
+        self.assertEqual(updated.status_code, 200, updated.data)
+        self.pos_customer.refresh_from_db()
+        self.assertEqual(self.pos_customer.name, "Updated Current Customer")
+        self.assertEqual(self.pos_customer.warehouse_id, self.warehouse.id)
+
+    def test_shift_list_and_detail_do_not_expose_another_warehouse(self):
+        other_warehouse = Warehouse.objects.create(
+            code="WHPOSS2",
+            name="Other Shift Warehouse",
+        )
+        other_user = get_user_model().objects.create_user(
+            username="pos-other-shift-user",
+            password="x",
+            warehouse=other_warehouse,
+        )
+        other_shift = PosShift.objects.create(
+            shift_no="SHIFT-POS-OTHER-WAREHOUSE",
+            warehouse=other_warehouse,
+            cashier=other_user,
+            opened_by=other_user,
+            opened_at=timezone.now(),
+        )
+
+        listing = self.client.get("/api/pos/shifts/")
+        hidden = self.client.get(f"/api/pos/shifts/{other_shift.id}/")
+
+        self.assertEqual(listing.status_code, 200, listing.data)
+        self.assertEqual(
+            {row["id"] for row in listing.data["results"]},
+            {self.shift.id},
+        )
+        self.assertEqual(hidden.status_code, 404)
+
+    def test_return_and_repayment_lists_reject_non_integer_filters(self):
+        invalid_return = self.client.get("/api/pos/returns/", {"sale_id": "bad"})
+        invalid_repayment = self.client.get(
+            "/api/pos/repayments/",
+            {"customer_id": "bad"},
+        )
+
+        self.assertEqual(invalid_return.status_code, 400, invalid_return.data)
+        self.assertEqual(invalid_repayment.status_code, 400, invalid_repayment.data)

@@ -4,7 +4,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4
 
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
@@ -16,6 +16,9 @@ from allapp.core.utils.log_context import build_log_payload
 
 import logging
 log = logging.getLogger(__name__)
+
+_ALREADY_POSTED = object()
+
 # -----------------------
 # 工具 & 可插拔入口
 # -----------------------
@@ -73,10 +76,10 @@ class BasePostingHandler:
 class DefaultPostingHandler(BasePostingHandler):
     """
     Scan-Only 统一处理器（以 TaskScanLog 为唯一数据源）
-    - 加锁顺序：WmsTask -> WmsTaskLine -> TaskScanLog(order_by id)
+    - 加锁顺序：WmsTask -> PostingJournal -> WmsTaskLine -> TaskScanLog(order_by id)
       （保留对 TaskLine 的锁，确保并发下行→扫的拓扑顺序稳定；不再做行级过账）
     - 落账入口：inventory.services.post_task(...)（仅扫描驱动，不调用任何行级 post_*）
-    - 扫描打点：批量写 TaskScanLog.posting_journal / posted_at / posting_batch（不改 status）
+    - 扫描打点：由库存服务在同一事务内精确写入并校验数量
     - 任务回填：posting_status / posted_at / posted_by / posting_note
     """
 
@@ -90,10 +93,6 @@ class DefaultPostingHandler(BasePostingHandler):
         note: str = "",
         by_user=None,
     ) -> int:
-
-        # 0) 统一取枚举/字面值
-        OK        = getattr(getattr(TaskScanLog, "ScanStatus", None), "OK", "OK")
-        REJECTED  = getattr(getattr(TaskScanLog, "ReviewStatus", None), "REJECTED", "REJECTED")
 
         # 1) 任务级 PJ（幂等与审计）—— 先建成 PENDING（外层非原子）
         pj, created = PostingJournal.objects.get_or_create(
@@ -121,15 +120,6 @@ class DefaultPostingHandler(BasePostingHandler):
             if _has_field(PostingJournal, fld) and getattr(pj, fld, None) != val:
                 setattr(pj, fld, val)
 
-        if not created:
-            if pj.status == "POSTED":
-                log.info("tasking.post.already_posted %s", ctx_text, extra=ctx)
-                # 幂等：任务已过账，直接返回
-                return 0
-            pj.attempt_count = (pj.attempt_count or 0) + 1
-            pj.message = (note or pj.message or "")[:255]
-            pj.save(update_fields=["attempt_count", "message", "updated_at"])
-
         # 2) 统一加锁顺序 + 固定排序：放入内层原子执行“重活”
         try:
             affected = self._handle_atomic(
@@ -140,36 +130,37 @@ class DefaultPostingHandler(BasePostingHandler):
                 note=note,
                 by_user=by_user,
                 pj=pj,
-                OK=OK,
-                REJECTED=REJECTED,
             )
         except Exception as e:
-            # 外层非原子写 PJ 失败状态（避免在回滚态里 save）
-            pj.status = "FAILED"
+            # 外层非原子写失败审计；条件更新避免并发重试覆盖已成功状态。
             log.exception("tasking.post.failed %s", ctx_text, extra=ctx)
-            pj.message = (str(e) or "FAILED")[:255]
-            pj.save(update_fields=["status", "message", "updated_at"])
+            failure_message = (str(e) or "FAILED")[:255]
+            failed_at = timezone.now()
+            PostingJournal.objects.filter(pk=pj.pk).exclude(status="POSTED").update(
+                status="FAILED",
+                message=failure_message,
+                updated_at=failed_at,
+            )
             failure_note = f"{note or '过账'}失败：{str(e) or '未知错误'}"[:200]
             task_updates = {
                 "posting_status": WmsTask.PostingStatus.FAILED,
                 "posting_note": failure_note,
-                "updated_at": timezone.now(),
+                "updated_at": failed_at,
             }
             by_user_id = getattr(by_user, "pk", None)
             if by_user_id is not None:
                 task_updates["posted_by_id"] = by_user_id
-            WmsTask.objects.filter(pk=task.pk).update(**task_updates)
+            WmsTask.objects.filter(pk=task.pk).exclude(
+                posting_status=WmsTask.PostingStatus.POSTED
+            ).update(**task_updates)
             raise
 
-        # 3) 成功：外层非原子写 PJ 成功状态
-        pj.status = "POSTED"
-        pj.message = (note or pj.message or "POSTED")[:255]
-        now_ts = now or timezone.now()
-        if _has_field(PostingJournal, "posted_at"):
-            pj.posted_at = now_ts
-            pj.save(update_fields=["status", "message", "posted_at", "updated_at"])
-        else:
-            pj.save(update_fields=["status", "message", "updated_at"])
+        if affected is _ALREADY_POSTED:
+            log.info("tasking.post.already_posted %s", ctx_text, extra=ctx)
+            return 0
+
+        # 成功状态由内层事务与库存变更一起提交，这里只重读供后续计费使用。
+        pj.refresh_from_db()
 
         # 4) 计费
         # try:
@@ -351,16 +342,14 @@ class DefaultPostingHandler(BasePostingHandler):
         note: str,
         by_user,
         pj: PostingJournal,
-        OK: str,
-        REJECTED: str,
     ) -> int:
         """
         统一锁序 + 固定排序 + 调库存服务 + 扫描打点 + 落账任务头。
         要点：
-        - 候选扫描：仅 status=OK 且 posted_at IS NULL；
-        - 若无候选 → 抛错回滚；
+        - 调用方必须显式传入扫描，原集合按 ID 重取并加锁；
+        - 空集合、重复 ID 或丢失扫描直接抛错；其他业务状态由库存服务严格校验；
         - 库存服务无交易 → 抛错回滚；
-        - 打点只更新 posted_at / posting_batch / posting_journal（不改 status）。
+        - 扫描打点由库存服务完成并校验更新数量。
         """
         now_ts = now or timezone.now()
         batch = batch_no or (timezone.now().strftime("%Y%m%d-%H%M%S-") + str(uuid4())[:8])
@@ -373,7 +362,30 @@ class DefaultPostingHandler(BasePostingHandler):
                 .get(pk=task.id))
 
         log.info("tasking.post.lock_task %s", ctx_text, extra=ctx)
-        # ② 再锁任务行（统一顺序第 2 位；有行就按 id 升序锁一下，保持顺序一致）
+        # ② 再锁任务级日记账，并在锁内重新判定幂等状态。
+        pj = PostingJournal.objects.select_for_update().get(pk=pj.pk)
+        posted_status = getattr(
+            getattr(WmsTask, "PostingStatus", None), "POSTED", "POSTED"
+        )
+        task_is_posted = getattr(task, "posting_status", None) == posted_status
+        journal_is_posted = pj.status == "POSTED"
+        if task_is_posted and journal_is_posted:
+            return _ALREADY_POSTED
+        if task.posting_status != pj.status:
+            raise ValidationError(
+                "任务与过账日记账状态不一致，已拒绝自动修复或重复过账。"
+            )
+        retryable_statuses = {
+            WmsTask.PostingStatus.PENDING,
+            WmsTask.PostingStatus.FAILED,
+        }
+        if task.posting_status not in retryable_statuses:
+            raise ValidationError(
+                f"过账状态 {task.posting_status} 不允许执行库存过账。"
+            )
+        log.info("tasking.post.lock_journal %s", ctx_text, extra=ctx)
+
+        # ③ 再锁任务行（有行就按 id 升序锁一下，保持顺序一致）
         # try:
         #     # 反向关系命名为 lines（常见写法）
         #     _ = (task.lines
@@ -399,46 +411,34 @@ class DefaultPostingHandler(BasePostingHandler):
         _ = list(qs_lines)  # ← 关键：强制查询，确保锁生效
         log.info("tasking.post.lock_lines %s", ctx_text, extra=ctx)
 
-        # ③ 再锁候选扫描（统一顺序第 3 位；清空默认排序后只按 id 升序）
-        if scans is None:
-            scans_qs = (TaskScanLog.objects
-                        .select_for_update()
-                        .filter(task_id=task.id, status=OK, posted_at__isnull=True)
-                        .order_by()          # 清掉 Meta 默认排序（如有）
-                        .order_by("id"))     # 只用主键升序，避免锁顺序不一致
-            scans_locked: List[TaskScanLog] = list(scans_qs)
-        else:
-            # 传入可能是列表或 QuerySet，这里统一成 id 列表后重取并加锁（保证排序/锁序一致）
-            try:
-                scan_ids = list(getattr(scans, "values_list")("id", flat=True))  # QuerySet
-            except Exception:
-                scan_ids = [getattr(s, "id", s) for s in scans]  # 兼容列表/可迭代
-            if not scan_ids:
-                scans_locked = []
-            else:
-                scans_locked = list(
-                    TaskScanLog.objects
-                    .select_for_update()
-                    .filter(id__in=scan_ids)
-                    .order_by()          # 清默认排序
-                    .order_by("id")      # 主键升序
-                )
+        # ④ 再锁候选扫描（清空默认排序后只按 id 升序）
+        supplied_scans = [] if scans is None else list(scans)
+        scan_ids = []
+        for scan in supplied_scans:
+            scan_id = getattr(scan, "pk", None)
+            if scan_id is None:
+                raise ValidationError("过账扫描必须是已持久化的 TaskScanLog。")
+            scan_ids.append(scan_id)
+        if not scan_ids:
+            raise ValidationError("无可过账扫描（必须显式提供至少一条扫描）。")
+        if len(scan_ids) != len(set(scan_ids)):
+            raise ValidationError("过账扫描包含重复记录。")
+
+        scans_locked: List[TaskScanLog] = list(
+            TaskScanLog.objects.select_for_update()
+            .filter(id__in=scan_ids)
+            .order_by()
+            .order_by("id")
+        )
+        if len(scans_locked) != len(scan_ids):
+            raise ValidationError("部分过账扫描不存在。")
         log.info("tasking.post.lock_scans %s candidate_count=%s", ctx_text, len(scans_locked), extra=ctx)
-        # 过滤：仅保留 OK 且未被拒绝且未打点的扫描
-        scans_ok: List[TaskScanLog] = [
-            s for s in scans_locked
-            if getattr(s, "status", None) == OK
-            and getattr(s, "review_status", None) != REJECTED
-            and getattr(s, "posted_at", None) is None
-        ]
-        if not scans_ok:
-            raise ValueError("无可过账明细（需要 OK 且未过账的 TaskScanLog）。")
 
         log.info(
             "tasking.post.scans_ready %s scan_count=%s first_scan_id=%s",
             ctx_text,
-            len(scans_ok),
-            scans_ok[0].id if scans_ok else None,
+            len(scans_locked),
+            scans_locked[0].id,
             extra=ctx,
         )
 
@@ -449,7 +449,8 @@ class DefaultPostingHandler(BasePostingHandler):
         result = inv_services.post_task(
             task=task,
             user=by_user,
-            scans=scans_ok,
+            scans=scans_locked,
+            note=note,
             now=now_ts,
             batch_no=batch,
         )
@@ -458,29 +459,25 @@ class DefaultPostingHandler(BasePostingHandler):
 
         # ⑤ 严格校验返回：无交易即失败回滚（根据你们 services 的返回结构尽量取“受影响条数”）
         affected = 0
+        result_ok = True
         if isinstance(result, dict):
-            affected = int(
-                result.get("affected_tx_count")
-                or result.get("tx_count")
-                or result.get("created_transactions")
-                or (result.get("ok") and 1)
-                or 0
-            )
+            result_ok = result.get("ok", True) is not False
+            for key in ("affected_tx_count", "tx_count", "created_transactions"):
+                if key in result and result[key] is not None:
+                    affected = int(result[key])
+                    break
+            else:
+                affected = 1 if result.get("ok") else 0
         else:
             # 老实现可能返回 True/False
             affected = 1 if result else 0
-        if affected <= 0:
+        zero_count_allowed = (
+            getattr(task, "task_type", None) == WmsTask.TaskType.COUNT and affected == 0
+        )
+        if not result_ok or (affected <= 0 and not zero_count_allowed):
             raise ValueError("库存过账未生成任何交易（InventoryTransaction）。")
 
-        # ⑥ 扫描批量打点（不改 status；配合你的 ck_tscan_status_ok 约束）
-        for s in scans_ok:
-            s.posting_journal_id = getattr(pj, "id", None)
-            s.posted_at = now_ts
-            s.posting_batch = batch
-        TaskScanLog.objects.bulk_update(scans_ok, ["posting_journal", "posted_at", "posting_batch"])
-
-        # ⑦ 任务头落账字段回填
-        posted_status = getattr(getattr(WmsTask, "PostingStatus", None), "POSTED", "POSTED")
+        # ⑥ 任务头补充经手人、时间和备注；成功状态已由库存服务提交。
         updates: Dict[str, Any] = {}
         if getattr(task, "posting_status", None) != posted_status:
             updates["posting_status"] = posted_status
@@ -532,5 +529,13 @@ class DefaultPostingHandler(BasePostingHandler):
             from allapp.inbound.services import close_inbound_order_after_putaway
 
             close_inbound_order_after_putaway(task, by_user=by_user)
+
+        # 库存服务必须在同一事务内提交任务和日记账成功状态。
+        task.refresh_from_db(fields=["posting_status"])
+        pj.refresh_from_db(fields=["status"])
+        if task.posting_status != posted_status or pj.status != "POSTED":
+            raise ValidationError(
+                "库存过账返回成功，但任务或过账日记账未处于 POSTED 状态。"
+            )
 
         return affected

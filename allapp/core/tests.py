@@ -8,7 +8,7 @@ from pathlib import Path
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from allapp.baseinfo.models import Owner
@@ -53,6 +53,9 @@ class CoreWarehouseScopeTests(TestCase):
         self.assertIsNone(seq.warehouse_id)
 
 
+@override_settings(
+    PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"],
+)
 class PrintConfigApiTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(
@@ -61,6 +64,53 @@ class PrintConfigApiTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(self.user)
+
+    def test_configuration_endpoints_require_authentication(self):
+        anonymous = APIClient()
+
+        for path in (
+            "/api/core/settings/",
+            "/api/core/print-configs/",
+            "/api/core/print-configs/default/",
+        ):
+            with self.subTest(path=path):
+                response = anonymous.get(path)
+                self.assertEqual(response.status_code, 401)
+
+    def test_system_settings_only_expose_active_client_visible_values(self):
+        SystemSetting.objects.create(
+            namespace="integration",
+            key="api_secret",
+            name="API secret",
+            value="must-not-leak",
+            client_visible=False,
+            is_active=True,
+        )
+        SystemSetting.objects.create(
+            namespace="integration",
+            key="retired_flag",
+            name="Retired flag",
+            value="true",
+            value_type=SystemSetting.ValueType.BOOLEAN,
+            client_visible=True,
+            is_active=False,
+        )
+        SystemSetting.objects.create(
+            namespace="integration",
+            key="feature_enabled",
+            name="Feature enabled",
+            value="true",
+            value_type=SystemSetting.ValueType.BOOLEAN,
+            client_visible=True,
+            is_active=True,
+        )
+
+        response = self.client.get("/api/core/settings/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["flat"]["integration.feature_enabled"])
+        self.assertNotIn("integration.api_secret", response.data["flat"])
+        self.assertNotIn("integration.retired_flag", response.data["flat"])
 
     def test_system_settings_include_pos_sale_print_config(self):
         response = self.client.get("/api/core/settings/")

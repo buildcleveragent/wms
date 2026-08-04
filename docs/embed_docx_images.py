@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
-"""Embed externally linked images in the generated DOCX package.
-
-LibreOffice's HTML import keeps local images as file:// links. This utility makes
-the Word handoff self-contained by copying those images into word/media and
-switching the drawing references from r:link to r:embed.
-"""
+"""Embed externally linked images in one or more generated DOCX packages."""
 
 from __future__ import annotations
 
+import argparse
 import os
 import tempfile
 import urllib.parse
@@ -16,13 +12,16 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 
-DOCX_PATH = Path(__file__).resolve().parent / "金桥融通WMS操作手册.docx"
+DOCS_DIR = Path(__file__).resolve().parent
+DEFAULT_DOCX = DOCS_DIR / "金桥融通WMS操作手册.docx"
 REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 CONTENT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
 
 
-def main() -> None:
-    with zipfile.ZipFile(DOCX_PATH, "r") as source:
+def embed_images(docx_path: Path) -> int:
+    """Replace external image links with embedded media and return the count."""
+    docx_path = Path(docx_path).resolve()
+    with zipfile.ZipFile(docx_path, "r") as source:
         files = {name: source.read(name) for name in source.namelist()}
 
     rel_name = "word/_rels/document.xml.rels"
@@ -45,7 +44,7 @@ def main() -> None:
             raise FileNotFoundError(f"Missing linked image: {image_path}")
 
         extension = image_path.suffix.lower().lstrip(".")
-        media_name = f"image{image_index}.{extension}"
+        media_name = f"manual-image-{image_index}.{extension}"
         image_index += 1
         extensions.add(extension)
         media[f"word/media/{media_name}"] = image_path.read_bytes()
@@ -56,6 +55,9 @@ def main() -> None:
         document_xml = document_xml.replace(
             f'r:link="{relationship_id}"', f'r:embed="{relationship_id}"'
         )
+
+    if not media:
+        return 0
 
     ET.register_namespace("", REL_NS)
     files[rel_name] = ET.tostring(rel_root, encoding="utf-8", xml_declaration=True)
@@ -84,20 +86,28 @@ def main() -> None:
         content_root, encoding="utf-8", xml_declaration=True
     )
 
-    handle, temp_name = tempfile.mkstemp(suffix=".docx", dir=DOCX_PATH.parent)
+    handle, temp_name = tempfile.mkstemp(suffix=".docx", dir=docx_path.parent)
     os.close(handle)
     temp_path = Path(temp_name)
     try:
-        with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_DEFLATED) as target:
+        with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_DEFLATED) as target_zip:
             for name, data in files.items():
-                target.writestr(name, data)
+                target_zip.writestr(name, data)
             for name, data in media.items():
-                target.writestr(name, data)
-        os.replace(temp_path, DOCX_PATH)
+                target_zip.writestr(name, data)
+        os.replace(temp_path, docx_path)
     finally:
         temp_path.unlink(missing_ok=True)
+    return len(media)
 
-    print(f"Embedded {len(media)} images in {DOCX_PATH}")
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("docx", nargs="*", type=Path, default=[DEFAULT_DOCX])
+    args = parser.parse_args()
+    for path in args.docx:
+        count = embed_images(path)
+        print(f"Embedded {count} images in {path}")
 
 
 if __name__ == "__main__":

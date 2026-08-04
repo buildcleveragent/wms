@@ -58,6 +58,9 @@
 <script setup>
 import { ref } from 'vue'
 import { api } from '@/utils/request'
+import { useAuth } from '@/store/auth'
+
+const auth = useAuth()
 
 const oldPassword = ref('')
 const newPassword1 = ref('')
@@ -94,9 +97,8 @@ async function submit() {
     oldPassword.value = ''
     newPassword1.value = ''
     newPassword2.value = ''
-    setTimeout(() => {
-      uni.navigateBack()
-    }, 800)
+    await auth.logout()
+    setTimeout(() => uni.reLaunch({ url: '/pages/login' }), 800)
   } catch (e) {
     // request.js 已统一展示后端错误信息。
   } finally {

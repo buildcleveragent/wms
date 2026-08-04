@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Iterable, Optional
 from uuid import uuid4
 
 from django.conf import settings
@@ -98,9 +98,13 @@ class DefaultPostingHandler(BasePostingHandler):
         # —— 2) 过滤扫描：READY/OK 且未被 REJECTED；若空直接报错 —— #
         REJECTED = getattr(getattr(TaskScanLog, "ReviewStatus", None), "REJECTED", "REJECTED")
         OK = getattr(getattr(TaskScanLog, "ScanStatus", None), "OK", "OK")
-        scans_ok = [s for s in (scans or [])
-                    if getattr(s, "status", None) == OK
-                    and getattr(s, "review_status", None) != REJECTED]
+        scans_ok = [
+            s
+            for s in (scans or [])
+            if getattr(s, "status", None) == OK
+            and getattr(s, "review_status", None) != REJECTED
+            and getattr(s, "posted_at", None) is None
+        ]
         if not scans_ok:
             # 注意：这里不写 DB，只抛错；让上层去把 PJ 标 FAILED
             raise ValueError("无可过账明细（需要 READY/OK 且未过账的 TaskScanLog）")
@@ -133,7 +137,14 @@ class DefaultPostingHandler(BasePostingHandler):
         batch = batch_no or (timezone.now().strftime("%Y%m%d-%H%M%S-") + str(uuid4())[:8])
 
         # 3.1 委托库存服务
-        result = inv_services.post_task(task=task, user=by_user)
+        result = inv_services.post_task(
+            task=task,
+            user=by_user,
+            scans=scans,
+            note=note,
+            now=now_ts,
+            batch_no=batch,
+        )
 
         # —— 严格校验返回 —— #
         affected = 0
@@ -174,14 +185,18 @@ class DefaultPostingHandler(BasePostingHandler):
         posted_status = getattr(getattr(WmsTask, "PostingStatus", None), "POSTED", "POSTED")
         update_fields = []
         if task.posting_status != posted_status:
-            task.posting_status = posted_status; update_fields.append("posting_status")
+            task.posting_status = posted_status
+            update_fields.append("posting_status")
         by_user_id = getattr(by_user, "pk", None) or getattr(pj, "created_by_id", None)
         if by_user_id is not None and task.posted_by_id != by_user_id:
-            task.posted_by_id = by_user_id; update_fields.append("posted_by")
+            task.posted_by_id = by_user_id
+            update_fields.append("posted_by")
         if not task.posted_at:
-            task.posted_at = now_ts; update_fields.append("posted_at")
+            task.posted_at = now_ts
+            update_fields.append("posted_at")
         if note:
-            task.posting_note = note[:200]; update_fields.append("posting_note")
+            task.posting_note = note[:200]
+            update_fields.append("posting_note")
         if update_fields:
             task.save(update_fields=update_fields)
 

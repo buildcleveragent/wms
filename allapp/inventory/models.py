@@ -440,6 +440,14 @@ class InventoryTransaction(BaseModel):
         verbose_name = "库存事务流水"
         verbose_name_plural = "库存事务流水"
         indexes = [
+            models.Index(
+                fields=["tx_type", "owner", "posted_at", "id"],
+                name="ix_tx_type_owner_time",
+            ),
+            models.Index(
+                fields=["tx_type", "warehouse", "posted_at", "id"],
+                name="ix_tx_type_wh_time",
+            ),
             models.Index(fields=["tx_type", "owner", "product"], name="idx_tx_type_owner_product"),
             models.Index(fields=["warehouse", "location"], name="idx_tx_wh_loc"),
             models.Index(fields=["owner", "product", "batch_no"], name="idx_tx_batch"),

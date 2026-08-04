@@ -9,12 +9,14 @@ from .views import (
     ProductViewSet,
     ReceiveProductViewSet,
     SupplierViewSet,
+    WarehouseViewSet,
 )
 from .export_print import pick_task_print
 
 router = DefaultRouter()
 router.register(r"catalog/products", ProductViewSet, basename="ob-product")
 router.register(r"catalog/customers", CustomerViewSet, basename="ob-customer")
+router.register(r"catalog/warehouses", WarehouseViewSet, basename="ob-warehouse")
 router.register(r"outbound/orders", OutboundOrderViewSet, basename="ob-order")
 router.register(
     r"outbound/assisted-orders",

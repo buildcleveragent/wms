@@ -124,7 +124,7 @@ class OutboundWarehouseScopeTests(TestCase):
 
         self.assertIn("warehouse", exc.exception.message_dict)
 
-    def test_owner_approve_is_idempotent_for_allocation(self):
+    def test_repeated_owner_approval_is_rejected_without_double_allocation(self):
         order = OutboundOrder.objects.create(
             owner=self.owner,
             customer=self.customer,
@@ -154,7 +154,8 @@ class OutboundWarehouseScopeTests(TestCase):
         self.assertEqual(detail.allocated_qty, Decimal("3.0000"))
         self.assertEqual(detail.available_qty, Decimal("7.0000"))
 
-        order.owner_approve(by_user=self.user, allow_backorder=False)
+        with self.assertRaises(ValidationError):
+            order.owner_approve(by_user=self.user, allow_backorder=False)
 
         detail.refresh_from_db()
         self.assertEqual(detail.allocated_qty, Decimal("3.0000"))
@@ -193,6 +194,7 @@ class OutboundWarehouseScopeTests(TestCase):
             self._api_request(
                 "post",
                 f"/api/outbound/orders/{order.id}/owner-reject/",
+                data={"reason": "请修改订单"},
                 user=self.owner_manager,
             ),
             pk=order.id,
@@ -408,8 +410,8 @@ class OutboundConcurrencyTests(TransactionTestCase):
 
         if thread1.is_alive() or thread2.is_alive():
             self.fail("concurrent outbound approval threads did not finish")
-        if errors:
-            raise errors[0]
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], ValidationError)
 
         detail.refresh_from_db()
         self.assertEqual(detail.allocated_qty, Decimal("3.0000"))

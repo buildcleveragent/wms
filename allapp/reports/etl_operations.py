@@ -9,8 +9,11 @@ from django.db.models import Q, Sum
 from django.utils import timezone
 
 from allapp.baseinfo.models import Customer, Owner, Supplier
-from allapp.billing.enums import AccrualStatus
 from allapp.billing.models import BillingAccrual
+from allapp.billing.services.ledger import (
+    financial_ledger_accruals,
+    is_financial_ledger_accrual,
+)
 from allapp.core.choices import InvTxType
 from allapp.inbound.models import InboundOrder, InboundOrderLine
 from allapp.inventory.models import InventoryDetail, InventoryTransaction
@@ -632,6 +635,9 @@ def sync_billing_facts(queryset=None) -> int:
     accruals = BillingAccrual.objects.all() if queryset is None else queryset
     count = 0
     for accrual in accruals.iterator(chunk_size=1000):
+        if not is_financial_ledger_accrual(accrual):
+            FactBilling.objects.filter(dedup_key=accrual.acc_fingerprint).delete()
+            continue
         owner_dim = _current(OwnerDim, owner_id=accrual.owner_id)
         warehouse_dim = _current(WarehouseDim, warehouse_id=accrual.warehouse_id)
         if not owner_dim or not warehouse_dim:
@@ -643,9 +649,13 @@ def sync_billing_facts(queryset=None) -> int:
             "fee_type": accrual.charge_type,
             "dedup_key": accrual.acc_fingerprint,
         }
-        if accrual.status == AccrualStatus.VOID:
-            FactBilling.objects.filter(**lookup).delete()
-            continue
+        # The source fingerprint is globally unique, while FactBilling's
+        # database constraint also includes SCD dimension ids.  If an owner or
+        # warehouse dimension rolls to a new version, remove the old canonical
+        # location first so one source entry cannot survive as two facts.
+        FactBilling.objects.filter(
+            dedup_key=accrual.acc_fingerprint
+        ).exclude(**lookup).delete()
         FactBilling.objects.update_or_create(
             **lookup,
             defaults={
@@ -668,9 +678,9 @@ def prune_stale_facts() -> dict[str, int]:
     live_transactions = InventoryTransaction.objects.filter(
         posted_at__isnull=False
     ).values_list("id", flat=True)
-    live_accrual_keys = BillingAccrual.objects.exclude(
-        status=AccrualStatus.VOID
-    ).values_list("acc_fingerprint", flat=True)
+    live_accrual_keys = financial_ledger_accruals().values_list(
+        "acc_fingerprint", flat=True
+    )
     return {
         "inbound": FactInboundLine.objects.exclude(line_id__in=live_inbound).delete()[0],
         "outbound": FactOutboundLine.objects.exclude(line_id__in=live_outbound).delete()[0],
@@ -746,7 +756,7 @@ def source_reconciliation(*, dfrom: date | None = None, dto: date | None = None)
     inbound_lines = InboundOrderLine.objects.filter(order__is_deleted=False)
     outbound_lines = OutboundOrderLine.objects.filter(order__is_deleted=False)
     transactions = InventoryTransaction.objects.filter(posted_at__isnull=False)
-    accruals = BillingAccrual.objects.exclude(status=AccrualStatus.VOID)
+    accruals = financial_ledger_accruals()
     inbound_facts = FactInboundLine.objects.all()
     outbound_facts = FactOutboundLine.objects.all()
     transaction_facts = FactInventoryTxn.objects.all()

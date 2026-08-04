@@ -167,6 +167,14 @@ class WmsTask(BaseModel):
         ]
 
         indexes = [
+            models.Index(
+                fields=["task_type", "status", "owner", "finished_at", "id"],
+                name="ix_task_tt_st_own_fin",
+            ),
+            models.Index(
+                fields=["task_type", "status", "warehouse", "finished_at", "id"],
+                name="ix_task_tt_st_wh_fin",
+            ),
             models.Index(fields=["owner", "warehouse", "task_type", "status"], name="ix_task_wh_tt_st"),
             models.Index(fields=["owner", "warehouse", "status"], name="idx_task_wh_st"),
             models.Index(fields=["task_type", "status"], name="idx_task_tt_st"),
@@ -2987,7 +2995,6 @@ class ContainerUsage(BaseModel):
 
         self.full_clean()
         return super().save(*args, **kwargs)
-
 
 
 

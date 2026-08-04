@@ -18,13 +18,16 @@ def _decimal_or_zero(value, default=ZERO_MONEY):
 def build_warehouse_overview_payload(
     *,
     accrual_qs: QuerySet[BillingAccrual],
+    ledger_accrual_qs: QuerySet[BillingAccrual],
     bill_qs: QuerySet[Bill],
     recent_limit: int = 10,
 ):
-    accrual_summary = accrual_qs.aggregate(
+    operational_summary = accrual_qs.aggregate(
         accrual_count=Count("id"),
         owner_count=Count("owner", distinct=True),
         quantity_total=Sum("quantity"),
+    )
+    financial_summary = ledger_accrual_qs.aggregate(
         subtotal=Sum("amount"),
         tax_total=Sum("tax_amount"),
     )
@@ -35,11 +38,14 @@ def build_warehouse_overview_payload(
         total=Sum("total"),
     )
 
+    owner_counts = {
+        row["owner_id"]: row["accrual_count"]
+        for row in accrual_qs.values("owner_id").annotate(accrual_count=Count("id"))
+    }
     by_owner = []
     for row in (
-        accrual_qs.values("owner_id", "owner__name")
+        ledger_accrual_qs.values("owner_id", "owner__name")
         .annotate(
-            accrual_count=Count("id"),
             subtotal=Sum("amount"),
             tax_total=Sum("tax_amount"),
         )
@@ -51,18 +57,21 @@ def build_warehouse_overview_payload(
             {
                 "owner": row["owner_id"],
                 "owner_name": row["owner__name"] or f"Owner #{row['owner_id']}",
-                "accrual_count": row["accrual_count"],
+                "accrual_count": owner_counts.get(row["owner_id"], 0),
                 "subtotal": subtotal,
                 "tax_total": tax_total,
                 "total": subtotal + tax_total,
             }
         )
 
+    charge_type_counts = {
+        row["charge_type"]: row["accrual_count"]
+        for row in accrual_qs.values("charge_type").annotate(accrual_count=Count("id"))
+    }
     by_charge_type = []
     for row in (
-        accrual_qs.values("charge_type")
+        ledger_accrual_qs.values("charge_type")
         .annotate(
-            accrual_count=Count("id"),
             subtotal=Sum("amount"),
             tax_total=Sum("tax_amount"),
         )
@@ -73,18 +82,21 @@ def build_warehouse_overview_payload(
         by_charge_type.append(
             {
                 "charge_type": row["charge_type"],
-                "accrual_count": row["accrual_count"],
+                "accrual_count": charge_type_counts.get(row["charge_type"], 0),
                 "subtotal": subtotal,
                 "tax_total": tax_total,
                 "total": subtotal + tax_total,
             }
         )
 
+    status_counts = {
+        row["status"]: row["accrual_count"]
+        for row in accrual_qs.values("status").annotate(accrual_count=Count("id"))
+    }
     by_status = []
     for row in (
-        accrual_qs.values("status")
+        ledger_accrual_qs.values("status")
         .annotate(
-            accrual_count=Count("id"),
             subtotal=Sum("amount"),
             tax_total=Sum("tax_amount"),
         )
@@ -95,18 +107,21 @@ def build_warehouse_overview_payload(
         by_status.append(
             {
                 "status": row["status"],
-                "accrual_count": row["accrual_count"],
+                "accrual_count": status_counts.get(row["status"], 0),
                 "subtotal": subtotal,
                 "tax_total": tax_total,
                 "total": subtotal + tax_total,
             }
         )
 
+    service_date_counts = {
+        row["service_date"]: row["accrual_count"]
+        for row in accrual_qs.values("service_date").annotate(accrual_count=Count("id"))
+    }
     by_service_date = []
     for row in (
-        accrual_qs.values("service_date")
+        ledger_accrual_qs.values("service_date")
         .annotate(
-            accrual_count=Count("id"),
             subtotal=Sum("amount"),
             tax_total=Sum("tax_amount"),
         )
@@ -117,20 +132,22 @@ def build_warehouse_overview_payload(
         by_service_date.append(
             {
                 "service_date": row["service_date"],
-                "accrual_count": row["accrual_count"],
+                "accrual_count": service_date_counts.get(row["service_date"], 0),
                 "subtotal": subtotal,
                 "tax_total": tax_total,
                 "total": subtotal + tax_total,
             }
         )
 
-    subtotal = _decimal_or_zero(accrual_summary["subtotal"])
-    tax_total = _decimal_or_zero(accrual_summary["tax_total"])
+    subtotal = _decimal_or_zero(financial_summary["subtotal"])
+    tax_total = _decimal_or_zero(financial_summary["tax_total"])
     return {
         "summary": {
-            "owner_count": accrual_summary["owner_count"] or 0,
-            "accrual_count": accrual_summary["accrual_count"] or 0,
-            "quantity_total": _decimal_or_zero(accrual_summary["quantity_total"], ZERO_QTY),
+            "owner_count": operational_summary["owner_count"] or 0,
+            "accrual_count": operational_summary["accrual_count"] or 0,
+            "quantity_total": _decimal_or_zero(
+                operational_summary["quantity_total"], ZERO_QTY
+            ),
             "subtotal": subtotal,
             "tax_total": tax_total,
             "total": subtotal + tax_total,

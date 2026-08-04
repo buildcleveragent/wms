@@ -15,32 +15,38 @@
       <text class="state-text">加载中...</text>
     </view>
 
+    <view v-else-if="error && rows.length === 0" class="state-wrap state-column">
+      <text class="state-text">{{ error }}</text>
+      <button size="mini" @click="load(true)">重试</button>
+    </view>
+
     <view v-else-if="!loading && rows.length === 0" class="state-wrap">
       <text class="state-text">暂无库存数据</text>
     </view>
 
-    <view v-else class="table-wrap">
-      <view class="table-header">
-        <view class="cell col-name">商品名</view>
-        <view class="cell col-code">编码</view>
-        <view class="cell col-sku">SKU</view>
-        <view class="cell col-spec">规格</view>
-        <view class="cell col-unit">单位</view>
-        <view class="cell col-num">现有</view>
-        <view class="cell col-num">可用</view>
-        <view class="cell col-num">分配</view>
-        <view class="cell col-num">锁定</view>
-        <view class="cell col-num">残次</view>
-      </view>
-
       <scroll-view
-        class="list"
+        v-else
+        class="table-scroll"
+        scroll-x
         scroll-y
         @scrolltolower="loadMore"
         refresher-enabled
         :refresher-triggered="refreshing"
         @refresherrefresh="onRefresh"
       >
+        <view class="table-content">
+          <view class="table-header">
+            <view class="cell col-name">商品名</view>
+            <view class="cell col-code">编码</view>
+            <view class="cell col-sku">SKU</view>
+            <view class="cell col-spec">规格</view>
+            <view class="cell col-unit">单位</view>
+            <view class="cell col-num">现有</view>
+            <view class="cell col-num">可用</view>
+            <view class="cell col-num">分配</view>
+            <view class="cell col-num">锁定</view>
+            <view class="cell col-num">残次</view>
+          </view>
         <view
           v-for="(item, index) in rows"
           :key="item.id"
@@ -79,10 +85,11 @@
 
         <view class="bottom-state">
           <text v-if="loadingMore">加载更多中...</text>
+          <text v-else-if="error">{{ error }}，点击搜索或下拉刷新重试</text>
           <text v-else-if="finished">没有更多了</text>
         </view>
+        </view>
       </scroll-view>
-    </view>
   </view>
 </template>
 
@@ -98,6 +105,8 @@ const loading = ref(false)
 const loadingMore = ref(false)
 const refreshing = ref(false)
 const finished = ref(false)
+const error = ref('')
+let requestGeneration = 0
 
 
 function fmtQty(value) {
@@ -110,49 +119,40 @@ function fmtQty(value) {
 }
 
 async function load(reset = false) {
-  if (loading.value || loadingMore.value) return
-
+  if (!reset && (loading.value || loadingMore.value || finished.value)) return
+  const generation = reset ? ++requestGeneration : requestGeneration
+  const requestedPage = reset ? 1 : page.value
+  const search = q.value
   if (reset) {
     page.value = 1
     finished.value = false
-  }
-
-  if (finished.value && !reset) return
-
-  if (reset) {
+    error.value = ''
+    rows.value = []
     loading.value = true
-  } else {
-    loadingMore.value = true
-  }
+  } else loadingMore.value = true
 
   try {
     const res = await api.inventorySummary({
-      search: q.value,
-      page: page.value,
+      search,
+      page: requestedPage,
       page_size: pageSize.value,
     })
+    if (generation !== requestGeneration) return
 
     const list = Array.isArray(res?.results) ? res.results : []
-
-    if (reset) {
-      rows.value = list
-    } else {
-      rows.value = rows.value.concat(list)
-    }
-
-    const count = Number(res?.count || 0)
-
-    if (rows.value.length >= count || list.length < pageSize.value) {
-      finished.value = true
-    } else {
-      page.value += 1
-    }
+    rows.value = reset ? list : rows.value.concat(list)
+    finished.value = !res?.next
+    page.value = requestedPage + 1
+    error.value = ''
   } catch (e) {
-    console.error('load inventory summary failed:', e)
+    if (generation === requestGeneration) {
+      error.value = e?.message || '库存加载失败，请稍后重试'
+    }
   } finally {
-    loading.value = false
-    loadingMore.value = false
-    refreshing.value = false
+    if (generation === requestGeneration) {
+      loading.value = false
+      loadingMore.value = false
+    }
   }
 }
 
@@ -164,9 +164,13 @@ function loadMore() {
   load(false)
 }
 
-function onRefresh() {
+async function onRefresh() {
   refreshing.value = true
-  load(true)
+  try {
+    await load(true)
+  } finally {
+    refreshing.value = false
+  }
 }
 
 onMounted(() => {
@@ -209,9 +213,7 @@ onMounted(() => {
   border-radius: 0;
 }
 
-.table-wrap {
-  background: #fff;
-}
+.table-content { min-width: 1320rpx; background: #fff; }
 
 .table-header,
 .table-row {
@@ -299,8 +301,9 @@ onMounted(() => {
   font-weight: 600;
 }
 
-.list {
+.table-scroll {
   height: calc(100vh - 110rpx);
+  width: 100%;
 }
 
 .state-wrap {
@@ -314,6 +317,7 @@ onMounted(() => {
   color: #888;
   font-size: 26rpx;
 }
+.state-column { flex-direction: column; gap: 20rpx; }
 
 .bottom-state {
   text-align: center;

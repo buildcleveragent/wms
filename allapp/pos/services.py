@@ -25,6 +25,7 @@ from allapp.inventory.services import lock_active_inventory_details_for_update
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import Product
+from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
 from allapp.tasking.models import TaskScanLog, TaskStatusLog, WmsTask, WmsTaskLine
 from allapp.tasking.posting_exec import execute_posting_handler
 
@@ -291,20 +292,16 @@ def _validate_prices_and_shape(items, products):
         if qty <= 0:
             _error("items", "商品数量必须大于 0。")
 
-        min_price = getattr(product, "min_price", None)
-        if min_price is not None and price < Decimal(min_price):
-            _error("price", f"{product.code} 成交价不能低于最低价 {min_price}。")
-
-        base_price = getattr(product, "price", None)
-        max_discount = getattr(product, "max_discount", None)
-        if base_price is not None and max_discount is not None:
-            discount_rate = (Decimal("100") - Decimal(max_discount)) / Decimal("100")
-            lowest = (Decimal(base_price) * discount_rate).quantize(PRICE)
-            if price < lowest:
-                _error(
-                    "price",
-                    f"{product.code} 成交价超过最高折扣限制，最低可售 {lowest}。",
-                )
+        try:
+            lowest = minimum_sale_price(
+                base_price=getattr(product, "price", None),
+                min_price=getattr(product, "min_price", None),
+                max_discount=getattr(product, "max_discount", None),
+            )
+        except InvalidSalePriceRule as exc:
+            _error("price", f"{product.code} 价格配置错误：{exc}")
+        if lowest is not None and price < lowest:
+            _error("price", f"{product.code} 成交价不能低于 {lowest}。")
 
         amount = _money(qty * price)
         qty_by_product[product.id] += qty

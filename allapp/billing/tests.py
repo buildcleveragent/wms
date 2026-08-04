@@ -598,6 +598,80 @@ class BillingServiceTests(TestCase):
 
         self.assertIn("数据对账未通过", str(exc.exception))
 
+    def test_generate_invoice_sums_subtotal_tax_and_total_exactly(self):
+        period = BillingPeriod.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            label="2026-04-TOTALS",
+            start_date=datetime.date(2026, 4, 1),
+            end_date=datetime.date(2026, 4, 30),
+            status=PeriodStatus.CLOSED,
+        )
+        rule = self._create_rule(unit_price="10.01")
+        first = self._create_accrual(
+            rule=rule,
+            amount="10.01",
+            service_date=datetime.date(2026, 4, 2),
+            period=period,
+            status=AccrualStatus.LOCKED,
+            fingerprint="acc-invoice-totals-1",
+        )
+        second = self._create_accrual(
+            rule=rule,
+            amount="20.02",
+            service_date=datetime.date(2026, 4, 3),
+            period=period,
+            status=AccrualStatus.LOCKED,
+            fingerprint="acc-invoice-totals-2",
+        )
+        BillingAccrual.objects.filter(pk=first.pk).update(tax_amount=Decimal("0.60"))
+        BillingAccrual.objects.filter(pk=second.pk).update(tax_amount=Decimal("1.20"))
+
+        bill = generate_invoice_for_period(period, invoice_no="INV-TOTALS")
+
+        self.assertEqual(bill.subtotal, Decimal("30.03"))
+        self.assertEqual(bill.tax_total, Decimal("1.80"))
+        self.assertEqual(bill.total, Decimal("31.83"))
+        self.assertEqual(
+            list(bill.lines.order_by("service_date").values_list("amount", "tax_amount")),
+            [
+                (Decimal("10.01"), Decimal("0.60")),
+                (Decimal("20.02"), Decimal("1.20")),
+            ],
+        )
+
+    def test_generate_invoice_rolls_back_every_write_when_line_creation_fails(self):
+        period = BillingPeriod.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            label="2026-04-ROLLBACK",
+            start_date=datetime.date(2026, 4, 1),
+            end_date=datetime.date(2026, 4, 30),
+            status=PeriodStatus.CLOSED,
+        )
+        accrual = self._create_accrual(
+            rule=self._create_rule(unit_price="15.00"),
+            amount="15.00",
+            service_date=datetime.date(2026, 4, 4),
+            period=period,
+            status=AccrualStatus.LOCKED,
+            fingerprint="acc-invoice-rollback",
+        )
+
+        with mock.patch(
+            "allapp.billing.services.invoice.BillLine.objects.bulk_create",
+            side_effect=RuntimeError("forced bill-line failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "forced bill-line failure"):
+                generate_invoice_for_period(period, invoice_no="INV-ROLLBACK")
+
+        period.refresh_from_db()
+        accrual.refresh_from_db()
+        self.assertEqual(period.status, PeriodStatus.CLOSED)
+        self.assertEqual(accrual.status, AccrualStatus.LOCKED)
+        self.assertEqual(Bill.objects.filter(period=period).count(), 0)
+        self.assertEqual(BillLine.objects.filter(bill__period=period).count(), 0)
+
 
     def test_accrue_order_processing_can_filter_allowed_methods(self):
         service_date = datetime.date(2026, 3, 6)
@@ -1133,6 +1207,177 @@ class BillingServiceTests(TestCase):
                                             issue_date=service_date, due_date=service_date)
         self.assertEqual(bill2.status, "ISSUED")
         self.assertEqual(bill2.subtotal, Decimal("12.00"))
+
+        # 再次解锁必须生成新一组冲销，且不能复用第一次的冲销。
+        second_result = unlock_period(
+            period2, by_user=self.user, reason="test rebill second reversal"
+        )
+        self.assertEqual(second_result["action"], "red_reversal")
+        self.assertEqual(second_result["reversal_accruals_created"], 1)
+        self.assertEqual(
+            dict(
+                BillingAccrual.objects.filter(
+                    acc_fingerprint__in=(
+                        "fp-rebill-1",
+                        "fp-rebill-1|REV",
+                        "fp-rebill-2",
+                        "fp-rebill-2|REV",
+                    )
+                ).values_list("acc_fingerprint", "amount")
+            ),
+            {
+                "fp-rebill-1": Decimal("10.00"),
+                "fp-rebill-1|REV": Decimal("-10.00"),
+                "fp-rebill-2": Decimal("12.00"),
+                "fp-rebill-2|REV": Decimal("-12.00"),
+            },
+        )
+        self.assertEqual(
+            BillingAccrual.objects.filter(
+                acc_fingerprint__endswith="|REV"
+            ).count(),
+            2,
+        )
+
+    def test_invoiced_unlock_reuses_matching_existing_reversal(self):
+        service_date = datetime.date(2026, 3, 23)
+        rule = self._create_rule(calc_method=CalcMethod.PER_ORDER, unit_price="10.00")
+        original = BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            rule=rule,
+            service_date=service_date,
+            currency="CNY",
+            quantity=Decimal("1.0000"),
+            unit_price=Decimal("10.0000"),
+            amount=Decimal("10.00"),
+            tax_amount=Decimal("1.00"),
+            status=AccrualStatus.OPEN,
+            acc_fingerprint="fp-reversal-reuse-original",
+        )
+        period = lock_period(
+            self.owner.id,
+            self.warehouse.id,
+            "T-REV-REUSE",
+            service_date,
+            service_date,
+        )
+        bill = generate_invoice_for_period(
+            period,
+            invoice_no="INV-REV-REUSE",
+            issue_date=service_date,
+            due_date=service_date,
+        )
+        original.refresh_from_db()
+        existing = BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=original.charge_type,
+            rule=original.rule,
+            service_date=original.service_date,
+            currency=original.currency,
+            quantity=original.quantity,
+            unit_price=-original.unit_price,
+            amount=-original.amount,
+            tax_amount=-original.tax_amount,
+            status=AccrualStatus.VOID,
+            event=original.event,
+            bundle_key=original.bundle_key,
+            acc_fingerprint=f"{original.acc_fingerprint}|REV",
+            created_by=self.user,
+            is_reversal=True,
+            reversal_of=original,
+        )
+
+        result = unlock_period(period, by_user=self.user, reason="retry residue")
+
+        self.assertEqual(result["reversal_accruals_created"], 0)
+        self.assertEqual(
+            BillingAccrual.objects.filter(
+                acc_fingerprint=f"{original.acc_fingerprint}|REV"
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            BillingAccrual.objects.get(
+                acc_fingerprint=f"{original.acc_fingerprint}|REV"
+            ).pk,
+            existing.pk,
+        )
+        period.refresh_from_db()
+        bill.refresh_from_db()
+        original.refresh_from_db()
+        existing.refresh_from_db()
+        self.assertEqual(period.status, PeriodStatus.OPEN)
+        self.assertEqual(bill.status, BillStatus.VOID)
+        self.assertIsNone(original.period_id)
+        self.assertIsNone(existing.period_id)
+
+    def test_invoiced_unlock_rejects_conflicting_existing_reversal_atomically(self):
+        service_date = datetime.date(2026, 3, 24)
+        rule = self._create_rule(calc_method=CalcMethod.PER_ORDER, unit_price="10.00")
+        original = BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            rule=rule,
+            service_date=service_date,
+            currency="CNY",
+            quantity=Decimal("1.0000"),
+            unit_price=Decimal("10.0000"),
+            amount=Decimal("10.00"),
+            tax_amount=Decimal("1.00"),
+            status=AccrualStatus.OPEN,
+            acc_fingerprint="fp-reversal-conflict-original",
+        )
+        period = lock_period(
+            self.owner.id,
+            self.warehouse.id,
+            "T-REV-CONFLICT",
+            service_date,
+            service_date,
+        )
+        bill = generate_invoice_for_period(
+            period,
+            invoice_no="INV-REV-CONFLICT",
+            issue_date=service_date,
+            due_date=service_date,
+        )
+        original.refresh_from_db()
+        conflicting = BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=original.charge_type,
+            rule=original.rule,
+            service_date=original.service_date,
+            currency=original.currency,
+            quantity=original.quantity,
+            unit_price=-original.unit_price,
+            amount=Decimal("-9.00"),
+            tax_amount=-original.tax_amount,
+            status=AccrualStatus.VOID,
+            event=original.event,
+            bundle_key=original.bundle_key,
+            acc_fingerprint=f"{original.acc_fingerprint}|REV",
+            created_by=self.user,
+            is_reversal=True,
+            reversal_of=original,
+        )
+
+        with self.assertRaisesRegex(ValueError, "conflict|冲销|reversal"):
+            unlock_period(period, by_user=self.user, reason="conflicting retry")
+
+        period.refresh_from_db()
+        bill.refresh_from_db()
+        original.refresh_from_db()
+        conflicting.refresh_from_db()
+        self.assertEqual(period.status, PeriodStatus.INVOICED)
+        self.assertEqual(bill.status, BillStatus.ISSUED)
+        self.assertEqual(original.status, AccrualStatus.INVOICED)
+        self.assertEqual(original.period_id, period.id)
+        self.assertEqual(conflicting.amount, Decimal("-9.00"))
+
     def test_accrue_metrics_for_date_skips_order_amount_metric(self):
         service_date = datetime.date(2026, 3, 17)
         self._create_rule(
@@ -2347,6 +2592,58 @@ class BillingApiTests(TestCase):
         self.assertEqual(workbook["Lines"]["A2"].value, "2026-04-06")
         self.assertEqual(workbook["Lines"]["B2"].value, ChargeType.DISPATCH)
 
+    def test_bill_exports_do_not_leak_another_owner(self):
+        own_period = BillingPeriod.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            label="2026-04-EXPORT-OWN",
+            start_date=datetime.date(2026, 4, 1),
+            end_date=datetime.date(2026, 4, 30),
+            status=PeriodStatus.CLOSED,
+        )
+        own_rule = self._create_rule(owner=self.owner, unit_price="12.00")
+        self._create_accrual(
+            rule=own_rule,
+            amount="12.00",
+            service_date=datetime.date(2026, 4, 7),
+            period=own_period,
+            status=AccrualStatus.LOCKED,
+            fingerprint="acc-bill-export-own",
+        )
+        own_bill = generate_invoice_for_period(own_period, invoice_no="INV-EXPORT-OWN")
+
+        other_period = BillingPeriod.objects.create(
+            owner=self.other_owner,
+            warehouse=self.warehouse,
+            label="2026-04-EXPORT-OTHER",
+            start_date=datetime.date(2026, 4, 1),
+            end_date=datetime.date(2026, 4, 30),
+            status=PeriodStatus.CLOSED,
+        )
+        other_rule = self._create_rule(owner=self.other_owner, unit_price="99.00")
+        self._create_accrual(
+            owner=self.other_owner,
+            rule=other_rule,
+            amount="99.00",
+            service_date=datetime.date(2026, 4, 7),
+            period=other_period,
+            status=AccrualStatus.LOCKED,
+            fingerprint="acc-bill-export-other",
+        )
+        other_bill = generate_invoice_for_period(
+            other_period,
+            invoice_no="INV-EXPORT-OTHER",
+        )
+
+        list_response = self.client.get("/api/billing/bills/export/")
+        detail_response = self.client.get(f"/api/billing/bills/{other_bill.id}/export/")
+
+        self.assertEqual(list_response.status_code, 200)
+        workbook = load_workbook(io.BytesIO(list_response.content), read_only=True)
+        rows = list(workbook["Bills"].iter_rows(min_row=2, values_only=True))
+        self.assertEqual([row[0] for row in rows], [own_bill.invoice_no])
+        self.assertEqual(detail_response.status_code, 404)
+
     def test_superuser_can_create_period_for_explicit_warehouse(self):
         other_warehouse = Warehouse.objects.create(code="WHAPI2", name="Warehouse API 2")
         superuser = get_user_model().objects.create_superuser(
@@ -2439,6 +2736,96 @@ class BillingApiTests(TestCase):
             {row["id"] for row in response.data["owner_options"]},
             {self.owner.id, self.other_owner.id},
         )
+
+    def test_warehouse_dashboard_uses_net_money_and_keeps_operational_counts(self):
+        boss = self._warehouse_boss("billing-warehouse-boss-reversal")
+        client = APIClient()
+        client.force_authenticate(boss)
+        service_date = datetime.date(2026, 4, 15)
+        rule = self._create_rule(unit_price="20.00")
+        active = self._create_accrual(
+            rule=rule,
+            amount="20.00",
+            service_date=service_date,
+            fingerprint="acc-dash-reversal-original",
+        )
+        BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            rule=rule,
+            service_date=service_date,
+            currency="CNY",
+            quantity=Decimal("1.0000"),
+            unit_price=Decimal("-20.0000"),
+            amount=Decimal("-20.00"),
+            tax_amount=Decimal("0.00"),
+            status=AccrualStatus.VOID,
+            is_reversal=True,
+            reversal_of=active,
+            acc_fingerprint="acc-dash-reversal-original|REV",
+            created_by=self.user,
+        )
+        BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.DISPATCH,
+            rule=rule,
+            service_date=service_date,
+            currency="CNY",
+            quantity=Decimal("1.0000"),
+            unit_price=Decimal("99.0000"),
+            amount=Decimal("99.00"),
+            tax_amount=Decimal("0.00"),
+            status=AccrualStatus.VOID,
+            is_reversal=True,
+            reversal_of=active,
+            acc_fingerprint="acc-dash-positive-dedup",
+            created_by=self.user,
+        )
+
+        response = client.get(
+            "/api/billing/dashboard/warehouse-overview/",
+            {"date_from": "2026-04-01", "date_to": "2026-04-30"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["summary"]["owner_count"], 1)
+        self.assertEqual(response.data["summary"]["accrual_count"], 1)
+        self.assertEqual(
+            Decimal(str(response.data["summary"]["quantity_total"])), Decimal("1")
+        )
+        self.assertEqual(
+            Decimal(str(response.data["summary"]["subtotal"])), Decimal("0.00")
+        )
+        self.assertEqual(
+            Decimal(str(response.data["summary"]["tax_total"])), Decimal("0.00")
+        )
+        self.assertEqual(
+            Decimal(str(response.data["summary"]["total"])), Decimal("0.00")
+        )
+        self.assertEqual(len(response.data["recent_accruals"]), 1)
+        self.assertEqual(response.data["recent_accruals"][0]["id"], active.id)
+
+        self.assertEqual(len(response.data["by_owner"]), 1)
+        self.assertEqual(
+            Decimal(str(response.data["by_owner"][0]["total"])), Decimal("0.00")
+        )
+        self.assertEqual(
+            Decimal(str(response.data["by_charge_type"][0]["total"])),
+            Decimal("0.00"),
+        )
+        self.assertEqual(
+            Decimal(str(response.data["by_service_date"][0]["total"])),
+            Decimal("0.00"),
+        )
+        status_totals = {
+            row["status"]: Decimal(str(row["total"]))
+            for row in response.data["by_status"]
+        }
+        self.assertEqual(status_totals[AccrualStatus.OPEN], Decimal("20.00"))
+        self.assertEqual(status_totals[AccrualStatus.VOID], Decimal("-20.00"))
+        self.assertEqual(sum(status_totals.values()), Decimal("0.00"))
 
     def test_warehouse_dashboard_overview_owner_filter_narrows_results(self):
         boss = self._warehouse_boss("billing-warehouse-boss-filter")

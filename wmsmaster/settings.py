@@ -29,6 +29,21 @@ env = environ.Env(
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
+# Local test runs use an isolated, ignored environment file when present.
+# CI continues to provide its own environment because this file is never
+# committed. Normal development and production processes do not load it.
+_TEST_COMMAND = " ".join(sys.argv).lower()
+_LOCAL_TEST_ENV = BASE_DIR / ".env.test.local"
+if (
+    _LOCAL_TEST_ENV.exists()
+    and (
+        "pytest" in _TEST_COMMAND
+        or "py.test" in _TEST_COMMAND
+        or "manage.py test" in _TEST_COMMAND
+    )
+):
+    environ.Env.read_env(_LOCAL_TEST_ENV, overwrite=True)
+
 
 def _detect_app_env():
     explicit = env("APP_ENV", default="").strip().lower()
@@ -94,6 +109,7 @@ INSTALLED_APPS = [
     "dal_select2",
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "rest_framework.authtoken",
     "corsheaders",
     "django_filters",
@@ -136,10 +152,11 @@ REST_FRAMEWORK = {
 
 # （可选）JWT 令牌时效等
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(days=1),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
-    "ROTATE_REFRESH_TOKENS": False,
-    "BLACKLIST_AFTER_ROTATION": False,  # 若启用黑名单请设 True 并安装 token_blacklist
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "CHECK_REVOKE_TOKEN": True,
 }
 
 WECHAT_MINI_APPID = env("WECHAT_MINI_APPID", default="").strip()

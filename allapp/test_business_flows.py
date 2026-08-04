@@ -1,6 +1,7 @@
 import datetime
 import io
 from decimal import Decimal
+from uuid import uuid4
 
 from openpyxl import load_workbook
 from django.contrib.auth import get_user_model
@@ -11,7 +12,8 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from allapp.baseinfo.models import Customer, Owner
+from allapp.accounts.models import UserRoleScope
+from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.inbound.models import InboundOrder, InboundOrderLine
 from allapp.billing.enums import AccrualStatus, CalcMethod, ChargeType, MetricType
 from allapp.billing.models import Bill, BillingAccrual, BillingJobRun, BillingMetricDaily, BillingRule
@@ -62,6 +64,10 @@ class BusinessFlowTests(TestCase):
 
         self.owner = Owner.objects.create(name="Flow Owner", code="FLOWOWN")
         self.warehouse = Warehouse.objects.create(code="FLOWWH", name="Flow Warehouse")
+        OwnerWarehouseBinding.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="FLOWSW",
@@ -105,6 +111,31 @@ class BusinessFlowTests(TestCase):
             username="flow-admin",
             email="flow-admin@example.com",
             password="x",
+        )
+        UserRoleScope.objects.create(
+            user=self.owner_user,
+            role=UserRoleScope.Role.OWNER_SALESPERSON,
+            owner=self.owner,
+        )
+        UserRoleScope.objects.create(
+            user=self.picker_user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=self.reviewer_user,
+            role=UserRoleScope.Role.WAREHOUSE_MANAGER,
+            warehouse=self.warehouse,
+        )
+        self.owner_user.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="outbound",
+                codename="submit_outbound_as_owner_buyers",
+            ),
+            Permission.objects.get(
+                content_type__app_label="outbound",
+                codename="approve_outbound_as_owner_manager",
+            ),
         )
 
         self.customer = Customer.objects.create(
@@ -437,6 +468,7 @@ class BusinessFlowTests(TestCase):
         create_response = owner_client.post(
             "/api/outbound/orders/",
             {
+                "warehouse_id": self.warehouse.id,
                 "customer_id": self.customer.id,
                 "items": [
                     {
@@ -447,6 +479,7 @@ class BusinessFlowTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=f"business-flow-{uuid4().hex}",
         )
         self.assertEqual(create_response.status_code, 201, create_response.json())
         order_id = create_response.json()["id"]
@@ -757,6 +790,7 @@ class BusinessFlowTests(TestCase):
         outbound_create = owner_client.post(
             "/api/outbound/orders/",
             {
+                "warehouse_id": self.warehouse.id,
                 "customer_id": self.customer.id,
                 "items": [
                     {
@@ -767,6 +801,7 @@ class BusinessFlowTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=f"business-flow-{uuid4().hex}",
         )
         self.assertEqual(outbound_create.status_code, 201, outbound_create.json())
         outbound_id = outbound_create.json()["id"]
@@ -874,6 +909,7 @@ class BusinessFlowTests(TestCase):
         outbound_create = owner_client.post(
             "/api/outbound/orders/",
             {
+                "warehouse_id": self.warehouse.id,
                 "customer_id": self.customer.id,
                 "items": [
                     {
@@ -884,6 +920,7 @@ class BusinessFlowTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=f"business-flow-{uuid4().hex}",
         )
         self.assertEqual(outbound_create.status_code, 201, outbound_create.json())
         outbound_id = outbound_create.json()["id"]
@@ -946,6 +983,7 @@ class BusinessFlowTests(TestCase):
         create_response = owner_client.post(
             "/api/outbound/orders/",
             {
+                "warehouse_id": self.warehouse.id,
                 "customer_id": self.customer.id,
                 "items": [
                     {
@@ -961,6 +999,7 @@ class BusinessFlowTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=f"business-flow-{uuid4().hex}",
         )
         self.assertEqual(create_response.status_code, 201, create_response.json())
         order_id = create_response.json()["id"]

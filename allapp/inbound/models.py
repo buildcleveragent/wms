@@ -111,6 +111,14 @@ class InboundOrder(BaseModel):
             ("submit_as_owner_buyers", "货主业务员可提交入库订单"),
         ]
         indexes = [
+            models.Index(
+                fields=["owner", "biz_date", "approval_status", "id"],
+                name="ix_in_own_date_appr_id",
+            ),
+            models.Index(
+                fields=["warehouse", "biz_date", "approval_status", "id"],
+                name="ix_in_wh_date_appr_id",
+            ),
             models.Index(fields=["owner", "biz_date", "submit_status"], name="ii_order_owner_date_status"),
             models.Index(fields=["approval_status"], name="ii_order_approval_status"),
         ]

@@ -212,13 +212,39 @@ class OutboundOrderAdmin(admin.ModelAdmin):
     def action_submit(self, request, queryset):
         if not _as_owner_buyers(self, request):
             raise PermissionDenied("需要货主业务员权限。")
-        self._transition_many(
-            request,
-            queryset,
-            allow=lambda o: o.submit_status == "DRAFT",
-            mutate=lambda o: setattr(o, "submit_status", "SUBMITTED"),
-            success_msg="已提交",
-        )
+        ok, errors = 0, []
+        for order in queryset:
+            try:
+                if not self._in_owner_scope(request, order):
+                    raise PermissionDenied("禁止提交其他货主的订单。")
+                with transaction.atomic():
+                    before = {
+                        "submit_status": order.submit_status,
+                        "approval_status": order.approval_status,
+                    }
+                    order = ob_services.submit_owner_draft(
+                        order,
+                        by_user=request.user,
+                    )
+                    record_audit_event(
+                        action="outbound.order.submit",
+                        module="outbound",
+                        request=request,
+                        obj=order,
+                        before=before,
+                        after={
+                            "submit_status": order.submit_status,
+                            "approval_status": order.approval_status,
+                        },
+                        metadata={"channel": "django_admin"},
+                    )
+                ok += 1
+            except Exception as exc:  # noqa: BLE001 - report each selected order
+                errors.append(f"{order.order_no}: {exc}")
+        if ok:
+            self.message_user(request, f"已提交：{ok} 张", messages.SUCCESS)
+        if errors:
+            self.message_user(request, "；".join(errors)[:2000], messages.ERROR)
 
     @admin.action(description="撤销提交")
     def action_revert_draft(self, request, queryset):
@@ -229,7 +255,24 @@ class OutboundOrderAdmin(admin.ModelAdmin):
             try:
                 if not self._in_owner_scope(request, order):
                     raise PermissionDenied("禁止撤回其他货主的订单。")
-                ob_services.withdraw_order(order, by_user=request.user)
+                with transaction.atomic():
+                    before = {
+                        "submit_status": order.submit_status,
+                        "approval_status": order.approval_status,
+                    }
+                    order = ob_services.withdraw_order(order, by_user=request.user)
+                    record_audit_event(
+                        action="outbound.order.withdraw",
+                        module="outbound",
+                        request=request,
+                        obj=order,
+                        before=before,
+                        after={
+                            "submit_status": order.submit_status,
+                            "approval_status": order.approval_status,
+                        },
+                        metadata={"channel": "django_admin"},
+                    )
                 ok += 1
             except Exception as exc:  # noqa: BLE001 - display per-order failure
                 errors.append(f"{order.order_no}: {exc}")
@@ -261,17 +304,20 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                     # - approval_status = OWNER_APPROVED
                     # - 记录 approved_by_ownermanager / approved_at_ownermanager
                     # - 调用 ob_services.allocate_inventory 冻结库存并生成 RESERVED 拣货任务
-                    order.owner_approve(by_user=request.user, allow_backorder=True)
-                    order.refresh_from_db()
-                record_audit_event(
-                    action="outbound.order.owner_approve",
-                    module="outbound",
-                    request=request,
-                    obj=order,
-                    before=before,
-                    after={"approval_status": order.approval_status},
-                    metadata={"channel": "django_admin"},
-                )
+                    order = ob_services.approve_owner_order(
+                        order,
+                        by_user=request.user,
+                        allow_backorder=True,
+                    )
+                    record_audit_event(
+                        action="outbound.order.owner_approve",
+                        module="outbound",
+                        request=request,
+                        obj=order,
+                        before=before,
+                        after={"approval_status": order.approval_status},
+                        metadata={"channel": "django_admin"},
+                    )
                 ok += 1
             except Exception as e:
                 err.append(f"{getattr(order, 'order_no', order.pk)}: {e}")
@@ -286,21 +332,37 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         if not self._as_owner_mgr(request):
             raise PermissionDenied("需要货主管理员权限。")
 
-        def mutate(o: OutboundOrder):
-            o.approval_status = "OWNER_REJECTED"
-            o.approved_by_ownermanager = request.user
-            o.approved_at_ownermanager = timezone.now()
-
-        self._transition_many(
-            request,
-            queryset,
-            allow=lambda o: (
-                self._in_owner_scope(request, o)
-                and o.approval_status == "OWNER_PENDING"
-            ),
-            mutate=mutate,
-            success_msg="已置为:货主管理员审核驳回",
-        )
+        ok, errors = 0, []
+        reason = "Django Admin 批量退回修改"
+        for order in queryset:
+            try:
+                if not self._in_owner_scope(request, order):
+                    raise PermissionDenied("禁止退回其他货主或仓库的订单。")
+                with transaction.atomic():
+                    order = ob_services.reject_owner_order(
+                        order,
+                        by_user=request.user,
+                        reason=reason,
+                    )
+                    record_audit_event(
+                        action="outbound.order.owner_reject",
+                        module="outbound",
+                        request=request,
+                        obj=order,
+                        after={
+                            "submit_status": order.submit_status,
+                            "approval_status": order.approval_status,
+                            "owner_reject_reason": reason,
+                        },
+                        metadata={"channel": "django_admin", "reason": reason},
+                    )
+                ok += 1
+            except Exception as exc:  # noqa: BLE001 - report each selected order
+                errors.append(f"{getattr(order, 'order_no', order.pk)}: {exc}")
+        if ok:
+            self.message_user(request, f"已退回修改：{ok} 张", messages.SUCCESS)
+        if errors:
+            self.message_user(request, "；".join(errors)[:2000], messages.ERROR)
 
     def _as_wh_mgr(self, request):
         return request.user.is_superuser or request.user.has_perm(
@@ -318,24 +380,9 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                 if not self._in_warehouse_scope(request, order):
                     raise PermissionDenied("禁止确认其他仓库的订单。")
                 with transaction.atomic():
-                    order = type(order).objects.select_for_update().get(pk=order.pk)
-                    if order.approval_status not in {"OWNER_APPROVED", "WHS_PENDING"}:
-                        continue
-
                     before = {"approval_status": order.approval_status}
-                    order.approval_status = "WHS_APPROVED"
-                    order.approved_by_warehouse = request.user
-                    order.approved_at_warehouse = timezone.now()
-                    order.save(
-                        update_fields=[
-                            "approval_status",
-                            "approved_by_warehouse",
-                            "approved_at_warehouse",
-                        ]
-                    )
-                    ob_services.promote_reserved_pick(
+                    order, task = ob_services.confirm_warehouse_order(
                         order,
-                        new_status=WmsTask.Status.RELEASED,
                         by_user=request.user,
                     )
                     record_audit_event(
@@ -345,7 +392,10 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                         obj=order,
                         before=before,
                         after={"approval_status": order.approval_status},
-                        metadata={"channel": "django_admin"},
+                        metadata={
+                            "channel": "django_admin",
+                            "pick_task_id": task.pk,
+                        },
                     )
                 ok += 1
             except Exception as e:
@@ -410,17 +460,18 @@ class OutboundOrderAdmin(admin.ModelAdmin):
             try:
                 if not self._in_owner_scope(request, order):
                     raise PermissionDenied("禁止取消其他货主的订单。")
-                before = {"approval_status": order.approval_status}
-                order = ob_services.cancel_order(order, by_user=request.user)
-                record_audit_event(
-                    action="outbound.order.cancel",
-                    module="outbound",
-                    request=request,
-                    obj=order,
-                    before=before,
-                    after={"approval_status": order.approval_status},
-                    metadata={"channel": "django_admin"},
-                )
+                with transaction.atomic():
+                    before = {"approval_status": order.approval_status}
+                    order = ob_services.cancel_order(order, by_user=request.user)
+                    record_audit_event(
+                        action="outbound.order.cancel",
+                        module="outbound",
+                        request=request,
+                        obj=order,
+                        before=before,
+                        after={"approval_status": order.approval_status},
+                        metadata={"channel": "django_admin"},
+                    )
                 ok += 1
             except Exception as exc:  # noqa: BLE001 - display per-order failure
                 errors.append(f"{order.order_no}: {exc}")

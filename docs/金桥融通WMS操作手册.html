@@ -7,21 +7,9 @@
 @page {
   size: A4;
   margin: 18mm 16mm 19mm 16mm;
-  @top-left {
-    content: "金桥融通仓库管理系统（WMS）操作手册";
-    color: #667085;
-    font-size: 8.5pt;
-  }
-  @top-right {
-    content: "V1.0 · 2026-07";
-    color: #667085;
-    font-size: 8.5pt;
-  }
-  @bottom-center {
-    content: "第 " counter(page) " 页 / 共 " counter(pages) " 页";
-    color: #7a8493;
-    font-size: 8.5pt;
-  }
+  @top-left { content: string(document-title); color: #667085; font-size: 8.2pt; }
+  @top-right { content: "V2.0 · 2026-08"; color: #667085; font-size: 8.2pt; }
+  @bottom-center { content: "第 " counter(page) " 页 / 共 " counter(pages) " 页"; color: #7a8493; font-size: 8.2pt; }
 }
 @page cover {
   margin: 0;
@@ -52,20 +40,20 @@ body { margin: 0; font-size: 10pt; line-height: 1.7; }
   background: rgba(255,255,255,.10);
 }
 .cover-logo { width: 23mm; height: 23mm; object-fit: contain; margin-bottom: 25mm; }
-.cover h1 { font-size: 28pt; line-height: 1.28; margin: 0 0 12mm; color: white; }
+.cover h1 { string-set: document-title content(); font-size: 27pt; line-height: 1.28; margin: 0 0 12mm; color: white; }
 .cover .lead { font-size: 14pt; color: #e8f1ff; margin-bottom: 28mm; }
-.cover-meta { border-top: 1px solid rgba(255,255,255,.45); padding-top: 9mm; width: 118mm; }
+.cover-meta { border-top: 1px solid rgba(255,255,255,.45); padding-top: 9mm; width: 125mm; }
 .cover-meta div { margin: 2.2mm 0; font-size: 10.5pt; }
-.cover-foot { position: absolute; left: 26mm; bottom: 25mm; color: #eaf2ff; font-size: 9pt; }
+.cover-foot { position: absolute; left: 26mm; right: 26mm; bottom: 25mm; color: #eaf2ff; font-size: 9pt; }
 .toc { page-break-after: always; }
 .toc h1 { color: #0f2f68; font-size: 23pt; border-bottom: 3px solid #155eef; padding-bottom: 4mm; }
 .toc ul { margin: 0; padding-left: 0; list-style: none; }
 .toc li { margin: 1.6mm 0; }
 .toc li.level-3 { margin-left: 7mm; color: #4d5c73; font-size: 9.2pt; }
 .toc a { color: inherit; text-decoration: none; }
-h2 { page-break-before: always; font-size: 20pt; color: #0f2f68; margin: 0 0 7mm; border-bottom: 2px solid #bfd2f6; padding-bottom: 3mm; }
+h2 { page-break-before: always; font-size: 19pt; color: #0f2f68; margin: 0 0 7mm; border-bottom: 2px solid #bfd2f6; padding-bottom: 3mm; }
 h2.first-section { page-break-before: auto; }
-h3 { font-size: 14pt; color: #174a98; margin: 8mm 0 3mm; page-break-after: avoid; }
+h3 { font-size: 13.5pt; color: #174a98; margin: 8mm 0 3mm; page-break-after: avoid; }
 h4 { font-size: 11.5pt; color: #243b63; margin: 5mm 0 2mm; page-break-after: avoid; }
 p { margin: 2.4mm 0; orphans: 3; widows: 3; }
 ul, ol { margin: 2.2mm 0 3mm; padding-left: 7mm; }
@@ -93,147 +81,118 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 
     <section class="cover">
       <img class="cover-logo" src="../static/img/aaa.png" alt="金桥融通" />
-      <h1>金桥融通仓库管理系统<br />（WMS）操作手册</h1>
-      <div class="lead">仓储交付 · 六角色岗位操作与异常处理</div>
+      <h1>金桥融通仓库管理系统（WMS）操作手册</h1>
+      <div class="lead">岗位操作 · 权限边界 · 异常处理</div>
       <div class="cover-meta">
-        <div>文档版本：V1.0</div>
-        <div>适用版本：2026 年 7 月交付基线</div>
+        <div>文档版本：V2.0</div>
+        <div>适用基线：2026-08-04 当前工作区</div>
         <div>文档状态：交付版</div>
-        <div>编制日期：2026 年 7 月 16 日</div>
+        <div>主要读者：六类 WMS 角色</div>
       </div>
-      <div class="cover-foot">适用角色：仓库操作员 · 仓库管理员 · 货主业务员 · 货主管理员 · 系统管理员 · 老板</div>
+      <div class="cover-foot">实际菜单和数据范围以账号角色、权限及显式货主/仓库范围为准</div>
     </section>
     
-<section class='toc'><h1>目录</h1><ul><li class='level-2'><a href='#section-1-1-手册说明'>1. 手册说明</a></li><li class='level-3'><a href='#section-2-1-1-系统组成'>1.1 系统组成</a></li><li class='level-3'><a href='#section-3-1-2-本手册范围'>1.2 本手册范围</a></li><li class='level-3'><a href='#section-4-1-3-操作原则'>1.3 操作原则</a></li><li class='level-2'><a href='#section-5-2-角色职责与权限速查'>2. 角色职责与权限速查</a></li><li class='level-3'><a href='#section-6-2-1-账号范围的含义'>2.1 账号范围的含义</a></li><li class='level-2'><a href='#section-7-3-登录-退出与通用操作'>3. 登录、退出与通用操作</a></li><li class='level-3'><a href='#section-8-3-1-首次登录'>3.1 首次登录</a></li><li class='level-3'><a href='#section-9-3-2-修改密码'>3.2 修改密码</a></li><li class='level-3'><a href='#section-10-3-3-正确退出'>3.3 正确退出</a></li><li class='level-3'><a href='#section-11-3-4-搜索-筛选和刷新'>3.4 搜索、筛选和刷新</a></li><li class='level-3'><a href='#section-12-3-5-常见状态说明'>3.5 常见状态说明</a></li><li class='level-2'><a href='#section-13-4-跨角色标准业务流程'>4. 跨角色标准业务流程</a></li><li class='level-3'><a href='#section-14-4-1-出库订单到库存扣减'>4.1 出库订单到库存扣减</a></li><li class='level-3'><a href='#section-15-4-2-无订单收货到库存增加'>4.2 无订单收货到库存增加</a></li><li class='level-3'><a href='#section-16-4-3-月度账单核对'>4.3 月度账单核对</a></li><li class='level-2'><a href='#section-17-5-仓库操作员操作指南'>5. 仓库操作员操作指南</a></li><li class='level-3'><a href='#section-18-5-1-登录与班前检查'>5.1 登录与班前检查</a></li><li class='level-3'><a href='#section-19-5-2-无订单收货'>5.2 无订单收货</a></li><li class='level-3'><a href='#section-20-5-3-代货主出库'>5.3 代货主出库</a></li><li class='level-3'><a href='#section-21-5-4-拣货任务'>5.4 拣货任务</a></li><li class='level-3'><a href='#section-22-5-5-复核并过账'>5.5 复核并过账</a></li><li class='level-3'><a href='#section-23-5-6-库存与仓库统计查询'>5.6 库存与仓库统计查询</a></li><li class='level-3'><a href='#section-24-5-7-班后交接'>5.7 班后交接</a></li><li class='level-2'><a href='#section-25-6-仓库管理员操作指南'>6. 仓库管理员操作指南</a></li><li class='level-3'><a href='#section-26-6-1-每日工作顺序'>6.1 每日工作顺序</a></li><li class='level-3'><a href='#section-27-6-2-入库单确认'>6.2 入库单确认</a></li><li class='level-3'><a href='#section-28-6-3-出库单确认与任务发布'>6.3 出库单确认与任务发布</a></li><li class='level-3'><a href='#section-29-6-4-任务监控与异常处理'>6.4 任务监控与异常处理</a></li><li class='level-3'><a href='#section-30-6-5-库存查询-调整与盘点控制'>6.5 库存查询、调整与盘点控制</a></li><li class='level-3'><a href='#section-31-6-6-计费与账单'>6.6 计费与账单</a></li><li class='level-3'><a href='#section-32-6-7-管理员日结检查表'>6.7 管理员日结检查表</a></li><li class='level-2'><a href='#section-33-7-货主业务员操作指南'>7. 货主业务员操作指南</a></li><li class='level-3'><a href='#section-34-7-1-开立销售出库订单'>7.1 开立销售出库订单</a></li><li class='level-3'><a href='#section-35-7-2-修改被退回订单'>7.2 修改被退回订单</a></li><li class='level-3'><a href='#section-36-7-3-一件代发批量导入'>7.3 一件代发批量导入</a></li><li class='level-3'><a href='#section-37-7-4-订单与库存查询'>7.4 订单与库存查询</a></li><li class='level-2'><a href='#section-38-8-货主管理员操作指南'>8. 货主管理员操作指南</a></li><li class='level-3'><a href='#section-39-8-1-订单审核'>8.1 订单审核</a></li><li class='level-3'><a href='#section-40-8-2-审核判断标准'>8.2 审核判断标准</a></li><li class='level-3'><a href='#section-41-8-3-实时库存-报表与账单'>8.3 实时库存、报表与账单</a></li><li class='level-3'><a href='#section-42-8-4-月结确认清单'>8.4 月结确认清单</a></li><li class='level-2'><a href='#section-43-9-系统管理员操作指南'>9. 系统管理员操作指南</a></li><li class='level-3'><a href='#section-44-9-1-新建用户'>9.1 新建用户</a></li><li class='level-3'><a href='#section-45-9-2-角色与权限管理'>9.2 角色与权限管理</a></li><li class='level-3'><a href='#section-46-9-3-基础资料维护顺序'>9.3 基础资料维护顺序</a></li><li class='level-3'><a href='#section-47-9-4-商品与包装维护'>9.4 商品与包装维护</a></li><li class='level-3'><a href='#section-48-9-5-仓库与库位维护'>9.5 仓库与库位维护</a></li><li class='level-3'><a href='#section-49-9-6-日志与账号安全'>9.6 日志与账号安全</a></li><li class='level-3'><a href='#section-50-9-7-用户开通验收表'>9.7 用户开通验收表</a></li><li class='level-2'><a href='#section-51-10-老板操作指南'>10. 老板操作指南</a></li><li class='level-3'><a href='#section-52-10-1-首页总览'>10.1 首页总览</a></li><li class='level-3'><a href='#section-53-10-2-库存与库容'>10.2 库存与库容</a></li><li class='level-3'><a href='#section-54-10-3-收入与计费'>10.3 收入与计费</a></li><li class='level-3'><a href='#section-55-10-4-预警中心'>10.4 预警中心</a></li><li class='level-3'><a href='#section-56-10-5-经营例会建议'>10.5 经营例会建议</a></li><li class='level-2'><a href='#section-57-11-异常处理与常见问题'>11. 异常处理与常见问题</a></li><li class='level-3'><a href='#section-58-11-1-无法登录'>11.1 无法登录</a></li><li class='level-3'><a href='#section-59-11-2-登录后看不到菜单或按钮'>11.2 登录后看不到菜单或按钮</a></li><li class='level-3'><a href='#section-60-11-3-数据为空或看到了错误范围'>11.3 数据为空或看到了错误范围</a></li><li class='level-3'><a href='#section-61-11-4-网络中断或提交超时'>11.4 网络中断或提交超时</a></li><li class='level-3'><a href='#section-62-11-5-库存数量不一致'>11.5 库存数量不一致</a></li><li class='level-3'><a href='#section-63-11-6-拣货无法完成或过账失败'>11.6 拣货无法完成或过账失败</a></li><li class='level-3'><a href='#section-64-11-7-账单金额不一致'>11.7 账单金额不一致</a></li><li class='level-2'><a href='#section-65-12-交付限制与上线前确认'>12. 交付限制与上线前确认</a></li><li class='level-3'><a href='#section-66-12-1-当前交付限制'>12.1 当前交付限制</a></li><li class='level-3'><a href='#section-67-12-2-上线前必须确认'>12.2 上线前必须确认</a></li><li class='level-2'><a href='#section-68-附录-A-问题上报模板'>附录 A：问题上报模板</a></li><li class='level-2'><a href='#section-69-附录-B-培训签到与实操验收'>附录 B：培训签到与实操验收</a></li><li class='level-2'><a href='#section-70-附录-C-文档修订记录'>附录 C：文档修订记录</a></li></ul></section>
-<div class="document-note">本手册以当前可验收功能为准。实际菜单由账号角色、所属货主和所属仓库共同决定。</div>
+<section class='toc'><h1>目录</h1><ul><li class='level-2'><a href='#section-1-系统组成与角色入口'>系统组成与角色入口</a></li><li class='level-2'><a href='#section-2-登录-账号与通用安全'>登录、账号与通用安全</a></li><li class='level-3'><a href='#section-3-首次登录'>首次登录</a></li><li class='level-3'><a href='#section-4-账号和数据范围'>账号和数据范围</a></li><li class='level-3'><a href='#section-5-通用操作原则'>通用操作原则</a></li><li class='level-3'><a href='#section-6-修改密码与退出'>修改密码与退出</a></li><li class='level-2'><a href='#section-7-常见状态与控制点'>常见状态与控制点</a></li><li class='level-2'><a href='#section-8-仓库操作员操作指南'>仓库操作员操作指南</a></li><li class='level-3'><a href='#section-9-角色职责与权限'>角色职责与权限</a></li><li class='level-3'><a href='#section-10-班前检查'>班前检查</a></li><li class='level-3'><a href='#section-11-有订单收货'>有订单收货</a></li><li class='level-3'><a href='#section-12-无订单收货-逐项录入'>无订单收货：逐项录入</a></li><li class='level-3'><a href='#section-13-无订单收货-Excel-批量入库'>无订单收货：Excel 批量入库</a></li><li class='level-3'><a href='#section-14-上架作业'>上架作业</a></li><li class='level-3'><a href='#section-15-代货主出库'>代货主出库</a></li><li class='level-3'><a href='#section-16-拣货-复核与过账'>拣货、复核与过账</a></li><li class='level-3'><a href='#section-17-库存-报表与交接'>库存、报表与交接</a></li><li class='level-2'><a href='#section-18-仓库管理员操作指南'>仓库管理员操作指南</a></li><li class='level-3'><a href='#section-19-角色定位与权限'>角色定位与权限</a></li><li class='level-3'><a href='#section-20-每日工作顺序'>每日工作顺序</a></li><li class='level-3'><a href='#section-21-入库单确认与收货监督'>入库单确认与收货监督</a></li><li class='level-3'><a href='#section-22-标准出库确认与任务发布'>标准出库确认与任务发布</a></li><li class='level-3'><a href='#section-23-驳回-取消和库存释放'>驳回、取消和库存释放</a></li><li class='level-3'><a href='#section-24-任务发布-审核与过账'>任务发布、审核与过账</a></li><li class='level-3'><a href='#section-25-库存查询-调整与盘点控制'>库存查询、调整与盘点控制</a></li><li class='level-3'><a href='#section-26-报表-导出与额外财务权限'>报表、导出与额外财务权限</a></li><li class='level-3'><a href='#section-27-日结检查表'>日结检查表</a></li><li class='level-2'><a href='#section-28-货主业务员操作指南'>货主业务员操作指南</a></li><li class='level-3'><a href='#section-29-角色职责与权限'>角色职责与权限</a></li><li class='level-3'><a href='#section-30-首页和开单准备'>首页和开单准备</a></li><li class='level-3'><a href='#section-31-创建-保存和提交订单'>创建、保存和提交订单</a></li><li class='level-3'><a href='#section-32-防重复提交和冲突处理'>防重复提交和冲突处理</a></li><li class='level-3'><a href='#section-33-撤回-退回修改和重新提交'>撤回、退回修改和重新提交</a></li><li class='level-3'><a href='#section-34-一件代发-Excel-导入'>一件代发 Excel 导入</a></li><li class='level-3'><a href='#section-35-库存-订单和报表查询'>库存、订单和报表查询</a></li><li class='level-3'><a href='#section-36-业务员日结检查表'>业务员日结检查表</a></li><li class='level-2'><a href='#section-37-货主管理员操作指南'>货主管理员操作指南</a></li><li class='level-3'><a href='#section-38-角色职责与权限'>角色职责与权限</a></li><li class='level-3'><a href='#section-39-每日审核顺序'>每日审核顺序</a></li><li class='level-3'><a href='#section-40-订单审核通过'>订单审核通过</a></li><li class='level-3'><a href='#section-41-退回修改'>退回修改</a></li><li class='level-3'><a href='#section-42-取消订单'>取消订单</a></li><li class='level-3'><a href='#section-43-库存与履约报表'>库存与履约报表</a></li><li class='level-3'><a href='#section-44-计费与账单核对'>计费与账单核对</a></li><li class='level-3'><a href='#section-45-月结确认清单'>月结确认清单</a></li><li class='level-2'><a href='#section-46-系统管理员操作指南'>系统管理员操作指南</a></li><li class='level-3'><a href='#section-47-角色定位与权限边界'>角色定位与权限边界</a></li><li class='level-3'><a href='#section-48-用户和角色范围管理'>用户和角色范围管理</a></li><li class='level-3'><a href='#section-49-规范角色组与-仓库主管-说明'>规范角色组与“仓库主管”说明</a></li><li class='level-3'><a href='#section-50-额外权限管理'>额外权限管理</a></li><li class='level-3'><a href='#section-51-基础资料维护顺序'>基础资料维护顺序</a></li><li class='level-3'><a href='#section-52-Excel-导入与批量配置'>Excel 导入与批量配置</a></li><li class='level-3'><a href='#section-53-商城-POS-与计费管理边界'>商城、POS 与计费管理边界</a></li><li class='level-3'><a href='#section-54-审计-账号安全与故障处理'>审计、账号安全与故障处理</a></li><li class='level-3'><a href='#section-55-用户开通验收表'>用户开通验收表</a></li><li class='level-2'><a href='#section-56-仓库老板操作指南'>仓库老板操作指南</a></li><li class='level-3'><a href='#section-57-角色职责与只读边界'>角色职责与只读边界</a></li><li class='level-3'><a href='#section-58-登录与范围确认'>登录与范围确认</a></li><li class='level-3'><a href='#section-59-首页总览'>首页总览</a></li><li class='level-3'><a href='#section-60-库存与库容'>库存与库容</a></li><li class='level-3'><a href='#section-61-收入与计费'>收入与计费</a></li><li class='level-3'><a href='#section-62-预警中心'>预警中心</a></li><li class='level-3'><a href='#section-63-经营例会建议'>经营例会建议</a></li><li class='level-3'><a href='#section-64-老板日常检查表'>老板日常检查表</a></li><li class='level-2'><a href='#section-65-异常处理与问题上报'>异常处理与问题上报</a></li><li class='level-3'><a href='#section-66-无法登录或菜单缺失'>无法登录或菜单缺失</a></li><li class='level-3'><a href='#section-67-数据为空或范围不正确'>数据为空或范围不正确</a></li><li class='level-3'><a href='#section-68-网络超时或重复提交提示'>网络超时或重复提交提示</a></li><li class='level-3'><a href='#section-69-库存-任务或账单不一致'>库存、任务或账单不一致</a></li><li class='level-3'><a href='#section-70-问题上报模板'>问题上报模板</a></li><li class='level-2'><a href='#section-71-日常自检与培训验收'>日常自检与培训验收</a></li><li class='level-2'><a href='#section-72-专项手册与边界'>专项手册与边界</a></li><li class='level-2'><a href='#section-73-文档修订记录'>文档修订记录</a></li></ul></section>
+<div class="document-note">本手册仅描述当前代码中具有有效权限、页面和业务闭环的功能。</div>
 
-
-
-
-<h2 class="first-section" id="section-1-1-手册说明">1. 手册说明</h2>
-<h3 id="section-2-1-1-系统组成">1.1 系统组成</h3>
-<p>金桥融通 WMS 由四个作业入口组成：</p>
+<p><strong>文档版本：</strong> V2.0</p>
+<p><strong>适用系统版本：</strong> 2026-08-04 当前工作区业务基线</p>
+<p><strong>适用对象：</strong> 仓库操作员、仓库管理员、货主业务员、货主管理员、系统管理员、仓库老板</p>
+<p><strong>文档状态：</strong> 交付版</p>
+<blockquote>
+<p>本合订版与六本角色分册由同一组源内容构建。培训和岗位发放优先使用对应角色分册。</p>
+</blockquote>
+<h2 class="first-section" id="section-1-系统组成与角色入口">系统组成与角色入口</h2>
 <ul>
-<li><strong>仓库 PDA（wmspda）</strong>：仓库现场移动作业，当前交付范围包括无订单收货、代货主出库、拣货、复核/过账、库存查询和仓库统计。</li>
-<li><strong>货主业务端（wmsownersale）</strong>：货主侧开单、订单审核、一件代发导入、实时库存、报表和账单查询。</li>
-<li><strong>仓储经营分析中心（wmsbossbilling）</strong>：面向老板的只读经营看板，覆盖作业节奏、库存与库容、收入与计费、预警中心。</li>
-<li><strong>Web 控制台 / Django Admin</strong>：面向仓库管理员和系统管理员的单据确认、任务管理、库存管理、计费配置、基础资料、用户权限和日志查询。</li>
+<li><strong>仓库 PDA（wmspda）</strong>：现场收货、上架、代办出库、拣货、复核、库存和仓库报表。</li>
+<li><strong>货主业务端（wmsownersale）</strong>：授权仓库选单、货主开单、审核、库存、履约、销售报表和账单。</li>
+<li><strong>仓储经营分析中心（wmsbossbilling）</strong>：老板只读查看经营、库存库容、收入计费和预警。</li>
+<li><strong>Web 控制台 / Django Admin</strong>：仓库管理、系统配置、基础资料、权限和审计。</li>
 </ul>
 <p><img alt="角色与系统入口" class="role-map" src="manual_assets/role-entry-map.png"/><p class="caption">图：角色与系统入口</p></p>
-<h3 id="section-3-1-2-本手册范围">1.2 本手册范围</h3>
-<p>本册只描述当前交付基线中能够形成操作闭环的仓储功能。以下内容不在本册范围内：</p>
-<ul>
-<li>POS 收银、退款、交班和 POS 对账，参见独立的《POS 用户操作手册》。</li>
-<li>面向终端消费者的商城小程序，参见独立的《销售小程序用户指南》。</li>
-<li>服务器部署、数据库备份恢复、域名证书、服务启停和版本回滚。</li>
-<li>PDA 工作台上尚未形成已验收页面的有订单收货、上架、打包、发运、补货、移库和盘点入口。</li>
-</ul>
-<h3 id="section-4-1-3-操作原则">1.3 操作原则</h3>
-<ol>
-<li>一人一号，禁止共用账号或把密码写在 PDA/电脑旁。</li>
-<li>操作前确认页面顶部的货主、仓库、客户和单据号；跨货主、跨仓数据不得代为修改。</li>
-<li>数量、批次、生产日期、有效期和库位是库存追溯依据，提交前必须逐项核对。</li>
-<li>审核、复核、过账和取消会改变库存或业务状态，遇到不确定情况先停止，不得反复点击。</li>
-<li>系统提示成功后再离开页面；网络中断时先查询原单状态，确认未成功后才允许重试。</li>
-<li>禁止直接修改库存明细来代替正常收货、拣货、盘点或调整流程。</li>
-</ol>
-<hr/>
-<h2 id="section-5-2-角色职责与权限速查">2. 角色职责与权限速查</h2>
 <table>
 <thead>
 <tr>
 <th>角色</th>
+<th>正式权限组</th>
 <th>主要入口</th>
-<th>主要职责</th>
-<th>可见数据范围</th>
-<th>禁止事项</th>
+<th>数据范围</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>仓库操作员</td>
-<td>仓库 PDA</td>
-<td>收货、代货主出库、拣货、复核/过账、库存与报表查询</td>
-<td>绑定仓库；代办功能还受货主授权限制</td>
-<td>不维护基础资料，不擅自调整库存，不越权审核货主订单</td>
+<td><code>WMS::仓库操作员</code></td>
+<td>仓库 PDA（wmspda）</td>
+<td>一个明确的仓库范围</td>
 </tr>
 <tr>
 <td>仓库管理员</td>
-<td>Web 控制台 / Admin，必要时 PDA</td>
-<td>入出库确认、任务发布与监督、库存处理、计费与报表核查</td>
-<td>绑定仓库及其业务数据</td>
-<td>不绕过审核链，不直接删除已产生库存影响的单据</td>
+<td><code>WMS::仓库管理员</code></td>
+<td>Web 控制台 / Django Admin，必要时使用仓库 PDA</td>
+<td>一个明确的仓库范围</td>
 </tr>
 <tr>
 <td>货主业务员</td>
-<td>货主业务端</td>
-<td>客户开单、选品、订单提交、一件代发导入、订单查询</td>
-<td>绑定货主</td>
-<td>不执行货主管理员审核，不查看其他货主数据</td>
+<td><code>WMS::货主业务员</code></td>
+<td>货主业务端（wmsownersale）</td>
+<td>一个明确的货主范围，并从货主已授权仓库中选择履约仓库</td>
 </tr>
 <tr>
 <td>货主管理员</td>
-<td>货主业务端</td>
-<td>出库审核、退回、取消，库存、报表和账单核对</td>
-<td>绑定货主</td>
-<td>不替仓库完成实物作业或仓库确认</td>
+<td><code>WMS::货主管理员</code></td>
+<td>货主业务端（wmsownersale）</td>
+<td>一个明确的货主范围</td>
 </tr>
 <tr>
 <td>系统管理员</td>
-<td>Web 控制台 / Admin</td>
-<td>账号、角色、权限、货主/仓库范围、基础资料和日志</td>
-<td>按管理权限</td>
-<td>不代替业务岗位开单、审核、拣货或过账</td>
+<td><code>超级管理员或经过审批的后台管理权限组</code></td>
+<td>Web 控制台 / Django Admin</td>
+<td>超级管理员为全局范围；普通后台账号仍受显式角色范围和权限限制</td>
 </tr>
 <tr>
-<td>老板</td>
-<td>仓储经营分析中心</td>
-<td>查看经营总览、库容、收入、计费和预警</td>
-<td>绑定仓库；可按授权筛选货主</td>
-<td>经营端为只读，不在此端改业务数据</td>
+<td>仓库老板</td>
+<td><code>WMS::仓库老板</code></td>
+<td>仓储经营分析中心（wmsbossbilling）</td>
+<td>一个或多个明确授权的仓库范围</td>
 </tr>
 </tbody>
 </table>
-<h3 id="section-6-2-1-账号范围的含义">2.1 账号范围的含义</h3>
-<ul>
-<li><strong>所属货主</strong>：限制货主业务员、货主管理员只能访问本货主的客户、商品、订单、库存和账单。</li>
-<li><strong>所属仓库</strong>：限制仓库人员和老板只能访问当前仓库业务；老板可在仓库范围内切换货主查看。</li>
-<li><strong>角色/用户组</strong>：决定菜单和按钮。仅绑定货主或仓库但未分配角色时，可能可以登录但看不到功能。</li>
-<li><strong>启用状态</strong>：停用账号不能登录；离职、调岗或货主合作终止后应立即停用。</li>
-</ul>
-<hr/>
-<h2 id="section-7-3-登录-退出与通用操作">3. 登录、退出与通用操作</h2>
-<h3 id="section-8-3-1-首次登录">3.1 首次登录</h3>
+<p>“仓库主管”只作为企业岗位称谓。需要单据确认和任务管理时使用 <code>WMS::仓库管理员</code>；旧组名“仓库主管”会被兼容代码识别为仓库老板。</p>
+<h2 id="section-2-登录-账号与通用安全">登录、账号与通用安全</h2>
+<h3 id="section-3-首次登录">首次登录</h3>
 <ol>
 <li>从系统管理员处取得正式入口、用户名和初始密码。</li>
-<li>打开对应应用或 Web 地址，输入用户名和密码，点击“登录”。</li>
-<li>首次进入后检查显示姓名、所属货主或所属仓库是否正确。</li>
-<li>进入“我的 → 修改密码”，使用原密码设置个人新密码。</li>
-<li>若登录后菜单为空，记录用户名和页面截图，联系系统管理员核对权限。</li>
+<li>打开本岗位对应的应用或 Web 地址，输入用户名和密码。</li>
+<li>登录后核对显示姓名、业务角色以及货主或仓库范围。</li>
+<li>首次登录立即进入“我的 → 修改密码”或 Web 右上角密码修改入口。</li>
+<li>如果能够登录但没有菜单，不要借用其他账号，记录用户名、入口和页面截图并联系系统管理员。</li>
 </ol>
-<p><img alt="仓库 PDA 登录界面" class="mobile-shot" src="manual_assets/pda-login.png"/><p class="caption">图：仓库 PDA 登录界面</p></p>
-<p><img alt="Web 管理后台登录界面" class="web-shot" src="manual_assets/web-login.png"/><p class="caption">图：Web 管理后台登录界面</p></p>
-<p><img alt="老板经营分析中心登录界面" class="mobile-shot" src="manual_assets/boss-login.png"/><p class="caption">图：老板经营分析中心登录界面</p></p>
-<blockquote>
-<p><strong>截图位：货主业务端登录界面。</strong> 待在正式交付 APK/H5 环境中补充，界面操作为“用户名 → 密码 → 登录”。</p>
-</blockquote>
-<h3 id="section-9-3-2-修改密码">3.2 修改密码</h3>
-<ol>
-<li>进入“我的 → 修改密码”或 Web 端右上角的密码修改入口。</li>
-<li>输入原密码、新密码和确认密码。</li>
-<li>新密码必须满足系统安全规则，两次新密码必须一致。</li>
-<li>提示“密码修改成功”后，退出并使用新密码重新登录。</li>
-</ol>
-<h3 id="section-10-3-3-正确退出">3.3 正确退出</h3>
-<p>完成当班操作后，从“我的”或页面“退出”按钮退出。共用设备交接班时必须退出账号，不得只关闭屏幕。</p>
-<h3 id="section-11-3-4-搜索-筛选和刷新">3.4 搜索、筛选和刷新</h3>
+<h3 id="section-4-账号和数据范围">账号和数据范围</h3>
 <ul>
-<li>搜索商品可使用名称、编码、SKU 或条码；搜索客户、货主、供应商可使用名称或编码。</li>
-<li>先缩小货主、仓库、状态、日期范围，再搜索单号或名称，结果更准确。</li>
-<li>PDA 扫码后应核对系统命中的商品名称和规格，不能只凭提示音继续操作。</li>
-<li>列表数据异常时先下拉刷新或点击“刷新”，不要立即重复提交。</li>
+<li>一人一号，不得共用账号或把密码留在 PDA、电脑旁。</li>
+<li>角色决定能够执行什么操作；显式角色范围决定能够操作哪个货主或仓库的数据。</li>
+<li>普通 WMS 用户只能启用一种业务角色。除仓库老板可授权多个仓库外，其他角色只能有一个活动范围。</li>
+<li>超级管理员使用全局权限，不设置业务角色范围；超级管理员账号不得用于日常开单、审批和现场作业。</li>
+<li>离职、调岗、合作终止或设备丢失后，应立即停用账号并保留审计记录。</li>
 </ul>
-<h3 id="section-12-3-5-常见状态说明">3.5 常见状态说明</h3>
+<h3 id="section-5-通用操作原则">通用操作原则</h3>
+<ol>
+<li>操作前核对货主、仓库、客户、商品、批次、库位和单据号。</li>
+<li>扫码后必须核对系统命中的商品名称和规格，不能只凭提示音继续。</li>
+<li>审核、复核、过账、取消和库存调整会改变业务状态或库存，提交前必须再次确认。</li>
+<li>系统提示成功后再离开页面；网络中断时先查询原单状态，确认未成功后才重试。</li>
+<li>禁止通过直接修改库存明细来代替正常收货、上架、拣货、复核、盘点或调整流程。</li>
+<li>页面入口可见不代表账号一定有执行权限；最终以服务器返回的角色、权限和数据范围校验为准。</li>
+</ol>
+<h3 id="section-6-修改密码与退出">修改密码与退出</h3>
+<ol>
+<li>修改密码时输入原密码、新密码和确认密码；新密码必须通过系统安全校验。</li>
+<li>修改成功后退出，并用新密码重新登录验证。</li>
+<li>当班结束或共用设备交接前必须从“我的”或用户菜单执行退出，不能只关闭屏幕或浏览器。</li>
+</ol>
+<hr/>
+<h2 id="section-7-常见状态与控制点">常见状态与控制点</h2>
 <table>
 <thead>
 <tr>
@@ -245,635 +204,611 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <tbody>
 <tr>
 <td>草稿 / DRAFT</td>
-<td>单据尚未提交</td>
-<td>业务员可继续修改或删除未生效明细</td>
+<td>单据尚未正式提交</td>
+<td>原创建人可在权限允许时修改、提交或删除未生效内容</td>
 </tr>
 <tr>
-<td>待货主管理员审核 / OWNER_PENDING</td>
-<td>业务员已提交</td>
-<td>货主管理员审核通过、退回修改或取消</td>
+<td>待货主审核 / OWNER_PENDING</td>
+<td>业务员已经提交</td>
+<td>等待货主管理员通过、退回或取消</td>
 </tr>
 <tr>
 <td>货主已通过 / OWNER_APPROVED</td>
-<td>货主确认业务有效</td>
-<td>等待仓库确认和生成/发布作业任务</td>
+<td>商业条件已确认，库存可能已冻结</td>
+<td>等待仓库管理员确认并发布任务</td>
 </tr>
 <tr>
 <td>待仓库确认 / WHS_PENDING</td>
 <td>等待仓库接单</td>
-<td>仓库管理员核对库存、仓库和业务条件</td>
+<td>仓库管理员检查仓库、库存和履约条件</td>
 </tr>
 <tr>
 <td>仓库已确认 / WHS_APPROVED</td>
 <td>已进入仓库履约</td>
-<td>操作员按任务执行，不能随意改订单</td>
+<td>不得随意修改原订单</td>
+</tr>
+<tr>
+<td>保留 / RESERVED</td>
+<td>任务已因货主审核创建但尚未发布</td>
+<td>仓库确认前不得现场执行</td>
+</tr>
+<tr>
+<td>待发布 / READY</td>
+<td>任务具备发布条件</td>
+<td>由仓库管理员发布</td>
 </tr>
 <tr>
 <td>已发布 / RELEASED</td>
-<td>任务可领取或执行</td>
-<td>操作员开始扫描作业</td>
+<td>操作员可以领取或执行</td>
+<td>按任务逐行扫描作业</td>
 </tr>
 <tr>
 <td>执行中 / IN_PROGRESS</td>
-<td>已发生作业记录</td>
-<td>继续完成剩余任务行</td>
+<td>已发生现场作业记录</td>
+<td>继续完成剩余任务行，不得另建重复任务</td>
 </tr>
 <tr>
 <td>已完成 / COMPLETED</td>
-<td>作业数量完成</td>
-<td>等待复核或过账，不能再随意改数量</td>
+<td>作业数量已经完成</td>
+<td>等待复核、审核或过账</td>
 </tr>
 <tr>
-<td>待复核 / PENDING</td>
-<td>需要第二次核对</td>
-<td>复核人核对商品、数量、批次和库位</td>
+<td>待审核 / PENDING</td>
+<td>需要复核或管理确认</td>
+<td>核对实物、数量、批次和库位</td>
 </tr>
 <tr>
 <td>已过账 / POSTED</td>
 <td>库存影响已正式生效</td>
-<td>只能通过规范冲销/调整处理错误</td>
+<td>错误只能通过规范冲销或批准的调整处理</td>
+</tr>
+<tr>
+<td>过账失败 / FAILED</td>
+<td>库存写入没有成功完成</td>
+<td>保留原任务号和错误信息，交管理员处理</td>
 </tr>
 <tr>
 <td>已驳回 / REJECTED</td>
 <td>审核未通过</td>
-<td>查看原因，修改后重新提交或关闭</td>
+<td>查看原因并按流程修改、重提或终止</td>
 </tr>
 <tr>
 <td>已取消 / CANCELLED</td>
 <td>单据或任务终止</td>
-<td>检查已冻结库存是否正确释放</td>
+<td>核对冻结库存是否释放、现场实物是否隔离</td>
 </tr>
 </tbody>
 </table>
-<hr/>
-<h2 id="section-13-4-跨角色标准业务流程">4. 跨角色标准业务流程</h2>
-<h3 id="section-14-4-1-出库订单到库存扣减">4.1 出库订单到库存扣减</h3>
-<table>
-<thead>
-<tr>
-<th>步骤</th>
-<th>责任角色</th>
-<th>系统操作</th>
-<th>完成标志</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1</td>
-<td>货主业务员</td>
-<td>选择客户、选品、录入数量/价格和收件信息，提交订单</td>
-<td>订单进入待货主管理员审核</td>
-</tr>
-<tr>
-<td>2</td>
-<td>货主管理员</td>
-<td>核对客户、商品、数量、价格和地址，通过或退回</td>
-<td>通过后进入仓库确认阶段</td>
-</tr>
-<tr>
-<td>3</td>
-<td>仓库管理员</td>
-<td>核对仓库、库存和订单，确认并发布拣货任务</td>
-<td>拣货任务可在 PDA 中看到</td>
-</tr>
-<tr>
-<td>4</td>
-<td>仓库操作员</td>
-<td>进入拣货任务，扫码/录入数量，完成拣货</td>
-<td>任务完成并进入待复核</td>
-</tr>
-<tr>
-<td>5</td>
-<td>复核人员</td>
-<td>核对商品、数量和库位，点击“复核通过”</td>
-<td>任务复核通过并库存过账</td>
-</tr>
-<tr>
-<td>6</td>
-<td>仓库管理员</td>
-<td>查询订单、任务和库存流水</td>
-<td>任务 POSTED，现存量减少，冻结量释放</td>
-</tr>
-</tbody>
-</table>
-<p><strong>关键控制点：</strong></p>
+<p>关键控制点：</p>
 <ul>
-<li>货主审核是商业确认，仓库确认是履约确认，不能相互替代。</li>
-<li>出库订单审核后会冻结/分配库存；取消或驳回后必须核对冻结量是否释放。</li>
-<li>拣货完成不等于库存已扣减，以“已过账 / POSTED”为准。</li>
+<li>货主管理员审核是商业确认，仓库管理员确认是履约确认，两者不能互相替代。</li>
+<li>标准出库必须先完成货主审核，再由仓库管理员确认发布；系统已停用仓库端代替货主审批的一键流程。</li>
+<li>拣货完成不等于库存已经扣减；以任务过账状态 <code>POSTED</code> 和库存流水为准。</li>
+<li>取消、撤回或驳回涉及已冻结库存时，必须核对分配量已经释放；任务已开始或已有执行数量时，系统会阻止直接取消。</li>
 </ul>
-<h3 id="section-15-4-2-无订单收货到库存增加">4.2 无订单收货到库存增加</h3>
-<table>
-<thead>
-<tr>
-<th>步骤</th>
-<th>责任角色</th>
-<th>系统操作</th>
-<th>完成标志</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1</td>
-<td>仓库操作员</td>
-<td>PDA 选择货主和供应商</td>
-<td>页面顶部显示正确货主</td>
-</tr>
-<tr>
-<td>2</td>
-<td>仓库操作员</td>
-<td>搜索/扫描商品，录入单位、数量、批次和日期</td>
-<td>待收货明细数量正确</td>
-</tr>
-<tr>
-<td>3</td>
-<td>仓库操作员</td>
-<td>进入入库单清单复核并提交</td>
-<td>系统返回收货任务号</td>
-</tr>
-<tr>
-<td>4</td>
-<td>仓库管理员</td>
-<td>查询任务、库存明细和库存汇总</td>
-<td>库存增加且有任务/过账记录可追溯</td>
-</tr>
-</tbody>
-</table>
-<p><strong>关键控制点：</strong> 同一商品不同批次或不同效期必须分行录入；批次号建议统一使用大写；数量必须大于 0。</p>
-<h3 id="section-16-4-3-月度账单核对">4.3 月度账单核对</h3>
-<ol>
-<li>仓库管理员确认计费规则、账期和计费数据已生成。</li>
-<li>货主管理员在“计费总览”选择账期，核对按收费类型汇总、状态汇总和每日趋势。</li>
-<li>进入账单详情，核对账单期间、费用行、不含税金额、税额和价税合计。</li>
-<li>老板在“收入与计费”按货主、日期、收费类型和状态查看整体收入。</li>
-<li>发现差异时记录货主、仓库、账期、收费类型和对应业务单号，由仓库管理员追溯计费事件；不得直接改账单总额掩盖差异。</li>
-</ol>
 <hr/>
-<h2 id="section-17-5-仓库操作员操作指南">5. 仓库操作员操作指南</h2>
-<h3 id="section-18-5-1-登录与班前检查">5.1 登录与班前检查</h3>
-<ol>
-<li>使用本人仓库操作员账号登录仓库 PDA。</li>
-<li>确认首页能看到当前授权功能；“代货主出库”只有同时具备仓库操作权、代办权限且货主已授权时才显示。</li>
-<li>进入“我的”核对用户名，确认设备网络正常、扫描头可用、电量充足。</li>
-<li>进入库存或报表页面执行一次刷新，确认能够读取当前仓库数据。</li>
-</ol>
-<h3 id="section-19-5-2-无订单收货">5.2 无订单收货</h3>
-<p>适用场景：实物已到仓但系统中没有可关联的入库订单，且现场已取得货主授权。</p>
-<ol>
-<li>首页点击“收货（无订单）”。</li>
-<li>在“选择货主”页面输入货主名称/编码或扫码，点击“搜索”，选中正确货主。</li>
-<li>点击“下一步：记录供应商”，搜索并选择供应商。</li>
-<li>进入商品录入页，输入商品名称、编码或条码，或点击“扫码”。</li>
-<li>核对商品名称、规格、条码和基本单位。</li>
-<li>选择收货单位，确认系统显示的换算数量；录入收货数量。</li>
-<li>按商品追溯要求填写批次、生产日期和有效截止日期。日期格式为 <code>YYYY-MM-DD</code>。</li>
-<li>点击“添加”将本次数量累加到已有同批次行；需要把原数量直接改成当前输入值时点击“改为”。</li>
-<li>点击底部“查看、提交入库单”，逐行核对商品、基本数量、基本单位、批次和日期。</li>
-<li>删除错误行或返回继续录入；确认全部数量大于 0 后点击“提交订单”。</li>
-<li>记录系统返回的收货任务号；如系统打开打印/导出页面，按现场要求打印或保存。</li>
-<li>返回库存查询，用同一货主、商品和仓库核对库存是否增加。</li>
-</ol>
-<p><strong>不得提交的情况：</strong> 货主不明、商品无法唯一匹配、包装换算不清楚、批次/效期应填但现场无法提供、实物数量尚未复点。</p>
-<h3 id="section-20-5-3-代货主出库">5.3 代货主出库</h3>
-<p>适用场景：货主已在系统中启用“允许仓库代办出库”，并授权当前仓库操作员代为创建和完成出库。</p>
-<ol>
-<li>首页点击“代货主出库”。若入口不可见，点击页面的“重新读取权限”；仍不可见时联系管理员。</li>
-<li>搜索并选择货主，核对授权提示。</li>
-<li>搜索并选择客户；更换货主会清空已选客户和商品，应重新选择。</li>
-<li>搜索商品名称、SKU 或条码，核对价格后点击“添加”。无有效价格的商品不能加入。</li>
-<li>在“出库明细”录入每行数量，数量必须大于 0。</li>
-<li>按实际业务填写源单号、收件人、联系电话、收货地址、订单备注和代办原因。CASH 客户必须填写收件人、电话和地址。</li>
-<li>复核货主、客户、商品、数量、价格和地址后提交。</li>
-<li>系统提示“代办订单已创建”后记录订单号，进入拣货任务执行。</li>
-<li>网络中断或页面提示重试时，先查询订单；系统可能提示“已恢复原代办订单”，这表示原请求已成功，不要重复建单。</li>
-</ol>
-<h3 id="section-21-5-4-拣货任务">5.4 拣货任务</h3>
-<ol>
-<li>首页点击“拣货”，在任务列表中选择当前仓库的活动任务。</li>
-<li>进入任务详情，核对任务号、货主、状态、复核状态和过账状态。</li>
-<li>按系统任务行到指定库位取货，核对商品、批次/效期和计划数量。</li>
-<li>扫描商品条码或手工输入条码，填写本次数量，点击“提交扫码”。</li>
-<li>观察已完成数量是否增加；如需修正，使用页面允许的数量调整功能，并再次核对实物。</li>
-<li>所有任务行完成后点击“完成拣货”。若提示仍有未拣完行，返回逐行检查。</li>
-<li>系统创建复核任务后，按现场岗位分工交给复核人员。</li>
-</ol>
-<p><strong>扫码异常处理：</strong></p>
+<h2 id="section-8-仓库操作员操作指南">仓库操作员操作指南</h2>
+<p><img alt="仓库 PDA 登录界面" class="mobile-shot" src="manual_assets/pda-login.png"/><p class="caption">图：仓库 PDA 登录界面</p></p>
+<h3 id="section-9-角色职责与权限">角色职责与权限</h3>
+<p>仓库操作员负责授权仓库内的现场收货、上架、拣货、复核及查询。规范角色组为 <code>WMS::仓库操作员</code>，必须配置一个活动的仓库角色范围。</p>
+<p>默认能力包括：仓库现场作业、无订单收货、查看仓库运营报表、查看和领取任务，以及在满足货主授权时执行代货主出库。</p>
+<p>以下能力不是默认权限：</p>
 <ul>
-<li>提示商品不匹配：停止拣货，核对库位、商品条码和任务行。</li>
-<li>数量超过计划：复点已拣数量，纠正后再提交。</li>
-<li>找不到库存：不要换货主、批次或库位凑数，通知仓库管理员处理差异。</li>
-<li>重复扫码：以页面累计数量为准，必要时在提交完成前调整。</li>
+<li>商品 Excel 导入需要额外的商品导入权限，首页以服务端 <code>can_import_products</code> 能力为准。</li>
+<li>POS 收银、销售报表、对账、退款等需要独立 POS 权限，操作方法见专项 POS 手册。</li>
+<li>仓库操作员不能确认货主订单、执行仓库管理员审核、调整角色权限或直接修改库存。</li>
 </ul>
-<h3 id="section-22-5-5-复核并过账">5.5 复核并过账</h3>
-<p><strong>双人复核：</strong></p>
+<h3 id="section-10-班前检查">班前检查</h3>
+<ol>
+<li>使用本人账号登录仓库 PDA，核对用户名和所属仓库。</li>
+<li>检查设备网络、扫描头、电量和打印条件。</li>
+<li>刷新首页权限资料；代货主出库和商品导入入口只在服务端确认能力后开放。</li>
+<li>打开任务列表或仓库报表确认能够读取当前仓库数据。</li>
+<li>查看上一班交接，优先处理已领取、执行中或待复核任务。</li>
+</ol>
+<h3 id="section-11-有订单收货">有订单收货</h3>
+<ol>
+<li>首页进入“收货（有订单）”，按任务号、来源单号或商品搜索。</li>
+<li>核对任务仓库和来源单据，点击“领取任务”；只有任务领取人可以登记收货。</li>
+<li>点击“开始收货”，逐行核对商品和计划数量。</li>
+<li>为每行选择当前仓库内的收货库位。</li>
+<li>登记良品、破损和拒收数量；需要追溯的商品按页面要求填写批次号、生产日期和有效期。</li>
+<li>核对三类数量及合计后保存该行。网络异常时可使用同一请求重试，系统会识别已经成功的记录。</li>
+<li>所有行处理完成后返回任务列表，确认任务状态和后续上架任务。</li>
+</ol>
+<p>禁止事项：不得把其他仓库库位填入任务，不得用良品数量掩盖破损或拒收，不得为绕过追溯规则虚构批次和效期。</p>
+<h3 id="section-12-无订单收货-逐项录入">无订单收货：逐项录入</h3>
+<p>适用于现场已经取得货主授权、但系统没有可关联入库订单的收货。</p>
+<ol>
+<li>首页进入“收货（无订单）”，搜索并选择正确货主。</li>
+<li>搜索并选择供应商，然后进入商品录入。</li>
+<li>扫描或搜索商品，核对名称、编码、规格、条码和基本单位。</li>
+<li>选择收货单位，确认包装换算后的基本数量。</li>
+<li>录入数量、批次、生产日期和有效期；同一商品不同批次或效期必须分行。</li>
+<li>使用“添加”累加同批次数量；需要直接替换当前数量时使用“改为”。</li>
+<li>打开入库清单，逐行复核商品、基本数量、单位和追溯字段。</li>
+<li>点击提交并记录收货任务号；随后查询库存明细和汇总确认数量增加。</li>
+</ol>
+<p>货主不明、商品不能唯一匹配、包装换算不清、应填追溯字段但现场无法提供或实物尚未复点时不得提交。</p>
+<h3 id="section-13-无订单收货-Excel-批量入库">无订单收货：Excel 批量入库</h3>
+<ol>
+<li>先选择货主，再进入“Excel 批量入库”。</li>
+<li>下载当前货主的标准模板。模板包含可用商品、单位和换算参考，不得使用其他货主的模板。</li>
+<li>只上传 <code>.xlsx</code> 文件，文件不超过页面限制；不得修改必需列名、填入公式或混用其他模板。</li>
+<li>点击“上传校验并预览”。此步骤只校验，不增加库存；任意一行错误都会阻止整批确认。</li>
+<li>核对预览中的商品、包装换算后基本数量、批次、生产日期和有效期。</li>
+<li>确认无误后点击“确认并批量入库”。系统会生成无订单收货任务并立即增加库存。</li>
+<li>记录任务号，按需要查看、打印或导出收货单，再核对库存。</li>
+</ol>
+<p>序列号控制商品当前不进入该批量流程；重复确认同一有效预览时，系统使用幂等控制避免重复入账。</p>
+<h3 id="section-14-上架作业">上架作业</h3>
+<ol>
+<li>首页进入“上架”，按任务号、来源单号或商品搜索。</li>
+<li>领取任务并点击“开始上架”；未领取任务不能登记上架。</li>
+<li>核对来源库位、商品和待上架数量。</li>
+<li>搜索并选择当前仓库内的目标库位，目标库位不能与来源库位相同。</li>
+<li>按实际移动数量点击“确认上架”。网络中断后使用同一行重试，先确认系统是否已保存。</li>
+<li>所有行完成后，核对任务状态、目标库位库存和来源库位变化。</li>
+</ol>
+<h3 id="section-15-代货主出库">代货主出库</h3>
+<p>只有当前账号同时具有单一仓库操作员范围、代办出库权限和任务领取权限，且货主允许仓库代办时，才能执行本流程。</p>
+<ol>
+<li>首页进入“代货主出库”；入口不可见时刷新权限资料，仍不可见则联系管理员。</li>
+<li>选择已授权货主和客户。更换货主会清空客户和商品，应重新选择。</li>
+<li>搜索商品名称、SKU 或条码，核对可售条件和价格后加入明细。</li>
+<li>录入大于零的数量及源单号、收件人、电话、地址、备注和代办原因。</li>
+<li><code>CASH</code> 客户必须填写完整收件人、联系电话和收货地址。</li>
+<li>提交后记录订单号；系统按代办链路创建订单和对应拣货任务。</li>
+<li>网络异常时先查历史订单；看到“已恢复原代办订单”表示原请求已成功，不得再建一张。</li>
+</ol>
+<h3 id="section-16-拣货-复核与过账">拣货、复核与过账</h3>
+<h4>拣货</h4>
+<ol>
+<li>进入“拣货”，打开当前仓库的活动任务并核对任务号、货主、状态和过账状态。</li>
+<li>按任务行到指定库位取货，核对商品、批次、效期和计划数量。</li>
+<li>扫描商品条码或按页面允许方式录入，提交本次数量并观察累计完成量。</li>
+<li>所有任务行完成后点击“完成拣货”。未拣完、商品不匹配或数量超计划时系统会拒绝完成。</li>
+<li>标准出库完成拣货后进入复核流程；实物与任务必须一一对应交接。</li>
+</ol>
+<h4>复核和库存生效</h4>
 <ol>
 <li>复核人员进入“复核”，打开待复核任务。</li>
-<li>核对任务号、货主和每行商品、计划数量、完成数量、批次及库位。</li>
-<li>发现数量异常时先复点实物；不可用“复核通过”跳过差异。</li>
-<li>全部一致后点击“复核通过”。</li>
-<li>系统提示复核通过并已过账后，确认任务过账状态为 <code>POSTED</code>。</li>
+<li>核对任务号、货主、商品、计划量、完成量、批次和库位。</li>
+<li>标准出库必须由不同于拣货人的操作员独立复核；系统允许的代办特殊流程按页面明确提示执行。</li>
+<li>发现差异时先复点实物，不得用“复核通过”跳过差异。</li>
+<li>全部一致后执行复核，通过后确认来源拣货任务已成功过账，库存状态为 <code>POSTED</code>。</li>
 </ol>
-<p><strong>单人复核并出库：</strong> 仅在系统明确显示允许自复核时使用。点击“复核并确认出库”后，系统会再次提示风险；操作员必须重新核对商品、数量和库位，再点击“确认出库”。</p>
-<h3 id="section-23-5-6-库存与仓库统计查询">5.6 库存与仓库统计查询</h3>
+<p>扫码异常时停止当前行：商品不匹配应核对库位和条码；库存不足不得换货主、批次或库位凑数；重复扫码以页面累计量为准并在完成前修正。</p>
+<h3 id="section-17-库存-报表与交接">库存、报表与交接</h3>
 <ul>
-<li>“查询/公司库存汇总”可按仓库、货主和商品查看在库、可用、已分配、锁定和损坏数量。</li>
-<li>“报表/仓库统计”可选择月份或日期范围，按货主查看入库单、出库单和数量，并进入统计明细。</li>
-<li>现场判断可出库数量时看“可用数量”，不能只看“在库数量”。</li>
-<li>发现负数、同一批次多处异常或可用量大于在库量时，截图并报告仓库管理员。</li>
+<li>“查询/公司库存汇总”用于查看在库、可用、已分配、锁定和损坏数量；判断能否出库必须看可用数量。</li>
+<li>“报表/仓库统计”按月份或日期范围查看货主维度的入出库单量和数量，并可进入明细。</li>
+<li>发现负数、可用量大于在库量、同一批次异常分散或任务已过账但库存未变化时，立即截图并上报。</li>
 </ul>
-<h3 id="section-24-5-7-班后交接">5.7 班后交接</h3>
-<ol>
-<li>确认本人执行中的任务已完成或明确交接，不留不明状态。</li>
-<li>核对已拣实物与待复核任务一一对应。</li>
-<li>记录未解决的库存、条码、设备或网络异常。</li>
-<li>退出账号，设备归位并充电。</li>
-</ol>
-<hr/>
-<h2 id="section-25-6-仓库管理员操作指南">6. 仓库管理员操作指南</h2>
-<h3 id="section-26-6-1-每日工作顺序">6.1 每日工作顺序</h3>
-<ol>
-<li>登录 Web 控制台，检查待确认入库/出库单和任务积压。</li>
-<li>检查前一班未完成、待复核、过账失败和超期任务。</li>
-<li>处理当日订单确认、任务发布和异常库存。</li>
-<li>班中查看仓库统计、库存锁定和任务完成率。</li>
-<li>班后核对未过账任务、库存差异和计费异常，完成交接记录。</li>
-</ol>
-<h3 id="section-27-6-2-入库单确认">6.2 入库单确认</h3>
-<ol>
-<li>进入“入库 → 入库单”，筛选待仓库确认的单据。</li>
-<li>打开单据，核对货主、仓库、供应商、预计到货日期和明细。</li>
-<li>确认仓库可接收、商品基础资料齐全、批次/效期规则明确。</li>
-<li>通过时执行“仓库管理员：确认通过”；不满足条件时填写原因并驳回。</li>
-<li>确认后检查收货任务是否生成/可发布，避免只改状态不跟踪作业。</li>
-</ol>
-<h3 id="section-28-6-3-出库单确认与任务发布">6.3 出库单确认与任务发布</h3>
-<ol>
-<li>进入“出库 → 出库单”，筛选待仓库确认的订单。</li>
-<li>核对货主审核状态、仓库、客户/供应商、商品、数量、地址和库存。</li>
-<li>确认库存分配结果，重点检查可用数量、冻结数量和批次/效期策略。</li>
-<li>执行“仓库管理员确认（审核 + 生成拣货任务）”。</li>
-<li>在“任务 → 拣货任务”确认任务已发布且 PDA 可见。</li>
-<li>需要驳回时执行仓库管理员驳回，并核对冻结库存和任务是否取消。</li>
-</ol>
-<blockquote>
-<p>“仓库管理员一键确认”会连续完成货主与仓库审核，仅应用于制度已明确授权的特殊场景；常规货主订单应保留货主管理员审核。</p>
-</blockquote>
-<h3 id="section-29-6-4-任务监控与异常处理">6.4 任务监控与异常处理</h3>
+<p>班后必须完成：</p>
 <ul>
-<li>任务列表按类型查看收货、上架、拣货、复核、打包和发运状态。</li>
-<li>重点关注已发布未领取、执行时间过长、已完成未复核、复核通过未过账、过账失败任务。</li>
-<li>取消任务前确认实物是否已移动；已发生实物动作时先隔离实物并形成交接记录。</li>
-<li>过账失败不得反复新建任务，应保留原任务号、错误信息和关联订单号交系统管理员排查。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已领取任务已经完成或明确交接。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已拣实物与待复核任务一一对应。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>收货、上架和出库的任务号已经记录。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>未解决的库存、条码、设备或网络异常已经上报。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已退出账号，设备归位并充电。</li>
 </ul>
-<h3 id="section-30-6-5-库存查询-调整与盘点控制">6.5 库存查询、调整与盘点控制</h3>
+<h2 id="section-18-仓库管理员操作指南">仓库管理员操作指南</h2>
+<p><img alt="Web 管理后台登录界面" class="web-shot" src="manual_assets/web-login.png"/><p class="caption">图：Web 管理后台登录界面</p></p>
+<h3 id="section-19-角色定位与权限">角色定位与权限</h3>
+<p>仓库管理员负责授权仓库的单据确认、任务控制、库存监督和运营异常处理。规范角色组为 <code>WMS::仓库管理员</code>，必须配置一个活动的仓库范围。</p>
+<p>本册也适用于企业内部称为“仓库主管”的作业管理岗位，但系统授权必须选择“仓库管理员”。旧用户组名称“仓库主管”属于仓库老板的兼容别名，会被识别为只读经营角色，不能用于授予仓库管理权限。</p>
+<p>默认权限覆盖仓库运营报表、入出库单查看与确认、任务查看与管理、库存明细/汇总/流水/快照查看。计费、商品导入、POS 和系统权限管理均不是仓库管理员默认能力，需要单独审批授权。</p>
+<h3 id="section-20-每日工作顺序">每日工作顺序</h3>
 <ol>
-<li>“库存/盘点 → 现存量”查询商品在货主、仓库、库位、批次维度的数量。</li>
-<li>“交易流水”和“过账分录”用于追溯库存增减来源。</li>
-<li>快速入库/出库调整只用于已批准的差异修正，不用于日常收发货。</li>
-<li>调整前保存盘点或差异依据，填写真实原因和关联单号。</li>
-<li>调整后同时核对库存明细、库存汇总、交易流水和过账分录。</li>
-<li>盘点差异应由复盘确认后处理；禁止为追平报表直接改库存明细。</li>
+<li>登录 Web 控制台或 Django Admin，确认当前账号的仓库范围。</li>
+<li>检查待货主审核、待仓库确认、保留、待发布、执行中、待复核和过账失败数量。</li>
+<li>处理满足条件的入出库确认，发布任务并跟踪现场执行。</li>
+<li>班中查看库存分配、任务完成率和仓库运营报表。</li>
+<li>班后处理未过账、库存差异和失败任务，形成下一班交接。</li>
 </ol>
-<h3 id="section-31-6-6-计费与账单">6.6 计费与账单</h3>
+<h3 id="section-21-入库单确认与收货监督">入库单确认与收货监督</h3>
 <ol>
-<li>进入“计费 → 计费总览”，按货主、仓库和账期筛选。</li>
-<li>核对费用总额、收费类型构成、趋势和当前账单。</li>
-<li>打开账单详情，检查费用行与仓储业务来源是否一致。</li>
-<li>账期锁定前完成异常处理；锁定后不应直接改历史费用。</li>
-<li>出现重复计费、缺失计费或金额异常时，记录货主、仓库、服务日期、收费类型、规则和业务来源。</li>
+<li>进入“入库 → 入库单”，筛选当前仓库待确认单据。</li>
+<li>核对货主、仓库、供应商、预计到货日期、商品、数量和追溯要求。</li>
+<li>货主尚未审核、仓库不匹配或基础资料不完整时不得确认。</li>
+<li>满足条件时执行“仓库管理员：确认通过”；不能接收时填写真实原因并驳回。</li>
+<li>确认后检查收货任务是否生成并具备发布/领取条件。</li>
+<li>跟踪有订单收货的良品、破损、拒收记录以及后续上架任务。</li>
+<li>对无订单或 Excel 批量入库，按任务号核对库存明细、汇总和流水，不能只看前端成功提示。</li>
 </ol>
-<h3 id="section-32-6-7-管理员日结检查表">6.7 管理员日结检查表</h3>
+<h3 id="section-22-标准出库确认与任务发布">标准出库确认与任务发布</h3>
+<ol>
+<li>进入“出库 → 出库单”，筛选当前仓库待确认订单。</li>
+<li>确认订单已经提交并由货主管理员审核通过；草稿、待货主审核、已取消或已关闭订单不能确认。</li>
+<li>核对货主、仓库、客户、地址、商品、数量、价格审核结果和库存分配。</li>
+<li>货主审核通过时系统会冻结库存并生成 <code>RESERVED</code> 拣货任务；检查是否只有一个有效任务且已经完整分配。</li>
+<li>执行“仓库管理员确认（审核 + 生成拣货任务）”，系统把合法的保留任务发布为 <code>RELEASED</code>。</li>
+<li>在任务列表确认 PDA 已可见，再安排操作员领取。</li>
+</ol>
+<p>系统已经停用“仓库管理员一键确认（货主+仓库审核）”。标准出库必须保留货主管理员审核和仓库管理员确认两个独立控制点。</p>
+<h3 id="section-23-驳回-取消和库存释放">驳回、取消和库存释放</h3>
+<ol>
+<li>仓库条件不满足时执行仓库管理员驳回，并填写可追踪的处理说明。</li>
+<li>系统只允许在相关拣货任务尚未开始、没有执行数量时取消任务并释放冻结库存。</li>
+<li>驳回或取消后核对订单状态、任务状态、库存已分配量和可用量。</li>
+<li>任务已开始、已完成或已有扫描数量时，先隔离实物并按异常流程处理，不能强行删除任务或订单。</li>
+<li>货主业务员撤回和货主管理员取消同样必须经过库存释放校验；发现冻结量未释放立即停止后续出库。</li>
+</ol>
+<h3 id="section-24-任务发布-审核与过账">任务发布、审核与过账</h3>
 <ul>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>待仓库确认单据已处理。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已发布未执行任务有责任人和原因。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已完成未复核/未过账任务已清理。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>出库取消/驳回后的冻结库存已释放。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>无异常负库存、锁定量或损坏量。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>当日入出库统计与任务记录一致。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>计费失败和账单异常已登记。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>下一班交接事项已记录。</li>
+<li>发布前检查任务有有效明细、计划数量大于零、仓库和单据来源一致。</li>
+<li>已发布未领取任务应明确责任人；执行时间过长时联系现场核对实物状态。</li>
+<li>任务完成后检查复核状态。标准出库的拣货人与复核人必须分离。</li>
+<li>管理端审核或过账只用于满足状态条件的任务；未审核通过的任务不得过账。</li>
+<li>过账失败时保留任务号、错误信息、扫描记录和业务单号，不得通过重建任务绕过原失败。</li>
+<li>取消任务前确认是否发生实物移动；已经移动的实物先隔离并形成交接记录。</li>
 </ul>
-<hr/>
-<h2 id="section-33-7-货主业务员操作指南">7. 货主业务员操作指南</h2>
-<h3 id="section-34-7-1-开立销售出库订单">7.1 开立销售出库订单</h3>
+<h3 id="section-25-库存查询-调整与盘点控制">库存查询、调整与盘点控制</h3>
 <ol>
-<li>登录货主业务端，在首页点击“开单”。</li>
-<li>搜索客户名称或编码，选中客户后点击“下一步：选品”。</li>
-<li>搜索商品名称、编码或条码，也可使用设备扫码。</li>
-<li>核对商品规格、价格、可用库存和销售单位，录入订购数量后点击“加入”。</li>
-<li>点击底部“查看、提交订单”，逐行核对商品、数量、单价和金额。</li>
-<li>按业务填写平台单号、收件人、联系电话和完整收货地址。系统要求时必须填写完整。</li>
-<li>系统不允许数量超过可用库存，也不允许价格低于最低价；出现提示时修正后再提交。</li>
-<li>点击“提交订单”，记录返回的订单号。</li>
-<li>到“我的订单”确认订单已进入待货主管理员审核，而不是仍停留在草稿。</li>
+<li>在库存明细和汇总中按仓库、货主、商品、库位、批次筛选。</li>
+<li>使用交易流水、过账分录和快照追溯库存增减来源。</li>
+<li>快速入库/出库调整只用于经过批准的差异修正，不用于日常收发货。</li>
+<li>调整前保存盘点或差异依据，填写真实原因和关联单号；调整后同时核对明细、汇总和流水。</li>
+<li>盘点差异必须复盘确认后处理，禁止为追平报表直接改库存明细。</li>
+<li>发现负库存、冻结量异常、过账失败或明细与汇总不一致时停止相关商品作业并升级处理。</li>
 </ol>
-<h3 id="section-35-7-2-修改被退回订单">7.2 修改被退回订单</h3>
-<ol>
-<li>在订单查询或审批列表查看“已退回修改”订单和退回原因。</li>
-<li>核对客户、商品、数量、价格和收件信息。</li>
-<li>按退回意见修正，不要直接新建相同订单造成重复。</li>
-<li>重新提交后，确认订单再次进入待审核状态。</li>
-</ol>
-<h3 id="section-36-7-3-一件代发批量导入">7.3 一件代发批量导入</h3>
-<ol>
-<li>首页点击“下载一件代发模板”，使用最新模板填写数据，不要修改列名和列顺序。</li>
-<li>每行填写可唯一识别客户、商品、数量和配送信息的数据；数字列不要混入单位或文字。</li>
-<li>进入“批量导入一件代发”，点击“选择 Excel”。</li>
-<li>选中文件后点击“上传并导入”，等待系统返回结果。</li>
-<li>分别核对“成功、跳过、失败”数量和每行原因。</li>
-<li>只修正失败行后再次导入；对“跳过”行先查询系统是否已有订单，不得盲目重复导入。</li>
-<li>到订单列表抽查客户、商品、数量、地址和审核状态。</li>
-</ol>
-<h3 id="section-37-7-4-订单与库存查询">7.4 订单与库存查询</h3>
+<h3 id="section-26-报表-导出与额外财务权限">报表、导出与额外财务权限</h3>
 <ul>
-<li>在“我的订单”按状态、单号或客户查询订单，进入详情核对明细和审核状态。</li>
-<li>在“实时库存”按商品名称、编码或 SKU 查询本货主库存。</li>
-<li>“可用数量”用于新订单判断；“在库数量”包含已分配或锁定部分，不能全部再次销售。</li>
-<li>库存不足时先与货主管理员/仓库确认，不得拆分多个相同订单绕过校验。</li>
+<li>默认可查看当前仓库运营报表并按授权导出，核对入库、出库、任务和库存趋势。</li>
+<li>计费总览、收入和账单不是规范仓库管理员角色的默认权限；只有额外授予仓库财务权限时才可使用。</li>
+<li>取得财务权限后，按货主、仓库和账期核对费用来源、收费类型和账单行；不得直接改总额掩盖差异。</li>
+<li>导出文件包含业务范围数据，应按公司数据安全要求保存和传递。</li>
 </ul>
-<hr/>
-<h2 id="section-38-8-货主管理员操作指南">8. 货主管理员操作指南</h2>
-<h3 id="section-39-8-1-订单审核">8.1 订单审核</h3>
-<ol>
-<li>登录货主业务端，进入“审核”。</li>
-<li>使用“待审核、已通过、已退回修改、已取消”标签查看订单。</li>
-<li>可按单号、客户名或客户编码搜索。</li>
-<li>打开待审核订单，核对客户、商品、数量、成交价格、总金额、收件人、电话和地址。</li>
-<li>确认业务真实、价格合规、客户和地址正确后点击“审核通过”。</li>
-<li>信息可修正时点击“退回修改”，并通过业务约定把原因告知业务员。</li>
-<li>订单不应继续履行时点击“取消订单”；取消后核对订单状态及库存冻结释放情况。</li>
-</ol>
-<h3 id="section-40-8-2-审核判断标准">8.2 审核判断标准</h3>
+<h3 id="section-27-日结检查表">日结检查表</h3>
 <ul>
-<li>客户与收货地址相符，联系电话格式正确。</li>
-<li>商品、规格、数量和价格与客户需求一致。</li>
-<li>可用库存满足订单，且不存在明显重复订单。</li>
-<li>一件代发订单的平台单号和配送信息完整。</li>
-<li>退供等特殊出库类型的业务对象和单据类型正确。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>待仓库确认单据已经处理或登记原因。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>保留任务与货主已审核订单一一对应。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已发布未执行任务有责任人和处理时限。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已完成未复核、未审核或未过账任务已经处理。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>取消、撤回和驳回后的冻结库存已经释放。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>无异常负库存、锁定量、残次数或范围外数据。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>过账失败、库存差异和额外财务异常已经登记。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>下一班交接事项已经记录。</li>
 </ul>
-<h3 id="section-41-8-3-实时库存-报表与账单">8.3 实时库存、报表与账单</h3>
+<h2 id="section-28-货主业务员操作指南">货主业务员操作指南</h2>
+<h3 id="section-29-角色职责与权限">角色职责与权限</h3>
+<p>货主业务员负责本货主的客户订单录入、选品、草稿维护、订单提交、一件代发导入和业务查询。规范角色组为 <code>WMS::货主业务员</code>，必须配置一个活动货主范围。</p>
+<p>订单的履约仓库不是用户角色范围。业务员只能从当前货主已经启用的仓库授权关系中明确选择仓库；系统不会因为旧用户字段中存在仓库值就自动扩大权限。</p>
+<p>货主业务员不能执行货主管理员审核、仓库确认、任务过账或查看其他货主数据。</p>
+<h3 id="section-30-首页和开单准备">首页和开单准备</h3>
 <ol>
-<li>“实时库存”查看本货主商品汇总，不会显示其他货主数据。</li>
-<li>“报表”按日期范围查看本货主入出库情况；需要明细时记录单号并联系仓库核查。</li>
-<li>“计费总览”选择账期，查看按收费类型汇总、状态汇总、每日趋势和最近应计。</li>
-<li>点击“查看账单详情”，核对期间、账单状态、费用行、小计、税额和总计。</li>
-<li>对账差异要同时提供货主、仓库、账期、收费类型、金额和业务单号。</li>
+<li>登录货主业务端，在“功能”页确认能够看到访销下单、访销订单、一件代发导入、实时库存和报表。</li>
+<li>进入开单后先选择出库仓库。没有可用仓库时联系系统管理员维护货主—仓库授权关系。</li>
+<li>选择客户后再选品；更换仓库或客户时重新检查购物车上下文。</li>
+<li>搜索商品名称、编码、SKU 或条码，核对包装单位、基本数量、价格和所选仓库可用库存。</li>
 </ol>
-<h3 id="section-42-8-4-月结确认清单">8.4 月结确认清单</h3>
+<h3 id="section-31-创建-保存和提交订单">创建、保存和提交订单</h3>
+<ol>
+<li>选择已授权仓库和正确客户。</li>
+<li>添加商品，录入订购数量和成交价；包装单位会换算为基本数量。订购数量和换算系数必须大于零，换算后的基本数量不能小于 <code>0.001</code>。</li>
+<li>系统以服务端商品规则校验价格。成交价不能为零或负数，不能低于最低价或最高折扣形成的价格下限。</li>
+<li>核对每行可用库存。页面提示库存不足时不得通过拆分重复订单绕过校验。</li>
+<li>填写平台单号、收件人、联系电话、完整地址和备注。</li>
+<li>客户编码为 <code>CASH</code> 时，收件人、有效联系电话和完整地址全部必填；不能根据客户名称中的文字判断是否需要填写。</li>
+<li>需要稍后继续时点击“保存草稿”；准备完成后点击“提交订单”。</li>
+<li>提交成功后记录订单号，并在“访销订单”确认进入待货主管理员审核。</li>
+</ol>
+<p>服务端会再次校验货主、授权仓库、客户、商品、包装换算、价格和库存。前端展示值不能覆盖服务端规则。</p>
+<h3 id="section-32-防重复提交和冲突处理">防重复提交和冲突处理</h3>
 <ul>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>本月入出库单量与业务台账一致。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>期末库存抽查商品与仓库记录一致。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>退回、取消订单没有继续履约。</li>
+<li>每次新建或重新提交使用客户端生成的幂等标识；网络超时后先查订单，再使用原内容重试。</li>
+<li>同一幂等标识对应的内容发生变化时，系统会返回提交冲突；返回购物车重新确认，不要强行重复请求。</li>
+<li>平台单号在规定业务范围内必须唯一。提示平台单号重复时查询原订单，不得改一个空格继续提交。</li>
+<li>整单任意一行价格、库存或数据范围不合法时，系统会拒绝整单，不会只保存合法行。</li>
+</ul>
+<h3 id="section-33-撤回-退回修改和重新提交">撤回、退回修改和重新提交</h3>
+<ol>
+<li>已提交但尚允许撤回的本人订单，可执行撤回；系统会校验任务是否已经开始并释放已冻结库存。</li>
+<li>货主管理员退回订单时，订单回到可编辑草稿并保存最近退回原因。</li>
+<li>在订单详情点击编辑，系统只允许原创建人加载当前货主、授权仓库内的可编辑草稿。</li>
+<li>按退回原因修改客户、仓库、商品、数量、价格或收件信息。</li>
+<li>可以先保存草稿，也可以点击“保存并重新提交”。重新提交后确认再次进入待审核。</li>
+<li>不要为同一业务需求另建新单，以免平台单号、库存分配和后续审核重复。</li>
+</ol>
+<h3 id="section-34-一件代发-Excel-导入">一件代发 Excel 导入</h3>
+<ol>
+<li>下载最新一件代发模板，不得修改列名和列顺序。</li>
+<li>进入“一件代发批量导入”，先选择当前货主已授权的出库仓库。</li>
+<li>每行填写订单编号、收件人姓名、收件人手机/电话、详细地址和大于零的数量；订单编号是必填防重依据。</li>
+<li>商品优先按“商家编码”匹配；未填编码时商品名称必须在本货主内唯一。导入价格采用系统当前商品默认价格并继续执行服务端价格规则。</li>
+<li>只选择 <code>.xlsx</code> 文件且不超过 5 MB；旧 <code>.xls</code>、空文件、损坏文件、业务公式、超过 1000 个非空业务行或缺少必要表头的文件会被拒绝。</li>
+<li>上传后等待系统返回成功、跳过和失败三类结果。</li>
+<li>成功行已经建单；跳过行表示相同订单编号已存在，应先查询原订单；失败行按行号和具体原因修正。</li>
+<li>导入逐行保存并允许部分成功。再次导入时只保留需要修正的失败行，避免重复成功行。</li>
+<li>到订单列表抽查仓库、客户、商品、数量、地址和审核状态。</li>
+</ol>
+<h3 id="section-35-库存-订单和报表查询">库存、订单和报表查询</h3>
+<ul>
+<li>“访销订单”按状态、订单号或客户查询，订单详情显示提交状态、审核状态和最近退回原因。</li>
+<li>“实时库存”只显示本货主数据；开单判断使用所选仓库的可用数量，而不是全部在库数量。</li>
+<li>“入出库履约”可以切换“实际”和“计划”口径：实际入库按 RECEIVE 库存过账，实际出库按已完成 DISPATCH 发运；计划口径按订单业务日期和需求数量统计。</li>
+<li>“销售报表”和“入出库履约”按当前货主范围展示；可按日期翻页查看明细，导出权限以服务端能力为准。</li>
+<li>发现订单已提交但列表没有、库存数与仓库反馈不一致或看到其他货主数据时立即停止并上报。</li>
+</ul>
+<h3 id="section-36-业务员日结检查表">业务员日结检查表</h3>
+<ul>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>当日草稿均有明确后续处理人。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已提交订单均进入待审核，没有重复订单或重复平台单号。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>被退回订单已经按原因修正或登记不再处理。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>一件代发导入的成功、跳过和失败行已经逐类核对。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>CASH 客户订单收件信息完整。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>库存不足、价格规则或仓库授权问题已经反馈。</li>
+</ul>
+<h2 id="section-37-货主管理员操作指南">货主管理员操作指南</h2>
+<h3 id="section-38-角色职责与权限">角色职责与权限</h3>
+<p>货主管理员负责本货主订单的商业审核、退回、取消，以及库存、履约报表和财务数据核对。规范角色组为 <code>WMS::货主管理员</code>，必须配置一个活动货主范围。</p>
+<p>默认能力包括货主订单管理、货主运营报表和货主财务查看；不能查看其他货主数据，不能代替仓库管理员确认发布，也不能执行仓库现场拣货、复核或过账。</p>
+<h3 id="section-39-每日审核顺序">每日审核顺序</h3>
+<ol>
+<li>登录货主业务端，在“功能 → 订单审批”查看待审核数量。</li>
+<li>优先处理交付时限临近、一件代发和库存紧张订单。</li>
+<li>审核前打开详情，不能只根据列表摘要批量判断。</li>
+<li>审核结束后查看已通过、已退回和已取消标签，确认处理结果。</li>
+<li>定期核对实时库存、入出库履约、销售报表和计费总览。</li>
+</ol>
+<h3 id="section-40-订单审核通过">订单审核通过</h3>
+<ol>
+<li>在“订单审批”打开待审核订单。</li>
+<li>核对货主、履约仓库、客户、平台单号、商品、包装换算、数量、成交价、总金额和收件信息。</li>
+<li>确认订单为已提交、未关闭且状态允许审核；草稿、已撤回、已退回或已取消订单不能审核。</li>
+<li>复查当前商品价格规则。系统会使用审核时的最新最低价和折扣限制再次校验，不能依赖业务员提交时的旧价格。</li>
+<li>确认业务真实、价格合规、地址完整且不存在明显重复后点击“审核通过”。</li>
+<li>审核通过会冻结/分配库存，并创建或刷新 <code>RESERVED</code> 拣货任务；这时任务尚未发布，仍需仓库管理员确认。</li>
+<li>返回列表确认状态为货主已通过，必要时通知仓库处理待确认订单。</li>
+</ol>
+<p>库存允许欠货的后台审核路径仍必须留下完整订单和分配结果；不得把“审核成功”理解为库存已经扣减。</p>
+<h3 id="section-41-退回修改">退回修改</h3>
+<ol>
+<li>信息可以由原业务员修正时点击“退回修改”。</li>
+<li>退回原因必填，最长 200 个字符，应明确指出客户、仓库、商品、数量、价格或地址中的具体问题。</li>
+<li>系统将订单退回可编辑草稿，并保存最近退回原因。</li>
+<li>只有原创建业务员可以修改并重新提交；管理员不得另建重复订单代替修改。</li>
+<li>业务员重提后重新进行完整审核，不能沿用上次结论。</li>
+</ol>
+<h3 id="section-42-取消订单">取消订单</h3>
+<ol>
+<li>订单不应继续履约时点击“取消订单”，填写真实业务原因。</li>
+<li>已取消或已关闭订单不能重复取消。</li>
+<li>系统会检查关联拣货任务；任务已开始、已完成或存在执行数量时会阻止直接取消。</li>
+<li>取消成功后核对订单状态、任务状态、已分配数量和可用库存是否恢复。</li>
+<li>如果实物已经移动，先通知仓库隔离实物并按异常流程处理，不得绕过系统校验。</li>
+</ol>
+<h3 id="section-43-库存与履约报表">库存与履约报表</h3>
+<ul>
+<li>“实时库存”按本货主显示在库、可用、已分配等数量；判断新订单能力时使用可用数量。</li>
+<li>“入出库履约”按日期查看汇总和逐行明细，并可切换“实际/计划”口径：实际入库取 RECEIVE 库存过账、实际出库取已完成 DISPATCH 发运；计划口径按订单业务日期和需求数量统计。</li>
+<li>“销售报表”用于业务趋势和订单查询，不代替库存流水或账单依据。</li>
+<li>发现已取消订单仍在执行、货主已审核却没有保留任务、已过账任务库存未变化时立即上报。</li>
+</ul>
+<h3 id="section-44-计费与账单核对">计费与账单核对</h3>
+<ol>
+<li>进入“计费总览”，选择账期并确认货主范围。</li>
+<li>查看收费类型汇总、状态汇总、每日趋势和最近应计。</li>
+<li>打开账单详情，核对账单期间、服务日期、费用类型、数量、单价、不含税金额、税额和价税合计。</li>
+<li>将关键费用行追溯到入出库、库存或其他计费来源。</li>
+<li>差异上报必须包含货主、仓库、账期、收费类型、金额和业务单号；不得直接要求修改账单总额。</li>
+</ol>
+<h3 id="section-45-月结确认清单">月结确认清单</h3>
+<ul>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>本月订单量和业务台账一致。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>退回、撤回和取消订单没有继续履约。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>货主已审核订单均有可追踪的仓库处理状态。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>期末库存抽查与仓库记录一致。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>收费类型、计费数量和单价符合合同。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>账单期间、不含税金额、税额和总额正确。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>差异已形成可追踪的问题记录。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>所有差异均有问题记录、责任人和处理状态。</li>
 </ul>
-<hr/>
-<h2 id="section-43-9-系统管理员操作指南">9. 系统管理员操作指南</h2>
-<h3 id="section-44-9-1-新建用户">9.1 新建用户</h3>
+<h2 id="section-46-系统管理员操作指南">系统管理员操作指南</h2>
+<p><img alt="Web 管理后台登录界面" class="web-shot" src="manual_assets/web-login.png"/><p class="caption">图：Web 管理后台登录界面</p></p>
+<h3 id="section-47-角色定位与权限边界">角色定位与权限边界</h3>
+<p>系统管理员是后台管理职责，不是 <code>UserRoleScope</code> 中的业务角色。超级管理员通过 Django <code>is_superuser</code> 获得全局访问；其他后台账号仍必须通过职员状态、显式业务角色范围、规范角色组和经过审批的辅助权限组合授权。</p>
+<p>系统管理员负责账号、角色范围、基础资料、配置和审计，不代替业务员开单、货主管理员审核、仓库管理员确认或操作员现场作业。</p>
+<h3 id="section-48-用户和角色范围管理">用户和角色范围管理</h3>
+<h4>新建用户</h4>
 <ol>
-<li>进入“系统 → 用户”，点击新增。</li>
-<li>设置唯一用户名、姓名、联系方式和初始密码。</li>
-<li>根据岗位选择“所属货主”或“所属大仓”：<ul>
-<li>货主业务员/货主管理员绑定货主，通常不绑定仓库。</li>
-<li>仓库操作员/仓库管理员/老板绑定仓库，通常不绑定货主；确有单货主范围时按实施方案配置。</li>
-</ul>
-</li>
-<li>勾选“有效”和需要登录后台时的“职员状态”。超级用户只用于极少数系统维护账号。</li>
-<li>添加一个主角色用户组，避免把多个高权限角色叠加给普通用户。</li>
-<li>保存后使用权限核对表验证菜单和数据范围，不把初始密码写入公开群或文档。</li>
+<li>进入“系统 → 用户”新增账号，设置唯一用户名、姓名、联系方式和初始密码。</li>
+<li>设置账号为有效；只有需要登录 Web 后台的账号才启用职员状态。</li>
+<li>普通业务用户不要勾选超级用户。</li>
+<li>在“用户角色范围”新增一条活动范围，选择业务角色及对应货主或仓库。</li>
+<li>保存后系统自动同步对应规范角色组，检查“系统规范角色组”显示是否正确。</li>
+<li>使用该角色测试账号验证入口、菜单、允许操作和数据隔离，再安全交付初始密码。</li>
 </ol>
-<h3 id="section-45-9-2-角色与权限管理">9.2 角色与权限管理</h3>
-<p>系统当前使用的主要用户组为仓库操作员、仓库管理员、货主业务员、货主管理员和系统管理员；仓库主管可作为特定管理岗位使用。老板账号按仓库范围开通经营分析入口。</p>
-<p>权限变更遵循以下原则：</p>
+<h4>范围规则</h4>
 <ul>
-<li>优先通过用户组授权，不给个人账号长期追加零散权限。</li>
-<li>货主业务员只负责开单；货主管理员负责货主审核；仓库管理员负责仓库确认；仓库操作员负责实物作业。</li>
-<li>删除、直接改库存、计费规则和用户权限属于高风险权限，应限制到必要岗位。</li>
-<li>每次调整后使用测试账号验证：能登录、菜单正确、只能查看本货主/本仓库、不能执行越权按钮。</li>
-<li>每月复核离职、调岗、长期未登录和临时授权账号。</li>
+<li>仓库操作员、仓库管理员只能配置一个活动仓库范围。</li>
+<li>货主业务员、货主管理员只能配置一个活动货主范围。</li>
+<li>仓库老板可以为同一角色配置多个活动仓库范围。</li>
+<li>同一普通用户不能同时启用多个业务角色。</li>
+<li>超级管理员使用全局范围，不得再配置业务角色范围。</li>
+<li>用户模型中的旧 <code>owner</code>、<code>warehouse</code> 字段仅供 POS、商城等兼容模块使用，不决定 WMS 角色和数据范围。</li>
 </ul>
-<h3 id="section-46-9-3-基础资料维护顺序">9.3 基础资料维护顺序</h3>
-<p>建议按以下顺序建档，避免业务单据引用缺失：</p>
+<h3 id="section-49-规范角色组与-仓库主管-说明">规范角色组与“仓库主管”说明</h3>
+<p>系统规范角色组包括：</p>
+<ul>
+<li><code>WMS::仓库操作员</code></li>
+<li><code>WMS::仓库管理员</code></li>
+<li><code>WMS::仓库老板</code></li>
+<li><code>WMS::货主管理员</code></li>
+<li><code>WMS::货主业务员</code></li>
+</ul>
+<p>规范角色组名称固定，由角色范围自动同步，不应手工改名或删除。需要调整规范权限模板时应通过代码、迁移和测试发布，不能在生产环境临时修改后不留记录。</p>
+<p>“仓库主管”是旧兼容组名，当前会识别为仓库老板角色。企业内部的作业主管若要确认单据、管理任务，应配置 <code>WMS::仓库管理员</code>，不能创建或沿用名为“仓库主管”的组。</p>
+<h3 id="section-50-额外权限管理">额外权限管理</h3>
+<ul>
+<li>商品 Excel 导入、POS、计费、报表导出、商城运营等不一定属于规范角色默认权限，应使用经过审批的辅助权限组。</li>
+<li>优先使用权限组，不给个人账号长期追加零散权限。</li>
+<li>删除、直接库存调整、计费规则、退款、支付状态、批量导入和用户授权属于高风险权限。</li>
+<li>每次权限变化后检查审计事件，并使用边界数据验证不能访问其他货主或仓库。</li>
+<li>不得用额外权限绕过显式角色范围；权限授予能力，角色范围限制能够触达的数据。</li>
+</ul>
+<h3 id="section-51-基础资料维护顺序">基础资料维护顺序</h3>
+<p>建议按以下顺序建档：</p>
 <ol>
 <li>货主。</li>
-<li>仓库、子仓和库位。</li>
-<li>商品分类、品牌、商品、计量单位和包装换算。</li>
+<li>仓库、子仓、库位及货主—仓库授权关系。</li>
+<li>商品分类、品牌、商品、基本单位、辅助单位和包装换算。</li>
 <li>客户、供应商、承运商、司机和车辆。</li>
 <li>入库、出库、分配、拣货和效期策略。</li>
-<li>计费规则、阶梯、账期等配置。</li>
-<li>用户、所属范围和角色。</li>
+<li>计费规则、阶梯和账期。</li>
+<li>用户、显式角色范围及必要的辅助权限。</li>
 </ol>
-<h3 id="section-47-9-4-商品与包装维护">9.4 商品与包装维护</h3>
+<p>商品编码、SKU、GTIN 和条码应唯一稳定；基本单位是库存记账单位。修改包装换算、批次/效期控制或停用商品前，必须确认没有未完成单据、任务和库存影响。</p>
+<h3 id="section-52-Excel-导入与批量配置">Excel 导入与批量配置</h3>
 <ul>
-<li>商品编码、SKU、GTIN/条码应唯一且稳定。</li>
-<li>基本单位是库存记账单位；辅助单位/包装必须维护正确的基本单位换算数量。</li>
-<li>启用批次或效期管理后，现场收货必须按规则录入。</li>
-<li>修改包装换算前确认是否已有未完成单据；历史单据不得因当前换算变化而失真。</li>
-<li>停用商品前确认没有未完成订单、任务和库存。</li>
+<li>使用系统当前页面下载的模板，不复用历史模板。</li>
+<li>商品导入按权限和数据范围校验，整批原子处理；任意错误会阻止整批写入。</li>
+<li>公式、重复标识、其他货主数据、无效扩展名和超限文件会被拒绝。</li>
+<li>SKU 由系统规则生成时，用户模板中的 SKU 不作为覆盖依据。</li>
+<li>无订单批量入库、一件代发导入与商品主数据导入用途不同，禁止混用模板。</li>
+<li>导入后保存结果、审计记录和抽查样本，不能只依据前端提示判断成功。</li>
 </ul>
-<h3 id="section-48-9-5-仓库与库位维护">9.5 仓库与库位维护</h3>
+<h3 id="section-53-商城-POS-与计费管理边界">商城、POS 与计费管理边界</h3>
 <ul>
-<li>仓库、子仓、库位编码应唯一，命名与现场标识一致。</li>
-<li>库位停用前必须清空或转移库存，并确认无未完成任务引用。</li>
-<li>容器绑定货主、仓库和库位时，应与实际容器标签一致。</li>
-<li>修改库容参数会影响老板端库位占用率和体积利用率，须留存依据。</li>
+<li>POS 权限、打印配置、撤销和退款按专项 POS 手册管理；POS 销售通过统一任务和过账链路影响库存。</li>
+<li>商城上架、支付、退款、评价审核和批量配置按商城专项指南管理；商城买家不配置 WMS 业务角色。</li>
+<li>计费规则、账期锁定、开票和解锁属于高风险财务操作，应保留审批依据和审计记录。</li>
+<li>系统管理员可以维护配置和排查异常，但不能代替货主或仓库确认业务事实。</li>
 </ul>
-<h3 id="section-49-9-6-日志与账号安全">9.6 日志与账号安全</h3>
+<h3 id="section-54-审计-账号安全与故障处理">审计、账号安全与故障处理</h3>
 <ol>
-<li>在“上机日志/Admin 日志”按用户名、时间、模块和操作类型查询。</li>
-<li>发现异常新增、修改、删除、导入或导出时，先停用可疑账号并保留日志。</li>
-<li>管理员不得直接读取或传播用户密码；遗忘密码应走重置流程。</li>
-<li>系统管理员只负责业务系统配置。本册不授权其直接操作数据库或服务器。</li>
+<li>在审计事件和 Admin 日志中按用户名、时间、模块和操作类型查询。</li>
+<li>发现异常新增、修改、删除、导入、导出或授权时，先停用可疑账号并保留日志。</li>
+<li>遗忘密码走重置流程；管理员不得读取、传播或在群聊中发送明文密码。</li>
+<li>角色范围冲突、缺失规范组或范围与组不一致时，账号应保持拒绝访问，修正配置后再验证。</li>
+<li>库存、订单、支付和账单异常应先保全事实记录，不直接改数据库或删除流水。</li>
 </ol>
-<h3 id="section-50-9-7-用户开通验收表">9.7 用户开通验收表</h3>
+<p>服务器部署、数据库备份恢复、域名证书、服务启停和版本回滚属于独立运维流程，本手册不授权在生产服务器直接操作。</p>
+<h3 id="section-55-用户开通验收表">用户开通验收表</h3>
 <ul>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>用户名唯一，姓名和联系方式正确。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>账号有效，初始密码已安全交付。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>所属货主或仓库正确，不存在无范围或双重错误范围。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>主角色用户组正确，未叠加无关高权限组。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>登录入口正确，菜单与岗位一致。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>无法查看其他货主/仓库数据。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>高风险按钮仅对授权人员可见。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已要求首次登录修改密码。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>账号有效，职员/超级用户状态符合用途。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>只有一种业务角色，货主或仓库范围正确。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>规范角色组已自动同步，没有无关高权限组。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>老板多仓范围逐仓验证，其他角色没有多活动范围。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>登录入口、菜单和岗位一致。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>不能查看其他货主或仓库数据。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>高风险按钮只对授权人员可见且服务端会再次校验。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>初始密码已安全交付并要求首次修改。</li>
 </ul>
-<hr/>
-<h2 id="section-51-10-老板操作指南">10. 老板操作指南</h2>
-<h3 id="section-52-10-1-首页总览">10.1 首页总览</h3>
+<h2 id="section-56-仓库老板操作指南">仓库老板操作指南</h2>
+<p><img alt="仓储经营分析中心登录界面" class="mobile-shot" src="manual_assets/boss-login.png"/><p class="caption">图：仓储经营分析中心登录界面</p></p>
+<h3 id="section-57-角色职责与只读边界">角色职责与只读边界</h3>
+<p>仓库老板通过“仓储经营分析中心”查看一个或多个授权仓库的经营、库存、计费和预警。规范角色组为 <code>WMS::仓库老板</code>；这是唯一允许同一账号配置多个活动仓库范围的业务角色。</p>
+<p>仓库老板默认拥有老板看板、仓库运营、仓库财务和报表导出权限。经营分析中心为只读入口，不用于开单、审批、库存调整、任务发布或过账。</p>
+<p>旧用户组“仓库主管”会作为仓库老板兼容别名识别。需要执行仓库确认和任务管理的作业主管应使用 <code>WMS::仓库管理员</code>，不能使用本角色。</p>
+<h3 id="section-58-登录与范围确认">登录与范围确认</h3>
 <ol>
-<li>登录“仓储经营分析中心”，确认顶部仓库名称和货主范围。</li>
-<li>选择“全部货主”查看仓库整体，或切换具体货主进行对比。</li>
-<li>重点查看今日入/出库单、当前在库量、库位占用率、体积利用率、今日计费额、逾期应收和预警数。</li>
-<li>在“今日作业节奏”比较各类任务的完成数、完成率和积压。</li>
-<li>查看收入 Top 货主、占仓 Top 货主和近 7 天趋势；资源占用高但收入低的货主应进一步核查合同和计费。</li>
+<li>登录“仓储经营分析中心”，核对显示姓名、仓库名称和货主范围。</li>
+<li>多仓账号只能看到已配置的仓库；切换范围后确认页面数据截至时间。</li>
+<li>使用“全部货主”查看仓库整体，或选择具体货主进行对比。</li>
+<li>数据为空时先核对仓库与日期范围，不要要求系统管理员临时扩大权限。</li>
 </ol>
-<p><img alt="老板经营分析中心登录界面" class="mobile-shot" src="manual_assets/boss-login.png"/><p class="caption">图：老板经营分析中心登录界面</p></p>
-<h3 id="section-53-10-2-库存与库容">10.2 库存与库容</h3>
+<h3 id="section-59-首页总览">首页总览</h3>
 <ol>
-<li>切换货主范围，查看在库、可用、7 天临期、30 天未变化、库位占用率和体积利用率。</li>
-<li>查看货主占仓排行和高占用热区，识别仓容紧张位置。</li>
+<li>查看今日入库单、出库单、当前在库量、库位占用率、体积利用率、今日计费额、逾期应收和预警数。</li>
+<li>在“今日作业节奏”比较任务总量、完成量、完成率和积压。</li>
+<li>查看收入 Top 货主、库存占用 Top 货主和近 7 天趋势。</li>
+<li>对完成率下降、积压增加、占仓高但收入低或预警集中项进入对应页面追踪。</li>
+<li>页面上的“实绩截至”用于判断数据新鲜度；数据未更新时先确认报表刷新状态。</li>
+</ol>
+<h3 id="section-60-库存与库容">库存与库容</h3>
+<ol>
+<li>切换仓库和货主范围，查看在库、可用、7 天临期、30 天未变化、库位占用率和体积利用率。</li>
+<li>查看货主占仓排行和高占用热区，识别仓容紧张区域。</li>
 <li>查看低效冷区、临期库存和呆滞库存明细。</li>
-<li>点击“看库存明细”追溯到商品/库位；看板数值用于经营判断，库存处置仍由仓库按业务流程执行。</li>
+<li>点击库存明细追溯商品、货主和库位；看板数值用于经营判断，库存处置必须交仓库按业务流程执行。</li>
+<li>呆滞口径以系统当前展示说明为准，不把代理指标直接当作财务减值结论。</li>
 </ol>
-<h3 id="section-54-10-3-收入与计费">10.3 收入与计费</h3>
+<h3 id="section-61-收入与计费">收入与计费</h3>
 <ol>
-<li>按货主、收费类型、开始日期、结束日期和应计状态筛选。</li>
+<li>按仓库、货主、收费类型、日期和应计状态筛选。</li>
 <li>查看货主数、应计条数、不含税小计、税额、价税合计和已出账金额。</li>
 <li>通过货主排名、收费结构、状态分布和每日趋势判断收入质量。</li>
-<li>点击货主、最近收费记录或最近账单进入明细，追溯费用来源。</li>
+<li>点击货主、最近收费记录或账单进入明细，追溯服务日期、费用类型、数量、单价和金额。</li>
+<li>发现金额异常时记录范围、账期、收费类型和来源单号，交货主管理员与财务核对，不在老板端修改。</li>
 </ol>
-<h3 id="section-55-10-4-预警中心">10.4 预警中心</h3>
-<p>预警中心集中展示：</p>
-<ul>
-<li>超期任务。</li>
-<li>逾期账单。</li>
-<li>计费任务失败。</li>
-<li>待复核任务。</li>
-<li>临期库存。</li>
-<li>复核差异。</li>
-</ul>
-<p>先处理高风险项，再处理一般关注项。老板端只负责发现和跟踪，具体修正由仓库管理员、货主管理员或系统管理员完成。</p>
-<h3 id="section-56-10-5-经营例会建议">10.5 经营例会建议</h3>
-<ul>
-<li>每日：今日作业完成率、积压、超期任务、临期库存。</li>
-<li>每周：近 7 天入出库趋势、仓容、热/冷区、货主占仓排行。</li>
-<li>每月：收入排名、收费结构、账单状态、逾期应收、资源占用与收入匹配度。</li>
-</ul>
-<hr/>
-<h2 id="section-57-11-异常处理与常见问题">11. 异常处理与常见问题</h2>
-<h3 id="section-58-11-1-无法登录">11.1 无法登录</h3>
-<p>按顺序检查：网络 → 用户名大小写 → 密码 → 账号是否停用 → 入口是否正确。连续失败后不要反复尝试，由系统管理员核对账号状态和日志。</p>
-<h3 id="section-59-11-2-登录后看不到菜单或按钮">11.2 登录后看不到菜单或按钮</h3>
-<p>记录用户名、入口、缺少的菜单和当前页面。系统管理员检查用户组、个人权限、所属货主、所属仓库和账号职员状态。不要借用管理员账号继续操作。</p>
-<h3 id="section-60-11-3-数据为空或看到了错误范围">11.3 数据为空或看到了错误范围</h3>
-<ul>
-<li>货主端为空：检查账号是否绑定正确货主。</li>
-<li>仓库端为空：检查账号是否绑定正确仓库、筛选日期是否过窄。</li>
-<li>看到其他货主/仓库数据：立即停止操作并退出，按权限事故上报。</li>
-</ul>
-<h3 id="section-61-11-4-网络中断或提交超时">11.4 网络中断或提交超时</h3>
+<h3 id="section-62-预警中心">预警中心</h3>
+<p>预警中心集中展示当前代码提供的经营关注项，例如超期任务、逾期账单、计费任务失败、待复核任务、临期库存和复核差异。</p>
 <ol>
-<li>保留当前页面，不连续点击提交。</li>
-<li>网络恢复后从订单/任务列表查询原单。</li>
-<li>已有单号或状态已推进：视为已成功，不再提交。</li>
-<li>查不到记录且原页面仍可编辑：重新核对后提交一次。</li>
-<li>代货主出库提示“已恢复原代办订单”时，使用原订单继续作业。</li>
+<li>先按风险级别和数量判断优先级。</li>
+<li>打开预警项核对仓库、货主、单号、发生时间和当前状态。</li>
+<li>将任务类问题交仓库管理员，订单/账单类问题交货主管理员或财务，系统故障交系统管理员。</li>
+<li>后续回到预警中心确认数量下降或状态关闭，不能只依赖口头反馈。</li>
 </ol>
-<h3 id="section-62-11-5-库存数量不一致">11.5 库存数量不一致</h3>
-<ol>
-<li>确认比较的是同一货主、仓库、商品、库位、批次和效期。</li>
-<li>区分在库、可用、分配、锁定和损坏数量。</li>
-<li>查询交易流水、过账分录、相关订单和任务。</li>
-<li>检查是否存在已完成未过账、取消未释放或过账失败任务。</li>
-<li>形成盘点/差异依据后，由仓库管理员按批准流程调整。</li>
-</ol>
-<h3 id="section-63-11-6-拣货无法完成或过账失败">11.6 拣货无法完成或过账失败</h3>
+<h3 id="section-63-经营例会建议">经营例会建议</h3>
 <ul>
-<li>未拣完：检查所有任务行累计数量。</li>
-<li>商品不匹配：核对条码、库位、批次和任务行。</li>
-<li>无权自复核：交给另一名有复核权限的人员。</li>
-<li>过账失败：记录任务号、订单号、错误信息和发生时间，不新建重复任务。</li>
+<li>每日：作业完成率、积压、超期任务、待复核、临期库存和计费失败。</li>
+<li>每周：近 7 天入出库趋势、仓容、高低效区域、货主占仓排行和收入排行。</li>
+<li>每月：收费结构、账单状态、逾期应收、资源占用与收入匹配度。</li>
+<li>导出报表用于正式会议时记录导出范围、时间和数据截至点，防止不同口径混用。</li>
 </ul>
-<h3 id="section-64-11-7-账单金额不一致">11.7 账单金额不一致</h3>
-<p>核对货主、仓库、账期、收费类型、计费数量、单价、税率和业务来源。账期锁定后不要直接改总额，应通过原始业务/计费事件追溯并按财务制度修正。</p>
-<hr/>
-<h2 id="section-65-12-交付限制与上线前确认">12. 交付限制与上线前确认</h2>
-<h3 id="section-66-12-1-当前交付限制">12.1 当前交付限制</h3>
-<ol>
-<li>PDA 工作台中的“收货（有订单）、上架、打包、发运、补货、移库、盘点”等入口当前未全部形成可验收页面，本版手册不把它们作为正式可操作功能。</li>
-<li>货主业务端“入库订单”相关工作台功能当前为禁用/待开发状态；货主端本版以销售出库业务为主。</li>
-<li>“代货主出库”属于授权功能，除用户权限外还必须由货主启用授权；未授权时入口应隐藏或接口拒绝。</li>
-<li>老板经营分析中心为只读入口，不承担业务审批、库存调整或账单修改。</li>
-<li>具体系统地址、APK 安装方式、正式账号和打印设备参数由项目交付清单另行提供，不写入公开手册。</li>
-</ol>
-<h3 id="section-67-12-2-上线前必须确认">12.2 上线前必须确认</h3>
+<h3 id="section-64-老板日常检查表">老板日常检查表</h3>
 <ul>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>六类角色各准备至少一个 UAT 账号并验证数据范围。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>PDA、货主业务端、老板端和 Web 端入口可访问。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>无订单收货、货主出库、审核、仓库确认、拣货、复核/过账完成实单演练。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>取消/驳回订单后冻结库存正确释放。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>库存明细、库存汇总、流水和任务能够互相追溯。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>账期、计费规则、账单和老板端收入数据通过抽样核对。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>扫描、打印/导出、PDA 网络和现场标签通过真机测试。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>未完成入口已隐藏或在交付说明中明确标记。</li>
-<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>完成全员首次登录、改密和交接班培训。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>当前查看的是正确仓库、货主和日期范围。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已关注作业积压、待复核和超期任务。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已关注临期、呆滞库存和仓容热点。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>收入、计费、账单和逾期应收趋势可解释。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>高风险预警已有责任人和处理时限。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>经营端未执行或要求他人绕过业务流程修改数据。</li>
 </ul>
-<hr/>
-<h2 id="section-68-附录-A-问题上报模板">附录 A：问题上报模板</h2>
-<p>发生问题时一次性提供以下信息：</p>
+<h2 id="section-65-异常处理与问题上报">异常处理与问题上报</h2>
+<h3 id="section-66-无法登录或菜单缺失">无法登录或菜单缺失</h3>
+<p>按“网络 → 入口 → 用户名和密码 → 账号启用状态 → 职员状态 → 角色范围 → 规范角色组 → 额外权限”的顺序检查。连续失败后停止尝试，由系统管理员查看账号和审计日志。</p>
+<h3 id="section-67-数据为空或范围不正确">数据为空或范围不正确</h3>
+<p>先清除筛选并刷新，再核对当前角色和货主/仓库范围。看到不属于本范围的数据时立即停止操作并上报，不得导出或转发。</p>
+<h3 id="section-68-网络超时或重复提交提示">网络超时或重复提交提示</h3>
+<p>不要连续点击。先回到列表按单号、任务号或平台单号查询；带幂等保护的操作可以使用同一请求重试，但不能改动内容后继续使用原请求标识。</p>
+<h3 id="section-69-库存-任务或账单不一致">库存、任务或账单不一致</h3>
+<p>保留页面截图和原始单号，按“业务单据 → 任务 → 扫描记录 → 过账状态 → 库存流水/计费来源”逐层核对。禁止通过删除记录或直接改汇总数掩盖差异。</p>
+<h3 id="section-70-问题上报模板">问题上报模板</h3>
 <ul>
-<li>发生时间：</li>
-<li>操作人员/角色：</li>
-<li>使用入口和设备：</li>
-<li>所属货主/仓库：</li>
-<li>订单号/任务号/账单号：</li>
-<li>操作步骤：</li>
-<li>页面提示原文：</li>
-<li>预期结果与实际结果：</li>
-<li>是否已重复点击或重新提交：</li>
-<li>页面截图：</li>
+<li>上报人、角色、用户名：</li>
+<li>发生时间和系统入口：</li>
+<li>货主、仓库、客户：</li>
+<li>订单号、任务号、平台单号或账期：</li>
+<li>商品编码、批次、库位和数量：</li>
+<li>当前状态、期望结果和实际结果：</li>
+<li>完整错误提示：</li>
+<li>是否发生实物移动、收付款或打印：</li>
+<li>已执行的查询和重试：</li>
+<li>截图或导出文件：</li>
 </ul>
-<h2 id="section-69-附录-B-培训签到与实操验收">附录 B：培训签到与实操验收</h2>
-<table>
-<thead>
-<tr>
-<th>姓名</th>
-<th>角色</th>
-<th>登录/改密</th>
-<th>完成本岗位实操</th>
-<th>异常上报</th>
-<th>培训日期</th>
-<th>签字</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-<td></td>
-</tr>
-</tbody>
-</table>
-<h2 id="section-70-附录-C-文档修订记录">附录 C：文档修订记录</h2>
+<h2 id="section-71-日常自检与培训验收">日常自检与培训验收</h2>
+<ul>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能使用本人账号登录、修改密码并正确退出。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能说明本角色的数据范围和禁止事项。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能完成本手册列出的核心业务流程。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能识别会改变库存或业务状态的高风险按钮。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>遇到网络中断时会先查询原单，不重复建单。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能使用问题模板提交可追踪的异常信息。</li>
+</ul>
+<h2 id="section-72-专项手册与边界">专项手册与边界</h2>
+<ul>
+<li>POS 收银、退款、交班和 POS 对账参见 <code>docs/pos_user_manual.md</code>；只有取得相应 POS 权限的账号才能使用。</li>
+<li>面向终端客户的商城参见 <code>docs/sales-miniapp-user-guide.md</code>；商城买家不是本手册六类 WMS 后台角色。</li>
+<li>服务器部署、数据库备份恢复、域名证书、服务启停和版本回滚不属于普通用户手册。</li>
+<li>没有已注册页面、有效权限和可验证业务闭环的功能，不作为正式可用能力发布。</li>
+</ul>
+<h2 id="section-73-文档修订记录">文档修订记录</h2>
 <table>
 <thead>
 <tr>
 <th>版本</th>
 <th>日期</th>
-<th>修订内容</th>
-<th>修订人</th>
-<th>审核人</th>
+<th>说明</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>V1.0</td>
-<td>2026-07-16</td>
-<td>按当前交付基线编制六角色操作手册</td>
-<td></td>
-<td></td>
+<td>V2.0</td>
+<td>2026-08-04</td>
+<td>按当前代码、权限和客户端契约拆分角色手册并修订业务流程</td>
 </tr>
 </tbody>
 </table>

@@ -44,3 +44,62 @@ class LocationsWarehouseScopeTests(TestCase):
         )
 
         self.assertEqual(container.warehouse_id, self.warehouse.id)
+
+    def test_location_rejects_warehouse_that_conflicts_with_code(self):
+        other_warehouse = Warehouse.objects.create(
+            code="WH-LOC-2",
+            name="Warehouse Location 2",
+        )
+        Subwarehouse.objects.create(
+            warehouse=other_warehouse,
+            code="SWLOC2",
+            name="Subwarehouse Location 2",
+        )
+
+        with self.assertRaises(ValidationError) as exc:
+            Location.objects.create(
+                warehouse=self.warehouse,
+                code="SWLOC2-01-01-01",
+                name="Cross-warehouse location",
+            )
+
+        self.assertIn("warehouse", exc.exception.message_dict)
+
+    def test_container_rejects_location_from_another_warehouse(self):
+        location = Location.objects.create(
+            warehouse=self.warehouse,
+            code="SWLOC1-01-01-03",
+            name="Location 3",
+        )
+        other_warehouse = Warehouse.objects.create(
+            code="WH-LOC-2",
+            name="Warehouse Location 2",
+        )
+
+        with self.assertRaises(ValidationError) as exc:
+            Container.objects.create(
+                owner=self.owner,
+                warehouse=other_warehouse,
+                location=location,
+                container_no="CONT-CROSS-WH",
+            )
+
+        self.assertIn("location", exc.exception.message_dict)
+
+    def test_container_scope_requires_matching_owner_binding(self):
+        with self.assertRaises(ValidationError) as public_exc:
+            Container.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                scope=Container.Scope.PUBLIC,
+                container_no="CONT-PUBLIC-OWNER",
+            )
+        self.assertIn("owner", public_exc.exception.message_dict)
+
+        with self.assertRaises(ValidationError) as private_exc:
+            Container.objects.create(
+                warehouse=self.warehouse,
+                scope=Container.Scope.PRIVATE,
+                container_no="CONT-PRIVATE-NO-OWNER",
+            )
+        self.assertIn("owner", private_exc.exception.message_dict)

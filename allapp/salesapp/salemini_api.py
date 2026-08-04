@@ -28,7 +28,7 @@ from allapp.inventory.models import InventoryDetail
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import Brand, ProductCategory
 
-from .mobile_api import (
+from .catalog_helpers import (
     MONEY_QUANT,
     PRICE_QUANT,
     QTY_QUANT,
@@ -38,6 +38,7 @@ from .mobile_api import (
     _image_url,
     _money,
     _owner_for_user,
+    _policy_for,
     _price,
     _qty,
     _qty_in_base_for_uom,
@@ -905,8 +906,6 @@ def _product_payload(
         "multiple_qty": Decimal("0"),
     }
     if customer:
-        from .mobile_api import _policy_for
-
         policy = _policy_for(owner, customer, product, channel)
     base_unit_price = _base_price(owner, customer, product, order_date, channel, config)
     uom_options = _uom_options(product, base_unit_price=base_unit_price)
@@ -1059,8 +1058,6 @@ def _build_order_preview(
             "min_order_qty": Decimal("0"),
             "multiple_qty": Decimal("0"),
         }
-        from .mobile_api import _policy_for
-
         policy = _policy_for(owner, customer, product, channel)
         order_uom = (
             line_data.get("order_uom") or _default_order_uom(product, policy)
@@ -2801,8 +2798,6 @@ class SaleMiniCartAddApi(APIView):
             for_update=True,
         )
         product = config.product
-
-        from .mobile_api import _policy_for
 
         channel = _channel_for_customer(owner, customer)
         policy = _policy_for(owner, customer, product, channel)

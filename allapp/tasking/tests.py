@@ -8,6 +8,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
 from django.test import TestCase, TransactionTestCase, override_settings
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from allapp.accounts.models import UserRoleScope
@@ -24,6 +25,7 @@ from allapp.tasking.models import (
     WmsTask,
     WmsTaskLine,
 )
+from allapp.tasking.services import publish_task
 from allapp.tasking.services_posting import post_task
 from allapp.tasking.views import WmsTaskLineViewSet, WmsTaskViewSet
 
@@ -213,6 +215,44 @@ class TaskingWarehouseScopeTests(TestCase):
             note="first post",
             by_user=self.superuser,
         )
+
+    def test_publish_rejects_foreign_task_line_and_rolls_back_assignments(self):
+        task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="TASK-PUBLISH-ROLLBACK",
+            task_type=WmsTask.TaskType.RECEIVE,
+            status=WmsTask.Status.DRAFT,
+        )
+        WmsTaskLine.objects.create(
+            task=task,
+            product=self.product,
+            qty_plan=Decimal("1.000"),
+        )
+        foreign_task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.other_warehouse,
+            task_no="TASK-PUBLISH-FOREIGN",
+            task_type=WmsTask.TaskType.RECEIVE,
+            status=WmsTask.Status.DRAFT,
+        )
+        foreign_line = WmsTaskLine.objects.create(
+            task=foreign_task,
+            product=self.product,
+            qty_plan=Decimal("1.000"),
+        )
+
+        with self.assertRaisesMessage(DRFValidationError, "非本任务的行ID"):
+            publish_task(
+                task,
+                head_assignee=self.superuser,
+                line_map={foreign_line.pk: self.superuser},
+            )
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, WmsTask.Status.DRAFT)
+        self.assertIsNone(task.released_at)
+        self.assertFalse(TaskAssignment.objects.filter(task=task).exists())
 
 
 @override_settings(OUTBOUND_LEGACY_AUTHZ_MODE="enforce")

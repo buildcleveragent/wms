@@ -73,12 +73,21 @@ class OutboundOrder(BaseModel):
     order_no = models.CharField("订单编号", max_length=100, unique=True)  # 去掉多余 db_index=True
     biz_date = models.DateField("日期", default=date.today)
     src_bill_no = models.CharField("源单号", max_length=100, blank=True, null=True)
+    idempotency_key = models.CharField(
+        "幂等键", max_length=64, blank=True, null=True
+    )
+    idempotency_fingerprint = models.CharField(
+        "幂等请求指纹", max_length=64, blank=True, default=""
+    )
     outbound_type = models.CharField("出库类型", max_length=15, choices=OUTBOUND_TYPE_CHOICES, default="SALES")
     delivery_method = models.CharField("交货方式", max_length=15, choices=DELIVERY_METHOD_CHOICES, blank=True, null=True)
     etd = models.DateTimeField("预计发货时间", blank=True, null=True)
 
     submit_status = models.CharField("提交状态", max_length=15, choices=SUBMIT_CHOICES, default="DRAFT", db_index=True)
     approval_status = models.CharField("审核状态", max_length=15, choices=APPROVAL_CHOICES, default="OWNER_PENDING", db_index=True)
+    owner_reject_reason = models.CharField(
+        "货主管理员退回原因", max_length=200, blank=True, default=""
+    )
 
     processing_mode = models.CharField(
         "处理模式",
@@ -179,6 +188,14 @@ class OutboundOrder(BaseModel):
         ]
         ordering = ["-biz_date", "-id"]
         indexes = [
+            models.Index(
+                fields=["owner", "biz_date", "approval_status", "id"],
+                name="ix_out_own_date_appr",
+            ),
+            models.Index(
+                fields=["warehouse", "biz_date", "approval_status", "id"],
+                name="ix_out_wh_date_appr",
+            ),
             models.Index(fields=["owner", "biz_date", "submit_status"], name="idx_out_owner_date_stat"),
             models.Index(fields=["approval_status"], name="idx_out_appr_stat"),
             models.Index(fields=["customer", "biz_date"], name="idx_out_cust_date"),
@@ -214,6 +231,21 @@ class OutboundOrder(BaseModel):
                     (~Q(outbound_type="SUPPLIER_RETURN") & Q(customer__isnull=False) & Q(supplier__isnull=True))
                 ),
             ),
+            models.UniqueConstraint(
+                fields=["owner", "created_by", "idempotency_key"],
+                name="ux_out_owner_actor_idem",
+            ),
+            models.UniqueConstraint(
+                fields=["owner", "src_bill_no"],
+                name="ux_out_owner_src_bill",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~Q(approval_status="OWNER_REJECTED")
+                    | ~Q(owner_reject_reason="")
+                ),
+                name="ox_owner_reject_reason",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -222,6 +254,8 @@ class OutboundOrder(BaseModel):
     def save(self, *args, **kwargs):
         if not self.warehouse_id:
             raise ValidationError({"warehouse": "必须明确指定出库订单仓库"})
+        if isinstance(self.src_bill_no, str):
+            self.src_bill_no = self.src_bill_no.strip() or None
         if not self.pk and not self.order_no:
             self.order_no = DocSequence.next_code(
                 doc_type="CK",
@@ -238,6 +272,11 @@ class OutboundOrder(BaseModel):
             errs["warehouse"] = "必须明确指定出库订单仓库"
         if self.is_closed and not self.close_reason:
             errs["close_reason"] = "订单关闭时必须提供关闭理由"
+        if (
+            self.approval_status == "OWNER_REJECTED"
+            and not (self.owner_reject_reason or "").strip()
+        ):
+            errs["owner_reject_reason"] = "退回订单必须填写退回原因"
         # 可选：预计发货时间不得早于业务日期
         # if self.etd and self.biz_date and self.etd.date() < self.biz_date:
         #     errs["etd"] = "预计发货时间不能早于单据日期"
@@ -247,8 +286,7 @@ class OutboundOrder(BaseModel):
 
     STATUS_OWNER_APPROVED = "OWNER_APPROVED"
 
-    @transaction.atomic
-    def owner_approve(self, by_user=None, allow_backorder=True):
+    def _apply_owner_approval(self, by_user=None, allow_backorder=True):
         """
         货主管理员确认：
         - 如果当前货主需要按订单金额收费，则先自动确认价格
@@ -258,10 +296,13 @@ class OutboundOrder(BaseModel):
         # # 1. 按 billing 规则决定是否需要价格
         # self.auto_confirm_pricing_if_required(by_user=by_user)
 
-        # 1. 审核通过动作中：先冻结订单价格，再更新审核状态
+        # 1. 标准销售出库必须按审核时的商品档案重新校验成交价。
+        ob_services.validate_standard_order_sale_prices(self)
+
+        # 2. 审核通过动作中：先冻结订单价格，再更新审核状态
         self.auto_confirm_pricing(by_user=by_user)
 
-        # 2. 订单审核状态
+        # 3. 订单审核状态
         self.approval_status = self.STATUS_OWNER_APPROVED
 
         update_fields = ["approval_status", "updated_at"]
@@ -274,8 +315,19 @@ class OutboundOrder(BaseModel):
 
         self.save(update_fields=update_fields)
 
-        # 3. 冻结库存
+        # 4. 冻结库存
         ob_services.allocate_inventory(self, by_user=by_user, allow_backorder=allow_backorder)
+
+    def owner_approve(self, by_user=None, allow_backorder=True):
+        """Use the locked state-machine service for every approval entry point."""
+
+        approved = ob_services.approve_owner_order(
+            self,
+            by_user=by_user,
+            allow_backorder=allow_backorder,
+        )
+        self.refresh_from_db()
+        return approved
 
     def _calculate_final_order_amount(self):
         """

@@ -1,7 +1,7 @@
 # allapp/baseinfo/admin.py
 from django.contrib import admin
 
-from allapp.core.admin_mixins import HideAuditFieldsMixin
+from allapp.core.admin_mixins import HideAuditFieldsMixin, HideAuditInlineMixin
 from allapp.core.admin_base import BaseReadonlyAdmin
 from .models import (
     CarrierCompany,
@@ -11,10 +11,19 @@ from .models import (
     Driver,
     Employee,
     Owner,
+    OwnerWarehouseBinding,
     Route,
     Supplier,
     Vehicle,
 )
+
+
+class OwnerWarehouseBindingInline(HideAuditInlineMixin, admin.TabularInline):
+    model = OwnerWarehouseBinding
+    fields = ("warehouse", "is_active", "remark")
+    autocomplete_fields = ("warehouse",)
+    extra = 0
+
 
 # ========== Owner ==========
 @admin.register(Owner)
@@ -48,6 +57,7 @@ class OwnerAdmin(HideAuditFieldsMixin,BaseReadonlyAdmin):
     search_fields = ("name", "code", "contact_person", "phone", "email")
     list_filter = ("allow_warehouse_assisted_outbound", "name", "code", "contact_person")
     readonly_fields = ("next_sku_sequence",)
+    inlines = (OwnerWarehouseBindingInline,)
 
     class Media:
         css = {

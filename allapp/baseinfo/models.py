@@ -59,6 +59,44 @@ class Owner(BaseModel, AddressMixin):
             models.Index(fields=['name', 'code']),
         ]
     def __str__(self): return self.name
+
+
+class OwnerWarehouseBinding(BaseModel):
+    """Explicitly authorizes an owner to use a warehouse for business orders."""
+
+    owner = models.ForeignKey(
+        "Owner",
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="warehouse_bindings",
+    )
+    warehouse = models.ForeignKey(
+        "locations.Warehouse",
+        verbose_name="仓库",
+        on_delete=models.PROTECT,
+        related_name="owner_bindings",
+    )
+
+    class Meta:
+        verbose_name = "货主仓库关联"
+        verbose_name_plural = "货主仓库关联"
+        ordering = ("owner_id", "warehouse__code", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("owner", "warehouse"),
+                name="uq_owner_warehouse_binding",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("owner", "is_active"),
+                name="idx_owner_wh_binding_active",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.owner} / {self.warehouse}"
+
 #-----------------------------------------------
 # 业务 models（示例放在各自 app 的 models.py）
 # ========= 客户（终端）=========

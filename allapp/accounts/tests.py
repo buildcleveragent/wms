@@ -1,5 +1,7 @@
+import json
 from io import StringIO
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
@@ -9,10 +11,12 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
-from rest_framework.test import APIRequestFactory, force_authenticate
+from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
+from rest_framework_simplejwt.tokens import AccessToken
 
 from allapp.accounts.access import AccessScope, scope_queryset_for_user
 from allapp.accounts.admin import PermissionMatrixWidget
+from allapp.accounts.audit import record_audit_event
 from allapp.accounts.models import AuditEvent, UserRoleScope
 from allapp.accounts.role_memberships import (
     ROLE_GROUP_NAMES,
@@ -59,6 +63,172 @@ class PasswordChangeTests(TestCase):
         user.refresh_from_db()
         self.assertTrue(user.check_password("NewPass12345!"))
         self.assertEqual(int(self.client.session["_auth_user_id"]), user.pk)
+
+
+@override_settings(
+    PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"],
+)
+class AuthenticationAuditTests(TestCase):
+    login_url = "/api/auth/login/"
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="jwt-audit-user",
+            password="StrongPass123!",
+        )
+        self.client = APIClient()
+
+    def test_jwt_login_returns_tokens_and_records_request_context(self):
+        response = self.client.post(
+            self.login_url,
+            {"username": self.user.username, "password": "StrongPass123!"},
+            format="json",
+            HTTP_X_REQUEST_ID="login-request-123",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access", response.data)
+        self.assertIn("refresh", response.data)
+        self.assertEqual(response.data["user"]["id"], self.user.pk)
+
+        event = AuditEvent.objects.get(action="LOGIN", module="authentication")
+        self.assertEqual(event.actor_id, self.user.pk)
+        self.assertEqual(event.username, self.user.username)
+        self.assertEqual(event.request_id, "login-request-123")
+        self.assertEqual(event.method, "POST")
+        self.assertEqual(event.path, self.login_url)
+        self.assertTrue(event.succeeded)
+
+    def test_failed_login_is_audited_without_storing_password(self):
+        supplied_password = "NeverPersistThisPassword!"
+
+        response = self.client.post(
+            self.login_url,
+            {"username": self.user.username, "password": supplied_password},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        event = AuditEvent.objects.get(
+            action="LOGIN_FAILED",
+            module="authentication.session",
+        )
+        self.assertFalse(event.succeeded)
+        self.assertEqual(event.metadata["attempted_identity"], self.user.username)
+        persisted_payload = json.dumps(
+            {
+                "before": event.before,
+                "after": event.after,
+                "metadata": event.metadata,
+            }
+        )
+        self.assertNotIn(supplied_password, persisted_payload)
+
+    @patch("wmsmaster.auth_views.record_audit_event", side_effect=RuntimeError("down"))
+    def test_audit_store_failure_does_not_block_jwt_login(self, mocked_audit):
+        response = self.client.post(
+            self.login_url,
+            {"username": self.user.username, "password": "StrongPass123!"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access", response.data)
+        mocked_audit.assert_called_once()
+
+
+@override_settings(PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"])
+class JwtSessionLifecycleTests(TestCase):
+    def setUp(self):
+        self.password = "StrongPass123!"
+        self.user = get_user_model().objects.create_user(
+            username="jwt-session-user",
+            password=self.password,
+        )
+        self.client = APIClient()
+
+    def login(self):
+        response = self.client.post(
+            "/api/auth/login/",
+            {"username": self.user.username, "password": self.password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        return response.data
+
+    def test_refresh_rotates_and_blacklists_the_old_refresh(self):
+        tokens = self.login()
+        rotated = self.client.post(
+            "/api/auth/refresh/", {"refresh": tokens["refresh"]}, format="json"
+        )
+        self.assertEqual(rotated.status_code, 200, rotated.data)
+        self.assertIn("refresh", rotated.data)
+
+        replay = self.client.post(
+            "/api/auth/refresh/", {"refresh": tokens["refresh"]}, format="json"
+        )
+        self.assertEqual(replay.status_code, 401)
+
+    def test_logout_blacklists_refresh(self):
+        tokens = self.login()
+        response = self.client.post(
+            "/api/auth/logout/", {"refresh": tokens["refresh"]}, format="json"
+        )
+        self.assertEqual(response.status_code, 204)
+        self.client.credentials()
+        replay = self.client.post(
+            "/api/auth/refresh/", {"refresh": tokens["refresh"]}, format="json"
+        )
+        self.assertEqual(replay.status_code, 401)
+
+    def test_password_change_revokes_existing_access_and_refresh(self):
+        tokens = self.login()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {tokens["access"]}')
+        changed = self.client.post(
+            "/api/auth/password/change/",
+            {
+                "old_password": self.password,
+                "new_password1": "NewStrongPass123!",
+                "new_password2": "NewStrongPass123!",
+            },
+            format="json",
+        )
+        self.assertEqual(changed.status_code, 200, changed.data)
+        self.user.refresh_from_db()
+        self.assertNotEqual(
+            AccessToken(tokens["access"]).get("hash_password"),
+            AccessToken.for_user(self.user).get("hash_password"),
+        )
+
+        profile = self.client.get("/api/auth/profile/")
+        self.assertEqual(profile.status_code, 401)
+        self.client.credentials()
+        refreshed = self.client.post(
+            "/api/auth/refresh/", {"refresh": tokens["refresh"]}, format="json"
+        )
+        self.assertEqual(refreshed.status_code, 401)
+
+    def test_health_endpoints_are_public_and_ready_checks_database(self):
+        self.assertEqual(self.client.get("/healthz/live").status_code, 200)
+        self.assertEqual(self.client.get("/healthz/ready").status_code, 200)
+
+
+class AuditEventImmutabilityTests(TestCase):
+    def test_audit_events_cannot_be_updated_or_deleted(self):
+        event = record_audit_event(action="TEST", module="accounts.tests")
+
+        event.action = "TAMPERED"
+        with self.assertRaisesMessage(ValidationError, "append-only"):
+            event.save()
+        with self.assertRaisesMessage(ValidationError, "append-only"):
+            AuditEvent.objects.filter(pk=event.pk).update(action="TAMPERED")
+        with self.assertRaisesMessage(ValidationError, "append-only"):
+            event.delete()
+        with self.assertRaisesMessage(ValidationError, "append-only"):
+            AuditEvent.objects.filter(pk=event.pk).delete()
+
+        event.refresh_from_db()
+        self.assertEqual(event.action, "TEST")
 
 
 class GroupAdminPermissionMatrixTests(TestCase):

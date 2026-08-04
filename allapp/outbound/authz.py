@@ -28,7 +28,11 @@ TASK_VIEW_PERMISSION = "tasking.view_wmstask"
 
 def legacy_authz_mode() -> str:
     value = str(getattr(settings, "OUTBOUND_LEGACY_AUTHZ_MODE", "enforce") or "enforce")
-    return value.strip().lower() if value.strip().lower() in {"shadow", "enforce"} else "enforce"
+    return (
+        value.strip().lower()
+        if value.strip().lower() in {"shadow", "enforce"}
+        else "enforce"
+    )
 
 
 def is_assisted_operator(user) -> bool:
@@ -83,12 +87,12 @@ def assisted_task_queryset(qs: QuerySet, *, warehouse_id=None) -> QuerySet:
     )
 
 
-def strict_order_queryset(qs: QuerySet, user) -> QuerySet:
+def strict_order_queryset(qs: QuerySet, user, *, scope=None) -> QuerySet:
     """Apply the planned fail-closed read scope to an order queryset."""
 
     if not user or not getattr(user, "is_authenticated", False):
         return qs.none()
-    scope = AccessScope.for_user(user)
+    scope = scope or AccessScope.for_user(user)
     if not scope.is_valid:
         return qs.none()
     if scope.is_global:
@@ -172,7 +176,9 @@ def _shadow_has_denied_rows(base_qs: QuerySet, scoped_qs: QuerySet) -> bool:
         return True
 
 
-def apply_legacy_scope(*, base_qs: QuerySet, scoped_qs: QuerySet, user, endpoint: str) -> QuerySet:
+def apply_legacy_scope(
+    *, base_qs: QuerySet, scoped_qs: QuerySet, user, endpoint: str
+) -> QuerySet:
     """Always enforce scope; ``shadow`` now only preserves rollout telemetry."""
 
     if legacy_authz_mode() == "shadow" and _shadow_has_denied_rows(base_qs, scoped_qs):
@@ -203,7 +209,10 @@ def can_use_task_actions(user) -> bool:
     return bool(
         user
         and getattr(user, "is_authenticated", False)
-        and (getattr(user, "is_superuser", False) or user.has_perm(TASK_OPERATOR_PERMISSION))
+        and (
+            getattr(user, "is_superuser", False)
+            or user.has_perm(TASK_OPERATOR_PERMISSION)
+        )
     )
 
 

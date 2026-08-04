@@ -9,7 +9,7 @@ from django.test import RequestFactory, TestCase, override_settings
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from allapp.accounts.models import AuditEvent, UserRoleScope
-from allapp.baseinfo.models import Customer, Owner
+from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.inventory.models import InventoryDetail
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.outbound import services as outbound_services
@@ -24,7 +24,12 @@ from allapp.outbound.views import (
 )
 from allapp.products.models import Product, ProductUom
 from allapp.tasking import services as task_services
-from allapp.tasking.models import TaskAssignment, WmsTask, WmsTaskLine
+from allapp.tasking.models import (
+    TaskAssignment,
+    TaskStatusLog,
+    WmsTask,
+    WmsTaskLine,
+)
 from allapp.tasking.views import WmsTaskViewSet
 
 
@@ -45,6 +50,10 @@ class OutboundProductionRemediationTests(TestCase):
         self.other_warehouse = Warehouse.objects.create(
             code="REMED-WH-2",
             name="Other Remediation Warehouse",
+        )
+        OwnerWarehouseBinding.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
         )
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
@@ -156,6 +165,7 @@ class OutboundProductionRemediationTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY="remediation-no-legacy-wh-0001",
         )
         force_authenticate(request, user=self.salesperson)
 
@@ -184,6 +194,7 @@ class OutboundProductionRemediationTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY="remediation-local-etd-0001",
         )
         force_authenticate(request, user=self.salesperson)
 
@@ -472,6 +483,74 @@ class OutboundProductionRemediationTests(TestCase):
 
         inventory.refresh_from_db()
         self.assertEqual(inventory.allocated_qty, Decimal("3.0000"))
+
+    def test_cancel_allocation_shortfall_rolls_back_all_releases(self):
+        order, order_line = self._order(qty="4.000")
+        first_inventory = self._inventory()
+        first_inventory.allocated_qty = Decimal("2.0000")
+        first_inventory.save()
+        second_location = Location.objects.create(
+            warehouse=self.warehouse,
+            subwarehouse=self.subwarehouse,
+            code="RMSW-01-01-02",
+            name="Remediation Location 2",
+        )
+        second_inventory = InventoryDetail.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            subwarehouse=self.subwarehouse,
+            location=second_location,
+            product=self.product,
+            onhand_qty=Decimal("10.0000"),
+            allocated_qty=Decimal("1.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+        )
+        task = WmsTask.objects.create(
+            task_no="REMED-CANCEL-ROLLBACK",
+            task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.RESERVED,
+            owner=self.owner,
+            warehouse=self.warehouse,
+            source_app="outbound",
+            source_model="outboundorder",
+            source_pk=str(order.pk),
+        )
+        first_line = WmsTaskLine.objects.create(
+            task=task,
+            product=self.product,
+            from_location=self.location,
+            qty_plan=Decimal("2.000"),
+            src_model="OutboundOrderLine",
+            src_id=order_line.pk,
+            status=WmsTaskLine.Status.RESERVED,
+        )
+        second_line = WmsTaskLine.objects.create(
+            task=task,
+            product=self.product,
+            from_location=second_location,
+            qty_plan=Decimal("2.000"),
+            src_model="OutboundOrderLine",
+            src_id=order_line.pk,
+            status=WmsTaskLine.Status.RESERVED,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "冻结库存不足"):
+            outbound_services.cancel_order(order, by_user=self.salesperson)
+
+        first_inventory.refresh_from_db()
+        second_inventory.refresh_from_db()
+        task.refresh_from_db()
+        order.refresh_from_db()
+        first_line.refresh_from_db()
+        second_line.refresh_from_db()
+        self.assertEqual(first_inventory.allocated_qty, Decimal("2.0000"))
+        self.assertEqual(second_inventory.allocated_qty, Decimal("1.0000"))
+        self.assertEqual(task.status, WmsTask.Status.RESERVED)
+        self.assertEqual(first_line.status, WmsTaskLine.Status.RESERVED)
+        self.assertEqual(second_line.status, WmsTaskLine.Status.RESERVED)
+        self.assertNotEqual(order.approval_status, "CANCELLED")
+        self.assertFalse(TaskStatusLog.objects.filter(task=task).exists())
 
     def test_real_review_pack_dispatch_chain_closes_standard_order(self):
         order, order_line = self._order(pack_requirement="BOX")

@@ -29,7 +29,7 @@ from itertools import groupby
 from typing import Optional
 
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import Q
 from django.db.utils import IntegrityError
 
 from allapp.billing.enums import (
@@ -710,7 +710,7 @@ def _unlock_invoiced_period(period: BillingPeriod, *, by_user=None, reason: str 
         4. 红冲 accrual 也与 period 解绑
         5. Period 状态恢复为 OPEN，允许重新计费→关账→开票
 
-    使用 bulk_create(ignore_conflicts=True) 防止重复红冲时指纹冲突报错。
+    冲销指纹已存在时仅复用完全一致的负数镜像；任何字段冲突都会中止并回滚整个操作。
     """
     bill = Bill.objects.filter(period=period).exclude(status=BillStatus.VOID).first()
     bill_voided = None
@@ -725,9 +725,9 @@ def _unlock_invoiced_period(period: BillingPeriod, *, by_user=None, reason: str 
         .select_related("rule")
     )
 
-    reversal_accruals = []
+    created_count = 0
     for a in accruals:
-        reversal_accruals.append(BillingAccrual(
+        expected_reversal = BillingAccrual(
             owner_id=a.owner_id,
             warehouse_id=a.warehouse_id,
             period=period,
@@ -746,10 +746,55 @@ def _unlock_invoiced_period(period: BillingPeriod, *, by_user=None, reason: str 
             created_by=by_user,
             is_reversal=True,
             reversal_of=a,
-        ))
+        )
 
-    created = BillingAccrual.objects.bulk_create(reversal_accruals, ignore_conflicts=True)
-    created_count = len(created)
+        existing_reversal = (
+            BillingAccrual.objects
+            .select_for_update()
+            .filter(acc_fingerprint=expected_reversal.acc_fingerprint)
+            .first()
+        )
+        if existing_reversal is not None:
+            comparison_fields = (
+                "owner_id",
+                "warehouse_id",
+                "service_date",
+                "charge_type",
+                "rule_id",
+                "currency",
+                "quantity",
+                "unit_price",
+                "amount",
+                "tax_amount",
+                "status",
+                "event_id",
+                "bundle_key",
+                "is_reversal",
+                "reversal_of_id",
+            )
+            mismatched_fields = [
+                field
+                for field in comparison_fields
+                if getattr(existing_reversal, field) != getattr(expected_reversal, field)
+            ]
+            # A completed prior attempt detaches reversals from the period,
+            # while an interrupted/in-flight attempt may still point at it.
+            # Any other period indicates that the fingerprint was reused for
+            # a different accounting event and must fail closed.
+            if existing_reversal.period_id not in (None, period.pk):
+                mismatched_fields.append("period_id")
+            if mismatched_fields:
+                raise ValueError(
+                    "Conflicting reversal accrual for fingerprint "
+                    f"{expected_reversal.acc_fingerprint}: mismatched fields "
+                    f"{', '.join(mismatched_fields)}."
+                )
+            continue
+
+        # 账期行锁防止正常解锁流程并发创建。如仍有绕过账期锁的写入
+        # 抢占唯一指纹，让验证或唯一约束错误向外传播，使整个解锁事务失败回滚。
+        expected_reversal.save(force_insert=True)
+        created_count += 1
 
     # 解绑原 INVOICED accrual 与 period（保留记录用于审计，但不影响 period 重新使用）
     BillingAccrual.objects.filter(

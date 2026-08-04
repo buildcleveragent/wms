@@ -3,21 +3,21 @@
     <view class="section" v-for="grp in groups" :key="grp.title">
       <view class="section-title">{{ grp.title }}</view>
       <view class="grid">
-        <view class="tile" v-for="it in grp.items" :key="it.text" @click="go(it.path)">
+        <view class="tile" v-for="it in grp.items" :key="it.key" @click="go(it)">
           <view class="tile-inner">
-            <view class="icon" :class="it.color">{{ it.emoji }}</view>
+            <view class="feature-icon" :class="it.color">{{ it.emoji }}</view>
             <text class="tile-text"> {{ it.text }}</text>
           </view>
         </view>
       </view>
     </view>
 
-    <view v-if="isAdmin" class="section">
-      <view class="section-title">管理员</view>
+    <view v-if="adminItems.length" class="section">
+      <view class="section-title">管理功能</view>
       <view class="grid">
-        <view class="tile" v-for="it in adminItems" :key="it.text" @click="go(it.path)">
+        <view class="tile" v-for="it in adminItems" :key="it.key" @click="go(it)">
           <view class="tile-inner">
-            <view class="icon" :class="it.color">{{ it.emoji }}</view>
+            <view class="feature-icon" :class="it.color">{{ it.emoji }}</view>
             <text class="tile-text"> {{ it.text }}</text>
           </view>
         </view>
@@ -26,46 +26,63 @@
   </view>
 </template>
 <script setup>
-import { ref } from 'vue'
-const isAdmin = ref(!!uni.getStorageSync('isAdmin')) // 同步读取标志，保证页面稳定渲染
+import { computed } from 'vue'
+import { useAuth } from '@/store/auth'
+import { buildOwnerMenu } from '@/utils/ownerAccess'
+import { downloadAuthenticatedFile } from '@/utils/request.js'
 
-const groups = ref([
-  { title: '常用功能', items: [
-    { text:'访销下单', path:'/pages/customers/select',        emoji:'📝', color:'blue' },
-    { text:'车销下单', path:'/pages/vansales/create',      emoji:'🚚', color:'orange' },
-    { text:'客户拜访', path:'/pages/visit/index',          emoji:'👥', color:'blue' },
-    { text:'客户新增', path:'/pages/customer/create',      emoji:'➕', color:'orange' },
-  ]},
-  { title: '访销管理', items: [
-    // { text:'访销下单', path:'/pages/orders/create',        emoji:'📝', color:'blue' },
-	// { key:'so_create', dom:'sales', text:'开单', icon:'/static/icons/create.png', to:'/pages/customers/select', perm:'so_create' },
-	{ text:'访销下单', path:'/pages/customers/select',        emoji:'📝', color:'blue' },
-    { text:'访销订单', path:'/pages/orders/list',          emoji:'📄', color:'blue' },
-    { text:'客户拜访', path:'/pages/visit/index',          emoji:'👥', color:'blue' },
-    { text:'客户新增', path:'/pages/customer/create',      emoji:'➕', color:'blue' },
-    { text:'陈列记录', path:'/pages/visit/display',        emoji:'🧾', color:'green' },
-    { text:'临期仓销售', path:'/pages/orders/near_expiry_sale', emoji:'🏷️', color:'blue' },
-  ]},
-  { title: '车销管理', items: [
-    { text:'车销下单', path:'/pages/vansales/create',      emoji:'🚚', color:'blue' },
-    { text:'车销订单', path:'/pages/vansales/list',        emoji:'📄', color:'blue' },
-    { text:'要货申请', path:'/pages/replenishment/request', emoji:'📦', color:'orange' },
-    { text:'车销返仓', path:'/pages/vansales/return',      emoji:'↩️', color:'orange' },
-    { text:'车销库存', path:'/pages/vansales/inventory',   emoji:'📊', color:'green' },
-    { text:'调拨记录', path:'/pages/transfer/records',     emoji:'🧾', color:'blue' },
-  ]},
-  { title: '统计分析', items: [
-    { text:'销售统计', path:'/pages/analytics/sales',      emoji:'📈', color:'green' },
-    { text:'客户分析', path:'/pages/analytics/customers',  emoji:'👤', color:'green' },
-    { text:'销售报表', path:'/pages/analytics/reports',    emoji:'🗂️', color:'blue' },
-  ]},
-  { title: '其他', items: [
-    { text:'通讯录', path:'/pages/contacts/index',         emoji:'📇', color:'green' },
-  ]},
-])
+const auth = useAuth()
+auth.ensureAuth()
 
-const adminItems = [
-  { text:'订单审批', path:'/pages/admin/pending', emoji:'✅', color:'orange' },
-]
-function go(url){ uni.navigateTo({ url }) }
+const groups = computed(() => {
+  const menu = buildOwnerMenu({ roles: auth.roles, capabilities: auth.capabilities })
+
+  return [
+    { title: '订单业务', items: menu.orders },
+    { title: '库存报表', items: menu.reports },
+  ].filter((group) => group.items.length)
+})
+
+const adminItems = computed(() => buildOwnerMenu({
+  roles: auth.roles,
+  capabilities: auth.capabilities,
+}).administration)
+
+function navigationFailed() {
+  uni.showToast({ title: '页面暂时无法打开，请稍后重试', icon: 'none' })
+}
+
+async function go(item) {
+  if (item.action === 'download_template') {
+    try {
+      await downloadAuthenticatedFile(
+        '/api/outbound/orders/import-drop-ship-template/',
+        '一件代发导入模板.xlsx',
+      )
+    } catch (error) {
+      uni.showToast({ title: error?.message || '模板下载失败', icon: 'none' })
+    }
+    return
+  }
+  const options = { url: item.path, fail: navigationFailed }
+  if (item.navigation === 'tab') {
+    uni.switchTab(options)
+    return
+  }
+  uni.navigateTo(options)
+}
 </script>
+
+<style scoped>
+.page { min-height: 100vh; padding: 24rpx; background: #f5f7fa; box-sizing: border-box; }
+.section { margin-bottom: 28rpx; }
+.section-title { margin-bottom: 14rpx; color: #374151; font-size: 30rpx; font-weight: 600; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16rpx; }
+.tile { padding: 22rpx; border-radius: 14rpx; background: #fff; box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, .05); }
+.tile-inner { display: flex; align-items: center; gap: 16rpx; }
+.feature-icon { display: flex; width: 64rpx; height: 64rpx; align-items: center; justify-content: center; border-radius: 16rpx; font-size: 34rpx; }
+.feature-icon.blue { background: #dbeafe; }
+.feature-icon.green { background: #dcfce7; }
+.feature-icon.orange { background: #ffedd5; }
+.tile-text { color: #111827; font-size: 28rpx; }
+</style>

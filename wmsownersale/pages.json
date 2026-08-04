@@ -1,8 +1,9 @@
 {
 "pages": [
+	{"path":"pages/bootstrap","style":{"navigationBarTitleText":"正在启动","navigationStyle":"custom"}},
 	{"path":"pages/login","style":{"navigationBarTitleText":"登录"}},
-	{"path":"pages/workbench/index","style":{"navigationBarTitleText":"工作台"}},
 	{"path":"pages/home/index","style":{"navigationBarTitleText":"首页"}},
+	{"path":"pages/warehouses/select","style":{"navigationBarTitleText":"选择出库仓库"}},
 
 	{"path":"pages/customers/select","style":{"navigationBarTitleText":"选择客户:点击选中的客户"}},
 	{"path":"pages/products/search","style":{"navigationBarTitleText":"选品"}},

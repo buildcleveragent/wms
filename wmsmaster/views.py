@@ -1,11 +1,13 @@
 # wmsmaster/views.py
 from django.contrib.auth import password_validation
 from django.core.exceptions import ValidationError
+from django.db import connection
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView  # noqa: F401
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.models import UserRoleScope
@@ -25,13 +27,17 @@ def profile_view(request):
 
     menus = []  # 初始化菜单列表
     if "inbound.view_receiving" in perms:
-        menus.append({"path": "/inbound/receiving", "title": "收货看板", "icon": "el-icon-menu"})
+        menus.append(
+            {"path": "/inbound/receiving", "title": "收货看板", "icon": "el-icon-menu"}
+        )
     if "inventory.view_detail" in perms:
         menus.append({"path": "/inventory", "title": "库存管理", "icon": "el-icon-box"})
 
     # 添加其他菜单项（根据权限动态生成）
     if any(p.startswith("billing.") for p in perms):
-        menus.append({"path": "/admin/billing/", "title": "计费", "icon": "el-icon-credit-card"})
+        menus.append(
+            {"path": "/admin/billing/", "title": "计费", "icon": "el-icon-credit-card"}
+        )
 
     can_process_warehouse_assisted_outbound = (
         bool(access_scope.warehouse_ids)
@@ -78,7 +84,8 @@ def profile_view(request):
                 and user.has_perm("reports.view_warehouse_operations"),
                 "can_view_owner_operations": is_owner_role
                 and user.has_perm("reports.view_owner_operations"),
-                "can_view_boss_dashboard": is_boss and user.has_perm("reports.view_boss_dashboard"),
+                "can_view_boss_dashboard": is_boss
+                and user.has_perm("reports.view_boss_dashboard"),
                 "can_view_warehouse_finance": is_boss
                 and user.has_perm("reports.view_warehouse_finance"),
                 "can_export_operations": access_scope.is_valid
@@ -134,3 +141,42 @@ def change_password_view(request):
     user.save(update_fields=["password"])
 
     return Response({"detail": "密码修改成功。"})
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def logout_view(request):
+    refresh = request.data.get("refresh") or ""
+    if not refresh:
+        return Response(
+            {"refresh": ["请提供刷新令牌。"]},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        RefreshToken(refresh).blacklist()
+    except TokenError:
+        return Response(
+            {"refresh": ["刷新令牌无效或已失效。"]},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def health_live_view(request):
+    return Response({"status": "ok"})
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def health_ready_view(request):
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+    except Exception:
+        return Response(
+            {"status": "unavailable"}, status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+    return Response({"status": "ok"})

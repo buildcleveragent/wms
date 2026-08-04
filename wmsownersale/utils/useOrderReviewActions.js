@@ -13,7 +13,10 @@ export function useOrderReviewActions(options = {}) {
   const canReview = computed(() => {
     const order = getOrder()
     if (!order) return false
-    return (order.approval_status || '') === 'OWNER_PENDING'
+    return order.can_owner_review !== false &&
+      (order.submit_status || '') === 'SUBMITTED' &&
+      (order.approval_status || '') === 'OWNER_PENDING' &&
+      !order.is_closed
   })
 
   function confirm(content, title = '确认') {
@@ -52,16 +55,24 @@ export function useOrderReviewActions(options = {}) {
     }
   }
 
-  async function rejectOrder(idArg) {
+  async function rejectOrder(idArg, reasonArg) {
     const id = Number(idArg || getOrderId())
     if (!id) return false
-
-    const ok = await confirm('确认退回业务员修改？')
+    const reason = String(reasonArg || '').trim()
+    if (!reason) {
+      uni.showToast({ title: '请填写退回原因', icon: 'none' })
+      return false
+    }
+    if (reason.length > 200) {
+      uni.showToast({ title: '退回原因不能超过200字', icon: 'none' })
+      return false
+    }
+    const ok = await confirm('确认退回业务员修改？退回后订单将变为草稿。')
     if (!ok) return false
 
     submitting.value = true
     try {
-      await api.ownerReject(id)
+      await api.ownerReject(id, reason)
       uni.showToast({ title: '已退回修改', icon: 'none' })
       await afterReject(id)
       return true

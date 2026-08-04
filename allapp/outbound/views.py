@@ -1,24 +1,35 @@
 # allapp/outbound/views.py  或  allapp/outbound/api_views.py
 from django.core.exceptions import ValidationError as DjangoValidationError
 from decimal import Decimal, InvalidOperation
+import hashlib
+import json
 from pathlib import Path
+import re
 from urllib.parse import quote
 from django.conf import settings
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from rest_framework.parsers import MultiPartParser, FormParser
-from openpyxl import load_workbook
 from django.apps import apps
 from datetime import datetime, timezone as datetime_timezone
 from uuid import UUID
 from django.db import IntegrityError
-from django.db.models import BigIntegerField, Q, Sum, Prefetch
-from django.db.models.functions import Cast
+from django.db.models import (
+    BigIntegerField,
+    DecimalField,
+    ExpressionWrapper,
+    F,
+    OuterRef,
+    Prefetch,
+    Q,
+    Subquery,
+    Sum,
+    Value,
+)
+from django.db.models.functions import Cast, Coalesce
 import logging
 from ..products.models import ProductPackage
-from django.db.models import F
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
-logger = logging.getLogger(__name__)
 from rest_framework import viewsets, mixins, status
 from rest_framework.pagination import PageNumberPagination
 from .models import OutboundOrder
@@ -41,6 +52,7 @@ from allapp.outbound.serializers import (
     AssistedOutboundOrderCreateSerializer,
     ConfirmPricingSerializer,
     OutboundOrderCreateSerializer,
+    OutboundOrderDraftUpdateSerializer,
     OutboundOrderReadSerializer,
 )
 from allapp.outbound import services as outbound_services
@@ -68,6 +80,17 @@ from allapp.core.utils.log_context import build_log_payload
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 from allapp.accounts.models import UserRoleScope
+from allapp.outbound.warehouse_access import (
+    owner_can_use_warehouse,
+    owner_warehouse_ids,
+    owner_warehouse_queryset,
+)
+from allapp.outbound.drop_ship_import import (
+    DropShipImportFileError,
+    import_drop_ship_workbook,
+)
+
+logger = logging.getLogger(__name__)
 
 
 # 放到 OutboundOrderViewSet 类中
@@ -148,9 +171,9 @@ class ReceiveProductPagination(PageNumberPagination):
     max_page_size = 500
 
 class ProductPagination(PageNumberPagination):
-    page_size = 1000
+    page_size = 50
     page_size_query_param = "page_size"
-    max_page_size = 1000
+    max_page_size = 100
 
 
 class AssistedHistoryPagination(PageNumberPagination):
@@ -163,6 +186,31 @@ class IdempotencyConflict(APIException):
     status_code = status.HTTP_409_CONFLICT
     default_detail = "request_id 已用于不同的代办出库请求。"
     default_code = "idempotency_conflict"
+
+
+class StandardOrderIdempotencyConflict(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = "本次幂等键已用于不同的标准订单请求，请重新开单。"
+    default_code = "idempotency_conflict"
+
+
+class StaleOrderEdit(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_code = "stale_order_edit"
+    default_detail = "订单已被其他会话修改，请重新加载。"
+
+    def __init__(self, current_updated_at):
+        detail = {
+            "code": self.default_code,
+            "detail": self.default_detail,
+            "current_updated_at": serializers.DateTimeField().to_representation(
+                current_updated_at
+            ),
+        }
+        super().__init__(detail=detail, code=self.default_code)
+
+
+STANDARD_ORDER_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{8,64}$")
 
 
 def _catalog_scope(request):
@@ -248,11 +296,54 @@ def _resolve_inventory_warehouse_scope(request):
         if requested_wh is not None and requested_wh not in scope.warehouse_ids:
             raise PermissionDenied("无权查看该仓库库存。")
         return frozenset({requested_wh}) if requested_wh else scope.warehouse_ids
-    # Owner roles may inspect only their own owner's stock.  A warehouse filter
-    # narrows that owner-safe view but never widens the owner boundary.
-    if requested_wh:
-        return frozenset({requested_wh})
-    return None
+    # Owner roles may inspect only explicitly associated warehouses.  This is
+    # independent from the user's role scope: the role remains owner-bound.
+    if scope.owner_ids:
+        allowed_warehouses = owner_warehouse_ids(scope.single_owner_id)
+        if requested_wh is not None and requested_wh not in allowed_warehouses:
+            raise PermissionDenied("无权查看该仓库库存。")
+        return frozenset({requested_wh}) if requested_wh else allowed_warehouses
+    return frozenset()
+
+
+def _product_carton_info(product):
+    """Return replenish UOM code and its conversion from prefetched packages."""
+
+    replenish_uom = getattr(product, "replenish_uom", None)
+    unit_code = getattr(replenish_uom, "code", None)
+    if not unit_code or not product.replenish_uom_id:
+        return unit_code, None
+
+    package = next(
+        (
+            candidate
+            for candidate in product.packages.all()
+            if candidate.uom_id == product.replenish_uom_id
+        ),
+        None,
+    )
+    return unit_code, getattr(package, "qty_in_base", None)
+
+
+class WarehouseViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    """Warehouses explicitly enabled for the authenticated owner role."""
+
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+
+    def list(self, request, *args, **kwargs):
+        scope = _catalog_scope(request)
+        owner_id = scope.single_owner_id
+        if not owner_id:
+            raise PermissionDenied("当前账号没有单一有效货主范围。")
+        warehouses = owner_warehouse_queryset(owner_id)
+        return Response(
+            [
+                {"id": warehouse.id, "code": warehouse.code, "name": warehouse.name}
+                for warehouse in warehouses
+            ]
+        )
+
 
 class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
@@ -282,13 +373,17 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             warehouse_id=request.query_params.get("warehouse_id"),
         )
 
-        # ✅ 只预取“当前查询命中的产品”的包装，并连带 uom，限制字段，避免 N+1
+        warehouse_ids = _resolve_inventory_warehouse_scope(request)
+
+        # Only fetch the fields consumed below.  Including is_sales_default is
+        # important: a deferred read here would otherwise produce one query per
+        # package even though the relationship itself was prefetched.
         pkg_qs = (ProductPackage.objects
                   .select_related("uom")
                   .only("id", "product_id", "uom_id", "qty_in_base", "barcode",
                         "length_cm", "width_cm", "height_cm",
                         "gross_weight_kg", "volume_m3",
-                        "is_purchase_default", "sort_order",
+                        "is_purchase_default", "is_sales_default", "sort_order",
                         "uom__name", "uom__code"))
 
         qs = Product.objects.all()
@@ -298,7 +393,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             qs = qs.filter(owner_id__in=allowed_owner_ids)
         qs = (qs.select_related("base_uom", "replenish_uom",)
               .prefetch_related(Prefetch("packages", queryset=pkg_qs))
-              .only("id", "owner_id", "code", "name", "sku", "spec","product_image","gtin","min_price","max_discount",
+              .only("id", "owner_id", "code", "name", "sku", "spec","product_image","gtin","price","min_price","max_discount",
                     "base_uom__code","base_uom__name", "replenish_uom__code", "replenish_uom__name","replenish_uom_id")
               .order_by("id"))
 
@@ -313,38 +408,41 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 Q(carton_barcode__icontains=q)
             )
 
+        # Availability is part of the database queryset, so DRF's count and
+        # slice see exactly the same set of products as the response.  This
+        # avoids empty pages when early product ids have no stock.
+        inventory = InvDetail.objects.filter(product_id=OuterRef("pk"))
+        if owner_id:
+            inventory = inventory.filter(owner_id=owner_id)
+        elif allowed_owner_ids is not None:
+            inventory = inventory.filter(owner_id__in=allowed_owner_ids)
+        if warehouse_ids is not None:
+            inventory = inventory.filter(warehouse_id__in=warehouse_ids)
+        inventory = (
+            inventory.values("product_id")
+            .annotate(total=Sum("available_qty"))
+            .values("total")[:1]
+        )
+        qs = qs.annotate(
+            available=Coalesce(
+                Subquery(
+                    inventory,
+                    output_field=DecimalField(max_digits=18, decimal_places=4),
+                ),
+                Value(Decimal("0")),
+                output_field=DecimalField(max_digits=18, decimal_places=4),
+            )
+        ).filter(available__gt=0)
+
         page = self.paginate_queryset(qs)
         if not page:
             return self.get_paginated_response([])
 
-        pid_list = [p.id for p in page]
-        warehouse_ids = _resolve_inventory_warehouse_scope(request)
-        inv_filter = {"product_id__in": pid_list}
-        if owner_id:
-            inv_filter["owner_id"] = owner_id
-        elif allowed_owner_ids is not None:
-            inv_filter["owner_id__in"] = allowed_owner_ids
-        if warehouse_ids is not None:
-            inv_filter["warehouse_id__in"] = warehouse_ids
-
-        rows = (InvDetail.objects
-                .filter(**inv_filter)
-                .values("product_id")
-                .annotate(avail=Sum("available_qty")))
-        avail_map = {r["product_id"]: r["avail"] for r in rows}
-
-        def carton_info(p):
-            unit_code = getattr(getattr(p, "replenish_uom", None), "code", None)
-            conv = None
-            if unit_code and hasattr(p, "packages"):
-                pkg = p.packages.filter(uom_id=p.replenish_uom_id).only("id", "base_qty", "multiplier").first()
-                if pkg is not None:
-                    conv = getattr(pkg, "base_qty", None) or getattr(pkg, "multiplier", None)
-            return unit_code, conv
-
         def default_sales_uom(p):
-            # 查找 product 的所有 package，返回 is_sales_default 为 True 的 UOM 的名称
-            default_package = p.packages.filter(is_sales_default=True).first()
+            default_package = next(
+                (pkg for pkg in p.packages.all() if pkg.is_sales_default),
+                None,
+            )
             if default_package:
                 return default_package.uom.name,default_package.qty_in_base
             return None
@@ -364,6 +462,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     'height_cm': pkg.height_cm,
                     'gross_weight_kg': pkg.gross_weight_kg,  # 获取毛重
                     'volume_m3': pkg.volume_m3,  # 获取体积
+                    'is_sales_default': pkg.is_sales_default,
                 })
             return packaging
 
@@ -412,10 +511,11 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             sel_idx = default_selected_index(packaging, unit_opts)
 
 
-            carton_unit, carton_conv = carton_info(p)
+            carton_unit, carton_conv = _product_carton_info(p)
 
-            if default_sales_uom(p):
-              aux_uom_name,aux_qty_in_base=default_sales_uom(p)
+            sales_uom = default_sales_uom(p)
+            if sales_uom:
+              aux_uom_name,aux_qty_in_base=sales_uom
             else:
               aux_uom_name=None
               aux_qty_in_base=None
@@ -425,8 +525,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 product_image_url = request.build_absolute_uri(p.product_image.url)
                 # product_image_url = "http://192.168.1.6:8001"+p.product_image.url  # 获取图片的 URL 地址
 
-            if avail_map.get(p.id, 0)>0:
-                data.append({
+            data.append({
                     "id": p.id,
                     "sku": p.sku or p.code or "",
                     "name": p.name or "",
@@ -435,7 +534,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "base_unit_name": getattr(getattr(p, "base_uom", None), "name", None),
                     "carton_unit": carton_unit,
                     "carton_conv": carton_conv,
-                    "available": avail_map.get(p.id, 0),
+                    "available": p.available,
                     "price": getattr(p, "price", None) or getattr(p, "sale_price", None) or 0,
                     "product_image_url":product_image_url,
                     "gtin":p.gtin,
@@ -590,10 +689,11 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
         qs = (Product.objects
               .filter(owner_id=owner_id)
-              .select_related("base_uom")
+              .select_related("base_uom", "replenish_uom")
               .prefetch_related(Prefetch("packages", queryset=pkg_qs))
               .only("id", "owner_id", "code", "name", "sku", "spec", "product_image", "gtin",
-                    "min_price", "max_discount", "base_uom__name", "base_uom__code")
+                    "price", "min_price", "max_discount", "base_uom__name", "base_uom__code",
+                    "replenish_uom_id", "replenish_uom__name", "replenish_uom__code")
               .order_by("id"))
 
 
@@ -613,15 +713,6 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         page = self.paginate_queryset(qs)
         if not page:
             return self.get_paginated_response([])
-
-        def carton_info(p):
-            unit_code = getattr(getattr(p, "replenish_uom", None), "code", None)
-            conv = None
-            if unit_code and hasattr(p, "packages"):
-                pkg = p.packages.filter(uom_id=p.replenish_uom_id).only("id", "base_qty", "multiplier").first()
-                if pkg is not None:
-                    conv = getattr(pkg, "base_qty", None) or getattr(pkg, "multiplier", None)
-            return unit_code, conv
 
         def default_sales_uom(p):
             # 查找 product 的所有 package，返回 is_sales_default 为 True 的 UOM 的名称
@@ -692,7 +783,7 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             unit_opts = build_unit_options(p, packaging)  # ← 基本单位 + 包装
             sel_idx = default_selected_index(packaging, unit_opts)
 
-            carton_unit, carton_conv = carton_info(p)
+            carton_unit, carton_conv = _product_carton_info(p)
 
             if default_sales_uom(p):
               aux_uom_name,aux_qty_in_base=default_sales_uom(p)
@@ -1142,9 +1233,57 @@ class OutboundOrderViewSet(
     permission_classes = [IsAuthenticated]
     pagination_class = DefaultPagination
 
+    def _access_scope(self):
+        if not hasattr(self, "_resolved_access_scope"):
+            self._resolved_access_scope = AccessScope.for_user(self.request.user)
+        return self._resolved_access_scope
+
+    @staticmethod
+    def _optimized_order_queryset():
+        line_qs = OutboundOrderLine.objects.select_related(
+            "product",
+            "product__base_uom",
+            "base_uom",
+            "aux_uom",
+        ).order_by("line_no", "id")
+        return (
+            OutboundOrder.objects.select_related(
+                "owner",
+                "warehouse",
+                "customer",
+                "supplier",
+                "created_by",
+                "priced_by",
+                "assisted_by",
+            )
+            .prefetch_related(Prefetch("lines", queryset=line_qs))
+            .annotate(
+                catalog_total_qty=Coalesce(
+                    Sum(
+                        "lines__base_qty",
+                        filter=Q(lines__is_deleted=False),
+                    ),
+                    Value(Decimal("0")),
+                    output_field=DecimalField(max_digits=20, decimal_places=4),
+                ),
+                catalog_total_amount=Coalesce(
+                    Sum(
+                        ExpressionWrapper(
+                            F("lines__base_qty") * F("lines__base_price"),
+                            output_field=DecimalField(max_digits=28, decimal_places=4),
+                        ),
+                        filter=Q(lines__is_deleted=False),
+                    ),
+                    Value(Decimal("0")),
+                    output_field=DecimalField(max_digits=28, decimal_places=4),
+                ),
+            )
+        )
+
     def get_queryset(self):
-        base = OutboundOrder.objects.all().order_by("-biz_date", "-id")
-        scoped = strict_order_queryset(base, self.request.user)
+        base = self._optimized_order_queryset().order_by("-biz_date", "-id")
+        scope = self._access_scope()
+        scoped = strict_order_queryset(base, self.request.user, scope=scope)
         # Assisted operators are newly introduced, tightly scoped identities;
         # never grant them historical fail-open visibility in shadow mode.
         if is_assisted_operator(self.request.user):
@@ -1155,6 +1294,7 @@ class OutboundOrderViewSet(
         permitted_assisted = strict_order_queryset(
             base.filter(processing_mode="WAREHOUSE_ASSISTED"),
             self.request.user,
+            scope=scope,
         )
         shadow_base = base.filter(
             Q(processing_mode="STANDARD") | Q(pk__in=permitted_assisted.values("pk"))
@@ -1165,6 +1305,11 @@ class OutboundOrderViewSet(
             user=self.request.user,
             endpoint=f"outbound.orders.{getattr(self, 'action', 'unknown')}",
         )
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["access_scope"] = self._access_scope()
+        return context
 
     def _require_owner_buyer(self, endpoint):
         user = self.request.user
@@ -1231,7 +1376,253 @@ class OutboundOrderViewSet(
     def get_serializer_class(self):
         if self.action == "create":
             return OutboundOrderCreateSerializer
+        if self.action == "update":
+            return OutboundOrderDraftUpdateSerializer
         return OutboundOrderReadSerializer
+
+    @staticmethod
+    def _editable_order_error(order, user):
+        if order.created_by_id != user.id:
+            raise PermissionDenied("仅订单原创建业务员可以修改该订单。")
+        if order.processing_mode != "STANDARD":
+            raise ValidationError({"detail": "仓库代办订单不支持货主端修改。"})
+        if order.is_closed:
+            raise ValidationError({"detail": "已关闭订单不能修改。"})
+        if order.submit_status != "DRAFT" or order.approval_status not in {
+            "OWNER_PENDING",
+            "OWNER_REJECTED",
+        }:
+            raise ValidationError({"detail": "当前订单状态不允许修改。"})
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        """Atomically replace the business content of an editable owner draft."""
+
+        current = self.get_object()
+        self._require_owner_buyer("outbound.orders.update")
+        self._editable_order_error(current, request.user)
+
+        serializer = OutboundOrderDraftUpdateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        fingerprint = self._standard_order_fingerprint(serializer.validated_data)
+
+        order = (
+            OutboundOrder.objects.select_for_update()
+            .select_related("owner", "warehouse", "customer")
+            .get(pk=current.pk)
+        )
+        self._editable_order_error(order, request.user)
+        expected_updated_at = serializer.validated_data["expected_updated_at"]
+        if expected_updated_at != order.updated_at:
+            raise StaleOrderEdit(order.updated_at)
+
+        src_bill_no = serializer.validated_data.get("src_bill_no")
+        duplicate = (
+            OutboundOrder.all_objects.filter(
+                owner_id=order.owner_id,
+                src_bill_no=src_bill_no,
+            )
+            .exclude(pk=order.pk)
+            .order_by("id")
+            .first()
+            if src_bill_no
+            else None
+        )
+        if duplicate:
+            raise self._duplicate_source_error(duplicate)
+
+        if order.idempotency_fingerprint == fingerprint:
+            data = dict(
+                OutboundOrderReadSerializer(
+                    order, context={"request": request}
+                ).data
+            )
+            data["changed"] = False
+            return Response(data)
+
+        before = {
+            "warehouse_id": order.warehouse_id,
+            "customer_id": order.customer_id,
+            "src_bill_no": order.src_bill_no,
+            "active_line_ids": list(order.lines.values_list("id", flat=True)),
+        }
+        validated = serializer.validated_data
+        order.warehouse_id = validated["warehouse_id__from_user"]
+        order.customer_id = validated.get("customer_id")
+        order.supplier_id = validated.get("supplier_id")
+        order.outbound_type = validated.get("outbound_type", "SALES")
+        order.delivery_method = validated.get("delivery_method")
+        order.etd = validated.get("etd")
+        order.memo = validated.get("remark", "")
+        order.src_bill_no = src_bill_no
+        order.contact = validated.get("contact", "")
+        order.contact_phone = validated.get("contact_phone", "")
+        order.ship_to = validated.get("ship_to", "")
+        order.idempotency_fingerprint = fingerprint
+        order.pricing_status = PricingStatus.PENDING
+        order.priced_at = None
+        order.priced_by = None
+        order.final_order_amount = Decimal("0.00")
+        order.updated_by = request.user
+        order.save(
+            update_fields=[
+                "warehouse",
+                "customer",
+                "supplier",
+                "outbound_type",
+                "delivery_method",
+                "etd",
+                "memo",
+                "src_bill_no",
+                "contact",
+                "contact_phone",
+                "ship_to",
+                "idempotency_fingerprint",
+                "pricing_status",
+                "priced_at",
+                "priced_by",
+                "final_order_amount",
+                "updated_by",
+                "updated_at",
+            ]
+        )
+
+        order.lines.update(
+            is_deleted=True,
+            deleted_at=timezone.now(),
+            deleted_by=request.user,
+        )
+        for index, item in enumerate(validated["items"]):
+            try:
+                OutboundOrderLine.objects.create(
+                    order=order,
+                    product_id=item["product_id"],
+                    base_qty=item["qty"],
+                    base_price=item.get("price") or Decimal("0.0000"),
+                    created_by=request.user,
+                )
+            except DjangoValidationError as exc:
+                errors = [{} for _ in validated["items"]]
+                errors[index] = OutboundOrderCreateSerializer._line_model_validation_detail(exc)
+                raise ValidationError({"items": errors}) from exc
+
+        record_audit_event(
+            action="outbound.order.update_draft",
+            module="outbound",
+            request=request,
+            obj=order,
+            before=before,
+            after={
+                "warehouse_id": order.warehouse_id,
+                "customer_id": order.customer_id,
+                "src_bill_no": order.src_bill_no,
+                "active_line_count": len(validated["items"]),
+            },
+        )
+        order.refresh_from_db()
+        data = dict(
+            OutboundOrderReadSerializer(order, context={"request": request}).data
+        )
+        data["changed"] = True
+        return Response(data)
+
+    @action(detail=True, methods=["get"], url_path="edit-context")
+    def edit_context(self, request, pk=None):
+        order = self.get_object()
+        self._require_owner_buyer("outbound.orders.edit_context")
+        self._editable_order_error(order, request.user)
+
+        lines = list(
+            order.lines.select_related("product", "product__base_uom").order_by("line_no")
+        )
+        product_ids = [line.product_id for line in lines]
+        available = {
+            row["product_id"]: row["available"] or Decimal("0")
+            for row in apps.get_model("inventory", "InventoryDetail")
+            .objects.filter(
+                owner_id=order.owner_id,
+                warehouse_id=order.warehouse_id,
+                product_id__in=product_ids,
+            )
+            .values("product_id")
+            .annotate(available=Sum("available_qty"))
+        }
+        items = []
+        for line in lines:
+            product = line.product
+            image_url = None
+            if getattr(product, "product_image", None):
+                image_url = request.build_absolute_uri(product.product_image.url)
+            base_name = (
+                getattr(product.base_uom, "name", None)
+                or getattr(product.base_uom, "code", None)
+                or "基本单位"
+            )
+            items.append(
+                {
+                    "id": product.id,
+                    "product_id": product.id,
+                    "sku": product.sku or product.code or "",
+                    "name": product.name or "",
+                    "spec": product.spec,
+                    "price": line.base_price,
+                    "orig_price": product.price,
+                    "min_price": product.min_price,
+                    "product_min_price": product.min_price,
+                    "max_discount": product.max_discount,
+                    "qty": line.base_qty,
+                    "available": available.get(product.id, Decimal("0")),
+                    "product_image_url": image_url,
+                    "gtin": product.gtin,
+                    "base_unit_name": base_name,
+                    "unitOptions": [
+                        {
+                            "key": "BASE",
+                            "kind": "base",
+                            "label": base_name,
+                            "multiplier": 1,
+                            "package_id": None,
+                            "barcode": None,
+                        }
+                    ],
+                    "selectedUnitIndex": 0,
+                }
+            )
+        return Response(
+            {
+                "id": order.id,
+                "updated_at": order.updated_at,
+                "owner_reject_reason": order.owner_reject_reason,
+                "warehouse": {
+                    "id": order.warehouse_id,
+                    "code": order.warehouse.code,
+                    "name": order.warehouse.name,
+                },
+                "customer": (
+                    {
+                        "id": order.customer_id,
+                        "code": order.customer.code,
+                        "name": order.customer.name,
+                    }
+                    if order.customer_id
+                    else None
+                ),
+                "header": {
+                    "outbound_type": order.outbound_type,
+                    "delivery_method": order.delivery_method,
+                    "etd": order.etd,
+                    "remark": order.memo,
+                    "src_bill_no": order.src_bill_no or "",
+                    "contact": order.contact or "",
+                    "contact_phone": order.contact_phone or "",
+                    "ship_to": order.ship_to or "",
+                },
+                "items": items,
+            }
+        )
 
     def list(self, request, *args, **kwargs):
         qs = self.get_queryset()
@@ -1273,10 +1664,14 @@ class OutboundOrderViewSet(
                 | Q(lines__product__carton_barcode__icontains=product_q)
                 | Q(lines__product__product_package__barcode__icontains=product_q)
             )
-        if owner_id:      qs = qs.filter(owner_id=owner_id)
-        if warehouse_id:  qs = qs.filter(warehouse_id=warehouse_id)
-        if submit_status: qs = qs.filter(submit_status=submit_status)
-        if approval_status: qs = qs.filter(approval_status=approval_status)
+        if owner_id:
+            qs = qs.filter(owner_id=owner_id)
+        if warehouse_id:
+            qs = qs.filter(warehouse_id=warehouse_id)
+        if submit_status:
+            qs = qs.filter(submit_status=submit_status)
+        if approval_status:
+            qs = qs.filter(approval_status=approval_status)
         if outbound_type:
             qs = qs.filter(outbound_type=outbound_type)
         if delivery_method:
@@ -1339,11 +1734,114 @@ class OutboundOrderViewSet(
         ser = OutboundOrderReadSerializer(page, many=True, context={"request": request})
         return self.get_paginated_response(ser.data)
 
-    def create(self, request, *args, **kwargs):
-        self._require_owner_buyer("outbound.orders.create")
-        ser = OutboundOrderCreateSerializer(data=request.data, context={"request": request})
-        ser.is_valid(raise_exception=True)
-        order = ser.save()
+    @staticmethod
+    def _standard_order_idempotency_key(request):
+        key = request.headers.get("Idempotency-Key") or ""
+        if not key:
+            raise ValidationError({"idempotency_key": "请提供 Idempotency-Key。"})
+        if not STANDARD_ORDER_IDEMPOTENCY_KEY_RE.fullmatch(key):
+            raise ValidationError(
+                {
+                    "idempotency_key": (
+                        "Idempotency-Key 仅允许字母、数字及 . _ : -，长度为 8-64 位。"
+                    )
+                }
+            )
+        return key
+
+    @staticmethod
+    def _standard_order_fingerprint(validated):
+        def decimal_text(value, places):
+            if value is None:
+                return None
+            return format(Decimal(value).quantize(Decimal(places)), "f")
+
+        etd = validated.get("etd")
+        canonical = {
+            "owner_id": int(validated["owner_id__from_user"]),
+            "warehouse_id": int(validated["warehouse_id__from_user"]),
+            "customer_id": validated.get("customer_id"),
+            "supplier_id": validated.get("supplier_id"),
+            "outbound_type": validated.get("outbound_type", "SALES"),
+            "delivery_method": validated.get("delivery_method") or None,
+            "etd": etd.isoformat() if etd is not None else None,
+            "remark": (validated.get("remark") or "").strip(),
+            "src_bill_no": validated.get("src_bill_no") or None,
+            "contact": (validated.get("contact") or "").strip(),
+            "contact_phone": (validated.get("contact_phone") or "").strip(),
+            "ship_to": (validated.get("ship_to") or "").strip(),
+            "items": [
+                {
+                    "product_id": int(item["product_id"]),
+                    "qty": decimal_text(item["qty"], "0.001"),
+                    "price": decimal_text(item.get("price"), "0.0001"),
+                }
+                for item in validated["items"]
+            ],
+        }
+        encoded = json.dumps(
+            canonical,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _duplicate_source_error(existing):
+        return ValidationError(
+            {
+                "src_bill_no": f"平台单号重复，已存在订单 {existing.order_no}",
+                "existing_order_id": str(existing.id),
+                "existing_order_no": existing.order_no or "",
+                "existing_approval_status": existing.approval_status or "",
+                "existing_submit_status": existing.submit_status or "",
+            }
+        )
+
+    @staticmethod
+    def _standard_order_response(order, request, *, replayed, http_status):
+        data = dict(
+            OutboundOrderReadSerializer(order, context={"request": request}).data
+        )
+        data["idempotent"] = replayed
+        data["replayed"] = replayed
+        return Response(data, status=http_status)
+
+    def _existing_idempotent_order(self, *, owner_id, user_id, key, fingerprint):
+        existing = (
+            OutboundOrder.all_objects.filter(
+                owner_id=owner_id,
+                created_by_id=user_id,
+                idempotency_key=key,
+            )
+            .order_by("id")
+            .first()
+        )
+        if existing and existing.idempotency_fingerprint != fingerprint:
+            raise StandardOrderIdempotencyConflict()
+        return existing
+
+    @transaction.atomic
+    def _persist_standard_order(self, *, serializer, request, key, fingerprint):
+        owner_id = serializer.validated_data["owner_id__from_user"]
+        src_bill_no = serializer.validated_data.get("src_bill_no")
+        if src_bill_no:
+            duplicate = (
+                OutboundOrder.all_objects.filter(
+                    owner_id=owner_id,
+                    src_bill_no=src_bill_no,
+                )
+                .order_by("id")
+                .first()
+            )
+            if duplicate:
+                raise self._duplicate_source_error(duplicate)
+
+        order = serializer.save(
+            idempotency_key=key,
+            idempotency_fingerprint=fingerprint,
+        )
         record_audit_event(
             action="outbound.order.create",
             module="outbound",
@@ -1351,57 +1849,128 @@ class OutboundOrderViewSet(
             obj=order,
             after={"submit_status": order.submit_status, "approval_status": order.approval_status},
         )
-        return Response(
-            OutboundOrderReadSerializer(order, context={"request": request}).data,
-            status=status.HTTP_201_CREATED,
+        return order
+
+    def create(self, request, *args, **kwargs):
+        self._require_owner_buyer("outbound.orders.create")
+        key = self._standard_order_idempotency_key(request)
+        ser = OutboundOrderCreateSerializer(data=request.data, context={"request": request})
+        ser.is_valid(raise_exception=True)
+        fingerprint = self._standard_order_fingerprint(ser.validated_data)
+        owner_id = ser.validated_data["owner_id__from_user"]
+        user_id = request.user.id
+
+        existing = self._existing_idempotent_order(
+            owner_id=owner_id,
+            user_id=user_id,
+            key=key,
+            fingerprint=fingerprint,
+        )
+        if existing:
+            return self._standard_order_response(
+                existing,
+                request,
+                replayed=True,
+                http_status=status.HTTP_200_OK,
+            )
+
+        try:
+            order = self._persist_standard_order(
+                serializer=ser,
+                request=request,
+                key=key,
+                fingerprint=fingerprint,
+            )
+        except (IntegrityError, DjangoValidationError) as exc:
+            existing = self._existing_idempotent_order(
+                owner_id=owner_id,
+                user_id=user_id,
+                key=key,
+                fingerprint=fingerprint,
+            )
+            if existing:
+                return self._standard_order_response(
+                    existing,
+                    request,
+                    replayed=True,
+                    http_status=status.HTTP_200_OK,
+                )
+            src_bill_no = ser.validated_data.get("src_bill_no")
+            duplicate = (
+                OutboundOrder.all_objects.filter(
+                    owner_id=owner_id,
+                    src_bill_no=src_bill_no,
+                )
+                .order_by("id")
+                .first()
+                if src_bill_no
+                else None
+            )
+            if duplicate:
+                raise self._duplicate_source_error(duplicate)
+            if isinstance(exc, DjangoValidationError):
+                raise ValidationError(
+                    exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+                ) from exc
+            raise
+
+        return self._standard_order_response(
+            order,
+            request,
+            replayed=False,
+            http_status=status.HTTP_201_CREATED,
         )
 
     # 提交：DRAFT -> SUBMITTED
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def submit(self, request, pk=None):
         order = self.get_object()
         self._require_owner_buyer("outbound.orders.submit")
-        if getattr(order, "submit_status", None) != "DRAFT":
-            return Response({"detail": "仅 DRAFT 可提交"}, status=400)
-        before = {"submit_status": order.submit_status}
-        order.submit_status = "SUBMITTED"
-        order.save(update_fields=["submit_status"])
+        self._editable_order_error(order, request.user)
+        before = {
+            "submit_status": order.submit_status,
+            "approval_status": order.approval_status,
+        }
+        try:
+            order = outbound_services.submit_owner_draft(order, by_user=request.user)
+        except DjangoValidationError as exc:
+            raise ValidationError(
+                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+            ) from exc
         record_audit_event(
             action="outbound.order.submit",
             module="outbound",
             request=request,
             obj=order,
             before=before,
-            after={"submit_status": order.submit_status},
+            after={
+                "submit_status": order.submit_status,
+                "approval_status": order.approval_status,
+            },
         )
-        return Response(OutboundOrderReadSerializer(order).data)
+        return Response(
+            OutboundOrderReadSerializer(order, context={"request": request}).data
+        )
 
     @action(detail=True, methods=["post"], url_path="owner-approve")
+    @transaction.atomic
     def owner_approve(self, request, pk=None):
         order = self.get_object()
         self._require_owner_manager(order, "outbound.orders.owner_approve")
 
-        if getattr(order, "approval_status", None) not in ("OWNER_PENDING", "OWNER_REJECTED"):
-            return Response(
-                {"detail": "当前状态不可进行货主管理员审核"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        before = {"approval_status": order.approval_status}
+        before = {
+            "submit_status": order.submit_status,
+            "approval_status": order.approval_status,
+        }
         try:
-            order.owner_approve(by_user=request.user, allow_backorder=True)
+            order = outbound_services.approve_owner_order(
+                order, by_user=request.user, allow_backorder=True
+            )
         except DjangoValidationError as e:
-            return Response(
-                {"detail": e.message_dict if hasattr(e, "message_dict") else e.messages},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        except Exception as e:
-            return Response(
-                {"detail": f"订单确认失败：{e}"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        order.refresh_from_db()
+            raise ValidationError(
+                e.message_dict if hasattr(e, "message_dict") else e.messages
+            ) from e
         record_audit_event(
             action="outbound.order.owner_approve",
             module="outbound",
@@ -1413,40 +1982,25 @@ class OutboundOrderViewSet(
         return Response(OutboundOrderReadSerializer(order, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="owner-reject")
+    @transaction.atomic
     def owner_reject(self, request, pk=None):
         order = self.get_object()
         self._require_owner_manager(order, "outbound.orders.owner_reject")
-        if getattr(order, "approval_status", None) != "OWNER_PENDING":
-            return Response(
-                {"detail": "仅待审核订单可退回修改"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        before = {"approval_status": order.approval_status}
+        reason = str((request.data or {}).get("reason") or "").strip()
+        before = {
+            "submit_status": order.submit_status,
+            "approval_status": order.approval_status,
+        }
         try:
-            with transaction.atomic():
-                order = type(order).objects.select_for_update().get(pk=order.pk)
-                order.approval_status = "OWNER_REJECTED"
-                if hasattr(order, "approved_by_ownermanager"):
-                    order.approved_by_ownermanager = request.user
-                if hasattr(order, "approved_at_ownermanager"):
-                    order.approved_at_ownermanager = timezone.now()
-                order.save(update_fields=[
-                    "approval_status",
-                    "approved_by_ownermanager",
-                    "approved_at_ownermanager",
-                    "updated_at",
-                ])
+            order = outbound_services.reject_owner_order(
+                order,
+                by_user=request.user,
+                reason=reason,
+            )
         except DjangoValidationError as e:
-            return Response(
-                {"detail": e.message_dict if hasattr(e, "message_dict") else e.messages},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        except Exception as e:
-            return Response(
-                {"detail": f"退回修改失败：{e}"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ValidationError(
+                e.message_dict if hasattr(e, "message_dict") else e.messages
+            ) from e
 
         record_audit_event(
             action="outbound.order.owner_reject",
@@ -1454,7 +2008,12 @@ class OutboundOrderViewSet(
             request=request,
             obj=order,
             before=before,
-            after={"approval_status": order.approval_status},
+            after={
+                "submit_status": order.submit_status,
+                "approval_status": order.approval_status,
+                "owner_reject_reason": order.owner_reject_reason,
+            },
+            metadata={"reason": reason},
         )
         return Response(
             OutboundOrderReadSerializer(order, context={"request": request}).data,
@@ -1468,33 +2027,9 @@ class OutboundOrderViewSet(
 
         order = self.get_object()
         self._require_warehouse_manager(order, "outbound.orders.warehouse_confirm")
-        if order.is_closed or order.approval_status not in {"OWNER_APPROVED", "WHS_PENDING"}:
-            return Response(
-                {"detail": "仅货主审核通过且未关闭的订单可由仓库确认。"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        try:
-            outbound_services.validate_sale_mini_payment_for_fulfillment(order)
-        except DjangoValidationError as exc:
-            raise ValidationError(
-                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
-            ) from exc
         before = {"approval_status": order.approval_status}
-        order.approval_status = "WHS_APPROVED"
-        order.approved_by_warehouse = request.user
-        order.approved_at_warehouse = timezone.now()
-        order.updated_by = request.user
-        order.save(
-            update_fields=[
-                "approval_status",
-                "approved_by_warehouse",
-                "approved_at_warehouse",
-                "updated_by",
-                "updated_at",
-            ]
-        )
         try:
-            task = outbound_services.promote_reserved_pick(
+            order, task = outbound_services.confirm_warehouse_order(
                 order,
                 by_user=request.user,
             )
@@ -1516,9 +2051,12 @@ class OutboundOrderViewSet(
         )
 
     @action(detail=True, methods=["post"], url_path="withdraw")
+    @transaction.atomic
     def withdraw(self, request, pk=None):
         order = self.get_object()
         self._require_owner_buyer("outbound.orders.withdraw")
+        if order.created_by_id != request.user.id:
+            raise PermissionDenied("仅订单原创建业务员可以撤回该订单。")
         before = {
             "submit_status": order.submit_status,
             "approval_status": order.approval_status,
@@ -1549,6 +2087,7 @@ class OutboundOrderViewSet(
         )
 
     @action(detail=True, methods=["post"], url_path="cancel")
+    @transaction.atomic
     def cancel(self, request, pk=None):
         order = self.get_object()
         self._require_owner_manager(order, "outbound.orders.cancel")
@@ -1560,16 +2099,9 @@ class OutboundOrderViewSet(
                 reason=(request.data or {}).get("reason") or "货主管理员取消订单",
             )
         except DjangoValidationError as e:
-            return Response(
-                {"detail": e.message_dict if hasattr(e, "message_dict") else e.messages},
-
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        except Exception as e:
-            return Response(
-                {"detail": f"取消订单失败：{e}"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ValidationError(
+                e.message_dict if hasattr(e, "message_dict") else e.messages
+            ) from e
         record_audit_event(
             action="outbound.order.cancel",
             module="outbound",
@@ -1681,18 +2213,17 @@ class OutboundOrderViewSet(
         self._require_owner_buyer("outbound.orders.import_drop_ship_excel")
         file_obj = request.FILES.get("file")
         if not file_obj:
-            return Response({"detail": "请上传 Excel 文件，字段名 file"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"code": "invalid_excel", "detail": "请上传 Excel 文件，字段名 file。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         user = request.user
         scope = AccessScope.for_user(user)
         owner_id = scope.single_owner_id
         raw_warehouse_id = request.data.get("warehouse_id")
         try:
-            warehouse_id = (
-                int(raw_warehouse_id)
-                if raw_warehouse_id
-                else scope.single_warehouse_id
-            )
+            warehouse_id = int(raw_warehouse_id) if raw_warehouse_id else None
         except (TypeError, ValueError):
             warehouse_id = None
 
@@ -1703,21 +2234,14 @@ class OutboundOrderViewSet(
             )
         if not warehouse_id:
             return Response(
-                {
-                    "detail": (
-                        "必须提供有效的 warehouse_id；"
-                        "仅单一仓库范围账号可自动确定仓库"
-                    )
-                },
+                {"warehouse_id": "请选择出库仓库。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         Customer = apps.get_model("baseinfo", "Customer")
-        OutboundOrder = apps.get_model("outbound", "OutboundOrder")
-        Warehouse = apps.get_model("locations", "Warehouse")
-        if not Warehouse.objects.filter(pk=warehouse_id, is_active=True).exists():
+        if not owner_can_use_warehouse(owner_id, warehouse_id):
             return Response(
-                {"detail": "warehouse_id 对应的仓库不存在或已停用"},
+                {"warehouse_id": "仓库不可用或未关联当前货主。"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1729,129 +2253,19 @@ class OutboundOrderViewSet(
             )
 
         try:
-            wb = load_workbook(file_obj, data_only=True)
-            ws = wb.active
-        except Exception as e:
-            return Response({"detail": f"Excel 解析失败: {e}"}, status=status.HTTP_400_BAD_REQUEST)
-
-        rows = list(ws.iter_rows(values_only=True))
-        if not rows:
-            return Response({"detail": "Excel 为空"}, status=status.HTTP_400_BAD_REQUEST)
-
-        headers = [self._excel_str(x) for x in rows[0]]
-        required_headers = [
-            "收件人姓名",
-            "收件人手机/电话",
-            "收件人详细地址",
-            "数量",
-            "订单编号",
-        ]
-        missing = [h for h in required_headers if h not in headers]
-        if missing:
+            result = import_drop_ship_workbook(
+                uploaded_file=file_obj,
+                request=request,
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                cash_customer=cash_customer,
+            )
+        except DropShipImportFileError as exc:
             return Response(
-                {"detail": f"模板缺少必要列: {missing}", "headers": headers},
+                {"code": "invalid_excel", "detail": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        result = {
-            "total_rows": 0,
-            "success_count": 0,
-            "skip_count": 0,
-            "fail_count": 0,
-            "successes": [],
-            "skips": [],
-            "errors": [],
-        }
-
-        serializer_cls = self.get_serializer_class()
-        if serializer_cls is OutboundOrderReadSerializer:
-            # create 动作外手工拿创建 serializer
-            from .serializers import OutboundOrderCreateSerializer
-            create_serializer_cls = OutboundOrderCreateSerializer
-        else:
-            create_serializer_cls = serializer_cls
-
-        for excel_row_no, raw_row in enumerate(rows[1:], start=2):
-            if not raw_row or all(self._excel_str(v) == "" for v in raw_row):
-                continue
-
-            result["total_rows"] += 1
-            row_dict = dict(zip(headers, raw_row))
-
-            try:
-                src_bill_no = self._excel_str(row_dict.get("订单编号"))
-                contact = self._excel_str(row_dict.get("收件人姓名"))
-                contact_phone = self._excel_str(row_dict.get("收件人手机/电话"))
-                ship_to = self._build_ship_to(row_dict)
-                qty = self._excel_decimal(row_dict.get("数量"))
-
-                if not src_bill_no:
-                    raise ValueError("订单编号不能为空")
-                if not contact:
-                    raise ValueError("收件人姓名不能为空")
-                if not contact_phone:
-                    raise ValueError("收件人手机/电话不能为空")
-                if not ship_to:
-                    raise ValueError("收货地址不能为空")
-
-                # 幂等：同 owner + src_bill_no 已存在则跳过
-                existing = OutboundOrder.objects.filter(
-                    owner_id=owner_id,
-                    src_bill_no=src_bill_no,
-                ).order_by("id").first()
-                if existing:
-                    result["skip_count"] += 1
-                    result["skips"].append({
-                        "row": excel_row_no,
-                        "src_bill_no": src_bill_no,
-                        "reason": f"订单已存在，order_id={existing.id}, order_no={existing.order_no}",
-                    })
-                    continue
-
-                product = self._find_product_for_import(owner_id, row_dict)
-                price = outbound_services.get_default_product_price(product)
-                remark = self._build_remark(row_dict)
-
-                payload = {
-                    "customer_id": cash_customer.id,
-                    "remark": remark,
-                    "src_bill_no": src_bill_no,
-                    "contact": contact,
-                    "contact_phone": contact_phone,
-                    "ship_to": ship_to,
-                    "items": [
-                        {
-                            "product_id": product.id,
-                            "qty": qty,
-                            "price": price,
-                        }
-                    ],
-                }
-
-                ser = create_serializer_cls(data=payload, context={"request": request})
-                ser.is_valid(raise_exception=True)
-
-                with transaction.atomic():
-                    order = ser.save()
-
-                result["success_count"] += 1
-                result["successes"].append({
-                    "row": excel_row_no,
-                    "src_bill_no": src_bill_no,
-                    "order_id": order.id,
-                    "order_no": getattr(order, "order_no", ""),
-                })
-
-            except Exception as e:
-                result["fail_count"] += 1
-                result["errors"].append({
-                    "row": excel_row_no,
-                    "src_bill_no": self._excel_str(row_dict.get("订单编号")) if "row_dict" in locals() else "",
-                    "reason": str(e),
-                })
-
         return Response(result, status=status.HTTP_200_OK)
-
 
     @action(
         detail=False,

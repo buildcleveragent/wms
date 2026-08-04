@@ -1,0 +1,67 @@
+{
+  "version": "V2.0",
+  "baseline_date": "2026-08-04",
+  "system_name": "金桥融通仓库管理系统（WMS）",
+  "manuals": [
+    {
+      "slug": "warehouse_operator",
+      "label": "仓库操作员",
+      "title": "金桥融通WMS仓库操作员操作手册",
+      "group": "WMS::仓库操作员",
+      "entry": "仓库 PDA（wmspda）",
+      "scope": "一个明确的仓库范围",
+      "fragment": "warehouse_operator.md",
+      "output": "金桥融通WMS仓库操作员操作手册"
+    },
+    {
+      "slug": "warehouse_manager",
+      "label": "仓库管理员",
+      "title": "金桥融通WMS仓库管理员操作手册",
+      "group": "WMS::仓库管理员",
+      "entry": "Web 控制台 / Django Admin，必要时使用仓库 PDA",
+      "scope": "一个明确的仓库范围",
+      "fragment": "warehouse_manager.md",
+      "output": "金桥融通WMS仓库管理员操作手册"
+    },
+    {
+      "slug": "owner_salesperson",
+      "label": "货主业务员",
+      "title": "金桥融通WMS货主业务员操作手册",
+      "group": "WMS::货主业务员",
+      "entry": "货主业务端（wmsownersale）",
+      "scope": "一个明确的货主范围，并从货主已授权仓库中选择履约仓库",
+      "fragment": "owner_salesperson.md",
+      "output": "金桥融通WMS货主业务员操作手册"
+    },
+    {
+      "slug": "owner_manager",
+      "label": "货主管理员",
+      "title": "金桥融通WMS货主管理员操作手册",
+      "group": "WMS::货主管理员",
+      "entry": "货主业务端（wmsownersale）",
+      "scope": "一个明确的货主范围",
+      "fragment": "owner_manager.md",
+      "output": "金桥融通WMS货主管理员操作手册"
+    },
+    {
+      "slug": "system_admin",
+      "label": "系统管理员",
+      "title": "金桥融通WMS系统管理员操作手册",
+      "group": "超级管理员或经过审批的后台管理权限组",
+      "entry": "Web 控制台 / Django Admin",
+      "scope": "超级管理员为全局范围；普通后台账号仍受显式角色范围和权限限制",
+      "fragment": "system_admin.md",
+      "output": "金桥融通WMS系统管理员操作手册"
+    },
+    {
+      "slug": "warehouse_boss",
+      "label": "仓库老板",
+      "title": "金桥融通WMS仓库老板经营看板手册",
+      "group": "WMS::仓库老板",
+      "entry": "仓储经营分析中心（wmsbossbilling）",
+      "scope": "一个或多个明确授权的仓库范围",
+      "fragment": "warehouse_boss.md",
+      "output": "金桥融通WMS仓库老板经营看板手册"
+    }
+  ]
+}

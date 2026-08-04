@@ -5,7 +5,7 @@
         <view class="title">入出库履约</view>
         <view class="subtitle">{{ basisLabel }} · 数据截至 {{ dataAsOf }}</view>
       </view>
-      <button class="refresh" :disabled="loading" @click="loadAll">刷新</button>
+      <button class="refresh" @click="loadAll">刷新</button>
     </view>
 
     <view class="filters">
@@ -27,6 +27,12 @@
         : '计划按订单业务日期与需求数量统计，仅用于需求和达成分析。' }}
     </view>
 
+    <view v-if="error" class="load-error">
+      <text>{{ error }}</text>
+      <button size="mini" @click="loadAll({ clear: true })">重试</button>
+    </view>
+
+    <template v-else>
     <view class="summary-grid">
       <view class="summary-card inbound">
         <view class="label">{{ basis === 'actual' ? '实际入库' : '计划入库' }}</view>
@@ -66,6 +72,7 @@
       <text>第 {{ page }} 页</text>
       <button :disabled="!nextPage || loading" @click="changePage(1)">下一页</button>
     </view>
+    </template>
   </view>
 </template>
 
@@ -89,6 +96,8 @@ const count = ref(0)
 const page = ref(1)
 const pageSize = 30
 const nextPage = ref(null)
+const error = ref('')
+let requestGeneration = 0
 
 const inbound = computed(() => summary.value.inbound || { qty: '0', orders: 0, lines: 0 })
 const outbound = computed(() => summary.value.outbound || { qty: '0', orders: 0, lines: 0 })
@@ -104,21 +113,39 @@ function params() {
   }
 }
 
-async function loadAll() {
-  if (loading.value) return
+function clearResults() {
+  summary.value = {}
+  dataAsOfRaw.value = ''
+  rows.value = []
+  count.value = 0
+  nextPage.value = null
+}
+
+async function loadAll({ clear = false } = {}) {
+  const generation = ++requestGeneration
+  const requestParams = params()
+  const requestPage = page.value
+  error.value = ''
+  if (clear) clearResults()
   loading.value = true
   try {
     const [summaryResponse, detailsResponse] = await Promise.all([
-      api.operationsSummary(params()),
-      api.operationsDetails({ ...params(), page: page.value, page_size: pageSize }),
+      api.operationsSummary(requestParams),
+      api.operationsDetails({ ...requestParams, page: requestPage, page_size: pageSize }),
     ])
+    if (generation !== requestGeneration) return
     summary.value = summaryResponse.summary || {}
     dataAsOfRaw.value = summaryResponse.data_as_of || detailsResponse.data_as_of || ''
     rows.value = detailsResponse.results || []
     count.value = Number(detailsResponse.count || 0)
     nextPage.value = detailsResponse.next
+  } catch (loadError) {
+    if (generation === requestGeneration) {
+      clearResults()
+      error.value = loadError?.message || '履约报表加载失败，请稍后重试'
+    }
   } finally {
-    loading.value = false
+    if (generation === requestGeneration) loading.value = false
   }
 }
 
@@ -126,24 +153,24 @@ function setBasis(value) {
   if (basis.value === value) return
   basis.value = value
   page.value = 1
-  loadAll()
+  loadAll({ clear: true })
 }
 
 function onStartChange(event) {
   startDate.value = event.detail.value
   page.value = 1
-  loadAll()
+  loadAll({ clear: true })
 }
 
 function onEndChange(event) {
   endDate.value = event.detail.value
   page.value = 1
-  loadAll()
+  loadAll({ clear: true })
 }
 
 function changePage(delta) {
   page.value += delta
-  loadAll()
+  loadAll({ clear: true })
 }
 
 function dateText(value) {
@@ -176,6 +203,8 @@ onLoad(loadAll)
 .section-head { display: flex; justify-content: space-between; align-items: center; margin: 28rpx 4rpx 14rpx; }
 .section-title { font-size: 30rpx; font-weight: 700; color: #172033; }
 .empty { padding: 60rpx 20rpx; text-align: center; color: #8a94a8; }
+.load-error { margin: 18rpx 0; padding: 32rpx; border-radius: 18rpx; background: #fff; color: #b42318; text-align: center; }
+.load-error button { margin-top: 18rpx; }
 .row { padding: 22rpx; margin-bottom: 14rpx; }
 .row-head, .row-foot { display: flex; align-items: center; gap: 12rpx; }
 .row-foot { justify-content: space-between; margin-top: 16rpx; color: #647087; font-size: 23rpx; }

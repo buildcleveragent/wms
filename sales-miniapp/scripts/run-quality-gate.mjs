@@ -75,7 +75,6 @@ if (fs.existsSync(path.join(repoRoot, 'manage.py'))) {
       'pytest',
       '-q',
       'allapp/salesapp/test_salemini_unit.py',
-      'allapp/salesapp/test_mobile_api_unit.py',
       'allapp/salesapp/test_services_pricing_unit.py',
     ],
     {

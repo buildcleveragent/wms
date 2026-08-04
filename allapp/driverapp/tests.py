@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -28,3 +29,33 @@ class DriverappWarehouseScopeTests(TestCase):
         )
 
         self.assertIsNone(shift.warehouse_id)
+
+    def test_driver_shift_request_id_is_idempotent_per_driver(self):
+        occurred_at = timezone.now()
+        DriverShift.objects.create(
+            driver=self.driver,
+            warehouse=self.warehouse,
+            action=DriverShift.Action.CLOCK_IN,
+            at=occurred_at,
+            request_id="same-mobile-request",
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                DriverShift.objects.create(
+                    driver=self.driver,
+                    warehouse=self.warehouse,
+                    action=DriverShift.Action.CLOCK_OUT,
+                    at=occurred_at,
+                    request_id="same-mobile-request",
+                )
+
+        other_driver = Driver.objects.create(name="Driver 2")
+        other_shift = DriverShift.objects.create(
+            driver=other_driver,
+            warehouse=self.warehouse,
+            action=DriverShift.Action.CLOCK_IN,
+            at=occurred_at,
+            request_id="same-mobile-request",
+        )
+        self.assertIsNotNone(other_shift.pk)

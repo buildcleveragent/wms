@@ -11,6 +11,7 @@ from allapp.accounts.access import AccessScope
 from allapp.baseinfo.models import Owner
 from allapp.billing.enums import AccrualStatus, BillStatus
 from allapp.billing.models import Bill, BillingAccrual, BillingJobRun
+from allapp.billing.services.ledger import financial_ledger_accruals
 from allapp.inbound.models import InboundOrder
 from allapp.inventory.models import InventoryDetail, InventorySummary, ReviewDifference
 from allapp.locations.models import Location, Warehouse
@@ -646,14 +647,18 @@ def build_boss_home_payload(*, user, owner_id: int | None = None, warehouse_id: 
         warehouse_id=warehouse_id,
     ).filter(onhand_qty__gt=0)
     inventory_summary_qs = _inventory_summary_fallback_queryset(user=user, owner_id=owner_id)
-    accrual_qs = _apply_scope_filter(
+    scoped_accrual_qs = _apply_scope_filter(
         scope_queryset_for_user(
             BillingAccrual.objects.select_related("owner", "warehouse", "period"),
             user,
-        ).filter(is_reversal=False).exclude(status=AccrualStatus.VOID),
+        ),
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )
+    accrual_qs = scoped_accrual_qs.filter(is_reversal=False).exclude(
+        status=AccrualStatus.VOID
+    )
+    ledger_accrual_qs = financial_ledger_accruals(scoped_accrual_qs)
     bill_qs = _apply_scope_filter(
         scope_queryset_for_user(
             Bill.objects.select_related("owner", "warehouse", "period"),
@@ -713,7 +718,7 @@ def build_boss_home_payload(*, user, owner_id: int | None = None, warehouse_id: 
         Decimal("0.000"),
     )
 
-    today_accrual = accrual_qs.filter(service_date=today).aggregate(
+    today_accrual = ledger_accrual_qs.filter(service_date=today).aggregate(
         subtotal=Sum("amount"),
         tax_total=Sum("tax_amount"),
     )
@@ -737,12 +742,19 @@ def build_boss_home_payload(*, user, owner_id: int | None = None, warehouse_id: 
         now=now,
     )
 
+    revenue_accrual_counts = {
+        row["owner_id"]: row["accrual_count"]
+        for row in (
+            accrual_qs.filter(service_date__range=(month_start, today))
+            .values("owner_id")
+            .annotate(accrual_count=Count("id"))
+        )
+    }
     revenue_top_owners = []
     for row in (
-        accrual_qs.filter(service_date__range=(month_start, today))
+        ledger_accrual_qs.filter(service_date__range=(month_start, today))
         .values("owner_id", "owner__name")
         .annotate(
-            accrual_count=Count("id"),
             subtotal=Sum("amount"),
             tax_total=Sum("tax_amount"),
         )
@@ -754,7 +766,7 @@ def build_boss_home_payload(*, user, owner_id: int | None = None, warehouse_id: 
             {
                 "owner": row["owner_id"],
                 "owner_name": row["owner__name"] or f"Owner #{row['owner_id']}",
-                "accrual_count": row["accrual_count"],
+                "accrual_count": revenue_accrual_counts.get(row["owner_id"], 0),
                 "subtotal": subtotal,
                 "tax_total": tax_total,
                 "total": subtotal + tax_total,
@@ -830,7 +842,7 @@ def build_boss_home_payload(*, user, owner_id: int | None = None, warehouse_id: 
     trend_rows = _build_trend_payload(
         inbound_qs=inbound_qs,
         outbound_qs=outbound_qs,
-        accrual_qs=accrual_qs,
+        accrual_qs=ledger_accrual_qs,
         start_date=trend_start,
         end_date=today,
     )

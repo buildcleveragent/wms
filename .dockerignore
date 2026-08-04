@@ -1,6 +1,14 @@
 *.pyc
 __pycache__
-*.git
+.git
+.gitignore
+.venv
+venv
+**/node_modules
+**/.pytest_cache
+**/.ruff_cache
+**/dist
+**/coverage
 *.idea
 *.vscode
 *.env
@@ -17,3 +25,4 @@ auth.json
 *.wgt
 media/
 staticfiles/
+backups/

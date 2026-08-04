@@ -1,11 +1,22 @@
 import logging
 
-from rest_framework_simplejwt.views import TokenObtainPairView
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.contrib.auth import get_user_model
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.serializers import (
+    TokenObtainPairSerializer,
+    TokenRefreshSerializer,
+)
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.utils import get_md5_hash_password
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView as BaseTokenRefreshView,
+)
 
 from allapp.accounts.audit import record_audit_event
 
 logger = logging.getLogger(__name__)
+
 
 class LoginSerializer(TokenObtainPairSerializer):
     @classmethod
@@ -35,5 +46,31 @@ class LoginSerializer(TokenObtainPairSerializer):
             logger.exception("audit.login.write_failed user_id=%s", self.user.id)
         return data
 
+
 class LoginView(TokenObtainPairView):
     serializer_class = LoginSerializer
+
+
+class PasswordRevokingTokenRefreshSerializer(TokenRefreshSerializer):
+    """Reject refresh tokens issued before the user's latest password hash."""
+
+    def validate(self, attrs):
+        token = RefreshToken(attrs["refresh"])
+        user_id = token.get("user_id")
+        user = (
+            get_user_model()
+            .objects.filter(pk=user_id, is_active=True)
+            .only("password")
+            .first()
+        )
+        if not user or token.get("hash_password") != get_md5_hash_password(
+            user.password
+        ):
+            raise AuthenticationFailed(
+                "令牌已因密码变更而失效。", code="password_changed"
+            )
+        return super().validate(attrs)
+
+
+class TokenRefreshView(BaseTokenRefreshView):
+    serializer_class = PasswordRevokingTokenRefreshSerializer

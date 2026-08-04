@@ -57,6 +57,7 @@ from .services import (
     unlock_period,
 )
 from .services.dashboard import build_warehouse_overview_payload
+from .services.ledger import financial_ledger_accruals
 
 
 def _require_billing_perm(request, perm_codename: str):
@@ -273,12 +274,16 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
         recent_limit = int(recent_limit_raw) if recent_limit_raw.isdigit() else 10
         recent_limit = max(1, min(recent_limit, 50))
 
-        base_accrual_qs = self._scope_dashboard_queryset(
-            BillingAccrual.objects.select_related("owner", "warehouse", "period", "rule", "event", "created_by")
-            .filter(is_reversal=False)
-            .exclude(status=AccrualStatus.VOID),
+        scoped_accrual_qs = self._scope_dashboard_queryset(
+            BillingAccrual.objects.select_related(
+                "owner", "warehouse", "period", "rule", "event", "created_by"
+            ),
             scope=scope,
         )
+        base_accrual_qs = scoped_accrual_qs.filter(is_reversal=False).exclude(
+            status=AccrualStatus.VOID
+        )
+        ledger_accrual_qs = financial_ledger_accruals(scoped_accrual_qs)
         base_bill_qs = self._scope_dashboard_queryset(
             Bill.objects.select_related("owner", "warehouse", "period")
             .prefetch_related("lines")
@@ -298,6 +303,7 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
 
         if warehouse_id:
             base_accrual_qs = base_accrual_qs.filter(warehouse_id=warehouse_id)
+            ledger_accrual_qs = ledger_accrual_qs.filter(warehouse_id=warehouse_id)
             base_bill_qs = base_bill_qs.filter(warehouse_id=warehouse_id)
             option_period_qs = option_period_qs.filter(warehouse_id=warehouse_id)
             option_accrual_qs = option_accrual_qs.filter(warehouse_id=warehouse_id)
@@ -323,20 +329,25 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
 
         if owner_id:
             base_accrual_qs = base_accrual_qs.filter(owner_id=owner_id)
+            ledger_accrual_qs = ledger_accrual_qs.filter(owner_id=owner_id)
             base_bill_qs = base_bill_qs.filter(owner_id=owner_id)
 
         if charge_type:
             base_accrual_qs = base_accrual_qs.filter(charge_type=charge_type)
+            ledger_accrual_qs = ledger_accrual_qs.filter(charge_type=charge_type)
 
         if accrual_status:
             base_accrual_qs = base_accrual_qs.filter(status=accrual_status)
+            ledger_accrual_qs = ledger_accrual_qs.filter(status=accrual_status)
 
         if date_from:
             base_accrual_qs = base_accrual_qs.filter(service_date__gte=date_from)
+            ledger_accrual_qs = ledger_accrual_qs.filter(service_date__gte=date_from)
             base_bill_qs = base_bill_qs.filter(period__end_date__gte=date_from)
 
         if date_to:
             base_accrual_qs = base_accrual_qs.filter(service_date__lte=date_to)
+            ledger_accrual_qs = ledger_accrual_qs.filter(service_date__lte=date_to)
             base_bill_qs = base_bill_qs.filter(period__start_date__lte=date_to)
 
         scope_owner_id = owner_id or (
@@ -357,6 +368,7 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
 
         payload = build_warehouse_overview_payload(
             accrual_qs=base_accrual_qs,
+            ledger_accrual_qs=ledger_accrual_qs,
             bill_qs=base_bill_qs,
             recent_limit=recent_limit,
         )

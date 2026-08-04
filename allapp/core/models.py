@@ -332,13 +332,16 @@ class DocSequenceManager(models.Manager):
             except DocSequence.DoesNotExist:
                 # 并发下可能同时创建，撞唯一约束就回读锁行
                 try:
-                    row = self.create(
-                        doc_type=doc_type,
-                        biz_date=biz_date,
-                        warehouse=warehouse,
-                        owner=owner,
-                        next_no=1,
-                    )
+                    # The savepoint keeps the outer transaction usable when
+                    # another request wins the first-row insert race.
+                    with transaction.atomic():
+                        row = self.create(
+                            doc_type=doc_type,
+                            biz_date=biz_date,
+                            warehouse=warehouse,
+                            owner=owner,
+                            next_no=1,
+                        )
                 except IntegrityError:
                     row = self.select_for_update().get(
                         doc_type=doc_type,

@@ -3,11 +3,14 @@ from __future__ import annotations
 import datetime
 from decimal import Decimal
 from io import BytesIO, StringIO
+from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from openpyxl import load_workbook
 from rest_framework.test import APIClient
 
@@ -521,6 +524,25 @@ class OperationsV2ApiTests(TestCase):
             {"V2-IN-A1-SELF", "V2-OUT-A1-SELF"},
         )
 
+    def test_detail_page_is_sorted_and_sliced_by_mysql(self):
+        with CaptureQueriesContext(connection) as captured:
+            response = self._get(
+                self.wh_manager,
+                endpoint="details",
+                page=1,
+                page_size=2,
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        data_queries = [
+            query["sql"]
+            for query in captured
+            if "UNION ALL" in query["sql"] and "LIMIT 2" in query["sql"]
+        ]
+        self.assertEqual(len(data_queries), 1, [query["sql"] for query in captured])
+        self.assertIn("ORDER BY", data_queries[0])
+        self.assertEqual(len(response.data["results"]), 2)
+
     def test_cross_scope_query_is_forbidden_but_in_scope_dimension_filter_works(self):
         forbidden = self._get(self.owner_manager, owner=self.owner_b.pk)
         self.assertEqual(forbidden.status_code, 403)
@@ -559,10 +581,42 @@ class OperationsV2ApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["X-Report-Metric-Basis"], "actual")
-        workbook = load_workbook(BytesIO(response.content), read_only=True)
+        workbook = load_workbook(
+            BytesIO(b"".join(response.streaming_content)),
+            read_only=True,
+        )
         rows = list(workbook["operations"].iter_rows(values_only=True))
         self.assertEqual(len(rows), 7)  # header + three receive + three dispatch facts
         self.assertNotIn("Owner V2 B", {row[6] for row in rows[1:]})
+
+    def test_export_rejects_result_sets_over_the_contract_limit(self):
+        payload = {
+            "start_date": self.day.isoformat(),
+            "end_date": self.day.isoformat(),
+            "direction": "all",
+            "metric_basis": "actual",
+        }
+        client = APIClient()
+        client.force_authenticate(self.owner_manager)
+
+        with patch(
+            "allapp.reports.views_operations.OperationsExportApi.max_rows",
+            1,
+        ), patch(
+            "allapp.reports.views_operations.Workbook"
+        ) as workbook:
+            response = client.post(
+                "/api/reports/v2/operations/exports/",
+                payload,
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 413)
+        workbook.assert_not_called()
+        self.assertEqual(
+            response.data["detail"],
+            "Export is limited to 1 rows; narrow the filters.",
+        )
 
     def test_documented_slashless_paths_do_not_redirect_or_drop_post_bodies(self):
         client = APIClient()
