@@ -8,6 +8,11 @@
 
     <view v-if="loading" class="loading-banner">正在同步账期和账单数据...</view>
 
+    <view v-if="periodsError" class="error-card">
+      <view>{{ periodsError }}</view>
+      <button class="retry-btn" :disabled="periodsLoading" @click="refreshAll">重试加载账期</button>
+    </view>
+
     <view class="filter-card">
       <view class="filter-grid">
 <!--        <picker :range="ownerPickerOptions" range-key="label" :value="ownerPickerIndex" @change="onOwnerChange">
@@ -45,9 +50,9 @@
       <button class="refresh-btn" @click="refreshAll">刷新</button>
     </view>
 
-    <view v-if="!periods.length && !loading" class="empty-card">
+    <view v-if="!periods.length && !loading && !periodsError" class="empty-card">
       <view class="empty-title">还没有可展示的账期</view>
-      <view class="empty-desc">先创建 BillingPeriod 并生成应计或账单，这里才会展示管理层可看的结果。</view>
+      <view class="empty-desc">当前筛选范围还没有已创建的账期。</view>
     </view>
 
     <template v-else-if="selectedPeriod">
@@ -63,6 +68,11 @@
           <text>{{ selectedPeriod.start_date }} 至 {{ selectedPeriod.end_date }}</text>
           <text>{{ previewScopeText }}</text>
         </view>
+      </view>
+
+      <view v-if="periodDataError" class="error-card">
+        <view>{{ periodDataError }}</view>
+        <button class="retry-btn" :disabled="periodLoading" @click="loadSelectedPeriodData">重试加载当前账期</button>
       </view>
 
       <view class="kpi-grid">
@@ -201,7 +211,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
+import { onLoad, onPullDownRefresh, onUnload } from '@dcloudio/uni-app'
 import { api, fetchAllPages } from '@/utils/request'
 
 const CHARGE_TYPE_LABELS = {
@@ -238,7 +248,10 @@ const ACCRUAL_STATUS_LABELS = {
   VOID: '作废',
 }
 
-const loading = ref(false)
+const periodsLoading = ref(false)
+const periodLoading = ref(false)
+const periodsError = ref('')
+const periodDataError = ref('')
 const periods = ref([])
 const preview = ref(null)
 const currentBill = ref(null)
@@ -247,6 +260,18 @@ const recentAccruals = ref([])
 const selectedOwnerId = ref('')
 const selectedWarehouseId = ref('')
 const selectedPeriodId = ref('')
+
+const loading = computed(() => periodsLoading.value || periodLoading.value)
+
+let alive = true
+let periodsGeneration = 0
+let periodDataGeneration = 0
+
+onUnload(() => {
+  alive = false
+  periodsGeneration += 1
+  periodDataGeneration += 1
+})
 
 function asList(payload) {
   if (Array.isArray(payload)) return payload
@@ -359,7 +384,7 @@ const periodPickerIndex = computed(() => {
 const summary = computed(() => {
   const subtotal = toNumber(preview.value?.subtotal)
   const taxTotal = toNumber(preview.value?.tax_total)
-  const total = currentBill.value ? toNumber(currentBill.value.total) : subtotal + taxTotal
+  const total = toNumber(preview.value?.total)
   return {
     accrualCount: Number(preview.value?.accrual_count || 0),
     subtotal,
@@ -383,7 +408,7 @@ const chargeRows = computed(() => {
       accrualCount: Number(item.accrual_count || 0),
       subtotal,
       taxTotal,
-      total: subtotal + taxTotal,
+      total: toNumber(item.total),
     }
   })
   return rows.sort((a, b) => b.total - a.total)
@@ -397,7 +422,9 @@ const statusRows = computed(() => {
       status: item.status,
       label: accrualStatusLabel(item.status),
       accrualCount: Number(item.accrual_count || 0),
-      total: subtotal + taxTotal,
+      subtotal,
+      taxTotal,
+      total: toNumber(item.total),
     }
   })
 })
@@ -409,7 +436,9 @@ const trendRows = computed(() => {
     return {
       serviceDate: item.service_date,
       accrualCount: Number(item.accrual_count || 0),
-      total: subtotal + taxTotal,
+      subtotal,
+      taxTotal,
+      total: toNumber(item.total),
     }
   })
 
@@ -424,6 +453,22 @@ function clearPeriodPayload() {
   preview.value = null
   currentBill.value = null
   recentAccruals.value = []
+}
+
+function selectionKey(period = selectedPeriod.value) {
+  if (!period) return ''
+  return [
+    period.id,
+    period.owner,
+    period.warehouse,
+    selectedOwnerId.value,
+    selectedWarehouseId.value,
+    selectedPeriodId.value,
+  ].map((value) => String(value ?? '')).join(':')
+}
+
+function requestErrorMessage(error, fallback) {
+  return error?.data?.detail || error?.message || fallback
 }
 
 function ensureSelectedPeriod() {
@@ -463,36 +508,58 @@ function buildAccrualParams(period) {
 
 async function loadSelectedPeriodData() {
   if (!selectedPeriod.value) {
+    periodDataGeneration += 1
+    periodDataError.value = ''
     clearPeriodPayload()
     return
   }
 
-  loading.value = true
+  const period = { ...selectedPeriod.value }
+  const snapshot = selectionKey(period)
+  const generation = ++periodDataGeneration
+  periodDataLoadingStart()
+  clearPeriodPayload()
   try {
-    const period = selectedPeriod.value
     const [previewRes, billsRes, accrualsRes] = await Promise.all([
       api.billingPeriodPreview(period.id),
       api.billingBills({ period: period.id, page: 1, page_size: 1 }),
       api.billingAccruals({ ...buildAccrualParams(period), page: 1, page_size: 10 }),
     ])
 
+    if (!alive || generation !== periodDataGeneration || snapshot !== selectionKey()) return
+
     preview.value = previewRes || null
     const bills = asList(billsRes)
     currentBill.value = bills.length ? bills[0] : null
     recentAccruals.value = asList(accrualsRes).slice(0, 10)
+    periodDataError.value = ''
   } catch (error) {
-    clearPeriodPayload()
-    console.error('load billing overview failed:', error)
+    if (alive && generation === periodDataGeneration && snapshot === selectionKey()) {
+      clearPeriodPayload()
+      periodDataError.value = requestErrorMessage(error, '当前账期加载失败，请稍后重试')
+    }
   } finally {
-    loading.value = false
-    uni.stopPullDownRefresh()
+    if (alive && generation === periodDataGeneration && snapshot === selectionKey()) {
+      periodLoading.value = false
+      uni.stopPullDownRefresh && uni.stopPullDownRefresh()
+    }
   }
 }
 
+function periodDataLoadingStart() {
+  periodLoading.value = true
+  periodDataError.value = ''
+}
+
 async function refreshAll() {
-  loading.value = true
+  const generation = ++periodsGeneration
+  periodDataGeneration += 1
+  periodsLoading.value = true
+  periodLoading.value = false
+  periodsError.value = ''
   try {
     const list = await fetchAllPages(api.billingPeriods)
+    if (!alive || generation !== periodsGeneration) return
     periods.value = list
 
     if (selectedOwnerId.value && !ownerPickerOptions.value.some((item) => String(item.id) === String(selectedOwnerId.value))) {
@@ -506,12 +573,14 @@ async function refreshAll() {
     if (!ensureSelectedPeriod()) return
     await loadSelectedPeriodData()
   } catch (error) {
-    periods.value = []
-    clearPeriodPayload()
-    console.error('refresh billing periods failed:', error)
+    if (alive && generation === periodsGeneration) {
+      periodsError.value = requestErrorMessage(error, '账期列表加载失败，请稍后重试')
+    }
   } finally {
-    loading.value = false
-    uni.stopPullDownRefresh()
+    if (alive && generation === periodsGeneration) {
+      periodsLoading.value = false
+      uni.stopPullDownRefresh && uni.stopPullDownRefresh()
+    }
   }
 }
 
@@ -523,6 +592,7 @@ async function onOwnerChange(event) {
     selectedWarehouseId.value = ''
   }
 
+  periodDataError.value = ''
   if (!ensureSelectedPeriod()) return
   await loadSelectedPeriodData()
 }
@@ -531,6 +601,7 @@ async function onWarehouseChange(event) {
   const next = warehousePickerOptions.value[Number(event.detail.value)]
   selectedWarehouseId.value = next?.id || ''
 
+  periodDataError.value = ''
   if (!ensureSelectedPeriod()) return
   await loadSelectedPeriodData()
 }
@@ -538,6 +609,7 @@ async function onWarehouseChange(event) {
 async function onPeriodChange(event) {
   const next = periodPickerOptions.value[Number(event.detail.value)]
   selectedPeriodId.value = next?.id || ''
+  periodDataError.value = ''
   await loadSelectedPeriodData()
 }
 
@@ -626,6 +698,24 @@ onPullDownRefresh(() => {
   background: rgba(11, 95, 255, 0.08);
   color: #0b5fff;
   font-size: 24rpx;
+}
+
+.error-card {
+  margin-bottom: 18rpx;
+  padding: 22rpx;
+  color: #b42318;
+  text-align: center;
+  background: #fff7ed;
+  border: 1rpx solid #fed7aa;
+  border-radius: 20rpx;
+}
+
+.retry-btn {
+  width: auto;
+  min-height: 80rpx;
+  margin-top: 14rpx;
+  color: #9a3412;
+  background: #fff;
 }
 
 .filter-card,

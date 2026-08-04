@@ -7,7 +7,7 @@ export default defineConfig({
     template: {
       compilerOptions: {
         isCustomElement: (tag) => [
-          'view', 'text', 'scroll-view', 'radio-group', 'radio', 'image',
+          'view', 'text', 'scroll-view', 'radio-group', 'radio', 'image', 'picker',
         ].includes(tag),
       },
     },

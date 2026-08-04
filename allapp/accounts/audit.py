@@ -10,6 +10,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.forms.models import model_to_dict
 
+from .client_ip import get_client_ip
 from .models import AuditEvent
 
 
@@ -30,12 +31,7 @@ def object_snapshot(obj) -> dict:
 def _client_ip(request):
     if request is None:
         return None
-    forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    return (
-        forwarded.split(",", 1)[0].strip()
-        if forwarded
-        else request.META.get("REMOTE_ADDR")
-    ) or None
+    return get_client_ip(request)
 
 
 def record_audit_event(

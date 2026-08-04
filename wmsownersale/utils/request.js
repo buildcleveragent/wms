@@ -337,12 +337,20 @@ export const api = {
       url: '/api/token/',
       method: 'POST',
       data: { username, password },
+      silent: true,
     }),
 
   authProfile: () =>
     request({
       url: '/api/auth/profile/',
     }),
+
+  // Validate a just-issued access token without mutating the persisted session.
+  authProfileWithAccess: (access) =>
+    rawRequest({
+      url: '/api/auth/profile/',
+      silent: true,
+    }, access),
 
   logout: () => request({
     url: '/api/auth/logout/',

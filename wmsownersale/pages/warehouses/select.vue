@@ -4,20 +4,23 @@
     <view class="hint">商品库存和订单履约将按所选仓库计算。</view>
 
     <view v-if="loading" class="state">正在加载仓库…</view>
-    <view v-else-if="errorMessage" class="state error">{{ errorMessage }}</view>
+    <view v-else-if="errorMessage" class="state error">
+      <view>{{ errorMessage }}</view>
+      <button class="retry-button" @click="loadWarehouses">重试</button>
+    </view>
     <view v-else-if="!warehouses.length" class="state empty">
       当前货主未配置可用出库仓库，请联系管理员
     </view>
 
-    <view
+    <button
       v-for="warehouse in warehouses"
       :key="warehouse.id"
-      class="card"
+      class="warehouse-card"
       @click="choose(warehouse)"
     >
       <view class="name">{{ warehouse.name }}</view>
       <view class="code">仓库编码：{{ warehouse.code }}</view>
-    </view>
+    </button>
   </view>
 </template>
 
@@ -34,13 +37,27 @@ const warehouses = ref([])
 const loading = ref(true)
 const errorMessage = ref('')
 let choosing = false
-let editing = false
+let mode = 'create'
+let returnTo = 'products'
+
+function safeMode(value) {
+  return value === 'change' ? 'change' : 'create'
+}
+
+function safeReturnTo(value) {
+  return value === 'cart' ? 'cart' : 'products'
+}
 
 function choose(warehouse) {
   if (choosing || !warehouse?.id) return
   choosing = true
-  if (editing && cart.editing_order_id) {
-    cart.changeWarehouseForEdit(warehouse)
+  if (mode === 'change') {
+    const changed = cart.changeWarehouse(warehouse)
+    if (!changed) {
+      choosing = false
+      uni.showToast({ title: '订单上下文已失效，请重新开单', icon: 'none' })
+      return
+    }
   } else {
     cart.beginOrder({
       user_id: auth.user?.id,
@@ -48,7 +65,9 @@ function choose(warehouse) {
       warehouse,
     })
   }
-  uni.redirectTo({ url: '/pages/customers/select' })
+  uni.redirectTo({
+    url: `/pages/customers/select?mode=${mode}&returnTo=${returnTo}`,
+  })
 }
 
 async function loadWarehouses() {
@@ -64,7 +83,7 @@ async function loadWarehouses() {
   try {
     const response = await api.warehouses()
     warehouses.value = Array.isArray(response) ? response : []
-    if (warehouses.value.length === 1) choose(warehouses.value[0])
+    if (warehouses.value.length === 1 && mode === 'create') choose(warehouses.value[0])
   } catch (error) {
     errorMessage.value = error?.message || '加载可用仓库失败，请稍后重试'
   } finally {
@@ -73,7 +92,8 @@ async function loadWarehouses() {
 }
 
 onLoad((query) => {
-  editing = query?.edit === '1'
+  mode = safeMode(query?.mode)
+  returnTo = safeReturnTo(query?.returnTo)
   loadWarehouses()
 })
 </script>
@@ -85,7 +105,23 @@ onLoad((query) => {
 .state { padding: 48rpx 24rpx; text-align: center; color: #6b7280; }
 .error { color: #b91c1c; }
 .empty { background: #fff7ed; color: #9a3412; border-radius: 16rpx; }
-.card { margin-bottom: 20rpx; padding: 28rpx; background: #fff; border: 1rpx solid #e5e7eb; border-radius: 16rpx; }
+.warehouse-card {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 88rpx;
+  margin: 0 0 20rpx;
+  padding: 28rpx;
+  font-size: inherit;
+  line-height: 1.4;
+  text-align: left;
+  color: inherit;
+  background: #fff;
+  border: 1rpx solid #e5e7eb;
+  border-radius: 16rpx;
+}
+.warehouse-card::after { border: 0; }
+.retry-button { width: 220rpx; min-height: 88rpx; margin-top: 20rpx; color: #2563eb; background: #fff; border: 1rpx solid #2563eb; }
 .name { font-size: 32rpx; font-weight: 600; color: #111827; }
 .code { margin-top: 10rpx; color: #6b7280; font-size: 26rpx; }
 </style>

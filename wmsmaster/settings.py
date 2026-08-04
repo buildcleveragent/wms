@@ -73,6 +73,32 @@ def _validated_choice(name, value, allowed):
     return normalized
 
 
+def _validated_login_rate(name, default):
+    """Return a DRF-style positive rate while failing closed on bad config."""
+
+    value = env(name, default=default).strip().lower()
+    try:
+        count, period = value.split("/", 1)
+        if int(count) <= 0 or period not in {
+            "s",
+            "sec",
+            "second",
+            "m",
+            "min",
+            "minute",
+            "h",
+            "hour",
+            "d",
+            "day",
+        }:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ImproperlyConfigured(
+            f"{name} 必须是正整数/时间单位，例如 5/min。"
+        ) from None
+    return value
+
+
 APP_ENV = _detect_app_env()
 if APP_ENV not in {"development", "test", "production"}:
     raise ImproperlyConfigured("APP_ENV 必须是 development、test 或 production。")
@@ -137,6 +163,15 @@ if ENABLE_DEBUG_TOOLBAR:
     INSTALLED_APPS.insert(0, "debug_toolbar")
 
 AUTH_USER_MODEL = "accounts.User"
+
+LOGIN_USERNAME_IP_RATE = _validated_login_rate(
+    "LOGIN_USERNAME_IP_RATE", "5/min"
+)
+LOGIN_IP_RATE = _validated_login_rate("LOGIN_IP_RATE", "30/min")
+LOGIN_TRUSTED_PROXY_COUNT = env.int("LOGIN_TRUSTED_PROXY_COUNT", default=0)
+if LOGIN_TRUSTED_PROXY_COUNT < 0:
+    raise ImproperlyConfigured("LOGIN_TRUSTED_PROXY_COUNT 不能小于 0。")
+LOGIN_THROTTLE_CACHE_ALIAS = "login_throttle"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -315,6 +350,19 @@ DATABASES = {
         "OPTIONS": db_options,
         "TEST": db_test,
     }
+}
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "wms-default",
+    },
+    LOGIN_THROTTLE_CACHE_ALIAS: {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "wms_login_throttle_cache",
+        "TIMEOUT": 60,
+        "OPTIONS": {"MAX_ENTRIES": 100000},
+    },
 }
 
 

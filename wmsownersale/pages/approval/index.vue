@@ -12,6 +12,12 @@
       <button class="btn" @click="search">搜索</button>
     </view>
 
+    <view v-if="loading && !rows.length" class="state-card">正在加载订单…</view>
+    <view v-else-if="error && !rows.length" class="state-card error-state">
+      <view>{{ error }}</view>
+      <button class="btn retry-btn" @click="reload">重试</button>
+    </view>
+
     <view
       v-for="(o, i) in rows"
       :key="o?.id ?? i"
@@ -22,12 +28,12 @@
         <view class="font-bold">{{ o.order_no || ('#' + o.id) }}</view>
         <view class="badge">{{ statusText(o) }}</view>
       </view>
-      <view class="text-gray">客户：{{ o.customer_name || o.customer_id }}</view>
+      <view class="text-gray">客户：{{ o.customer_name || '—' }}</view>
       <view class="text-gray">数量：{{ o.total_qty ?? '—' }} · 金额：¥ {{ o.total_amount ?? 0 }}</view>
       <view class="text-gray">业务日期：{{ o.biz_date }}</view>
 
       <view class="row mt-2">
-        <template v-if="tab === 'PENDING'">
+        <template v-if="canReviewRow(o)">
           <button class="btn btn-sm" :disabled="reviewing" @click.stop="approve(o.id)">审核通过</button>
           <button class="btn btn-sm" :disabled="reviewing" @click.stop="goApproveDetail(o)">填写原因并退回</button>
           <button class="btn btn-sm" :disabled="reviewing" @click.stop="cancel(o.id)">取消订单</button>
@@ -38,11 +44,18 @@
       </view>
     </view>
 
-    <view class="row" v-if="list.next" style="margin-top:16rpx">
-      <button class="btn" @click="loadMore">加载更多</button>
+    <view v-if="error && rows.length" class="state-card error-state">
+      <view>{{ error }}</view>
+      <button class="btn retry-btn" @click="retryCurrentPage">重试加载</button>
     </view>
 
-    <view v-if="!rows.length && !loading" class="text-gray mt-4">暂无数据</view>
+    <view class="row" v-if="list.next && !error" style="margin-top:16rpx">
+      <button class="btn" :disabled="loading" @click="loadMore">
+        {{ loading ? '正在加载…' : '加载更多' }}
+      </button>
+    </view>
+
+    <view v-if="!rows.length && !loading && !error" class="text-gray mt-4">暂无数据</view>
   </view>
 </template>
 
@@ -65,6 +78,8 @@ const list = ref({ count: 0, next: null, previous: null, results: [] })
 const rows = computed(() => list.value.results || [])
 const page = ref(1)
 const loading = ref(false)
+const error = ref('')
+const failedPage = ref(null)
 const firstShow = ref(true)
 
 let alive = true
@@ -104,11 +119,18 @@ function queryParams(pageNo = 1) {
   }
 }
 
-async function fetch(pageNo = 1) {
+async function fetch(pageNo = 1, { reset = false } = {}) {
   const tag = ++reqSeq
+  const params = queryParams(pageNo)
+  if (reset) {
+    list.value = { count: 0, next: null, previous: null, results: [] }
+    page.value = 1
+  }
+  error.value = ''
+  failedPage.value = null
   loading.value = true
   try {
-    const res = await api.orders(queryParams(pageNo))
+    const res = await api.orders(params)
     if (!alive || tag !== reqSeq) return
 
     const normalized = normalize(res)
@@ -117,11 +139,18 @@ async function fetch(pageNo = 1) {
     } else {
       list.value = {
         ...normalized,
-        results: [...(list.value.results || []), ...normalized.results],
+        results: Array.from(new Map([
+          ...(list.value.results || []),
+          ...normalized.results,
+        ].map((row) => [String(row.id), row])).values()),
       }
     }
+    page.value = pageNo
   } catch (e) {
-    uni.showToast({ title: e?.data?.detail || '加载失败', icon: 'none' })
+    if (alive && tag === reqSeq) {
+      error.value = e?.data?.detail || e?.message || '订单加载失败，请稍后重试'
+      failedPage.value = pageNo
+    }
   } finally {
     if (alive && tag === reqSeq) {
       loading.value = false
@@ -131,19 +160,20 @@ async function fetch(pageNo = 1) {
 }
 
 async function search() {
-  page.value = 1
-  await fetch(1)
+  await fetch(1, { reset: true })
 }
 
 async function reload() {
-  page.value = 1
-  await fetch(1)
+  await fetch(1, { reset: true })
 }
 
 async function loadMore() {
   if (!list.value.next || loading.value) return
-  page.value += 1
-  await fetch(page.value)
+  await fetch(page.value + 1)
+}
+
+async function retryCurrentPage() {
+  await fetch(failedPage.value || page.value + 1)
 }
 
 function switchTab(nextTab) {
@@ -153,12 +183,20 @@ function switchTab(nextTab) {
 }
 
 function statusText(o) {
-  return o.approval_status_display || ({
+  return o.approval_status_name || ({
     OWNER_PENDING: '待审核',
     OWNER_APPROVED: '已通过',
     OWNER_REJECTED: '待修改',
     CANCELLED: '已取消',
   }[o.approval_status] || '—')
+}
+
+function canReviewRow(order) {
+  return Boolean(
+    order?.can_owner_review &&
+    String(order?.submit_status || '') === 'SUBMITTED' &&
+    String(order?.approval_status || '') === 'OWNER_PENDING'
+  )
 }
 
 async function approve(orderId) {
@@ -202,4 +240,7 @@ onShow(() => {
 .tab.active{ border-color: #333; }
 .mt-2{ margin-top: 12rpx; }
 .btn-sm{ padding: 10rpx 20rpx; font-size: 24rpx; border-radius: 8rpx; }
+.state-card{ margin: 24rpx 0; padding: 36rpx 24rpx; text-align: center; color: #6b7280; }
+.error-state{ color: #b42318; background: #fff7ed; border-radius: 12rpx; }
+.retry-btn{ width: auto; margin-top: 16rpx; }
 </style>

@@ -58,6 +58,12 @@ class StandardOrderIdempotencyTests(TestCase):
             code="IDEM-CUSTOMER-2",
             name="Other Idempotency Customer",
         )
+        self.other_actor_customer = Customer.objects.create(
+            owner=self.owner,
+            salesperson=self.other_user,
+            code="IDEM-CUSTOMER-ACTOR-2",
+            name="Other Actor Customer",
+        )
         self.other_product = Product.objects.create(
             owner=self.owner,
             code="IDEM-SKU-2",
@@ -239,7 +245,9 @@ class StandardOrderIdempotencyTests(TestCase):
     def test_same_key_is_scoped_to_the_authenticated_salesperson(self):
         key = "order-actor-scope-0001"
         first = self.create(self.payload(), key=key, user=self.user)
-        second = self.create(self.payload(), key=key, user=self.other_user)
+        second_payload = self.payload()
+        second_payload["customer_id"] = self.other_actor_customer.id
+        second = self.create(second_payload, key=key, user=self.other_user)
 
         self.assertEqual(first.status_code, 201, first.data)
         self.assertEqual(second.status_code, 201, second.data)

@@ -13,13 +13,13 @@
 		</view>
 		<view v-else-if="!rows.length" class="customer-state">没有符合条件的客户</view>
 
-		<view v-for="(c,i) in rows" :key="c?.id ?? i" class="card" @click="choose(c)">
+		<button v-for="(c,i) in rows" :key="c?.id ?? i" class="customer-card" @click="choose(c)">
 			<view class="row">
 				<view class="font-bold">{{ c?.name }}</view>
 				<view class="badge">ID: {{ c?.id }}</view>
 			</view>
 			<view class="text-gray">{{ c?.code }}</view>
-		</view>
+		</button>
 		<view v-if="loadingMore" class="customer-state">正在加载更多…</view>
 		<view v-else-if="error && rows.length" class="customer-state error-state">
 			<view>{{ error }}</view>
@@ -50,7 +50,17 @@ const error = ref('')
 // ---- 存活守卫：避免离开页面后回写 UI ----
 let alive = true
 let reqSeq = 0
+let mode = 'create'
+let returnTo = 'products'
 onUnload(() => { alive = false; reqSeq++ })   // 页面销毁：让未归来的请求结果作废
+
+function safeMode(value) {
+  return value === 'change' ? 'change' : 'create'
+}
+
+function safeReturnTo(value) {
+  return value === 'cart' ? 'cart' : 'products'
+}
 
 function normalize(res){
   return Array.isArray(res)
@@ -108,11 +118,16 @@ function choose(c){
     return
   }
   alive = false; reqSeq++
-  // 用 redirectTo 可减少历史栈干扰
+  if (mode === 'change' && returnTo === 'cart') {
+    uni.navigateBack({ delta: 1 })
+    return
+  }
   uni.redirectTo({ url: '/pages/products/search' })
 }
 
-onLoad(() => {
+onLoad((query) => {
+  mode = safeMode(query?.mode)
+  returnTo = safeReturnTo(query?.returnTo)
   auth.ensureAuth()
   if (!cart.hasContextForUser(auth.user?.id, auth.user?.owner_id)) {
     cart.resetOrder()
@@ -128,4 +143,20 @@ onReachBottom(() => { loadMore() })
 .customer-state { padding: 36rpx 12rpx; color: #6b7280; text-align: center; }
 .error-state { color: #b42318; }
 .error-state button { width: auto; margin-top: 18rpx; }
+.customer-card {
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 88rpx;
+	margin: 0 0 20rpx;
+	padding: 24rpx;
+	font-size: inherit;
+	line-height: 1.4;
+	text-align: left;
+	color: inherit;
+	background: #fff;
+	border: 1rpx solid #e5e7eb;
+	border-radius: 16rpx;
+}
+.customer-card::after { border: 0; }
 </style>

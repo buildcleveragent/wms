@@ -1,58 +1,82 @@
-const CENTS = 100
+const PRICE_SCALE = 4
 
-function optionalNumber(value) {
-  if (value === null || value === undefined || value === '') return null
-  const number = Number(value)
-  return Number.isFinite(number) ? number : null
-}
-
-function configuredNumber(value, label) {
-  if (value === null || value === undefined || value === '') return null
-  const number = Number(value)
-  if (!Number.isFinite(number)) throw new RangeError(`${label}配置不正确`)
-  return number
-}
-
-function ceilToCent(value) {
-  return Math.ceil((value - Number.EPSILON) * CENTS) / CENTS
-}
-
-export function calculateMinimumSalePrice(origPrice, productMinPrice, maxDiscount) {
-  const original = optionalNumber(origPrice)
-  const configuredMinimum = configuredNumber(productMinPrice, '商品最低价')
-  const discount = configuredNumber(maxDiscount, '最高折扣')
-  const candidates = []
-
-  if (configuredMinimum !== null) {
-    if (configuredMinimum < 0) throw new RangeError('商品最低价不能小于 0')
-    candidates.push(configuredMinimum)
+function incrementDigits(digits) {
+  const chars = digits.split('')
+  for (let index = chars.length - 1; index >= 0; index -= 1) {
+    if (chars[index] !== '9') {
+      chars[index] = String(Number(chars[index]) + 1)
+      return chars.join('')
+    }
+    chars[index] = '0'
   }
+  return `1${chars.join('')}`
+}
 
-  if (discount !== null) {
-    if (discount < 0 || discount > 100) throw new RangeError('最高折扣必须在 0 到 100 之间')
-    if (original === null || original < 0) throw new RangeError('商品原价配置不正确')
-    candidates.push(original * (100 - discount) / 100)
+function parseDecimal(value, { round = false } = {}) {
+  if (value === null || value === undefined || value === '') return null
+  const source = String(value).trim()
+  const match = source.match(/^\+?(\d+)(?:\.(\d*))?$/)
+  if (!match) return null
+
+  const whole = match[1].replace(/^0+(?=\d)/, '') || '0'
+  const fraction = match[2] || ''
+  if (!round && fraction.length > PRICE_SCALE) return null
+
+  let scaled = `${whole}${fraction.slice(0, PRICE_SCALE).padEnd(PRICE_SCALE, '0')}`
+    .replace(/^0+(?=\d)/, '') || '0'
+  if (round && fraction.length > PRICE_SCALE && Number(fraction[PRICE_SCALE]) >= 5) {
+    scaled = incrementDigits(scaled)
   }
+  return scaled
+}
 
-  return candidates.length ? ceilToCent(Math.max(...candidates)) : null
+function compareScaled(left, right) {
+  const normalizedLeft = left.replace(/^0+(?=\d)/, '')
+  const normalizedRight = right.replace(/^0+(?=\d)/, '')
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return normalizedLeft.length > normalizedRight.length ? 1 : -1
+  }
+  if (normalizedLeft === normalizedRight) return 0
+  return normalizedLeft > normalizedRight ? 1 : -1
+}
+
+function formatScaled(scaled) {
+  const padded = scaled.padStart(PRICE_SCALE + 1, '0')
+  const splitAt = padded.length - PRICE_SCALE
+  return `${padded.slice(0, splitAt)}.${padded.slice(splitAt)}`
+}
+
+export function normalizePrice4(value) {
+  const scaled = parseDecimal(value, { round: true })
+  return scaled === null ? null : formatScaled(scaled)
+}
+
+export function comparePrice4(left, right) {
+  const leftScaled = parseDecimal(left)
+  const rightScaled = parseDecimal(right)
+  if (leftScaled === null || rightScaled === null) return null
+  return compareScaled(leftScaled, rightScaled)
 }
 
 export function initializePriceGuard(item) {
-  const currentPrice = optionalNumber(item.price)
-  const existingOriginal = optionalNumber(item.orig_price)
-  item.orig_price = existingOriginal !== null ? existingOriginal : (currentPrice ?? 0)
-
-  try {
-    item.min_price = calculateMinimumSalePrice(
-      item.orig_price,
-      item.product_min_price,
-      item.max_discount
-    )
-    item.price_rule_error = ''
-  } catch (error) {
+  const serverMinimum = item.minimum_sale_price ?? item.min_price
+  if (serverMinimum === null || serverMinimum === undefined || serverMinimum === '') {
+    item.minimum_sale_price = null
     item.min_price = null
-    item.price_rule_error = error?.message || '商品价格配置不正确'
+    item.price_rule_error = ''
+    return item
   }
+
+  const minimum = normalizePrice4(serverMinimum)
+  if (minimum === null) {
+    item.min_price = null
+    item.price_rule_error = '服务端最低价配置不正确'
+    return item
+  }
+
+  item.minimum_sale_price = minimum
+  item.min_price = Number(minimum)
+  item.price_rule_error = ''
   return item
 }
 
@@ -62,25 +86,46 @@ export function enforceMinimumPrice(item) {
     return { valid: false, adjusted: false, error: item.price_rule_error }
   }
 
-  const minimum = item.min_price
-  const value = optionalNumber(item.price)
-  if (value === null || value <= 0) {
-    if (minimum !== null && minimum > 0) item.price = minimum
-    return { valid: false, adjusted: minimum !== null, minimum, error: '成交价必须大于 0' }
-  }
-  if (minimum !== null && value < minimum) {
-    item.price = minimum
-    return { valid: false, adjusted: true, minimum, error: `单价不得低于 ¥${minimum.toFixed(2)}` }
+  const priceScaled = parseDecimal(item.price)
+  const minimum = item.minimum_sale_price
+  if (priceScaled === null) {
+    return {
+      valid: false,
+      adjusted: false,
+      minimum,
+      error: '成交价必须是大于 0 且最多四位小数的数字',
+    }
   }
 
-  item.price = Math.round((value + Number.EPSILON) * CENTS) / CENTS
+  if (compareScaled(priceScaled, '0') <= 0) {
+    if (minimum && comparePrice4(minimum, '0') > 0) item.price = Number(minimum)
+    return {
+      valid: false,
+      adjusted: Boolean(minimum),
+      minimum,
+      error: '成交价必须大于 0',
+    }
+  }
+
+  if (minimum && comparePrice4(formatScaled(priceScaled), minimum) < 0) {
+    item.price = Number(minimum)
+    return {
+      valid: false,
+      adjusted: true,
+      minimum,
+      error: `单价不得低于 ¥${minimum}`,
+    }
+  }
+
+  item.price = Number(formatScaled(priceScaled))
   return { valid: true, adjusted: false, minimum, error: '' }
 }
 
 export function isPriceAllowed(item) {
   initializePriceGuard(item)
-  const value = optionalNumber(item.price)
-  return !item.price_rule_error && value !== null && value > 0 && (
-    item.min_price === null || value >= item.min_price
-  )
+  if (item.price_rule_error) return false
+  const priceScaled = parseDecimal(item.price)
+  if (priceScaled === null || compareScaled(priceScaled, '0') <= 0) return false
+  if (!item.minimum_sale_price) return true
+  return comparePrice4(formatScaled(priceScaled), item.minimum_sale_price) >= 0
 }

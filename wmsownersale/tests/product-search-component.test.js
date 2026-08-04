@@ -117,4 +117,27 @@ describe('商品搜索分页组件', () => {
     expect(wrapper.text()).toContain('新结果')
     expect(wrapper.text()).not.toContain('旧结果')
   })
+
+  it('首次加载失败显示错误并可重试', async () => {
+    mocks.products
+      .mockRejectedValueOnce(new Error('网络不可用'))
+      .mockResolvedValueOnce({ results: [product(2, '重试结果')], next: null })
+    const wrapper = render()
+    await mocks.onLoad()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('网络不可用')
+    await wrapper.find('.retry-button').trigger('click')
+    await flushPromises()
+    expect(mocks.products).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('重试结果')
+  })
+
+  it('空结果显示明确提示', async () => {
+    mocks.products.mockResolvedValue({ results: [], next: null })
+    const wrapper = render()
+    await mocks.onLoad()
+    await flushPromises()
+    expect(wrapper.text()).toContain('没有符合条件的商品')
+  })
 })

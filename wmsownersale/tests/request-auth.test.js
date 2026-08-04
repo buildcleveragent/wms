@@ -110,4 +110,24 @@ describe('认证上传与轮换令牌', () => {
       { refresh: 'refresh-two' },
     ])
   })
+
+  it('临时 access 校验 profile 不覆盖既有会话', async () => {
+    const storage = { access: 'old-access', refresh: 'old-refresh' }
+    let authorization
+    const uni = makeUni({
+      storage,
+      onUpload: vi.fn(),
+      onRequest: (options) => {
+        authorization = options.header.Authorization
+        options.success({ statusCode: 200, data: { user: { id: 7 } } })
+      },
+    })
+    vi.stubGlobal('uni', uni)
+    const { api } = await import('@/utils/request')
+
+    await expect(api.authProfileWithAccess('temporary-access'))
+      .resolves.toEqual({ user: { id: 7 } })
+    expect(authorization).toBe('Bearer temporary-access')
+    expect(storage).toEqual({ access: 'old-access', refresh: 'old-refresh' })
+  })
 })

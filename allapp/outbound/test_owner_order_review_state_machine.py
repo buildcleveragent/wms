@@ -239,6 +239,9 @@ class OwnerOrderReviewStateMachineTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertTrue(response.data["changed"])
         self.assertTrue(response.data["updated_at"])
+        self.assertEqual(response.data["owner_name"], self.owner.name)
+        self.assertEqual(response.data["warehouse_name"], self.other_warehouse.name)
+        self.assertEqual(response.data["customer_name"], self.customer_2.name)
         order.refresh_from_db()
         self.assertEqual(order.warehouse_id, self.other_warehouse.id)
         self.assertEqual(order.customer_id, self.customer_2.id)
@@ -274,6 +277,7 @@ class OwnerOrderReviewStateMachineTests(TestCase):
         self.assertEqual(response.data["customer"]["code"], self.customer.code)
         self.assertEqual(response.data["items"][0]["product_id"], self.product.id)
         self.assertEqual(response.data["items"][0]["qty"], Decimal("1.000"))
+        self.assertEqual(response.data["items"][0]["minimum_sale_price"], "1.0000")
 
     def test_stale_update_returns_409_without_mutating_order_lines_or_audit(self):
         order = self.make_order(submit="DRAFT", approval="OWNER_PENDING")

@@ -6,6 +6,7 @@ from unittest.mock import patch
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
+from django.core.cache import caches
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -135,6 +136,137 @@ class AuthenticationAuditTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("access", response.data)
         mocked_audit.assert_called_once()
+
+
+@override_settings(PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"])
+class LoginThrottleTests(TestCase):
+    login_url = "/api/auth/login/"
+
+    def setUp(self):
+        caches["login_throttle"].clear()
+        self.client = APIClient()
+        self.user = get_user_model().objects.create_user(
+            username="throttle-user",
+            password="StrongPass123!",
+        )
+
+    def tearDown(self):
+        caches["login_throttle"].clear()
+
+    @override_settings(LOGIN_USERNAME_IP_RATE="2/min", LOGIN_IP_RATE="100/min")
+    def test_username_ip_bucket_returns_structured_429_and_safe_audit(self):
+        supplied_password = "NeverPersistThrottlePassword!"
+        for _ in range(2):
+            response = self.client.post(
+                self.login_url,
+                {"username": self.user.username, "password": supplied_password},
+                format="json",
+                REMOTE_ADDR="198.51.100.10",
+            )
+            self.assertEqual(response.status_code, 401)
+
+        throttled = self.client.post(
+            self.login_url,
+            {"username": self.user.username, "password": supplied_password},
+            format="json",
+            REMOTE_ADDR="198.51.100.10",
+        )
+
+        self.assertEqual(throttled.status_code, 429)
+        self.assertEqual(throttled.data["code"], "login_throttled")
+        self.assertGreaterEqual(throttled.data["retry_after"], 1)
+        self.assertEqual(
+            throttled.headers["Retry-After"], str(throttled.data["retry_after"])
+        )
+        event = AuditEvent.objects.get(action="LOGIN_THROTTLED")
+        self.assertEqual(event.ip_address, "198.51.100.10")
+        self.assertEqual(event.metadata["attempted_identity"], self.user.username)
+        self.assertNotIn(supplied_password, json.dumps(event.metadata))
+
+    @override_settings(LOGIN_USERNAME_IP_RATE="100/min", LOGIN_IP_RATE="2/min")
+    def test_ip_bucket_covers_different_usernames(self):
+        for username in ("first", "second"):
+            response = self.client.post(
+                self.login_url,
+                {"username": username, "password": "wrong"},
+                format="json",
+                REMOTE_ADDR="198.51.100.11",
+            )
+            self.assertEqual(response.status_code, 401)
+
+        throttled = self.client.post(
+            self.login_url,
+            {"username": "third", "password": "wrong"},
+            format="json",
+            REMOTE_ADDR="198.51.100.11",
+        )
+        self.assertEqual(throttled.status_code, 429)
+
+    @override_settings(
+        LOGIN_USERNAME_IP_RATE="100/min",
+        LOGIN_IP_RATE="2/min",
+        LOGIN_TRUSTED_PROXY_COUNT=0,
+    )
+    def test_untrusted_forwarded_for_cannot_evade_ip_bucket(self):
+        for forwarded in ("203.0.113.1", "203.0.113.2"):
+            response = self.client.post(
+                self.login_url,
+                {"username": forwarded, "password": "wrong"},
+                format="json",
+                REMOTE_ADDR="198.51.100.12",
+                HTTP_X_FORWARDED_FOR=forwarded,
+            )
+            self.assertEqual(response.status_code, 401)
+
+        throttled = self.client.post(
+            self.login_url,
+            {"username": "third", "password": "wrong"},
+            format="json",
+            REMOTE_ADDR="198.51.100.12",
+            HTTP_X_FORWARDED_FOR="203.0.113.3",
+        )
+        self.assertEqual(throttled.status_code, 429)
+        self.assertEqual(
+            AuditEvent.objects.get(action="LOGIN_THROTTLED").ip_address,
+            "198.51.100.12",
+        )
+
+    @override_settings(LOGIN_USERNAME_IP_RATE="5/min", LOGIN_IP_RATE="30/min")
+    def test_legitimate_login_remains_available_below_limit(self):
+        response = self.client.post(
+            self.login_url,
+            {"username": self.user.username, "password": "StrongPass123!"},
+            format="json",
+            REMOTE_ADDR="198.51.100.13",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access", response.data)
+
+    @override_settings(LOGIN_USERNAME_IP_RATE="1/min", LOGIN_IP_RATE="100/min")
+    def test_username_ip_bucket_recovers_after_window_expires(self):
+        with patch(
+            "allapp.accounts.throttling.LoginUsernameIPThrottle.timer",
+            return_value=1_000,
+        ):
+            first = self.client.post(
+                self.login_url,
+                {"username": "window-user", "password": "wrong"},
+                format="json",
+                REMOTE_ADDR="198.51.100.14",
+            )
+        with patch(
+            "allapp.accounts.throttling.LoginUsernameIPThrottle.timer",
+            return_value=1_061,
+        ):
+            after_window = self.client.post(
+                self.login_url,
+                {"username": "window-user", "password": "wrong"},
+                format="json",
+                REMOTE_ADDR="198.51.100.14",
+            )
+
+        self.assertEqual(first.status_code, 401)
+        self.assertEqual(after_window.status_code, 401)
 
 
 @override_settings(PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"])

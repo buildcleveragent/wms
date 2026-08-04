@@ -10,7 +10,8 @@
         <view class="badge">¥ {{ money(order.total_amount) }}</view>
       </view>
 
-      <view class="text-gray">客户：{{ order.customer_name || order.customer_id || order.customer || '—' }}</view>
+      <view class="text-gray">客户：{{ order.customer_name || '—' }}</view>
+      <view class="text-gray">仓库：{{ order.warehouse_name || '—' }}</view>
       <view class="text-gray" v-if="order.biz_date">业务日期：{{ order.biz_date }}</view>
       <view class="text-gray">业务员：{{ order.created_by_name || order.salesperson_name || order.created_by || '—' }}</view>
       <view class="text-gray">提交状态：{{ order.submit_status_name || order.submit_status || '—' }}</view>
@@ -28,9 +29,7 @@
     <view class="card" v-if="!loading && order">
       <view class="font-bold" style="margin-bottom:12rpx;">商品明细</view>
 
-      <view v-if="!lines.length" class="text-gray">
-        暂无明细。若一直为空，请确认后端订单详情接口返回 lines（/api/outbound/orders/{id}/）。
-      </view>
+      <view v-if="!lines.length" class="text-gray">暂无商品明细。</view>
 
       <view v-else>
         <view class="row font-bold" style="margin-bottom:10rpx;">

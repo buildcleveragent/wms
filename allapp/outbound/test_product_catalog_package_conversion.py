@@ -92,6 +92,9 @@ class ProductCatalogPackageConversionTests(TestCase):
         self.factory = APIRequestFactory()
 
         self.plain_product = self._product("CAT-PLAIN", "Plain Product")
+        self.plain_product.min_price = Decimal("8.1234")
+        self.plain_product.max_discount = Decimal("10.00")
+        self.plain_product.save(update_fields=["min_price", "max_discount", "updated_at"])
         self.carton_product = self._product(
             "CAT-CARTON",
             "Carton Product",
@@ -162,6 +165,9 @@ class ProductCatalogPackageConversionTests(TestCase):
         )
         self.assertIsNone(products[self.plain_product.id]["carton_unit"])
         self.assertIsNone(products[self.plain_product.id]["carton_conv"])
+        self.assertEqual(
+            products[self.plain_product.id]["minimum_sale_price"], "9.0000"
+        )
         self.assertEqual(products[self.carton_product.id]["carton_unit"], "CATBOX")
         self.assertEqual(products[self.carton_product.id]["carton_conv"], 12)
         self.assertEqual(

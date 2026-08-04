@@ -341,3 +341,16 @@ class AuditEvent(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("AuditEvent is append-only and cannot be deleted.")
+
+
+class LoginThrottleCacheEntry(models.Model):
+    """Schema owned by Django's database cache login-throttle alias."""
+
+    cache_key = models.CharField(max_length=255, primary_key=True)
+    value = models.TextField()
+    expires = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = "wms_login_throttle_cache"
+        verbose_name = "登录限流缓存"
+        verbose_name_plural = "登录限流缓存"

@@ -672,34 +672,47 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
             )
         return base_qs.filter(period=period)
 
+    @staticmethod
+    def _preview_group_totals(qs, *group_fields):
+        """Return one consistent subtotal/tax/total contract for preview groups."""
+
+        rows = list(
+            qs.values(*group_fields)
+            .annotate(
+                accrual_count=Count("id"),
+                subtotal=Sum("amount"),
+                tax_total=Sum("tax_amount"),
+            )
+            .order_by(*group_fields)
+        )
+        for row in rows:
+            row["subtotal"] = row["subtotal"] or Decimal("0.00")
+            row["tax_total"] = row["tax_total"] or Decimal("0.00")
+            row["total"] = row["subtotal"] + row["tax_total"]
+        return rows
+
     @action(detail=True, methods=["get"], url_path="preview")
     def preview(self, request, pk=None):
         period = self.get_object()
         qs = self._preview_queryset(period)
         accruals = list(qs)
 
+        subtotal = sum((Decimal(a.amount) for a in accruals), Decimal("0.00"))
+        tax_total = sum(
+            (Decimal(a.tax_amount) for a in accruals), Decimal("0.00")
+        )
+
         data = {
             "period": self.get_serializer(period).data,
             "scope": "open_unlocked" if period.status == PeriodStatus.OPEN else "period_locked",
             "accrual_count": len(accruals),
             "quantity_total": sum((Decimal(a.quantity) for a in accruals), Decimal("0.0000")),
-            "subtotal": sum((Decimal(a.amount) for a in accruals), Decimal("0.00")),
-            "tax_total": sum((Decimal(a.tax_amount) for a in accruals), Decimal("0.00")),
-            "by_charge_type": list(
-                qs.values("charge_type")
-                .annotate(accrual_count=Count("id"), subtotal=Sum("amount"), tax_total=Sum("tax_amount"))
-                .order_by("charge_type")
-            ),
-            "by_status": list(
-                qs.values("status")
-                .annotate(accrual_count=Count("id"), subtotal=Sum("amount"))
-                .order_by("status")
-            ),
-            "by_service_date": list(
-                qs.values("service_date")
-                .annotate(accrual_count=Count("id"), subtotal=Sum("amount"))
-                .order_by("service_date")
-            ),
+            "subtotal": subtotal,
+            "tax_total": tax_total,
+            "total": subtotal + tax_total,
+            "by_charge_type": self._preview_group_totals(qs, "charge_type"),
+            "by_status": self._preview_group_totals(qs, "status"),
+            "by_service_date": self._preview_group_totals(qs, "service_date"),
         }
         return Response(data)
 

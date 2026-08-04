@@ -460,13 +460,32 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         if not customer_id:
             return None
         Customer = apps.get_model("baseinfo", "Customer")
-        return Customer.objects.only("id", "owner_id", "code", "name").get(pk=customer_id)
+        customer = (
+            Customer.objects.only(
+                "id", "owner_id", "salesperson_id", "code", "name", "is_active"
+            )
+            .filter(pk=customer_id, is_active=True)
+            .first()
+        )
+        if customer is None:
+            self._raise_customer_access_error()
+        return customer
 
-    def _assert_customer_belongs_to_owner(self, customer, owner_id):
+    @staticmethod
+    def _raise_customer_access_error():
+        raise serializers.ValidationError(
+            {"customer_id": "客户不存在、未启用或不在当前业务员可用范围内。"}
+        )
+
+    def _assert_customer_access(self, customer, owner_id, user):
         if not customer:
             return
         if customer.owner_id != owner_id:
-            raise serializers.ValidationError("客户不属于当前用户的货主，禁止下单。")
+            self._raise_customer_access_error()
+        if not self._is_cash_customer(customer) and customer.salesperson_id != getattr(
+            user, "id", None
+        ):
+            self._raise_customer_access_error()
 
     def _assert_supplier_belongs_to_owner(self, supplier_id, owner_id):
         Supplier = apps.get_model("baseinfo", "Supplier")
@@ -616,7 +635,7 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
             customer = self._get_customer(data.get("customer_id"))
 
         # 一致性：客户、商品均需属于当前用户的 owner
-        self._assert_customer_belongs_to_owner(customer, owner_id)
+        self._assert_customer_access(customer, owner_id, user)
         self._assert_products_belong_to_owner(data["items"], owner_id)
         if ot == "SALES":
             self._validate_standard_sales_prices(data["items"], owner_id)
@@ -648,11 +667,8 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
     @transaction.atomic
     def create(self, validated):
         logger.debug(
-            "%s.create items=%d customer_id=%s src_bill_no=%s",
-            self.__class__.__name__,
+            "outbound.order.create.validated item_count=%d",
             len(validated.get("items", [])),
-            validated.get("customer_id"),
-            validated.get("src_bill_no"),
         )
 
         OutboundOrder     = apps.get_model("outbound", "OutboundOrder")
@@ -663,11 +679,6 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
 
         owner_id     = validated["owner_id__from_user"]
         warehouse_id = validated["warehouse_id__from_user"]
-
-        logger.debug(
-            "Create OutboundOrder owner_id=%s warehouse_id=%s customer_id=%s items=%s",
-            owner_id, warehouse_id, validated.get("customer_id"), len(validated.get("items", []))
-        )
 
         order = OutboundOrder.objects.create(
             owner_id        = owner_id,
@@ -743,6 +754,13 @@ class OutboundOrderLineReadSerializer(serializers.ModelSerializer):
             return Decimal("0.00")
 
 class OutboundOrderReadSerializer(serializers.ModelSerializer):
+    customer_name        = serializers.CharField(
+        source="customer.name", read_only=True, allow_null=True
+    )
+    warehouse_name       = serializers.CharField(
+        source="warehouse.name", read_only=True
+    )
+    owner_name           = serializers.CharField(source="owner.name", read_only=True)
     submit_status_name   = serializers.SerializerMethodField()
     approval_status_name = serializers.SerializerMethodField()
     total_amount         = serializers.SerializerMethodField()
@@ -770,7 +788,8 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
             "final_order_amount",
 
             "outbound_type", "delivery_method", "etd",
-            "owner", "customer", "supplier", "warehouse",
+            "owner", "owner_name", "customer", "customer_name",
+            "supplier", "warehouse", "warehouse_name",
             "processing_mode", "assisted_by", "assisted_at",
             "assistance_reason", "assistance_request_id",
             "created_by", "created_by_name",

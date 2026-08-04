@@ -2291,6 +2291,7 @@ class BillingApiTests(TestCase):
         fingerprint,
         owner=None,
         warehouse=None,
+        tax_amount="0.00",
     ):
         return BillingAccrual.objects.create(
             owner=owner or self.owner,
@@ -2303,7 +2304,7 @@ class BillingApiTests(TestCase):
             quantity=Decimal("1"),
             unit_price=Decimal(amount),
             amount=Decimal(amount),
-            tax_amount=Decimal("0.00"),
+            tax_amount=Decimal(tax_amount),
             status=status,
             bundle_key="",
             acc_fingerprint=fingerprint,
@@ -2405,6 +2406,7 @@ class BillingApiTests(TestCase):
         self._create_accrual(
             rule=rule,
             amount="12.50",
+            tax_amount="1.25",
             service_date=datetime.date(2026, 4, 2),
             fingerprint="acc-preview-1",
         )
@@ -2414,6 +2416,14 @@ class BillingApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["accrual_count"], 1)
         self.assertEqual(Decimal(response.data["subtotal"]), Decimal("12.50"))
+        self.assertEqual(Decimal(response.data["tax_total"]), Decimal("1.25"))
+        self.assertEqual(Decimal(response.data["total"]), Decimal("13.75"))
+        for group_name in ("by_charge_type", "by_status", "by_service_date"):
+            self.assertEqual(len(response.data[group_name]), 1)
+            row = response.data[group_name][0]
+            self.assertEqual(Decimal(row["subtotal"]), Decimal("12.50"))
+            self.assertEqual(Decimal(row["tax_total"]), Decimal("1.25"))
+            self.assertEqual(Decimal(row["total"]), Decimal("13.75"))
         self.assertEqual(response.data["scope"], "open_unlocked")
 
     def test_period_lock_and_invoice_actions_work_end_to_end(self):

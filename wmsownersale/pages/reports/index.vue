@@ -6,7 +6,7 @@
       <view class="hero-desc">计划、实际收发、库存与对账均按当前货主范围展示。</view>
     </view>
 
-    <view
+    <button
       v-for="card in cards"
       :key="card.path"
       class="card"
@@ -18,13 +18,15 @@
       </view>
       <view class="card-title">{{ card.title }}</view>
       <view class="card-desc">{{ card.desc }}</view>
-    </view>
+    </button>
+    <view v-if="!cards.length" class="empty-state">当前账号没有可用报表。</view>
   </view>
 </template>
 
 <script setup>
 import { computed } from 'vue'
 import { useAuth } from '@/store/auth'
+import { ownerAccess } from '@/utils/ownerAccess'
 
 const auth = useAuth()
 auth.ensureAuth()
@@ -35,6 +37,7 @@ const baseCards = [
     desc: '按计划量、库存过账和发运实绩查看订单进度与差异',
     path: '/pages/reports/operations',
     icon: '📈',
+    requiresOperations: true,
   },
   {
     title: '实时库存',
@@ -52,7 +55,13 @@ const baseCards = [
 ]
 
 const cards = computed(() =>
-  baseCards.filter((card) => !card.managerOnly || auth.isOwnerManager)
+  baseCards.filter((card) => {
+    const access = ownerAccess({ roles: auth.roles, capabilities: auth.capabilities })
+    if (!access.ownerRole) return false
+    if (card.requiresOperations && !access.canViewOperations) return false
+    if (card.managerOnly && !access.manager) return false
+    return true
+  })
 )
 
 function go(path) {
@@ -67,6 +76,20 @@ function go(path) {
   padding: 24rpx;
   box-sizing: border-box;
 }
+
+.card {
+  display: block;
+  width: 100%;
+  min-height: 96rpx;
+  margin: 0 0 20rpx;
+  padding: 24rpx;
+  text-align: left;
+  line-height: normal;
+  border: 0;
+}
+
+.card::after { border: 0; }
+.empty-state { padding: 48rpx 24rpx; text-align: center; color: #6b7280; }
 
 .hero {
   padding: 28rpx;

@@ -10,7 +10,7 @@
         <view>模板要求：</view>
         <view>1. 每行 1 个订单</view>
         <view>2. 优先填写“商家编码”匹配系统 SKU</view>
-        <view>3. “订单编号”建议必填，用于防重复</view>
+        <view>3. “订单编号”必填，用于防重复</view>
         <view>4. 仅支持 .xlsx 格式</view>
         <view>5. 文件最大 5 MB，最多 1000 个非空业务行</view>
       </view>
@@ -97,6 +97,7 @@
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/utils/request.js'
+import { chooseExcelFile } from '@/utils/filePicker.js'
 
 const filePath = ref('')
 const fileName = ref('')
@@ -136,36 +137,17 @@ async function loadWarehouses() {
   }
 }
 
-function chooseExcel() {
-  uni.chooseFile({
-    count: 1,
-    extension: ['.xlsx'],
-    success: (res) => {
-      const path = res?.tempFilePaths?.[0] || ''
-      const file = res?.tempFiles?.[0] || {}
-
-      const selectedName = file.name || path.split('/').pop() || ''
-      if (!selectedName.toLowerCase().endsWith('.xlsx')) {
-        filePath.value = ''
-        fileName.value = ''
-        uni.showToast({ title: '仅支持 .xlsx 格式', icon: 'none' })
-        return
-      }
-      if (Number(file.size || 0) > 5 * 1024 * 1024) {
-        filePath.value = ''
-        fileName.value = ''
-        uni.showToast({ title: 'Excel 文件不能超过 5 MB', icon: 'none' })
-        return
-      }
-
-      filePath.value = path
-      fileName.value = selectedName
-    },
-    fail: (err) => {
-      console.error('chooseFile fail', err)
-      uni.showToast({ title: '选择文件失败', icon: 'none' })
-    }
-  })
+async function chooseExcel() {
+  try {
+    const selected = await chooseExcelFile()
+    if (!selected) return
+    filePath.value = selected.path
+    fileName.value = selected.name
+  } catch (error) {
+    filePath.value = ''
+    fileName.value = ''
+    uni.showToast({ title: error?.message || '选择文件失败，请重试', icon: 'none' })
+  }
 }
 
 async function uploadExcel() {
@@ -191,7 +173,6 @@ async function uploadExcel() {
       icon: 'none'
     })
   } catch (e) {
-    console.error('import excel fail', e)
     const msg =
       e?.data?.detail ||
       e?.message ||

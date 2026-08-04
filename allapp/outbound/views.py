@@ -85,6 +85,7 @@ from allapp.outbound.warehouse_access import (
     owner_warehouse_ids,
     owner_warehouse_queryset,
 )
+from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
 from allapp.outbound.drop_ship_import import (
     DropShipImportFileError,
     import_drop_ship_workbook,
@@ -525,6 +526,17 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 product_image_url = request.build_absolute_uri(p.product_image.url)
                 # product_image_url = "http://192.168.1.6:8001"+p.product_image.url  # 获取图片的 URL 地址
 
+            try:
+                lowest_price = minimum_sale_price(
+                    base_price=p.price,
+                    min_price=p.min_price,
+                    max_discount=p.max_discount,
+                )
+            except InvalidSalePriceRule as exc:
+                raise ValidationError(
+                    {"detail": f"商品 {p.code or p.sku or p.pk} 价格配置错误：{exc}"}
+                ) from exc
+
             data.append({
                     "id": p.id,
                     "sku": p.sku or p.code or "",
@@ -542,6 +554,9 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "aux_qty_in_base":aux_qty_in_base,
                     "max_discount": p.max_discount ,
                     "product_min_price": p.min_price,
+                    "minimum_sale_price": (
+                        format(lowest_price, ".4f") if lowest_price is not None else None
+                    ),
                     "unitOptions": unit_opts,
                     "selectedUnitIndex": sel_idx,
                     "base_quantity": 0,
@@ -559,12 +574,12 @@ class CustomerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         Customer = apps.get_model("baseinfo", "Customer")
         user = self.request.user
         scope = _catalog_scope(self.request)
-        qs = Customer.objects.all()
+        qs = Customer.objects.filter(is_active=True)
         if not scope.is_global:
             if scope.owner_ids:
                 qs = qs.filter(owner_id__in=scope.owner_ids)
                 if UserRoleScope.Role.OWNER_MANAGER not in scope.roles:
-                    qs = qs.filter(salesperson=user)
+                    qs = qs.filter(Q(salesperson=user) | Q(code__iexact="CASH"))
             else:
                 param_name = (
                     "owner_id"
@@ -1553,6 +1568,21 @@ class OutboundOrderViewSet(
         items = []
         for line in lines:
             product = line.product
+            try:
+                lowest_price = minimum_sale_price(
+                    base_price=product.price,
+                    min_price=product.min_price,
+                    max_discount=product.max_discount,
+                )
+            except InvalidSalePriceRule as exc:
+                raise ValidationError(
+                    {
+                        "detail": (
+                            f"商品 {product.code or product.sku or product.pk} "
+                            f"价格配置错误：{exc}"
+                        )
+                    }
+                ) from exc
             image_url = None
             if getattr(product, "product_image", None):
                 image_url = request.build_absolute_uri(product.product_image.url)
@@ -1572,6 +1602,9 @@ class OutboundOrderViewSet(
                     "orig_price": product.price,
                     "min_price": product.min_price,
                     "product_min_price": product.min_price,
+                    "minimum_sale_price": (
+                        format(lowest_price, ".4f") if lowest_price is not None else None
+                    ),
                     "max_discount": product.max_discount,
                     "qty": line.base_qty,
                     "available": available.get(product.id, Decimal("0")),

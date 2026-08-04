@@ -25,6 +25,24 @@ function persistUser(user) {
   else uni.removeStorageSync('user')
 }
 
+function commitSession(access, refresh, user) {
+  const previous = {
+    access: getAccessToken(),
+    refresh: getRefreshToken(),
+    user: storedUser(),
+  }
+  try {
+    setTokens(access, refresh)
+    persistUser(user)
+  } catch (error) {
+    // uni storage has no transaction primitive, so restore the complete prior
+    // session if any write in the logical commit fails.
+    setTokens(previous.access, previous.refresh)
+    persistUser(previous.user)
+    throw error
+  }
+}
+
 export const useAuth = defineStore('auth', {
   state: () => ({
     user: storedUser(),
@@ -68,18 +86,24 @@ export const useAuth = defineStore('auth', {
     },
     async login(username, password) {
       const res = await api.login(username, password)
-      this.access = res?.access || ''
-      this.refresh = res?.refresh || ''
-      setTokens(this.access, this.refresh)
-      const profile = await api.authProfile()
-      useCart().resetOrder()
-      this.capabilities = profile?.capabilities || {}
-      this.user = {
+      const access = res?.access || ''
+      const refresh = res?.refresh || ''
+      if (!access || !refresh) throw new Error('登录响应缺少令牌。')
+
+      const profile = await api.authProfileWithAccess(access)
+      const capabilities = profile?.capabilities || {}
+      const user = {
         ...(profile?.user || { username }),
-        capabilities: this.capabilities,
+        capabilities,
       }
-      persistUser(this.user)
-      return this.user
+      commitSession(access, refresh, user)
+
+      this.access = access
+      this.refresh = refresh
+      this.capabilities = capabilities
+      this.user = user
+      try { useCart().resetOrder() } catch (error) {}
+      return user
     },
     clearLocalSession() {
       useCart().resetOrder()

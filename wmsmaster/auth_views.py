@@ -1,7 +1,9 @@
 import logging
+import math
 
 from django.contrib.auth import get_user_model
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.exceptions import APIException
 from rest_framework_simplejwt.serializers import (
     TokenObtainPairSerializer,
     TokenRefreshSerializer,
@@ -14,8 +16,22 @@ from rest_framework_simplejwt.views import (
 )
 
 from allapp.accounts.audit import record_audit_event
+from allapp.accounts.throttling import LoginIPThrottle, LoginUsernameIPThrottle
 
 logger = logging.getLogger(__name__)
+
+
+class LoginThrottled(APIException):
+    status_code = 429
+    default_code = "login_throttled"
+
+    def __init__(self, wait):
+        self.wait = max(1, math.ceil(wait or 60))
+        self.detail = {
+            "code": self.default_code,
+            "detail": "登录尝试过于频繁，请稍后重试。",
+            "retry_after": self.wait,
+        }
 
 
 class LoginSerializer(TokenObtainPairSerializer):
@@ -49,6 +65,25 @@ class LoginSerializer(TokenObtainPairSerializer):
 
 class LoginView(TokenObtainPairView):
     serializer_class = LoginSerializer
+    throttle_classes = (LoginUsernameIPThrottle, LoginIPThrottle)
+
+    def throttled(self, request, wait):
+        retry_after = max(1, math.ceil(wait or 60))
+        attempted_identity = str(request.data.get("username") or "")[:150]
+        try:
+            record_audit_event(
+                action="LOGIN_THROTTLED",
+                module="authentication",
+                request=request,
+                succeeded=False,
+                metadata={
+                    "attempted_identity": attempted_identity,
+                    "retry_after": retry_after,
+                },
+            )
+        except Exception:
+            logger.exception("audit.login_throttled.write_failed")
+        raise LoginThrottled(retry_after)
 
 
 class PasswordRevokingTokenRefreshSerializer(TokenRefreshSerializer):
