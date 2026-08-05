@@ -9,7 +9,11 @@ from django.db import transaction
 from django.db.models import Prefetch, Sum
 
 from allapp.baseinfo.models import Owner
-from allapp.inventory.models import InventoryDetail, InventorySnapshotDaily, InventoryTransaction
+from allapp.inventory.models import (
+    InventoryDetail,
+    InventorySnapshotDaily,
+    InventoryTransaction,
+)
 from allapp.locations.models import Location
 from allapp.locations.models import Warehouse
 from allapp.products.models import Product, ProductPackage
@@ -56,11 +60,17 @@ def _load_location_area_resolver():
     return getattr(importlib.import_module(mod), func)
 
 
-def _resolve_product_unit_volume(product, cache: Dict[int, Optional[Decimal]]) -> Optional[Decimal]:
+def _resolve_product_unit_volume(
+    product, cache: Dict[int, Optional[Decimal]]
+) -> Optional[Decimal]:
     if product.id in cache:
         return cache[product.id]
 
-    unit_volume = Decimal(product.volume) if getattr(product, "volume", None) is not None else None
+    unit_volume = (
+        Decimal(product.volume)
+        if getattr(product, "volume", None) is not None
+        else None
+    )
     if unit_volume is None:
         for pkg in product.packages.all():
             pkg_volume = getattr(pkg, "volume_m3", None)
@@ -74,7 +84,9 @@ def _resolve_product_unit_volume(product, cache: Dict[int, Optional[Decimal]]) -
     return unit_volume
 
 
-def _resolve_location_area(location, service_date, cache: Dict[int, Optional[Decimal]]) -> Optional[Decimal]:
+def _resolve_location_area(
+    location, service_date, cache: Dict[int, Optional[Decimal]]
+) -> Optional[Decimal]:
     if location.id in cache:
         return cache[location.id]
 
@@ -138,9 +150,13 @@ def _tx_aggregate_dim_key(row):
     )
 
 
-def _row_payload_from_detail(detail, *, unit_volume_cache, location_area_cache, service_date):
+def _row_payload_from_detail(
+    detail, *, unit_volume_cache, location_area_cache, service_date
+):
     unit_volume = _resolve_product_unit_volume(detail.product, unit_volume_cache)
-    location_area = _resolve_location_area(detail.location, service_date, location_area_cache)
+    location_area = _resolve_location_area(
+        detail.location, service_date, location_area_cache
+    )
     return {
         "owner_id": detail.owner_id,
         "warehouse_id": detail.warehouse_id,
@@ -155,13 +171,23 @@ def _row_payload_from_detail(detail, *, unit_volume_cache, location_area_cache, 
         "allocated_qty": _q4(detail.allocated_qty),
         "locked_qty": _q4(detail.locked_qty),
         "damaged_qty": _q4(detail.damaged_qty),
-        "unit_volume_m3_snapshot": _q6(unit_volume) if unit_volume is not None else None,
-        "location_area_m2_snapshot": _q4(location_area) if location_area is not None else None,
-        "snapshot_source": "BOOTSTRAP_DETAIL",
+        "base_unit_code": _normalize_dim_text(getattr(detail, "base_unit", "")),
+        "base_unit_source": InventorySnapshotDaily.UnitSource.VERIFIED,
+        "unit_volume_m3_snapshot": (
+            _q6(unit_volume) if unit_volume is not None else None
+        ),
+        "location_area_m2_snapshot": (
+            _q4(location_area) if location_area is not None else None
+        ),
+        "snapshot_source": InventorySnapshotDaily.Source.BOOTSTRAP_DETAIL,
     }
 
 
 def _row_payload_from_snapshot(snapshot):
+    previous_is_approximate = snapshot.snapshot_source in {
+        InventorySnapshotDaily.Source.BOOTSTRAP_DETAIL,
+        InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX,
+    }
     return {
         "owner_id": snapshot.owner_id,
         "warehouse_id": snapshot.warehouse_id,
@@ -176,13 +202,37 @@ def _row_payload_from_snapshot(snapshot):
         "allocated_qty": _q4(snapshot.allocated_qty),
         "locked_qty": _q4(snapshot.locked_qty),
         "damaged_qty": _q4(snapshot.damaged_qty),
+        "base_unit_code": _normalize_dim_text(snapshot.base_unit_code),
+        "base_unit_source": snapshot.base_unit_source,
         "unit_volume_m3_snapshot": snapshot.unit_volume_m3_snapshot,
         "location_area_m2_snapshot": snapshot.location_area_m2_snapshot,
-        "snapshot_source": "TX_ROLLFORWARD",
+        "snapshot_source": (
+            InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX
+            if previous_is_approximate
+            else InventorySnapshotDaily.Source.TX_ROLLFORWARD
+        ),
     }
 
 
-def _enrich_new_row_metadata(row_payload, *, product_map, location_map, unit_volume_cache, location_area_cache, service_date):
+def _enrich_new_row_metadata(
+    row_payload,
+    *,
+    product_map,
+    location_map,
+    unit_volume_cache,
+    location_area_cache,
+    service_date,
+):
+    if not row_payload.get("base_unit_code"):
+        product = product_map.get(row_payload["product_id"])
+        row_payload["base_unit_code"] = _normalize_dim_text(
+            getattr(getattr(product, "base_uom", None), "code", "")
+        )
+        row_payload["base_unit_source"] = (
+            InventorySnapshotDaily.UnitSource.VERIFIED
+            if row_payload["base_unit_code"]
+            else InventorySnapshotDaily.UnitSource.UNKNOWN
+        )
     if row_payload["unit_volume_m3_snapshot"] is None:
         product = product_map.get(row_payload["product_id"])
         if product:
@@ -193,7 +243,9 @@ def _enrich_new_row_metadata(row_payload, *, product_map, location_map, unit_vol
     if row_payload["location_area_m2_snapshot"] is None:
         location = location_map.get(row_payload["location_id"])
         if location:
-            location_area = _resolve_location_area(location, service_date, location_area_cache)
+            location_area = _resolve_location_area(
+                location, service_date, location_area_cache
+            )
             if location_area is not None:
                 row_payload["location_area_m2_snapshot"] = _q4(location_area)
 
@@ -213,10 +265,14 @@ def _should_persist_snapshot_row(row_payload):
 
 def _build_bootstrap_payloads(service_date, *, owner_id=None, warehouse_id=None):
     details = _snapshot_scope_filters(
-        InventoryDetail.objects.filter(is_active=True).select_related("product", "location").prefetch_related(
+        InventoryDetail.objects.filter(is_active=True)
+        .select_related("product", "location")
+        .prefetch_related(
             Prefetch(
                 "product__packages",
-                queryset=ProductPackage.objects.order_by("-is_sales_default", "-is_pickable", "sort_order", "id"),
+                queryset=ProductPackage.objects.order_by(
+                    "-is_sales_default", "-is_pickable", "sort_order", "id"
+                ),
             )
         ),
         owner_id=owner_id,
@@ -285,14 +341,21 @@ def _load_tx_aggregates(service_date, *, owner_id=None, warehouse_id=None):
 
     products = {
         product.id: product
-        for product in Product.objects.filter(id__in=product_ids).prefetch_related(
+        for product in Product.objects.filter(id__in=product_ids)
+        .select_related("base_uom")
+        .prefetch_related(
             Prefetch(
                 "packages",
-                queryset=ProductPackage.objects.order_by("-is_sales_default", "-is_pickable", "sort_order", "id"),
+                queryset=ProductPackage.objects.order_by(
+                    "-is_sales_default", "-is_pickable", "sort_order", "id"
+                ),
             )
         )
     }
-    locations = {location.id: location for location in Location.objects.filter(id__in=location_ids)}
+    locations = {
+        location.id: location
+        for location in Location.objects.filter(id__in=location_ids)
+    }
     return qty_by_key, scopes_with_tx, products, locations
 
 
@@ -328,7 +391,12 @@ def generate_inventory_snapshot_for_date(
             "service_date": service_date,
             "mode": "bootstrap",
             "rows_created": len(rows_to_create),
-            "scopes_processed": len({(payload["owner_id"], payload["warehouse_id"]) for payload in payloads.values()}),
+            "scopes_processed": len(
+                {
+                    (payload["owner_id"], payload["warehouse_id"])
+                    for payload in payloads.values()
+                }
+            ),
         }
 
     prev_date = service_date - datetime.timedelta(days=1)
@@ -345,22 +413,40 @@ def generate_inventory_snapshot_for_date(
 
     missing_baseline_scopes = sorted(tx_scopes - previous_scopes)
     if missing_baseline_scopes:
-        missing = ", ".join(f"owner={scope[0]} warehouse={scope[1]}" for scope in missing_baseline_scopes)
+        missing = ", ".join(
+            f"owner={scope[0]} warehouse={scope[1]}"
+            for scope in missing_baseline_scopes
+        )
         raise ValueError(
             f"Missing previous inventory snapshot for {prev_date} before generating {service_date}: {missing}"
         )
 
     unit_volume_cache: Dict[int, Optional[Decimal]] = {}
     location_area_cache: Dict[int, Optional[Decimal]] = {}
-    final_payloads = {
-        key: dict(payload)
-        for key, payload in previous_payloads.items()
+    final_payloads = {key: dict(payload) for key, payload in previous_payloads.items()}
+    approximate_scopes = {
+        (previous_payload["owner_id"], previous_payload["warehouse_id"])
+        for previous_payload in previous_payloads.values()
+        if previous_payload["snapshot_source"]
+        in {
+            InventorySnapshotDaily.Source.BOOTSTRAP_DETAIL,
+            InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX,
+        }
     }
 
     for key, qty_delta in tx_by_key.items():
         payload = final_payloads.get(key)
         if payload is None:
-            owner_value, warehouse_value, location_value, product_value, batch_no, production_date, expiry_date, serial_no = key
+            (
+                owner_value,
+                warehouse_value,
+                location_value,
+                product_value,
+                batch_no,
+                production_date,
+                expiry_date,
+                serial_no,
+            ) = key
             payload = {
                 "owner_id": owner_value,
                 "warehouse_id": warehouse_value,
@@ -375,9 +461,15 @@ def generate_inventory_snapshot_for_date(
                 "allocated_qty": _q4(0),
                 "locked_qty": _q4(0),
                 "damaged_qty": _q4(0),
+                "base_unit_code": "",
+                "base_unit_source": InventorySnapshotDaily.UnitSource.UNKNOWN,
                 "unit_volume_m3_snapshot": None,
                 "location_area_m2_snapshot": None,
-                "snapshot_source": "TX_ROLLFORWARD",
+                "snapshot_source": (
+                    InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX
+                    if (owner_value, warehouse_value) in approximate_scopes
+                    else InventorySnapshotDaily.Source.TX_ROLLFORWARD
+                ),
             }
             final_payloads[key] = payload
 
@@ -389,7 +481,11 @@ def generate_inventory_snapshot_for_date(
             - Decimal(payload["damaged_qty"] or 0)
         )
         payload["available_qty"] = _q4(max(Decimal("0"), available_qty))
-        payload["snapshot_source"] = "TX_ROLLFORWARD"
+        if (
+            payload["snapshot_source"]
+            != InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX
+        ):
+            payload["snapshot_source"] = InventorySnapshotDaily.Source.TX_ROLLFORWARD
         _enrich_new_row_metadata(
             payload,
             product_map=product_map,
@@ -409,7 +505,12 @@ def generate_inventory_snapshot_for_date(
         "service_date": service_date,
         "mode": "rollforward",
         "rows_created": len(rows_to_create),
-        "scopes_processed": len({(payload["owner_id"], payload["warehouse_id"]) for payload in final_payloads.values()}),
+        "scopes_processed": len(
+            {
+                (payload["owner_id"], payload["warehouse_id"])
+                for payload in final_payloads.values()
+            }
+        ),
     }
 
 

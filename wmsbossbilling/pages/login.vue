@@ -44,7 +44,7 @@ const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const submitting = ref(false)
-const baseUrl = BASE_URL
+const baseUrl = BASE_URL || '同源安全连接'
 
 const auth = useAuth()
 
@@ -76,6 +76,7 @@ async function doLogin() {
     })
     enterDashboard()
   } catch (error) {
+    uni.showToast({ title: error?.message || '登录失败', icon: 'none' })
     console.error('boss billing login failed:', error)
   } finally {
     submitting.value = false

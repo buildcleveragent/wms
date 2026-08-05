@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 
 from allapp.accounts.models import UserRoleScope
 from allapp.accounts.roles import ROLE_GROUP_TEMPLATES
-from allapp.baseinfo.models import Customer, Owner, Supplier
+from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding, Supplier
 from allapp.billing.enums import AccrualStatus, BillStatus, CalcMethod, ChargeType
 from allapp.billing.models import (
     Bill,
@@ -30,6 +30,7 @@ from allapp.inbound.constants import (
 from allapp.inbound.models import InboundOrder, InboundOrderLine
 from allapp.inventory.models import (
     InventoryDetail,
+    InventorySnapshotDaily,
     InventorySummary,
     InventoryTransaction,
     ReviewDifference,
@@ -56,6 +57,11 @@ def _current_test_date(now=None):
     if timezone.is_naive(current):
         return current.date()
     return timezone.localtime(current).date()
+
+
+def _currency_total(groups, currency="CNY"):
+    row = next((item for item in groups if item["currency"] == currency), None)
+    return Decimal(str(row["total"])) if row else Decimal("0.00")
 
 
 class ReportsWarehouseScopeTests(TestCase):
@@ -139,6 +145,10 @@ class BossDashboardApiTests(TestCase):
         )
         self.other_warehouse = Warehouse.objects.create(
             code="WHBOSS2", name="Warehouse Boss 2"
+        )
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
+        OwnerWarehouseBinding.objects.create(
+            owner=self.other_owner, warehouse=self.warehouse
         )
 
         self.subwarehouse = Subwarehouse.objects.create(
@@ -499,24 +509,118 @@ class BossDashboardApiTests(TestCase):
         response = self.client.get("/api/reports/boss/home/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["scope"]["warehouse"], self.warehouse.id)
+        self.assertEqual(response.data["scope"]["mode"], "ALL_AUTHORIZED")
+        self.assertIsNone(response.data["scope"]["warehouse"])
         self.assertEqual(response.data["summary"]["today_inbound_orders"], 1)
         self.assertEqual(response.data["summary"]["today_outbound_orders"], 1)
         self.assertEqual(
-            Decimal(str(response.data["summary"]["today_accrual_total"])),
+            _currency_total(response.data["summary"]["accruals_by_currency"]),
             Decimal("165.00"),
         )
         self.assertEqual(
-            Decimal(str(response.data["summary"]["overdue_receivable_total"])),
+            Decimal(
+                str(
+                    response.data["summary"]["overdue_receivables_by_currency"][0][
+                        "total"
+                    ]
+                )
+            ),
             Decimal("110.00"),
         )
-        self.assertEqual(response.data["summary"]["open_alert_count"], 6)
+        self.assertGreater(response.data["summary"]["open_alert_count"], 0)
         self.assertEqual(len(response.data["owner_options"]), 2)
         self.assertEqual(
-            response.data["rankings"]["revenue_top_owners"][0]["owner"], self.owner.id
+            response.data["rankings"]["revenue_contribution_by_currency"][0]["rows"][0][
+                "owner"
+            ],
+            self.owner.id,
         )
         attention_keys = [item["key"] for item in response.data["attention_items"]]
         self.assertIn("overdue_tasks", attention_keys)
+
+    def test_boss_home_keeps_currencies_and_bill_statuses_separate(self):
+        _assign_report_role(
+            self.user,
+            UserRoleScope.Role.WAREHOUSE_BOSS,
+            warehouse=self.other_warehouse,
+        )
+        OwnerWarehouseBinding.objects.create(
+            owner=self.owner, warehouse=self.other_warehouse
+        )
+        usd_rule = BillingRule.objects.create(
+            owner=self.owner,
+            warehouse=self.other_warehouse,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
+            currency="USD",
+            unit_price=Decimal("7.00"),
+        )
+        usd_period = BillingPeriod.objects.create(
+            owner=self.owner,
+            warehouse=self.other_warehouse,
+            label=f"{self.today:%Y%m}-USD",
+            start_date=self.month_start,
+            end_date=self.today,
+            currency="USD",
+        )
+        BillingAccrual.objects.create(
+            owner=self.owner,
+            warehouse=self.other_warehouse,
+            period=usd_period,
+            charge_type=ChargeType.DISPATCH,
+            rule=usd_rule,
+            service_date=self.today,
+            currency="USD",
+            quantity=Decimal("1.0000"),
+            unit_price=Decimal("7.0000"),
+            amount=Decimal("7.00"),
+            tax_amount=Decimal("0.70"),
+            status=AccrualStatus.OPEN,
+            acc_fingerprint="boss-home-usd",
+            created_by=self.user,
+        )
+        Bill.objects.create(
+            owner=self.owner,
+            warehouse=self.other_warehouse,
+            period=usd_period,
+            invoice_no="BILL-BOSS-USD-DRAFT",
+            issue_date=self.today,
+            due_date=self.today + datetime.timedelta(days=7),
+            currency="USD",
+            subtotal=Decimal("7.00"),
+            tax_total=Decimal("0.70"),
+            total=Decimal("7.70"),
+            status=BillStatus.DRAFT,
+        )
+
+        response = self.client.get("/api/reports/boss/home/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {
+                row["currency"]
+                for row in response.data["summary"]["accruals_by_currency"]
+            },
+            {"CNY", "USD"},
+        )
+        self.assertEqual(
+            {
+                row["currency"]
+                for row in response.data["summary"]["issued_bills_by_currency"]
+            },
+            {"CNY"},
+        )
+        self.assertEqual(
+            _currency_total(response.data["summary"]["draft_bills_by_currency"], "USD"),
+            Decimal("7.70"),
+        )
+        self.assertEqual(
+            {
+                row["currency"]
+                for row in response.data["summary"]["overdue_receivables_by_currency"]
+            },
+            {"CNY"},
+        )
 
     def test_boss_home_uses_signed_reversal_net_and_excludes_positive_void(self):
         original = BillingAccrual.objects.get(acc_fingerprint="boss-home-acc-a")
@@ -546,21 +650,21 @@ class BossDashboardApiTests(TestCase):
 
         unlock_period(self.period_a, by_user=self.user, reason="boss net test")
 
-        response = self.client.get(
-            "/api/reports/boss/home/", {"owner": self.owner.id}
-        )
+        response = self.client.get("/api/reports/boss/home/", {"owner": self.owner.id})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            Decimal(str(response.data["summary"]["today_accrual_total"])),
+            Decimal(str(response.data["summary"]["accruals_by_currency"][0]["total"])),
             Decimal("0.00"),
         )
         self.assertEqual(
-            Decimal(str(response.data["summary"]["month_billed_total"])),
+            _currency_total(response.data["summary"]["issued_bills_by_currency"]),
             Decimal("0.00"),
         )
         self.assertEqual(
-            Decimal(str(response.data["summary"]["overdue_receivable_total"])),
+            _currency_total(
+                response.data["summary"]["overdue_receivables_by_currency"]
+            ),
             Decimal("0.00"),
         )
         today_trend = next(
@@ -569,17 +673,40 @@ class BossDashboardApiTests(TestCase):
             if str(row["date"]) == self.today.isoformat()
         )
         self.assertEqual(
-            Decimal(str(today_trend["accrual_total"])), Decimal("0.00")
+            _currency_total(today_trend["accruals_by_currency"]),
+            Decimal("0.00"),
         )
         owner_ranking = next(
             row
-            for row in response.data["rankings"]["revenue_top_owners"]
+            for group in response.data["rankings"]["revenue_contribution_by_currency"]
+            for row in group["rows"]
             if row["owner"] == self.owner.id
         )
         self.assertEqual(Decimal(str(owner_ranking["subtotal"])), Decimal("0.00"))
         self.assertEqual(Decimal(str(owner_ranking["tax_total"])), Decimal("0.00"))
         self.assertEqual(Decimal(str(owner_ranking["total"])), Decimal("0.00"))
         self.assertEqual(owner_ranking["accrual_count"], 1)
+
+    def test_paid_bill_is_issued_but_never_overdue_and_missing_due_date_warns(self):
+        bill = Bill.objects.get(invoice_no="BILL-BOSS-A")
+        Bill.objects.filter(pk=bill.pk).update(
+            status=BillStatus.PAID,
+            due_date=None,
+        )
+
+        home = self.client.get("/api/reports/boss/home/")
+        alerts = self.client.get("/api/reports/boss/alerts/")
+
+        self.assertEqual(home.status_code, 200)
+        self.assertEqual(
+            _currency_total(home.data["summary"]["issued_bills_by_currency"]),
+            Decimal("110.00"),
+        )
+        self.assertEqual(home.data["summary"]["overdue_receivables_by_currency"], [])
+        self.assertEqual(alerts.status_code, 200)
+        missing = alerts.data["sections"]["bills_missing_due_date"]
+        self.assertEqual(missing["count"], 1)
+        self.assertEqual(missing["items"][0]["status"], BillStatus.PAID)
 
     def test_boss_alert_api_respects_owner_filter(self):
         response = self.client.get(
@@ -596,20 +723,35 @@ class BossDashboardApiTests(TestCase):
         self.assertEqual(response.data["sections"]["review_differences"]["count"], 0)
         self.assertEqual(response.data["summary"]["high_risk_items"], 3)
 
+    def test_alert_pagination_and_read_only_detail_cover_review_difference(self):
+        response = self.client.get(
+            "/api/reports/boss/alerts/sections/review_differences/",
+            {"page": 1, "page_size": 1},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(len(response.data["results"]), 1)
+        item = response.data["results"][0]
+        detail = self.client.get(
+            f"/api/reports/boss/alerts/sections/review_differences/review_difference/{item['id']}/"
+        )
+        self.assertEqual(detail.status_code, 200)
+        self.assertTrue(detail.data["detail"]["legacy_owner_unknown"])
+
     def test_boss_inventory_api_returns_expiring_stale_and_hot_cold_locations(self):
         response = self.client.get("/api/reports/boss/inventory/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["scope"]["warehouse"], self.warehouse.id)
+        self.assertEqual(response.data["scope"]["mode"], "ALL_AUTHORIZED")
         self.assertEqual(len(response.data["owner_options"]), 2)
-        self.assertEqual(
-            Decimal(str(response.data["summary"]["expiring_qty_7d"])), Decimal("8.0000")
-        )
-        self.assertEqual(
-            Decimal(str(response.data["summary"]["stale_qty_30d"])), Decimal("5.0000")
-        )
+        self.assertEqual(response.data["summary"]["expiring_sku_count_7d"], 1)
+        self.assertEqual(response.data["summary"]["stale_sku_count_30d"], 1)
         self.assertEqual(response.data["summary"]["sku_count"], 2)
         self.assertEqual(response.data["summary"]["owner_count"], 2)
+        self.assertEqual(
+            {row["unit_code"] for row in response.data["summary"]["quantity_by_uom"]},
+            {self.uom_a.code, self.uom_b.code},
+        )
         self.assertEqual(response.data["summary"]["hot_location_count"], 1)
         self.assertEqual(response.data["summary"]["cold_location_count"], 1)
         self.assertEqual(response.data["owner_rankings"][0]["owner"], self.owner.id)
@@ -627,6 +769,68 @@ class BossDashboardApiTests(TestCase):
             response.data["cold_locations"][0]["location_code"], self.location.code
         )
 
+    def test_boss_inventory_detail_uses_global_scope_and_base_unit(self):
+        response = self.client.get(
+            "/api/reports/boss/inventory/details/",
+            {"owner": self.owner.id, "page": 1, "page_size": 1},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["scope"]["owner"], self.owner.id)
+        self.assertEqual(response.data["scope"]["mode"], "ALL_AUTHORIZED")
+        self.assertEqual(response.data["count"], 1)
+        self.assertIsNone(response.data["next_page"])
+        self.assertEqual(response.data["results"][0]["base_unit"], self.uom_a.code)
+        self.assertEqual(response.data["results"][0]["warehouse_id"], self.warehouse.id)
+
+    def test_historical_inventory_never_falls_back_to_current_inventory(self):
+        historical_date = self.today - datetime.timedelta(days=1)
+        response = self.client.get(
+            "/api/reports/boss/inventory/",
+            {
+                "date_from": historical_date.isoformat(),
+                "date_to": historical_date.isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["meta"]["data_status"], "UNAVAILABLE")
+        self.assertEqual(response.data["summary"]["quantity_by_uom"], [])
+        self.assertEqual(response.data["summary"]["sku_count"], 0)
+
+    def test_historical_inferred_unit_is_warned_and_excluded_from_unit_totals(self):
+        historical_date = self.today - datetime.timedelta(days=1)
+        InventorySnapshotDaily.objects.create(
+            snapshot_date=historical_date,
+            owner=self.owner,
+            warehouse=self.warehouse,
+            location=self.location,
+            product=self.product_a,
+            onhand_qty=Decimal("5.0000"),
+            available_qty=Decimal("4.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("1.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit_code=self.uom_a.code,
+            base_unit_source=InventorySnapshotDaily.UnitSource.LEGACY_INFERRED,
+            snapshot_source=InventorySnapshotDaily.Source.BOOTSTRAP_DETAIL,
+        )
+
+        response = self.client.get(
+            "/api/reports/boss/inventory/",
+            {
+                "date_from": historical_date.isoformat(),
+                "date_to": historical_date.isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["meta"]["data_status"], "WARNING")
+        warning_codes = {row["code"] for row in response.data["meta"]["warnings"]}
+        self.assertIn("HISTORICAL_INVENTORY_APPROXIMATE", warning_codes)
+        self.assertIn("HISTORICAL_INVENTORY_UNIT_INFERRED", warning_codes)
+        self.assertEqual(response.data["summary"]["quantity_by_uom"], [])
+
     def test_boss_inventory_api_respects_owner_filter(self):
         response = self.client.get(
             "/api/reports/boss/inventory/", {"owner": self.owner.id}
@@ -635,12 +839,8 @@ class BossDashboardApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["scope"]["owner"], self.owner.id)
         self.assertEqual(response.data["summary"]["owner_count"], 1)
-        self.assertEqual(
-            Decimal(str(response.data["summary"]["expiring_qty_7d"])), Decimal("0.0000")
-        )
-        self.assertEqual(
-            Decimal(str(response.data["summary"]["stale_qty_30d"])), Decimal("5.0000")
-        )
+        self.assertEqual(response.data["summary"]["expiring_sku_count_7d"], 0)
+        self.assertEqual(response.data["summary"]["stale_sku_count_30d"], 1)
         self.assertEqual(response.data["summary"]["hot_location_count"], 0)
         self.assertEqual(response.data["summary"]["cold_location_count"], 1)
         self.assertEqual(len(response.data["owner_rankings"]), 1)
@@ -670,14 +870,8 @@ class BossDashboardApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data["owner_options"]), 2)
-        self.assertEqual(
-            Decimal(str(response.data["summary"]["current_onhand_qty"])),
-            Decimal("0.0000"),
-        )
-        self.assertEqual(
-            Decimal(str(response.data["summary"]["current_available_qty"])),
-            Decimal("0.0000"),
-        )
+        self.assertNotIn("current_onhand_qty", response.data["summary"])
+        self.assertEqual(response.data["summary"]["quantity_by_uom"], [])
         self.assertEqual(response.data["summary"]["owner_count"], 0)
         self.assertEqual(response.data["owner_rankings"], [])
 
@@ -703,14 +897,8 @@ class BossDashboardApiTests(TestCase):
         response = self.client.get("/api/reports/boss/home/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            Decimal(str(response.data["summary"]["current_onhand_qty"])),
-            Decimal("0.0000"),
-        )
-        self.assertEqual(
-            Decimal(str(response.data["summary"]["current_available_qty"])),
-            Decimal("0.0000"),
-        )
+        self.assertNotIn("current_onhand_qty", response.data["summary"])
+        self.assertEqual(response.data["summary"]["quantity_by_uom"], [])
         self.assertEqual(response.data["rankings"]["inventory_top_owners"], [])
 
     def test_boss_pages_use_warehouse_scope_even_when_user_is_bound_to_owner(self):

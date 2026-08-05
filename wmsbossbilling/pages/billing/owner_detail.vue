@@ -59,13 +59,13 @@
           <view class="kpi-sub">当前筛选范围</view>
         </view>
         <view class="kpi-card gold">
-          <view class="kpi-label">不含税小计</view>
-          <view class="kpi-value">{{ money(summary.subtotal) }}</view>
-          <view class="kpi-sub">税额 {{ money(summary.taxTotal) }}</view>
+          <view class="kpi-label">应计金额（分币种）</view>
+          <view class="kpi-value">{{ moneyGroupText(summary.accruals) }}</view>
+          <view class="kpi-sub">原币展示，不折算</view>
         </view>
         <view class="kpi-card green">
-          <view class="kpi-label">价税合计</view>
-          <view class="kpi-value">{{ money(summary.total) }}</view>
+          <view class="kpi-label">已出账</view>
+          <view class="kpi-value">{{ moneyGroupText(summary.issuedBills) }}</view>
           <view class="kpi-sub">账单 {{ filteredBills.length }} 张</view>
         </view>
       </view>
@@ -100,7 +100,7 @@
             <view class="row-title">{{ bill.invoice_no }}</view>
             <view class="row-sub">{{ bill.period_label || '未绑定账期' }} · {{ billStatusLabel(bill.status) }}</view>
           </view>
-          <view class="row-money">{{ money(bill.total) }}</view>
+          <view class="row-money">{{ money(bill.total, bill.currency) }}</view>
         </view>
         <view v-if="!filteredBills.length" class="empty-inline">没有匹配的账单。</view>
       </view>
@@ -120,7 +120,7 @@
             <view class="row-title">{{ chargeTypeLabel(item.charge_type) }}</view>
             <view class="row-sub">{{ item.service_date }} · {{ accrualStatusLabel(item.status) }} · 指纹 {{ item.acc_fingerprint }}</view>
           </view>
-          <view class="row-money">{{ money(item.amount) }}</view>
+          <view class="row-money">{{ money(item.amount, item.currency) }}</view>
         </view>
         <view v-if="!filteredAccruals.length" class="empty-inline">当前筛选下没有收费记录。</view>
       </view>
@@ -173,14 +173,13 @@ const summary = computed(() => {
   const source = overview.value?.summary || {}
   return {
     accrualCount: Number(source.accrual_count || 0),
-    subtotal: toNumber(source.subtotal),
-    taxTotal: toNumber(source.tax_total),
-    total: toNumber(source.total),
+    accruals: asList(source.accruals_by_currency),
+    issuedBills: asList(source.issued_bills_by_currency),
   }
 })
 
 const ownerName = computed(() => overview.value?.scope?.owner_name || '货主明细')
-const scopeWarehouseName = computed(() => overview.value?.scope?.warehouse_name || '当前仓库')
+const scopeWarehouseName = computed(() => overview.value?.scope?.warehouse_name || '全部授权仓库')
 const scopeDateText = computed(() => {
   if (draftDateFrom.value && draftDateTo.value) return `${draftDateFrom.value} 至 ${draftDateTo.value}`
   return '全部日期'
@@ -223,6 +222,11 @@ const filteredAccruals = computed(() => {
       .includes(q)
   )
 })
+
+function moneyGroupText(groups) {
+  const rows = asList(groups)
+  return rows.length ? rows.map((row) => money(row.total, row.currency)).join(' / ') : '-'
+}
 
 function overviewParams() {
   return {

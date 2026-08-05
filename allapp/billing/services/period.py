@@ -29,31 +29,46 @@ from itertools import groupby
 from typing import Optional
 
 from django.db import transaction
+from django.utils import timezone
 from django.db.models import Q
 from django.db.utils import IntegrityError
 
 from allapp.billing.enums import (
-    AccrualStatus, BillStatus, BundleType, CapMode, PeriodStatus,
+    AccrualStatus,
+    BillStatus,
+    BundleType,
+    CapMode,
+    PeriodStatus,
 )
 from allapp.billing.models import (
-    Bill, BillingAccrual, BillingPeriod, BillingRule,
+    Bill,
+    BillingAccrual,
+    BillingEvent,
+    BillingPeriod,
+    BillingRule,
 )
 
 from ._common import (
-    _apply_fixed_bundle_total, _q, _save_adjusted_accrual,
-    _select_bundle_rule_for_period, logger,
+    _q,
+    _save_adjusted_accrual,
+    _select_bundle_rule_for_period,
+    logger,
 )
 from ._reconciliation import (
     _billing_accuracy_gate_enabled,
     _ensure_reconciliation_for_date_range,
 )
+from .integrity import ensure_close_readiness
 
 
 # ============================================================================
 # Period 获取/创建辅助
 # ============================================================================
 
-def _get_or_create_period_locked(*, owner_id, warehouse_id, label, start_date, end_date):
+
+def _get_or_create_period_locked(
+    *, owner_id, warehouse_id, label, start_date, end_date
+):
     """
     获取或创建 BillingPeriod，并加行锁。
 
@@ -69,7 +84,9 @@ def _get_or_create_period_locked(*, owner_id, warehouse_id, label, start_date, e
             owner_id=owner_id,
             warehouse_id=warehouse_id,
             label=label,
-            defaults=dict(start_date=start_date, end_date=end_date, status=PeriodStatus.OPEN),
+            defaults=dict(
+                start_date=start_date, end_date=end_date, status=PeriodStatus.OPEN
+            ),
         )
     except IntegrityError:
         period = BillingPeriod.objects.filter(
@@ -93,6 +110,7 @@ def _get_or_create_period_locked(*, owner_id, warehouse_id, label, start_date, e
 # 这样封顶/打包的业务逻辑只维护一份，不会出现 lock 和 preview 结果不一致的问题。
 # ============================================================================
 
+
 def _scoped_cap_rules(owner_id, warehouse_id, start_date, end_date):
     """
     查询适用于指定 owner/warehouse/日期范围 的 PER_PERIOD 封顶规则。
@@ -101,8 +119,9 @@ def _scoped_cap_rules(owner_id, warehouse_id, start_date, end_date):
     避免无关 owner 的规则被扫描到（性能优化）。
     """
     return (
-        BillingRule.objects
-        .filter(active=True, cap_mode=CapMode.PER_PERIOD, cap_amount__isnull=False)
+        BillingRule.objects.filter(
+            active=True, cap_mode=CapMode.PER_PERIOD, cap_amount__isnull=False
+        )
         .filter(Q(owner_id=owner_id) | Q(owner__isnull=True))
         .filter(Q(warehouse_id=warehouse_id) | Q(warehouse__isnull=True))
         .filter(
@@ -113,7 +132,9 @@ def _scoped_cap_rules(owner_id, warehouse_id, start_date, end_date):
     )
 
 
-def _apply_period_caps(period, owner_id, warehouse_id, start_date, end_date, *, adjust_fn):
+def _apply_period_caps(
+    period, owner_id, warehouse_id, start_date, end_date, *, adjust_fn
+):
     """
     应用「按账期」封顶（PER_PERIOD cap）。
 
@@ -132,9 +153,9 @@ def _apply_period_caps(period, owner_id, warehouse_id, start_date, end_date, *, 
         cap = Decimal(cap or 0)
         if cap <= 0:
             continue
-        accs = (BillingAccrual.objects
-                .filter(period=period, rule_id=rid, status=AccrualStatus.LOCKED, is_reversal=False)
-                .order_by("service_date", "id"))
+        accs = BillingAccrual.objects.filter(
+            period=period, rule_id=rid, status=AccrualStatus.LOCKED, is_reversal=False
+        ).order_by("service_date", "id")
         running = Decimal("0")
         for a in accs:
             allowed = max(Decimal("0"), cap - running)
@@ -144,7 +165,7 @@ def _apply_period_caps(period, owner_id, warehouse_id, start_date, end_date, *, 
             running += new_amt
 
 
-def _apply_period_bundles(period, *, adjust_fn):
+def _apply_period_bundles(period, *, adjust_fn, bundle_type=None):
     """
     应用「按账期」打包（PER_PERIOD bundle）。
 
@@ -156,8 +177,9 @@ def _apply_period_bundles(period, *, adjust_fn):
            - FIXED: 该打包组总额强制调整为恰好等于 bundle_price（多退少补）
     """
     bundle_keys = list(
-        BillingAccrual.objects
-        .filter(period=period, status=AccrualStatus.LOCKED, is_reversal=False)
+        BillingAccrual.objects.filter(
+            period=period, status=AccrualStatus.LOCKED, is_reversal=False
+        )
         .exclude(bundle_key="")
         .values_list("bundle_key", flat=True)
         .distinct()
@@ -165,28 +187,46 @@ def _apply_period_bundles(period, *, adjust_fn):
 
     for bk in bundle_keys:
         involved_rule_ids = list(
-            BillingAccrual.objects
-            .filter(period=period, bundle_key=bk, status=AccrualStatus.LOCKED, is_reversal=False)
+            BillingAccrual.objects.filter(
+                period=period,
+                bundle_key=bk,
+                status=AccrualStatus.LOCKED,
+                is_reversal=False,
+            )
             .values_list("rule_id", flat=True)
             .distinct()
         )
         involved_charge_types = list(
-            BillingAccrual.objects
-            .filter(period=period, bundle_key=bk, status=AccrualStatus.LOCKED, is_reversal=False)
+            BillingAccrual.objects.filter(
+                period=period,
+                bundle_key=bk,
+                status=AccrualStatus.LOCKED,
+                is_reversal=False,
+            )
             .values_list("charge_type", flat=True)
             .distinct()
         )
-        r = _select_bundle_rule_for_period(period, bk, preferred_rule_ids=involved_rule_ids,
-                                           charge_types=involved_charge_types)
+        r = _select_bundle_rule_for_period(
+            period,
+            bk,
+            preferred_rule_ids=involved_rule_ids,
+            charge_types=involved_charge_types,
+        )
         if not r:
+            continue
+        if bundle_type is not None and r.bundle_type != bundle_type:
             continue
         bprice = Decimal(r.bundle_price or 0)
         if bprice <= 0:
             continue
 
         accs = list(
-            BillingAccrual.objects
-            .filter(period=period, bundle_key=bk, status=AccrualStatus.LOCKED, is_reversal=False)
+            BillingAccrual.objects.filter(
+                period=period,
+                bundle_key=bk,
+                status=AccrualStatus.LOCKED,
+                is_reversal=False,
+            )
             .select_related("rule")
             .order_by("service_date", "id")
         )
@@ -200,13 +240,31 @@ def _apply_period_bundles(period, *, adjust_fn):
                 allowed = max(Decimal("0"), bprice - running)
                 new_amt = min(Decimal(a.amount), allowed)
                 if new_amt != Decimal(a.amount):
-                    adjust_fn(a, new_amt, f"per_period_bundle_cap:bundle_key={bk},cap={bprice}")
+                    adjust_fn(
+                        a,
+                        new_amt,
+                        f"per_period_bundle_cap:bundle_key={bk},cap={bprice}",
+                    )
                 running += new_amt
         else:
-            # FIXED bundle — use dedicated total-redistribution function
-            for a in accs:
-                adjust_fn(a, Decimal(a.amount), f"per_period_bundle_fixed:bundle_key={bk},target={bprice}")
-            _apply_fixed_bundle_total(accs, bprice)
+            target = max(Decimal("0.00"), _q(bprice, "0.01"))
+            diff = _q(target - total, "0.01")
+            reason = f"per_period_bundle_fixed:bundle_key={bk},target={bprice}"
+            if diff > 0:
+                adjust_fn(accs[-1], Decimal(accs[-1].amount) + diff, reason)
+            elif diff < 0:
+                remaining = -diff
+                for accrual in reversed(accs):
+                    if remaining <= 0:
+                        break
+                    reducible = min(Decimal(accrual.amount), remaining)
+                    if reducible > 0:
+                        adjust_fn(
+                            accrual,
+                            Decimal(accrual.amount) - reducible,
+                            reason,
+                        )
+                        remaining -= reducible
 
 
 # ============================================================================
@@ -221,6 +279,7 @@ def _apply_period_bundles(period, *, adjust_fn):
 #
 # 解决: 锁定后、封顶前，按 event_id 分组检测重复，保留最新、VOID 旧的。
 # ============================================================================
+
 
 def _dedup_locked_accruals(period: BillingPeriod) -> int:
     """
@@ -244,8 +303,9 @@ def _dedup_locked_accruals(period: BillingPeriod) -> int:
     # 查询该 period 下所有已锁定、非冲销、有 event 关联的 accrual
     # 按 event_id 分组，同组内按 created_at 倒序（最新在前）
     accruals = list(
-        BillingAccrual.objects
-        .filter(period=period, status=AccrualStatus.LOCKED, is_reversal=False)
+        BillingAccrual.objects.filter(
+            period=period, status=AccrualStatus.LOCKED, is_reversal=False
+        )
         .exclude(event__isnull=True)
         .order_by("event_id", "-created_at")
         .select_related("rule")
@@ -275,8 +335,11 @@ def _dedup_locked_accruals(period: BillingPeriod) -> int:
 # lock_period（关账）
 # ============================================================================
 
+
 @transaction.atomic
-def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingPeriod:
+def lock_period(
+    owner_id, warehouse_id, label, start_date, end_date, *, by_user=None
+) -> BillingPeriod:
     """
     关账：将日期范围内的 OPEN accrual 锁定到 period，并应用账期口径的封顶和打包。
 
@@ -300,16 +363,27 @@ def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingP
     返回:
         已关账的 BillingPeriod（status=CLOSED）
     """
+    ensure_close_readiness(
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
     if _billing_accuracy_gate_enabled("BILLING_RECONCILIATION_GATE_LOCK_ENABLED"):
         _ensure_reconciliation_for_date_range(
             stage="锁账",
-            owner_id=owner_id, warehouse_id=warehouse_id,
-            start_date=start_date, end_date=end_date,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            start_date=start_date,
+            end_date=end_date,
         )
 
     period, created = _get_or_create_period_locked(
-        owner_id=owner_id, warehouse_id=warehouse_id,
-        label=label, start_date=start_date, end_date=end_date,
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+        label=label,
+        start_date=start_date,
+        end_date=end_date,
     )
     if not created and period.status != PeriodStatus.OPEN:
         raise ValueError(f"Period {period.label} is already {period.status}.")
@@ -322,18 +396,24 @@ def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingP
     # 步骤 3: 批量将 OPEN + 尚未挂靠任何 period 的 accrual 锁定
     # 使用 QuerySet.update 而非逐条 save，因为只是做状态迁移，不需要 full_clean
     # period__isnull=True 防止误将已属于其他 period 的 accrual 抢占
-    (BillingAccrual.objects
-     .filter(owner_id=owner_id, warehouse_id=warehouse_id, status=AccrualStatus.OPEN,
-             period__isnull=True)
-     .filter(service_date__gte=start_date, service_date__lte=end_date)
-     .update(status=AccrualStatus.LOCKED, period=period))
+    (
+        BillingAccrual.objects.filter(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            status=AccrualStatus.OPEN,
+            period__isnull=True,
+        )
+        .filter(service_date__gte=start_date, service_date__lte=end_date)
+        .update(status=AccrualStatus.LOCKED, period=period)
+    )
 
     # 步骤 4: 去重 — 同一 event 因改价产生的多条 accrual，只保留最新价格的那条
     voided_count = _dedup_locked_accruals(period)
     if voided_count:
         logger.info(
             "lock_period: voided %d duplicate accruals (repricing) for period %s",
-            voided_count, label,
+            voided_count,
+            label,
         )
 
     # 关账时的调整回调: 先保存调整前金额（用于 unlock 恢复），再执行实际调整
@@ -342,19 +422,56 @@ def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingP
         if accrual.pre_adjustment_amount is None:
             accrual.pre_adjustment_amount = accrual.amount
             accrual.save(update_fields=["pre_adjustment_amount"])
+        if accrual.event_id:
+            detail = dict(accrual.event.pricing_detail or {})
+            adjustments = list(detail.get("period_adjustments") or [])
+            adjustments.append(
+                {
+                    "reason": reason,
+                    "before": str(accrual.amount),
+                    "after": str(_q(new_amount, "0.01")),
+                }
+            )
+            detail["period_adjustments"] = adjustments
+            BillingEvent.objects.filter(pk=accrual.event_id).update(
+                pricing_detail=detail
+            )
+            accrual.event.pricing_detail = detail
         _save_adjusted_accrual(accrual, new_amount)
 
-    # 步骤 5 & 6: 应用账期封顶和打包
-    _apply_period_caps(period, owner_id, warehouse_id, start_date, end_date, adjust_fn=_lock_adjust_fn)
-    _apply_period_bundles(period, adjust_fn=_lock_adjust_fn)
+    # 固定打包先定价，所有 CAP 最后作为硬上限生效。
+    _apply_period_bundles(
+        period, adjust_fn=_lock_adjust_fn, bundle_type=BundleType.FIXED
+    )
+    _apply_period_caps(
+        period, owner_id, warehouse_id, start_date, end_date, adjust_fn=_lock_adjust_fn
+    )
+    _apply_period_bundles(period, adjust_fn=_lock_adjust_fn, bundle_type=BundleType.CAP)
 
     period.status = PeriodStatus.CLOSED
-    period.save(update_fields=["status"])
+    period.closed_at = timezone.now()
+    period.closed_by = by_user
+    period.invoiced_at = None
+    period.invoiced_by = None
+    period.transition_quality = "VERIFIED"
+    period.save(
+        update_fields=[
+            "status",
+            "closed_at",
+            "closed_by",
+            "invoiced_at",
+            "invoiced_by",
+            "transition_quality",
+        ]
+    )
 
     locked_count = BillingAccrual.objects.filter(period=period).count()
     logger.info(
         "lock_period: label=%s owner=%s warehouse=%s accruals_locked=%d",
-        label, owner_id, warehouse_id, locked_count,
+        label,
+        owner_id,
+        warehouse_id,
+        locked_count,
     )
     return period
 
@@ -371,6 +488,7 @@ def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingP
 #   确保试算结果与实际关账一致。
 # ============================================================================
 
+
 @dataclasses.dataclass
 class _PreviewAccrual:
     """
@@ -381,6 +499,7 @@ class _PreviewAccrual:
     2. 需要额外的 adjustment_reason 字段记录调整原因
     3. 需要同时保留 original 和 adjusted 两个版本的金额
     """
+
     accrual_id: int
     event_id: Optional[int]
     created_at: datetime.datetime
@@ -406,9 +525,12 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
     Returns per-accrual detail with original and adjusted amounts.
     """
     accruals_qs = (
-        BillingAccrual.objects
-        .filter(owner_id=owner_id, warehouse_id=warehouse_id,
-                status=AccrualStatus.OPEN, period__isnull=True)
+        BillingAccrual.objects.filter(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            status=AccrualStatus.OPEN,
+            period__isnull=True,
+        )
         .filter(service_date__gte=start_date, service_date__lte=end_date)
         .select_related("rule")
         .order_by("service_date", "id")
@@ -448,7 +570,9 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
         for dup in group[1:]:
             dup._voided_by_dedup = True
             dup.adjusted_amount = Decimal("0.00")
-            dup.adjustment_reason = f"voided_by_dedup:kept_accrual={group[0].accrual_id}"
+            dup.adjustment_reason = (
+                f"voided_by_dedup:kept_accrual={group[0].accrual_id}"
+            )
 
     # 从 previews 中移除被去重的条目（它们不参与后续封顶/打包计算）
     active_previews = {k: v for k, v in previews.items() if not v._voided_by_dedup}
@@ -468,12 +592,17 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
     # We need a temporary "fake" period object for bundle rule selection.
     # Try to find existing or build a transient one (not saved).
     period = BillingPeriod.objects.filter(
-        owner_id=owner_id, warehouse_id=warehouse_id, label=label,
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+        label=label,
     ).first()
     if period is None:
         period = BillingPeriod(
-            owner_id=owner_id, warehouse_id=warehouse_id,
-            label=label, start_date=start_date, end_date=end_date,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            label=label,
+            start_date=start_date,
+            end_date=end_date,
             status=PeriodStatus.OPEN,
         )
 
@@ -481,33 +610,24 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
     # We need the actual DB accrual objects for the queryset-based cap/bundle logic
     # So we use a different approach: simulate by iterating previews
 
-    # --- 对 active_previews 模拟 PER_PERIOD 封顶 ---
-    cap_rules = _scoped_cap_rules(owner_id, warehouse_id, start_date, end_date)
-    for rid, cap in cap_rules:
-        cap = Decimal(cap or 0)
-        if cap <= 0:
-            continue
-        rule_previews = sorted(
-            [p for p in active_previews.values() if p.rule_id == rid],
-            key=lambda p: (p.service_date, p.accrual_id),
-        )
-        running = Decimal("0")
-        for p in rule_previews:
-            allowed = max(Decimal("0"), cap - running)
-            new_amt = min(p.adjusted_amount, allowed)
-            if new_amt != p.adjusted_amount:
-                p.adjusted_amount = new_amt
-                p.adjustment_reason = f"per_period_cap:rule={rid},cap={cap}"
-            running += new_amt
-
-    # --- 对 active_previews 模拟 PER_PERIOD 打包 ---
+    # --- 先模拟 FIXED 打包；CAP 在最后统一执行 ---
     bundle_keys_set = {p.bundle_key for p in active_previews.values() if p.bundle_key}
     for bk in bundle_keys_set:
-        involved_rule_ids = list({p.rule_id for p in active_previews.values() if p.bundle_key == bk})
-        involved_charge_types = list({p.charge_type for p in active_previews.values() if p.bundle_key == bk})
-        r = _select_bundle_rule_for_period(period, bk, preferred_rule_ids=involved_rule_ids,
-                                           charge_types=involved_charge_types)
+        involved_rule_ids = list(
+            {p.rule_id for p in active_previews.values() if p.bundle_key == bk}
+        )
+        involved_charge_types = list(
+            {p.charge_type for p in active_previews.values() if p.bundle_key == bk}
+        )
+        r = _select_bundle_rule_for_period(
+            period,
+            bk,
+            preferred_rule_ids=involved_rule_ids,
+            charge_types=involved_charge_types,
+        )
         if not r:
+            continue
+        if r.bundle_type != BundleType.FIXED:
             continue
         bprice = Decimal(r.bundle_price or 0)
         if bprice <= 0:
@@ -521,33 +641,65 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
         if total <= 0:
             continue
 
-        if r.bundle_type == BundleType.CAP:
-            running = Decimal("0")
-            for p in bk_previews:
-                allowed = max(Decimal("0"), bprice - running)
-                new_amt = min(p.adjusted_amount, allowed)
-                if new_amt != p.adjusted_amount:
-                    p.adjusted_amount = new_amt
-                    p.adjustment_reason = f"per_period_bundle_cap:bundle_key={bk},cap={bprice}"
-                running += new_amt
-        else:
-            target = max(Decimal("0.00"), _q(bprice, "0.01"))
-            current_total = sum(p.adjusted_amount for p in bk_previews)
-            diff = _q(target - current_total, "0.01")
-            if diff != 0:
-                if diff > 0:
-                    bk_previews[-1].adjusted_amount += diff
-                    bk_previews[-1].adjustment_reason = f"per_period_bundle_fixed:bundle_key={bk},target={bprice}"
-                else:
-                    remaining = -diff
-                    for p in reversed(bk_previews):
-                        if remaining <= 0:
-                            break
-                        reducible = min(p.adjusted_amount, remaining)
-                        if reducible > 0:
-                            p.adjusted_amount -= reducible
-                            p.adjustment_reason = f"per_period_bundle_fixed:bundle_key={bk},target={bprice}"
-                            remaining -= reducible
+        target = max(Decimal("0.00"), _q(bprice, "0.01"))
+        current_total = sum(p.adjusted_amount for p in bk_previews)
+        diff = _q(target - current_total, "0.01")
+        if diff != 0:
+            if diff > 0:
+                bk_previews[-1].adjusted_amount += diff
+                bk_previews[-1].adjustment_reason = (
+                    f"per_period_bundle_fixed:bundle_key={bk},target={bprice}"
+                )
+            else:
+                remaining = -diff
+                for p in reversed(bk_previews):
+                    if remaining <= 0:
+                        break
+                    reducible = min(p.adjusted_amount, remaining)
+                    if reducible > 0:
+                        p.adjusted_amount -= reducible
+                        p.adjustment_reason = (
+                            f"per_period_bundle_fixed:bundle_key={bk},target={bprice}"
+                        )
+                        remaining -= reducible
+
+    # FIXED 可能抬高金额；再次执行规则 CAP 和 bundle CAP，保证 CAP 永远是最终硬上限。
+    for rid, cap in _scoped_cap_rules(owner_id, warehouse_id, start_date, end_date):
+        cap = Decimal(cap or 0)
+        running = Decimal("0")
+        for p in sorted(
+            [item for item in active_previews.values() if item.rule_id == rid],
+            key=lambda item: (item.service_date, item.accrual_id),
+        ):
+            allowed = max(Decimal("0"), cap - running)
+            new_amt = min(p.adjusted_amount, allowed)
+            if new_amt != p.adjusted_amount:
+                p.adjusted_amount = new_amt
+                p.adjustment_reason = f"per_period_cap:rule={rid},cap={cap}"
+            running += new_amt
+
+    for bk in bundle_keys_set:
+        involved = [p for p in active_previews.values() if p.bundle_key == bk]
+        r = _select_bundle_rule_for_period(
+            period,
+            bk,
+            preferred_rule_ids=list({p.rule_id for p in involved}),
+            charge_types=list({p.charge_type for p in involved}),
+        )
+        if not r or r.bundle_type != BundleType.CAP or not r.bundle_price:
+            continue
+        running = Decimal("0")
+        for p in sorted(
+            involved, key=lambda item: (item.service_date, item.accrual_id)
+        ):
+            allowed = max(Decimal("0"), Decimal(r.bundle_price) - running)
+            new_amt = min(p.adjusted_amount, allowed)
+            if new_amt != p.adjusted_amount:
+                p.adjusted_amount = new_amt
+                p.adjustment_reason = (
+                    f"per_period_bundle_cap:bundle_key={bk},cap={r.bundle_price}"
+                )
+            running += new_amt
 
     # 重算税额（active + voided 都要算）
     all_previews = {**active_previews, **voided_previews}
@@ -557,20 +709,30 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
         else:
             p.adjusted_tax_amount = Decimal("0.00")
 
-    accrual_list = sorted(all_previews.values(), key=lambda p: (p.service_date, p.accrual_id))
+    accrual_list = sorted(
+        all_previews.values(), key=lambda p: (p.service_date, p.accrual_id)
+    )
     adjustments_applied = sum(1 for p in accrual_list if p.adjustment_reason)
 
     logger.info(
         "preview_lock_period: label=%s owner=%s warehouse=%s accruals=%d adjustments=%d",
-        label, owner_id, warehouse_id, len(accrual_list), adjustments_applied,
+        label,
+        owner_id,
+        warehouse_id,
+        len(accrual_list),
+        adjustments_applied,
     )
 
     return {
         "accrual_count": len(accrual_list),
         "original_subtotal": _q(sum(p.original_amount for p in accrual_list), "0.01"),
         "adjusted_subtotal": _q(sum(p.adjusted_amount for p in accrual_list), "0.01"),
-        "original_tax_total": _q(sum(p.original_tax_amount for p in accrual_list), "0.01"),
-        "adjusted_tax_total": _q(sum(p.adjusted_tax_amount for p in accrual_list), "0.01"),
+        "original_tax_total": _q(
+            sum(p.original_tax_amount for p in accrual_list), "0.01"
+        ),
+        "adjusted_tax_total": _q(
+            sum(p.adjusted_tax_amount for p in accrual_list), "0.01"
+        ),
         "adjustments_applied": adjustments_applied,
         "accruals": [
             {
@@ -603,6 +765,7 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
 #   红冲通过创建「镜像反向记录」实现逻辑撤销，保留完整的审计轨迹。
 # ============================================================================
 
+
 @transaction.atomic
 def unlock_period(period: BillingPeriod, *, by_user=None, reason: str = "") -> dict:
     """
@@ -633,7 +796,9 @@ def unlock_period(period: BillingPeriod, *, by_user=None, reason: str = "") -> d
     raise ValueError(f"Cannot unlock period with status {period.status}.")
 
 
-def _unlock_closed_period(period: BillingPeriod, *, by_user=None, reason: str = "") -> dict:
+def _unlock_closed_period(
+    period: BillingPeriod, *, by_user=None, reason: str = ""
+) -> dict:
     """
     直接回退: 将 CLOSED（未开票）的 period 恢复为 OPEN。
 
@@ -646,43 +811,66 @@ def _unlock_closed_period(period: BillingPeriod, *, by_user=None, reason: str = 
         3. Period 状态 CLOSED → OPEN
     """
     if Bill.objects.filter(period=period).exclude(status=BillStatus.VOID).exists():
-        raise ValueError("Period has an active bill. Use red-reversal via INVOICED status instead.")
+        raise ValueError(
+            "Period has an active bill. Use red-reversal via INVOICED status instead."
+        )
 
-    accruals = BillingAccrual.objects.filter(period=period, status=AccrualStatus.LOCKED).select_related("rule")
+    accruals = BillingAccrual.objects.filter(
+        period=period, status=AccrualStatus.LOCKED
+    ).select_related("rule")
     reverted = 0
     for a in accruals:
-        if a.pre_adjustment_amount is not None and Decimal(a.pre_adjustment_amount) != Decimal(a.amount):
+        if a.pre_adjustment_amount is not None and Decimal(
+            a.pre_adjustment_amount
+        ) != Decimal(a.amount):
             a.amount = a.pre_adjustment_amount
             a.tax_amount = (
                 _q(a.amount * (a.rule.tax_rate or 0), "0.01")
-                if a.rule.taxable else Decimal("0.00")
+                if a.rule.taxable
+                else Decimal("0.00")
             )
             if a.quantity and a.quantity > 0:
                 a.unit_price = _q(a.amount / a.quantity, "0.0001")
         a.status = AccrualStatus.OPEN
         a.period = None
         a.pre_adjustment_amount = None
-        a.save(update_fields=["amount", "tax_amount", "unit_price", "status", "period", "pre_adjustment_amount"])
+        a.save(
+            update_fields=[
+                "amount",
+                "tax_amount",
+                "unit_price",
+                "status",
+                "period",
+                "pre_adjustment_amount",
+            ]
+        )
         reverted += 1
 
     # 清理 lock 阶段 _dedup_locked_accruals 产生的 VOID accrual，解除其与 period 的关联
-    void_dedup_count = (
-        BillingAccrual.objects
-        .filter(period=period, status=AccrualStatus.VOID, is_reversal=True)
-        .update(period=None)
-    )
+    void_dedup_count = BillingAccrual.objects.filter(
+        period=period, status=AccrualStatus.VOID, is_reversal=True
+    ).update(period=None)
     if void_dedup_count:
         logger.info(
             "unlock_period: detached %d VOID dedup accruals from period %s",
-            void_dedup_count, period.label,
+            void_dedup_count,
+            period.label,
         )
 
     period.status = PeriodStatus.OPEN
-    period.save(update_fields=["status"])
+    period.closed_at = None
+    period.closed_by = None
+    period.invoiced_at = None
+    period.invoiced_by = None
+    period.save(
+        update_fields=["status", "closed_at", "closed_by", "invoiced_at", "invoiced_by"]
+    )
 
     logger.info(
         "unlock_period (rollback): period=%s accruals_reverted=%d reason=%s",
-        period.label, reverted, reason,
+        period.label,
+        reverted,
+        reason,
     )
     return {
         "action": "direct_rollback",
@@ -694,7 +882,9 @@ def _unlock_closed_period(period: BillingPeriod, *, by_user=None, reason: str = 
     }
 
 
-def _unlock_invoiced_period(period: BillingPeriod, *, by_user=None, reason: str = "") -> dict:
+def _unlock_invoiced_period(
+    period: BillingPeriod, *, by_user=None, reason: str = ""
+) -> dict:
     """
     红冲: 对已开票的 period 创建反向冲销记录。
 
@@ -716,14 +906,13 @@ def _unlock_invoiced_period(period: BillingPeriod, *, by_user=None, reason: str 
     bill_voided = None
     if bill:
         bill.status = BillStatus.VOID
-        bill.save(update_fields=["status"])
+        bill.document_status = "VOID"
+        bill.save(update_fields=["status", "document_status"])
         bill_voided = bill.invoice_no
 
-    accruals = (
-        BillingAccrual.objects
-        .filter(period=period, status=AccrualStatus.INVOICED)
-        .select_related("rule")
-    )
+    accruals = BillingAccrual.objects.filter(
+        period=period, status=AccrualStatus.INVOICED
+    ).select_related("rule")
 
     created_count = 0
     for a in accruals:
@@ -749,8 +938,7 @@ def _unlock_invoiced_period(period: BillingPeriod, *, by_user=None, reason: str 
         )
 
         existing_reversal = (
-            BillingAccrual.objects
-            .select_for_update()
+            BillingAccrual.objects.select_for_update()
             .filter(acc_fingerprint=expected_reversal.acc_fingerprint)
             .first()
         )
@@ -775,7 +963,8 @@ def _unlock_invoiced_period(period: BillingPeriod, *, by_user=None, reason: str 
             mismatched_fields = [
                 field
                 for field in comparison_fields
-                if getattr(existing_reversal, field) != getattr(expected_reversal, field)
+                if getattr(existing_reversal, field)
+                != getattr(expected_reversal, field)
             ]
             # A completed prior attempt detaches reversals from the period,
             # while an interrupted/in-flight attempt may still point at it.
@@ -797,9 +986,9 @@ def _unlock_invoiced_period(period: BillingPeriod, *, by_user=None, reason: str 
         created_count += 1
 
     # 解绑原 INVOICED accrual 与 period（保留记录用于审计，但不影响 period 重新使用）
-    BillingAccrual.objects.filter(
-        period=period, status=AccrualStatus.INVOICED
-    ).update(period=None)
+    BillingAccrual.objects.filter(period=period, status=AccrualStatus.INVOICED).update(
+        period=None
+    )
 
     # 红冲 accrual 也解绑（它们是 VOID 状态，不应留在 period 上干扰后续 lock）
     BillingAccrual.objects.filter(
@@ -808,11 +997,20 @@ def _unlock_invoiced_period(period: BillingPeriod, *, by_user=None, reason: str 
 
     # period 恢复为 OPEN，允许重新生成 accrual → lock → invoice
     period.status = PeriodStatus.OPEN
-    period.save(update_fields=["status"])
+    period.closed_at = None
+    period.closed_by = None
+    period.invoiced_at = None
+    period.invoiced_by = None
+    period.save(
+        update_fields=["status", "closed_at", "closed_by", "invoiced_at", "invoiced_by"]
+    )
 
     logger.info(
         "unlock_period (red-reversal): period=%s reversals_created=%d bill_voided=%s reason=%s",
-        period.label, created_count, bill_voided, reason,
+        period.label,
+        created_count,
+        bill_voided,
+        reason,
     )
     return {
         "action": "red_reversal",

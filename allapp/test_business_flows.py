@@ -17,7 +17,13 @@ from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.inbound.models import InboundOrder, InboundOrderLine
 from allapp.billing.enums import AccrualStatus, CalcMethod, ChargeType, MetricType
-from allapp.billing.models import Bill, BillingAccrual, BillingJobRun, BillingMetricDaily, BillingRule
+from allapp.billing.models import (
+    Bill,
+    BillingAccrual,
+    BillingJobRun,
+    BillingMetricDaily,
+    BillingRule,
+)
 from allapp.billing.services import (
     accrue_metrics_for_date,
     generate_invoice_for_period,
@@ -25,8 +31,15 @@ from allapp.billing.services import (
     lock_period,
     run_scheduled_metric_generation_for_date,
 )
-from allapp.inventory.models import InventoryDetail, InventorySummary, InventoryTransaction
-from allapp.inventory.services_quick_adjust import QuickAdjustInput, quick_adjust_via_post_task
+from allapp.inventory.models import (
+    InventoryDetail,
+    InventorySummary,
+    InventoryTransaction,
+)
+from allapp.inventory.services_quick_adjust import (
+    QuickAdjustInput,
+    quick_adjust_via_post_task,
+)
 from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_date
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
@@ -63,7 +76,9 @@ def business_flow_barcode_resolver(owner_id, barcode):
     }
 
 
-@override_settings(TASKING_BARCODE_RESOLVER="allapp.test_business_flows.business_flow_barcode_resolver")
+@override_settings(
+    TASKING_BARCODE_RESOLVER="allapp.test_business_flows.business_flow_barcode_resolver"
+)
 class BusinessFlowTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
@@ -175,7 +190,9 @@ class BusinessFlowTests(TestCase):
             code="FLOWSUP",
             name="Flow Supplier",
         )
-        self.base_uom = ProductUom.objects.create(code="PCS", name="Piece", decimal_places=0)
+        self.base_uom = ProductUom.objects.create(
+            code="PCS", name="Piece", decimal_places=0
+        )
 
     def api_client_for(self, user):
         client = APIClient()
@@ -244,7 +261,10 @@ class BusinessFlowTests(TestCase):
                 "allocated_qty": summary_allocated,
                 "locked_qty": summary_locked,
                 "damaged_qty": summary_damaged,
-                "available_qty": summary_onhand - summary_allocated - summary_locked - summary_damaged,
+                "available_qty": summary_onhand
+                - summary_allocated
+                - summary_locked
+                - summary_damaged,
             },
         )
         return detail
@@ -302,7 +322,9 @@ class BusinessFlowTests(TestCase):
         )
 
         generate_metrics_for_date(self.owner.id, self.warehouse.id, service_date)
-        accrue_metrics_for_date(self.owner.id, self.warehouse.id, service_date, by_user=self.owner_user)
+        accrue_metrics_for_date(
+            self.owner.id, self.warehouse.id, service_date, by_user=self.owner_user
+        )
         period = lock_period(
             self.owner.id,
             self.warehouse.id,
@@ -310,7 +332,12 @@ class BusinessFlowTests(TestCase):
             service_date,
             service_date,
         )
-        bill = generate_invoice_for_period(period, invoice_no=f"INV-{service_date.isoformat()}")
+        bill = generate_invoice_for_period(
+            period,
+            invoice_no=f"INV-{service_date.isoformat()}",
+            issue_date=service_date,
+            due_date=service_date,
+        )
         return product, period, bill
 
     def assign_task_line(self, task, line, user):
@@ -343,12 +370,14 @@ class BusinessFlowTests(TestCase):
     def assert_posting_batch_aligned(self, task):
         """扫描打点与库存流水必须使用同一过账批次(handlers.py batch/now 统一后的全局保证)。"""
         scan_batches = set(
-            TaskScanLog.objects.filter(task=task, posted_at__isnull=False)
-            .values_list("posting_batch", flat=True)
+            TaskScanLog.objects.filter(task=task, posted_at__isnull=False).values_list(
+                "posting_batch", flat=True
+            )
         )
         tx_batches = set(
-            InventoryTransaction.objects.filter(src_model="WmsTask", src_id=task.id)
-            .values_list("posting_batch", flat=True)
+            InventoryTransaction.objects.filter(
+                src_model="WmsTask", src_id=task.id
+            ).values_list("posting_batch", flat=True)
         )
         self.assertEqual(len(scan_batches), 1, scan_batches)
         self.assertEqual(scan_batches, tx_batches)
@@ -381,8 +410,12 @@ class BusinessFlowTests(TestCase):
         receive_extra._by_user = operator
         receive_extra.save()
 
-        approve_task(receive_task.id, by_user=self.superuser, note="formal inbound approve")
-        _run_posting_handler(receive_task.id, by_user=self.superuser, note="formal inbound post")
+        approve_task(
+            receive_task.id, by_user=self.superuser, note="formal inbound approve"
+        )
+        _run_posting_handler(
+            receive_task.id, by_user=self.superuser, note="formal inbound post"
+        )
         receive_task.refresh_from_db()
         self.assert_posting_batch_aligned(receive_task)
         return receive_task
@@ -392,8 +425,7 @@ class BusinessFlowTests(TestCase):
         qty_decimal = Decimal(str(qty))
 
         putaway_task = (
-            WmsTask.objects
-            .filter(
+            WmsTask.objects.filter(
                 task_type=WmsTask.TaskType.PUTAWAY,
                 owner=self.owner,
                 warehouse=self.warehouse,
@@ -406,7 +438,9 @@ class BusinessFlowTests(TestCase):
 
         putaway_task.release()
         putaway_line = putaway_task.lines.get(product=product)
-        WmsTaskLine.objects.filter(pk=putaway_line.id).update(to_location_id=to_location.id)
+        WmsTaskLine.objects.filter(pk=putaway_line.id).update(
+            to_location_id=to_location.id
+        )
         putaway_line.refresh_from_db()
         self.assign_task_line(putaway_task, putaway_line, operator)
 
@@ -432,7 +466,9 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(putaway_task.review_status, WmsTask.ReviewStatus.PENDING)
 
         approve_task(putaway_task.id, by_user=self.superuser, note="putaway approve")
-        _run_posting_handler(putaway_task.id, by_user=self.superuser, note="putaway post")
+        _run_posting_handler(
+            putaway_task.id, by_user=self.superuser, note="putaway post"
+        )
         putaway_task.refresh_from_db()
         self.assert_posting_batch_aligned(putaway_task)
         return putaway_task
@@ -518,7 +554,9 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(approve_response.status_code, 200, approve_response.json())
 
         order = OutboundOrder.objects.get(pk=order_id)
-        task = WmsTask.objects.get(task_type=WmsTask.TaskType.PICK, source_pk=str(order.id))
+        task = WmsTask.objects.get(
+            task_type=WmsTask.TaskType.PICK, source_pk=str(order.id)
+        )
         promote_reserved_pick(order, new_status=WmsTask.Status.RELEASED)
 
         picker_client = self.api_client_for(self.picker_user)
@@ -572,7 +610,9 @@ class BusinessFlowTests(TestCase):
         released = unallocate_for_order(order)
 
         detail.refresh_from_db()
-        task = WmsTask.objects.get(task_type=WmsTask.TaskType.PICK, source_pk=str(order.id))
+        task = WmsTask.objects.get(
+            task_type=WmsTask.TaskType.PICK, source_pk=str(order.id)
+        )
 
         self.assertEqual(released, Decimal("4.000"))
         self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
@@ -691,7 +731,9 @@ class BusinessFlowTests(TestCase):
             format="json",
         )
         self.assertEqual(scan_response.status_code, 200, scan_response.json())
-        self.assertEqual(Decimal(str(scan_response.json()["line"]["qty_done"])), Decimal("2.000"))
+        self.assertEqual(
+            Decimal(str(scan_response.json()["line"]["qty_done"])), Decimal("2.000")
+        )
 
         review_response = client.post(
             f"/api/pda/pick-tasks/{task.id}/create-review-task/",
@@ -732,7 +774,10 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(detail_response.context["bill"].id, bill.id)
         self.assertContains(detail_response, bill.invoice_no)
         self.assertContains(detail_response, "STORAGE")
-        self.assertEqual(detail_response.context["overall_line_count"], Bill.objects.get(pk=bill.id).lines.count())
+        self.assertEqual(
+            detail_response.context["overall_line_count"],
+            Bill.objects.get(pk=bill.id).lines.count(),
+        )
 
     def test_flow_9_formal_inbound_order_to_outbound_full_chain(self):
         product = self.create_product("FULLSKU")
@@ -791,8 +836,12 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(receive_task.status, WmsTask.Status.COMPLETED)
         self.assertEqual(receive_task.review_status, WmsTask.ReviewStatus.PENDING)
 
-        approve_task(receive_task.id, by_user=self.superuser, note="formal inbound approve")
-        _run_posting_handler(receive_task.id, by_user=self.superuser, note="formal inbound post")
+        approve_task(
+            receive_task.id, by_user=self.superuser, note="formal inbound approve"
+        )
+        _run_posting_handler(
+            receive_task.id, by_user=self.superuser, note="formal inbound post"
+        )
 
         receive_task.refresh_from_db()
         inbound_detail = InventoryDetail.objects.get(
@@ -840,7 +889,9 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(outbound_approve.status_code, 200, outbound_approve.json())
 
         outbound_order = OutboundOrder.objects.get(pk=outbound_id)
-        pick_task = promote_reserved_pick(outbound_order, new_status=WmsTask.Status.RELEASED)
+        pick_task = promote_reserved_pick(
+            outbound_order, new_status=WmsTask.Status.RELEASED
+        )
 
         picker_client = self.api_client_for(self.picker_user)
         pick_scan = picker_client.post(
@@ -901,7 +952,9 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(receive_task.posting_status, WmsTask.PostingStatus.POSTED)
         self.assertEqual(receive_detail.onhand_qty, Decimal("5.0000"))
 
-        putaway_task = self.complete_putaway(product, "5.000", to_location=self.pick_location)
+        putaway_task = self.complete_putaway(
+            product, "5.000", to_location=self.pick_location
+        )
 
         receive_detail.refresh_from_db()
         putaway_detail = InventoryDetail.objects.get(
@@ -1005,9 +1058,15 @@ class BusinessFlowTests(TestCase):
             name="Overflow Location",
         )
 
-        detail_a_primary = self.seed_inventory(product_a, "4.0000", location=self.pick_location)
-        detail_a_overflow = self.seed_inventory(product_a, "3.0000", location=overflow_location)
-        detail_b = self.seed_inventory(product_b, "4.0000", location=self.adjust_location)
+        detail_a_primary = self.seed_inventory(
+            product_a, "4.0000", location=self.pick_location
+        )
+        detail_a_overflow = self.seed_inventory(
+            product_a, "3.0000", location=overflow_location
+        )
+        detail_b = self.seed_inventory(
+            product_b, "4.0000", location=self.adjust_location
+        )
 
         owner_client = self.api_client_for(self.owner_user)
         create_response = owner_client.post(
@@ -1044,13 +1103,22 @@ class BusinessFlowTests(TestCase):
         order = OutboundOrder.objects.get(pk=order_id)
         pick_task = promote_reserved_pick(order, new_status=WmsTask.Status.RELEASED)
         task_lines = list(pick_task.lines.order_by("id"))
-        product_a_lines = [line for line in task_lines if line.product_id == product_a.id]
-        product_b_lines = [line for line in task_lines if line.product_id == product_b.id]
+        product_a_lines = [
+            line for line in task_lines if line.product_id == product_a.id
+        ]
+        product_b_lines = [
+            line for line in task_lines if line.product_id == product_b.id
+        ]
 
         self.assertEqual(len(task_lines), 3)
         self.assertEqual(len(product_a_lines), 2)
-        self.assertEqual(sum(line.qty_plan for line in product_a_lines), Decimal("6.000"))
-        self.assertEqual({line.from_location_id for line in product_a_lines}, {self.pick_location.id, overflow_location.id})
+        self.assertEqual(
+            sum(line.qty_plan for line in product_a_lines), Decimal("6.000")
+        )
+        self.assertEqual(
+            {line.from_location_id for line in product_a_lines},
+            {self.pick_location.id, overflow_location.id},
+        )
         self.assertEqual(len(product_b_lines), 1)
         self.assertEqual(product_b_lines[0].from_location_id, self.adjust_location.id)
 
@@ -1092,11 +1160,15 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(detail_b.onhand_qty, Decimal("0.0000"))
         self.assertEqual(detail_b.available_qty, Decimal("0.0000"))
         self.assertEqual(
-            InventorySummary.objects.get(owner=self.owner, product=product_a).onhand_qty,
+            InventorySummary.objects.get(
+                owner=self.owner, product=product_a
+            ).onhand_qty,
             Decimal("1.0000"),
         )
         self.assertEqual(
-            InventorySummary.objects.get(owner=self.owner, product=product_b).onhand_qty,
+            InventorySummary.objects.get(
+                owner=self.owner, product=product_b
+            ).onhand_qty,
             Decimal("0.0000"),
         )
         self.assertEqual(
@@ -1114,7 +1186,9 @@ class BusinessFlowTests(TestCase):
 
         inbound_order = self.create_formal_inbound_order(product, "5.000")
         self.complete_formal_receive(inbound_order, product, "5.000")
-        putaway_task = self.complete_putaway(product, "5.000", to_location=self.pick_location)
+        putaway_task = self.complete_putaway(
+            product, "5.000", to_location=self.pick_location
+        )
 
         BillingRule.objects.create(
             owner=self.owner,
@@ -1150,7 +1224,9 @@ class BusinessFlowTests(TestCase):
         )
         self.assertEqual(cbm_metric.value, Decimal("1.250000"))
 
-        accrue_metrics_for_date(self.owner.id, self.warehouse.id, service_date, by_user=self.owner_user)
+        accrue_metrics_for_date(
+            self.owner.id, self.warehouse.id, service_date, by_user=self.owner_user
+        )
         period = lock_period(
             self.owner.id,
             self.warehouse.id,
@@ -1158,7 +1234,12 @@ class BusinessFlowTests(TestCase):
             service_date,
             service_date,
         )
-        bill = generate_invoice_for_period(period, invoice_no=f"INV-OPS-{service_date.isoformat()}")
+        bill = generate_invoice_for_period(
+            period,
+            invoice_no=f"INV-OPS-{service_date.isoformat()}",
+            issue_date=service_date,
+            due_date=service_date,
+        )
 
         accrual = BillingAccrual.objects.get(
             owner=self.owner,

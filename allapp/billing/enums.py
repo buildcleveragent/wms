@@ -1,5 +1,6 @@
 from django.db import models
 
+
 class ChargeType(models.TextChoices):
     RECEIVE = "RECEIVE", "收货"
     PUTAWAY = "PUTAWAY", "上架/移库入"
@@ -12,6 +13,7 @@ class ChargeType(models.TextChoices):
     COUNT = "COUNT", "盘点"
     ADJUST = "ADJUST", "调整"
     STORAGE = "STORAGE", "仓储/保管"
+
 
 class CalcMethod(models.TextChoices):
     PER_TASK = "PER_TASK", "按任务"
@@ -27,16 +29,31 @@ class CalcMethod(models.TextChoices):
     PER_AREA_MONTH = "PER_AREA_MONTH", "按面积㎡/月"
     PERCENT_OF_ORDER_AMOUNT = "PERCENT_OF_ORDER_AMOUNT", "按订单金额比例"
 
+
 class AccrualStatus(models.TextChoices):
     OPEN = "OPEN", "未锁定"
     LOCKED = "LOCKED", "已锁定"
     INVOICED = "INVOICED", "已开票"
     VOID = "VOID", "作废"
 
+
+class PricingStatus(models.TextChoices):
+    PENDING = "PENDING", "待计价"
+    ACCRUED = "ACCRUED", "已计费"
+    NO_CHARGE = "NO_CHARGE", "无需收费"
+    UNPRICED = "UNPRICED", "未定价"
+
+
+class SourceQuality(models.TextChoices):
+    VERIFIED = "VERIFIED", "可信"
+    APPROXIMATE = "APPROXIMATE", "近似"
+
+
 class PeriodStatus(models.TextChoices):
     OPEN = "OPEN", "开账"
     CLOSED = "CLOSED", "关账"
     INVOICED = "INVOICED", "已开票"
+
 
 class BillStatus(models.TextChoices):
     DRAFT = "DRAFT", "草稿"
@@ -44,15 +61,36 @@ class BillStatus(models.TextChoices):
     PAID = "PAID", "已收款"
     VOID = "VOID", "作废"
 
+
+class BillDocumentStatus(models.TextChoices):
+    DRAFT = "DRAFT", "草稿"
+    ISSUED = "ISSUED", "已开票"
+    VOID = "VOID", "作废"
+
+
+class BillPaymentStatus(models.TextChoices):
+    UNPAID = "UNPAID", "未收款"
+    PARTIAL = "PARTIAL", "部分收款"
+    PAID = "PAID", "已收清"
+
+
+class PaymentReceiptStatus(models.TextChoices):
+    DRAFT = "DRAFT", "草稿"
+    POSTED = "POSTED", "已过账"
+    REVERSED = "REVERSED", "已冲销"
+
+
 class MetricType(models.TextChoices):
     AREA_M2 = "AREA_M2", "面积(㎡)"
     CBM = "CBM", "体积(CBM)"
     PALLET = "PALLET", "托盘位(个)"
     ORDER_AMT = "ORDER_AMT", "订单金额"
 
+
 class LadderMode(models.TextChoices):
     WHOLE = "WHOLE", "整档全量价"
     INCREMENTAL = "INCREMENTAL", "分段累进"
+
 
 # —— 新增：封顶与打包的口径/类型 —— #
 class CapMode(models.TextChoices):
@@ -60,11 +98,13 @@ class CapMode(models.TextChoices):
     PER_DAY = "PER_DAY", "按天封顶"
     PER_PERIOD = "PER_PERIOD", "按账期封顶"
 
+
 class BundleScope(models.TextChoices):
     NONE = "NONE", "不打包"
     PER_DAY = "PER_DAY", "按天打包"
     PER_PERIOD = "PER_PERIOD", "按账期打包"
 
+
 class BundleType(models.TextChoices):
-    CAP = "CAP", "打包上限"       # 总额不超过打包价
+    CAP = "CAP", "打包上限"  # 总额不超过打包价
     FIXED = "FIXED", "固定打包价"  # 有发生则总额=打包价

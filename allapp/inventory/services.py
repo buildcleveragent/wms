@@ -61,7 +61,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from allapp.core.utils.log_context import build_log_payload
-from allapp.inventory.models import (InvTxType,
+from allapp.inventory.models import (
+    InvTxType,
     InventoryDetail,
     InventoryTransaction,
     InventorySummary,
@@ -69,6 +70,7 @@ from allapp.inventory.models import (InvTxType,
 )
 from allapp.locations.models import Location, Warehouse
 from allapp.tasking.models import WmsTask, WmsTaskLine, TaskScanLog
+
 logger = logging.getLogger(__name__)
 
 
@@ -88,6 +90,7 @@ _POSTING_FAMILY_BY_TASK_TYPE = {
 # ======================
 # 小工具：统一数量精度/安全
 # ======================
+
 
 def _q4(x) -> Decimal:
     """
@@ -190,14 +193,20 @@ def _ensure_same_wh(*, task: WmsTask, location_id: int):
         raise ValidationError("库位所属仓与任务仓库不一致")
 
 
-def _get_line_from_to_ids(line: Optional[WmsTaskLine]) -> Tuple[Optional[int], Optional[int]]:
+def _get_line_from_to_ids(
+    line: Optional[WmsTaskLine],
+) -> Tuple[Optional[int], Optional[int]]:
     """
     从任务行获得 to/from 库位的 id（都可能为 None，用作兜底）。
     """
     if not line:
         return None, None
-    to_id = getattr(line, "to_location_id", None) or getattr(getattr(line, "to_location", None), "id", None)
-    from_id = getattr(line, "from_location_id", None) or getattr(getattr(line, "from_location", None), "id", None)
+    to_id = getattr(line, "to_location_id", None) or getattr(
+        getattr(line, "to_location", None), "id", None
+    )
+    from_id = getattr(line, "from_location_id", None) or getattr(
+        getattr(line, "from_location", None), "id", None
+    )
     return to_id, from_id
 
 
@@ -213,11 +222,15 @@ def _scan_product_id(s: TaskScanLog, line: Optional[WmsTaskLine]) -> Optional[in
     """
     扫描商品优先从 scan.product 读；兜底到行.product。
     """
-    pid = getattr(s, "product_id", None) or getattr(getattr(s, "product", None), "id", None)
+    pid = getattr(s, "product_id", None) or getattr(
+        getattr(s, "product", None), "id", None
+    )
     if pid:
         return pid
     if line:
-        pid = getattr(line, "product_id", None) or getattr(getattr(line, "product", None), "id", None)
+        pid = getattr(line, "product_id", None) or getattr(
+            getattr(line, "product", None), "id", None
+        )
     return pid
 
 
@@ -317,7 +330,9 @@ def _upsert_detail(
     if det.onhand_qty < 0:
         raise ValidationError("库存不足：出库数量超出当前账面库存。")
 
-    det.available_qty = det.onhand_qty - det.allocated_qty - det.locked_qty - det.damaged_qty
+    det.available_qty = (
+        det.onhand_qty - det.allocated_qty - det.locked_qty - det.damaged_qty
+    )
     det.save()
     ctx, ctx_text = build_log_payload(
         owner_id=owner_id,
@@ -376,6 +391,7 @@ def _detail_dimension_values(
     production_date=None,
     expiry_date=None,
     serial_no: Optional[str] = "",
+    container_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Return the normalized unique inventory dimension used for locking/upsert."""
     return {
@@ -383,6 +399,7 @@ def _detail_dimension_values(
         "warehouse_id": warehouse_id,
         "product_id": product_id,
         "location_id": location_id,
+        "container_id": container_id,
         "batch_no": (batch_no or "").strip().upper(),
         "production_date": production_date or None,
         "expiry_date": expiry_date or None,
@@ -397,6 +414,7 @@ def _detail_dimension_key(values: Dict[str, Any]) -> Tuple[Any, ...]:
         values["product_id"],
         values["warehouse_id"],
         values["location_id"],
+        values["container_id"],
         values["batch_no"],
         values["production_date"],
         values["expiry_date"],
@@ -415,17 +433,29 @@ def _detail_key_from_instance(detail: InventoryDetail) -> Tuple[Any, ...]:
             production_date=detail.production_date,
             expiry_date=detail.expiry_date,
             serial_no=detail.serial_no,
+            container_id=detail.container_id,
         )
     )
 
 
 def _dimension_sort_key(key: Tuple[Any, ...]) -> Tuple[Any, ...]:
-    owner_id, product_id, warehouse_id, location_id, batch, production, expiry, serial = key
+    (
+        owner_id,
+        product_id,
+        warehouse_id,
+        location_id,
+        container_id,
+        batch,
+        production,
+        expiry,
+        serial,
+    ) = key
     return (
         owner_id,
         product_id,
         warehouse_id,
         location_id,
+        container_id or 0,
         batch or "",
         production.isoformat() if production else "",
         expiry.isoformat() if expiry else "",
@@ -466,7 +496,9 @@ def lock_active_inventory_details_for_update(
 
 def _lock_inventory_dimensions(
     dimensions: Iterable[Dict[str, Any]],
-) -> Tuple[Dict[Tuple[Any, ...], InventoryDetail], Dict[Tuple[int, int], InventorySummary]]:
+) -> Tuple[
+    Dict[Tuple[Any, ...], InventoryDetail], Dict[Tuple[int, int], InventorySummary]
+]:
     """
     Lock all inventory rows touched by one posting in a stable order.
 
@@ -475,10 +507,7 @@ def _lock_inventory_dimensions(
     subsequent full summary recalculation consistent.  If the scope has no detail yet, its
     summary row is used as the creation mutex.
     """
-    dimensions_by_key = {
-        _detail_dimension_key(values): values
-        for values in dimensions
-    }
+    dimensions_by_key = {_detail_dimension_key(values): values for values in dimensions}
     if not dimensions_by_key:
         return {}, {}
 
@@ -492,7 +521,9 @@ def _lock_inventory_dimensions(
     summaries: Dict[Tuple[int, int], InventorySummary] = {}
     for owner_id, product_id in pairs:
         if (owner_id, product_id) not in existing_pairs:
-            summaries[(owner_id, product_id)] = _lock_or_create_summary(owner_id, product_id)
+            summaries[(owner_id, product_id)] = _lock_or_create_summary(
+                owner_id, product_id
+            )
 
     for key in sorted(dimensions_by_key, key=_dimension_sort_key):
         if key in details_by_key:
@@ -501,12 +532,16 @@ def _lock_inventory_dimensions(
             **dimensions_by_key[key],
             defaults=_empty_detail_quantities(),
         )
-        details_by_key[key] = InventoryDetail.objects.select_for_update().get(pk=detail.pk)
+        details_by_key[key] = InventoryDetail.objects.select_for_update().get(
+            pk=detail.pk
+        )
 
     # Match the established detail -> summary lock order used by other inventory writers.
     for owner_id, product_id in pairs:
         if (owner_id, product_id) not in summaries:
-            summaries[(owner_id, product_id)] = _lock_or_create_summary(owner_id, product_id)
+            summaries[(owner_id, product_id)] = _lock_or_create_summary(
+                owner_id, product_id
+            )
 
     return details_by_key, summaries
 
@@ -569,10 +604,13 @@ def _insert_tx(
         src_id=src_id,
         src_line_id=src_line_id,
         memo=(memo or "")[:255],
-        posted_at=posted_at,                                  # 过账打点（若模型有该字段）
-        posting_batch=(posting_batch or None)[:40] if posting_batch else None,  # 批次号（若模型有该字段）
+        posted_at=posted_at,  # 过账打点（若模型有该字段）
+        posting_batch=(
+            (posting_batch or None)[:40] if posting_batch else None
+        ),  # 批次号（若模型有该字段）
         **optional_fields,
     )
+
 
 def _refresh_summaries(
     pairs: Iterable[Tuple[int, int]],
@@ -606,10 +644,20 @@ def _refresh_summaries(
             for detail in current_details
             if detail.owner_id == owner_id and detail.product_id == product_id
         ]
-        onhand = sum((detail.onhand_qty or Decimal("0") for detail in pair_details), Decimal("0"))
-        allocated = sum((detail.allocated_qty or Decimal("0") for detail in pair_details), Decimal("0"))
-        locked = sum((detail.locked_qty or Decimal("0") for detail in pair_details), Decimal("0"))
-        damaged = sum((detail.damaged_qty or Decimal("0") for detail in pair_details), Decimal("0"))
+        onhand = sum(
+            (detail.onhand_qty or Decimal("0") for detail in pair_details), Decimal("0")
+        )
+        allocated = sum(
+            (detail.allocated_qty or Decimal("0") for detail in pair_details),
+            Decimal("0"),
+        )
+        locked = sum(
+            (detail.locked_qty or Decimal("0") for detail in pair_details), Decimal("0")
+        )
+        damaged = sum(
+            (detail.damaged_qty or Decimal("0") for detail in pair_details),
+            Decimal("0"),
+        )
 
         summary = (locked_summaries or {}).get((owner_id, product_id))
         if summary is None:
@@ -620,8 +668,6 @@ def _refresh_summaries(
         summary.locked_qty = _q4(locked)
         summary.damaged_qty = _q4(damaged)
         summary.save()
-
-
 
 
 def _can_post(task: WmsTask) -> Tuple[bool, str]:
@@ -646,7 +692,16 @@ def _can_post(task: WmsTask) -> Tuple[bool, str]:
 def _scan_qty_for_type(task_type: str, s: TaskScanLog) -> Decimal:
     t = task_type or ""
 
-    if t in ("RECEIVE", "PUTAWAY", "RELOC", "REPLEN", "PICK", "DISPATCH", "LOAD", "ADJUST"):
+    if t in (
+        "RECEIVE",
+        "PUTAWAY",
+        "RELOC",
+        "REPLEN",
+        "PICK",
+        "DISPATCH",
+        "LOAD",
+        "ADJUST",
+    ):
         # 这些任务只允许用 qty_base_delta
         if getattr(s, "qty_base_delta", None) is None:
             raise ValidationError(f"{task_type} 需要 qty_base_delta（缺失）")
@@ -661,7 +716,6 @@ def _scan_qty_for_type(task_type: str, s: TaskScanLog) -> Decimal:
         return _q4(q)
 
     raise ValidationError(f"不支持的库存过账任务类型：{t or '<空>'}")
-
 
 
 def _qty_for_type(task_type: str, scan: TaskScanLog) -> Decimal:
@@ -703,6 +757,7 @@ def _qty_for_type(task_type: str, scan: TaskScanLog) -> Decimal:
 # 批内聚合键（默认不含 task_line_id）
 # ======================
 
+
 class _AggKey:
     """
     收/发/盘的聚合键：
@@ -711,15 +766,39 @@ class _AggKey:
     - batch_no(LOT), production_date, expiry_date, serial_no
     - tx_type（RECEIVE/ISSUE/ADJ_GAIN/ADJ_LOSS）
     """
+
     __slots__ = (
-        "posting_batch", "task_id", "owner_id", "warehouse_id", "product_id",
-        "location_id", "batch_no", "production_date", "expiry_date", "serial_no", "tx_type",
-        "task_line_id", "source_detail_id",
+        "posting_batch",
+        "task_id",
+        "owner_id",
+        "warehouse_id",
+        "product_id",
+        "location_id",
+        "batch_no",
+        "production_date",
+        "expiry_date",
+        "serial_no",
+        "tx_type",
+        "task_line_id",
+        "source_detail_id",
     )
 
-    def __init__(self, posting_batch, task_id, owner_id, warehouse_id, product_id,
-                 location_id, batch_no, production_date, expiry_date, serial_no, tx_type,
-                 task_line_id=None, source_detail_id=None):
+    def __init__(
+        self,
+        posting_batch,
+        task_id,
+        owner_id,
+        warehouse_id,
+        product_id,
+        location_id,
+        batch_no,
+        production_date,
+        expiry_date,
+        serial_no,
+        tx_type,
+        task_line_id=None,
+        source_detail_id=None,
+    ):
         self.posting_batch = posting_batch
         self.task_id = task_id
         self.owner_id = owner_id
@@ -736,9 +815,19 @@ class _AggKey:
 
     def as_tuple(self):
         return (
-            self.posting_batch, self.task_id, self.owner_id, self.warehouse_id, self.product_id,
-            self.location_id, self.batch_no, self.production_date, self.expiry_date, self.serial_no, self.tx_type,
-            self.task_line_id, self.source_detail_id,
+            self.posting_batch,
+            self.task_id,
+            self.owner_id,
+            self.warehouse_id,
+            self.product_id,
+            self.location_id,
+            self.batch_no,
+            self.production_date,
+            self.expiry_date,
+            self.serial_no,
+            self.tx_type,
+            self.task_line_id,
+            self.source_detail_id,
         )
 
     def __hash__(self):
@@ -751,6 +840,7 @@ class _AggKey:
 # ======================
 # 聚合：收/发/盘（不含 from→to 的简单型）
 # ======================
+
 
 def _normalized_model_name(value: Optional[str]) -> str:
     return (value or "").replace("_", "").replace(".", "").lower()
@@ -789,7 +879,9 @@ def _pos_scan_source_details(
         if line.status != WmsTaskLine.Status.COMPLETED:
             raise ValidationError(f"POS PICK 任务行 {line.id} 尚未完成")
         if _normalized_model_name(line.src_model) != "outboundorderline":
-            raise ValidationError(f"POS PICK 任务行 {line.id} 来源必须为 OutboundOrderLine")
+            raise ValidationError(
+                f"POS PICK 任务行 {line.id} 来源必须为 OutboundOrderLine"
+            )
 
         detail_id = _required_pos_meta_int(line, "source_inventory_detail_id")
         _required_pos_meta_int(line, "pos_sale_id")
@@ -801,7 +893,9 @@ def _pos_scan_source_details(
         try:
             task_order_id = int(task.source_pk)
         except (TypeError, ValueError) as exc:
-            raise ValidationError(f"POS PICK 任务 {task.id} 缺少有效的出库单来源") from exc
+            raise ValidationError(
+                f"POS PICK 任务 {task.id} 缺少有效的出库单来源"
+            ) from exc
         if task_order_id != order_id:
             raise ValidationError(f"POS PICK 任务行 {line.id} 的出库单来源不一致")
         if (line.plan_meta or {}).get("sale_no") != task.ref_no:
@@ -813,8 +907,7 @@ def _pos_scan_source_details(
     if missing:
         raise ValidationError(f"POS PICK 原库存层不存在或已软删除: {missing}")
     return {
-        scan_id: details[detail_id]
-        for scan_id, detail_id in detail_ids_by_scan.items()
+        scan_id: details[detail_id] for scan_id, detail_id in detail_ids_by_scan.items()
     }
 
 
@@ -850,7 +943,11 @@ def _group_receive_like(
         if not loc_id:
             to_id, from_id = _get_line_from_to_ids(line)
             if tx_type == InvTxType.RECEIVE:
-                loc_id = to_id or from_id or getattr(settings, "TASKING_DEFAULT_RECEIVE_LOCATION_ID", None)
+                loc_id = (
+                    to_id
+                    or from_id
+                    or getattr(settings, "TASKING_DEFAULT_RECEIVE_LOCATION_ID", None)
+                )
             else:
                 loc_id = from_id or to_id
         if not loc_id:
@@ -859,7 +956,6 @@ def _group_receive_like(
 
         # 3) 数量方向归一。数量口径由调用方显式指定，不从交易类型猜测。
         qty = _qty_for_type(qty_task_type, scan=s)
-
 
         # 4) POS uses the exact reserved layer as the authoritative dimension.
         source_detail = source_details.get(s.id)
@@ -888,18 +984,24 @@ def _group_receive_like(
                 or source_detail.expiry_date != s.exp_date
                 or (source_detail.serial_no or "").upper() != (s.barcode or "").upper()
             ):
-                raise ValidationError(f"POS PICK 任务行 {line.id} 的跟踪属性与原库存层不一致")
+                raise ValidationError(
+                    f"POS PICK 任务行 {line.id} 的跟踪属性与原库存层不一致"
+                )
 
             meta_subwarehouse_id = meta.get("subwarehouse_id")
             if meta_subwarehouse_id is not None:
                 try:
                     meta_subwarehouse_id = int(meta_subwarehouse_id)
                 except (TypeError, ValueError) as exc:
-                    raise ValidationError(f"POS PICK 任务行 {line.id} 的子仓快照无效") from exc
+                    raise ValidationError(
+                        f"POS PICK 任务行 {line.id} 的子仓快照无效"
+                    ) from exc
             try:
                 meta_zone_type = int(meta.get("zone_type"))
             except (TypeError, ValueError) as exc:
-                raise ValidationError(f"POS PICK 任务行 {line.id} 的区域快照无效") from exc
+                raise ValidationError(
+                    f"POS PICK 任务行 {line.id} 的区域快照无效"
+                ) from exc
             if (
                 source_detail.subwarehouse_id != meta_subwarehouse_id
                 or source_detail.zone_type != meta_zone_type
@@ -912,13 +1014,17 @@ def _group_receive_like(
             try:
                 reserved_qty = _q4(meta["reserved_qty"])
             except (KeyError, TypeError, ValueError) as exc:
-                raise ValidationError(f"POS PICK 任务行 {line.id} 的预占数量无效") from exc
+                raise ValidationError(
+                    f"POS PICK 任务行 {line.id} 的预占数量无效"
+                ) from exc
             if (
                 reserved_qty != qty_abs
                 or _q4(line.qty_plan) != qty_abs
                 or _q4(line.qty_done) != qty_abs
             ):
-                raise ValidationError(f"POS PICK 任务行 {line.id} 的扫描、完成和预占数量不一致")
+                raise ValidationError(
+                    f"POS PICK 任务行 {line.id} 的扫描、完成和预占数量不一致"
+                )
 
             loc_id = source_detail.location_id
             batch_value = source_detail.batch_no
@@ -967,7 +1073,7 @@ def _group_receive_like(
             qty,
             agg[key],
             extra=ctx,
-          )
+        )
 
     return agg
 
@@ -975,6 +1081,7 @@ def _group_receive_like(
 # ======================
 # 聚合：PUTAWAY/RELOC（需要 from→to 成对的复杂型）
 # ======================
+
 
 def _group_putaway(
     task: WmsTask,
@@ -999,8 +1106,16 @@ def _group_putaway(
 
         # from/to 必须齐全：scan.* → line.*
         to_id, from_id = _get_line_from_to_ids(line)
-        s_to = getattr(s, "to_location_id", None) or getattr(getattr(s, "to_location", None), "id", None) or to_id
-        s_from = getattr(s, "from_location_id", None) or getattr(getattr(s, "from_location", None), "id", None) or from_id
+        s_to = (
+            getattr(s, "to_location_id", None)
+            or getattr(getattr(s, "to_location", None), "id", None)
+            or to_id
+        )
+        s_from = (
+            getattr(s, "from_location_id", None)
+            or getattr(getattr(s, "from_location", None), "id", None)
+            or from_id
+        )
         if not s_from or not s_to:
             raise ValidationError("PUTAWAY 需要 from/to 库位")
 
@@ -1062,7 +1177,10 @@ def _group_putaway(
 # 执行：把聚合结果一次性写入明细与交易
 # ======================
 
-def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, batch_no: str) -> int:
+
+def _apply_receive_like(
+    task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, batch_no: str
+) -> int:
     """
     对“收/发/盘”的聚合结果逐条入账：
     - 每个分组 → 1 条交易（RECEIVE / ISSUE / ADJ_*）
@@ -1070,11 +1188,7 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
     """
     created = 0
     task_type = task.task_type
-    pending_groups = [
-        (key, _q4(qty))
-        for key, qty in groups.items()
-        if _q4(qty) != 0
-    ]
+    pending_groups = [(key, _q4(qty)) for key, qty in groups.items() if _q4(qty) != 0]
     dimensions = [
         _detail_dimension_values(
             owner_id=key.owner_id,
@@ -1160,7 +1274,7 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
             detail=locked_detail,
         )
         # 交易
-        _insert_tx(
+        inventory_tx = _insert_tx(
             tx_type=key.tx_type,
             owner_id=key.owner_id,
             warehouse_id=key.warehouse_id,
@@ -1182,6 +1296,47 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
             zone_type=(posted_detail.zone_type if is_pos_group else None),
             src_no=(task.ref_no if is_pos_group else None),
         )
+        if getattr(settings, "INVENTORY_FIFO_ENABLED", False):
+            from allapp.inventory.fifo import consume_fifo, create_receipt_layer
+
+            if key.tx_type in {InvTxType.RECEIVE, InvTxType.ADJ_GAIN}:
+                received_date = (
+                    timezone.localtime(now).date()
+                    if timezone.is_aware(now)
+                    else now.date()
+                )
+                create_receipt_layer(
+                    owner_id=key.owner_id,
+                    warehouse_id=key.warehouse_id,
+                    product_id=key.product_id,
+                    location_id=key.location_id,
+                    quantity=abs(qty),
+                    source_type="InventoryTransaction",
+                    source_id=inventory_tx.id,
+                    received_date=received_date,
+                    batch_no=key.batch_no or "",
+                    serial_no=key.serial_no or "",
+                    expiry_date=key.expiry_date,
+                    inventory_transaction_id=inventory_tx.id,
+                    movement_type=(
+                        "ADJUST" if key.tx_type == InvTxType.ADJ_GAIN else "RECEIVE"
+                    ),
+                )
+            elif key.tx_type in {InvTxType.ISSUE, InvTxType.ADJ_LOSS}:
+                consume_fifo(
+                    owner_id=key.owner_id,
+                    warehouse_id=key.warehouse_id,
+                    product_id=key.product_id,
+                    location_id=key.location_id,
+                    quantity=abs(qty),
+                    batch_no=key.batch_no or "",
+                    serial_no=key.serial_no or "",
+                    inventory_transaction_id=inventory_tx.id,
+                    occurred_at=now,
+                    movement_type=(
+                        "ADJUST" if key.tx_type == InvTxType.ADJ_LOSS else "ISSUE"
+                    ),
+                )
         ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
         logger.info(
             "inventory.receive_like.applied %s tx_type=%s product_id=%s location_id=%s qty=%s",
@@ -1201,7 +1356,9 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
     return created
 
 
-def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal], *, now, batch_no: str) -> int:
+def _apply_putaway(
+    task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal], *, now, batch_no: str
+) -> int:
     """
     对“上架/移库”的聚合结果逐条入账：
     - 每个分组（同一条路径 from→to） → 两条交易：MOVE_OUT(-qty) + MOVE_IN(+qty)，用 pair_id 关联。
@@ -1401,7 +1558,7 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
                 posted_at=now,
                 posting_batch=batch_no,
             )
-            _insert_tx(
+            inventory_tx_in = _insert_tx(
                 tx_type=key_in.tx_type,
                 owner_id=key_in.owner_id,
                 warehouse_id=key_in.warehouse_id,
@@ -1420,6 +1577,21 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
                 posted_at=now,
                 posting_batch=batch_no,
             )
+            if getattr(settings, "INVENTORY_FIFO_ENABLED", False):
+                from allapp.inventory.fifo import move_fifo
+
+                move_fifo(
+                    owner_id=key_out.owner_id,
+                    warehouse_id=key_out.warehouse_id,
+                    product_id=key_out.product_id,
+                    from_location_id=key_out.location_id,
+                    to_location_id=key_in.location_id,
+                    quantity=qty_pos,
+                    batch_no=key_out.batch_no or "",
+                    serial_no=key_out.serial_no or "",
+                    inventory_transaction_id=inventory_tx_in.id,
+                    occurred_at=now,
+                )
             created += 2
             continue
 
@@ -1435,7 +1607,10 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
         )
         source_detail = details_by_key[_detail_dimension_key(source_values)]
         if task_type == WmsTask.TaskType.REPLEN:
-            if not key_out.source_detail_id or source_detail.id != key_out.source_detail_id:
+            if (
+                not key_out.source_detail_id
+                or source_detail.id != key_out.source_detail_id
+            ):
                 raise ValidationError("补货来源库存层已发生变化，请重新规划任务。")
             if any(
                 _q4(value) != 0
@@ -1445,7 +1620,9 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
                     source_detail.damaged_qty,
                 )
             ):
-                raise ValidationError("补货来源库存已分配、锁定或损坏，请重新规划任务。")
+                raise ValidationError(
+                    "补货来源库存已分配、锁定或损坏，请重新规划任务。"
+                )
             if _q4(source_detail.available_qty) < qty_pos:
                 raise ValidationError("补货来源可用库存已发生变化，请重新规划任务。")
 
@@ -1510,7 +1687,7 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
                 )
             ],
         )
-        _insert_tx(
+        inventory_tx_in = _insert_tx(
             tx_type=key_in.tx_type,
             owner_id=key_in.owner_id,
             warehouse_id=key_in.warehouse_id,
@@ -1529,6 +1706,21 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
             posted_at=now,
             posting_batch=batch_no,
         )
+        if getattr(settings, "INVENTORY_FIFO_ENABLED", False):
+            from allapp.inventory.fifo import move_fifo
+
+            move_fifo(
+                owner_id=key_out.owner_id,
+                warehouse_id=key_out.warehouse_id,
+                product_id=key_out.product_id,
+                from_location_id=key_out.location_id,
+                to_location_id=key_in.location_id,
+                quantity=qty_pos,
+                batch_no=key_out.batch_no or "",
+                serial_no=key_out.serial_no or "",
+                inventory_transaction_id=inventory_tx_in.id,
+                occurred_at=now,
+            )
         ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
         logger.info(
             "inventory.putaway.applied_pair %s from_location_id=%s to_location_id=%s product_id=%s qty=%s pair_id=%s",
@@ -1552,6 +1744,7 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
 # ======================
 # 对外入口：统一过账（仅扫描 + 批内聚合）
 # ======================
+
 
 @transaction.atomic
 def post_task(
@@ -1580,9 +1773,7 @@ def post_task(
     ctx, ctx_text = build_log_payload(task=task, user=user, journal=pj)
     logger.info("inventory.post_task.begin %s", ctx_text, extra=ctx)
 
-    posted_status = getattr(
-        getattr(WmsTask, "PostingStatus", None), "POSTED", "POSTED"
-    )
+    posted_status = getattr(getattr(WmsTask, "PostingStatus", None), "POSTED", "POSTED")
     task_is_posted = task.posting_status == posted_status
     journal_is_posted = pj.status == "POSTED"
     if task_is_posted and journal_is_posted:
@@ -1608,9 +1799,7 @@ def post_task(
         getattr(WmsTask.PostingStatus, "FAILED", "FAILED"),
     }
     if task.posting_status not in retryable_statuses:
-        raise ValidationError(
-            f"过账状态 {task.posting_status} 不允许执行库存过账。"
-        )
+        raise ValidationError(f"过账状态 {task.posting_status} 不允许执行库存过账。")
 
     # 与盘点发布使用同一仓库互斥锁，保证“刷新快照并落范围锁”与库存变更串行。
     Warehouse.objects.select_for_update().get(pk=task.warehouse_id)
@@ -1629,14 +1818,14 @@ def post_task(
             task_type or "<empty>",
             extra=ctx,
         )
-        raise ValidationError(
-            f"不支持的库存过账任务类型：{task_type or '<空>'}"
-        )
+        raise ValidationError(f"不支持的库存过账任务类型：{task_type or '<空>'}")
 
     # 3) 重取并锁定调用方明确提供的扫描
     now_ts = now or timezone.now()
     batch = batch_no or now_ts.strftime("%Y%m%d-%H%M%S")
-    pj_ctx, pj_text = build_log_payload(task=task, user=user, journal=pj, posting_batch=batch)
+    pj_ctx, pj_text = build_log_payload(
+        task=task, user=user, journal=pj, posting_batch=batch
+    )
     try:
         scans = _lock_and_validate_scans(task=task, scans=scans)
     except ValidationError:
@@ -1661,6 +1850,16 @@ def post_task(
             qty_task_type=task_type,
         )
         affected = _apply_receive_like(task, groups, now=now_ts, batch_no=batch)
+
+    elif posting_family == "MOVE" and task_type == WmsTask.TaskType.RELOC:
+        from allapp.tasking.relocation import post_relocation_inventory
+
+        affected = post_relocation_inventory(
+            task=task,
+            scans=scans,
+            now=now_ts,
+            batch_no=batch,
+        )
 
     elif posting_family == "MOVE":
         groups = _group_putaway(
@@ -1751,19 +1950,34 @@ def post_task(
         task.posting_status = posted_status
         task.save(update_fields=["posting_status"])
     except Exception:
-        logger.exception("inventory.post_task.task_status_update_failed %s", pj_text, extra=pj_ctx)
+        logger.exception(
+            "inventory.post_task.task_status_update_failed %s", pj_text, extra=pj_ctx
+        )
         raise  # 重新抛出异常，让事务回滚
 
     pj.status = "POSTED"
     pj.message = f"{batch}"
     pj.attempt_count = (pj.attempt_count or 0) + 1
     pj.save(update_fields=["status", "message", "attempt_count"])
-    logger.info("inventory.post_task.completed %s affected_tx_count=%s", pj_text, affected, extra=pj_ctx)
+    logger.info(
+        "inventory.post_task.completed %s affected_tx_count=%s",
+        pj_text,
+        affected,
+        extra=pj_ctx,
+    )
 
-    return {"ok": True, "affected_tx_count": int(affected), "batch_no": batch, "message": "OK"}
+    return {
+        "ok": True,
+        "affected_tx_count": int(affected),
+        "batch_no": batch,
+        "message": "OK",
+    }
+
 
 # allapp/inventory/services.py （在处理 ISSUE 成功写分录并更新 onhand 后，追加 ↓）
-def _release_allocated_after_issue(owner_id, warehouse_id, product_id, location_id, qty_abs):
+def _release_allocated_after_issue(
+    owner_id, warehouse_id, product_id, location_id, qty_abs
+):
     """
     ISSUE 后释放 allocated：allocated = max(allocated - qty_abs, 0)
     """
@@ -1775,7 +1989,6 @@ def _release_allocated_after_issue(owner_id, warehouse_id, product_id, location_
     #     location_id=location_id,
     #     allocated_qty__gt=0,
     # ).update(allocated_qty=F("allocated_qty") - qty_abs)
-
 
     qs = InventoryDetail.objects.filter(
         owner_id=owner_id,

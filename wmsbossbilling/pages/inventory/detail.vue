@@ -18,34 +18,8 @@
     </view>
 	
 	
-	<view class="filter-row">
-	  <picker
-	    mode="selector"
-	    :range="ownerOptions"
-	    range-key="label"
-	    :value="ownerPickerIndex"
-	    @change="onOwnerChange"
-	  >
-	    <view class="picker-box">
-	      <text class="picker-label">货主筛选</text>
-	      <text class="picker-value">{{ ownerOptions[ownerPickerIndex]?.label || '全部货主' }}</text>
-	    </view>
-	  </picker>
-	
-	  <picker
-	    mode="selector"
-	    :range="warehouseOptions"
-	    range-key="label"
-	    :value="warehousePickerIndex"
-	    @change="onWarehouseChange"
-	  >
-	    <view class="picker-box">
-	      <text class="picker-label">仓库筛选</text>
-	      <text class="picker-value">{{ warehouseOptions[warehousePickerIndex]?.label || '全部仓库' }}</text>
-	    </view>
-	  </picker>
-	</view>
-	
+    <BossScopeFilter @change="onScopeChange" />
+    <BossDataStatus :meta="meta" :error="dataError" />
 
     <view class="filter-card">
       <view class="filter-row">
@@ -103,6 +77,7 @@
             <view class="product-sub">
               {{ item.product_code || item.product_sku || '-' }}
               <text v-if="item.product_spec"> · {{ item.product_spec }}</text>
+              <text> · 单位 {{ item.base_unit || 'UNKNOWN' }}</text>
             </view>
           </view>
 
@@ -116,7 +91,7 @@
           </view>
 
           <view class="cell col-num">
-            <text class="num-text">{{ fmtQty(item.onhand_qty_display || item.onhand_qty) }}</text>
+            <text class="num-text">{{ fmtQty(item.onhand_qty_display || item.onhand_qty) }} {{ item.base_unit }}</text>
           </view>
 
           <view class="cell col-num primary">
@@ -150,11 +125,14 @@
 import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import BossNav from '@/components/boss-nav.vue'
+import BossScopeFilter from '@/components/boss-scope-filter.vue'
+import BossDataStatus from '@/components/boss-data-status.vue'
 import { useAuth } from '@/store/auth'
+import { useBossScope } from '@/store/bossScope'
 import { api } from '@/utils/request'
-import { asList } from '@/utils/billing'
 
 const auth = useAuth()
+const bossScope = useBossScope()
 
 const rows = ref([])
 const total = ref(0)
@@ -162,56 +140,12 @@ const page = ref(1)
 const pageSize = ref(50)
 const pageSizeOptions = [10, 20, 50, 100]
 const search = ref('')
-const ownerId = ref('')
-
-const warehouseId = ref('')
-
-// const optionRows = ref([])
-
-const warehouseOptionRows = ref([])
-
 const loading = ref(false)
 const finished = ref(false)
+const meta = ref(null)
+const dataError = ref(null)
 
 const operatorName = computed(() => auth.user?.display_name || auth.user?.username || '老板账号')
-
-const ownerOptions = computed(() => {
-  const rows = asList(inventoryOverviewPayload.value?.owner_options).map((item) => ({
-    id: String(item.id),
-    label: item.name || `货主 #${item.id}`,
-  }))
-
-  return [{ id: '', label: '全部货主' }, ...rows]
-})
-
-const warehouseOptions = computed(() => {
-  const map = new Map()
-
-  warehouseOptionRows.value.forEach((item) => {
-    const id = item.warehouse_id
-    if (id === null || id === undefined || id === '') return
-    map.set(String(id), item.warehouse_name || `仓库 #${id}`)
-  })
-
-  return [
-    { id: '', label: '全部仓库' },
-    ...Array.from(map.entries()).map(([id, label]) => ({ id, label })),
-  ]
-})
-
-const ownerPickerIndex = computed(() => {
-  const rows = ownerOptions.value || []
-  const index = rows.findIndex((item) => String(item.id) === String(ownerId.value || ''))
-  return index >= 0 ? index : 0
-})
-
-const warehousePickerIndex = computed(() => {
-  const rows = warehouseOptions.value || []
-  const index = rows.findIndex((item) => String(item.id) === String(warehouseId.value || ''))
-  return index >= 0 ? index : 0
-})
-
-const inventoryOverviewPayload = ref(null)
 
 
 function fmtQty(value) {
@@ -229,34 +163,15 @@ function rowKey(item) {
 
 function buildParams() {
   const params = {
-    mode: 'warehouse',
+    ...bossScope.params,
     page: page.value,
     page_size: pageSize.value,
     search: search.value,
   }
 
-  if (ownerId.value) {
-    params.owner_id = ownerId.value
-  }
-  
-  if (warehouseId.value) {
-      params.warehouse_id = warehouseId.value
-  }
-
-
   return params
 }
 
-
-// async function loadOptions() {
-//   const res = await api.bossInventoryDetail({
-//     mode: 'warehouse',
-//     page: 1,
-//     page_size: 500,
-//   })
-
-//   optionRows.value = Array.isArray(res?.results) ? res.results : []
-// }
 
 async function load(reset = false) {
   if (loading.value) return
@@ -270,10 +185,12 @@ async function load(reset = false) {
   if (finished.value && !reset) return
 
   loading.value = true
+  dataError.value = null
 
   try {
-    const res = await api.bossInventoryDetail(buildParams())
+    const res = await api.bossInventoryDetails(buildParams())
     const list = Array.isArray(res?.results) ? res.results : []
+    meta.value = res?.meta || null
 
     total.value = Number(res?.count || 0)
 
@@ -283,8 +200,12 @@ async function load(reset = false) {
       rows.value = [...rows.value, ...list]
     }
 
-    finished.value = !res?.next || rows.value.length >= total.value
+    finished.value = !res?.next_page || rows.value.length >= total.value
   } catch (error) {
+    dataError.value = error
+    rows.value = []
+    total.value = 0
+    finished.value = true
     console.error('boss inventory detail failed:', error)
   } finally {
     loading.value = false
@@ -318,28 +239,24 @@ function back() {
   uni.navigateBack()
 }
 
-// onLoad((query = {}) => {
-//   if (!auth.ensureAuth()) {
-//     uni.reLaunch({ url: '/pages/login' })
-//     return
-//   }
-
-//   ownerId.value = query.owner_id || ''
-//   load(true)
-// })
-
 onLoad(async (query = {}) => {
   if (!auth.ensureAuth()) {
     uni.reLaunch({ url: '/pages/login' })
     return
   }
 
-  ownerId.value = query.owner_id || ''
-  warehouseId.value = query.warehouse_id || ''
-
-  // await loadOptions()
-  await loadFilterOptions()  
-  load(true)
+  bossScope.restore(auth.user)
+  if (query.warehouse !== undefined) bossScope.warehouse = String(query.warehouse || '')
+  if (query.owner !== undefined) bossScope.owner = String(query.owner || '')
+  if (query.date_from && query.date_to) bossScope.setDates(query.date_from, query.date_to)
+  try {
+    await bossScope.loadContext(auth.user, true)
+    load(true)
+  } catch (error) {
+    dataError.value = error
+    rows.value = []
+    total.value = 0
+  }
 })
 
 
@@ -348,28 +265,8 @@ onPullDownRefresh(() => {
 })
 
 
-function onOwnerChange(event) {
-  const option = ownerOptions.value[Number(event.detail.value || 0)] || ownerOptions.value[0]
-  ownerId.value = option?.id || ''
+function onScopeChange() {
   load(true)
-}
-
-function onWarehouseChange(event) {
-  const option = warehouseOptions.value[Number(event.detail.value || 0)] || warehouseOptions.value[0]
-  warehouseId.value = option?.id || ''
-  load(true)
-}
-
-async function loadFilterOptions() {
-  inventoryOverviewPayload.value = await api.bossInventory({})
-
-  const res = await api.bossInventoryDetail({
-    mode: 'warehouse',
-    page: 1,
-    page_size: 500,
-  })
-
-  warehouseOptionRows.value = Array.isArray(res?.results) ? res.results : []
 }
 
 </script>

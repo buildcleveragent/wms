@@ -108,6 +108,21 @@ def profile_view(request):
                 "can_retry_replenishment_posting": settings.REPLENISHMENT_PDA_ENABLED
                 and is_manager
                 and user.has_perm("tasking.taskconfirm_as_wh_manager"),
+                "can_request_relocation": settings.RELOCATION_REQUEST_ENABLED
+                and is_operator
+                and user.has_perm("tasking.request_relocation"),
+                "can_execute_relocation": settings.RELOCATION_PDA_ENABLED
+                and is_operator
+                and user.has_perm("tasking.claim_task_as_wh_operator"),
+                "can_approve_relocation": settings.RELOCATION_REQUEST_ENABLED
+                and is_manager
+                and user.has_perm("tasking.approve_relocation"),
+                "can_manage_relocation": settings.RELOCATION_REQUEST_ENABLED
+                and is_manager
+                and user.has_perm("tasking.manage_relocation"),
+                "can_manage_relocation_tasks": settings.RELOCATION_PDA_ENABLED
+                and is_manager
+                and user.has_perm("tasking.manage_relocation"),
             },
             "menus": menus,  # 返回动态生成的菜单
         }

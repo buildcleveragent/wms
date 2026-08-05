@@ -1,18 +1,18 @@
 # allapp/inventory/models.py
 from django.conf import settings
 from django.utils.translation import gettext_lazy as _
-from django.db.models import Q, F, CheckConstraint, Value,BooleanField
+from django.db.models import Q, F, CheckConstraint, Value, BooleanField
 import datetime
 from django.db.models.functions import Upper, Coalesce, NullIf
 from decimal import Decimal
 from django.db import models
 from django.core.validators import MinValueValidator
+from django.core.exceptions import ValidationError
 from allapp.core.choices import ZoneType
 from allapp.core.models import BaseModel
-from allapp.core.choices import (SubmitStatus, InvTxType, TransferStatus)
-from allapp.baseinfo.models import Owner
-from allapp.locations.models import Warehouse, Subwarehouse, Location
-from allapp.products.models import Product
+from allapp.core.choices import InvTxType
+
+
 # =========================A. 现存量 =========================
 class InventoryDetail(BaseModel):
     """
@@ -22,15 +22,45 @@ class InventoryDetail(BaseModel):
     """
 
     # —— 维度外键 —— #
-    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
-    product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
-    subwarehouse = models.ForeignKey("locations.Subwarehouse", on_delete=models.PROTECT, verbose_name="子仓",null=True, blank=True,)
-    zone_type = models.PositiveSmallIntegerField(_("区域类型"), choices=ZoneType.choices, default=ZoneType.STORAGE, db_index=True)
-    location = models.ForeignKey("locations.Location", on_delete=models.PROTECT, verbose_name="库位")
+    owner = models.ForeignKey(
+        "baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主"
+    )
+    product = models.ForeignKey(
+        "products.Product", on_delete=models.PROTECT, verbose_name="商品"
+    )
+    warehouse = models.ForeignKey(
+        "locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库"
+    )
+    subwarehouse = models.ForeignKey(
+        "locations.Subwarehouse",
+        on_delete=models.PROTECT,
+        verbose_name="子仓",
+        null=True,
+        blank=True,
+    )
+    zone_type = models.PositiveSmallIntegerField(
+        _("区域类型"), choices=ZoneType.choices, default=ZoneType.STORAGE, db_index=True
+    )
+    location = models.ForeignKey(
+        "locations.Location", on_delete=models.PROTECT, verbose_name="库位"
+    )
+    container = models.ForeignKey(
+        "locations.Container",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="inventory_details",
+        verbose_name="容器",
+    )
 
     # （可选但强烈建议）批次外键；仍保留批次快照字段方便打印/兼容
-    lot = models.ForeignKey("inbound.Lot", on_delete=models.PROTECT, null=True, blank=True, verbose_name="批次")
+    lot = models.ForeignKey(
+        "inbound.Lot",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        verbose_name="批次",
+    )
 
     # —— 批次/效期/序列（字符串统一：写入端自行规范；唯一约束里再兜底大小写）—— #
     batch_no = models.CharField("批次号", max_length=64, blank=True, default="")
@@ -39,19 +69,54 @@ class InventoryDetail(BaseModel):
 
     serial_no = models.CharField("序列号", max_length=64, blank=True, default="")
     # 规范化后的序列号：空/空白 -> NULL；非空 -> UPPER，供“跨位置唯一”约束与检索
-    serial_no_norm = models.CharField("序列号(规范化)", max_length=64, null=True, blank=True, db_index=True)
+    serial_no_norm = models.CharField(
+        "序列号(规范化)", max_length=64, null=True, blank=True, db_index=True
+    )
 
     # —— 冗余快照 —— #
     base_unit = models.CharField("基本单位", max_length=30)
-    product_serial_control = models.BooleanField("序列化控制快照", default=False, )
+    product_serial_control = models.BooleanField(
+        "序列化控制快照",
+        default=False,
+    )
 
     # —— 数量 —— #
-    onhand_qty =    models.DecimalField("账面库存", max_digits=18, decimal_places=4, default=0,validators=[MinValueValidator(0)])
-    allocated_qty = models.DecimalField("已分配数量", max_digits=18, decimal_places=4, default=0,validators=[MinValueValidator(0)])
-    locked_qty =    models.DecimalField("锁定数量", max_digits=18, decimal_places=4, default=0,validators=[MinValueValidator(0)])
-    damaged_qty =   models.DecimalField("损坏数量", max_digits=18, decimal_places=4, default=0,validators=[MinValueValidator(0)])
+    onhand_qty = models.DecimalField(
+        "账面库存",
+        max_digits=18,
+        decimal_places=4,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    allocated_qty = models.DecimalField(
+        "已分配数量",
+        max_digits=18,
+        decimal_places=4,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    locked_qty = models.DecimalField(
+        "锁定数量",
+        max_digits=18,
+        decimal_places=4,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    damaged_qty = models.DecimalField(
+        "损坏数量",
+        max_digits=18,
+        decimal_places=4,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
     # 可用量存储，但由 save() 恒等式强制回填
-    available_qty = models.DecimalField("可用数量", max_digits=18, decimal_places=4, default=0,validators=[MinValueValidator(0)])
+    available_qty = models.DecimalField(
+        "可用数量",
+        max_digits=18,
+        decimal_places=4,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
 
     class Meta:
         verbose_name = "库存现存量"
@@ -60,15 +125,16 @@ class InventoryDetail(BaseModel):
         # —— 唯一/检查约束（MySQL 8.0.13+ 支持表达式唯一/函数索引） —— #
         constraints = [
             # 1) 维度唯一：仅允许“1条活跃快照”
-
             #    - batch/serial：大小写不敏感；NULL→""（用于唯一判断）
             #    - production/expiry：NULL→'1000-01-01'（用于唯一判断）
-
             models.UniqueConstraint(
                 F("owner"),
                 F("product"),
                 F("warehouse"),
                 F("location"),
+                Coalesce(
+                    F("container"), Value(0), output_field=models.BigIntegerField()
+                ),
                 Upper(Coalesce(F("batch_no"), Value(""))),
                 Coalesce(F("production_date"), Value(datetime.date(1000, 1, 1))),
                 Coalesce(F("expiry_date"), Value(datetime.date(1000, 1, 1))),
@@ -79,27 +145,44 @@ class InventoryDetail(BaseModel):
             # 2) 数量非负
             models.CheckConstraint(
                 name="chk_inv_non_negative",
-                check=Q(onhand_qty__gte=0, allocated_qty__gte=0,
-                        locked_qty__gte=0, damaged_qty__gte=0, available_qty__gte=0),
+                check=Q(
+                    onhand_qty__gte=0,
+                    allocated_qty__gte=0,
+                    locked_qty__gte=0,
+                    damaged_qty__gte=0,
+                    available_qty__gte=0,
+                ),
             ),
-
             # 3) 序列化商品数量限制（更严格可改为 in {0,1}）
             models.CheckConstraint(
                 name="chk_inv_serial_qty_le_one",
-                check=Q(product_serial_control=False) |
-                      Q(onhand_qty__lte=1, allocated_qty__lte=1,
-                        locked_qty__lte=1, damaged_qty__lte=1, available_qty__lte=1),
+                check=Q(product_serial_control=False)
+                | Q(
+                    onhand_qty__lte=1,
+                    allocated_qty__lte=1,
+                    locked_qty__lte=1,
+                    damaged_qty__lte=1,
+                    available_qty__lte=1,
+                ),
             ),
-
             # 4) 可用量恒等式：available = onhand - allocated - locked - damaged
             models.CheckConstraint(
                 name="chk_inv_available_identity",
-                check=Q(available_qty=F("onhand_qty") - F("allocated_qty") - F("locked_qty") - F("damaged_qty")),
+                check=Q(
+                    available_qty=F("onhand_qty")
+                    - F("allocated_qty")
+                    - F("locked_qty")
+                    - F("damaged_qty")
+                ),
             ),
-
             # 5) 序列号跨位置唯一（仅对“非空规范化 SN”生效；NULL 可重复）
             models.UniqueConstraint(
-                fields=["owner", "product", "serial_no_norm", "is_active"],  # 若无 is_active，可去掉
+                fields=[
+                    "owner",
+                    "product",
+                    "serial_no_norm",
+                    "is_active",
+                ],  # 若无 is_active，可去掉
                 name="ux_inv_serial_owner_prod_act",
             ),
         ]
@@ -108,31 +191,38 @@ class InventoryDetail(BaseModel):
         indexes = [
             # FEFO：到期为空则推到最后
             models.Index(
-                F("owner"), F("product"), F("warehouse"), F("location"),
+                F("owner"),
+                F("product"),
+                F("warehouse"),
+                F("location"),
                 Coalesce(F("expiry_date"), Value(datetime.date(9999, 12, 31))),
                 name="idx_inv_fefo_mysql",
             ),
-
             # 批次检索（批次不区分大小写）
             models.Index(
-                F("owner"), F("product"),
+                F("owner"),
+                F("product"),
                 Upper(Coalesce(F("batch_no"), Value(""))),
                 name="idx_inv_owner_prod_batch_mysql",
             ),
-
             # 有效期检索
             models.Index(
-                F("owner"), F("product"),
+                F("owner"),
+                F("product"),
                 Coalesce(F("expiry_date"), Value(datetime.date(1000, 1, 1))),
                 name="idx_inv_owner_prod_exp",
             ),
-
             # 位置+商品（这是“字段索引”，仍然用 fields=）
-            models.Index(name="idx_inv_loc_product_mysql", fields=["warehouse", "subwarehouse","location", "product"]),
-
+            models.Index(
+                name="idx_inv_loc_product_mysql",
+                fields=["warehouse", "subwarehouse", "location", "product"],
+            ),
+            models.Index(
+                name="idx_inv_wh_loc_cont_prod",
+                fields=["warehouse", "location", "container", "product"],
+            ),
             # 活跃过滤
             models.Index(name="idx_inv_is_active", fields=["is_active"]),
-
         ]
 
     def __str__(self):
@@ -154,8 +244,25 @@ class InventoryDetail(BaseModel):
         if self.location_id:
             if self.warehouse_id and self.warehouse_id != self.location.warehouse_id:
                 errors["warehouse"] = "warehouse 必须与 location.warehouse 一致。"
-            if self.subwarehouse_id and self.subwarehouse_id != self.location.subwarehouse_id:
-                errors["subwarehouse"] = "subwarehouse 必须与 location.subwarehouse 一致。"
+            if (
+                self.subwarehouse_id
+                and self.subwarehouse_id != self.location.subwarehouse_id
+            ):
+                errors["subwarehouse"] = (
+                    "subwarehouse 必须与 location.subwarehouse 一致。"
+                )
+
+        if self.container_id:
+            container = self.container
+            if self.warehouse_id and container.warehouse_id != self.warehouse_id:
+                errors["container"] = "容器必须与库存属于同一仓库。"
+            if container.location_id != self.location_id:
+                errors["container"] = "容器当前位置必须与库存库位一致。"
+            if (
+                container.scope == container.Scope.PRIVATE
+                and container.owner_id != self.owner_id
+            ):
+                errors["container"] = "私有容器必须与库存属于同一货主。"
 
         # 产品驱动的控制口径
         if self.product_id:
@@ -193,7 +300,11 @@ class InventoryDetail(BaseModel):
             # 效期控制
             if bool(getattr(p, "expiry_control", False)):
                 # 允许 production/expiry 为 NULL；若有值，可加 exp >= prod 的校验
-                if self.production_date and self.expiry_date and self.expiry_date < self.production_date:
+                if (
+                    self.production_date
+                    and self.expiry_date
+                    and self.expiry_date < self.production_date
+                ):
                     errors["expiry_date"] = "有效期不得早于生产日期。"
             # else:
             #     if self.production_date or self.expiry_date:
@@ -210,13 +321,17 @@ class InventoryDetail(BaseModel):
         # —— 回填快照 —— #
         if self.product_id and getattr(self.product, "base_uom_id", None):
             self.base_unit = self.product.base_uom.code
-            self.product_serial_control = bool(getattr(self.product, "serial_control", False))
+            self.product_serial_control = bool(
+                getattr(self.product, "serial_control", False)
+            )
 
         # —— 可用量恒等式 —— #
-        self.available_qty = (self.onhand_qty or Decimal("0")) \
-                             - (self.allocated_qty or Decimal("0")) \
-                             - (self.locked_qty or Decimal("0")) \
-                             - (self.damaged_qty or Decimal("0"))
+        self.available_qty = (
+            (self.onhand_qty or Decimal("0"))
+            - (self.allocated_qty or Decimal("0"))
+            - (self.locked_qty or Decimal("0"))
+            - (self.damaged_qty or Decimal("0"))
+        )
 
         # —— 规范化序列号（与 clean 保持一致；避免绕过 clean 的直接 save）—— #
         s = (self.serial_no or "").strip().upper()
@@ -258,27 +373,79 @@ class InventoryDetail(BaseModel):
     #     if errors:
     #         raise ValidationError(errors)
 
+
 class InventorySnapshotDaily(models.Model):
+    class Source(models.TextChoices):
+        BOOTSTRAP_DETAIL = "BOOTSTRAP_DETAIL", "当前库存回补历史（近似）"
+        TX_ROLLFORWARD = "TX_ROLLFORWARD", "可信事务推演"
+        TX_ROLLFORWARD_APPROX = "TX_ROLLFORWARD_APPROX", "近似基线事务推演"
+
+    class UnitSource(models.TextChoices):
+        VERIFIED = "VERIFIED", "快照生成时确认"
+        LEGACY_INFERRED = "LEGACY_INFERRED", "按当前商品单位回填"
+        UNKNOWN = "UNKNOWN", "无法确认"
+
     snapshot_date = models.DateField("快照日期", db_index=True)
-    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
-    location = models.ForeignKey("locations.Location", on_delete=models.PROTECT, verbose_name="库位")
-    product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
+    owner = models.ForeignKey(
+        "baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主"
+    )
+    warehouse = models.ForeignKey(
+        "locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库"
+    )
+    location = models.ForeignKey(
+        "locations.Location", on_delete=models.PROTECT, verbose_name="库位"
+    )
+    product = models.ForeignKey(
+        "products.Product", on_delete=models.PROTECT, verbose_name="商品"
+    )
 
     batch_no = models.CharField("批次号", max_length=64, blank=True, default="")
     production_date = models.DateField("生产日期", null=True, blank=True)
     expiry_date = models.DateField("有效期至", null=True, blank=True)
     serial_no = models.CharField("序列号", max_length=64, blank=True, default="")
 
-    onhand_qty = models.DecimalField("账面库存快照", max_digits=18, decimal_places=4, default=0)
-    available_qty = models.DecimalField("可用库存快照", max_digits=18, decimal_places=4, default=0)
-    allocated_qty = models.DecimalField("已分配快照", max_digits=18, decimal_places=4, default=0)
-    locked_qty = models.DecimalField("锁定快照", max_digits=18, decimal_places=4, default=0)
-    damaged_qty = models.DecimalField("损坏快照", max_digits=18, decimal_places=4, default=0)
+    onhand_qty = models.DecimalField(
+        "账面库存快照", max_digits=18, decimal_places=4, default=0
+    )
+    available_qty = models.DecimalField(
+        "可用库存快照", max_digits=18, decimal_places=4, default=0
+    )
+    allocated_qty = models.DecimalField(
+        "已分配快照", max_digits=18, decimal_places=4, default=0
+    )
+    locked_qty = models.DecimalField(
+        "锁定快照", max_digits=18, decimal_places=4, default=0
+    )
+    damaged_qty = models.DecimalField(
+        "损坏快照", max_digits=18, decimal_places=4, default=0
+    )
+    base_unit_code = models.CharField(
+        "基本单位快照",
+        max_length=30,
+        blank=True,
+        default="",
+        help_text="生成快照时的商品基本单位编码；空值表示历史记录无法确认。",
+    )
+    base_unit_source = models.CharField(
+        "基本单位来源",
+        max_length=20,
+        choices=UnitSource.choices,
+        default=UnitSource.UNKNOWN,
+    )
 
-    unit_volume_m3_snapshot = models.DecimalField("单位体积快照(m³)", max_digits=12, decimal_places=6, null=True, blank=True)
-    location_area_m2_snapshot = models.DecimalField("库位面积快照(㎡)", max_digits=12, decimal_places=4, null=True, blank=True)
-    snapshot_source = models.CharField("快照来源", max_length=40, blank=True, default="")
+    unit_volume_m3_snapshot = models.DecimalField(
+        "单位体积快照(m³)", max_digits=12, decimal_places=6, null=True, blank=True
+    )
+    location_area_m2_snapshot = models.DecimalField(
+        "库位面积快照(㎡)", max_digits=12, decimal_places=4, null=True, blank=True
+    )
+    snapshot_source = models.CharField(
+        "快照来源",
+        max_length=40,
+        choices=Source.choices,
+        blank=True,
+        default="",
+    )
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
 
     class Meta:
@@ -301,13 +468,23 @@ class InventorySnapshotDaily(models.Model):
             ),
         ]
         indexes = [
-            models.Index(fields=["snapshot_date", "owner", "warehouse"], name="idx_inv_snapshot_date_scope"),
-            models.Index(fields=["owner", "warehouse", "location"], name="idx_inv_snapshot_scope_loc"),
-            models.Index(fields=["product", "snapshot_date"], name="idx_inv_snapshot_product_date"),
+            models.Index(
+                fields=["snapshot_date", "owner", "warehouse"],
+                name="idx_inv_snapshot_date_scope",
+            ),
+            models.Index(
+                fields=["owner", "warehouse", "location"],
+                name="idx_inv_snapshot_scope_loc",
+            ),
+            models.Index(
+                fields=["product", "snapshot_date"],
+                name="idx_inv_snapshot_product_date",
+            ),
         ]
 
     def __str__(self):
         return f"SNAP[{self.snapshot_date}][{self.owner_id}/{self.warehouse_id}/{self.location_id}/{self.product_id}]"
+
 
 # =========================B. 汇总（Owner+SKU）=========================
 class InventorySummary(BaseModel):
@@ -317,16 +494,54 @@ class InventorySummary(BaseModel):
     - 数量非负，available = onhand - allocated - locked - damaged。
     - base_unit 为 Product 基本单位快照（系统维护，只读）。
     """
-    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
-    product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
 
-    base_unit = models.CharField("基本单位", max_length=30, )
+    owner = models.ForeignKey(
+        "baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主"
+    )
+    product = models.ForeignKey(
+        "products.Product", on_delete=models.PROTECT, verbose_name="商品"
+    )
 
-    onhand_qty    = models.DecimalField("账面库存",   max_digits=18, decimal_places=4, default=0,validators=[MinValueValidator(0)])
-    allocated_qty = models.DecimalField("已分配数量", max_digits=18, decimal_places=4, default=0,validators=[MinValueValidator(0)])
-    locked_qty    = models.DecimalField("锁定数量",   max_digits=18, decimal_places=4, default=0,validators=[MinValueValidator(0)])
-    damaged_qty   = models.DecimalField("损坏数量",   max_digits=18, decimal_places=4, default=0,validators=[MinValueValidator(0)])
-    available_qty = models.DecimalField("可用数量", max_digits=18, decimal_places=4, default=0,validators=[MinValueValidator(0)])
+    base_unit = models.CharField(
+        "基本单位",
+        max_length=30,
+    )
+
+    onhand_qty = models.DecimalField(
+        "账面库存",
+        max_digits=18,
+        decimal_places=4,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    allocated_qty = models.DecimalField(
+        "已分配数量",
+        max_digits=18,
+        decimal_places=4,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    locked_qty = models.DecimalField(
+        "锁定数量",
+        max_digits=18,
+        decimal_places=4,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    damaged_qty = models.DecimalField(
+        "损坏数量",
+        max_digits=18,
+        decimal_places=4,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    available_qty = models.DecimalField(
+        "可用数量",
+        max_digits=18,
+        decimal_places=4,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
 
     class Meta:
         verbose_name = "库存汇总"
@@ -343,17 +558,20 @@ class InventorySummary(BaseModel):
             ),
             # 数量非负
             models.CheckConstraint(
-                check=Q(onhand_qty__gte=0) &
-                      Q(available_qty__gte=0) &
-                      Q(allocated_qty__gte=0) &
-                      Q(locked_qty__gte=0) &
-                      Q(damaged_qty__gte=0),
+                check=Q(onhand_qty__gte=0)
+                & Q(available_qty__gte=0)
+                & Q(allocated_qty__gte=0)
+                & Q(locked_qty__gte=0)
+                & Q(damaged_qty__gte=0),
                 name="chk_invsummary_non_negative",
             ),
             # 恒等式：available = onhand - allocated - locked - damaged
             models.CheckConstraint(
                 check=Q(
-                    available_qty=F("onhand_qty") - F("allocated_qty") - F("locked_qty") - F("damaged_qty")
+                    available_qty=F("onhand_qty")
+                    - F("allocated_qty")
+                    - F("locked_qty")
+                    - F("damaged_qty")
                 ),
                 name="chk_sum_avail_identity",
             ),
@@ -370,12 +588,18 @@ class InventorySummary(BaseModel):
             self.base_unit = self.product.base_uom.code
 
         # 语义校验（避免 available 为负）
-        calc_available = (self.onhand_qty or Decimal("0")) \
-                         - (self.allocated_qty or Decimal("0")) \
-                         - (self.locked_qty or Decimal("0")) \
-                         - (self.damaged_qty or Decimal("0"))
+        calc_available = (
+            (self.onhand_qty or Decimal("0"))
+            - (self.allocated_qty or Decimal("0"))
+            - (self.locked_qty or Decimal("0"))
+            - (self.damaged_qty or Decimal("0"))
+        )
         if calc_available < 0:
-            raise ValidationError({"available_qty": "可用数量不可为负，请检查分配/锁定/损坏是否超出账面。"})
+            raise ValidationError(
+                {
+                    "available_qty": "可用数量不可为负，请检查分配/锁定/损坏是否超出账面。"
+                }
+            )
 
     def save(self, *args, **kwargs):
         # 1) base_unit 快照
@@ -383,14 +607,17 @@ class InventorySummary(BaseModel):
             self.base_unit = self.product.base_uom.code
 
         # 2) 恒等式
-        self.available_qty = (self.onhand_qty or Decimal("0")) \
-                             - (self.allocated_qty or Decimal("0")) \
-                             - (self.locked_qty or Decimal("0")) \
-                             - (self.damaged_qty or Decimal("0"))
+        self.available_qty = (
+            (self.onhand_qty or Decimal("0"))
+            - (self.allocated_qty or Decimal("0"))
+            - (self.locked_qty or Decimal("0"))
+            - (self.damaged_qty or Decimal("0"))
+        )
 
         # 3) 严格校验
         self.full_clean()
         return super().save(*args, **kwargs)
+
 
 # =========================C. 库存事务流水=========================
 # 建议统一枚举（示例）
@@ -402,39 +629,65 @@ class InventoryTransaction(BaseModel):
     - 数量按 Product.base_uom 计。
     """
 
-    tx_type   = models.CharField("事务类型", max_length=16, choices=InvTxType.choices)
+    tx_type = models.CharField("事务类型", max_length=16, choices=InvTxType.choices)
 
-    owner     = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
-    product   = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
-    location  = models.ForeignKey("locations.Location", on_delete=models.PROTECT, verbose_name="库位")
-    subwarehouse = models.ForeignKey("locations.Subwarehouse", on_delete=models.PROTECT, verbose_name="子仓", null=True,
-                                     blank=True, )
+    owner = models.ForeignKey(
+        "baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主"
+    )
+    product = models.ForeignKey(
+        "products.Product", on_delete=models.PROTECT, verbose_name="商品"
+    )
+    warehouse = models.ForeignKey(
+        "locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库"
+    )
+    location = models.ForeignKey(
+        "locations.Location", on_delete=models.PROTECT, verbose_name="库位"
+    )
+    subwarehouse = models.ForeignKey(
+        "locations.Subwarehouse",
+        on_delete=models.PROTECT,
+        verbose_name="子仓",
+        null=True,
+        blank=True,
+    )
     zone_type = models.PositiveSmallIntegerField(
         _("区域类型"), choices=ZoneType.choices, default=ZoneType.STORAGE, db_index=True
     )
-    batch_no        = models.CharField("批次号", max_length=64, blank=True, default="")
+    batch_no = models.CharField("批次号", max_length=64, blank=True, default="")
     production_date = models.DateField("生产日期", null=True, blank=True)
-    expiry_date     = models.DateField("有效期至", null=True, blank=True)
-    serial_no       = models.CharField("序列号", max_length=64, blank=True, default="")
+    expiry_date = models.DateField("有效期至", null=True, blank=True)
+    serial_no = models.CharField("序列号", max_length=64, blank=True, default="")
+    container = models.ForeignKey(
+        "locations.Container",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="inventory_transactions",
+        verbose_name="容器",
+    )
+    container_no = models.CharField("容器号快照", max_length=60, blank=True, default="")
 
     base_unit = models.CharField("基本单位", max_length=30, editable=False)
-    qty_delta = models.DecimalField("数量变化(+入/-出)", max_digits=18, decimal_places=4)
+    qty_delta = models.DecimalField(
+        "数量变化(+入/-出)", max_digits=18, decimal_places=4
+    )
 
-    # 同一次移库的成对标识（仅 ISSUE/RECEIVE 使用；可为空）
-    pair_id  = models.UUIDField("配对号", null=True, blank=True, db_index=True)
+    # 同一次库存移动的成对标识（ISSUE/RECEIVE 或 MOVE_OUT/MOVE_IN；可为空）
+    pair_id = models.UUIDField("配对号", null=True, blank=True, db_index=True)
 
     # 来源单据快照（用作幂等/追溯）
-    src_model   = models.CharField("来源类型", max_length=64)
-    src_id      = models.BigIntegerField("来源ID")
+    src_model = models.CharField("来源类型", max_length=64)
+    src_id = models.BigIntegerField("来源ID")
     src_line_id = models.BigIntegerField("来源行ID", null=True, blank=True)
-    src_no      = models.CharField("来源单号", max_length=64, blank=True, default="")
+    src_no = models.CharField("来源单号", max_length=64, blank=True, default="")
 
     memo = models.CharField("备注", max_length=255, blank=True, default="")
 
     # ✅ 新增：过账生效时间 / 过账批次号
     posted_at = models.DateTimeField("过账时间", null=True, blank=True, db_index=True)
-    posting_batch = models.CharField("过账批次号", max_length=40, null=True, blank=True, db_index=True)
+    posting_batch = models.CharField(
+        "过账批次号", max_length=40, null=True, blank=True, db_index=True
+    )
 
     class Meta:
         verbose_name = "库存事务流水"
@@ -448,11 +701,18 @@ class InventoryTransaction(BaseModel):
                 fields=["tx_type", "warehouse", "posted_at", "id"],
                 name="ix_tx_type_wh_time",
             ),
-            models.Index(fields=["tx_type", "owner", "product"], name="idx_tx_type_owner_product"),
+            models.Index(
+                fields=["tx_type", "owner", "product"], name="idx_tx_type_owner_product"
+            ),
             models.Index(fields=["warehouse", "location"], name="idx_tx_wh_loc"),
             models.Index(fields=["owner", "product", "batch_no"], name="idx_tx_batch"),
-            models.Index(fields=["owner", "product", "expiry_date"], name="idx_tx_expiry"),
-            models.Index(fields=["owner", "product", "serial_no"], name="idx_tx_serial"),
+            models.Index(
+                fields=["owner", "product", "expiry_date"], name="idx_tx_expiry"
+            ),
+            models.Index(
+                fields=["owner", "product", "serial_no"], name="idx_tx_serial"
+            ),
+            models.Index(fields=["warehouse", "container"], name="idx_tx_wh_container"),
             models.Index(fields=["src_model", "src_id"], name="idx_tx_src"),
             models.Index(fields=["pair_id"], name="idx_tx_pair"),
             # ✅ 可选：常用的 posted_at 窗口查询与按批次定位，已在字段上 db_index=True，这里不再重复
@@ -461,16 +721,26 @@ class InventoryTransaction(BaseModel):
         ]
         constraints = [
             # location 必填
-            CheckConstraint(name="ck_tx_location_required", check=Q(location__isnull=False)),
+            CheckConstraint(
+                name="ck_tx_location_required", check=Q(location__isnull=False)
+            ),
             # qty_delta 非 0
             CheckConstraint(name="ck_tx_qty_non_zero", check=~Q(qty_delta=0)),
-            # RECEIVE >0，ISSUE <0
+            # RECEIVE/MOVE_IN >0，ISSUE/MOVE_OUT <0
             CheckConstraint(
                 name="ck_tx_sign_by_type",
                 check=(
-                    (Q(tx_type=InvTxType.RECEIVE) & Q(qty_delta__gt=0)) |
-                    (Q(tx_type=InvTxType.ISSUE)   & Q(qty_delta__lt=0)) |
-                    Q(tx_type__in=[InvTxType.ADJ_GAIN, InvTxType.ADJ_LOSS])  # 调整由业务控制正负
+                    (
+                        Q(tx_type__in=[InvTxType.RECEIVE, InvTxType.MOVE_IN])
+                        & Q(qty_delta__gt=0)
+                    )
+                    | (
+                        Q(tx_type__in=[InvTxType.ISSUE, InvTxType.MOVE_OUT])
+                        & Q(qty_delta__lt=0)
+                    )
+                    | Q(
+                        tx_type__in=[InvTxType.ADJ_GAIN, InvTxType.ADJ_LOSS]
+                    )  # 调整由业务控制正负
                 ),
             ),
             # 幂等（如需允许同一来源行多分录，请改为指纹 fp 唯一）
@@ -518,12 +788,34 @@ class InventoryTransaction(BaseModel):
         # 4) 仓库一致性
         if self.location_id and self.location.warehouse_id != self.warehouse_id:
             raise ValidationError({"warehouse": "location 必须隶属 warehouse"})
-        if self.location_id and self.subwarehouse_id and self.subwarehouse_id != self.location.subwarehouse_id:
-            raise ValidationError({"subwarehouse": "subwarehouse 必须与 location.subwarehouse 一致。"})
+        if (
+            self.location_id
+            and self.subwarehouse_id
+            and self.subwarehouse_id != self.location.subwarehouse_id
+        ):
+            raise ValidationError(
+                {"subwarehouse": "subwarehouse 必须与 location.subwarehouse 一致。"}
+            )
+
+        if self.container_id:
+            if self.container.warehouse_id != self.warehouse_id:
+                raise ValidationError({"container": "容器必须与交易属于同一仓库。"})
+            if (
+                self.container.scope == self.container.Scope.PRIVATE
+                and self.container.owner_id != self.owner_id
+            ):
+                raise ValidationError({"container": "私有容器必须与交易属于同一货主。"})
+            self.container_no = self.container.container_no
 
         # 5) pair_id 使用范围
-        if self.pair_id and self.tx_type not in (InvTxType.RECEIVE, InvTxType.ISSUE):
-            raise ValidationError({"pair_id": "仅 RECEIVE/ISSUE 允许指定 pair_id"})
+        paired_types = (
+            InvTxType.RECEIVE,
+            InvTxType.ISSUE,
+            InvTxType.MOVE_IN,
+            InvTxType.MOVE_OUT,
+        )
+        if self.pair_id and self.tx_type not in paired_types:
+            raise ValidationError({"pair_id": "仅库存移动成对交易允许指定 pair_id"})
 
     def save(self, *args, **kwargs):
         self._sync_scope_from_location()
@@ -534,25 +826,32 @@ class InventoryTransaction(BaseModel):
         self.full_clean()
         return super().save(*args, **kwargs)
 
+
 # =========================2) 库存调拨（跨仓/跨园区）=========================
 
 
 # -- 过账日记账：一次具体动作的幂等与审计 --
 class PostingJournal(models.Model):
-    src_model = models.CharField("来源模型", max_length=32, db_index=True)   # 'WmsTask' / 'WmsTaskLine' ...
-    src_id    = models.BigIntegerField("来源ID", db_index=True)
-    tx_type   = models.CharField("动作类型", max_length=16, db_index=True)  # 'POST' / 'REVERSE' / 'CANCEL'
+    src_model = models.CharField(
+        "来源模型", max_length=32, db_index=True
+    )  # 'WmsTask' / 'WmsTaskLine' ...
+    src_id = models.BigIntegerField("来源ID", db_index=True)
+    tx_type = models.CharField(
+        "动作类型", max_length=16, db_index=True
+    )  # 'POST' / 'REVERSE' / 'CANCEL'
 
-    status    = models.CharField("状态", max_length=16, default="PENDING")  # PENDING/POSTED/FAILED
-    message   = models.CharField("说明", max_length=255, blank=True, default="")
+    status = models.CharField(
+        "状态", max_length=16, default="PENDING"
+    )  # PENDING/POSTED/FAILED
+    message = models.CharField("说明", max_length=255, blank=True, default="")
     attempt_count = models.IntegerField("尝试次数", default=0)
-    created_at= models.DateTimeField("创建时间", auto_now_add=True)
-    updated_at= models.DateTimeField("更新时间", auto_now=True)
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["src_model","src_id","tx_type"], name="uniq_post_src_tx"
+                fields=["src_model", "src_id", "tx_type"], name="uniq_post_src_tx"
             ),
         ]
         indexes = [
@@ -563,9 +862,6 @@ class PostingJournal(models.Model):
     def __str__(self):
         return f"{self.src_model}#{self.src_id}:{self.tx_type}({self.status})"
 
-from django.db import models
-
-from django.core.exceptions import ValidationError
 
 class ReviewDifference(models.Model):
     """
@@ -573,16 +869,53 @@ class ReviewDifference(models.Model):
     """
 
     class Status(models.TextChoices):
-        PENDING = 'PENDING', '待复核'
-        IN_PROGRESS = 'IN_PROGRESS', '复核中'
-        COMPLETED = 'COMPLETED', '已完成'
-        CANCELLED = 'CANCELLED', '已取消'
+        PENDING = "PENDING", "待复核"
+        IN_PROGRESS = "IN_PROGRESS", "复核中"
+        COMPLETED = "COMPLETED", "已完成"
+        CANCELLED = "CANCELLED", "已取消"
 
     order_no = models.CharField(max_length=50, unique=True, verbose_name="单号")
-    warehouse = models.ForeignKey('locations.Warehouse', on_delete=models.PROTECT, verbose_name="仓库")
-    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
-                                    verbose_name="复核人")
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, verbose_name="状态")
+    warehouse = models.ForeignKey(
+        "locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库"
+    )
+    owner = models.ForeignKey(
+        "baseinfo.Owner",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="review_differences",
+        verbose_name="货主",
+        help_text="历史无法唯一确认归属的差异单允许为空。",
+    )
+    source_task = models.ForeignKey(
+        "tasking.WmsTask",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="review_differences",
+        verbose_name="来源任务",
+    )
+    source_task_line = models.ForeignKey(
+        "tasking.WmsTaskLine",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="review_differences",
+        verbose_name="来源任务行",
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name="复核人",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        verbose_name="状态",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     completed_at = models.DateTimeField(null=True, blank=True, verbose_name="完成时间")
     reason = models.TextField(null=True, blank=True, verbose_name="复核原因")
@@ -592,6 +925,16 @@ class ReviewDifference(models.Model):
         errors = {}
         if not self.warehouse_id:
             errors["warehouse"] = "必须明确指定复核差异单仓库。"
+        if self.source_task_id:
+            if self.source_task.warehouse_id != self.warehouse_id:
+                errors["source_task"] = "来源任务必须属于同一仓库。"
+            if self.owner_id and self.source_task.owner_id != self.owner_id:
+                errors["owner"] = "差异单货主必须与来源任务一致。"
+        if self.source_task_line_id:
+            if not self.source_task_id:
+                errors["source_task"] = "指定来源任务行时必须同时指定来源任务。"
+            elif self.source_task_line.task_id != self.source_task_id:
+                errors["source_task_line"] = "来源任务行必须属于来源任务。"
         if self.status == self.Status.COMPLETED and not self.completed_at:
             errors["completed_at"] = "复核完成后必须填写完成时间。"
         if errors:
@@ -616,17 +959,39 @@ class ReviewDifferenceLine(models.Model):
     复核差异单明细，记录每项差异的具体信息
     """
 
-    recheck_order = models.ForeignKey(ReviewDifference, on_delete=models.CASCADE, related_name="lines",
-                                      verbose_name="复核单")
-    product = models.ForeignKey('products.Product', on_delete=models.PROTECT, verbose_name="商品")
-    location = models.ForeignKey('locations.Location', on_delete=models.PROTECT, verbose_name="库位")
-    batch_no = models.CharField(max_length=50, null=True, blank=True, verbose_name="批次号")
-    serial_no = models.CharField(max_length=50, null=True, blank=True, verbose_name="序列号")
-    quantity_before = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="复核前数量")
-    quantity_after = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="复核后数量")
-    quantity_difference = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="差异数量")
-    status = models.CharField(max_length=20, choices=ReviewDifference.Status.choices,
-                              default=ReviewDifference.Status.PENDING, verbose_name="差异状态")
+    recheck_order = models.ForeignKey(
+        ReviewDifference,
+        on_delete=models.CASCADE,
+        related_name="lines",
+        verbose_name="复核单",
+    )
+    product = models.ForeignKey(
+        "products.Product", on_delete=models.PROTECT, verbose_name="商品"
+    )
+    location = models.ForeignKey(
+        "locations.Location", on_delete=models.PROTECT, verbose_name="库位"
+    )
+    batch_no = models.CharField(
+        max_length=50, null=True, blank=True, verbose_name="批次号"
+    )
+    serial_no = models.CharField(
+        max_length=50, null=True, blank=True, verbose_name="序列号"
+    )
+    quantity_before = models.DecimalField(
+        max_digits=10, decimal_places=2, verbose_name="复核前数量"
+    )
+    quantity_after = models.DecimalField(
+        max_digits=10, decimal_places=2, verbose_name="复核后数量"
+    )
+    quantity_difference = models.DecimalField(
+        max_digits=10, decimal_places=2, verbose_name="差异数量"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=ReviewDifference.Status.choices,
+        default=ReviewDifference.Status.PENDING,
+        verbose_name="差异状态",
+    )
 
     def clean(self):
         if self.quantity_after < 0 or self.quantity_difference < 0:
@@ -639,6 +1004,181 @@ class ReviewDifferenceLine(models.Model):
         verbose_name = "复核差异单明细"
         verbose_name_plural = "复核差异单明细"
 
+
+class InventoryCostLayer(models.Model):
+    class CostQuality(models.TextChoices):
+        VERIFIED = "VERIFIED", "可信"
+        COST_MISSING = "COST_MISSING", "成本缺失"
+        LEGACY_OPENING = "LEGACY_OPENING", "遗留期初"
+
+    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT)
+    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT)
+    product = models.ForeignKey("products.Product", on_delete=models.PROTECT)
+    base_uom = models.ForeignKey(
+        "products.ProductUom",
+        on_delete=models.PROTECT,
+        related_name="inventory_cost_layers",
+    )
+    lot = models.ForeignKey(
+        "inbound.Lot", null=True, blank=True, on_delete=models.PROTECT
+    )
+    batch_no = models.CharField(max_length=64, blank=True, default="")
+    serial_no = models.CharField(max_length=64, blank=True, default="")
+    expiry_date = models.DateField(null=True, blank=True)
+    received_date = models.DateField(null=True, blank=True, db_index=True)
+    original_qty = models.DecimalField(max_digits=18, decimal_places=4)
+    unit_cost = models.DecimalField(
+        max_digits=18, decimal_places=6, null=True, blank=True
+    )
+    cost_currency = models.CharField(max_length=8, blank=True, default="")
+    cost_quality = models.CharField(
+        max_length=20, choices=CostQuality.choices, default=CostQuality.COST_MISSING
+    )
+    source_type = models.CharField(max_length=40)
+    source_id = models.CharField(max_length=80)
+    source_line_id = models.CharField(max_length=80, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            CheckConstraint(
+                condition=Q(original_qty__gt=0), name="chk_cost_layer_qty_pos"
+            ),
+            models.UniqueConstraint(
+                fields=[
+                    "source_type",
+                    "source_id",
+                    "source_line_id",
+                    "product",
+                    "batch_no",
+                    "serial_no",
+                ],
+                name="ux_cost_layer_source_dim",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["owner", "warehouse", "product", "received_date"],
+                name="ix_cost_layer_fifo",
+            )
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.product_id and self.base_uom_id != self.product.base_uom_id:
+            errors["base_uom"] = "成本层基本单位必须与创建时商品基本单位一致。"
+        if self.original_qty is not None and self.original_qty <= 0:
+            errors["original_qty"] = "成本层原始数量必须大于零。"
+        if self.cost_quality == self.CostQuality.VERIFIED:
+            if self.unit_cost is None or not self.cost_currency:
+                errors["unit_cost"] = "可信成本层必须同时具有单位成本和币种。"
+        if errors:
+            raise ValidationError(errors)
+
+
+class InventoryLayerPosition(models.Model):
+    layer = models.ForeignKey(
+        InventoryCostLayer, on_delete=models.PROTECT, related_name="positions"
+    )
+    location = models.ForeignKey("locations.Location", on_delete=models.PROTECT)
+    container = models.ForeignKey(
+        "locations.Container", null=True, blank=True, on_delete=models.PROTECT
+    )
+    container_scope_id = models.PositiveBigIntegerField(default=0, editable=False)
+    remaining_qty = models.DecimalField(max_digits=18, decimal_places=4)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            CheckConstraint(
+                condition=Q(remaining_qty__gte=0), name="chk_layer_pos_qty_nonneg"
+            ),
+            models.UniqueConstraint(
+                fields=["layer", "location", "container_scope_id"],
+                name="ux_layer_position",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["location", "layer"], name="ix_layer_pos_location")
+        ]
+
+    def save(self, *args, **kwargs):
+        self.container_scope_id = self.container_id or 0
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {
+                "container_scope_id"
+            }
+        return super().save(*args, **kwargs)
+
+
+class InventoryLayerMovement(models.Model):
+    class MovementType(models.TextChoices):
+        RECEIVE = "RECEIVE", "收货"
+        MOVE = "MOVE", "移库"
+        ISSUE = "ISSUE", "出库"
+        ADJUST = "ADJUST", "调整"
+        COST_ADJUST = "COST_ADJUST", "成本调整"
+
+    layer = models.ForeignKey(
+        InventoryCostLayer, on_delete=models.PROTECT, related_name="movements"
+    )
+    inventory_transaction = models.ForeignKey(
+        "inventory.InventoryTransaction",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+    )
+    movement_type = models.CharField(max_length=20, choices=MovementType.choices)
+    from_location = models.ForeignKey(
+        "locations.Location",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="cost_layer_moves_out",
+    )
+    to_location = models.ForeignKey(
+        "locations.Location",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="cost_layer_moves_in",
+    )
+    quantity = models.DecimalField(max_digits=18, decimal_places=4)
+    occurred_at = models.DateTimeField()
+    detail = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
+    )
+
+    class Meta:
+        constraints = [
+            CheckConstraint(condition=Q(quantity__gt=0), name="chk_layer_move_qty_pos")
+        ]
+        indexes = [
+            models.Index(fields=["layer", "occurred_at"], name="ix_layer_move_time")
+        ]
+
+
+class InventoryCostAdjustment(models.Model):
+    layer = models.ForeignKey(
+        InventoryCostLayer, on_delete=models.PROTECT, related_name="cost_adjustments"
+    )
+    old_unit_cost = models.DecimalField(
+        max_digits=18, decimal_places=6, null=True, blank=True
+    )
+    new_unit_cost = models.DecimalField(max_digits=18, decimal_places=6)
+    old_currency = models.CharField(max_length=8, blank=True, default="")
+    new_currency = models.CharField(max_length=8)
+    reason = models.CharField(max_length=200)
+    effective_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+
+    class Meta:
+        ordering = ["effective_at", "id"]
+
+
 # 用 InventoryDetail 做代理模型，仅用于在 Admin 里挂“库存快调”入口
 # 末尾追加（保持你既有 import 和 InventoryDetail 定义不动）
 class InventoryQuickInboundAdjust(InventoryDetail):
@@ -646,6 +1186,7 @@ class InventoryQuickInboundAdjust(InventoryDetail):
         proxy = True
         verbose_name = "入库快调"
         verbose_name_plural = "入库快调"
+
 
 class InventoryQuickOutboundAdjust(InventoryDetail):
     class Meta:

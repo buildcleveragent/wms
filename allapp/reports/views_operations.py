@@ -56,9 +56,14 @@ class CanExportOperations(CanViewOperations):
 
 
 def _value(request, name, default=""):
+    aliases = {"start_date": "date_from", "end_date": "date_to"}
     if request.method == "POST" and name in request.data:
         return request.data.get(name, default)
-    return request.query_params.get(name, default)
+    if request.method == "POST" and aliases.get(name) in request.data:
+        return request.data.get(aliases[name], default)
+    return request.query_params.get(
+        name, request.query_params.get(aliases.get(name), default)
+    )
 
 
 def _parse_date(value, name):
@@ -235,6 +240,17 @@ class OperationsExportApi(OperationsApiMixin, APIView):
             )
 
         wb = Workbook(write_only=True)
+        generated_at = timezone.now()
+        info = wb.create_sheet("报告信息")
+        info.append(["字段", "值"])
+        info.append(["报告类型", "运营计划/实际/异常明细"])
+        info.append(["仓库", filters.warehouse_id or "全部授权仓库"])
+        info.append(["货主", filters.owner_id or "全部货主"])
+        info.append(["日期范围", f"{filters.start_date} ~ {filters.end_date}"])
+        info.append(["指标口径", filters.metric_basis])
+        info.append(["方向", filters.direction])
+        info.append(["数据截至时间", generated_at.isoformat()])
+        info.append(["数据状态", "COMPLETE"])
         ws = wb.create_sheet("operations")
         headers = [
             "direction",
@@ -285,10 +301,13 @@ class OperationsExportApi(OperationsApiMixin, APIView):
             output,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+        generated_token = generated_at.strftime("%Y%m%dT%H%M%S")
+        warehouse_token = filters.warehouse_id or "all-authorized"
         response["Content-Disposition"] = (
-            'attachment; filename="operations-report.xlsx"'
+            f'attachment; filename="operations-{warehouse_token}-'
+            f'{filters.start_date}-{filters.end_date}-{generated_token}.xlsx"'
         )
-        response["X-Report-Data-As-Of"] = timezone.now().isoformat()
+        response["X-Report-Data-As-Of"] = generated_at.isoformat()
         response["X-Report-Metric-Basis"] = filters.metric_basis
         record_audit_event(
             action="EXPORT",

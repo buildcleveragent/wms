@@ -1,5 +1,13 @@
 import { defineStore } from 'pinia'
-import { api, clearToken, getStoredToken, getStoredUser, setStoredUser, setToken } from '@/utils/request'
+import {
+  api,
+  clearToken,
+  getStoredRefreshToken,
+  getStoredToken,
+  getStoredUser,
+  setStoredUser,
+  setTokens,
+} from '@/utils/request'
 
 function fallbackUser(username = '') {
   return username
@@ -14,11 +22,13 @@ export const useAuth = defineStore('auth', {
   state: () => ({
     user: getStoredUser(),
     access: getStoredToken(),
+    refresh: getStoredRefreshToken(),
   }),
   actions: {
     restore() {
       this.user = getStoredUser()
       this.access = getStoredToken()
+      this.refresh = getStoredRefreshToken()
     },
     load() {
       this.restore()
@@ -30,7 +40,8 @@ export const useAuth = defineStore('auth', {
     async login(username, password) {
       const res = await api.login(username, password)
       this.access = res?.access || ''
-      setToken(this.access)
+      this.refresh = res?.refresh || ''
+      setTokens(this.access, this.refresh)
 
       let profileUser = null
       try {
@@ -44,9 +55,16 @@ export const useAuth = defineStore('auth', {
       setStoredUser(this.user)
       return this.user
     },
-    logout() {
+    async logout() {
+      const refresh = this.refresh || getStoredRefreshToken()
+      try {
+        if (refresh) await api.logout(refresh)
+      } catch (error) {
+        // Local cleanup is mandatory even when the network is unavailable.
+      }
       this.user = null
       this.access = ''
+      this.refresh = ''
       clearToken()
     },
   },

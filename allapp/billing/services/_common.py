@@ -17,16 +17,26 @@
 import datetime
 import logging
 from calendar import monthrange
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, Tuple, Iterable
 
+from django.db import connection
 from django.db.models import F, Q, Sum
 
 from allapp.billing.enums import (
-    AccrualStatus, BundleScope, BundleType, CalcMethod, CapMode, LadderMode,
+    AccrualStatus,
+    BundleScope,
+    BundleType,
+    CapMode,
+    LadderMode,
 )
 from allapp.billing.models import (
-    BillingAccrual, BillingJobRun, BillingRule, BillingRuleTier, BillingPeriod,
+    BillingAccrual,
+    BillingJobRun,
+    BillingRule,
+    BillingRuleTier,
+    BillingPeriod,
 )
 
 # 全局 logger，所有计费子模块共用此 logger 名称
@@ -42,6 +52,7 @@ SCHEDULED_METRIC_JOB_NAME = BillingJobRun.JobName.DAILY_METRIC_GENERATION
 # ============================================================================
 # 精度工具
 # ============================================================================
+
 
 def _q(val, q="0.01"):
     """
@@ -74,6 +85,7 @@ def _days_in_month(d: datetime.date) -> int:
 # 数据对账异常
 # ============================================================================
 
+
 class BillingAccuracyGateError(ValueError):
     """
     数据对账门控异常。
@@ -89,7 +101,15 @@ class BillingAccuracyGateError(ValueError):
         failed_checks: 失败的检查项名称列表
         details: 包含完整检查结果的字典
     """
-    def __init__(self, *, stage: str, issue_count: int, failed_checks: Iterable[str], details=None):
+
+    def __init__(
+        self,
+        *,
+        stage: str,
+        issue_count: int,
+        failed_checks: Iterable[str],
+        details=None,
+    ):
         self.stage = stage
         self.issue_count = int(issue_count or 0)
         self.failed_checks = list(dict.fromkeys(failed_checks))
@@ -107,7 +127,10 @@ class BillingAccuracyGateError(ValueError):
 # 规则选择引擎
 # ============================================================================
 
-def _select_rule(owner_id, warehouse_id, charge_type, calc_method, service_date) -> Optional[BillingRule]:
+
+def _select_rule(
+    owner_id, warehouse_id, charge_type, calc_method, service_date
+) -> Optional[BillingRule]:
     """
     根据「谁、在哪、什么费、怎么算、哪天」匹配最优的一条计费规则。
 
@@ -132,10 +155,13 @@ def _select_rule(owner_id, warehouse_id, charge_type, calc_method, service_date)
     返回:
         匹配到的 BillingRule 或 None（未配置规则时跳过计费，不报错）
     """
-    qs = (BillingRule.objects
-          .filter(active=True, charge_type=charge_type, calc_method=calc_method)
-          .filter(Q(owner_id=owner_id) | Q(owner__isnull=True))
-          .filter(Q(warehouse_id=warehouse_id) | Q(warehouse__isnull=True)))
+    qs = (
+        BillingRule.objects.filter(
+            active=True, charge_type=charge_type, calc_method=calc_method
+        )
+        .filter(Q(owner_id=owner_id) | Q(owner__isnull=True))
+        .filter(Q(warehouse_id=warehouse_id) | Q(warehouse__isnull=True))
+    )
     if service_date:
         qs = qs.filter(
             Q(effective_from__isnull=True) | Q(effective_from__lte=service_date),
@@ -153,7 +179,11 @@ def _select_rule(owner_id, warehouse_id, charge_type, calc_method, service_date)
     if rule is None:
         logger.debug(
             "No billing rule matched: owner=%s warehouse=%s charge=%s calc=%s date=%s",
-            owner_id, warehouse_id, charge_type, calc_method, service_date,
+            owner_id,
+            warehouse_id,
+            charge_type,
+            calc_method,
+            service_date,
         )
     return rule
 
@@ -162,7 +192,10 @@ def _select_rule(owner_id, warehouse_id, charge_type, calc_method, service_date)
 # 指纹防重
 # ============================================================================
 
-def _event_fp(task_id, scanlog_id, charge_type, calc_method, service_date, qty, scope_key=None):
+
+def _event_fp(
+    task_id, scanlog_id, charge_type, calc_method, service_date, qty, scope_key=None
+):
     """
     生成 BillingEvent 的唯一指纹。
 
@@ -181,7 +214,17 @@ def _event_fp(task_id, scanlog_id, charge_type, calc_method, service_date, qty, 
     return base
 
 
-def _acc_fp(owner_id, warehouse_id, rule_id, charge_type, service_date, qty, unit_price, currency, ev_fp):
+def _acc_fp(
+    owner_id,
+    warehouse_id,
+    rule_id,
+    charge_type,
+    service_date,
+    qty,
+    unit_price,
+    currency,
+    ev_fp,
+):
     """
     生成 BillingAccrual 的唯一指纹。
 
@@ -197,6 +240,7 @@ def _acc_fp(owner_id, warehouse_id, rule_id, charge_type, service_date, qty, uni
 # ============================================================================
 # Accrual 金额调整辅助
 # ============================================================================
+
 
 def _save_adjusted_accrual(accrual: BillingAccrual, new_amount: Decimal) -> None:
     """
@@ -222,7 +266,8 @@ def _save_adjusted_accrual(accrual: BillingAccrual, new_amount: Decimal) -> None
     accrual.amount = new_amount
     accrual.tax_amount = (
         _q(accrual.amount * (accrual.rule.tax_rate or 0), "0.01")
-        if accrual.rule.taxable else Decimal("0.00")
+        if accrual.rule.taxable
+        else Decimal("0.00")
     )
     if accrual.quantity and accrual.quantity > 0:
         accrual.unit_price = _q((accrual.amount / accrual.quantity), "0.0001")
@@ -242,8 +287,7 @@ def _period_bundle_rule_queryset(period: BillingPeriod, bundle_key: str):
         - 生效日期区间与账期有交集
     """
     return (
-        BillingRule.objects
-        .filter(
+        BillingRule.objects.filter(
             active=True,
             bundle_key=bundle_key,
             bundle_scope=BundleScope.PER_PERIOD,
@@ -258,8 +302,9 @@ def _period_bundle_rule_queryset(period: BillingPeriod, bundle_key: str):
     )
 
 
-def _select_bundle_rule_for_period(period: BillingPeriod, bundle_key: str,
-                                   preferred_rule_ids=None, charge_types=None) -> Optional[BillingRule]:
+def _select_bundle_rule_for_period(
+    period: BillingPeriod, bundle_key: str, preferred_rule_ids=None, charge_types=None
+) -> Optional[BillingRule]:
     """
     为指定账期和打包键选择最匹配的打包规则。
 
@@ -332,7 +377,10 @@ def _apply_fixed_bundle_total(accs, target_total: Decimal) -> None:
 # 阶梯计价引擎
 # ============================================================================
 
-def _compute_fee_with_rule(rule: BillingRule, base_value: Decimal) -> Tuple[Decimal, Decimal]:
+
+def _compute_fee_with_rule(
+    rule: BillingRule, base_value: Decimal
+) -> Tuple[Decimal, Decimal]:
     """
     核心定价函数：根据规则和基础值计算费用。
 
@@ -421,7 +469,11 @@ def _compute_fee_with_rule(rule: BillingRule, base_value: Decimal) -> Tuple[Deci
         logger.warning(
             "INCREMENTAL tier gap: rule=%s base_value=%s priced_up_to=%s "
             "(quantity in [%s, %s) received zero pricing)",
-            rule.id, bv, last, last, bv,
+            rule.id,
+            bv,
+            last,
+            last,
+            bv,
         )
     # 有效费率 = 总费用 / 总量，方便记录
     eff = _q((amt / bv) if bv > 0 else Decimal("0"), "0.0001")
@@ -432,14 +484,21 @@ def _compute_fee_with_rule(rule: BillingRule, base_value: Decimal) -> Tuple[Deci
 # 日封顶 / 日打包
 # ============================================================================
 
+
 def _sum_amount_rule_day(rule_id, owner_id, warehouse_id, d):
     """查询某规则在某天已累计的有效 accrual 金额总和（排除 VOID/reversal，加行锁防并发超限）。"""
-    agg = (BillingAccrual.objects
-           .select_for_update()
-           .filter(rule_id=rule_id, owner_id=owner_id, warehouse_id=warehouse_id, service_date=d)
-           .exclude(status=AccrualStatus.VOID)
-           .filter(is_reversal=False)
-           .aggregate(s=Sum("amount"))["s"])
+    agg = (
+        BillingAccrual.objects.select_for_update()
+        .filter(
+            rule_id=rule_id,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            service_date=d,
+        )
+        .exclude(status=AccrualStatus.VOID)
+        .filter(is_reversal=False)
+        .aggregate(s=Sum("amount"))["s"]
+    )
     return Decimal(agg or 0)
 
 
@@ -447,21 +506,28 @@ def _sum_amount_bundle_day(bundle_key, owner_id, warehouse_id, d):
     """查询某打包组（bundle_key）在某天已累计的有效 accrual 金额总和（排除 VOID/reversal，加行锁防并发超限）。"""
     if not bundle_key:
         return Decimal(0)
-    agg = (BillingAccrual.objects
-           .select_for_update()
-           .filter(bundle_key=bundle_key, owner_id=owner_id, warehouse_id=warehouse_id, service_date=d)
-           .exclude(status=AccrualStatus.VOID)
-           .filter(is_reversal=False)
-           .aggregate(s=Sum("amount"))["s"])
+    agg = (
+        BillingAccrual.objects.select_for_update()
+        .filter(
+            bundle_key=bundle_key,
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            service_date=d,
+        )
+        .exclude(status=AccrualStatus.VOID)
+        .filter(is_reversal=False)
+        .aggregate(s=Sum("amount"))["s"]
+    )
     return Decimal(agg or 0)
 
 
-def _apply_caps_bundles_day(rule: BillingRule, owner_id, warehouse_id, service_date, draft_amount: Decimal) -> Decimal:
+def _apply_caps_bundles_day(
+    rule: BillingRule, owner_id, warehouse_id, service_date, draft_amount: Decimal
+) -> Decimal:
     """
     在每笔 accrual 生成时即时应用的「日口径」限额控制。
 
-    执行顺序（与整体计费流程的约定一致）:
-        阶梯计价 → 本函数(日封顶/日打包) → 最低收费
+    本函数只负责最后的硬上限。调用方必须先完成阶梯计价和最低收费。
 
     两种限额机制:
         1. **日封顶 (cap_mode=PER_DAY)**: 单条规则在当天的总费用不超过 cap_amount。
@@ -479,6 +545,23 @@ def _apply_caps_bundles_day(rule: BillingRule, owner_id, warehouse_id, service_d
     """
     amt = Decimal(draft_amount or 0)
 
+    # Existing accrual rows alone cannot serialize the first concurrent charge.
+    # Lock the rule, and for cross-rule bundles lock every member in stable order.
+    if connection.in_atomic_block:
+        if rule.bundle_scope == BundleScope.PER_DAY and rule.bundle_key:
+            list(
+                BillingRule.objects.select_for_update()
+                .filter(bundle_key=rule.bundle_key, bundle_scope=BundleScope.PER_DAY)
+                .order_by("pk")
+                .values_list("pk", flat=True)
+            )
+        else:
+            list(
+                BillingRule.objects.select_for_update()
+                .filter(pk=rule.pk)
+                .values_list("pk", flat=True)
+            )
+
     # 封顶（按天）
     if rule.cap_mode == CapMode.PER_DAY and rule.cap_amount:
         used = _sum_amount_rule_day(rule.id, owner_id, warehouse_id, service_date)
@@ -486,9 +569,71 @@ def _apply_caps_bundles_day(rule: BillingRule, owner_id, warehouse_id, service_d
         amt = min(amt, remain)
 
     # 打包（按天，仅 CAP 类型）
-    if rule.bundle_scope == BundleScope.PER_DAY and rule.bundle_price and rule.bundle_type == BundleType.CAP and rule.bundle_key:
-        used_b = _sum_amount_bundle_day(rule.bundle_key, owner_id, warehouse_id, service_date)
+    if (
+        rule.bundle_scope == BundleScope.PER_DAY
+        and rule.bundle_price
+        and rule.bundle_type == BundleType.CAP
+        and rule.bundle_key
+    ):
+        used_b = _sum_amount_bundle_day(
+            rule.bundle_key, owner_id, warehouse_id, service_date
+        )
         remain_b = max(Decimal("0.00"), Decimal(rule.bundle_price) - used_b)
         amt = min(amt, remain_b)
 
     return max(Decimal("0.00"), amt)
+
+
+@dataclass(frozen=True)
+class DailyPricingResult:
+    """单笔计价的可审计结果；CAP 永远是最后生效的硬上限。"""
+
+    raw_amount: Decimal
+    minimum_amount: Decimal
+    final_amount: Decimal
+    effective_price: Decimal
+    limit_reasons: tuple
+
+    def as_detail(self):
+        return {
+            "raw_amount": str(self.raw_amount),
+            "minimum_amount": str(self.minimum_amount),
+            "final_amount": str(self.final_amount),
+            "effective_price": str(self.effective_price),
+            "limit_reasons": list(self.limit_reasons),
+        }
+
+
+def _finalize_daily_price(
+    rule: BillingRule,
+    owner_id,
+    warehouse_id,
+    service_date,
+    quantity: Decimal,
+    raw_amount: Decimal,
+) -> DailyPricingResult:
+    """统一执行 raw -> 每笔最低收费 -> 日规则 CAP -> 日 bundle CAP。"""
+    qty = Decimal(quantity or 0)
+    raw = max(Decimal("0.00"), _q(raw_amount or 0, "0.01"))
+    minimum = raw
+    if qty > 0 and rule.min_charge is not None:
+        minimum = max(minimum, _q(rule.min_charge, "0.01"))
+    final = _q(
+        _apply_caps_bundles_day(rule, owner_id, warehouse_id, service_date, minimum),
+        "0.01",
+    )
+    reasons = []
+    if final < minimum:
+        if rule.cap_mode == CapMode.PER_DAY and rule.cap_amount is not None:
+            reasons.append("DAILY_RULE_CAP")
+        if (
+            rule.bundle_scope == BundleScope.PER_DAY
+            and rule.bundle_type == BundleType.CAP
+            and rule.bundle_price is not None
+            and rule.bundle_key
+        ):
+            reasons.append("DAILY_BUNDLE_CAP")
+        if not reasons:
+            reasons.append("DAILY_LIMIT")
+    effective = _q(final / qty, "0.0001") if qty > 0 else Decimal("0.0000")
+    return DailyPricingResult(raw, minimum, final, effective, tuple(reasons))

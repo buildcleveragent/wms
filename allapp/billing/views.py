@@ -9,6 +9,7 @@ from django.http import HttpResponse
 from django.db import transaction
 from django.db.models import Count, Q, QuerySet, Sum
 from django.utils.dateparse import parse_date
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
@@ -17,9 +18,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from allapp.accounts.access import AccessScope
-from allapp.accounts.audit import record_audit_event
-from allapp.baseinfo.models import Owner
+from allapp.accounts.audit import object_snapshot, record_audit_event
+from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
 from allapp.locations.models import Warehouse
+from allapp.reports.boss_contract import build_meta, warning
 
 from .enums import AccrualStatus, BillStatus, PeriodStatus
 from .models import (
@@ -30,6 +32,8 @@ from .models import (
     BillingPeriod,
     BillingRule,
     BillingRuleTier,
+    PaymentReceipt,
+    ReceivableCollectionCase,
 )
 from .serializers import (
     BillDetailSerializer,
@@ -41,10 +45,15 @@ from .serializers import (
     BillingMetricDailySerializer,
     BillingPeriodInvoiceSerializer,
     BillingPeriodSerializer,
+    RepriceUnpricedSerializer,
     BillingRuleSerializer,
     BillingRuleTierSerializer,
     UnlockPeriodSerializer,
+    PaymentReceiptSerializer,
+    ReceivableCollectionCaseSerializer,
+    CollectionActivitySerializer,
 )
+from .services.receivables import post_receipt, reverse_receipt
 from .services import (
     accrue_metrics_for_date,
     accrue_order_processing_from_posted,
@@ -54,6 +63,9 @@ from .services import (
     generate_invoice_for_period,
     lock_period,
     preview_lock_period,
+    build_close_readiness,
+    BillingCloseBlocked,
+    reprice_unpriced_events,
     unlock_period,
 )
 from .services.dashboard import build_warehouse_overview_payload
@@ -76,6 +88,15 @@ def _require_financial_export_perm(request):
         raise PermissionDenied("需要运营报表导出权限。")
 
 
+class BillingModelPermissions(permissions.DjangoModelPermissions):
+    perms_map = {
+        **permissions.DjangoModelPermissions.perms_map,
+        "GET": ["%(app_label)s.view_%(model_name)s"],
+        "HEAD": ["%(app_label)s.view_%(model_name)s"],
+        "OPTIONS": ["%(app_label)s.view_%(model_name)s"],
+    }
+
+
 def _explicit_billing_scope(user) -> AccessScope:
     """Return the tenant scope accepted for a state-changing billing request.
 
@@ -89,6 +110,138 @@ def _explicit_billing_scope(user) -> AccessScope:
     if not scope.is_valid or scope.source != "user_role_scope":
         raise PermissionDenied("计费写入必须使用有效的显式角色范围授权。")
     return scope
+
+
+class PaymentReceiptViewSet(viewsets.ModelViewSet):
+    serializer_class = PaymentReceiptSerializer
+    permission_classes = [BillingModelPermissions]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["owner", "warehouse", "currency", "status", "receipt_date"]
+    ordering_fields = ["receipt_date", "receipt_no", "created_at"]
+    ordering = ["-receipt_date", "-id"]
+
+    def get_queryset(self):
+        qs = PaymentReceipt.objects.select_related(
+            "owner", "warehouse"
+        ).prefetch_related("allocations")
+        return AccessScope.for_user(self.request.user).filter_queryset(
+            qs, owner_field="owner_id", warehouse_field="warehouse_id"
+        )
+
+    def perform_create(self, serializer):
+        if not self.request.user.has_perm("billing.add_paymentreceipt"):
+            raise PermissionDenied("需要收款登记权限。")
+        scope = _explicit_billing_scope(self.request.user)
+        owner = serializer.validated_data["owner"]
+        warehouse = serializer.validated_data["warehouse"]
+        if not scope.allows(owner_id=owner.pk, warehouse_id=warehouse.pk):
+            raise PermissionDenied("收款单超出授权货主或仓库范围。")
+        serializer.save()
+
+    def perform_update(self, serializer):
+        if not self.request.user.has_perm("billing.change_paymentreceipt"):
+            raise PermissionDenied("需要收款修改权限。")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.status != "DRAFT":
+            raise PermissionDenied("已过账或已冲销收款单禁止删除。")
+        return super().perform_destroy(instance)
+
+    @action(detail=True, methods=["post"])
+    def post(self, request, pk=None):
+        if not request.user.has_perm("billing.change_paymentreceipt"):
+            raise PermissionDenied("需要收款过账权限。")
+        try:
+            receipt = post_receipt(self.get_object().pk, by_user=request.user)
+        except ValueError as exc:
+            return Response(
+                {"code": "PAYMENT_POST_BLOCKED", "detail": str(exc)}, status=409
+            )
+        return Response(self.get_serializer(receipt).data)
+
+    @action(detail=True, methods=["post"])
+    def reverse(self, request, pk=None):
+        if not request.user.has_perm("billing.change_paymentreceipt"):
+            raise PermissionDenied("需要收款冲销权限。")
+        receipt_no = str(request.data.get("receipt_no") or "").strip()
+        if not receipt_no:
+            return Response({"detail": "receipt_no is required."}, status=400)
+        raw_date = request.data.get("receipt_date")
+        reversal_date = parse_date(str(raw_date)) if raw_date else None
+        if raw_date and reversal_date is None:
+            return Response({"detail": "receipt_date must be YYYY-MM-DD."}, status=400)
+        try:
+            reversal = reverse_receipt(
+                self.get_object().pk,
+                receipt_no=receipt_no,
+                reversal_date=reversal_date,
+                memo=str(request.data.get("memo") or ""),
+                by_user=request.user,
+            )
+        except ValueError as exc:
+            return Response(
+                {"code": "PAYMENT_REVERSE_BLOCKED", "detail": str(exc)}, status=409
+            )
+        return Response(self.get_serializer(reversal).data, status=201)
+
+
+class ReceivableCollectionCaseViewSet(viewsets.ModelViewSet):
+    serializer_class = ReceivableCollectionCaseSerializer
+    permission_classes = [BillingModelPermissions]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["bill", "status", "assignee"]
+    ordering = ["-updated_at", "-id"]
+
+    def get_queryset(self):
+        qs = ReceivableCollectionCase.objects.select_related(
+            "bill", "bill__owner", "bill__warehouse", "assignee"
+        ).prefetch_related("activities")
+        return AccessScope.for_user(self.request.user).filter_queryset(
+            qs, owner_field="bill__owner_id", warehouse_field="bill__warehouse_id"
+        )
+
+    def _require_manage(self):
+        if not self.request.user.has_perm("billing.manage_collections"):
+            raise PermissionDenied("需要催收记录维护权限。")
+
+    def perform_create(self, serializer):
+        self._require_manage()
+        bill = serializer.validated_data["bill"]
+        if not AccessScope.for_user(self.request.user).allows(
+            owner_id=bill.owner_id, warehouse_id=bill.warehouse_id
+        ):
+            raise PermissionDenied("催收案件超出授权范围。")
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._require_manage()
+        bill = serializer.validated_data.get("bill", serializer.instance.bill)
+        if not AccessScope.for_user(self.request.user).allows(
+            owner_id=bill.owner_id, warehouse_id=bill.warehouse_id
+        ):
+            raise PermissionDenied("催收案件超出授权范围。")
+        assignee = serializer.validated_data.get("assignee")
+        if assignee and not AccessScope.for_user(assignee).allows(
+            warehouse_id=serializer.instance.bill.warehouse_id
+        ):
+            raise PermissionDenied("责任人没有账单对应仓库范围。")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        raise PermissionDenied("催收案件和历史禁止删除。")
+
+    @action(detail=True, methods=["post"])
+    def activities(self, request, pk=None):
+        self._require_manage()
+        serializer = CollectionActivitySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        activity = serializer.save(case=self.get_object(), created_by=request.user)
+        if activity.next_follow_up_at:
+            ReceivableCollectionCase.objects.filter(pk=activity.case_id).update(
+                next_follow_up_at=activity.next_follow_up_at
+            )
+        return Response(CollectionActivitySerializer(activity).data, status=201)
 
 
 def _scope_id(value):
@@ -125,6 +278,7 @@ class BillingDataPermission(permissions.DjangoModelPermissions):
         "invoice": "billing.add_bill",
         "generate": "billing.change_billingperiod",
         "preview_lock": "billing.change_billingperiod",
+        "reprice_unpriced": "billing.change_billingperiod",
     }
 
     def has_permission(self, request, view):
@@ -190,9 +344,13 @@ class OwnerWarehouseSaveMixin:
         if getattr(user, "is_superuser", False):
             return
         scope = _explicit_billing_scope(user)
-        if not owner_id or not warehouse_id or not scope.allows(
-            owner_id=owner_id,
-            warehouse_id=warehouse_id,
+        if (
+            not owner_id
+            or not warehouse_id
+            or not scope.allows(
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+            )
         ):
             raise PermissionDenied("无权写入目标货主或仓库的计费数据。")
 
@@ -244,32 +402,83 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
         if not scope.is_valid:
             raise PermissionDenied("No valid billing data scope.")
         if not request.user.is_superuser:
-            if scope.warehouse_ids and not request.user.has_perm("reports.view_warehouse_finance"):
-                raise PermissionDenied("No permission to view warehouse financial data.")
-            if scope.owner_ids and not request.user.has_perm("accounts.view_owner_financials"):
+            if scope.warehouse_ids and not request.user.has_perm(
+                "reports.view_warehouse_finance"
+            ):
+                raise PermissionDenied(
+                    "No permission to view warehouse financial data."
+                )
+            if scope.owner_ids and not request.user.has_perm(
+                "accounts.view_owner_financials"
+            ):
                 raise PermissionDenied("No permission to view owner financial data.")
 
         if owner_raw and not owner_raw.isdigit():
-            return Response({"detail": "owner must be an integer id."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "owner must be an integer id."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if warehouse_raw and not warehouse_raw.isdigit():
-            return Response({"detail": "warehouse must be an integer id."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "warehouse must be an integer id."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         owner_id = int(owner_raw) if owner_raw else None
         warehouse_id = int(warehouse_raw) if warehouse_raw else None
 
         if scope.owner_ids and owner_id and not scope.allows(owner_id=owner_id):
-            raise PermissionDenied("No access to other owners in billing dashboard.")
+            exc = PermissionDenied("No access to other owners in billing dashboard.")
+            exc.detail = {
+                "code": "SCOPE_FORBIDDEN",
+                "detail": "No access to other owners in billing dashboard.",
+            }
+            raise exc
         if warehouse_id and not scope.allows(warehouse_id=warehouse_id):
-            raise PermissionDenied("No access to other warehouses in billing dashboard.")
+            exc = PermissionDenied(
+                "No access to other warehouses in billing dashboard."
+            )
+            exc.detail = {
+                "code": "SCOPE_FORBIDDEN",
+                "detail": "No access to other warehouses in billing dashboard.",
+            }
+            raise exc
 
-        date_from = parse_date(date_from_raw) if date_from_raw else None
-        date_to = parse_date(date_to_raw) if date_to_raw else None
+        current = timezone.now()
+        today = (
+            timezone.localtime(current).date()
+            if timezone.is_aware(current)
+            else current.date()
+        )
+        date_to = parse_date(date_to_raw) if date_to_raw else today
+        date_from = (
+            parse_date(date_from_raw) if date_from_raw else date_to.replace(day=1)
+        )
         if date_from_raw and date_from is None:
-            return Response({"detail": "date_from must be YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "date_from must be YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if date_to_raw and date_to is None:
-            return Response({"detail": "date_to must be YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "date_to must be YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if date_from and date_to and date_from > date_to:
-            return Response({"detail": "date_from cannot be after date_to."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "date_from cannot be after date_to."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if date_to > today:
+            return Response(
+                {"detail": "date_to cannot be after today."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if date_from and date_to and (date_to - date_from).days > 366:
+            return Response(
+                {"detail": "date range cannot exceed 367 days."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         recent_limit = int(recent_limit_raw) if recent_limit_raw.isdigit() else 10
         recent_limit = max(1, min(recent_limit, 50))
@@ -291,41 +500,31 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
             scope=scope,
         )
 
-        option_period_qs = self._scope_dashboard_queryset(
-            BillingPeriod.objects.select_related("owner", "warehouse"),
-            scope=scope,
-        )
-        option_accrual_qs = base_accrual_qs
-        option_bill_qs = self._scope_dashboard_queryset(
-            Bill.objects.select_related("owner", "warehouse").exclude(status=BillStatus.VOID),
-            scope=scope,
-        )
-
         if warehouse_id:
             base_accrual_qs = base_accrual_qs.filter(warehouse_id=warehouse_id)
             ledger_accrual_qs = ledger_accrual_qs.filter(warehouse_id=warehouse_id)
             base_bill_qs = base_bill_qs.filter(warehouse_id=warehouse_id)
-            option_period_qs = option_period_qs.filter(warehouse_id=warehouse_id)
-            option_accrual_qs = option_accrual_qs.filter(warehouse_id=warehouse_id)
-            option_bill_qs = option_bill_qs.filter(warehouse_id=warehouse_id)
 
-        owner_options_map = {}
-        for row in option_period_qs.values("owner_id", "owner__name").distinct():
-            owner_options_map[row["owner_id"]] = {
-                "id": row["owner_id"],
-                "name": row["owner__name"] or f"Owner #{row['owner_id']}",
+        binding_qs = OwnerWarehouseBinding.objects.select_related("owner").filter(
+            is_active=True,
+            is_deleted=False,
+            owner__is_active=True,
+            owner__is_deleted=False,
+        )
+        if warehouse_id:
+            binding_qs = binding_qs.filter(warehouse_id=warehouse_id)
+        elif scope.warehouse_ids:
+            binding_qs = binding_qs.filter(warehouse_id__in=scope.warehouse_ids)
+        owner_options_map = {
+            binding.owner_id: {
+                "id": binding.owner_id,
+                "name": binding.owner.name,
             }
-        for row in option_accrual_qs.values("owner_id", "owner__name").distinct():
-            owner_options_map[row["owner_id"]] = {
-                "id": row["owner_id"],
-                "name": row["owner__name"] or f"Owner #{row['owner_id']}",
-            }
-        for row in option_bill_qs.values("owner_id", "owner__name").distinct():
-            owner_options_map[row["owner_id"]] = {
-                "id": row["owner_id"],
-                "name": row["owner__name"] or f"Owner #{row['owner_id']}",
-            }
-        owner_options = sorted(owner_options_map.values(), key=lambda item: (item["name"], item["id"]))
+            for binding in binding_qs.order_by("owner__name", "owner_id")
+        }
+        owner_options = sorted(
+            owner_options_map.values(), key=lambda item: (item["name"], item["id"])
+        )
 
         if owner_id:
             base_accrual_qs = base_accrual_qs.filter(owner_id=owner_id)
@@ -343,16 +542,14 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
         if date_from:
             base_accrual_qs = base_accrual_qs.filter(service_date__gte=date_from)
             ledger_accrual_qs = ledger_accrual_qs.filter(service_date__gte=date_from)
-            base_bill_qs = base_bill_qs.filter(period__end_date__gte=date_from)
+            base_bill_qs = base_bill_qs.filter(issue_date__gte=date_from)
 
         if date_to:
             base_accrual_qs = base_accrual_qs.filter(service_date__lte=date_to)
             ledger_accrual_qs = ledger_accrual_qs.filter(service_date__lte=date_to)
-            base_bill_qs = base_bill_qs.filter(period__start_date__lte=date_to)
+            base_bill_qs = base_bill_qs.filter(issue_date__lte=date_to)
 
-        scope_owner_id = owner_id or (
-            next(iter(scope.owner_ids)) if len(scope.owner_ids) == 1 else None
-        )
+        scope_owner_id = owner_id
         scope_owner_name = ""
         if scope_owner_id:
             scope_owner_name = owner_options_map.get(scope_owner_id, {}).get("name", "")
@@ -373,30 +570,46 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
             recent_limit=recent_limit,
         )
         payload["scope"] = {
+            "mode": "WAREHOUSE" if warehouse_id else "ALL_AUTHORIZED",
             "owner": scope_owner_id,
             "owner_name": scope_owner_name,
-            "warehouse": warehouse_id or (
-                next(iter(scope.warehouse_ids)) if len(scope.warehouse_ids) == 1 else None
-            ),
+            "warehouse": warehouse_id,
             "warehouse_name": self._resolve_scope_label(
                 Warehouse,
-                warehouse_id or (
-                    next(iter(scope.warehouse_ids)) if len(scope.warehouse_ids) == 1 else None
-                ),
-            ),
+                warehouse_id,
+            )
+            or "全部授权仓库",
             "date_from": date_from,
             "date_to": date_to,
             "charge_type": charge_type,
             "status": accrual_status,
         }
         payload["owner_options"] = owner_options
+        unknown_currency_count = (
+            ledger_accrual_qs.filter(Q(currency__isnull=True) | Q(currency="")).count()
+            + base_bill_qs.filter(Q(currency__isnull=True) | Q(currency="")).count()
+        )
+        warnings = []
+        if unknown_currency_count:
+            warnings.append(warning("UNKNOWN_CURRENCY", unknown_currency_count))
+        payload["meta"] = build_meta(scope=payload["scope"], warnings=warnings)
         return Response(payload)
 
 
-class BillingRuleViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMixin, viewsets.ModelViewSet):
-    queryset = BillingRule.objects.select_related("owner", "warehouse").prefetch_related("tiers").all()
+class BillingRuleViewSet(
+    OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMixin, viewsets.ModelViewSet
+):
+    queryset = (
+        BillingRule.objects.select_related("owner", "warehouse")
+        .prefetch_related("tiers")
+        .all()
+    )
     serializer_class = BillingRuleSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_fields = {
         "owner": ["exact"],
         "warehouse": ["exact"],
@@ -434,9 +647,7 @@ class BillingRuleViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMi
         if getattr(user, "is_superuser", False):
             return
         scope = _explicit_billing_scope(user)
-        if not scope.allows(
-            owner_id=rule.owner_id, warehouse_id=rule.warehouse_id
-        ):
+        if not scope.allows(owner_id=rule.owner_id, warehouse_id=rule.warehouse_id):
             raise PermissionDenied("无权修改通用规则或范围外规则。")
 
     def perform_update(self, serializer):
@@ -468,7 +679,9 @@ class BillingRuleViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMi
 
 
 class BillingRuleTierViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
-    queryset = BillingRuleTier.objects.select_related("rule", "rule__owner", "rule__warehouse").all()
+    queryset = BillingRuleTier.objects.select_related(
+        "rule", "rule__owner", "rule__warehouse"
+    ).all()
     serializer_class = BillingRuleTierSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = {
@@ -520,10 +733,16 @@ class BillingRuleTierViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelVi
         instance.delete()
 
 
-class BillingMetricDailyViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMixin, viewsets.ModelViewSet):
+class BillingMetricDailyViewSet(
+    OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMixin, viewsets.ModelViewSet
+):
     queryset = BillingMetricDaily.objects.select_related("owner", "warehouse").all()
     serializer_class = BillingMetricDailySerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_fields = {
         "owner": ["exact"],
         "warehouse": ["exact"],
@@ -575,17 +794,36 @@ class BillingMetricDailyViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehous
         return Response(summary)
 
 
-class BillingEventViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
-    queryset = (
-        BillingEvent.objects.select_related("owner", "warehouse", "task", "task_line", "scan_log", "posting_journal")
-        .all()
-    )
+class BillingEventViewSet(
+    OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet
+):
+    queryset = BillingEvent.objects.select_related(
+        "owner",
+        "warehouse",
+        "task",
+        "task_line",
+        "scan_log",
+        "posting_journal",
+        "metric",
+        "pricing_rule",
+    ).all()
     serializer_class = BillingEventSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_fields = {
         "owner": ["exact"],
         "warehouse": ["exact"],
         "charge_type": ["exact", "in"],
+        "calc_method": ["exact", "in"],
+        "pricing_status": ["exact", "in"],
+        "pricing_reason": ["exact", "in", "icontains"],
+        "pricing_rule": ["exact", "isnull"],
+        "priced_at": ["exact", "gte", "lte", "isnull"],
+        "metric": ["exact", "isnull"],
+        "bundle_key": ["exact", "icontains"],
         "service_date": ["exact", "gte", "lte"],
         "task": ["exact"],
         "task_line": ["exact"],
@@ -595,8 +833,30 @@ class BillingEventViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyMo
     ordering_fields = ["id", "service_date", "created_at"]
     ordering = ["-service_date", "-id"]
 
+    @action(detail=False, methods=["post"], url_path="reprice-unpriced")
+    def reprice_unpriced(self, request):
+        payload = RepriceUnpricedSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        if not request.user.is_superuser:
+            scope = _explicit_billing_scope(request.user)
+            if not scope.allows(owner_id=data["owner"], warehouse_id=data["warehouse"]):
+                raise PermissionDenied("无权重算范围外货主或仓库的计费事件。")
+        return Response(
+            reprice_unpriced_events(
+                owner_id=data["owner"],
+                warehouse_id=data["warehouse"],
+                date_from=data["date_from"],
+                date_to=data["date_to"],
+                dry_run=data["dry_run"],
+                by_user=request.user,
+            )
+        )
 
-class BillingAccrualViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
+
+class BillingAccrualViewSet(
+    OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet
+):
     queryset = (
         BillingAccrual.objects.select_related(
             "owner",
@@ -610,7 +870,11 @@ class BillingAccrualViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnly
         .prefetch_related("billline_set__bill")
         .all()
     )
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_fields = {
         "owner": ["exact"],
         "warehouse": ["exact"],
@@ -634,10 +898,16 @@ class BillingAccrualViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnly
         return BillingAccrualSerializer
 
 
-class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMixin, viewsets.ModelViewSet):
+class BillingPeriodViewSet(
+    OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMixin, viewsets.ModelViewSet
+):
     queryset = BillingPeriod.objects.select_related("owner", "warehouse").all()
     serializer_class = BillingPeriodSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_fields = {
         "owner": ["exact"],
         "warehouse": ["exact"],
@@ -649,12 +919,118 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
     ordering_fields = ["id", "label", "start_date", "end_date"]
     ordering = ["-start_date", "-id"]
 
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        scoped = self.get_object()
+        period = BillingPeriod.objects.select_for_update().get(pk=scoped.pk)
+        immutable_scope = set()
+        if "owner" in request.data and str(request.data.get("owner")) != str(
+            period.owner_id
+        ):
+            immutable_scope.add("owner")
+        if "warehouse" in request.data and str(request.data.get("warehouse")) != str(
+            period.warehouse_id
+        ):
+            immutable_scope.add("warehouse")
+        protected_fields = {"label", "start_date", "end_date", "currency"} & set(
+            request.data.keys()
+        )
+        blocked = immutable_scope or (
+            period.status in {PeriodStatus.CLOSED, PeriodStatus.INVOICED}
+            and protected_fields
+        )
+        if blocked:
+            record_audit_event(
+                action="UPDATE_REJECTED",
+                module="billing.period",
+                request=request,
+                obj=period,
+                succeeded=False,
+                before=object_snapshot(period),
+                metadata={"fields": sorted(blocked)},
+            )
+            return Response(
+                {
+                    "code": "PERIOD_IMMUTABLE",
+                    "period_status": period.status,
+                    "detail": "账期范围创建后不可变，关闭或开票后业务字段不可修改。",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        before = object_snapshot(period)
+        serializer = self.get_serializer(
+            period, data=request.data, partial=kwargs.pop("partial", False)
+        )
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        record_audit_event(
+            action="UPDATE",
+            module="billing.period",
+            request=request,
+            obj=period,
+            before=before,
+            after=object_snapshot(period),
+        )
+        return Response(serializer.data)
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        scoped = self.get_object()
+        period = BillingPeriod.objects.select_for_update().get(pk=scoped.pk)
+        blocked = (
+            period.status != PeriodStatus.OPEN
+            or period.billingaccrual_set.exists()
+            or period.bill_set.exists()
+        )
+        if blocked:
+            record_audit_event(
+                action="DELETE_REJECTED",
+                module="billing.period",
+                request=request,
+                obj=period,
+                succeeded=False,
+                before=object_snapshot(period),
+            )
+            return Response(
+                {
+                    "code": "PERIOD_DELETE_BLOCKED",
+                    "period_status": period.status,
+                    "detail": "仅无应计、无账单关联的 OPEN 账期可删除。",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        before = object_snapshot(period)
+        record_audit_event(
+            action="DELETE",
+            module="billing.period",
+            request=request,
+            obj=period,
+            before=before,
+        )
+        period.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["get"], url_path="close-readiness")
+    def close_readiness(self, request, pk=None):
+        period = self.get_object()
+        return Response(
+            build_close_readiness(
+                owner_id=period.owner_id,
+                warehouse_id=period.warehouse_id,
+                start_date=period.start_date,
+                end_date=period.end_date,
+                for_invoice=period.status == PeriodStatus.CLOSED,
+            )
+        )
+
     def _guard_status(self, period: BillingPeriod, allowed_statuses):
         if period.status in allowed_statuses:
             return None
         allowed = ", ".join(allowed_statuses)
         return Response(
-            {"detail": f"该操作仅允许在账期状态 {allowed} 时执行，当前为 {period.status}。"},
+            {
+                "detail": f"该操作仅允许在账期状态 {allowed} 时执行，当前为 {period.status}。"
+            },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -698,15 +1074,19 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
         accruals = list(qs)
 
         subtotal = sum((Decimal(a.amount) for a in accruals), Decimal("0.00"))
-        tax_total = sum(
-            (Decimal(a.tax_amount) for a in accruals), Decimal("0.00")
-        )
+        tax_total = sum((Decimal(a.tax_amount) for a in accruals), Decimal("0.00"))
 
         data = {
             "period": self.get_serializer(period).data,
-            "scope": "open_unlocked" if period.status == PeriodStatus.OPEN else "period_locked",
+            "scope": (
+                "open_unlocked"
+                if period.status == PeriodStatus.OPEN
+                else "period_locked"
+            ),
             "accrual_count": len(accruals),
-            "quantity_total": sum((Decimal(a.quantity) for a in accruals), Decimal("0.0000")),
+            "quantity_total": sum(
+                (Decimal(a.quantity) for a in accruals), Decimal("0.0000")
+            ),
             "subtotal": subtotal,
             "tax_total": tax_total,
             "total": subtotal + tax_total,
@@ -730,7 +1110,9 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
             overwrite=bool(request.data.get("overwrite", False)),
             allow_area_fallback=bool(request.data.get("allow_area_fallback", False)),
         )
-        return Response({"period": self.get_serializer(period).data, "summary": summary})
+        return Response(
+            {"period": self.get_serializer(period).data, "summary": summary}
+        )
 
     @action(detail=True, methods=["post"], url_path="accrue-storage")
     @transaction.atomic
@@ -751,7 +1133,9 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
                 period.owner_id,
                 period.warehouse_id,
                 service_date,
-                allow_area_fallback=bool(request.data.get("allow_area_fallback", False)),
+                allow_area_fallback=bool(
+                    request.data.get("allow_area_fallback", False)
+                ),
             )
             total_metrics_created += metric_summary["created"]
             total_metrics_updated += metric_summary["updated"]
@@ -821,6 +1205,12 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
                 period.label,
                 period.start_date,
                 period.end_date,
+                by_user=request.user,
+            )
+        except BillingCloseBlocked as exc:
+            return Response(
+                {"code": "BILLING_CLOSE_BLOCKED", "readiness": exc.readiness},
+                status=status.HTTP_409_CONFLICT,
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -840,8 +1230,15 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
 
         invoice_no = payload.validated_data.get("invoice_no")
         if not invoice_no:
-            seq = Bill.objects.filter(period__owner=period.owner, period__warehouse=period.warehouse).count() + 1
-            invoice_no = f"INV-{period.label}-{period.owner_id}-{period.warehouse_id}-{seq:04d}"
+            seq = (
+                Bill.objects.filter(
+                    period__owner=period.owner, period__warehouse=period.warehouse
+                ).count()
+                + 1
+            )
+            invoice_no = (
+                f"INV-{period.label}-{period.owner_id}-{period.warehouse_id}-{seq:04d}"
+            )
 
         try:
             bill = generate_invoice_for_period(
@@ -849,10 +1246,19 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
                 invoice_no=invoice_no,
                 issue_date=payload.validated_data.get("issue_date"),
                 due_date=payload.validated_data.get("due_date"),
+                by_user=request.user,
+            )
+        except BillingCloseBlocked as exc:
+            return Response(
+                {"code": "BILLING_CLOSE_BLOCKED", "readiness": exc.readiness},
+                status=status.HTTP_409_CONFLICT,
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(BillDetailSerializer(bill, context={"request": request}).data, status=status.HTTP_201_CREATED)
+        return Response(
+            BillDetailSerializer(bill, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["post"], url_path="preview-lock")
     def preview_lock(self, request, pk=None):
@@ -875,7 +1281,9 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
     def unlock(self, request, pk=None):
         _require_billing_perm(request, "change_billingperiod")
         period = self.get_object()
-        blocked = self._guard_status(period, [PeriodStatus.CLOSED, PeriodStatus.INVOICED])
+        blocked = self._guard_status(
+            period, [PeriodStatus.CLOSED, PeriodStatus.INVOICED]
+        )
         if blocked is not None:
             return blocked
 
@@ -894,13 +1302,23 @@ class BillingPeriodViewSet(OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSave
 
 
 class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
-    queryset = Bill.objects.select_related("owner", "warehouse", "period").prefetch_related("lines__accrual").all()
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    queryset = (
+        Bill.objects.select_related("owner", "warehouse", "period")
+        .prefetch_related("lines__accrual", "payment_allocations__receipt")
+        .all()
+    )
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_fields = {
         "owner": ["exact"],
         "warehouse": ["exact"],
         "period": ["exact"],
         "status": ["exact", "in"],
+        "document_status": ["exact", "in"],
+        "payment_status": ["exact", "in"],
         "issue_date": ["exact", "gte", "lte"],
         "due_date": ["exact", "gte", "lte"],
     }
@@ -930,12 +1348,27 @@ class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewS
         qs = self.filter_queryset(self.get_queryset())
 
         workbook = Workbook()
-        sheet = workbook.active
-        sheet.title = "Bills"
+        info = workbook.active
+        info.title = "报告信息"
+        info.append(["字段", "值"])
+        info.append(["报告类型", "账单列表"])
+        info.append(["仓库", request.query_params.get("warehouse") or "全部授权仓库"])
+        info.append(["货主", request.query_params.get("owner") or "全部货主"])
+        info.append(
+            [
+                "日期范围",
+                f"{request.query_params.get('issue_date__gte', '')} ~ {request.query_params.get('issue_date__lte', '')}",
+            ]
+        )
+        info.append(["数据截至时间", timezone.now().isoformat()])
+        info.append(["数据口径", "原币种；单据状态与回款状态分离"])
+        sheet = workbook.create_sheet("Bills")
         sheet.append(
             [
                 "Invoice No",
                 "Status",
+                "Document Status",
+                "Payment Status",
                 "Owner",
                 "Warehouse",
                 "Period",
@@ -956,6 +1389,8 @@ class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewS
                 [
                     bill.invoice_no,
                     bill.status,
+                    bill.document_status,
+                    bill.payment_status,
                     getattr(bill.owner, "name", "") if bill.owner_id else "",
                     getattr(bill.warehouse, "name", "") if bill.warehouse_id else "",
                     getattr(bill.period, "label", "") if bill.period_id else "",
@@ -988,16 +1423,41 @@ class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewS
         bill = self.get_object()
         workbook = Workbook()
 
-        summary_sheet = workbook.active
-        summary_sheet.title = "Bill"
+        info = workbook.active
+        info.title = "报告信息"
+        info.append(["字段", "值"])
+        info.append(["报告类型", "单张账单明细"])
+        info.append(["仓库", getattr(bill.warehouse, "name", bill.warehouse_id)])
+        info.append(["货主", getattr(bill.owner, "name", bill.owner_id)])
+        info.append(["日期范围", f"{bill.period.start_date} ~ {bill.period.end_date}"])
+        info.append(["币种", bill.currency])
+        info.append(["数据截至时间", timezone.now().isoformat()])
+        summary_sheet = workbook.create_sheet("Bill")
         summary_sheet.append(["Field", "Value"])
         summary_sheet.append(["Invoice No", bill.invoice_no])
         summary_sheet.append(["Status", bill.status])
-        summary_sheet.append(["Owner", getattr(bill.owner, "name", "") if bill.owner_id else ""])
-        summary_sheet.append(["Warehouse", getattr(bill.warehouse, "name", "") if bill.warehouse_id else ""])
-        summary_sheet.append(["Period", getattr(bill.period, "label", "") if bill.period_id else ""])
-        summary_sheet.append(["Issue Date", bill.issue_date.isoformat() if bill.issue_date else ""])
-        summary_sheet.append(["Due Date", bill.due_date.isoformat() if bill.due_date else ""])
+        summary_sheet.append(["Document Status", bill.document_status])
+        summary_sheet.append(["Payment Status", bill.payment_status])
+        summary_sheet.append(["Paid Amount", bill.paid_amount])
+        summary_sheet.append(["Outstanding Amount", bill.outstanding_amount])
+        summary_sheet.append(
+            ["Owner", getattr(bill.owner, "name", "") if bill.owner_id else ""]
+        )
+        summary_sheet.append(
+            [
+                "Warehouse",
+                getattr(bill.warehouse, "name", "") if bill.warehouse_id else "",
+            ]
+        )
+        summary_sheet.append(
+            ["Period", getattr(bill.period, "label", "") if bill.period_id else ""]
+        )
+        summary_sheet.append(
+            ["Issue Date", bill.issue_date.isoformat() if bill.issue_date else ""]
+        )
+        summary_sheet.append(
+            ["Due Date", bill.due_date.isoformat() if bill.due_date else ""]
+        )
         summary_sheet.append(["Currency", bill.currency])
         summary_sheet.append(["Subtotal", Decimal(bill.subtotal)])
         summary_sheet.append(["Tax Total", Decimal(bill.tax_total)])
@@ -1031,5 +1491,10 @@ class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewS
                 ]
             )
 
-        invoice_token = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in bill.invoice_no or f"bill-{bill.id}")
-        return self._xlsx_response(workbook, f"{invoice_token or f'bill-{bill.id}'}.xlsx")
+        invoice_token = "".join(
+            ch if ch.isalnum() or ch in ("-", "_") else "-"
+            for ch in bill.invoice_no or f"bill-{bill.id}"
+        )
+        return self._xlsx_response(
+            workbook, f"{invoice_token or f'bill-{bill.id}'}.xlsx"
+        )

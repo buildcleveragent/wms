@@ -20,7 +20,7 @@ from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.shortcuts import get_object_or_404
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
@@ -534,6 +534,8 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="scan")
     def scan(self, request, pk=None):
         task = self.get_object()
+        if task.task_type == WmsTask.TaskType.RELOC:
+            raise DRFValidationError("移库任务必须通过 /api/relocation/pda/tasks/{id}/record/ 执行。")
         self._gate_task_action(
             task,
             permission=_TASKING_OPERATOR_PERMISSION,

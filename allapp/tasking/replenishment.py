@@ -111,6 +111,7 @@ def _source_details(policy: ReplenishmentPolicy, *, lock: bool = False):
         allocated_qty=0,
         locked_qty=0,
         damaged_qty=0,
+        container__isnull=True,
         available_qty__gt=0,
         is_active=True,
     ).select_related("location", "product")
@@ -289,8 +290,6 @@ def _create_task(
             from_location=detail.location,
             to_location=policy.target_location,
             qty_move=0,
-            created_by=by_user,
-            updated_by=by_user,
         )
         remaining = q3(remaining - take)
 
@@ -704,8 +703,6 @@ def record_replenishment(
         from_location=line.from_location,
         to_location=line.to_location,
         qty_move=line.qty_done,
-        updated_by=by_user,
-        updated_at=timezone.now(),
     )
 
     posting_required = not task.lines.exclude(

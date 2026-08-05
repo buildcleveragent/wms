@@ -36,12 +36,18 @@ from typing import Dict, Optional
 from django.conf import settings
 from django.db import transaction
 from django.db.models import (
-    Case, DecimalField, ExpressionWrapper, F, Prefetch, Sum, When,
+    Case,
+    DecimalField,
+    ExpressionWrapper,
+    F,
+    Prefetch,
+    Sum,
+    When,
 )
 from django.db.utils import IntegrityError
 from django.utils import timezone
 
-from allapp.billing.enums import MetricType
+from allapp.billing.enums import MetricType, SourceQuality
 from allapp.billing.models import BillingMetricDaily
 from allapp.outbound.models import OutboundOrderLine
 
@@ -51,6 +57,7 @@ from ._common import AUTO_METRIC_SOURCE_PREFIX, _q, logger
 # ======================== 指标解析器插件机制 ======================== #
 # 允许业务方通过 Django settings 注入自定义的指标计算函数，
 # 而无需修改本模块代码，符合开闭原则（对扩展开放、对修改关闭）。
+
 
 def _load_metric_resolver(metric_type: str):
     """
@@ -83,7 +90,10 @@ def _load_metric_resolver(metric_type: str):
 # 自定义解析器可能返回 dict、tuple 或裸数值等多种格式，
 # 本函数将其统一转换为内部标准结构，降低后续处理的复杂度。
 
-def _normalize_metric_payload(metric_type: str, payload, default_source: str, default_note: str = ""):
+
+def _normalize_metric_payload(
+    metric_type: str, payload, default_source: str, default_note: str = ""
+):
     """
     将自定义解析器返回的多种格式统一规范化为内部标准字典。
 
@@ -122,6 +132,7 @@ def _normalize_metric_payload(metric_type: str, payload, default_source: str, de
         value = payload.get("value")
         source = payload.get("source", default_source)
         note = payload.get("note", default_note)
+        source_quality = payload.get("source_quality", SourceQuality.VERIFIED)
     elif isinstance(payload, tuple):
         if len(payload) == 3:
             value, source, note = payload
@@ -133,12 +144,18 @@ def _normalize_metric_payload(metric_type: str, payload, default_source: str, de
             source = default_source
             note = default_note
         else:
-            raise ValueError(f"Unsupported metric payload tuple for {metric_type}: {payload!r}")
+            raise ValueError(
+                f"Unsupported metric payload tuple for {metric_type}: {payload!r}"
+            )
     else:
         # 裸标量（int、float、Decimal 等），直接使用默认的 source 和 note
         value = payload
         source = default_source
         note = default_note
+        source_quality = SourceQuality.VERIFIED
+
+    if not isinstance(payload, dict):
+        source_quality = SourceQuality.VERIFIED
 
     if value is None:
         return None
@@ -148,7 +165,23 @@ def _normalize_metric_payload(metric_type: str, payload, default_source: str, de
         "value": _q(Decimal(value), "0.0001"),  # 统一精度到 4 位小数
         "source": source,
         "note": note or "",
+        "source_quality": source_quality,
     }
+
+
+def _inventory_rows_source_quality(rows) -> str:
+    from allapp.inventory.models import InventorySnapshotDaily
+
+    approximate_sources = {
+        InventorySnapshotDaily.Source.BOOTSTRAP_DETAIL,
+        InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX,
+    }
+    if any(
+        getattr(row, "snapshot_source", "") in approximate_sources
+        for row in (rows or [])
+    ):
+        return SourceQuality.APPROXIMATE
+    return SourceQuality.VERIFIED
 
 
 # ======================== 库存数据源路由帮助函数 ======================== #
@@ -159,6 +192,7 @@ def _normalize_metric_payload(metric_type: str, payload, default_source: str, de
 #     若快照不存在，则自动触发快照生成，然后再次查询。
 #
 # 这样可以保证：历史数据幂等可重算；当天数据反映实时库存。
+
 
 def _current_inventory_metric_rows(owner_id, warehouse_id):
     """
@@ -185,13 +219,19 @@ def _current_inventory_metric_rows(owner_id, warehouse_id):
     from allapp.products.models import ProductPackage
 
     return list(
-        InventoryDetail.objects
-        .filter(owner_id=owner_id, warehouse_id=warehouse_id, is_active=True, onhand_qty__gt=0)
+        InventoryDetail.objects.filter(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            is_active=True,
+            onhand_qty__gt=0,
+        )
         .select_related("product", "location")
         .prefetch_related(
             Prefetch(
                 "product__packages",
-                queryset=ProductPackage.objects.order_by("-is_sales_default", "-is_pickable", "sort_order", "id"),
+                queryset=ProductPackage.objects.order_by(
+                    "-is_sales_default", "-is_pickable", "sort_order", "id"
+                ),
             )
         )
     )
@@ -222,14 +262,12 @@ def _snapshot_inventory_metric_rows(owner_id, warehouse_id, service_date):
     from allapp.inventory.models import InventorySnapshotDaily
 
     return list(
-        InventorySnapshotDaily.objects
-        .filter(
+        InventorySnapshotDaily.objects.filter(
             snapshot_date=service_date,
             owner_id=owner_id,
             warehouse_id=warehouse_id,
             onhand_qty__gt=0,
-        )
-        .select_related("product", "location")
+        ).select_related("product", "location")
     )
 
 
@@ -290,7 +328,9 @@ def _ensure_inventory_snapshot_for_date(owner_id, warehouse_id, service_date):
         # 快照链断裂（前一天快照缺失）→ 回退到 bootstrap 模式
         logger.warning(
             "Snapshot chain broken for %s (owner=%s, warehouse=%s), falling back to bootstrap mode",
-            service_date, owner_id, warehouse_id,
+            service_date,
+            owner_id,
+            warehouse_id,
         )
         return generate_inventory_snapshot_for_date(
             service_date,
@@ -361,7 +401,9 @@ def _inventory_metric_rows(owner_id, warehouse_id, service_date):
     return _current_inventory_metric_rows(owner_id, warehouse_id)
 
 
-def _resolve_product_unit_volume(product, cache: Dict[int, Optional[Decimal]]) -> Optional[Decimal]:
+def _resolve_product_unit_volume(
+    product, cache: Dict[int, Optional[Decimal]]
+) -> Optional[Decimal]:
     """
     解析单个商品的单位体积（m³/基本单位），并写入内存缓存。
 
@@ -388,7 +430,11 @@ def _resolve_product_unit_volume(product, cache: Dict[int, Optional[Decimal]]) -
         return cache[product.id]
 
     # 优先使用商品主档中的 volume 字段
-    unit_volume = Decimal(product.volume) if getattr(product, "volume", None) is not None else None
+    unit_volume = (
+        Decimal(product.volume)
+        if getattr(product, "volume", None) is not None
+        else None
+    )
     if unit_volume is None:
         # 回退：从已排序的包装规格中取第一条有效记录推算单位体积
         for pkg in product.packages.all():
@@ -405,7 +451,10 @@ def _resolve_product_unit_volume(product, cache: Dict[int, Optional[Decimal]]) -
 
 # ======================== 四种指标计算函数 ======================== #
 
-def _build_pallet_metric(owner_id, warehouse_id, service_date, *, inventory_rows=None, **kwargs):
+
+def _build_pallet_metric(
+    owner_id, warehouse_id, service_date, *, inventory_rows=None, **kwargs
+):
     """
     计算 PALLET 指标：当日占用的不重复库位数。
 
@@ -432,8 +481,14 @@ def _build_pallet_metric(owner_id, warehouse_id, service_date, *, inventory_rows
     返回：
         dict，包含 value（Decimal）、source（str）、note（str）。
     """
-    rows = inventory_rows if inventory_rows is not None else _inventory_metric_rows(owner_id, warehouse_id, service_date)
-    occupied_locations = {row.location_id for row in rows if Decimal(row.onhand_qty or 0) > 0}
+    rows = (
+        inventory_rows
+        if inventory_rows is not None
+        else _inventory_metric_rows(owner_id, warehouse_id, service_date)
+    )
+    occupied_locations = {
+        row.location_id for row in rows if Decimal(row.onhand_qty or 0) > 0
+    }
     use_snapshot = _inventory_rows_use_snapshot(service_date, rows)
     return {
         "value": Decimal(len(occupied_locations)),
@@ -443,10 +498,13 @@ def _build_pallet_metric(owner_id, warehouse_id, service_date, *, inventory_rows
             else f"{AUTO_METRIC_SOURCE_PREFIX}PALLET_OCCUPIED_LOCATION_COUNT"
         ),
         "note": "Distinct occupied inventory locations with onhand_qty > 0.",
+        "source_quality": _inventory_rows_source_quality(rows),
     }
 
 
-def _build_cbm_metric(owner_id, warehouse_id, service_date, *, inventory_rows=None, **kwargs):
+def _build_cbm_metric(
+    owner_id, warehouse_id, service_date, *, inventory_rows=None, **kwargs
+):
     """
     计算 CBM 指标：当日库存总体积（立方米）。
 
@@ -479,7 +537,11 @@ def _build_cbm_metric(owner_id, warehouse_id, service_date, *, inventory_rows=No
     返回：
         dict，包含 value（Decimal，总立方米）、source（str）、note（str）。
     """
-    rows = inventory_rows if inventory_rows is not None else _inventory_metric_rows(owner_id, warehouse_id, service_date)
+    rows = (
+        inventory_rows
+        if inventory_rows is not None
+        else _inventory_metric_rows(owner_id, warehouse_id, service_date)
+    )
     if _inventory_rows_use_snapshot(service_date, rows):
         # 路径 A：历史快照路径，直接使用快照固化的单位体积字段
         total = Decimal("0.0000")
@@ -495,11 +557,14 @@ def _build_cbm_metric(owner_id, warehouse_id, service_date, *, inventory_rows=No
 
         notes = ["Sum(onhand_qty * unit_volume_m3_snapshot)."]
         if missing_product_ids:
-            notes.append(f"{len(missing_product_ids)} snapshot products missing volume and were skipped.")
+            notes.append(
+                f"{len(missing_product_ids)} snapshot products missing volume and were skipped."
+            )
         return {
             "value": total,
             "source": f"{AUTO_METRIC_SOURCE_PREFIX}INVENTORY_SNAPSHOT_ONHAND_VOLUME",
             "note": " ".join(notes),
+            "source_quality": _inventory_rows_source_quality(rows),
         }
 
     # 路径 B：实时库存路径，动态解析体积（含两级回退）
@@ -520,18 +585,31 @@ def _build_cbm_metric(owner_id, warehouse_id, service_date, *, inventory_rows=No
 
     notes = ["Sum(onhand_qty * unit_volume_m3)."]
     if package_fallback_hits:
-        notes.append(f"{package_fallback_hits} detail rows used package-level volume fallback.")
+        notes.append(
+            f"{package_fallback_hits} detail rows used package-level volume fallback."
+        )
     if missing_product_ids:
-        notes.append(f"{len(missing_product_ids)} products missing volume and were skipped.")
+        notes.append(
+            f"{len(missing_product_ids)} products missing volume and were skipped."
+        )
 
     return {
         "value": total,
         "source": f"{AUTO_METRIC_SOURCE_PREFIX}INVENTORY_ONHAND_VOLUME",
         "note": " ".join(notes),
+        "source_quality": SourceQuality.VERIFIED,
     }
 
 
-def _build_area_metric(owner_id, warehouse_id, service_date, *, inventory_rows=None, allow_area_fallback=False, **kwargs):
+def _build_area_metric(
+    owner_id,
+    warehouse_id,
+    service_date,
+    *,
+    inventory_rows=None,
+    allow_area_fallback=False,
+    **kwargs,
+):
     """
     计算 AREA_M2 指标：当日占用库位的总面积（平方米）。
 
@@ -573,11 +651,17 @@ def _build_area_metric(owner_id, warehouse_id, service_date, *, inventory_rows=N
     返回：
         dict（含 value、source、note），或 None（无数据且不允许回退时）。
     """
-    rows = inventory_rows if inventory_rows is not None else _inventory_metric_rows(owner_id, warehouse_id, service_date)
+    rows = (
+        inventory_rows
+        if inventory_rows is not None
+        else _inventory_metric_rows(owner_id, warehouse_id, service_date)
+    )
     if _inventory_rows_use_snapshot(service_date, rows):
         # 路径 A：历史快照路径
-        occupied_locations = {row.location_id for row in rows if Decimal(row.onhand_qty or 0) > 0}
-        location_areas = {}       # {location_id: Decimal(area_m2)} 去重存储
+        occupied_locations = {
+            row.location_id for row in rows if Decimal(row.onhand_qty or 0) > 0
+        }
+        location_areas = {}  # {location_id: Decimal(area_m2)} 去重存储
         missing_area_locations = set()  # 缺失面积快照的库位集合
 
         for row in rows:
@@ -587,17 +671,22 @@ def _build_area_metric(owner_id, warehouse_id, service_date, *, inventory_rows=N
                 missing_area_locations.add(row.location_id)
                 continue
             # setdefault 保证同一库位面积只被记录一次，避免重复累加
-            location_areas.setdefault(row.location_id, Decimal(row.location_area_m2_snapshot))
+            location_areas.setdefault(
+                row.location_id, Decimal(row.location_area_m2_snapshot)
+            )
 
         if location_areas:
             # 有有效面积数据，求和返回
             notes = ["Sum(distinct occupied location_area_m2_snapshot)."]
             if missing_area_locations:
-                notes.append(f"{len(missing_area_locations)} occupied locations missing area snapshot.")
+                notes.append(
+                    f"{len(missing_area_locations)} occupied locations missing area snapshot."
+                )
             return {
                 "value": sum(location_areas.values(), Decimal("0.0000")),
                 "source": f"{AUTO_METRIC_SOURCE_PREFIX}SNAPSHOT_AREA_M2",
                 "note": " ".join(notes),
+                "source_quality": _inventory_rows_source_quality(rows),
             }
 
         # 快照行全部缺失面积，决定是否允许回退
@@ -609,23 +698,32 @@ def _build_area_metric(owner_id, warehouse_id, service_date, *, inventory_rows=N
             "value": Decimal(len(occupied_locations)),
             "source": f"{AUTO_METRIC_SOURCE_PREFIX}AREA_FALLBACK_LOC_COUNT",
             "note": "No snapshot location area data found; using occupied location count as area proxy.",
+            "source_quality": _inventory_rows_source_quality(rows),
         }
 
     # 路径 B：实时库存路径，优先使用自定义解析器
     resolver = _load_metric_resolver(MetricType.AREA_M2)
     if resolver:
-        return resolver(owner_id=owner_id, warehouse_id=warehouse_id, service_date=service_date, inventory_rows=rows)
+        return resolver(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            service_date=service_date,
+            inventory_rows=rows,
+        )
 
     # 无自定义解析器时的处理
     if not allow_area_fallback:
         return None  # 无面积主数据，不回退，跳过本指标
 
     # 路径 B-fallback：以占用库位数代替面积（适用于尚未配置面积主数据的仓库）
-    occupied_locations = {row.location_id for row in rows if Decimal(row.onhand_qty or 0) > 0}
+    occupied_locations = {
+        row.location_id for row in rows if Decimal(row.onhand_qty or 0) > 0
+    }
     return {
         "value": Decimal(len(occupied_locations)),
         "source": f"{AUTO_METRIC_SOURCE_PREFIX}AREA_FALLBACK_LOC_COUNT",
         "note": "No explicit area master data found; using occupied location count as area proxy.",
+        "source_quality": SourceQuality.VERIFIED,
     }
 
 
@@ -672,20 +770,20 @@ def _build_order_amount_metric(owner_id, warehouse_id, service_date, **kwargs):
         ),
         output_field=DecimalField(max_digits=18, decimal_places=2),
     )
-    total = (
-        OutboundOrderLine.objects
-        .filter(
-            order__owner_id=owner_id,
-            order__warehouse_id=warehouse_id,
-            order__biz_date=service_date,
-            order__submit_status="SUBMITTED",
-            order__is_deleted=False,
-            is_deleted=False,
-        )
-        .exclude(order__approval_status="CANCELLED")
-        .aggregate(total=Sum(line_amount_expr))["total"]
-        or Decimal("0.00")  # aggregate 返回 None（无匹配行）时归零
-    )
+    total = OutboundOrderLine.objects.filter(
+        order__owner_id=owner_id,
+        order__warehouse_id=warehouse_id,
+        order__biz_date=service_date,
+        order__submit_status="SUBMITTED",
+        order__is_deleted=False,
+        is_deleted=False,
+    ).exclude(order__approval_status="CANCELLED").aggregate(
+        total=Sum(line_amount_expr)
+    )[
+        "total"
+    ] or Decimal(
+        "0.00"
+    )  # aggregate 返回 None（无匹配行）时归零
 
     return {
         "value": total,
@@ -696,7 +794,10 @@ def _build_order_amount_metric(owner_id, warehouse_id, service_date, **kwargs):
 
 # ======================== 调度入口与类型过滤 ======================== #
 
-def _default_metric_payload(metric_type: str, owner_id, warehouse_id, service_date, **kwargs):
+
+def _default_metric_payload(
+    metric_type: str, owner_id, warehouse_id, service_date, **kwargs
+):
     """
     统一调度入口：根据 metric_type 调用对应的指标构建函数。
 
@@ -723,7 +824,12 @@ def _default_metric_payload(metric_type: str, owner_id, warehouse_id, service_da
     # 优先检查是否配置了整体类型级别的自定义解析器
     resolver = _load_metric_resolver(metric_type)
     if resolver:
-        return resolver(owner_id=owner_id, warehouse_id=warehouse_id, service_date=service_date, **kwargs)
+        return resolver(
+            owner_id=owner_id,
+            warehouse_id=warehouse_id,
+            service_date=service_date,
+            **kwargs,
+        )
 
     # 内置指标分发
     if metric_type == MetricType.PALLET:
@@ -733,7 +839,9 @@ def _default_metric_payload(metric_type: str, owner_id, warehouse_id, service_da
     if metric_type == MetricType.AREA_M2:
         return _build_area_metric(owner_id, warehouse_id, service_date, **kwargs)
     if metric_type == MetricType.ORDER_AMT:
-        return _build_order_amount_metric(owner_id, warehouse_id, service_date, **kwargs)
+        return _build_order_amount_metric(
+            owner_id, warehouse_id, service_date, **kwargs
+        )
     return None  # 未识别的指标类型，由调用方决定如何处理
 
 
@@ -751,7 +859,12 @@ def _auto_metric_types(metric_types=None):
     返回：
         有效指标类型字符串的列表。
     """
-    base_types = [MetricType.PALLET, MetricType.CBM, MetricType.AREA_M2, MetricType.ORDER_AMT]
+    base_types = [
+        MetricType.PALLET,
+        MetricType.CBM,
+        MetricType.AREA_M2,
+        MetricType.ORDER_AMT,
+    ]
     if metric_types is None:
         return base_types
     allowed = set(base_types)
@@ -781,6 +894,7 @@ def _is_auto_metric_row(metric: BillingMetricDaily) -> bool:
 
 
 # ======================== 指标持久化（含竞态恢复） ======================== #
+
 
 def _recover_existing_metric_after_create_race(metric_filter):
     """
@@ -879,6 +993,7 @@ def _store_generated_metric(
     value = Decimal(metric_payload["value"])
     source = metric_payload["source"]
     note = metric_payload["note"]
+    source_quality = metric_payload.get("source_quality", SourceQuality.VERIFIED)
     create_kwargs = {
         "owner_id": owner_id,
         "warehouse_id": warehouse_id,
@@ -886,6 +1001,7 @@ def _store_generated_metric(
         "metric_type": metric_type,
         "value": value,
         "source": source,
+        "source_quality": source_quality,
         "note": note,
     }
     metric_filter = {
@@ -896,7 +1012,9 @@ def _store_generated_metric(
     }
 
     # 步骤 1：加锁查询已有记录，防止并发 UPDATE 覆盖
-    existing = BillingMetricDaily.objects.select_for_update().filter(**metric_filter).first()
+    existing = (
+        BillingMetricDaily.objects.select_for_update().filter(**metric_filter).first()
+    )
 
     # 步骤 2：保护手工录入值（非自动 + 不允许强制覆盖）
     if existing and not overwrite and not _is_auto_metric_row(existing):
@@ -905,6 +1023,7 @@ def _store_generated_metric(
             "action": "skipped_manual",
             "value": existing.value,
             "source": existing.source,
+            "source_quality": existing.source_quality,
             "note": existing.note,
         }
 
@@ -918,6 +1037,7 @@ def _store_generated_metric(
                 "action": "deleted_zero",
                 "value": Decimal("0.0000"),
                 "source": source,
+                "source_quality": source_quality,
                 "note": note,
             }
         # 无记录或手工记录不可覆盖时，跳过零值插入
@@ -926,6 +1046,7 @@ def _store_generated_metric(
             "action": "skipped_zero",
             "value": value,
             "source": source,
+            "source_quality": source_quality,
             "note": note,
         }
 
@@ -939,6 +1060,7 @@ def _store_generated_metric(
                 "action": "created",
                 "value": value,
                 "source": source,
+                "source_quality": source_quality,
                 "note": note,
             }
         except IntegrityError as exc:
@@ -956,6 +1078,7 @@ def _store_generated_metric(
             "action": "skipped_manual",
             "value": existing.value,
             "source": existing.source,
+            "source_quality": existing.source_quality,
             "note": existing.note,
         }
 
@@ -968,6 +1091,7 @@ def _store_generated_metric(
                 "action": "deleted_zero",
                 "value": Decimal("0.0000"),
                 "source": source,
+                "source_quality": source_quality,
                 "note": note,
             }
         return {
@@ -975,6 +1099,7 @@ def _store_generated_metric(
             "action": "skipped_zero",
             "value": value,
             "source": source,
+            "source_quality": source_quality,
             "note": note,
         }
 
@@ -982,13 +1107,15 @@ def _store_generated_metric(
     changed = (
         Decimal(existing.value) != value
         or (existing.source or "") != source
+        or existing.source_quality != source_quality
         or (existing.note or "") != note
     )
     if changed:
         existing.value = value
         existing.source = source
+        existing.source_quality = source_quality
         existing.note = note
-        existing.save(update_fields=["value", "source", "note"])
+        existing.save(update_fields=["value", "source", "source_quality", "note"])
         action = "updated"
     else:
         action = "noop"  # 数据完全一致，无需任何数据库操作
@@ -998,5 +1125,6 @@ def _store_generated_metric(
         "action": action,
         "value": value,
         "source": source,
+        "source_quality": source_quality,
         "note": note,
     }

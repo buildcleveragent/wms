@@ -156,7 +156,9 @@ class ReplenishmentFlowTests(TestCase):
 
     def test_record_is_idempotent_and_posts_paired_replenishment_move(self):
         source = self._detail(qty="10", batch="MOVE", expiry=datetime.date(2027, 1, 1))
-        policy = self._policy(target_qty=Decimal("10"), auto_release=True)
+        policy = self._policy(
+            min_qty=Decimal("5"), target_qty=Decimal("10"), auto_release=True
+        )
         task = evaluate_policy(policy.pk, by_user=self.user)["task"]
         line = task.lines.get()
         TaskAssignment.objects.create(

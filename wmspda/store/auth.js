@@ -34,6 +34,16 @@ export const useAuth = defineStore('auth', {
     canRetryReplenishmentPosting: (state) =>
       state.profileLoaded === true &&
       state.profile?.capabilities?.can_retry_replenishment_posting === true,
+    canRequestRelocation: (state) =>
+      state.profileLoaded === true && state.profile?.capabilities?.can_request_relocation === true,
+    canApproveRelocation: (state) =>
+      state.profileLoaded === true && state.profile?.capabilities?.can_approve_relocation === true,
+    canManageRelocation: (state) =>
+      state.profileLoaded === true && state.profile?.capabilities?.can_manage_relocation === true,
+    canExecuteRelocation: (state) =>
+      state.profileLoaded === true && state.profile?.capabilities?.can_execute_relocation === true,
+    canManageRelocationTasks: (state) =>
+      state.profileLoaded === true && state.profile?.capabilities?.can_manage_relocation_tasks === true,
   },
 
   actions: {

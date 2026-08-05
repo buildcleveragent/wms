@@ -32,7 +32,6 @@ from allapp.outbound.authz import (
     strict_pick_queryset,
 )
 from .models import TaskAssignment, WmsTask, WmsTaskLine
-from allapp.inventory import services as inv_services
 from allapp.tasking import services as task_services
 
 TASK_TYPE_SLUG_TO_URL = {
@@ -699,7 +698,7 @@ class _JsonMixin:
 
 
 class TaskPostView(LoginRequiredMixin, View, _JsonMixin):
-    """触发任务过账（post）；统一委托 inventory.services.post_task。"""
+    """触发任务过账；统一委托任务过账处理器。"""
     http_method_names = ["post"]
 
     @transaction.atomic
@@ -721,7 +720,9 @@ class TaskPostView(LoginRequiredMixin, View, _JsonMixin):
         ):
             return self._err("需要仓库操作权限", status=403)
         try:
-            result = inv_services.post_task(task_id=task.id, by_user=request.user)
+            result = task_services._run_posting_handler(
+                task.id, by_user=request.user, note="控制台过账"
+            )
             return self._ok({"task_id": task.id, "result": result})
         except Exception as e:
             return self._err(str(e))
@@ -750,7 +751,9 @@ class TaskClaimView(LoginRequiredMixin, View, _JsonMixin):
             return self._err("需要仓库操作权限", status=403)
         try:
             if hasattr(task_services, "claim_task"):
-                result = task_services.claim_task(task_id=task.id, by_user=request.user)
+                result = task_services.claim_task(
+                    task, by_user=request.user, allowed_wh_ids={task.warehouse_id}
+                )
             else:
                 result = {"message": "claim_task() 未在 tasking.services 中找到，跳过。"}
             return self._ok({"task_id": task.id, "result": result})

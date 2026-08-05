@@ -35,6 +35,7 @@ from .models import (ReviewTaskExtra,ReviewLineExtra, AdjustLineExtra,  AdjustTa
     LoadLineExtra, LoadTaskExtra,PackLineExtra, PackTaskExtra, PickLineExtra, PickTaskExtra, PutawayLineExtra,
     PutawayTaskExtra,QCLineExtra,QCTaskExtra,ReceiveLineExtra,ReceiveTaskExtra,RelocLineExtra,RelocTaskExtra,
     ReplenishLineExtra, ReplenishTaskExtra, ReplenishmentPolicy, ReplenishmentRequest,
+    RelocationRequest, RelocationRequestLine, RelocationReservation,
     TaskAssignment, TaskScanLog, TaskStatusLog, WmsTask, WmsTaskLine,)
 
 from django.db import transaction
@@ -756,7 +757,7 @@ def _stats_brief(stats: dict) -> str:
 class WmsTaskAdmin(admin.ModelAdmin):
     # —— 批量动作：状态流转 + 记录日志 —— #
     actions_selection_counter = True
-    actions = ["action_wave_release_pick","action_approve", "action_reject","action_post","action_release", "action_start", "action_complete", "action_cancel"]
+    actions = ["action_wave_release_pick","action_approve", "action_reject","action_post","action_release", "action_cancel"]
     list_display = (
         "task_no_clip","task_type", "status", "review_status","posting_status","priority",
         "owner", "released_at", "started_at", "finished_at","picked_by",
@@ -973,6 +974,8 @@ class WmsTaskAdmin(admin.ModelAdmin):
             for pk in locked_ids:
                 obj = pk_to_obj[pk]
                 try:
+                    if obj.task_type == WmsTask.TaskType.RELOC:
+                        raise ValidationError("移库任务只能通过移库申请审批或直接下发接口发布。")
                     if obj.task_type == WmsTask.TaskType.COUNT:
                         from allapp.tasking.counting import release_count_task
 
@@ -1018,6 +1021,10 @@ class WmsTaskAdmin(admin.ModelAdmin):
                     from allapp.tasking.counting import cancel_count_task
 
                     cancel_count_task(task.id, by_user=request.user, note="Admin 取消任务")
+                elif task.task_type == WmsTask.TaskType.RELOC:
+                    from allapp.tasking.relocation import void_task
+
+                    void_task(task.id, by_user=request.user, note="Admin 取消移库任务")
                 else:
                     svc.task_cancel(request=request, task=task, reason="Admin 取消任务")
                 ok += 1
@@ -1087,7 +1094,7 @@ class WmsTaskAdmin(admin.ModelAdmin):
                 updated += 1
         with transaction.atomic():
             qs = queryset.select_for_update().exclude(
-                task_type=WmsTask.TaskType.COUNT
+                task_type__in=[WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC]
             ).filter(review_status=RS_PENDING)
             updated += qs.update(review_status=RS_APPROVED, posting_status=PS_PENDING)
 
@@ -1125,7 +1132,7 @@ class WmsTaskAdmin(admin.ModelAdmin):
                 updated += 1
         with transaction.atomic():
             qs = queryset.select_for_update().exclude(
-                task_type=WmsTask.TaskType.COUNT
+                task_type__in=[WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC]
             ).filter(review_status=RS_PENDING)
             updated += qs.update(review_status=RS_REJECTED)
 
@@ -2106,6 +2113,71 @@ class ReplenishmentRequestAdmin(admin.ModelAdmin):
         "generated_task",
     )
     readonly_fields = ("status", "reviewed_by", "reviewed_at", "generated_task")
+
+
+class RelocationRequestLineInline(admin.TabularInline):
+    model = RelocationRequestLine
+    extra = 0
+    readonly_fields = (
+        "inventory_detail", "requested_qty", "to_location", "to_container", "source_snapshot"
+    )
+    can_delete = False
+
+
+@admin.register(RelocationRequest)
+class RelocationRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        "id", "status", "mode", "trigger", "owner", "warehouse", "source_container",
+        "to_location", "created_by", "reviewed_by", "generated_task", "created_at",
+    )
+    list_filter = ("status", "mode", "trigger", "warehouse", "owner")
+    search_fields = ("reason", "source_container__container_no", "generated_task__task_no")
+    autocomplete_fields = (
+        "owner", "warehouse", "source_container", "to_location", "target_parent_container",
+        "created_by", "reviewed_by", "generated_task",
+    )
+    readonly_fields = (
+        "status", "reviewed_by", "reviewed_at", "review_note", "generated_task"
+    )
+    inlines = (RelocationRequestLineInline,)
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related("owner", "warehouse")
+        return AccessScope.for_user(request.user).filter_queryset(
+            qs, owner_field="owner_id", warehouse_field="warehouse_id"
+        )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(RelocationReservation)
+class RelocationReservationAdmin(admin.ModelAdmin):
+    list_display = ("task_line", "inventory_detail", "qty", "status", "consumed_at", "released_at")
+    list_filter = ("status",)
+    search_fields = ("task_line__task__task_no", "inventory_detail__product__code")
+    readonly_fields = (
+        "task_line", "inventory_detail", "qty", "status", "consumed_at", "released_at"
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related(
+            "task_line__task", "inventory_detail"
+        )
+        return AccessScope.for_user(request.user).filter_queryset(
+            qs,
+            owner_field="task_line__task__owner_id",
+            warehouse_field="task_line__task__warehouse_id",
+        )
 
 @admin.register(ContentType)
 class _HiddenContentTypeAdmin(admin.ModelAdmin):

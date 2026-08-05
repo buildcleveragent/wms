@@ -25,6 +25,18 @@
       }
     },
     {
+      "path": "pages/cockpit/index",
+      "style": { "navigationBarTitleText": "仓储经营分析中心 - 经营驾驶舱" }
+    },
+    {
+      "path": "pages/alerts/section",
+      "style": { "navigationBarTitleText": "仓储经营分析中心 - 预警列表" }
+    },
+    {
+      "path": "pages/alerts/detail",
+      "style": { "navigationBarTitleText": "仓储经营分析中心 - 预警详情" }
+    },
+    {
       "path": "pages/billing/overview",
       "style": {
         "navigationBarTitleText": "仓储经营分析中心 - 收入与计费"

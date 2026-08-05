@@ -54,9 +54,15 @@ from allapp.billing.services.period import (  # noqa: F401
 from allapp.billing.services.invoice import (  # noqa: F401
     generate_invoice_for_period,
 )
+from allapp.billing.services.integrity import (  # noqa: F401
+    BillingCloseBlocked,
+    build_close_readiness,
+    reprice_unpriced_events,
+)
 
 __all__ = [
     "BillingAccuracyGateError",
+    "BillingCloseBlocked",
     "accrue_for_posting",
     "accrue_metrics_for_date",
     "accrue_order_processing_for_task",
@@ -65,6 +71,8 @@ __all__ = [
     "generate_metrics_for_date",
     "generate_metrics_for_range",
     "generate_invoice_for_period",
+    "build_close_readiness",
+    "reprice_unpriced_events",
     "lock_period",
     "preview_lock_period",
     "run_scheduled_metric_generation_for_date",

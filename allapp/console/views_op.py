@@ -29,7 +29,6 @@ from allapp.outbound.authz import (
 )
 from allapp.tasking.models import WmsTask, WmsTaskLine
 from allapp.tasking import services as tasking_services
-from allapp.inventory import services as inventory_services
 
 logger = logging.getLogger(__name__)
 
@@ -396,7 +395,9 @@ class OpPostView(LoginRequiredMixin, View):
             return render(request, "console/op/_session_items.html",
                           {"task": task, "session_items": bucket, "message": "请勾选确认过账", "ok": False})
         try:
-            inventory_services.post_task(task_id=task.id, by_user=request.user)
+            tasking_services._run_posting_handler(
+                task.id, by_user=request.user, note="操作台过账"
+            )
             msg, ok = "过账成功", True
         except Exception as e:
             msg, ok = f"过账失败：{e}", False

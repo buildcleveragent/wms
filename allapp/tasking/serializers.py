@@ -172,8 +172,12 @@ class ReplenishTaskExtraSerializer(serializers.ModelSerializer):
 class RelocTaskExtraSerializer(serializers.ModelSerializer):
     class Meta:
         model = RelocTaskExtra
-        fields = ["id", "task", "src_zone", "dst_zone", "policy_code", "reason_code"]
-        read_only_fields = ["id"]
+        fields = [
+            "id", "task", "src_zone", "dst_zone", "policy_code", "reason_code",
+            "trigger", "request", "reason", "execution_state", "exception_code",
+            "exception_note", "exception_by", "root_container", "target_parent_container",
+        ]
+        read_only_fields = fields
 
 
 class CountTaskExtraSerializer(serializers.ModelSerializer):
@@ -259,9 +263,10 @@ class RelocLineExtraSerializer(serializers.ModelSerializer):
     class Meta:
         model = RelocLineExtra
         fields = [
-            "id", "line", "from_location", "to_location", "from_lpn", "to_lpn", "qty_move", "reason_code",
+            "id", "line", "from_location", "to_location", "from_lpn", "to_lpn",
+            "from_container", "to_container", "qty_move", "reason_code",
         ]
-        read_only_fields = ["id"]
+        read_only_fields = fields
 
 
 class CountLineExtraSerializer(serializers.ModelSerializer):
@@ -337,8 +342,7 @@ class WmsTaskLineSerializer(serializers.ModelSerializer):
         ser_cls = LINE_EXTRA_MAP.get((ttype or "").upper())
         if not ser_cls:
             return None
-        # related_name 使用类名，需通过 OneToOne 反向拿到实例
-        rel_name = ser_cls.Meta.model.__name__  # e.g. ReceiveLineExtra
+        rel_name = ser_cls.Meta.model._meta.default_related_name or ser_cls.Meta.model.__name__.lower()
         extra_obj = getattr(obj, rel_name, None)
         if not extra_obj:
             return None
@@ -347,16 +351,16 @@ class WmsTaskLineSerializer(serializers.ModelSerializer):
     # ---- write ----
     def create(self, validated_data: Dict[str, Any]) -> WmsTaskLine:
         task = validated_data.get("task")
-        if task and task.task_type == WmsTask.TaskType.COUNT:
-            raise serializers.ValidationError("盘点行必须通过盘点专用服务创建。")
+        if task and task.task_type in {WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC}:
+            raise serializers.ValidationError("盘点/移库行必须通过对应专用服务创建。")
         extra_payload = validated_data.pop("extra_payload", None)
         line = super().create(validated_data)
         self._upsert_line_extra(line, extra_payload)
         return line
 
     def update(self, instance: WmsTaskLine, validated_data: Dict[str, Any]) -> WmsTaskLine:
-        if instance.task.task_type == WmsTask.TaskType.COUNT:
-            raise serializers.ValidationError("盘点行必须通过盘点专用录入接口修改。")
+        if instance.task.task_type in {WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC}:
+            raise serializers.ValidationError("盘点/移库行必须通过对应专用接口修改。")
         extra_payload = validated_data.pop("extra_payload", None)
         line = super().update(instance, validated_data)
         if extra_payload is not None:
@@ -435,8 +439,7 @@ class WmsTaskSerializer(serializers.ModelSerializer, ChoiceDisplayMixin):
         ser_cls = TASK_EXTRA_MAP.get((ttype or "").upper())
         if not ser_cls:
             return None
-        # related_name 即模型类名，如 ReceiveTaskExtra
-        rel_name = ser_cls.Meta.model.__name__
+        rel_name = ser_cls.Meta.model._meta.default_related_name or ser_cls.Meta.model.__name__.lower()
         extra_obj = getattr(obj, rel_name, None)
         if not extra_obj:
             return None
@@ -464,8 +467,8 @@ class WmsTaskSerializer(serializers.ModelSerializer, ChoiceDisplayMixin):
 
     @transaction.atomic
     def create(self, validated_data: Dict[str, Any]) -> WmsTask:
-        if validated_data.get("task_type") == WmsTask.TaskType.COUNT:
-            raise serializers.ValidationError("盘点任务必须通过 /api/pda/count-tasks/ 创建。")
+        if validated_data.get("task_type") in {WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC}:
+            raise serializers.ValidationError("盘点/移库任务必须通过对应专用接口创建。")
         extra_payload = validated_data.pop("extra_payload", None)
         task = super().create(validated_data)
         self._upsert_task_extra(task, extra_payload)
@@ -474,10 +477,10 @@ class WmsTaskSerializer(serializers.ModelSerializer, ChoiceDisplayMixin):
     @transaction.atomic
     def update(self, instance: WmsTask, validated_data: Dict[str, Any]) -> WmsTask:
         if (
-            instance.task_type == WmsTask.TaskType.COUNT
-            or validated_data.get("task_type") == WmsTask.TaskType.COUNT
+            instance.task_type in {WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC}
+            or validated_data.get("task_type") in {WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC}
         ):
-            raise serializers.ValidationError("盘点任务必须通过盘点专用接口操作。")
+            raise serializers.ValidationError("盘点/移库任务必须通过对应专用接口操作。")
         extra_payload = validated_data.pop("extra_payload", None)
         task = super().update(instance, validated_data)
         if extra_payload is not None:

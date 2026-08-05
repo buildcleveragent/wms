@@ -18,38 +18,14 @@
     </view>
 
     <view class="filter-card">
+      <BossScopeFilter @change="refreshAll" />
       <view class="filter-grid">
-        <picker :range="ownerOptions" range-key="label" :value="ownerPickerIndex" @change="onOwnerChange">
-          <view class="picker-box">
-            <text class="picker-label">货主</text>
-            <text class="picker-value">{{ ownerOptions[ownerPickerIndex]?.label || '全部货主' }}</text>
-          </view>
-        </picker>
-
         <picker :range="chargeTypeOptions" range-key="label" :value="chargeTypePickerIndex" @change="onChargeTypeChange">
           <view class="picker-box">
             <text class="picker-label">收费类型</text>
             <text class="picker-value">{{ chargeTypeOptions[chargeTypePickerIndex]?.label || '全部类型' }}</text>
           </view>
         </picker>
-
-        <view class="date-range-card">
-          <view class="date-range-grid">
-            <picker mode="date" :value="draftDateFrom" @change="onDateFromChange">
-              <view class="picker-box">
-                <text class="picker-label">开始日期</text>
-                <text class="picker-value">{{ draftDateFrom || '不限' }}</text>
-              </view>
-            </picker>
-
-            <picker mode="date" :value="draftDateTo" @change="onDateToChange">
-              <view class="picker-box">
-                <text class="picker-label">结束日期</text>
-                <text class="picker-value">{{ draftDateTo || '不限' }}</text>
-              </view>
-            </picker>
-          </view>
-        </view>
 
         <picker :range="statusOptions" range-key="label" :value="statusPickerIndex" @change="onStatusChange">
           <view class="picker-box">
@@ -60,8 +36,8 @@
 
         <view class="picker-box info-box">
           <text class="picker-label">账单概况</text>
-          <text class="picker-value">{{ summary.billCount }} 张账单</text>
-          <text class="picker-sub">已出账 {{ money(summary.billedTotal) }}</text>
+          <text class="picker-value">{{ summary.issuedBillCount }} 张已出账</text>
+          <text class="picker-sub">{{ moneyGroupText(summary.issuedBills) }}</text>
         </view>
       </view>
 
@@ -72,6 +48,7 @@
     </view>
 
     <view v-if="loading" class="loading-banner">正在同步仓库计费数据...</view>
+    <BossDataStatus :meta="payload?.meta" :error="dataError" :stale="stale" />
 
     <view v-else-if="!hasAnyData" class="empty-card">
       <view class="empty-title">当前范围没有计费数据</view>
@@ -91,14 +68,14 @@
           <view class="kpi-sub">已排除作废和冲销行</view>
         </view>
         <view class="kpi-card pink">
-          <view class="kpi-label">不含税小计</view>
-          <view class="kpi-value">{{ money(summary.subtotal) }}</view>
-          <view class="kpi-sub">税额 {{ money(summary.taxTotal) }}</view>
+          <view class="kpi-label">应计金额（分币种）</view>
+          <view class="kpi-value">{{ moneyGroupText(summary.accruals) }}</view>
+          <view class="kpi-sub">不跨币种合计</view>
         </view>
         <view class="kpi-card green">
-          <view class="kpi-label">价税合计</view>
-          <view class="kpi-value">{{ money(summary.total) }}</view>
-          <view class="kpi-sub">已出账 {{ money(summary.billedTotal) }}</view>
+          <view class="kpi-label">草稿账单</view>
+          <view class="kpi-value">{{ moneyGroupText(summary.draftBills) }}</view>
+          <view class="kpi-sub">草稿不计入已出账</view>
         </view>
       </view>
 
@@ -109,16 +86,16 @@
         </view>
         <view
           v-for="(row, index) in ownerRows"
-          :key="row.owner"
+          :key="`${row.currency}-${row.owner}`"
           class="row-card clickable"
           @click="openOwnerDetail(row.owner)"
         >
           <view class="rank-pill">{{ index + 1 }}</view>
           <view class="row-main">
             <view class="row-title">{{ row.ownerName }}</view>
-            <view class="row-sub">{{ row.accrualCount }} 条 · 税额 {{ money(row.taxTotal) }}</view>
+            <view class="row-sub">{{ row.accrualCount }} 条 · 税额 {{ money(row.taxTotal, row.currency) }}</view>
           </view>
-          <view class="row-money">{{ money(row.total) }}</view>
+          <view class="row-money">{{ money(row.total, row.currency) }}</view>
         </view>
       </view>
 
@@ -127,12 +104,12 @@
           <view class="section-title">收费结构</view>
           <view class="section-desc">按收费类型观察本仓主要收费来源。</view>
         </view>
-        <view v-for="row in chargeRows" :key="row.chargeType" class="row-card">
+        <view v-for="row in chargeRows" :key="`${row.currency}-${row.chargeType}`" class="row-card">
           <view class="row-main">
             <view class="row-title">{{ row.label }}</view>
-            <view class="row-sub">{{ row.accrualCount }} 条 · 税额 {{ money(row.taxTotal) }}</view>
+            <view class="row-sub">{{ row.accrualCount }} 条 · 税额 {{ money(row.taxTotal, row.currency) }}</view>
           </view>
-          <view class="row-money">{{ money(row.total) }}</view>
+          <view class="row-money">{{ money(row.total, row.currency) }}</view>
         </view>
       </view>
 
@@ -142,10 +119,10 @@
           <view class="section-desc">快速观察未锁定、已锁定和已开票的收费记录。</view>
         </view>
         <view class="status-grid">
-          <view v-for="row in statusRows" :key="row.status" class="status-card">
+          <view v-for="row in statusRows" :key="`${row.currency}-${row.status}`" class="status-card">
             <view class="status-name">{{ row.label }}</view>
             <view class="status-count">{{ row.accrualCount }} 条</view>
-            <view class="status-money">{{ money(row.total) }}</view>
+            <view class="status-money">{{ money(row.total, row.currency) }}</view>
           </view>
         </view>
       </view>
@@ -155,12 +132,12 @@
           <view class="section-title">每日趋势</view>
           <view class="section-desc">按服务日期汇总，便于发现高收费日。</view>
         </view>
-        <view v-for="row in trendRows" :key="row.serviceDate" class="trend-row">
+        <view v-for="row in trendRows" :key="`${row.currency}-${row.serviceDate}`" class="trend-row">
           <view class="trend-date">{{ row.serviceDate }}</view>
           <view class="trend-bar-wrap">
             <view class="trend-bar" :style="{ width: `${row.width}%` }"></view>
           </view>
-          <view class="trend-total">{{ money(row.total) }}</view>
+          <view class="trend-total">{{ money(row.total, row.currency) }}</view>
         </view>
       </view>
 
@@ -180,7 +157,7 @@
               <view class="row-title">{{ item.owner_name }} · {{ chargeTypeLabel(item.charge_type) }}</view>
               <view class="row-sub">{{ item.service_date }} · 数量 {{ qty(item.quantity) }}</view>
             </view>
-            <view class="row-money">{{ money(item.amount) }}</view>
+            <view class="row-money">{{ money(item.amount, item.currency) }}</view>
           </view>
         </view>
 
@@ -201,7 +178,7 @@
                 {{ bill.owner_name }} · {{ bill.period_label || '未绑定账期' }} · {{ billStatusLabel(bill.status) }}
               </view>
             </view>
-            <view class="row-money">{{ money(bill.total) }}</view>
+            <view class="row-money">{{ money(bill.total, bill.currency) }}</view>
           </view>
         </view>
       </view>
@@ -213,7 +190,10 @@
 import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import BossNav from '@/components/boss-nav.vue'
+import BossScopeFilter from '@/components/boss-scope-filter.vue'
+import BossDataStatus from '@/components/boss-data-status.vue'
 import { useAuth } from '@/store/auth'
+import { useBossScope } from '@/store/bossScope'
 import { api, buildQuery } from '@/utils/request'
 import {
   ACCRUAL_STATUS_LABELS,
@@ -221,19 +201,19 @@ import {
   asList,
   chargeTypeLabel,
   billStatusLabel,
-  defaultDateRange,
   money,
   qty,
   toNumber,
 } from '@/utils/billing'
 
 const auth = useAuth()
+const bossScope = useBossScope()
 const payload = ref(null)
 const loading = ref(false)
+const dataError = ref(null)
+const loadedFingerprint = ref('')
+const stale = computed(() => !!dataError.value && loadedFingerprint.value === bossScope.fingerprint && !!payload.value)
 
-const selectedOwnerId = ref('')
-const draftDateFrom = ref('')
-const draftDateTo = ref('')
 const draftChargeType = ref('')
 const draftStatus = ref('')
 
@@ -248,38 +228,19 @@ const statusOptions = [
 
 const scope = computed(() => payload.value?.scope || {})
 const operatorName = computed(() => auth.user?.display_name || auth.user?.username || '老板账号')
-const scopeWarehouseName = computed(() => scope.value.warehouse_name || '当前仓库')
-const scopeDateText = computed(() => {
-  if (draftDateFrom.value && draftDateTo.value) return `${draftDateFrom.value} 至 ${draftDateTo.value}`
-  if (draftDateFrom.value) return `${draftDateFrom.value} 起`
-  if (draftDateTo.value) return `截止 ${draftDateTo.value}`
-  return '全部日期'
-})
+const scopeWarehouseName = computed(() => scope.value.warehouse_name || '全部授权仓库')
+const scopeDateText = computed(() => `${bossScope.date_from} 至 ${bossScope.date_to}`)
 
 const summary = computed(() => {
   const source = payload.value?.summary || {}
   return {
     ownerCount: Number(source.owner_count || 0),
     accrualCount: Number(source.accrual_count || 0),
-    subtotal: toNumber(source.subtotal),
-    taxTotal: toNumber(source.tax_total),
-    total: toNumber(source.total),
-    billCount: Number(source.bill_count || 0),
-    billedTotal: toNumber(source.billed_total),
+    accruals: asList(source.accruals_by_currency),
+    issuedBillCount: Number(source.issued_bill_count || 0),
+    issuedBills: asList(source.issued_bills_by_currency),
+    draftBills: asList(source.draft_bills_by_currency),
   }
-})
-
-const ownerOptions = computed(() => {
-  const rows = asList(payload.value?.owner_options).map((item) => ({
-    id: String(item.id),
-    label: item.name || `货主 #${item.id}`,
-  }))
-  return [{ id: '', label: '全部货主' }, ...rows]
-})
-
-const ownerPickerIndex = computed(() => {
-  const index = ownerOptions.value.findIndex((item) => String(item.id) === String(selectedOwnerId.value))
-  return index >= 0 ? index : 0
 })
 
 const chargeTypePickerIndex = computed(() => {
@@ -300,8 +261,8 @@ const ownerRows = computed(() =>
       accrualCount: Number(item.accrual_count || 0),
       taxTotal: toNumber(item.tax_total),
       total: toNumber(item.total),
+      currency: item.currency,
     }))
-    .sort((a, b) => b.total - a.total)
 )
 
 const chargeRows = computed(() =>
@@ -312,8 +273,8 @@ const chargeRows = computed(() =>
       accrualCount: Number(item.accrual_count || 0),
       taxTotal: toNumber(item.tax_total),
       total: toNumber(item.total),
+      currency: item.currency,
     }))
-    .sort((a, b) => b.total - a.total)
 )
 
 const statusRows = computed(() =>
@@ -322,6 +283,7 @@ const statusRows = computed(() =>
     label: ACCRUAL_STATUS_LABELS[item.status] || item.status || '-',
     accrualCount: Number(item.accrual_count || 0),
     total: toNumber(item.total),
+    currency: item.currency,
   }))
 )
 
@@ -329,11 +291,17 @@ const trendRows = computed(() => {
   const rows = asList(payload.value?.by_service_date).map((item) => ({
     serviceDate: item.service_date,
     total: toNumber(item.total),
+    currency: item.currency,
   }))
-  const max = rows.reduce((memo, row) => Math.max(memo, row.total), 0)
+  const maxByCurrency = rows.reduce((memo, row) => {
+    memo[row.currency] = Math.max(memo[row.currency] || 0, row.total)
+    return memo
+  }, {})
   return rows.map((row) => ({
     ...row,
-    width: max > 0 ? Math.max((row.total / max) * 100, 8) : 0,
+    width: maxByCurrency[row.currency] > 0
+      ? Math.max((row.total / maxByCurrency[row.currency]) * 100, 8)
+      : 0,
   }))
 })
 
@@ -349,9 +317,7 @@ const hasAnyData = computed(
 
 function requestParams() {
   return {
-    owner: selectedOwnerId.value || undefined,
-    date_from: draftDateFrom.value || undefined,
-    date_to: draftDateTo.value || undefined,
+    ...bossScope.params,
     charge_type: draftChargeType.value || undefined,
     status: draftStatus.value || undefined,
     recent_limit: 12,
@@ -359,11 +325,15 @@ function requestParams() {
 }
 
 async function refreshAll() {
+  const fingerprint = bossScope.fingerprint
   loading.value = true
   try {
     payload.value = await api.billingWarehouseOverview(requestParams())
+    loadedFingerprint.value = fingerprint
+    dataError.value = null
   } catch (error) {
-    payload.value = null
+    dataError.value = error
+    if (loadedFingerprint.value !== fingerprint || error.kind === 'FORBIDDEN') payload.value = null
     console.error('load boss billing overview failed:', error)
   } finally {
     loading.value = false
@@ -372,31 +342,15 @@ async function refreshAll() {
 }
 
 function clearFilters() {
-  const range = defaultDateRange()
-  selectedOwnerId.value = ''
-  draftDateFrom.value = range.start
-  draftDateTo.value = range.end
   draftChargeType.value = ''
   draftStatus.value = ''
   refreshAll()
 }
 
-function onOwnerChange(event) {
-  const next = ownerOptions.value[Number(event.detail.value)]
-  selectedOwnerId.value = next?.id || ''
-  refreshAll()
+function moneyGroupText(groups) {
+  const rows = asList(groups)
+  return rows.length ? rows.map((row) => money(row.total, row.currency)).join(' / ') : '-'
 }
-
-function onDateFromChange(event) {
-  draftDateFrom.value = event.detail.value || ''
-  refreshAll()
-}
-
-function onDateToChange(event) {
-  draftDateTo.value = event.detail.value || ''
-  refreshAll()
-}
-
 function onChargeTypeChange(event) {
   const next = chargeTypeOptions[Number(event.detail.value)]
   draftChargeType.value = next?.code || ''
@@ -413,8 +367,8 @@ function openOwnerDetail(ownerId) {
   const query = buildQuery({
     owner: ownerId,
     warehouse: scope.value.warehouse,
-    date_from: draftDateFrom.value,
-    date_to: draftDateTo.value,
+    date_from: bossScope.date_from,
+    date_to: bossScope.date_to,
     charge_type: draftChargeType.value,
     status: draftStatus.value,
   })
@@ -428,8 +382,8 @@ function openAccrualDetail(item) {
     id: item.id,
     owner: item.owner,
     warehouse: item.warehouse,
-    date_from: draftDateFrom.value,
-    date_to: draftDateTo.value,
+    date_from: bossScope.date_from,
+    date_to: bossScope.date_to,
   })
   uni.navigateTo({
     url: `/pages/billing/accrual_detail?${query}`,
@@ -448,8 +402,9 @@ function openBillDetail(bill) {
   })
 }
 
-function logout() {
-  auth.logout()
+async function logout() {
+  await auth.logout()
+  bossScope.clear()
   uni.reLaunch({
     url: '/pages/login',
   })
@@ -460,13 +415,15 @@ onLoad((query) => {
     uni.reLaunch({ url: '/pages/login' })
     return
   }
-  const range = defaultDateRange()
-  selectedOwnerId.value = query?.owner ? String(query.owner) : ''
-  draftDateFrom.value = query?.date_from ? String(query.date_from) : range.start
-  draftDateTo.value = query?.date_to ? String(query.date_to) : range.end
+  bossScope.restore(auth.user)
+  if (query?.owner) bossScope.owner = String(query.owner)
+  if (query?.date_from && query?.date_to) bossScope.setDates(String(query.date_from), String(query.date_to))
   draftChargeType.value = query?.charge_type ? String(query.charge_type) : ''
   draftStatus.value = query?.status ? String(query.status) : ''
-  refreshAll()
+  bossScope.loadContext(auth.user).then(refreshAll).catch((error) => {
+    dataError.value = error
+    payload.value = null
+  })
 })
 
 onPullDownRefresh(() => {

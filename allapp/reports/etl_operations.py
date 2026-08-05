@@ -30,6 +30,7 @@ from .models import (
     FactInventorySnapshotDaily,
     FactInventoryTxn,
     FactOutboundLine,
+    FactOutboundOrderSLA,
     OwnerDim,
     ProductDim,
     SupplierDim,
@@ -83,8 +84,8 @@ def sync_dimensions() -> dict[str, int]:
         )
         counts["warehouses"] += int(changed)
 
-    for product in Product.all_objects.select_related("base_uom").all().iterator(
-        chunk_size=1000
+    for product in (
+        Product.all_objects.select_related("base_uom").all().iterator(chunk_size=1000)
     ):
         _, changed = upsert_scd2(
             ProductDim,
@@ -258,7 +259,9 @@ def _allocate_to_lines(lines, totals: dict[int, Decimal]) -> dict[int, Decimal]:
             if remaining <= 0:
                 break
             plan = Decimal(line.base_qty or 0)
-            value = remaining if index == len(product_lines) - 1 else min(plan, remaining)
+            value = (
+                remaining if index == len(product_lines) - 1 else min(plan, remaining)
+            )
             result[line.id] = value
             remaining -= value
     return result
@@ -384,7 +387,9 @@ def _receive_exception_totals(tasks):
 def sync_inbound_facts(queryset=None) -> int:
     orders = InboundOrder.objects.all() if queryset is None else queryset
     count = 0
-    for order in orders.select_related("owner", "warehouse", "supplier").iterator(chunk_size=200):
+    for order in orders.select_related("owner", "warehouse", "supplier").iterator(
+        chunk_size=200
+    ):
         lines = list(order.lines.select_related("product").order_by("line_no", "id"))
         if not lines:
             continue
@@ -435,8 +440,12 @@ def sync_inbound_facts(queryset=None) -> int:
                     "supplier": supplier_dim,
                     "product": product_dim,
                     "order_date": ensure_datedim(order.biz_date),
-                    "receive_date": ensure_datedim(receive_at.date()) if receive_at else None,
-                    "putaway_date": ensure_datedim(putaway_at.date()) if putaway_at else None,
+                    "receive_date": (
+                        ensure_datedim(receive_at.date()) if receive_at else None
+                    ),
+                    "putaway_date": (
+                        ensure_datedim(putaway_at.date()) if putaway_at else None
+                    ),
                     "qty_plan": line.base_qty or ZERO,
                     "qty_received": received_by_line[line.id],
                     "qty_reject": reject_qty,
@@ -453,13 +462,19 @@ def sync_inbound_facts(queryset=None) -> int:
 def sync_outbound_facts(queryset=None) -> int:
     orders = OutboundOrder.objects.all() if queryset is None else queryset
     count = 0
-    for order in orders.select_related("owner", "warehouse", "customer").iterator(chunk_size=200):
+    for order in orders.select_related("owner", "warehouse", "customer").iterator(
+        chunk_size=200
+    ):
         lines = list(order.lines.select_related("product").order_by("line_no", "id"))
         if not lines:
             continue
         owner_dim = _current(OwnerDim, owner_id=order.owner_id)
         warehouse_dim = _current(WarehouseDim, warehouse_id=order.warehouse_id)
-        customer_dim = _current(CustomerDim, customer_id=order.customer_id) if order.customer_id else None
+        customer_dim = (
+            _current(CustomerDim, customer_id=order.customer_id)
+            if order.customer_id
+            else None
+        )
         if not owner_dim or not warehouse_dim:
             continue
 
@@ -507,7 +522,9 @@ def sync_outbound_facts(queryset=None) -> int:
             plan = Decimal(line.base_qty or 0)
             shipped = shipped_by_line[line.id]
             in_full = bool(plan > 0 and shipped >= plan)
-            on_time = bool(in_full and ship_at and order.etd and ship_at <= order.etd)
+            on_time = bool(
+                ship_at and order.etd and _aware(ship_at) <= _aware(order.etd)
+            )
             FactOutboundLine.objects.update_or_create(
                 line_id=line.id,
                 defaults={
@@ -532,6 +549,28 @@ def sync_outbound_facts(queryset=None) -> int:
                 },
             )
             count += 1
+        planned_total = sum((Decimal(line.base_qty or 0) for line in lines), ZERO)
+        shipped_total = sum((shipped_by_line[line.id] for line in lines), ZERO)
+        order_in_full = bool(planned_total > 0 and shipped_total >= planned_total)
+        sla_eligible = bool(order.etd and ship_at)
+        order_on_time = bool(sla_eligible and _aware(ship_at) <= _aware(order.etd))
+        FactOutboundOrderSLA.objects.update_or_create(
+            order_id=order.id,
+            defaults={
+                "owner": owner_dim,
+                "warehouse": warehouse_dim,
+                "customer": customer_dim,
+                "order_date": ensure_datedim(order.biz_date),
+                "etd": order.etd,
+                "shipped_at": ship_at,
+                "planned_qty": planned_total,
+                "shipped_qty": shipped_total,
+                "sla_eligible": sla_eligible,
+                "on_time": order_on_time,
+                "in_full": order_in_full,
+                "otif": order_on_time and order_in_full,
+            },
+        )
     return count
 
 
@@ -539,7 +578,9 @@ def sync_outbound_facts(queryset=None) -> int:
 def sync_inventory_transactions(queryset=None) -> int:
     transactions = InventoryTransaction.objects.all() if queryset is None else queryset
     count = 0
-    for tx in transactions.select_related("owner", "warehouse", "product").iterator(chunk_size=1000):
+    for tx in transactions.select_related("owner", "warehouse", "product").iterator(
+        chunk_size=1000
+    ):
         owner_dim = _current(OwnerDim, owner_id=tx.owner_id)
         warehouse_dim = _current(WarehouseDim, warehouse_id=tx.warehouse_id)
         product_dim = _current(ProductDim, product_id=tx.product_id)
@@ -547,7 +588,11 @@ def sync_inventory_transactions(queryset=None) -> int:
             continue
         task = None
         if (tx.src_model or "").lower() == "wmstask":
-            task = WmsTask.objects.filter(pk=tx.src_id).only("task_type", "source_pk").first()
+            task = (
+                WmsTask.objects.filter(pk=tx.src_id)
+                .only("task_type", "source_pk")
+                .first()
+            )
         order_type = "OTHER"
         order_model = None
         if task:
@@ -571,7 +616,11 @@ def sync_inventory_transactions(queryset=None) -> int:
                 order_type = "ADJUST"
         elif tx.tx_type in {InvTxType.ADJ_GAIN, InvTxType.ADJ_LOSS}:
             order_type = "ADJUST"
-        root_ids = root_order_ids_for_tasks([task.id], order_model) if order_model and task else set()
+        root_ids = (
+            root_order_ids_for_tasks([task.id], order_model)
+            if order_model and task
+            else set()
+        )
         order_id = next(iter(root_ids)) if len(root_ids) == 1 else None
         FactInventoryTxn.objects.update_or_create(
             txn_id=tx.id,
@@ -598,9 +647,11 @@ def sync_inventory_snapshot(snapshot_date: date) -> int:
     date_dim = ensure_datedim(snapshot_date)
     FactInventorySnapshotDaily.objects.filter(snapshot_date=date_dim).delete()
     rows = []
-    for detail in InventoryDetail.objects.select_related(
-        "owner", "warehouse", "product"
-    ).all().iterator(chunk_size=1000):
+    for detail in (
+        InventoryDetail.objects.select_related("owner", "warehouse", "product")
+        .all()
+        .iterator(chunk_size=1000)
+    ):
         owner_dim = _current(OwnerDim, owner_id=detail.owner_id)
         warehouse_dim = _current(WarehouseDim, warehouse_id=detail.warehouse_id)
         product_dim = _current(ProductDim, product_id=detail.product_id)
@@ -653,9 +704,9 @@ def sync_billing_facts(queryset=None) -> int:
         # database constraint also includes SCD dimension ids.  If an owner or
         # warehouse dimension rolls to a new version, remove the old canonical
         # location first so one source entry cannot survive as two facts.
-        FactBilling.objects.filter(
-            dedup_key=accrual.acc_fingerprint
-        ).exclude(**lookup).delete()
+        FactBilling.objects.filter(dedup_key=accrual.acc_fingerprint).exclude(
+            **lookup
+        ).delete()
         FactBilling.objects.update_or_create(
             **lookup,
             defaults={
@@ -669,9 +720,9 @@ def sync_billing_facts(queryset=None) -> int:
 def prune_stale_facts() -> dict[str, int]:
     """Remove facts whose live source row no longer exists or is no longer posted."""
 
-    live_inbound = InboundOrderLine.objects.filter(
-        order__is_deleted=False
-    ).values_list("id", flat=True)
+    live_inbound = InboundOrderLine.objects.filter(order__is_deleted=False).values_list(
+        "id", flat=True
+    )
     live_outbound = OutboundOrderLine.objects.filter(
         order__is_deleted=False
     ).values_list("id", flat=True)
@@ -682,12 +733,18 @@ def prune_stale_facts() -> dict[str, int]:
         "acc_fingerprint", flat=True
     )
     return {
-        "inbound": FactInboundLine.objects.exclude(line_id__in=live_inbound).delete()[0],
-        "outbound": FactOutboundLine.objects.exclude(line_id__in=live_outbound).delete()[0],
+        "inbound": FactInboundLine.objects.exclude(line_id__in=live_inbound).delete()[
+            0
+        ],
+        "outbound": FactOutboundLine.objects.exclude(
+            line_id__in=live_outbound
+        ).delete()[0],
         "inventory_transactions": FactInventoryTxn.objects.exclude(
             txn_id__in=live_transactions
         ).delete()[0],
-        "billing": FactBilling.objects.exclude(dedup_key__in=live_accrual_keys).delete()[0],
+        "billing": FactBilling.objects.exclude(
+            dedup_key__in=live_accrual_keys
+        ).delete()[0],
     }
 
 
@@ -743,7 +800,9 @@ def _actual_shipped_qty_for_orders(orders) -> Decimal:
     return _qty(total)
 
 
-def source_reconciliation(*, dfrom: date | None = None, dto: date | None = None) -> dict:
+def source_reconciliation(
+    *, dfrom: date | None = None, dto: date | None = None
+) -> dict:
     """Reconcile a complete mart or one explicit business-date window.
 
     A ranged full load is a supported recovery/backfill operation. Comparing
@@ -768,7 +827,9 @@ def source_reconciliation(*, dfrom: date | None = None, dto: date | None = None)
         accruals = accruals.filter(service_date__range=(dfrom, dto))
         inbound_facts = inbound_facts.filter(order_date__date__range=(dfrom, dto))
         outbound_facts = outbound_facts.filter(order_date__date__range=(dfrom, dto))
-        transaction_facts = transaction_facts.filter(occurred_at__date__range=(dfrom, dto))
+        transaction_facts = transaction_facts.filter(
+            occurred_at__date__range=(dfrom, dto)
+        )
         billing_facts = billing_facts.filter(date__date__range=(dfrom, dto))
     inbound_orders = InboundOrder.objects.filter(
         id__in=inbound_lines.values("order_id")
@@ -784,9 +845,13 @@ def source_reconciliation(*, dfrom: date | None = None, dto: date | None = None)
         "outbound_plan_qty": _qty(outbound_lines.aggregate(qty=Sum("base_qty"))["qty"]),
         "outbound_shipped_qty": _actual_shipped_qty_for_orders(outbound_orders),
         "inventory_transactions": transactions.count(),
-        "inventory_qty_delta": _qty(transactions.aggregate(qty=Sum("qty_delta"))["qty"]),
+        "inventory_qty_delta": _qty(
+            transactions.aggregate(qty=Sum("qty_delta"))["qty"]
+        ),
         "billing_rows": accruals.count(),
-        "billing_amount": Decimal(accruals.aggregate(amount=Sum("amount"))["amount"] or 0),
+        "billing_amount": Decimal(
+            accruals.aggregate(amount=Sum("amount"))["amount"] or 0
+        ),
     }
     facts = {
         "inbound_lines": inbound_facts.count(),
@@ -797,9 +862,13 @@ def source_reconciliation(*, dfrom: date | None = None, dto: date | None = None)
         "outbound_lines": outbound_facts.count(),
         "outbound_plan_qty": _qty(outbound_facts.aggregate(qty=Sum("qty_plan"))["qty"]),
         "inventory_transactions": transaction_facts.count(),
-        "inventory_qty_delta": _qty(transaction_facts.aggregate(qty=Sum("qty_delta"))["qty"]),
+        "inventory_qty_delta": _qty(
+            transaction_facts.aggregate(qty=Sum("qty_delta"))["qty"]
+        ),
         "billing_rows": billing_facts.count(),
-        "billing_amount": Decimal(billing_facts.aggregate(amount=Sum("amount"))["amount"] or 0),
+        "billing_amount": Decimal(
+            billing_facts.aggregate(amount=Sum("amount"))["amount"] or 0
+        ),
         "outbound_shipped_qty": _qty(
             outbound_facts.aggregate(qty=Sum("qty_shipped"))["qty"]
         ),

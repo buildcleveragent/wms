@@ -37,8 +37,14 @@ export function toNumber(value) {
   return Number.isFinite(num) ? num : 0
 }
 
-export function money(value) {
-  return `¥${toNumber(value).toFixed(2)}`
+export function money(value, currency) {
+  const code = String(currency || 'UNKNOWN').toUpperCase()
+  const amount = toNumber(value).toFixed(2)
+  if (code === 'CNY') return `¥${amount}`
+  if (code === 'USD') return `$${amount}`
+  if (code === 'EUR') return `€${amount}`
+  if (code === 'GBP') return `£${amount}`
+  return `${code} ${amount}`
 }
 
 // export function qty(value) {

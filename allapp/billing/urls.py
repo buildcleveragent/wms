@@ -10,6 +10,8 @@ from .views import (
     BillingRuleTierViewSet,
     BillingRuleViewSet,
     BillingWarehouseOverviewApi,
+    PaymentReceiptViewSet,
+    ReceivableCollectionCaseViewSet,
 )
 
 router = DefaultRouter()
@@ -20,6 +22,8 @@ router.register(r"billing/events", BillingEventViewSet, basename="billing-event"
 router.register(r"billing/accruals", BillingAccrualViewSet, basename="billing-accrual")
 router.register(r"billing/periods", BillingPeriodViewSet, basename="billing-period")
 router.register(r"billing/bills", BillViewSet, basename="billing-bill")
+router.register(r"billing/payment-receipts", PaymentReceiptViewSet, basename="billing-payment-receipt")
+router.register(r"billing/collection-cases", ReceivableCollectionCaseViewSet, basename="billing-collection-case")
 
 urlpatterns = [
     path("billing/dashboard/warehouse-overview/", BillingWarehouseOverviewApi.as_view(), name="billing-warehouse-overview"),

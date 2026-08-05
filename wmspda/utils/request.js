@@ -987,6 +987,40 @@ export const api = {
   retryReplenishmentPosting: (id) =>
     request({ url: `/api/replenishment/pda/tasks/${id}/retry-posting/`, method: 'POST' }),
 
+  // 移库申请与 PDA 作业
+  relocationOptions: (params = {}) =>
+    request({ url: `/api/relocation/options/?${buildQuery(params)}`, method: 'GET' }),
+  relocationRequests: () =>
+    request({ url: '/api/relocation/requests/', method: 'GET' }),
+  createRelocationRequest: (payload) =>
+    request({ url: '/api/relocation/requests/', method: 'POST', data: payload }),
+  approveRelocationRequest: (id, payload = {}) =>
+    request({ url: `/api/relocation/requests/${id}/approve/`, method: 'POST', data: payload }),
+  rejectRelocationRequest: (id, payload = {}) =>
+    request({ url: `/api/relocation/requests/${id}/reject/`, method: 'POST', data: payload }),
+  cancelRelocationRequest: (id) =>
+    request({ url: `/api/relocation/requests/${id}/cancel/`, method: 'POST' }),
+  directReleaseRelocation: (payload) =>
+    request({ url: '/api/relocation/direct-release/', method: 'POST', data: payload }),
+  relocationTasks: (params = {}) =>
+    request({ url: `/api/relocation/pda/tasks/?${buildQuery(params)}`, method: 'GET' }),
+  relocationTask: (id) =>
+    request({ url: `/api/relocation/pda/tasks/${id}/`, method: 'GET' }),
+  claimRelocationTask: (id) =>
+    request({ url: `/api/relocation/pda/tasks/${id}/claim/`, method: 'POST' }),
+  startRelocationTask: (id) =>
+    request({ url: `/api/relocation/pda/tasks/${id}/start/`, method: 'POST' }),
+  recordRelocation: (id, payload) =>
+    request({ url: `/api/relocation/pda/tasks/${id}/record/`, method: 'POST', data: payload }),
+  reportRelocationException: (id, payload) =>
+    request({ url: `/api/relocation/pda/tasks/${id}/report-exception/`, method: 'POST', data: payload }),
+  resumeRelocation: (id) =>
+    request({ url: `/api/relocation/pda/tasks/${id}/resume/`, method: 'POST' }),
+  voidRelocation: (id, payload) =>
+    request({ url: `/api/relocation/pda/tasks/${id}/void/`, method: 'POST', data: payload }),
+  retryRelocationPosting: (id) =>
+    request({ url: `/api/relocation/pda/tasks/${id}/retry-posting/`, method: 'POST' }),
+
   // PDA 盘点
   countTasks: (params = {}) =>
     request({ url: `/api/pda/count-tasks/?${buildQuery(params)}`, method: 'GET' }),

@@ -38,7 +38,7 @@
   │ BillingEvent │ ←── │ 指纹防重(fp) │
   └──────┬──────┘     └──────────────┘
          │
-         ▼  规则匹配 → 阶梯计价 → 封顶/打包(日) → 最低收费
+         ▼  规则匹配 → 阶梯计价 → 最低收费 → 封顶/打包(日)
   ┌──────────────┐
   │BillingAccrual│  status=OPEN
   └──────┬───────┘
@@ -205,10 +205,10 @@ def _apply_caps_bundles_day(rule, owner_id, warehouse_id, service_date, draft_am
 
 **执行顺序**（系统设计约定）：
 ```
-阶梯计价 → 封顶/打包(日) → 最低收费
+阶梯计价 → 最低收费 → 日规则封顶 → 日打包上限
 ```
 
-> 注意：最低收费在封顶之后，意味着最低收费可能让日总额超过上限。这是有意为之的设计选择（代码注释 L430 提到了这一点）。
+> 所有 CAP 都是最终硬上限。最低收费先应用，再由日规则 CAP 和日打包 CAP 裁剪，不能突破剩余额度。
 
 ---
 
@@ -238,7 +238,7 @@ def accrue_for_posting(task, posting_journal, by_user=None) -> (created_events, 
 
 3. 对每条 scan log：
    - 创建 `BillingEvent`（指纹防重）
-   - 匹配规则 → 阶梯计价 → 日封顶/打包 → 最低收费
+   - 创建计费事件 → 匹配规则 → 阶梯计价 → 最低收费 → 日封顶/打包
    - 创建 `BillingAccrual`（指纹防重）
 
 **关键细节**：
@@ -259,7 +259,7 @@ def accrue_storage_for_date(owner_id, warehouse_id, service_date, by_user=None) 
 **流程**：
 1. 匹配 `STORAGE / PER_DAY_ONHAND_BASE` 规则
 2. 查询 `InventoryDetail` 中该 owner/warehouse 的在库总量
-3. 以在库量为 `base_value` 走阶梯计价 → 封顶/打包 → 最低收费
+3. 以在库量为 `base_value` 走阶梯计价 → 最低收费 → 封顶/打包
 4. 创建 Event + Accrual
 
 **与指标计费的区别**：这是直接查实时库存；后面第 13 节的 `accrue_metrics_for_date` 则基于预先计算好的日指标（PALLET/CBM/AREA 等）。
@@ -416,7 +416,7 @@ def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_
 
 ### 计费阶段
 
-四个独立循环，各自走：规则匹配 → 阶梯 → 封顶 → 最低 → Event + Accrual。
+四个独立循环，各自走：Event → 规则匹配 → 阶梯 → 最低 → CAP → Accrual。无规则事件标记为 `UNPRICED` 并阻止关账。
 
 **PERCENT_OF_ORDER_AMOUNT 的特殊处理**（L1661–1672）：
 如果 resolver 没有返回某些日期的金额，会 fallback 到 `BillingMetricDaily`（ORDER_AMT 指标）补全。

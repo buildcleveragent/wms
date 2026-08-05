@@ -5,12 +5,14 @@ from typing import Any, Dict, Iterable, Optional
 
 from django.db.models import DecimalField, ExpressionWrapper, F
 
-from allapp.billing.enums import AccrualStatus, BillStatus
+from allapp.billing.enums import AccrualStatus, BillStatus, PricingStatus
 from allapp.billing.models import (
     Bill,
     BillLine,
     BillingAccrual,
+    BillingEvent,
     BillingMetricDaily,
+    BillingPeriod,
     qmoney,
 )
 from allapp.inventory.models import (
@@ -647,9 +649,9 @@ def _billing_accrual_queryset(
 def _billing_line_queryset(
     *, owner_id=None, warehouse_id=None, service_date=None, period_id=None
 ):
-    queryset = BillLine.objects.select_related("bill", "bill__period", "accrual").exclude(
-        bill__status=BillStatus.VOID
-    )
+    queryset = BillLine.objects.select_related(
+        "bill", "bill__period", "accrual"
+    ).exclude(bill__status=BillStatus.VOID)
     if owner_id:
         queryset = queryset.filter(bill__owner_id=owner_id)
     if warehouse_id:
@@ -784,6 +786,67 @@ def reconcile_billing_accuracy(
         _build_check("billing_accrual_consistency", accrual_issues, limit=limit)
     )
 
+    event_qs = BillingEvent.objects.prefetch_related("billingaccrual_set")
+    if owner_id:
+        event_qs = event_qs.filter(owner_id=owner_id)
+    if warehouse_id:
+        event_qs = event_qs.filter(warehouse_id=warehouse_id)
+    if service_date:
+        event_qs = event_qs.filter(service_date=service_date)
+    if period_id:
+        period = BillingPeriod.objects.filter(pk=period_id).first()
+        if period:
+            event_qs = event_qs.filter(
+                service_date__range=(period.start_date, period.end_date)
+            )
+    event_issues = []
+    for event in event_qs:
+        valid_accruals = [
+            accrual
+            for accrual in event.billingaccrual_set.all()
+            if accrual.status != AccrualStatus.VOID
+        ]
+        problems = []
+        if event.pricing_status in {PricingStatus.PENDING, PricingStatus.UNPRICED}:
+            problems.append("pricing_incomplete")
+        if event.pricing_status == PricingStatus.ACCRUED and not valid_accruals:
+            problems.append("active_accrual_missing")
+        if event.pricing_status == PricingStatus.NO_CHARGE and (
+            not event.pricing_rule_id
+            or not event.pricing_reason
+            or not event.pricing_detail
+        ):
+            problems.append("no_charge_evidence_missing")
+        if problems:
+            event_issues.append(
+                {
+                    "event_id": event.id,
+                    "owner_id": event.owner_id,
+                    "warehouse_id": event.warehouse_id,
+                    "service_date": event.service_date,
+                    "pricing_status": event.pricing_status,
+                    "problems": ",".join(problems),
+                }
+            )
+    checks.append(
+        _build_check("billing_event_pricing_completeness", event_issues, limit=limit)
+    )
+
+    locked_linkage_qs = BillingAccrual.objects.filter(
+        status=AccrualStatus.LOCKED, period__isnull=True
+    )
+    if owner_id:
+        locked_linkage_qs = locked_linkage_qs.filter(owner_id=owner_id)
+    if warehouse_id:
+        locked_linkage_qs = locked_linkage_qs.filter(warehouse_id=warehouse_id)
+    checks.append(
+        _build_check(
+            "billing_locked_period_linkage",
+            locked_linkage_qs.values("id", "owner_id", "warehouse_id", "service_date"),
+            limit=limit,
+        )
+    )
+
     bill_issues = []
     for bill in _billing_bill_queryset(
         owner_id=owner_id,
@@ -910,7 +973,11 @@ def reconcile_billing_accuracy(
     invoicing_issues = []
     for accrual in accruals:
         line_count = line_counts.get(accrual.id, 0)
-        if accrual.status == AccrualStatus.INVOICED and accrual.period_id and line_count != 1:
+        if (
+            accrual.status == AccrualStatus.INVOICED
+            and accrual.period_id
+            and line_count != 1
+        ):
             invoicing_issues.append(
                 {
                     "accrual_id": accrual.id,

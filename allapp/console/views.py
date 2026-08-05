@@ -157,10 +157,11 @@ class PickScanView(View):
 class PickPostView(View):
     """过账动作：调用服务层，返回重定向或刷新"""
     def post(self, request, pk):
-        res = task_services.post_task(task_id=pk, by_user=request.user)
+        res = task_services._run_posting_handler(
+            pk, by_user=request.user, note="控制台过账"
+        )
         from django.http import HttpResponse
         resp = HttpResponse(status=204)
         resp["HX-Redirect"] = f"/console/pick/{pk}/"  # 过账后刷新当前页
         resp["HX-Trigger"] = "toast:ok"
         return resp
-

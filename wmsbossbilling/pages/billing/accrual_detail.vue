@@ -21,8 +21,8 @@
       <view class="headline-grid">
         <view class="headline-card">
           <view class="headline-label">不含税金额</view>
-          <view class="headline-value">{{ money(detail.amount) }}</view>
-          <view class="headline-sub">税额 {{ money(detail.tax_amount) }}</view>
+          <view class="headline-value">{{ money(detail.amount, detail.currency) }}</view>
+          <view class="headline-sub">税额 {{ money(detail.tax_amount, detail.currency) }}</view>
         </view>
         <view class="headline-card">
           <view class="headline-label">数量</view>
@@ -51,7 +51,7 @@
           class="info-row"
         >
           <text class="label">调整前金额</text>
-          <text class="value">{{ money(detail.pre_adjustment_amount) }}</text>
+          <text class="value">{{ money(detail.pre_adjustment_amount, detail.currency) }}</text>
         </view>
       </view>
 

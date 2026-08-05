@@ -327,7 +327,12 @@ class WmsTaskLine(BaseModel):
                 errs["from_location"] = _("来源库位不属于任务所在仓库。")
             if self.to_location_id and self.to_location.warehouse_id != tw:
                 errs["to_location"] = _("去向库位不属于任务所在仓库。")
-            if self.from_location_id and self.to_location_id and self.from_location_id == self.to_location_id:
+            if (
+                self.from_location_id
+                and self.to_location_id
+                and self.from_location_id == self.to_location_id
+                and getattr(self.task, "task_type", None) != "RELOC"
+            ):
                 errs["to_location"] = _("来源与去向库位不能相同。")
 
             # 3) 位置形态与任务类型（示例；可按需调整/放服务层）
@@ -524,7 +529,7 @@ class TaskScanLog(TimeStampedMixin):
     mfg_date     = models.DateField(_("生产日期"), blank=True, null=True)
     exp_date     = models.DateField(_("有效期至"), blank=True, null=True)
     serial_no    = models.CharField(_("序列号"), max_length=80, blank=True, null=True)
-    container_no = models.CharField(_("容器/托盘号"), max_length=40, blank=True, null=True)
+    container_no = models.CharField(_("容器/托盘号"), max_length=60, blank=True, null=True)
 
     status = models.CharField(_("结果"), max_length=8, choices=ScanStatus.choices, default=ScanStatus.OK, db_index=True)
     void_reason=models.CharField(_("作废原因"), max_length=50, blank=True, null=True)
@@ -1509,6 +1514,9 @@ class ReviewLineExtra(TaskLineExtraBase):
                 review_diff = ReviewDifference.objects.create(
                     order_no=order_no,
                     warehouse=task.warehouse,
+                    owner=task.owner,
+                    source_task=task,
+                    source_task_line=line,
                     reviewed_by=None,
                     status=ReviewDifference.Status.PENDING,
                     reason=self.discrepancy_reason or "",
@@ -2511,21 +2519,72 @@ class ReplenishLineExtra(TaskLineExtraBase):
 
 # ==移位
 class RelocTaskExtra(TaskExtraBase):
+    class Trigger(models.TextChoices):
+        REQUEST = "REQUEST", "操作员申请"
+        DIRECT = "DIRECT", "经理直接下发"
+
+    class ExecutionState(models.TextChoices):
+        READY = "READY", "待执行"
+        WORKING = "WORKING", "执行中"
+        EXCEPTION = "EXCEPTION", "异常暂停"
+        POSTING_FAILED = "POSTING_FAILED", "过账失败"
+        DONE = "DONE", "已完成"
+
     """移仓/移库任务头：默认来源/目标区域 + 策略/原因"""
     src_zone    = models.CharField("默认来源区域", max_length=20, blank=True, default="")
     dst_zone    = models.CharField("默认目标区域", max_length=20, blank=True, default="")
     policy_code = models.CharField("策略码", max_length=20, blank=True, default="")
     reason_code = models.CharField("原因码", max_length=20, blank=True, default="")
+    trigger = models.CharField(
+        "触发类型",
+        max_length=10,
+        choices=Trigger.choices,
+        default=Trigger.REQUEST,
+    )
+    request = models.OneToOneField(
+        "tasking.RelocationRequest",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="task_extra",
+    )
+    reason = models.CharField("移库原因", max_length=200, blank=True, default="")
+    execution_state = models.CharField(
+        "执行状态",
+        max_length=20,
+        choices=ExecutionState.choices,
+        default=ExecutionState.READY,
+        db_index=True,
+    )
+    exception_code = models.CharField("异常代码", max_length=30, blank=True, default="")
+    exception_note = models.CharField("异常说明", max_length=200, blank=True, default="")
+    exception_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="relocation_exceptions_handled",
+    )
+    root_container = models.ForeignKey(
+        "locations.Container",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="relocation_tasks_as_root",
+    )
+    target_parent_container = models.ForeignKey(
+        "locations.Container",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="relocation_tasks_as_target_parent",
+    )
 
     class Meta:
         verbose_name = "移仓任务头扩展"
         verbose_name_plural = "移仓任务头扩展"
         constraints = [
             models.UniqueConstraint(fields=["task"], name="ux_rlctsk_task"),
-            models.CheckConstraint(
-                name="ck_rlc_zones_diff",
-                check=(models.Q(src_zone="") | models.Q(dst_zone="") | ~models.Q(src_zone=models.F("dst_zone"))),
-            ),
         ]
         indexes = [
             models.Index(fields=["src_zone"],    name="ix_rlctsk_src"),
@@ -2567,8 +2626,22 @@ class RelocLineExtra(TaskLineExtraBase):
         null=True, blank=True,
     )
 
-    from_lpn = models.CharField("上游容器号", max_length=40, blank=True, default="", db_index=True)
-    to_lpn   = models.CharField("目标容器号", max_length=40, blank=True, default="", db_index=True)
+    from_lpn = models.CharField("上游容器号", max_length=60, blank=True, default="", db_index=True)
+    to_lpn   = models.CharField("目标容器号", max_length=60, blank=True, default="", db_index=True)
+    from_container = models.ForeignKey(
+        "locations.Container",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="relocation_source_lines",
+    )
+    to_container = models.ForeignKey(
+        "locations.Container",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="relocation_target_lines",
+    )
 
     # 展开 DEC_QTY
     qty_move = models.DecimalField("移动数量", max_digits=14, decimal_places=4, default=0)
@@ -2637,6 +2710,219 @@ class RelocLineExtra(TaskLineExtraBase):
             self.from_lpn = self.from_lpn.strip().upper()
         if self.to_lpn:
             self.to_lpn = self.to_lpn.strip().upper()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class RelocationRequest(BaseModel):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "待审核"
+        APPROVED = "APPROVED", "已通过"
+        REJECTED = "REJECTED", "已驳回"
+        CANCELLED = "CANCELLED", "已取消"
+
+    class Mode(models.TextChoices):
+        LAYER = "LAYER", "库存层"
+        CONTAINER = "CONTAINER", "整容器"
+
+    class Trigger(models.TextChoices):
+        REQUEST = "REQUEST", "操作员申请"
+        DIRECT = "DIRECT", "经理直接下发"
+
+    owner = models.ForeignKey(
+        "baseinfo.Owner", on_delete=models.PROTECT, related_name="relocation_requests"
+    )
+    warehouse = models.ForeignKey(
+        "locations.Warehouse", on_delete=models.PROTECT, related_name="relocation_requests"
+    )
+    mode = models.CharField("申请模式", max_length=12, choices=Mode.choices)
+    trigger = models.CharField(
+        "触发类型", max_length=10, choices=Trigger.choices, default=Trigger.REQUEST
+    )
+    reason = models.CharField("申请原因", max_length=200)
+    status = models.CharField(
+        "状态", max_length=12, choices=Status.choices, default=Status.PENDING, db_index=True
+    )
+    source_container = models.ForeignKey(
+        "locations.Container",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="relocation_requests_as_source",
+    )
+    to_location = models.ForeignKey(
+        "locations.Location",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="container_relocation_requests",
+    )
+    target_parent_container = models.ForeignKey(
+        "locations.Container",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="relocation_requests_as_target_parent",
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="relocation_requests_reviewed",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_note = models.CharField("审核意见", max_length=200, blank=True, default="")
+    generated_task = models.ForeignKey(
+        "tasking.WmsTask",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="relocation_requests",
+    )
+
+    class Meta:
+        verbose_name = "移库申请"
+        verbose_name_plural = "移库申请"
+        indexes = [
+            models.Index(fields=["warehouse", "status", "created_at"], name="ix_reloc_req_queue"),
+            models.Index(fields=["created_by", "status", "created_at"], name="ix_reloc_req_creator"),
+        ]
+        permissions = [
+            ("request_relocation", "申请移库"),
+            ("approve_relocation", "审核移库申请"),
+            ("manage_relocation", "管理移库任务"),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.mode == self.Mode.LAYER:
+            if self.source_container_id or self.to_location_id or self.target_parent_container_id:
+                errors["mode"] = "库存层申请不能设置整容器头字段。"
+        elif self.mode == self.Mode.CONTAINER:
+            if not self.source_container_id or not self.to_location_id:
+                errors["mode"] = "整容器申请必须设置来源容器和目标库位。"
+            if self.source_container_id and self.source_container.warehouse_id != self.warehouse_id:
+                errors["source_container"] = "来源容器不属于申请仓库。"
+            if self.to_location_id and self.to_location.warehouse_id != self.warehouse_id:
+                errors["to_location"] = "目标库位不属于申请仓库。"
+            if self.target_parent_container_id:
+                parent = self.target_parent_container
+                if parent.warehouse_id != self.warehouse_id:
+                    errors["target_parent_container"] = "目标父容器不属于申请仓库。"
+                elif self.to_location_id and parent.location_id != self.to_location_id:
+                    errors["target_parent_container"] = "目标父容器不在目标库位。"
+        if errors:
+            raise ValidationError(errors)
+
+
+class RelocationRequestLine(BaseModel):
+    request = models.ForeignKey(
+        "tasking.RelocationRequest", on_delete=models.PROTECT, related_name="lines"
+    )
+    inventory_detail = models.ForeignKey(
+        "inventory.InventoryDetail", on_delete=models.PROTECT, related_name="relocation_request_lines"
+    )
+    requested_qty = models.DecimalField("申请数量", max_digits=18, decimal_places=4)
+    to_location = models.ForeignKey(
+        "locations.Location", on_delete=models.PROTECT, related_name="relocation_request_lines"
+    )
+    to_container = models.ForeignKey(
+        "locations.Container",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="relocation_request_lines_as_target",
+    )
+    source_snapshot = models.JSONField("来源库存快照", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "移库申请行"
+        verbose_name_plural = "移库申请行"
+        constraints = [
+            models.CheckConstraint(check=Q(requested_qty__gt=0), name="ck_reloc_req_line_qty")
+        ]
+        indexes = [
+            models.Index(fields=["request", "inventory_detail"], name="ix_reloc_req_line_src")
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.request_id and self.inventory_detail_id:
+            detail = self.inventory_detail
+            if detail.owner_id != self.request.owner_id:
+                errors["inventory_detail"] = "来源库存与申请货主不一致。"
+            if detail.warehouse_id != self.request.warehouse_id:
+                errors["inventory_detail"] = "来源库存与申请仓库不一致。"
+        if self.request_id and self.to_location_id:
+            if self.to_location.warehouse_id != self.request.warehouse_id:
+                errors["to_location"] = "目标库位与申请仓库不一致。"
+        if self.to_container_id:
+            container = self.to_container
+            if self.request_id and container.warehouse_id != self.request.warehouse_id:
+                errors["to_container"] = "目标容器与申请仓库不一致。"
+            elif (
+                self.to_location_id
+                and self.request.mode == RelocationRequest.Mode.LAYER
+                and container.location_id != self.to_location_id
+            ):
+                errors["to_container"] = "目标容器不在目标库位。"
+            elif (
+                self.request_id
+                and container.scope == container.Scope.PRIVATE
+                and container.owner_id != self.request.owner_id
+            ):
+                errors["to_container"] = "私有目标容器与申请货主不一致。"
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class RelocationReservation(BaseModel):
+    class Status(models.TextChoices):
+        ACTIVE = "ACTIVE", "活动"
+        CONSUMED = "CONSUMED", "已消费"
+        RELEASED = "RELEASED", "已释放"
+
+    task_line = models.OneToOneField(
+        "tasking.WmsTaskLine", on_delete=models.PROTECT, related_name="relocation_reservation"
+    )
+    inventory_detail = models.ForeignKey(
+        "inventory.InventoryDetail", on_delete=models.PROTECT, related_name="relocation_reservations"
+    )
+    qty = models.DecimalField("预留数量", max_digits=18, decimal_places=4)
+    status = models.CharField(
+        "状态", max_length=10, choices=Status.choices, default=Status.ACTIVE, db_index=True
+    )
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    released_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "移库预留"
+        verbose_name_plural = "移库预留"
+        constraints = [
+            models.CheckConstraint(check=Q(qty__gt=0), name="ck_reloc_res_qty")
+        ]
+        indexes = [
+            models.Index(fields=["inventory_detail", "status"], name="ix_reloc_res_src_status")
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.task_line_id and self.inventory_detail_id:
+            task = self.task_line.task
+            detail = self.inventory_detail
+            if detail.owner_id != task.owner_id or detail.warehouse_id != task.warehouse_id:
+                raise ValidationError({"inventory_detail": "预留库存超出任务货主或仓库范围。"})
+            if self.task_line.src_id and self.task_line.src_id != detail.pk:
+                raise ValidationError({"inventory_detail": "预留库存与任务行来源不一致。"})
+
+    def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
 

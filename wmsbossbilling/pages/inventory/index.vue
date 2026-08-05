@@ -19,14 +19,8 @@
     </view>
 
     <view class="filter-card">
+      <BossScopeFilter @change="refreshAll" />
       <view class="filter-row">
-        <picker :range="ownerOptions" range-key="label" :value="ownerPickerIndex" @change="onOwnerChange">
-          <view class="picker-box">
-            <text class="picker-label">货主范围</text>
-            <text class="picker-value">{{ ownerOptions[ownerPickerIndex]?.label || '全部货主' }}</text>
-          </view>
-        </picker>
-
         <view class="picker-box info-box">
           <text class="picker-label">当前仓容</text>
           <text class="picker-value">{{ percent(summary.volumeUtilizationRate) }}</text>
@@ -43,22 +37,23 @@
     </view>
 
     <view v-if="loading" class="loading-banner">正在同步库存与库容...</view>
+    <BossDataStatus :meta="payload?.meta" :error="dataError" :stale="stale" />
 
     <template v-else>
       <view class="kpi-grid">
         <view class="kpi-card blue">
-          <view class="kpi-label">当前在库量</view>
-          <view class="kpi-value">{{ qty(summary.currentOnhandQty) }}</view>
-          <view class="kpi-sub">可用 {{ qty(summary.currentAvailableQty) }}</view>
+          <view class="kpi-label">库存数量（按基本单位）</view>
+          <view class="kpi-value">{{ quantityText }}</view>
+          <view class="kpi-sub">禁止跨单位合计</view>
         </view>
         <view class="kpi-card orange">
           <view class="kpi-label">7天内临期</view>
-          <view class="kpi-value">{{ qty(summary.expiringQty7d) }}</view>
+          <view class="kpi-value">{{ summary.expiringSkuCount7d }}</view>
           <view class="kpi-sub">{{ summary.expiringSkuCount7d }} 个 SKU</view>
         </view>
         <view class="kpi-card purple">
           <view class="kpi-label">30天未变化</view>
-          <view class="kpi-value">{{ qty(summary.staleQty30d) }}</view>
+          <view class="kpi-value">{{ summary.staleSkuCount30d }}</view>
           <view class="kpi-sub">{{ summary.staleSkuCount30d }} 个 SKU</view>
         </view>
         <view class="kpi-card pink">
@@ -100,7 +95,7 @@
             </view>
             <view class="row-side stack">
               <text>{{ row.usedVolumeText }} m³</text>
-              <text>{{ qty(row.onhandQty) }}</text>
+              <text>{{ row.skuCount }} 个 SKU</text>
             </view>
           </view>
         </view>
@@ -128,7 +123,7 @@
             </view>
             <view class="hotspot-detail">
               <text>{{ row.usedVolumeText }} / {{ row.capacityVolumeText }} m³</text>
-              <text>在库 {{ qty(row.onhandQty) }} / 可用 {{ qty(row.availableQty) }}</text>
+              <text>{{ row.skuCount }} 个 SKU / {{ row.ownerCount }} 个货主</text>
             </view>
           </view>
         </view>
@@ -153,7 +148,7 @@
               </view>
               <view class="row-side stack">
                 <text>静置 {{ row.staleDays }} 天</text>
-                <text>{{ qty(row.onhandQty) }}</text>
+                <text>{{ row.skuCount }} 个 SKU</text>
               </view>
             </view>
           </view>
@@ -174,7 +169,7 @@
             </view>
             <view class="row-side stack">
               <text>{{ row.daysLabel }}</text>
-              <text>{{ qty(row.onhandQty) }}</text>
+              <text>{{ qty(row.onhandQty) }} {{ row.baseUnit }}</text>
             </view>
           </view>
         </view>
@@ -195,7 +190,7 @@
           </view>
           <view class="row-side stack">
             <text>静置 {{ row.staleDays }} 天</text>
-            <text>{{ qty(row.onhandQty) }}</text>
+            <text>{{ qty(row.onhandQty) }} {{ row.baseUnit }}</text>
           </view>
         </view>
       </view>
@@ -207,40 +202,30 @@
 import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import BossNav from '@/components/boss-nav.vue'
+import BossScopeFilter from '@/components/boss-scope-filter.vue'
+import BossDataStatus from '@/components/boss-data-status.vue'
 import { useAuth } from '@/store/auth'
-import { api } from '@/utils/request'
+import { useBossScope } from '@/store/bossScope'
+import { api, buildQuery } from '@/utils/request'
 import { asList, percent, qty, toNumber } from '@/utils/billing'
 
 const auth = useAuth()
+const bossScope = useBossScope()
 const payload = ref(null)
 const loading = ref(false)
-const selectedOwnerId = ref('')
+const dataError = ref(null)
+const loadedFingerprint = ref('')
+const stale = computed(() => !!dataError.value && loadedFingerprint.value === bossScope.fingerprint && !!payload.value)
 
 const operatorName = computed(() => auth.user?.display_name || auth.user?.username || '老板账号')
 const scope = computed(() => payload.value?.scope || {})
-const warehouseName = computed(() => scope.value.warehouse_name || '当前仓库')
+const warehouseName = computed(() => scope.value.warehouse_name || '全部授权仓库')
 const ownerScopeText = computed(() => scope.value.owner_name || '全部货主')
-
-const ownerOptions = computed(() => {
-  const rows = asList(payload.value?.owner_options).map((item) => ({
-    id: String(item.id),
-    label: item.name || `货主 #${item.id}`,
-  }))
-  return [{ id: '', label: '全部货主' }, ...rows]
-})
-
-const ownerPickerIndex = computed(() => {
-  const index = ownerOptions.value.findIndex((item) => item.id === String(selectedOwnerId.value || ''))
-  return index >= 0 ? index : 0
-})
 
 const summary = computed(() => {
   const source = payload.value?.summary || {}
   return {
-    currentOnhandQty: toNumber(source.current_onhand_qty),
-    currentAvailableQty: toNumber(source.current_available_qty),
-    currentLockedQty: toNumber(source.current_locked_qty),
-    currentDamagedQty: toNumber(source.current_damaged_qty),
+    quantityByUom: asList(source.quantity_by_uom),
     skuCount: Number(source.sku_count || 0),
     ownerCount: Number(source.owner_count || 0),
     occupiedLocationCount: Number(source.occupied_location_count || 0),
@@ -249,14 +234,18 @@ const summary = computed(() => {
     volumeUtilizationRate: source.volume_utilization_rate,
     usedVolumeText: toNumber(source.used_volume_m3).toFixed(3),
     capacityVolumeText: toNumber(source.capacity_volume_m3).toFixed(3),
-    expiringQty7d: toNumber(source.expiring_qty_7d),
     expiringSkuCount7d: Number(source.expiring_sku_count_7d || 0),
-    staleQty30d: toNumber(source.stale_qty_30d),
     staleSkuCount30d: Number(source.stale_sku_count_30d || 0),
     hotLocationCount: Number(source.hot_location_count || 0),
     coldLocationCount: Number(source.cold_location_count || 0),
   }
 })
+
+const quantityText = computed(() => summary.value.quantityByUom.length
+  ? summary.value.quantityByUom
+      .map((row) => `${qty(row.onhand_qty)} ${row.unit_code || 'UNKNOWN'}`)
+      .join(' / ')
+  : '-')
 
 const ownerRows = computed(() =>
   asList(payload.value?.owner_rankings).map((row) => ({
@@ -277,6 +266,7 @@ const expiringRows = computed(() =>
     locationCode: row.location_code || '-',
     expiryDate: row.expiry_date || '-',
     onhandQty: toNumber(row.onhand_qty),
+    baseUnit: row.base_unit || 'UNKNOWN',
     daysLabel: Number(row.days_to_expiry || 0) <= 0 ? '今天到期' : `剩 ${Number(row.days_to_expiry || 0)} 天`,
   }))
 )
@@ -290,6 +280,7 @@ const staleRows = computed(() =>
     updatedDate: formatDate(row.updated_at),
     staleDays: Number(row.stale_days || 0),
     onhandQty: toNumber(row.onhand_qty),
+    baseUnit: row.base_unit || 'UNKNOWN',
   }))
 )
 
@@ -317,6 +308,7 @@ const coldRows = computed(() =>
     subwarehouseName: row.subwarehouse_name || '',
     onhandQty: toNumber(row.onhand_qty),
     availableQty: toNumber(row.available_qty),
+    skuCount: Number(row.sku_count || 0),
     staleDays: Number(row.stale_days || 0),
     updatedDate: formatDate(row.latest_updated_at),
     utilizationText: coldUtilizationText(row.volume_utilization_rate),
@@ -340,30 +332,21 @@ function coldUtilizationText(value) {
   return `利用率 ${percent(value)}`
 }
 
-function buildParams() {
-  const params = {}
-  if (selectedOwnerId.value) {
-    params.owner = selectedOwnerId.value
-  }
-  return params
-}
-
 async function refreshAll() {
+  const fingerprint = bossScope.fingerprint
   loading.value = true
   try {
-    payload.value = await api.bossInventory(buildParams())
+    payload.value = await api.bossInventory(bossScope.params)
+    loadedFingerprint.value = fingerprint
+    dataError.value = null
   } catch (error) {
+    dataError.value = error
+    if (loadedFingerprint.value !== fingerprint || error.kind === 'FORBIDDEN') payload.value = null
     console.error('boss inventory overview failed:', error)
   } finally {
     loading.value = false
     uni.stopPullDownRefresh()
   }
-}
-
-function onOwnerChange(event) {
-  const option = ownerOptions.value[Number(event.detail.value || 0)] || ownerOptions.value[0]
-  selectedOwnerId.value = option?.id || ''
-  refreshAll()
 }
 
 function openRevenue() {
@@ -381,8 +364,9 @@ function openOwnerRevenue(ownerId) {
   })
 }
 
-function logout() {
-  auth.logout()
+async function logout() {
+  await auth.logout()
+  bossScope.clear()
   uni.reLaunch({ url: '/pages/login' })
 }
 
@@ -391,7 +375,10 @@ onLoad(() => {
     uni.reLaunch({ url: '/pages/login' })
     return
   }
-  refreshAll()
+  bossScope.loadContext(auth.user).then(refreshAll).catch((error) => {
+    dataError.value = error
+    payload.value = null
+  })
 })
 
 onPullDownRefresh(() => {
@@ -400,12 +387,8 @@ onPullDownRefresh(() => {
 
 
 function openInventoryDetail() {
-  const query = selectedOwnerId.value
-    ? `?owner_id=${selectedOwnerId.value}`
-    : ''
-
   uni.navigateTo({
-    url: `/pages/inventory/detail${query}`,
+    url: `/pages/inventory/detail?${buildQuery(bossScope.params)}`,
   })
 }
 

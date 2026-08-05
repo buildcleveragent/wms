@@ -19,8 +19,6 @@
     - views.py: BillingPeriodViewSet.invoice action
     - admin.py: BillingPeriodAdmin.invoice_view
 """
-from decimal import Decimal
-
 from django.db import transaction
 from django.utils import timezone
 
@@ -28,11 +26,22 @@ from allapp.billing.enums import AccrualStatus, BillStatus, PeriodStatus
 from allapp.billing.models import Bill, BillLine, BillingAccrual, BillingPeriod
 
 from ._common import _q, logger
-from ._reconciliation import _billing_accuracy_gate_enabled, _ensure_reconciliation_for_period
+from ._reconciliation import (
+    _billing_accuracy_gate_enabled,
+    _ensure_reconciliation_for_period,
+)
+from .integrity import ensure_close_readiness
 
 
 @transaction.atomic
-def generate_invoice_for_period(period: BillingPeriod, invoice_no: str, issue_date=None, due_date=None) -> Bill:
+def generate_invoice_for_period(
+    period: BillingPeriod,
+    invoice_no: str,
+    issue_date=None,
+    due_date=None,
+    *,
+    by_user=None,
+) -> Bill:
     """
     从已关账的 period 生成发票/结算单。
 
@@ -40,7 +49,7 @@ def generate_invoice_for_period(period: BillingPeriod, invoice_no: str, issue_da
         period: 已关账（CLOSED）的 BillingPeriod 实例
         invoice_no: 发票号（如 "INV-2026-03-1-0001"），需全局唯一
         issue_date: 开票日期，默认今天
-        due_date: 到期日期，可选
+        due_date: 到期日期，必填且不得早于开票日期
 
     返回:
         生成的 Bill 实例（status=ISSUED）
@@ -58,10 +67,23 @@ def generate_invoice_for_period(period: BillingPeriod, invoice_no: str, issue_da
     period = BillingPeriod.objects.select_for_update().get(pk=period.pk)
 
     # ---- 前置校验 ----
+    resolved_issue_date = issue_date or timezone.now().date()
+    if due_date is None:
+        raise ValueError("due_date is required when issuing a bill.")
+    if due_date < resolved_issue_date:
+        raise ValueError("due_date cannot be before issue_date.")
     if period.status != PeriodStatus.CLOSED:
         raise ValueError("Only closed periods can be invoiced.")
     if Bill.objects.filter(period=period).exclude(status=BillStatus.VOID).exists():
         raise ValueError("Invoice already exists for this period.")
+
+    ensure_close_readiness(
+        owner_id=period.owner_id,
+        warehouse_id=period.warehouse_id,
+        start_date=period.start_date,
+        end_date=period.end_date,
+        for_invoice=True,
+    )
 
     # 数据对账门控（可通过 settings 关闭）
     if _billing_accuracy_gate_enabled("BILLING_RECONCILIATION_GATE_INVOICE_ENABLED"):
@@ -69,8 +91,7 @@ def generate_invoice_for_period(period: BillingPeriod, invoice_no: str, issue_da
 
     # ---- 查询待开票的 accrual ----
     accs = list(
-        BillingAccrual.objects
-        .filter(period=period, status=AccrualStatus.LOCKED)
+        BillingAccrual.objects.filter(period=period, status=AccrualStatus.LOCKED)
         .select_related("rule")
         .order_by("service_date", "charge_type", "id")
     )
@@ -79,17 +100,27 @@ def generate_invoice_for_period(period: BillingPeriod, invoice_no: str, issue_da
 
     # ---- 创建 Bill 主记录 ----
     bill = Bill.objects.create(
-        owner=period.owner, warehouse=period.warehouse, period=period,
-        invoice_no=invoice_no, issue_date=issue_date or timezone.now().date(),
-        due_date=due_date, currency=period.currency
+        owner=period.owner,
+        warehouse=period.warehouse,
+        period=period,
+        invoice_no=invoice_no,
+        issue_date=resolved_issue_date,
+        due_date=due_date,
+        currency=period.currency,
     )
 
     # ---- 批量创建 BillLine（1 次 INSERT 代替 N 次） ----
     bill_lines = [
         BillLine(
-            bill=bill, accrual=a, charge_type=a.charge_type, service_date=a.service_date,
-            quantity=a.quantity, unit_price=a.unit_price, amount=a.amount, tax_amount=a.tax_amount,
-            description=f"{a.charge_type} {a.service_date}"
+            bill=bill,
+            accrual=a,
+            charge_type=a.charge_type,
+            service_date=a.service_date,
+            quantity=a.quantity,
+            unit_price=a.unit_price,
+            amount=a.amount,
+            tax_amount=a.tax_amount,
+            description=f"{a.charge_type} {a.service_date}",
         )
         for a in accs
     ]
@@ -108,17 +139,35 @@ def generate_invoice_for_period(period: BillingPeriod, invoice_no: str, issue_da
     bill.tax_total = _q(tax_total, "0.01")
     bill.total = _q(subtotal + tax_total, "0.01")
     bill.status = BillStatus.ISSUED
-    bill.save(update_fields=["subtotal", "tax_total", "total", "status"])
+    bill.document_status = "ISSUED"
+    bill.payment_status = "UNPAID"
+    bill.save(
+        update_fields=[
+            "subtotal",
+            "tax_total",
+            "total",
+            "status",
+            "document_status",
+            "payment_status",
+        ]
+    )
 
     # ---- 更新 Period 状态 ----
     period.status = PeriodStatus.INVOICED
-    period.save(update_fields=["status"])
+    period.invoiced_at = timezone.now()
+    period.invoiced_by = by_user
+    period.transition_quality = "VERIFIED"
+    period.save(
+        update_fields=["status", "invoiced_at", "invoiced_by", "transition_quality"]
+    )
     # 同步调用方持有的 period 对象（可能是不同的 Python 实例）
     if original_period is not period:
         original_period.status = period.status
 
     logger.info(
         "generate_invoice_for_period: invoice_no=%s lines=%d total=%s",
-        invoice_no, len(bill_lines), bill.total,
+        invoice_no,
+        len(bill_lines),
+        bill.total,
     )
     return bill

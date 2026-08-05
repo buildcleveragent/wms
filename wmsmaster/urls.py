@@ -19,6 +19,7 @@ urlpatterns = [
     path("healthz/ready", health_ready_view, name="health-ready"),
     path("api/inbound/", include("allapp.inbound.urls")),  # 放在可能覆盖它的 router 之前
     path("api/replenishment/", include("allapp.tasking.urls_replenishment")),
+    path("api/relocation/", include("allapp.tasking.urls_relocation")),
     path("api/", include("allapp.inventory.urls")),
     path("api/", include("allapp.tasking.urls_pda")),
     path("api/", include("allapp.billing.urls")),

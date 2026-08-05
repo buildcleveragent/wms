@@ -34,13 +34,10 @@ environ.Env.read_env(BASE_DIR / ".env")
 # committed. Normal development and production processes do not load it.
 _TEST_COMMAND = " ".join(sys.argv).lower()
 _LOCAL_TEST_ENV = BASE_DIR / ".env.test.local"
-if (
-    _LOCAL_TEST_ENV.exists()
-    and (
-        "pytest" in _TEST_COMMAND
-        or "py.test" in _TEST_COMMAND
-        or "manage.py test" in _TEST_COMMAND
-    )
+if _LOCAL_TEST_ENV.exists() and (
+    "pytest" in _TEST_COMMAND
+    or "py.test" in _TEST_COMMAND
+    or "manage.py test" in _TEST_COMMAND
 ):
     environ.Env.read_env(_LOCAL_TEST_ENV, overwrite=True)
 
@@ -109,16 +106,13 @@ IS_PRODUCTION = APP_ENV == "production"
 
 # Replenishment is rolled out in independently observable stages.  Keep every
 # behavior-changing stage disabled until the warehouse is audited and ready.
-REPLENISHMENT_MANUAL_ENABLED = env.bool(
-    "REPLENISHMENT_MANUAL_ENABLED", default=False
-)
+REPLENISHMENT_MANUAL_ENABLED = env.bool("REPLENISHMENT_MANUAL_ENABLED", default=False)
 REPLENISHMENT_PDA_ENABLED = env.bool("REPLENISHMENT_PDA_ENABLED", default=False)
-REPLENISHMENT_MINMAX_ENABLED = env.bool(
-    "REPLENISHMENT_MINMAX_ENABLED", default=False
-)
-REPLENISHMENT_DEMAND_ENABLED = env.bool(
-    "REPLENISHMENT_DEMAND_ENABLED", default=False
-)
+REPLENISHMENT_MINMAX_ENABLED = env.bool("REPLENISHMENT_MINMAX_ENABLED", default=False)
+REPLENISHMENT_DEMAND_ENABLED = env.bool("REPLENISHMENT_DEMAND_ENABLED", default=False)
+RELOCATION_REQUEST_ENABLED = env.bool("RELOCATION_REQUEST_ENABLED", default=False)
+RELOCATION_PDA_ENABLED = env.bool("RELOCATION_PDA_ENABLED", default=False)
+RELOCATION_CONTAINER_ENABLED = env.bool("RELOCATION_CONTAINER_ENABLED", default=False)
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env("SECRET_KEY", default="").strip()
@@ -177,9 +171,7 @@ if ENABLE_DEBUG_TOOLBAR:
 
 AUTH_USER_MODEL = "accounts.User"
 
-LOGIN_USERNAME_IP_RATE = _validated_login_rate(
-    "LOGIN_USERNAME_IP_RATE", "5/min"
-)
+LOGIN_USERNAME_IP_RATE = _validated_login_rate("LOGIN_USERNAME_IP_RATE", "5/min")
 LOGIN_IP_RATE = _validated_login_rate("LOGIN_IP_RATE", "30/min")
 LOGIN_TRUSTED_PROXY_COUNT = env.int("LOGIN_TRUSTED_PROXY_COUNT", default=0)
 if LOGIN_TRUSTED_PROXY_COUNT < 0:
@@ -237,9 +229,7 @@ WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH = env(
     default="",
 ).strip()
 try:
-    WECHAT_PAY_PLATFORM_KEYS = json.loads(
-        env("WECHAT_PAY_PLATFORM_KEYS", default="{}")
-    )
+    WECHAT_PAY_PLATFORM_KEYS = json.loads(env("WECHAT_PAY_PLATFORM_KEYS", default="{}"))
 except (TypeError, ValueError) as exc:
     raise ImproperlyConfigured(
         "WECHAT_PAY_PLATFORM_KEYS 必须是序列号到 PEM 或文件路径的 JSON 对象。"
@@ -291,6 +281,10 @@ INTERNAL_IPS = (
 # 允许指定的域访问（修改为你的前端 URL）
 
 CORS_ALLOWED_ORIGINS = _csv_env("CORS_ALLOWED_ORIGINS", default=[])
+if IS_PRODUCTION and any(
+    not origin.lower().startswith("https://") for origin in CORS_ALLOWED_ORIGINS
+):
+    raise ImproperlyConfigured("生产环境 CORS_ALLOWED_ORIGINS 只允许 HTTPS 来源。")
 
 # MIDDLEWARE_CLASSES = (
 #    'admin_model_list_order.middleware.AdminModelListOrder',
@@ -462,11 +456,30 @@ CSRF_TRUSTED_ORIGINS = _csv_env(
     "CSRF_TRUSTED_ORIGINS",
     default=[] if IS_PRODUCTION else ["http://127.0.0.1", "http://localhost"],
 )
+if IS_PRODUCTION and any(
+    not origin.lower().startswith("https://") for origin in CSRF_TRUSTED_ORIGINS
+):
+    raise ImproperlyConfigured("生产环境 CSRF_TRUSTED_ORIGINS 只允许 HTTPS 来源。")
 if IS_PRODUCTION and not ALLOWED_HOSTS:
     raise ImproperlyConfigured("生产环境必须显式配置 ALLOWED_HOSTS。")
 
 SESSION_COOKIE_SECURE = IS_PRODUCTION
 CSRF_COOKIE_SECURE = IS_PRODUCTION
+SECURE_SSL_REDIRECT = IS_PRODUCTION
+SECURE_PROXY_SSL_HEADER = (
+    ("HTTP_X_FORWARDED_PROTO", "https")
+    if env.bool("TRUST_PROXY_SSL_HEADER", default=IS_PRODUCTION)
+    else None
+)
+SECURE_HSTS_SECONDS = env.int(
+    "SECURE_HSTS_SECONDS", default=31536000 if IS_PRODUCTION else 0
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = IS_PRODUCTION and env.bool(
+    "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True
+)
+SECURE_HSTS_PRELOAD = IS_PRODUCTION and env.bool("SECURE_HSTS_PRELOAD", default=False)
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
 
 OUTBOUND_ALLOCATE_ON = "OWNER_APPROVE"  # 何时分配：OWNER_APPROVE / WH_APPROVE
 OUTBOUND_PICK_TASK_STATUS_ON_APPROVE = "DRAFT"  # 生成的拣货任务初始态
@@ -507,6 +520,7 @@ INVENTORY_SNAPSHOT_LOCATION_AREA_RESOLVER = env(
     "INVENTORY_SNAPSHOT_LOCATION_AREA_RESOLVER",
     default="",
 )
+INVENTORY_FIFO_ENABLED = env.bool("INVENTORY_FIFO_ENABLED", default=False)
 TEMPLATES[0]["OPTIONS"]["context_processors"] += [
     "allapp.console.context_processors.console_menu",
 ]

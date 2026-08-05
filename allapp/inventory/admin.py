@@ -51,6 +51,7 @@ INVENTORY_DETAIL_EXPORT_HEADERS = (
     "区域类型",
     "库位编码",
     "库位名称",
+    "容器号",
     "商品编号",
     "SKU",
     "商品名称",
@@ -92,6 +93,7 @@ def _inventory_detail_export_row(detail):
         detail.get_zone_type_display(),
         _xlsx_text(location.code),
         _xlsx_text(location.name),
+        _xlsx_text(detail.container.container_no if detail.container else ""),
         _xlsx_text(product.code),
         _xlsx_text(product.sku),
         _xlsx_text(product.name),
@@ -176,6 +178,7 @@ class InventoryDetailAdmin(ScopedInventoryReadAdmin):
         "subwarehouse",
         "zone_type",
         "location",
+        "container",
         "batch_no",
         "production_date",
         "expiry_date",
@@ -186,7 +189,7 @@ class InventoryDetailAdmin(ScopedInventoryReadAdmin):
 
     list_filter = _safe_fields(
         InventoryDetail,
-        ["owner", "subwarehouse","zone_type", "location", "product", "is_active"],
+        ["owner", "subwarehouse","zone_type", "location", "container", "product", "is_active"],
     )
     search_fields = [
         # 关联字段名请按你真实的 Product/Owner/Location 模型字段做微调
@@ -194,12 +197,12 @@ class InventoryDetailAdmin(ScopedInventoryReadAdmin):
         "product__code", "product__name",
         "owner__code", "owner__name",
         "subwarehouse__code", "subwarehouse__name",
-        "location__code", "location__name","product__sku",
+        "location__code", "location__name", "container__container_no", "product__sku",
     ]
 
     ordering = _safe_fields(InventoryDetail, ["expiry_date", "owner", "product"])
     list_per_page = 50
-    list_select_related = ("owner", "product", "warehouse", "subwarehouse", "location")
+    list_select_related = ("owner", "product", "warehouse", "subwarehouse", "location", "container")
 
     def get_urls(self):
         custom_urls = [
@@ -231,6 +234,7 @@ class InventoryDetailAdmin(ScopedInventoryReadAdmin):
             "subwarehouse",
             "location",
             "product",
+            "container",
         )
         return _inventory_detail_export_response(queryset)
 
@@ -396,6 +400,8 @@ class InventoryTransactionAdmin(ScopedInventoryReadAdmin):
         "product",
         "subwarehouse",
         "location",
+        "container",
+        "container_no",
         "qty_delta_display",
         "batch_no",
         "production_date",
@@ -418,14 +424,14 @@ class InventoryTransactionAdmin(ScopedInventoryReadAdmin):
 
     list_filter = _safe_fields(
         InventoryTransaction,
-        ["tx_type", "owner", "subwarehouse", "product", "location"],
+        ["tx_type", "owner", "subwarehouse", "product", "location", "container"],
     )
     search_fields = [
         "src_model", "src_no", "batch_no", "serial_no",
         "product__code", "product__name",
         "owner__code", "owner__name",
         "warehouse__code", "warehouse__name",
-        "location__code", "location__name",
+        "location__code", "location__name", "container__container_no", "container_no",
     ]
     # autocomplete_fields = _safe_fields(
     #     InventoryTransaction,

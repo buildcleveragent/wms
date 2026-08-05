@@ -19,14 +19,8 @@
     </view>
 
     <view class="filter-card">
+      <BossScopeFilter @change="refreshAll" />
       <view class="filter-row">
-        <picker :range="ownerOptions" range-key="label" :value="ownerPickerIndex" @change="onOwnerChange">
-          <view class="picker-box">
-            <text class="picker-label">货主范围</text>
-            <text class="picker-value">{{ ownerOptions[ownerPickerIndex]?.label || '全部货主' }}</text>
-          </view>
-        </picker>
-
         <view class="picker-box info-box">
           <text class="picker-label">预警总量</text>
           <text class="picker-value">{{ summary.totalItems }} 项</text>
@@ -41,6 +35,7 @@
     </view>
 
     <view v-if="loading" class="loading-banner">正在同步预警中心...</view>
+    <BossDataStatus :meta="payload?.meta" :error="dataError" :stale="stale" />
 
     <template v-else>
       <view class="summary-grid">
@@ -65,8 +60,9 @@
             </view>
             <view class="section-desc">{{ section.severity === 'high' ? '高风险，建议优先处理。' : '中风险，建议持续关注。' }}</view>
           </view>
-          <view class="section-count">{{ section.count }}</view>
+          <view class="section-count">已展示 {{ section.shownCount }} / 共 {{ section.count }}</view>
         </view>
+        <button v-if="section.hasMore" class="btn-ghost" @click="openSection(section.key)">查看全部</button>
 
         <view v-if="!section.items.length" class="empty-inline">当前没有这一类预警。</view>
 
@@ -92,32 +88,25 @@
 import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import BossNav from '@/components/boss-nav.vue'
+import BossScopeFilter from '@/components/boss-scope-filter.vue'
+import BossDataStatus from '@/components/boss-data-status.vue'
 import { useAuth } from '@/store/auth'
-import { api } from '@/utils/request'
+import { useBossScope } from '@/store/bossScope'
+import { api, buildQuery } from '@/utils/request'
 import { asList, billStatusLabel, money, qty } from '@/utils/billing'
 
 const auth = useAuth()
+const bossScope = useBossScope()
 const payload = ref(null)
 const loading = ref(false)
-const selectedOwnerId = ref('')
+const dataError = ref(null)
+const loadedFingerprint = ref('')
+const stale = computed(() => !!dataError.value && loadedFingerprint.value === bossScope.fingerprint && !!payload.value)
 
 const operatorName = computed(() => auth.user?.display_name || auth.user?.username || '老板账号')
 const scope = computed(() => payload.value?.scope || {})
-const warehouseName = computed(() => scope.value.warehouse_name || '当前仓库')
+const warehouseName = computed(() => scope.value.warehouse_name || '全部授权仓库')
 const ownerScopeText = computed(() => scope.value.owner_name || '全部货主')
-
-const ownerOptions = computed(() => {
-  const rows = asList(payload.value?.owner_options).map((item) => ({
-    id: String(item.id),
-    label: item.name || `货主 #${item.id}`,
-  }))
-  return [{ id: '', label: '全部货主' }, ...rows]
-})
-
-const ownerPickerIndex = computed(() => {
-  const index = ownerOptions.value.findIndex((item) => item.id === String(selectedOwnerId.value || ''))
-  return index >= 0 ? index : 0
-})
 
 const summary = computed(() => {
   const source = payload.value?.summary || {}
@@ -129,8 +118,11 @@ const summary = computed(() => {
 })
 
 const sectionOrder = [
+  'unpriced_billing_events',
+  'approximate_billing_data',
   'overdue_tasks',
   'overdue_bills',
+  'bills_missing_due_date',
   'failed_billing_jobs',
   'pending_review_tasks',
   'expiring_inventory',
@@ -145,62 +137,77 @@ const sectionRows = computed(() =>
       label: section.label || key,
       severity: section.severity || 'medium',
       count: Number(section.count || 0),
+      shownCount: Number(section.shown_count || 0),
+      hasMore: !!section.has_more,
       items: Array.isArray(section.items) ? section.items : [],
     }
   })
 )
 
-function buildParams() {
-  return selectedOwnerId.value ? { owner: selectedOwnerId.value } : {}
-}
-
 async function refreshAll() {
+  const fingerprint = bossScope.fingerprint
   loading.value = true
   try {
-    payload.value = await api.bossAlerts(buildParams())
+    payload.value = await api.bossAlerts(bossScope.params)
+    loadedFingerprint.value = fingerprint
+    dataError.value = null
+  } catch (error) {
+    dataError.value = error
+    if (loadedFingerprint.value !== fingerprint || error.kind === 'FORBIDDEN') payload.value = null
   } finally {
     loading.value = false
     uni.stopPullDownRefresh()
   }
 }
 
-function onOwnerChange(event) {
-  const next = ownerOptions.value[Number(event.detail.value) || 0]
-  selectedOwnerId.value = next?.id || ''
-  refreshAll()
-}
-
 function openRevenue() {
   uni.reLaunch({ url: '/pages/billing/overview' })
 }
 
-function logout() {
-  auth.logout()
+async function logout() {
+  await auth.logout()
+  bossScope.clear()
   uni.reLaunch({ url: '/pages/login' })
 }
 
 function canOpenDetail(sectionKey, item) {
-  return sectionKey === 'overdue_bills' && !!item?.id
+  return !!item?.id
 }
 
 function openSectionItem(sectionKey, item) {
   if (!canOpenDetail(sectionKey, item)) return
+  const itemType = item.item_type || ({
+    overdue_tasks: 'task', pending_review_tasks: 'task', overdue_bills: 'bill',
+    bills_missing_due_date: 'bill', failed_billing_jobs: 'billing_job',
+    review_differences: 'review_difference', unpriced_billing_events: 'billing_event',
+  }[sectionKey] || 'item')
   uni.navigateTo({
-    url: `/pages/billing/bill_detail?id=${item.id}`,
+    url: `/pages/alerts/detail?${buildQuery({ section: sectionKey, item_type: itemType, id: item.id, ...bossScope.params })}`,
   })
 }
 
+function openSection(section) {
+  uni.navigateTo({ url: `/pages/alerts/section?${buildQuery({ section, ...bossScope.params })}` })
+}
+
 function itemTitle(sectionKey, item) {
+  if (sectionKey === 'unpriced_billing_events' || sectionKey === 'approximate_billing_data') {
+    return `${item.owner_name || '未识别货主'} · ${item.warehouse_name || '未识别仓库'}`
+  }
   if (sectionKey === 'overdue_tasks') return `${item.task_no} · ${item.owner_name || '未识别货主'}`
   if (sectionKey === 'pending_review_tasks') return `${item.task_no} · ${item.owner_name || '未识别货主'}`
   if (sectionKey === 'expiring_inventory') return `${item.product_name} · ${item.owner_name || '未识别货主'}`
   if (sectionKey === 'overdue_bills') return item.invoice_no
+  if (sectionKey === 'bills_missing_due_date') return item.invoice_no
   if (sectionKey === 'failed_billing_jobs') return `${item.owner_name || '未识别货主'} · ${item.job_name}`
   if (sectionKey === 'review_differences') return item.order_no
   return item.id || '-'
 }
 
 function itemMeta(sectionKey, item) {
+  if (sectionKey === 'unpriced_billing_events' || sectionKey === 'approximate_billing_data') {
+    return `${item.service_date || '-'} · ${item.charge_type || '-'} · ${item.calc_method || '-'} · ${item.reason || '-'}`
+  }
   if (sectionKey === 'overdue_tasks') {
     return `${item.task_type} · 状态 ${item.status} · 计划截至 ${item.planned_end || '-'}`
   }
@@ -213,6 +220,7 @@ function itemMeta(sectionKey, item) {
   if (sectionKey === 'overdue_bills') {
     return `${item.owner_name || '-'} · ${billStatusLabel(item.status)} · 到期 ${item.due_date || '-'}`
   }
+  if (sectionKey === 'bills_missing_due_date') return `${item.owner_name || '-'} · ${item.issue_date || '-'} · 缺少到期日`
   if (sectionKey === 'failed_billing_jobs') {
     return `${item.service_date || '-'} · ${item.message || '无错误描述'}`
   }
@@ -223,9 +231,11 @@ function itemMeta(sectionKey, item) {
 }
 
 function itemSide(sectionKey, item) {
+  if (sectionKey === 'unpriced_billing_events') return '未定价'
+  if (sectionKey === 'approximate_billing_data') return '近似'
   if (sectionKey === 'overdue_tasks') return `${item.overdue_hours || 0}h`
-  if (sectionKey === 'expiring_inventory') return qty(item.onhand_qty)
-  if (sectionKey === 'overdue_bills') return money(item.total)
+  if (sectionKey === 'expiring_inventory') return `${qty(item.onhand_qty)} ${item.base_unit || 'UNKNOWN'}`
+  if (sectionKey === 'overdue_bills' || sectionKey === 'bills_missing_due_date') return money(item.total, item.currency)
   if (sectionKey === 'pending_review_tasks') return item.status || '-'
   if (sectionKey === 'failed_billing_jobs') return '失败'
   if (sectionKey === 'review_differences') return item.status || '-'
@@ -237,7 +247,10 @@ onLoad(() => {
     uni.reLaunch({ url: '/pages/login' })
     return
   }
-  refreshAll()
+  bossScope.loadContext(auth.user).then(refreshAll).catch((error) => {
+    dataError.value = error
+    payload.value = null
+  })
 })
 
 onPullDownRefresh(() => {

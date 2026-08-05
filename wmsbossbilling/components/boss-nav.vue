@@ -28,6 +28,7 @@ const tabs = [
   { key: 'inventory', label: '库存与库容', url: '/pages/inventory/index' },
   { key: 'revenue', label: '收入与计费', url: '/pages/billing/overview' },
   { key: 'alerts', label: '预警中心', url: '/pages/alerts/index' },
+  { key: 'cockpit', label: '经营驾驶舱', url: '/pages/cockpit/index' },
 ]
 
 function go(tab) {
@@ -55,10 +56,12 @@ function go(tab) {
 .nav-track {
   display: flex;
   gap: 10rpx;
+  overflow-x: auto;
 }
 
 .nav-pill {
-  flex: 1;
+  flex: 0 0 auto;
+  min-width: 150rpx;
   min-height: 78rpx;
   border-radius: 20rpx;
   display: flex;

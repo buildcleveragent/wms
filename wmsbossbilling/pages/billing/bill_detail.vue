@@ -21,23 +21,23 @@
       <view class="headline-grid">
         <view class="headline-card">
           <view class="headline-label">不含税小计</view>
-          <view class="headline-value">{{ money(bill.subtotal) }}</view>
+          <view class="headline-value">{{ money(bill.subtotal, bill.currency) }}</view>
           <view class="headline-sub">账单整体金额</view>
         </view>
         <view class="headline-card">
           <view class="headline-label">税额合计</view>
-          <view class="headline-value">{{ money(bill.tax_total) }}</view>
+          <view class="headline-value">{{ money(bill.tax_total, bill.currency) }}</view>
           <view class="headline-sub">账单整体税额</view>
         </view>
         <view class="headline-card">
           <view class="headline-label">价税合计</view>
-          <view class="headline-value">{{ money(bill.total) }}</view>
+          <view class="headline-value">{{ money(bill.total, bill.currency) }}</view>
           <view class="headline-sub">{{ bill.due_date ? `到期 ${bill.due_date}` : '未设置到期日' }}</view>
         </view>
         <view class="headline-card dark">
           <view class="headline-label white-soft">当前筛选结果</view>
           <view class="headline-value white">{{ filteredSummary.lineCount }} 条</view>
-          <view class="headline-sub white-soft">{{ money(filteredSummary.total) }}</view>
+          <view class="headline-sub white-soft">{{ money(filteredSummary.total, bill.currency) }}</view>
         </view>
       </view>
 
@@ -88,8 +88,8 @@
         <view class="group-grid">
           <view v-for="row in groupedRows" :key="row.chargeType" class="group-card">
             <view class="group-label">{{ row.label }}</view>
-            <view class="group-total">{{ money(row.total) }}</view>
-            <view class="group-sub">{{ row.lineCount }} 条 · 税额 {{ money(row.taxTotal) }}</view>
+            <view class="group-total">{{ money(row.total, bill.currency) }}</view>
+            <view class="group-sub">{{ row.lineCount }} 条 · 税额 {{ money(row.taxTotal, bill.currency) }}</view>
           </view>
         </view>
         <view v-if="!groupedRows.length" class="empty-inline">当前筛选下没有汇总结果。</view>
@@ -108,7 +108,7 @@
         >
           <view class="line-head">
             <view class="line-title">{{ chargeTypeLabel(line.charge_type) }}</view>
-            <view class="line-amount">{{ money(line.amount) }}</view>
+            <view class="line-amount">{{ money(line.amount, bill.currency) }}</view>
           </view>
           <view class="line-date">{{ line.service_date }}</view>
           <view class="line-meta">应计指纹 {{ line.accrual_fingerprint || '-' }}</view>
@@ -123,7 +123,7 @@
             </view>
             <view class="metric-item">
               <text class="metric-label">税额</text>
-              <text class="metric-value">{{ money(line.tax_amount) }}</text>
+              <text class="metric-value">{{ money(line.tax_amount, bill.currency) }}</text>
             </view>
           </view>
           <view class="line-desc">{{ line.description || '无额外说明' }}</view>
