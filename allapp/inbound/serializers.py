@@ -569,6 +569,7 @@ class ReceiptRecordSerializer(serializers.Serializer):
         max_digits=14, decimal_places=3, min_value=Decimal("0"), required=False, default=Decimal("0")
     )
     lot_no = serializers.CharField(max_length=60, required=False, allow_blank=True, default="")
+    serial_no = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
     mfg_date = serializers.DateField(required=False, allow_null=True)
     exp_date = serializers.DateField(required=False, allow_null=True)
     damage_reason_code = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")

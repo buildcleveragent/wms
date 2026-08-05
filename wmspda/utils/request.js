@@ -952,6 +952,68 @@ export const api = {
       method: 'POST',
       data,
     }),
+
+  // 补货策略、申请与 PDA 作业
+  replenishmentPolicies: () =>
+    request({ url: '/api/replenishment/policies/', method: 'GET' }),
+
+  replenishmentRequests: () =>
+    request({ url: '/api/replenishment/requests/', method: 'GET' }),
+
+  createReplenishmentRequest: (payload) =>
+    request({ url: '/api/replenishment/requests/', method: 'POST', data: payload }),
+
+  approveReplenishmentRequest: (id, payload = {}) =>
+    request({ url: `/api/replenishment/requests/${id}/approve/`, method: 'POST', data: payload }),
+
+  rejectReplenishmentRequest: (id, payload = {}) =>
+    request({ url: `/api/replenishment/requests/${id}/reject/`, method: 'POST', data: payload }),
+
+  replenishmentTasks: (params = {}) =>
+    request({ url: `/api/replenishment/pda/tasks/?${buildQuery(params)}`, method: 'GET' }),
+
+  replenishmentTask: (id) =>
+    request({ url: `/api/replenishment/pda/tasks/${id}/`, method: 'GET' }),
+
+  claimReplenishmentTask: (id) =>
+    request({ url: `/api/replenishment/pda/tasks/${id}/claim/`, method: 'POST' }),
+
+  startReplenishmentTask: (id) =>
+    request({ url: `/api/replenishment/pda/tasks/${id}/start/`, method: 'POST' }),
+
+  recordReplenishment: (id, payload) =>
+    request({ url: `/api/replenishment/pda/tasks/${id}/record/`, method: 'POST', data: payload }),
+
+  retryReplenishmentPosting: (id) =>
+    request({ url: `/api/replenishment/pda/tasks/${id}/retry-posting/`, method: 'POST' }),
+
+  // PDA 盘点
+  countTasks: (params = {}) =>
+    request({ url: `/api/pda/count-tasks/?${buildQuery(params)}`, method: 'GET' }),
+
+  countTaskDetail: (id) =>
+    request({ url: `/api/pda/count-tasks/${id}/`, method: 'GET' }),
+
+  countTaskLines: (id) =>
+    request({ url: `/api/pda/count-tasks/${id}/lines/`, method: 'GET' }),
+
+  claimCountTask: (id) =>
+    request({ url: `/api/pda/count-tasks/${id}/claim/`, method: 'POST' }),
+
+  recordCount: (id, payload) =>
+    request({ url: `/api/pda/count-tasks/${id}/record/`, method: 'POST', data: payload }),
+
+  submitCountTask: (id) =>
+    request({ url: `/api/pda/count-tasks/${id}/submit/`, method: 'POST' }),
+
+  approveCountTask: (id, payload = {}) =>
+    request({ url: `/api/pda/count-tasks/${id}/approve/`, method: 'POST', data: payload }),
+
+  rejectCountTask: (id, payload = {}) =>
+    request({ url: `/api/pda/count-tasks/${id}/reject/`, method: 'POST', data: payload }),
+
+  postCountTask: (id, payload = {}) =>
+    request({ url: `/api/pda/count-tasks/${id}/post/`, method: 'POST', data: payload }),
 	
 	
   companyInventorySummary: (params = {}) => {

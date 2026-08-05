@@ -11,29 +11,21 @@
       <button class="search-btn" size="mini" @click="onSearch">搜索</button>
     </view>
 
-    <view v-if="loading && rows.length === 0" class="state-wrap">
+    <view v-if="(loading || refreshing) && rows.length === 0" class="state-wrap">
       <text class="state-text">加载中...</text>
     </view>
 
     <view v-else-if="error && rows.length === 0" class="state-wrap state-column">
       <text class="state-text">{{ error }}</text>
-      <button size="mini" @click="load(true)">重试</button>
+      <button size="mini" @click="reload">重试</button>
     </view>
 
     <view v-else-if="!loading && rows.length === 0" class="state-wrap">
       <text class="state-text">暂无库存数据</text>
     </view>
 
-      <scroll-view
-        v-else
-        class="table-scroll"
-        scroll-x
-        scroll-y
-        @scrolltolower="loadMore"
-        refresher-enabled
-        :refresher-triggered="refreshing"
-        @refresherrefresh="onRefresh"
-      >
+    <template v-else>
+      <scroll-view class="table-scroll" scroll-x>
         <view class="table-content">
           <view class="table-header">
             <view class="cell col-name">商品名</view>
@@ -83,31 +75,42 @@
 		  </view>
         </view>
 
-        <view class="bottom-state">
-          <text v-if="loadingMore">加载更多中...</text>
-          <text v-else-if="error">{{ error }}，点击搜索或下拉刷新重试</text>
-          <text v-else-if="finished">没有更多了</text>
-        </view>
         </view>
       </scroll-view>
+
+      <view class="bottom-state">
+        <text class="loaded-count">已加载 {{ rows.length }} / 总计 {{ total }}</text>
+        <text v-if="loadingMore">加载更多中...</text>
+        <button v-else-if="error" class="load-more-button" size="mini" @click="loadMore">
+          重试加载
+        </button>
+        <button v-else-if="hasNext" class="load-more-button" size="mini" @click="loadMore">
+          加载更多
+        </button>
+        <text v-else>已加载全部库存</text>
+      </view>
+    </template>
   </view>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
+import { onPullDownRefresh, onReachBottom, onUnload } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
+
+const PAGE_SIZE = 50
 
 const q = ref('')
 const rows = ref([])
 const page = ref(1)
-const pageSize = ref(10)
 const loading = ref(false)
 const loadingMore = ref(false)
 const refreshing = ref(false)
-const finished = ref(false)
+const hasNext = ref(true)
+const total = ref(0)
 const error = ref('')
 let requestGeneration = 0
-
+let active = true
 
 function fmtQty(value) {
   if (value === null || value === undefined || value === '') return '-'
@@ -118,63 +121,131 @@ function fmtQty(value) {
   return String(Number(n.toFixed(4)))
 }
 
-async function load(reset = false) {
-  if (!reset && (loading.value || loadingMore.value || finished.value)) return
-  const generation = reset ? ++requestGeneration : requestGeneration
-  const requestedPage = reset ? 1 : page.value
+function isBusy() {
+  return loading.value || loadingMore.value || refreshing.value
+}
+
+function mergeById(current, incoming) {
+  const seen = new Set(
+    current
+      .filter((item) => item?.id !== undefined && item?.id !== null)
+      .map((item) => String(item.id)),
+  )
+  const merged = [...current]
+  incoming.forEach((item) => {
+    if (item?.id === undefined || item?.id === null) {
+      merged.push(item)
+      return
+    }
+    const id = String(item.id)
+    if (seen.has(id)) return
+    seen.add(id)
+    merged.push(item)
+  })
+  return merged
+}
+
+async function loadFirst({ refresh = false } = {}) {
+  const generation = ++requestGeneration
   const search = q.value
-  if (reset) {
-    page.value = 1
-    finished.value = false
-    error.value = ''
-    rows.value = []
-    loading.value = true
-  } else loadingMore.value = true
+
+  page.value = 1
+  hasNext.value = true
+  total.value = 0
+  error.value = ''
+  rows.value = []
+  loading.value = !refresh
+  loadingMore.value = false
+  refreshing.value = refresh
 
   try {
     const res = await api.inventorySummary({
       search,
-      page: requestedPage,
-      page_size: pageSize.value,
+      page: 1,
+      page_size: PAGE_SIZE,
     })
-    if (generation !== requestGeneration) return
+    if (!active || generation !== requestGeneration) return
 
     const list = Array.isArray(res?.results) ? res.results : []
-    rows.value = reset ? list : rows.value.concat(list)
-    finished.value = !res?.next
-    page.value = requestedPage + 1
+    rows.value = mergeById([], list)
+    total.value = Number.isFinite(Number(res?.count)) ? Number(res.count) : rows.value.length
+    hasNext.value = Boolean(res?.next)
+    page.value = 2
     error.value = ''
   } catch (e) {
-    if (generation === requestGeneration) {
+    if (active && generation === requestGeneration) {
       error.value = e?.message || '库存加载失败，请稍后重试'
     }
   } finally {
-    if (generation === requestGeneration) {
+    if (active && generation === requestGeneration) {
       loading.value = false
-      loadingMore.value = false
+      refreshing.value = false
     }
   }
 }
 
 function onSearch() {
-  load(true)
+  loadFirst()
 }
 
-function loadMore() {
-  load(false)
+function reload() {
+  loadFirst()
 }
 
-async function onRefresh() {
-  refreshing.value = true
+async function loadMore() {
+  if (!active || isBusy() || !hasNext.value) return
+
+  const generation = requestGeneration
+  const requestedPage = page.value
+  const search = q.value
+  loadingMore.value = true
+
   try {
-    await load(true)
+    const res = await api.inventorySummary({
+      search,
+      page: requestedPage,
+      page_size: PAGE_SIZE,
+    })
+    if (!active || generation !== requestGeneration) return
+
+    const list = Array.isArray(res?.results) ? res.results : []
+    rows.value = mergeById(rows.value, list)
+    total.value = Number.isFinite(Number(res?.count)) ? Number(res.count) : total.value
+    hasNext.value = Boolean(res?.next)
+    page.value = requestedPage + 1
+    error.value = ''
+  } catch (e) {
+    if (active && generation === requestGeneration) {
+      error.value = e?.message || '库存加载失败，请稍后重试'
+    }
   } finally {
-    refreshing.value = false
+    if (active && generation === requestGeneration) loadingMore.value = false
   }
 }
 
+async function refreshPage() {
+  try {
+    await loadFirst({ refresh: true })
+  } finally {
+    uni.stopPullDownRefresh()
+  }
+}
+
+onReachBottom(loadMore)
+onPullDownRefresh(refreshPage)
+onUnload(() => {
+  active = false
+  requestGeneration += 1
+})
+
 onMounted(() => {
-  load(true)
+  active = true
+  loadFirst()
+})
+
+onUnmounted(() => {
+  active = false
+  requestGeneration += 1
 })
 </script>
 
@@ -302,7 +373,6 @@ onMounted(() => {
 }
 
 .table-scroll {
-  height: calc(100vh - 110rpx);
   width: 100%;
 }
 
@@ -320,11 +390,23 @@ onMounted(() => {
 .state-column { flex-direction: column; gap: 20rpx; }
 
 .bottom-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14rpx;
   text-align: center;
   color: #888;
   font-size: 22rpx;
   padding: 20rpx 0 30rpx;
   background: #fff;
+}
+
+.loaded-count {
+  color: #666;
+}
+
+.load-more-button {
+  min-width: 180rpx;
 }
 
 .col-num {

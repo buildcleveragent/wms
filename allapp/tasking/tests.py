@@ -12,7 +12,7 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from allapp.accounts.models import UserRoleScope
-from allapp.baseinfo.models import Owner
+from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
 from allapp.inventory.models import InventoryDetail, PostingJournal
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product, ProductUom
@@ -38,6 +38,9 @@ class TaskingWarehouseScopeTests(TestCase):
         )
         self.other_warehouse = Warehouse.objects.create(
             code="WH-TASK-2", name="Warehouse Tasking 2"
+        )
+        OwnerWarehouseBinding.objects.create(
+            owner=self.owner, warehouse=self.warehouse
         )
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,

@@ -67,7 +67,7 @@ from allapp.inventory.models import (InvTxType,
     InventorySummary,
     PostingJournal,
 )
-from allapp.locations.models import Location
+from allapp.locations.models import Location, Warehouse
 from allapp.tasking.models import WmsTask, WmsTaskLine, TaskScanLog
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,7 @@ _POSTING_FAMILY_BY_TASK_TYPE = {
     "RECEIVE": "RECEIVE",
     "PUTAWAY": "MOVE",
     "RELOC": "MOVE",
+    "REPLEN": "MOVE",
     "PICK": "ISSUE",
     "LOAD": "ISSUE",
     "DISPATCH": "ISSUE",
@@ -232,6 +233,7 @@ def _upsert_detail(
     expiry_date=None,
     serial_no: Optional[str] = "",
     task_type: Optional[str] = None,  # 增加任务类型参数
+    task: Optional[WmsTask] = None,
     detail: Optional[InventoryDetail] = None,
 ) -> InventoryDetail:
     """
@@ -243,6 +245,17 @@ def _upsert_detail(
     posting_family = _POSTING_FAMILY_BY_TASK_TYPE.get(task_type or "")
     if posting_family is None:
         raise ValidationError(f"不支持的库存过账任务类型：{task_type or '<空>'}")
+
+    from allapp.tasking.counting import assert_inventory_not_count_locked
+
+    assert_inventory_not_count_locked(
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+        product_id=product_id,
+        location_id=location_id,
+        batch_no=batch_no or "",
+        task=task,
+    )
 
     # 正常过账路径会在进入本函数前按固定顺序锁定所有候选明细。
     # 保留 detail=None 的兼容入口，但也必须重取行锁，不允许无锁读改写。
@@ -283,6 +296,7 @@ def _upsert_detail(
 
     base_onhand = det.onhand_qty or Decimal("0")
     base_alloc = det.allocated_qty or Decimal("0")
+    det.zone_type = Location.objects.only("zone_type").get(pk=location_id).zone_type
 
     if posting_family == "ISSUE":
         # 对拣货/发运任务：qty_delta 一般为负数（ISSUE）
@@ -632,7 +646,7 @@ def _can_post(task: WmsTask) -> Tuple[bool, str]:
 def _scan_qty_for_type(task_type: str, s: TaskScanLog) -> Decimal:
     t = task_type or ""
 
-    if t in ("RECEIVE", "PUTAWAY", "RELOC", "PICK", "DISPATCH", "LOAD", "ADJUST"):
+    if t in ("RECEIVE", "PUTAWAY", "RELOC", "REPLEN", "PICK", "DISPATCH", "LOAD", "ADJUST"):
         # 这些任务只允许用 qty_base_delta
         if getattr(s, "qty_base_delta", None) is None:
             raise ValidationError(f"{task_type} 需要 qty_base_delta（缺失）")
@@ -653,7 +667,7 @@ def _scan_qty_for_type(task_type: str, s: TaskScanLog) -> Decimal:
 def _qty_for_type(task_type: str, scan: TaskScanLog) -> Decimal:
     """
     方向归一规则：
-    - RECEIVE / PUTAWAY / RELOC：>0
+    - RECEIVE / PUTAWAY / RELOC / REPLEN：>0
     - PICK / DISPATCH / LOAD：<0（若取到正数则转为负）
     - COUNT：可正可负（0=无差异，不入账）
     - ADJUST：可正可负，但不可为 0
@@ -661,7 +675,7 @@ def _qty_for_type(task_type: str, scan: TaskScanLog) -> Decimal:
     t = task_type or ""
     q = _scan_qty_for_type(t, scan)  # 严格来源
 
-    if t in ("RECEIVE", "PUTAWAY", "RELOC"):
+    if t in ("RECEIVE", "PUTAWAY", "RELOC", "REPLEN"):
         if q <= 0:
             raise ValidationError(f"{task_type} 需要 qty_base_delta > 0")
         return _q4(q)
@@ -997,6 +1011,7 @@ def _group_putaway(
         # pair = uuid4().hex[:16]                # 一对交易的关联 id
         # pair = uuid4() 每条扫描都产出一对 MOVE（语义还说自己是“聚合”😅）
 
+        is_replenishment = task.task_type == WmsTask.TaskType.REPLEN
         common = dict(
             posting_batch=batch_no,
             task_id=task.id,
@@ -1007,10 +1022,26 @@ def _group_putaway(
             production_date=getattr(s, "mfg_date", None),
             expiry_date=getattr(s, "exp_date", None),
             serial_no=getattr(s, "serial_no", ""),
+            task_line_id=getattr(line, "id", None),
+            source_detail_id=(
+                getattr(line, "src_id", None)
+                if is_replenishment
+                and _normalized_model_name(getattr(line, "src_model", ""))
+                == "inventorydetail"
+                else None
+            ),
         )
 
-        key_in  = _AggKey(location_id=s_to,  tx_type=InvTxType.RECEIVE, **common)
-        key_out = _AggKey(location_id=s_from, tx_type=InvTxType.ISSUE, **common)
+        key_in = _AggKey(
+            location_id=s_to,
+            tx_type=(InvTxType.MOVE_IN if is_replenishment else InvTxType.RECEIVE),
+            **common,
+        )
+        key_out = _AggKey(
+            location_id=s_from,
+            tx_type=(InvTxType.MOVE_OUT if is_replenishment else InvTxType.ISSUE),
+            **common,
+        )
         agg[(key_out, key_in)] += qty_pos
         ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
         logger.info(
@@ -1125,6 +1156,7 @@ def _apply_receive_like(task: WmsTask, groups: Dict[_AggKey, Decimal], *, now, b
             expiry_date=key.expiry_date,
             serial_no=key.serial_no,
             task_type=task_type,
+            task=task,
             detail=locked_detail,
         )
         # 交易
@@ -1183,9 +1215,46 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
         if _q4(qty_pos) != 0
     ]
 
+    location_ids = sorted(
+        {
+            key.location_id
+            for (key_out, key_in), _qty in pending_groups
+            for key in (key_out, key_in)
+        }
+    )
+    locations = {
+        location.id: location
+        for location in Location.objects.select_for_update()
+        .filter(id__in=location_ids)
+        .order_by("id")
+    }
+    if len(locations) != len(location_ids):
+        raise ValidationError("上架来源或目标库位不存在。")
+    for location in locations.values():
+        if location.warehouse_id != task.warehouse_id:
+            raise ValidationError("上架库位必须属于任务仓库。")
+        if location.is_disabled or location.is_frozen:
+            raise ValidationError(f"库位 {location.code} 已停用或冻结，不能过账。")
+
+    serial_routes: Dict[Tuple[int, int, str], Tuple[int, int, Decimal]] = {}
+    for (key_out, key_in), qty in pending_groups:
+        serial = (key_out.serial_no or "").strip().upper()
+        if not serial:
+            continue
+        serial_key = (key_out.owner_id, key_out.product_id, serial)
+        route = (key_out.location_id, key_in.location_id, _q4(qty))
+        if serial_key in serial_routes:
+            raise ValidationError(f"序列号 {serial} 在同一任务中存在重复上架路径。")
+        if route[0] == route[1]:
+            raise ValidationError("序列号上架的来源和目标库位不能相同。")
+        if route[2] != Decimal("1.0000"):
+            raise ValidationError("序列号商品必须整件一次性上架，数量必须为1。")
+        serial_routes[serial_key] = route
+
     dimensions = []
     for (key_out, key_in), _qty in pending_groups:
-        for key in (key_out, key_in):
+        keys = (key_out,) if key_out.serial_no else (key_out, key_in)
+        for key in keys:
             dimensions.append(
                 _detail_dimension_values(
                     owner_id=key.owner_id,
@@ -1237,6 +1306,149 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
         # 这里生成本对 OUT/IN 的 pair_id（字符串，满足 _insert_tx 的类型注解）
         pair = str(uuid4())
 
+        if key_out.serial_no:
+            from allapp.tasking.counting import assert_inventory_not_count_locked
+
+            assert_inventory_not_count_locked(
+                owner_id=key_out.owner_id,
+                warehouse_id=key_out.warehouse_id,
+                product_id=key_out.product_id,
+                location_id=key_out.location_id,
+                batch_no=key_out.batch_no,
+                task=task,
+            )
+            assert_inventory_not_count_locked(
+                owner_id=key_in.owner_id,
+                warehouse_id=key_in.warehouse_id,
+                product_id=key_in.product_id,
+                location_id=key_in.location_id,
+                batch_no=key_in.batch_no,
+                task=task,
+            )
+            source_key = _detail_dimension_key(
+                _detail_dimension_values(
+                    owner_id=key_out.owner_id,
+                    warehouse_id=key_out.warehouse_id,
+                    product_id=key_out.product_id,
+                    location_id=key_out.location_id,
+                    batch_no=key_out.batch_no,
+                    production_date=key_out.production_date,
+                    expiry_date=key_out.expiry_date,
+                    serial_no=key_out.serial_no,
+                )
+            )
+            source_detail = details_by_key[source_key]
+            if task_type == WmsTask.TaskType.REPLEN and (
+                not key_out.source_detail_id
+                or source_detail.id != key_out.source_detail_id
+            ):
+                raise ValidationError("补货来源库存层已发生变化，请重新规划任务。")
+            if not source_detail.product_serial_control:
+                raise ValidationError("带序列号的上架记录必须对应序列号管理商品。")
+            if (source_detail.serial_no or "").upper() != (
+                key_out.serial_no or ""
+            ).upper():
+                raise ValidationError("来源库存序列号与上架记录不一致。")
+            if source_detail.location_id != key_out.location_id:
+                raise ValidationError("序列号来源库存位置已发生变化，请重新执行任务。")
+            if _q4(source_detail.onhand_qty) != Decimal("1.0000"):
+                raise ValidationError("序列号来源库存数量必须为1。")
+            if any(
+                _q4(value) != 0
+                for value in (
+                    source_detail.allocated_qty,
+                    source_detail.locked_qty,
+                    source_detail.damaged_qty,
+                )
+            ):
+                raise ValidationError("序列号库存已分配、锁定或损坏，不能上架。")
+
+            destination = locations[key_in.location_id]
+            source_detail.location = destination
+            source_detail.warehouse_id = destination.warehouse_id
+            source_detail.subwarehouse_id = destination.subwarehouse_id
+            source_detail.zone_type = destination.zone_type
+            source_detail.save(
+                update_fields=[
+                    "location",
+                    "warehouse",
+                    "subwarehouse",
+                    "zone_type",
+                    "base_unit",
+                    "product_serial_control",
+                    "serial_no",
+                    "serial_no_norm",
+                    "available_qty",
+                    "updated_at",
+                ]
+            )
+            _insert_tx(
+                tx_type=key_out.tx_type,
+                owner_id=key_out.owner_id,
+                warehouse_id=key_out.warehouse_id,
+                product_id=key_out.product_id,
+                location_id=key_out.location_id,
+                qty_delta=-qty_pos,
+                batch_no=key_out.batch_no,
+                production_date=key_out.production_date,
+                expiry_date=key_out.expiry_date,
+                serial_no=key_out.serial_no,
+                src_model="WmsTask",
+                src_id=task.id,
+                src_line_id=key_out.task_line_id,
+                memo=task_type,
+                pair_id=pair,
+                posted_at=now,
+                posting_batch=batch_no,
+            )
+            _insert_tx(
+                tx_type=key_in.tx_type,
+                owner_id=key_in.owner_id,
+                warehouse_id=key_in.warehouse_id,
+                product_id=key_in.product_id,
+                location_id=key_in.location_id,
+                qty_delta=qty_pos,
+                batch_no=key_in.batch_no,
+                production_date=key_in.production_date,
+                expiry_date=key_in.expiry_date,
+                serial_no=key_in.serial_no,
+                src_model="WmsTask",
+                src_id=task.id,
+                src_line_id=key_in.task_line_id,
+                memo=task_type,
+                pair_id=pair,
+                posted_at=now,
+                posting_batch=batch_no,
+            )
+            created += 2
+            continue
+
+        source_values = _detail_dimension_values(
+            owner_id=key_out.owner_id,
+            warehouse_id=key_out.warehouse_id,
+            product_id=key_out.product_id,
+            location_id=key_out.location_id,
+            batch_no=key_out.batch_no,
+            production_date=key_out.production_date,
+            expiry_date=key_out.expiry_date,
+            serial_no=key_out.serial_no,
+        )
+        source_detail = details_by_key[_detail_dimension_key(source_values)]
+        if task_type == WmsTask.TaskType.REPLEN:
+            if not key_out.source_detail_id or source_detail.id != key_out.source_detail_id:
+                raise ValidationError("补货来源库存层已发生变化，请重新规划任务。")
+            if any(
+                _q4(value) != 0
+                for value in (
+                    source_detail.allocated_qty,
+                    source_detail.locked_qty,
+                    source_detail.damaged_qty,
+                )
+            ):
+                raise ValidationError("补货来源库存已分配、锁定或损坏，请重新规划任务。")
+            if _q4(source_detail.available_qty) < qty_pos:
+                raise ValidationError("补货来源可用库存已发生变化，请重新规划任务。")
+
         _upsert_detail(
             owner_id=key_out.owner_id,
             warehouse_id=key_out.warehouse_id,
@@ -1248,23 +1460,11 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
             expiry_date=key_out.expiry_date,
             serial_no=key_out.serial_no,
             task_type=task_type,
-            detail=details_by_key[
-                _detail_dimension_key(
-                    _detail_dimension_values(
-                        owner_id=key_out.owner_id,
-                        warehouse_id=key_out.warehouse_id,
-                        product_id=key_out.product_id,
-                        location_id=key_out.location_id,
-                        batch_no=key_out.batch_no,
-                        production_date=key_out.production_date,
-                        expiry_date=key_out.expiry_date,
-                        serial_no=key_out.serial_no,
-                    )
-                )
-            ],
+            task=task,
+            detail=source_detail,
         )
         _insert_tx(
-            tx_type=InvTxType.ISSUE,
+            tx_type=key_out.tx_type,
             owner_id=key_out.owner_id,
             warehouse_id=key_out.warehouse_id,
             product_id=key_out.product_id,
@@ -1276,8 +1476,8 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
             serial_no=key_out.serial_no,
             src_model="WmsTask",
             src_id=task.id,
-            src_line_id=None,
-            memo="PUTAWAY",
+            src_line_id=key_out.task_line_id,
+            memo=task_type,
             pair_id=pair,
             posted_at=now,
             posting_batch=batch_no,
@@ -1294,6 +1494,7 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
             expiry_date=key_in.expiry_date,
             serial_no=key_in.serial_no,
             task_type=task_type,
+            task=task,
             detail=details_by_key[
                 _detail_dimension_key(
                     _detail_dimension_values(
@@ -1310,7 +1511,7 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
             ],
         )
         _insert_tx(
-            tx_type=InvTxType.RECEIVE,
+            tx_type=key_in.tx_type,
             owner_id=key_in.owner_id,
             warehouse_id=key_in.warehouse_id,
             product_id=key_in.product_id,
@@ -1322,8 +1523,8 @@ def _apply_putaway(task: WmsTask, groups: Dict[Tuple[_AggKey, _AggKey], Decimal]
             serial_no=key_in.serial_no,
             src_model="WmsTask",
             src_id=task.id,
-            src_line_id=None,
-            memo="PUTAWAY",
+            src_line_id=key_in.task_line_id,
+            memo=task_type,
             pair_id=pair,
             posted_at=now,
             posting_batch=batch_no,
@@ -1410,6 +1611,9 @@ def post_task(
         raise ValidationError(
             f"过账状态 {task.posting_status} 不允许执行库存过账。"
         )
+
+    # 与盘点发布使用同一仓库互斥锁，保证“刷新快照并落范围锁”与库存变更串行。
+    Warehouse.objects.select_for_update().get(pk=task.warehouse_id)
 
     ok, why = _can_post(task)
     if not ok:

@@ -2077,11 +2077,14 @@ class OutboundOrderViewSet(
             obj=order,
             before=before,
             after={"approval_status": order.approval_status},
-            metadata={"pick_task_id": task.pk},
+            metadata={"pick_task_id": getattr(task, "pk", None)},
         )
-        return Response(
-            OutboundOrderReadSerializer(order, context={"request": request}).data
-        )
+        data = OutboundOrderReadSerializer(order, context={"request": request}).data
+        if order.approval_status == "WHS_PENDING":
+            data["replenishment_wait"] = outbound_services.replenishment_waiting_detail(
+                order
+            )
+        return Response(data)
 
     @action(detail=True, methods=["post"], url_path="withdraw")
     @transaction.atomic

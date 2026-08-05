@@ -1,7 +1,9 @@
+import datetime
 import threading
 from decimal import Decimal
 from unittest import mock
 
+import pytest
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
 from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
@@ -323,6 +325,30 @@ class InventoryPostingFailClosedTests(TestCase):
             ).exists()
         )
 
+    def test_default_handler_auto_selects_only_valid_ok_scans(self):
+        task = self._task(WmsTask.TaskType.RECEIVE)
+        ok_scan = self._scan(task, qty_base_delta=Decimal("1.000000"))
+        ignored_scan = self._scan(
+            task,
+            status=TaskScanLog.ScanStatus.IGNORED,
+            qty_base_delta=None,
+        )
+
+        affected = DefaultPostingHandler().handle(
+            task=task,
+            scans=None,
+            batch_no="INV-FC-HANDLER-AUTO",
+            note="auto scan selection",
+        )
+
+        ok_scan.refresh_from_db()
+        ignored_scan.refresh_from_db()
+        self.assertEqual(affected, 1)
+        self.assertIsNotNone(ok_scan.posted_at)
+        self.assertEqual(ok_scan.posting_batch, "INV-FC-HANDLER-AUTO")
+        self.assertIsNone(ignored_scan.posted_at)
+        self.assertEqual(ignored_scan.status, TaskScanLog.ScanStatus.IGNORED)
+
     def test_legacy_ship_alias_is_not_treated_as_dispatch(self):
         task = self._task(WmsTask.TaskType.OTHER)
         scan = self._scan(task)
@@ -631,6 +657,253 @@ class InventoryPostingFailClosedTests(TestCase):
         )
         self.assertEqual(len({tx.pair_id for tx in transactions}), 1)
         self.assertIsNotNone(transactions[0].pair_id)
+
+    @pytest.mark.integration
+    def test_putaway_preserves_batch_dates_and_total_inventory(self):
+        production_date = datetime.date(2026, 7, 1)
+        expiry_date = datetime.date(2027, 7, 1)
+        self.detail.production_date = production_date
+        self.detail.expiry_date = expiry_date
+        self.detail.save(
+            update_fields=[
+                "production_date",
+                "expiry_date",
+                "updated_at",
+            ]
+        )
+        destination = Location.objects.create(
+            warehouse=self.warehouse,
+            code="INVFC-01-01-03",
+            name="Tracked putaway destination",
+        )
+        task = self._task(WmsTask.TaskType.PUTAWAY)
+        scan = self._scan(task, qty_base_delta=Decimal("1.000000"))
+        scan.mfg_date = production_date
+        scan.exp_date = expiry_date
+        scan.save(update_fields=["mfg_date", "exp_date"])
+        line = scan.task_line
+        line.to_location = destination
+        line.save(update_fields=["to_location"])
+
+        before_total = sum(
+            InventoryDetail.objects.filter(
+                owner=self.owner,
+                product=self.product,
+            ).values_list("onhand_qty", flat=True),
+            Decimal("0"),
+        )
+        result = inventory_services.post_task(
+            task=task,
+            scans=[scan],
+            batch_no="INV-FC-PUTAWAY-TRACKED",
+        )
+
+        source = InventoryDetail.objects.get(pk=self.detail.pk)
+        target = InventoryDetail.objects.get(
+            owner=self.owner,
+            product=self.product,
+            location=destination,
+            batch_no="INV-FC-LOT",
+            production_date=production_date,
+            expiry_date=expiry_date,
+        )
+        transactions = list(
+            InventoryTransaction.objects.filter(
+                src_model="WmsTask",
+                src_id=task.pk,
+            ).order_by("id")
+        )
+        after_total = sum(
+            InventoryDetail.objects.filter(
+                owner=self.owner,
+                product=self.product,
+            ).values_list("onhand_qty", flat=True),
+            Decimal("0"),
+        )
+        self.assertEqual(result["affected_tx_count"], 2)
+        self.assertEqual(source.onhand_qty, Decimal("9.0000"))
+        self.assertEqual(target.onhand_qty, Decimal("1.0000"))
+        self.assertEqual(after_total, before_total)
+        self.assertEqual({tx.batch_no for tx in transactions}, {"INV-FC-LOT"})
+        self.assertEqual({tx.production_date for tx in transactions}, {production_date})
+        self.assertEqual({tx.expiry_date for tx in transactions}, {expiry_date})
+        self.assertEqual({tx.serial_no for tx in transactions}, {""})
+        self.assertEqual(
+            {tx.posting_batch for tx in transactions},
+            {"INV-FC-PUTAWAY-TRACKED"},
+        )
+        self.assertEqual(len({tx.pair_id for tx in transactions}), 1)
+
+    @pytest.mark.integration
+    def test_putaway_preserves_serial_number(self):
+        self.product.serial_control = True
+        self.product.save(update_fields=["serial_control"])
+        self.detail.onhand_qty = Decimal("1.0000")
+        self.detail.serial_no = "INV-FC-SERIAL-001"
+        self.detail.save()
+        destination = Location.objects.create(
+            warehouse=self.warehouse,
+            code="INVFC-01-01-06",
+            name="Serial putaway destination",
+        )
+        task = self._task(WmsTask.TaskType.PUTAWAY)
+        scan = self._scan(task, qty_base_delta=Decimal("1.000000"))
+        scan.serial_no = self.detail.serial_no
+        scan.save(update_fields=["serial_no"])
+        line = scan.task_line
+        line.to_location = destination
+        line.save(update_fields=["to_location"])
+        source_detail_id = self.detail.pk
+
+        inventory_services.post_task(
+            task=task,
+            scans=[scan],
+            batch_no="INV-FC-PUTAWAY-SERIAL",
+        )
+
+        self.assertTrue(
+            InventoryDetail.objects.filter(
+                owner=self.owner,
+                product=self.product,
+                location=destination,
+                serial_no="INV-FC-SERIAL-001",
+                onhand_qty=Decimal("1.0000"),
+            ).exists()
+        )
+        moved_detail = InventoryDetail.objects.get(
+            owner=self.owner,
+            product=self.product,
+            serial_no="INV-FC-SERIAL-001",
+            is_active=True,
+        )
+        self.assertEqual(moved_detail.pk, source_detail_id)
+        self.assertEqual(moved_detail.location_id, destination.pk)
+        self.assertFalse(
+            InventoryDetail.objects.filter(
+                owner=self.owner,
+                product=self.product,
+                location=self.location,
+                serial_no="INV-FC-SERIAL-001",
+                is_active=True,
+            ).exists()
+        )
+        transactions = list(
+            InventoryTransaction.objects.filter(
+                src_model="WmsTask",
+                src_id=task.pk,
+            ).order_by("id")
+        )
+        self.assertEqual(len(transactions), 2)
+        self.assertEqual(sum((tx.qty_delta for tx in transactions), Decimal("0")), 0)
+        self.assertEqual(len({tx.pair_id for tx in transactions}), 1)
+        self.assertEqual(
+            {tx.posting_batch for tx in transactions},
+            {"INV-FC-PUTAWAY-SERIAL"},
+        )
+
+    @pytest.mark.integration
+    def test_putaway_insufficient_source_inventory_rolls_back_both_sides(self):
+        destination = Location.objects.create(
+            warehouse=self.warehouse,
+            code="INVFC-01-01-04",
+            name="Insufficient putaway destination",
+        )
+        task = self._task(WmsTask.TaskType.PUTAWAY)
+        scan = self._scan(task, qty_base_delta=Decimal("11.000000"))
+        line = scan.task_line
+        line.to_location = destination
+        line.save(update_fields=["to_location"])
+
+        self._assert_rejected_without_effects(
+            task,
+            [scan],
+            tracked_scans=[scan],
+        )
+        self.assertFalse(
+            InventoryDetail.objects.filter(
+                owner=self.owner,
+                product=self.product,
+                location=destination,
+                onhand_qty__gt=0,
+            ).exists()
+        )
+
+    @pytest.mark.integration
+    def test_putaway_second_ledger_write_failure_is_atomic_and_retryable(self):
+        destination = Location.objects.create(
+            warehouse=self.warehouse,
+            code="INVFC-01-01-05",
+            name="Retry putaway destination",
+        )
+        task = self._task(WmsTask.TaskType.PUTAWAY)
+        scan = self._scan(task, qty_base_delta=Decimal("2.000000"))
+        line = scan.task_line
+        line.to_location = destination
+        line.save(update_fields=["to_location"])
+        real_insert = inventory_services._insert_tx
+        call_count = 0
+
+        def fail_second_insert(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise RuntimeError("simulated target ledger failure")
+            return real_insert(**kwargs)
+
+        with mock.patch(
+            "allapp.inventory.services._insert_tx",
+            side_effect=fail_second_insert,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "target ledger failure"):
+                inventory_services.post_task(
+                    task=task,
+                    scans=[scan],
+                    batch_no="INV-FC-PUTAWAY-FAILED",
+                )
+
+        task.refresh_from_db()
+        scan.refresh_from_db()
+        self.detail.refresh_from_db()
+        self.assertEqual(task.posting_status, WmsTask.PostingStatus.PENDING)
+        self.assertIsNone(scan.posted_at)
+        self.assertEqual(self.detail.onhand_qty, Decimal("10.0000"))
+        self.assertFalse(
+            InventoryTransaction.objects.filter(
+                src_model="WmsTask",
+                src_id=task.pk,
+            ).exists()
+        )
+        self.assertFalse(
+            InventoryDetail.objects.filter(
+                owner=self.owner,
+                product=self.product,
+                location=destination,
+                onhand_qty__gt=0,
+            ).exists()
+        )
+
+        result = inventory_services.post_task(
+            task=task,
+            scans=[scan],
+            batch_no="INV-FC-PUTAWAY-RETRY",
+        )
+        self.detail.refresh_from_db()
+        target = InventoryDetail.objects.get(
+            owner=self.owner,
+            product=self.product,
+            location=destination,
+            batch_no="INV-FC-LOT",
+        )
+        self.assertEqual(result["affected_tx_count"], 2)
+        self.assertEqual(self.detail.onhand_qty, Decimal("8.0000"))
+        self.assertEqual(target.onhand_qty, Decimal("2.0000"))
+        self.assertEqual(
+            InventoryTransaction.objects.filter(
+                src_model="WmsTask",
+                src_id=task.pk,
+            ).count(),
+            2,
+        )
 
     def test_nonzero_count_gain_writes_adjustment_transaction(self):
         task = self._task(WmsTask.TaskType.COUNT)

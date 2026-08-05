@@ -415,7 +415,7 @@ export const api = {
     const qs = buildQuery({
       search: params.search || '',
       page: params.page || 1,
-      page_size: params.page_size || 10,
+      page_size: params.page_size || 50,
     })
     return request({
       url: `/api/inventory/summary/?${qs}`,

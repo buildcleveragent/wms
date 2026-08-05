@@ -1,6 +1,6 @@
 # allapp/tasking/plugins/handlers.py
 from __future__ import annotations
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, Optional
 from uuid import uuid4
 
 from django.conf import settings
@@ -300,6 +300,14 @@ class DefaultPostingHandler(BasePostingHandler):
                 status=WmsTaskLine.Status.READY,
                 src_model="inventory.InventoryTransaction",
                 src_id=tx.pk,
+                plan_meta={
+                    "lot_no": tx.batch_no or "",
+                    "mfg_date": tx.production_date.isoformat()
+                    if tx.production_date
+                    else "",
+                    "exp_date": tx.expiry_date.isoformat() if tx.expiry_date else "",
+                    "serial_no": tx.serial_no or "",
+                },
             )
             line_count += 1
         log.info(
@@ -346,8 +354,8 @@ class DefaultPostingHandler(BasePostingHandler):
         """
         统一锁序 + 固定排序 + 调库存服务 + 扫描打点 + 落账任务头。
         要点：
-        - 调用方必须显式传入扫描，原集合按 ID 重取并加锁；
-        - 空集合、重复 ID 或丢失扫描直接抛错；其他业务状态由库存服务严格校验；
+        - 未显式传入扫描时，在锁内只选择当前任务可过账的 OK 事实；
+        - 显式传入时按 ID 重取并严格校验，不静默过滤非法记录；
         - 库存服务无交易 → 抛错回滚；
         - 扫描打点由库存服务完成并校验更新数量。
         """
@@ -408,30 +416,50 @@ class DefaultPostingHandler(BasePostingHandler):
                         .select_for_update()
                         .filter(task_id=task.id)
                         .order_by("id"))
-        _ = list(qs_lines)  # ← 关键：强制查询，确保锁生效
+        locked_lines = list(qs_lines)  # ← 关键：强制查询，确保锁生效
+        valid_line_ids = [line.id for line in locked_lines]
         log.info("tasking.post.lock_lines %s", ctx_text, extra=ctx)
 
         # ④ 再锁候选扫描（清空默认排序后只按 id 升序）
-        supplied_scans = [] if scans is None else list(scans)
-        scan_ids = []
-        for scan in supplied_scans:
-            scan_id = getattr(scan, "pk", None)
-            if scan_id is None:
-                raise ValidationError("过账扫描必须是已持久化的 TaskScanLog。")
-            scan_ids.append(scan_id)
+        if scans is None:
+            rejected = getattr(
+                TaskScanLog.ReviewStatus, "REJECTED", "REJECTED"
+            )
+            scans_locked = list(
+                TaskScanLog.objects.select_for_update()
+                .filter(
+                    task_id=task.id,
+                    task_line_id__in=valid_line_ids,
+                    status=TaskScanLog.ScanStatus.OK,
+                    posted_at__isnull=True,
+                    posting_journal_id__isnull=True,
+                    posting_batch__isnull=True,
+                )
+                .exclude(review_status=rejected)
+                .order_by()
+                .order_by("id")
+            )
+            scan_ids = [scan.id for scan in scans_locked]
+        else:
+            supplied_scans = list(scans)
+            scan_ids = []
+            for scan in supplied_scans:
+                scan_id = getattr(scan, "pk", None)
+                if scan_id is None:
+                    raise ValidationError("过账扫描必须是已持久化的 TaskScanLog。")
+                scan_ids.append(scan_id)
+            if len(scan_ids) != len(set(scan_ids)):
+                raise ValidationError("过账扫描包含重复记录。")
+            scans_locked = list(
+                TaskScanLog.objects.select_for_update()
+                .filter(id__in=scan_ids)
+                .order_by()
+                .order_by("id")
+            )
+            if len(scans_locked) != len(scan_ids):
+                raise ValidationError("部分过账扫描不存在。")
         if not scan_ids:
-            raise ValidationError("无可过账扫描（必须显式提供至少一条扫描）。")
-        if len(scan_ids) != len(set(scan_ids)):
-            raise ValidationError("过账扫描包含重复记录。")
-
-        scans_locked: List[TaskScanLog] = list(
-            TaskScanLog.objects.select_for_update()
-            .filter(id__in=scan_ids)
-            .order_by()
-            .order_by("id")
-        )
-        if len(scans_locked) != len(scan_ids):
-            raise ValidationError("部分过账扫描不存在。")
+            raise ValidationError("无可过账扫描。")
         log.info("tasking.post.lock_scans %s candidate_count=%s", ctx_text, len(scans_locked), extra=ctx)
 
         log.info(

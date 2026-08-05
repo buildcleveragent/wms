@@ -30,7 +30,8 @@
 	{
 	  "path": "pages/inventory/index",
 	  "style": {
-	    "navigationBarTitleText": "实时库存"
+	    "navigationBarTitleText": "实时库存",
+	    "enablePullDownRefresh": true
 	  }
 	}
 		

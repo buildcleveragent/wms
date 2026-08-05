@@ -3,6 +3,7 @@ import io
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
 from openpyxl import load_workbook
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -29,7 +30,12 @@ from allapp.inventory.services_quick_adjust import QuickAdjustInput, quick_adjus
 from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_date
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
-from allapp.outbound.services import allocate_inventory, promote_reserved_pick, unallocate_for_order
+from allapp.outbound.services import (
+    allocate_inventory,
+    confirm_warehouse_order,
+    promote_reserved_pick,
+    unallocate_for_order,
+)
 from allapp.products.models import Product, ProductUom
 from allapp.tasking.services import _run_posting_handler, approve_task, scan_task
 from allapp.tasking.models import (
@@ -135,6 +141,26 @@ class BusinessFlowTests(TestCase):
             Permission.objects.get(
                 content_type__app_label="outbound",
                 codename="approve_outbound_as_owner_manager",
+            ),
+        )
+        self.picker_user.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="tasking",
+                codename="claim_task_as_wh_operator",
+            ),
+            Permission.objects.get(
+                content_type__app_label="tasking",
+                codename="view_wmstask",
+            ),
+        )
+        self.reviewer_user.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="tasking",
+                codename="taskconfirm_as_wh_manager",
+            ),
+            Permission.objects.get(
+                content_type__app_label="tasking",
+                codename="view_wmstask",
             ),
         )
 
@@ -859,6 +885,7 @@ class BusinessFlowTests(TestCase):
             ).exists()
         )
 
+    @pytest.mark.e2e
     def test_flow_10_formal_inbound_putaway_to_outbound_full_chain(self):
         product = self.create_product("PUTSKU")
 
@@ -933,7 +960,10 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(outbound_approve.status_code, 200, outbound_approve.json())
 
         outbound_order = OutboundOrder.objects.get(pk=outbound_id)
-        pick_task = promote_reserved_pick(outbound_order, new_status=WmsTask.Status.RELEASED)
+        outbound_order, pick_task = confirm_warehouse_order(
+            outbound_order,
+            by_user=self.superuser,
+        )
         pick_line = pick_task.lines.get()
         self.assertEqual(pick_line.from_location_id, self.pick_location.id)
 

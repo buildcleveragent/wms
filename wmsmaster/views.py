@@ -1,4 +1,5 @@
 # wmsmaster/views.py
+from django.conf import settings
 from django.contrib.auth import password_validation
 from django.core.exceptions import ValidationError
 from django.db import connection
@@ -63,6 +64,8 @@ def profile_view(request):
         )
     )
     is_boss = UserRoleScope.Role.WAREHOUSE_BOSS in access_scope.roles
+    is_operator = UserRoleScope.Role.WAREHOUSE_OPERATOR in access_scope.roles
+    is_manager = UserRoleScope.Role.WAREHOUSE_MANAGER in access_scope.roles
 
     return Response(
         {
@@ -91,6 +94,20 @@ def profile_view(request):
                 "can_export_operations": access_scope.is_valid
                 and user.has_perm("reports.export_operations"),
                 "can_import_products": can_import_products(user),
+                "can_request_replenishment": settings.REPLENISHMENT_MANUAL_ENABLED
+                and is_operator
+                and user.has_perm("tasking.request_replenishment"),
+                "can_execute_replenishment": settings.REPLENISHMENT_PDA_ENABLED
+                and is_operator
+                and user.has_perm("tasking.claim_task_as_wh_operator"),
+                "can_approve_replenishment": settings.REPLENISHMENT_MANUAL_ENABLED
+                and is_manager
+                and user.has_perm("tasking.approve_replenishment"),
+                "can_manage_replenishment_policy": is_manager
+                and user.has_perm("tasking.manage_replenishment_policy"),
+                "can_retry_replenishment_posting": settings.REPLENISHMENT_PDA_ENABLED
+                and is_manager
+                and user.has_perm("tasking.taskconfirm_as_wh_manager"),
             },
             "menus": menus,  # 返回动态生成的菜单
         }

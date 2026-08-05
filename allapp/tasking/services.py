@@ -1,19 +1,14 @@
 # allapp/tasking/services.py
 from __future__ import annotations
-from allapp.locations.models import Location
-from allapp.products.models import Product
 import logging
 from django.apps import apps
 from django.db.models import OneToOneRel
 from allapp.tasking import services
 logger = logging.getLogger(__name__)
 
-from datetime import datetime
 from allapp.core.utils.log_context import build_log_payload
-from allapp.tasking.models import DocSequence
-from allapp.inventory.models import InventoryDetail
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any, Dict, Optional, Union, Tuple
+from typing import Any, Dict, Optional, Union
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.utils.module_loading import import_string
 from django.conf import settings
@@ -228,13 +223,12 @@ def _run_posting_handler(task_id: int, by_user=None, note: str = "过账"):
         from allapp.outbound.services import validate_pick_task_sale_mini_payment
 
         validate_pick_task_sale_mini_payment(task)
-    scans = list(TaskScanLog.objects.filter(task_id=task.id).order_by("id"))
     # 支持 settings 配字符串或可调用
     ctx, ctx_text = build_log_payload(task=task, user=by_user)
     logger.info(
         "tasking.posting.run.begin %s scans=%s note=%s",
         ctx_text,
-        len(scans),
+        "auto",
         note or "",
         extra=ctx,
     )
@@ -242,7 +236,7 @@ def _run_posting_handler(task_id: int, by_user=None, note: str = "过账"):
     handler = import_string(handler_cfg)() if isinstance(handler_cfg, str) else handler_cfg()
     created = handler.handle(
         task=task,
-        scans=scans,
+        scans=None,
         now=None,
         batch_no=None,
         note=note or "",
@@ -251,10 +245,29 @@ def _run_posting_handler(task_id: int, by_user=None, note: str = "过账"):
     logger.info(
         "tasking.posting.run.completed %s scans=%s created=%s",
         ctx_text,
-        len(scans),
+        "auto",
         created,
         extra=ctx,
     )
+    if (
+        task.task_type == WmsTask.TaskType.REPLEN
+        and getattr(settings, "REPLENISHMENT_DEMAND_ENABLED", False)
+    ):
+        try:
+            from allapp.outbound.services import resume_waiting_orders_after_replenishment
+
+            resumed = resume_waiting_orders_after_replenishment(task, by_user=by_user)
+            logger.info(
+                "tasking.replenishment.orders_resumed %s order_ids=%s",
+                ctx_text,
+                resumed,
+                extra=ctx,
+            )
+        except Exception:
+            # Inventory posting has already committed.  Do not mislabel a
+            # successful movement as failed because an order-resume follow-up
+            # needs an operational retry.
+            logger.exception("tasking.replenishment.order_resume_failed %s", ctx_text, extra=ctx)
     return {"ok": True, "tx_created": created}
 
 def _resolver():
@@ -276,7 +289,7 @@ def _compute_fp(task_id: int, barcode: str, inc_qty: Decimal,
 
 def _allow_overdone(task_type: str) -> bool:
     default = {
-        "RECEIVE": True, "PUTAWAY": True, "RELOC": True, "COUNT": True,
+        "RECEIVE": True, "PUTAWAY": True, "RELOC": True, "REPLEN": False, "COUNT": True,
         "PICK": False, "PACK": False, "DISPATCH": False, "LOAD": False,
     }
     cfg = getattr(settings, "TASKING_ALLOW_OVERDONE", None) or default
@@ -332,6 +345,9 @@ def scan_task(
     lot_no = r.get("lot_no")
     mfg_date = r.get("mfg_date")
     exp_date = r.get("exp_date")
+    serial_no = r.get("serial_no") or (
+        raw_label_key if code_type in {"SN", "SERIAL"} else None
+    )
 
     # —— 规则：只对“一箱一码 / 一件一码”的码使用 label_key —— #
     #   普通商品码（SKU/GTIN/ITEM/RAW）不占用 label_key，这样同一任务内可以多次扫码
@@ -471,6 +487,7 @@ def scan_task(
             lot_no=lot_no,
             mfg_date=mfg_date,
             exp_date=exp_date,
+            serial_no=serial_no,
             fp=fp,
         )
     except IntegrityError:
@@ -499,9 +516,8 @@ def scan_task(
         if line.qty_done > plan:
             raise ValidationError(f"{task.task_type} 不允许超量：{line.qty_done} > 计划 {plan}")
 
-    # PICK 扫码日志是追加式作业事实，直接返回；不得调用收货快照
-    # 覆盖旧日志，否则过账只能看到最后一次增量。
-    if task.task_type == WmsTask.TaskType.PICK:
+    # RECEIVE/PICK/移库类扫码是追加式事实，不得调用覆盖式收货快照。
+    if task.task_type != WmsTask.TaskType.COUNT:
         return {
             "idempotent": False,
             "line_id": line.id,
@@ -509,48 +525,19 @@ def scan_task(
             "scan_id": scan.id,
         }
 
-    # （在循环前）先生成收货快照版本号
-
-    # rev = save_receiving_snapshot(task_line_id=line.id, by_user=by_user)
-
-    p = Product.objects.only("id").get(id=product_id)
-
-    # 选一个库位：
-    # - 优先用传入的 location_id
-    # - 否则优先用行上的 from_location，再用 to_location
-    loc_obj = None
-    if location_id:
-        try:
-            loc_obj = Location.objects.only("id").get(id=location_id)
-        except Location.DoesNotExist:
-            loc_obj = getattr(line, "from_location", None) or getattr(line, "to_location", None)
-    else:
-        loc_obj = getattr(line, "from_location", None) or getattr(line, "to_location", None)
-
-
-    snap_items = [{
-        "product": p,  # 用 'product' 键，传实例最稳
-        "location": loc_obj,
-        "qty_ok": inc_qty,  # ★ 关键：save_receiving_snapshot 只看 qty_ok
-        "qty_base": float(inc_qty),  # 用 float，避免在快照内部被过滤
-        "qty": float(inc_qty),  # 兼容只认 qty 的实现
-        "lot_no": lot_no,
-        "mfg_date": mfg_date,
-        "exp_date": exp_date,
-        "uom_code": uom_code,
-        "pack_qty": float(pack_qty) if pack_qty else None,
-    }]
-
-    rev = save_receiving_snapshot(
+    # COUNT 表示最新盘点快照：旧事实置为 IGNORED，保留当前扫描且不重复建日志。
+    TaskScanLog.objects.filter(
         task_line_id=line.id,
-        items=snap_items,
-        operator=by_user,  # 传用户对象
-        source="PDA",
+        posting_journal__isnull=True,
+    ).exclude(pk=scan.pk).update(status="IGNORED", remark="SNAPSHOT_REPLACED")
+    WmsTaskLine.objects.filter(pk=line.pk).update(
+        scan_snapshot_rev=F("scan_snapshot_rev") + 1
     )
-
-    # 6) 回填当前扫描对应的快照版本号
-    TaskScanLog.objects.filter(pk=scan.pk).update(scan_snapshot_rev=rev)
-    scan.scan_snapshot_rev = rev
+    line.refresh_from_db(fields=["scan_snapshot_rev"])
+    TaskScanLog.objects.filter(pk=scan.pk).update(
+        scan_snapshot_rev=line.scan_snapshot_rev
+    )
+    scan.scan_snapshot_rev = line.scan_snapshot_rev
 
     return {"idempotent": False, "line_id": line.id, "qty_done": line.qty_done, "scan_id": scan.id}
 
@@ -645,7 +632,7 @@ def _assert_can_release(t: WmsTask) -> None:
         raise ValidationError(f"当前状态为 {t.status}，仅 DRAFT/READY 可发布。")
     if not t.lines.exists():
         raise ValidationError("任务无明细，不能发布。")
-    if not t.lines.filter(qty_plan__gt=0).exists():
+    if t.task_type != WmsTask.TaskType.COUNT and not t.lines.filter(qty_plan__gt=0).exists():
         raise ValidationError("所有任务行计划数量为 0，不能发布。")
     if (
         t.task_type == WmsTask.TaskType.PICK
@@ -678,6 +665,11 @@ def _request_actor(request):
 def task_release(*, request, task):
     """Release a task through the shared validation and assignment service."""
 
+    if task.task_type == WmsTask.TaskType.COUNT:
+        from allapp.tasking.counting import release_count_task
+
+        return release_count_task(task.id, by_user=_request_actor(request))
+
     from allapp.outbound.services import validate_pick_task_sale_mini_payment
 
     validate_pick_task_sale_mini_payment(task)
@@ -689,6 +681,9 @@ def task_release(*, request, task):
 @transaction.atomic
 def task_start(*, request, task):
     """Start a released task and keep its status transition auditable."""
+
+    if task.task_type == WmsTask.TaskType.COUNT:
+        raise ValidationError("盘点任务必须通过盘点专用认领和录入接口执行。")
 
     from allapp.outbound.services import validate_pick_task_sale_mini_payment
 
@@ -816,6 +811,13 @@ def task_complete(*, request, task):
 @transaction.atomic
 def task_cancel(*, request, task, reason=None):
     """Cancel only untouched tasks; outbound PICK cancellation goes via its order."""
+
+    if task.task_type == WmsTask.TaskType.COUNT:
+        from allapp.tasking.counting import cancel_count_task
+
+        return cancel_count_task(
+            task.id, by_user=_request_actor(request), note=reason or "取消盘点"
+        )
 
     locked = WmsTask.objects.select_for_update().get(pk=task.pk)
     if locked.status == WmsTask.Status.CANCELLED:
@@ -1637,13 +1639,13 @@ FINALIZE_STRATEGIES = {
         "after": lambda line, extra: None,  # 发运无额外操作
         "post": lambda line, extra, *, by_user=None, reason="AUTO": None,  # 发运不做即时过账
     },
-    "REPLENISH": {
-        "fetch": make_fetch(extra_model=ReplenishLineExtra, qty_attr="qty_moved", require_from=True, require_to=True),
+    "REPLEN": {
+        "fetch": make_fetch(extra_model=ReplenishLineExtra, qty_attr="qty_move", require_from=True, require_to=True),
         "after": lambda line, extra: None,  # 补货无额外操作
         "post":  lambda line, extra, *, by_user=None, reason="AUTO": None,  # 补货不做即时过账
     },
-    "RELLOC": {
-        "fetch": make_fetch(extra_model=RelocLineExtra, qty_attr="qty_moved", require_from=True, require_to=True),
+    "RELOC": {
+        "fetch": make_fetch(extra_model=RelocLineExtra, qty_attr="qty_move", require_from=True, require_to=True),
         "after": lambda line, extra: None,  # 移位无额外操作
         "post":  lambda line, extra, *, by_user=None, reason="AUTO": None,  # 移位不做即时过账
     },
@@ -1710,249 +1712,65 @@ def generate_count_lines(
     limit: int = 100000,                   # 最多生成行数
     method: str = "BLIND",               # 盘点方式（向导未给就走默认）
 ) -> int:
-    """
-    按盘点向导字段生成盘点任务行；仅使用现有字段：
-      owner/warehouse 来自 task，本函数不再重复传参。
-      zone/location/location_prefix/product/batch_no/ignore_zero/limit 对应向导页面。
-    """
+    """兼容旧调用；实际范围解析和行/扩展创建统一由 counting 服务完成。"""
+    from allapp.tasking.counting import CountScopeParams, _rebuild_count_lines
+    from allapp.tasking.models import CountTaskExtra
 
-    # 1) 基础范围：该任务的货主+仓库
-    qs = InventoryDetail.objects.filter(
-        owner=task.owner,
-        warehouse=task.warehouse,
-        is_active=True,
+    scope = "SKU" if product else ("LOC" if location or location_prefix else ("ZONE" if zone_type else "ALL"))
+    params = CountScopeParams(
+        warehouse_id=task.warehouse_id,
+        owner_id=task.owner_id,
+        scope=scope,
+        zone_type=getattr(zone_type, "pk", zone_type),
+        location_id=getattr(location, "pk", location),
+        location_prefix=location_prefix,
+        product_id=getattr(product, "pk", product),
+        batch_no=batch_no,
+        exclude_zero_onhand=ignore_zero,
+        max_lines=limit,
+        blind=(method or "BLIND") == "BLIND",
+        task_remark=task.remark or "",
     )
-
-    # 2) 逐项套用向导筛选（全部是现有字段）
-    if zone_type:
-        qs = qs.filter(zone_type=zone_type)
-
-    if location:
-        qs = qs.filter(location=location)
-    elif location_prefix:
-        prefix = (location_prefix or "").strip().upper()
-        if prefix:
-            qs = qs.filter(location__code__istartswith=prefix)
-
-    if product:
-        qs = qs.filter(product=product)
-
-    if batch_no:
-        bn = (batch_no or "").strip().upper()
-        if bn:
-            # 库存明细里是 batch_no（字符串）
-            qs = qs.filter(batch_no__iexact=bn)
-
-    if ignore_zero:
-        # “忽略在库为 0 的明细”：按账面库存 onhand 过滤
-        qs = qs.filter(onhand_qty__gt=0)
-
-    # 3) 选取需要的字段，排序 & 限制数量
-    qs = (
-        qs.select_related("product", "location")
-          .order_by("location__code", "product__code", "expiry_date", "batch_no")[:limit]
+    extra, _ = CountTaskExtra.objects.update_or_create(
+        task=task,
+        defaults={
+            "scope": params.scope,
+            "blind": params.blind,
+            "freeze": True,
+            "scope_payload": params.payload(),
+            "root_task": task,
+            "round_no": 1,
+        },
     )
-
-    # 4) 落任务行 + 行扩展（账面数快照放在 qty_book；实盘数初始为 0）
-    created = 0
-    for inv in qs:
-        line = WmsTaskLine.objects.create(
-            task=task,
-            product=inv.product,
-            from_location=inv.location,
-            qty_plan=inv.onhand_qty or Decimal("0"),
-            status=WmsTaskLine.Status.DRAFT,
-        )
-        CountLineExtra.objects.create(
-            line=line,
-            lot_no=inv.batch_no or "",           # 你模型里批次是 batch_no（字符串）
-            exp_date=getattr(inv, "expiry_date", None),
-            # lpn_no：库存没有该字段，不能用于筛选；这里仅占位为空串
-            qty_book=inv.onhand_qty or Decimal("0"),
-            qty_counted=Decimal("0"),
-            method=method,
-        )
-        created += 1
-
+    created, _truncated = _rebuild_count_lines(task, params)
     return created
 
 @transaction.atomic
 def finalize_count_task_after_logs(task: WmsTask, *, by_user=None) -> str:
-    """
-    在【所有行的 CountLineExtra 都已 COUNTED 且行的 ScanLog 已写好】之后调用。
-
-    分支：
-      - 仍有未盘行：返回 "NOOP_PENDING_LINES"
-      - 有差异：
-          * 若可进入下一轮（未达上限）：创建下一轮复盘任务；当前任务仅置 COMPLETED；返回 "NEXT_ROUND_CREATED"
-          * 若已达上限：当前任务直接 COMPLETED + APPROVED + PENDING；返回 "FINALIZED_FOR_POSTING"
-      - 无差异：当前任务直接 COMPLETED + APPROVED + PENDING；返回 "COMPLETED_NO_DIFF"
-    """
+    """兼容旧收尾钩子；盘点状态机统一委托给 counting 服务。"""
     if not task or task.task_type != WmsTask.TaskType.COUNT:
         return "NOOP_NOT_COUNT"
-    ctx, ctx_text = build_log_payload(task=task, user=by_user)
-
-    # 若已处于审核/过账流，不再处理
-    if task.review_status == WmsTask.ReviewStatus.APPROVED or \
-       task.posting_status in (WmsTask.PostingStatus.PENDING, WmsTask.PostingStatus.POSTED):
-        logger.info(
-            "tasking.count.finalize.skip_locked %s review_status=%s posting_status=%s",
-            ctx_text,
-            task.review_status,
-            task.posting_status,
-            extra=ctx,
-        )
+    if task.review_status in {
+        WmsTask.ReviewStatus.APPROVED,
+        WmsTask.ReviewStatus.PENDING,
+        WmsTask.ReviewStatus.NEED_RECOUNT,
+    } or task.posting_status in {
+        WmsTask.PostingStatus.PENDING,
+        WmsTask.PostingStatus.POSTED,
+    }:
         return "NOOP_LOCKED"
-
-    line_ids = list(task.lines.values_list("id", flat=True))
-    if not line_ids:
-        # 没有行，当作无差异直接完成
-
-        WmsTask.objects.filter(pk=task.pk).update(
-            status=WmsTask.Status.COMPLETED,
-            review_status=WmsTask.ReviewStatus.APPROVED,
-            posting_status=WmsTask.PostingStatus.PENDING,
-        )
-        logger.warning(
-            "tasking.count.finalize.no_lines %s",
-            ctx_text,
-            extra=ctx,
-        )
-        return "COMPLETED_NO_LINES"
-
-    # 还有未盘行 → 不收尾
-    if CountLineExtra.objects.filter(line_id__in=line_ids).exclude(count_status="COUNTED").exists():
-        logger.info(
-            "tasking.count.finalize.pending_lines %s line_count=%s",
-            ctx_text,
-            len(line_ids),
-            extra=ctx,
-        )
+    if not task.lines.exists() or CountLineExtra.objects.filter(line__task=task).exclude(
+        count_status="COUNTED"
+    ).exists():
         return "NOOP_PENDING_LINES"
+    from allapp.tasking.counting import submit_count_task
 
-    # 差异集合（任一行 qty_diff != 0 即视为有差异）
-    diff_qs = (CountLineExtra.objects
-               .filter(line_id__in=line_ids)
-               .exclude(qty_diff=0)
-               .exclude(qty_diff__isnull=True))
-
-    # 取当前轮次（同一任务内应一致；取任一行即可）
-    any_extra = (CountLineExtra.objects
-                 .filter(line_id__in=line_ids)
-                 .only("countorder")
-                 .first())
-    cur_order = any_extra.countorder if any_extra else CountLineExtra.CountOrder.FIRST
-
-    ORDER = ("FIRST", "SECOND", "THIRD")
-    limit = max(1, min(getattr(settings, "COUNT_MAX_TIMES", 3), len(ORDER)))
-    i = ORDER.index(cur_order)
-
-    if diff_qs.exists():
-        # —— 有差异 —— #
-        if i + 1 < limit:
-            # 还有下一轮：创建复盘任务（幂等防重复）
-            logger.warning(
-                "tasking.count.finalize.diff_detected %s current_order=%s next_order=%s limit=%s",
-                ctx_text,
-                cur_order,
-                ORDER[i + 1],
-                limit,
-                extra=ctx,
-            )
-            remark = f"任务号{task.task_no}的复盘"
-            exists_rc = WmsTask.objects.filter(
-                task_type=WmsTask.TaskType.COUNT,
-                status=WmsTask.Status.DRAFT,
-                remark=remark,
-                owner=task.owner,
-                warehouse=task.warehouse,
-            ).exists()
-            if not exists_rc:
-                biz_date = datetime.today().date()
-                count_task_no = DocSequence.next_code(
-                    doc_type="PD",
-                    warehouse=task.warehouse,
-                    owner=task.owner,
-                    biz_date=biz_date,
-                )
-                rc = WmsTask.objects.create(
-                    task_no=count_task_no,
-                    task_type=WmsTask.TaskType.COUNT,
-                    status=WmsTask.Status.DRAFT,
-                    owner=task.owner,
-                    warehouse=task.warehouse,
-                    remark=remark,
-                    created_by=by_user,
-                )
-                new_order = ORDER[i + 1]
-                # 用本轮的账面快照作为下一轮的计划/账面
-                for d in diff_qs.select_related("line", "line__product", "line__from_location"):
-                    line = WmsTaskLine.objects.create(
-                        task=rc,
-                        product=d.line.product,
-                        from_location=d.line.from_location,
-                        qty_plan=d.qty_book,                  # 用账面数做下一轮计划
-                        status=WmsTaskLine.Status.DRAFT,
-                    )
-                    CountLineExtra.objects.create(
-                        line=line,
-                        lot_no=d.lot_no,
-                        exp_date=d.exp_date,
-                        qty_book=d.qty_book,                  # 延续账面快照
-                        qty_counted=Decimal("0"),
-                        method="BLIND",
-                        countorder=new_order,
-                    )
-                next_ctx, next_ctx_text = build_log_payload(task=rc, user=by_user)
-                logger.info(
-                    "tasking.count.finalize.next_round_created %s parent_task_id=%s parent_task_no=%s",
-                    next_ctx_text,
-                    task.id,
-                    task.task_no,
-                    extra=next_ctx,
-                )
-
-            # 当前轮只置已完成，不审核不过账
-            WmsTask.objects.filter(pk=task.pk).update(
-                status=WmsTask.Status.COMPLETED,
-                review_status=WmsTask.ReviewStatus.NEED_RECOUNT,
-                posting_status=WmsTask.PostingStatus.NEED_RECOUNT,
-            )
-            logger.info(
-                "tasking.count.finalize.need_recount %s",
-                ctx_text,
-                extra=ctx,
-            )
-            return "NEXT_ROUND_CREATED"
-
-        else:
-            # 达到上限，不能再复盘：直接进入审核/过账流
-            WmsTask.objects.filter(pk=task.pk).update(
-                status=WmsTask.Status.COMPLETED,
-                review_status=WmsTask.ReviewStatus.APPROVED,
-                posting_status=WmsTask.PostingStatus.PENDING,
-            )
-            logger.warning(
-                "tasking.count.finalize.max_round_reached %s current_order=%s limit=%s",
-                ctx_text,
-                cur_order,
-                limit,
-                extra=ctx,
-            )
-            return "FINALIZED_FOR_POSTING_WITH_DIFF"
-
-    # —— 无差异 —— #
-    WmsTask.objects.filter(pk=task.pk).update(
-        status=WmsTask.Status.COMPLETED,
-        review_status=WmsTask.ReviewStatus.APPROVED,
-        posting_status=WmsTask.PostingStatus.PENDING,
-    )
-    logger.info(
-        "tasking.count.finalize.completed_no_diff %s",
-        ctx_text,
-        extra=ctx,
-    )
-    return "COMPLETED_NO_DIFF"
+    result = submit_count_task(task.id, by_user=by_user)
+    return {
+        "AUTO_POSTED_NO_DIFF": "COMPLETED_NO_DIFF",
+        "RECOUNT_RELEASED": "NEXT_ROUND_CREATED",
+        "PENDING_APPROVAL": "FINALIZED_FOR_POSTING_WITH_DIFF",
+    }[result["outcome"]]
 
 
 
@@ -1973,7 +1791,8 @@ def get_line_extra_generic(tl: WmsTaskLine):
         getattr(WmsTask.TaskType, "PACK",     None): "PackLineExtra",
         getattr(WmsTask.TaskType, "LOAD",     None): "LoadLineExtra",
         getattr(WmsTask.TaskType, "DISPATCH", None): "DispatchLineExtra",
-        getattr(WmsTask.TaskType, "REPLENISH",None): "ReplenishLineExtra",
+        getattr(WmsTask.TaskType, "REPLEN",    None): "ReplenishLineExtra",
+        getattr(WmsTask.TaskType, "RELOC",     None): "RelocLineExtra",
         getattr(WmsTask.TaskType, "COUNT",    None): "CountLineExtra",
         getattr(WmsTask.TaskType, "ADJUST",   None): "AdjustLineExtra",
     }

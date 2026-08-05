@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Sum
+from django.db.models import F, Q, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import mixins, permissions, status, viewsets
@@ -41,6 +41,7 @@ from allapp.inbound.services import (
     finalize_receive_line_with_variance,
     receive_goods_without_order,
 )
+from allapp.inventory.models import InventoryDetail
 from allapp.locations.models import Location
 from allapp.tasking import services as task_services
 from allapp.tasking.models import (
@@ -622,7 +623,8 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
         if processed_total > planned_total and not variance_reason:
             raise ValidationError("超收必须填写差异原因。")
         if (
-            payload.get("finalize")
+            not line.product.serial_control
+            and payload.get("finalize")
             and processed_total != planned_total
             and not variance_reason
         ):
@@ -634,25 +636,100 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             extra = ReceiveLineExtra.objects.select_for_update().get(line=line)
         except ReceiveLineExtra.DoesNotExist as exc:
             raise ValidationError("任务行缺少收货扩展。") from exc
+        serial_no = (payload.get("serial_no") or "").strip().upper()
+        is_serial = bool(line.product.serial_control)
+        if is_serial:
+            if not serial_no:
+                raise ValidationError({"serial_no": "序列号商品必须逐件录入序列号。"})
+            if (
+                payload["qty_ok"] != Decimal("1")
+                or payload["qty_damage"] != 0
+                or payload["qty_reject"] != 0
+            ):
+                raise ValidationError("序列号商品上架链路仅接受逐件合格收货（qty_ok=1）。")
+            duplicate_scan = TaskScanLog.objects.filter(
+                owner_id=task.owner_id,
+                product_id=line.product_id,
+                serial_no__iexact=serial_no,
+                status=TaskScanLog.ScanStatus.OK,
+            ).exists()
+            duplicate_inventory = InventoryDetail.objects.filter(
+                owner_id=task.owner_id,
+                product_id=line.product_id,
+                serial_no_norm=serial_no,
+                is_active=True,
+            ).exists()
+            if duplicate_scan or duplicate_inventory:
+                raise ValidationError({"serial_no": "该序列号已存在，不能重复收货。"})
 
-        save_receiving_snapshot(
-            task_line_id=line.pk,
-            items=[
-                {
-                    "product": line.product,
-                    "location": location,
-                    "qty_ok": payload["qty_ok"],
-                    "lot_no": payload.get("lot_no") or "",
-                    "mfg_date": payload.get("mfg_date"),
-                    "exp_date": payload.get("exp_date"),
-                }
-            ],
-            operator=request.user,
-            source="PDA",
-        )
-        extra.qty_ok = payload["qty_ok"]
-        extra.qty_damage = payload["qty_damage"]
-        extra.qty_reject = payload["qty_reject"]
+            new_qty_ok = Decimal(extra.qty_ok or 0) + Decimal("1")
+            cumulative_total = (
+                new_qty_ok
+                + Decimal(extra.qty_damage or 0)
+                + Decimal(extra.qty_reject or 0)
+            )
+            if cumulative_total > planned_total and not variance_reason:
+                raise ValidationError("超收必须填写差异原因。")
+            WmsTaskLine.objects.filter(pk=line.pk).update(
+                scan_snapshot_rev=F("scan_snapshot_rev") + 1
+            )
+            line.refresh_from_db(fields=["scan_snapshot_rev"])
+            TaskScanLog.objects.create(
+                owner_id=task.owner_id,
+                warehouse_id=task.warehouse_id,
+                task=task,
+                task_line=line,
+                product=line.product,
+                location=location,
+                method=TaskScanLog.Method.SCAN,
+                source="PDA",
+                by_user=request.user,
+                barcode=serial_no,
+                label_key=serial_no,
+                code_type="SERIAL",
+                qty_base_delta=Decimal("1"),
+                lot_no=payload.get("lot_no") or None,
+                mfg_date=payload.get("mfg_date"),
+                exp_date=payload.get("exp_date"),
+                serial_no=serial_no,
+                status=TaskScanLog.ScanStatus.OK,
+                fp=hashlib.sha256(
+                    f"inbound-receipt-serial:{task.pk}:{line.pk}:{serial_no}".encode(
+                        "utf-8"
+                    )
+                ).hexdigest(),
+                scan_snapshot_rev=line.scan_snapshot_rev,
+            )
+            extra.qty_ok = new_qty_ok
+            effective_total = cumulative_total
+        else:
+            if serial_no:
+                raise ValidationError({"serial_no": "非序列号商品不能录入序列号。"})
+            save_receiving_snapshot(
+                task_line_id=line.pk,
+                items=[
+                    {
+                        "product": line.product,
+                        "location": location,
+                        "qty_ok": payload["qty_ok"],
+                        "lot_no": payload.get("lot_no") or "",
+                        "mfg_date": payload.get("mfg_date"),
+                        "exp_date": payload.get("exp_date"),
+                    }
+                ],
+                operator=request.user,
+                source="PDA",
+            )
+            extra.qty_ok = payload["qty_ok"]
+            extra.qty_damage = payload["qty_damage"]
+            extra.qty_reject = payload["qty_reject"]
+            effective_total = processed_total
+        if (
+            payload.get("finalize")
+            and effective_total != planned_total
+            and not variance_reason
+        ):
+            raise ValidationError("结束差异收货行时必须填写差异原因。")
         extra.lot_no = payload.get("lot_no") or None
         extra.mfg_date = payload.get("mfg_date")
         extra.exp_date = payload.get("exp_date")
@@ -664,7 +741,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
         except DjangoValidationError as exc:
             raise _drf_validation_error(exc) from exc
 
-        if processed_total != planned_total and variance_reason:
+        if effective_total != planned_total and variance_reason:
             WmsTaskLine.objects.filter(pk=line.pk).update(
                 remark=variance_reason[:200],
                 updated_by=request.user,
@@ -693,6 +770,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 "qty_ok": str(payload["qty_ok"]),
                 "qty_damage": str(payload["qty_damage"]),
                 "qty_reject": str(payload["qty_reject"]),
+                "serial_no": serial_no,
                 "variance_reason": variance_reason,
                 "request_id": payload["request_id"],
             },
@@ -758,6 +836,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             line.save(update_fields=["to_location", "scan_snapshot_rev", "updated_at"])
         except DjangoValidationError as exc:
             raise _drf_validation_error(exc) from exc
+        tracking = line.plan_meta or {}
         try:
             with transaction.atomic():
                 TaskScanLog.objects.create(
@@ -771,6 +850,10 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
                     source="PDA",
                     by_user=request.user,
                     qty_base_delta=payload["qty"],
+                    lot_no=tracking.get("lot_no") or None,
+                    mfg_date=tracking.get("mfg_date") or None,
+                    exp_date=tracking.get("exp_date") or None,
+                    serial_no=tracking.get("serial_no") or None,
                     status=TaskScanLog.ScanStatus.OK,
                     fp=scan_fp,
                     scan_snapshot_rev=line.scan_snapshot_rev,

@@ -13,7 +13,7 @@ from allapp.billing.enums import AccrualStatus, BillStatus
 from allapp.billing.models import Bill, BillingAccrual, BillingJobRun
 from allapp.billing.services.ledger import financial_ledger_accruals
 from allapp.inbound.models import InboundOrder
-from allapp.inventory.models import InventoryDetail, InventorySummary, ReviewDifference
+from allapp.inventory.models import InventoryDetail, InventorySummary
 from allapp.locations.models import Location, Warehouse
 from allapp.outbound.models import OutboundOrder
 from allapp.tasking.models import WmsTask
@@ -547,7 +547,7 @@ def _build_trend_payload(*, inbound_qs, outbound_qs, accrual_qs, start_date: dat
     return rows
 
 
-def _build_alert_counts(*, task_qs, inventory_qs, bill_qs, job_qs, review_diff_qs, today, now):
+def _build_alert_counts(*, task_qs, inventory_qs, bill_qs, job_qs, today, now):
     closed_statuses = [WmsTask.Status.COMPLETED, WmsTask.Status.CANCELLED]
     return {
         "overdue_tasks": task_qs.exclude(status__in=closed_statuses).filter(
@@ -570,8 +570,10 @@ def _build_alert_counts(*, task_qs, inventory_qs, bill_qs, job_qs, review_diff_q
             status=BillingJobRun.Status.FAILED,
             service_date__gte=today - datetime.timedelta(days=7),
         ).count(),
-        "review_differences": review_diff_qs.exclude(
-            status__in=[ReviewDifference.Status.COMPLETED, ReviewDifference.Status.CANCELLED]
+        "review_differences": task_qs.filter(
+            task_type=WmsTask.TaskType.COUNT,
+            status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.PENDING,
         ).count(),
     }
 
@@ -672,18 +674,6 @@ def build_boss_home_payload(*, user, owner_id: int | None = None, warehouse_id: 
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )
-    review_diff_qs = _apply_scope_filter(
-        scope_queryset_for_user(
-            ReviewDifference.objects.select_related("warehouse"),
-            user,
-            owner_field=None,
-            warehouse_field="warehouse_id",
-        ),
-        owner_id=owner_id,
-        warehouse_id=warehouse_id,
-        owner_field=None,
-        warehouse_field="warehouse_id",
-    )
     location_qs = _apply_scope_filter(
         scope_queryset_for_user(
             Location.objects.filter(is_disabled=False),
@@ -737,7 +727,6 @@ def build_boss_home_payload(*, user, owner_id: int | None = None, warehouse_id: 
         inventory_qs=inventory_qs,
         bill_qs=bill_qs,
         job_qs=job_qs,
-        review_diff_qs=review_diff_qs,
         today=today,
         now=now,
     )
@@ -921,19 +910,6 @@ def build_boss_alert_payload(
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )
-    review_diff_qs = _apply_scope_filter(
-        scope_queryset_for_user(
-            ReviewDifference.objects.select_related("warehouse"),
-            user,
-            owner_field=None,
-            warehouse_field="warehouse_id",
-        ),
-        owner_id=owner_id,
-        warehouse_id=warehouse_id,
-        owner_field=None,
-        warehouse_field="warehouse_id",
-    )
-
     closed_statuses = [WmsTask.Status.COMPLETED, WmsTask.Status.CANCELLED]
 
     overdue_tasks = []
@@ -1039,15 +1015,18 @@ def build_boss_alert_payload(
 
     review_differences = []
     for diff in (
-        review_diff_qs.exclude(status__in=[ReviewDifference.Status.COMPLETED, ReviewDifference.Status.CANCELLED])
-        .order_by("created_at", "id")[:item_limit]
+        task_qs.filter(
+            task_type=WmsTask.TaskType.COUNT,
+            status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.PENDING,
+        ).order_by("finished_at", "id")[:item_limit]
     ):
         review_differences.append(
             {
                 "id": diff.id,
-                "order_no": diff.order_no,
-                "status": diff.status,
-                "created_at": diff.created_at,
+                "order_no": diff.task_no,
+                "status": diff.review_status,
+                "created_at": diff.finished_at or diff.created_at,
                 "warehouse": diff.warehouse_id,
                 "warehouse_name": getattr(diff.warehouse, "name", ""),
             }
@@ -1102,8 +1081,10 @@ def build_boss_alert_payload(
         "review_differences": {
             "label": "盘点差异待处理",
             "severity": "medium",
-            "count": review_diff_qs.exclude(
-                status__in=[ReviewDifference.Status.COMPLETED, ReviewDifference.Status.CANCELLED]
+            "count": task_qs.filter(
+                task_type=WmsTask.TaskType.COUNT,
+                status=WmsTask.Status.COMPLETED,
+                review_status=WmsTask.ReviewStatus.PENDING,
             ).count(),
             "items": review_differences,
         },

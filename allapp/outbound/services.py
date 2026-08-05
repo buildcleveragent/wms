@@ -5,7 +5,9 @@ import logging
 from datetime import date
 from decimal import Decimal
 
+from django.conf import settings
 from django.utils import timezone
+from allapp.locations.models import Warehouse
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F, Q, Sum
@@ -21,6 +23,7 @@ from allapp.tasking.models import (
     PackTaskExtra,
     ReviewLineExtra,
     ReviewTaskExtra,
+    ReplenishmentPolicy,
     TaskStatusLog,
     WmsTask,
     WmsTaskLine,
@@ -222,6 +225,30 @@ def confirm_warehouse_order(order, *, by_user):
         raise ValidationError("仅已提交、货主审核通过且未关闭的订单可由仓库确认。")
 
     validate_sale_mini_payment_for_fulfillment(locked)
+    shortages = allocation_shortfalls(locked)
+    if shortages and settings.REPLENISHMENT_DEMAND_ENABLED:
+        from allapp.tasking.replenishment import create_demand_tasks
+
+        create_demand_tasks(locked, shortages, by_user=by_user)
+        locked.approval_status = "WHS_PENDING"
+        locked.approved_by_warehouse = by_user
+        locked.approved_at_warehouse = timezone.now()
+        locked.updated_by = by_user
+        locked.save(
+            update_fields=[
+                "approval_status", "approved_by_warehouse", "approved_at_warehouse",
+                "updated_by", "updated_at",
+            ]
+        )
+        task = (
+            WmsTask.objects.filter(task_type=TASK_TYPE_PICK)
+            .filter(_task_source_q(locked))
+            .exclude(status=WmsTask.Status.CANCELLED)
+            .order_by("id")
+            .first()
+        )
+        return locked, task
+
     locked.approval_status = "WHS_APPROVED"
     locked.approved_by_warehouse = by_user
     locked.approved_at_warehouse = timezone.now()
@@ -237,6 +264,71 @@ def confirm_warehouse_order(order, *, by_user):
     )
     task = promote_reserved_pick(locked, by_user=by_user)
     return locked, task
+
+
+@transaction.atomic
+def resume_waiting_orders_after_replenishment(replenishment_task, *, by_user=None):
+    """Retry pick allocation and release orders unblocked by a replenishment."""
+
+    from allapp.outbound.models import OutboundOrder
+
+    product_ids = set(replenishment_task.lines.values_list("product_id", flat=True))
+    if not product_ids:
+        return []
+    order_ids = list(
+        OutboundOrder.objects.filter(
+            owner_id=replenishment_task.owner_id,
+            warehouse_id=replenishment_task.warehouse_id,
+            approval_status="WHS_PENDING",
+            is_closed=False,
+            lines__product_id__in=product_ids,
+        )
+        .distinct()
+        .order_by("created_at", "id")
+        .values_list("id", flat=True)
+    )
+    resumed = []
+    for order_id in order_ids:
+        order = OutboundOrder.objects.select_for_update().get(pk=order_id)
+        allocate_inventory(order, by_user=by_user, allow_backorder=True)
+        if allocation_shortfalls(order):
+            continue
+        order.approval_status = "WHS_APPROVED"
+        order.updated_by = by_user
+        order.save(update_fields=["approval_status", "updated_by", "updated_at"])
+        promote_reserved_pick(order, by_user=by_user)
+        resumed.append(order.pk)
+    return resumed
+
+
+def replenishment_waiting_detail(order) -> dict:
+    """Return the deterministic shortage and active demand-task view for an order."""
+
+    shortages = allocation_shortfalls(order)
+    tasks = (
+        WmsTask.objects.filter(
+            task_type=WmsTask.TaskType.REPLEN,
+            status__in=[
+                WmsTask.Status.DRAFT,
+                WmsTask.Status.READY,
+                WmsTask.Status.RELEASED,
+                WmsTask.Status.IN_PROGRESS,
+            ],
+        )
+        .filter(
+            Q(source_model="OutboundOrder", source_pk=str(order.pk))
+            | Q(replenishtaskextra__demand_order_ids__contains=[order.pk])
+        )
+        .distinct()
+        .order_by("id")
+    )
+    return {
+        "task_nos": list(tasks.values_list("task_no", flat=True)),
+        "shortages": [
+            {key: (str(value) if isinstance(value, Decimal) else value) for key, value in row.items()}
+            for row in shortages
+        ],
+    }
 
 
 def validate_standard_order_sale_prices(order) -> None:
@@ -405,7 +497,7 @@ def _compute_line_demands(order) -> list:
 # Helper: 获取按 FEFO 排序的库存明细（冻结量）
 def _fefo_details_qs(owner_id: int, warehouse_id: int, product_id: int):
     """获取某产品按 FEFO 排序的库存明细，按库存可用量递减"""
-    return (
+    qs = (
         InventoryDetail.objects
         .filter(
             owner_id=owner_id,
@@ -421,12 +513,27 @@ def _fefo_details_qs(owner_id: int, warehouse_id: int, product_id: int):
         )
         .only("id", "location_id", "available_qty", "allocated_qty", "onhand_qty")
     )
+    target_ids = []
+    if settings.REPLENISHMENT_DEMAND_ENABLED:
+        target_ids = list(
+            ReplenishmentPolicy.objects.filter(
+                owner_id=owner_id,
+                warehouse_id=warehouse_id,
+                product_id=product_id,
+                demand_enabled=True,
+                is_active=True,
+            ).values_list("target_location_id", flat=True)
+        )
+    if target_ids:
+        qs = qs.filter(location_id__in=target_ids)
+    return qs
 
 # 冻结库存：available → allocated，并将切分结果写入保留态任务（RESERVED）
 @transaction.atomic
 def allocate_inventory(order, by_user=None, allow_backorder=True):
     """货主管理员确认时，冻结库存，并生成/刷新保留拣货任务（RESERVED）"""
     order = type(order).objects.select_for_update().get(pk=order.pk)
+    Warehouse.objects.select_for_update().get(pk=order.warehouse_id)
     ctx, ctx_text = build_log_payload(order=order, user=by_user)
     logger.info("outbound.allocate_inventory.begin %s", ctx_text, extra=ctx)
     task = _get_or_create_reserved_task(order, by_user=by_user)
@@ -461,6 +568,17 @@ def allocate_inventory(order, by_user=None, allow_backorder=True):
                 continue
 
             alloc = min(avail, remaining)
+
+            from allapp.tasking.counting import assert_inventory_not_count_locked
+
+            assert_inventory_not_count_locked(
+                owner_id=det.owner_id,
+                warehouse_id=det.warehouse_id,
+                product_id=det.product_id,
+                location_id=det.location_id,
+                batch_no=det.batch_no,
+                task=task,
+            )
 
             # 硬分配：冻结 available → allocated
             updated = (
@@ -1429,6 +1547,53 @@ def unallocate_for_order(order, *, by_user=None) -> Decimal:
     return released
 
 
+def _cancel_unstarted_demand_replenishments(order, *, by_user=None):
+    tasks = (
+        WmsTask.objects.select_for_update()
+        .select_related("replenishtaskextra")
+        .filter(
+            task_type=WmsTask.TaskType.REPLEN,
+            status__in=[
+                WmsTask.Status.DRAFT,
+                WmsTask.Status.READY,
+                WmsTask.Status.RELEASED,
+            ],
+        )
+        .filter(
+            Q(source_model="OutboundOrder", source_pk=str(order.pk))
+            | Q(replenishtaskextra__demand_order_ids__contains=[order.pk])
+        )
+    )
+    for task in tasks:
+        extra = getattr(task, "replenishtaskextra", None)
+        linked_order_ids = set(getattr(extra, "demand_order_ids", None) or [])
+        other_order_ids = linked_order_ids - {order.pk}
+        if other_order_ids:
+            extra.demand_order_ids = sorted(other_order_ids)
+            extra.updated_by = by_user
+            extra.save(
+                update_fields=["demand_order_ids", "updated_by", "updated_at"]
+            )
+            continue
+        if task.lines.filter(qty_done__gt=0).exists():
+            continue
+        old_status = task.status
+        task.lines.exclude(status=WmsTaskLine.Status.CANCELLED).update(
+            status=WmsTaskLine.Status.CANCELLED, updated_by=by_user
+        )
+        task.status = WmsTask.Status.CANCELLED
+        task.finished_at = timezone.now()
+        task.updated_by = by_user
+        task.save(update_fields=["status", "finished_at", "updated_by", "updated_at"])
+        TaskStatusLog.objects.create(
+            task=task,
+            old_status=old_status,
+            new_status=WmsTask.Status.CANCELLED,
+            changed_by=by_user,
+            note="来源出库单取消，补货任务自动取消",
+        )
+
+
 @transaction.atomic
 def cancel_order(order, *, by_user, reason="货主管理员取消订单"):
     """Cancel an unstarted order and release every outstanding allocation."""
@@ -1440,6 +1605,7 @@ def cancel_order(order, *, by_user, reason="货主管理员取消订单"):
     if order.is_closed:
         raise ValidationError("已关闭订单不能取消。")
     _validate_allocation_can_be_released(order)
+    _cancel_unstarted_demand_replenishments(order, by_user=by_user)
     unallocate_for_order(order, by_user=by_user)
     order.approval_status = "CANCELLED"
     order.close_reason = (reason or "取消订单").strip()[:50]
@@ -1461,6 +1627,7 @@ def withdraw_order(order, *, by_user, reason="撤销提交"):
     if order.approval_status == "CANCELLED" or order.is_closed:
         raise ValidationError("已取消或已关闭订单不能撤回。")
     _validate_allocation_can_be_released(order)
+    _cancel_unstarted_demand_replenishments(order, by_user=by_user)
     unallocate_for_order(order, by_user=by_user)
 
     order.submit_status = "DRAFT"

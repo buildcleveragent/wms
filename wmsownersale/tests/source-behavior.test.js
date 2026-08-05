@@ -13,13 +13,26 @@ describe('页面异步状态与移动端结构契约', () => {
     expect(source).toContain('!list.value.next')
   })
 
-  it('库存表支持双向滚动、最小宽度和刷新代次', () => {
+  it('库存表使用页面纵向翻页、横向滚动和刷新代次', () => {
     const source = read('pages/inventory/index.vue')
     expect(source).toContain('scroll-x')
-    expect(source).toContain('scroll-y')
+    expect(source).not.toContain('scroll-y')
+    expect(source).toContain('onReachBottom(loadMore)')
+    expect(source).toContain('onPullDownRefresh(refreshPage)')
+    expect(source).not.toContain('@scrolltolower')
     expect(source).toMatch(/\.table-content\s*\{[^}]*min-width:/)
+    expect(source).not.toMatch(/\.table-scroll\s*\{[^}]*height:/)
+    expect(source).toContain('page_size: PAGE_SIZE')
+    expect(source).toContain('const PAGE_SIZE = 50')
     expect(source).toContain('generation !== requestGeneration')
-    expect(source).toContain('refreshing.value = false')
+    expect(source).toContain('uni.stopPullDownRefresh()')
+
+    const requestSource = read('utils/request.js')
+    expect(requestSource).toMatch(/inventorySummary:[\s\S]*page_size: params\.page_size \|\| 50/)
+
+    const pages = JSON.parse(read('pages.json').replace(/\/\/.*$/gm, ''))
+    const inventory = pages.pages.find((page) => page.path === 'pages/inventory/index')
+    expect(inventory?.style?.enablePullDownRefresh).toBe(true)
   })
 
   it('报表只允许最新请求写入且错误时清除旧条件数据', () => {

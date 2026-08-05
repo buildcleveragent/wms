@@ -127,6 +127,149 @@ class InboundOrderAndPdaApiTests(TestCase):
         )
         return user
 
+    def test_serial_receipt_is_unitary_accumulative_idempotent_and_unique(self):
+        self.product.serial_control = True
+        self.product.save(update_fields=["serial_control"])
+        operator = self.warehouse_user("api-serial-operator")
+        task = WmsTask.objects.create(
+            task_no="API-RECEIVE-SERIAL",
+            task_type=WmsTask.TaskType.RECEIVE,
+            status=WmsTask.Status.RELEASED,
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        line = WmsTaskLine.objects.create(
+            task=task,
+            product=self.product,
+            from_location=self.receive_location,
+            qty_plan=Decimal("2.000"),
+            status=WmsTaskLine.Status.RELEASED,
+        )
+        ReceiveLineExtra.objects.create(line=line)
+        client = self.client_for(operator)
+        self.assertEqual(
+            client.post(f"/api/inbound/pda/tasks/{task.pk}/claim/").status_code,
+            200,
+        )
+        self.assertEqual(
+            client.post(f"/api/inbound/pda/tasks/{task.pk}/start/").status_code,
+            200,
+        )
+        base_payload = {
+            "line_id": line.pk,
+            "location_id": self.receive_location.pk,
+            "qty_ok": "1.000",
+            "qty_damage": "0.000",
+            "qty_reject": "0.000",
+        }
+
+        missing = client.post(
+            f"/api/inbound/pda/tasks/{task.pk}/record-receipt/",
+            {**base_payload, "request_id": "serial-missing-01"},
+            format="json",
+        )
+        self.assertEqual(missing.status_code, 400, missing.data)
+        non_unit = client.post(
+            f"/api/inbound/pda/tasks/{task.pk}/record-receipt/",
+            {
+                **base_payload,
+                "request_id": "serial-nonunit-01",
+                "serial_no": "SN-API-001",
+                "qty_ok": "2.000",
+            },
+            format="json",
+        )
+        self.assertEqual(non_unit.status_code, 400, non_unit.data)
+
+        first_payload = {
+            **base_payload,
+            "request_id": "serial-receive-01",
+            "serial_no": "sn-api-001",
+        }
+        first = client.post(
+            f"/api/inbound/pda/tasks/{task.pk}/record-receipt/",
+            first_payload,
+            format="json",
+        )
+        self.assertEqual(first.status_code, 200, first.data)
+        replay = client.post(
+            f"/api/inbound/pda/tasks/{task.pk}/record-receipt/",
+            first_payload,
+            format="json",
+        )
+        self.assertEqual(replay.status_code, 200, replay.data)
+        self.assertTrue(replay.data["idempotent"])
+        duplicate = client.post(
+            f"/api/inbound/pda/tasks/{task.pk}/record-receipt/",
+            {
+                **base_payload,
+                "request_id": "serial-receive-02",
+                "serial_no": "SN-API-001",
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate.status_code, 400, duplicate.data)
+        second = client.post(
+            f"/api/inbound/pda/tasks/{task.pk}/record-receipt/",
+            {
+                **base_payload,
+                "request_id": "serial-receive-03",
+                "serial_no": "SN-API-002",
+                "finalize": True,
+            },
+            format="json",
+        )
+        self.assertEqual(second.status_code, 200, second.data)
+        line.refresh_from_db()
+        extra = ReceiveLineExtra.objects.get(line=line)
+        self.assertEqual(line.qty_done, Decimal("2.000"))
+        self.assertEqual(extra.qty_ok, Decimal("2.000"))
+        self.assertCountEqual(
+            TaskScanLog.objects.filter(
+                task=task,
+                task_line=line,
+                status=TaskScanLog.ScanStatus.OK,
+            ).values_list("serial_no", flat=True),
+            ["SN-API-001", "SN-API-002"],
+        )
+
+        normal_task = WmsTask.objects.create(
+            task_no="API-RECEIVE-NORMAL-SERIAL-REJECT",
+            task_type=WmsTask.TaskType.RECEIVE,
+            status=WmsTask.Status.RELEASED,
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
+        normal_product = Product.objects.create(
+            owner=self.owner,
+            code="APISKU-NORMAL",
+            sku="APISKU-NORMAL",
+            name="Normal API product",
+            base_uom=self.uom,
+            volume="0.100000",
+            price="10.00",
+        )
+        normal_line = WmsTaskLine.objects.create(
+            task=normal_task,
+            product=normal_product,
+            from_location=self.receive_location,
+            qty_plan=Decimal("1.000"),
+            status=WmsTaskLine.Status.RELEASED,
+        )
+        ReceiveLineExtra.objects.create(line=normal_line)
+        TaskAssignment.objects.create(task=normal_task, assignee=operator)
+        rejected = client.post(
+            f"/api/inbound/pda/tasks/{normal_task.pk}/record-receipt/",
+            {
+                **base_payload,
+                "request_id": "normal-with-serial-01",
+                "line_id": normal_line.pk,
+                "serial_no": "SHOULD-FAIL",
+            },
+            format="json",
+        )
+        self.assertEqual(rejected.status_code, 400, rejected.data)
+
     @staticmethod
     def client_for(user):
         client = APIClient()

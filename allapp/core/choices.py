@@ -7,8 +7,11 @@ ZONE_TYPE_CHOICES = [("RECEIVING","收货区"), ("STORAGE", "存货区"), ("PICK
 
 
 class ZoneType(models.IntegerChoices):
-    STORAGE = 1, _("拣选区")
-    PICK = 2, _("存储区")
+    # These numeric values are already persisted in production.  Keep the
+    # values stable and correct the symbolic names to match their historical
+    # Chinese labels; no data rewrite is required.
+    PICK = 1, _("拣选区")
+    STORAGE = 2, _("存储区")
     RECEIVING = 3, _("收货区")
     SHIPPING = 4, _("发运区")
     RETURN = 5, _("退货区")
@@ -101,4 +104,3 @@ class CreateMode(models.TextChoices):
     IMPORT = "IMPORT", "导入"
     API = "API", "接口创建"
     SYSTEM = "SYSTEM", "系统创建"
-

@@ -25,6 +25,15 @@ export const useAuth = defineStore('auth', {
     canImportProducts: (state) =>
       state.profileLoaded === true &&
       state.profile?.capabilities?.can_import_products === true,
+    canRequestReplenishment: (state) =>
+      state.profileLoaded === true &&
+      state.profile?.capabilities?.can_request_replenishment === true,
+    canApproveReplenishment: (state) =>
+      state.profileLoaded === true &&
+      state.profile?.capabilities?.can_approve_replenishment === true,
+    canRetryReplenishmentPosting: (state) =>
+      state.profileLoaded === true &&
+      state.profile?.capabilities?.can_retry_replenishment_posting === true,
   },
 
   actions: {

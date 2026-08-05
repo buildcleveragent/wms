@@ -394,7 +394,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                         after={"approval_status": order.approval_status},
                         metadata={
                             "channel": "django_admin",
-                            "pick_task_id": task.pk,
+                            "pick_task_id": getattr(task, "pk", None),
                         },
                     )
                 ok += 1

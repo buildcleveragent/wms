@@ -107,6 +107,19 @@ IS_DEVELOPMENT = APP_ENV == "development"
 IS_TEST = APP_ENV == "test"
 IS_PRODUCTION = APP_ENV == "production"
 
+# Replenishment is rolled out in independently observable stages.  Keep every
+# behavior-changing stage disabled until the warehouse is audited and ready.
+REPLENISHMENT_MANUAL_ENABLED = env.bool(
+    "REPLENISHMENT_MANUAL_ENABLED", default=False
+)
+REPLENISHMENT_PDA_ENABLED = env.bool("REPLENISHMENT_PDA_ENABLED", default=False)
+REPLENISHMENT_MINMAX_ENABLED = env.bool(
+    "REPLENISHMENT_MINMAX_ENABLED", default=False
+)
+REPLENISHMENT_DEMAND_ENABLED = env.bool(
+    "REPLENISHMENT_DEMAND_ENABLED", default=False
+)
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env("SECRET_KEY", default="").strip()
 if not SECRET_KEY:

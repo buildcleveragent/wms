@@ -18,7 +18,9 @@ urlpatterns = [
     path("healthz/live", health_live_view, name="health-live"),
     path("healthz/ready", health_ready_view, name="health-ready"),
     path("api/inbound/", include("allapp.inbound.urls")),  # 放在可能覆盖它的 router 之前
+    path("api/replenishment/", include("allapp.tasking.urls_replenishment")),
     path("api/", include("allapp.inventory.urls")),
+    path("api/", include("allapp.tasking.urls_pda")),
     path("api/", include("allapp.billing.urls")),
     # path("", TemplateView.as_view(template_name="index.html"), name="home"),
     path("", DashboardHomeView.as_view(), name="dashboard_home"),

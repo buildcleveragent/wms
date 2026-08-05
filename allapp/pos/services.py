@@ -22,6 +22,7 @@ from allapp.inventory.models import (
     InventoryTransaction,
 )
 from allapp.inventory.services import lock_active_inventory_details_for_update
+from allapp.locations.models import Warehouse
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import Product
@@ -636,6 +637,7 @@ def _create_pos_pick_tasks_and_post(
     """Reserve exact FEFO layers, create POS PICK evidence, and post every owner task."""
 
     actor = user if user and user.is_authenticated else None
+    Warehouse.objects.select_for_update().get(pk=warehouse_id)
     pairs = {
         (binding["sale_line"].owner_id, binding["sale_line"].product_id)
         for binding in line_bindings
@@ -711,6 +713,17 @@ def _create_pos_pick_tasks_and_post(
             take = _floor_task_qty(min(allocatable, remaining))
             if take <= 0:
                 continue
+
+            from allapp.tasking.counting import assert_inventory_not_count_locked
+
+            assert_inventory_not_count_locked(
+                owner_id=detail.owner_id,
+                warehouse_id=detail.warehouse_id,
+                product_id=detail.product_id,
+                location_id=detail.location_id,
+                batch_no=detail.batch_no,
+                task=task,
+            )
 
             detail.allocated_qty = _q4(detail.allocated_qty + take)
             detail.save()

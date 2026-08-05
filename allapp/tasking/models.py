@@ -9,6 +9,7 @@ from django.db.models import F, Q, ExpressionWrapper, DecimalField
 from django.contrib.contenttypes.models import ContentType
 from datetime import datetime
 from allapp.core.models import BaseModel, TimeStampedMixin, UserStampedMixin, DocSequence
+from allapp.core.choices import ZoneType
 from django.utils import timezone
 from django.db.models import Q, F, Case, When, Value, IntegerField, ExpressionWrapper
 from django.contrib.contenttypes.fields import GenericForeignKey
@@ -218,7 +219,7 @@ class WmsTask(BaseModel):
 
         if not self.lines.exists():
             raise ValidationError("任务无明细，不能发布。")
-        if not self.lines.filter(qty_plan__gt=0).exists():
+        if self.task_type != self.TaskType.COUNT and not self.lines.filter(qty_plan__gt=0).exists():
             raise ValidationError("所有任务行计划数量为 0，不能发布。")
 
         # 通过校验，执行发布
@@ -522,6 +523,7 @@ class TaskScanLog(TimeStampedMixin):
     lot_no       = models.CharField(_("批号"), max_length=60, blank=True, null=True)
     mfg_date     = models.DateField(_("生产日期"), blank=True, null=True)
     exp_date     = models.DateField(_("有效期至"), blank=True, null=True)
+    serial_no    = models.CharField(_("序列号"), max_length=80, blank=True, null=True)
     container_no = models.CharField(_("容器/托盘号"), max_length=40, blank=True, null=True)
 
     status = models.CharField(_("结果"), max_length=8, choices=ScanStatus.choices, default=ScanStatus.OK, db_index=True)
@@ -559,8 +561,8 @@ class TaskScanLog(TimeStampedMixin):
                 name="ck_tscan_ok_qty",
                 check=(
                         ~Q(status="OK") |
-                        (Q(qty_base_delta__isnull=False) & ~Q(qty_base_delta=0)) |
-                        (Q(qty_base__isnull=False) & ~Q(qty_base=0))
+                        Q(qty_base_delta__isnull=False) |
+                        Q(qty_base__isnull=False)
                 ),
             ),
             models.CheckConstraint(name="ck_tscan_pack_pos",check=Q(pack_qty__isnull=True) | Q(pack_qty__gt=0)),
@@ -598,6 +600,8 @@ class TaskScanLog(TimeStampedMixin):
             self.label_key = (_norm(self.label_key).upper()) or None
         if isinstance(self.lot_no, str):
             self.lot_no = (_norm(self.lot_no).upper()) or None
+        if isinstance(self.serial_no, str):
+            self.serial_no = (_norm(self.serial_no).upper()) or None
         if isinstance(self.uom_code, str):
             self.uom_code = (_norm(self.uom_code).upper()) or None
         if isinstance(self.code_type, str):
@@ -2169,13 +2173,221 @@ class DispatchLineExtra(TaskLineExtraBase):
 
 
 # ==补货
+class ReplenishmentPolicy(BaseModel):
+    """Per-pick-face replenishment policy.
+
+    Quantities are always stored in the product base unit.  ``replenish_uom``
+    only controls task-planning multiples.
+    """
+
+    owner = models.ForeignKey(
+        "baseinfo.Owner", on_delete=models.PROTECT, related_name="replenishment_policies"
+    )
+    warehouse = models.ForeignKey(
+        "locations.Warehouse", on_delete=models.PROTECT, related_name="replenishment_policies"
+    )
+    product = models.ForeignKey(
+        "products.Product", on_delete=models.PROTECT, related_name="replenishment_policies"
+    )
+    target_location = models.ForeignKey(
+        "locations.Location", on_delete=models.PROTECT, related_name="replenishment_policies"
+    )
+    min_qty = models.DecimalField("补货下限", max_digits=18, decimal_places=4)
+    target_qty = models.DecimalField("补货目标", max_digits=18, decimal_places=4)
+    replenish_uom = models.ForeignKey(
+        "products.ProductUom", on_delete=models.PROTECT, related_name="replenishment_policies"
+    )
+    source_zone_type = models.PositiveSmallIntegerField(
+        "来源区域类型", choices=ZoneType.choices, default=ZoneType.STORAGE
+    )
+    priority = models.PositiveSmallIntegerField(
+        "优先级", choices=WmsTask.Priority.choices, default=WmsTask.Priority.MED
+    )
+    auto_release = models.BooleanField("阈值任务自动发布", default=False)
+    demand_enabled = models.BooleanField("启用需求补货", default=True)
+
+    class Meta:
+        verbose_name = "补货策略"
+        verbose_name_plural = "补货策略"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner", "warehouse", "product", "target_location", "is_deleted"],
+                name="ux_replen_policy_scope",
+            ),
+            models.CheckConstraint(
+                check=Q(min_qty__gte=0) & Q(target_qty__gt=F("min_qty")),
+                name="ck_replen_policy_qty",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["warehouse", "owner", "product", "is_active"],
+                name="ix_replen_policy_scope",
+            ),
+            models.Index(
+                fields=["target_location", "is_active"], name="ix_replen_policy_target"
+            ),
+        ]
+        permissions = [
+            ("manage_replenishment_policy", "管理补货策略"),
+            ("evaluate_replenishment", "执行补货策略评估"),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.owner_id and self.warehouse_id:
+            from allapp.baseinfo.models import OwnerWarehouseBinding
+
+            if not OwnerWarehouseBinding.objects.filter(
+                owner_id=self.owner_id,
+                warehouse_id=self.warehouse_id,
+                is_active=True,
+            ).exists():
+                errors["warehouse"] = "货主未绑定该仓库。"
+        if self.product_id and self.owner_id and self.product.owner_id != self.owner_id:
+            errors["product"] = "商品不属于该货主。"
+        if self.target_location_id:
+            if self.warehouse_id and self.target_location.warehouse_id != self.warehouse_id:
+                errors["target_location"] = "目标库位不属于该仓库。"
+            elif self.target_location.zone_type != ZoneType.PICK:
+                errors["target_location"] = "目标库位必须是拣选区。"
+            elif (
+                not self.target_location.is_active
+                or self.target_location.is_disabled
+                or self.target_location.is_frozen
+            ):
+                errors["target_location"] = "目标库位已停用或冻结。"
+        if self.product_id and self.replenish_uom_id:
+            if not self.replenish_uom.is_active or not self.product.packages.filter(
+                uom_id=self.replenish_uom_id, is_active=True
+            ).exists():
+                errors["replenish_uom"] = "补货单位必须存在于商品包装层级中。"
+        if self.source_zone_type == ZoneType.PICK:
+            errors["source_zone_type"] = "来源区域不能是拣选区。"
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class ReplenishmentRequest(BaseModel):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "待审核"
+        APPROVED = "APPROVED", "已通过"
+        REJECTED = "REJECTED", "已驳回"
+        CANCELLED = "CANCELLED", "已取消"
+
+    owner = models.ForeignKey(
+        "baseinfo.Owner", on_delete=models.PROTECT, related_name="replenishment_requests"
+    )
+    warehouse = models.ForeignKey(
+        "locations.Warehouse", on_delete=models.PROTECT, related_name="replenishment_requests"
+    )
+    product = models.ForeignKey(
+        "products.Product", on_delete=models.PROTECT, related_name="replenishment_requests"
+    )
+    target_location = models.ForeignKey(
+        "locations.Location", on_delete=models.PROTECT, related_name="replenishment_requests"
+    )
+    requested_qty = models.DecimalField("申请数量", max_digits=18, decimal_places=4)
+    reason = models.CharField("申请原因", max_length=200)
+    status = models.CharField(
+        "状态", max_length=12, choices=Status.choices, default=Status.PENDING, db_index=True
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="replenishment_requests_reviewed",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_note = models.CharField("审核意见", max_length=200, blank=True, default="")
+    generated_task = models.ForeignKey(
+        "tasking.WmsTask",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="manual_replenishment_requests",
+    )
+
+    class Meta:
+        verbose_name = "补货申请"
+        verbose_name_plural = "补货申请"
+        indexes = [
+            models.Index(
+                fields=["warehouse", "status", "created_at"], name="ix_replen_req_queue"
+            ),
+            models.Index(
+                fields=["created_by", "status", "created_at"], name="ix_replen_req_creator"
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(check=Q(requested_qty__gt=0), name="ck_replen_req_qty")
+        ]
+        permissions = [
+            ("request_replenishment", "申请补货"),
+            ("approve_replenishment", "审核补货申请"),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.owner_id and self.warehouse_id:
+            from allapp.baseinfo.models import OwnerWarehouseBinding
+
+            if not OwnerWarehouseBinding.objects.filter(
+                owner_id=self.owner_id,
+                warehouse_id=self.warehouse_id,
+                is_active=True,
+            ).exists():
+                errors["warehouse"] = "货主未绑定该仓库。"
+        if self.product_id and self.owner_id and self.product.owner_id != self.owner_id:
+            errors["product"] = "商品不属于该货主。"
+        if self.target_location_id:
+            if self.warehouse_id and self.target_location.warehouse_id != self.warehouse_id:
+                errors["target_location"] = "目标库位不属于该仓库。"
+            elif self.target_location.zone_type != ZoneType.PICK:
+                errors["target_location"] = "目标库位必须是拣选区。"
+            elif (
+                not self.target_location.is_active
+                or self.target_location.is_disabled
+                or self.target_location.is_frozen
+            ):
+                errors["target_location"] = "目标库位已停用或冻结。"
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
 class ReplenishTaskExtra(TaskExtraBase):
     """补货头：触发类型/默认来源目标区域/策略码（头部只放默认与策略）"""
     trigger = models.CharField(
         "触发类型", max_length=10,
-        choices=[("MINMAX", "最小最大"), ("DEMAND", "需求驱动")],
+        choices=[("MINMAX", "最小最大"), ("DEMAND", "需求驱动"), ("MANUAL", "手工申请")],
         default="MINMAX"
     )
+    policy = models.ForeignKey(
+        "tasking.ReplenishmentPolicy",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="tasks",
+    )
+    request = models.OneToOneField(
+        "tasking.ReplenishmentRequest",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="task_extra",
+    )
+    demand_order_ids = models.JSONField("关联需求订单ID", default=list, blank=True)
     src_zone    = models.CharField("默认来源区域", max_length=20, blank=True, default="")
     dst_zone    = models.CharField("默认目标区域", max_length=20, blank=True, default="")
     policy_code = models.CharField("策略码", max_length=20, blank=True, default="")
@@ -2439,6 +2651,25 @@ class CountTaskExtra(TaskExtraBase):
     blind = models.BooleanField("盲盘", default=True)
     freeze = models.BooleanField("冻结库存", default=True)
     recount_threshold = models.DecimalField("复盘阈值(绝对数)", max_digits=14, decimal_places=4, default=0)
+    scope_payload = models.JSONField("盘点范围条件", default=dict, blank=True)
+    root_task = models.ForeignKey(
+        "tasking.WmsTask",
+        verbose_name="根盘点任务",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="count_rounds_as_root",
+    )
+    parent_task = models.ForeignKey(
+        "tasking.WmsTask",
+        verbose_name="上轮盘点任务",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="count_recount_tasks",
+    )
+    round_no = models.PositiveSmallIntegerField("盘点轮次", default=1)
+    snapshot_at = models.DateTimeField("账面快照时间", null=True, blank=True)
 
     class Meta:
         verbose_name = "盘点任务头扩展"
@@ -2453,11 +2684,64 @@ class CountTaskExtra(TaskExtraBase):
         ]
         indexes = [
             models.Index(fields=["scope"], name="ix_cnttsk_scope"),
+            models.Index(fields=["root_task", "round_no"], name="ix_cnttsk_root_round"),
         ]
 
     @classmethod
     def expected_task_type(cls):
         return "COUNT"
+
+
+class CountScopeLock(models.Model):
+    """Active soft lock for a normalized inventory-count scope."""
+
+    root_task = models.ForeignKey(
+        "tasking.WmsTask",
+        on_delete=models.PROTECT,
+        related_name="count_scope_locks",
+        verbose_name="根盘点任务",
+    )
+    active_task = models.ForeignKey(
+        "tasking.WmsTask",
+        on_delete=models.PROTECT,
+        related_name="active_count_scope_locks",
+        verbose_name="当前盘点任务",
+    )
+    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
+    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
+    location = models.ForeignKey("locations.Location", on_delete=models.PROTECT, verbose_name="库位")
+    product = models.ForeignKey(
+        "products.Product", on_delete=models.PROTECT, null=True, blank=True, verbose_name="商品"
+    )
+    batch_no = models.CharField("批次号", max_length=64, blank=True, default="")
+    lock_key = models.CharField("锁范围键", max_length=255, db_index=True)
+    active_key = models.CharField(
+        "活动锁唯一键", max_length=255, unique=True, null=True, blank=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    released_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    released_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="released_count_scope_locks",
+    )
+
+    class Meta:
+        verbose_name = "盘点范围锁"
+        verbose_name_plural = "盘点范围锁"
+        indexes = [
+            models.Index(fields=["warehouse", "released_at"], name="ix_cntlock_wh_rel"),
+            models.Index(
+                fields=["owner", "location", "product", "released_at"],
+                name="ix_cntlock_scope",
+            ),
+        ]
+
+    def __str__(self):
+        return self.lock_key
+
 # ==盘点行
 class CountLineExtra(TaskLineExtraBase):
     """盘点：账面/实盘/差异 + 可选批次/效期/LPN"""
@@ -2537,7 +2821,7 @@ class CountLineExtra(TaskLineExtraBase):
             self.qty_diff,
             extra=ctx,
         )
-        if self.qty_counted>0:
+        if self.qty_counted > 0:
             self.count_status="COUNTED"
 
     @transaction.atomic
@@ -2995,8 +3279,3 @@ class ContainerUsage(BaseModel):
 
         self.full_clean()
         return super().save(*args, **kwargs)
-
-
-
-
-

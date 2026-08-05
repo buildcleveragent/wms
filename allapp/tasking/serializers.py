@@ -21,10 +21,10 @@ from .models import (
     WmsTask, WmsTaskLine, TaskAssignment, TaskStatusLog, TaskScanLog,
     # Extra - 头
     ReceiveTaskExtra, PutawayTaskExtra, PickTaskExtra, PackTaskExtra, LoadTaskExtra,
-    DispatchTaskExtra, ReplenishTaskExtra, RelocTaskExtra,
+    DispatchTaskExtra, ReplenishTaskExtra, RelocTaskExtra, CountTaskExtra,
     # Extra - 行
     ReceiveLineExtra, PutawayLineExtra, PickLineExtra, PackLineExtra, LoadLineExtra,
-    DispatchLineExtra, ReplenishLineExtra, RelocLineExtra,
+    DispatchLineExtra, ReplenishLineExtra, RelocLineExtra, CountLineExtra,
 )
 
 # --------- Helpers ---------
@@ -43,6 +43,7 @@ def task_extra_model(task_type: str):
         "DISPATCH": DispatchTaskExtra,
         "REPLEN": ReplenishTaskExtra,
         "RELOC": RelocTaskExtra,
+        "COUNT": CountTaskExtra,
     }.get((task_type or "").upper())
 
 
@@ -56,6 +57,7 @@ def line_extra_model(task_type: str):
         "DISPATCH": DispatchLineExtra,
         "REPLEN": ReplenishLineExtra,
         "RELOC": RelocLineExtra,
+        "COUNT": CountLineExtra,
     }.get((task_type or "").upper())
 
 
@@ -160,7 +162,10 @@ class DispatchTaskExtraSerializer(serializers.ModelSerializer):
 class ReplenishTaskExtraSerializer(serializers.ModelSerializer):
     class Meta:
         model = ReplenishTaskExtra
-        fields = ["id", "task", "trigger", "src_zone", "dst_zone", "policy_code"]
+        fields = [
+            "id", "task", "trigger", "policy", "request", "demand_order_ids",
+            "src_zone", "dst_zone", "policy_code"
+        ]
         read_only_fields = ["id"]
 
 
@@ -169,6 +174,16 @@ class RelocTaskExtraSerializer(serializers.ModelSerializer):
         model = RelocTaskExtra
         fields = ["id", "task", "src_zone", "dst_zone", "policy_code", "reason_code"]
         read_only_fields = ["id"]
+
+
+class CountTaskExtraSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CountTaskExtra
+        fields = [
+            "id", "task", "scope", "blind", "freeze", "recount_threshold",
+            "scope_payload", "root_task", "parent_task", "round_no", "snapshot_at",
+        ]
+        read_only_fields = ["id", "root_task", "parent_task", "round_no", "snapshot_at"]
 
 
 # --------- Extra (Line) ---------
@@ -237,7 +252,7 @@ class ReplenishLineExtraSerializer(serializers.ModelSerializer):
         fields = [
             "id", "line", "from_location", "to_location", "from_lpn", "to_lpn", "qty_move",
         ]
-        read_only_fields = ["id"]
+        read_only_fields = ["id", "from_location", "to_location", "qty_move"]
 
 
 class RelocLineExtraSerializer(serializers.ModelSerializer):
@@ -247,6 +262,16 @@ class RelocLineExtraSerializer(serializers.ModelSerializer):
             "id", "line", "from_location", "to_location", "from_lpn", "to_lpn", "qty_move", "reason_code",
         ]
         read_only_fields = ["id"]
+
+
+class CountLineExtraSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CountLineExtra
+        fields = [
+            "id", "line", "lot_no", "exp_date", "lpn_no", "qty_counted",
+            "qty_book", "qty_diff", "count_status", "method", "countorder",
+        ]
+        read_only_fields = ["id", "qty_book", "qty_diff", "count_status", "countorder"]
 
 
 # 注册便于动态选择
@@ -259,6 +284,7 @@ TASK_EXTRA_MAP.update({
     "DISPATCH": DispatchTaskExtraSerializer,
     "REPLEN": ReplenishTaskExtraSerializer,
     "RELOC": RelocTaskExtraSerializer,
+    "COUNT": CountTaskExtraSerializer,
 })
 
 LINE_EXTRA_MAP.update({
@@ -270,6 +296,7 @@ LINE_EXTRA_MAP.update({
     "DISPATCH": DispatchLineExtraSerializer,
     "REPLEN": ReplenishLineExtraSerializer,
     "RELOC": RelocLineExtraSerializer,
+    "COUNT": CountLineExtraSerializer,
 })
 
 
@@ -319,12 +346,17 @@ class WmsTaskLineSerializer(serializers.ModelSerializer):
 
     # ---- write ----
     def create(self, validated_data: Dict[str, Any]) -> WmsTaskLine:
+        task = validated_data.get("task")
+        if task and task.task_type == WmsTask.TaskType.COUNT:
+            raise serializers.ValidationError("盘点行必须通过盘点专用服务创建。")
         extra_payload = validated_data.pop("extra_payload", None)
         line = super().create(validated_data)
         self._upsert_line_extra(line, extra_payload)
         return line
 
     def update(self, instance: WmsTaskLine, validated_data: Dict[str, Any]) -> WmsTaskLine:
+        if instance.task.task_type == WmsTask.TaskType.COUNT:
+            raise serializers.ValidationError("盘点行必须通过盘点专用录入接口修改。")
         extra_payload = validated_data.pop("extra_payload", None)
         line = super().update(instance, validated_data)
         if extra_payload is not None:
@@ -432,6 +464,8 @@ class WmsTaskSerializer(serializers.ModelSerializer, ChoiceDisplayMixin):
 
     @transaction.atomic
     def create(self, validated_data: Dict[str, Any]) -> WmsTask:
+        if validated_data.get("task_type") == WmsTask.TaskType.COUNT:
+            raise serializers.ValidationError("盘点任务必须通过 /api/pda/count-tasks/ 创建。")
         extra_payload = validated_data.pop("extra_payload", None)
         task = super().create(validated_data)
         self._upsert_task_extra(task, extra_payload)
@@ -439,6 +473,11 @@ class WmsTaskSerializer(serializers.ModelSerializer, ChoiceDisplayMixin):
 
     @transaction.atomic
     def update(self, instance: WmsTask, validated_data: Dict[str, Any]) -> WmsTask:
+        if (
+            instance.task_type == WmsTask.TaskType.COUNT
+            or validated_data.get("task_type") == WmsTask.TaskType.COUNT
+        ):
+            raise serializers.ValidationError("盘点任务必须通过盘点专用接口操作。")
         extra_payload = validated_data.pop("extra_payload", None)
         task = super().update(instance, validated_data)
         if extra_payload is not None:
