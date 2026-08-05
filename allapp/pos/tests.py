@@ -771,7 +771,9 @@ class PosApiTests(TestCase):
 
         order = OutboundOrder.objects.get(src_bill_no="POS-BILLING-ACCRUAL")
         order_events = BillingEvent.objects.filter(
-            owner=self.owner, charge_type=ChargeType.DISPATCH
+            owner=self.owner,
+            charge_type=ChargeType.DISPATCH,
+            calc_method=CalcMethod.PER_ORDER,
         )
         self.assertEqual(order_events.count(), 1)
         order_accruals = BillingAccrual.objects.filter(
@@ -937,7 +939,9 @@ class PosApiTests(TestCase):
         self.assertEqual(detail.onhand_qty, Decimal("10.0000"))
         self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
 
-    def test_pos_pick_with_invalid_source_model_never_falls_back_to_generic_posting(self):
+    def test_pos_pick_with_invalid_source_model_never_falls_back_to_generic_posting(
+        self,
+    ):
         from allapp.tasking.posting_exec import execute_posting_handler
 
         def corrupt_source_then_post(task, **kwargs):
@@ -1694,6 +1698,48 @@ class PosApiTests(TestCase):
             Decimal("9.0000"),
         )
 
+    def test_checkout_idempotency_key_includes_explicit_line_amount(self):
+        payload = {
+            "src_bill_no": "POS-RECEIPT-IDEM-AMOUNT",
+            "idempotency_key": "idem-explicit-amount",
+            "payment": self.payment("9.00"),
+            "items": [
+                {
+                    "product_id": self.product.id,
+                    "qty": "1.000",
+                    "price": "9.0000",
+                    "amount": "9.00",
+                }
+            ],
+        }
+        first = self.client.post("/api/pos/checkout/", payload, format="json")
+        conflicting = {
+            **payload,
+            "payment": self.payment("8.50"),
+            "items": [
+                {
+                    "product_id": self.product.id,
+                    "qty": "1.000",
+                    "price": "8.5000",
+                    "amount": "8.50",
+                }
+            ],
+        }
+        second = self.client.post("/api/pos/checkout/", conflicting, format="json")
+
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(second.status_code, 400)
+        self.assertEqual(
+            PosSale.objects.filter(src_bill_no="POS-RECEIPT-IDEM-AMOUNT").count(),
+            1,
+        )
+        self.assertEqual(
+            InventoryDetail.objects.get(
+                owner=self.owner, product=self.product
+            ).available_qty,
+            Decimal("9.0000"),
+        )
+
     def test_checkout_idempotency_key_does_not_double_post_stock(self):
         payload = {
             "src_bill_no": "POS-RECEIPT-IDEM",
@@ -1850,6 +1896,137 @@ class PosApiTests(TestCase):
         products = {row["product_id"]: row for row in stats.data["products"]}
         self.assertEqual(products[rounding_product.id]["sale_amount"], "1.00")
         self.assertEqual(products[rounding_product.id]["qty"], "3.000")
+
+    def test_checkout_uses_explicit_negotiated_line_amount(self):
+        negotiated_product = Product.objects.create(
+            owner=self.owner,
+            code="POS-NEGOTIATED-SKU",
+            name="POS Negotiated Product",
+            sku="POS-NEGOTIATED-SKU",
+            unit_barcode="POS-NEGOTIATED-BAR",
+            base_uom=self.uom,
+            price=Decimal("10.0000"),
+            min_price=Decimal("1.0000"),
+            batch_control=False,
+            expiry_control=False,
+        )
+        InventoryDetail.objects.create(
+            owner=self.owner,
+            product=negotiated_product,
+            warehouse=self.warehouse,
+            location=self.location,
+            onhand_qty=Decimal("20.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+        )
+
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-NEGOTIATED-AMOUNT",
+                "payment": self.payment("95.00"),
+                "items": [
+                    {
+                        "product_id": negotiated_product.id,
+                        "qty": "12.000",
+                        "price": "7.9167",
+                        "amount": "95.00",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        sale = PosSale.objects.get(src_bill_no="POS-NEGOTIATED-AMOUNT")
+        sale_line = sale.lines.get()
+        order = OutboundOrder.objects.get(src_bill_no="POS-NEGOTIATED-AMOUNT")
+        order_line = order.lines.get()
+        self.assertEqual(sale.total_amount, Decimal("95.00"))
+        self.assertEqual(sale_line.price, Decimal("7.9167"))
+        self.assertEqual(sale_line.amount, Decimal("95.00"))
+        self.assertEqual(order.final_order_amount, Decimal("95.00"))
+        self.assertEqual(order_line.base_price, Decimal("7.9167"))
+        self.assertEqual(order_line.final_line_amount, Decimal("95.00"))
+        self.assertEqual(sale.payment.amount_due, Decimal("95.00"))
+
+    def test_checkout_preserves_explicit_amount_not_representable_by_price(self):
+        negotiated_product = Product.objects.create(
+            owner=self.owner,
+            code="POS-LARGE-NEGOTIATED-SKU",
+            name="POS Large Negotiated Product",
+            sku="POS-LARGE-NEGOTIATED-SKU",
+            unit_barcode="POS-LARGE-NEGOTIATED-BAR",
+            base_uom=self.uom,
+            price=Decimal("0.0100"),
+            min_price=Decimal("0.0001"),
+            batch_control=False,
+            expiry_control=False,
+        )
+        InventoryDetail.objects.create(
+            owner=self.owner,
+            product=negotiated_product,
+            warehouse=self.warehouse,
+            location=self.location,
+            onhand_qty=Decimal("10000.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+        )
+
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-LARGE-NEGOTIATED-AMOUNT",
+                "payment": self.payment("95.00"),
+                "items": [
+                    {
+                        "product_id": negotiated_product.id,
+                        "qty": "9999.000",
+                        "price": "0.0095",
+                        "amount": "95.00",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        sale = PosSale.objects.get(src_bill_no="POS-LARGE-NEGOTIATED-AMOUNT")
+        self.assertEqual(sale.total_amount, Decimal("95.00"))
+        self.assertEqual(sale.lines.get().amount, Decimal("95.00"))
+        self.assertEqual(
+            sale.lines.get().qty * sale.lines.get().price, Decimal("94.9905")
+        )
+
+    def test_checkout_rejects_explicit_amount_price_mismatch(self):
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-NEGOTIATED-MISMATCH",
+                "payment": self.payment("18.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "2.000",
+                        "price": "8.9999",
+                        "amount": "18.00",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(
+            PosSale.objects.filter(src_bill_no="POS-NEGOTIATED-MISMATCH").exists()
+        )
+        self.assertFalse(
+            OutboundOrder.objects.filter(src_bill_no="POS-NEGOTIATED-MISMATCH").exists()
+        )
 
     def test_void_sale_restores_stock_and_cancels_outbound_orders(self):
         checkout = self.client.post(
@@ -2440,6 +2617,83 @@ class PosApiTests(TestCase):
             ).exists()
         )
 
+    def test_negotiated_amount_partial_returns_absorb_rounding_remainder(self):
+        rounding_product = Product.objects.create(
+            owner=self.owner,
+            code="POS-RETURN-ROUND-SKU",
+            name="POS Return Rounding Product",
+            sku="POS-RETURN-ROUND-SKU",
+            unit_barcode="POS-RETURN-ROUND-BAR",
+            base_uom=self.uom,
+            price=Decimal("0.3333"),
+            min_price=Decimal("0.0001"),
+            batch_control=False,
+            expiry_control=False,
+        )
+        InventoryDetail.objects.create(
+            owner=self.owner,
+            product=rounding_product,
+            warehouse=self.warehouse,
+            location=self.location,
+            onhand_qty=Decimal("3.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+        )
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-RETURN-ROUND-AMOUNT",
+                "payment": self.payment("1.00"),
+                "items": [
+                    {
+                        "product_id": rounding_product.id,
+                        "qty": "3.000",
+                        "price": "0.3333",
+                        "amount": "1.00",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        sale = PosSale.objects.get(src_bill_no="POS-RETURN-ROUND-AMOUNT")
+        sale_line = sale.lines.get()
+
+        for index, refund_amount in enumerate(("0.33", "0.34", "0.33"), start=1):
+            response = self.client.post(
+                "/api/pos/returns/",
+                {
+                    "sale_id": sale.id,
+                    "reason": f"partial return {index}",
+                    "idempotency_key": f"partial-return-{index}",
+                    "lines": [{"sale_line_id": sale_line.id, "qty": "1.000"}],
+                    "refunds": [{"method": "CASH", "amount": refund_amount}],
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, 201, response.data)
+
+        return_amounts = list(
+            PosReturn.objects.filter(sale=sale)
+            .order_by("id")
+            .values_list("total_amount", flat=True)
+        )
+        self.assertEqual(
+            return_amounts,
+            [Decimal("0.33"), Decimal("0.34"), Decimal("0.33")],
+        )
+        self.assertEqual(sum(return_amounts, Decimal("0.00")), Decimal("1.00"))
+
+        detail_response = self.client.get(f"/api/pos/sales/{sale.id}/")
+        self.assertEqual(detail_response.status_code, 200, detail_response.data)
+        line_payload = detail_response.data["lines"][0]
+        self.assertEqual(Decimal(str(line_payload["returned_amount"])), Decimal("1.00"))
+        self.assertEqual(
+            Decimal(str(line_payload["returnable_amount"])), Decimal("0.00")
+        )
+
     def test_pos_return_idempotency_does_not_double_restore_stock(self):
         checkout = self.client.post(
             "/api/pos/checkout/",
@@ -3007,6 +3261,39 @@ class PosApiTests(TestCase):
             0,
         )
 
+    def test_checkout_rejects_explicit_amount_below_minimum_total(self):
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "customer_id": self.pos_customer.id,
+                "src_bill_no": "POS-RECEIPT-LOW-AMOUNT",
+                "payment": self.payment("15.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "2.000",
+                        "price": "7.5000",
+                        "amount": "15.00",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(
+            PosSale.objects.filter(src_bill_no="POS-RECEIPT-LOW-AMOUNT").exists()
+        )
+        self.assertFalse(
+            OutboundOrder.objects.filter(src_bill_no="POS-RECEIPT-LOW-AMOUNT").exists()
+        )
+        self.assertEqual(
+            InventoryDetail.objects.get(
+                owner=self.owner, product=self.product
+            ).available_qty,
+            Decimal("10.0000"),
+        )
+
     def test_checkout_rejects_max_discount_breach_without_stock_post(self):
         discount_product = Product.objects.create(
             owner=self.owner,
@@ -3191,6 +3478,12 @@ class PosApiTests(TestCase):
         )
 
     def test_checkout_uses_requested_stock_zone_scope(self):
+        pick_location = Location.objects.create(
+            warehouse=self.warehouse,
+            code="SWPOS-02-01-01",
+            name="POS Zone Pick Location",
+            zone_type=ZoneType.PICK,
+        )
         zone_product = Product.objects.create(
             owner=self.owner,
             code="POS-ZONE-SKU",
@@ -3207,7 +3500,7 @@ class PosApiTests(TestCase):
             owner=self.owner,
             product=zone_product,
             warehouse=self.warehouse,
-            location=self.location,
+            location=pick_location,
             zone_type=ZoneType.PICK,
             onhand_qty=Decimal("3.0000"),
             allocated_qty=Decimal("0.0000"),

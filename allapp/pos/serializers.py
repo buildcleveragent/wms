@@ -281,6 +281,12 @@ class PosCheckoutLineSerializer(serializers.Serializer):
     price = serializers.DecimalField(
         max_digits=18, decimal_places=4, min_value=Decimal("0.0000")
     )
+    amount = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+        required=False,
+    )
 
 
 class PosPaymentInputSerializer(serializers.Serializer):
@@ -386,6 +392,8 @@ class PosSaleLineReadSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
     returned_qty = serializers.SerializerMethodField()
     returnable_qty = serializers.SerializerMethodField()
+    returned_amount = serializers.SerializerMethodField()
+    returnable_amount = serializers.SerializerMethodField()
 
     class Meta:
         model = PosSaleLine
@@ -401,6 +409,8 @@ class PosSaleLineReadSerializer(serializers.ModelSerializer):
             "amount",
             "returned_qty",
             "returnable_qty",
+            "returned_amount",
+            "returnable_amount",
             "outbound_order_line_id",
         ]
 
@@ -421,6 +431,24 @@ class PosSaleLineReadSerializer(serializers.ModelSerializer):
     def get_returnable_qty(self, obj):
         returned = Decimal(str(self.get_returned_qty(obj) or 0))
         return max(obj.qty - returned, Decimal("0.000"))
+
+    def get_returned_amount(self, obj):
+        returned = getattr(obj, "_pos_returned_amount", None)
+        if returned is None:
+            returned = sum(
+                (
+                    line.amount
+                    for line in obj.return_lines.filter(
+                        return_order__status=PosReturn.Status.COMPLETED
+                    )
+                ),
+                Decimal("0.00"),
+            )
+        return returned
+
+    def get_returnable_amount(self, obj):
+        returned = Decimal(str(self.get_returned_amount(obj) or 0))
+        return max(obj.amount - returned, Decimal("0.00"))
 
 
 class PosSaleReadSerializer(serializers.ModelSerializer):

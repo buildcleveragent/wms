@@ -171,11 +171,18 @@ def _idempotency_fingerprint(
     payment = payment or {}
     payments = payments or []
     canonical_items = [
-        {
-            "product_id": int(item["product_id"]),
-            "qty": str(_q3(item["qty"])),
-            "price": str(_price(item["price"])),
-        }
+        dict(
+            {
+                "product_id": int(item["product_id"]),
+                "qty": str(_q3(item["qty"])),
+                "price": str(_price(item["price"])),
+            },
+            **(
+                {"amount": str(_money(item["amount"]))}
+                if item.get("amount") is not None
+                else {}
+            ),
+        )
         for item in items
     ]
     canonical = {
@@ -293,6 +300,19 @@ def _validate_prices_and_shape(items, products):
         if qty <= 0:
             _error("items", "商品数量必须大于 0。")
 
+        explicit_amount = raw.get("amount")
+        if explicit_amount is not None:
+            amount = _money(explicit_amount)
+            derived_price = _price(amount / qty)
+            if price != derived_price:
+                _error(
+                    "price",
+                    f"{product.code} 成交单价必须等于总金额除以数量后的四位小数结果 {derived_price}。",
+                )
+            price = derived_price
+        else:
+            amount = _money(qty * price)
+
         try:
             lowest = minimum_sale_price(
                 base_price=getattr(product, "price", None),
@@ -303,8 +323,14 @@ def _validate_prices_and_shape(items, products):
             _error("price", f"{product.code} 价格配置错误：{exc}")
         if lowest is not None and price < lowest:
             _error("price", f"{product.code} 成交价不能低于 {lowest}。")
+        if lowest is not None and explicit_amount is not None:
+            minimum_amount = _money(qty * lowest)
+            if amount < minimum_amount:
+                _error(
+                    "amount",
+                    f"{product.code} 成交金额不能低于 {minimum_amount}。",
+                )
 
-        amount = _money(qty * price)
         qty_by_product[product.id] += qty
         normalized.append(
             {
@@ -941,16 +967,38 @@ def _restore_stock_from_sale(sale, user, reason):
     _refresh_summaries(touched)
 
 
-def _returned_qty_by_sale_line(sale_line_ids):
+def _returned_totals_by_sale_line(sale_line_ids):
     rows = (
         PosReturnLine.objects.filter(
             sale_line_id__in=sale_line_ids,
             return_order__status=PosReturn.Status.COMPLETED,
         )
         .values("sale_line_id")
-        .annotate(qty=Sum("qty"))
+        .annotate(qty=Sum("qty"), amount=Sum("amount"))
     )
-    return {row["sale_line_id"]: row["qty"] or ZERO for row in rows}
+    return {
+        row["sale_line_id"]: {
+            "qty": row["qty"] or ZERO,
+            "amount": row["amount"] or ZERO,
+        }
+        for row in rows
+    }
+
+
+def _allocated_return_amount(
+    *, sale_qty, sale_amount, returned_qty, returned_amount, return_qty
+):
+    sale_qty = _q3(sale_qty)
+    sale_amount = _money(sale_amount)
+    returned_qty = _q3(returned_qty)
+    returned_amount = _money(returned_amount)
+    return_qty = _q3(return_qty)
+    cumulative_qty = _q3(returned_qty + return_qty)
+    if cumulative_qty == sale_qty:
+        cumulative_amount = sale_amount
+    else:
+        cumulative_amount = _money(sale_amount * cumulative_qty / sale_qty)
+    return _money(cumulative_amount - returned_amount)
 
 
 def _restore_stock_for_return_lines(return_lines, return_no, now):
@@ -1610,22 +1658,33 @@ def create_pos_return(
     if missing:
         _error("items", f"退货明细不存在或不属于该销售单：{missing}")
 
-    returned_qty = _returned_qty_by_sale_line(requested_ids)
+    returned_totals = _returned_totals_by_sale_line(requested_ids)
     normalized_lines = []
     qty_by_line = defaultdict(lambda: ZERO)
+    amount_by_line = defaultdict(lambda: ZERO)
     for raw in lines:
         sale_line = sale_lines[int(raw["sale_line_id"])]
         qty = _q3(raw["qty"])
         if qty <= 0:
             _error("items", "退货数量必须大于 0。")
+        returned = returned_totals.get(sale_line.id, {"qty": ZERO, "amount": ZERO})
+        prior_requested_qty = qty_by_line[sale_line.id]
+        prior_requested_amount = amount_by_line[sale_line.id]
         qty_by_line[sale_line.id] += qty
-        available = _q3(sale_line.qty - returned_qty.get(sale_line.id, ZERO))
+        available = _q3(sale_line.qty - returned["qty"])
         if qty_by_line[sale_line.id] > available:
             _error(
                 "items",
                 f"{sale_line.product.code} 可退数量不足，可退 {available}，本次退 {qty_by_line[sale_line.id]}。",
             )
-        amount = _money(qty * sale_line.price)
+        amount = _allocated_return_amount(
+            sale_qty=sale_line.qty,
+            sale_amount=sale_line.amount,
+            returned_qty=returned["qty"] + prior_requested_qty,
+            returned_amount=returned["amount"] + prior_requested_amount,
+            return_qty=qty,
+        )
+        amount_by_line[sale_line.id] += amount
         normalized_lines.append(
             {
                 "sale_line": sale_line,

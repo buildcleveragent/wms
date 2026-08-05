@@ -155,7 +155,7 @@
               class="small-input"
               :type="isCountItem(item) ? 'number' : 'digit'"
               v-model="item.qty"
-              @blur="normalizeLine(index)"
+              @blur="normalizeQuantityLine(index)"
             />
           </view>
 
@@ -165,14 +165,25 @@
               <input
                 class="price-input"
                 type="digit"
-                v-model="item.price"
-                @blur="normalizeLine(index)"
+                :value="item.price"
+                @input="onLinePriceInput(index, $event)"
+                @blur="normalizePriceLine(index)"
               />
             </view>
           </view>
 
           <view class="cart-amount-col" style="width: 160rpx; flex: 0 0 160rpx; margin-left: 8rpx; box-sizing: border-box;">
-            <text class="line-amount">{{ money(lineAmount(item)) }}</text>
+            <view :class="['amount-wrap', { invalid: !!item.price_error }]">
+              <text class="yuan">¥</text>
+              <input
+                class="amount-input"
+                type="digit"
+                :value="item.amount"
+                @input="onLineAmountInput(index, $event)"
+                @blur="normalizeAmountLine(index)"
+              />
+            </view>
+            <text v-if="item.price_error" class="line-price-error">{{ item.price_error }}</text>
           </view>
 
           <view class="cart-action-col" style="width: 70rpx; flex: 0 0 70rpx; margin-left: 8rpx; text-align: center; box-sizing: border-box;">
@@ -906,6 +917,13 @@ const totalBaseQty = computed(() =>
 const totalAmount = computed(() =>
   cartItems.value.reduce((sum, item) => sum + Number(lineAmount(item) || 0), 0)
 )
+const cartPricingReady = computed(() =>
+  cartItems.value.every((item) => {
+    const amount = numberFromValue(item.amount, 0)
+    const price = numberFromValue(item.price, -1)
+    return !item.price_error && amount > 0 && price >= 0
+  })
+)
 const ownerCount = computed(() => {
   const ownerIds = cartItems.value
     .map((item) => item.owner_id)
@@ -1044,15 +1062,14 @@ const returnPaymentMethodIndex = computed(() =>
   Math.max(0, paymentMethods.findIndex((method) => method.value === returnRefundMethod.value))
 )
 const returnTotalAmount = computed(() =>
-  returnLines.value.reduce((sum, line) => {
-    const qty = numberFromValue(line.return_qty, 0)
-    const price = numberFromValue(line.price, 0)
-    return sum + qty * price
-  }, 0)
+  returnLines.value.reduce((sum, line) => sum + returnLineAmount(line), 0)
 )
 const shiftSummary = computed(() => currentShift.value?.summary || {})
 const canCheckout = computed(() =>
-  cartItems.value.length > 0 && paymentReady.value && isActiveShift(currentShift.value)
+  cartItems.value.length > 0 &&
+  cartPricingReady.value &&
+  paymentReady.value &&
+  isActiveShift(currentShift.value)
 )
 const historyPreviewSales = computed(() => historySales.value.slice(0, HISTORY_PREVIEW_LIMIT))
 const historyMoreSales = computed(() => historySales.value.slice(HISTORY_PREVIEW_LIMIT))
@@ -1609,15 +1626,22 @@ function normalizeDraftCartItem(item) {
     : options.map((option) => option.label || (option.kind === 'base' ? '基本单位' : '包装'))
   const unitIndex = Math.min(Math.max(Number(item.unit_index || 0), 0), Math.max(unitLabels.length - 1, 0))
 
-  return {
+  const normalized = {
     ...item,
     available_qty: item.available_qty || 0,
     qty: String(item.qty || '1'),
     price: priceInputText(item.price),
+    amount: item.amount === undefined || item.amount === null || item.amount === ''
+      ? ''
+      : amountInputText(item.amount),
+    pricing_mode: item.pricing_mode === 'amount' ? 'amount' : 'price',
+    list_price: item.list_price ?? item.price,
+    price_error: '',
     unit_options: options,
     unit_labels: unitLabels,
     unit_index: unitIndex,
   }
+  return normalizeCartLine(normalized, { silent: true })
 }
 
 function money(value) {
@@ -1627,7 +1651,24 @@ function money(value) {
 
 function priceInputText(value) {
   const n = Number(value || 0)
+  return Number.isFinite(n) ? n.toFixed(4) : '0.0000'
+}
+
+function amountInputText(value) {
+  const n = Number(value || 0)
   return Number.isFinite(n) ? n.toFixed(2) : '0.00'
+}
+
+function plainPrice(value) {
+  const n = Number(value || 0)
+  return Number.isFinite(n) ? n.toFixed(4) : '0.0000'
+}
+
+function roundDecimal(value, digits) {
+  const n = Number(value || 0)
+  if (!Number.isFinite(n)) return 0
+  const factor = 10 ** digits
+  return Math.round((n + Number.EPSILON) * factor) / factor
 }
 
 function numberFromValue(value, fallback = 0) {
@@ -1929,7 +1970,7 @@ function buildSalePrintData(response = {}) {
           qty,
           qtyText: plainQty(qty, item),
           price,
-          priceText: plainMoney(price),
+          priceText: plainPrice(price),
           amount,
           amountText: plainMoney(amount),
           remark: '',
@@ -1949,7 +1990,7 @@ function buildSalePrintData(response = {}) {
           qty,
           qtyText: plainQty(qty),
           price,
-          priceText: plainMoney(price),
+          priceText: plainPrice(price),
           amount,
           amountText: plainMoney(amount),
           remark: '',
@@ -2695,6 +2736,21 @@ function saleCanReturn(sale = {}) {
   return lines.some((line) => numberFromValue(line.returnable_qty ?? line.qty, 0) > 0)
 }
 
+function returnLineAmount(line = {}) {
+  const originalQty = numberFromValue(line.qty, 0)
+  const originalAmount = numberFromValue(line.amount, 0)
+  const returnedQty = numberFromValue(line.returned_qty, 0)
+  const returnedAmount = numberFromValue(line.returned_amount, 0)
+  const returnQty = numberFromValue(line.return_qty, 0)
+  if (originalQty <= 0 || originalAmount <= 0 || returnQty <= 0) return 0
+
+  const cumulativeQty = Math.min(roundDecimal(returnedQty + returnQty, 3), originalQty)
+  const cumulativeAmount = Math.abs(cumulativeQty - originalQty) < 0.0005
+    ? originalAmount
+    : roundDecimal(originalAmount * cumulativeQty / originalQty, 2)
+  return Math.max(roundDecimal(cumulativeAmount - returnedAmount, 2), 0)
+}
+
 async function startReturnSale(sale) {
   if (!saleCanReturn(sale)) return
   try {
@@ -3299,6 +3355,7 @@ function applyProductSnapshotToCartItem(item, product) {
   item.location_code = product.location_code || product.location || product.bin_code || item.location_code || ''
   item.base_unit_name = product.base_unit?.name || product.base_unit?.code || item.base_unit_name || ''
   item.available_qty = stockAvailableQty(product)
+  item.list_price = product.price
   item.min_price = product.min_price
   item.max_discount = product.max_discount
   item.unit_options = options
@@ -3350,7 +3407,7 @@ function addToCart(product) {
   }
 
   const unitLabels = options.map((option) => option.label || (option.kind === 'base' ? '基本单位' : '包装'))
-  cartItems.value.push({
+  const item = {
     product_id: product.id,
     owner_id: product.owner_id,
     code: product.code || '',
@@ -3362,12 +3419,18 @@ function addToCart(product) {
     available_qty: stockAvailableQty(product),
     min_price: product.min_price,
     max_discount: product.max_discount,
+    list_price: product.price,
     qty: '1',
     price: priceInputText(product.price),
+    amount: '',
+    pricing_mode: 'price',
+    price_error: '',
     unit_options: options,
     unit_labels: unitLabels,
     unit_index: 0,
-  })
+  }
+  normalizeCartLine(item, { silent: true })
+  cartItems.value.push(item)
   setScanFeedback(`已加入：${productName}`, 'success')
   uni.showToast({ title: '已加入购物车', icon: 'none' })
   collapseProductResults()
@@ -3392,9 +3455,69 @@ function payloadQty(item) {
   return isCountItem(item) ? String(Math.trunc(qty)) : qty.toFixed(3)
 }
 
+function checkoutBaseQty(item) {
+  return numberFromValue(payloadQty(item), 0)
+}
+
 function lineAmount(item) {
-  const price = Number(item.price || 0)
-  return Number(lineBaseQty(item) || 0) * (Number.isFinite(price) ? price : 0)
+  return numberFromValue(item.amount, 0)
+}
+
+function calculatedLineAmount(item) {
+  const price = numberFromValue(item.price, 0)
+  return roundDecimal(checkoutBaseQty(item) * price, 2)
+}
+
+function derivedLinePrice(item) {
+  const baseQty = checkoutBaseQty(item)
+  const amount = numberFromValue(item.amount, 0)
+  if (baseQty <= 0 || amount <= 0) return 0
+  return roundDecimal(amount / baseQty, 4)
+}
+
+function minimumLinePrice(item) {
+  const candidates = []
+  const configuredMin = numberFromValue(item.min_price, NaN)
+  if (Number.isFinite(configuredMin) && configuredMin >= 0) candidates.push(configuredMin)
+
+  const maxDiscount = numberFromValue(item.max_discount, NaN)
+  const listPrice = numberFromValue(item.list_price, NaN)
+  if (
+    Number.isFinite(maxDiscount) &&
+    maxDiscount >= 0 &&
+    maxDiscount <= 100 &&
+    Number.isFinite(listPrice) &&
+    listPrice >= 0
+  ) {
+    candidates.push(roundDecimal(listPrice * (100 - maxDiscount) / 100, 4))
+  }
+  return candidates.length ? Math.max(...candidates) : null
+}
+
+function validateLinePricing(item) {
+  const amount = numberFromValue(item.amount, 0)
+  const price = numberFromValue(item.price, -1)
+  const baseQty = checkoutBaseQty(item)
+  let error = ''
+
+  if (baseQty <= 0) {
+    error = '数量必须大于0'
+  } else if (amount <= 0) {
+    error = '金额必须大于0'
+  } else if (price < 0) {
+    error = '单价不能小于0'
+  } else {
+    const lowest = minimumLinePrice(item)
+    if (lowest !== null) {
+      const minimumAmount = roundDecimal(baseQty * lowest, 2)
+      if (price + 0.00005 < lowest || amount + 0.005 < minimumAmount) {
+        error = `最低 ${plainPrice(lowest)}`
+      }
+    }
+  }
+
+  item.price_error = error
+  return !error
 }
 
 function normalizeCartLine(item, options = {}) {
@@ -3412,12 +3535,53 @@ function normalizeCartLine(item, options = {}) {
   }
 
   item.qty = formatSaleQty(saleQty, item)
-  item.price = priceInputText(item.price)
+  if (item.pricing_mode === 'amount') {
+    item.amount = amountInputText(item.amount)
+    item.price = priceInputText(derivedLinePrice(item))
+  } else {
+    item.pricing_mode = 'price'
+    item.price = priceInputText(item.price)
+    item.amount = amountInputText(calculatedLineAmount(item))
+  }
+  validateLinePricing(item)
+  return item
 }
 
-function normalizeLine(index) {
+function normalizeQuantityLine(index) {
   const item = cartItems.value[index]
   if (item) normalizeCartLine(item)
+}
+
+function onLinePriceInput(index, event) {
+  const item = cartItems.value[index]
+  if (!item) return
+  item.pricing_mode = 'price'
+  item.price = String(event?.detail?.value ?? '')
+  item.amount = amountInputText(calculatedLineAmount(item))
+  validateLinePricing(item)
+}
+
+function normalizePriceLine(index) {
+  const item = cartItems.value[index]
+  if (!item) return
+  item.pricing_mode = 'price'
+  normalizeCartLine(item)
+}
+
+function onLineAmountInput(index, event) {
+  const item = cartItems.value[index]
+  if (!item) return
+  item.pricing_mode = 'amount'
+  item.amount = String(event?.detail?.value ?? '')
+  item.price = priceInputText(derivedLinePrice(item))
+  validateLinePricing(item)
+}
+
+function normalizeAmountLine(index) {
+  const item = cartItems.value[index]
+  if (!item) return
+  item.pricing_mode = 'amount'
+  normalizeCartLine(item)
 }
 
 function changeUnit(index, event) {
@@ -3523,6 +3687,11 @@ async function validateBeforeCheckout() {
     uni.showToast({ title: `${overStock.code} 可售库存不足`, icon: 'none' })
     return false
   }
+  const invalidPricing = cartItems.value.find((item) => !validateLinePricing(item))
+  if (invalidPricing) {
+    uni.showToast({ title: `${invalidPricing.code} ${invalidPricing.price_error}`, icon: 'none' })
+    return false
+  }
   if (!paymentReady.value) {
     const message = splitPaymentEnabled.value
       ? '拆分支付合计必须等于应收，赊账必须选择客户'
@@ -3559,7 +3728,8 @@ async function checkout() {
       items: cartItems.value.map((item) => ({
         product_id: item.product_id,
         qty: payloadQty(item),
-        price: Number(item.price || 0).toFixed(2),
+        price: plainPrice(item.price),
+        amount: plainMoney(item.amount),
       })),
     }
     if (splitPaymentEnabled.value) {
@@ -4659,12 +4829,45 @@ button {
   box-sizing: border-box;
 }
 
-.line-amount {
-  display: block;
+.amount-wrap {
+  width: 100%;
+  height: 56rpx;
+  background: #f8fafc;
+  border: 1rpx solid #d7dde6;
+  border-radius: 8rpx;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.amount-wrap.invalid {
+  border-color: #f04438;
+  background: #fff5f5;
+}
+
+.amount-input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 52rpx;
+  min-height: 52rpx;
+  border: 0;
+  background: transparent;
+  padding: 0 10rpx 0 6rpx;
   color: #172033;
   font-size: 28rpx;
   font-weight: 600;
   text-align: right;
+  box-sizing: border-box;
+}
+
+.line-price-error {
+  display: block;
+  max-width: 100%;
+  margin-top: 2rpx;
+  color: #d92d20;
+  font-size: 20rpx;
+  line-height: 24rpx;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -19,6 +19,8 @@ from pathlib import Path
 import environ
 from django.core.exceptions import ImproperlyConfigured
 
+from wmsmaster.environment import is_test_command, load_environment
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 env = environ.Env(
@@ -27,19 +29,13 @@ env = environ.Env(
     CORS_ALLOW_ALL_ORIGINS=(bool, False),
     LOG_LEVEL=(str, "INFO"),
 )
-environ.Env.read_env(BASE_DIR / ".env")
 
 # Local test runs use an isolated, ignored environment file when present.
-# CI continues to provide its own environment because this file is never
-# committed. Normal development and production processes do not load it.
-_TEST_COMMAND = " ".join(sys.argv).lower()
+# Explicit shell/CI variables take priority, followed by the local test file
+# and finally the base .env file. Normal development and production commands
+# do not load the local test file.
 _LOCAL_TEST_ENV = BASE_DIR / ".env.test.local"
-if _LOCAL_TEST_ENV.exists() and (
-    "pytest" in _TEST_COMMAND
-    or "py.test" in _TEST_COMMAND
-    or "manage.py test" in _TEST_COMMAND
-):
-    environ.Env.read_env(_LOCAL_TEST_ENV, overwrite=True)
+load_environment(BASE_DIR / ".env", _LOCAL_TEST_ENV, sys.argv)
 
 
 def _detect_app_env():
@@ -47,8 +43,7 @@ def _detect_app_env():
     if explicit:
         return explicit
 
-    argv = " ".join(sys.argv).lower()
-    if "pytest" in argv or "py.test" in argv or "manage.py test" in argv:
+    if is_test_command(sys.argv):
         return "test"
     return "development"
 

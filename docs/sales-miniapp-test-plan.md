@@ -166,6 +166,9 @@ For normal migration-mode verification, use a clean isolated Django test databas
      allapp/salesapp/tests.py::SaleMiniApiTests
    ```
 
+   Explicit process environment variables take priority over `.env.test.local`,
+   so the named schema is honored even when the local test environment file exists.
+
 3. For local business regression without replaying migrations, use the verified fast DB command:
 
    ```bash

@@ -217,7 +217,8 @@ POST /api/pos/checkout/
 - `items`：必填，购物车明细。
 - `items[].product_id`：必填，商品 ID。
 - `items[].qty`：必填，基本单位数量，必须大于 `0`。
-- `items[].price`：必填，成交单价。
+- `items[].price`：必填，四位小数成交单价。
+- `items[].amount`：可选，两位小数成交总金额。传入时总金额为最终行金额，`price` 必须等于 `amount / qty` 四舍五入到四位小数后的结果；不传时保持原有的数量乘单价计算方式。
 
 示例：
 
@@ -239,7 +240,8 @@ curl -X POST http://127.0.0.1:8000/api/pos/checkout/ \
       {
         "product_id": 101,
         "qty": "2.000",
-        "price": "9.0000"
+        "price": "9.0000",
+        "amount": "18.00"
       }
     ]
   }'
@@ -267,7 +269,7 @@ curl -X POST http://127.0.0.1:8000/api/pos/checkout/ \
 - `delivery_method` 为 `PICKUP`。
 - `submit_status` 为 `SUBMITTED`。
 - `approval_status` 为 `WHS_APPROVED`，订单按 POS 即时销售关闭。
-- 每个购物车条目创建一条 `OutboundOrderLine`，写入 `base_qty` 和 `base_price`。
+- 每个购物车条目创建一条 `OutboundOrderLine`，写入 `base_qty`、`base_price` 和权威行金额 `final_line_amount`。
 - 按 FEFO 自动扣减库存，写入 `InventoryTransaction(ISSUE)`。
 
 如果未传 `customer_id`，系统会按每个商品货主自动使用 `code=CASH` 的散客客户；如果该客户不存在，会自动创建 `CASH / 散客`。
@@ -281,6 +283,8 @@ POST /api/pos/sales/{id}/void/
 ```
 
 `void` 为整单撤销：系统会将 POS 销售单和收款标记为已撤销，销售出库单标记为取消，并按原库存流水写入反向 `InventoryTransaction(RECEIVE)` 回补库存。
+
+销售详情的 `lines[]` 同时返回 `returned_qty`、`returnable_qty`、`returned_amount` 和 `returnable_amount`。议价行部分退货按原行总金额累计分摊，最后一次退完时自动吸收分币尾差。
 
 ## 7. 结账校验规则
 
@@ -296,6 +300,7 @@ POST /api/pos/sales/{id}/void/
 - `qty` 必须大于 `0`。
 - `price` 不能低于商品 `min_price`。
 - 如果商品同时配置了 `price` 和 `max_discount`，成交价不能低于 `price * (1 - max_discount / 100)`。
+- 传入 `amount` 时必须大于 `0`，并且不能低于该数量按最低成交价计算的最低总金额。
 - 当前仓库可售库存必须大于或等于购物车内该商品合计数量。
 
 同一商品在购物车中出现多行时，库存校验会按商品汇总数量。
@@ -442,6 +447,7 @@ await api.posCheckout({
       product_id: 101,
       qty: '2.000',
       price: '9.0000',
+      amount: '18.00',
     },
   ],
 })
