@@ -102,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
@@ -126,8 +126,7 @@ const dirtyLineIds = new Set<number>()
 const adjustmentPromises = new Map<number, Promise<boolean>>()
 
 // 扫描钩子
-const { lastScan, quickScan, setScanCallback, initScanner, unRegisterBroadcast } =
-  useBarcodeScanner()
+const { quickScan } = useBarcodeScanner({ onScan: handleBarcodeScanned })
 
 const allDone = computed(() => {
   if (!lines.value.length) return false
@@ -343,11 +342,11 @@ async function handleScan() {
 }
 
 // 注册扫描回调：扫码→直接提交
-setScanCallback((barcode: string) => {
+function handleBarcodeScanned(barcode: string) {
   console.log('拣货页面收到条码:', barcode)
   scanBarcode.value = barcode
   submitScan(barcode)
-})
+}
 
 async function postTask() {
   if (!taskId.value || posting.value) return
@@ -473,16 +472,6 @@ onLoad((opts: any) => {
   loadTask()
   loadLines()
 })
-
-onMounted(() => {
-  initScanner()
-})
-
-onUnmounted(() => {
-  unRegisterBroadcast()
-})
-
-
 
 </script>
 

@@ -69,6 +69,7 @@
         <text class="toolbar-label primary-label">商品</text>
         <input
           class="input scan-input"
+          data-testid="pos-product-input"
           :value="productKeyword"
           :focus="productInputFocus"
           placeholder="扫码或输入商品名称/编码/SKU/条码"
@@ -155,7 +156,9 @@
               class="small-input"
               :type="isCountItem(item) ? 'number' : 'digit'"
               v-model="item.qty"
+              confirm-type="done"
               @blur="normalizeQuantityLine(index)"
+              @confirm="confirmCartLineEdit(index, 'quantity')"
             />
           </view>
 
@@ -166,8 +169,10 @@
                 class="price-input"
                 type="digit"
                 :value="item.price"
+                confirm-type="done"
                 @input="onLinePriceInput(index, $event)"
                 @blur="normalizePriceLine(index)"
+                @confirm="confirmCartLineEdit(index, 'price')"
               />
             </view>
           </view>
@@ -179,8 +184,10 @@
                 class="amount-input"
                 type="digit"
                 :value="item.amount"
+                confirm-type="done"
                 @input="onLineAmountInput(index, $event)"
                 @blur="normalizeAmountLine(index)"
+                @confirm="confirmCartLineEdit(index, 'amount')"
               />
             </view>
             <text v-if="item.price_error" class="line-price-error">{{ item.price_error }}</text>
@@ -404,7 +411,7 @@
               </picker>
             </view>
           </view>
-          <button class="submit-btn" :disabled="!canCheckout || submitting" @click="checkout">
+          <button data-testid="pos-checkout" class="submit-btn" :disabled="!canCheckout || submitting" @click="checkout">
             结账
           </button>
         </view>
@@ -470,9 +477,17 @@
         <text class="section-title">最近小票</text>
         <text class="selected-text">{{ lastReceipt.sale_no || lastReceipt.src_bill_no }}</text>
       </view>
-      <button class="ghost-btn receipt-print-btn" :disabled="!lastSalePrintData" @click="printLastSale">
-        打印销售单
+      <button
+        class="ghost-btn receipt-print-btn"
+        data-testid="recent-sale-print"
+        :disabled="!lastSalePrintData || lastSalePrinting"
+        @click="printLastSale"
+      >
+        {{ lastSalePrinting ? '打印中...' : '打印销售单' }}
       </button>
+      <view v-if="lastSalePrintError" class="receipt-print-warning" data-testid="receipt-print-warning">
+        {{ lastSalePrintError }}
+      </view>
       <view class="receipt-row">
         <text>应收 {{ money(lastReceipt.total_amount) }}</text>
         <text>
@@ -655,6 +670,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onHide, onShow } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
+import { CHECKOUT_STATUS, executeCheckoutFlow, executePrintAttempt } from '@/utils/posCheckoutFlow'
 
 const customerKeyword = ref('')
 const customers = ref([])
@@ -689,6 +705,8 @@ const submitting = ref(false)
 const idempotencyKey = ref(makeIdempotencyKey())
 const lastReceipt = ref(null)
 const lastSalePrintData = ref(null)
+const lastSalePrintError = ref('')
+const lastSalePrinting = ref(false)
 const historyKeyword = ref('')
 const historySales = ref([])
 const historyLoading = ref(false)
@@ -906,10 +924,7 @@ const returnSubmitting = ref(false)
 const {
   lastScan,
   quickScan,
-  setScanCallback,
-  initScanner,
-  unRegisterBroadcast,
-} = useBarcodeScanner()
+} = useBarcodeScanner({ onScan: handleScan })
 
 const totalBaseQty = computed(() =>
   cartItems.value.reduce((sum, item) => sum + Number(lineBaseQty(item) || 0), 0)
@@ -1091,8 +1106,6 @@ onMounted(() => {
   restoreSalePrintModePreference()
   restoreReceiptWarehouseInfoPreference()
   restoreSaleDraft()
-  setScanCallback(handleScan)
-  initScanner()
   focusProductInput()
   loadSystemSettings()
   loadSalePrintConfigs()
@@ -1122,7 +1135,6 @@ onHide(() => {
 onUnmounted(() => {
   saveSaleDraft()
   productInputFocus.value = false
-  unRegisterBroadcast()
 })
 
 watch(
@@ -2358,7 +2370,23 @@ async function printLastSale() {
     uni.showToast({ title: '没有可打印的销售单', icon: 'none' })
     return
   }
-  await printSaleBySystemSetting(lastSalePrintData.value, null, '最近小票前端打印')
+  if (lastSalePrinting.value) return
+  lastSalePrinting.value = true
+  try {
+    const result = await executePrintAttempt(() =>
+      printSaleBySystemSetting(lastSalePrintData.value, null, '最近小票前端打印')
+    )
+    if (result.status === CHECKOUT_STATUS.COMPLETED) {
+      lastSalePrintError.value = ''
+      uni.showToast({ title: '销售单打印已发起', icon: 'none' })
+    } else {
+      lastSalePrintError.value = '结账已成功，但打印失败，请点击“打印销售单”重试'
+      uni.showToast({ title: '打印失败，请重试', icon: 'none' })
+      console.error('print last POS sale failed', result.error)
+    }
+  } finally {
+    lastSalePrinting.value = false
+  }
 }
 
 function normalizePosSaleRows(data) {
@@ -3584,6 +3612,17 @@ function normalizeAmountLine(index) {
   normalizeCartLine(item)
 }
 
+function confirmCartLineEdit(index, field) {
+  if (field === 'quantity') {
+    normalizeQuantityLine(index)
+  } else if (field === 'price') {
+    normalizePriceLine(index)
+  } else if (field === 'amount') {
+    normalizeAmountLine(index)
+  }
+  focusProductInput()
+}
+
 function changeUnit(index, event) {
   const item = cartItems.value[index]
   if (!item) return
@@ -3666,6 +3705,7 @@ function resetSale(options = {}) {
   if (!options.keepReceipt) {
     lastReceipt.value = null
     lastSalePrintData.value = null
+    lastSalePrintError.value = ''
   }
   focusProductInput()
 }
@@ -3749,40 +3789,64 @@ async function checkout() {
     if (selectedCustomer.value) {
       payload.customer_id = selectedCustomer.value.id
     }
-    const res = await api.posCheckout(payload)
-    const orders = Array.isArray(res.orders) ? res.orders : []
-    const printData = buildSalePrintData(res)
-    lastSalePrintData.value = printData
-    lastReceipt.value = res.receipt || {
-      sale_no: printData.billNo,
-      src_bill_no: printData.billNo,
-      total_amount: printData.totalAmount,
-      payment: {
-        method: paymentMethod.value,
-        amount_received: printData.amountReceived,
-        change_amount: printData.changeAmount,
+    let printData = null
+    const result = await executeCheckoutFlow({
+      submit: () => api.posCheckout(payload),
+      commit: async (res) => {
+        try {
+          const orders = Array.isArray(res.orders) ? res.orders : []
+          printData = buildSalePrintData(res)
+          lastSalePrintData.value = printData
+          lastReceipt.value = res.receipt || {
+            sale_no: printData.billNo,
+            src_bill_no: printData.billNo,
+            total_amount: printData.totalAmount,
+            payment: {
+              method: paymentMethod.value,
+              amount_received: printData.amountReceived,
+              change_amount: printData.changeAmount,
+            },
+            orders,
+          }
+          lastSalePrintError.value = ''
+          const msg = orders.length > 1
+            ? `结账成功：已生成${orders.length}张销售出库单`
+            : `结账成功：${res.sale?.sale_no || orders[0]?.order_no || orders[0]?.id || ''}`
+          uni.showToast({ title: msg, icon: 'none' })
+        } finally {
+          resetSale({ keepReceipt: true })
+          loadPosSaleHistory({ force: true, silent: true })
+          loadPosStats({ force: true, silent: true })
+          loadCurrentShift()
+          loadShiftHistory({ force: true, silent: true })
+        }
       },
-      orders,
+      shouldPrint: autoPrintSale.value,
+      print: () => printSaleBySystemSetting(
+        printData,
+        preparedPrintWindow,
+        '结账后前端自动打印',
+      ),
+    })
+
+    if (result.status === CHECKOUT_STATUS.CHECKOUT_FAILED) {
+      if (preparedPrintWindow && !preparedPrintWindow.closed) preparedPrintWindow.close()
+      showPosError(result.error, '结账失败')
+      console.error('pos checkout failed', result.error)
+    } else if (result.status === CHECKOUT_STATUS.PRINT_FAILED) {
+      if (preparedPrintWindow && !preparedPrintWindow.closed) preparedPrintWindow.close()
+      lastSalePrintError.value = '结账已成功，但打印失败，请点击“打印销售单”重试'
+      uni.showToast({ title: '结账成功，但自动打印失败', icon: 'none' })
+      console.error('POS checkout succeeded but printing failed', result.error)
+    } else if (result.status === CHECKOUT_STATUS.COMMITTED_UI_FAILED) {
+      if (preparedPrintWindow && !preparedPrintWindow.closed) preparedPrintWindow.close()
+      uni.showToast({ title: '结账成功，回执处理异常，请从销售历史查看', icon: 'none' })
+      console.error('POS checkout succeeded but receipt processing failed', result.error)
     }
-    const msg =
-      orders.length > 1
-        ? `结账成功：已生成${orders.length}张销售出库单`
-        : `结账成功：${res.sale?.sale_no || orders[0]?.order_no || orders[0]?.id || ''}`
-    uni.showToast({ title: msg, icon: 'none' })
-    if (autoPrintSale.value) {
-      await printSaleBySystemSetting(printData, preparedPrintWindow, '结账后前端自动打印')
-    }
-    resetSale({ keepReceipt: true })
-    loadPosSaleHistory({ force: true, silent: true })
-    loadPosStats({ force: true, silent: true })
-    loadCurrentShift()
-    loadShiftHistory({ force: true, silent: true })
-  } catch (e) {
-    if (preparedPrintWindow && !preparedPrintWindow.closed) {
-      preparedPrintWindow.close()
-    }
-    showPosError(e, '结账失败')
-    console.error('pos checkout failed', e)
+  } catch (error) {
+    if (preparedPrintWindow && !preparedPrintWindow.closed) preparedPrintWindow.close()
+    showPosError(error, '结账准备失败')
+    console.error('prepare POS checkout failed', error)
   } finally {
     submitting.value = false
   }
@@ -5052,6 +5116,16 @@ button {
 .receipt-section {
   order: 4;
   margin-bottom: 0;
+}
+
+.receipt-print-warning {
+  margin-top: 10rpx;
+  padding: 12rpx 14rpx;
+  border: 1rpx solid #f4b740;
+  border-radius: 8rpx;
+  background: #fff8e6;
+  color: #9a5b00;
+  font-size: 25rpx;
 }
 
 .stats-section {

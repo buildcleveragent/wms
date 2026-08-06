@@ -151,7 +151,7 @@
 
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch,reactive } from 'vue'
+import { ref, computed, reactive } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
 import { api } from '@/utils/request'
@@ -493,43 +493,13 @@ function goExcelImport(){
 // =========================
 // 扫描相关
 // =========================
-let currentScan="q"
-
-const { lastScan, canScan, quickScan, setScanCallback, initScanner, unRegisterBroadcast } = useBarcodeScanner()
-const scannedProduct = ref(null)
-
-// 监听扫描结果变化：自动用条码搜索
-watch(lastScan, (newBarcode) => {
-  if (newBarcode) {
-   if (currentScan=="q"){
-	   q.value = newBarcode
-	   search()
-   }if (currentScan=="batch") {
-   	   batch.value = newBarcode
-   } else {
-   	
-   }
-	
-  }
-})
+const { quickScan } = useBarcodeScanner({ onScan: handleBarcodeScanned })
 
 // 手动触发扫描
 const handleScan = () => {
   quickScan()
 }
 
-function batchScan()
-{
-	currentScan="batch"
-	quickScan()
-}
-
-
-// 扫描回调（也可在这里直接add）
-setScanCallback((barcode) => {
-  console.log('入库页面收到条码:', barcode)
-  handleBarcodeScanned(barcode)
-})
 async function handleBarcodeScanned(code:string){
   q.value = code
   await search()
@@ -546,13 +516,6 @@ onLoad(()=>{
   search()
 })
 
-onMounted(() => {
-  initScanner()
-})
-
-onUnmounted(() => {
-  unRegisterBroadcast()
-})
 const unitSelIndexMap = reactive({}) 
 function onUnitChange(p, newIndex) {
   const idx = Number(newIndex)

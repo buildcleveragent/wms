@@ -1,108 +1,115 @@
-import { ref, onMounted, onUnmounted } from 'vue'
+import { onUnmounted, ref } from 'vue'
+import { onHide, onShow, onUnload } from '@dcloudio/uni-app'
 
-export function useBarcodeScanner() {
-  const lastScan = ref("")
+export function useBarcodeScanner({ onScan } = {}) {
+  const lastScan = ref('')
   const canScan = ref(false)
-  const _urovo = ref(null)
-  const _mainActivity = ref(null)
-  const _receiver = ref(null)
-  const receiverRegistered = ref(false)
-
-  // 扫描结果回调函数
-  let onScanCallback = null
-
-  const setScanCallback = (callback) => {
-    onScanCallback = callback
-  }
+  let urovo = null
+  let mainActivity = null
+  let receiver = null
+  let receiverRegistered = false
+  let active = false
+  let disposed = false
+  let onScanCallback = typeof onScan === 'function' ? onScan : null
 
   const quickScan = () => {
     try {
       // #ifdef APP-PLUS
-      if (_urovo.value && _urovo.value.startScan) {
-        _urovo.value.startScan()
+      if (active && urovo && urovo.startScan) {
+        urovo.startScan()
       } else {
-        uni.showToast({ title: "当前环境不支持扫描", icon: "none" })
+        uni.showToast({ title: '当前环境不支持扫描', icon: 'none' })
       }
       // #endif
-    } catch (e) {
-      uni.showToast({ title: "无法触发扫描", icon: "none" })
+    } catch (error) {
+      uni.showToast({ title: '无法触发扫描', icon: 'none' })
     }
   }
 
   const registerBroadcast = () => {
+    if (disposed || !active || receiverRegistered || !mainActivity) return
     try {
-      if (receiverRegistered.value || !_mainActivity.value) return
       // #ifdef APP-PLUS
-      const IntentFilter = plus.android.importClass("android.content.IntentFilter")
+      const plusObj = typeof plus !== 'undefined' ? plus : null
+      if (!plusObj?.android) return
+      const IntentFilter = plusObj.android.importClass('android.content.IntentFilter')
       const filter = new IntentFilter()
-      filter.addAction("android.intent.ACTION_DECODE_DATA")
-
-      const BroadcastReceiver = plus.android.implements(
-        "io.dcloud.feature.internal.reflect.BroadcastReceiver",
+      filter.addAction('android.intent.ACTION_DECODE_DATA')
+      const localReceiver = plusObj.android.implements(
+        'io.dcloud.feature.internal.reflect.BroadcastReceiver',
         {
-          onReceive: function(context, intent) {
-            plus.android.importClass(intent)
-            const code = intent.getStringExtra("barcode_string")
-            if (code) {
-              lastScan.value = code
-              uni.vibrateShort && uni.vibrateShort()
-              
-              // 如果有回调函数，执行回调
-              if (onScanCallback && typeof onScanCallback === 'function') {
-                onScanCallback(code)
-              }
-            }
-          }
-        }
+          onReceive(context, intent) {
+            if (!active || disposed || localReceiver !== receiver) return
+            plusObj.android.importClass(intent)
+            const code = intent.getStringExtra('barcode_string')
+            if (!code) return
+            lastScan.value = code
+            if (uni.vibrateShort) uni.vibrateShort()
+            if (onScanCallback) onScanCallback(code)
+          },
+        },
       )
-      _receiver.value = BroadcastReceiver
-      _mainActivity.value.registerReceiver(BroadcastReceiver, filter)
-      receiverRegistered.value = true
+      receiver = localReceiver
+      mainActivity.registerReceiver(localReceiver, filter)
+      receiverRegistered = true
       // #endif
-    } catch (e) {
-      console.error('注册广播失败:', e)
+    } catch (error) {
+      receiver = null
+      receiverRegistered = false
+      console.error('注册广播失败:', error)
     }
   }
 
-  const unRegisterBroadcast = () => {
+  const unRegisterBroadcast = ({ dispose = false } = {}) => {
+    active = false
     try {
-      if (!receiverRegistered.value || !_mainActivity.value || !_receiver.value) return
       // #ifdef APP-PLUS
-      _mainActivity.value.unregisterReceiver(_receiver.value)
+      if (receiverRegistered && mainActivity && receiver) {
+        mainActivity.unregisterReceiver(receiver)
+      }
       // #endif
-      receiverRegistered.value = false
-      _receiver.value = null
-      onScanCallback = null // 清理回调
-    } catch (e) {
-      console.error('注销广播失败:', e)
+    } catch (error) {
+      console.error('注销广播失败:', error)
+    } finally {
+      receiverRegistered = false
+      receiver = null
+      if (dispose) {
+        disposed = true
+        onScanCallback = null
+        urovo = null
+        mainActivity = null
+        canScan.value = false
+      }
     }
   }
 
   const initScanner = () => {
+    if (disposed) return
+    active = true
     try {
       // #ifdef APP-PLUS
-      _urovo.value = uni.requireNativePlugin("TH-PlatformSDK")
-      
-      const plusObj = typeof plus !== "undefined" ? plus : null
-      if (plusObj && plusObj.android) {
-        _mainActivity.value = plus.android.runtimeMainActivity()
-        canScan.value = !!_urovo.value
-        registerBroadcast()
+      const plusObj = typeof plus !== 'undefined' ? plus : null
+      if (!plusObj?.android) {
+        canScan.value = false
+        return
       }
+      urovo ||= uni.requireNativePlugin('TH-PlatformSDK')
+      mainActivity ||= plusObj.android.runtimeMainActivity()
+      canScan.value = Boolean(urovo)
+      registerBroadcast()
       // #endif
-    } catch (e) {
+    } catch (error) {
       canScan.value = false
-      console.error('初始化扫描功能失败:', e)
+      console.error('初始化扫描功能失败:', error)
     }
   }
 
-  // 生命周期在调用时手动管理
-  return {
-    lastScan,
-    canScan,
-    quickScan,
-    setScanCallback,
-    initScanner,
-    unRegisterBroadcast
-  }
+  const disposeScanner = () => unRegisterBroadcast({ dispose: true })
+
+  onShow(initScanner)
+  onHide(unRegisterBroadcast)
+  onUnload(disposeScanner)
+  onUnmounted(disposeScanner)
+
+  return { lastScan, canScan, quickScan }
 }

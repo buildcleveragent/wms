@@ -33,10 +33,9 @@
 
 <script setup>
 // import { ref, computed } from 'vue'
-import { ref, computed,onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
-// 👇 一定要把 onUnload 引进来（需要的话也可加 onHide）
-import { onLoad, onReachBottom, onUnload } from '@dcloudio/uni-app'
+import { onLoad, onReachBottom } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'     
 import { useCart } from '@/store/cart'
 
@@ -91,36 +90,7 @@ onReachBottom(() => { loadMore() })
 
 
 // 扫描相关
-const { lastScan, canScan, quickScan, setScanCallback, initScanner, unRegisterBroadcast } = useBarcodeScanner()
-
-// 业务数据
-const scannedProduct = ref(null)
-
-// 监听扫描结果变化
-watch(lastScan, (newBarcode) => {
-  if (newBarcode) {
-    // 将扫描结果设置到输入框
-    q.value = newBarcode
-    // 自动触发搜索
-    search()
-  }
-})
-
-// 设置扫描回调
-setScanCallback((barcode) => {
-  console.log('入库页面收到条码:', barcode)
-  handleBarcodeScanned(barcode)
-})
-
-// 初始化扫描
-onMounted(() => {
-  initScanner()
-})
-
-// 清理扫描
-onUnmounted(() => {
-  unRegisterBroadcast()
-})
+const { quickScan } = useBarcodeScanner({ onScan: handleBarcodeScanned })
 
 // 手动触发扫描
 const handleScan = () => {

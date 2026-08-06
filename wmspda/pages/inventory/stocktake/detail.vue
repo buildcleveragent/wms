@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api, createIdempotencyUuid } from '@/utils/request'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
@@ -65,7 +65,9 @@ const savingId = ref<number | null>(null)
 const submitting = ref(false)
 const scanCode = ref('')
 const note = ref('')
-const { quickScan, setScanCallback, initScanner, unRegisterBroadcast } = useBarcodeScanner()
+const { quickScan } = useBarcodeScanner({
+  onScan: (code: string) => { scanCode.value = code; locateBarcode(code) },
+})
 
 const isWorking = computed(() => ['RELEASED', 'IN_PROGRESS'].includes(task.value?.status))
 const canRecord = computed(() => isWorking.value && Boolean(task.value?.can_record))
@@ -157,11 +159,8 @@ async function post() { await api.postCountTask(taskId.value, { note: note.value
 
 onLoad((query: any) => { taskId.value = Number(query?.task_id || 0) })
 onMounted(async () => {
-  setScanCallback((code: string) => { scanCode.value = code; locateBarcode(code) })
-  initScanner()
   try { await load() } catch (error) { console.error(error); uni.showToast({ title: '加载盘点详情失败', icon: 'none' }) }
 })
-onUnmounted(unRegisterBroadcast)
 </script>
 
 <style scoped>

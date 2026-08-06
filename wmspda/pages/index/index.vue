@@ -26,7 +26,7 @@
 </template>
 
 <script>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useAuth } from '@/store/auth'
 
@@ -59,96 +59,12 @@ export default {
         (!item.requiresProductImport || auth.canImportProducts),
     ))
     
-    const lastScan = ref("")
-    const canScan = ref(false)
-    const _urovo = ref(null)
-    const _mainActivity = ref(null)
-    const _receiver = ref(null)
-    const receiverRegistered = ref(false)
-
     // 方法
     const go = (item) => {
       console.log("👉 go() 被调用，准备跳转：", item.path)
       uni.showToast({ title: "跳转中...", icon: "none" })
       uni.navigateTo({ url: item.path })
     }
-
-    const quickScan = () => {
-      try {
-        // #ifdef APP-PLUS
-        if (_urovo.value && _urovo.value.startScan) {
-          _urovo.value.startScan()
-        } else {
-          uni.showToast({ title: "当前环境不支持扫描", icon: "none" })
-        }
-        // #endif
-      } catch (e) {
-        uni.showToast({ title: "无法触发扫描", icon: "none" })
-      }
-    }
-
-    const registerBroadcast = () => {
-      try {
-        if (receiverRegistered.value || !_mainActivity.value) return
-        // #ifdef APP-PLUS
-        const IntentFilter = plus.android.importClass("android.content.IntentFilter")
-        const filter = new IntentFilter()
-        filter.addAction("android.intent.ACTION_DECODE_DATA")
-
-        const BroadcastReceiver = plus.android.implements(
-          "io.dcloud.feature.internal.reflect.BroadcastReceiver",
-          {
-            onReceive: function(context, intent) {
-              plus.android.importClass(intent)
-              const code = intent.getStringExtra("barcode_string")
-              if (code) {
-                lastScan.value = code
-                uni.vibrateShort && uni.vibrateShort()
-              }
-            }
-          }
-        )
-        _receiver.value = BroadcastReceiver
-        _mainActivity.value.registerReceiver(BroadcastReceiver, filter)
-        receiverRegistered.value = true
-        // #endif
-      } catch (e) {
-        console.error('注册广播失败:', e)
-      }
-    }
-
-    const unRegisterBroadcast = () => {
-      try {
-        if (!receiverRegistered.value || !_mainActivity.value || !_receiver.value) return
-        // #ifdef APP-PLUS
-        _mainActivity.value.unregisterReceiver(_receiver.value)
-        // #endif
-        receiverRegistered.value = false
-        _receiver.value = null
-      } catch (e) {
-        console.error('注销广播失败:', e)
-      }
-    }
-
-    // 生命周期
-    onMounted(() => {
-      try {
-        // #ifdef APP-PLUS
-        // 修复：移除有语法错误的行
-        _urovo.value = uni.requireNativePlugin("TH-PlatformSDK")
-        
-        const plusObj = typeof plus !== "undefined" ? plus : null
-        if (plusObj && plusObj.android) {
-          _mainActivity.value = plus.android.runtimeMainActivity()
-          canScan.value = !!_urovo.value
-          registerBroadcast()
-        }
-        // #endif
-      } catch (e) {
-        canScan.value = false
-        console.error('初始化扫描功能失败:', e)
-      }
-    })
 
     onShow(() => {
       // 每次回到工作台都重新确认能力，保证后台撤权能及时生效。
@@ -157,17 +73,10 @@ export default {
       })
     })
 
-    onUnmounted(() => {
-      unRegisterBroadcast()
-    })
-
     // 返回模板需要的数据和方法
     return {
       actions,
-      lastScan,
-      canScan,
       go,
-      quickScan
     }
   }
 }

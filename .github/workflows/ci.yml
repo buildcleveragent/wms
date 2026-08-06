@@ -22,6 +22,27 @@ env:
   MYSQL_VERSION: '8.0'
 
 jobs:
+  pda-client:
+    name: PDA Client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: wmspda/package-lock.json
+      - run: npm ci
+        working-directory: wmspda
+      - run: npm run test:unit
+        working-directory: wmspda
+      - run: npm run build:h5
+        working-directory: wmspda
+      - run: npx playwright install --with-deps chromium
+        working-directory: wmspda
+      - run: npm run test:e2e
+        working-directory: wmspda
+
   owner-sale-client:
     name: Owner Sale Client
     runs-on: ubuntu-latest
