@@ -25,6 +25,9 @@ export const useAuth = defineStore('auth', {
     canImportProducts: (state) =>
       state.profileLoaded === true &&
       state.profile?.capabilities?.can_import_products === true,
+    canExportProducts: (state) =>
+      state.profileLoaded === true &&
+      state.profile?.capabilities?.can_export_products === true,
     canRequestReplenishment: (state) =>
       state.profileLoaded === true &&
       state.profile?.capabilities?.can_request_replenishment === true,

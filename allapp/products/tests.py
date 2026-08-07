@@ -26,7 +26,14 @@ from .category_backfill import (
     build_category_backfill_workbook,
     import_category_backfill,
 )
-from .excel_import import HEADERS, IMPORT_SHEET_NAME, MAX_IMPORT_FILE_SIZE
+from .excel_import import (
+    HEADERS,
+    IMPORT_SHEET_NAME,
+    MAX_IMPORT_FILE_SIZE,
+    PACKAGE_HEADERS,
+    PACKAGE_SHEET_NAME,
+    PRODUCT_HEADERS,
+)
 from .views import ProductViewSet
 
 # 业务模型
@@ -34,7 +41,9 @@ Owner = apps.get_model("baseinfo", "Owner")
 ProductUom = apps.get_model("products", "ProductUom")
 ProductCategory = apps.get_model("products", "ProductCategory")
 Product = apps.get_model("products", "Product")
+ProductPackage = apps.get_model("products", "ProductPackage")
 Warehouse = apps.get_model("locations", "Warehouse")
+OwnerWarehouseBinding = apps.get_model("baseinfo", "OwnerWarehouseBinding")
 
 # 可选：DAL 自动补全视图（存在则测试）
 try:
@@ -161,7 +170,9 @@ class ProductCategoryBackfillTests(TestCase):
         )
 
     def test_export_and_atomic_import_only_update_category(self):
-        content = build_category_backfill_workbook(Product.objects.filter(pk=self.product.pk))
+        content = build_category_backfill_workbook(
+            Product.objects.filter(pk=self.product.pk)
+        )
         workbook = load_workbook(io.BytesIO(content))
         workbook["商品分类补录"]["E2"] = self.category.code
 
@@ -175,11 +186,15 @@ class ProductCategoryBackfillTests(TestCase):
         )
 
     def test_invalid_row_rolls_back_every_valid_row(self):
-        content = build_category_backfill_workbook(Product.objects.filter(pk=self.product.pk))
+        content = build_category_backfill_workbook(
+            Product.objects.filter(pk=self.product.pk)
+        )
         workbook = load_workbook(io.BytesIO(content))
         sheet = workbook["商品分类补录"]
         sheet["E2"] = self.category.code
-        sheet.append([self.owner.code, "MISSING", "不存在", "未分类", self.category.code])
+        sheet.append(
+            [self.owner.code, "MISSING", "不存在", "未分类", self.category.code]
+        )
 
         with self.assertRaises(CategoryBackfillError):
             import_category_backfill(self._upload(workbook), user=self.user)
@@ -674,12 +689,22 @@ class ProductExcelImportApiTests(TestCase):
         workbook = load_workbook(io.BytesIO(response.content))
         self.assertEqual(
             workbook.sheetnames,
-            ["填写说明", "商品导入", "基础资料", "_meta"],
+            ["填写说明", "商品导入", "商品包装", "基础资料", "_meta"],
         )
         self.assertEqual(workbook["_meta"].sheet_state, "hidden")
-        self.assertEqual(workbook["_meta"]["B2"].value, "2")
+        self.assertEqual(workbook["_meta"]["B2"].value, "3")
         headers = [cell.value for cell in workbook[IMPORT_SHEET_NAME][1]]
-        self.assertEqual(tuple(headers), HEADERS)
+        self.assertEqual(tuple(headers), PRODUCT_HEADERS)
+        package_headers = [cell.value for cell in workbook[PACKAGE_SHEET_NAME][1]]
+        self.assertEqual(tuple(package_headers), PACKAGE_HEADERS)
+        self.assertEqual(
+            tuple(headers[:5]),
+            ("货主编码", "商品编号", "商品名称", "分类编码", "基本单位编码"),
+        )
+        self.assertEqual(
+            tuple(package_headers[:4]),
+            ("货主编码", "商品编号", "包装单位编码", "包装换算数量"),
+        )
         instructions = {
             row[0].value: row[1].value
             for row in workbook["填写说明"].iter_rows(min_col=1, max_col=2)
@@ -696,9 +721,9 @@ class ProductExcelImportApiTests(TestCase):
         self.assertIn(self.owner.code, owner_codes)
         self.assertNotIn(self.other_owner.code, owner_codes)
         self.assertIn("ProductImportUomCodes", workbook.defined_names)
-        code_column = HEADERS.index("商品编号") + 1
-        owner_column = HEADERS.index("货主编码") + 1
-        barcode_column = HEADERS.index("GTIN") + 1
+        code_column = PRODUCT_HEADERS.index("商品编号") + 1
+        owner_column = PRODUCT_HEADERS.index("货主编码") + 1
+        barcode_column = PRODUCT_HEADERS.index("GTIN") + 1
         self.assertEqual(
             workbook[IMPORT_SHEET_NAME].cell(1, owner_column).fill.fgColor.rgb,
             workbook[IMPORT_SHEET_NAME].cell(1, code_column).fill.fgColor.rgb,
@@ -842,7 +867,7 @@ class ProductExcelImportApiTests(TestCase):
                 self._valid_row(
                     "PDA-EXISTING",
                     **{"商品名称": "尝试修改原商品"},
-                )
+                ),
             ]
         )
 
@@ -1209,6 +1234,146 @@ class ProductExcelImportApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertTrue(Product.objects.filter(code="PDA-LEGACY-ACTION").exists())
+
+    def test_export_owner_scope_permission_and_profile_capability(self):
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
+        warehouse_client = APIClient()
+        warehouse_client.force_authenticate(self.warehouse_denied_user)
+        owners = warehouse_client.get("/api/products/export-owners/")
+        profile = warehouse_client.get("/api/auth/profile/")
+
+        self.assertEqual(owners.status_code, 200, owners.data)
+        self.assertEqual(
+            [item["id"] for item in owners.data["results"]], [self.owner.id]
+        )
+        self.assertTrue(profile.data["capabilities"]["can_export_products"])
+
+        denied_client = APIClient()
+        denied_client.force_authenticate(self.no_permission_user)
+        denied = denied_client.get("/api/products/export-owners/")
+        denied_profile = denied_client.get("/api/auth/profile/")
+        self.assertEqual(denied.status_code, 403)
+        self.assertFalse(denied_profile.data["capabilities"]["can_export_products"])
+
+    def test_export_rejects_missing_and_out_of_scope_owner(self):
+        missing = self.client.get("/api/products/export-excel/")
+        forbidden = self.client.get(
+            f"/api/products/export-excel/?owner_id={self.other_owner.id}"
+        )
+
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_export_v3_round_trip_preserves_multiple_packages(self):
+        product = Product.objects.create(
+            owner=self.owner,
+            code="PDA-EXPORT-001",
+            name="=档案商品 001",
+            category=self.category,
+            brand=self.brand,
+            base_uom=self.uom,
+            gtin="00012345",
+            batch_control=False,
+            expiry_control=False,
+            expiry_basis=None,
+            is_active=False,
+        )
+        ProductPackage.objects.create(
+            product=product,
+            uom=self.uom,
+            qty_in_base=1,
+            barcode="000001",
+            is_pickable=True,
+            sort_order=1,
+        )
+        ProductPackage.objects.create(
+            product=product,
+            uom=self.carton_uom,
+            qty_in_base=12,
+            barcode="000012",
+            length_cm=10,
+            width_cm=20,
+            height_cm=30,
+            gross_weight_kg="2.500",
+            is_purchase_default=True,
+            is_sales_default=True,
+            sort_order=2,
+        )
+
+        exported = self.client.get(
+            f"/api/products/export-excel/?owner_id={self.owner.id}"
+        )
+        self.assertEqual(exported.status_code, 200)
+        self.assertIn("filename*=UTF-8", exported["Content-Disposition"])
+        workbook = load_workbook(io.BytesIO(exported.content), data_only=False)
+        self.assertEqual(workbook["_meta"]["B2"].value, "3")
+        self.assertEqual(workbook[IMPORT_SHEET_NAME]["A2"].value, self.owner.code)
+        name_column = PRODUCT_HEADERS.index("商品名称") + 1
+        self.assertEqual(
+            workbook[IMPORT_SHEET_NAME].cell(2, name_column).data_type, "s"
+        )
+        package_codes = {
+            workbook[PACKAGE_SHEET_NAME].cell(row, 3).value
+            for row in range(2, workbook[PACKAGE_SHEET_NAME].max_row + 1)
+            if workbook[PACKAGE_SHEET_NAME].cell(row, 3).value
+        }
+        self.assertEqual(package_codes, {self.uom.code, self.carton_uom.code})
+
+        ProductPackage.all_objects.filter(product=product).delete()
+        Product.all_objects.filter(pk=product.pk).delete()
+        uploaded = SimpleUploadedFile(
+            "round-trip.xlsx",
+            exported.content,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        imported = self.client.post(
+            "/api/products/import-excel/", {"file": uploaded}, format="multipart"
+        )
+
+        self.assertEqual(imported.status_code, 200, imported.data)
+        recreated = Product.objects.get(owner=self.owner, code="PDA-EXPORT-001")
+        self.assertFalse(recreated.is_active)
+        self.assertEqual(recreated.name, "=档案商品 001")
+        packages = list(recreated.packages.order_by("sort_order"))
+        self.assertEqual(len(packages), 2)
+        self.assertEqual(packages[1].qty_in_base, 12)
+        self.assertTrue(packages[1].is_purchase_default)
+
+    def test_v3_rejects_mixed_legacy_and_package_sheet_data(self):
+        workbook = Workbook()
+        product_sheet = workbook.active
+        product_sheet.title = IMPORT_SHEET_NAME
+        product_sheet.append(list(HEADERS))
+        row = self._valid_row(
+            "PDA-MIXED",
+            **{
+                "包装单位编码": self.carton_uom.code,
+                "包装换算数量": 12,
+            },
+        )
+        product_sheet.append([row.get(header) for header in HEADERS])
+        package_sheet = workbook.create_sheet(PACKAGE_SHEET_NAME)
+        package_sheet.append(list(PACKAGE_HEADERS))
+        package_sheet.append(
+            [
+                self.owner.code,
+                "PDA-MIXED",
+                self.carton_uom.code,
+                12,
+            ]
+        )
+        output = io.BytesIO()
+        workbook.save(output)
+
+        response = self.client.post(
+            "/api/products/import-excel/",
+            {"file": SimpleUploadedFile("mixed.xlsx", output.getvalue())},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("不能同时", response.data["detail"])
+        self.assertFalse(Product.objects.filter(code="PDA-MIXED").exists())
 
 
 @unittest.skipUnless(

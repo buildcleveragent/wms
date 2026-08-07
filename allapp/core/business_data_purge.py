@@ -15,7 +15,7 @@ from django.db import connections, transaction
 
 from allapp.accounts.audit import record_audit_event
 
-PURGE_MANIFEST_VERSION = "2026-07-22.1"
+PURGE_MANIFEST_VERSION = "2026-08-07.1"
 
 
 PRESERVED_MODEL_LABELS = frozenset(
@@ -44,6 +44,7 @@ PRESERVED_MODEL_LABELS = frozenset(
         "baseinfo.driver",
         "baseinfo.employee",
         "baseinfo.owner",
+        "baseinfo.ownerwarehousebinding",
         "baseinfo.route",
         "baseinfo.supplier",
         "baseinfo.vehicle",
@@ -60,6 +61,7 @@ PRESERVED_MODEL_LABELS = frozenset(
         # Reusable billing and strategy definitions.
         "billing.billingrule",
         "billing.billingruletier",
+        "billing.billingservicecontract",
         "strategies.strategy",
         "strategies.strategycategory",
         "strategies.strategylog",
@@ -83,6 +85,7 @@ PRESERVED_MODEL_LABELS = frozenset(
         "driverapp.driverdevice",
         "driverapp.trackingdevice",
         "reports.datedim",
+        "reports.operatingtarget",
         "reports.reasondim",
         "reports.tempzonedim",
     }
@@ -92,8 +95,11 @@ PRESERVED_MODEL_LABELS = frozenset(
 PURGED_MODEL_LABELS = frozenset(
     {
         # Login state.  JWTs remain valid until their configured expiry.
+        "accounts.loginthrottlecacheentry",
         "authtoken.token",
         "sessions.session",
+        "token_blacklist.blacklistedtoken",
+        "token_blacklist.outstandingtoken",
         # Product master and packaging.
         "products.product",
         "products.productpackage",
@@ -109,6 +115,10 @@ PURGED_MODEL_LABELS = frozenset(
         "inbound.returninspection",
         # Inventory.
         "inventory.inventorydetail",
+        "inventory.inventorycostadjustment",
+        "inventory.inventorycostlayer",
+        "inventory.inventorylayermovement",
+        "inventory.inventorylayerposition",
         "inventory.inventorysnapshotdaily",
         "inventory.inventorysummary",
         "inventory.inventorytransaction",
@@ -125,6 +135,7 @@ PURGED_MODEL_LABELS = frozenset(
         "tasking.adjusttaskextra",
         "tasking.containerusage",
         "tasking.countlineextra",
+        "tasking.countscopelock",
         "tasking.counttaskextra",
         "tasking.dispatchlineextra",
         "tasking.dispatchtaskextra",
@@ -141,7 +152,12 @@ PURGED_MODEL_LABELS = frozenset(
         "tasking.receivelineextra",
         "tasking.receivetaskextra",
         "tasking.reloclineextra",
+        "tasking.relocationrequest",
+        "tasking.relocationrequestline",
+        "tasking.relocationreservation",
         "tasking.reloctaskextra",
+        "tasking.replenishmentpolicy",
+        "tasking.replenishmentrequest",
         "tasking.replenishlineextra",
         "tasking.replenishtaskextra",
         "tasking.reviewlineextra",
@@ -159,6 +175,10 @@ PURGED_MODEL_LABELS = frozenset(
         "billing.billingmetricdaily",
         "billing.billingperiod",
         "billing.billline",
+        "billing.collectionactivity",
+        "billing.paymentallocation",
+        "billing.paymentreceipt",
+        "billing.receivablecollectioncase",
         # POS operations.
         "pos.posauditlog",
         "pos.poscustomerrepayment",
@@ -202,6 +222,8 @@ PURGED_MODEL_LABELS = frozenset(
         "salesapp.saleminipayment",
         "salesapp.saleminipaymentevent",
         "salesapp.saleminipointledger",
+        "salesapp.saleminiproductreview",
+        "salesapp.saleminiproductreviewimage",
         "salesapp.saleminirefund",
         "salesapp.saleproductconfig",
         "salesapp.salesorder",
@@ -226,15 +248,20 @@ PURGED_MODEL_LABELS = frozenset(
         "reports.dedupledger",
         "reports.etljobrun",
         "reports.etlwatermark",
+        "reports.alertcase",
+        "reports.alertcasehistory",
+        "reports.businessreviewsnapshot",
         "reports.factbilling",
         "reports.factinboundline",
         "reports.factinventorysnapshotdaily",
         "reports.factinventorytxn",
         "reports.factoutboundline",
+        "reports.factoutboundordersla",
         "reports.ownerdim",
         "reports.productdim",
         "reports.reportsnapshot",
         "reports.supplierdim",
+        "reports.taskstatesnapshotdaily",
         "reports.warehousedim",
         # Assignments can contain logical IDs for records purged above.
         "strategies.strategyassignment",

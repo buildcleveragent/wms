@@ -11,12 +11,16 @@ from django.db import connection
 from django.test import SimpleTestCase, TransactionTestCase
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
+from rest_framework_simplejwt.token_blacklist.models import (
+    BlacklistedToken,
+    OutstandingToken,
+)
 
 from allapp.accounts.audit import record_audit_event
-from allapp.accounts.models import AuditEvent
-from allapp.baseinfo.models import Customer, Owner
+from allapp.accounts.models import AuditEvent, LoginThrottleCacheEntry
+from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.billing.enums import CalcMethod, ChargeType
-from allapp.billing.models import BillingPeriod, BillingRule
+from allapp.billing.models import BillingPeriod, BillingRule, BillingServiceContract
 from allapp.core.business_data_purge import (
     PRESERVED_MODEL_LABELS,
     PURGED_MODEL_LABELS,
@@ -27,10 +31,11 @@ from allapp.core.business_data_purge import (
     resolve_manifest,
 )
 from allapp.core.models import DocSequence
-from allapp.inventory.models import InventoryDetail
+from allapp.inventory.models import InventoryCostLayer, InventoryDetail
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.pos.models import PosCustomer, PosShift
 from allapp.products.models import Product, ProductCategory, ProductUom
+from allapp.reports.models import OperatingTarget
 from allapp.salesapp.models import PriceGroup, SaleProductConfig
 from allapp.strategies.models import (
     Strategy,
@@ -41,10 +46,44 @@ from allapp.strategies.models import (
 
 
 class BusinessDataPurgeManifestTests(SimpleTestCase):
+    newly_preserved = {
+        "baseinfo.ownerwarehousebinding",
+        "billing.billingservicecontract",
+        "reports.operatingtarget",
+    }
+    newly_purged = {
+        "accounts.loginthrottlecacheentry",
+        "billing.collectionactivity",
+        "billing.paymentallocation",
+        "billing.paymentreceipt",
+        "billing.receivablecollectioncase",
+        "inventory.inventorycostadjustment",
+        "inventory.inventorycostlayer",
+        "inventory.inventorylayermovement",
+        "inventory.inventorylayerposition",
+        "reports.alertcase",
+        "reports.alertcasehistory",
+        "reports.businessreviewsnapshot",
+        "reports.factoutboundordersla",
+        "reports.taskstatesnapshotdaily",
+        "salesapp.saleminiproductreview",
+        "salesapp.saleminiproductreviewimage",
+        "tasking.countscopelock",
+        "tasking.relocationrequest",
+        "tasking.relocationrequestline",
+        "tasking.relocationreservation",
+        "tasking.replenishmentpolicy",
+        "tasking.replenishmentrequest",
+        "token_blacklist.blacklistedtoken",
+        "token_blacklist.outstandingtoken",
+    }
+
     def test_every_managed_model_is_explicitly_classified(self):
         manifest = resolve_manifest()
 
         self.assertFalse(PRESERVED_MODEL_LABELS & PURGED_MODEL_LABELS)
+        self.assertTrue(self.newly_preserved <= PRESERVED_MODEL_LABELS)
+        self.assertTrue(self.newly_purged <= PURGED_MODEL_LABELS)
         self.assertIn("accounts_user", manifest.preserved_tables)
         self.assertIn("products_product", manifest.purged_tables)
         self.assertIn("django_migrations", manifest.preserved_tables)
@@ -95,6 +134,10 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
             name="Purge Customer",
         )
         self.warehouse = Warehouse.objects.create(code="PWH", name="Purge Warehouse")
+        self.owner_warehouse_binding = OwnerWarehouseBinding.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="PSW1",
@@ -128,12 +171,28 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
             base_unit=self.uom.code,
             onhand_qty=3,
         )
+        InventoryCostLayer.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            product=self.product,
+            base_uom=self.uom,
+            original_qty=3,
+            source_type="PURGE_TEST",
+            source_id="PURGE-LAYER",
+        )
         self.rule = BillingRule.objects.create(
             owner=self.owner,
             warehouse=self.warehouse,
             charge_type=ChargeType.STORAGE,
             calc_method=CalcMethod.PER_CBM_DAY,
             unit_price="1.0000",
+        )
+        self.service_contract = BillingServiceContract.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.STORAGE,
+            calc_method=CalcMethod.PER_CBM_DAY,
+            effective_from=datetime.date(2026, 7, 1),
         )
         BillingPeriod.objects.create(
             owner=self.owner,
@@ -182,12 +241,33 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
             owner=self.owner,
             next_no=88,
         )
+        self.operating_target = OperatingTarget.objects.create(
+            month=datetime.date(2026, 7, 1),
+            warehouse=self.warehouse,
+            owner=self.owner,
+            metric=OperatingTarget.Metric.OTIF,
+            target_value="95.0000",
+            created_by=self.operator,
+        )
+        LoginThrottleCacheEntry.objects.create(
+            cache_key="purge-login-throttle",
+            value="cached",
+            expires=timezone.now() + datetime.timedelta(hours=1),
+        )
         Session.objects.create(
             session_key="purge-session",
             session_data="e30:1:invalid",
             expire_date=timezone.now() + datetime.timedelta(days=1),
         )
         self.token = Token.objects.create(user=self.operator)
+        self.outstanding_token = OutstandingToken.objects.create(
+            user=self.operator,
+            jti="purge-outstanding-token",
+            token="purge-token",
+            created_at=timezone.now(),
+            expires_at=timezone.now() + datetime.timedelta(days=1),
+        )
+        BlacklistedToken.objects.create(token=self.outstanding_token)
         self.previous_audit = record_audit_event(
             action="PURGE_TEST_BEFORE",
             module="core.tests",
@@ -229,21 +309,33 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
 
         self.assertFalse(Product.all_objects.filter(pk=self.product.pk).exists())
         self.assertFalse(InventoryDetail.all_objects.exists())
+        self.assertFalse(InventoryCostLayer.objects.exists())
         self.assertFalse(BillingPeriod.objects.exists())
         self.assertFalse(PosShift.objects.exists())
         self.assertFalse(SaleProductConfig.all_objects.exists())
         self.assertFalse(StrategyAssignment.objects.exists())
         self.assertFalse(Session.objects.exists())
         self.assertFalse(Token.objects.exists())
+        self.assertFalse(LoginThrottleCacheEntry.objects.exists())
+        self.assertFalse(OutstandingToken.objects.exists())
+        self.assertFalse(BlacklistedToken.objects.exists())
 
         self.assertTrue(get_user_model().objects.filter(pk=self.operator.pk).exists())
         self.assertTrue(Owner.all_objects.filter(pk=self.owner.pk).exists())
+        self.assertTrue(
+            OwnerWarehouseBinding.all_objects.filter(
+                pk=self.owner_warehouse_binding.pk
+            ).exists()
+        )
         self.assertTrue(Customer.all_objects.filter(pk=self.customer.pk).exists())
         self.assertTrue(
             ProductCategory.all_objects.filter(pk=self.category.pk).exists()
         )
         self.assertTrue(ProductUom.all_objects.filter(pk=self.uom.pk).exists())
         self.assertTrue(BillingRule.objects.filter(pk=self.rule.pk).exists())
+        self.assertTrue(
+            BillingServiceContract.objects.filter(pk=self.service_contract.pk).exists()
+        )
         self.assertTrue(PosCustomer.objects.filter(pk=self.pos_customer.pk).exists())
         self.assertTrue(PriceGroup.all_objects.filter(pk=self.price_group.pk).exists())
         self.assertTrue(Strategy.objects.filter(pk=self.strategy.pk).exists())
@@ -256,6 +348,9 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
             owner_sequence_before,
         )
         self.assertTrue(AuditEvent.objects.filter(pk=self.previous_audit.pk).exists())
+        self.assertTrue(
+            OperatingTarget.objects.filter(pk=self.operating_target.pk).exists()
+        )
         success = AuditEvent.objects.get(
             action="BUSINESS_DATA_PURGE",
             succeeded=True,

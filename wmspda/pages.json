@@ -6,6 +6,7 @@
 		{"path": "pages/inbound/selectsupplier","style": {"navigationBarTitleText": "无订单入库"}},
 		{"path": "pages/products/search","style": {"navigationBarTitleText": "录入产品"}},
 		{"path": "pages/products/import","style": {"navigationBarTitleText": "商品批量导入"}},
+		{"path": "pages/products/export","style": {"navigationBarTitleText": "商品档案导出"}},
 		{"path": "pages/orders/cart","style": {"navigationBarTitleText": "入库单"}},
 		{"path": "pages/pos/index","style": {"navigationBarTitleText": "POS收银", "navigationStyle": "custom"}},
 		{"path": "pages/pos/report","style": {"navigationBarTitleText": "POS销售报表"}},

@@ -10,8 +10,10 @@
 - 命令不会创建或验证备份，只会把备份编号或路径写入审计事件。
 - 命令不会停止 Web、后台任务或计费调度；正式执行前必须由运维停止这些进程。
 - 命令不会删除 `media/` 中的商品图片等文件。
-- Django Session 和 DRF Token 会被删除。SimpleJWT 没有启用撤销机制，因此已经签发
-  的 Access Token 最长仍可使用 1 天，Refresh Token 最长仍可使用 7 天。
+- 商品、商品包装及依赖商品的补货策略会被删除，清理后必须重新导入商品并重新配置补货策略。
+- Django Session、DRF Token、SimpleJWT Outstanding/Blacklist 记录会被删除，正式清理后
+  所有用户必须重新登录。清空黑名单不会主动撤销已经签发的 JWT；Access Token 最长仍可使用
+  1 天，Refresh Token 最长仍可使用 7 天。
 - 数据库中出现未分类表，或者保留表仍通过外键引用待清理表时，正式执行会被拒绝。
 - 目标代码中已声明但数据库尚未通过迁移创建的表会显示为 `MISSING` 并安全跳过。
 
@@ -20,6 +22,9 @@
 如果计划删除并重建整个数据库，应先使用 `backup_preserved_data` 导出保留模型。
 备份包是权限为 `0700` 的目录，包含 `preserved-data.sql.gz` 和 `manifest.json`；
 其中含用户密码哈希、联系方式、地址和权限配置等敏感数据，必须放在加密存储中并异地保存。
+
+备份包与生成它的清理清单版本严格绑定。清单升级到 `2026-08-07.1` 后，旧版本备份包
+不能由新版 `restore_preserved_data` 直接恢复；部署新版代码后必须重新生成、复制并核验备份包。
 
 备份不包含 `AuditEvent`、`SystemLog`、Django Admin Log、`StrategyLog`、业务清理模型或
 `django_migrations`。商品分类图片只备份数据库路径，`media/` 文件必须另行备份。

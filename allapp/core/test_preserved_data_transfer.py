@@ -1,3 +1,4 @@
+import datetime
 import gzip
 import json
 import os
@@ -15,7 +16,9 @@ from django.db import connection
 from django.test import SimpleTestCase, TransactionTestCase
 
 from allapp.accounts.models import AuditEvent
-from allapp.baseinfo.models import Owner
+from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
+from allapp.billing.enums import CalcMethod, ChargeType
+from allapp.billing.models import BillingServiceContract
 from allapp.core.business_data_purge import canonical_target
 from allapp.core.preserved_data_transfer import (
     EXCLUDED_HISTORY_MODEL_LABELS,
@@ -26,7 +29,9 @@ from allapp.core.preserved_data_transfer import (
     resolve_transfer_scope,
     validate_dump_sql,
 )
+from allapp.locations.models import Warehouse
 from allapp.products.models import ProductCategory
+from allapp.reports.models import OperatingTarget
 
 
 class PreservedDataTransferUnitTests(SimpleTestCase):
@@ -36,6 +41,9 @@ class PreservedDataTransferUnitTests(SimpleTestCase):
         self.assertEqual(scope.excluded_model_labels, EXCLUDED_HISTORY_MODEL_LABELS)
         self.assertNotIn("django_migrations", scope.selected_tables)
         self.assertIn("accounts_user", scope.selected_tables)
+        self.assertIn("baseinfo_ownerwarehousebinding", scope.selected_tables)
+        self.assertIn("billing_billingservicecontract", scope.selected_tables)
+        self.assertIn("reports_operatingtarget", scope.selected_tables)
         self.assertIn("products_productcategory", scope.selected_tables)
         self.assertNotIn("accounts_auditevent", scope.selected_tables)
         self.assertNotIn("django_admin_log", scope.selected_tables)
@@ -136,6 +144,26 @@ class PreservedDataTransferMySQLTests(TransactionTestCase):
             password="original-password",
         )
         owner = Owner.objects.create(name="Preserved Owner", code="PRESERVED")
+        warehouse = Warehouse.objects.create(code="PRESWH", name="Preserved")
+        binding = OwnerWarehouseBinding.objects.create(
+            owner=owner,
+            warehouse=warehouse,
+        )
+        contract = BillingServiceContract.objects.create(
+            owner=owner,
+            warehouse=warehouse,
+            charge_type=ChargeType.STORAGE,
+            calc_method=CalcMethod.PER_CBM_DAY,
+            effective_from=datetime.date(2026, 8, 1),
+        )
+        target = OperatingTarget.objects.create(
+            month=datetime.date(2026, 8, 1),
+            warehouse=warehouse,
+            owner=owner,
+            metric=OperatingTarget.Metric.OTIF,
+            target_value="95.0000",
+            created_by=operator,
+        )
         category = ProductCategory.objects.create(
             code="PRESERVED-CATEGORY",
             name="Preserved Category",
@@ -190,6 +218,9 @@ class PreservedDataTransferMySQLTests(TransactionTestCase):
         restored_user = get_user_model().objects.get(pk=operator.pk)
         self.assertTrue(restored_user.check_password("original-password"))
         self.assertTrue(Owner.objects.filter(pk=owner.pk, code="PRESERVED").exists())
+        self.assertTrue(OwnerWarehouseBinding.objects.filter(pk=binding.pk).exists())
+        self.assertTrue(BillingServiceContract.objects.filter(pk=contract.pk).exists())
+        self.assertTrue(OperatingTarget.objects.filter(pk=target.pk).exists())
         restored_category = ProductCategory.objects.get(pk=category.pk)
         self.assertEqual(restored_category.image.name, "product_categories/example.png")
         self.assertFalse(AuditEvent.objects.filter(pk=historical_audit.pk).exists())

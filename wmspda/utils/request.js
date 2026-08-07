@@ -287,6 +287,74 @@ export function downloadProductImportTemplate() {
   })
 }
 
+export function downloadProductArchive(ownerId, ownerCode = '') {
+  const token = getToken()
+  const url = `${BASE_URL}/api/products/export-excel/?owner_id=${encodeURIComponent(ownerId)}`
+
+  // #ifdef H5
+  if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+    return window.fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }).then(async (response) => {
+      if (response.status === 401) {
+        redirectToLogin()
+        throw { statusCode: 401, message: '登录已超时，需要重新登录' }
+      }
+      if (!response.ok) {
+        let data = null
+        try {
+          data = await response.json()
+        } catch (e) {}
+        throw {
+          statusCode: response.status,
+          data,
+          message:
+            response.status === 403
+              ? '无商品档案导出权限'
+              : getFriendlyMessage(data, '商品档案导出失败'),
+        }
+      }
+      const blob = await response.blob()
+      const disposition = response.headers.get('content-disposition') || ''
+      const matched = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+      const filename = matched
+        ? decodeURIComponent(matched[1])
+        : `商品档案-${ownerCode || ownerId}.xlsx`
+      const objectUrl = window.URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      window.URL.revokeObjectURL(objectUrl)
+      return { opened: true, tempFilePath: '', filename }
+    })
+  }
+  // #endif
+
+  return new Promise((resolve, reject) => {
+    uni.downloadFile({
+      url,
+      header: token ? { Authorization: `Bearer ${token}` } : {},
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve({ tempFilePath: res.tempFilePath || '', opened: false })
+          return
+        }
+        if (res.statusCode === 401) redirectToLogin()
+        reject({
+          statusCode: res.statusCode,
+          data: res.data,
+          message: res.statusCode === 403 ? '无商品档案导出权限' : '商品档案导出失败',
+        })
+      },
+      fail: (error) =>
+        reject({ statusCode: 0, data: error, message: '商品档案下载失败' }),
+    })
+  })
+}
+
 export function uploadProductImportExcel(filePath) {
   const token = getToken()
   return new Promise((resolve, reject) => {
@@ -458,6 +526,11 @@ export const api = {
 
   downloadProductImportTemplate,
   importProductsExcel: uploadProductImportExcel,
+  productExportOwners: (q = '', page = 1) =>
+    request({
+      url: `/api/products/export-owners/?search=${encodeURIComponent(q)}&page=${page}`,
+    }),
+  downloadProductArchive,
   downloadNoOrderReceiveImportTemplate,
   previewNoOrderReceiveImport: uploadNoOrderReceiveImportPreview,
   confirmNoOrderReceiveImport: (payload) =>
