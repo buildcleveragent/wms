@@ -11,14 +11,15 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Customer, Owner
+from allapp.core.models import PrintConfig
 from allapp.inventory.models import (
     InventoryDetail,
     InventoryTransaction,
     PostingJournal,
 )
 from allapp.locations.models import Location, Subwarehouse, Warehouse
-from allapp.outbound.models import OutboundOrder
 from allapp.outbound.export_print import pick_task_print
+from allapp.outbound.models import OutboundOrder
 from allapp.outbound.views import (
     AssistedOutboundOrderViewSet,
     OutboundOrderViewSet,
@@ -412,8 +413,49 @@ class AssistedOutboundFlowTests(TestCase):
             f"/api/pda/pick-tasks/{created.data['task_id']}/print/"
         )
         print_request.user = self.operator
+        PrintConfig.objects.create(
+            code="outbound_assisted_test",
+            name="代办出库打印测试",
+            module=PrintConfig.Module.OUTBOUND,
+            print_method=PrintConfig.PrintMethod.BACKEND_HTML,
+            printer_type=PrintConfig.PrinterType.DOT_MATRIX,
+            page_size_css="8in 4in",
+            page_margin="1mm 2mm",
+            sheet_width="95%",
+            sheet_padding_top="1mm",
+            sheet_padding_right="2mm",
+            sheet_padding_bottom="3mm",
+            sheet_padding_left="4mm",
+            font_family="Noto Sans SC, Arial, sans-serif",
+            body_font_size="11px",
+            company_font_size="21px",
+            title_font_size="19px",
+            meta_font_size="12px",
+            table_font_size="10px",
+            table_header_font_size="9px",
+            money_font_size="14px",
+            footer_font_size="8px",
+            body_line_height="1.3",
+            meta_line_height="1.2",
+            table_line_height="16px",
+            money_line_height="17px",
+            footer_line_height="1.1",
+            table_cell_padding="2px 3px",
+            is_default=True,
+            is_active=True,
+        )
         print_response = pick_task_print(print_request, created.data["task_id"])
         self.assertEqual(print_response.status_code, 200)
+        self.assertContains(print_response, "size: 8in 4in")
+        self.assertNotContains(print_response, "size: A4")
+        self.assertContains(
+            print_response,
+            "font-family: Noto Sans SC, Arial, sans-serif",
+        )
+        self.assertContains(print_response, "font-size: 21px")
+        self.assertContains(print_response, "font-size: 19px")
+        self.assertContains(print_response, "font-size: 14px")
+        self.assertContains(print_response, "padding: 2px 3px")
         self.assertContains(print_response, "箱")
         self.assertContains(print_response, "1 箱=4")
         self.assertContains(print_response, "实际收件人张三")

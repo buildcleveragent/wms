@@ -166,6 +166,43 @@ class PrintConfigApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["results"])
         self.assertEqual(response.data["default"]["code"], "pos_dot_241_93")
+        self.assertEqual(
+            response.data["default"]["font_family"],
+            "Microsoft YaHei, Arial, sans-serif",
+        )
+
+    def test_outbound_default_print_config_and_fallback_order(self):
+        default_config = PrintConfig.get_default(PrintConfig.Module.OUTBOUND)
+
+        self.assertEqual(default_config.code, "outbound_dot_241_93")
+        self.assertTrue(default_config.is_active)
+        self.assertTrue(default_config.is_default)
+        self.assertEqual(default_config.page_size_css, "9.5in 3.6667in")
+        self.assertEqual(default_config.body_font_size, "13px")
+        response = self.client.get("/api/core/print-configs/default/?module=outbound")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["code"], "outbound_dot_241_93")
+        self.assertEqual(
+            response.data["font_family"],
+            "Microsoft YaHei, Arial, sans-serif",
+        )
+
+        default_config.is_default = False
+        default_config.sort_order = 20
+        default_config.save(update_fields=["is_default", "sort_order", "updated_at"])
+        fallback = PrintConfig.objects.create(
+            code="outbound_test_fallback",
+            name="出库测试回退配置",
+            module=PrintConfig.Module.OUTBOUND,
+            is_default=False,
+            is_active=True,
+            sort_order=1,
+        )
+
+        self.assertEqual(
+            PrintConfig.get_default(PrintConfig.Module.OUTBOUND),
+            fallback,
+        )
 
 
 class DataAccuracyCommandTests(TestCase):

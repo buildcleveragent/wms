@@ -116,9 +116,10 @@ class PrintConfigAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "字号",
+            "字体与字号",
             {
                 "fields": (
+                    "font_family",
                     "body_font_size",
                     "company_font_size",
                     "title_font_size",

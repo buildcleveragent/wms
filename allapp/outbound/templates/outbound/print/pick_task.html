@@ -5,24 +5,37 @@
   <title>{{ object.owner.name }}出库单 {{ object.order_no }}</title>
 
   <style>
-    @page { size: A4; margin: 8mm; }
+    @page { size: {{ print_css.page_size_css }}; margin: {{ print_css.page_margin }}; }
 
     body {
-      font-family: "Microsoft YaHei", Arial, sans-serif;
-      font-size: 13px;
+      margin: 0;
+      font-family: {{ print_css.font_family }};
+      font-size: {{ print_css.body_font_size }};
       color: #000;
-      line-height: 1.4;
+      line-height: {{ print_css.body_line_height }};
+    }
+
+    .print-sheet {
+      box-sizing: border-box;
+      width: {{ print_css.sheet_width }};
+      padding: {{ print_css.sheet_padding_top }} {{ print_css.sheet_padding_right }}
+        {{ print_css.sheet_padding_bottom }} {{ print_css.sheet_padding_left }};
     }
 
     /* 标题 */
     .title {
       text-align: center;
-      font-size: 22px;
       font-weight: 700;
       margin: 2px 0 6px;
     }
+    .company-name { font-size: {{ print_css.company_font_size }}; }
+    .document-title { font-size: {{ print_css.title_font_size }}; }
 
     /* 无框线信息区 */
+    .top-row, .meta {
+      font-size: {{ print_css.meta_font_size }};
+      line-height: {{ print_css.meta_line_height }};
+    }
     .top-row { margin-bottom: 4px; }
     .top-row .center {
       width: 100%;
@@ -59,20 +72,27 @@
       width: 100%;
       border-collapse: collapse;
       margin-top: 6px;
-      font-size: 13px;
+      font-size: {{ print_css.table_font_size }};
       table-layout: fixed; /* 固定列宽，配合省略号 */
     }
     table.goods th, table.goods td {
       border: 1px solid #000;
-      padding: 6px 6px;
+      padding: {{ print_css.table_cell_padding }};
       text-align: center;
       vertical-align: middle;
 
       /* 固定行高，避免换行撑高 */
       height: 28px;
-      line-height: 18px;
+      line-height: {{ print_css.table_line_height }};
     }
-    table.goods th { font-weight: 700; }
+    table.goods th {
+      font-size: {{ print_css.table_header_font_size }};
+      font-weight: 700;
+    }
+    table.goods .total-row {
+      font-size: {{ print_css.money_font_size }};
+      line-height: {{ print_css.money_line_height }};
+    }
 
     /* 不换行 + 超出省略 */
     .nowrap {
@@ -85,6 +105,10 @@
     .t-right { text-align: right !important; }
 
     /* 底部签字区（无框线） */
+    .sign, .copies {
+      font-size: {{ print_css.footer_font_size }};
+      line-height: {{ print_css.footer_line_height }};
+    }
     .sign { margin-top: 10px; }
     .sign-row {
       display: flex;
@@ -106,15 +130,15 @@
       margin-top: 10px;
       display: flex;
       justify-content: space-between;
-      font-size: 12px;
     }
   </style>
 </head>
 
 <body onload="window.print()">
+<div class="print-sheet">
 
   <!-- 标题 -->
-  <div class="title">金桥融通仓出库单</div>
+  <div class="title"><span class="company-name">金桥融通仓</span><span class="document-title">出库单</span></div>
 
   <!-- 送货单号（居中） -->
   <div class="top-row">
@@ -201,7 +225,7 @@
       {% endfor %}
 
       <!-- ✅ 合计 + 大写：同一行；“合计”在序号列下面，“大写”在其右侧 -->
-      <tr>
+      <tr class="total-row">
         <!-- 合计写到“序号”列下 -->
         <td><b>合计</b></td>
 
@@ -244,6 +268,8 @@
     <div>第二联：送货</div>
     <div>第三联：客户</div>
   </div>
+
+</div>
 
 </body>
 </html>

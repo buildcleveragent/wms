@@ -26,6 +26,7 @@ class PrintConfigSerializer(serializers.ModelSerializer):
             "sheet_padding_right",
             "sheet_padding_bottom",
             "sheet_padding_left",
+            "font_family",
             "body_font_size",
             "company_font_size",
             "title_font_size",

@@ -10,11 +10,38 @@ from django.utils import timezone
 from rest_framework_simplejwt.tokens import AccessToken
 
 from allapp.accounts.audit import record_audit_event
-from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+from allapp.core.models import PrintConfig
+from allapp.core.printing import normalize_print_css
 from allapp.outbound.authz import (
     strict_pick_queryset,
 )
+from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.tasking.models import WmsTask
+
+OUTBOUND_PRINT_CSS_DEFAULTS = {
+    "page_size_css": "9.5in 3.6667in",
+    "page_margin": "5mm",
+    "sheet_width": "100%",
+    "sheet_padding_top": "0",
+    "sheet_padding_right": "0",
+    "sheet_padding_bottom": "0",
+    "sheet_padding_left": "0",
+    "font_family": "Microsoft YaHei, Arial, sans-serif",
+    "body_font_size": "13px",
+    "company_font_size": "22px",
+    "title_font_size": "22px",
+    "meta_font_size": "13px",
+    "table_font_size": "13px",
+    "table_header_font_size": "13px",
+    "money_font_size": "13px",
+    "footer_font_size": "12px",
+    "body_line_height": "1.4",
+    "meta_line_height": "1.4",
+    "table_line_height": "18px",
+    "money_line_height": "18px",
+    "footer_line_height": "1.4",
+    "table_cell_padding": "6px 6px",
+}
 
 
 def _money_to_rmb_upper(amount: Decimal) -> str:
@@ -121,20 +148,23 @@ def pick_task_print(request, task_id: int):
 
     # 2) 通过任务行的 src_id 解析出库单
     tl = (
-        task.lines
-        .filter(src_model="OutboundOrderLine", src_id__isnull=False)
+        task.lines.filter(src_model="OutboundOrderLine", src_id__isnull=False)
         .order_by("id")
         .first()
     )
     if not tl:
-        return HttpResponse("Bad Request: pick task has no OutboundOrderLine binding", status=400)
+        return HttpResponse(
+            "Bad Request: pick task has no OutboundOrderLine binding", status=400
+        )
 
     try:
-        ol = (
-            OutboundOrderLine.objects
-            .select_related("order", "order__owner", "order__customer", "order__supplier", "order__warehouse")
-            .get(pk=tl.src_id)
-        )
+        ol = OutboundOrderLine.objects.select_related(
+            "order",
+            "order__owner",
+            "order__customer",
+            "order__supplier",
+            "order__warehouse",
+        ).get(pk=tl.src_id)
     except OutboundOrderLine.DoesNotExist:
         return HttpResponse("Bad Request: outbound order line not found", status=400)
 
@@ -146,8 +176,7 @@ def pick_task_print(request, task_id: int):
         output_field=DecimalField(max_digits=18, decimal_places=2),
     )
     lines = (
-        OutboundOrderLine.objects
-        .filter(order_id=order.id)
+        OutboundOrderLine.objects.filter(order_id=order.id)
         .select_related(
             "product",
             "base_uom",
@@ -188,6 +217,8 @@ def pick_task_print(request, task_id: int):
     ship_time = order.approved_at_warehouse or order.etd or timezone.now()
 
     total_amount_upper = _money_to_rmb_upper(total_amount)
+    print_config = PrintConfig.get_default(PrintConfig.Module.OUTBOUND)
+    print_css = normalize_print_css(print_config, OUTBOUND_PRINT_CSS_DEFAULTS)
     record_audit_event(
         action="outbound.pick.print",
         module="outbound",
@@ -196,19 +227,27 @@ def pick_task_print(request, task_id: int):
         metadata={"order_id": order.id},
     )
 
-    return render(request, "outbound/print/pick_task.html", {
-        "object": order,            # ✅ 模板里 object 现在就是 OutboundOrder
-        "lines": lines,             # ✅ 明细是 OutboundOrderLine（带 base_price / amount）
-        "ship_time": ship_time,
-        "sender_name": sender_name,
-        "sender_phone": sender_phone,
-        "receiver_name": receiver_name,
-        "receiver_phone": receiver_phone,
-        "receiver_address": receiver_address,
-        "total_qty": total_qty,
-        "total_amount": total_amount,
-        "total_amount_upper": total_amount_upper,
-    })
+    return render(
+        request,
+        "outbound/print/pick_task.html",
+        {
+            "object": order,  # ✅ 模板里 object 现在就是 OutboundOrder
+            "lines": lines,  # ✅ 明细是 OutboundOrderLine（带 base_price / amount）
+            "ship_time": ship_time,
+            "sender_name": sender_name,
+            "sender_phone": sender_phone,
+            "receiver_name": receiver_name,
+            "receiver_phone": receiver_phone,
+            "receiver_address": receiver_address,
+            "total_qty": total_qty,
+            "total_amount": total_amount,
+            "total_amount_upper": total_amount_upper,
+            "print_config": print_config,
+            "print_css": print_css,
+        },
+    )
+
+
 #
 # from decimal import Decimal
 # from django.http import HttpResponse
@@ -327,8 +366,6 @@ def pick_task_print(request, task_id: int):
 #         "sender_phone": sender_phone,
 #         "total_qty": total_qty,
 #     })
-
-
 
 
 # def pick_task_print(request, task_id: int):

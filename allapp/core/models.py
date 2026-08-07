@@ -4,7 +4,6 @@ from datetime import date
 
 from django.conf import settings
 from django.db import IntegrityError, models, transaction
-from django.utils import timezone
 
 
 class _SkipCleanFlag:
@@ -230,6 +229,12 @@ class PrintConfig(TimeStampedMixin):
     sheet_padding_right = models.CharField("右内边距", max_length=30, default="0")
     sheet_padding_bottom = models.CharField("下内边距", max_length=30, default="0")
     sheet_padding_left = models.CharField("左内边距", max_length=30, default="0")
+    font_family = models.CharField(
+        "字体",
+        max_length=200,
+        default="Microsoft YaHei, Arial, sans-serif",
+        help_text="使用逗号分隔字体名称，不需要引号。",
+    )
     body_font_size = models.CharField("正文字号", max_length=30, default="22px")
     company_font_size = models.CharField(
         "公司/仓库名字号", max_length=30, default="36px"
