@@ -17,7 +17,7 @@
                 ref="searchInputRef"
                 v-model="query"
                 class="input search-input assisted-product-search"
-                placeholder="商品名称、编码、SKU 或条码"
+                placeholder="商品名称、货主商品编码、仓库SKU编码或条码"
                 confirm-type="search"
                 :confirm-hold="true"
                 :disabled="submissionLocked"
@@ -252,7 +252,7 @@
             </view>
 
             <view v-if="!draft.items.length" class="empty initial-empty">
-              请搜索商品名称、SKU、条码或扫码选品
+              请搜索商品名称、仓库SKU编码、条码或扫码选品
             </view>
           </view>
         </view>
@@ -633,7 +633,7 @@ async function loadProducts(event = null, options = {}) {
   const keyword = explicitKeyword || await waitForStableQuery()
   if (!ownerId) return
   if (!keyword) {
-    uni.showToast({ title: '请输入商品名称、编码、SKU 或条码', icon: 'none' })
+    uni.showToast({ title: '请输入商品名称、货主商品编码、仓库SKU编码或条码', icon: 'none' })
     return
   }
 

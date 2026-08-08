@@ -29,7 +29,7 @@
           <view class="cart-product-cell">
             <view class="product-name">{{ item.name }}</view>
             <view class="meta">
-              SKU：{{ item.sku || '-' }}　可用：{{ formatQty(item.available_qty) }}
+              仓库SKU编码：{{ item.sku || '-' }}　可用：{{ formatQty(item.available_qty) }}
               {{ item.base_unit_name }}
             </view>
           </view>

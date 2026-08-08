@@ -25,13 +25,13 @@
 
 参数：
 
-- `search`：商品编码、SKU、条码或名称关键字。
+- `search`：货主商品编码、仓库SKU编码、条码或名称关键字。
 - `barcode`：精确扫码字段，匹配 `gtin/unit_barcode/carton_barcode/ProductPackage.barcode`。
 - `page`、`page_size`：分页。
 
 返回：
 
-- 商品 ID、编码、SKU、名称、基本单位。
+- 商品 ID、货主商品编码、仓库SKU编码、名称、基本单位。
 - 建议售价、最低价、最高折扣。
 - 当前仓库可售库存。
 - 可用销售单位选项：基本单位和已有 `ProductPackage`。

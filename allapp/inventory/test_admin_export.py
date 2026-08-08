@@ -108,8 +108,8 @@ class InventoryDetailAdminExportTests(TestCase):
         rows = self._rows(response)
         self.assertEqual(len(rows), 2)
         header, exported = rows
-        self.assertIn("SKU", header)
-        self.assertEqual(exported[header.index("SKU")], "SKU-KEEP")
+        self.assertIn("仓库SKU编码", header)
+        self.assertEqual(exported[header.index("仓库SKU编码")], "SKU-KEEP")
         self.assertEqual(exported[header.index("账面库存")], 12)
 
     def test_export_keeps_warehouse_access_scope(self):
@@ -138,4 +138,4 @@ class InventoryDetailAdminExportTests(TestCase):
         self.assertEqual(len(rows), 2)
         header, exported = rows
         self.assertEqual(exported[header.index("仓库编号")], "ADEXP1")
-        self.assertEqual(exported[header.index("SKU")], "SKU-KEEP")
+        self.assertEqual(exported[header.index("仓库SKU编码")], "SKU-KEEP")

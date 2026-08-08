@@ -102,8 +102,8 @@ class Command(BaseCommand):
         ws.append(
             [
                 "货主",
-                "商品编号",
-                "SKU",
+                "货主商品编码",
+                "仓库SKU编码",
                 "商品名称",
                 "规格",
                 "单位",

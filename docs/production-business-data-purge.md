@@ -2,7 +2,7 @@
 
 `purge_business_data` 用于清空易变业务数据，同时保留表结构、Django 迁移记录、
 用户权限、货主客户、仓库基础档案和可复用配置。命令只执行 `DELETE`，不会执行
-`DROP`、`TRUNCATE`、重置自增 ID、回退商品 SKU 序号或回退单号序列。
+`DROP`、`TRUNCATE`、重置自增 ID、回退仓库SKU编码序号或回退单号序列。
 
 ## 重要限制
 

@@ -1,15 +1,18 @@
 # allapp/tasking/plugins/defaults.py
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional
-from django.utils import timezone
 
 @dataclass
 class BarcodeResolveResult:
     product_id: Optional[int] = None
+    product_package_id: Optional[int] = None
     code_type: str = ""              # "SKU" / "LOC" / "LPN" / "LOT" ...
+    matched_field: Optional[str] = None
+    matched_fields: list[str] = field(default_factory=list)
     label_key: str = ""              # 原始码
     uom_code: Optional[str] = None
+    uom_name: Optional[str] = None
     pack_qty: Decimal = Decimal("1")
     lot_no: Optional[str] = None
     mfg_date = None

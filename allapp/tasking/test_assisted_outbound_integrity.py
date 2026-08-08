@@ -144,6 +144,53 @@ class PickScanIntegrityTests(TestCase):
         self.line_2.refresh_from_db()
         self.assertEqual(self.line_1.qty_done + self.line_2.qty_done, Decimal("2.000"))
 
+    def test_pack_multiplier_applies_to_pick_and_is_returned_and_logged(self):
+        task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="PICK-INTEGRITY-PACK",
+            task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.RELEASED,
+        )
+        line = WmsTaskLine.objects.create(
+            task=task,
+            product=self.product,
+            from_location=self.location_1,
+            qty_plan=Decimal("20.000"),
+            status=WmsTaskLine.Status.RELEASED,
+        )
+
+        def resolver(_owner_id, _barcode):
+            return {
+                "product_id": self.product.id,
+                "product_package_id": None,
+                "pack_qty": Decimal("4"),
+                "code_type": "CARTON",
+                "matched_fields": ["carton_barcode"],
+                "uom_code": "CTN",
+                "uom_name": "箱",
+            }
+
+        with mock.patch("allapp.tasking.services._resolver", return_value=resolver):
+            result = services.scan_task(
+                task.id,
+                "BOX-4",
+                2,
+                location_id=self.location_1.id,
+                by_user=self.user,
+                client_seq="pack-1",
+            )
+
+        line.refresh_from_db()
+        scan = TaskScanLog.objects.get(pk=result["scan_id"])
+        self.assertEqual(line.qty_done, Decimal("8.000"))
+        self.assertEqual(scan.qty_aux, Decimal("2.000"))
+        self.assertEqual(scan.qty_base_delta, Decimal("8.000000"))
+        self.assertEqual(scan.matched_fields, ["carton_barcode"])
+        self.assertIsNone(scan.label_key)
+        self.assertEqual(result["resolved"]["effective_qty"], Decimal("8.000"))
+        self.assertEqual(result["resolved"]["uom_name"], "箱")
+
     def test_manual_pick_quantity_can_be_corrected_after_saving_zero(self):
         services.adjust_pick_line_qty(
             self.task.id,

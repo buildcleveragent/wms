@@ -18,7 +18,11 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from allapp.core.choices import ZoneType
-from allapp.products.models import Product
+from allapp.products.models import (
+    Product,
+    ProductIdentifierRegistry,
+    normalize_product_identifier,
+)
 
 from .accuracy import reconcile_pos_accuracy
 from .exports import (
@@ -169,13 +173,19 @@ class PosProductListApi(generics.ListAPIView):
         barcode = (self.request.query_params.get("barcode") or "").strip()
 
         if barcode:
+            identifiers = ProductIdentifierRegistry.objects.filter(
+                normalized_value=normalize_product_identifier(barcode),
+                product__is_deleted=False,
+                product__is_active=True,
+            ).filter(
+                Q(product_package__isnull=True)
+                | Q(
+                    product_package__is_deleted=False,
+                    product_package__is_active=True,
+                )
+            )
             queryset = queryset.filter(
-                Q(code=barcode)
-                | Q(sku=barcode)
-                | Q(gtin=barcode)
-                | Q(unit_barcode=barcode)
-                | Q(carton_barcode=barcode)
-                | Q(product_package__barcode=barcode)
+                pk__in=identifiers.values("product_id")
             )
         elif search:
             queryset = queryset.filter(

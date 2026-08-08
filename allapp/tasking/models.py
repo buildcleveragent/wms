@@ -501,6 +501,13 @@ class TaskScanLog(TimeStampedMixin):
     task = models.ForeignKey("tasking.WmsTask", verbose_name=_("任务"),on_delete=models.PROTECT, related_name="scan_logs")
     task_line = models.ForeignKey("tasking.WmsTaskLine", verbose_name=_("任务行"),on_delete=models.PROTECT, null=True, blank=True, related_name="scan_logs")
     product = models.ForeignKey("products.Product", verbose_name=_("商品"),on_delete=models.PROTECT, null=True, blank=True)  # ✅ 允许未知SKU
+    product_package = models.ForeignKey(
+        "products.ProductPackage",
+        verbose_name=_("解析包装层级"),
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
     location = models.ForeignKey("locations.Location", verbose_name=_("库位"),on_delete=models.PROTECT, null=True, blank=True)
 
     # —— 扫码/标签 —— #
@@ -517,7 +524,9 @@ class TaskScanLog(TimeStampedMixin):
     # —— 解析快照 —— #
     code_type = models.CharField(_("码类型"), max_length=16, blank=True, null=True)   # UNIT/LPN/SSCC/GTIN...
     uom_code  = models.CharField(_("解析单位"), max_length=20, blank=True, null=True) # EA/CS/LPN...
+    uom_name  = models.CharField(_("解析单位名称"), max_length=50, blank=True, null=True)
     pack_qty  = models.DecimalField(_("换算(包→基本)"), max_digits=14, decimal_places=6, null=True, blank=True)
+    matched_fields = models.JSONField(_("命中标识字段"), default=list, blank=True)
 
     # —— 数量（基本单位） —— #
     qty_aux        = models.DecimalField(_("包数(+/-)"), max_digits=18, decimal_places=3, null=True, blank=True)

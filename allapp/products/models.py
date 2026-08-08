@@ -6,7 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.db import models, transaction
 from django.core.exceptions import ValidationError
 
-from allapp.core.models import BaseModel
+from allapp.core.models import BaseModel, SoftDeleteManager
 from allapp.baseinfo.models import Owner
 
 # 可选：严格 GTIN 校验（GS1 Mod10）
@@ -14,6 +14,93 @@ from allapp.baseinfo.models import Owner
 # 如需启用校验位检测，将此常量置为 True。
 
 ENABLE_GTIN_CHECK_DIGIT = False
+
+PRODUCT_IDENTIFIER_FIELDS = (
+    "code",
+    "sku",
+    "gtin",
+    "unit_barcode",
+    "carton_barcode",
+    "external_code",
+)
+def normalize_product_identifier(value) -> str:
+    """Return the canonical comparison form used by the identifier registry."""
+    return str(value).strip().upper() if value not in (None, "") else ""
+
+
+class ProductQuerySet(models.QuerySet):
+    """Prevent writes that would bypass Product.save() and its registry sync."""
+
+    def update(self, **kwargs):
+        blocked = set(kwargs).intersection((*PRODUCT_IDENTIFIER_FIELDS, "carton_package", "carton_package_id"))
+        if blocked:
+            fields = ", ".join(sorted(blocked))
+            raise ValueError(f"商品标识字段不能通过 QuerySet.update() 修改：{fields}")
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        blocked = set(fields).intersection((*PRODUCT_IDENTIFIER_FIELDS, "carton_package", "carton_package_id"))
+        if blocked:
+            names = ", ".join(sorted(blocked))
+            raise ValueError(f"商品标识字段不能通过 bulk_update() 修改：{names}")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def bulk_create(self, *args, **kwargs):
+        raise ValueError("Product 不支持 bulk_create()；请逐个调用 save() 以同步商品标识注册表。")
+
+
+class ProductManager(SoftDeleteManager.from_queryset(ProductQuerySet)):
+    pass
+
+
+class AllProductManager(models.Manager.from_queryset(ProductQuerySet)):
+    pass
+
+
+class ProductPackageQuerySet(models.QuerySet):
+    """Prevent writes that would bypass package barcode registry sync."""
+
+    def update(self, **kwargs):
+        blocked = set(kwargs).intersection({"barcode", "product", "product_id"})
+        if blocked:
+            names = ", ".join(sorted(blocked))
+            raise ValueError(f"包装关键字段不能通过 QuerySet.update() 修改：{names}")
+        if (kwargs.get("is_deleted") is True or kwargs.get("is_active") is False) and (
+            Product.all_objects.filter(carton_package_id__in=self.values("pk")).exists()
+        ):
+            raise ValidationError("包含已绑定商品箱码的包装层级，不能停用或删除。")
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        blocked = set(fields).intersection({"barcode", "product", "product_id"})
+        if blocked:
+            names = ", ".join(sorted(blocked))
+            raise ValueError(f"包装关键字段不能通过 bulk_update() 修改：{names}")
+        if set(fields).intersection({"is_active", "is_deleted"}):
+            bound_ids = set(
+                Product.all_objects.filter(
+                    carton_package_id__in=[obj.pk for obj in objs if obj.pk]
+                ).values_list("carton_package_id", flat=True)
+            )
+            if any(
+                obj.pk in bound_ids and (obj.is_deleted or not obj.is_active)
+                for obj in objs
+            ):
+                raise ValidationError("包含已绑定商品箱码的包装层级，不能停用或删除。")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def bulk_create(self, *args, **kwargs):
+        raise ValueError(
+            "ProductPackage 不支持 bulk_create()；请逐个调用 save() 以同步商品标识注册表。"
+        )
+
+
+class ProductPackageManager(SoftDeleteManager.from_queryset(ProductPackageQuerySet)):
+    pass
+
+
+class AllProductPackageManager(models.Manager.from_queryset(ProductPackageQuerySet)):
+    pass
 
 def _as_pos_int(x):
     try:
@@ -399,14 +486,17 @@ class Product(BaseModel):
         ("PALLET", "打托/缠膜"),
     ]
 
+    objects = ProductManager()
+    all_objects = AllProductManager()
+
     owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="products", verbose_name="货主")
 
     # 基本信息
-    code = models.CharField("商品编号", max_length=50, help_text="货主内唯一")
+    code = models.CharField("货主商品编码", max_length=50, help_text="货主内唯一")
     name = models.CharField("商品名称", max_length=200)
     spec = models.CharField("规格", max_length=200, blank=True, null=True)
     sku = models.CharField(
-        "SKU编码",
+        "仓库SKU编码",
         max_length=50,
         blank=True,
         help_text="系统按“货主编码-序号”自动生成，货主内唯一",
@@ -418,9 +508,18 @@ class Product(BaseModel):
     description = models.TextField("描述", blank=True, null=True)
 
     # 条码（更细可在 ProductPackage 中维护层级条码）
-    gtin = models.CharField("标准条码(GTIN/EAN/UPC)", max_length=20, blank=True, null=True)
+    gtin = models.CharField("标准贸易条码", max_length=20, blank=True, null=True)
     unit_barcode = models.CharField("零码", max_length=50, blank=True, null=True)
     carton_barcode = models.CharField("箱码", max_length=50, blank=True, null=True)
+    carton_package = models.ForeignKey(
+        "ProductPackage",
+        on_delete=models.PROTECT,
+        related_name="carton_barcode_products",
+        verbose_name="箱码对应包装层级",
+        blank=True,
+        null=True,
+        help_text="先创建商品包装层级，再将箱码与该商品的有效包装层级一次性绑定。",
+    )
 
     pack_requirement = models.CharField(
         "打包要求", max_length=20, choices=PACK_REQ_CHOICES, default="NONE", db_index=True
@@ -497,7 +596,7 @@ class Product(BaseModel):
         "原产国(ISO-2)", max_length=2, blank=True, null=True,
         validators=[RegexValidator(r'^[A-Z]{2}$', "必须为两位大写字母的 ISO-2 代码")]
     )
-    external_code = models.CharField("外部系统编码", max_length=50, blank=True, null=True)
+    external_code = models.CharField("外部系统商品编码", max_length=50, blank=True, null=True)
     extra = models.JSONField("扩展属性", blank=True, null=False, default=dict)  # 建议默认空 dict
     material_quality = models.CharField("材质", max_length=20, blank=True, null=True)
     vender = models.CharField("厂家", max_length=50, blank=True, null=True)
@@ -587,28 +686,78 @@ class Product(BaseModel):
         return f"{self.code} - {self.name}"
 
     def save(self, *args, **kwargs):
-        """为新商品原子地分配货主范围内永不回退的 SKU 序号。"""
-        if not self._state.adding:
-            return super().save(*args, **kwargs)
-
-        if not self.owner_id:
+        """Save the product and synchronize its owner-wide identifier registry."""
+        adding = self._state.adding
+        if adding and not self.owner_id:
             raise ValueError("新建商品时必须指定货主。")
-
         with transaction.atomic():
-            owner = (
-                Owner.all_objects.select_for_update()
-                .only("id", "code", "next_sku_sequence")
-                .get(pk=self.owner_id)
-            )
-            sequence = owner.next_sku_sequence
-            self.sku = f"{owner.code}-{sequence}"
+            owner = None
+            validate_carton_binding = adding
+            if adding:
+                owner = (
+                    Owner.all_objects.select_for_update()
+                    .only("id", "code", "next_sku_sequence")
+                    .get(pk=self.owner_id)
+                )
+                sequence = owner.next_sku_sequence
+                while ProductIdentifierRegistry.objects.filter(
+                    owner_id=owner.pk,
+                    normalized_value=normalize_product_identifier(
+                        f"{owner.code}-{sequence}"
+                    ),
+                ).exists():
+                    sequence += 1
+                self.sku = f"{owner.code}-{sequence}"
+            else:
+                # Serialize concurrent edits of the same product so the registry
+                # always reflects the row version that committed last.
+                original = type(self).all_objects.select_for_update().only(
+                    "pk", "carton_barcode", "carton_package_id"
+                ).get(pk=self.pk)
+                old_barcode = normalize_product_identifier(original.carton_barcode)
+                new_barcode = normalize_product_identifier(self.carton_barcode)
+                validate_carton_binding = (
+                    new_barcode != old_barcode
+                    or self.carton_package_id != original.carton_package_id
+                )
+                if old_barcode and (
+                    validate_carton_binding
+                ):
+                    raise ValidationError(
+                        {"carton_barcode": "箱码及其对应包装层级绑定后不可修改。"}
+                    )
+
+            if validate_carton_binding and (self.carton_barcode or self.carton_package_id):
+                if not self.carton_barcode or not self.carton_package_id:
+                    raise ValidationError(
+                        {"carton_package": "箱码和箱码对应包装层级必须同时设置。"}
+                    )
+                package = ProductPackage.all_objects.select_related("product").get(
+                    pk=self.carton_package_id
+                )
+                if not self.pk or package.product_id != self.pk:
+                    raise ValidationError(
+                        {"carton_package": "箱码对应包装层级必须属于当前商品。"}
+                    )
+                if package.is_deleted or not package.is_active:
+                    raise ValidationError(
+                        {"carton_package": "箱码对应包装层级必须启用且未删除。"}
+                    )
+
             result = super().save(*args, **kwargs)
-            Owner.all_objects.filter(pk=owner.pk).update(
-                next_sku_sequence=F("next_sku_sequence") + 1
-            )
-            owner.next_sku_sequence = sequence + 1
-            if "owner" in self._state.fields_cache:
-                self._state.fields_cache["owner"] = owner
+
+            if adding:
+                Owner.all_objects.filter(pk=owner.pk).update(
+                    next_sku_sequence=sequence + 1
+                )
+                owner.next_sku_sequence = sequence + 1
+                if "owner" in self._state.fields_cache:
+                    self._state.fields_cache["owner"] = owner
+
+            persisted = type(self).all_objects.only(
+                "owner_id", *PRODUCT_IDENTIFIER_FIELDS
+            ).get(pk=self.pk)
+            ProductIdentifierRegistry.sync_product(persisted)
             return result
 
     # 便捷：首选拣配包装
@@ -632,7 +781,7 @@ class Product(BaseModel):
             self.code = self.code.strip().upper()
 
         if not self.code:
-            errors["code"] = "商品编号不能为空"
+            errors["code"] = "货主商品编码不能为空"
 
         if self._state.adding and not self.category_id:
             errors["category"] = "新建商品时至少需要选择一个大类"
@@ -660,6 +809,25 @@ class Product(BaseModel):
             if isinstance(v, str):
                 setattr(self, f, v.strip() or None)
 
+        original_binding = None
+        if self.pk:
+            original_binding = type(self).all_objects.filter(pk=self.pk).values(
+                "carton_barcode", "carton_package_id"
+            ).first()
+        binding_changed = original_binding is None or (
+            normalize_product_identifier(self.carton_barcode)
+            != normalize_product_identifier(original_binding["carton_barcode"])
+            or self.carton_package_id != original_binding["carton_package_id"]
+        )
+        if binding_changed and bool(self.carton_barcode) != bool(self.carton_package_id):
+            errors["carton_package"] = "箱码和箱码对应包装层级必须同时设置。"
+        elif binding_changed and self.carton_package_id:
+            package = ProductPackage.all_objects.filter(pk=self.carton_package_id).first()
+            if package is None or (self.pk and package.product_id != self.pk):
+                errors["carton_package"] = "箱码对应包装层级必须属于当前商品。"
+            elif package.is_deleted or not package.is_active:
+                errors["carton_package"] = "箱码对应包装层级必须启用且未删除。"
+
         if self.origin_country:
             self.origin_country = self.origin_country.upper()
 
@@ -670,9 +838,9 @@ class Product(BaseModel):
         # GTIN（默认宽松；如启用校验位则做 Mod10 校验）
         if self.gtin:
             if not self.gtin.isdigit() or len(self.gtin) not in (8, 12, 13, 14):
-                errors["gtin"] = "GTIN必须为8/12/13/14位数字"
+                errors["gtin"] = "标准贸易条码必须为8/12/13/14位数字"
             elif ENABLE_GTIN_CHECK_DIGIT and not _gtin_mod10_is_valid(self.gtin):
-                errors["gtin"] = "GTIN 校验位不通过（GS1 Mod10）"
+                errors["gtin"] = "标准贸易条码校验位不通过（GS1 Mod10）"
 
         # 库存上下限
         if self.min_stock is not None and self.max_stock is not None and self.min_stock >= self.max_stock:
@@ -754,17 +922,52 @@ class Product(BaseModel):
                 else:
                     errors[field] = f"该货主下{label}“{val}”已存在（{conflict.code}-{conflict.name}）。"
 
-        _uniq_owner_field("code", "商品编号")
-        _uniq_owner_field("sku", "SKU编码")
-        _uniq_owner_field("gtin", "标准条码")
+        _uniq_owner_field("code", "货主商品编码")
+        _uniq_owner_field("sku", "仓库SKU编码")
+        _uniq_owner_field("gtin", "标准贸易条码")
         _uniq_owner_field("unit_barcode", "零码")
         _uniq_owner_field("carton_barcode", "箱码")
-        _uniq_owner_field("external_code", "外部系统编码")
+        _uniq_owner_field("external_code", "外部系统商品编码")
+
+        # 六类标识共享一个货主级命名空间；同一商品内部重复合法。
+        if self.owner_id:
+            for field in PRODUCT_IDENTIFIER_FIELDS:
+                value = normalize_product_identifier(getattr(self, field, None))
+                if not value:
+                    continue
+                conflict = ProductIdentifierRegistry.objects.filter(
+                    owner_id=self.owner_id,
+                    normalized_value=value,
+                )
+                if self.pk:
+                    # Product fields may share a value within the same product,
+                    # but a package barcode always owns its value exclusively.
+                    conflict = conflict.exclude(
+                        product_id=self.pk,
+                        product_package__isnull=True,
+                    )
+                registry = conflict.select_related(
+                    "product", "product_package__uom"
+                ).first()
+                if registry:
+                    product = registry.product
+                    if registry.product_package_id:
+                        package = registry.product_package
+                        deleted = "（已软删除）" if package.is_deleted else ""
+                        source = (
+                            f"商品 {product.code} 的包装层级 "
+                            f"{package.uom.code}{deleted}"
+                        )
+                    else:
+                        deleted = "（已软删除）" if product.is_deleted else ""
+                        source = f"商品 {product.code}-{product.name}{deleted}"
+                    errors[field] = f"该货主下标识“{value}”已被{source}占用。"
 
 
         if self.pk:
-            orig = type(self).objects.only(
-                "code", "sku", "gtin", "unit_barcode", "carton_barcode", "external_code"
+            orig = type(self).all_objects.only(
+                "code", "sku", "gtin", "unit_barcode", "carton_barcode", "external_code",
+                "carton_package_id",
             ).get(pk=self.pk)
 
             def _norm(x):
@@ -774,9 +977,17 @@ class Product(BaseModel):
                 return x
 
             changed = []
-            for f in ["code", "sku", "gtin", "unit_barcode", "carton_barcode", "external_code"]:
+            for f in ["code", "sku", "gtin", "unit_barcode", "external_code"]:
                 if _norm(getattr(self, f)) != _norm(getattr(orig, f)):
                     changed.append(f)
+
+            old_carton = _norm(orig.carton_barcode)
+            new_carton = _norm(self.carton_barcode)
+            if old_carton and (
+                new_carton != old_carton
+                or self.carton_package_id != orig.carton_package_id
+            ):
+                changed.append("carton_barcode/carton_package")
 
             if changed:
                 errors["code"] = (
@@ -787,8 +998,104 @@ class Product(BaseModel):
         if errors:
             raise ValidationError(errors)
 
+
+class ProductIdentifierRegistry(models.Model):
+    """Maps one normalized owner-wide identifier to exactly one product."""
+
+    owner = models.ForeignKey(
+        Owner,
+        on_delete=models.PROTECT,
+        related_name="product_identifier_registry",
+        verbose_name="货主",
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="identifier_registry",
+        verbose_name="商品",
+    )
+    product_package = models.OneToOneField(
+        "ProductPackage",
+        on_delete=models.CASCADE,
+        related_name="identifier_registry_entry",
+        verbose_name="商品包装层级",
+        blank=True,
+        null=True,
+    )
+    normalized_value = models.CharField("标准化标识值", max_length=50)
+
+    class Meta:
+        verbose_name = "商品标识注册项"
+        verbose_name_plural = "商品标识注册项"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner", "normalized_value"],
+                name="uniq_owner_product_identifier",
+            ),
+        ]
+
+    @classmethod
+    def values_for_product(cls, product) -> set[str]:
+        return {
+            normalized
+            for field in PRODUCT_IDENTIFIER_FIELDS
+            if (normalized := normalize_product_identifier(getattr(product, field, None)))
+        }
+
+    @classmethod
+    def sync_product(cls, product) -> None:
+        desired = cls.values_for_product(product)
+        base_entries = cls.objects.filter(
+            product_id=product.pk,
+            product_package__isnull=True,
+        )
+        base_entries.exclude(
+            owner_id=product.owner_id
+        ).delete()
+        current = set(
+            base_entries.filter(
+                owner_id=product.owner_id,
+            ).values_list(
+                "normalized_value", flat=True
+            )
+        )
+        base_entries.exclude(
+            normalized_value__in=desired
+        ).delete()
+        cls.objects.bulk_create(
+            [
+                cls(
+                    owner_id=product.owner_id,
+                    product_id=product.pk,
+                    normalized_value=value,
+                )
+                for value in sorted(desired - current)
+            ]
+        )
+
+    @classmethod
+    def sync_package(cls, package) -> None:
+        normalized = normalize_product_identifier(package.barcode)
+        if not normalized:
+            cls.objects.filter(product_package_id=package.pk).delete()
+            return
+        cls.objects.update_or_create(
+            product_package_id=package.pk,
+            defaults={
+                "owner_id": package.product.owner_id,
+                "product_id": package.product_id,
+                "normalized_value": normalized,
+            },
+        )
+
+    def __str__(self):
+        return f"{self.owner_id}:{self.normalized_value} -> {self.product_id}"
+
 # ========================= 商品 × 包装层级# =========================
 class ProductPackage(BaseModel):
+    objects = ProductPackageManager()
+    all_objects = AllProductPackageManager()
+
     product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="packages", verbose_name="商品",related_query_name="product_package")
     uom = models.ForeignKey(ProductUom, on_delete=models.PROTECT, related_name="packages", verbose_name="包装单位")
     qty_in_base = models.PositiveIntegerField("换算数量")
@@ -886,7 +1193,30 @@ class ProductPackage(BaseModel):
                 self.volume_m3_status = self.VolumeStatus.NONE
                 self.volume_m3 = None
 
-        return super().save(*args, **kwargs)
+        with transaction.atomic():
+            if self._state.adding:
+                if not self.product_id:
+                    raise ValueError("新建商品包装层级时必须指定商品。")
+            else:
+                original = type(self).all_objects.select_for_update().only(
+                    "pk", "product_id", "is_active", "is_deleted"
+                ).get(pk=self.pk)
+                if Product.all_objects.filter(carton_package_id=self.pk).exists() and (
+                    self.product_id != original.product_id
+                    or self.is_deleted
+                    or not self.is_active
+                ):
+                    raise ValidationError(
+                        "该包装层级已绑定商品箱码，不能转移、停用或删除。"
+                    )
+            result = super().save(*args, **kwargs)
+            persisted = (
+                type(self).all_objects.select_related("product")
+                .only("id", "product_id", "barcode", "product__owner_id")
+                .get(pk=self.pk)
+            )
+            ProductIdentifierRegistry.sync_package(persisted)
+            return result
 
     def clean(self):
         super().clean()
@@ -895,6 +1225,15 @@ class ProductPackage(BaseModel):
         # --- 规范化 ---
         if isinstance(self.barcode, str):
             self.barcode = self.barcode.strip() or None
+
+        if self.pk and Product.all_objects.filter(carton_package_id=self.pk).exists():
+            original = type(self).all_objects.filter(pk=self.pk).only("product_id").first()
+            if original and (
+                self.product_id != original.product_id
+                or self.is_deleted
+                or not self.is_active
+            ):
+                errors["__all__"] = "该包装层级已绑定商品箱码，不能转移、停用或删除。"
 
         # --- 基础校验 ---
         if not self.uom_id:
@@ -921,6 +1260,28 @@ class ProductPackage(BaseModel):
                 qs = qs.exclude(pk=self.pk)
             if qs.exists():
                 errors["barcode"] = "该商品下此层级条码已存在。"
+
+            normalized = normalize_product_identifier(self.barcode)
+            registry_qs = ProductIdentifierRegistry.objects.filter(
+                owner_id=self.product.owner_id,
+                normalized_value=normalized,
+            )
+            if self.pk:
+                registry_qs = registry_qs.exclude(product_package_id=self.pk)
+            registry = registry_qs.select_related(
+                "product", "product_package__uom"
+            ).first()
+            if registry:
+                if registry.product_package_id:
+                    package = registry.product_package
+                    deleted = "（已软删除）" if package.is_deleted else ""
+                    source = f"包装层级 {package.uom.code}{deleted}"
+                else:
+                    deleted = "（商品已软删除）" if registry.product.is_deleted else ""
+                    source = f"商品标识 {registry.product.code}{deleted}"
+                errors["barcode"] = (
+                    f"该货主下标识“{normalized}”已被{source}占用。"
+                )
 
         # 每商品的“默认单位”唯一（应用层校验；并发场景仍由 DB 约束兜底）
         for flag, label in (("is_purchase_default", "采购"), ("is_sales_default", "销售")):

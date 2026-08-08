@@ -52,8 +52,8 @@ INVENTORY_DETAIL_EXPORT_HEADERS = (
     "库位编码",
     "库位名称",
     "容器号",
-    "商品编号",
-    "SKU",
+    "货主商品编码",
+    "仓库SKU编码",
     "商品名称",
     "规格",
     "批次号",
@@ -244,7 +244,7 @@ class InventoryDetailAdmin(ScopedInventoryReadAdmin):
     def product_spec(self,obj):
         return getattr(obj.product,"spec","") if obj.product else ""
 
-    @admin.display(description="SKU", ordering="product__sku")
+    @admin.display(description="仓库SKU编码", ordering="product__sku")
     def product_sku(self, obj):
         return obj.product.sku if obj.product else ""
 

@@ -121,7 +121,7 @@ class NoOrderReceiveExcelImportTests(TestCase):
         self.assertEqual(
             [cell.value for cell in workbook["无订单收货"][1]],
             [
-                "商品编号",
+                "货主商品编码",
                 "商品名称",
                 "收货数量",
                 "收货单位代码",
@@ -153,6 +153,24 @@ class NoOrderReceiveExcelImportTests(TestCase):
             ),
             reference_rows,
         )
+
+    def test_legacy_product_code_header_is_rejected_with_new_header_guidance(self):
+        template = self._template_response()
+        workbook = load_workbook(io.BytesIO(template.content))
+        workbook["无订单收货"]["A1"] = "商品编号"
+        output = io.BytesIO()
+        workbook.save(output)
+        upload = SimpleUploadedFile("无订单收货.xlsx", output.getvalue())
+
+        response = self.client.post(
+            "/api/inbound/receive_without_order/import_preview/",
+            {"owner_id": self.owner.id, "file": upload},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("模板缺少必要列", response.data["detail"])
+        self.assertIn("货主商品编码", response.data["detail"])
 
     def test_preview_converts_package_quantity_without_writing_inventory(self):
         response = self._preview([["EXSKU1", "仅供核对的名称", "2", "CS", "", "", ""]])

@@ -21,7 +21,14 @@ from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 from allapp.baseinfo.models import Owner
 
-from .models import Brand, Product, ProductCategory, ProductPackage, ProductUom
+from .models import (
+    Brand,
+    Product,
+    ProductCategory,
+    ProductPackage,
+    ProductUom,
+    normalize_product_identifier,
+)
 from .permissions import can_manage_all_owner_products
 
 
@@ -31,22 +38,23 @@ MAX_XLSX_UNCOMPRESSED_SIZE = 50 * 1024 * 1024
 MAX_XLSX_ENTRIES = 300
 IMPORT_SHEET_NAME = "商品导入"
 PACKAGE_SHEET_NAME = "商品包装"
-TEMPLATE_VERSION = "3"
+TEMPLATE_VERSION = "4"
 
 
 PRODUCT_HEADERS = (
     "货主编码",
-    "商品编号",
+    "货主商品编码",
     "商品名称",
     "分类编码",
     "基本单位编码",
-    "SKU编码",
+    "仓库SKU编码",
     "规格",
     "品牌编码",
-    "GTIN",
+    "标准贸易条码",
     "零码",
     "箱码",
-    "外部系统编码",
+    "箱码对应包装单位编码",
+    "外部系统商品编码",
     "默认价格",
     "最低价格",
     "最高折扣%",
@@ -82,7 +90,7 @@ HEADERS = PRODUCT_HEADERS + LEGACY_PACKAGE_HEADERS
 
 PACKAGE_HEADERS = (
     "货主编码",
-    "商品编号",
+    "货主商品编码",
     "包装单位编码",
     "包装换算数量",
     "包装条码",
@@ -100,44 +108,46 @@ PACKAGE_HEADERS = (
 )
 
 REQUIRED_PACKAGE_HEADERS = frozenset(
-    {"货主编码", "商品编号", "包装单位编码", "包装换算数量"}
+    {"货主编码", "货主商品编码", "包装单位编码", "包装换算数量"}
 )
 
 REQUIRED_HEADERS = frozenset(
-    {"货主编码", "商品编号", "商品名称", "分类编码", "基本单位编码"}
+    {"货主编码", "货主商品编码", "商品名称", "分类编码", "基本单位编码"}
 )
 TEXT_HEADERS = frozenset(
     {
         "货主编码",
-        "商品编号",
-        "SKU编码",
+        "货主商品编码",
+        "仓库SKU编码",
         "分类编码",
         "品牌编码",
         "基本单位编码",
-        "GTIN",
+        "标准贸易条码",
         "零码",
         "箱码",
-        "外部系统编码",
+        "箱码对应包装单位编码",
+        "外部系统商品编码",
         "包装单位编码",
         "包装条码",
     }
 )
 
-PACKAGE_TEXT_HEADERS = frozenset({"货主编码", "商品编号", "包装单位编码", "包装条码"})
+PACKAGE_TEXT_HEADERS = frozenset({"货主编码", "货主商品编码", "包装单位编码", "包装条码"})
 
 MODEL_FIELD_LABELS = {
     "owner": "货主编码",
-    "code": "商品编号",
-    "sku": "SKU编码",
+    "code": "货主商品编码",
+    "sku": "仓库SKU编码",
     "name": "商品名称",
     "spec": "规格",
     "category": "分类编码",
     "brand": "品牌编码",
     "base_uom": "基本单位编码",
-    "gtin": "GTIN",
+    "gtin": "标准贸易条码",
     "unit_barcode": "零码",
     "carton_barcode": "箱码",
-    "external_code": "外部系统编码",
+    "carton_package": "箱码对应包装单位编码",
+    "external_code": "外部系统商品编码",
     "price": "默认价格",
     "min_price": "最低价格",
     "max_discount": "最高折扣%",
@@ -196,6 +206,8 @@ class ParsedProductRow:
     row_number: int
     product: Product
     package_data: dict[str, Any] | None
+    carton_barcode: str | None = None
+    carton_package_uom_code: str | None = None
 
 
 @dataclass
@@ -295,11 +307,11 @@ def _write_instruction_sheet(sheet) -> None:
             ),
         ]
     )
-    sheet.append(["必填字段", "货主编码、商品编号、商品名称、分类编码、基本单位编码。"])
+    sheet.append(["必填字段", "货主编码、货主商品编码、商品名称、分类编码、基本单位编码。"])
     sheet.append(
         [
             "包装必填字段",
-            "货主编码、商品编号、包装单位编码、包装换算数量；无包装可不填写包装表。",
+            "货主编码、货主商品编码、包装单位编码、包装换算数量；无包装可不填写包装表。",
         ]
     )
     sheet.append(
@@ -307,8 +319,8 @@ def _write_instruction_sheet(sheet) -> None:
     )
     sheet.append(
         [
-            "SKU规则",
-            "SKU编码无需填写，系统按“货主编码-货主下一个SKU序号”自动生成。",
+            "仓库SKU编码规则",
+            "仓库SKU编码无需填写，系统按“货主编码-货主下一个仓库SKU序号”自动生成。",
         ]
     )
     sheet.append(
@@ -339,9 +351,18 @@ def _write_instruction_sheet(sheet) -> None:
     )
     sheet.append(
         [
+            "箱码绑定",
+            _joined_text(
+                "填写箱码时必须同时填写“箱码对应包装单位编码”；",
+                "该包装单位必须在“商品包装”中属于同一商品且处于启用状态。",
+            ),
+        ]
+    )
+    sheet.append(
+        [
             "重复规则",
             _joined_text(
-                "商品编号、条码或外部系统编码与已有商品冲突，",
+                "货主商品编码、条码或外部系统商品编码与已有商品冲突，",
                 "或 Excel 内部重复，都会使整批不写入。",
             ),
         ]
@@ -360,15 +381,15 @@ def _write_instruction_sheet(sheet) -> None:
     sheet.append(
         [
             "货主编码",
-            "商品编号",
-            "SKU编码",
+            "货主商品编码",
+            "仓库SKU编码",
             "商品名称",
             "基本单位编码",
             "批次管理",
             "保质期管理",
         ]
     )
-    sheet.append(["OWNER-001", "SKU-001", "SKU-001", "示例商品", "PCS", "否", "否"])
+    sheet.append(["OWNER-001", "ITEM-001", "", "示例商品", "PCS", "否", "否"])
     sheet["A1"].font = Font(size=16, bold=True, color="FFFFFF")
     sheet["A1"].fill = PatternFill("solid", fgColor="2563EB")
     sheet["B1"].fill = PatternFill("solid", fgColor="2563EB")
@@ -593,15 +614,15 @@ class ProductExcelImporter:
         )
         if duplicates:
             raise ProductImportFileError(f"Excel 表头重复：{', '.join(duplicates)}。")
-        unknown = [header for header in nonempty_headers if header not in HEADERS]
-        if unknown:
-            message = f"Excel 包含不支持的表头：{', '.join(unknown)}。"
-            raise ProductImportFileError(message)
         missing = [
             header for header in REQUIRED_HEADERS if header not in nonempty_headers
         ]
         if missing:
             message = f"Excel 缺少必要表头：{', '.join(sorted(missing))}。"
+            raise ProductImportFileError(message)
+        unknown = [header for header in nonempty_headers if header not in HEADERS]
+        if unknown:
+            message = f"Excel 包含不支持的表头：{', '.join(unknown)}。"
             raise ProductImportFileError(message)
 
         column_by_header = {
@@ -634,10 +655,10 @@ class ProductExcelImporter:
             raise ProductImportFileError("“商品导入”工作表没有数据行。")
 
         parsed: list[ParsedProductRow] = []
-        seen: dict[tuple[object, str, str], int] = {}
+        seen_identifiers: dict[tuple[object, str], dict[str, Any]] = {}
         for row_number, values in raw_rows:
             row = self._parse_row(row_number, values)
-            self._check_file_duplicates(row_number, values, seen)
+            self._check_file_duplicates(row_number, values, seen_identifiers)
             if row is not None:
                 parsed.append(row)
         package_rows: list[ParsedPackageRow] = []
@@ -647,15 +668,47 @@ class ProductExcelImporter:
                 for _, values in raw_rows
             ):
                 raise ProductImportFileError(
-                    "v3 文件不能同时填写商品主表旧版包装列和“商品包装”工作表。"
+                    "v4 文件不能同时填写商品主表旧版包装列和“商品包装”工作表。"
                 )
             package_rows = self._parse_package_sheet(
-                workbook[PACKAGE_SHEET_NAME], parsed
+                workbook[PACKAGE_SHEET_NAME], parsed, seen_identifiers
             )
+        package_uoms = {
+            (*row.product_key, row.package_data["uom"].code.upper())
+            for row in package_rows
+            if row.package_data.get("uom") is not None
+            and row.package_data.get("is_active", True)
+        }
+        for row in parsed:
+            if (
+                row.package_data
+                and row.package_data.get("uom") is not None
+                and row.package_data.get("is_active", True)
+            ):
+                package_uoms.add(
+                    (
+                        row.product.owner.code.upper(),
+                        row.product.code.upper(),
+                        row.package_data["uom"].code.upper(),
+                    )
+                )
+            if row.carton_barcode and (
+                row.product.owner.code.upper(),
+                row.product.code.upper(),
+                row.carton_package_uom_code or "",
+            ) not in package_uoms:
+                self._error(
+                    row.row_number,
+                    "箱码对应包装单位编码",
+                    "找不到该商品对应的启用包装层级，请在商品包装表中提供相同包装单位编码。",
+                )
         return parsed, package_rows
 
     def _parse_package_sheet(
-        self, sheet, product_rows: list[ParsedProductRow]
+        self,
+        sheet,
+        product_rows: list[ParsedProductRow],
+        seen_identifiers: dict[tuple[object, str], dict[str, Any]],
     ) -> list[ParsedPackageRow]:
         self._active_sheet = PACKAGE_SHEET_NAME
         header_cells = list(sheet.iter_rows(min_row=1, max_row=1, values_only=False))[0]
@@ -698,7 +751,6 @@ class ProductExcelImporter:
         }
         parsed: list[ParsedPackageRow] = []
         seen_uoms: dict[tuple[str, str, str], int] = {}
-        seen_barcodes: dict[tuple[str, str, str], int] = {}
         default_rows: dict[tuple[str, str, str], int] = {}
         for row_number in range(2, sheet.max_row + 1):
             values = {
@@ -728,7 +780,7 @@ class ProductExcelImporter:
                 values,
                 product_by_key,
                 seen_uoms,
-                seen_barcodes,
+                seen_identifiers,
                 default_rows,
             )
             if parsed_row is not None:
@@ -742,17 +794,17 @@ class ProductExcelImporter:
         values,
         product_by_key,
         seen_uoms,
-        seen_barcodes,
+        seen_identifiers,
         default_rows,
     ) -> ParsedPackageRow | None:
         before_error_count = len(self.errors)
         owner_code = _text(values.get("货主编码")).upper()
-        product_code = _text(values.get("商品编号")).upper()
+        product_code = _text(values.get("货主商品编码")).upper()
         uom_code = _text(values.get("包装单位编码")).upper()
         qty_text = _text(values.get("包装换算数量"))
         for field, value in (
             ("货主编码", owner_code),
-            ("商品编号", product_code),
+            ("货主商品编码", product_code),
             ("包装单位编码", uom_code),
             ("包装换算数量", qty_text),
         ):
@@ -763,7 +815,7 @@ class ProductExcelImporter:
         if owner_code and product_code and product is None:
             self._error(
                 row_number,
-                "商品编号",
+                "货主商品编码",
                 "包装引用的商品必须同时存在于“商品导入”工作表。",
                 sheet=PACKAGE_SHEET_NAME,
             )
@@ -836,16 +888,26 @@ class ProductExcelImporter:
             else:
                 seen_uoms[uom_key] = row_number
             if barcode:
-                barcode_key = (*key, barcode.upper())
-                if barcode_key in seen_barcodes:
+                normalized = normalize_product_identifier(barcode)
+                owner = self._owner_cache.get(owner_code)
+                owner_key: object = owner.pk if owner is not None else owner_code
+                barcode_key = (owner_key, normalized)
+                previous = seen_identifiers.get(barcode_key)
+                if previous:
                     self._error(
                         row_number,
                         "包装条码",
-                        f"与第 {seen_barcodes[barcode_key]} 行重复。",
+                        f"标识“{normalized}”与“{previous['sheet']}”第 "
+                        f"{previous['row']} 行的{previous['field']}冲突。",
                         sheet=PACKAGE_SHEET_NAME,
                     )
                 else:
-                    seen_barcodes[barcode_key] = row_number
+                    seen_identifiers[barcode_key] = {
+                        "sheet": PACKAGE_SHEET_NAME,
+                        "row": row_number,
+                        "field": "包装条码",
+                        "exclusive": True,
+                    }
             for field, flag in (
                 ("采购默认", package_data["is_purchase_default"]),
                 ("销售默认", package_data["is_sales_default"]),
@@ -879,8 +941,8 @@ class ProductExcelImporter:
         owner = self._resolve_owner(row_number, values.get("货主编码"))
         code = self._required_code(
             row_number,
-            "商品编号",
-            values.get("商品编号"),
+            "货主商品编码",
+            values.get("货主商品编码"),
             max_length=50,
         )
         if owner is None or not code:
@@ -889,11 +951,11 @@ class ProductExcelImporter:
         existing = Product.all_objects.filter(owner=owner, code__iexact=code).first()
         if existing:
             message = (
-                "商品编号命中已软删除商品，请恢复旧商品或更换编号；整批不会写入。"
+                "货主商品编码命中已软删除商品，请恢复旧商品或更换编号；整批不会写入。"
                 if existing.is_deleted
-                else "商品编号已存在；整批不会写入。"
+                else "货主商品编码已存在；整批不会写入。"
             )
-            self._error(row_number, "商品编号", message)
+            self._error(row_number, "货主商品编码", message)
             return None
 
         name = self._required_text(
@@ -918,6 +980,19 @@ class ProductExcelImporter:
             required=False,
         )
 
+        carton_barcode = self._optional_text(
+            row_number, "箱码", values.get("箱码"), max_length=50
+        )
+        carton_package_uom_code = _text(
+            values.get("箱码对应包装单位编码")
+        ).upper() or None
+        if bool(carton_barcode) != bool(carton_package_uom_code):
+            self._error(
+                row_number,
+                "箱码对应包装单位编码",
+                "箱码和箱码对应包装单位编码必须同时填写。",
+            )
+
         product = Product(
             owner=owner,
             code=code,
@@ -930,7 +1005,7 @@ class ProductExcelImporter:
             brand=brand,
             base_uom=base_uom,
             gtin=self._optional_text(
-                row_number, "GTIN", values.get("GTIN"), max_length=20
+                row_number, "标准贸易条码", values.get("标准贸易条码"), max_length=20
             ),
             unit_barcode=self._optional_text(
                 row_number,
@@ -938,11 +1013,9 @@ class ProductExcelImporter:
                 values.get("零码"),
                 max_length=50,
             ),
-            carton_barcode=self._optional_text(
-                row_number, "箱码", values.get("箱码"), max_length=50
-            ),
+            carton_barcode=None,
             external_code=self._optional_text(
-                row_number, "外部系统编码", values.get("外部系统编码"), max_length=50
+                row_number, "外部系统商品编码", values.get("外部系统商品编码"), max_length=50
             ),
             price=self._decimal(
                 row_number, "默认价格", values.get("默认价格"), minimum=Decimal("0")
@@ -1099,7 +1172,11 @@ class ProductExcelImporter:
         if len(self.errors) != before_error_count:
             return None
         return ParsedProductRow(
-            row_number=row_number, product=product, package_data=package_data
+            row_number=row_number,
+            product=product,
+            package_data=package_data,
+            carton_barcode=carton_barcode,
+            carton_package_uom_code=carton_package_uom_code,
         )
 
     def _resolve_owner(self, row_number: int, value) -> Owner | None:
@@ -1248,23 +1325,45 @@ class ProductExcelImporter:
         owner_key: object = (
             owner.pk if owner is not None else owner_code or "missing-owner"
         )
-        code = _text(row_values.get("商品编号")).upper()
+        code = _text(row_values.get("货主商品编码")).upper()
         identifiers = (
-            ("商品编号", code),
-            ("GTIN", _text(row_values.get("GTIN"))),
-            ("零码", _text(row_values.get("零码"))),
-            ("箱码", _text(row_values.get("箱码"))),
-            ("外部系统编码", _text(row_values.get("外部系统编码"))),
+            ("货主商品编码", code, False),
+            ("标准贸易条码", _text(row_values.get("标准贸易条码")), False),
+            ("零码", _text(row_values.get("零码")), False),
+            ("箱码", _text(row_values.get("箱码")), False),
+            (
+                "外部系统商品编码",
+                _text(row_values.get("外部系统商品编码")),
+                False,
+            ),
+            ("包装条码", _text(row_values.get("包装条码")), True),
         )
-        for field, value in identifiers:
+        for field, value, exclusive in identifiers:
             if not value:
                 continue
-            key = (owner_key, field, str(value).upper())
+            normalized = normalize_product_identifier(value)
+            key = (owner_key, normalized)
             previous = seen.get(key)
-            if previous:
-                self._error(row_number, field, f"与第 {previous} 行重复。")
-            else:
-                seen[key] = row_number
+            conflicts = previous and (
+                exclusive
+                or previous["exclusive"]
+                or previous["row"] != row_number
+                or previous["sheet"] != IMPORT_SHEET_NAME
+            )
+            if conflicts:
+                self._error(
+                    row_number,
+                    field,
+                    f"标识“{normalized}”与“{previous['sheet']}”第 "
+                    f"{previous['row']} 行的{previous['field']}冲突。",
+                )
+            elif previous is None:
+                seen[key] = {
+                    "sheet": IMPORT_SHEET_NAME,
+                    "row": row_number,
+                    "field": field,
+                    "exclusive": exclusive,
+                }
 
     def _add_validation_errors(
         self, row_number, exc: DjangoValidationError, *, sheet=None
@@ -1297,6 +1396,7 @@ class ProductExcelImporter:
         created = []
         with transaction.atomic():
             product_by_key = {}
+            package_by_key = {}
             for row in rows:
                 product = row.product
                 product.full_clean()
@@ -1310,6 +1410,13 @@ class ProductExcelImporter:
                     )
                     package.full_clean()
                     package.save()
+                    package_by_key[
+                        (
+                            product.owner.code.upper(),
+                            product.code.upper(),
+                            package.uom.code.upper(),
+                        )
+                    ] = package
                 product_by_key[(product.owner.code.upper(), product.code.upper())] = (
                     product
                 )
@@ -1331,6 +1438,22 @@ class ProductExcelImporter:
                 )
                 package.full_clean()
                 package.save()
+                package_by_key[(*row.product_key, package.uom.code.upper())] = package
+            for row in rows:
+                if not row.carton_barcode:
+                    continue
+                product = row.product
+                package = package_by_key[
+                    (
+                        product.owner.code.upper(),
+                        product.code.upper(),
+                        row.carton_package_uom_code,
+                    )
+                ]
+                product.carton_barcode = row.carton_barcode
+                product.carton_package = package
+                product.full_clean()
+                product.save(update_fields=["carton_barcode", "carton_package", "updated_at"])
             owner_ids = sorted({row.product.owner_id for row in rows})
             record_audit_event(
                 action="products.import_excel",

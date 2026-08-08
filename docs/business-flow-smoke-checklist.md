@@ -18,7 +18,7 @@ Manual smoke:
 - Login to PDA or warehouse-facing receive entry.
 - Submit one no-order receive for an existing SKU, explicit owner, warehouse, and location.
 - Confirm the receive request returns success and the task is posted.
-- Open inventory summary and inventory detail for the same SKU and location.
+- Open inventory summary and inventory detail for the same warehouse SKU code and location.
 
 Expected:
 
@@ -34,7 +34,7 @@ Automated:
 
 Manual smoke:
 
-- In owner-side order entry, create one outbound order for a SKU with available stock.
+- In owner-side order entry, create one outbound order for a warehouse SKU code with available stock.
 - Approve the order and confirm a pick task is created.
 - In PDA, scan the pick task to full quantity, submit review, and post with a second user.
 - Re-open the order, task, and inventory detail.
@@ -112,7 +112,7 @@ Automated:
 Manual smoke:
 
 - Login to `wmsownersale`.
-- Open inventory list and confirm the billed SKU is visible.
+- Open inventory list and confirm the billed warehouse SKU code is visible.
 - Open billing period or bill list, enter bill detail, and export.
 - Open the exported file locally.
 
@@ -132,7 +132,7 @@ Manual smoke:
 
 - Login to `wmspda`.
 - Open pick-task list and enter one active task.
-- Scan the SKU to full quantity and submit review.
+- Scan the warehouse SKU code to full quantity and submit review.
 - Refresh the task list or detail page.
 
 Expected:

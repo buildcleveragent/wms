@@ -98,10 +98,10 @@ class TaskScanLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaskScanLog
         fields = [
-            "id", "task", "task_line", "product", "location",
+            "id", "task", "task_line", "product", "product_package", "location",
             "method", "source", "by_user",
             "barcode", "label_key",
-            "code_type", "uom_code", "pack_qty",
+            "code_type", "uom_code", "uom_name", "pack_qty", "matched_fields",
             "qty_aux", "qty_base", "qty_base_delta",
             "lot_no", "mfg_date", "exp_date", "container_no",
             "review_status", "reason_code", "remark",

@@ -95,6 +95,7 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     inlines = [ProductPackageInline]
     list_display = (
         "owner","name","spec","sku","code", "gtin", "unit_barcode", "carton_barcode",
+        "carton_package",
         "base_uom", "price", "min_price", "max_discount", "pricing_strategy",
         "category", "vender","brand",
         "min_stock","max_stock","weight","net_content","volume",
@@ -110,12 +111,17 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     list_display_links = ("name",)
     
     search_fields = ("code", "name", "spec","sku", "gtin", "unit_barcode", "carton_barcode", "external_code")
-    autocomplete_fields = ("owner", "category", "brand", "base_uom", "replenish_uom")
-    list_select_related = ("owner", "category", "brand", "base_uom", "replenish_uom")
+    autocomplete_fields = (
+        "owner", "category", "brand", "base_uom", "replenish_uom", "carton_package",
+    )
+    list_select_related = (
+        "owner", "category", "brand", "base_uom", "replenish_uom", "carton_package",
+    )
     ordering = ("owner", "code")
     readonly_fields = ("sku",)
     fields = (
         "owner","name","spec","sku","code", "gtin", "unit_barcode", "carton_barcode",
+        "carton_package",
         "base_uom", "price", "min_price", "max_discount", "pricing_strategy",
         "category", "vender","brand",
         "min_stock","max_stock","weight","net_content","volume",

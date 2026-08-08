@@ -20,7 +20,7 @@
         <input
           v-model="search"
           class="input"
-          placeholder="搜索仓库 / 货主 / 商品 / 编码 / SKU"
+          placeholder="搜索仓库 / 货主 / 商品 / 货主商品编码 / 仓库SKU编码"
           confirm-type="search"
           @confirm="onSearch"
         />
@@ -59,7 +59,7 @@
         <view class="cell col-owner">货主</view>
         <view class="cell col-name">商品名</view>
         <view class="cell col-code">编码</view>
-        <view class="cell col-sku">SKU</view>
+        <view class="cell col-sku">仓库SKU编码</view>
         <view class="cell col-spec">规格</view>
         <view class="cell col-unit">单位</view>
         <view class="cell col-num">现有</view>

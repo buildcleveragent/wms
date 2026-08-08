@@ -25,18 +25,13 @@ class OwnerInventorySummaryPaginationTests(TestCase):
             owner=cls.owner,
         )
 
-        Product.objects.bulk_create(
-            [
-                Product(
-                    owner=cls.owner,
-                    code=f"PAG{index:03d}",
-                    sku=f"PAG{index:03d}",
-                    name=f"Inventory Product {index:03d}",
-                    base_uom=cls.uom,
-                )
-                for index in range(55)
-            ]
-        )
+        for index in range(55):
+            Product.objects.create(
+                owner=cls.owner,
+                code=f"PAG{index:03d}",
+                name=f"Inventory Product {index:03d}",
+                base_uom=cls.uom,
+            )
         products = list(Product.objects.filter(owner=cls.owner).order_by("code"))
         InventorySummary.objects.bulk_create(
             [

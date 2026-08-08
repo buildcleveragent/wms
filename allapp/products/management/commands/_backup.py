@@ -316,12 +316,12 @@ class Command(BaseCommand):
 
         # 支持你当前 sheet1 的字段，也兼容中文表头
         OWNER_KEYS = ("owner", "owner_id", "货主id", "货主", "货主名称", "商家")
-        GTIN_KEYS = ("gtin", "商品条码", "条码", "barcode", "国际条码")
+        GTIN_KEYS = ("标准贸易条码",)
         NAME_KEYS = ("name", "商品名称", "品名")
         BASE_UOM_KEYS = ("base_uom", "基本单位", "基础单位", "单位")
         EXTRA_KEYS = ("extra", "扩展属性", "扩展信息", "备注")
-        CODE_KEYS = ("code", "商品编号", "商品编码")
-        SKU_KEYS = ("sku", "sku编码", "SKU", "SKU编码")
+        CODE_KEYS = ("货主商品编码",)
+        SKU_KEYS = ("仓库SKU编码",)
         EXPIRY_CONTROL_KEYS = ("expiry_control", "保质期管理", "效期管理")
         SHELF_LIFE_DAYS_KEYS = ("shelf_life_days", "保质期天数", "保质期")
 

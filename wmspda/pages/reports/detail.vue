@@ -135,7 +135,7 @@ function normalizeQuery(query = {}) {
 
 function productText(item) {
   const parts = [item.product_code, item.product_sku].filter(Boolean)
-  return parts.length ? parts.join(' / ') : '无商品编码'
+  return parts.length ? parts.join(' / ') : '无货主商品编码或仓库SKU编码'
 }
 
 function extraText(item) {

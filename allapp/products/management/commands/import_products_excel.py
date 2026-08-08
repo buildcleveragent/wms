@@ -180,7 +180,7 @@ class Command(BaseCommand):
         NAME_KEYS = ("商品名称", "name", "品名")
         SPEC_KEYS = ("规格", "spec", "规格型号")
         UOM_KEYS = ("单位", "基本单位", "base_uom", "基础单位")
-        CODE_KEYS = ("code", "商品编号", "商品编码")
+        CODE_KEYS = ("货主商品编码",)
         CATEGORY_KEYS = ("分类编码", "商品分类", "category", "category_code")
         PRICE_KEYS = ("价格", "单价", "售价", "price")
 

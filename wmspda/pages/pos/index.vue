@@ -72,7 +72,7 @@
           data-testid="pos-product-input"
           :value="productKeyword"
           :focus="productInputFocus"
-          placeholder="扫码或输入商品名称/编码/SKU/条码"
+          placeholder="扫码或输入商品名称/货主商品编码/仓库SKU编码/条码"
           confirm-type="search"
           :confirm-hold="true"
           @focus="productInputFocus = true"

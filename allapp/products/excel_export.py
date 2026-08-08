@@ -127,7 +127,7 @@ def build_product_export_workbook(owner: Owner) -> tuple[bytes, int, int]:
 
     products = list(
         Product.objects.filter(owner=owner)
-        .select_related("owner", "category", "brand", "base_uom")
+        .select_related("owner", "category", "brand", "base_uom", "carton_package__uom")
         .prefetch_related("packages__uom")
         .order_by("code", "id")
     )
@@ -172,15 +172,16 @@ def _write_safe_row(sheet, row_number, headers, values):
             cell.data_type = "s"
         if header in {
             "货主编码",
-            "商品编号",
-            "SKU编码",
+            "货主商品编码",
+            "仓库SKU编码",
             "分类编码",
             "品牌编码",
             "基本单位编码",
-            "GTIN",
+            "标准贸易条码",
             "零码",
             "箱码",
-            "外部系统编码",
+            "箱码对应包装单位编码",
+            "外部系统商品编码",
             "包装单位编码",
             "包装条码",
         }:
@@ -196,17 +197,20 @@ def _yes_no(value):
 def _product_values(product):
     return {
         "货主编码": product.owner.code,
-        "商品编号": product.code,
+        "货主商品编码": product.code,
         "商品名称": product.name,
         "分类编码": product.category.code if product.category_id else None,
         "基本单位编码": product.base_uom.code,
-        "SKU编码": product.sku,
+        "仓库SKU编码": product.sku,
         "规格": product.spec,
         "品牌编码": product.brand.code if product.brand_id else None,
-        "GTIN": product.gtin,
+        "标准贸易条码": product.gtin,
         "零码": product.unit_barcode,
         "箱码": product.carton_barcode,
-        "外部系统编码": product.external_code,
+        "箱码对应包装单位编码": (
+            product.carton_package.uom.code if product.carton_package_id else None
+        ),
+        "外部系统商品编码": product.external_code,
         "默认价格": product.price,
         "最低价格": product.min_price,
         "最高折扣%": product.max_discount,
@@ -233,7 +237,7 @@ def _product_values(product):
 def _package_values(product, package):
     return {
         "货主编码": product.owner.code,
-        "商品编号": product.code,
+        "货主商品编码": product.code,
         "包装单位编码": package.uom.code,
         "包装换算数量": package.qty_in_base,
         "包装条码": package.barcode,

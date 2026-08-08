@@ -199,7 +199,7 @@ python manage.py reconcile_data_accuracy --owner <owner_id> --warehouse <warehou
 每天同时做：
 
 - 按 [docs/business-flow-smoke-checklist.md](/wms/docs/business-flow-smoke-checklist.md) 跑一轮人工 smoke
-- 抽盘少量 SKU
+- 抽盘少量仓库SKU编码
 - 检查是否有重复 job run、重复 bill、异常 accrual、快照缺天
 
 建议抽盘覆盖：

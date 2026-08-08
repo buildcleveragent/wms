@@ -112,7 +112,7 @@ def export_receive_task_excel(request, task_id):
     # 5) 表头
     headers = [
         "行号",
-        "SKU",
+        "仓库SKU编码",
         "品名",
         "规格",
         "单位",

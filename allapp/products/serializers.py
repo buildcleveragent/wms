@@ -1,7 +1,15 @@
 # apps/products/serializers.py  可直接覆盖版
-from rest_framework import serializers
+from django.db import IntegrityError
+from rest_framework import serializers, status
+from rest_framework.exceptions import APIException
 from allapp.accounts.access import AccessScope
-from .models import Product, ProductPackage  # ProductUom 未使用可移除
+from .models import (
+    PRODUCT_IDENTIFIER_FIELDS,
+    Product,
+    ProductIdentifierRegistry,
+    ProductPackage,
+    normalize_product_identifier,
+)
 from .permissions import can_manage_all_owner_products
 
 class ProductPackageBriefSerializer(serializers.ModelSerializer):
@@ -19,16 +27,26 @@ class ProductPackageBriefSerializer(serializers.ModelSerializer):
             "gross_weight_kg", "volume_m3", "volume_auto",
             "is_pickable", "is_stock_uom",
             "is_inventory_default", "is_purchase_default", "is_sales_default",
+            "is_active",
             "sort_order",
         ]
         # 体积(m3)通常由长宽高自动计算，只读即可；审计字段也只读
         read_only_fields = ("id", "volume_m3", "created_at", "updated_at")
 
 
+class ProductIdentifierConflict(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = "商品标识发生并发冲突，请刷新后重试。"
+    default_code = "product_identifier_conflict"
+
+
 class ProductSerializer(serializers.ModelSerializer):
     owner_code = serializers.CharField(source="owner.code", read_only=True)
     base_uom_code = serializers.CharField(source="base_uom.code", read_only=True)
     packages = ProductPackageBriefSerializer(many=True, read_only=True)
+    carton_package_detail = ProductPackageBriefSerializer(
+        source="carton_package", read_only=True
+    )
     product_image = serializers.SerializerMethodField()
 
     def get_product_image(self, obj):
@@ -83,7 +101,105 @@ class ProductSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"category": "商品只能选择分类链全部启用的分类。"}
             )
+
+        carton_barcode = attrs.get(
+            "carton_barcode",
+            self.instance.carton_barcode if self.instance is not None else None,
+        )
+        carton_package = attrs.get(
+            "carton_package",
+            self.instance.carton_package if self.instance is not None else None,
+        )
+        binding_changed = self.instance is None or (
+            normalize_product_identifier(carton_barcode)
+            != normalize_product_identifier(self.instance.carton_barcode)
+            or getattr(carton_package, "pk", None) != self.instance.carton_package_id
+        )
+        if binding_changed and bool(carton_barcode) != bool(carton_package):
+            raise serializers.ValidationError(
+                {"carton_package": "箱码和箱码对应包装层级必须同时设置。"}
+            )
+        if self.instance is None and carton_barcode:
+            raise serializers.ValidationError(
+                {"carton_package": "请先创建商品和包装层级，再通过更新接口绑定箱码。"}
+            )
+        if binding_changed and carton_package is not None:
+            if carton_package.product_id != self.instance.pk:
+                raise serializers.ValidationError(
+                    {"carton_package": "箱码对应包装层级必须属于当前商品。"}
+                )
+            if carton_package.is_deleted or not carton_package.is_active:
+                raise serializers.ValidationError(
+                    {"carton_package": "箱码对应包装层级必须启用且未删除。"}
+                )
+        if self.instance is not None and self.instance.carton_barcode:
+            if (
+                normalize_product_identifier(carton_barcode)
+                != normalize_product_identifier(self.instance.carton_barcode)
+                or getattr(carton_package, "pk", None)
+                != self.instance.carton_package_id
+            ):
+                raise serializers.ValidationError(
+                    {"carton_barcode": "箱码及其对应包装层级绑定后不可修改。"}
+                )
+
+        owner = attrs.get(
+            "owner", self.instance.owner if self.instance is not None else None
+        )
+        if owner is not None:
+            errors = {}
+            for field in PRODUCT_IDENTIFIER_FIELDS:
+                value = attrs.get(
+                    field,
+                    getattr(self.instance, field, None)
+                    if self.instance is not None
+                    else None,
+                )
+                normalized = normalize_product_identifier(value)
+                if not normalized:
+                    continue
+                conflicts = ProductIdentifierRegistry.objects.filter(
+                    owner_id=owner.pk,
+                    normalized_value=normalized,
+                )
+                if self.instance is not None:
+                    conflicts = conflicts.exclude(
+                        product_id=self.instance.pk,
+                        product_package__isnull=True,
+                    )
+                conflict = conflicts.select_related(
+                    "product", "product_package__uom"
+                ).first()
+                if conflict:
+                    product = conflict.product
+                    if conflict.product_package_id:
+                        package = conflict.product_package
+                        deleted = "（已软删除）" if package.is_deleted else ""
+                        source = (
+                            f"商品 {product.code} 的包装层级 "
+                            f"{package.uom.code}{deleted}"
+                        )
+                    else:
+                        deleted = "（已软删除）" if product.is_deleted else ""
+                        source = f"商品 {product.code}-{product.name}{deleted}"
+                    errors[field] = (
+                        f"该货主下标识“{normalized}”已被{source}占用。"
+                    )
+            if errors:
+                raise serializers.ValidationError(errors)
         return attrs
+
+    def create(self, validated_data):
+        try:
+            return super().create(validated_data)
+        except IntegrityError as exc:
+            raise ProductIdentifierConflict() from exc
+
+    def update(self, instance, validated_data):
+        try:
+            return super().update(instance, validated_data)
+        except IntegrityError as exc:
+            raise ProductIdentifierConflict() from exc
 
     class Meta:
         model = Product
@@ -93,6 +209,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "code", "sku", "external_code", "name", "spec", "description",
             "category", "brand",
             "gtin", "unit_barcode", "carton_barcode",
+            "carton_package", "carton_package_detail",
             "base_uom", "base_uom_code",
             "pick_policy", "break_box_allowed", "min_pick_multiple",
             "replenish_min", "replenish_uom",

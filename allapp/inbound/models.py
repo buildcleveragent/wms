@@ -601,7 +601,7 @@ class InboundReceiptLine(BaseModel):
         verbose_name="商品",
     )
 
-    product_code = models.CharField("商品编号", max_length=60)
+    product_code = models.CharField("货主商品编码", max_length=60)
     product_name = models.CharField("名称", max_length=120)
     spec = models.CharField("规格型号", max_length=120, blank=True, null=True)
     # SKU 条码快照（仅用于呈现/追溯；真正解析在记录层做过了）
@@ -990,7 +990,7 @@ class Lot(BaseModel):
     # 商品：允许为空，但要求提供 product_code（快照）
     product = models.ForeignKey("products.Product", on_delete=models.PROTECT,
                                 null=True, blank=True, related_name="lots")
-    product_code = models.CharField("商品编号(快照)", max_length=60)
+    product_code = models.CharField("货主商品编码（快照）", max_length=60)
 
     lot_no = models.CharField("批号", max_length=60)
     lot_no_norm = models.CharField("批号(规范化)", max_length=64, db_index=True)
@@ -1055,7 +1055,7 @@ class Lot(BaseModel):
 
         # 4) 也可在这里检查 product_code 是否为空（如果你希望强制快照）
         if not self.product_code:
-            errs["product_code"] = "商品编号(快照)不能为空"
+            errs["product_code"] = "货主商品编码（快照）不能为空"
 
         if errs:
             raise ValidationError(errs)

@@ -295,6 +295,24 @@ def _allow_overdone(task_type: str) -> bool:
     cfg = getattr(settings, "TASKING_ALLOW_OVERDONE", None) or default
     return bool(cfg.get(task_type, False))
 
+
+def _resolved_scan_payload(
+    *, product_id, product_package_id, code_type, matched_fields,
+    uom_code, uom_name, pack_qty, effective_qty,
+):
+    matched_fields = list(matched_fields or [])
+    return {
+        "product_id": product_id,
+        "product_package_id": product_package_id,
+        "code_type": code_type,
+        "matched_field": matched_fields[0] if matched_fields else None,
+        "matched_fields": matched_fields,
+        "uom_code": uom_code,
+        "uom_name": uom_name,
+        "pack_qty": pack_qty,
+        "effective_qty": effective_qty,
+    }
+
 @transaction.atomic
 def scan_task(
     task_id: int,
@@ -337,11 +355,16 @@ def scan_task(
     product_id = r.get("product_id")
     if not product_id:
         raise ValidationError("条码解析未识别商品。")
-    pack_qty = r.get("pack_qty") or 1
+    pack_qty = Decimal(str(r.get("pack_qty") or 1))
+    if pack_qty <= 0:
+        raise ValidationError("条码解析换算数量必须大于 0。")
     raw_label_key = (r.get("label_key") or "").strip() or None
     label_key = raw_label_key
     code_type = r.get("code_type")
+    product_package_id = r.get("product_package_id")
+    matched_fields = list(r.get("matched_fields") or [])
     uom_code = r.get("uom_code")
+    uom_name = r.get("uom_name")
     lot_no = r.get("lot_no")
     mfg_date = r.get("mfg_date")
     exp_date = r.get("exp_date")
@@ -352,10 +375,26 @@ def scan_task(
     # —— 规则：只对“一箱一码 / 一件一码”的码使用 label_key —— #
     #   普通商品码（SKU/GTIN/ITEM/RAW）不占用 label_key，这样同一任务内可以多次扫码
     #   留给 LPN / SSCC / SN / 容器号等码使用 label_key 做“同任务唯一”控制
-    if code_type in {"SKU", "GTIN", "ITEM", "RAW"}:
+    if code_type in {
+        "SKU", "GTIN", "ITEM", "RAW", "PRODUCT_CODE", "EXTERNAL",
+        "UNIT", "CARTON", "PACKAGE",
+    }:
         label_key = None
     else:
         label_key = raw_label_key
+
+    qty = _q3(qty)
+    inc_qty = _q3(qty * pack_qty)
+    resolved_payload = _resolved_scan_payload(
+        product_id=product_id,
+        product_package_id=product_package_id,
+        code_type=code_type,
+        matched_fields=matched_fields,
+        uom_code=uom_code,
+        uom_name=uom_name,
+        pack_qty=pack_qty,
+        effective_qty=inc_qty,
+    )
 
     # PICK 在选下一条未完成行前先识别客户端重试。否则首行恰好扫满后，
     # 同一请求的重放会被错误地应用到第二库位。
@@ -370,7 +409,7 @@ def scan_task(
             _compute_fp(
                 task.id,
                 barcode,
-                _q3(qty),
+                inc_qty,
                 from_location_id,
                 user_id,
                 client_seq,
@@ -393,6 +432,16 @@ def scan_task(
                 "line_id": prior_line.id,
                 "qty_done": prior_line.qty_done,
                 "scan_id": prior_scan.id,
+                "resolved": _resolved_scan_payload(
+                    product_id=prior_scan.product_id,
+                    product_package_id=prior_scan.product_package_id,
+                    code_type=prior_scan.code_type,
+                    matched_fields=prior_scan.matched_fields,
+                    uom_code=prior_scan.uom_code,
+                    uom_name=prior_scan.uom_name,
+                    pack_qty=prior_scan.pack_qty,
+                    effective_qty=prior_scan.qty_base_delta,
+                ),
             }
 
     # 3) 锁行（RECEIVE/COUNT 可自动建行）。PICK 同商品可能按库位拆成多行：
@@ -416,13 +465,7 @@ def scan_task(
         raise ValidationError("未找到匹配任务行（非 RECEIVE/COUNT 不自动建行）。")
 
     # 4) 计算增量与 FP
-    qty = _q3(qty)
-    if task.task_type == "RECEIVE":
-        inc_qty = _q3(qty * Decimal(str(pack_qty)))
-    elif task.task_type == "COUNT":
-        inc_qty = _q3(qty)  # 实盘总数
-    else:
-        inc_qty = _q3(qty)
+    # 所有商品库存任务都以基础单位记账；qty 表示扫描到的包装数量。
 
     # ---- 关键：统一出库扣减库位 ----
     task_type_u = (task.task_type or "").upper()
@@ -470,6 +513,7 @@ def scan_task(
             task_id=task.id,
             task_line_id=line.id,
             product_id=product_id,
+            product_package_id=product_package_id,
             # location_id=location_id
             #             or getattr(line, "to_location_id", None)
             #             or getattr(line, "from_location_id", None),
@@ -481,7 +525,10 @@ def scan_task(
             label_key=label_key,
             code_type=code_type,
             uom_code=uom_code,
+            uom_name=uom_name,
             pack_qty=pack_qty,
+            matched_fields=matched_fields,
+            qty_aux=qty,
             qty_base_delta=inc_qty,
             qty_base=(inc_qty if task.task_type == "COUNT" else None),
             lot_no=lot_no,
@@ -492,9 +539,25 @@ def scan_task(
         )
     except IntegrityError:
         # fp 重复：同一次请求重试/连点 -> 直接幂等返回（不重复累加）
-        if TaskScanLog.objects.filter(fp=fp).exists():
+        existing_scan = TaskScanLog.objects.filter(fp=fp).first()
+        if existing_scan:
             line.refresh_from_db(fields=["qty_done"])
-            return {"idempotent": True, "line_id": line.id, "qty_done": line.qty_done}
+            return {
+                "idempotent": True,
+                "line_id": line.id,
+                "qty_done": line.qty_done,
+                "scan_id": existing_scan.id,
+                "resolved": _resolved_scan_payload(
+                    product_id=existing_scan.product_id,
+                    product_package_id=existing_scan.product_package_id,
+                    code_type=existing_scan.code_type,
+                    matched_fields=existing_scan.matched_fields,
+                    uom_code=existing_scan.uom_code,
+                    uom_name=existing_scan.uom_name,
+                    pack_qty=existing_scan.pack_qty,
+                    effective_qty=existing_scan.qty_base_delta,
+                ),
+            }
 
         # label_key 冲突：同任务内重复的箱标/序列键
         if label_key and TaskScanLog.objects.filter(task_id=task.id, label_key=label_key).exists():
@@ -523,6 +586,7 @@ def scan_task(
             "line_id": line.id,
             "qty_done": line.qty_done,
             "scan_id": scan.id,
+            "resolved": resolved_payload,
         }
 
     # COUNT 表示最新盘点快照：旧事实置为 IGNORED，保留当前扫描且不重复建日志。
@@ -539,7 +603,29 @@ def scan_task(
     )
     scan.scan_snapshot_rev = line.scan_snapshot_rev
 
-    return {"idempotent": False, "line_id": line.id, "qty_done": line.qty_done, "scan_id": scan.id}
+    return {
+        "idempotent": False,
+        "line_id": line.id,
+        "qty_done": line.qty_done,
+        "scan_id": scan.id,
+        "resolved": resolved_payload,
+    }
+
+
+def post_scan(*, request, task):
+    """HTTP adapter for the generic task scan action."""
+    payload = request.data or {}
+    barcode = (payload.get("barcode") or "").strip()
+    if not barcode:
+        raise ValidationError("缺少条码。")
+    return scan_task(
+        task_id=task.pk,
+        barcode=barcode,
+        qty=payload.get("qty") or 1,
+        location_id=payload.get("location_id") or None,
+        by_user=request.user,
+        client_seq=payload.get("client_seq"),
+    )
 
 def claim_task(task, *, by_user, allowed_wh_ids: set[int], to_status: str | None = None):
     """

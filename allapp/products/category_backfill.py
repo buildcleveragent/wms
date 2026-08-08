@@ -26,7 +26,7 @@ from .permissions import can_manage_all_owner_products
 
 
 SHEET_NAME = "商品分类补录"
-HEADERS = ("货主编码", "商品编号", "商品名称", "当前分类路径", "目标分类编码")
+HEADERS = ("货主编码", "货主商品编码", "商品名称", "当前分类路径", "目标分类编码")
 
 
 class CategoryBackfillError(ValueError):
@@ -177,7 +177,7 @@ def import_category_backfill(uploaded_file, *, user, request=None):
         category_code = str(cells[4].value or "").strip().upper()
         key = (owner_code, product_code)
         if not owner_code or not product_code or not category_code:
-            errors.append(f"第 {row_number} 行：货主、商品编号和目标分类编码不能为空")
+            errors.append(f"第 {row_number} 行：货主、货主商品编码和目标分类编码不能为空")
             continue
         if key in seen:
             errors.append(f"第 {row_number} 行：商品重复 {owner_code}/{product_code}")

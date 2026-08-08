@@ -26,7 +26,7 @@ PREVIEW_TOKEN_SALT = "inbound.no-order-excel-preview.v1"
 XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 HEADERS = (
-    "商品编号",
+    "货主商品编码",
     "商品名称",
     "收货数量",
     "收货单位代码",
@@ -34,7 +34,7 @@ HEADERS = (
     "生产日期",
     "有效截止日期",
 )
-REQUIRED_VALUE_HEADERS = frozenset({"商品编号", "收货数量", "收货单位代码"})
+REQUIRED_VALUE_HEADERS = frozenset({"货主商品编码", "收货数量", "收货单位代码"})
 IGNORED_VALUE_HEADERS = frozenset({"商品名称"})
 REQUIRED_TEMPLATE_HEADERS = frozenset(HEADERS) - IGNORED_VALUE_HEADERS
 
@@ -83,10 +83,10 @@ def _write_instructions(sheet, owner):
         ("无订单收货 Excel 模板", f"模板版本：{TEMPLATE_VERSION}"),
         ("适用货主", f"{owner.code} - {owner.name}"),
         ("使用步骤", "填写“无订单收货”工作表，在 wmspda 上传校验，确认后一次性入库。"),
-        ("商品编号", "必须填写“商品单位参考”中的商品编号，只匹配当前货主的已有商品。"),
+        ("货主商品编码", "必须填写“商品单位参考”中的货主商品编码，只匹配当前货主的已有商品。"),
         (
             "商品名称",
-            "仅供人工核对，可留空；系统导入时忽略此列，仅按商品编号识别商品。",
+            "仅供人工核对，可留空；系统导入时忽略此列，仅按货主商品编码识别商品。",
         ),
         (
             "数量与单位",
@@ -127,7 +127,7 @@ def _write_data_sheet(sheet):
             30 if header == "商品名称" else 18
         )
     for row_number in range(2, MAX_IMPORT_ROWS + 2):
-        for header in ("商品编号", "商品名称", "收货单位代码", "批次号"):
+        for header in ("货主商品编码", "商品名称", "收货单位代码", "批次号"):
             column = HEADERS.index(header) + 1
             sheet.cell(row=row_number, column=column).number_format = "@"
         for header in ("生产日期", "有效截止日期"):
@@ -140,7 +140,7 @@ def _write_data_sheet(sheet):
 
 def _write_reference_sheet(sheet, products):
     headers = (
-        "商品编号",
+        "货主商品编码",
         "商品名称",
         "规格",
         "收货单位代码",
@@ -201,7 +201,7 @@ def _write_reference_sheet(sheet, products):
 
 
 def _write_list_sheet(sheet, product_codes, uom_codes):
-    sheet.append(["商品编号", "单位代码"])
+    sheet.append(["货主商品编码", "单位代码"])
     for index in range(max(len(product_codes), len(uom_codes))):
         sheet.append(
             [
@@ -236,7 +236,7 @@ def _add_validations(workbook, data_sheet, product_codes, uom_codes):
 
     if product_codes:
         add_named_range("InboundProductCodes", "A", len(product_codes))
-        add_dropdown("商品编号", "InboundProductCodes")
+        add_dropdown("货主商品编码", "InboundProductCodes")
     if uom_codes:
         add_named_range("InboundUomCodes", "B", len(uom_codes))
         add_dropdown("收货单位代码", "InboundUomCodes")
@@ -341,12 +341,12 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
     )
     if duplicate_headers:
         raise InboundExcelFileError(f"模板存在重复列：{duplicate_headers}")
-    unknown_headers = [header for header in nonempty_headers if header not in HEADERS]
-    if unknown_headers:
-        raise InboundExcelFileError(f"模板存在未知列：{unknown_headers}")
     missing_headers = sorted(REQUIRED_TEMPLATE_HEADERS - set(nonempty_headers))
     if missing_headers:
         raise InboundExcelFileError(f"模板缺少必要列：{missing_headers}")
+    unknown_headers = [header for header in nonempty_headers if header not in HEADERS]
+    if unknown_headers:
+        raise InboundExcelFileError(f"模板存在未知列：{unknown_headers}")
     header_columns = {
         header: raw_headers.index(header) + 1 for header in nonempty_headers
     }
@@ -377,14 +377,14 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
             if cell.data_type == "f":
                 _row_error(errors, excel_row, header, "不允许使用公式")
 
-        product_code = _text(cells["商品编号"].value).upper()
+        product_code = _text(cells["货主商品编码"].value).upper()
         uom_code = _text(cells["收货单位代码"].value).upper()
         lot_no = _text(cells.get("批次号").value if cells.get("批次号") else "").upper()
         product = product_map.get(product_code)
         if not product_code:
-            _row_error(errors, excel_row, "商品编号", "不能为空")
+            _row_error(errors, excel_row, "货主商品编码", "不能为空")
         elif product is None:
-            _row_error(errors, excel_row, "商品编号", "当前货主下不存在或商品已停用")
+            _row_error(errors, excel_row, "货主商品编码", "当前货主下不存在或商品已停用")
 
         qty = None
         raw_qty = cells["收货数量"].value
@@ -425,7 +425,7 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
                 _row_error(
                     errors,
                     excel_row,
-                    "商品编号",
+                    "货主商品编码",
                     "序列号管理商品暂不支持 Excel 入库，请改用人工收货",
                 )
             unit_map = {product.base_uom.code.strip().upper(): Decimal("1")}

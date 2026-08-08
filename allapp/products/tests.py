@@ -332,6 +332,29 @@ class ProductViewSetTests(TestCase):
         codes = [i["code"] for i in resp2.data]
         self.assertIn("SKU-NEW", codes)
 
+    def test_create_rejects_cross_field_identifier_with_field_error(self):
+        self.prod_a.unit_barcode = "API-CROSS-001"
+        self.prod_a.save(update_fields=["unit_barcode"])
+        view = ProductViewSet.as_view({"post": "create"})
+        req = self.factory.post(
+            "/products/",
+            data={
+                "code": "api-cross-001",
+                "name": "冲突商品",
+                "base_uom": self.uom.id,
+                "category": self.category.id,
+                "is_active": True,
+            },
+            format="json",
+        )
+        force_authenticate(req, user=self.user_a)
+
+        resp = view(req)
+
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertIn("code", resp.data)
+        self.assertIn("已被商品", str(resp.data["code"]))
+
     def test_regular_user_cannot_create_for_other_owner(self):
         view = ProductViewSet.as_view({"post": "create"})
         payload = {
@@ -431,7 +454,7 @@ class ProductViewSetTests(TestCase):
         workbook = load_workbook(io.BytesIO(resp.content))
         self.assertIn(IMPORT_SHEET_NAME, workbook.sheetnames)
         headers = [cell.value for cell in workbook[IMPORT_SHEET_NAME][1]]
-        self.assertIn("商品编号", headers)
+        self.assertIn("货主商品编码", headers)
 
     def test_template_download_keeps_csv_compatibility(self):
         view = ProductViewSet.as_view({"get": "template"})
@@ -666,7 +689,7 @@ class ProductExcelImportApiTests(TestCase):
     def _valid_row(self, code="PDA-XLSX-1", **overrides):
         row = {
             "货主编码": self.owner.code,
-            "商品编号": code,
+            "货主商品编码": code,
             "商品名称": f"导入商品 {code}",
             "基本单位编码": self.uom.code,
             "分类编码": self.category.code,
@@ -692,18 +715,18 @@ class ProductExcelImportApiTests(TestCase):
             ["填写说明", "商品导入", "商品包装", "基础资料", "_meta"],
         )
         self.assertEqual(workbook["_meta"].sheet_state, "hidden")
-        self.assertEqual(workbook["_meta"]["B2"].value, "3")
+        self.assertEqual(workbook["_meta"]["B2"].value, "4")
         headers = [cell.value for cell in workbook[IMPORT_SHEET_NAME][1]]
         self.assertEqual(tuple(headers), PRODUCT_HEADERS)
         package_headers = [cell.value for cell in workbook[PACKAGE_SHEET_NAME][1]]
         self.assertEqual(tuple(package_headers), PACKAGE_HEADERS)
         self.assertEqual(
             tuple(headers[:5]),
-            ("货主编码", "商品编号", "商品名称", "分类编码", "基本单位编码"),
+            ("货主编码", "货主商品编码", "商品名称", "分类编码", "基本单位编码"),
         )
         self.assertEqual(
             tuple(package_headers[:4]),
-            ("货主编码", "商品编号", "包装单位编码", "包装换算数量"),
+            ("货主编码", "货主商品编码", "包装单位编码", "包装换算数量"),
         )
         instructions = {
             row[0].value: row[1].value
@@ -711,7 +734,7 @@ class ProductExcelImportApiTests(TestCase):
             if row[0].value and row[1].value
         }
         self.assertIn("货主编码", instructions["必填字段"])
-        self.assertIn("系统按", instructions["SKU规则"])
+        self.assertIn("系统按", instructions["仓库SKU编码规则"])
         self.assertIn("批次、序列号和保质期管理默认否", instructions["布尔值"])
         self.assertIn("整批不写入", instructions["重复规则"])
         owner_codes = {
@@ -721,9 +744,9 @@ class ProductExcelImportApiTests(TestCase):
         self.assertIn(self.owner.code, owner_codes)
         self.assertNotIn(self.other_owner.code, owner_codes)
         self.assertIn("ProductImportUomCodes", workbook.defined_names)
-        code_column = PRODUCT_HEADERS.index("商品编号") + 1
+        code_column = PRODUCT_HEADERS.index("货主商品编码") + 1
         owner_column = PRODUCT_HEADERS.index("货主编码") + 1
-        barcode_column = PRODUCT_HEADERS.index("GTIN") + 1
+        barcode_column = PRODUCT_HEADERS.index("标准贸易条码") + 1
         self.assertEqual(
             workbook[IMPORT_SHEET_NAME].cell(1, owner_column).fill.fgColor.rgb,
             workbook[IMPORT_SHEET_NAME].cell(1, code_column).fill.fgColor.rgb,
@@ -736,13 +759,28 @@ class ProductExcelImportApiTests(TestCase):
             "@",
         )
 
+    def test_legacy_product_code_header_is_rejected_with_new_header_guidance(self):
+        legacy_headers = tuple(
+            "商品编号" if header == "货主商品编码" else header
+            for header in HEADERS
+        )
+
+        response = self._post_rows(
+            [self._valid_row()],
+            headers=legacy_headers,
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("缺少必要表头", response.data["detail"])
+        self.assertIn("货主商品编码", response.data["detail"])
+
     def test_happy_path_creates_product_package_and_audit_event(self):
         response = self._post_rows(
             [
                 self._valid_row(
                     code=" pda-xlsx-happy ",
                     **{
-                        "SKU编码": "pda-sku-happy",
+                        "仓库SKU编码": "pda-sku-happy",
                         "默认价格": "12.50",
                         "最低库存": 2,
                         "最高库存": 20,
@@ -776,6 +814,79 @@ class ProductExcelImportApiTests(TestCase):
                 action="products.import_excel",
                 object_type="",
             ).exists()
+        )
+
+    def test_legacy_package_barcode_cannot_reuse_same_product_identifier(self):
+        response = self._post_rows(
+            [
+                self._valid_row(
+                    "PDA-PACKAGE-CONFLICT",
+                    **{
+                        "包装单位编码": self.carton_uom.code,
+                        "包装换算数量": 12,
+                        "包装条码": " pda-package-conflict ",
+                    },
+                )
+            ]
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(response.data["created_count"], 0)
+        self.assertTrue(
+            any(
+                error["field"] == "包装条码"
+                and "货主商品编码" in error["message"]
+                for error in response.data["errors"]
+            )
+        )
+
+    def test_package_sheet_barcode_conflicts_with_product_sheet_identifier(self):
+        workbook = Workbook()
+        product_sheet = workbook.active
+        product_sheet.title = IMPORT_SHEET_NAME
+        product_sheet.append(list(HEADERS))
+        product_row = self._valid_row(
+            "PDA-PACKAGE-SHEET",
+            **{"外部系统商品编码": "PACKAGE-SHEET-SHARED"},
+        )
+        product_sheet.append([product_row.get(header) for header in HEADERS])
+        package_sheet = workbook.create_sheet(PACKAGE_SHEET_NAME)
+        package_sheet.append(list(PACKAGE_HEADERS))
+        package_row = {
+            "货主编码": self.owner.code,
+            "货主商品编码": "PDA-PACKAGE-SHEET",
+            "包装单位编码": self.carton_uom.code,
+            "包装换算数量": 12,
+            "包装条码": " package-sheet-shared ",
+        }
+        package_sheet.append(
+            [package_row.get(header) for header in PACKAGE_HEADERS]
+        )
+        output = io.BytesIO()
+        workbook.save(output)
+        uploaded = SimpleUploadedFile(
+            "package-sheet-conflict.xlsx",
+            output.getvalue(),
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        )
+
+        response = self.client.post(
+            "/api/products/import-excel/",
+            {"file": uploaded},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(response.data["created_count"], 0)
+        self.assertTrue(
+            any(
+                error["sheet"] == PACKAGE_SHEET_NAME
+                and error["field"] == "包装条码"
+                and "外部系统商品编码" in error["message"]
+                for error in response.data["errors"]
+            )
         )
 
     def test_single_owner_scope_rejects_other_owner_and_writes_nothing(self):
@@ -876,7 +987,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(response.data["skipped_count"], 0)
         self.assertTrue(
             any(
-                error["field"] == "商品编号" and "已存在" in error["message"]
+                error["field"] == "货主商品编码" and "已存在" in error["message"]
                 for error in response.data["errors"]
             )
         )
@@ -904,7 +1015,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(response.data["skipped_count"], 0)
         self.assertTrue(
             any(
-                error["field"] == "商品编号" and "恢复旧商品" in error["message"]
+                error["field"] == "货主商品编码" and "恢复旧商品" in error["message"]
                 for error in response.data["errors"]
             )
         )
@@ -926,16 +1037,40 @@ class ProductExcelImportApiTests(TestCase):
             [
                 self._valid_row(
                     "PDA-IDENTIFIER-NEW",
-                    **{"外部系统编码": "SHARED-EXTERNAL"},
+                    **{"外部系统商品编码": "SHARED-EXTERNAL"},
                 )
             ]
         )
 
         self.assertEqual(response.status_code, 400, response.data)
         self.assertTrue(
-            any(error["field"] == "外部系统编码" for error in response.data["errors"])
+            any(error["field"] == "外部系统商品编码" for error in response.data["errors"])
         )
         self.assertFalse(Product.objects.filter(code="PDA-IDENTIFIER-NEW").exists())
+
+    def test_existing_cross_field_identifier_rejects_whole_batch(self):
+        Product.objects.create(
+            owner=self.owner,
+            code="PDA-CROSS-OLD",
+            name="跨字段占用商品",
+            base_uom=self.uom,
+            unit_barcode="CROSS-FIELD-001",
+            expiry_control=False,
+            expiry_basis=None,
+        )
+
+        response = self._post_rows([self._valid_row("cross-field-001")])
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(response.data["created_count"], 0)
+        self.assertTrue(
+            any(
+                error["field"] == "货主商品编码"
+                and "标识" in error["message"]
+                for error in response.data["errors"]
+            )
+        )
+        self.assertFalse(Product.objects.filter(code="CROSS-FIELD-001").exists())
 
     def test_invalid_row_makes_whole_batch_atomic(self):
         response = self._post_rows(
@@ -952,8 +1087,8 @@ class ProductExcelImportApiTests(TestCase):
     def test_supplied_skus_are_ignored_and_generated_sequentially(self):
         response = self._post_rows(
             [
-                self._valid_row("PDA-DUP-1", **{"SKU编码": "SAME-SKU"}),
-                self._valid_row("PDA-DUP-2", **{"SKU编码": "SAME-SKU"}),
+                self._valid_row("PDA-DUP-1", **{"仓库SKU编码": "SAME-SKU"}),
+                self._valid_row("PDA-DUP-2", **{"仓库SKU编码": "SAME-SKU"}),
             ]
         )
 
@@ -987,7 +1122,29 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(response.data["created_count"], 0)
         self.assertTrue(
             any(
-                error["row"] == 3 and error["field"] == "商品编号"
+                error["row"] == 3 and error["field"] == "货主商品编码"
+                for error in response.data["errors"]
+            )
+        )
+
+    def test_file_cross_field_duplicates_report_both_rows_and_fields(self):
+        response = self._post_rows(
+            [
+                self._valid_row(
+                    "PDA-CROSS-ROW-1",
+                    **{"箱码": "FILE-CROSS-001"},
+                ),
+                self._valid_row("file-cross-001"),
+            ]
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(response.data["created_count"], 0)
+        self.assertTrue(
+            any(
+                error["row"] == 3
+                and error["field"] == "货主商品编码"
+                and "第 2 行的箱码" in error["message"]
                 for error in response.data["errors"]
             )
         )
@@ -998,7 +1155,7 @@ class ProductExcelImportApiTests(TestCase):
                 self._valid_row(
                     "PDA-MFG",
                     **{
-                        "SKU编码": "",
+                        "仓库SKU编码": "",
                         "批次管理": "",
                         "序列号管理": "",
                         "启用": "",
@@ -1048,7 +1205,7 @@ class ProductExcelImportApiTests(TestCase):
             self._valid_row("PDA-BAD-CATEGORY", **{"分类编码": "NO-CATEGORY"}),
             self._valid_row("PDA-BAD-BRAND", **{"品牌编码": "NO-BRAND"}),
             self._valid_row("PDA-BAD-STOCK", **{"最低库存": 10, "最高库存": 5}),
-            self._valid_row("PDA-BAD-GTIN", **{"GTIN": "123"}),
+            self._valid_row("PDA-BAD-GTIN", **{"标准贸易条码": "123"}),
             self._valid_row(
                 "PDA-BAD-BOOLEAN",
                 **{"批次管理": "不确定"},
@@ -1096,7 +1253,7 @@ class ProductExcelImportApiTests(TestCase):
                 "分类编码",
                 "品牌编码",
                 "最低库存",
-                "GTIN",
+                "标准贸易条码",
                 "保质期天数",
                 "包装换算数量",
                 "包装条码",
@@ -1191,7 +1348,7 @@ class ProductExcelImportApiTests(TestCase):
         )
         duplicate_header_response = self._post_rows(
             [self._valid_row("PDA-DUP-HEADER")],
-            headers=HEADERS + ("商品编号",),
+            headers=HEADERS + ("货主商品编码",),
         )
 
         self.assertEqual(empty_response.status_code, 400)
@@ -1306,7 +1463,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(exported.status_code, 200)
         self.assertIn("filename*=UTF-8", exported["Content-Disposition"])
         workbook = load_workbook(io.BytesIO(exported.content), data_only=False)
-        self.assertEqual(workbook["_meta"]["B2"].value, "3")
+        self.assertEqual(workbook["_meta"]["B2"].value, "4")
         self.assertEqual(workbook[IMPORT_SHEET_NAME]["A2"].value, self.owner.code)
         name_column = PRODUCT_HEADERS.index("商品名称") + 1
         self.assertEqual(

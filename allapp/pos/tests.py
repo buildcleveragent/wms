@@ -445,6 +445,28 @@ class PosApiTests(TestCase):
         self.assertEqual(row["unit_options"][0]["kind"], "base")
         self.assertEqual(row["unit_options"][1]["kind"], "package")
 
+    def test_product_lookup_ignores_inactive_and_soft_deleted_package_barcode(self):
+        package = self.product.packages.get(barcode="POS-CTN-BAR")
+        package.is_active = False
+        package.save(update_fields=["is_active"])
+
+        inactive = self.client.get(
+            "/api/pos/products/", {"barcode": "POS-CTN-BAR"}
+        )
+
+        self.assertEqual(inactive.status_code, 200)
+        self.assertEqual(inactive.data["count"], 0)
+
+        package.is_active = True
+        package.is_deleted = True
+        package.save(update_fields=["is_active", "is_deleted"])
+        deleted = self.client.get(
+            "/api/pos/products/", {"barcode": "POS-CTN-BAR"}
+        )
+
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.data["count"], 0)
+
     def test_product_lookup_does_not_require_user_owner(self):
         no_owner_user = get_user_model().objects.create_user(
             username="pos-no-owner",
