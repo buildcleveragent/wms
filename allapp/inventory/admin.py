@@ -12,7 +12,6 @@ from tempfile import SpooledTemporaryFile
 from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
-from django.db import models as dj_models
 from django.http import FileResponse, JsonResponse, HttpResponseForbidden
 from django.shortcuts import render, redirect
 from django.urls import path, reverse
@@ -21,6 +20,10 @@ from openpyxl import Workbook
 
 from allapp.baseinfo.models import Owner
 from allapp.products.models import Product
+from allapp.products.identifier_lookup import (
+    UnifiedProductAdminSearchMixin,
+    filter_by_product_search,
+)
 from allapp.locations.models import Warehouse, Location
 
 from .models import (
@@ -161,7 +164,7 @@ class ScopedInventoryReadAdmin(admin.ModelAdmin):
 
 # ============== 1) 现存量 ==============
 @admin.register(InventoryDetail)
-class InventoryDetailAdmin(ScopedInventoryReadAdmin):
+class InventoryDetailAdmin(UnifiedProductAdminSearchMixin, ScopedInventoryReadAdmin):
 
     change_list_template = "admin/inventory/inventorydetail/change_list.html"
 
@@ -304,7 +307,7 @@ class InventoryDetailAdmin(ScopedInventoryReadAdmin):
 
 # ============== 2) 汇总 ==============
 @admin.register(InventorySummary)
-class InventorySummaryAdmin(ScopedInventoryReadAdmin):
+class InventorySummaryAdmin(UnifiedProductAdminSearchMixin, ScopedInventoryReadAdmin):
     scope_warehouse_field = None
     # list_display = _safe_fields(
     #     InventorySummary,
@@ -391,7 +394,9 @@ class InventorySummaryAdmin(ScopedInventoryReadAdmin):
 
 # ============== 3) 事务流水 ==============
 @admin.register(InventoryTransaction)
-class InventoryTransactionAdmin(ScopedInventoryReadAdmin):
+class InventoryTransactionAdmin(
+    UnifiedProductAdminSearchMixin, ScopedInventoryReadAdmin
+):
 
 
     list_display = (
@@ -444,7 +449,9 @@ class InventoryTransactionAdmin(ScopedInventoryReadAdmin):
 
 
 @admin.register(InventorySnapshotDaily)
-class InventorySnapshotDailyAdmin(ScopedInventoryReadAdmin):
+class InventorySnapshotDailyAdmin(
+    UnifiedProductAdminSearchMixin, ScopedInventoryReadAdmin
+):
     list_display = (
         "snapshot_date",
         "owner",
@@ -680,11 +687,7 @@ class _ProductOptionsMixin:
         if owner_id:
             qs = Product.objects.filter(owner_id=owner_id)
         if q:
-            qs = qs.filter(
-                dj_models.Q(name__icontains=q) |
-                dj_models.Q(sku__icontains=q) |
-                dj_models.Q(gtin__icontains=q)
-            )
+            qs = filter_by_product_search(qs, q, product_field="pk")
         qs = qs.order_by("name")[:200]
         return JsonResponse({"results": [{"id": p.pk, "text": str(p)} for p in qs]})
 

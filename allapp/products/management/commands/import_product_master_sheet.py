@@ -9,12 +9,10 @@ from typing import Any, Dict, Optional, Tuple
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import IntegrityError, transaction
-
 from openpyxl import load_workbook
 
 from allapp.baseinfo.models import Owner
 from allapp.products.models import Product, ProductCategory, ProductUom
-
 
 UOM_CODE_MAP = {
     "个": ("GE", "COUNT", 0),
@@ -197,7 +195,9 @@ class Command(BaseCommand):
             owner = Owner.all_objects.filter(name__icontains=key).first()
 
         if owner is None:
-            raise ValueError(f"找不到 owner：{key}。请先在后台创建 Owner，或确认 owner 填的是 id/code/name。")
+            raise ValueError(
+                f"找不到 owner：{key}。请先在后台创建 Owner，或确认 owner 填的是 id/code/name。"
+            )
 
         if getattr(owner, "is_deleted", False):
             owner.restore()
@@ -274,7 +274,9 @@ class Command(BaseCommand):
 
         return headers
 
-    def row_to_dict(self, headers: Dict[str, int], row_values: Tuple[Any, ...]) -> Dict[str, Any]:
+    def row_to_dict(
+        self, headers: Dict[str, int], row_values: Tuple[Any, ...]
+    ) -> Dict[str, Any]:
         row: Dict[str, Any] = {}
 
         for key, idx in headers.items():
@@ -335,7 +337,9 @@ class Command(BaseCommand):
         errors = 0
 
         with transaction.atomic():
-            for row_no, values in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            for row_no, values in enumerate(
+                ws.iter_rows(min_row=2, values_only=True), start=2
+            ):
                 if values is None:
                     continue
 
@@ -411,13 +415,15 @@ class Command(BaseCommand):
                             )
 
                             if existing:
-                                gtin_conflict_qs = gtin_conflict_qs.exclude(pk=existing.pk)
+                                gtin_conflict_qs = gtin_conflict_qs.exclude(
+                                    pk=existing.pk
+                                )
 
                             gtin_conflict = gtin_conflict_qs.first()
 
                             if gtin_conflict:
                                 raise ValueError(
-                                    f"GTIN 冲突：同一货主下 gtin={gtin_val} "
+                                    f"标准贸易条码冲突：同一货主下 gtin={gtin_val} "
                                     f"已被商品 code={gtin_conflict.code}, name={gtin_conflict.name} 使用"
                                 )
 
@@ -484,11 +490,15 @@ class Command(BaseCommand):
 
                 except (ValidationError, IntegrityError, ValueError) as e:
                     errors += 1
-                    self.stdout.write(self.style.ERROR(f"[第 {row_no} 行] 导入失败：{e}"))
+                    self.stdout.write(
+                        self.style.ERROR(f"[第 {row_no} 行] 导入失败：{e}")
+                    )
 
                 except Exception as e:
                     errors += 1
-                    self.stdout.write(self.style.ERROR(f"[第 {row_no} 行] 未知错误：{e}"))
+                    self.stdout.write(
+                        self.style.ERROR(f"[第 {row_no} 行] 未知错误：{e}")
+                    )
 
             if dry_run:
                 transaction.set_rollback(True)
@@ -502,4 +512,6 @@ class Command(BaseCommand):
         self.stdout.write(f"errors  : {errors}")
 
         if dry_run:
-            self.stdout.write(self.style.WARNING("dry-run 模式：已模拟校验，但没有写入数据库。"))
+            self.stdout.write(
+                self.style.WARNING("dry-run 模式：已模拟校验，但没有写入数据库。")
+            )

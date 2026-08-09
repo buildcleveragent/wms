@@ -18,6 +18,8 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 
 from allapp.outbound import services as outbound_services
 from allapp.outbound.serializers import OutboundOrderCreateSerializer
+from allapp.products.identifier_lookup import effective_external_identifiers
+from allapp.products.models import normalize_product_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -248,31 +250,89 @@ class DropShipImportService:
 
     def _product_maps(self, rows: list[ParsedRow]):
         Product = apps.get_model("products", "Product")
-        skus = {_text(row.values.get("商家编码")) for row in rows}
+        merchant_codes = {
+            normalize_product_identifier(row.values.get("商家编码")) for row in rows
+        }
         names = {_text(row.values.get("商品名称")) for row in rows}
-        skus.discard("")
+        merchant_codes.discard("")
         names.discard("")
         products = (
             Product.objects.filter(owner_id=self.owner_id)
-            .filter(Q(sku__in=skus) | Q(name__in=names))
+            .filter(
+                Q(code__in=merchant_codes)
+                | Q(sku__in=merchant_codes)
+                | Q(name__in=names)
+            )
             .order_by("id")
         )
-        by_sku: dict[str, object] = {}
+        by_merchant_code: dict[str, object] = {}
+        merchant_code_conflicts: set[str] = set()
+        by_wms_sku: dict[str, object] = {}
         by_name: dict[str, list[object]] = {}
-        for product in products:
-            if product.sku and product.sku not in by_sku:
-                by_sku[product.sku] = product
-            by_name.setdefault(product.name, []).append(product)
-        return by_sku, by_name
 
-    def _find_product(self, row, by_sku, by_name):
-        sku = _text(row.get("商家编码"))
+        def register_merchant_code(value, product):
+            normalized = normalize_product_identifier(value)
+            if not normalized:
+                return
+            existing = by_merchant_code.get(normalized)
+            if existing is not None and existing.pk != product.pk:
+                merchant_code_conflicts.add(normalized)
+                by_merchant_code.pop(normalized, None)
+                return
+            if normalized not in merchant_code_conflicts:
+                by_merchant_code[normalized] = product
+
+        for product in products:
+            register_merchant_code(product.code, product)
+            normalized_sku = normalize_product_identifier(product.sku)
+            if normalized_sku and normalized_sku not in by_wms_sku:
+                by_wms_sku[normalized_sku] = product
+            by_name.setdefault(product.name, []).append(product)
+
+        external_identifiers = (
+            effective_external_identifiers()
+            .filter(
+                owner_id=self.owner_id,
+                product__is_deleted=False,
+                normalized_value__in=merchant_codes,
+            )
+            .select_related("product")
+            .order_by("id")
+        )
+        for identifier in external_identifiers:
+            register_merchant_code(identifier.normalized_value, identifier.product)
+
+        return (
+            by_merchant_code,
+            merchant_code_conflicts,
+            by_wms_sku,
+            by_name,
+        )
+
+    def _find_product(
+        self,
+        row,
+        by_merchant_code,
+        merchant_code_conflicts,
+        by_wms_sku,
+        by_name,
+    ):
+        merchant_code = _text(row.get("商家编码"))
+        normalized_code = normalize_product_identifier(merchant_code)
         product_name = _text(row.get("商品名称"))
-        if sku:
-            product = by_sku.get(sku)
-            if product is None:
-                raise DropShipRowError(f"商家编码[{sku}]匹配不到商品")
-            return product
+        if normalized_code:
+            if normalized_code in merchant_code_conflicts:
+                raise DropShipRowError(
+                    f"商家编码[{merchant_code}]存在编码冲突，请联系管理员处理"
+                )
+            product = by_merchant_code.get(normalized_code)
+            if product is not None:
+                return product
+            if normalized_code in by_wms_sku:
+                raise DropShipRowError(
+                    "不接受仓库SKU编码，请填写货主商品编码或有效外部标识"
+                )
+            raise DropShipRowError(f"商家编码[{merchant_code}]匹配不到商品")
         if product_name:
             products = by_name.get(product_name, [])
             if len(products) == 1:
@@ -298,7 +358,12 @@ class DropShipImportService:
                 src_bill_no__in=source_numbers,
             ).order_by("id")
         }
-        by_sku, by_name = self._product_maps(rows)
+        (
+            by_merchant_code,
+            merchant_code_conflicts,
+            by_wms_sku,
+            by_name,
+        ) = self._product_maps(rows)
         result = {
             "total_rows": len(rows),
             "success_count": 0,
@@ -335,7 +400,13 @@ class DropShipImportService:
                     )
                     continue
 
-                product = self._find_product(row, by_sku, by_name)
+                product = self._find_product(
+                    row,
+                    by_merchant_code,
+                    merchant_code_conflicts,
+                    by_wms_sku,
+                    by_name,
+                )
                 payload = {
                     "warehouse_id": self.warehouse_id,
                     "customer_id": self.cash_customer.id,

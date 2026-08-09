@@ -1,19 +1,19 @@
 # allapp/outbound/views.py  或  allapp/outbound/api_views.py
-from django.core.exceptions import ValidationError as DjangoValidationError
-from decimal import Decimal, InvalidOperation
 import hashlib
 import json
-from pathlib import Path
+import logging
 import re
+from datetime import datetime
+from datetime import timezone as datetime_timezone
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from urllib.parse import quote
-from django.conf import settings
-from django.http import FileResponse, Http404
-from django.shortcuts import get_object_or_404
-from rest_framework.parsers import MultiPartParser, FormParser
-from django.apps import apps
-from datetime import datetime, timezone as datetime_timezone
 from uuid import UUID
-from django.db import IntegrityError
+
+from django.apps import apps
+from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import (
     BigIntegerField,
     DecimalField,
@@ -27,25 +27,56 @@ from django.db.models import (
     Value,
 )
 from django.db.models.functions import Cast, Coalesce
-import logging
-from ..products.models import ProductPackage
-from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
-from rest_framework import viewsets, mixins, status
-from rest_framework.pagination import PageNumberPagination
-from .models import OutboundOrder
-from rest_framework import serializers
-from rest_framework.permissions import IsAuthenticated
-from allapp.tasking.models import WmsTask, WmsTaskLine
-from allapp.tasking import services as task_services
-from allapp.tasking.services import _run_posting_handler, adjust_pick_line_qty
-from allapp.inventory.models import PostingJournal
-from django.db import transaction
+from django.http import FileResponse, Http404
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
+from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+
+from allapp.accounts.access import AccessScope
+from allapp.accounts.audit import record_audit_event
+from allapp.accounts.models import UserRoleScope
 from allapp.billing.enums import PeriodStatus
 from allapp.billing.models import BillingPeriod
+from allapp.core.utils.log_context import build_log_payload
+from allapp.inventory.models import PostingJournal
+from allapp.outbound import services as outbound_services
+from allapp.outbound.assisted_history import (
+    assisted_history_queryset,
+)
+from allapp.outbound.assisted_history import (
+    build_stats as build_assisted_outbound_stats,
+)
+from allapp.outbound.assisted_history import (
+    filter_history_queryset,
+)
+from allapp.outbound.assisted_history import history_options as assisted_history_options
+from allapp.outbound.assisted_history import (
+    serialize_history_order,
+)
+from allapp.outbound.authz import (
+    apply_legacy_scope,
+    assisted_task_queryset,
+    can_review_task_actions,
+    can_self_review_assisted_task,
+    can_use_task_actions,
+    get_assisted_order_for_task,
+    is_assisted_operator,
+    require_assisted_operator,
+    require_legacy_action,
+    strict_order_queryset,
+    strict_pick_queryset,
+)
+from allapp.outbound.drop_ship_import import (
+    DropShipImportFileError,
+    import_drop_ship_workbook,
+)
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.models import OutboundOrderLine
 from allapp.outbound.serializers import (
@@ -55,41 +86,22 @@ from allapp.outbound.serializers import (
     OutboundOrderDraftUpdateSerializer,
     OutboundOrderReadSerializer,
 )
-from allapp.outbound import services as outbound_services
-from allapp.outbound.assisted_history import (
-    assisted_history_queryset,
-    build_stats as build_assisted_outbound_stats,
-    filter_history_queryset,
-    history_options as assisted_history_options,
-    serialize_history_order,
-)
-from allapp.outbound.authz import (
-    apply_legacy_scope,
-    assisted_task_queryset,
-    can_self_review_assisted_task,
-    can_review_task_actions,
-    can_use_task_actions,
-    get_assisted_order_for_task,
-    is_assisted_operator,
-    require_assisted_operator,
-    require_legacy_action,
-    strict_order_queryset,
-    strict_pick_queryset,
-)
-from allapp.core.utils.log_context import build_log_payload
-from allapp.accounts.access import AccessScope
-from allapp.accounts.audit import record_audit_event
-from allapp.accounts.models import UserRoleScope
 from allapp.outbound.warehouse_access import (
     owner_can_use_warehouse,
     owner_warehouse_ids,
     owner_warehouse_queryset,
 )
-from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
-from allapp.outbound.drop_ship_import import (
-    DropShipImportFileError,
-    import_drop_ship_workbook,
+from allapp.products.identifier_lookup import (
+    filter_by_product_search,
+    product_search_q,
 )
+from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
+from allapp.tasking import services as task_services
+from allapp.tasking.models import WmsTask, WmsTaskLine
+from allapp.tasking.services import _run_posting_handler, adjust_pick_line_qty
+
+from ..products.models import ProductPackage
+from .models import OutboundOrder
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +171,6 @@ def confirm_pricing(self, request, pk=None):
     )
 
 
-
 class DefaultPagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = "page_size"
@@ -170,6 +181,7 @@ class ReceiveProductPagination(PageNumberPagination):
     page_size = 300
     page_size_query_param = "page_size"
     max_page_size = 500
+
 
 class ProductPagination(PageNumberPagination):
     page_size = 50
@@ -269,9 +281,13 @@ def _parse_catalog_id(value, field_name):
         raise ValidationError({field_name: "必须是有效整数。"})
 
 
-def _resolve_product_owner_scope(request, *, param_name="owner", default_to_user_owner=True):
+def _resolve_product_owner_scope(
+    request, *, param_name="owner", default_to_user_owner=True
+):
     scope = _catalog_scope(request)
-    requested_owner = _parse_catalog_id(request.query_params.get(param_name), param_name)
+    requested_owner = _parse_catalog_id(
+        request.query_params.get(param_name), param_name
+    )
     allowed_owner_ids = _catalog_owner_ids(scope)
     if scope.is_global:
         if requested_owner:
@@ -351,7 +367,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     pagination_class = ProductPagination
 
     def list(self, request, *args, **kwargs):
-        Product   = apps.get_model("products", "Product")
+        Product = apps.get_model("products", "Product")
         InvDetail = apps.get_model("inventory", "InventoryDetail")
         scope = _catalog_scope(request)
         allowed_owner_ids = _catalog_owner_ids(scope)
@@ -366,7 +382,9 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 user=request.user,
                 warehouse_id=request.query_params.get("warehouse_id"),
             )
-            logger.warning("outbound.product_list.owner_missing %s", ctx_text, extra=ctx)
+            logger.warning(
+                "outbound.product_list.owner_missing %s", ctx_text, extra=ctx
+            )
             return Response([])
         ctx, ctx_text = build_log_payload(
             user=request.user,
@@ -379,35 +397,59 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         # Only fetch the fields consumed below.  Including is_sales_default is
         # important: a deferred read here would otherwise produce one query per
         # package even though the relationship itself was prefetched.
-        pkg_qs = (ProductPackage.objects
-                  .select_related("uom")
-                  .only("id", "product_id", "uom_id", "qty_in_base", "barcode",
-                        "length_cm", "width_cm", "height_cm",
-                        "gross_weight_kg", "volume_m3",
-                        "is_purchase_default", "is_sales_default", "sort_order",
-                        "uom__name", "uom__code"))
+        pkg_qs = ProductPackage.objects.select_related("uom").only(
+            "id",
+            "product_id",
+            "uom_id",
+            "qty_in_base",
+            "barcode",
+            "length_cm",
+            "width_cm",
+            "height_cm",
+            "gross_weight_kg",
+            "volume_m3",
+            "is_purchase_default",
+            "is_sales_default",
+            "sort_order",
+            "uom__name",
+            "uom__code",
+        )
 
         qs = Product.objects.all()
         if owner_id:
             qs = qs.filter(owner_id=owner_id)
         elif allowed_owner_ids is not None:
             qs = qs.filter(owner_id__in=allowed_owner_ids)
-        qs = (qs.select_related("base_uom", "replenish_uom",)
-              .prefetch_related(Prefetch("packages", queryset=pkg_qs))
-              .only("id", "owner_id", "code", "name", "sku", "spec","product_image","gtin","price","min_price","max_discount",
-                    "base_uom__code","base_uom__name", "replenish_uom__code", "replenish_uom__name","replenish_uom_id")
-              .order_by("id"))
+        qs = (
+            qs.select_related(
+                "base_uom",
+                "replenish_uom",
+            )
+            .prefetch_related(Prefetch("packages", queryset=pkg_qs))
+            .only(
+                "id",
+                "owner_id",
+                "code",
+                "name",
+                "sku",
+                "spec",
+                "product_image",
+                "gtin",
+                "price",
+                "min_price",
+                "max_discount",
+                "base_uom__code",
+                "base_uom__name",
+                "replenish_uom__code",
+                "replenish_uom__name",
+                "replenish_uom_id",
+            )
+            .order_by("id")
+        )
 
         q = request.query_params.get("search")
         if q:
-            qs = qs.filter(
-                Q(name__icontains=q) |
-                Q(code__icontains=q) |
-                Q(sku__icontains=q) |
-                Q(gtin__icontains=q) |
-                Q(unit_barcode__icontains=q) |
-                Q(carton_barcode__icontains=q)
-            )
+            qs = filter_by_product_search(qs, q, product_field="pk")
 
         # Availability is part of the database queryset, so DRF's count and
         # slice see exactly the same set of products as the response.  This
@@ -445,65 +487,72 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 None,
             )
             if default_package:
-                return default_package.uom.name,default_package.qty_in_base
+                return default_package.uom.name, default_package.qty_in_base
             return None
-
 
         def product_packaging(p):
             """获取商品所有包装信息，使用 ProductPackage 来表示包装"""
             packaging = []
             for pkg in p.packages.all():  # 使用 p.packages 获取商品的所有包装信息
-                packaging.append({
-                    'id': pkg.id,  # 包装的 ID
-                    'uom_type': pkg.uom.name,  # 获取包装单位名称
-                    'quantity_in_base': pkg.qty_in_base,  # 获取换算数量
-                    'barcode': pkg.barcode,  # 获取条码
-                    'length_cm': pkg.length_cm,  # 获取包装尺寸
-                    'width_cm': pkg.width_cm,
-                    'height_cm': pkg.height_cm,
-                    'gross_weight_kg': pkg.gross_weight_kg,  # 获取毛重
-                    'volume_m3': pkg.volume_m3,  # 获取体积
-                    'is_sales_default': pkg.is_sales_default,
-                })
+                packaging.append(
+                    {
+                        "id": pkg.id,  # 包装的 ID
+                        "uom_type": pkg.uom.name,  # 获取包装单位名称
+                        "quantity_in_base": pkg.qty_in_base,  # 获取换算数量
+                        "barcode": pkg.barcode,  # 获取条码
+                        "length_cm": pkg.length_cm,  # 获取包装尺寸
+                        "width_cm": pkg.width_cm,
+                        "height_cm": pkg.height_cm,
+                        "gross_weight_kg": pkg.gross_weight_kg,  # 获取毛重
+                        "volume_m3": pkg.volume_m3,  # 获取体积
+                        "is_sales_default": pkg.is_sales_default,
+                    }
+                )
             return packaging
 
         # === 在服务端拼出 _unitOptions / _selectedUnitIndex（最小新增逻辑） ===
         def build_unit_options(p, packaging):
-            base_name = (getattr(getattr(p, "base_uom", None), "name", None) or
-                         getattr(getattr(p, "base_uom", None), "code", None))
+            base_name = getattr(getattr(p, "base_uom", None), "name", None) or getattr(
+                getattr(p, "base_uom", None), "code", None
+            )
             opts = []
             if base_name:
-                opts.append({
-                    "key": "BASE",
-                    "kind": "base",
-                    "label": base_name,
-                    "multiplier": 1,
-                    "package_id": None,
-                    "barcode": None,
-                })
+                opts.append(
+                    {
+                        "key": "BASE",
+                        "kind": "base",
+                        "label": base_name,
+                        "multiplier": 1,
+                        "package_id": None,
+                        "barcode": None,
+                    }
+                )
             for row in packaging:
                 # 跳过与基本单位 1:1 的冗余项
                 if row["quantity_in_base"] == 1 and row["uom_type"] == base_name:
                     continue
-                opts.append({
-                    "key": row["id"],
-                    "kind": "package",
-                    "label": row["uom_type"],
-                    "multiplier": row["quantity_in_base"],
-                    "package_id": row["id"],
-                    "barcode": row["barcode"],
-                })
+                opts.append(
+                    {
+                        "key": row["id"],
+                        "kind": "package",
+                        "label": row["uom_type"],
+                        "multiplier": row["quantity_in_base"],
+                        "package_id": row["id"],
+                        "barcode": row["barcode"],
+                    }
+                )
             return opts
 
         def default_selected_index(packaging, unit_opts):
             # 优先选择 is_sales_default 的包装；否则 0（通常为基本单位）
-            sales_pkg_id = next((r["id"] for r in packaging if r.get("is_sales_default")), None)
+            sales_pkg_id = next(
+                (r["id"] for r in packaging if r.get("is_sales_default")), None
+            )
             if sales_pkg_id is not None:
                 for i, o in enumerate(unit_opts):
                     if o["package_id"] == sales_pkg_id:
                         return i
             return 0
-
 
         data = []
         for p in page:
@@ -511,15 +560,14 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             unit_opts = build_unit_options(p, packaging)  # ← 基本单位 + 包装
             sel_idx = default_selected_index(packaging, unit_opts)
 
-
             carton_unit, carton_conv = _product_carton_info(p)
 
             sales_uom = default_sales_uom(p)
             if sales_uom:
-              aux_uom_name,aux_qty_in_base=sales_uom
+                aux_uom_name, aux_qty_in_base = sales_uom
             else:
-              aux_uom_name=None
-              aux_qty_in_base=None
+                aux_uom_name = None
+                aux_qty_in_base = None
 
             product_image_url = None
             if p.product_image:
@@ -537,36 +585,47 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     {"detail": f"商品 {p.code or p.sku or p.pk} 价格配置错误：{exc}"}
                 ) from exc
 
-            data.append({
+            data.append(
+                {
                     "id": p.id,
                     "sku": p.sku or p.code or "",
                     "name": p.name or "",
                     "spec": p.spec,
                     "base_unit": getattr(getattr(p, "base_uom", None), "code", None),
-                    "base_unit_name": getattr(getattr(p, "base_uom", None), "name", None),
+                    "base_unit_name": getattr(
+                        getattr(p, "base_uom", None), "name", None
+                    ),
                     "carton_unit": carton_unit,
                     "carton_conv": carton_conv,
                     "available": p.available,
-                    "price": getattr(p, "price", None) or getattr(p, "sale_price", None) or 0,
-                    "product_image_url":product_image_url,
-                    "gtin":p.gtin,
-                    "aux_uom_name":aux_uom_name,
-                    "aux_qty_in_base":aux_qty_in_base,
-                    "max_discount": p.max_discount ,
+                    "price": getattr(p, "price", None)
+                    or getattr(p, "sale_price", None)
+                    or 0,
+                    "product_image_url": product_image_url,
+                    "gtin": p.gtin,
+                    "aux_uom_name": aux_uom_name,
+                    "aux_qty_in_base": aux_qty_in_base,
+                    "max_discount": p.max_discount,
                     "product_min_price": p.min_price,
                     "minimum_sale_price": (
-                        format(lowest_price, ".4f") if lowest_price is not None else None
+                        format(lowest_price, ".4f")
+                        if lowest_price is not None
+                        else None
                     ),
                     "unitOptions": unit_opts,
                     "selectedUnitIndex": sel_idx,
                     "base_quantity": 0,
-                })
-        logger.debug("outbound.product_list.response %s count=%s", ctx_text, len(data), extra=ctx)
+                }
+            )
+        logger.debug(
+            "outbound.product_list.response %s count=%s", ctx_text, len(data), extra=ctx
+        )
         return self.get_paginated_response(data)
+
 
 class CustomerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
-    pagination_class = DefaultPagination     # 你项目里已有的分页类
+    pagination_class = DefaultPagination  # 你项目里已有的分页类
     filter_backends = []
     queryset = apps.get_model("baseinfo", "Customer").objects.none()
 
@@ -593,11 +652,11 @@ class CustomerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 )
                 qs = qs.filter(owner_id=owner_id) if owner_id else qs.none()
         else:
-            requested_owner = self.request.query_params.get("owner_id") or self.request.query_params.get("owner")
+            requested_owner = self.request.query_params.get(
+                "owner_id"
+            ) or self.request.query_params.get("owner")
             if requested_owner:
-                qs = qs.filter(
-                    owner_id=_parse_catalog_id(requested_owner, "owner_id")
-                )
+                qs = qs.filter(owner_id=_parse_catalog_id(requested_owner, "owner_id"))
 
         q = self.request.query_params.get("search")
         if q:
@@ -610,9 +669,10 @@ class CustomerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         data = [{"id": c.id, "code": c.code, "name": c.name} for c in page]
         return self.get_paginated_response(data)
 
+
 class OwnerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
-    pagination_class = DefaultPagination     # 你项目里已有的分页类
+    pagination_class = DefaultPagination  # 你项目里已有的分页类
     filter_backends = []
     queryset = apps.get_model("baseinfo", "Owner").objects.none()
 
@@ -635,9 +695,10 @@ class OwnerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         data = [{"id": c.id, "code": c.code, "name": c.name} for c in page]
         return self.get_paginated_response(data)
 
+
 class SupplierViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
-    pagination_class = DefaultPagination     # 你项目里已有的分页类
+    pagination_class = DefaultPagination  # 你项目里已有的分页类
     filter_backends = []
     queryset = apps.get_model("baseinfo", "Supplier").objects.none()
 
@@ -663,18 +724,21 @@ class SupplierViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         data = [{"id": c.id, "code": c.code, "name": c.name} for c in page]
         return self.get_paginated_response(data)
 
+
 class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
     pagination_class = ReceiveProductPagination
 
     def list(self, request, *args, **kwargs):
-        Product   = apps.get_model("products", "Product")
+        Product = apps.get_model("products", "Product")
         ProductPackage = apps.get_model("products", "ProductPackage")
 
         owner_id = _resolve_product_owner_scope(request, param_name="owner")
         if not owner_id:
             ctx, ctx_text = build_log_payload(user=request.user)
-            logger.warning("outbound.receive_product_list.owner_missing %s", ctx_text, extra=ctx)
+            logger.warning(
+                "outbound.receive_product_list.owner_missing %s", ctx_text, extra=ctx
+            )
             return Response([])
         ctx, ctx_text = build_log_payload(user=request.user, owner_id=owner_id)
 
@@ -686,44 +750,51 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         #                 "uom__code","uom__name"))
 
         # ✅ 只预取“当前查询命中的产品”的包装，并连带 uom，限制字段，避免 N+1
-        pkg_qs = (ProductPackage.objects
-                  .select_related("uom")
-                  .only("id", "product_id", "uom_id", "qty_in_base", "barcode",
-                        "length_cm", "width_cm", "height_cm",
-                        "gross_weight_kg", "volume_m3",
-                        "is_purchase_default", "sort_order",
-                        "uom__name", "uom__code"))
+        pkg_qs = ProductPackage.objects.select_related("uom").only(
+            "id",
+            "product_id",
+            "uom_id",
+            "qty_in_base",
+            "barcode",
+            "length_cm",
+            "width_cm",
+            "height_cm",
+            "gross_weight_kg",
+            "volume_m3",
+            "is_purchase_default",
+            "sort_order",
+            "uom__name",
+            "uom__code",
+        )
 
-
-        # qs = (Product.objects
-        #       .filter(owner_id=owner_id)
-        #       .select_related("base_uom", "replenish_uom",)
-        #       .only("id", "owner_id", "code", "name", "sku", "spec","product_image","gtin","min_price","max_discount",
-        #             "base_uom__code","base_uom__name", "replenish_uom__code", "replenish_uom__name","replenish_uom_id")
-        #       .order_by("id"))
-
-        qs = (Product.objects
-              .filter(owner_id=owner_id)
-              .select_related("base_uom", "replenish_uom")
-              .prefetch_related(Prefetch("packages", queryset=pkg_qs))
-              .only("id", "owner_id", "code", "name", "sku", "spec", "product_image", "gtin",
-                    "price", "min_price", "max_discount", "base_uom__name", "base_uom__code",
-                    "replenish_uom_id", "replenish_uom__name", "replenish_uom__code")
-              .order_by("id"))
-
+        qs = (
+            Product.objects.filter(owner_id=owner_id)
+            .select_related("base_uom", "replenish_uom")
+            .prefetch_related(Prefetch("packages", queryset=pkg_qs))
+            .only(
+                "id",
+                "owner_id",
+                "code",
+                "name",
+                "sku",
+                "spec",
+                "product_image",
+                "gtin",
+                "price",
+                "min_price",
+                "max_discount",
+                "base_uom__name",
+                "base_uom__code",
+                "replenish_uom_id",
+                "replenish_uom__name",
+                "replenish_uom__code",
+            )
+            .order_by("id")
+        )
 
         q = request.query_params.get("search")
         if q:
-            qs = qs.filter(
-                Q(name__icontains=q) |
-                Q(code__icontains=q) |
-                Q(sku__icontains=q) |
-                Q(gtin__icontains=q) |
-                Q(unit_barcode__icontains=q) |
-                Q(carton_barcode__icontains=q)
-            ).distinct()
-
-
+            qs = filter_by_product_search(qs, q, product_field="pk")
 
         page = self.paginate_queryset(qs)
         if not page:
@@ -733,63 +804,71 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             # 查找 product 的所有 package，返回 is_sales_default 为 True 的 UOM 的名称
             default_package = p.packages.filter(is_sales_default=True).first()
             if default_package:
-                return default_package.uom.name,default_package.qty_in_base
+                return default_package.uom.name, default_package.qty_in_base
             return None
 
         def product_packaging(p):
             """获取商品所有包装信息，使用 ProductPackage 来表示包装"""
             packaging = []
             for pkg in p.packages.all():  # 使用 p.packages 获取商品的所有包装信息
-                packaging.append({
-                    'id': pkg.id,  # 包装的 ID
-                    'uom_type': pkg.uom.name,  # 获取包装单位名称
-                    'quantity_in_base': pkg.qty_in_base,  # 获取换算数量
-                    'barcode': pkg.barcode,  # 获取条码
-                    'length_cm': pkg.length_cm,  # 获取包装尺寸
-                    'width_cm': pkg.width_cm,
-                    'height_cm': pkg.height_cm,
-                    'gross_weight_kg': pkg.gross_weight_kg,  # 获取毛重
-                    'volume_m3': pkg.volume_m3,  # 获取体积
-                })
+                packaging.append(
+                    {
+                        "id": pkg.id,  # 包装的 ID
+                        "uom_type": pkg.uom.name,  # 获取包装单位名称
+                        "quantity_in_base": pkg.qty_in_base,  # 获取换算数量
+                        "barcode": pkg.barcode,  # 获取条码
+                        "length_cm": pkg.length_cm,  # 获取包装尺寸
+                        "width_cm": pkg.width_cm,
+                        "height_cm": pkg.height_cm,
+                        "gross_weight_kg": pkg.gross_weight_kg,  # 获取毛重
+                        "volume_m3": pkg.volume_m3,  # 获取体积
+                    }
+                )
             return packaging
 
         # === 在服务端拼出 _unitOptions / _selectedUnitIndex（最小新增逻辑） ===
         def build_unit_options(p, packaging):
-            base_name = (getattr(getattr(p, "base_uom", None), "name", None) or
-                         getattr(getattr(p, "base_uom", None), "code", None))
+            base_name = getattr(getattr(p, "base_uom", None), "name", None) or getattr(
+                getattr(p, "base_uom", None), "code", None
+            )
             opts = []
             if base_name:
-                opts.append({
-                    "key": "BASE",
-                    "kind": "base",
-                    "label": base_name,
-                    "multiplier": 1,
-                    "package_id": None,
-                    "barcode": None,
-                })
+                opts.append(
+                    {
+                        "key": "BASE",
+                        "kind": "base",
+                        "label": base_name,
+                        "multiplier": 1,
+                        "package_id": None,
+                        "barcode": None,
+                    }
+                )
             for row in packaging:
                 # 跳过与基本单位 1:1 的冗余项
                 if row["quantity_in_base"] == 1 and row["uom_type"] == base_name:
                     continue
-                opts.append({
-                    "key": row["id"],
-                    "kind": "package",
-                    "label": row["uom_type"],
-                    "multiplier": row["quantity_in_base"],
-                    "package_id": row["id"],
-                    "barcode": row["barcode"],
-                })
+                opts.append(
+                    {
+                        "key": row["id"],
+                        "kind": "package",
+                        "label": row["uom_type"],
+                        "multiplier": row["quantity_in_base"],
+                        "package_id": row["id"],
+                        "barcode": row["barcode"],
+                    }
+                )
             return opts
 
         def default_selected_index(packaging, unit_opts):
             # 优先选择 is_sales_default 的包装；否则 0（通常为基本单位）
-            sales_pkg_id = next((r["id"] for r in packaging if r.get("is_sales_default")), None)
+            sales_pkg_id = next(
+                (r["id"] for r in packaging if r.get("is_sales_default")), None
+            )
             if sales_pkg_id is not None:
                 for i, o in enumerate(unit_opts):
                     if o["package_id"] == sales_pkg_id:
                         return i
             return 0
-
 
         data = []
         for p in page:
@@ -801,43 +880,69 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             carton_unit, carton_conv = _product_carton_info(p)
 
             if default_sales_uom(p):
-              aux_uom_name,aux_qty_in_base=default_sales_uom(p)
+                aux_uom_name, aux_qty_in_base = default_sales_uom(p)
             else:
-              aux_uom_name=None
-              aux_qty_in_base=None
+                aux_uom_name = None
+                aux_qty_in_base = None
 
             product_image_url = None
             if p.product_image:
                 product_image_url = request.build_absolute_uri(p.product_image.url)
                 # product_image_url = "http://192.168.1.6:8001"+p.product_image.url  # 获取图片的 URL 地址
 
+            try:
+                lowest_price = minimum_sale_price(
+                    base_price=p.price,
+                    min_price=p.min_price,
+                    max_discount=p.max_discount,
+                )
+            except InvalidSalePriceRule as exc:
+                raise ValidationError(
+                    {"detail": f"商品 {p.code or p.sku or p.pk} 价格配置错误：{exc}"}
+                ) from exc
 
-            data.append({
-                "id": p.id,
-                "sku": p.sku or p.code or "",
-                "name": p.name or "",
-                "spec": p.spec,
-                "base_unit": getattr(getattr(p, "base_uom", None), "code", None),
-                "base_unit_name": getattr(getattr(p, "base_uom", None), "name", None),
-                "carton_unit": carton_unit,
-                "carton_conv": carton_conv,
-                "price": getattr(p, "price", None) or getattr(p, "sale_price", None) or 0,
-                "product_image_url":product_image_url,
-                "gtin":p.gtin,
-                "aux_uom_name":aux_uom_name,
-                "aux_qty_in_base":aux_qty_in_base,
-                "max_discount": p.max_discount ,
-                "product_min_price": p.min_price,
-                "packaging": packaging,  # 包装信息返回，包括 id
-
-                # === 新增：用于前端单选/回填到购物车
-                "unitOptions": unit_opts,
-                "selectedUnitIndex": sel_idx,
-                "base_quantity":0,
-                # "selectedUnit": sel_unit,  # 若不想冗余，可不下发这个，前端用 index 取
-            })
-        logger.debug("outbound.receive_product_list.response %s count=%s", ctx_text, len(data), extra=ctx)
+            data.append(
+                {
+                    "id": p.id,
+                    "sku": p.sku or p.code or "",
+                    "name": p.name or "",
+                    "spec": p.spec,
+                    "base_unit": getattr(getattr(p, "base_uom", None), "code", None),
+                    "base_unit_name": getattr(
+                        getattr(p, "base_uom", None), "name", None
+                    ),
+                    "carton_unit": carton_unit,
+                    "carton_conv": carton_conv,
+                    "price": getattr(p, "price", None)
+                    or getattr(p, "sale_price", None)
+                    or 0,
+                    "product_image_url": product_image_url,
+                    "gtin": p.gtin,
+                    "aux_uom_name": aux_uom_name,
+                    "aux_qty_in_base": aux_qty_in_base,
+                    "max_discount": p.max_discount,
+                    "product_min_price": p.min_price,
+                    "minimum_sale_price": (
+                        format(lowest_price, ".4f")
+                        if lowest_price is not None
+                        else None
+                    ),
+                    "packaging": packaging,  # 包装信息返回，包括 id
+                    # === 新增：用于前端单选/回填到购物车
+                    "unitOptions": unit_opts,
+                    "selectedUnitIndex": sel_idx,
+                    "base_quantity": 0,
+                    # "selectedUnit": sel_unit,  # 若不想冗余，可不下发这个，前端用 index 取
+                }
+            )
+        logger.debug(
+            "outbound.receive_product_list.response %s count=%s",
+            ctx_text,
+            len(data),
+            extra=ctx,
+        )
         return self.get_paginated_response(data)
+
 
 class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
     """Strict warehouse-assisted outbound entry and owner-scoped catalogs."""
@@ -881,7 +986,9 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         search = (request.query_params.get("search") or "").strip()
         if search:
             qs = qs.filter(Q(code__icontains=search) | Q(name__icontains=search))
-        return Response([{"id": owner.id, "code": owner.code, "name": owner.name} for owner in qs])
+        return Response(
+            [{"id": owner.id, "code": owner.code, "name": owner.name} for owner in qs]
+        )
 
     @action(detail=False, methods=["get"])
     def customers(self, request):
@@ -919,7 +1026,9 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=["get"])
     def stats(self, request):
-        return Response(build_assisted_outbound_stats(request.user, request.query_params))
+        return Response(
+            build_assisted_outbound_stats(request.user, request.query_params)
+        )
 
     @action(detail=False, methods=["get"])
     def products(self, request):
@@ -943,15 +1052,7 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
             .select_related("base_uom")
             .prefetch_related(Prefetch("packages", queryset=package_qs))
         )
-        qs = qs.filter(
-            Q(code__icontains=search)
-            | Q(sku__icontains=search)
-            | Q(name__icontains=search)
-            | Q(gtin__icontains=search)
-            | Q(unit_barcode__icontains=search)
-            | Q(carton_barcode__icontains=search)
-            | Q(product_package__barcode__icontains=search)
-        ).distinct()
+        qs = filter_by_product_search(qs, search, product_field="pk")
         qs = qs.order_by("id")
         product_ids = list(qs.values_list("id", flat=True))
         available = {
@@ -1051,7 +1152,9 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
     def _canonical_datetime(value):
         if value in (None, ""):
             return None
-        parsed = value if isinstance(value, datetime) else parse_datetime(str(value).strip())
+        parsed = (
+            value if isinstance(value, datetime) else parse_datetime(str(value).strip())
+        )
         if parsed is None:
             return str(value).strip()
         if timezone.is_naive(parsed):
@@ -1081,9 +1184,11 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
                 (
                     str(item.get("product_id")),
                     self._canonical_qty(item.get("qty")),
-                    str(item.get("package_id"))
-                    if item.get("package_id") not in (None, "")
-                    else None,
+                    (
+                        str(item.get("package_id"))
+                        if item.get("package_id") not in (None, "")
+                        else None
+                    ),
                     self._canonical_optional_qty(item.get("package_qty")),
                 )
                 for item in raw_items
@@ -1113,9 +1218,11 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
                 (
                     str(line.product_id),
                     self._canonical_qty(line.base_qty),
-                    str(getattr(line, "aux_uom_id", None))
-                    if getattr(line, "aux_uom_id", None) is not None
-                    else None,
+                    (
+                        str(getattr(line, "aux_uom_id", None))
+                        if getattr(line, "aux_uom_id", None) is not None
+                        else None
+                    ),
                     self._canonical_optional_qty(getattr(line, "aux_qty", None)),
                 )
                 for line in order.lines.filter(is_deleted=False)
@@ -1199,7 +1306,9 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
     def create(self, request, *args, **kwargs):
         existing = self._idempotent_result(request.data, request.user)
         if existing:
-            return self._response(*existing, idempotent=True, http_status=status.HTTP_200_OK)
+            return self._response(
+                *existing, idempotent=True, http_status=status.HTTP_200_OK
+            )
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -1242,7 +1351,10 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
 
 
 class OutboundOrderViewSet(
-    mixins.CreateModelMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
 ):
     queryset = OutboundOrder.objects.all().order_by("-biz_date", "-id")
     permission_classes = [IsAuthenticated]
@@ -1451,9 +1563,7 @@ class OutboundOrderViewSet(
 
         if order.idempotency_fingerprint == fingerprint:
             data = dict(
-                OutboundOrderReadSerializer(
-                    order, context={"request": request}
-                ).data
+                OutboundOrderReadSerializer(order, context={"request": request}).data
             )
             data["changed"] = False
             return Response(data)
@@ -1521,7 +1631,9 @@ class OutboundOrderViewSet(
                 )
             except DjangoValidationError as exc:
                 errors = [{} for _ in validated["items"]]
-                errors[index] = OutboundOrderCreateSerializer._line_model_validation_detail(exc)
+                errors[index] = (
+                    OutboundOrderCreateSerializer._line_model_validation_detail(exc)
+                )
                 raise ValidationError({"items": errors}) from exc
 
         record_audit_event(
@@ -1551,7 +1663,9 @@ class OutboundOrderViewSet(
         self._editable_order_error(order, request.user)
 
         lines = list(
-            order.lines.select_related("product", "product__base_uom").order_by("line_no")
+            order.lines.select_related("product", "product__base_uom").order_by(
+                "line_no"
+            )
         )
         product_ids = [line.product_id for line in lines]
         available = {
@@ -1603,7 +1717,9 @@ class OutboundOrderViewSet(
                     "min_price": product.min_price,
                     "product_min_price": product.min_price,
                     "minimum_sale_price": (
-                        format(lowest_price, ".4f") if lowest_price is not None else None
+                        format(lowest_price, ".4f")
+                        if lowest_price is not None
+                        else None
                     ),
                     "max_discount": product.max_discount,
                     "qty": line.base_qty,
@@ -1659,8 +1775,10 @@ class OutboundOrderViewSet(
 
     def list(self, request, *args, **kwargs):
         qs = self.get_queryset()
-        q = request.query_params.get("search")
-        product_q = request.query_params.get("product") or request.query_params.get("sku")
+        q = (request.query_params.get("search") or "").strip()
+        product_q = (
+            request.query_params.get("product") or request.query_params.get("sku") or ""
+        ).strip()
         owner_id = request.query_params.get("owner_id")
         warehouse_id = request.query_params.get("warehouse_id")
         submit_status = request.query_params.get("submit_status")
@@ -1674,29 +1792,19 @@ class OutboundOrderViewSet(
 
         if q:
             qs = qs.filter(
-                Q(order_no__icontains=q) |
-                Q(src_bill_no__icontains=q) |
-                Q(contact__icontains=q) | Q(contact_phone__icontains=q) |
-                Q(customer__name__icontains=q) | Q(customer__code__icontains=q) |
-                Q(supplier__name__icontains=q) |
-                Q(lines__product__name__icontains=q) |
-                Q(lines__product__code__icontains=q) |
-                Q(lines__product__sku__icontains=q) |
-                Q(lines__product__gtin__icontains=q) |
-                Q(lines__product__unit_barcode__icontains=q) |
-                Q(lines__product__carton_barcode__icontains=q) |
-                Q(lines__product__product_package__barcode__icontains=q)
-            )
+                Q(order_no__icontains=q)
+                | Q(src_bill_no__icontains=q)
+                | Q(contact__icontains=q)
+                | Q(contact_phone__icontains=q)
+                | Q(customer__name__icontains=q)
+                | Q(customer__code__icontains=q)
+                | Q(supplier__name__icontains=q)
+                | product_search_q(q, product_field="lines__product_id")
+            ).distinct()
         if product_q:
             qs = qs.filter(
-                Q(lines__product__name__icontains=product_q)
-                | Q(lines__product__code__icontains=product_q)
-                | Q(lines__product__sku__icontains=product_q)
-                | Q(lines__product__gtin__icontains=product_q)
-                | Q(lines__product__unit_barcode__icontains=product_q)
-                | Q(lines__product__carton_barcode__icontains=product_q)
-                | Q(lines__product__product_package__barcode__icontains=product_q)
-            )
+                product_search_q(product_q, product_field="lines__product_id")
+            ).distinct()
         if owner_id:
             qs = qs.filter(owner_id=owner_id)
         if warehouse_id:
@@ -1741,7 +1849,11 @@ class OutboundOrderViewSet(
             overdue_q = Q(etd__lt=timezone.now(), is_closed=False) & ~Q(
                 approval_status="CANCELLED"
             )
-            qs = qs.filter(overdue_q) if overdue.lower() in {"1", "true"} else qs.exclude(overdue_q)
+            qs = (
+                qs.filter(overdue_q)
+                if overdue.lower() in {"1", "true"}
+                else qs.exclude(overdue_q)
+            )
 
         if task_no or task_status or waybill_no:
             task_qs = WmsTask.objects.filter(
@@ -1880,14 +1992,19 @@ class OutboundOrderViewSet(
             module="outbound",
             request=request,
             obj=order,
-            after={"submit_status": order.submit_status, "approval_status": order.approval_status},
+            after={
+                "submit_status": order.submit_status,
+                "approval_status": order.approval_status,
+            },
         )
         return order
 
     def create(self, request, *args, **kwargs):
         self._require_owner_buyer("outbound.orders.create")
         key = self._standard_order_idempotency_key(request)
-        ser = OutboundOrderCreateSerializer(data=request.data, context={"request": request})
+        ser = OutboundOrderCreateSerializer(
+            data=request.data, context={"request": request}
+        )
         ser.is_valid(raise_exception=True)
         fingerprint = self._standard_order_fingerprint(ser.validated_data)
         owner_id = ser.validated_data["owner_id__from_user"]
@@ -2012,7 +2129,9 @@ class OutboundOrderViewSet(
             before=before,
             after={"approval_status": order.approval_status},
         )
-        return Response(OutboundOrderReadSerializer(order, context={"request": request}).data)
+        return Response(
+            OutboundOrderReadSerializer(order, context={"request": request}).data
+        )
 
     @action(detail=True, methods=["post"], url_path="owner-reject")
     @transaction.atomic
@@ -2195,45 +2314,22 @@ class OutboundOrderViewSet(
 
         sender_name = self._excel_str(row_dict.get("发货人姓名"))
         sender_phone = self._excel_str(row_dict.get("发货人手机/电话"))
-        sender_addr = "".join([
-            self._excel_str(row_dict.get("发货人省")),
-            self._excel_str(row_dict.get("发货人市")),
-            self._excel_str(row_dict.get("发货人区")),
-            self._excel_str(row_dict.get("发货人详细地址")),
-        ])
+        sender_addr = "".join(
+            [
+                self._excel_str(row_dict.get("发货人省")),
+                self._excel_str(row_dict.get("发货人市")),
+                self._excel_str(row_dict.get("发货人区")),
+                self._excel_str(row_dict.get("发货人详细地址")),
+            ]
+        )
         if sender_name or sender_phone or sender_addr:
-            parts.append(
-                f"发货人:{sender_name} {sender_phone} {sender_addr}".strip()
-            )
+            parts.append(f"发货人:{sender_name} {sender_phone} {sender_addr}".strip())
 
         return " | ".join(parts)
 
     def _get_default_price(self, product):
         """Compatibility wrapper for callers outside the importer."""
         return outbound_services.get_default_product_price(product)
-
-    def _find_product_for_import(self, owner_id, row_dict):
-        Product = apps.get_model("products", "Product")
-
-        sku = self._excel_str(row_dict.get("商家编码"))
-        goods_name = self._excel_str(row_dict.get("商品名称"))
-
-        if sku:
-            p = Product.objects.filter(owner_id=owner_id, sku=sku).order_by("id").first()
-            if p:
-                return p
-            raise ValueError(f"商家编码[{sku}]匹配不到商品")
-
-        if goods_name:
-            qs = Product.objects.filter(owner_id=owner_id, name=goods_name).order_by("id")
-            cnt = qs.count()
-            if cnt == 1:
-                return qs.first()
-            if cnt > 1:
-                raise ValueError(f"商品名称[{goods_name}]匹配到多个商品，请改填商家编码")
-            raise ValueError(f"商品名称[{goods_name}]匹配不到商品")
-
-        raise ValueError("商家编码和商品名称不能同时为空")
 
     @action(
         detail=False,
@@ -2281,10 +2377,16 @@ class OutboundOrderViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        cash_customer = Customer.objects.filter(owner_id=owner_id, code="CASH").order_by("id").first()
+        cash_customer = (
+            Customer.objects.filter(owner_id=owner_id, code="CASH")
+            .order_by("id")
+            .first()
+        )
         if not cash_customer:
             return Response(
-                {"detail": f"当前货主[{owner_id}]下不存在 code=CASH 的散客客户，请先创建"},
+                {
+                    "detail": f"当前货主[{owner_id}]下不存在 code=CASH 的散客客户，请先创建"
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -2309,7 +2411,13 @@ class OutboundOrderViewSet(
         url_path="import-drop-ship-template",
     )
     def import_drop_ship_template(self, request):
-        template_path = Path(settings.BASE_DIR) / "allapp" / "outbound" / "resources" / "yi-jian-dai-fa-mo-ban.xlsx"
+        template_path = (
+            Path(settings.BASE_DIR)
+            / "allapp"
+            / "outbound"
+            / "resources"
+            / "yi-jian-dai-fa-mo-ban.xlsx"
+        )
 
         if not template_path.exists():
             raise Http404("模板文件不存在，请联系管理员。")
@@ -2321,8 +2429,11 @@ class OutboundOrderViewSet(
             filename=filename,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        response["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+        response["Content-Disposition"] = (
+            f"attachment; filename*=UTF-8''{quote(filename)}"
+        )
         return response
+
 
 class PickTaskSerializer(serializers.ModelSerializer):
     owner_name = serializers.CharField(source="owner.name", read_only=True)
@@ -2355,6 +2466,7 @@ class PickTaskSerializer(serializers.ModelSerializer):
             "is_warehouse_assisted",
             "can_self_review",
         ]
+
 
 class PickTaskLineSerializer(serializers.ModelSerializer):
     product_sku = serializers.CharField(source="product.sku", read_only=True)
@@ -2390,6 +2502,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
       - POST /api/outbound/pda/pick-tasks/<id>/create-review-task/ complete拣货
       - POST /api/outbound/pda/pick-tasks/<id>/post/   完成并过账
     """
+
     permission_classes = [IsAuthenticated]
     serializer_class = PickTaskSerializer
 
@@ -2442,9 +2555,11 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         return get_object_or_404(qs, pk=pk)
 
     def get_queryset(self):
-        qs = self._scope_pick_queryset(WmsTask.objects.filter(
-            task_type=WmsTask.TaskType.PICK,
-        )).order_by("-id")
+        qs = self._scope_pick_queryset(
+            WmsTask.objects.filter(
+                task_type=WmsTask.TaskType.PICK,
+            )
+        ).order_by("-id")
 
         action = getattr(self, "action", None)
 
@@ -2482,13 +2597,14 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         ctx, ctx_text = build_log_payload(task_id=pk, user=request.user)
         logger.info("outbound.pick.lines.request %s", ctx_text, extra=ctx)
         lines = (
-            WmsTaskLine.objects
-            .filter(task_id=task.id)
+            WmsTaskLine.objects.filter(task_id=task.id)
             .select_related("product", "from_location", "to_location")
             .order_by("id")
         )
         data = PickTaskLineSerializer(lines, many=True).data
-        logger.debug("outbound.pick.lines.response %s count=%s", ctx_text, len(data), extra=ctx)
+        logger.debug(
+            "outbound.pick.lines.response %s count=%s", ctx_text, len(data), extra=ctx
+        )
         return Response(data)
 
     @action(methods=["post"], detail=True)
@@ -2522,8 +2638,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         line_id = res.get("line_id")
         if line_id:
             line = (
-                WmsTaskLine.objects
-                .filter(id=line_id)
+                WmsTaskLine.objects.filter(id=line_id)
                 .only("id", "qty_plan", "qty_done", "status")
                 .first()
             )
@@ -2537,7 +2652,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
         return Response(res)
 
-# === 新增：拣货完成 → 提交复核 =========================================
+    # === 新增：拣货完成 → 提交复核 =========================================
     @action(methods=["post"], detail=True, url_path="create-review-task")
     @transaction.atomic
     def create_review_task(self, request, pk=None):
@@ -2552,7 +2667,9 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 by_user=request.user,
             )
         except DjangoValidationError as exc:
-            logger.warning("outbound.pick.create_review.rejected %s", ctx_text, extra=ctx)
+            logger.warning(
+                "outbound.pick.create_review.rejected %s", ctx_text, extra=ctx
+            )
             raise ValidationError(
                 exc.message_dict if hasattr(exc, "message_dict") else exc.messages
             ) from exc
@@ -2573,16 +2690,18 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             task.status,
             extra=ctx,
         )
-        return Response({
-            "task_id": task.id,
-            "review_task_id": review_task.id,
-            "review_task_no": review_task.task_no,
-            "review_task_status": review_task.status,
-            "status": task.status,
-            "review_status": task.review_status,
-            "posting_status": task.posting_status,
-            "message": "拣货已完成，已提交复核。",
-        })
+        return Response(
+            {
+                "task_id": task.id,
+                "review_task_id": review_task.id,
+                "review_task_no": review_task.task_no,
+                "review_task_status": review_task.status,
+                "status": task.status,
+                "review_status": task.review_status,
+                "posting_status": task.posting_status,
+                "message": "拣货已完成，已提交复核。",
+            }
+        )
 
     # === 修改：复核通过 + 过账 ==============================================
     @action(methods=["post"], detail=True)
@@ -2652,8 +2771,10 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 )
 
             picker = getattr(task, "picked_by", None)
-            if picker and picker.id == request.user.id and not can_self_review_assisted_task(
-                request.user, task
+            if (
+                picker
+                and picker.id == request.user.id
+                and not can_self_review_assisted_task(request.user, task)
             ):
                 logger.warning(
                     "outbound.pick.post.self_review_blocked %s", ctx_text, extra=ctx
@@ -2720,12 +2841,14 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             metadata={"review_task_id": review_task.id if review_task else None},
         )
 
-        return Response({
-            "task_id": int(pk),
-            "posted": True,
-            "idempotent": bool((result or {}).get("tx_created") == 0),
-            **(result or {}),
-        })
+        return Response(
+            {
+                "task_id": int(pk),
+                "posted": True,
+                "idempotent": bool((result or {}).get("tx_created") == 0),
+                **(result or {}),
+            }
+        )
 
     @action(methods=["post"], detail=True, url_path="adjust-line-qty")
     def adjust_line_qty(self, request, pk=None):

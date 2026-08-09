@@ -16,13 +16,16 @@ from django.utils import timezone
 
 from allapp.core.choices import InvTxType, ZoneType
 from allapp.core.models import DocSequence
+from allapp.inventory.locking import (
+    lock_warehouses_for_inventory_write,
+    run_inventory_write_with_retry,
+)
 from allapp.inventory.models import (
     InventoryDetail,
     InventorySummary,
     InventoryTransaction,
 )
 from allapp.inventory.services import lock_active_inventory_details_for_update
-from allapp.locations.models import Warehouse
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import Product
@@ -663,7 +666,6 @@ def _create_pos_pick_tasks_and_post(
     """Reserve exact FEFO layers, create POS PICK evidence, and post every owner task."""
 
     actor = user if user and user.is_authenticated else None
-    Warehouse.objects.select_for_update().get(pk=warehouse_id)
     pairs = {
         (binding["sale_line"].owner_id, binding["sale_line"].product_id)
         for binding in line_bindings
@@ -1394,8 +1396,36 @@ def create_customer_repayment(
     }
 
 
-@transaction.atomic
 def create_pos_sale(
+    *,
+    user,
+    customer_id=None,
+    src_bill_no="",
+    remark="",
+    items=None,
+    payment=None,
+    payments=None,
+    idempotency_key="",
+    stock_zone_type=None,
+):
+    return run_inventory_write_with_retry(
+        lambda: _create_pos_sale_once(
+            user=user,
+            customer_id=customer_id,
+            src_bill_no=src_bill_no,
+            remark=remark,
+            items=items,
+            payment=payment,
+            payments=payments,
+            idempotency_key=idempotency_key,
+            stock_zone_type=stock_zone_type,
+        ),
+        operation_name="pos.checkout",
+    )
+
+
+@transaction.atomic
+def _create_pos_sale_once(
     *,
     user,
     customer_id=None,
@@ -1410,6 +1440,7 @@ def create_pos_sale(
     warehouse_id = getattr(user, "warehouse_id", None)
     if not warehouse_id:
         raise ValidationError("当前用户未绑定仓库(warehouse)，无法收银。")
+    lock_warehouses_for_inventory_write(warehouse_id)
     items = items or []
     if not items:
         _error("items", "购物车不能为空。")
@@ -1593,8 +1624,30 @@ def create_pos_sale(
     return result_for_sale(sale)
 
 
-@transaction.atomic
 def create_pos_return(
+    *,
+    user,
+    sale_id,
+    lines,
+    refunds,
+    reason="",
+    idempotency_key="",
+):
+    return run_inventory_write_with_retry(
+        lambda: _create_pos_return_once(
+            user=user,
+            sale_id=sale_id,
+            lines=lines,
+            refunds=refunds,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        ),
+        operation_name="pos.return",
+    )
+
+
+@transaction.atomic
+def _create_pos_return_once(
     *,
     user,
     sale_id,
@@ -1606,6 +1659,7 @@ def create_pos_return(
     warehouse_id = getattr(user, "warehouse_id", None)
     if not warehouse_id:
         raise ValidationError("当前用户未绑定仓库(warehouse)，无法退货。")
+    lock_warehouses_for_inventory_write(warehouse_id)
     reason = (reason or "").strip()
     if not reason:
         _error("reason", "POS 退货必须填写原因。")
@@ -1770,9 +1824,27 @@ def create_pos_return(
     return result_for_return(return_order)
 
 
-@transaction.atomic
 def void_pos_sale(*, sale_id, user, reason=""):
-    sale = PosSale.objects.select_for_update().get(pk=sale_id)
+    warehouse_id = (
+        PosSale.objects.filter(pk=sale_id).values_list("warehouse_id", flat=True).get()
+    )
+    return run_inventory_write_with_retry(
+        lambda: _void_pos_sale_once(
+            sale_id=sale_id,
+            warehouse_id=warehouse_id,
+            user=user,
+            reason=reason,
+        ),
+        operation_name="pos.void",
+    )
+
+
+@transaction.atomic
+def _void_pos_sale_once(*, sale_id, warehouse_id, user, reason=""):
+    lock_warehouses_for_inventory_write(warehouse_id)
+    sale = PosSale.objects.select_for_update().get(
+        pk=sale_id, warehouse_id=warehouse_id
+    )
     if sale.status == PosSale.Status.VOIDED:
         raise ValidationError("POS 销售单已撤销。")
     if (

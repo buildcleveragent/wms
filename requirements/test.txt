@@ -10,6 +10,8 @@ asgiref==3.9.1
     #   django
     #   django-cors-headers
     #   django-htmx
+beautifulsoup4==4.14.3
+    # via -r requirements/dev.in
 asttokens==3.0.0
     # via stack-data
 black==25.1.0
@@ -105,6 +107,8 @@ fonttools==4.63.0
     # via
     #   -c requirements/requirements.txt
     #   weasyprint
+flake8==7.3.0
+    # via -r requirements/dev.in
 identify==2.6.13
     # via pre-commit
 iniconfig==2.1.0
@@ -119,6 +123,10 @@ jedi==0.19.2
     # via ipython
 matplotlib-inline==0.1.7
     # via ipython
+mccabe==0.7.0
+    # via flake8
+mistune==3.2.0
+    # via -r requirements/dev.in
 mypy-extensions==1.1.0
     # via black
 mysqlclient==2.2.7
@@ -166,6 +174,10 @@ pycparser==2.22
     # via
     #   -c requirements/requirements.txt
     #   cffi
+pycodestyle==2.14.0
+    # via flake8
+pyflakes==3.4.0
+    # via flake8
 pydyf==0.12.1
     # via
     #   -c requirements/requirements.txt
@@ -203,6 +215,8 @@ sqlparse==0.5.3
     # via
     #   -c requirements/requirements.txt
     #   django
+soupsieve==2.8
+    # via beautifulsoup4
 stack-data==0.6.3
     # via ipython
 tablib==3.10.0

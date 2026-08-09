@@ -19,6 +19,7 @@ from allapp.baseinfo.models import Customer, Owner
 from allapp.billing.enums import CalcMethod, ChargeType
 from allapp.billing.models import BillingAccrual, BillingEvent, BillingRule
 from allapp.core.choices import InvTxType, ZoneType
+from allapp.inventory.locking import InventoryConcurrencyError
 from allapp.inventory.models import (
     InventoryDetail,
     InventorySummary,
@@ -325,6 +326,37 @@ class PosApiTests(TestCase):
             PosSale.objects.filter(src_bill_no="POS-RECEIPT-NO-PERM").exists()
         )
 
+    def test_checkout_maps_exhausted_inventory_retry_to_http_409(self):
+        payload = {
+            "src_bill_no": "POS-INVENTORY-BUSY",
+            "payment": self.payment("9.00"),
+            "items": [
+                {
+                    "product_id": self.product.id,
+                    "qty": "1.000",
+                    "price": "9.0000",
+                }
+            ],
+        }
+
+        with patch(
+            "allapp.pos.serializers.create_pos_sale",
+            side_effect=InventoryConcurrencyError(),
+        ):
+            response = self.client.post(
+                "/api/pos/checkout/",
+                payload,
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 409, response.data)
+        self.assertEqual(response.data["code"], "inventory_busy")
+        self.assertTrue(response.data["retryable"])
+        self.assertEqual(response["Retry-After"], "1")
+        self.assertFalse(
+            PosSale.objects.filter(src_bill_no="POS-INVENTORY-BUSY").exists()
+        )
+
     def test_checkout_requires_open_shift(self):
         cashier = get_user_model().objects.create_user(
             username="pos-no-shift",
@@ -450,9 +482,7 @@ class PosApiTests(TestCase):
         package.is_active = False
         package.save(update_fields=["is_active"])
 
-        inactive = self.client.get(
-            "/api/pos/products/", {"barcode": "POS-CTN-BAR"}
-        )
+        inactive = self.client.get("/api/pos/products/", {"barcode": "POS-CTN-BAR"})
 
         self.assertEqual(inactive.status_code, 200)
         self.assertEqual(inactive.data["count"], 0)
@@ -460,9 +490,7 @@ class PosApiTests(TestCase):
         package.is_active = True
         package.is_deleted = True
         package.save(update_fields=["is_active", "is_deleted"])
-        deleted = self.client.get(
-            "/api/pos/products/", {"barcode": "POS-CTN-BAR"}
-        )
+        deleted = self.client.get("/api/pos/products/", {"barcode": "POS-CTN-BAR"})
 
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(deleted.data["count"], 0)

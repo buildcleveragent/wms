@@ -1,5 +1,6 @@
 """Environment file loading helpers for Django settings."""
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -26,6 +27,9 @@ def load_environment(
     values retain the highest priority.
     """
 
-    if local_test_env.exists() and is_test_command(argv):
+    explicit_test_environment = os.environ.get("APP_ENV", "").strip().lower() == "test"
+    if local_test_env.exists() and (
+        explicit_test_environment or is_test_command(argv)
+    ):
         environ.Env.read_env(local_test_env, overwrite=False)
     environ.Env.read_env(base_env, overwrite=False)

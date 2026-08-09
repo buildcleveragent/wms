@@ -62,6 +62,8 @@ class PosCheckoutConcurrencyTests(TransactionTestCase):
             code="CASH",
             name="Cash customer",
         )
+        self._sequence = itertools.count(1)
+        self._sequence_lock = threading.Lock()
 
     def _create_product(self, code, name, onhand):
         product = Product.objects.create(
@@ -87,15 +89,13 @@ class PosCheckoutConcurrencyTests(TransactionTestCase):
         return product
 
     def _run_actions(self, actions):
-        sequence = itertools.count(1)
-        sequence_lock = threading.Lock()
         start = threading.Barrier(len(actions))
         results = [None] * len(actions)
         errors = [None] * len(actions)
 
         def next_value(prefix):
-            with sequence_lock:
-                return f"{prefix}-{next(sequence):08d}"
+            with self._sequence_lock:
+                return f"{prefix}-{next(self._sequence):08d}"
 
         def next_code(*, doc_type, **kwargs):
             return next_value(doc_type)
@@ -396,3 +396,93 @@ class PosCheckoutConcurrencyTests(TransactionTestCase):
         self.assertEqual(detail.onhand_qty, Decimal("4.0000"))
         self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
         self.assertEqual(detail.available_qty, Decimal("4.0000"))
+
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_critical_checkout_locking_is_stable_for_twenty_rounds(self):
+        for round_index in range(20):
+            oversell_product = self._create_product(
+                f"PC-STRESS-OVER-{round_index}",
+                f"POS oversell stress {round_index}",
+                Decimal("10.0000"),
+            )
+            oversell_payloads = [
+                {
+                    "src_bill_no": f"POS-STRESS-OVER-{round_index}-{worker}",
+                    "payment": {"method": "CASH", "amount_received": "54.00"},
+                    "items": [
+                        {
+                            "product_id": oversell_product.id,
+                            "qty": "6.000",
+                            "price": "9.0000",
+                        }
+                    ],
+                }
+                for worker in (1, 2)
+            ]
+
+            oversell_results, oversell_errors = self._run_checkouts(oversell_payloads)
+
+            self.assertEqual(
+                sum(result is not None for result in oversell_results),
+                1,
+                msg=f"oversell round {round_index}",
+            )
+            failures = [error for error in oversell_errors if error is not None]
+            self.assertEqual(len(failures), 1, msg=f"oversell round {round_index}")
+            self.assertIsInstance(
+                failures[0], ValidationError, msg=f"oversell round {round_index}"
+            )
+            oversell_detail = InventoryDetail.objects.get(product=oversell_product)
+            self.assertEqual(oversell_detail.onhand_qty, Decimal("4.0000"))
+
+            first = self._create_product(
+                f"PC-STRESS-A-{round_index}",
+                f"POS order stress A {round_index}",
+                Decimal("5.0000"),
+            )
+            second = self._create_product(
+                f"PC-STRESS-B-{round_index}",
+                f"POS order stress B {round_index}",
+                Decimal("5.0000"),
+            )
+            order_payloads = [
+                {
+                    "src_bill_no": f"POS-STRESS-ORDER-{round_index}-1",
+                    "payment": {"method": "CASH", "amount_received": "18.00"},
+                    "items": [
+                        {"product_id": first.id, "qty": "1.000", "price": "9.0000"},
+                        {"product_id": second.id, "qty": "1.000", "price": "9.0000"},
+                    ],
+                },
+                {
+                    "src_bill_no": f"POS-STRESS-ORDER-{round_index}-2",
+                    "payment": {"method": "CASH", "amount_received": "18.00"},
+                    "items": [
+                        {"product_id": second.id, "qty": "1.000", "price": "9.0000"},
+                        {"product_id": first.id, "qty": "1.000", "price": "9.0000"},
+                    ],
+                },
+            ]
+
+            order_results, order_errors = self._run_checkouts(order_payloads)
+
+            self.assertTrue(
+                all(result is not None for result in order_results),
+                msg=(
+                    f"reverse-order round {round_index}: "
+                    f"errors={[repr(error) for error in order_errors]}"
+                ),
+            )
+            self.assertEqual(
+                order_errors,
+                [None, None],
+                msg=f"reverse-order round {round_index}",
+            )
+            self.assertEqual(
+                list(
+                    InventoryDetail.objects.filter(product_id__in=[first.id, second.id])
+                    .order_by("product_id")
+                    .values_list("onhand_qty", flat=True)
+                ),
+                [Decimal("3.0000"), Decimal("3.0000")],
+            )

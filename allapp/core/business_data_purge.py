@@ -15,7 +15,7 @@ from django.db import connections, transaction
 
 from allapp.accounts.audit import record_audit_event
 
-PURGE_MANIFEST_VERSION = "2026-08-07.1"
+PURGE_MANIFEST_VERSION = "2026-08-08.1"
 
 
 PRESERVED_MODEL_LABELS = frozenset(
@@ -102,6 +102,9 @@ PURGED_MODEL_LABELS = frozenset(
         "token_blacklist.outstandingtoken",
         # Product master and packaging.
         "products.product",
+        "products.productbarcode",
+        "products.productexternalidentifier",
+        "products.productidentifierregistry",
         "products.productpackage",
         # Inbound.
         "inbound.inboundorder",

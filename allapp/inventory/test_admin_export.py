@@ -96,12 +96,15 @@ class InventoryDetailAdminExportTests(TestCase):
 
         changelist_response = self.client.get(
             self.changelist_url,
-            {"q": "SKU-KEEP"},
+            {"q": self.first_product.sku},
         )
         self.assertContains(changelist_response, "导出当前筛选结果（Excel）")
-        self.assertContains(changelist_response, f"{self.export_url}?q=SKU-KEEP")
+        self.assertContains(
+            changelist_response,
+            f"{self.export_url}?q={self.first_product.sku}",
+        )
 
-        response = self.client.get(self.export_url, {"q": "SKU-KEEP"})
+        response = self.client.get(self.export_url, {"q": self.first_product.sku})
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("attachment", response["Content-Disposition"])
@@ -109,7 +112,9 @@ class InventoryDetailAdminExportTests(TestCase):
         self.assertEqual(len(rows), 2)
         header, exported = rows
         self.assertIn("仓库SKU编码", header)
-        self.assertEqual(exported[header.index("仓库SKU编码")], "SKU-KEEP")
+        self.assertEqual(
+            exported[header.index("仓库SKU编码")], self.first_product.sku
+        )
         self.assertEqual(exported[header.index("账面库存")], 12)
 
     def test_export_keeps_warehouse_access_scope(self):
@@ -138,4 +143,6 @@ class InventoryDetailAdminExportTests(TestCase):
         self.assertEqual(len(rows), 2)
         header, exported = rows
         self.assertEqual(exported[header.index("仓库编号")], "ADEXP1")
-        self.assertEqual(exported[header.index("仓库SKU编码")], "SKU-KEEP")
+        self.assertEqual(
+            exported[header.index("仓库SKU编码")], self.first_product.sku
+        )

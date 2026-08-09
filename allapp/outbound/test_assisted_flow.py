@@ -18,6 +18,7 @@ from allapp.inventory.models import (
     PostingJournal,
 )
 from allapp.locations.models import Location, Subwarehouse, Warehouse
+from allapp.outbound import services as outbound_services
 from allapp.outbound.export_print import pick_task_print
 from allapp.outbound.models import OutboundOrder
 from allapp.outbound.views import (
@@ -25,7 +26,8 @@ from allapp.outbound.views import (
     OutboundOrderViewSet,
     PickTaskViewSet,
 )
-from allapp.products.models import Product, ProductPackage, ProductUom
+from allapp.products.identifier_services import add_product_barcode
+from allapp.products.models import Product, ProductBarcode, ProductPackage, ProductUom
 from allapp.tasking.models import TaskScanLog, TaskStatusLog, WmsTask
 
 
@@ -67,6 +69,11 @@ class AssistedOutboundFlowTests(TestCase):
         self.operator.user_permissions.add(
             _permission("outbound", "process_warehouse_assisted_outbound"),
             _permission("tasking", "claim_task_as_wh_operator"),
+        )
+        UserRoleScope.objects.create(
+            user=self.operator,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
         )
         self.customer = Customer.objects.create(
             owner=self.owner,
@@ -161,6 +168,14 @@ class AssistedOutboundFlowTests(TestCase):
         )
         cross_warehouse_user = get_user_model().objects.create_user(
             username="assisted-flow-print-cross", warehouse=other_warehouse
+        )
+        cross_warehouse_user.user_permissions.add(
+            _permission("tasking", "view_wmstask")
+        )
+        UserRoleScope.objects.create(
+            user=cross_warehouse_user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=other_warehouse,
         )
         denied_print_request = self.factory.get(
             f"/api/outbound/pda/pick-tasks/{task.id}/print/"
@@ -299,14 +314,19 @@ class AssistedOutboundFlowTests(TestCase):
         self.assertEqual(second_detail.allocated_qty, Decimal("3.0000"))
 
     def test_package_catalog_and_server_validated_base_quantity_conversion(self):
-        UserRoleScope.objects.create(
-            user=self.operator,
-            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
-            warehouse=self.warehouse,
+        add_product_barcode(
+            product=self.product,
+            barcode="6901234567890",
+            barcode_type=ProductBarcode.BarcodeType.GTIN,
+            is_primary=True,
         )
-        self.product.gtin = "6901234567890"
-        self.product.unit_barcode = "ASSIST-FLOW-UNIT-BARCODE"
-        self.product.save(update_fields=["gtin", "unit_barcode"])
+        add_product_barcode(
+            product=self.product,
+            barcode="ASSIST-FLOW-UNIT-BARCODE",
+            barcode_type=ProductBarcode.BarcodeType.UNIT,
+            is_primary=True,
+        )
+        self.product.refresh_from_db()
         carton_uom = ProductUom.objects.create(
             code="ASSIST-FLOW-CTN",
             name="箱",
@@ -584,7 +604,12 @@ class AssistedOutboundFlowTests(TestCase):
         )
         reviewer.user_permissions.add(
             _permission("tasking", "view_wmstask"),
-            _permission("tasking", "claim_task_as_wh_operator"),
+            _permission("tasking", "taskconfirm_as_wh_manager"),
+        )
+        UserRoleScope.objects.create(
+            user=reviewer,
+            role=UserRoleScope.Role.WAREHOUSE_MANAGER,
+            warehouse=self.warehouse,
         )
         list_view = PickTaskViewSet.as_view({"get": "list"})
         review_queue = list_view(
@@ -670,6 +695,20 @@ class AssistedOutboundFlowTests(TestCase):
         original_reviewer = get_user_model().objects.create_user(
             username="assisted-flow-original-reviewer",
             warehouse=self.warehouse,
+        )
+        line = task.lines.get()
+        line.qty_done = line.qty_plan
+        line.save(update_fields=["qty_done"])
+        review_task = outbound_services.create_review_task_for_pick(
+            task,
+            by_user=self.operator,
+        )
+        WmsTask.objects.filter(pk=review_task.pk).update(
+            status=WmsTask.Status.COMPLETED,
+            review_status=WmsTask.ReviewStatus.APPROVED,
+            posting_status=WmsTask.PostingStatus.PENDING,
+            approved_by=original_reviewer,
+            approved_at=timezone.now(),
         )
         WmsTask.objects.filter(pk=task.id).update(
             status=WmsTask.Status.COMPLETED,
@@ -766,7 +805,7 @@ class AssistedOutboundFlowTests(TestCase):
         )
         rows = response.data.get("results", response.data)
         ids = {row["id"] for row in rows}
-        self.assertIn(standard.id, ids)
+        self.assertNotIn(standard.id, ids)
         self.assertNotIn(assisted_id, ids)
 
         operator_response = view(

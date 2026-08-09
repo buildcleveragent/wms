@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.outbound.services import unallocate_for_order
 
 from .models import SaleMiniOrderMapping, SaleMiniPayment, SaleMiniRefund
@@ -84,11 +85,19 @@ def _local_cancel_locked(mapping, by_user=None):
 
 @transaction.atomic
 def cancel_mapping_if_unpaid(mapping_id, by_user=None):
+    warehouse_id = (
+        SaleMiniOrderMapping.objects.filter(pk=mapping_id)
+        .values_list("outbound_order__warehouse_id", flat=True)
+        .get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     mapping = (
         SaleMiniOrderMapping.objects.select_for_update()
         .select_related("outbound_order")
         .get(pk=mapping_id)
     )
+    if mapping.outbound_order.warehouse_id != warehouse_id:
+        raise ValidationError("商城订单仓库在取消期间发生变化，请重试。")
     if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.PAID:
         return {"result": "paid", "mapping": mapping}
     if mapping.payment_status in {
@@ -280,15 +289,25 @@ def _finalize_successful_refund_locked(
 
 @transaction.atomic
 def apply_refund_result(refund, payload, *, from_callback=False, by_user=None):
+    warehouse_id = (
+        SaleMiniRefund.objects.filter(pk=refund.pk)
+        .values_list("payment__mapping__outbound_order__warehouse_id", flat=True)
+        .get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     refund = (
         SaleMiniRefund.objects.select_for_update()
-        .select_related("payment", "payment__mapping", "payment__mapping__outbound_order")
+        .select_related(
+            "payment", "payment__mapping", "payment__mapping__outbound_order"
+        )
         .get(pk=refund.pk)
     )
     payment = SaleMiniPayment.objects.select_for_update().get(pk=refund.payment_id)
     mapping = SaleMiniOrderMapping.objects.select_for_update().get(
         pk=payment.mapping_id
     )
+    if mapping.outbound_order.warehouse_id != warehouse_id:
+        raise ValidationError("商城订单仓库在退款期间发生变化，请重试。")
     refund.payment = payment
     payment.mapping = mapping
     validate_refund_result(refund, payload, require_merchant=from_callback)
@@ -499,7 +518,10 @@ def _prepare_refund_query(refund_id):
 
 def reconcile_refund(refund):
     current = SaleMiniRefund.objects.select_related("payment").get(pk=refund.pk)
-    if current.status == SaleMiniRefund.Status.SUCCESS or current.requires_manual_action:
+    if (
+        current.status == SaleMiniRefund.Status.SUCCESS
+        or current.requires_manual_action
+    ):
         return current
     if current.status != SaleMiniRefund.Status.PROCESSING:
         return submit_refund(current)
@@ -514,18 +536,28 @@ def reconcile_refund(refund):
 
 
 def _is_duplicate_success_payment(mapping, payment):
-    return mapping.payments.exclude(pk=payment.pk).filter(
-        status__in=[
-            SaleMiniPayment.Status.PAID,
-            SaleMiniPayment.Status.REFUNDING,
-            SaleMiniPayment.Status.REFUNDED,
-        ],
-        transaction_id__isnull=False,
-    ).exists()
+    return (
+        mapping.payments.exclude(pk=payment.pk)
+        .filter(
+            status__in=[
+                SaleMiniPayment.Status.PAID,
+                SaleMiniPayment.Status.REFUNDING,
+                SaleMiniPayment.Status.REFUNDED,
+            ],
+            transaction_id__isnull=False,
+        )
+        .exists()
+    )
 
 
 @transaction.atomic
 def apply_payment_success(payment, payload, by_user=None):
+    warehouse_id = (
+        SaleMiniPayment.objects.filter(pk=payment.pk)
+        .values_list("mapping__outbound_order__warehouse_id", flat=True)
+        .get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     payment = (
         SaleMiniPayment.objects.select_for_update()
         .select_related("mapping", "mapping__outbound_order")
@@ -536,11 +568,14 @@ def apply_payment_success(payment, payload, by_user=None):
         .select_related("outbound_order")
         .get(pk=payment.mapping_id)
     )
+    if mapping.outbound_order.warehouse_id != warehouse_id:
+        raise ValidationError("商城订单仓库在支付确认期间发生变化，请重试。")
     payment.mapping = mapping
     validate_payment_result(payment, payload)
     transaction_id = payload.get("transaction_id")
     if (
-        payment.status in {
+        payment.status
+        in {
             SaleMiniPayment.Status.PAID,
             SaleMiniPayment.Status.REFUNDING,
             SaleMiniPayment.Status.REFUNDED,
@@ -671,6 +706,12 @@ def settle_internal_zero(mapping, by_user=None):
 
 @transaction.atomic
 def refund_internal_zero_payment(payment, by_user=None, reason="用户申请退款"):
+    warehouse_id = (
+        SaleMiniPayment.objects.filter(pk=payment.pk)
+        .values_list("mapping__outbound_order__warehouse_id", flat=True)
+        .get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     payment = (
         SaleMiniPayment.objects.select_for_update()
         .select_related("mapping", "mapping__outbound_order")
@@ -681,6 +722,8 @@ def refund_internal_zero_payment(payment, by_user=None, reason="用户申请退�
     mapping = SaleMiniOrderMapping.objects.select_for_update().get(
         pk=payment.mapping_id
     )
+    if mapping.outbound_order.warehouse_id != warehouse_id:
+        raise ValidationError("商城订单仓库在零元退款期间发生变化，请重试。")
     payment.mapping = mapping
     refund, _created = get_or_create_full_refund(
         payment,
@@ -750,9 +793,7 @@ def query_and_apply_payment(payment, by_user=None):
         return {
             "trade_state": current.trade_state or "SUCCESS",
             "result": (
-                "paid"
-                if current.status == SaleMiniPayment.Status.PAID
-                else "pending"
+                "paid" if current.status == SaleMiniPayment.Status.PAID else "pending"
             ),
             "refund": current.refunds.order_by("-id").first(),
         }
@@ -786,9 +827,8 @@ def _latest_active_payment(mapping):
 
 
 def safely_cancel_unpaid_mapping(mapping, by_user=None):
-    current = (
-        SaleMiniOrderMapping.objects.select_related("outbound_order")
-        .get(pk=mapping.pk)
+    current = SaleMiniOrderMapping.objects.select_related("outbound_order").get(
+        pk=mapping.pk
     )
     if current.payment_status == SaleMiniOrderMapping.PaymentStatus.PAID:
         return {"result": "paid", "mapping": current}
@@ -852,7 +892,9 @@ def safely_cancel_unpaid_mapping(mapping, by_user=None):
             _record_payment_query_error(payment.pk, exc)
             return {"result": "unknown", "mapping": current, "error": str(exc)}
         with transaction.atomic():
-            locked_payment = SaleMiniPayment.objects.select_for_update().get(pk=payment.pk)
+            locked_payment = SaleMiniPayment.objects.select_for_update().get(
+                pk=payment.pk
+            )
             locked_payment.status = SaleMiniPayment.Status.CLOSED
             locked_payment.closed_at = timezone.now()
             locked_payment.next_reconcile_at = None

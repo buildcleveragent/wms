@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from allapp.accounts.audit import record_audit_event
+from allapp.baseinfo.models import Owner
 
 from .excel_export import (
     build_product_export_workbook,
@@ -22,6 +23,13 @@ from .excel_import import (
     ProductImportFileError,
     build_product_import_template,
     resolve_product_import_access,
+)
+from .identifier_excel import (
+    IdentifierExcelError,
+    IdentifierExcelConflictError,
+    build_identifier_export,
+    build_identifier_template,
+    import_identifier_workbook,
 )
 
 
@@ -154,3 +162,47 @@ class ProductExportExcelApi(APIView):
         )
         response["Cache-Control"] = "private, no-store"
         return response
+
+
+class ProductIdentifierTemplateApi(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        resolve_product_import_access(request.user)
+        response = HttpResponse(build_identifier_template(), content_type=XLSX_CONTENT_TYPE)
+        response["Content-Disposition"] = "attachment; filename=product_identifier_maintenance.xlsx; filename*=UTF-8''%E5%95%86%E5%93%81%E6%A0%87%E8%AF%86%E7%BB%B4%E6%8A%A4%E6%A8%A1%E6%9D%BF.xlsx"
+        return response
+
+
+class ProductIdentifierExportApi(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        owner = resolve_export_owner(request.user, request.query_params.get("owner_id"))
+        response = HttpResponse(build_identifier_export(owner), content_type=XLSX_CONTENT_TYPE)
+        response["Content-Disposition"] = "attachment; filename=product_identifier_history.xlsx"
+        return response
+
+
+class ProductIdentifierImportApi(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        access = resolve_product_import_access(request.user)
+        try:
+            owner_id = int(request.data.get("owner_id"))
+        except (TypeError, ValueError):
+            return Response({"detail": "请选择有效货主。"}, status=status.HTTP_400_BAD_REQUEST)
+        if not access.allows_owner(owner_id):
+            return Response({"detail": "无权维护该货主的商品标识。"}, status=status.HTTP_403_FORBIDDEN)
+        uploaded = request.FILES.get("file")
+        if uploaded is None:
+            return Response({"detail": "请上传 Excel 文件，字段名为 file。"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            result = import_identifier_workbook(uploaded, owner=Owner.objects.get(pk=owner_id))
+        except IdentifierExcelConflictError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except (IdentifierExcelError, Owner.DoesNotExist) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)

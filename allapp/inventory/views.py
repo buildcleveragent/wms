@@ -11,6 +11,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
+from allapp.products.identifier_lookup import product_search_q
 
 from .models import InventoryDetail
 from .serializers import (
@@ -56,12 +57,7 @@ class OwnerInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericViewSe
 
         q = (self.request.query_params.get("search") or "").strip()
         if q:
-            qs = qs.filter(
-                Q(product__name__icontains=q)
-                | Q(product__code__icontains=q)
-                | Q(product__sku__icontains=q)
-                | Q(product__gtin__icontains=q)
-            )
+            qs = qs.filter(product_search_q(q))
 
         return qs
 
@@ -147,10 +143,7 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
         # 可选搜索：商品名 / 编码 / SKU / GTIN；也可顺手支持货主名、仓库名
         if search:
             qs = qs.filter(
-                Q(product__name__icontains=search)
-                | Q(product__code__icontains=search)
-                | Q(product__sku__icontains=search)
-                | Q(product__gtin__icontains=search)
+                product_search_q(search)
                 | Q(owner__name__icontains=search)
                 | Q(warehouse__name__icontains=search)
             )

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import datetime
 import io
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Q
+from django.db.models import DecimalField, OuterRef, Prefetch, Q, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
@@ -18,11 +20,13 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from allapp.core.choices import ZoneType
-from allapp.products.models import (
-    Product,
-    ProductIdentifierRegistry,
-    normalize_product_identifier,
+from allapp.inventory.locking import InventoryConcurrencyError
+from allapp.inventory.models import InventoryDetail
+from allapp.products.identifier_lookup import (
+    exact_matching_product_ids,
+    filter_by_product_search,
 )
+from allapp.products.models import Product, ProductPackage
 
 from .accuracy import reconcile_pos_accuracy
 from .exports import (
@@ -173,31 +177,48 @@ class PosProductListApi(generics.ListAPIView):
         barcode = (self.request.query_params.get("barcode") or "").strip()
 
         if barcode:
-            identifiers = ProductIdentifierRegistry.objects.filter(
-                normalized_value=normalize_product_identifier(barcode),
-                product__is_deleted=False,
-                product__is_active=True,
-            ).filter(
-                Q(product_package__isnull=True)
-                | Q(
-                    product_package__is_deleted=False,
-                    product_package__is_active=True,
-                )
-            )
-            queryset = queryset.filter(
-                pk__in=identifiers.values("product_id")
-            )
+            queryset = queryset.filter(pk__in=exact_matching_product_ids(barcode))
         elif search:
-            queryset = queryset.filter(
-                Q(code__icontains=search)
-                | Q(sku__icontains=search)
-                | Q(name__icontains=search)
-                | Q(gtin__icontains=search)
-                | Q(unit_barcode__icontains=search)
-                | Q(carton_barcode__icontains=search)
-            )
+            queryset = filter_by_product_search(queryset, search, product_field="pk")
 
-        return queryset.distinct().order_by("code", "id")
+        inventory = InventoryDetail.objects.filter(
+            warehouse_id=warehouse_id,
+            owner_id=OuterRef("owner_id"),
+            product_id=OuterRef("pk"),
+            is_active=True,
+            available_qty__gt=0,
+        )
+        zone_type = (self.request.query_params.get("zone_type") or "").strip()
+        if zone_type:
+            inventory = inventory.filter(zone_type=int(zone_type))
+        inventory_total = (
+            inventory.values("product_id")
+            .annotate(total=Sum("available_qty"))
+            .values("total")[:1]
+        )
+        active_packages = (
+            ProductPackage.objects.filter(is_active=True)
+            .select_related("uom")
+            .order_by("sort_order", "id")
+        )
+        queryset = queryset.annotate(
+            _pos_available_qty=Coalesce(
+                Subquery(
+                    inventory_total,
+                    output_field=DecimalField(max_digits=18, decimal_places=4),
+                ),
+                Value(Decimal("0")),
+                output_field=DecimalField(max_digits=18, decimal_places=4),
+            )
+        ).prefetch_related(
+            Prefetch(
+                "packages",
+                queryset=active_packages,
+                to_attr="_pos_active_packages",
+            )
+        )
+
+        return queryset.order_by("code", "id")
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -291,6 +312,8 @@ class PosCheckoutApi(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             result = serializer.save()
+        except InventoryConcurrencyError as exc:
+            return _inventory_busy_response(exc)
         except DjangoValidationError as exc:
             return Response(
                 _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
@@ -306,6 +329,19 @@ def _validation_error_data(exc):
     if hasattr(exc, "messages"):
         return exc.messages
     return {"detail": str(exc)}
+
+
+def _inventory_busy_response(exc):
+    response = Response(
+        {
+            "detail": exc.messages[0],
+            "code": exc.error_code,
+            "retryable": exc.retryable,
+        },
+        status=status.HTTP_409_CONFLICT,
+    )
+    response["Retry-After"] = str(exc.retry_after_seconds)
+    return response
 
 
 def _sale_queryset_for_user(user):
@@ -558,6 +594,8 @@ class PosSaleVoidApi(APIView):
         get_object_or_404(_sale_queryset_for_user(request.user), pk=sale_id)
         try:
             result = void_pos_sale(sale_id=sale_id, user=request.user, reason=reason)
+        except InventoryConcurrencyError as exc:
+            return _inventory_busy_response(exc)
         except DjangoValidationError as exc:
             return Response(
                 _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
@@ -600,6 +638,8 @@ class PosReturnListCreateApi(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             result = serializer.save()
+        except InventoryConcurrencyError as exc:
+            return _inventory_busy_response(exc)
         except DjangoValidationError as exc:
             return Response(
                 _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST

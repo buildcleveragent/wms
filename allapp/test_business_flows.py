@@ -4,18 +4,17 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from openpyxl import load_workbook
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.db.models import Sum
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 from rest_framework.test import APIClient
 
 from allapp.accounts.models import UserRoleScope
-from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
-from allapp.inbound.models import InboundOrder, InboundOrderLine
+from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding, Supplier
 from allapp.billing.enums import AccrualStatus, CalcMethod, ChargeType, MetricType
 from allapp.billing.models import (
     Bill,
@@ -31,8 +30,11 @@ from allapp.billing.services import (
     lock_period,
     run_scheduled_metric_generation_for_date,
 )
+from allapp.billing.services.integrity import build_close_readiness
+from allapp.inbound.models import InboundOrder, InboundOrderLine
 from allapp.inventory.models import (
     InventoryDetail,
+    InventorySnapshotDaily,
     InventorySummary,
     InventoryTransaction,
 )
@@ -46,11 +48,9 @@ from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.outbound.services import (
     allocate_inventory,
     confirm_warehouse_order,
-    promote_reserved_pick,
     unallocate_for_order,
 )
 from allapp.products.models import Product, ProductUom
-from allapp.tasking.services import _run_posting_handler, approve_task, scan_task
 from allapp.tasking.models import (
     PutawayLineExtra,
     TaskAssignment,
@@ -58,7 +58,7 @@ from allapp.tasking.models import (
     WmsTask,
     WmsTaskLine,
 )
-from allapp.baseinfo.models import Supplier
+from allapp.tasking.services import _run_posting_handler, approve_task, scan_task
 
 
 def business_flow_barcode_resolver(owner_id, barcode):
@@ -156,6 +156,26 @@ class BusinessFlowTests(TestCase):
             Permission.objects.get(
                 content_type__app_label="outbound",
                 codename="approve_outbound_as_owner_manager",
+            ),
+            Permission.objects.get(
+                content_type__app_label="billing",
+                codename="view_billingperiod",
+            ),
+            Permission.objects.get(
+                content_type__app_label="billing",
+                codename="view_bill",
+            ),
+            Permission.objects.get(
+                content_type__app_label="billing",
+                codename="view_billingaccrual",
+            ),
+            Permission.objects.get(
+                content_type__app_label="reports",
+                codename="export_operations",
+            ),
+            Permission.objects.get(
+                content_type__app_label="accounts",
+                codename="view_owner_financials",
             ),
         )
         self.picker_user.user_permissions.add(
@@ -305,11 +325,22 @@ class BusinessFlowTests(TestCase):
             posted_at=datetime.datetime.combine(service_date, datetime.time(9, 0)),
         )
 
+        InventorySnapshotDaily.objects.create(
+            snapshot_date=service_date - datetime.timedelta(days=1),
+            owner=self.owner,
+            warehouse=self.warehouse,
+            location=self.pick_location,
+            product=product,
+            base_unit_code=self.base_uom.code,
+            base_unit_source=InventorySnapshotDaily.UnitSource.VERIFIED,
+            unit_volume_m3_snapshot=product.volume,
+            snapshot_source=InventorySnapshotDaily.Source.TX_ROLLFORWARD,
+        )
         generate_inventory_snapshot_for_date(
             service_date,
             owner_id=self.owner.id,
             warehouse_id=self.warehouse.id,
-            bootstrap=True,
+            bootstrap=False,
         )
 
         BillingRule.objects.create(
@@ -320,11 +351,22 @@ class BusinessFlowTests(TestCase):
             unit_price=Decimal("2.00"),
             currency="CNY",
         )
-
-        generate_metrics_for_date(self.owner.id, self.warehouse.id, service_date)
+        generate_metrics_for_date(
+            self.owner.id,
+            self.warehouse.id,
+            service_date,
+            metric_types=[MetricType.CBM],
+        )
         accrue_metrics_for_date(
             self.owner.id, self.warehouse.id, service_date, by_user=self.owner_user
         )
+        readiness = build_close_readiness(
+            owner_id=self.owner.id,
+            warehouse_id=self.warehouse.id,
+            start_date=service_date,
+            end_date=service_date,
+        )
+        self.assertTrue(readiness["ready"], readiness)
         period = lock_period(
             self.owner.id,
             self.warehouse.id,
@@ -553,11 +595,10 @@ class BusinessFlowTests(TestCase):
         )
         self.assertEqual(approve_response.status_code, 200, approve_response.json())
 
-        order = OutboundOrder.objects.get(pk=order_id)
-        task = WmsTask.objects.get(
-            task_type=WmsTask.TaskType.PICK, source_pk=str(order.id)
+        order, task = confirm_warehouse_order(
+            OutboundOrder.objects.get(pk=order_id),
+            by_user=self.superuser,
         )
-        promote_reserved_pick(order, new_status=WmsTask.Status.RELEASED)
 
         picker_client = self.api_client_for(self.picker_user)
         scan_response = picker_client.post(
@@ -618,7 +659,10 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
         self.assertEqual(detail.available_qty, Decimal("6.0000"))
         self.assertEqual(task.status, WmsTask.Status.CANCELLED)
-        self.assertFalse(task.lines.exists())
+        self.assertTrue(task.lines.exists())
+        self.assertFalse(
+            task.lines.exclude(status=WmsTaskLine.Status.CANCELLED).exists()
+        )
 
     def test_flow_4_quick_adjust_updates_inventory_and_company_report(self):
         product = self.create_product("ADJSKU")
@@ -705,14 +749,15 @@ class BusinessFlowTests(TestCase):
         export_response = client.get(f"/api/billing/bills/{bill.id}/export/")
         self.assertEqual(export_response.status_code, 200)
         workbook = load_workbook(io.BytesIO(export_response.content))
-        self.assertEqual(workbook.sheetnames, ["Bill", "Lines"])
+        self.assertEqual(workbook.sheetnames, ["报告信息", "Bill", "Lines"])
 
     def test_flow_7_pda_pick_scan_and_state_transition(self):
         product = self.create_product("PDASKU")
         self.seed_inventory(product, "2.0000")
         order = self.create_outbound_order(product, "2.000")
         allocate_inventory(order, by_user=self.owner_user, allow_backorder=False)
-        task = promote_reserved_pick(order, new_status=WmsTask.Status.RELEASED)
+        order.owner_approve(self.owner_user)
+        order, task = confirm_warehouse_order(order, by_user=self.superuser)
 
         client = self.api_client_for(self.picker_user)
 
@@ -888,9 +933,9 @@ class BusinessFlowTests(TestCase):
         )
         self.assertEqual(outbound_approve.status_code, 200, outbound_approve.json())
 
-        outbound_order = OutboundOrder.objects.get(pk=outbound_id)
-        pick_task = promote_reserved_pick(
-            outbound_order, new_status=WmsTask.Status.RELEASED
+        outbound_order, pick_task = confirm_warehouse_order(
+            OutboundOrder.objects.get(pk=outbound_id),
+            by_user=self.superuser,
         )
 
         picker_client = self.api_client_for(self.picker_user)
@@ -1100,8 +1145,10 @@ class BusinessFlowTests(TestCase):
         )
         self.assertEqual(approve_response.status_code, 200, approve_response.json())
 
-        order = OutboundOrder.objects.get(pk=order_id)
-        pick_task = promote_reserved_pick(order, new_status=WmsTask.Status.RELEASED)
+        order, pick_task = confirm_warehouse_order(
+            OutboundOrder.objects.get(pk=order_id),
+            by_user=self.superuser,
+        )
         task_lines = list(pick_task.lines.order_by("id"))
         product_a_lines = [
             line for line in task_lines if line.product_id == product_a.id
@@ -1183,6 +1230,26 @@ class BusinessFlowTests(TestCase):
     def test_flow_12_operational_inventory_to_billing_invoice_chain(self):
         service_date = timezone.now().date()
         product = self.create_product("OPSBILL", volume="0.250000")
+
+        for charge_type in (ChargeType.RECEIVE, ChargeType.PUTAWAY):
+            BillingRule.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                charge_type=charge_type,
+                calc_method=CalcMethod.PER_QTY_ABSDEL,
+                unit_price=Decimal("0.00"),
+                currency="CNY",
+                note="Operation is explicitly no-charge in this flow.",
+            )
+        BillingRule.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            charge_type=ChargeType.STORAGE,
+            calc_method=CalcMethod.PER_PALLET_DAY,
+            unit_price=Decimal("0.00"),
+            currency="CNY",
+            note="Pallet storage is explicitly no-charge in this flow.",
+        )
 
         inbound_order = self.create_formal_inbound_order(product, "5.000")
         self.complete_formal_receive(inbound_order, product, "5.000")

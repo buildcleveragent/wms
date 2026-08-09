@@ -7,6 +7,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Customer, Owner
 from allapp.locations.models import Warehouse
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
@@ -65,6 +66,11 @@ class AssistedOutboundHistoryTests(TestCase):
         user.user_permissions.add(
             _permission("outbound", "process_warehouse_assisted_outbound"),
             _permission("tasking", "claim_task_as_wh_operator"),
+        )
+        UserRoleScope.objects.create(
+            user=user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=warehouse,
         )
         return user
 

@@ -1,5 +1,7 @@
 # allapp/tasking/plugins/handlers.py
 from __future__ import annotations
+
+import logging
 from typing import Any, Dict, Iterable, Optional
 from uuid import uuid4
 
@@ -8,16 +10,17 @@ from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from allapp.tasking.models import WmsTask, TaskScanLog,WmsTaskLine
-from allapp.inventory.models import PostingJournal, InventoryTransaction
-from allapp.inventory import services as inv_services
 from allapp.core.models import DocSequence
 from allapp.core.utils.log_context import build_log_payload
+from allapp.inventory import services as inv_services
+from allapp.inventory.locking import lock_warehouses_for_inventory_write
+from allapp.inventory.models import InventoryTransaction, PostingJournal
+from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
 
-import logging
 log = logging.getLogger(__name__)
 
 _ALREADY_POSTED = object()
+
 
 # -----------------------
 # 工具 & 可插拔入口
@@ -29,12 +32,14 @@ def _has_field(model, name: str) -> bool:
     except Exception:
         return False
 
+
 def get_posting_handler():
     """
     从 settings.TASKING_POSTING_HANDLER 动态加载处理器类，并实例化。
     例如：'allapp.tasking.plugins.handlers.DefaultPostingHandler'
     """
     from importlib import import_module
+
     ctx, ctx_text = build_log_payload()
     log.info("tasking.posting_handler.load.begin %s", ctx_text, extra=ctx)
     path = getattr(settings, "TASKING_POSTING_HANDLER", None)
@@ -57,6 +62,7 @@ class BasePostingHandler:
     处理器接口：统一从这里过账
     handle(task=..., scans=..., now=None, batch_no=None, note='', by_user=None) -> int
     """
+
     def handle(
         self,
         *,
@@ -93,16 +99,73 @@ class DefaultPostingHandler(BasePostingHandler):
         note: str = "",
         by_user=None,
     ) -> int:
+        try:
+            return self._handle_with_warehouse_lock(
+                task=task,
+                scans=scans,
+                now=now,
+                batch_no=batch_no,
+                note=note,
+                by_user=by_user,
+            )
+        except Exception as exc:
+            # Standalone failures retain an audit state.  When this handler is nested
+            # in a larger inventory transaction, the caller's rollback removes it.
+            failed_at = timezone.now()
+            pj, _ = PostingJournal.objects.get_or_create(
+                src_model="WmsTask",
+                src_id=task.id,
+                tx_type="POST",
+                defaults={"status": "FAILED", "attempt_count": 0},
+            )
+            PostingJournal.objects.filter(pk=pj.pk).exclude(status="POSTED").update(
+                status="FAILED",
+                message=(str(exc) or "FAILED")[:255],
+                updated_at=failed_at,
+            )
+            task_updates = {
+                "posting_status": WmsTask.PostingStatus.FAILED,
+                "posting_note": f"{note or '过账'}失败：{str(exc) or '未知错误'}"[:200],
+                "updated_at": failed_at,
+            }
+            by_user_id = getattr(by_user, "pk", None)
+            if by_user_id is not None:
+                task_updates["posted_by_id"] = by_user_id
+            WmsTask.objects.filter(pk=task.pk).exclude(
+                posting_status=WmsTask.PostingStatus.POSTED
+            ).update(**task_updates)
+            raise
 
-        # 1) 任务级 PJ（幂等与审计）—— 先建成 PENDING（外层非原子）
+    @transaction.atomic
+    def _handle_with_warehouse_lock(
+        self,
+        *,
+        task: WmsTask,
+        scans: Optional[Iterable[TaskScanLog]] = None,
+        now=None,
+        batch_no: Optional[str] = None,
+        note: str = "",
+        by_user=None,
+    ) -> int:
+
+        lock_warehouses_for_inventory_write(task.warehouse_id)
+        task = WmsTask.objects.select_for_update().get(pk=task.pk)
+
+        # 仓库、任务锁稳定后再创建/锁定任务级过账日记账。
         pj, created = PostingJournal.objects.get_or_create(
             src_model="WmsTask",
             src_id=task.id,
             tx_type="POST",
-            defaults={"status": "PENDING", "message": (note or "过账")[:255], "attempt_count": 0},
+            defaults={
+                "status": "PENDING",
+                "message": (note or "过账")[:255],
+                "attempt_count": 0,
+            },
         )
 
-        ctx, ctx_text = build_log_payload(task=task, user=by_user, journal=pj, posting_batch=batch_no)
+        ctx, ctx_text = build_log_payload(
+            task=task, user=by_user, journal=pj, posting_batch=batch_no
+        )
         log.info("tasking.post.begin %s", ctx_text, extra=ctx)
         log.info(
             "tasking.post.journal_ready %s status=%s created=%s",
@@ -115,8 +178,11 @@ class DefaultPostingHandler(BasePostingHandler):
         # log.info("[POST] repost decision: task=%s need_repost=%s new_pj=%s",
         #          task.id, need_repost, getattr(new_pj, "id", None))
 
-        #（可选）同步 owner/warehouse 字段
-        for fld, val in (("owner_id", task.owner_id), ("warehouse_id", task.warehouse_id)):
+        # （可选）同步 owner/warehouse 字段
+        for fld, val in (
+            ("owner_id", task.owner_id),
+            ("warehouse_id", task.warehouse_id),
+        ):
             if _has_field(PostingJournal, fld) and getattr(pj, fld, None) != val:
                 setattr(pj, fld, val)
 
@@ -131,28 +197,8 @@ class DefaultPostingHandler(BasePostingHandler):
                 by_user=by_user,
                 pj=pj,
             )
-        except Exception as e:
-            # 外层非原子写失败审计；条件更新避免并发重试覆盖已成功状态。
+        except Exception:
             log.exception("tasking.post.failed %s", ctx_text, extra=ctx)
-            failure_message = (str(e) or "FAILED")[:255]
-            failed_at = timezone.now()
-            PostingJournal.objects.filter(pk=pj.pk).exclude(status="POSTED").update(
-                status="FAILED",
-                message=failure_message,
-                updated_at=failed_at,
-            )
-            failure_note = f"{note or '过账'}失败：{str(e) or '未知错误'}"[:200]
-            task_updates = {
-                "posting_status": WmsTask.PostingStatus.FAILED,
-                "posting_note": failure_note,
-                "updated_at": failed_at,
-            }
-            by_user_id = getattr(by_user, "pk", None)
-            if by_user_id is not None:
-                task_updates["posted_by_id"] = by_user_id
-            WmsTask.objects.filter(pk=task.pk).exclude(
-                posting_status=WmsTask.PostingStatus.POSTED
-            ).update(**task_updates)
             raise
 
         if affected is _ALREADY_POSTED:
@@ -172,6 +218,7 @@ class DefaultPostingHandler(BasePostingHandler):
         # 4) 计费
         try:
             from allapp.billing import services as billing_services
+
             # from allapp.billing.services.accrual import AUTO_REVIEW_ORDER_PROCESSING_METHODS
             #
             # billing_services.accrue_for_posting(task, pj, by_user=by_user)
@@ -185,16 +232,18 @@ class DefaultPostingHandler(BasePostingHandler):
             #         by_user=by_user,
             #         allowed_methods=AUTO_REVIEW_ORDER_PROCESSING_METHODS,
             #     )
-            from allapp.billing.services.accrual import AUTO_REVIEW_ORDER_PROCESSING_METHODS
+            from allapp.billing.services.accrual import (
+                AUTO_REVIEW_ORDER_PROCESSING_METHODS,
+            )
 
             billing_services.accrue_for_posting(task, pj, by_user=by_user)
 
             should_accrue_order_processing = (
-                    task.task_type == WmsTask.TaskType.REVIEW
-                    or (
-                            task.task_type == WmsTask.TaskType.PICK
-                            and task.review_status == WmsTask.ReviewStatus.APPROVED
-                    )
+                task.task_type == WmsTask.TaskType.REVIEW
+                or (
+                    task.task_type == WmsTask.TaskType.PICK
+                    and task.review_status == WmsTask.ReviewStatus.APPROVED
+                )
             )
 
             if should_accrue_order_processing:
@@ -205,14 +254,15 @@ class DefaultPostingHandler(BasePostingHandler):
                     allowed_methods=AUTO_REVIEW_ORDER_PROCESSING_METHODS,
                 )
         except Exception as e:
-            log.error("tasking.post.billing_accrue_failed %s err=%s", ctx_text, e, extra=ctx)
+            log.error(
+                "tasking.post.billing_accrue_failed %s err=%s", ctx_text, e, extra=ctx
+            )
             # 在 PJ 上标记 billing 失败，便于 billing_retry_failed 命令后续补算
             try:
                 pj.message = f"{pj.message}|BILLING_FAILED:{str(e)[:100]}"[:255]
                 pj.save(update_fields=["message", "updated_at"])
             except Exception:
                 pass
-
 
         return affected
 
@@ -302,9 +352,9 @@ class DefaultPostingHandler(BasePostingHandler):
                 src_id=tx.pk,
                 plan_meta={
                     "lot_no": tx.batch_no or "",
-                    "mfg_date": tx.production_date.isoformat()
-                    if tx.production_date
-                    else "",
+                    "mfg_date": (
+                        tx.production_date.isoformat() if tx.production_date else ""
+                    ),
                     "exp_date": tx.expiry_date.isoformat() if tx.expiry_date else "",
                     "serial_no": tx.serial_no or "",
                 },
@@ -360,14 +410,17 @@ class DefaultPostingHandler(BasePostingHandler):
         - 扫描打点由库存服务完成并校验更新数量。
         """
         now_ts = now or timezone.now()
-        batch = batch_no or (timezone.now().strftime("%Y%m%d-%H%M%S-") + str(uuid4())[:8])
-        ctx, ctx_text = build_log_payload(task=task, user=by_user, journal=pj, posting_batch=batch)
+        batch = batch_no or (
+            timezone.now().strftime("%Y%m%d-%H%M%S-") + str(uuid4())[:8]
+        )
+        ctx, ctx_text = build_log_payload(
+            task=task, user=by_user, journal=pj, posting_batch=batch
+        )
 
         from allapp.tasking.models import WmsTask
+
         # ① 先锁任务头（统一顺序第 1 位）
-        task = (WmsTask.objects
-                .select_for_update()
-                .get(pk=task.id))
+        task = WmsTask.objects.select_for_update().get(pk=task.id)
 
         log.info("tasking.post.lock_task %s", ctx_text, extra=ctx)
         # ② 再锁任务级日记账，并在锁内重新判定幂等状态。
@@ -407,24 +460,22 @@ class DefaultPostingHandler(BasePostingHandler):
         #          .filter(task_id=task.id)
         #          .order_by("id"))
         try:
-            qs_lines = (task.lines
-                        .select_for_update()
-                        .order_by("id"))
+            qs_lines = task.lines.select_for_update().order_by("id")
         except Exception:
             from allapp.tasking.models import WmsTaskLine
-            qs_lines = (WmsTaskLine.objects
-                        .select_for_update()
-                        .filter(task_id=task.id)
-                        .order_by("id"))
+
+            qs_lines = (
+                WmsTaskLine.objects.select_for_update()
+                .filter(task_id=task.id)
+                .order_by("id")
+            )
         locked_lines = list(qs_lines)  # ← 关键：强制查询，确保锁生效
         valid_line_ids = [line.id for line in locked_lines]
         log.info("tasking.post.lock_lines %s", ctx_text, extra=ctx)
 
         # ④ 再锁候选扫描（清空默认排序后只按 id 升序）
         if scans is None:
-            rejected = getattr(
-                TaskScanLog.ReviewStatus, "REJECTED", "REJECTED"
-            )
+            rejected = getattr(TaskScanLog.ReviewStatus, "REJECTED", "REJECTED")
             scans_locked = list(
                 TaskScanLog.objects.select_for_update()
                 .filter(
@@ -460,7 +511,12 @@ class DefaultPostingHandler(BasePostingHandler):
                 raise ValidationError("部分过账扫描不存在。")
         if not scan_ids:
             raise ValidationError("无可过账扫描。")
-        log.info("tasking.post.lock_scans %s candidate_count=%s", ctx_text, len(scans_locked), extra=ctx)
+        log.info(
+            "tasking.post.lock_scans %s candidate_count=%s",
+            ctx_text,
+            len(scans_locked),
+            extra=ctx,
+        )
 
         log.info(
             "tasking.post.scans_ready %s scan_count=%s first_scan_id=%s",
@@ -483,7 +539,9 @@ class DefaultPostingHandler(BasePostingHandler):
             batch_no=batch,
         )
 
-        log.info("tasking.post.inventory_result %s result=%r", ctx_text, result, extra=ctx)
+        log.info(
+            "tasking.post.inventory_result %s result=%r", ctx_text, result, extra=ctx
+        )
 
         # ⑤ 严格校验返回：无交易即失败回滚（根据你们 services 的返回结构尽量取“受影响条数”）
         affected = 0
@@ -532,8 +590,16 @@ class DefaultPostingHandler(BasePostingHandler):
         # … 成功过账后 …
         # from allapp.tasking.models import WmsTask
         # 仅“收货任务”且本次确实写出了分录，才派生上架任务
-        if getattr(task, "task_type", None) == WmsTask.TaskType.RECEIVE and affected > 0:
-            log.info("tasking.post.putaway_task_triggered %s affected=%s", ctx_text, affected, extra=ctx)
+        if (
+            getattr(task, "task_type", None) == WmsTask.TaskType.RECEIVE
+            and affected > 0
+        ):
+            log.info(
+                "tasking.post.putaway_task_triggered %s affected=%s",
+                ctx_text,
+                affected,
+                extra=ctx,
+            )
             self._create_putaway_task(task, by_user, now_ts)
 
         audit_action = {

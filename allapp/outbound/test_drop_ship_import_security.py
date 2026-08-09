@@ -1,11 +1,15 @@
 import io
 import zipfile
+from datetime import timedelta
 from decimal import Decimal
 from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from openpyxl import Workbook
 from rest_framework.test import APIRequestFactory
 
@@ -20,9 +24,20 @@ from allapp.outbound.drop_ship_import import (
     MAX_XLSX_UNCOMPRESSED_SIZE,
     DropShipImportFileError,
     DropShipImportService,
+    ParsedRow,
 )
 from allapp.outbound.models import OutboundOrder
-from allapp.products.models import Product, ProductUom
+from allapp.products.identifier_services import (
+    add_external_identifier,
+    add_product_barcode,
+    set_identifier_active,
+)
+from allapp.products.models import (
+    Product,
+    ProductBarcode,
+    ProductExternalIdentifier,
+    ProductUom,
+)
 
 
 HEADERS = [
@@ -74,15 +89,21 @@ class DropShipImportSecurityTests(TestCase):
             cash_customer=self.customer,
         )
 
-    def row(self, order_no="EXCEL-1", qty=1, sku=None):
+    def row(
+        self,
+        order_no="EXCEL-1",
+        qty=1,
+        merchant_code=None,
+        product_name="Excel Product",
+    ):
         return [
             "张三",
             "13800000000",
             "测试地址",
             qty,
             order_no,
-            self.product.sku if sku is None else sku,
-            "Excel Product",
+            self.product.code if merchant_code is None else merchant_code,
+            product_name,
         ]
 
     def workbook_file(self, rows, headers=HEADERS, name="orders.xlsx"):
@@ -197,6 +218,197 @@ class DropShipImportSecurityTests(TestCase):
             result,
         )
         self.assertTrue(OutboundOrder.objects.filter(src_bill_no="SUCCESS").exists())
+
+    def test_merchant_code_matches_owner_code_and_effective_external_identifier(self):
+        external = add_external_identifier(
+            product=self.product,
+            source_system="ERP",
+            external_code="ERP-EXCEL-P",
+        )
+        add_external_identifier(
+            product=self.product,
+            source_system="OMS",
+            external_code=external.external_code,
+        )
+        legacy = add_external_identifier(
+            product=self.product,
+            source_system="LEGACY",
+            external_code="LEGACY-EXCEL-P",
+            is_primary=True,
+        )
+        for order_no, merchant_code in (
+            ("BY-CODE", "  excel-p  "),
+            ("BY-EXTERNAL", external.external_code.lower()),
+            ("BY-LEGACY", legacy.external_code),
+        ):
+            with self.subTest(merchant_code=merchant_code):
+                result = self.service().import_file(
+                    self.workbook_file(
+                        [self.row(order_no=order_no, merchant_code=merchant_code)]
+                    )
+                )
+                self.assertEqual(result["success_count"], 1, result)
+
+    def test_wms_sku_and_barcode_are_rejected_without_name_fallback(self):
+        barcode = add_product_barcode(
+            product=self.product,
+            barcode="EXCEL-BARCODE",
+            barcode_type=ProductBarcode.BarcodeType.OTHER,
+        )
+        cases = (
+            ("SKU-ONLY", self.product.sku, "不接受仓库SKU编码"),
+            ("BARCODE-ONLY", barcode.barcode, "匹配不到商品"),
+        )
+        for order_no, merchant_code, message in cases:
+            with self.subTest(merchant_code=merchant_code):
+                result = self.service().import_file(
+                    self.workbook_file(
+                        [
+                            self.row(
+                                order_no=order_no,
+                                merchant_code=merchant_code,
+                                product_name=self.product.name,
+                            )
+                        ]
+                    )
+                )
+                self.assertEqual(result["fail_count"], 1, result)
+                self.assertIn(message, result["errors"][0]["reason"])
+                self.assertFalse(
+                    OutboundOrder.objects.filter(src_bill_no=order_no).exists()
+                )
+
+    def test_external_identifier_must_be_currently_effective(self):
+        now = timezone.now()
+        retired = add_external_identifier(
+            product=self.product,
+            source_system="ERP",
+            external_code="ERP-RETIRED",
+        )
+        set_identifier_active(retired, False)
+        add_external_identifier(
+            product=self.product,
+            source_system="OMS",
+            external_code="OMS-FUTURE",
+            valid_from=now + timedelta(days=1),
+        )
+        add_external_identifier(
+            product=self.product,
+            source_system="PIM",
+            external_code="PIM-EXPIRED",
+            valid_to=now - timedelta(days=1),
+        )
+        deleted = add_external_identifier(
+            product=self.product,
+            source_system="ECOM",
+            external_code="ECOM-DELETED",
+        )
+        ProductExternalIdentifier.all_objects.filter(pk=deleted.pk).update(
+            is_deleted=True
+        )
+
+        rows = [
+            self.row(order_no=f"INACTIVE-{index}", merchant_code=value)
+            for index, value in enumerate(
+                ("ERP-RETIRED", "OMS-FUTURE", "PIM-EXPIRED", "ECOM-DELETED"),
+                start=1,
+            )
+        ]
+        result = self.service().import_file(self.workbook_file(rows))
+        self.assertEqual(result["fail_count"], 4, result)
+        self.assertEqual(result["success_count"], 0, result)
+
+        set_identifier_active(retired, True)
+        reactivated = self.service().import_file(
+            self.workbook_file(
+                [self.row(order_no="REACTIVATED", merchant_code="ERP-RETIRED")]
+            )
+        )
+        self.assertEqual(reactivated["success_count"], 1, reactivated)
+
+    def test_external_identifier_is_owner_scoped_and_conflicts_fail_closed(self):
+        other_owner = Owner.objects.create(code="EXT-OTHER", name="Other")
+        other_product = Product.objects.create(
+            owner=other_owner,
+            code="OTHER-P",
+            name="Other Product",
+            base_uom=self.product.base_uom,
+        )
+        add_external_identifier(
+            product=other_product,
+            source_system="ERP",
+            external_code="OTHER-OWNER-CODE",
+        )
+        isolated = self.service().import_file(
+            self.workbook_file(
+                [
+                    self.row(
+                        order_no="CROSS-OWNER",
+                        merchant_code="OTHER-OWNER-CODE",
+                    )
+                ]
+            )
+        )
+        self.assertEqual(isolated["fail_count"], 1, isolated)
+
+        conflicting_product = Product.objects.create(
+            owner=self.owner,
+            code="CONFLICTING-P",
+            name="Conflicting Product",
+            base_uom=self.product.base_uom,
+        )
+        conflict = ProductExternalIdentifier(
+            owner=self.owner,
+            product=conflicting_product,
+            source_system="BROKEN",
+            external_code=self.product.code,
+            normalized_value=self.product.code,
+        )
+        conflict._identifier_service_write = True
+        conflict.save()
+        conflicted = self.service().import_file(
+            self.workbook_file(
+                [self.row(order_no="CONFLICT", merchant_code=self.product.code)]
+            )
+        )
+        self.assertEqual(conflicted["fail_count"], 1, conflicted)
+        self.assertIn("编码冲突", conflicted["errors"][0]["reason"])
+
+    def test_empty_merchant_code_keeps_unique_name_fallback(self):
+        result = self.service().import_file(
+            self.workbook_file(
+                [
+                    self.row(
+                        order_no="NAME-FALLBACK",
+                        merchant_code="",
+                        product_name=self.product.name,
+                    )
+                ]
+            )
+        )
+        self.assertEqual(result["success_count"], 1, result)
+
+    def test_product_mapping_query_count_is_constant(self):
+        def parsed_rows(count):
+            return [
+                ParsedRow(
+                    row_number=index + 2,
+                    values={
+                        "商家编码": self.product.code,
+                        "商品名称": self.product.name,
+                    },
+                    has_formula=False,
+                )
+                for index in range(count)
+            ]
+
+        for count in (1, 100):
+            with (
+                self.subTest(count=count),
+                CaptureQueriesContext(connection) as queries,
+            ):
+                self.service()._product_maps(parsed_rows(count))
+            self.assertEqual(len(queries), 2, [query["sql"] for query in queries])
 
     def test_unknown_row_exception_is_logged_with_context_and_returns_safe_message(
         self,

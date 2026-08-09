@@ -1,17 +1,19 @@
 from __future__ import annotations
-from django.contrib import admin, messages
-from django.core.exceptions import PermissionDenied
-from django.db import transaction
 
+from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.shortcuts import redirect
-from django.utils import timezone
 from django.urls import reverse
+from django.utils import timezone
+
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
+from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.outbound import services as ob_services
 from allapp.outbound.authz import strict_order_queryset
+
 from .models import OutboundOrder, OutboundOrderLine
-from ..tasking.models import WmsTask
 
 
 # —— 权限判断：货主业务员（或超管）才允许“提交” —— #
@@ -20,6 +22,7 @@ def _as_owner_buyers(self, request):
         "outbound.submit_outbound_as_owner_buyers"
     )
 
+
 # ========= 多租户隔离（非超管仅看自己 owner）的通用混入 =========
 class OwnerScopedAdminMixin(admin.ModelAdmin):
     """
@@ -27,6 +30,7 @@ class OwnerScopedAdminMixin(admin.ModelAdmin):
       - 头表: "owner"
       - 行表: "order__owner" / "shipment__owner" / "outbound_return__owner" 等
     """
+
     owner_path = "owner"
 
     def get_queryset(self, request):
@@ -38,12 +42,14 @@ class OwnerScopedAdminMixin(admin.ModelAdmin):
             return qs.none()
         return qs.filter(**{f"{self.owner_path}_id": owner_id})
 
+
 # ========= Inlines =========
 class OutboundOrderLineInline(admin.TabularInline):
     model = OutboundOrderLine
     extra = 0
     autocomplete_fields = ["product"]
     fields = ("product", "base_qty", "base_uom", "base_price")
+
 
 # ========= 出库订单 =========
 @admin.register(OutboundOrder)
@@ -61,19 +67,43 @@ class OutboundOrderAdmin(admin.ModelAdmin):
 
     # —— 列表配置 —— #
     list_display = (
-        "order_no", "biz_date", "outbound_type", "owner", "warehouse", "customer", "supplier",
-        "submit_status", "approval_status", "processing_mode", "delivery_method", "is_closed",
-        "created_by", "created_at",
+        "order_no",
+        "biz_date",
+        "outbound_type",
+        "owner",
+        "warehouse",
+        "customer",
+        "supplier",
+        "submit_status",
+        "approval_status",
+        "processing_mode",
+        "delivery_method",
+        "is_closed",
+        "created_by",
+        "created_at",
     )
     list_select_related = ("owner", "warehouse", "customer", "supplier", "created_by")
     list_filter = (
-        "outbound_type", "submit_status", "approval_status", "processing_mode",
-        "delivery_method", "is_closed",
-        ("biz_date", admin.DateFieldListFilter), "owner", "warehouse", "customer", "supplier",
+        "outbound_type",
+        "submit_status",
+        "approval_status",
+        "processing_mode",
+        "delivery_method",
+        "is_closed",
+        ("biz_date", admin.DateFieldListFilter),
+        "owner",
+        "warehouse",
+        "customer",
+        "supplier",
     )
     search_fields = (
-        "order_no", "src_bill_no", "ship_to", "contact", "contact_phone",
-        "customer__name", "supplier__name",
+        "order_no",
+        "src_bill_no",
+        "ship_to",
+        "contact",
+        "contact_phone",
+        "customer__name",
+        "supplier__name",
     )
     ordering = ("-biz_date", "-id")
     date_hierarchy = "biz_date"
@@ -112,17 +142,32 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         )
 
     # —— 表单配置 —— #
-    autocomplete_fields = ("owner", "warehouse", "customer", "supplier",)
+    autocomplete_fields = (
+        "owner",
+        "warehouse",
+        "customer",
+        "supplier",
+    )
     readonly_fields = (
-        "order_no", "created_at", "created_by",
+        "order_no",
+        "created_at",
+        "created_by",
         # These are workflow facts, not editable metadata.  They are changed
         # only by the controlled actions/services below, so a crafted Admin
         # form submission cannot turn an unshipped order into a closed one.
-        "submit_status", "approval_status", "is_closed", "close_reason",
-        "approved_by_ownermanager", "approved_at_ownermanager",
-        "approved_by_warehouse", "approved_at_warehouse",
-        "processing_mode", "assisted_by", "assisted_at",
-        "assistance_reason", "assistance_request_id",
+        "submit_status",
+        "approval_status",
+        "is_closed",
+        "close_reason",
+        "approved_by_ownermanager",
+        "approved_at_ownermanager",
+        "approved_by_warehouse",
+        "approved_at_warehouse",
+        "processing_mode",
+        "assisted_by",
+        "assisted_at",
+        "assistance_reason",
+        "assistance_request_id",
     )
 
     # 使用简单的 fields（用户此前偏好），避免 fieldsets 造成冗长切分
@@ -180,9 +225,13 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                 "不能在后台直接创建已关闭订单；订单必须由 DISPATCH 完成后自动关闭。"
             )
         if change:
-            persisted = type(obj).objects.only(
-                "submit_status", "approval_status", "is_closed", "close_reason"
-            ).get(pk=obj.pk)
+            persisted = (
+                type(obj)
+                .objects.only(
+                    "submit_status", "approval_status", "is_closed", "close_reason"
+                )
+                .get(pk=obj.pk)
+            )
             changed_workflow_fields = []
             for field_name in ("submit_status", "approval_status", "is_closed"):
                 if getattr(obj, field_name) != getattr(persisted, field_name):
@@ -200,11 +249,13 @@ class OutboundOrderAdmin(admin.ModelAdmin):
 
     # —— 批量动作 —— #
     actions = (
-        "action_submit", "action_revert_draft",
-        "action_owner_approve", "action_owner_reject",
-        "action_whs_approve", "action_whs_reject",
+        "action_submit",
+        "action_revert_draft",
+        "action_owner_approve",
+        "action_owner_reject",
+        "action_whs_approve",
+        "action_whs_reject",
         "action_cancel",
-
     )
     # actions = ["action_atp_preview"]
 
@@ -277,7 +328,9 @@ class OutboundOrderAdmin(admin.ModelAdmin):
             except Exception as exc:  # noqa: BLE001 - display per-order failure
                 errors.append(f"{order.order_no}: {exc}")
         if ok:
-            self.message_user(request, f"已安全撤回并释放分配：{ok} 张", messages.SUCCESS)
+            self.message_user(
+                request, f"已安全撤回并释放分配：{ok} 张", messages.SUCCESS
+            )
         if errors:
             self.message_user(request, "；".join(errors)[:2000], messages.ERROR)
 
@@ -292,23 +345,14 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                 if not self._in_owner_scope(request, order):
                     raise PermissionDenied("禁止审核其他货主或仓库的订单。")
                 with transaction.atomic():
-                    order = type(order).objects.select_for_update().get(pk=order.pk)
-                    # Lock first, then recheck both tenant scope and business
-                    # state so a stale Admin list selection cannot approve a
-                    # withdrawn, cancelled or closed order.
-                    if not self._in_owner_scope(request, order):
-                        raise PermissionDenied("禁止审核其他货主或仓库的订单。")
-                    ob_services.validate_owner_approval_preconditions(order)
                     before = {"approval_status": order.approval_status}
-                    # 统一走模型方法，里面负责：
-                    # - approval_status = OWNER_APPROVED
-                    # - 记录 approved_by_ownermanager / approved_at_ownermanager
-                    # - 调用 ob_services.allocate_inventory 冻结库存并生成 RESERVED 拣货任务
                     order = ob_services.approve_owner_order(
                         order,
                         by_user=request.user,
                         allow_backorder=True,
                     )
+                    if not self._in_owner_scope(request, order):
+                        raise PermissionDenied("禁止审核其他货主或仓库的订单。")
                     record_audit_event(
                         action="outbound.order.owner_approve",
                         module="outbound",
@@ -323,7 +367,11 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                 err.append(f"{getattr(order, 'order_no', order.pk)}: {e}")
 
         if ok:
-            self.message_user(request, f"已货主确认并分配 {ok} 张出库单（生成保留拣货任务）。", level=messages.SUCCESS)
+            self.message_user(
+                request,
+                f"已货主确认并分配 {ok} 张出库单（生成保留拣货任务）。",
+                level=messages.SUCCESS,
+            )
         if err:
             self.message_user(request, "；".join(err)[:2000], level=messages.ERROR)
 
@@ -402,7 +450,11 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                 err.append(f"{getattr(order, 'order_no', order.pk)}: {e}")
 
         if ok:
-            self.message_user(request, f"仓库确认完成：{ok} 张出库单已生成拣货任务草稿。", level=messages.SUCCESS)
+            self.message_user(
+                request,
+                f"仓库确认完成：{ok} 张出库单已生成拣货任务草稿。",
+                level=messages.SUCCESS,
+            )
         if err:
             self.message_user(request, "；".join(err)[:2000], level=messages.ERROR)
 
@@ -417,7 +469,16 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                 if not self._in_warehouse_scope(request, order):
                     raise PermissionDenied("禁止驳回其他仓库的订单。")
                 with transaction.atomic():
+                    warehouse_id = (
+                        type(order)
+                        .objects.filter(pk=order.pk)
+                        .values_list("warehouse_id", flat=True)
+                        .get()
+                    )
+                    lock_warehouses_for_inventory_write(warehouse_id)
                     order = type(order).objects.select_for_update().get(pk=order.pk)
+                    if order.warehouse_id != warehouse_id:
+                        raise ValidationError("出库单仓库在驳回期间发生变化，请重试。")
                     before = {"approval_status": order.approval_status}
                     ob_services.unallocate_for_order(order, by_user=request.user)
                     order.approval_status = "WHS_REJECTED"
@@ -445,7 +506,11 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                 err.append(f"{getattr(order, 'order_no', order.pk)}: {e}")
 
         if ok:
-            self.message_user(request, f"仓库已拒绝：{ok} 张出库单已释放冻结并取消任务。", level=messages.SUCCESS)
+            self.message_user(
+                request,
+                f"仓库已拒绝：{ok} 张出库单已释放冻结并取消任务。",
+                level=messages.SUCCESS,
+            )
         if err:
             self.message_user(request, "；".join(err)[:2000], level=messages.ERROR)
 
@@ -520,15 +585,16 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                 except Exception as e:  # noqa: BLE001 - 呈现到 admin 消息
                     messages.warning(request, f"{obj}: 变更失败 - {e}")
         if ok:
-            self.message_user(request, f"{success_msg}：{ok} 条", level=messages.SUCCESS)
+            self.message_user(
+                request, f"{success_msg}：{ok} 条", level=messages.SUCCESS
+            )
         else:
             self.message_user(request, "无记录被变更", level=messages.WARNING)
 
 
-
-
 class _FuncBaseAdmin(admin.ModelAdmin):
     """把 Proxy 当成“菜单锚点”，staff 可见，列表直接跳功能页"""
+
     # 让“出库管理”这个 app 出现在顶栏
     def has_module_permission(self, request):
         return True
@@ -543,11 +609,17 @@ class _FuncBaseAdmin(admin.ModelAdmin):
         return True
 
     # 禁用通过该入口增删改（它只是锚点）
-    def has_add_permission(self, request): return True
-    def has_change_permission(self, request, obj=None): return True
-    def has_delete_permission(self, request, obj=None): return True
+    def has_add_permission(self, request):
+        return True
+
+    def has_change_permission(self, request, obj=None):
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        return True
 
     # 列表页 -> 直接跳到你的功能页（URL name 见下）
     target_url_name = None
+
     def changelist_view(self, request, extra_context=None):
         return redirect(reverse(self.target_url_name))

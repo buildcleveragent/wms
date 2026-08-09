@@ -3,14 +3,22 @@ from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
 from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Owner
-from allapp.inventory.models import InventoryDetail
+from allapp.core.choices import InvTxType
+from allapp.inventory.models import InventoryDetail, InventoryTransaction
 from allapp.locations.models import Location, Subwarehouse, Warehouse
-from allapp.products.models import Brand, Product, ProductCategory, ProductUom
+from allapp.products.identifier_services import add_product_barcode
+from allapp.products.models import (
+    Brand,
+    Product,
+    ProductBarcode,
+    ProductCategory,
+    ProductUom,
+)
 from allapp.salesapp.models import SaleProductConfig
 from allapp.tasking.models import WmsTask
 
@@ -132,7 +140,7 @@ class OperationConsoleScopeTests(TestCase):
             {"line-qty_done": "1.000", "line-remark": "cross warehouse"},
         )
         with mock.patch(
-            "allapp.console.views_op.inventory_services.post_task"
+            "allapp.console.views_op.tasking_services._run_posting_handler"
         ) as mocked_post:
             post_response = self.client.post(
                 reverse("op:post", args=[self.task.id]),
@@ -143,6 +151,94 @@ class OperationConsoleScopeTests(TestCase):
         self.assertEqual(line_response.status_code, 404)
         self.assertEqual(post_response.status_code, 404)
         mocked_post.assert_not_called()
+
+
+class InventoryTransactionConsoleSearchTests(TestCase):
+    def setUp(self):
+        from allapp.console.views import _filtered_qs
+
+        self.filtered_qs = _filtered_qs
+        self.owner = Owner.objects.create(code="TXSEARCH", name="流水搜索货主")
+        self.uom = ProductUom.objects.create(code="TXSEARCH-EA", name="件")
+        self.product = Product.objects.create(
+            owner=self.owner,
+            code="TX-PRODUCT",
+            sku="TX-WMS-SKU",
+            name="流水搜索商品",
+            base_uom=self.uom,
+        )
+        add_product_barcode(
+            product=self.product,
+            barcode="TX-HISTORICAL-BARCODE",
+            barcode_type=ProductBarcode.BarcodeType.OTHER,
+        )
+        self.warehouse = Warehouse.objects.create(code="TXWH", name="流水授权仓")
+        subwarehouse = Subwarehouse.objects.create(
+            warehouse=self.warehouse,
+            code="TXSW",
+            name="流水子仓",
+        )
+        self.location = Location.objects.create(
+            warehouse=self.warehouse,
+            subwarehouse=subwarehouse,
+            code="TXSW-01-01-01",
+            name="流水库位",
+        )
+        self.transaction = InventoryTransaction.objects.create(
+            tx_type=InvTxType.RECEIVE,
+            owner=self.owner,
+            product=self.product,
+            location=self.location,
+            qty_delta=Decimal("1.0000"),
+            src_model="console.tests",
+            src_id=1,
+            src_line_id=1,
+            src_no="TX-SEARCH-1",
+        )
+        self.user = get_user_model().objects.create_user(
+            username="tx-search-user",
+            password="pw",
+        )
+        UserRoleScope.objects.create(
+            user=self.user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
+
+    def test_search_uses_identifier_history_and_enforces_scope(self):
+        request = RequestFactory().get("/console/inventory/", {"q": "historical-bar"})
+        request.user = self.user
+
+        queryset, _ = self.filtered_qs(request)
+
+        self.assertEqual(list(queryset), [self.transaction])
+
+        other_warehouse = Warehouse.objects.create(code="TXOTHER", name="未授权仓")
+        other_subwarehouse = Subwarehouse.objects.create(
+            warehouse=other_warehouse,
+            code="TXOTHERSW",
+            name="未授权子仓",
+        )
+        other_location = Location.objects.create(
+            warehouse=other_warehouse,
+            subwarehouse=other_subwarehouse,
+            code="TXOTHERSW-01-01-01",
+            name="未授权库位",
+        )
+        InventoryTransaction.objects.create(
+            tx_type=InvTxType.RECEIVE,
+            owner=self.owner,
+            product=self.product,
+            location=other_location,
+            qty_delta=Decimal("1.0000"),
+            src_model="console.tests",
+            src_id=2,
+            src_line_id=1,
+            src_no="TX-SEARCH-2",
+        )
+
+        queryset, _ = self.filtered_qs(request)
+        self.assertEqual(list(queryset), [self.transaction])
 
 
 class SaleMiniProductListingConsoleTests(TestCase):

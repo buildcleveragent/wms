@@ -5,12 +5,18 @@ from .views_excel import (
     ProductExportOwnersApi,
     ProductImportExcelApi,
     ProductImportTemplateApi,
+    ProductIdentifierExportApi,
+    ProductIdentifierImportApi,
+    ProductIdentifierTemplateApi,
 )
 
 
 app_name = "products_pda"
 
 urlpatterns = [
+    path("identifier-maintenance-template/", ProductIdentifierTemplateApi.as_view(), name="identifier-template"),
+    path("identifier-maintenance-export/", ProductIdentifierExportApi.as_view(), name="identifier-export"),
+    path("identifier-maintenance-import/", ProductIdentifierImportApi.as_view(), name="identifier-import"),
     path("export-owners/", ProductExportOwnersApi.as_view(), name="export-owners"),
     path("export-excel/", ProductExportExcelApi.as_view(), name="export-excel"),
     path(

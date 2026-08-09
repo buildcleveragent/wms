@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -14,25 +14,25 @@ from django.utils import timezone
 from allapp.baseinfo.models import OwnerWarehouseBinding
 from allapp.core.choices import InvTxType
 from allapp.core.models import DocSequence
+from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.inventory.models import (
     InventoryDetail,
     InventoryTransaction,
 )
-from allapp.locations.models import Container, Location, Warehouse
+from allapp.locations.models import Container, Location
 from allapp.tasking.models import (
     ContainerUsage,
-    RelocLineExtra,
-    RelocTaskExtra,
     RelocationRequest,
     RelocationRequestLine,
     RelocationReservation,
+    RelocLineExtra,
+    RelocTaskExtra,
     TaskAssignment,
     TaskScanLog,
     TaskStatusLog,
     WmsTask,
     WmsTaskLine,
 )
-
 
 QTY_QUANT = Decimal("0.0001")
 
@@ -500,6 +500,12 @@ def _release_task(task: WmsTask, *, by_user) -> None:
 
 @transaction.atomic
 def approve_request(request_id: int, *, by_user, note: str = "") -> WmsTask:
+    warehouse_id = (
+        RelocationRequest.objects.filter(pk=request_id)
+        .values_list("warehouse_id", flat=True)
+        .get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     request = (
         RelocationRequest.objects.select_for_update()
         .select_related(
@@ -518,7 +524,8 @@ def approve_request(request_id: int, *, by_user, note: str = "") -> WmsTask:
         return request.generated_task
     if request.status != RelocationRequest.Status.PENDING:
         raise ValidationError("只有待审核的移库申请可以批准。")
-    Warehouse.objects.select_for_update().get(pk=request.warehouse_id)
+    if request.warehouse_id != warehouse_id:
+        raise ValidationError("移库申请仓库在审核期间发生变化，请重试。")
     lines = list(
         RelocationRequestLine.objects.select_for_update()
         .filter(request=request)
@@ -1055,9 +1062,15 @@ def resume_task(task_id: int, *, by_user):
 
 @transaction.atomic
 def void_task(task_id: int, *, by_user, note: str):
+    warehouse_id = (
+        WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     task = WmsTask.objects.select_for_update().get(
         pk=task_id, task_type=WmsTask.TaskType.RELOC
     )
+    if task.warehouse_id != warehouse_id:
+        raise ValidationError("移库任务仓库在作废期间发生变化，请重试。")
     if task.posting_status == WmsTask.PostingStatus.POSTED:
         raise ValidationError("已过账移库任务不能作废，请创建反向移库任务。")
     reservations = list(
@@ -1347,7 +1360,10 @@ def post_relocation_inventory(
             target.save()
 
         pair_id = hashlib.md5(f"reloc:{task.pk}:{line.pk}".encode("utf-8")).hexdigest()
-        pair_uuid = f"{pair_id[:8]}-{pair_id[8:12]}-{pair_id[12:16]}-{pair_id[16:20]}-{pair_id[20:32]}"
+        pair_uuid = (
+            f"{pair_id[:8]}-{pair_id[8:12]}-{pair_id[12:16]}-"
+            f"{pair_id[16:20]}-{pair_id[20:32]}"
+        )
         common = {
             "owner_id": task.owner_id,
             "warehouse_id": task.warehouse_id,

@@ -9,7 +9,7 @@
       <view class="tips">
         <view>模板要求：</view>
         <view>1. 每行 1 个订单</view>
-        <view>2. 优先填写“商家编码”匹配系统 SKU</view>
+        <view>2. “商家编码”填写货主商品编码或当前有效外部系统商品编码，不接受仓库SKU编码或条码</view>
         <view>3. “订单编号”必填，用于防重复</view>
         <view>4. 仅支持 .xlsx 格式</view>
         <view>5. 文件最大 5 MB，最多 1000 个非空业务行</view>

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Optional
 
 from django.conf import settings
@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
 from allapp.core.models import DocSequence
+from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.inventory.models import InventoryDetail, PostingJournal
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product
@@ -27,7 +28,6 @@ from allapp.tasking.models import (
     WmsTask,
     WmsTaskLine,
 )
-
 
 QTY_QUANT = Decimal("0.0001")
 
@@ -393,6 +393,10 @@ def _assert_no_inflight_conflicts(task: WmsTask, candidates: list[dict]):
 def release_count_task(task_id: int, *, by_user) -> WmsTask:
     if not _manager_allowed(by_user):
         raise PermissionDenied("无盘点发布权限。")
+    warehouse_id = (
+        WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     task = (
         WmsTask.objects.select_for_update()
         .select_related("owner", "warehouse")
@@ -402,7 +406,8 @@ def release_count_task(task_id: int, *, by_user) -> WmsTask:
         return task
     if task.status not in {WmsTask.Status.DRAFT, WmsTask.Status.READY}:
         raise ValidationError("仅草稿或待发布盘点任务可以发布。")
-    Warehouse.objects.select_for_update().get(pk=task.warehouse_id)
+    if task.warehouse_id != warehouse_id:
+        raise ValidationError("盘点任务仓库在发布期间发生变化，请重试。")
     extra = CountTaskExtra.objects.select_for_update().get(task=task)
     params = _params_from_extra(extra)
     _validate_params(params)
@@ -744,11 +749,17 @@ def _create_recount(task: WmsTask, extras: list[CountLineExtra], *, by_user) -> 
 
 @transaction.atomic
 def submit_count_task(task_id: int, *, by_user) -> dict:
+    warehouse_id = (
+        WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     task = (
         WmsTask.objects.select_for_update()
         .select_related("owner", "warehouse")
         .get(pk=task_id, task_type=WmsTask.TaskType.COUNT)
     )
+    if task.warehouse_id != warehouse_id:
+        raise ValidationError("盘点任务仓库在提交期间发生变化，请重试。")
     _assert_operator(task, by_user)
     if task.status not in {WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS}:
         raise ValidationError("盘点任务当前状态不允许提交。")

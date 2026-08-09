@@ -33,6 +33,7 @@ from django.utils.dateparse import parse_date
 from rest_framework.exceptions import ValidationError
 
 from allapp.accounts.access import AccessScope
+from allapp.products.identifier_lookup import product_search_q
 from allapp.tasking.models import WmsTask
 
 from .models import OutboundOrder, OutboundOrderLine
@@ -268,15 +269,7 @@ def filter_history_queryset(qs, params, *, include_status=True):
     if search:
         product_match = OutboundOrderLine.objects.filter(
             order_id=OuterRef("pk"), is_deleted=False
-        ).filter(
-            Q(product__name__icontains=search)
-            | Q(product__code__icontains=search)
-            | Q(product__sku__icontains=search)
-            | Q(product__gtin__icontains=search)
-            | Q(product__unit_barcode__icontains=search)
-            | Q(product__carton_barcode__icontains=search)
-            | Q(product__product_package__barcode__icontains=search)
-        )
+        ).filter(product_search_q(search))
         qs = qs.annotate(_history_product_match=Exists(product_match)).filter(
             Q(order_no__icontains=search)
             | Q(src_bill_no__icontains=search)

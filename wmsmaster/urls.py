@@ -52,6 +52,7 @@ urlpatterns = [
     path("api/pos/", include("allapp.pos.urls")),
     path("api/sale-mini/", include("allapp.salesapp.salemini_urls")),
     path("api/products/", include("allapp.products.urls_pda")),
+    path("api/", include("allapp.products.urls_identifiers")),
     path("reports/", include("allapp.reports.urls")),
     path("tasking/console/", include("allapp.tasking.urls_console", namespace="tasking_console")),
     path("console/", include("allapp.console.urls", namespace="console")),

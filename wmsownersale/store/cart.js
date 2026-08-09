@@ -146,6 +146,7 @@ export const useCart = defineStore('cart', {
       const previousCustomerId = this.customer?.id
       if (previousCustomerId && String(previousCustomerId) !== String(customer.id)) {
         clearCustomerHeader(this.order_header)
+        this.items = []
         this.idempotency_key = createIdempotencyKey()
       }
       this.customer = customer

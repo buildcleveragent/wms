@@ -3,14 +3,14 @@ from __future__ import annotations
 import datetime
 import io
 from decimal import Decimal
-from openpyxl import Workbook
 
-from django.http import HttpResponse
 from django.db import transaction
 from django.db.models import Count, Q, QuerySet, Sum
-from django.utils.dateparse import parse_date
+from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django_filters.rest_framework import DjangoFilterBackend
+from openpyxl import Workbook
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -37,39 +37,39 @@ from .models import (
 )
 from .serializers import (
     BillDetailSerializer,
-    BillListSerializer,
     BillingAccrualDetailSerializer,
     BillingAccrualSerializer,
     BillingEventSerializer,
-    BillingMetricGenerateSerializer,
     BillingMetricDailySerializer,
+    BillingMetricGenerateSerializer,
     BillingPeriodInvoiceSerializer,
     BillingPeriodSerializer,
-    RepriceUnpricedSerializer,
     BillingRuleSerializer,
     BillingRuleTierSerializer,
-    UnlockPeriodSerializer,
+    BillListSerializer,
+    CollectionActivitySerializer,
     PaymentReceiptSerializer,
     ReceivableCollectionCaseSerializer,
-    CollectionActivitySerializer,
+    RepriceUnpricedSerializer,
+    UnlockPeriodSerializer,
 )
-from .services.receivables import post_receipt, reverse_receipt
 from .services import (
+    BillingCloseBlocked,
     accrue_metrics_for_date,
     accrue_order_processing_from_posted,
     accrue_storage_for_date,
+    build_close_readiness,
+    generate_invoice_for_period,
     generate_metrics_for_date,
     generate_metrics_for_range,
-    generate_invoice_for_period,
     lock_period,
     preview_lock_period,
-    build_close_readiness,
-    BillingCloseBlocked,
     reprice_unpriced_events,
     unlock_period,
 )
 from .services.dashboard import build_warehouse_overview_payload
 from .services.ledger import financial_ledger_accruals
+from .services.receivables import post_receipt, reverse_receipt
 
 
 def _require_billing_perm(request, perm_codename: str):
@@ -935,9 +935,27 @@ class BillingPeriodViewSet(
         protected_fields = {"label", "start_date", "end_date", "currency"} & set(
             request.data.keys()
         )
-        blocked = immutable_scope or (
-            period.status in {PeriodStatus.CLOSED, PeriodStatus.INVOICED}
-            and protected_fields
+        if immutable_scope:
+            record_audit_event(
+                action="UPDATE_REJECTED",
+                module="billing.period",
+                request=request,
+                obj=period,
+                succeeded=False,
+                before=object_snapshot(period),
+                metadata={"fields": sorted(immutable_scope), "reason": "scope_change"},
+            )
+            return Response(
+                {
+                    "code": "SCOPE_FORBIDDEN",
+                    "detail": "无权修改账期的货主或仓库范围。",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        blocked = (
+            protected_fields
+            if period.status in {PeriodStatus.CLOSED, PeriodStatus.INVOICED}
+            else set()
         )
         if blocked:
             record_audit_event(
@@ -947,7 +965,7 @@ class BillingPeriodViewSet(
                 obj=period,
                 succeeded=False,
                 before=object_snapshot(period),
-                metadata={"fields": sorted(blocked)},
+                metadata={"fields": sorted(blocked), "reason": "immutable_period"},
             )
             return Response(
                 {
@@ -1357,7 +1375,10 @@ class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewS
         info.append(
             [
                 "日期范围",
-                f"{request.query_params.get('issue_date__gte', '')} ~ {request.query_params.get('issue_date__lte', '')}",
+                (
+                    f"{request.query_params.get('issue_date__gte', '')} ~ "
+                    f"{request.query_params.get('issue_date__lte', '')}"
+                ),
             ]
         )
         info.append(["数据截至时间", timezone.now().isoformat()])

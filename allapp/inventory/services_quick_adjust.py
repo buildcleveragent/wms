@@ -1,6 +1,6 @@
 # allapp/inventory/services_quick_adjust.py
 from __future__ import annotations
-from allapp.tasking.models import  WmsTask,WmsTaskLine,TaskScanLog
+
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
@@ -9,13 +9,15 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from allapp.baseinfo.models import Owner
+from allapp.core.models import DocSequence
+
 # 统一过账入口（按你冻结版已有的 services ）
 from allapp.inventory import services as inv_services
-from allapp.core.models import DocSequence
-from allapp.locations.models import Location
-from allapp.baseinfo.models import Owner
+from allapp.inventory.locking import lock_warehouses_for_inventory_write
+from allapp.locations.models import Location, Warehouse
 from allapp.products.models import Product
-from allapp.locations.models import Warehouse
+from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,7 @@ class QuickAdjustInput:
     allow_negative: bool = False
     barcode: Optional[str] = None  # 添加 barcode 属性
 
+
 @transaction.atomic
 def quick_adjust_via_post_task(data: QuickAdjustInput) -> dict:
     if data.qty_base_delta is None:
@@ -43,14 +46,23 @@ def quick_adjust_via_post_task(data: QuickAdjustInput) -> dict:
         raise ValueError("数量变动不能为 0")
 
     # 解析默认库位和仓库
-    location = data.location or Location.objects.get(pk=getattr(settings, "DEFAULT_ADJUST_LOCATION_ID"))
+    location = data.location or Location.objects.get(
+        pk=getattr(settings, "DEFAULT_ADJUST_LOCATION_ID")
+    )
     location_warehouse = getattr(location, "warehouse", None)
     warehouse = data.warehouse or location_warehouse
     if warehouse is None:
-        raise ValueError("无法确定调整任务所属仓库，请显式传 warehouse 或传入带仓库的 location。")
-    if data.warehouse and getattr(location, "warehouse_id", None) and data.warehouse.id != location.warehouse_id:
+        raise ValueError(
+            "无法确定调整任务所属仓库，请显式传 warehouse 或传入带仓库的 location。"
+        )
+    if (
+        data.warehouse
+        and getattr(location, "warehouse_id", None)
+        and data.warehouse.id != location.warehouse_id
+    ):
         raise ValueError("warehouse 必须与 location.warehouse 一致")
 
+    lock_warehouses_for_inventory_write(warehouse.id)
     task_no = DocSequence.next_code(
         doc_type="TJ",
         warehouse=warehouse,
@@ -68,7 +80,7 @@ def quick_adjust_via_post_task(data: QuickAdjustInput) -> dict:
         remark=data.remark or "ADMIN_QUICK_ADJUST",
         review_status=WmsTask.ReviewStatus.APPROVED,
         posting_status=WmsTask.PostingStatus.PENDING,
-        status = WmsTask.Status.COMPLETED,
+        status=WmsTask.Status.COMPLETED,
     )
 
     # task.review_status = WmsTask.ReviewStatus.APPROVED
@@ -114,14 +126,21 @@ def quick_adjust_via_post_task(data: QuickAdjustInput) -> dict:
     )
 
 
-
-
 # —— 兼容层：如果你在别处已经写死调用 adjust_stock()，保留这个薄封装 —— #
 def adjust_stock(
-    *, user, owner, warehouse, product,
-    qty_delta, reason="ADMIN_QUICK_ADJUST",
-    location=None, lot=None, expiry=None, serial=None,
-    remark="", allow_negative=False,
+    *,
+    user,
+    owner,
+    warehouse,
+    product,
+    qty_delta,
+    reason="ADMIN_QUICK_ADJUST",
+    location=None,
+    lot=None,
+    expiry=None,
+    serial=None,
+    remark="",
+    allow_negative=False,
 ):
     """
     兼容旧接口，内部走 quick_adjust_via_post_task（统一过账），不直接 UPDATE 库存表。

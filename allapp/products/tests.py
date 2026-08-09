@@ -34,6 +34,8 @@ from .excel_import import (
     PACKAGE_SHEET_NAME,
     PRODUCT_HEADERS,
 )
+from .identifier_services import add_product_barcode
+from .models import ProductBarcode
 from .views import ProductViewSet
 
 # 业务模型
@@ -333,8 +335,12 @@ class ProductViewSetTests(TestCase):
         self.assertIn("SKU-NEW", codes)
 
     def test_create_rejects_cross_field_identifier_with_field_error(self):
-        self.prod_a.unit_barcode = "API-CROSS-001"
-        self.prod_a.save(update_fields=["unit_barcode"])
+        add_product_barcode(
+            product=self.prod_a,
+            barcode="API-CROSS-001",
+            barcode_type=ProductBarcode.BarcodeType.UNIT,
+            is_primary=True,
+        )
         view = ProductViewSet.as_view({"post": "create"})
         req = self.factory.post(
             "/products/",
@@ -761,8 +767,7 @@ class ProductExcelImportApiTests(TestCase):
 
     def test_legacy_product_code_header_is_rejected_with_new_header_guidance(self):
         legacy_headers = tuple(
-            "商品编号" if header == "货主商品编码" else header
-            for header in HEADERS
+            "商品编号" if header == "货主商品编码" else header for header in HEADERS
         )
 
         response = self._post_rows(
@@ -834,8 +839,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(response.data["created_count"], 0)
         self.assertTrue(
             any(
-                error["field"] == "包装条码"
-                and "货主商品编码" in error["message"]
+                error["field"] == "包装条码" and "货主商品编码" in error["message"]
                 for error in response.data["errors"]
             )
         )
@@ -859,9 +863,7 @@ class ProductExcelImportApiTests(TestCase):
             "包装换算数量": 12,
             "包装条码": " package-sheet-shared ",
         }
-        package_sheet.append(
-            [package_row.get(header) for header in PACKAGE_HEADERS]
-        )
+        package_sheet.append([package_row.get(header) for header in PACKAGE_HEADERS])
         output = io.BytesIO()
         workbook.save(output)
         uploaded = SimpleUploadedFile(
@@ -1044,7 +1046,10 @@ class ProductExcelImportApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400, response.data)
         self.assertTrue(
-            any(error["field"] == "外部系统商品编码" for error in response.data["errors"])
+            any(
+                error["field"] == "外部系统商品编码"
+                for error in response.data["errors"]
+            )
         )
         self.assertFalse(Product.objects.filter(code="PDA-IDENTIFIER-NEW").exists())
 
@@ -1065,8 +1070,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(response.data["created_count"], 0)
         self.assertTrue(
             any(
-                error["field"] == "货主商品编码"
-                and "标识" in error["message"]
+                error["field"] == "货主商品编码" and "标识" in error["message"]
                 for error in response.data["errors"]
             )
         )
@@ -1476,25 +1480,41 @@ class ProductExcelImportApiTests(TestCase):
         }
         self.assertEqual(package_codes, {self.uom.code, self.carton_uom.code})
 
-        ProductPackage.all_objects.filter(product=product).delete()
-        Product.all_objects.filter(pk=product.pk).delete()
+        product_owner_column = PRODUCT_HEADERS.index("货主编码") + 1
+        product_code_column = PRODUCT_HEADERS.index("货主商品编码") + 1
+        for row in range(2, workbook[IMPORT_SHEET_NAME].max_row + 1):
+            if workbook[IMPORT_SHEET_NAME].cell(row, product_code_column).value:
+                workbook[IMPORT_SHEET_NAME].cell(
+                    row, product_owner_column, self.other_owner.code
+                )
+        package_owner_column = PACKAGE_HEADERS.index("货主编码") + 1
+        package_code_column = PACKAGE_HEADERS.index("货主商品编码") + 1
+        for row in range(2, workbook[PACKAGE_SHEET_NAME].max_row + 1):
+            if workbook[PACKAGE_SHEET_NAME].cell(row, package_code_column).value:
+                workbook[PACKAGE_SHEET_NAME].cell(
+                    row, package_owner_column, self.other_owner.code
+                )
+        round_trip = io.BytesIO()
+        workbook.save(round_trip)
         uploaded = SimpleUploadedFile(
             "round-trip.xlsx",
-            exported.content,
+            round_trip.getvalue(),
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+        self.client.force_authenticate(self.cross_owner_user)
         imported = self.client.post(
             "/api/products/import-excel/", {"file": uploaded}, format="multipart"
         )
 
         self.assertEqual(imported.status_code, 200, imported.data)
-        recreated = Product.objects.get(owner=self.owner, code="PDA-EXPORT-001")
+        recreated = Product.objects.get(owner=self.other_owner, code="PDA-EXPORT-001")
         self.assertFalse(recreated.is_active)
         self.assertEqual(recreated.name, "=档案商品 001")
         packages = list(recreated.packages.order_by("sort_order"))
         self.assertEqual(len(packages), 2)
         self.assertEqual(packages[1].qty_in_base, 12)
         self.assertTrue(packages[1].is_purchase_default)
+        self.assertEqual(product.packages.count(), 2)
 
     def test_v3_rejects_mixed_legacy_and_package_sheet_data(self):
         workbook = Workbook()
@@ -1557,7 +1577,7 @@ class ProductImportCommandTests(TestCase):
     def test_import_product_master_sheet_creates_product_and_uom(self):
         path = self._write_workbook(
             [
-                ["owner", "code", "name", "base_uom", "category"],
+                ["owner", "货主商品编码", "name", "base_uom", "category"],
                 [
                     self.owner.code,
                     "CMD-SKU-1",
@@ -1581,7 +1601,7 @@ class ProductImportCommandTests(TestCase):
     def test_import_product_master_sheet_dry_run_does_not_persist_product(self):
         path = self._write_workbook(
             [
-                ["owner", "code", "name", "base_uom", "category"],
+                ["owner", "货主商品编码", "name", "base_uom", "category"],
                 [
                     self.owner.code,
                     "CMD-DRY-1",

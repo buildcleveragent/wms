@@ -15,6 +15,7 @@ from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Owner
 from allapp.inventory.models import InventoryDetail
 from allapp.locations.models import Container, Location, Warehouse
+from allapp.products.identifier_lookup import product_search_q
 from allapp.tasking import services as task_services
 from allapp.tasking.models import RelocationRequest, TaskAssignment, WmsTask
 from allapp.tasking.relocation import (
@@ -305,8 +306,7 @@ class RelocationOptionsView(APIView):
             ).select_related("product", "location", "container")
         if search:
             inventory_qs = inventory_qs.filter(
-                Q(product__code__icontains=search)
-                | Q(product__name__icontains=search)
+                product_search_q(search)
                 | Q(location__code__icontains=search)
                 | Q(container__container_no__icontains=search)
             )
@@ -395,8 +395,7 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
         if search:
             qs = qs.filter(
                 Q(task_no__icontains=search)
-                | Q(lines__product__name__icontains=search)
-                | Q(lines__product__code__icontains=search)
+                | product_search_q(search, product_field="lines__product_id")
             ).distinct()
         statuses = self.request.query_params.getlist("status")
         if statuses:

@@ -334,7 +334,9 @@ db_test = {}
 db_test_name = env("DB_TEST_NAME", default="").strip()
 if db_test_name:
     db_test["NAME"] = db_test_name
-if DB_ENGINE == "django.db.backends.mysql":
+if DB_ENGINE == "django.db.backends.mysql" and env.bool(
+    "DB_TEST_DISABLE_FK_CHECKS", default=False
+):
     db_test["OPTIONS"] = {
         "init_command": "SET foreign_key_checks = 0;",
     }

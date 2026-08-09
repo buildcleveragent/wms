@@ -8,9 +8,8 @@ import re
 from types import SimpleNamespace
 
 from django.core.exceptions import MultipleObjectsReturned, ValidationError
-from django.db.models import Q
-
 from allapp.locations.models import Location
+from allapp.products.identifier_lookup import get_exact_identifier_sources
 from allapp.products.models import (
     ProductIdentifierRegistry,
     normalize_product_identifier,
@@ -19,16 +18,6 @@ from allapp.products.models import (
 
 _BARCODE_MULTIPLIER_RE = re.compile(r"^[^*]+\*(\d+)$")
 _DATE8_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
-
-_FIELD_TYPES = (
-    ("carton_barcode", "CARTON"),
-    ("unit_barcode", "UNIT"),
-    ("gtin", "GTIN"),
-    ("sku", "SKU"),
-    ("code", "PRODUCT_CODE"),
-    ("external_code", "EXTERNAL"),
-)
-
 
 def _parse_multiplier(barcode: str) -> tuple[str, Decimal | None]:
     """Return the lookup value and an optional explicit base-unit multiplier."""
@@ -98,24 +87,8 @@ def default_resolver(owner_id: int, barcode: str):
         )
 
     normalized = normalize_product_identifier(label_key)
-    registry_qs = (
-        ProductIdentifierRegistry.objects.filter(
-            owner_id=owner_id,
-            normalized_value=normalized,
-            product__is_deleted=False,
-        )
-        .filter(
-            Q(product_package__isnull=True)
-            | Q(product_package__is_deleted=False, product_package__is_active=True)
-        )
-        .select_related(
-            "product__base_uom",
-            "product__carton_package__uom",
-            "product_package__uom",
-        )
-    )
     try:
-        registry = registry_qs.get()
+        sources = get_exact_identifier_sources(owner_id, normalized)
     except ProductIdentifierRegistry.DoesNotExist:
         return _result(
             label_key=label_key,
@@ -126,57 +99,36 @@ def default_resolver(owner_id: int, barcode: str):
     except MultipleObjectsReturned as exc:
         raise ValidationError(f"编码冲突：标识“{normalized}”匹配到多个商品注册项。") from exc
 
-    product = registry.product
-    if registry.product_package_id:
-        package = registry.product_package
-        inferred_qty = Decimal(package.qty_in_base)
-        return _result(
-            product_id=product.pk,
-            product_package_id=package.pk,
-            code_type="PACKAGE",
-            matched_field="product_package.barcode",
-            matched_fields=["product_package.barcode"],
-            label_key=label_key,
-            uom_code=package.uom.code,
-            uom_name=package.uom.name,
-            pack_qty=explicit_multiplier or inferred_qty,
-            lot_no=lot_no,
-            exp_date=exp_date,
-        )
+    product = sources.registry.product
+    if product.is_deleted or not product.is_active:
+        raise ValidationError(f"商品标识“{normalized}”所属商品已停用或删除。")
 
-    matched = [
-        (field, code_type)
-        for field, code_type in _FIELD_TYPES
-        if normalize_product_identifier(getattr(product, field, None)) == normalized
-    ]
+    matched = list(sources.stable_fields)
+    active_barcodes = list(sources.barcodes)
+    active_external = list(sources.external_identifiers)
+    type_priority = {"CARTON": 0, "PACKAGE": 1, "UNIT": 2, "GTIN": 3, "SKU": 4, "PRODUCT_CODE": 5, "EXTERNAL": 6, "OTHER": 7}
+    for record in active_barcodes:
+        matched.append((f"product_barcode:{record.pk}", record.barcode_type))
+    for record in active_external:
+        matched.append((f"external_identifier:{record.pk}", "EXTERNAL"))
     if not matched:
-        raise ValidationError(
-            f"条码注册表异常：标识“{normalized}”未匹配商品 {product.code} 的任何标识字段。"
-        )
-    matched_fields = [field for field, _code_type in matched]
-    if "carton_barcode" in matched_fields and len(matched_fields) > 1:
-        raise ValidationError(
-            f"编码冲突：标识“{normalized}”同时命中箱码和基础单位标识 "
-            f"{', '.join(matched_fields)}。"
-        )
+        if sources.has_history:
+            raise ValidationError(f"条码或外部标识“{normalized}”已停用、未生效或已过期。")
+        raise ValidationError(f"条码注册表异常：标识“{normalized}”未匹配商品 {product.code} 的任何标识来源。")
 
+    semantics = {(record.package_id, record.qty_in_base) for record in active_barcodes}
+    if matched and any(code_type in {"SKU", "PRODUCT_CODE", "EXTERNAL"} for _field, code_type in matched):
+        semantics.add((None, 1))
+    if len(semantics) > 1:
+        raise ValidationError(f"编码冲突：标识“{normalized}”同时具有不同包装或换算语义。")
+
+    matched.sort(key=lambda item: type_priority.get(item[1], 99))
+    matched_fields = [field for field, _code_type in matched]
     matched_field, code_type = matched[0]
-    package = None
-    inferred_qty = Decimal("1")
-    uom = product.base_uom
-    if code_type == "CARTON":
-        package = product.carton_package
-        if (
-            package is None
-            or package.product_id != product.pk
-            or package.is_deleted
-            or not package.is_active
-        ):
-            raise ValidationError(
-                f"箱码配置错误：商品 {product.code} 的箱码未绑定启用且未删除的包装层级。"
-            )
-        inferred_qty = Decimal(package.qty_in_base)
-        uom = package.uom
+    chosen = next((record for record in active_barcodes if f"product_barcode:{record.pk}" == matched_field), None)
+    package = chosen.package if chosen else None
+    inferred_qty = Decimal(chosen.qty_in_base if chosen else 1)
+    uom = package.uom if package else product.base_uom
 
     return _result(
         product_id=product.pk,

@@ -1,34 +1,34 @@
 # allapp/outbound/services.py
-#过账（PICK 执行）时释放 allocated
+# 过账（PICK 执行）时释放 allocated
 from __future__ import annotations
+
 import logging
 from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
-from django.utils import timezone
-from allapp.locations.models import Warehouse
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F, Q, Sum
+from django.utils import timezone
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.models import UserRoleScope
 from allapp.core.models import DocSequence
 from allapp.core.utils.log_context import build_log_payload
+from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.inventory.models import InventoryDetail
 from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
 from allapp.tasking.models import (
     DispatchTaskExtra,
     PackTaskExtra,
+    ReplenishmentPolicy,
     ReviewLineExtra,
     ReviewTaskExtra,
-    ReplenishmentPolicy,
     TaskStatusLog,
     WmsTask,
     WmsTaskLine,
 )
-
 
 TASK_TYPE_PICK = getattr(WmsTask.TaskType, "PICK", "PICK")
 logger = logging.getLogger(__name__)
@@ -63,9 +63,7 @@ def validate_pick_task_sale_mini_payment(task) -> None:
     """Apply the sale-mini payment gate to a PICK task from an outbound order."""
 
     source_model = (task.source_model or "").lower()
-    if task.task_type != TASK_TYPE_PICK or not source_model.endswith(
-        "outboundorder"
-    ):
+    if task.task_type != TASK_TYPE_PICK or not source_model.endswith("outboundorder"):
         return
     OutboundOrder = get_outbound_order_model()
     try:
@@ -127,7 +125,13 @@ def approve_owner_order(order, *, by_user, allow_backorder=True):
     """Lock, revalidate and approve one owner order atomically."""
 
     Order = type(order)
+    warehouse_id = (
+        Order.objects.filter(pk=order.pk).values_list("warehouse_id", flat=True).get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     locked = Order.objects.select_for_update().get(pk=order.pk)
+    if locked.warehouse_id != warehouse_id:
+        raise ValidationError("出库单仓库在货主审核期间发生变化，请重试。")
     validate_owner_approval_preconditions(locked)
     locked._apply_owner_approval(
         by_user=by_user,
@@ -148,7 +152,13 @@ def reject_owner_order(order, *, by_user, reason):
         raise ValidationError({"reason": "退回原因不能超过 200 个字符。"})
 
     Order = type(order)
+    warehouse_id = (
+        Order.objects.filter(pk=order.pk).values_list("warehouse_id", flat=True).get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     locked = Order.objects.select_for_update().get(pk=order.pk)
+    if locked.warehouse_id != warehouse_id:
+        raise ValidationError("出库单仓库在货主驳回期间发生变化，请重试。")
     validate_owner_approval_preconditions(locked)
     _validate_allocation_can_be_released(locked)
     unallocate_for_order(locked, by_user=by_user)
@@ -216,7 +226,13 @@ def confirm_warehouse_order(order, *, by_user):
     """Lock and confirm a still-submitted owner-approved standard order."""
 
     Order = type(order)
+    warehouse_id = (
+        Order.objects.filter(pk=order.pk).values_list("warehouse_id", flat=True).get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     locked = Order.objects.select_for_update().get(pk=order.pk)
+    if locked.warehouse_id != warehouse_id:
+        raise ValidationError("出库单仓库在仓库确认期间发生变化，请重试。")
     if (
         locked.submit_status != "SUBMITTED"
         or locked.is_closed
@@ -236,8 +252,11 @@ def confirm_warehouse_order(order, *, by_user):
         locked.updated_by = by_user
         locked.save(
             update_fields=[
-                "approval_status", "approved_by_warehouse", "approved_at_warehouse",
-                "updated_by", "updated_at",
+                "approval_status",
+                "approved_by_warehouse",
+                "approved_at_warehouse",
+                "updated_by",
+                "updated_at",
             ]
         )
         task = (
@@ -272,6 +291,7 @@ def resume_waiting_orders_after_replenishment(replenishment_task, *, by_user=Non
 
     from allapp.outbound.models import OutboundOrder
 
+    lock_warehouses_for_inventory_write(replenishment_task.warehouse_id)
     product_ids = set(replenishment_task.lines.values_list("product_id", flat=True))
     if not product_ids:
         return []
@@ -325,7 +345,10 @@ def replenishment_waiting_detail(order) -> dict:
     return {
         "task_nos": list(tasks.values_list("task_no", flat=True)),
         "shortages": [
-            {key: (str(value) if isinstance(value, Decimal) else value) for key, value in row.items()}
+            {
+                key: (str(value) if isinstance(value, Decimal) else value)
+                for key, value in row.items()
+            }
             for row in shortages
         ],
     }
@@ -387,6 +410,7 @@ def get_default_product_price(product) -> Decimal:
             continue
     return Decimal("0")
 
+
 # def _task_source_key(order):
 #     """统一构造 WmsTask 的来源三元组"""
 #     return {
@@ -395,25 +419,29 @@ def get_default_product_price(product) -> Decimal:
 #         "source_pk":    order.pk,
 #     }
 
+
 def _task_source_key(order):
     """统一构造 WmsTask 的来源键（canonical）"""
     return {
-        "source_model": order._meta.model_name,   # outboundorder
-        "source_pk": str(order.pk),               # CharField，统一用 str
+        "source_model": order._meta.model_name,  # outboundorder
+        "source_pk": str(order.pk),  # CharField，统一用 str
     }
+
 
 def _task_source_q(order):
     """兼容历史数据：既匹配 canonical(outboundorder)，也匹配 legacy(OutboundOrder)。"""
     return Q(source_pk=str(order.pk)) & (
-        Q(source_model=order._meta.model_name) |
-        Q(source_model=order.__class__.__name__)
+        Q(source_model=order._meta.model_name)
+        | Q(source_model=order.__class__.__name__)
     )
 
 
 # 延迟导入 OutboundOrder
 def get_outbound_order_model():
     from allapp.outbound.models import OutboundOrder  # 延迟导入，避免循环导入
+
     return OutboundOrder
+
 
 # Helper: 获取或创建保留态任务（RESERVED）
 def _get_or_create_reserved_task(order, by_user=None) -> WmsTask:
@@ -422,8 +450,7 @@ def _get_or_create_reserved_task(order, by_user=None) -> WmsTask:
     logger.info("outbound.reserved_task.lookup.begin %s", ctx_text, extra=ctx)
     key = _task_source_key(order)
     task = (
-        WmsTask.objects
-        .filter(task_type=TASK_TYPE_PICK)
+        WmsTask.objects.filter(task_type=TASK_TYPE_PICK)
         .filter(_task_source_q(order))  # 兼容旧数据
         .exclude(status__in=["CANCELLED", "COMPLETED"])
         .first()
@@ -477,29 +504,34 @@ def _get_or_create_reserved_task(order, by_user=None) -> WmsTask:
     #     created_at=timezone.now(),
     # )
 
+
 # Helper: 计算订单行需求
 def _compute_line_demands(order) -> list:
     """计算出库单的总需求"""
     demands = []
     line_map = {}
-    for line in order.lines.all().only("id", "product_id", "base_qty"):  # 可根据你的需求字段调整
+    for line in order.lines.all().only(
+        "id", "product_id", "base_qty"
+    ):  # 可根据你的需求字段调整
         qty = getattr(line, "base_qty") or Decimal("0")
         if qty <= 0:
             continue
         line_map[line.id] = line.product_id
-        demands.append({
-            'line_id': line.id,
-            'product_id': line.product_id,
-            'demand': qty,
-        })
+        demands.append(
+            {
+                "line_id": line.id,
+                "product_id": line.product_id,
+                "demand": qty,
+            }
+        )
     return demands
+
 
 # Helper: 获取按 FEFO 排序的库存明细（冻结量）
 def _fefo_details_qs(owner_id: int, warehouse_id: int, product_id: int):
     """获取某产品按 FEFO 排序的库存明细，按库存可用量递减"""
     qs = (
-        InventoryDetail.objects
-        .filter(
+        InventoryDetail.objects.filter(
             owner_id=owner_id,
             warehouse_id=warehouse_id,
             product_id=product_id,
@@ -509,7 +541,7 @@ def _fefo_details_qs(owner_id: int, warehouse_id: int, product_id: int):
         .select_for_update(skip_locked=True)  # 锁住行，防止并发冲突
         .order_by(
             "expiry_date",  # FEFO：早到期的先分配
-            "-onhand_qty"  # 若效期相同，优先使用库存多的
+            "-onhand_qty",  # 若效期相同，优先使用库存多的
         )
         .only("id", "location_id", "available_qty", "allocated_qty", "onhand_qty")
     )
@@ -528,18 +560,26 @@ def _fefo_details_qs(owner_id: int, warehouse_id: int, product_id: int):
         qs = qs.filter(location_id__in=target_ids)
     return qs
 
+
 # 冻结库存：available → allocated，并将切分结果写入保留态任务（RESERVED）
 @transaction.atomic
 def allocate_inventory(order, by_user=None, allow_backorder=True):
     """货主管理员确认时，冻结库存，并生成/刷新保留拣货任务（RESERVED）"""
+    warehouse_id = (
+        type(order)
+        .objects.filter(pk=order.pk)
+        .values_list("warehouse_id", flat=True)
+        .get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     order = type(order).objects.select_for_update().get(pk=order.pk)
-    Warehouse.objects.select_for_update().get(pk=order.warehouse_id)
+    if order.warehouse_id != warehouse_id:
+        raise ValidationError("出库单仓库在分配期间发生变化，请重试。")
     ctx, ctx_text = build_log_payload(order=order, user=by_user)
     logger.info("outbound.allocate_inventory.begin %s", ctx_text, extra=ctx)
     task = _get_or_create_reserved_task(order, by_user=by_user)
     existing_lines = (
-        WmsTaskLine.objects
-        .select_for_update()
+        WmsTaskLine.objects.select_for_update()
         .filter(task=task)
         .exclude(status=WmsTaskLine.Status.CANCELLED)
     )
@@ -581,23 +621,24 @@ def allocate_inventory(order, by_user=None, allow_backorder=True):
             )
 
             # 硬分配：冻结 available → allocated
-            updated = (
-                InventoryDetail.objects
-                .filter(pk=det.pk, available_qty__gte=alloc)
-                .update(
-                    allocated_qty=F("allocated_qty") + alloc,
-                    # Keep the inventory identity without depending on a
-                    # database's evaluation order for multiple UPDATE
-                    # assignments (MySQL differs from SQLite/PostgreSQL).
-                    available_qty=F("available_qty") - alloc,
-                )
+            updated = InventoryDetail.objects.filter(
+                pk=det.pk, available_qty__gte=alloc
+            ).update(
+                allocated_qty=F("allocated_qty") + alloc,
+                # Keep the inventory identity without depending on a
+                # database's evaluation order for multiple UPDATE
+                # assignments (MySQL differs from SQLite/PostgreSQL).
+                available_qty=F("available_qty") - alloc,
             )
 
             if updated == 0:
                 det.refresh_from_db(fields=["available_qty", "allocated_qty"])
-                task_ctx, task_text = build_log_payload(order=order, task=task, user=by_user)
+                task_ctx, task_text = build_log_payload(
+                    order=order, task=task, user=by_user
+                )
                 logger.warning(
-                    "outbound.allocate_inventory.retryable_conflict %s detail_id=%s product_id=%s location_id=%s qty=%s",
+                    "outbound.allocate_inventory.retryable_conflict %s "
+                    "detail_id=%s product_id=%s location_id=%s qty=%s",
                     task_text,
                     det.id,
                     d["product_id"],
@@ -620,9 +661,12 @@ def allocate_inventory(order, by_user=None, allow_backorder=True):
                 status="RESERVED",
                 plan_meta={"inventory_detail_id": det.id},
             )
-            task_ctx, task_text = build_log_payload(order=order, task=task, user=by_user)
+            task_ctx, task_text = build_log_payload(
+                order=order, task=task, user=by_user
+            )
             logger.info(
-                "outbound.allocate_inventory.detail_allocated %s product_id=%s location_id=%s qty=%s line_id=%s detail_id=%s",
+                "outbound.allocate_inventory.detail_allocated %s product_id=%s "
+                "location_id=%s qty=%s line_id=%s detail_id=%s",
                 task_text,
                 d["product_id"],
                 det.location_id,
@@ -635,11 +679,15 @@ def allocate_inventory(order, by_user=None, allow_backorder=True):
 
         # 如果库存不足，并且不允许补货，抛出错误
         if remaining > 0 and not allow_backorder:
-            raise ValidationError(f"库存不足，产品 {d['product_id']} 缺口 {remaining}。")
+            raise ValidationError(
+                f"库存不足，产品 {d['product_id']} 缺口 {remaining}。"
+            )
 
         # 如果库存不足，并且允许补货，提醒用户
         if remaining > 0 and allow_backorder:
-            task_ctx, task_text = build_log_payload(order=order, task=task, user=by_user)
+            task_ctx, task_text = build_log_payload(
+                order=order, task=task, user=by_user
+            )
             logger.warning(
                 "outbound.allocate_inventory.shortage %s product_id=%s shortage_qty=%s",
                 task_text,
@@ -749,9 +797,7 @@ def promote_reserved_pick(
     task.released_at = now
     task.updated_at = now
     task.updated_by = by_user
-    task.save(
-        update_fields=["status", "released_at", "updated_at", "updated_by"]
-    )
+    task.save(update_fields=["status", "released_at", "updated_at", "updated_by"])
 
     WmsTaskLine.objects.filter(task=task).exclude(
         status__in=[WmsTaskLine.Status.COMPLETED, WmsTaskLine.Status.CANCELLED]
@@ -785,7 +831,17 @@ def approve_and_release_order(order, *, by_user, allow_backorder=True) -> WmsTas
     """
 
     Order = type(order)
-    order = Order.objects.select_for_update().select_related("owner", "warehouse").get(pk=order.pk)
+    warehouse_id = (
+        Order.objects.filter(pk=order.pk).values_list("warehouse_id", flat=True).get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
+    order = (
+        Order.objects.select_for_update()
+        .select_related("owner", "warehouse")
+        .get(pk=order.pk)
+    )
+    if order.warehouse_id != warehouse_id:
+        raise ValidationError("出库单仓库在审核期间发生变化，请重试。")
 
     if order.processing_mode != ASSISTED_PROCESSING_MODE:
         raise ValidationError(
@@ -830,8 +886,11 @@ def create_warehouse_assisted_order(*, validated_data, by_user):
     if not scope.is_valid or len(scope.warehouse_ids) != 1:
         raise ValidationError("代办出库必须具有单一有效仓库操作范围。")
     warehouse_id = next(iter(scope.warehouse_ids))
+    lock_warehouses_for_inventory_write(warehouse_id)
     OutboundOrder = get_outbound_order_model()
-    OutboundOrderLine = OutboundOrder._meta.apps.get_model("outbound", "OutboundOrderLine")
+    OutboundOrderLine = OutboundOrder._meta.apps.get_model(
+        "outbound", "OutboundOrderLine"
+    )
     owner = validated_data["owner"]
     customer = validated_data["customer"]
     items = validated_data["items"]
@@ -1191,9 +1250,11 @@ def _review_workflow_payload(review_task):
     for review_line in review_task.lines.select_related("product").order_by("id"):
         order_line_id = (review_line.plan_meta or {}).get("outbound_order_line_id")
         if not order_line_id and review_line.src_id:
-            order_line_id = WmsTaskLine.objects.filter(pk=review_line.src_id).values_list(
-                "src_id", flat=True
-            ).first()
+            order_line_id = (
+                WmsTaskLine.objects.filter(pk=review_line.src_id)
+                .values_list("src_id", flat=True)
+                .first()
+            )
         qty = Decimal(review_line.qty_done or review_line.qty_plan or 0)
         if order_line_id and qty > 0:
             payload.append(
@@ -1401,14 +1462,19 @@ def close_order_after_dispatch(dispatch_task, *, by_user=None):
     if order is None:
         raise ValidationError("发运任务无法解析对应的出库订单。")
 
-    dispatch_tasks = WmsTask.objects.select_for_update().filter(
-        task_type=WmsTask.TaskType.DISPATCH,
-        source_model="outboundorder",
-        source_pk=str(order.pk),
-    ).exclude(status=WmsTask.Status.CANCELLED)
-    if not dispatch_tasks.exists() or dispatch_tasks.exclude(
-        status=WmsTask.Status.COMPLETED
-    ).exists():
+    dispatch_tasks = (
+        WmsTask.objects.select_for_update()
+        .filter(
+            task_type=WmsTask.TaskType.DISPATCH,
+            source_model="outboundorder",
+            source_pk=str(order.pk),
+        )
+        .exclude(status=WmsTask.Status.CANCELLED)
+    )
+    if (
+        not dispatch_tasks.exists()
+        or dispatch_tasks.exclude(status=WmsTask.Status.COMPLETED).exists()
+    ):
         return order
 
     dispatched_by_line = {
@@ -1437,6 +1503,7 @@ def close_order_after_dispatch(dispatch_task, *, by_user=None):
         )
     return order
 
+
 # 仓库管理员拒绝：释放已冻结的库存并取消任务
 @transaction.atomic
 def _validate_allocation_can_be_released(order) -> None:
@@ -1464,21 +1531,30 @@ def _validate_allocation_can_be_released(order) -> None:
 @transaction.atomic
 def unallocate_for_order(order, *, by_user=None) -> Decimal:
     """Release frozen inventory and retain cancelled task lines as audit evidence."""
+    Order = type(order)
+    warehouse_id = (
+        Order.objects.filter(pk=order.pk).values_list("warehouse_id", flat=True).get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
+    order = Order.objects.select_for_update().get(pk=order.pk)
+    if order.warehouse_id != warehouse_id:
+        raise ValidationError("出库单仓库在释放库存期间发生变化，请重试。")
     released = Decimal("0")
     ctx, ctx_text = build_log_payload(order=order)
     logger.info("outbound.unallocate.begin %s", ctx_text, extra=ctx)
     _validate_allocation_can_be_released(order)
     tasks = (
-        WmsTask.objects
-        .select_for_update()
+        WmsTask.objects.select_for_update()
         .filter(task_type=TASK_TYPE_PICK)
         .filter(_task_source_q(order))  # 兼容旧数据
         .exclude(status__in=["CANCELLED", "COMPLETED"])
     )
 
     for task in tasks:
-        lines = WmsTaskLine.objects.select_for_update().filter(task=task).exclude(
-            status=WmsTaskLine.Status.CANCELLED
+        lines = (
+            WmsTaskLine.objects.select_for_update()
+            .filter(task=task)
+            .exclude(status=WmsTaskLine.Status.CANCELLED)
         )
         for tl in lines:
             remaining = Decimal(tl.qty_plan or 0)
@@ -1543,7 +1619,12 @@ def unallocate_for_order(order, *, by_user=None) -> Decimal:
         )
         task_ctx, task_text = build_log_payload(order=order, task=task)
         logger.info("outbound.unallocate.task_cancelled %s", task_text, extra=task_ctx)
-    logger.info("outbound.unallocate.completed %s released_qty=%s", ctx_text, released, extra=ctx)
+    logger.info(
+        "outbound.unallocate.completed %s released_qty=%s",
+        ctx_text,
+        released,
+        extra=ctx,
+    )
     return released
 
 
@@ -1571,9 +1652,7 @@ def _cancel_unstarted_demand_replenishments(order, *, by_user=None):
         if other_order_ids:
             extra.demand_order_ids = sorted(other_order_ids)
             extra.updated_by = by_user
-            extra.save(
-                update_fields=["demand_order_ids", "updated_by", "updated_at"]
-            )
+            extra.save(update_fields=["demand_order_ids", "updated_by", "updated_at"])
             continue
         if task.lines.filter(qty_done__gt=0).exists():
             continue
@@ -1599,7 +1678,13 @@ def cancel_order(order, *, by_user, reason="货主管理员取消订单"):
     """Cancel an unstarted order and release every outstanding allocation."""
 
     Order = type(order)
+    warehouse_id = (
+        Order.objects.filter(pk=order.pk).values_list("warehouse_id", flat=True).get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     order = Order.objects.select_for_update().get(pk=order.pk)
+    if order.warehouse_id != warehouse_id:
+        raise ValidationError("出库单仓库在取消期间发生变化，请重试。")
     if order.approval_status == "CANCELLED":
         raise ValidationError("订单已取消，请勿重复操作。")
     if order.is_closed:
@@ -1621,7 +1706,13 @@ def withdraw_order(order, *, by_user, reason="撤销提交"):
     """Return an unstarted submitted order to editable draft state."""
 
     Order = type(order)
+    warehouse_id = (
+        Order.objects.filter(pk=order.pk).values_list("warehouse_id", flat=True).get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     order = Order.objects.select_for_update().get(pk=order.pk)
+    if order.warehouse_id != warehouse_id:
+        raise ValidationError("出库单仓库在撤回期间发生变化，请重试。")
     if order.submit_status != "SUBMITTED":
         raise ValidationError("仅已提交订单可以撤回。")
     if order.approval_status == "CANCELLED" or order.is_closed:
@@ -1661,6 +1752,7 @@ def withdraw_order(order, *, by_user, reason="撤销提交"):
     )
     return order
 
+
 # 生成拣货任务草稿：把 RESERVE 任务升级为 DRAFT/READY
 @transaction.atomic
 def create_pick_task(order, task_status="DRAFT") -> WmsTask:
@@ -1673,8 +1765,8 @@ def create_pick_task(order, task_status="DRAFT") -> WmsTask:
 
     # 生成拣货任务行
     for d in demands:
-        remaining = d['demand']
-        qs = _fefo_details_qs(order.owner_id, order.warehouse_id, d['product_id'])
+        remaining = d["demand"]
+        qs = _fefo_details_qs(order.owner_id, order.warehouse_id, d["product_id"])
 
         for det in qs:
             if remaining <= 0:
@@ -1688,18 +1780,20 @@ def create_pick_task(order, task_status="DRAFT") -> WmsTask:
             # 生成任务行（指向 OutboundOrderLine，与 allocate_inventory 一致）
             WmsTaskLine.objects.create(
                 task=task,
-                product_id=d['product_id'],
+                product_id=d["product_id"],
                 from_location_id=det.location_id,
                 to_location_id=None,  # 集货位
                 qty_plan=alloc,
                 src_model="OutboundOrderLine",
-                src_id=d['line_id'],
+                src_id=d["line_id"],
                 rule_key="FEFO",
             )
             remaining -= alloc
 
         if remaining > 0:
-            raise ValidationError(f"库存不足，产品 {d['product_id']} 缺口 {remaining}。")
+            raise ValidationError(
+                f"库存不足，产品 {d['product_id']} 缺口 {remaining}。"
+            )
 
     task.status = task_status
     task.save(update_fields=["status"])
@@ -1712,6 +1806,7 @@ def create_pick_task(order, task_status="DRAFT") -> WmsTask:
     )
     return task
 
+
 # 放行拣货任务：DRAFT → READY
 @transaction.atomic
 def wave_release(task_ids: list[int]) -> int:
@@ -1720,12 +1815,18 @@ def wave_release(task_ids: list[int]) -> int:
     这通常是波次放行的操作，用于仓库确认后触发的操作。
     """
 
-    tasks = WmsTask.objects.filter(id__in=task_ids, task_type=TASK_TYPE_PICK, status="DRAFT")
+    tasks = WmsTask.objects.filter(
+        id__in=task_ids, task_type=TASK_TYPE_PICK, status="DRAFT"
+    )
 
     if not tasks.exists():
         raise ValidationError("没有找到符合条件的拣货任务。")
 
     updated_count = tasks.update(status="READY")  # 批量更新状态为 READY
-    logger.info("outbound.wave_release.completed task_count=%s task_ids=%s", updated_count, task_ids)
+    logger.info(
+        "outbound.wave_release.completed task_count=%s task_ids=%s",
+        updated_count,
+        task_ids,
+    )
 
     return updated_count

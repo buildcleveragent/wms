@@ -1,8 +1,8 @@
 # WMS 系统测试手册
 
-> 文档基线：2026-08-01 代码库现状  
+> 文档基线：2026-08-08 代码库现状
 > 适用范围：Django 后端、API、Console/Admin、PDA/货主端相关接口、POS、商城小程序、报表与计费  
-> 自动化基线：49 个 Python 测试文件，共 669 个测试用例
+> 自动化基线：88 个 Python 测试文件，共 958 个测试用例
 
 ## 1. 文档目的
 
@@ -48,25 +48,9 @@ pytest 配置位于 `pytest.ini`：
 
 ## 3. 当前自动化测试总览
 
-| 领域 | 文件数 | 用例数 | 主要覆盖 |
-| --- | ---: | ---: | --- |
-| 账号与权限 | 1 | 47 | 角色、范围、权限矩阵、登录审计、审计防篡改、同步命令 |
-| 通用 API | 1 | 3 | PDA APK 下载页和文件响应 |
-| 基础资料 | 1 | 4 | 员工、承运商仓库范围，客户租户唯一约束 |
-| 核心与数据治理 | 4 | 33 | 客户端清单、配置安全、数据准确性、业务数据清理、保留数据迁移 |
-| 标签、司机、库位、策略 | 4 | 13 | 应用注册、仓库派生、容器边界、司机幂等、策略模型 |
-| 商品 | 6 | 66 | 分类、商品 API、Excel 导入、仓库SKU编码序列、测试数据命令 |
-| 入库 | 3 | 27 | 正式/无订单入库、Excel、PDA、权限、幂等、回滚与并发 |
-| 库存 | 4 | 19 | 库存范围、修复、导出、快照、多库位原子过账、并发 |
-| 出库 | 6 | 59 | 标准/辅助出库、历史、权限、幂等、取消回滚、生产修复、并发 |
-| 任务 | 3 | 30 | 任务 API、扫描、范围、发布回滚、权限、过账并发 |
-| 计费 | 2 | 94 | 规则、计提、账期、开票精度与回滚、导出隔离、API、调度、并发 |
-| 报表 | 4 | 51 | 老板看板、PDA 吞吐、ETL 作废同步、运营 V2、导出上限 |
-| Console | 1 | 9 | 看板授权、操作台越权防护、商城商品批量配置 |
-| POS | 2 | 85 | 收银、支付、赊销、退货、作废、打印、租户隔离、统计、并发 |
-| 销售与商城 | 6 | 117 | 销售 API、商城、购物车、支付退款、对账命令、评价、后台批量上架 |
-| 跨模块业务闭环 | 1 | 12 | 入库到库存、出库、PDA、报表、计费完整链路 |
-| **合计** | **49** | **669** | |
+当前通过 `pytest --collect-only -q allapp` 收集到 958 个测试，分布在 88 个测试文件。发布门禁按账号与平台、仓储、结算与商城、POS、跨模块业务闭环五个分片执行；用例清单以 pytest 实时收集结果为准，不再在本节维护容易漂移的分模块静态计数。
+
+商品编码专项覆盖稳定编码写保护、货主级统一唯一性、多条码与外部标识历史、包装换算快照、有效期与退役、统一扫码解析、统一模糊搜索、一件代发商家编码语义、API/Admin/Excel 权限和 0008→0011 数据迁移演练。数据库并发与迁移测试必须使用 MySQL，不能用 SQLite 结果替代。
 
 ## 4. 各模块测试文件与覆盖内容
 
@@ -223,19 +207,21 @@ CI 配置位于 `.github/workflows/ci.yml`。
 `lint` job 执行：
 
 ```bash
-black --check --diff .
-isort --check-only --diff .
-ruff check .
-flake8 . --max-line-length=100 --extend-ignore=E203,W503
+python scripts/lint_ratchet.py
 bandit -r allapp/ -ll
 safety check --json
 ```
 
-其中 Bandit 和 Safety 当前使用容错执行，不会单独阻断流水线；Black、isort、Ruff 和 Flake8 会阻断。
+`lint_ratchet.py` 统一运行 Black、isort、Ruff 和 Flake8：本次新增或修改的
+Python 文件必须四项全绿；未修改文件只允许保留基线中的同一问题，任何新增问题或
+问题数量增加都会阻断。基线位于 `.ci/lint-baseline.json`，只能通过实际清理逐步
+减少，不能用更新基线掩盖新增债务。Bandit 和 Safety 当前仍使用容错执行。
+CI 还会把基线与上一提交比较；基线新增任何问题指纹同样会失败。
 
 ### 6.2 后端测试矩阵
 
-CI 启动 MySQL 8 和 Redis 7，先执行迁移和 `--collect-only`，再用 `pytest -n auto` 分五组运行：
+CI 启动 MySQL 8.0 和 Redis 7，先执行迁移和 `--collect-only`，再用
+`pytest -n auto` 分五组运行：
 
 - `platform`：accounts、api、baseinfo、core、driverapp、labeling、locations、products、strategies。
 - `warehouse`：inbound、inventory、outbound、tasking。
@@ -243,20 +229,25 @@ CI 启动 MySQL 8 和 Redis 7，先执行迁移和 `--collect-only`，再用 `py
 - `pos-sales`：整个 `pos` 目录（包括 POS 并发测试）。
 - `business-flows`：`allapp/test_business_flows.py`。
 
-五个主矩阵分组分别覆盖 166、135、271、85 和 12 个测试，共覆盖当前全部 669 个 Python 测试。`sale-mini-payment-gate` 另行运行 `npm run test:release`，重复验证商城关键 API、支付并发、Console、后台批量上架、纯单元测试和两个前端构建。
+五个主矩阵分组共同覆盖当前收集到的 958 个 Python 测试。`sale-mini-payment-gate` 另行运行 `npm run test:release`，重复验证商城关键 API、支付并发、Console、后台批量上架、纯单元测试和两个前端构建。
+
+此外，`test-serial` 在全新测试数据库上串行执行全仓用例，不使用
+`--reuse-db`、`--no-migrations` 或提前终止参数。`release-gate` 只有在 lint、
+五分片、全仓串行、覆盖率、PDA、货主端和商城门禁全部成功时才放行镜像构建。
 
 ### 6.3 CI 收集完整性
 
 本次审计已把 `pos-sales` 和 `settlement` 从显式测试文件改为应用目录，修复此前遗漏 POS 并发测试、商城 Admin 测试及新增测试文件的问题。因此：
 
-- 主矩阵会执行当前全部 669 个 Python 测试。
+- 主矩阵会执行当前全部 958 个 Python 测试。
 - 后续在 `allapp/pos` 或 `allapp/salesapp` 新增符合 pytest 命名规则的文件会自动纳入。
 - 仍应保留全仓 `--collect-only` 检查，防止其他应用新增文件后没有同步加入对应矩阵目录。
 
 ### 6.4 覆盖率与后续门禁
 
 - 五个主矩阵分片分别生成 coverage 数据。
-- `coverage-aggregate` 合并分片并执行 `coverage report --fail-under=70`。
+- `coverage-aggregate` 必须收到恰好五份 coverage 数据后才能合并，并执行
+  `coverage report --fail-under=70`；缺少任一分片不得容错通过。
 - 安全 job 执行 Trivy 文件系统扫描和 OWASP Dependency Check。
 - 主分支 push 在覆盖率通过后构建 Docker 镜像，再部署 staging。
 
@@ -308,7 +299,7 @@ python manage.py makemigrations --check --dry-run
 python -m pytest --collect-only -q allapp
 ```
 
-预期最后一条收集 669 个测试。用例数发生变化时，应同步更新本手册的基线统计和 CI 覆盖说明。
+预期最后一条收集 958 个测试。用例数发生变化时，应同步更新本手册的基线统计和 CI 覆盖说明。
 
 ### 7.4 本地隔离 MySQL 测试库
 
@@ -323,7 +314,8 @@ cp .env.test.example .env.test.local
 ./docker/run_mysql_tests.sh -q allapp/outbound/tests.py
 ```
 
-脚本启动 MySQL 8.4、等待健康检查，然后使用 `pytest --reuse-db` 执行测试。
+脚本启动 MySQL 8.0 和 Redis 7、等待两者健康检查，然后使用
+`pytest --reuse-db` 执行本地快速回归。
 它会强制检查 `APP_ENV=test`、测试库名称、测试用户、回环地址和 33306
 端口，任一条件不符都会拒绝执行。运行 pytest 或 `manage.py test` 时，
 Django 会在文件存在的情况下加载 `.env.test.local`；其他命令不会加载它。
@@ -371,7 +363,7 @@ APP_ENV=test SECRET_KEY=test-secret-key python -m pytest -q \
 
 当前基线应为 29 passed。
 
-### 8.2 全量 669 个测试
+### 8.2 全量 958 个测试
 
 ```bash
 python -m pytest -q --tb=short allapp
@@ -380,7 +372,7 @@ python -m pytest -q --tb=short allapp
 并行执行：
 
 ```bash
-python -m pytest -n auto -q --tb=short --maxfail=1 allapp
+python -m pytest -n auto -q --tb=short allapp
 ```
 
 首次排查失败时建议先不用 `-n auto`，以便获得稳定、完整的错误堆栈。
@@ -431,18 +423,18 @@ python -m pytest -n auto -q allapp \
   --cov-fail-under=70
 ```
 
-HTML 报告位于 `htmlcov/index.html`。本地全量命令和当前 CI 主矩阵都会把 669 个测试计入覆盖率。
+HTML 报告位于 `htmlcov/index.html`。本地全量命令和当前 CI 主矩阵都会把 958 个测试计入覆盖率。
 
 ### 8.7 代码质量和安全检查
 
 ```bash
-black --check --diff .
-isort --check-only --diff .
-ruff check .
-flake8 . --max-line-length=100 --extend-ignore=E203,W503
+python scripts/lint_ratchet.py
 bandit -r allapp/ -ll
 pre-commit run --all-files
 ```
+
+需要查看某个新文件的具体问题时，可单独运行 Black、isort、Ruff 和 Flake8；
+正式门禁和 pre-commit 均以同一递减检查脚本为准。
 
 ## 9. 测试数据与隔离原则
 
@@ -495,13 +487,15 @@ python manage.py validate_sale_mini_data_accuracy --fail-on-issues --limit 20
 
 ### 10.3 发布通过标准
 
-- 669 个 Python 测试全部通过（其中包括 POS 并发专项）。
+- 958 个 Python 测试全部通过（其中包括商品标识迁移和 POS 并发专项）。
 - `npm run test:release` 通过。
 - 覆盖率不低于 70%。
 - `manage.py check`、迁移漂移检查、数据准确性检查通过。
 - 没有新增未处理的高危安全问题。
 - 核心人工闭环有执行人、环境、版本、结果和证据。
 - 数据库迁移、备份、恢复和回滚至少在预生产环境演练一次。
+- 浏览器、PDA、POS 和真实扫码枪的固定清单全部留存证据；证据模板见
+  `docs/release-device-smoke-evidence-template.md`。
 
 ## 11. 结果判读与常见问题
 

@@ -28,6 +28,7 @@ from allapp.inventory.models import (
     ReviewDifference,
 )
 from allapp.locations.models import Warehouse
+from allapp.products.identifier_lookup import product_search_q
 from allapp.tasking.models import WmsTask
 
 from .boss_contract import build_meta, warning
@@ -283,9 +284,7 @@ class BossInventoryDetailListApi(BossScopedApiMixin, APIView):
         search = (request.query_params.get("search") or "").strip()
         if search:
             qs = qs.filter(
-                Q(product__name__icontains=search)
-                | Q(product__code__icontains=search)
-                | Q(product__sku__icontains=search)
+                product_search_q(search, product_field="product_id")
                 | Q(owner__name__icontains=search)
                 | Q(location__code__icontains=search)
             )

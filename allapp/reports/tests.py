@@ -4,8 +4,8 @@ from io import StringIO
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.core.management import call_command
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -37,7 +37,11 @@ from allapp.inventory.models import (
 )
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
-from allapp.products.models import Product, ProductUom
+from allapp.products.identifier_services import (
+    add_product_barcode,
+    set_identifier_active,
+)
+from allapp.products.models import Product, ProductBarcode, ProductUom
 from allapp.reports.models import ReportSnapshot
 from allapp.tasking.models import WmsTask
 
@@ -782,6 +786,30 @@ class BossDashboardApiTests(TestCase):
         self.assertIsNone(response.data["next_page"])
         self.assertEqual(response.data["results"][0]["base_unit"], self.uom_a.code)
         self.assertEqual(response.data["results"][0]["warehouse_id"], self.warehouse.id)
+
+    def test_boss_inventory_detail_searches_only_effective_identifier_history(self):
+        historical = add_product_barcode(
+            product=self.product_a,
+            barcode="BOSS-HISTORICAL-CARTON",
+            barcode_type=ProductBarcode.BarcodeType.OTHER,
+        )
+
+        response = self.client.get(
+            "/api/reports/boss/inventory/details/",
+            {"search": "historical-cart"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["product_id"], self.product_a.id)
+
+        set_identifier_active(historical, False)
+        retired_response = self.client.get(
+            "/api/reports/boss/inventory/details/",
+            {"search": "historical-cart"},
+        )
+        self.assertEqual(retired_response.status_code, 200)
+        self.assertEqual(retired_response.data["count"], 0)
 
     def test_historical_inventory_never_falls_back_to_current_inventory(self):
         historical_date = self.today - datetime.timedelta(days=1)

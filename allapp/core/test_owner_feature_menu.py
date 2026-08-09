@@ -3,10 +3,10 @@ from pathlib import Path
 
 from django.test import SimpleTestCase
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLIENT_ROOT = REPO_ROOT / "wmsownersale"
 FEATURE_PAGE = CLIENT_ROOT / "pages" / "features" / "index.vue"
+OWNER_ACCESS = CLIENT_ROOT / "utils" / "ownerAccess.js"
 PAGES_MANIFEST = CLIENT_ROOT / "pages.json"
 
 EXPECTED_FEATURE_ROUTES = {
@@ -32,7 +32,8 @@ def feature_items(source):
 class OwnerFeatureMenuContractTests(SimpleTestCase):
     def setUp(self):
         self.source = FEATURE_PAGE.read_text(encoding="utf-8")
-        self.items = feature_items(self.source)
+        self.menu_source = OWNER_ACCESS.read_text(encoding="utf-8")
+        self.items = feature_items(self.menu_source)
 
     def test_every_feature_route_is_registered_and_has_a_component(self):
         manifest_source = PAGES_MANIFEST.read_text(encoding="utf-8")
@@ -49,7 +50,9 @@ class OwnerFeatureMenuContractTests(SimpleTestCase):
         self.assertTrue(feature_routes.issubset(declared_routes))
         for route in feature_routes:
             with self.subTest(route=route):
-                self.assertTrue((CLIENT_ROOT / f"{route.removeprefix('/')}.vue").is_file())
+                self.assertTrue(
+                    (CLIENT_ROOT / f"{route.removeprefix('/')}.vue").is_file()
+                )
 
     def test_feature_keys_and_paths_are_unique(self):
         keys = [key for key, _ in self.items]
@@ -74,21 +77,21 @@ class OwnerFeatureMenuContractTests(SimpleTestCase):
 
         for route in obsolete_routes:
             with self.subTest(route=route):
-                self.assertNotIn(route, self.source)
+                self.assertNotIn(route, self.menu_source)
 
     def test_role_and_capability_filters_use_the_auth_store(self):
         self.assertIn("const auth = useAuth()", self.source)
-        self.assertIn("auth.isOwnerSalesperson", self.source)
-        self.assertIn("auth.isOwnerManager", self.source)
-        self.assertIn(
-            "auth.capabilities?.can_view_owner_operations",
-            self.source,
-        )
+        self.assertIn("buildOwnerMenu", self.source)
+        self.assertIn("roles: auth.roles", self.source)
+        self.assertIn("capabilities: auth.capabilities", self.source)
+        self.assertIn("roleSet.has('owner_salesperson')", self.menu_source)
+        self.assertIn("roleSet.has('owner_manager')", self.menu_source)
+        self.assertIn("capabilities?.can_view_owner_operations", self.menu_source)
         self.assertNotIn("getStorageSync('isAdmin')", self.source)
 
     def test_report_tab_and_regular_pages_use_the_correct_navigation_methods(self):
         self.assertRegex(
-            self.source,
+            self.menu_source,
             r"key: 'sales_reports'.*?path: '/pages/reports/index'.*?navigation: 'tab'",
         )
         self.assertIn("if (item.navigation === 'tab')", self.source)

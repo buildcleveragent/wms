@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
+from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -12,13 +12,13 @@ from django.utils import timezone
 
 from allapp.core.choices import ZoneType
 from allapp.core.models import DocSequence
+from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.inventory.models import InventoryDetail
-from allapp.locations.models import Warehouse
 from allapp.tasking.models import (
     ReplenishLineExtra,
-    ReplenishTaskExtra,
     ReplenishmentPolicy,
     ReplenishmentRequest,
+    ReplenishTaskExtra,
     TaskAssignment,
     TaskScanLog,
     TaskStatusLog,
@@ -298,7 +298,8 @@ def _create_task(
     if auto_release:
         _release_task(task, by_user=by_user)
     logger.info(
-        "replenishment.task.created task_id=%s trigger=%s policy_id=%s requested=%s planned=%s shortage=%s",
+        "replenishment.task.created task_id=%s trigger=%s policy_id=%s "
+        "requested=%s planned=%s shortage=%s",
         task.pk,
         trigger,
         policy.pk,
@@ -311,6 +312,12 @@ def _create_task(
 
 @transaction.atomic
 def evaluate_policy(policy_id: int, *, by_user=None, force: bool = False):
+    warehouse_id = (
+        ReplenishmentPolicy.objects.filter(pk=policy_id)
+        .values_list("warehouse_id", flat=True)
+        .get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     policy = (
         ReplenishmentPolicy.objects.select_for_update()
         .select_related(
@@ -318,7 +325,8 @@ def evaluate_policy(policy_id: int, *, by_user=None, force: bool = False):
         )
         .get(pk=policy_id, is_active=True)
     )
-    Warehouse.objects.select_for_update().get(pk=policy.warehouse_id)
+    if policy.warehouse_id != warehouse_id:
+        raise ValidationError("补货策略仓库在评估期间发生变化，请重试。")
     projected = q3(target_available(policy) + in_transit_qty(policy))
     if not force and projected >= q3(policy.min_qty):
         return {"created": False, "reason": "ABOVE_MIN", "projected_qty": projected}
@@ -376,7 +384,7 @@ def evaluate_policies(
 def create_demand_tasks(order, shortages: list[dict], *, by_user=None) -> list[WmsTask]:
     """Create or release tasks that cover an outbound pick-face shortage."""
 
-    Warehouse.objects.select_for_update().get(pk=order.warehouse_id)
+    lock_warehouses_for_inventory_write(order.warehouse_id)
     tasks: list[WmsTask] = []
     for shortage in shortages:
         policy = (
@@ -455,6 +463,12 @@ def create_demand_tasks(order, shortages: list[dict], *, by_user=None) -> list[W
 
 @transaction.atomic
 def approve_request(request_id: int, *, by_user, note: str = ""):
+    warehouse_id = (
+        ReplenishmentRequest.objects.filter(pk=request_id)
+        .values_list("warehouse_id", flat=True)
+        .get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     request = (
         ReplenishmentRequest.objects.select_for_update()
         .select_related("owner", "warehouse", "product", "target_location")
@@ -483,7 +497,8 @@ def approve_request(request_id: int, *, by_user, note: str = ""):
     )
     if policy is None:
         raise ValidationError("该商品与目标拣货位尚未配置补货策略。")
-    Warehouse.objects.select_for_update().get(pk=request.warehouse_id)
+    if request.warehouse_id != warehouse_id:
+        raise ValidationError("补货申请仓库在审核期间发生变化，请重试。")
     rounded = _round_up_multiple(request.requested_qty, _package_multiple(policy))
     maximum = source_available(policy)
     if maximum < rounded:

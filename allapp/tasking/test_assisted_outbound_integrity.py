@@ -11,7 +11,13 @@ from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Customer, Owner
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.outbound.models import OutboundOrder
-from allapp.products.models import Product, ProductUom
+from allapp.products.identifier_services import add_product_barcode
+from allapp.products.models import (
+    Product,
+    ProductBarcode,
+    ProductPackage,
+    ProductUom,
+)
 from allapp.tasking import services
 from allapp.tasking.models import (
     TaskAssignment,
@@ -24,8 +30,8 @@ from allapp.tasking.views import (
     TaskAssignmentViewSet,
     TaskScanLogViewSet,
     TaskStatusLogViewSet,
-    WmsTaskViewSet,
     WmsTaskLineViewSet,
+    WmsTaskViewSet,
 )
 
 
@@ -191,6 +197,91 @@ class PickScanIntegrityTests(TestCase):
         self.assertEqual(result["resolved"]["effective_qty"], Decimal("8.000"))
         self.assertEqual(result["resolved"]["uom_name"], "箱")
 
+    def test_real_package_and_other_barcodes_apply_snapshot_and_remain_repeatable(self):
+        carton_uom = ProductUom.objects.create(
+            code="PICK-INT-CTN", name="箱", is_active=True
+        )
+        package = ProductPackage.objects.create(
+            product=self.product,
+            uom=carton_uom,
+            qty_in_base=12,
+        )
+        package_barcode = add_product_barcode(
+            product=self.product,
+            barcode="PICK-REAL-PACKAGE",
+            barcode_type=ProductBarcode.BarcodeType.PACKAGE,
+            package=package,
+        )
+        other_barcode = add_product_barcode(
+            product=self.product,
+            barcode="PICK-REAL-OTHER",
+            barcode_type=ProductBarcode.BarcodeType.OTHER,
+        )
+        task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no="PICK-INTEGRITY-REAL-IDENTIFIER",
+            task_type=WmsTask.TaskType.PICK,
+            status=WmsTask.Status.RELEASED,
+        )
+        line = WmsTaskLine.objects.create(
+            task=task,
+            product=self.product,
+            from_location=self.location_1,
+            qty_plan=Decimal("40.000"),
+            status=WmsTaskLine.Status.RELEASED,
+        )
+
+        package_result = services.scan_task(
+            task.id,
+            package_barcode.barcode,
+            2,
+            location_id=self.location_1.id,
+            by_user=self.user,
+            client_seq="real-package",
+        )
+        explicit_result = services.scan_task(
+            task.id,
+            f"{package_barcode.barcode}*5",
+            1,
+            location_id=self.location_1.id,
+            by_user=self.user,
+            client_seq="real-package-explicit",
+        )
+        services.scan_task(
+            task.id,
+            other_barcode.barcode,
+            1,
+            location_id=self.location_1.id,
+            by_user=self.user,
+            client_seq="real-other-1",
+        )
+        services.scan_task(
+            task.id,
+            other_barcode.barcode,
+            1,
+            location_id=self.location_1.id,
+            by_user=self.user,
+            client_seq="real-other-2",
+        )
+
+        line.refresh_from_db()
+        package_scan = TaskScanLog.objects.get(pk=package_result["scan_id"])
+        other_scans = TaskScanLog.objects.filter(
+            task=task,
+            code_type=ProductBarcode.BarcodeType.OTHER,
+        )
+        self.assertEqual(line.qty_done, Decimal("31.000"))
+        self.assertEqual(package_result["resolved"]["code_type"], "PACKAGE")
+        self.assertEqual(package_result["resolved"]["pack_qty"], Decimal("12"))
+        self.assertEqual(package_result["resolved"]["effective_qty"], Decimal("24"))
+        self.assertEqual(explicit_result["resolved"]["pack_qty"], Decimal("5"))
+        self.assertEqual(explicit_result["resolved"]["effective_qty"], Decimal("5"))
+        self.assertEqual(package_scan.product_package_id, package.pk)
+        self.assertEqual(package_scan.qty_base_delta, Decimal("24.000000"))
+        self.assertEqual(other_scans.count(), 2)
+        self.assertFalse(other_scans.exclude(label_key__isnull=True).exists())
+
     def test_manual_pick_quantity_can_be_corrected_after_saving_zero(self):
         services.adjust_pick_line_qty(
             self.task.id,
@@ -248,7 +339,9 @@ class TaskingRelatedScopeTests(TestCase):
         self.assisted_user = get_user_model().objects.create_user(
             username="task-scope-assisted", warehouse=self.warehouse
         )
-        self.unbound_user = get_user_model().objects.create_user(username="task-scope-none")
+        self.unbound_user = get_user_model().objects.create_user(
+            username="task-scope-none"
+        )
         UserRoleScope.objects.create(
             user=self.user,
             role=UserRoleScope.Role.WAREHOUSE_MANAGER,
@@ -372,7 +465,9 @@ class TaskingRelatedScopeTests(TestCase):
                 )
 
     @override_settings(OUTBOUND_LEGACY_AUTHZ_MODE="enforce")
-    def test_complete_assisted_operator_without_view_permissions_sees_only_assisted_source(self):
+    def test_complete_assisted_operator_without_view_permissions_sees_only_assisted_source(
+        self,
+    ):
         cases = (
             (WmsTaskViewSet, self.task.id),
             (WmsTaskLineViewSet, self.line.id),
@@ -430,9 +525,7 @@ class TaskingRelatedScopeTests(TestCase):
         )
         force_authenticate(request, user=self.user)
 
-        response = WmsTaskViewSet.as_view({"post": "scan"})(
-            request, pk=self.task.id
-        )
+        response = WmsTaskViewSet.as_view({"post": "scan"})(request, pk=self.task.id)
 
         self.assertEqual(response.status_code, 403)
 
@@ -574,7 +667,9 @@ class TaskingRoleCapabilityApiTests(TestCase):
             status=WmsTask.Status.RELEASED,
         )
         TaskAssignment.objects.create(task=self.own_task, assignee=self.operator)
-        TaskAssignment.objects.create(task=self.other_task, assignee=self.other_operator)
+        TaskAssignment.objects.create(
+            task=self.other_task, assignee=self.other_operator
+        )
         self.factory = APIRequestFactory()
 
     def _request(self, method, path, data=None, *, user):
@@ -590,14 +685,18 @@ class TaskingRoleCapabilityApiTests(TestCase):
             else response.data
         )
 
-    def test_boss_and_owner_manager_are_denied_raw_task_api_even_with_view_permission(self):
+    def test_boss_and_owner_manager_are_denied_raw_task_api_even_with_view_permission(
+        self,
+    ):
         view = WmsTaskViewSet.as_view({"get": "list"})
         for user in (self.boss, self.owner_manager):
             with self.subTest(user=user.username):
                 response = view(self._request("get", "/api/tasking/tasks/", user=user))
                 self.assertEqual(response.status_code, 403)
 
-    def test_operator_sees_only_own_or_pool_tasks_and_cannot_operate_other_assignment(self):
+    def test_operator_sees_only_own_or_pool_tasks_and_cannot_operate_other_assignment(
+        self,
+    ):
         list_view = WmsTaskViewSet.as_view({"get": "list"})
         response = list_view(
             self._request("get", "/api/tasking/tasks/", user=self.operator)

@@ -59,6 +59,20 @@ class EnvironmentLoadingTests(SimpleTestCase):
                 self.assertEqual(os.environ["WMS_ENV_PRIORITY"], "base")
                 self.assertNotIn("WMS_TEST_ONLY", os.environ)
 
+    def test_explicit_test_app_environment_loads_local_test_environment(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_env, local_test_env = self._env_files(Path(tmpdir))
+            with patch.dict(os.environ, {"APP_ENV": "test"}, clear=True):
+                load_environment(
+                    base_env,
+                    local_test_env,
+                    ["python", "manage.py", "validate_sale_mini_data_accuracy"],
+                )
+
+                self.assertEqual(os.environ["WMS_ENV_PRIORITY"], "test")
+                self.assertEqual(os.environ["WMS_TEST_ONLY"], "test-value")
+                self.assertEqual(os.environ["WMS_BASE_ONLY"], "base-value")
+
     def test_django_test_command_is_detected(self):
         self.assertTrue(is_test_command(["python", "manage.py", "test"]))
         self.assertFalse(is_test_command(["python", "manage.py", "check"]))

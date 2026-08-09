@@ -1,5 +1,6 @@
 import logging
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import HttpResponse, JsonResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, status, viewsets
@@ -17,9 +18,20 @@ from rest_framework.response import Response
 from allapp.accounts.access import AccessScope
 
 from .excel_import import ProductImportConflictError, ProductImportFileError
-from .models import Product, ProductPackage
+from .identifier_lookup import filter_by_product_search
+from .identifier_services import (
+    IdentifierConcurrencyError,
+    set_barcode_primary,
+    set_external_primary,
+    set_identifier_active,
+)
+from .models import Product, ProductBarcode, ProductExternalIdentifier, ProductPackage
 from .permissions import can_manage_all_owner_products, can_view_all_owner_products
-from .serializers import ProductSerializer
+from .serializers import (
+    ProductBarcodeSerializer,
+    ProductExternalIdentifierSerializer,
+    ProductSerializer,
+)
 from .views_excel import import_product_file, product_template_response
 
 # ✅ 补上资源导入（若资源缺失则统一给出 501 提示，避免 NameError）
@@ -99,12 +111,21 @@ class OwnerScopedMixin:
         serializer.save(owner_id=owner_id)
 
 
+class ProductActiveIdentifierSearchFilter(filters.SearchFilter):
+    def filter_queryset(self, request, queryset, view):
+        return filter_by_product_search(
+            queryset,
+            request.query_params.get(self.search_param),
+            product_field="pk",
+        )
+
+
 class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
     queryset = Product.objects.all().select_related("owner")
     serializer_class = ProductSerializer
     filter_backends = [
         DjangoFilterBackend,
-        filters.SearchFilter,
+        ProductActiveIdentifierSearchFilter,
         filters.OrderingFilter,
     ]
     filterset_fields = {
@@ -115,7 +136,7 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
         "batch_control": ["exact"],
         "expiry_control": ["exact"],
     }
-    search_fields = ("code", "name", "unit_barcode", "carton_barcode", "external_code")
+    search_fields = ("code", "sku", "name", "spec")
     ordering_fields = ("owner", "code", "name", "updated_at")
     ordering = ("owner", "code")
 
@@ -281,6 +302,100 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
 
 
 logger = logging.getLogger(__name__)
+
+
+class IdentifierViewSetBase(OwnerScopedMixin, viewsets.ModelViewSet):
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
+    filterset_fields = {
+        "owner": ["exact"],
+        "product": ["exact"],
+        "is_active": ["exact"],
+    }
+    ordering = ("-updated_at", "-id")
+
+    def perform_create(self, serializer):
+        product = serializer.validated_data["product"]
+        allowed = self.has_all_owner_scope()
+        if not allowed:
+            owner_id = AccessScope.for_user(self.request.user).single_owner_id
+            allowed = owner_id == product.owner_id
+        if not allowed:
+            raise PermissionDenied("无权维护该货主的商品标识。")
+        serializer.save()
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        set_identifier_active(self.get_object(), False)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(methods=["POST"], detail=True, url_path="retire")
+    def retire(self, request, pk=None):
+        record = set_identifier_active(self.get_object(), False)
+        return Response(self.get_serializer(record).data)
+
+    @action(methods=["POST"], detail=True, url_path="reactivate")
+    def reactivate(self, request, pk=None):
+        record = set_identifier_active(self.get_object(), True)
+        return Response(self.get_serializer(record).data)
+
+
+class ProductBarcodeViewSet(IdentifierViewSetBase):
+    queryset = ProductBarcode.objects.select_related("owner", "product", "package__uom")
+    serializer_class = ProductBarcodeSerializer
+    search_fields = ("barcode", "normalized_value", "product__code", "product__name")
+    filterset_fields = {
+        **IdentifierViewSetBase.filterset_fields,
+        "barcode_type": ["exact"],
+        "package": ["exact"],
+        "is_primary": ["exact"],
+    }
+
+    @action(methods=["POST"], detail=True, url_path="set-primary")
+    def set_primary(self, request, pk=None):
+        try:
+            record = set_barcode_primary(self.get_object())
+        except IdentifierConcurrencyError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.messages}, status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response(self.get_serializer(record).data)
+
+
+class ProductExternalIdentifierViewSet(IdentifierViewSetBase):
+    queryset = ProductExternalIdentifier.objects.select_related("owner", "product")
+    serializer_class = ProductExternalIdentifierSerializer
+    search_fields = (
+        "source_system",
+        "external_code",
+        "normalized_value",
+        "product__code",
+        "product__name",
+    )
+    filterset_fields = {
+        **IdentifierViewSetBase.filterset_fields,
+        "source_system": ["exact"],
+        "is_primary": ["exact"],
+    }
+
+    @action(methods=["POST"], detail=True, url_path="set-primary")
+    def set_primary(self, request, pk=None):
+        try:
+            record = set_external_primary(self.get_object())
+        except IdentifierConcurrencyError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except DjangoValidationError as exc:
+            return Response(
+                {"detail": exc.messages}, status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response(self.get_serializer(record).data)
 
 
 def get_product_details(request, product_id):

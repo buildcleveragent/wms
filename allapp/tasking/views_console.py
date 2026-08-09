@@ -31,6 +31,7 @@ from allapp.outbound.authz import (
     require_legacy_action,
     strict_pick_queryset,
 )
+from allapp.products.identifier_lookup import product_search_q
 from .models import TaskAssignment, WmsTask, WmsTaskLine
 from allapp.tasking import services as task_services
 
@@ -452,8 +453,7 @@ class TaskLineWorkListView(LoginRequiredMixin, TemplateView):
         if search:
             qs = qs.filter(
                 Q(task__task_no__icontains=search)
-                | Q(product__name__icontains=search)
-                | Q(product__sku__icontains=search)
+                | product_search_q(search)
             )
         return qs
 

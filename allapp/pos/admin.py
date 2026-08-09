@@ -5,6 +5,8 @@ import json
 from django.contrib import admin
 from django.urls import NoReverseMatch, reverse
 from django.utils.html import format_html, format_html_join
+
+from allapp.products.identifier_lookup import UnifiedProductAdminSearchMixin
 from django.utils.text import Truncator
 
 from .models import (
@@ -422,7 +424,9 @@ class PosSaleAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 
 
 @admin.register(PosSaleLine)
-class PosSaleLineAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
+class PosSaleLineAdmin(
+    UnifiedProductAdminSearchMixin, ReadOnlyAdminMixin, admin.ModelAdmin
+):
     list_display = (
         "sale",
         "line_no",
@@ -676,7 +680,9 @@ class PosReturnAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
 
 
 @admin.register(PosReturnLine)
-class PosReturnLineAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
+class PosReturnLineAdmin(
+    UnifiedProductAdminSearchMixin, ReadOnlyAdminMixin, admin.ModelAdmin
+):
     list_display = (
         "return_order",
         "line_no",

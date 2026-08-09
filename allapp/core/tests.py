@@ -64,6 +64,36 @@ class PrintConfigApiTests(TestCase):
         )
         self.client = APIClient()
         self.client.force_authenticate(self.user)
+        # Data migrations seed these rows in a fresh deployment, but test
+        # database flushes (and --reuse-db across suites) intentionally do not
+        # replay RunPython operations.  Keep this API test self-contained.
+        PrintConfig.objects.update_or_create(
+            code="pos_dot_241_93",
+            defaults={
+                "name": "POS 默认针式三等分",
+                "module": PrintConfig.Module.POS_SALE,
+                "is_default": True,
+                "is_active": True,
+                "sort_order": 10,
+            },
+        )
+        PrintConfig.objects.update_or_create(
+            code="outbound_dot_241_93",
+            defaults={
+                "name": "出库单默认针式三等分",
+                "module": PrintConfig.Module.OUTBOUND,
+                "print_method": PrintConfig.PrintMethod.BACKEND_HTML,
+                "printer_type": PrintConfig.PrinterType.DOT_MATRIX,
+                "paper_mode": "dot_241_93",
+                "paper_width": "9.5in",
+                "paper_height": "3.6667in",
+                "page_size_css": "9.5in 3.6667in",
+                "body_font_size": "13px",
+                "is_default": True,
+                "is_active": True,
+                "sort_order": 10,
+            },
+        )
 
     def test_configuration_endpoints_require_authentication(self):
         anonymous = APIClient()
@@ -731,7 +761,8 @@ class DataAccuracyCommandTests(TestCase):
             commands = (output_dir / "commands.sh").read_text(encoding="utf-8")
             self.assertIn(
                 (
-                    f"python manage.py inventory_generate_snapshot --date {self.period.end_date.isoformat()} "
+                    "python manage.py inventory_generate_snapshot "
+                    f"--date {self.period.end_date.isoformat()} "
                     f"--owner {self.owner.id} --warehouse {self.warehouse.id}"
                 ),
                 commands,

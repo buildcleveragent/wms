@@ -3,7 +3,6 @@ from pathlib import Path
 
 from django.test import SimpleTestCase
 
-
 ROOT = Path(__file__).resolve().parents[2]
 CLIENT_ROOT = ROOT / "wmsownersale"
 
@@ -17,8 +16,14 @@ class OwnerOrderIdempotencyClientContractTests(SimpleTestCase):
 
         self.assertIn("const submitting = ref(false)", source)
         self.assertIn("if (submitting.value) return", source)
-        self.assertIn(":loading=\"submitting\"", source)
-        self.assertIn("!submitting.value", source)
+        self.assertIn(':loading="submitting"', source)
+        self.assertIn(':disabled="!canSubmit"', source)
+        self.assertRegex(
+            source,
+            re.compile(
+                r"const canSubmit = computed\(\(\) => \{.*?submitting\.value", re.DOTALL
+            ),
+        )
         self.assertIn("finally", source)
         self.assertIn("submitting.value = false", source)
         self.assertIn("cart.ensureIdempotencyKey()", source)
@@ -53,7 +58,7 @@ class OwnerOrderIdempotencyClientContractTests(SimpleTestCase):
         source = self.read("pages/orders/cart.vue")
         submit_block = source[source.index("async function submitOrder") :]
         conflict_block = submit_block[
-            submit_block.index("=== 409") : submit_block.index("const duplicateMsg")
+            submit_block.index("=== 409") : submit_block.index("const duplicateMessage")
         ]
 
         self.assertIn("请返回并重新开单", conflict_block)

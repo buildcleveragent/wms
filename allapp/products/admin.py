@@ -16,7 +16,15 @@ from .category_backfill import (
     import_category_backfill,
     scoped_products,
 )
-from .models import ( ProductCategory, Brand, ProductUom, Product, ProductPackage,)
+from .identifier_services import (
+    add_external_identifier, add_product_barcode, set_barcode_primary,
+    set_external_primary, set_identifier_active,
+)
+from .identifier_lookup import filter_by_product_search
+from .models import (
+    ProductCategory, Brand, ProductUom, Product, ProductPackage,
+    ProductBarcode, ProductExternalIdentifier,
+)
 from allapp.core.admin_base import AdvancedAdminBase, DeletedStatusFilter,BaseReadonlyAdmin
 
 
@@ -86,13 +94,29 @@ class ProductPackageInline(admin.TabularInline):
         "is_pickable", "is_purchase_default", "is_sales_default",
         "sort_order",
     )
-    readonly_fields = ("volume_m3_status",)
+    readonly_fields = ("volume_m3_status", "barcode")
+
+
+class ProductBarcodeHistoryInline(admin.TabularInline):
+    model = ProductBarcode
+    extra = 0
+    can_delete = False
+    fields = ("barcode", "barcode_type", "package", "qty_in_base", "is_primary", "valid_from", "valid_to", "is_active")
+    readonly_fields = fields
+
+
+class ProductExternalIdentifierHistoryInline(admin.TabularInline):
+    model = ProductExternalIdentifier
+    extra = 0
+    can_delete = False
+    fields = ("source_system", "external_code", "is_primary", "valid_from", "valid_to", "is_active")
+    readonly_fields = fields
 
 @admin.register(Product)
 class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     admin_priority = 1
     change_list_template = "admin/products/product/change_list.html"
-    inlines = [ProductPackageInline]
+    inlines = [ProductPackageInline, ProductBarcodeHistoryInline, ProductExternalIdentifierHistoryInline]
     list_display = (
         "owner","name","spec","sku","code", "gtin", "unit_barcode", "carton_barcode",
         "carton_package",
@@ -110,7 +134,7 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
 
     list_display_links = ("name",)
     
-    search_fields = ("code", "name", "spec","sku", "gtin", "unit_barcode", "carton_barcode", "external_code")
+    search_fields = ("code", "name", "spec", "sku")
     autocomplete_fields = (
         "owner", "category", "brand", "base_uom", "replenish_uom", "carton_package",
     )
@@ -118,7 +142,7 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         "owner", "category", "brand", "base_uom", "replenish_uom", "carton_package",
     )
     ordering = ("owner", "code")
-    readonly_fields = ("sku",)
+    readonly_fields = ("sku", "gtin", "unit_barcode", "carton_barcode", "external_code")
     fields = (
         "owner","name","spec","sku","code", "gtin", "unit_barcode", "carton_barcode",
         "carton_package",
@@ -128,6 +152,15 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         ("batch_control","expiry_control",), "expiry_basis","shelf_life_days","pick_policy",
         "product_image", "material_quality",
     )
+
+    def get_search_results(self, request, queryset, search_term):
+        """Use the same full-phrase, current-identifier search as the API."""
+        return (
+            filter_by_product_search(
+                queryset, search_term, product_field="pk"
+            ),
+            False,
+        )
 
     def get_urls(self):
         custom_urls = [
@@ -262,6 +295,7 @@ class ProductPackageAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         "is_pickable", "is_purchase_default", "is_sales_default",
         "sort_order", "is_active",
     )
+    readonly_fields = ("barcode",)
 
     formfield_overrides = {
         models.DecimalField: {"widget": forms.NumberInput(attrs={"style": "width:80px;"})},
@@ -271,3 +305,98 @@ class ProductPackageAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         css = {
             "all": ("admin_custom.css",)  # 放在 STATIC 下
         }
+
+
+@admin.register(ProductBarcode)
+class ProductBarcodeAdmin(admin.ModelAdmin):
+    list_display = ("owner", "product", "barcode", "barcode_type", "package", "qty_in_base", "is_primary", "is_active", "valid_from", "valid_to")
+    list_filter = ("owner", "barcode_type", "is_primary", "is_active")
+    search_fields = ("barcode", "normalized_value", "product__code", "product__name")
+    autocomplete_fields = ("product", "package")
+    readonly_fields = ("owner", "normalized_value", "qty_in_base")
+    actions = ("make_primary", "retire", "reactivate")
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = list(super().get_readonly_fields(request, obj))
+        if obj:
+            fields.extend(["product", "barcode", "barcode_type", "package", "is_primary"])
+        return tuple(fields)
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            saved = add_product_barcode(
+                product=obj.product, barcode=obj.barcode,
+                barcode_type=obj.barcode_type, package=obj.package,
+                is_primary=obj.is_primary, valid_from=obj.valid_from,
+                valid_to=obj.valid_to,
+            )
+            obj.pk = saved.pk
+            obj._state.adding = False
+            return
+        obj._identifier_service_write = True
+        obj.save()
+
+    def delete_model(self, request, obj):
+        set_identifier_active(obj, False)
+
+    @admin.action(description="设为主条码")
+    def make_primary(self, request, queryset):
+        for record in queryset:
+            set_barcode_primary(record)
+
+    @admin.action(description="退役所选条码")
+    def retire(self, request, queryset):
+        for record in queryset:
+            set_identifier_active(record, False)
+
+    @admin.action(description="重新启用所选条码")
+    def reactivate(self, request, queryset):
+        for record in queryset:
+            set_identifier_active(record, True)
+
+
+@admin.register(ProductExternalIdentifier)
+class ProductExternalIdentifierAdmin(admin.ModelAdmin):
+    list_display = ("owner", "product", "source_system", "external_code", "is_primary", "is_active", "valid_from", "valid_to")
+    list_filter = ("owner", "source_system", "is_primary", "is_active")
+    search_fields = ("source_system", "external_code", "normalized_value", "product__code", "product__name")
+    autocomplete_fields = ("product",)
+    readonly_fields = ("owner", "normalized_value")
+    actions = ("make_primary", "retire", "reactivate")
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = list(super().get_readonly_fields(request, obj))
+        if obj:
+            fields.extend(["product", "source_system", "external_code", "is_primary"])
+        return tuple(fields)
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            saved = add_external_identifier(
+                product=obj.product, source_system=obj.source_system,
+                external_code=obj.external_code, is_primary=obj.is_primary,
+                valid_from=obj.valid_from, valid_to=obj.valid_to,
+            )
+            obj.pk = saved.pk
+            obj._state.adding = False
+            return
+        obj._identifier_service_write = True
+        obj.save()
+
+    def delete_model(self, request, obj):
+        set_identifier_active(obj, False)
+
+    @admin.action(description="设为主外部标识")
+    def make_primary(self, request, queryset):
+        for record in queryset:
+            set_external_primary(record)
+
+    @admin.action(description="退役所选外部标识")
+    def retire(self, request, queryset):
+        for record in queryset:
+            set_identifier_active(record, False)
+
+    @admin.action(description="重新启用所选外部标识")
+    def reactivate(self, request, queryset):
+        for record in queryset:
+            set_identifier_active(record, True)

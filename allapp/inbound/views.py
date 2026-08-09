@@ -43,6 +43,7 @@ from allapp.inbound.services import (
 )
 from allapp.inventory.models import InventoryDetail
 from allapp.locations.models import Location
+from allapp.products.identifier_lookup import product_search_q
 from allapp.tasking import services as task_services
 from allapp.tasking.models import (
     PutawayLineExtra,
@@ -193,8 +194,7 @@ class InboundOrderViewSet(
                 Q(order_no__icontains=query)
                 | Q(src_bill_no__icontains=query)
                 | Q(supplier__name__icontains=query)
-                | Q(lines__product__sku__icontains=query)
-                | Q(lines__product__name__icontains=query)
+                | product_search_q(query, product_field="lines__product_id")
             ).distinct()
         approval_status = (
             self.request.query_params.get("approval_status") or ""
@@ -448,8 +448,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(
                 Q(task_no__icontains=search)
                 | Q(ref_no__icontains=search)
-                | Q(lines__product__sku__icontains=search)
-                | Q(lines__product__name__icontains=search)
+                | product_search_q(search, product_field="lines__product_id")
             ).distinct()
         return queryset.order_by("-priority", "id")
 

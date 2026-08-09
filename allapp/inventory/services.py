@@ -7,7 +7,8 @@ Scan-Only + 批内聚合 的统一过账服务（业内最佳实践版本）
 --------------------------------
 1) 留痕层（TaskScanLog）：逐条记录每次扫码（可复核、可回放、可审计），绝不聚合、绝不丢。
 2) 交易层（InventoryTransaction）：对“本次过账动作（posting_batch）”按业务维度聚合后再入账：
-   - 收货/发货/盘点：同一批（posting_batch）内，(owner,wh,product,location,lot,mfg,exp,serial,tx_type,task_id) 维度聚合。
+   - 收货/发货/盘点：同一批内，按货主、仓库、商品、库位、批次、
+     日期、序列号、交易类型和任务维度聚合。
    - 上架/移库：对 (from → to) 路径成对聚合，写一对 MOVE_OUT/MOVE_IN，用 pair_id 关联。
    这样交易表规模适中，语义贴近“这次过账到底收了/发了/移了多少”。
 
@@ -20,10 +21,10 @@ B) 扫描打点：仅处理 status=OK & posted_at IS NULL 的扫描；写完统�
 
 锁顺序与并发安全：
 --------------------------------
-- 本服务内部只锁任务（WmsTask）与任务级 PJ（PostingJournal）。
-- 你的 DefaultPostingHandler 里已经采用 “WmsTask -> WmsTaskLine -> TaskScanLog(order_by id)” 的加锁顺序；
-  在高并发下，建议仍通过 handler 入口调用本服务，保证锁顺序一致，避免死锁。
-- 本服务的 select_for_update 锁住 WmsTask 行，确保同一个任务不会被两个并发事务同时过账。
+- 统一顺序为 Warehouse -> 业务对象 -> PostingJournal -> 任务行/扫描 ->
+  InventoryDetail -> InventorySummary。
+- 同仓库存写入串行化，不同仓库仍可并行；所有任务通过 handler 入口保持一致顺序。
+- 本服务的 select_for_update 锁住 WmsTask 行，确保同一任务不会并发重复过账。
 
 数量精度：
 --------------------------------
@@ -34,42 +35,46 @@ B) 扫描打点：仅处理 status=OK & posted_at IS NULL 的扫描；写完统�
 --------------------------------
 - 商品：优先取 scan.product，其次取 scan.task_line.product（避免设备端漏传）。
 - 库位：
-  * RECEIVE：scan.location → 行.to_location → 行.from_location → settings.TASKING_DEFAULT_RECEIVE_LOCATION_ID
+  * RECEIVE：scan.location → 行.to_location → 行.from_location → 默认收货库位
   * PICK/DISPATCH：scan.location → 行.from_location → 行.to_location
   * COUNT：必须有 scan.location 或可兜底行.from/to（按 COUNT 业务习惯建议必须显式传）
   * PUTAWAY/RELOC：必须成对 from/to，有一方缺失则抛错
 
 聚合键（默认不含 task_line_id）：
 --------------------------------
-- 收/发/盘： posting_batch + task_id + owner_id, warehouse_id, product_id, location_id, batch_no, production_date, expiry_date, serial_no, tx_type
-- 上架/移库：对 (from → to) 成对聚合，最终落账时仍分别以 location_id=from / location_id=to 写 OUT/IN 两条交易，共用 pair_id。
+- 收/发/盘：按批次、任务、货主、仓库、商品、库位、生产/失效日期、
+  序列号和交易类型聚合。
+- 上架/移库：对 (from → to) 成对聚合，分别写 OUT/IN 两条交易，
+  共用 pair_id。
 - 如需“按行结算/回滚”，可在未来把 task_line_id 纳入聚合键或另建 TransactionAttribution 归属表，不影响当前实现。
 
 """
 from __future__ import annotations
+
 import logging
 from collections import defaultdict
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from uuid import uuid4
-from django.db.models import F, Q, Value
-from django.db.models.functions import Least
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import F, Q, Value
+from django.db.models.functions import Least
 from django.utils import timezone
 
 from allapp.core.utils.log_context import build_log_payload
+from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.inventory.models import (
-    InvTxType,
     InventoryDetail,
-    InventoryTransaction,
     InventorySummary,
+    InventoryTransaction,
+    InvTxType,
     PostingJournal,
 )
-from allapp.locations.models import Location, Warehouse
-from allapp.tasking.models import WmsTask, WmsTaskLine, TaskScanLog
+from allapp.locations.models import Location
+from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +302,8 @@ def _upsert_detail(
             warehouse_id=warehouse_id,
         )
         logger.info(
-            "inventory.detail.created %s product_id=%s location_id=%s detail_id=%s batch_no=%s serial_no=%s",
+            "inventory.detail.created %s product_id=%s location_id=%s "
+            "detail_id=%s batch_no=%s serial_no=%s",
             ctx_text,
             product_id,
             location_id,
@@ -339,7 +345,9 @@ def _upsert_detail(
         warehouse_id=warehouse_id,
     )
     logger.info(
-        "inventory.detail.upserted %s product_id=%s location_id=%s qty_delta=%s onhand_qty=%s allocated_qty=%s available_qty=%s detail_id=%s task_type=%s",
+        "inventory.detail.upserted %s product_id=%s location_id=%s "
+        "qty_delta=%s onhand_qty=%s allocated_qty=%s available_qty=%s "
+        "detail_id=%s task_type=%s",
         ctx_text,
         det.product_id,
         det.location_id,
@@ -353,7 +361,9 @@ def _upsert_detail(
     )
 
     logger.info(
-        "inventory.detail.upserted %s product_id=%s location_id=%s batch_no=%s production_date=%s expiry_date=%s qty_delta=%s onhand_qty=%s allocated_qty=%s available_qty=%s detail_id=%s task_type=%s",
+        "inventory.detail.upserted %s product_id=%s location_id=%s batch_no=%s "
+        "production_date=%s expiry_date=%s qty_delta=%s onhand_qty=%s "
+        "allocated_qty=%s available_qty=%s detail_id=%s task_type=%s",
         ctx_text,
         det.product_id,
         det.location_id,
@@ -1061,7 +1071,9 @@ def _group_receive_like(
         agg[key] += qty
         ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
         logger.info(
-            "inventory.receive_like.scan_grouped %s tx_type=%s scan_id=%s product_id=%s location_id=%s batch_no=%s production_date=%s expiry_date=%s qty=%s grouped_qty=%s",
+            "inventory.receive_like.scan_grouped %s tx_type=%s scan_id=%s "
+            "product_id=%s location_id=%s batch_no=%s production_date=%s "
+            "expiry_date=%s qty=%s grouped_qty=%s",
             ctx_text,
             tx_type,
             getattr(s, "id", None),
@@ -1160,7 +1172,8 @@ def _group_putaway(
         agg[(key_out, key_in)] += qty_pos
         ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
         logger.info(
-            "inventory.putaway.scan_grouped %s from_location_id=%s to_location_id=%s product_id=%s qty=%s grouped_qty=%s",
+            "inventory.putaway.scan_grouped %s from_location_id=%s "
+            "to_location_id=%s product_id=%s qty=%s grouped_qty=%s",
             ctx_text,
             s_from,
             s_to,
@@ -1723,7 +1736,8 @@ def _apply_putaway(
             )
         ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
         logger.info(
-            "inventory.putaway.applied_pair %s from_location_id=%s to_location_id=%s product_id=%s qty=%s pair_id=%s",
+            "inventory.putaway.applied_pair %s from_location_id=%s "
+            "to_location_id=%s product_id=%s qty=%s pair_id=%s",
             ctx_text,
             key_out.location_id,
             key_in.location_id,
@@ -1760,15 +1774,22 @@ def post_task(
     统一任务过账入口（Scan-Only + 批内聚合）
 
     流程概览：
-    1) 依次锁任务、任务级 PostingJournal，并在锁内校验幂等状态。
+    1) 依次锁仓库、任务、任务级 PostingJournal，并在锁内校验幂等状态。
     2) 解析显式任务类型策略；未支持类型直接失败。
     3) 按传入 ID 重取并锁定扫描，严格校验归属与可过账状态。
     4) 聚合并写 InventoryDetail / InventoryTransaction。
     5) 精确打点扫描；更新数量不一致则回滚。
     6) 回填任务 posting_status=POSTED；PJ 置 POSTED 并记录批号。
     """
-    # 1) 任务 + PJ：统一锁序并在锁内判定幂等/状态一致性
-    task = _lock_task(task.id)
+    # 1) 仓库 -> 任务 -> PJ：统一锁序并在锁内判定幂等/状态一致性。
+    task_id = task.id
+    warehouse_id = (
+        WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
+    task = _lock_task(task_id)
+    if task.warehouse_id != warehouse_id:
+        raise ValidationError("任务仓库在过账期间发生变化，请重试。")
     pj = _lock_journal("WmsTask", task.id, "POST")
     ctx, ctx_text = build_log_payload(task=task, user=user, journal=pj)
     logger.info("inventory.post_task.begin %s", ctx_text, extra=ctx)
@@ -1800,9 +1821,6 @@ def post_task(
     }
     if task.posting_status not in retryable_statuses:
         raise ValidationError(f"过账状态 {task.posting_status} 不允许执行库存过账。")
-
-    # 与盘点发布使用同一仓库互斥锁，保证“刷新快照并落范围锁”与库存变更串行。
-    Warehouse.objects.select_for_update().get(pk=task.warehouse_id)
 
     ok, why = _can_post(task)
     if not ok:

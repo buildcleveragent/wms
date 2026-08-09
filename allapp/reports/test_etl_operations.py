@@ -26,8 +26,10 @@ from allapp.inventory.models import InventoryTransaction
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import Product, ProductUom
+from allapp.reports.etl_operations import source_reconciliation
 from allapp.reports.models import (
     AggBillingDaily,
+    AggOTIFDaily,
     AggThroughputDaily,
     EtlJobRun,
     EtlWatermark,
@@ -35,13 +37,12 @@ from allapp.reports.models import (
     FactInboundLine,
     FactInventoryTxn,
     FactOutboundLine,
+    FactOutboundOrderSLA,
     OwnerDim,
     ProductDim,
     WarehouseDim,
 )
-from allapp.reports.etl_operations import source_reconciliation
 from allapp.tasking.models import ReceiveLineExtra, WmsTask
-
 
 pytestmark = pytest.mark.integration
 
@@ -196,7 +197,9 @@ class OperationsEtlTests(TestCase):
             line_no=10,
             lot_no="ETL-LOT",
         )
-        OutboundOrder.objects.filter(pk=cls.outbound.pk).update(created_at=order_created)
+        OutboundOrder.objects.filter(pk=cls.outbound.pk).update(
+            created_at=order_created
+        )
         cls.outbound.created_at = order_created
 
         cls.pick_task = cls._completed_task(
@@ -363,7 +366,12 @@ class OperationsEtlTests(TestCase):
         self.assertEqual(outbound.sec_pack, 60 * 60)
         self.assertEqual(outbound.sec_ship, 3 * 60 * 60)
         self.assertFalse(outbound.in_full)
-        self.assertFalse(outbound.on_time)
+        self.assertTrue(outbound.on_time)
+
+        order_sla = FactOutboundOrderSLA.objects.get(order_id=self.outbound.pk)
+        self.assertTrue(order_sla.on_time)
+        self.assertFalse(order_sla.in_full)
+        self.assertFalse(order_sla.otif)
 
         run = EtlJobRun.objects.get(job_name="etl_full_reports")
         self.assertTrue(run.ok)
@@ -377,6 +385,14 @@ class OperationsEtlTests(TestCase):
         )
         self.assertEqual(aggregate.inbound_qty, Decimal("6"))
         self.assertEqual(aggregate.outbound_qty, Decimal("9"))
+        otif_aggregate = AggOTIFDaily.objects.get(
+            date__date=self.day,
+            owner__owner_id=self.owner.id,
+            customer__customer_id=self.customer.id,
+        )
+        self.assertEqual(otif_aggregate.orders, 1)
+        self.assertEqual(otif_aggregate.orders_on_time, 1)
+        self.assertEqual(otif_aggregate.orders_in_full, 0)
 
         self._full()
         self.assertEqual(OwnerDim.objects.count(), 1)
@@ -385,7 +401,49 @@ class OperationsEtlTests(TestCase):
         self.assertEqual(FactInboundLine.objects.count(), 1)
         self.assertEqual(FactOutboundLine.objects.count(), 1)
         self.assertEqual(FactInventoryTxn.objects.count(), 2)
-        self.assertEqual(EtlJobRun.objects.filter(job_name="etl_full_reports", ok=True).count(), 2)
+        self.assertEqual(
+            EtlJobRun.objects.filter(job_name="etl_full_reports", ok=True).count(), 2
+        )
+
+    def test_late_short_shipment_is_neither_on_time_nor_in_full(self):
+        type(self.dispatch_task).objects.filter(pk=self.dispatch_task.pk).update(
+            finished_at=datetime.datetime(2026, 7, 14, 17, 0)
+        )
+
+        self._full()
+
+        fact = FactOutboundOrderSLA.objects.get(order_id=self.outbound.pk)
+        self.assertFalse(fact.on_time)
+        self.assertFalse(fact.in_full)
+        self.assertFalse(fact.otif)
+
+    def test_missing_etd_is_not_sla_eligible_even_when_shipped_in_full(self):
+        type(self.outbound).objects.filter(pk=self.outbound.pk).update(etd=None)
+        for line in (self.pick_line, self.pack_line, self.dispatch_line):
+            type(line).objects.filter(pk=line.pk).update(qty_done=Decimal("10"))
+
+        self._full()
+
+        fact = FactOutboundOrderSLA.objects.get(order_id=self.outbound.pk)
+        self.assertFalse(fact.sla_eligible)
+        self.assertFalse(fact.on_time)
+        self.assertTrue(fact.in_full)
+        self.assertFalse(fact.otif)
+
+    def test_in_full_late_shipment_is_not_otif(self):
+        type(self.dispatch_task).objects.filter(pk=self.dispatch_task.pk).update(
+            finished_at=datetime.datetime(2026, 7, 14, 17, 0)
+        )
+        for line in (self.pick_line, self.pack_line, self.dispatch_line):
+            type(line).objects.filter(pk=line.pk).update(qty_done=Decimal("10"))
+
+        self._full()
+
+        fact = FactOutboundOrderSLA.objects.get(order_id=self.outbound.pk)
+        self.assertTrue(fact.sla_eligible)
+        self.assertFalse(fact.on_time)
+        self.assertTrue(fact.in_full)
+        self.assertFalse(fact.otif)
 
     def test_billing_facts_follow_amount_updates_and_voids_idempotently(self):
         rule = BillingRule.objects.create(
@@ -468,9 +526,7 @@ class OperationsEtlTests(TestCase):
             FactBilling.objects.filter(dedup_key=accrual.acc_fingerprint).count(),
             1,
         )
-        canonical_fact = FactBilling.objects.get(
-            dedup_key=accrual.acc_fingerprint
-        )
+        canonical_fact = FactBilling.objects.get(dedup_key=accrual.acc_fingerprint)
         self.assertEqual(canonical_fact.owner.name, "ETL Owner Renamed")
         self.assertEqual(canonical_fact.warehouse.name, "ETL Warehouse Renamed")
         self.assertTrue(source_reconciliation()["ok"])
@@ -697,7 +753,9 @@ class OperationsEtlTests(TestCase):
         self._full()
 
         self.assertTrue(
-            ProductDim.objects.filter(product_id=archived_product.pk, is_current=True).exists()
+            ProductDim.objects.filter(
+                product_id=archived_product.pk, is_current=True
+            ).exists()
         )
         fact = FactInventoryTxn.objects.get(txn_id=transaction_row.pk)
         self.assertEqual(fact.product.product_id, archived_product.pk)
@@ -749,9 +807,9 @@ class OperationsEtlTests(TestCase):
         self.assertEqual(outbound.ship_date.date, self.day)
         self.assertEqual(outbound.sec_ship, 3 * 60 * 60)
         self.assertEqual(
-            FactInventoryTxn.objects.get(txn_id=InventoryTransaction.objects.get(
-                posting_batch="ETL-PA-1"
-            ).id).order_type,
+            FactInventoryTxn.objects.get(
+                txn_id=InventoryTransaction.objects.get(posting_batch="ETL-PA-1").id
+            ).order_type,
             "TRANSFER",
         )
 
@@ -890,7 +948,9 @@ class OperationsEtlTests(TestCase):
         self._incremental(since=first_watermark)
         self.assertEqual(FactOutboundLine.objects.count(), 1)
         self.assertEqual(FactInventoryTxn.objects.count(), 2)
-        self.assertTrue(EtlJobRun.objects.filter(job_name="etl_incremental_reports").last().ok)
+        self.assertTrue(
+            EtlJobRun.objects.filter(job_name="etl_incremental_reports").last().ok
+        )
 
     def test_failed_incremental_reconciliation_does_not_advance_watermark(self):
         self._full()

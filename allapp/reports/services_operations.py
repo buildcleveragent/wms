@@ -28,6 +28,7 @@ from allapp.core.choices import InvTxType
 from allapp.inbound.models import InboundOrder, InboundOrderLine
 from allapp.inventory.models import InventoryTransaction
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+from allapp.products.identifier_lookup import product_search_q
 from allapp.tasking.models import WmsTask, WmsTaskLine
 
 
@@ -124,14 +125,7 @@ def _apply_requested_scope(
 def _product_query(prefix: str, value: str) -> Q:
     if not value:
         return Q()
-    return (
-        Q(**{f"{prefix}code__icontains": value})
-        | Q(**{f"{prefix}sku__icontains": value})
-        | Q(**{f"{prefix}name__icontains": value})
-        | Q(**{f"{prefix}gtin__icontains": value})
-        | Q(**{f"{prefix}unit_barcode__icontains": value})
-        | Q(**{f"{prefix}carton_barcode__icontains": value})
-    )
+    return product_search_q(value, product_field=f"{prefix}id")
 
 
 def _plan_lines(direction: str, filters: OperationFilters, scope: AccessScope, user):

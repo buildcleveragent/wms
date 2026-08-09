@@ -27,6 +27,8 @@ from django.forms import modelform_factory
 from django.forms.models import BaseInlineFormSet
 from django.shortcuts import redirect, get_object_or_404
 from django.utils.html import format_html
+
+from allapp.products.identifier_lookup import UnifiedProductAdminSearchMixin
 from allapp.tasking.plugins.handlers import get_posting_handler
 from . import services  # 放着 save_receiving_snapshot
 from allapp.tasking import services as svc  # 内含 publish_using_inline / publish_task
@@ -2089,7 +2091,7 @@ class TaskScanLogAdmin(admin.ModelAdmin):
 
 
 @admin.register(ReplenishmentPolicy)
-class ReplenishmentPolicyAdmin(admin.ModelAdmin):
+class ReplenishmentPolicyAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmin):
     list_display = (
         "owner", "warehouse", "product", "target_location", "min_qty", "target_qty",
         "replenish_uom", "auto_release", "demand_enabled", "is_active",
@@ -2101,7 +2103,7 @@ class ReplenishmentPolicyAdmin(admin.ModelAdmin):
 
 
 @admin.register(ReplenishmentRequest)
-class ReplenishmentRequestAdmin(admin.ModelAdmin):
+class ReplenishmentRequestAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmin):
     list_display = (
         "id", "status", "owner", "warehouse", "product", "target_location",
         "requested_qty", "created_by", "reviewed_by", "generated_task", "created_at",
@@ -2155,7 +2157,8 @@ class RelocationRequestAdmin(admin.ModelAdmin):
 
 
 @admin.register(RelocationReservation)
-class RelocationReservationAdmin(admin.ModelAdmin):
+class RelocationReservationAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmin):
+    product_search_paths = ("inventory_detail__product_id",)
     list_display = ("task_line", "inventory_detail", "qty", "status", "consumed_at", "released_at")
     list_filter = ("status",)
     search_fields = ("task_line__task__task_no", "inventory_detail__product__code")

@@ -140,9 +140,16 @@ class OwnerWarehouseOrderApiTests(TestCase):
         response = WarehouseViewSet.as_view({"get": "list"})(request)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, [
-            {"id": self.warehouse.id, "code": self.warehouse.code, "name": self.warehouse.name}
-        ])
+        self.assertEqual(
+            response.data,
+            [
+                {
+                    "id": self.warehouse.id,
+                    "code": self.warehouse.code,
+                    "name": self.warehouse.name,
+                }
+            ],
+        )
 
     def test_create_requires_explicit_warehouse(self):
         response = self._create()
@@ -297,7 +304,7 @@ class DropShipImportWarehouseTests(TestCase):
                 "13800138000",
                 "测试路1号",
                 "2",
-                self.product.sku,
+                self.product.code,
             )
         ]:
             sheet.append(row)
@@ -321,9 +328,7 @@ class DropShipImportWarehouseTests(TestCase):
             format="multipart",
         )
         force_authenticate(request, user=self.user)
-        return OutboundOrderViewSet.as_view(
-            {"post": "import_drop_ship_excel"}
-        )(request)
+        return OutboundOrderViewSet.as_view({"post": "import_drop_ship_excel"})(request)
 
     def test_import_requires_explicit_warehouse(self):
         response = self._import()
@@ -391,7 +396,7 @@ class DropShipImportWarehouseTests(TestCase):
                 "13800138000",
                 "测试路1号",
                 "2",
-                self.product.sku,
+                self.product.code,
             ),
             (
                 "DROP-ORDER-FAIL",
@@ -407,7 +412,7 @@ class DropShipImportWarehouseTests(TestCase):
                 "13800138002",
                 "测试路3号",
                 "1",
-                self.product.sku,
+                self.product.code,
             ),
         ]
         data = {
@@ -421,9 +426,9 @@ class DropShipImportWarehouseTests(TestCase):
         )
         force_authenticate(request, user=self.user)
 
-        response = OutboundOrderViewSet.as_view(
-            {"post": "import_drop_ship_excel"}
-        )(request)
+        response = OutboundOrderViewSet.as_view({"post": "import_drop_ship_excel"})(
+            request
+        )
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["total_rows"], 3)

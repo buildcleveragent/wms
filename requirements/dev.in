@@ -13,8 +13,13 @@ coverage
 
 # 代码质量
 black
+flake8
 isort
 ruff
+
+# 操作手册构建与静态验收
+beautifulsoup4
+mistune
 
 # Git hooks
 pre-commit

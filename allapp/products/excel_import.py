@@ -21,11 +21,13 @@ from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 from allapp.baseinfo.models import Owner
 
+from .identifier_services import add_product_barcode
 from .models import (
     Brand,
     Product,
     ProductCategory,
     ProductPackage,
+    ProductBarcode,
     ProductUom,
     normalize_product_identifier,
 )
@@ -1450,10 +1452,13 @@ class ProductExcelImporter:
                         row.carton_package_uom_code,
                     )
                 ]
-                product.carton_barcode = row.carton_barcode
-                product.carton_package = package
-                product.full_clean()
-                product.save(update_fields=["carton_barcode", "carton_package", "updated_at"])
+                add_product_barcode(
+                    product=product,
+                    barcode=row.carton_barcode,
+                    barcode_type=ProductBarcode.BarcodeType.CARTON,
+                    package=package,
+                    is_primary=True,
+                )
             owner_ids = sorted({row.product.owner_id for row in rows})
             record_audit_event(
                 action="products.import_excel",

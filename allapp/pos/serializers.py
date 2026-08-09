@@ -136,6 +136,9 @@ class PosProductSerializer(serializers.ModelSerializer):
         return None if value in (None, "") else value
 
     def get_available_qty(self, obj):
+        annotated = getattr(obj, "_pos_available_qty", None)
+        if annotated is not None:
+            return annotated
         return available_qty_for_product_in_scope(
             owner_id=obj.owner_id,
             warehouse_id=self.context["warehouse_id"],
@@ -155,11 +158,14 @@ class PosProductSerializer(serializers.ModelSerializer):
                     "barcode": obj.unit_barcode or obj.gtin or "",
                 }
             )
-        for package in (
-            obj.packages.filter(is_active=True)
-            .select_related("uom")
-            .order_by("sort_order", "id")
-        ):
+        packages = getattr(obj, "_pos_active_packages", None)
+        if packages is None:
+            packages = (
+                obj.packages.filter(is_active=True)
+                .select_related("uom")
+                .order_by("sort_order", "id")
+            )
+        for package in packages:
             options.append(
                 {
                     "kind": "package",

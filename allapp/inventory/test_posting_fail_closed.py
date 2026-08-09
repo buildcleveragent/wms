@@ -1008,29 +1008,15 @@ class InventoryPostingRealConcurrencyTests(TransactionTestCase):
 
     @skipUnlessDBFeature("has_select_for_update")
     def test_concurrent_real_handler_posts_adjustment_once(self):
-        rendezvous = threading.Barrier(2)
         winner_inside_inventory = threading.Event()
+        second_request_started = threading.Event()
         release_winner = threading.Event()
         post_call_lock = threading.Lock()
-        journal_status_lock = threading.Lock()
         post_call_count = 0
-        lock_outside_journal_statuses = []
         results = [None, None]
         errors = []
         batches = ["INV-FC-CONC-1", "INV-FC-CONC-2"]
-        real_handle_atomic = DefaultPostingHandler._handle_atomic
         real_post_task = inventory_services.post_task
-
-        def synchronized_handle_atomic(handler, **kwargs):
-            with journal_status_lock:
-                lock_outside_journal_statuses.append(kwargs["pj"].status)
-            try:
-                rendezvous.wait(timeout=10)
-            except threading.BrokenBarrierError as exc:
-                raise AssertionError(
-                    "posting requests did not reach the barrier"
-                ) from exc
-            return real_handle_atomic(handler, **kwargs)
 
         def held_post_task(*args, **kwargs):
             nonlocal post_call_count
@@ -1046,6 +1032,8 @@ class InventoryPostingRealConcurrencyTests(TransactionTestCase):
         def invoke(index):
             close_old_connections()
             try:
+                if index == 1:
+                    second_request_started.set()
                 task = WmsTask.objects.get(pk=self.task.pk)
                 scan = TaskScanLog.objects.get(pk=self.scan.pk)
                 results[index] = DefaultPostingHandler().handle(
@@ -1060,29 +1048,29 @@ class InventoryPostingRealConcurrencyTests(TransactionTestCase):
                 close_old_connections()
 
         threads = [threading.Thread(target=invoke, args=(index,)) for index in range(2)]
-        with (
-            mock.patch.object(
-                DefaultPostingHandler,
-                "_handle_atomic",
-                new=synchronized_handle_atomic,
-            ),
-            mock.patch.object(
-                inventory_services,
-                "post_task",
-                side_effect=held_post_task,
-            ),
+        with mock.patch.object(
+            inventory_services,
+            "post_task",
+            side_effect=held_post_task,
         ):
             try:
-                for thread in threads:
-                    thread.start()
+                threads[0].start()
                 self.assertTrue(
                     winner_inside_inventory.wait(timeout=10),
                     "no posting request reached the inventory service",
                 )
-                self.assertTrue(all(thread.is_alive() for thread in threads))
+                threads[1].start()
+                self.assertTrue(
+                    second_request_started.wait(timeout=10),
+                    "second posting request did not start",
+                )
+                threads[1].join(timeout=0.25)
+                self.assertTrue(
+                    threads[1].is_alive(),
+                    "second posting request bypassed the warehouse write lock",
+                )
             finally:
                 release_winner.set()
-                rendezvous.abort()
                 for thread in threads:
                     thread.join(timeout=10)
 
@@ -1107,7 +1095,6 @@ class InventoryPostingRealConcurrencyTests(TransactionTestCase):
         )
 
         self.assertEqual(sorted(results), [0, 1])
-        self.assertEqual(lock_outside_journal_statuses, ["PENDING", "PENDING"])
         self.assertEqual(post_call_count, 1)
         self.assertEqual(transactions.count(), 1)
         transaction = transactions.get()

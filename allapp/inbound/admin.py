@@ -24,6 +24,10 @@ from allapp.inbound.constants import (
     PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
 )
 from allapp.products.models import Product
+from allapp.products.identifier_lookup import (
+    UnifiedProductAdminSearchMixin,
+    filter_by_product_search,
+)
 from allapp.tasking.models import WmsTask, WmsTaskLine
 
 from .models import (
@@ -654,11 +658,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         ):
             qs = Product.objects.filter(owner_id=owner_id)
         if q:
-            qs = qs.filter(
-                dj_models.Q(name__icontains=q)
-                | dj_models.Q(sku__icontains=q)
-                | dj_models.Q(gtin__icontains=q)
-            )
+            qs = filter_by_product_search(qs, q, product_field="pk")
         qs = qs.order_by("name")[:200]
 
         return JsonResponse({"results": [{"id": p.pk, "text": str(p)} for p in qs]})
@@ -838,7 +838,8 @@ class PdaNoOrderReceiveLineInline(admin.TabularInline):
 
 
 @admin.register(PdaNoOrderReceive)
-class PdaNoOrderReceiveAdmin(admin.ModelAdmin):
+class PdaNoOrderReceiveAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmin):
+    product_search_paths = ("lines__product_id",)
     admin_priority = 4
     list_display = (
         "task_no",

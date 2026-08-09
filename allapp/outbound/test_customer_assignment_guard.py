@@ -22,7 +22,7 @@ from allapp.products.models import Product, ProductUom
 class CustomerAssignmentGuardTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(code="CUST-GUARD", name="Customer Guard")
-        self.warehouse = Warehouse.objects.create(code="CUST-GUARD-WH", name="Guard WH")
+        self.warehouse = Warehouse.objects.create(code="CUSTGW", name="Guard WH")
         OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
         submit_permission = Permission.objects.get(
             content_type__app_label="outbound",
@@ -235,7 +235,7 @@ class CustomerAssignmentGuardTests(TestCase):
 class CustomerAssignmentAuditCommandTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(code="CUST-AUDIT", name="Customer Audit")
-        self.warehouse = Warehouse.objects.create(code="CUST-AUDIT-WH", name="Audit WH")
+        self.warehouse = Warehouse.objects.create(code="CUSTAW", name="Audit WH")
         self.creator = get_user_model().objects.create_user(
             username="customer-audit-creator", password="x", owner=self.owner
         )

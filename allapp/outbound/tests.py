@@ -1,5 +1,6 @@
 import threading
 from decimal import Decimal
+from io import BytesIO
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -7,6 +8,7 @@ from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections
 from django.test import TestCase, TransactionTestCase
+from openpyxl import load_workbook
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from allapp.accounts.models import UserRoleScope
@@ -233,6 +235,19 @@ class OutboundWarehouseScopeTests(TestCase):
             response["Content-Type"],
         )
         self.assertIn("filename*=UTF-8", response["Content-Disposition"])
+        workbook = load_workbook(
+            BytesIO(b"".join(response.streaming_content)), read_only=False
+        )
+        try:
+            merchant_code = next(
+                cell for cell in workbook.active[1] if cell.value == "商家编码"
+            )
+            self.assertIsNotNone(merchant_code.comment)
+            self.assertIn("货主商品编码", merchant_code.comment.text)
+            self.assertIn("外部系统商品编码", merchant_code.comment.text)
+            self.assertIn("不接受仓库SKU编码或条码", merchant_code.comment.text)
+        finally:
+            workbook.close()
 
     def test_pick_task_lines_and_create_review_requires_completed_lines(self):
         task = WmsTask.objects.create(

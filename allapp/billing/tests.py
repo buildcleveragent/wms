@@ -1,28 +1,26 @@
-import datetime
 import csv
+import datetime
 import io
-import threading
 import tempfile
+import threading
 from decimal import Decimal
 from unittest import mock
 
-from openpyxl import load_workbook
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import close_old_connections
+from django.db import close_old_connections, models
 from django.db.utils import IntegrityError
-from django.db import models
 from django.test import TestCase, TransactionTestCase, override_settings
-from django.utils import timezone
 from django.urls import reverse
+from django.utils import timezone
+from openpyxl import load_workbook
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
-from allapp.core.choices import InvTxType
 from allapp.billing.enums import (
     AccrualStatus,
     BillStatus,
@@ -36,7 +34,6 @@ from allapp.billing.enums import (
 )
 from allapp.billing.models import (
     Bill,
-    BillLine,
     BillingAccrual,
     BillingEvent,
     BillingJobRun,
@@ -44,6 +41,7 @@ from allapp.billing.models import (
     BillingPeriod,
     BillingRule,
     BillingRuleTier,
+    BillLine,
 )
 from allapp.billing.services import (
     accrue_metrics_for_date,
@@ -57,6 +55,7 @@ from allapp.billing.services import (
     unlock_period,
 )
 from allapp.billing.services._common import _compute_fee_with_rule
+from allapp.core.choices import InvTxType
 from allapp.inventory.models import (
     InventoryDetail,
     InventorySnapshotDaily,
@@ -318,7 +317,9 @@ class BillingServiceTests(TestCase):
             by_user=self.user,
         )
 
-        self.assertEqual(events, 1)
+        # The resolver exposes order, line and amount semantics. Missing pricing
+        # rules are retained as unpriced events for audit, while one accrual is priced.
+        self.assertEqual(events, 3)
         self.assertEqual(accruals, 1)
         accrual = BillingAccrual.objects.get()
         self.assertEqual(accrual.amount, Decimal("10.00"))
@@ -372,7 +373,7 @@ class BillingServiceTests(TestCase):
             by_user=self.user,
         )
 
-        self.assertEqual(events, 1)
+        self.assertEqual(events, 3)
         self.assertEqual(accruals, 1)
         accrual = BillingAccrual.objects.get()
         self.assertEqual(accrual.amount, Decimal("12.00"))
@@ -412,7 +413,7 @@ class BillingServiceTests(TestCase):
             by_user=self.user,
         )
 
-        self.assertEqual(events, 1)
+        self.assertEqual(events, 3)
         self.assertEqual(accruals, 1)
         accrual = BillingAccrual.objects.get()
         self.assertEqual(accrual.quantity, Decimal("30.00"))
@@ -2875,7 +2876,10 @@ class BillingApiTests(TestCase):
         workbook = load_workbook(io.BytesIO(response.content))
         sheet = workbook["Bills"]
         self.assertEqual(sheet["A2"].value, bill.invoice_no)
-        self.assertEqual(sheet["E2"].value, period.label)
+        headers = {cell.value: cell.column for cell in sheet[1]}
+        self.assertEqual(
+            sheet.cell(row=2, column=headers["Period"]).value, period.label
+        )
 
     def test_bill_detail_export_endpoint_returns_line_workbook(self):
         period = BillingPeriod.objects.create(

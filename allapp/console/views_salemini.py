@@ -25,6 +25,7 @@ from django.views import View
 from allapp.baseinfo.models import Owner
 from allapp.inventory.models import InventoryDetail
 from allapp.products.models import Brand, Product, ProductCategory
+from allapp.products.identifier_lookup import filter_by_product_search
 from allapp.salesapp.models import SaleProductConfig
 from allapp.salesapp.salemini_api import _category_subtree_ids
 
@@ -137,15 +138,7 @@ def _product_queryset(params):
 
     keyword = (params.get("q") or "").strip()
     if keyword:
-        qs = qs.filter(
-            Q(code__icontains=keyword)
-            | Q(sku__icontains=keyword)
-            | Q(gtin__icontains=keyword)
-            | Q(unit_barcode__icontains=keyword)
-            | Q(carton_barcode__icontains=keyword)
-            | Q(name__icontains=keyword)
-            | Q(spec__icontains=keyword)
-        )
+        qs = filter_by_product_search(qs, keyword, product_field="pk")
 
     active_state = params.get("active") or "active"
     if active_state == "active":

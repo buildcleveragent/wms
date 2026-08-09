@@ -2,13 +2,14 @@ name: wms-test
 
 services:
   mysql-test:
-    image: mysql:8.4
+    image: mysql:8.0
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${DB_TEST_NAME:?DB_TEST_NAME must be set}
       MYSQL_USER: ${DB_USER:?DB_USER must be set}
       MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
+      MYSQL_ROOT_HOST: "%"
     ports:
       - "127.0.0.1:${WMS_TEST_DB_PORT:-33306}:3306"
     command:
@@ -20,14 +21,33 @@ services:
         - mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent
       interval: 2s
       timeout: 3s
-      retries: 30
-      start_period: 10s
+      retries: 90
+      start_period: 60s
     volumes:
       - wms-test-mysql-data:/var/lib/mysql
     labels:
       com.wms.purpose: isolated-test-database
 
+  redis-test:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WMS_TEST_REDIS_PORT:-36379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    volumes:
+      - wms-test-redis-data:/data
+    labels:
+      com.wms.purpose: isolated-test-cache
+
 volumes:
   wms-test-mysql-data:
     labels:
       com.wms.purpose: isolated-test-database
+  wms-test-redis-data:
+    labels:
+      com.wms.purpose: isolated-test-cache

@@ -34,8 +34,8 @@ from ._common import AUTO_METRIC_SOURCE_PREFIX, SCHEDULED_METRIC_JOB_NAME, logge
 from ._metrics import (
     _auto_metric_types,
     _default_metric_payload,
-    _inventory_metric_rows,
     _ensure_inventory_snapshot_for_date,
+    _inventory_metric_rows,
     _normalize_metric_payload,
     _store_generated_metric,
 )
@@ -43,7 +43,6 @@ from ._reconciliation import (
     _billing_accuracy_gate_enabled,
     _ensure_reconciliation_for_service_date,
 )
-
 
 # ============================================================================
 # 单日 / 日期范围 指标生成
@@ -127,7 +126,10 @@ def generate_metrics_for_date(
                     "action": "unsupported",
                     "value": None,
                     "source": None,
-                    "note": "No metric resolver or default builder is available for this metric type.",
+                    "note": (
+                        "No metric resolver or default builder is available "
+                        "for this metric type."
+                    ),
                 }
             )
             continue
@@ -480,6 +482,7 @@ def _run_scheduled_metric_generation_for_scope(
         "status": (
             "warning" if final_status == BillingJobRun.Status.WARNING else "success"
         ),
+        "summary": payload,
         "message": _metric_job_run_message(metric_summary),
     }
 

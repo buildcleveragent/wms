@@ -21,11 +21,9 @@ from pathlib import Path
 
 import mistune
 from bs4 import BeautifulSoup
+from embed_docx_images import embed_images
 from PIL import Image
 from weasyprint import HTML
-
-from embed_docx_images import embed_images
-
 
 DOCS_DIR = Path(__file__).resolve().parent
 MANUALS_DIR = DOCS_DIR / "manuals"
@@ -140,7 +138,9 @@ def read_source(name: str) -> str:
 
 
 def demote_headings(markdown: str) -> str:
-    return re.sub(r"^(#{2,5})(?= )", lambda match: "#" + match.group(1), markdown, flags=re.M)
+    return re.sub(
+        r"^(#{2,5})(?= )", lambda match: "#" + match.group(1), markdown, flags=re.M
+    )
 
 
 def login_image(spec: ManualSpec, *, consolidated: bool = False) -> str:
@@ -277,7 +277,9 @@ def render_html(target: BuildTarget, *, version: str, baseline_date: str) -> str
     for index, heading in enumerate(soup.find_all(["h2", "h3"]), start=1):
         heading_id = slugify(heading.get_text(" ", strip=True), index)
         heading["id"] = heading_id
-        toc_items.append((int(heading.name[1]), heading_id, heading.get_text(" ", strip=True)))
+        toc_items.append(
+            (int(heading.name[1]), heading_id, heading.get_text(" ", strip=True))
+        )
 
     for image in soup.find_all("img"):
         alt = image.get("alt", "界面截图")
@@ -352,7 +354,10 @@ def build_word_images() -> None:
         with Image.open(assets / source_name) as source:
             source.load()
             ratio = min(1.0, max_width / source.width)
-            size = (max(1, round(source.width * ratio)), max(1, round(source.height * ratio)))
+            size = (
+                max(1, round(source.width * ratio)),
+                max(1, round(source.height * ratio)),
+            )
             source.resize(size, Image.Resampling.LANCZOS).save(
                 assets / target_name, format="PNG", optimize=True
             )
@@ -422,7 +427,7 @@ def convert_docx(word_html: Path, docx_path: Path) -> None:
             check=False,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=180,
             env=environment,
         )
         if result.returncode != 0 or not docx_path.is_file():
@@ -437,7 +442,9 @@ def build_target(target: BuildTarget, *, version: str, baseline_date: str) -> No
     target.output_stem.parent.mkdir(parents=True, exist_ok=True)
     markdown_path = target.output_stem.with_suffix(".md")
     html_path = target.output_stem.with_suffix(".html")
-    word_html_path = target.output_stem.with_name(target.output_stem.name + "_Word源.html")
+    word_html_path = target.output_stem.with_name(
+        target.output_stem.name + "_Word源.html"
+    )
     pdf_path = target.output_stem.with_suffix(".pdf")
     docx_path = target.output_stem.with_suffix(".docx")
 
@@ -447,7 +454,9 @@ def build_target(target: BuildTarget, *, version: str, baseline_date: str) -> No
     word_html_path.write_text(
         build_word_html(document, base_dir=html_path.parent), encoding="utf-8"
     )
-    HTML(filename=str(html_path), base_url=str(html_path.parent)).write_pdf(str(pdf_path))
+    HTML(filename=str(html_path), base_url=str(html_path.parent)).write_pdf(
+        str(pdf_path)
+    )
     convert_docx(word_html_path, docx_path)
     print(f"Built {markdown_path}, {docx_path}, {pdf_path}")
 
@@ -495,9 +504,17 @@ def write_index(manifest: dict[str, str], specs: list[ManualSpec]) -> None:
 
 def parse_args(specs: list[ManualSpec]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--all", action="store_true", help="build all role manuals and consolidated manual")
-    parser.add_argument("--role", choices=[spec.slug for spec in specs], help="build one role manual")
-    parser.add_argument("--consolidated", action="store_true", help="build only the consolidated manual")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="build all role manuals and consolidated manual",
+    )
+    parser.add_argument(
+        "--role", choices=[spec.slug for spec in specs], help="build one role manual"
+    )
+    parser.add_argument(
+        "--consolidated", action="store_true", help="build only the consolidated manual"
+    )
     return parser.parse_args()
 
 
@@ -513,7 +530,9 @@ def main() -> None:
 
     targets: list[BuildTarget] = []
     if build_all or args.role:
-        selected = specs if build_all else [spec for spec in specs if spec.slug == args.role]
+        selected = (
+            specs if build_all else [spec for spec in specs if spec.slug == args.role]
+        )
         for spec in selected:
             targets.append(
                 BuildTarget(

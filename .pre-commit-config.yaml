@@ -25,28 +25,13 @@ repos:
       - id: mixed-line-ending
         args: ["--fix=lf"]
 
-  - repo: https://github.com/psf/black
-    rev: 24.10.0
+  - repo: local
     hooks:
-      - id: black
-
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        args: ["--profile=black"]
-
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
-    hooks:
-      - id: ruff
-        args: ["--fix"]
-
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.1.1
-    hooks:
-      - id: flake8
-        args: ["--max-line-length=100", "--extend-ignore=E203,W503"]
+      - id: lint-ratchet
+        name: Black/isort/Ruff/Flake8 debt ratchet
+        entry: python scripts/lint_ratchet.py
+        language: system
+        pass_filenames: false
 
   # Optional: lightweight security scan before push
   - repo: https://github.com/PyCQA/bandit
@@ -56,4 +41,3 @@ repos:
         name: bandit (scan allapp/)
         args: ["-ll", "-r", "allapp/"]
         stages: [pre-push]
-

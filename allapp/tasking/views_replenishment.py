@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 from allapp.accounts.models import UserRoleScope
+from allapp.products.identifier_lookup import product_search_q
 from allapp.tasking import services as task_services
 from allapp.tasking.models import (
     ReplenishmentPolicy,
@@ -341,8 +342,7 @@ class ReplenishmentTaskViewSet(viewsets.ReadOnlyModelViewSet):
         if search:
             qs = qs.filter(
                 Q(task_no__icontains=search)
-                | Q(lines__product__name__icontains=search)
-                | Q(lines__product__code__icontains=search)
+                | product_search_q(search, product_field="lines__product_id")
             ).distinct()
         statuses = self.request.query_params.getlist("status")
         if statuses:

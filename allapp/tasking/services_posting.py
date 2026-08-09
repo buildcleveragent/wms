@@ -1,22 +1,30 @@
 # allapp/tasking/services_posting.py
-from django.db import transaction, IntegrityError
-from django.utils import timezone
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import IntegrityError, transaction
+from django.utils import timezone
+
+from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.tasking.models import PostingJournal, WmsTask
 from allapp.tasking.posting_exec import execute_posting_handler
 
-TX_POST = "POST"        # 过账
+TX_POST = "POST"  # 过账
 TX_REVERSE = "REVERSE"  # 冲销（可选）
-TX_CANCEL = "CANCEL"    # 作废（可选）
+TX_CANCEL = "CANCEL"  # 作废（可选）
 
 STATUS_PENDING = "PENDING"
-STATUS_POSTED  = "POSTED"
-STATUS_FAILED  = "FAILED"
+STATUS_POSTED = "POSTED"
+STATUS_FAILED = "FAILED"
+
 
 def _as_wh_mgr(user):
-    return user and (user.is_superuser or user.has_perm("tasking.taskconfirm_as_wh_manager"))
+    return user and (
+        user.is_superuser or user.has_perm("tasking.taskconfirm_as_wh_manager")
+    )
 
-def _get_or_create_journal_locked(*, src_model: str, src_id: int, tx_type: str) -> PostingJournal:
+
+def _get_or_create_journal_locked(
+    *, src_model: str, src_id: int, tx_type: str
+) -> PostingJournal:
     """
     幂等 + 并发控制：
     - 尝试 get_or_create 一条日记账（PENDING）
@@ -26,12 +34,16 @@ def _get_or_create_journal_locked(*, src_model: str, src_id: int, tx_type: str) 
     with transaction.atomic():
         try:
             j, created = PostingJournal.objects.get_or_create(
-                src_model=src_model, src_id=src_id, tx_type=tx_type,
+                src_model=src_model,
+                src_id=src_id,
+                tx_type=tx_type,
                 defaults={"status": STATUS_PENDING, "message": "", "attempt_count": 0},
             )
         except IntegrityError:
             # 并发 get_or_create 碰撞，退而求其次再取
-            j = PostingJournal.objects.get(src_model=src_model, src_id=src_id, tx_type=tx_type)
+            j = PostingJournal.objects.get(
+                src_model=src_model, src_id=src_id, tx_type=tx_type
+            )
         # 行锁：保证只有拿到锁的事务能修改这条日记账
         j = PostingJournal.objects.select_for_update().get(pk=j.pk)
         return j
@@ -51,8 +63,14 @@ def post_task(task_id: int, *, by_user=None, note: str = "过账"):
     if not _as_wh_mgr(by_user):
         raise PermissionDenied("无过账权限。")
 
-    # 1) 锁住任务头，读当前状态
+    # 1) 所有库存写入先锁仓库，再锁任务头。
+    warehouse_id = (
+        WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
+    )
+    lock_warehouses_for_inventory_write(warehouse_id)
     task = WmsTask.objects.select_for_update().get(pk=task_id)
+    if task.warehouse_id != warehouse_id:
+        raise ValidationError("任务仓库在过账期间发生变化，请重试。")
 
     # 2) 审核/状态门控
     if task.status != WmsTask.Status.COMPLETED:
@@ -61,7 +79,9 @@ def post_task(task_id: int, *, by_user=None, note: str = "过账"):
         raise ValidationError("未审核通过，不能过账。")
 
     # 3) 幂等日记账（锁）
-    j = _get_or_create_journal_locked(src_model="WmsTask", src_id=task_id, tx_type=TX_POST)
+    j = _get_or_create_journal_locked(
+        src_model="WmsTask", src_id=task_id, tx_type=TX_POST
+    )
 
     # 已过账则直接返回（幂等）
     if j.status == STATUS_POSTED:
@@ -71,7 +91,14 @@ def post_task(task_id: int, *, by_user=None, note: str = "过账"):
             task.posted_by = by_user
             task.posted_at = timezone.now()
             task.posting_note = note or (j.message or "")
-            task.save(update_fields=["posting_status", "posted_by", "posted_at", "posting_note"])
+            task.save(
+                update_fields=[
+                    "posting_status",
+                    "posted_by",
+                    "posted_at",
+                    "posting_note",
+                ]
+            )
         return {"ok": True, "tx_created": 0, "journal": j.pk, "status": j.status}
 
     # 4) 执行器执行 + 写回
@@ -95,7 +122,9 @@ def post_task(task_id: int, *, by_user=None, note: str = "过账"):
         task.posted_by = by_user
         task.posted_at = timezone.now()
         task.posting_note = note or ""
-        task.save(update_fields=["posting_status", "posted_by", "posted_at", "posting_note"])
+        task.save(
+            update_fields=["posting_status", "posted_by", "posted_at", "posting_note"]
+        )
 
         return {"ok": True, "tx_created": created, "journal": j.pk, "status": j.status}
 
@@ -109,6 +138,8 @@ def post_task(task_id: int, *, by_user=None, note: str = "过账"):
         task.posted_by = by_user
         task.posted_at = timezone.now()
         task.posting_note = f"{note or ''} {e}"[:255]
-        task.save(update_fields=["posting_status", "posted_by", "posted_at", "posting_note"])
+        task.save(
+            update_fields=["posting_status", "posted_by", "posted_at", "posting_note"]
+        )
 
         raise

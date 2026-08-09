@@ -22,10 +22,15 @@ def _json_default(value):
     return str(value)
 
 
+def _json_safe(value):
+    """Return a JSONField-safe copy while preserving audit hash semantics."""
+    return json.loads(json.dumps(value, default=_json_default))
+
+
 def object_snapshot(obj) -> dict:
     if obj is None:
         return {}
-    return model_to_dict(obj)
+    return _json_safe(model_to_dict(obj))
 
 
 def _client_ip(request):
@@ -61,7 +66,7 @@ def record_audit_event(
     object_id = str(getattr(obj, "pk", "") or "")
     owner_id = owner_id or getattr(obj, "owner_id", None)
     warehouse_id = warehouse_id or getattr(obj, "warehouse_id", None)
-    event_metadata = dict(metadata or {})
+    event_metadata = _json_safe(dict(metadata or {}))
     event_metadata.setdefault("_event_id", uuid.uuid4().hex)
     payload = {
         "username": getattr(actor, "username", "") if actor else "",
@@ -75,8 +80,8 @@ def record_audit_event(
         "method": (getattr(request, "method", "") or "") if request else "",
         "path": (getattr(request, "path", "") or "") if request else "",
         "succeeded": bool(succeeded),
-        "before": before or {},
-        "after": after or {},
+        "before": _json_safe(before or {}),
+        "after": _json_safe(after or {}),
         "metadata": event_metadata,
     }
     raw = json.dumps(
