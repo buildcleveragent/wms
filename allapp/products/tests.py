@@ -803,7 +803,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["created_count"], 1)
         product = Product.objects.get(owner=self.owner, code="PDA-XLSX-HAPPY")
-        self.assertEqual(product.sku, "PXIA-1")
+        self.assertEqual(product.sku, "PXIA1")
         self.assertEqual(product.created_by_id, self.user.id)
         self.assertFalse(product.expiry_control)
         self.assertFalse(product.serial_control)
@@ -1102,7 +1102,7 @@ class ProductExcelImportApiTests(TestCase):
             .order_by("code")
             .values_list("sku", flat=True)
         )
-        self.assertEqual(products, ["PXIA-1", "PXIA-2"])
+        self.assertEqual(products, ["PXIA1", "PXIA2"])
 
     def test_file_duplicates_are_checked_even_with_existing_code_conflict(self):
         Product.objects.create(
@@ -1185,8 +1185,8 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         mfg = Product.objects.get(code="PDA-MFG")
         inbound = Product.objects.get(code="PDA-INBOUND")
-        self.assertEqual(mfg.sku, "PXIA-1")
-        self.assertEqual(inbound.sku, "PXIA-2")
+        self.assertEqual(mfg.sku, "PXIA1")
+        self.assertEqual(inbound.sku, "PXIA2")
         self.assertFalse(mfg.batch_control)
         self.assertFalse(mfg.serial_control)
         self.assertTrue(mfg.is_active)
@@ -1594,7 +1594,7 @@ class ProductImportCommandTests(TestCase):
             os.unlink(path)
 
         product = Product.objects.get(owner=self.owner, code="CMD-SKU-1")
-        self.assertEqual(product.sku, "PIC-1")
+        self.assertEqual(product.sku, "PIC1")
         self.assertEqual(product.name, "命令导入商品")
         self.assertEqual(product.base_uom.name, "件")
 

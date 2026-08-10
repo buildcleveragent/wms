@@ -1,6 +1,7 @@
 # apps/products/models.py
 from __future__ import annotations
 
+import uuid
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.core.exceptions import ValidationError
@@ -33,6 +34,11 @@ LEGACY_PRODUCT_IDENTIFIER_FIELDS = (
     "carton_barcode",
     "external_code",
 )
+
+
+def format_owner_sequence_identifier(owner_code: str, sequence: int) -> str:
+    """Build the immutable owner sequence identifier used by new SKUs."""
+    return f"{str(owner_code).strip().upper()}{int(sequence)}"
 
 
 def normalize_product_identifier(value) -> str:
@@ -634,7 +640,7 @@ class Product(BaseModel):
         "仓库SKU编码",
         max_length=50,
         blank=True,
-        help_text="系统按“货主编码-序号”自动生成，货主内唯一",
+        help_text="系统按“货主编码+序号”自动生成，货主内唯一",
     )
     category = models.ForeignKey(
         ProductCategory,
@@ -740,7 +746,10 @@ class Product(BaseModel):
     expiry_control = models.BooleanField("保质期管理", default=True)
 
     product_image = models.ImageField(
-        "商品图片", upload_to="products/", blank=True, null=True  # 按日期分目录存储
+        "商品图片",
+        upload_to="products/",
+        blank=True,
+        null=True,  # 按日期分目录存储
     )
 
     # 定价相关
@@ -785,8 +794,12 @@ class Product(BaseModel):
     mix_expiry_allowed = models.BooleanField("允许库位混效期", default=False)
 
     # 温控（如采用多温区模型，可不使用下两字段）
-    # temperature_min = models.DecimalField("最低温(°C)", max_digits=5, decimal_places=2, blank=True, null=True)
-    # temperature_max = models.DecimalField("最高温(°C)", max_digits=5, decimal_places=2, blank=True, null=True)
+    # temperature_min = models.DecimalField(
+    #     "最低温(°C)", max_digits=5, decimal_places=2, blank=True, null=True
+    # )
+    # temperature_max = models.DecimalField(
+    #     "最高温(°C)", max_digits=5, decimal_places=2, blank=True, null=True
+    # )
 
     # 产地（ISO-3166-1 alpha-2）
     origin_country = models.CharField(
@@ -803,7 +816,7 @@ class Product(BaseModel):
         "扩展属性", blank=True, null=False, default=dict
     )  # 建议默认空 dict
     material_quality = models.CharField("材质", max_length=20, blank=True, null=True)
-    vender = models.CharField("厂家", max_length=50, blank=True, null=True)
+    vender = models.CharField("厂家", max_length=200, blank=True, null=True)
 
     class Meta:
         verbose_name = "商品档案"
@@ -904,7 +917,10 @@ class Product(BaseModel):
                 fields=["owner", "is_active", "expiry_control"],
                 name="owner_active_expiry_idx",
             ),
-            # models.Index(fields=["owner", "is_active", "is_hazardous"], name="owner_active_hazard_idx"),
+            # models.Index(
+            #     fields=["owner", "is_active", "is_hazardous"],
+            #     name="owner_active_hazard_idx",
+            # ),
         ]
 
     def __str__(self):
@@ -928,14 +944,22 @@ class Product(BaseModel):
                     .get(pk=self.owner_id)
                 )
                 sequence = owner.next_sku_sequence
-                while ProductIdentifierRegistry.objects.filter(
-                    owner_id=owner.pk,
-                    normalized_value=normalize_product_identifier(
-                        f"{owner.code}-{sequence}"
-                    ),
-                ).exists():
+                while True:
+                    candidate = format_owner_sequence_identifier(owner.code, sequence)
+                    occupied = (
+                        ProductIdentifierRegistry.objects.filter(
+                            owner_id=owner.pk,
+                            normalized_value=normalize_product_identifier(candidate),
+                        ).exists()
+                        or type(self)
+                        .all_objects.filter(owner_id=owner.pk)
+                        .filter(Q(code__iexact=candidate) | Q(sku__iexact=candidate))
+                        .exists()
+                    )
+                    if not occupied:
+                        break
                     sequence += 1
-                self.sku = f"{owner.code}-{sequence}"
+                self.sku = format_owner_sequence_identifier(owner.code, sequence)
             else:
                 original = (
                     type(self)
@@ -1162,7 +1186,11 @@ class Product(BaseModel):
         #     self.fefo_required = False
 
         # 温度范围
-        # if self.temperature_min is not None and self.temperature_max is not None and self.temperature_min > self.temperature_max:
+        # if (
+        #     self.temperature_min is not None
+        #     and self.temperature_max is not None
+        #     and self.temperature_min > self.temperature_max
+        # ):
         #     errors["temperature_min"] = "最低温不能高于最高温。"
 
         # 序列号商品不建议混批
@@ -1258,6 +1286,52 @@ class Product(BaseModel):
 
         if errors:
             raise ValidationError(errors)
+
+
+class Gs1LookupCache(models.Model):
+    """Shared, provider-backed GTIN lookup cache and short-lived fetch lease."""
+
+    class Status(models.TextChoices):
+        FETCHING = "FETCHING", "查询中"
+        SUCCESS = "SUCCESS", "成功"
+        ERROR = "ERROR", "失败"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    canonical_gtin = models.CharField("标准 GTIN-14", max_length=14, unique=True)
+    query_code = models.CharField("查询条码", max_length=16)
+    status = models.CharField(
+        "查询状态", max_length=12, choices=Status.choices, default=Status.FETCHING
+    )
+    found = models.BooleanField("已查到", null=True, blank=True)
+    registered = models.BooleanField("已注册", null=True, blank=True)
+    payload = models.JSONField("服务商响应数据", default=dict, blank=True)
+    provider_code = models.IntegerField("服务商状态码", null=True, blank=True)
+    provider_message = models.CharField("服务商消息", max_length=200, blank=True)
+    provider_request_id = models.CharField(
+        "服务商请求 ID", max_length=64, blank=True, db_index=True
+    )
+    fetched_at = models.DateTimeField("查询时间", null=True, blank=True)
+    expires_at = models.DateTimeField("缓存过期时间", db_index=True)
+    lease_until = models.DateTimeField("查询租约到期", null=True, blank=True)
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        verbose_name = "GS1 查询缓存"
+        verbose_name_plural = "GS1 查询缓存"
+        ordering = ("-updated_at",)
+
+
+class Gs1ProviderRateLimit(models.Model):
+    """Database-coordinated start-time gate for the shared ApiZero quota."""
+
+    provider = models.CharField("服务商", max_length=32, primary_key=True)
+    next_allowed_at = models.DateTimeField("下次允许调用时间")
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        verbose_name = "GS1 服务商限速"
+        verbose_name_plural = "GS1 服务商限速"
 
 
 class ProductIdentifierRegistry(models.Model):
@@ -1648,8 +1722,14 @@ class ProductPackage(BaseModel):
         ordering = ["product", "sort_order", "uom"]  # ✅ 用字段名
         constraints = [
             models.UniqueConstraint(fields=["product", "uom"], name="uniq_product_uom"),
-            # models.UniqueConstraint(fields=["product", "is_purchase_default"], name="uniproduct_purchasedefault"),
-            # models.UniqueConstraint(fields=["product", "is_sales_default"], name="uniproduct_salesdefault"),
+            # models.UniqueConstraint(
+            #     fields=["product", "is_purchase_default"],
+            #     name="uniproduct_purchasedefault",
+            # ),
+            # models.UniqueConstraint(
+            #     fields=["product", "is_sales_default"],
+            #     name="uniproduct_salesdefault",
+            # ),
             # ✅ 每商品最多 1 条“采购默认”(True)（非默认用 NULL 不参与冲突）
             models.UniqueConstraint(
                 fields=["product", "is_purchase_default", "is_deleted"],
@@ -1697,7 +1777,10 @@ class ProductPackage(BaseModel):
 
     def __str__(self):
         # 注意：大量列表渲染时请 select_related("product__base_uom", "uom")
-        return f"{self.product.code} - 1 {self.uom.code} = {self.qty_in_base} {self.product.base_uom.code}"
+        return (
+            f"{self.product.code} - 1 {self.uom.code} = "
+            f"{self.qty_in_base} {self.product.base_uom.code}"
+        )
 
     def save(self, *args, **kwargs):
         # ✅ 只做“自动计算/赋值”，不要在 save() 里 full_clean()（否则 admin 容易 500）
@@ -1864,7 +1947,8 @@ class ProductPackage(BaseModel):
     #                 self.volume_m3 = calc_q
     #                 self.volume_m3_status = self.VolumeStatus.CALCULATED
     #             else:
-    #                 tol = max(Decimal("0.000001"), calc_q * Decimal("0.001"))  # 容差 max(1e-6, 0.1%)
+    #                 # 容差 max(1e-6, 0.1%)
+    #                 tol = max(Decimal("0.000001"), calc_q * Decimal("0.001"))
     #                 if (self.volume_m3 - calc_q).copy_abs() > tol:
     #                     self.volume_m3_status = self.VolumeStatus.MISMATCH
     #                 else:
@@ -1887,13 +1971,22 @@ class ProductPackage(BaseModel):
     #         errors["qty_in_base"] = "换算数量必须 > 0。"
     #
     #     # 与基本单位相同则必须 1:1
-    #     if self.uom_id and self.product_id and self.uom_id == self.product.base_uom_id and self.qty_in_base != 1:
+    #     if (
+    #         self.uom_id
+    #         and self.product_id
+    #         and self.uom_id == self.product.base_uom_id
+    #         and self.qty_in_base != 1
+    #     ):
     #         errors["qty_in_base"] = "基础单位层级的换算数必须为 1。"
     #
     #     # 每商品的“默认单位”唯一（应用层校验；并发场景请在服务层加锁）
     #     for flag, label in (("is_purchase_default", "采购"), ("is_sales_default", "销售")):
     #         if getattr(self, flag):
-    #             qs = type(self).objects.filter(product_id=self.product_id, **{flag: True}, is_deleted=False)
+    #             qs = type(self).objects.filter(
+    #                 product_id=self.product_id,
+    #                 **{flag: True},
+    #                 is_deleted=False,
+    #             )
     #             if self.pk:
     #                 qs = qs.exclude(pk=self.pk)
     #             if qs.exists():

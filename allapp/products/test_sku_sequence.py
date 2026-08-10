@@ -35,7 +35,7 @@ class ProductSkuSequenceTests(TestCase):
         product = self.create_product(owner, "PRODUCT-100", sku="CALLER-SUPPLIED")
 
         owner.refresh_from_db()
-        self.assertEqual(product.sku, "jqrt-100")
+        self.assertEqual(product.sku, "JQRT100")
         self.assertEqual(owner.next_sku_sequence, 101)
 
     def test_soft_deleted_product_does_not_release_sequence(self):
@@ -46,8 +46,8 @@ class ProductSkuSequenceTests(TestCase):
         second = self.create_product(owner, "PRODUCT-2")
 
         owner.refresh_from_db()
-        self.assertEqual(first.sku, "DEL-1")
-        self.assertEqual(second.sku, "DEL-2")
+        self.assertEqual(first.sku, "DEL1")
+        self.assertEqual(second.sku, "DEL2")
         self.assertEqual(owner.next_sku_sequence, 3)
 
     def test_migration_initializes_from_active_and_soft_deleted_products(self):
@@ -74,7 +74,7 @@ class ProductSkuSequenceTests(TestCase):
 
         owner.refresh_from_db()
         product.refresh_from_db()
-        self.assertEqual(product.sku, "UPD-1")
+        self.assertEqual(product.sku, "UPD1")
         self.assertEqual(owner.next_sku_sequence, 2)
 
     def test_failed_insert_does_not_consume_sequence(self):

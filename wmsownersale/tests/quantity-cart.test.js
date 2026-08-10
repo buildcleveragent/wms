@@ -71,7 +71,7 @@ describe('购物车数量防线', () => {
     expect(cart.items[0].qty).toBe(1)
   })
 
-  it('更换客户保留商品并清空客户相关表头', () => {
+  it('更换客户清空商品和客户相关表头', () => {
     const cart = useCart()
     cart.beginOrder({ user_id: 1, owner_id: 2, warehouse: { id: 3, name: '仓库' } })
     cart.setCustomer({ id: 4, code: 'A', name: '客户 A' })
@@ -82,7 +82,7 @@ describe('购物车数量防线', () => {
     const firstKey = cart.idempotency_key
 
     expect(cart.setCustomer({ id: 6, code: 'B', name: '客户 B' })).toBe(true)
-    expect(cart.items).toHaveLength(1)
+    expect(cart.items).toEqual([])
     expect(cart.order_header).toMatchObject({
       src_bill_no: '', contact: '', contact_phone: '', ship_to: '',
     })

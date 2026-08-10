@@ -9,6 +9,7 @@ from .excel_views import (
 )
 from .export_print import ReceiveTaskPrintView
 from .export_views import export_receive_task_excel
+from .gs1_views import Gs1LookupApi, Gs1OptionsApi, Gs1QuickCreateApi
 from .views import InboundOrderViewSet, InboundTaskViewSet, ReceiveGoodsWithoutOrder
 
 router = DefaultRouter()
@@ -17,6 +18,13 @@ router.register(r"pda/tasks", InboundTaskViewSet, basename="inbound-pda-task")
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("gs1-products/lookup/", Gs1LookupApi.as_view(), name="gs1-product-lookup"),
+    path("gs1-products/options/", Gs1OptionsApi.as_view(), name="gs1-product-options"),
+    path(
+        "gs1-products/quick-create/",
+        Gs1QuickCreateApi.as_view(),
+        name="gs1-product-quick-create",
+    ),
     path(
         "receive_without_order/",
         ReceiveGoodsWithoutOrder.as_view(),

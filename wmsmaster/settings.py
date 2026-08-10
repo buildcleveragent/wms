@@ -108,6 +108,12 @@ REPLENISHMENT_DEMAND_ENABLED = env.bool("REPLENISHMENT_DEMAND_ENABLED", default=
 RELOCATION_REQUEST_ENABLED = env.bool("RELOCATION_REQUEST_ENABLED", default=False)
 RELOCATION_PDA_ENABLED = env.bool("RELOCATION_PDA_ENABLED", default=False)
 RELOCATION_CONTAINER_ENABLED = env.bool("RELOCATION_CONTAINER_ENABLED", default=False)
+APIZERO_GS1_ENABLED = env.bool("APIZERO_GS1_ENABLED", default=False)
+APIZERO_GS1_API_KEY = env("APIZERO_GS1_API_KEY", default="")
+APIZERO_GS1_URL = env(
+    "APIZERO_GS1_URL", default="https://v1.apizero.cn/api/barcode-gs1"
+)
+APIZERO_GS1_TIMEOUT = env.float("APIZERO_GS1_TIMEOUT", default=5.0)
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env("SECRET_KEY", default="").strip()

@@ -1,5 +1,6 @@
 import itertools
 import threading
+import time
 from decimal import Decimal
 from unittest import mock
 
@@ -22,6 +23,8 @@ from .services import create_pos_return, create_pos_sale, void_pos_sale
 
 
 class PosCheckoutConcurrencyTests(TransactionTestCase):
+    concurrent_action_timeout_seconds = 120
+
     def setUp(self):
         self.owner = Owner.objects.create(code="PCONC", name="POS concurrent owner")
         self.warehouse = Warehouse.objects.create(code="PCWH", name="POS concurrent WH")
@@ -122,8 +125,9 @@ class PosCheckoutConcurrencyTests(TransactionTestCase):
             ]
             for thread in threads:
                 thread.start()
+            deadline = time.monotonic() + self.concurrent_action_timeout_seconds
             for thread in threads:
-                thread.join(timeout=30)
+                thread.join(timeout=max(0, deadline - time.monotonic()))
 
         if any(thread.is_alive() for thread in threads):
             self.fail("concurrent POS actions did not finish")

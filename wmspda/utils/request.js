@@ -566,6 +566,25 @@ export const api = {
       url: `/api/catalog/receive_products?search=${encodeURIComponent(q)}&page=${page}&owner=${owner}`,
     }),
 
+  gs1ProductLookup: (ownerId, barcode) =>
+    request({
+      url: '/api/inbound/gs1-products/lookup/',
+      method: 'POST',
+      data: { owner_id: ownerId, barcode },
+    }),
+
+  gs1ProductOptions: (ownerId, search = '') =>
+    request({
+      url: `/api/inbound/gs1-products/options/?${buildQuery({ owner_id: ownerId, search })}`,
+    }),
+
+  gs1ProductQuickCreate: (payload) =>
+    request({
+      url: '/api/inbound/gs1-products/quick-create/',
+      method: 'POST',
+      data: payload,
+    }),
+
   receive_without_order: (q = '', page = 1, owner) =>
     request({
       url: `/api/inbound/receive_without_order?search=${encodeURIComponent(q)}&page=${page}&owner=${owner}`,

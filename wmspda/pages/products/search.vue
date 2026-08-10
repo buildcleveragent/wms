@@ -8,8 +8,8 @@
 	    </view>
   
     <view class="bar">
-      <input class="input flex-input" v-model="q" placeholder="名称/编码/条码 可输入部分内容"  @confirm="search" />
-      <button class="btn-outline" @click="search">搜索</button>
+      <input class="input flex-input" v-model="q" placeholder="名称/编码/条码 可输入部分内容" data-testid="product-search-input" @confirm="search" />
+      <button class="btn-outline" data-testid="product-search-submit" @click="search">搜索</button>
       <button class="btn-outline" @click="quickScan">扫码</button>
     </view>
 
@@ -146,6 +146,14 @@
         <text>查看、提交入库单：数量:{{cart.totalQty}} </text> 
       </button>
     </view>
+    <Gs1QuickCreateModal
+      :visible="gs1Visible"
+      :candidate="gs1Candidate"
+      :options="gs1Options"
+      :submitting="gs1Submitting"
+      @close="closeGs1Modal"
+      @submit="submitGs1QuickCreate"
+    />
   </view>
 </template>
 
@@ -155,8 +163,8 @@ import { ref, computed, reactive } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
 import { api } from '@/utils/request'
-import { scanOne } from '@/utils/scan'
 import { useCart } from '@/store/cart'
+import Gs1QuickCreateModal from '@/components/Gs1QuickCreateModal.vue'
 
 const q = ref('')
 const qtyInputRefs = reactive<Record<string | number, any>>({})
@@ -174,7 +182,10 @@ console.log("rows",rows.value)
 const cart = useCart()
 console.log("cart1111111112222222222222222",cart)
 
-const fmt = (n:any)=> Number(n||0).toFixed(2)
+const gs1Visible = ref(false)
+const gs1Candidate = ref<any>(null)
+const gs1Options = ref<{categories:any[]; uoms:any[]}>({ categories: [], uoms: [] })
+const gs1Submitting = ref(false)
 
 // =========================
 // 数量输入：按商品 id 记录期望数量
@@ -286,6 +297,13 @@ async function search(){
   list.value = Array.isArray(res)
     ? { count: res.length, next:null, previous:null, results: res }
     : (res?.results ? res : { count:0, next:null, previous:null, results:[] })
+
+  // 手工输入完整 GTIN 与扫码走同一条“本地优先、GS1 兜底”链路。
+  const keyword = q.value.trim()
+  const isFullGtin = /^(?:\d{8}|\d{12}|\d{13}|\d{14}|01\d{14})$/.test(keyword)
+  if (!list.value.results.length && isFullGtin) {
+    await handleBarcodeScanned(keyword)
+  }
 }
 
 function getInputValue(e: any): string {
@@ -495,14 +513,92 @@ function goExcelImport(){
 // =========================
 const { quickScan } = useBarcodeScanner({ onScan: handleBarcodeScanned })
 
-// 手动触发扫描
-const handleScan = () => {
-  quickScan()
-}
-
 async function handleBarcodeScanned(code:string){
   q.value = code
-  await search()
+  if (!cart.owner?.id) return
+  uni.showLoading({ title: '识别商品中' })
+  try {
+    const result:any = await api.gs1ProductLookup(cart.owner.id, code)
+    if (result?.source === 'local' && result.product) {
+      list.value = { count: 1, next: null, previous: null, results: [result.product] }
+      uni.showToast({ title: '已找到本地商品', icon: 'success' })
+      return
+    }
+    const candidate = result?.candidate
+    if (!candidate?.found) {
+      uni.showToast({ title: 'GS1 未查到该商品，请人工建档', icon: 'none' })
+      return
+    }
+    const options:any = await api.gs1ProductOptions(cart.owner.id)
+    gs1Candidate.value = candidate
+    gs1Options.value = {
+      categories: options?.categories || [],
+      uoms: options?.uoms || [],
+    }
+    gs1Visible.value = true
+  } finally {
+    uni.hideLoading()
+  }
+}
+
+function closeGs1Modal(){
+  if (gs1Submitting.value) return
+  gs1Visible.value = false
+  gs1Candidate.value = null
+}
+
+function optionalPositiveInt(value:any){
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+async function submitGs1QuickCreate(form:any){
+  if (!gs1Candidate.value?.lookup_id || !cart.owner?.id) return
+  gs1Submitting.value = true
+  try {
+    const result:any = await api.gs1ProductQuickCreate({
+      owner_id: cart.owner.id,
+      lookup_id: gs1Candidate.value.lookup_id,
+      category_id: form.category_id,
+      base_uom_id: form.base_uom_id,
+      quantity: form.quantity,
+      batch_control: Boolean(form.batch_control),
+      lot_no: String(form.lot_no || '').trim(),
+      expiry_control: Boolean(form.expiry_control),
+      expiry_basis: form.expiry_control ? form.expiry_basis : null,
+      shelf_life_days: form.expiry_control ? optionalPositiveInt(form.shelf_life_days) : null,
+      inbound_valid_days: form.expiry_control ? optionalPositiveInt(form.inbound_valid_days) : null,
+      expiry_warning_days: form.expiry_control ? optionalPositiveInt(form.expiry_warning_days) : null,
+      mfg_date: form.expiry_control && form.mfg_date ? form.mfg_date : null,
+      exp_date: form.expiry_control && form.exp_date ? form.exp_date : null,
+    })
+    const product = result?.product
+    const item = result?.cart_item
+    if (!product?.id || !item) throw new Error('快速建档返回数据不完整')
+    const quantity = Number(item.quantity)
+    cart.addItem({
+      ...product,
+      qty: quantity,
+      base_quantity: quantity,
+      lot_no: item.lot_no || '',
+      batch_number: item.lot_no || '',
+      mfg_date: item.mfg_date || '',
+      production_date: item.mfg_date || '',
+      exp_date: item.exp_date || '',
+      expiry_date: item.exp_date || '',
+    })
+    list.value = { count: 1, next: null, previous: null, results: [product] }
+    gs1Visible.value = false
+    gs1Candidate.value = null
+    uni.showToast({
+      title: result.created ? '商品已建档并加入购物车' : '商品已加入购物车',
+      icon: 'success',
+    })
+  } catch (error:any) {
+    if (error?.message) console.warn('GS1 快速建档失败:', error.message)
+  } finally {
+    gs1Submitting.value = false
+  }
 }
 
 // =========================

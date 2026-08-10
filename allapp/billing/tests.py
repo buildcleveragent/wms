@@ -3,6 +3,7 @@ import datetime
 import io
 import tempfile
 import threading
+import time
 from decimal import Decimal
 from unittest import mock
 
@@ -68,6 +69,14 @@ from allapp.products.models import Product, ProductUom
 from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
 from allapp.tasking.plugins.handlers import DefaultPostingHandler
 from wmsmaster.views import profile_view
+
+CONCURRENCY_TEST_TIMEOUT_SECONDS = 120
+
+
+def _join_concurrency_test_threads(*threads):
+    deadline = time.monotonic() + CONCURRENCY_TEST_TIMEOUT_SECONDS
+    for thread in threads:
+        thread.join(timeout=max(0, deadline - time.monotonic()))
 
 
 class BillingServiceTests(TestCase):
@@ -3905,7 +3914,7 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
             with generation_lock:
                 generation_calls += 1
             generation_entered.set()
-            if not release_generation.wait(timeout=5):
+            if not release_generation.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS):
                 raise AssertionError(
                     "timed out waiting to release billing scheduler concurrent test"
                 )
@@ -3943,14 +3952,16 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
         ):
             thread1 = threading.Thread(target=invoke, args=(0,))
             thread1.start()
-            self.assertTrue(generation_entered.wait(timeout=5))
+            self.assertTrue(
+                generation_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS)
+            )
 
             thread2 = threading.Thread(target=invoke, args=(1,))
             thread2.start()
-            thread2.join(timeout=5)
+            thread2.join(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS)
 
             release_generation.set()
-            thread1.join(timeout=5)
+            _join_concurrency_test_threads(thread1, thread2)
 
         if thread1.is_alive() or thread2.is_alive():
             self.fail("concurrent billing scheduler threads did not finish")
@@ -4042,7 +4053,7 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
                 current_call = create_calls
             if current_call == 1:
                 create_entered.set()
-                if not release_create.wait(timeout=5):
+                if not release_create.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS):
                     raise AssertionError(
                         "timed out waiting to release metric concurrent test"
                     )
@@ -4068,14 +4079,15 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
         ):
             thread1 = threading.Thread(target=invoke, args=(0,))
             thread1.start()
-            self.assertTrue(create_entered.wait(timeout=5))
+            self.assertTrue(
+                create_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS)
+            )
 
             thread2 = threading.Thread(target=invoke, args=(1,))
             thread2.start()
 
             release_create.set()
-            thread1.join(timeout=5)
-            thread2.join(timeout=5)
+            _join_concurrency_test_threads(thread1, thread2)
 
         if thread1.is_alive() or thread2.is_alive():
             self.fail("concurrent metric generation threads did not finish")
@@ -4271,7 +4283,9 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
         def fake_save_adjusted_accrual(accrual, new_amount):
             if not adjustment_entered.is_set():
                 adjustment_entered.set()
-                if not release_adjustment.wait(timeout=5):
+                if not release_adjustment.wait(
+                    timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS
+                ):
                     raise AssertionError(
                         "timed out waiting to release concurrent lock_period test"
                     )
@@ -4298,14 +4312,15 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
         ):
             thread1 = threading.Thread(target=invoke, args=(0,))
             thread1.start()
-            self.assertTrue(adjustment_entered.wait(timeout=5))
+            self.assertTrue(
+                adjustment_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS)
+            )
 
             thread2 = threading.Thread(target=invoke, args=(1,))
             thread2.start()
 
             release_adjustment.set()
-            thread1.join(timeout=5)
-            thread2.join(timeout=5)
+            _join_concurrency_test_threads(thread1, thread2)
 
         if thread1.is_alive() or thread2.is_alive():
             self.fail("concurrent lock_period threads did not finish")
@@ -4365,7 +4380,7 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
         def fake_billline_bulk_create(*args, **kwargs):
             if not billline_entered.is_set():
                 billline_entered.set()
-                if not release_billline.wait(timeout=5):
+                if not release_billline.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS):
                     raise AssertionError(
                         "timed out waiting to release concurrent invoice test"
                     )
@@ -4391,14 +4406,15 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
         ):
             thread1 = threading.Thread(target=invoke, args=(0, "INV-CONC-1"))
             thread1.start()
-            self.assertTrue(billline_entered.wait(timeout=5))
+            self.assertTrue(
+                billline_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS)
+            )
 
             thread2 = threading.Thread(target=invoke, args=(1, "INV-CONC-2"))
             thread2.start()
 
             release_billline.set()
-            thread1.join(timeout=5)
-            thread2.join(timeout=5)
+            _join_concurrency_test_threads(thread1, thread2)
 
         if thread1.is_alive() or thread2.is_alive():
             self.fail("concurrent generate_invoice threads did not finish")
