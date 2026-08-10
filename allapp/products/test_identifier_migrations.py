@@ -16,7 +16,8 @@ class ProductIdentifierMigrationTests(TransactionTestCase):
         self.old_apps = self.executor.loader.project_state([MIGRATE_FROM]).apps
 
     def tearDown(self):
-        MigrationExecutor(connection).migrate([MIGRATE_TO])
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes("products"))
         super().tearDown()
 
     def _owner_and_uoms(self, suffix):

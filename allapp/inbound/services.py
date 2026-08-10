@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from allapp.accounts.audit import record_audit_event
 from allapp.baseinfo.models import Owner
+from allapp.baseinfo.owner_warehouse_access import owner_can_use_warehouse
 from allapp.core.models import DocSequence
 from allapp.core.utils.log_context import build_log_payload
 from allapp.inbound.constants import (
@@ -374,6 +375,8 @@ def receive_goods_without_order(
         owner = Owner.objects.get(pk=owner_id, is_active=True)
     except Owner.DoesNotExist as exc:
         raise ValidationError(f"owner_id 不存在或已停用：{owner_id}") from exc
+    if not owner_can_use_warehouse(owner.id, warehouse.id):
+        raise PermissionDenied("该货主未授权当前仓库。")
 
     product_ids = {int(item["product_id"]) for item in items}
     product_map = {

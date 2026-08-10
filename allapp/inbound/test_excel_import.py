@@ -9,7 +9,7 @@ from openpyxl import load_workbook
 from rest_framework.test import APIClient
 
 from allapp.accounts.models import UserRoleScope
-from allapp.baseinfo.models import Owner
+from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
 from allapp.inventory.models import InventoryDetail
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product, ProductPackage, ProductUom
@@ -21,6 +21,10 @@ class NoOrderReceiveExcelImportTests(TestCase):
         self.owner = Owner.objects.create(code="EXOWN", name="Excel Owner")
         self.other_owner = Owner.objects.create(code="OTHER", name="Other Owner")
         self.warehouse = Warehouse.objects.create(code="EXWH", name="Excel Warehouse")
+        OwnerWarehouseBinding.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+        )
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="EXSW",
@@ -84,6 +88,12 @@ class NoOrderReceiveExcelImportTests(TestCase):
             "/api/inbound/receive_without_order/import_template/",
             {"owner_id": selected_owner.id},
         )
+
+    def test_template_rejects_owner_without_active_warehouse_binding(self):
+        response = self._template_response(owner=self.other_owner)
+
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertIn("未授权当前仓库", str(response.data))
 
     def _file_with_rows(self, rows, *, owner=None):
         response = self._template_response(owner=owner)
@@ -258,6 +268,10 @@ class NoOrderReceiveExcelImportTests(TestCase):
         self.assertIn("模板缺少必要列", missing_column_response.data["detail"])
 
     def test_template_for_another_owner_is_rejected(self):
+        OwnerWarehouseBinding.objects.create(
+            owner=self.other_owner,
+            warehouse=self.warehouse,
+        )
         response = self._preview(
             [["EXSKU1", "Excel Product", "1", "EA", "", "", ""]],
             owner=self.owner,

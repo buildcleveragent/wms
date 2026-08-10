@@ -3,8 +3,8 @@
 		<view class="text-lg font-bold mb-2">点击选中的货主</view>
 		
 		<view class="bar">
-			<input class="input flex-input" v-model="q" placeholder="货主名/编码 可输入部分内容" @confirm="search" />
-			<button class="btn-outline" @click="search">搜索</button>
+			<input data-testid="owner-search-input" class="input flex-input" v-model="q" placeholder="货主名/编码 可输入部分内容" @confirm="search" />
+			<button data-testid="owner-search-submit" class="btn-outline" @click="search">搜索</button>
 			<button class="btn-outline" @click="quickScan">扫码</button>
 		</view>
 		
@@ -16,7 +16,14 @@
 		    </picker>
 		  </view> -->
 
-		<view v-for="(c,i) in rows" :key="c?.id ?? i" class="card" @click="choose(c)">
+		<view v-if="loading" data-testid="owner-loading" class="state-text">正在加载货主...</view>
+		<view v-else-if="loadError" data-testid="owner-error" class="state-panel">
+			<view>{{ loadError }}</view>
+			<button class="btn-outline retry-button" @click="search">重新加载</button>
+		</view>
+		<view v-else-if="!rows.length" data-testid="owner-empty" class="state-text">暂无可操作货主</view>
+
+		<view v-for="(c,i) in rows" :key="c?.id ?? i" data-testid="owner-row" class="card" @click="choose(c)">
 			<view class="row">
 				<view class="font-bold">{{ c?.name }}</view>
 				<view class="badge">ID: {{ c?.id }}</view>
@@ -35,7 +42,7 @@
 // import { ref, computed } from 'vue'
 import { ref, computed } from 'vue'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
-import { onLoad, onReachBottom } from '@dcloudio/uni-app'
+import { onLoad, onReachBottom, onUnload } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'     
 import { useCart } from '@/store/cart'
 
@@ -43,6 +50,8 @@ const q = ref('')
 const page = ref(1)
 const list = ref({ count:0, next:null, previous:null, results:[] })
 const rows = computed(()=> list.value.results || [])
+const loading = ref(false)
+const loadError = ref('')
 
 const cart = useCart()
 
@@ -59,8 +68,12 @@ function normalize(res){
 
 async function fetch(pageNo = 1){
   const tag = ++reqSeq
+  if (pageNo === 1) {
+    loading.value = true
+    loadError.value = ''
+  }
   try{
-    // 后端已按业务员固定货主过滤，无需传 owner_id
+    // 后端按当前仓库的显式货主授权过滤，无需传 owner_id
     const res = await api.owners(q.value || '', pageNo)
     if (!alive || tag !== reqSeq) return   // 页面已销毁或有更新版请求 → 丢弃结果
     const n = normalize(res)
@@ -68,6 +81,11 @@ async function fetch(pageNo = 1){
     else list.value = { ...n, results: [ ...(list.value.results || []), ...n.results ] }
   }catch(e){
     // 页面销毁后返回的错误直接忽略
+    if (alive && tag === reqSeq) {
+      loadError.value = e?.message || '货主加载失败，请重试'
+    }
+  }finally{
+    if (alive && tag === reqSeq && pageNo === 1) loading.value = false
   }
 }
 
@@ -95,12 +113,14 @@ onReachBottom(() => { loadMore() })
 
 
 // 扫描相关
-const { quickScan } = useBarcodeScanner({ onScan: handleBarcodeScanned })
-
-// 手动触发扫描
-const handleScan = () => {
-  quickScan()
+async function handleBarcodeScanned(barcode){
+  const value = String(barcode || '').trim()
+  if (!value) return
+  q.value = value
+  await search()
 }
+
+const { quickScan } = useBarcodeScanner({ onScan: handleBarcodeScanned })
 
 </script>
 
@@ -271,6 +291,25 @@ padding: 20rpx;
   justify-content: flex-start;  /* 水平排列，从左开始 */
   gap: 10rpx;  /* 设置按钮和输入框之间的间距 */
   padding-top:40rpx;
+}
+
+.state-text,
+.state-panel {
+  color: #666;
+  font-size: 28rpx;
+  padding: 48rpx 12rpx;
+  text-align: center;
+}
+
+.state-panel {
+  color: #c0392b;
+}
+
+.retry-button {
+  display: inline-flex;
+  width: auto;
+  margin-top: 20rpx;
+  padding: 0 28rpx;
 }
 
 

@@ -316,14 +316,13 @@ class OutboundProductionRemediationTests(TestCase):
         )
 
     def test_warehouse_catalog_uses_authorized_warehouse_associations(self):
-        self._inventory()
         other_owner = Owner.objects.create(name="Other Catalog Owner", code="REMOTHER")
         WmsTask.objects.create(
-            task_no="REMED-OTHER-WH-TASK",
+            task_no="REMED-HISTORICAL-TASK",
             task_type=WmsTask.TaskType.PICK,
             status=WmsTask.Status.RELEASED,
             owner=other_owner,
-            warehouse=self.other_warehouse,
+            warehouse=self.warehouse,
         )
         operator = get_user_model().objects.create_user(
             username="remediation-operator-catalog",
@@ -357,6 +356,46 @@ class OutboundProductionRemediationTests(TestCase):
             {self.owner.id},
         )
         self.assertEqual(product_response.status_code, 403)
+
+    def test_warehouse_catalog_excludes_inactive_owner_or_binding(self):
+        inactive_owner = Owner.objects.create(
+            name="Inactive Catalog Owner",
+            code="REMINACTIVE",
+            is_active=False,
+        )
+        OwnerWarehouseBinding.objects.create(
+            owner=inactive_owner,
+            warehouse=self.warehouse,
+        )
+        inactive_binding_owner = Owner.objects.create(
+            name="Inactive Binding Owner",
+            code="REMBINDOFF",
+        )
+        OwnerWarehouseBinding.objects.create(
+            owner=inactive_binding_owner,
+            warehouse=self.warehouse,
+            is_active=False,
+        )
+        operator = get_user_model().objects.create_user(
+            username="remediation-operator-inactive-catalog",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=operator,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
+        request = APIRequestFactory().get("/api/catalog/owners/")
+        force_authenticate(request, user=operator)
+
+        response = OwnerViewSet.as_view({"get": "list"})(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {row["id"] for row in response.data["results"]},
+            {self.owner.id},
+        )
 
     def test_warehouse_operator_sees_personal_tasks_and_unclaimed_pool_only(self):
         operator = get_user_model().objects.create_user(

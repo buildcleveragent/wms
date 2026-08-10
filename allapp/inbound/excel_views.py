@@ -8,9 +8,6 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from allapp.accounts.access import AccessScope
-from allapp.baseinfo.models import Owner
-
 from .excel_import import (
     XLSX_CONTENT_TYPE,
     InboundExcelFileError,
@@ -19,6 +16,7 @@ from .excel_import import (
     load_preview_credentials,
     parse_no_order_receive_excel,
 )
+from .no_order_access import resolve_no_order_receive_scope
 from .permissions import CanReceiveWithoutOrder
 from .serializers import ReceiveWithoutOrderPayloadSerializer
 from .services import (
@@ -30,21 +28,11 @@ from .views import IdempotencyConflict
 
 
 def _resolve_scope(request, owner_id, warehouse_id=None):
-    try:
-        owner_id = int(owner_id)
-    except (TypeError, ValueError) as exc:
-        raise ValidationError({"owner_id": "必须提供有效的货主 ID"}) from exc
-    scope = AccessScope.for_user(request.user)
-    resolved_warehouse_id = warehouse_id or scope.single_warehouse_id
-    if not resolved_warehouse_id:
-        raise ValidationError("必须提供 warehouse_id；仅单一仓库范围账号可自动确定仓库")
-    if not scope.allows(owner_id=owner_id, warehouse_id=resolved_warehouse_id):
-        raise PermissionDenied("无权处理指定货主或仓库")
-    try:
-        owner = Owner.objects.get(pk=owner_id, is_active=True)
-    except Owner.DoesNotExist as exc:
-        raise ValidationError({"owner_id": "货主不存在或已停用"}) from exc
-    return owner, int(resolved_warehouse_id)
+    return resolve_no_order_receive_scope(
+        request.user,
+        owner_id,
+        warehouse_id,
+    )
 
 
 class NoOrderReceiveImportTemplateApi(APIView):

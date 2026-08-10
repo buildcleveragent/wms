@@ -42,6 +42,7 @@ from rest_framework.response import Response
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 from allapp.accounts.models import UserRoleScope
+from allapp.baseinfo.owner_warehouse_access import owner_ids_for_warehouses
 from allapp.billing.enums import PeriodStatus
 from allapp.billing.models import BillingPeriod
 from allapp.core.utils.log_context import build_log_payload
@@ -234,34 +235,11 @@ def _catalog_scope(request):
 
 
 def _warehouse_owner_ids(scope):
-    """Resolve owners that have business facts in the authorized warehouses."""
+    """Resolve owners explicitly authorized for the scoped warehouses."""
 
     if not scope.is_valid or not scope.warehouse_ids:
         return frozenset()
-    warehouse_ids = tuple(scope.warehouse_ids)
-    InventoryDetail = apps.get_model("inventory", "InventoryDetail")
-    InboundOrder = apps.get_model("inbound", "InboundOrder")
-    owner_ids = set(
-        InventoryDetail.objects.filter(warehouse_id__in=warehouse_ids)
-        .values_list("owner_id", flat=True)
-        .distinct()
-    )
-    owner_ids.update(
-        OutboundOrder.objects.filter(warehouse_id__in=warehouse_ids)
-        .values_list("owner_id", flat=True)
-        .distinct()
-    )
-    owner_ids.update(
-        InboundOrder.objects.filter(warehouse_id__in=warehouse_ids)
-        .values_list("owner_id", flat=True)
-        .distinct()
-    )
-    owner_ids.update(
-        WmsTask.objects.filter(warehouse_id__in=warehouse_ids)
-        .values_list("owner_id", flat=True)
-        .distinct()
-    )
-    return frozenset(int(owner_id) for owner_id in owner_ids if owner_id)
+    return owner_ids_for_warehouses(scope.warehouse_ids)
 
 
 def _catalog_owner_ids(scope):
@@ -679,7 +657,7 @@ class OwnerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     def get_queryset(self):
         Owner = apps.get_model("baseinfo", "Owner")
         scope = _catalog_scope(self.request)
-        qs = Owner.objects.all()
+        qs = Owner.objects.filter(is_active=True)
         allowed_owner_ids = _catalog_owner_ids(scope)
         if allowed_owner_ids is not None:
             qs = qs.filter(id__in=allowed_owner_ids)

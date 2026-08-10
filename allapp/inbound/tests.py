@@ -15,7 +15,7 @@ from openpyxl import load_workbook
 from rest_framework.test import APIClient
 
 from allapp.accounts.models import AuditEvent, UserRoleScope
-from allapp.baseinfo.models import Owner, Supplier
+from allapp.baseinfo.models import Owner, OwnerWarehouseBinding, Supplier
 from allapp.inbound.admin import InboundOrderAdmin, PdaNoOrderReceiveAdmin
 from allapp.inbound.constants import (
     PDA_NO_ORDER_RECEIVE_NOTE,
@@ -30,7 +30,10 @@ from allapp.inbound.models import (
     NoOrderReceiveRequest,
     PdaNoOrderReceive,
 )
-from allapp.inbound.services import create_receive_task_draft, receive_goods_without_order
+from allapp.inbound.services import (
+    create_receive_task_draft,
+    receive_goods_without_order,
+)
 from allapp.inventory.models import InventoryTransaction
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product, ProductUom
@@ -183,6 +186,10 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         )
         self.other_warehouse = Warehouse.objects.create(
             code="INBWH2", name="Inbound Warehouse 2"
+        )
+        OwnerWarehouseBinding.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
         )
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
@@ -503,6 +510,52 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403, response.data)
+        self.assertFalse(NoOrderReceiveRequest.objects.exists())
+        self.assertFalse(
+            WmsTask.objects.filter(
+                source_app=PDA_NO_ORDER_RECEIVE_SOURCE_APP,
+                source_model=PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
+            ).exists()
+        )
+
+    def test_receive_without_order_rejects_unbound_owner_without_writes(self):
+        unbound_product = Product.objects.create(
+            owner=self.other_owner,
+            code="INBSKU-UNBOUND",
+            name="Inbound Unbound Product",
+            sku="INBSKU-UNBOUND",
+            base_uom=self.base_uom,
+            volume="0.100000",
+            price="10.00",
+        )
+        user = self.user_model.objects.create_user(
+            username="inbound-no-order-unbound-owner",
+            password="x",
+            warehouse=self.warehouse,
+        )
+        UserRoleScope.objects.create(
+            user=user,
+            role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+            warehouse=self.warehouse,
+        )
+        user.user_permissions.add(self._permission("accounts", "receive_without_order"))
+        client = APIClient()
+        client.force_authenticate(user)
+
+        response = client.post(
+            "/api/inbound/receive_without_order/",
+            {
+                "request_id": "receive-unbound-owner-0001",
+                "owner_id": self.other_owner.pk,
+                "warehouse_id": self.warehouse.pk,
+                "location_id": self.location.pk,
+                "items": [{"product_id": unbound_product.pk, "qty": "2.0000"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertIn("未授权当前仓库", str(response.data))
         self.assertFalse(NoOrderReceiveRequest.objects.exists())
         self.assertFalse(
             WmsTask.objects.filter(

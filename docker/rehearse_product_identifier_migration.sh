@@ -6,9 +6,18 @@ ENV_FILE="${ROOT_DIR}/.env.test.local"
 BACKUP_FILE="${1:-${ROOT_DIR}/backups/wms_db_recovered_20260808_013200.sql}"
 REPORT_FILE="${2:-${ROOT_DIR}/docs/reports/product-identifier-migration-rehearsal.json}"
 DATABASE_NAME="wms_migration_rehearsal_$(date +%Y%m%d_%H%M%S)_$$"
+PYTHON_BIN="${WMS_TEST_PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "缺少本机测试环境文件。" >&2
+  exit 2
+fi
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+  echo "拒绝执行：Python 解释器不可执行。" >&2
+  exit 2
+fi
+if [[ "$("${PYTHON_BIN}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" != "3.12" ]]; then
+  echo "拒绝执行：迁移演练必须使用 Python 3.12。" >&2
   exit 2
 fi
 
@@ -144,7 +153,7 @@ if ! env \
   DB_PASSWORD="${MYSQL_ROOT_PASSWORD}" \
   DB_HOST="${DB_HOST}" \
   DB_PORT="${DB_PORT}" \
-  "${ROOT_DIR}/.venv/bin/python" "${ROOT_DIR}/manage.py" migrate \
+  "${PYTHON_BIN}" "${ROOT_DIR}/manage.py" migrate \
   products 0008_product_carton_package --noinput >"${prepare_log}" 2>&1; then
   echo "迁移演练拒绝继续：无法将授权备份准备到 products 0008；受限日志未输出。" >&2
   exit 1
@@ -179,18 +188,18 @@ if env \
   DB_PASSWORD="${MYSQL_ROOT_PASSWORD}" \
   DB_HOST="${DB_HOST}" \
   DB_PORT="${DB_PORT}" \
-  "${ROOT_DIR}/.venv/bin/python" "${ROOT_DIR}/manage.py" migrate --noinput \
+  "${PYTHON_BIN}" "${ROOT_DIR}/manage.py" migrate --noinput \
   >"${migration_log}" 2>&1; then
   migration_success=true
   if env APP_ENV=test DB_NAME="${DATABASE_NAME}" DB_TEST_NAME="${DATABASE_NAME}" \
     DB_USER=root DB_PASSWORD="${MYSQL_ROOT_PASSWORD}" DB_HOST="${DB_HOST}" DB_PORT="${DB_PORT}" \
-    "${ROOT_DIR}/.venv/bin/python" "${ROOT_DIR}/manage.py" audit_product_identifier_history \
+    "${PYTHON_BIN}" "${ROOT_DIR}/manage.py" audit_product_identifier_history \
     >"${audit_log}" 2>&1; then
     identifier_audit_success=true
   fi
   if env APP_ENV=test DB_NAME="${DATABASE_NAME}" DB_TEST_NAME="${DATABASE_NAME}" \
     DB_USER=root DB_PASSWORD="${MYSQL_ROOT_PASSWORD}" DB_HOST="${DB_HOST}" DB_PORT="${DB_PORT}" \
-    "${ROOT_DIR}/.venv/bin/python" "${ROOT_DIR}/manage.py" audit_carton_package_bindings \
+    "${PYTHON_BIN}" "${ROOT_DIR}/manage.py" audit_carton_package_bindings \
     >>"${audit_log}" 2>&1; then
     carton_audit_success=true
   fi

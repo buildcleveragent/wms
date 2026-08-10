@@ -22,6 +22,7 @@ from allapp.inbound.constants import (
     PDA_NO_ORDER_RECEIVE_NOTE,
 )
 from allapp.inbound.models import InboundOrder
+from allapp.inbound.no_order_access import resolve_no_order_receive_scope
 from allapp.inbound.permissions import (
     CanReceiveWithoutOrder,
     can_operate_inbound_tasks,
@@ -68,20 +69,12 @@ class ReceiveGoodsWithoutOrder(APIView):
     permission_classes = [permissions.IsAuthenticated, CanReceiveWithoutOrder]
 
     def _resolve_scope(self, request, payload):
-        user = request.user
-        payload_owner_id = int(payload["owner_id"])
-        payload_warehouse_id = payload.get("warehouse_id")
-
-        scope = AccessScope.for_user(user)
-        warehouse_id = payload_warehouse_id or scope.single_warehouse_id
-        if not warehouse_id:
-            raise ValidationError(
-                "必须提供 warehouse_id；仅单一仓库范围账号可自动确定仓库"
-            )
-
-        if not scope.allows(owner_id=payload_owner_id, warehouse_id=warehouse_id):
-            raise PermissionDenied("无权处理指定货主或仓库")
-        return payload_owner_id, warehouse_id
+        owner, warehouse_id = resolve_no_order_receive_scope(
+            request.user,
+            payload["owner_id"],
+            payload.get("warehouse_id"),
+        )
+        return owner.id, warehouse_id
 
     def post(self, request):
         raw_payload = request.data.copy()

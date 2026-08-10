@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from django.apps import apps
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q
@@ -10,7 +9,8 @@ from django.utils import timezone
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
-from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
+from allapp.baseinfo.models import Owner
+from allapp.baseinfo.owner_warehouse_access import owner_ids_for_warehouses
 from allapp.products.gs1 import equivalent_gtins
 from allapp.products.models import (
     Brand,
@@ -40,29 +40,8 @@ def require_quick_create_owner(user, owner_id: int) -> Owner:
         raise PermissionDenied("货主不存在或已停用。")
     if scope.is_global or owner_id in scope.owner_ids:
         return owner
-    if (
-        scope.warehouse_ids
-        and OwnerWarehouseBinding.objects.filter(
-            owner_id=owner_id,
-            warehouse_id__in=scope.warehouse_ids,
-            is_active=True,
-            is_deleted=False,
-        ).exists()
-    ):
+    if owner_id in owner_ids_for_warehouses(scope.warehouse_ids):
         return owner
-    if scope.warehouse_ids:
-        warehouse_ids = tuple(scope.warehouse_ids)
-        scoped_models = (
-            (apps.get_model("inventory", "InventoryDetail"), "warehouse_id"),
-            (apps.get_model("outbound", "OutboundOrder"), "warehouse_id"),
-            (apps.get_model("inbound", "InboundOrder"), "warehouse_id"),
-            (apps.get_model("tasking", "WmsTask"), "warehouse_id"),
-        )
-        for model, warehouse_field in scoped_models:
-            if model.objects.filter(
-                owner_id=owner_id, **{f"{warehouse_field}__in": warehouse_ids}
-            ).exists():
-                return owner
     raise PermissionDenied("无权为该货主查询或创建商品。")
 
 
