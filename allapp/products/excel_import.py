@@ -40,10 +40,10 @@ MAX_XLSX_UNCOMPRESSED_SIZE = 50 * 1024 * 1024
 MAX_XLSX_ENTRIES = 300
 IMPORT_SHEET_NAME = "商品导入"
 PACKAGE_SHEET_NAME = "商品包装"
-TEMPLATE_VERSION = "4"
+TEMPLATE_VERSION = "5"
 
 
-PRODUCT_HEADERS = (
+BASE_PRODUCT_HEADERS = (
     "货主编码",
     "货主商品编码",
     "商品名称",
@@ -87,8 +87,12 @@ LEGACY_PACKAGE_HEADERS = (
     "销售默认",
 )
 
+# The v5 template exposes the legacy inline package fields again so products whose
+# code is generated during persistence can still import one package level.
+PRODUCT_HEADERS = BASE_PRODUCT_HEADERS + LEGACY_PACKAGE_HEADERS
+
 # Backwards-compatible public constant used by legacy v2 import callers/tests.
-HEADERS = PRODUCT_HEADERS + LEGACY_PACKAGE_HEADERS
+HEADERS = PRODUCT_HEADERS
 
 PACKAGE_HEADERS = (
     "货主编码",
@@ -115,6 +119,9 @@ REQUIRED_PACKAGE_HEADERS = frozenset(
 
 REQUIRED_HEADERS = frozenset(
     {"货主编码", "货主商品编码", "商品名称", "分类编码", "基本单位编码"}
+)
+REQUIRED_VALUE_HEADERS = frozenset(
+    {"货主编码", "商品名称", "分类编码", "基本单位编码"}
 )
 TEXT_HEADERS = frozenset(
     {
@@ -309,7 +316,16 @@ def _write_instruction_sheet(sheet) -> None:
             ),
         ]
     )
-    sheet.append(["必填字段", "货主编码、货主商品编码、商品名称、分类编码、基本单位编码。"])
+    sheet.append(["必填字段", "货主编码、商品名称、分类编码、基本单位编码。"])
+    sheet.append(
+        [
+            "货主商品编码规则",
+            _joined_text(
+                "优先使用填写的货主商品编码；留空时使用标准贸易条码（GTIN）；",
+                "两者均留空时，使用系统自动生成的仓库SKU编码。仅含空格视为留空。",
+            ),
+        ]
+    )
     sheet.append(
         [
             "包装必填字段",
@@ -346,8 +362,8 @@ def _write_instruction_sheet(sheet) -> None:
         [
             "包装规则",
             _joined_text(
-                "每个包装在“商品包装”单独占一行；一个商品可填写多层包装；",
-                "不要同时使用商品主表中的旧版包装列。",
+                "多层包装在“商品包装”中每层单独占一行；主表同行包装列可填写一个包装层级；",
+                "同一商品不得同时使用两处。无码且无货主商品编码的商品只能使用主表同行包装列。",
             ),
         ]
     )
@@ -406,7 +422,7 @@ def _write_import_sheet(sheet) -> None:
     _write_business_sheet(
         sheet,
         PRODUCT_HEADERS,
-        required_headers=REQUIRED_HEADERS,
+        required_headers=REQUIRED_VALUE_HEADERS,
         text_headers=TEXT_HEADERS,
     )
 
@@ -500,6 +516,7 @@ def _add_template_validations(
     if uoms:
         add_named_range("ProductImportUomCodes", "D", len(uoms))
         add_list(data_sheet, PRODUCT_HEADERS, "基本单位编码", "ProductImportUomCodes")
+        add_list(data_sheet, PRODUCT_HEADERS, "包装单位编码", "ProductImportUomCodes")
         add_list(
             package_sheet, PACKAGE_HEADERS, "包装单位编码", "ProductImportUomCodes"
         )
@@ -518,6 +535,8 @@ def _add_template_validations(
     ):
         add_list(data_sheet, PRODUCT_HEADERS, header, '"是,否"')
     add_list(data_sheet, PRODUCT_HEADERS, "效期基准", '"MFG,INBOUND"')
+    for header in ("采购默认", "销售默认"):
+        add_list(data_sheet, PRODUCT_HEADERS, header, '"是,否"')
     for header in (
         "体积自动计算",
         "可直接拣配",
@@ -665,13 +684,6 @@ class ProductExcelImporter:
                 parsed.append(row)
         package_rows: list[ParsedPackageRow] = []
         if PACKAGE_SHEET_NAME in workbook.sheetnames:
-            if any(
-                any(_text(values.get(header)) for header in LEGACY_PACKAGE_HEADERS)
-                for _, values in raw_rows
-            ):
-                raise ProductImportFileError(
-                    "v4 文件不能同时填写商品主表旧版包装列和“商品包装”工作表。"
-                )
             package_rows = self._parse_package_sheet(
                 workbook[PACKAGE_SHEET_NAME], parsed, seen_identifiers
             )
@@ -748,8 +760,14 @@ class ProductExcelImporter:
             header: index + 1 for index, header in enumerate(raw_headers) if header
         }
         product_by_key = {
-            (row.product.owner.code.upper(), row.product.code.upper()): row.product
+            (row.product.owner.code.upper(), row.product.code.upper()): row
             for row in product_rows
+            if row.product.code
+        }
+        generated_code_owners = {
+            row.product.owner.code.upper()
+            for row in product_rows
+            if getattr(row.product, "_derive_code_from_sku_on_create", False)
         }
         parsed: list[ParsedPackageRow] = []
         seen_uoms: dict[tuple[str, str, str], int] = {}
@@ -784,6 +802,7 @@ class ProductExcelImporter:
                 seen_uoms,
                 seen_identifiers,
                 default_rows,
+                generated_code_owners,
             )
             if parsed_row is not None:
                 parsed.append(parsed_row)
@@ -798,6 +817,7 @@ class ProductExcelImporter:
         seen_uoms,
         seen_identifiers,
         default_rows,
+        generated_code_owners,
     ) -> ParsedPackageRow | None:
         before_error_count = len(self.errors)
         owner_code = _text(values.get("货主编码")).upper()
@@ -811,14 +831,28 @@ class ProductExcelImporter:
             ("包装换算数量", qty_text),
         ):
             if not value:
-                self._error(row_number, field, "不能为空。", sheet=PACKAGE_SHEET_NAME)
+                message = "不能为空。"
+                if field == "货主商品编码" and owner_code in generated_code_owners:
+                    message = (
+                        "该货主存在由系统生成货主商品编码的商品，商品包装表无法预先引用；"
+                        "请改填商品导入主表同行包装列。"
+                    )
+                self._error(row_number, field, message, sheet=PACKAGE_SHEET_NAME)
         key = (owner_code, product_code)
-        product = product_by_key.get(key)
+        product_row = product_by_key.get(key)
+        product = product_row.product if product_row is not None else None
         if owner_code and product_code and product is None:
             self._error(
                 row_number,
                 "货主商品编码",
                 "包装引用的商品必须同时存在于“商品导入”工作表。",
+                sheet=PACKAGE_SHEET_NAME,
+            )
+        elif product_row is not None and product_row.package_data is not None:
+            self._error(
+                row_number,
+                "货主商品编码",
+                "该商品已在商品导入主表填写同行包装，不得同时在商品包装表填写。",
                 sheet=PACKAGE_SHEET_NAME,
             )
         uom = self._resolve_uom(
@@ -941,16 +975,27 @@ class ProductExcelImporter:
     ) -> ParsedProductRow | None:
         before_error_count = len(self.errors)
         owner = self._resolve_owner(row_number, values.get("货主编码"))
-        code = self._required_code(
+        supplied_code = self._optional_code(
             row_number,
             "货主商品编码",
             values.get("货主商品编码"),
             max_length=50,
         )
-        if owner is None or not code:
+        gtin = self._optional_text(
+            row_number, "标准贸易条码", values.get("标准贸易条码"), max_length=20
+        )
+        code = supplied_code or gtin or ""
+        derive_code_from_sku = not supplied_code and not _text(
+            values.get("标准贸易条码")
+        )
+        if owner is None:
             return None
 
-        existing = Product.all_objects.filter(owner=owner, code__iexact=code).first()
+        existing = (
+            Product.all_objects.filter(owner=owner, code__iexact=code).first()
+            if code
+            else None
+        )
         if existing:
             message = (
                 "货主商品编码命中已软删除商品，请恢复旧商品或更换编号；整批不会写入。"
@@ -1006,9 +1051,7 @@ class ProductExcelImporter:
             category=category,
             brand=brand,
             base_uom=base_uom,
-            gtin=self._optional_text(
-                row_number, "标准贸易条码", values.get("标准贸易条码"), max_length=20
-            ),
+            gtin=gtin,
             unit_barcode=self._optional_text(
                 row_number,
                 "零码",
@@ -1076,6 +1119,8 @@ class ProductExcelImporter:
             created_by=self.user,
             updated_by=self.user,
         )
+        if derive_code_from_sku:
+            product._derive_code_from_sku_on_create = True
         expiry_control = self._boolean(
             row_number,
             "保质期管理",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import socket
 import time
 from datetime import timedelta
 from urllib import error as url_error
@@ -14,6 +15,8 @@ from urllib.parse import urlparse
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+
+from allapp.core.models import SecretSettingError, SystemSetting
 
 from .models import Gs1LookupCache, Gs1ProviderRateLimit
 
@@ -107,11 +110,23 @@ def _reserve_provider_slot():
 
 
 def _provider_request(query_code: str) -> dict:
-    if not getattr(settings, "APIZERO_GS1_ENABLED", False):
-        raise Gs1LookupError("GS1 查询服务尚未启用。", code="provider_disabled")
-    api_key = str(getattr(settings, "APIZERO_GS1_API_KEY", "") or "").strip()
+    try:
+        api_key = SystemSetting.get_secret_value(
+            SystemSetting.INTEGRATION_NAMESPACE,
+            SystemSetting.APIZERO_GS1_API_KEY,
+            "",
+        )
+    except SecretSettingError as exc:
+        raise Gs1LookupError(
+            "GS1 查询配置无法解密，请管理员检查系统设置加密主密钥。",
+            code="provider_not_configured",
+        ) from exc
+    api_key = str(api_key or "").strip()
     if not api_key:
-        raise Gs1LookupError("GS1 查询服务未配置密钥。", code="provider_not_configured")
+        raise Gs1LookupError(
+            "GS1 查询配置缺失：尚未配置 ApiZero API Key，请管理员在系统设置中配置。",
+            code="provider_not_configured",
+        )
 
     _reserve_provider_slot()
     endpoint = getattr(
@@ -128,8 +143,39 @@ def _provider_request(query_code: str) -> dict:
             req, timeout=float(getattr(settings, "APIZERO_GS1_TIMEOUT", 5.0))
         ) as response:
             body = response.read().decode("utf-8")
-    except (url_error.URLError, TimeoutError, OSError) as exc:
-        raise Gs1LookupError("GS1 查询服务暂不可用，请稍后重试。") from exc
+    except url_error.HTTPError as exc:
+        if exc.code == 429:
+            raise Gs1LookupError(
+                "GS1 查询过于频繁，请稍后重试。",
+                code="provider_rate_limited",
+                retry_after=1,
+            ) from exc
+        raise Gs1LookupError(
+            f"GS1 查询服务返回 HTTP {exc.code}，请稍后重试。",
+            code="provider_network_error",
+        ) from exc
+    except (TimeoutError, socket.timeout) as exc:
+        raise Gs1LookupError(
+            "GS1 查询超时，请稍后重试。", code="provider_timeout"
+        ) from exc
+    except url_error.URLError as exc:
+        if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+            raise Gs1LookupError(
+                "GS1 查询超时，请稍后重试。", code="provider_timeout"
+            ) from exc
+        raise Gs1LookupError(
+            "无法连接 GS1 查询服务，请检查网络后重试。",
+            code="provider_network_error",
+        ) from exc
+    except OSError as exc:
+        raise Gs1LookupError(
+            "无法连接 GS1 查询服务，请检查网络后重试。",
+            code="provider_network_error",
+        ) from exc
+    except UnicodeDecodeError as exc:
+        raise Gs1LookupError(
+            "GS1 查询服务返回了无效数据。", code="provider_invalid_response"
+        ) from exc
     try:
         result = json.loads(body)
     except (TypeError, ValueError) as exc:
@@ -140,7 +186,12 @@ def _provider_request(query_code: str) -> dict:
         raise Gs1LookupError(
             "GS1 查询服务返回了无效数据。", code="provider_invalid_response"
         )
-    provider_code = int(result.get("code", -1))
+    try:
+        provider_code = int(result.get("code", -1))
+    except (TypeError, ValueError) as exc:
+        raise Gs1LookupError(
+            "GS1 查询服务返回了无效状态码。", code="provider_invalid_response"
+        ) from exc
     if provider_code != 0:
         mapping = {
             4000: ("条码格式不受 GS1 查询服务支持。", "invalid_barcode", None),
@@ -194,9 +245,11 @@ def get_or_fetch_lookup(barcode: str) -> tuple[Gs1LookupCache, bool]:
                 "该条码正在查询，请稍后重试。", code="lookup_in_progress", retry_after=1
             )
         if cache.status == Gs1LookupCache.Status.ERROR and cache.expires_at > now:
+            cached_error = dict(cache.payload or {})
             raise Gs1LookupError(
                 cache.provider_message or "GS1 查询服务暂不可用，请稍后重试。",
-                code="provider_unavailable",
+                code=cached_error.get("error_code") or "provider_unavailable",
+                retry_after=cached_error.get("retry_after"),
             )
         cache.query_code = query_code
         cache.status = Gs1LookupCache.Status.FETCHING
@@ -217,6 +270,7 @@ def get_or_fetch_lookup(barcode: str) -> tuple[Gs1LookupCache, bool]:
     except Gs1LookupError as exc:
         Gs1LookupCache.objects.filter(pk=cache.pk).update(
             status=Gs1LookupCache.Status.ERROR,
+            payload={"error_code": exc.code, "retry_after": exc.retry_after},
             provider_message=str(exc)[:200],
             expires_at=timezone.now() + timedelta(seconds=30),
             lease_until=None,

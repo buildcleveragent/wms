@@ -23,6 +23,10 @@ describe('GS1 receiving quick-create contracts', () => {
     expect(page).toContain('api.gs1ProductQuickCreate')
     expect(page).toContain('cart.addItem({')
     expect(page).toContain('base_quantity: quantity')
+    expect(page).toContain('product-search-error')
+    expect(page).toContain('错误编号：{{ searchError.requestId }}')
+    expect(page).toContain('showSearchError')
+    expect(page).toContain('await lookupGs1(keyword)')
   })
 
   it('collects mandatory catalog and tracking fields before submission', () => {

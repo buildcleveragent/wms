@@ -5,6 +5,7 @@ from decimal import Decimal
 from io import StringIO
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -21,7 +22,14 @@ from allapp.billing.models import (
     BillLine,
 )
 from allapp.core.choices import InvTxType
-from allapp.core.models import DocSequence, PrintConfig, SystemSetting
+from allapp.core.admin import SystemSettingAdminForm
+from allapp.core.models import (
+    SECRET_VALUE_PREFIX,
+    DocSequence,
+    PrintConfig,
+    SecretSettingError,
+    SystemSetting,
+)
 from allapp.inventory.models import (
     InventoryDetail,
     InventorySummary,
@@ -29,6 +37,131 @@ from allapp.inventory.models import (
 )
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product, ProductUom
+
+
+TEST_SYSTEM_SETTING_KEY = Fernet.generate_key().decode("ascii")
+
+
+@override_settings(SYSTEM_SETTING_ENCRYPTION_KEY=TEST_SYSTEM_SETTING_KEY)
+class SystemSettingSecretTests(TestCase):
+    def _setting(self):
+        return SystemSetting.objects.create(
+            namespace="integration",
+            key="secret-test",
+            name="Secret test",
+            value_type=SystemSetting.ValueType.STRING,
+            is_secret=True,
+            client_visible=False,
+        )
+
+    def test_secret_is_encrypted_and_only_explicit_secret_reader_decrypts(self):
+        setting = self._setting()
+        setting.set_secret_value("provider-secret-value")
+        setting.save(update_fields=["value", "updated_at"])
+
+        setting.refresh_from_db()
+        self.assertTrue(setting.value.startswith(SECRET_VALUE_PREFIX))
+        self.assertNotIn("provider-secret-value", setting.value)
+        self.assertEqual(setting.effective_value(), "")
+        self.assertIsNone(
+            SystemSetting.get_value(setting.namespace, setting.key, None)
+        )
+        self.assertEqual(
+            SystemSetting.get_secret_value(setting.namespace, setting.key),
+            "provider-secret-value",
+        )
+
+    def test_secret_key_fallback_and_wrong_key_fail_safely(self):
+        with override_settings(
+            SYSTEM_SETTING_ENCRYPTION_KEY="",
+            SECRET_KEY="stable-django-secret",
+        ):
+            setting = self._setting()
+            setting.set_secret_value("provider-secret-value")
+            setting.save(update_fields=["value", "updated_at"])
+            self.assertEqual(setting.secret_value(), "provider-secret-value")
+
+        with override_settings(
+            SYSTEM_SETTING_ENCRYPTION_KEY="",
+            SECRET_KEY="different-django-secret",
+        ):
+            with self.assertRaisesRegex(SecretSettingError, "无法解密"):
+                setting.secret_value()
+        with override_settings(
+            SYSTEM_SETTING_ENCRYPTION_KEY=Fernet.generate_key().decode()
+        ):
+            with self.assertRaisesRegex(SecretSettingError, "无法解密"):
+                setting.secret_value()
+
+    def test_admin_form_masks_and_preserves_or_replaces_existing_secret(self):
+        setting = self._setting()
+        setting.set_secret_value("old-secret")
+        setting.save(update_fields=["value", "updated_at"])
+        original_ciphertext = setting.value
+        base_data = {
+            "namespace": setting.namespace,
+            "key": setting.key,
+            "name": setting.name,
+            "value_type": setting.value_type,
+            "default_value": "",
+            "description": "",
+            "client_visible": False,
+            "is_secret": True,
+            "is_active": True,
+            "sort_order": 0,
+            "options": "{}",
+        }
+
+        preserved = SystemSettingAdminForm(
+            data={**base_data, "value": ""},
+            instance=setting,
+        )
+        self.assertTrue(preserved.is_valid(), preserved.errors)
+        preserved.save()
+        setting.refresh_from_db()
+        self.assertEqual(setting.value, original_ciphertext)
+
+        replaced = SystemSettingAdminForm(
+            data={**base_data, "value": "new-secret"},
+            instance=setting,
+        )
+        self.assertTrue(replaced.is_valid(), replaced.errors)
+        replaced.save()
+        setting.refresh_from_db()
+        self.assertNotEqual(setting.value, original_ciphertext)
+        self.assertEqual(setting.secret_value(), "new-secret")
+
+    def test_admin_form_uses_secret_key_fallback_without_dedicated_key(self):
+        setting = self._setting()
+        base_data = {
+            "namespace": setting.namespace,
+            "key": setting.key,
+            "name": setting.name,
+            "value_type": setting.value_type,
+            "value": "new-secret",
+            "default_value": "",
+            "description": "",
+            "client_visible": False,
+            "is_secret": True,
+            "is_active": True,
+            "sort_order": 0,
+            "options": "{}",
+        }
+
+        with override_settings(
+            SYSTEM_SETTING_ENCRYPTION_KEY="",
+            SECRET_KEY="admin-form-django-secret",
+        ):
+            form = SystemSettingAdminForm(data=base_data, instance=setting)
+            self.assertTrue(form.is_valid(), form.errors)
+            saved = form.save()
+            self.assertEqual(saved.secret_value(), "new-secret")
+
+    def test_secret_cannot_be_client_visible(self):
+        setting = self._setting()
+        setting.client_visible = True
+        with self.assertRaisesRegex(Exception, "禁止向前端公开"):
+            setting.full_clean()
 
 
 class CoreWarehouseScopeTests(TestCase):
@@ -55,6 +188,7 @@ class CoreWarehouseScopeTests(TestCase):
 
 @override_settings(
     PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"],
+    SYSTEM_SETTING_ENCRYPTION_KEY=TEST_SYSTEM_SETTING_KEY,
 )
 class PrintConfigApiTests(TestCase):
     def setUp(self):
@@ -108,14 +242,18 @@ class PrintConfigApiTests(TestCase):
                 self.assertEqual(response.status_code, 401)
 
     def test_system_settings_only_expose_active_client_visible_values(self):
-        SystemSetting.objects.create(
+        secret = SystemSetting.objects.create(
             namespace="integration",
             key="api_secret",
             name="API secret",
-            value="must-not-leak",
+            is_secret=True,
             client_visible=False,
             is_active=True,
         )
+        secret.set_secret_value("must-not-leak")
+        secret.save(update_fields=["value", "updated_at"])
+        # Even a direct database update must not make encrypted settings public.
+        SystemSetting.objects.filter(pk=secret.pk).update(client_visible=True)
         SystemSetting.objects.create(
             namespace="integration",
             key="retired_flag",

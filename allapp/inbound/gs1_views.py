@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import logging
+import re
 from decimal import Decimal
+from uuid import uuid4
 
+from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import OperationalError, ProgrammingError
 from django.db.models import Q
 from rest_framework import serializers, status
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -29,6 +33,95 @@ from .gs1_services import (
 from .permissions import CanReceiveWithoutOrder
 
 logger = logging.getLogger(__name__)
+
+REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{8,64}$")
+
+LOOKUP_ERROR_MAP = {
+    "provider_not_configured": (
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "GS1_CONFIG_MISSING",
+    ),
+    "provider_rate_limited": (
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        "GS1_RATE_LIMITED",
+    ),
+    "lookup_in_progress": (
+        status.HTTP_429_TOO_MANY_REQUESTS,
+        "GS1_LOOKUP_IN_PROGRESS",
+    ),
+    "provider_invalid_response": (status.HTTP_502_BAD_GATEWAY, "GS1_INVALID_RESPONSE"),
+    "provider_quota_exhausted": (
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "GS1_QUOTA_EXHAUSTED",
+    ),
+    "provider_timeout": (status.HTTP_503_SERVICE_UNAVAILABLE, "GS1_TIMEOUT"),
+    "provider_network_error": (
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "GS1_NETWORK_ERROR",
+    ),
+    "provider_unavailable": (
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "GS1_NETWORK_ERROR",
+    ),
+    "invalid_barcode": (status.HTTP_400_BAD_REQUEST, "GS1_INVALID_BARCODE"),
+}
+
+
+def _lookup_request_id(request):
+    existing = getattr(request, "gs1_request_id", "")
+    if existing:
+        return existing
+    supplied = str(request.headers.get("X-Request-ID") or "").strip()
+    request_id = supplied if REQUEST_ID_RE.fullmatch(supplied) else str(uuid4())
+    request.gs1_request_id = request_id
+    return request_id
+
+
+def _lookup_response(request, *, code, detail, http_status, retry_after=None):
+    request_id = _lookup_request_id(request)
+    response = Response(
+        {
+            "code": code,
+            "detail": detail,
+            "request_id": request_id,
+            "retry_after": retry_after,
+        },
+        status=http_status,
+    )
+    response["X-Request-ID"] = request_id
+    if retry_after:
+        response["Retry-After"] = str(retry_after)
+    return response
+
+
+def _with_lookup_request_id(request, response):
+    response["X-Request-ID"] = _lookup_request_id(request)
+    return response
+
+
+def _schema_is_missing(exc):
+    if getattr(exc, "args", ()) and exc.args[0] == 1146:
+        return True
+    message = str(exc).lower()
+    return "no such table" in message or (
+        "doesn't exist" in message
+        and (
+            "products_gs1lookupcache" in message
+            or "products_gs1providerratelimit" in message
+        )
+    )
+
+
+class Gs1LookupErrorContractMixin:
+    def handle_exception(self, exc):
+        if isinstance(exc, (PermissionDenied, DjangoPermissionDenied)):
+            return _lookup_response(
+                self.request,
+                code="GS1_OWNER_FORBIDDEN",
+                detail=str(exc) or "账号无权查询该货主。",
+                http_status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().handle_exception(exc)
 
 
 class LookupInputSerializer(serializers.Serializer):
@@ -129,52 +222,117 @@ def _django_validation(exc):
     return ValidationError(getattr(exc, "messages", [str(exc)]))
 
 
-class Gs1LookupApi(APIView):
+class Gs1LookupApi(Gs1LookupErrorContractMixin, APIView):
     permission_classes = [IsAuthenticated, CanReceiveWithoutOrder]
 
     def post(self, request):
         serializer = LookupInputSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            detail = serializer.errors.get("barcode") or serializer.errors
+            if isinstance(detail, (list, tuple)):
+                detail = detail[0] if detail else "条码格式无效。"
+            return _lookup_response(
+                request,
+                code="GS1_INVALID_BARCODE",
+                detail=str(detail),
+                http_status=status.HTTP_400_BAD_REQUEST,
+            )
         values = serializer.validated_data
-        owner = require_quick_create_owner(request.user, values["owner_id"])
         try:
+            owner = require_quick_create_owner(request.user, values["owner_id"])
             local = find_owner_product(owner.pk, values["barcode"])
-        except (ValueError, DjangoValidationError) as exc:
-            if isinstance(exc, ValueError):
-                raise ValidationError({"barcode": str(exc)}) from exc
-            raise _django_validation(exc) from exc
-        if local is not None:
-            return Response({"source": "local", "product": receive_product_card(local)})
-        try:
+            if local is not None:
+                return _with_lookup_request_id(
+                    request,
+                    Response(
+                        {"source": "local", "product": receive_product_card(local)}
+                    ),
+                )
             cache, cache_hit = get_or_fetch_lookup(values["barcode"])
         except ValueError as exc:
-            raise ValidationError({"barcode": str(exc)}) from exc
+            return _lookup_response(
+                request,
+                code="GS1_INVALID_BARCODE",
+                detail=str(exc),
+                http_status=status.HTTP_400_BAD_REQUEST,
+            )
+        except (PermissionDenied, DjangoPermissionDenied) as exc:
+            return _lookup_response(
+                request,
+                code="GS1_OWNER_FORBIDDEN",
+                detail=str(exc) or "账号无权查询该货主。",
+                http_status=status.HTTP_403_FORBIDDEN,
+            )
+        except DjangoValidationError as exc:
+            converted = _django_validation(exc)
+            return _lookup_response(
+                request,
+                code="GS1_INVALID_BARCODE",
+                detail=str(converted.detail),
+                http_status=status.HTTP_400_BAD_REQUEST,
+            )
         except Gs1LookupError as exc:
-            http_status = (
-                status.HTTP_429_TOO_MANY_REQUESTS
-                if exc.code in {"provider_rate_limited", "lookup_in_progress"}
-                else status.HTTP_503_SERVICE_UNAVAILABLE
+            http_status, code = LOOKUP_ERROR_MAP.get(
+                exc.code,
+                (status.HTTP_503_SERVICE_UNAVAILABLE, "GS1_NETWORK_ERROR"),
             )
-            response = Response(
-                {"code": exc.code, "detail": str(exc), "retry_after": exc.retry_after},
-                status=http_status,
+            return _lookup_response(
+                request,
+                code=code,
+                detail=str(exc),
+                http_status=http_status,
+                retry_after=exc.retry_after,
             )
-            if exc.retry_after:
-                response["Retry-After"] = str(exc.retry_after)
-            return response
+        except (OperationalError, ProgrammingError) as exc:
+            if _schema_is_missing(exc):
+                return _lookup_response(
+                    request,
+                    code="GS1_SCHEMA_NOT_READY",
+                    detail=(
+                        "GS1 查询表尚未初始化，请管理员执行 "
+                        "products.0012_gs1_lookup_cache_and_sku_format 数据库迁移。"
+                    ),
+                    http_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            return self._internal_error(request, values, exc, stage="database")
+        except Exception as exc:
+            return self._internal_error(request, values, exc, stage="lookup")
         logger.info(
-            "inbound.gs1.lookup owner_id=%s canonical_gtin=%s cache_hit=%s found=%s",
+            "inbound.gs1.lookup request_id=%s owner_id=%s canonical_gtin=%s "
+            "cache_hit=%s found=%s",
+            _lookup_request_id(request),
             owner.pk,
             cache.canonical_gtin,
             cache_hit,
             cache.found,
         )
-        return Response(
-            {
-                "source": "gs1",
-                "cache_hit": cache_hit,
-                "candidate": public_candidate(cache),
-            }
+        return _with_lookup_request_id(
+            request,
+            Response(
+                {
+                    "source": "gs1",
+                    "cache_hit": cache_hit,
+                    "candidate": public_candidate(cache),
+                }
+            ),
+        )
+
+    @staticmethod
+    def _internal_error(request, values, exc, *, stage):
+        request_id = _lookup_request_id(request)
+        logger.exception(
+            "inbound.gs1.lookup_failed request_id=%s stage=%s owner_id=%s barcode=%s",
+            request_id,
+            stage,
+            values.get("owner_id"),
+            values.get("barcode"),
+            exc_info=True,
+        )
+        return _lookup_response(
+            request,
+            code="GS1_LOOKUP_INTERNAL_ERROR",
+            detail=f"GS1 查询发生未预期错误，请联系管理员并提供错误编号 {request_id}。",
+            http_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 

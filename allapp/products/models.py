@@ -960,6 +960,8 @@ class Product(BaseModel):
                         break
                     sequence += 1
                 self.sku = format_owner_sequence_identifier(owner.code, sequence)
+                if getattr(self, "_derive_code_from_sku_on_create", False):
+                    self.code = self.sku
             else:
                 original = (
                     type(self)
@@ -1065,7 +1067,10 @@ class Product(BaseModel):
         if self.code:
             self.code = self.code.strip().upper()
 
-        if not self.code:
+        derive_code_from_sku = self._state.adding and getattr(
+            self, "_derive_code_from_sku_on_create", False
+        )
+        if not self.code and not derive_code_from_sku:
             errors["code"] = "货主商品编码不能为空"
 
         if self._state.adding and not self.category_id:

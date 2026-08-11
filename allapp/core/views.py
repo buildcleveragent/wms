@@ -30,6 +30,7 @@ class SystemSettingsApi(APIView):
         queryset = SystemSetting.objects.filter(
             is_active=True,
             client_visible=True,
+            is_secret=False,
         ).order_by("namespace", "sort_order", "key")
         for setting in queryset:
             value = setting.effective_value()

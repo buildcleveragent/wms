@@ -1,9 +1,36 @@
 # core/models/base.py
+import base64
+import hashlib
 import json
 from datetime import date
 
+from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
+
+
+SECRET_VALUE_PREFIX = "fernet:v1:"
+
+
+class SecretSettingError(RuntimeError):
+    """Raised when an encrypted system setting cannot be safely used."""
+
+
+def _secret_fernet():
+    key = str(getattr(settings, "SYSTEM_SETTING_ENCRYPTION_KEY", "") or "").strip()
+    if not key:
+        django_secret = str(getattr(settings, "SECRET_KEY", "") or "")
+        if not django_secret:
+            raise SecretSettingError("系统设置加密基础密钥未配置。")
+        digest = hashlib.sha256(
+            f"wms-system-setting:v1:{django_secret}".encode("utf-8")
+        ).digest()
+        key = base64.urlsafe_b64encode(digest).decode("ascii")
+    try:
+        return Fernet(key.encode("ascii"))
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        raise SecretSettingError("系统设置加密主密钥格式无效。") from exc
 
 
 class _SkipCleanFlag:
@@ -114,6 +141,9 @@ class SystemSetting(TimeStampedMixin):
     POS_SALE_PRINT_BACKEND = "backend_html"
     POS_DEFAULT_SALE_PRINT_CONFIG = "pos_dot_241_93"
 
+    INTEGRATION_NAMESPACE = "integration"
+    APIZERO_GS1_API_KEY = "apizero_gs1_api_key"
+
     namespace = models.CharField(
         "命名空间", max_length=50, default="global", db_index=True
     )
@@ -126,6 +156,7 @@ class SystemSetting(TimeStampedMixin):
     default_value = models.TextField("默认值", blank=True, default="")
     description = models.TextField("说明", blank=True, default="")
     client_visible = models.BooleanField("前端可读取", default=False)
+    is_secret = models.BooleanField("密钥配置", default=False)
     is_active = models.BooleanField("启用", default=True)
     sort_order = models.PositiveIntegerField("排序", default=0)
     options = models.JSONField("可选项/扩展配置", default=dict, blank=True)
@@ -149,7 +180,55 @@ class SystemSetting(TimeStampedMixin):
     def __str__(self):
         return f"{self.namespace}.{self.key}"
 
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.is_secret and self.client_visible:
+            errors["client_visible"] = "密钥配置禁止向前端公开。"
+        if self.is_secret and self.default_value:
+            errors["default_value"] = "密钥配置禁止使用默认值。"
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if (
+            self.is_secret
+            and self.value
+            and not self.value.startswith(SECRET_VALUE_PREFIX)
+        ):
+            raise SecretSettingError("密钥配置必须通过 set_secret_value() 加密写入。")
+        super().save(*args, **kwargs)
+
+    @property
+    def has_secret_value(self):
+        return bool(self.is_secret and self.value)
+
+    def set_secret_value(self, plaintext):
+        if not self.is_secret:
+            raise SecretSettingError("只有密钥配置才能写入加密值。")
+        text = str(plaintext or "").strip()
+        if not text:
+            self.value = ""
+            return
+        token = _secret_fernet().encrypt(text.encode("utf-8")).decode("ascii")
+        self.value = f"{SECRET_VALUE_PREFIX}{token}"
+
+    def secret_value(self):
+        if not self.is_secret:
+            raise SecretSettingError("该系统设置不是密钥配置。")
+        if not self.value:
+            return ""
+        if not self.value.startswith(SECRET_VALUE_PREFIX):
+            raise SecretSettingError("密钥配置不是受支持的加密格式。")
+        token = self.value[len(SECRET_VALUE_PREFIX) :]
+        try:
+            return _secret_fernet().decrypt(token.encode("ascii")).decode("utf-8")
+        except (InvalidToken, UnicodeDecodeError, UnicodeEncodeError, ValueError) as exc:
+            raise SecretSettingError("密钥配置无法解密。") from exc
+
     def effective_value(self):
+        if self.is_secret:
+            return ""
         raw_value = self.value if self.value not in (None, "") else self.default_value
         if raw_value in (None, ""):
             return ""
@@ -174,7 +253,22 @@ class SystemSetting(TimeStampedMixin):
         ).first()
         if not setting:
             return default
+        if setting.is_secret:
+            return default
         value = setting.effective_value()
+        return default if value in (None, "") else value
+
+    @classmethod
+    def get_secret_value(cls, namespace, key, default=None):
+        setting = cls.objects.filter(
+            namespace=namespace,
+            key=key,
+            is_active=True,
+            is_secret=True,
+        ).first()
+        if not setting:
+            return default
+        value = setting.secret_value()
         return default if value in (None, "") else value
 
 

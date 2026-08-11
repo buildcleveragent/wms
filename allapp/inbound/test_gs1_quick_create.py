@@ -1,15 +1,19 @@
 from datetime import timedelta
 from unittest import mock
 
+from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.db import ProgrammingError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
+from allapp.core.models import SystemSetting
 from allapp.locations.models import Warehouse
+from allapp.products.gs1 import Gs1LookupError
 from allapp.products.models import (
     Gs1LookupCache,
     Product,
@@ -18,7 +22,10 @@ from allapp.products.models import (
 )
 
 
-@override_settings(APIZERO_GS1_ENABLED=True, APIZERO_GS1_API_KEY="test-key")
+TEST_SYSTEM_SETTING_KEY = Fernet.generate_key().decode("ascii")
+
+
+@override_settings(SYSTEM_SETTING_ENCRYPTION_KEY=TEST_SYSTEM_SETTING_KEY)
 class Gs1QuickCreateApiTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -38,6 +45,19 @@ class Gs1QuickCreateApiTests(TestCase):
         cls.user.user_permissions.add(
             Permission.objects.get(codename="receive_without_order")
         )
+        api_key, _ = SystemSetting.objects.update_or_create(
+            namespace=SystemSetting.INTEGRATION_NAMESPACE,
+            key=SystemSetting.APIZERO_GS1_API_KEY,
+            defaults={
+                "name": "GS1 API key",
+                "value_type": SystemSetting.ValueType.STRING,
+                "client_visible": False,
+                "is_secret": True,
+                "is_active": True,
+            },
+        )
+        api_key.set_secret_value("test-key")
+        api_key.save(update_fields=["value", "updated_at"])
 
     def setUp(self):
         self.client = APIClient()
@@ -143,6 +163,43 @@ class Gs1QuickCreateApiTests(TestCase):
         self.assertEqual(local.data["source"], "local")
         self.assertEqual(local.data["product"]["id"], create.data["product"]["id"])
 
+    @mock.patch("allapp.products.gs1._provider_request")
+    def test_provider_not_found_is_a_successful_empty_candidate(self, provider):
+        result = self.provider_result()
+        result["data"] = {
+            "barcode": "6901234567892",
+            "gtin14": "06901234567892",
+            "found": False,
+            "registered": False,
+        }
+        provider.return_value = result
+
+        response = self.client.post(
+            "/api/inbound/gs1-products/lookup/",
+            {"owner_id": self.owner.pk, "barcode": "6901234567892"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["source"], "gs1")
+        self.assertFalse(response.data["candidate"]["found"])
+
+    def test_provider_configuration_is_read_from_system_settings(self):
+        api_key = SystemSetting.objects.get(
+            namespace=SystemSetting.INTEGRATION_NAMESPACE,
+            key=SystemSetting.APIZERO_GS1_API_KEY,
+        )
+        api_key.value = ""
+        api_key.save(update_fields=["value", "updated_at"])
+        missing = self.client.post(
+            "/api/inbound/gs1-products/lookup/",
+            {"owner_id": self.owner.pk, "barcode": "6912345678901"},
+            format="json",
+        )
+        self.assertEqual(missing.status_code, 503, missing.data)
+        self.assertEqual(missing.data["code"], "GS1_CONFIG_MISSING")
+        self.assertIn("ApiZero API Key", missing.data["detail"])
+
     def test_quick_create_validates_tracking_fields_and_scope(self):
         cache = Gs1LookupCache.objects.create(
             canonical_gtin="06921168509256",
@@ -177,3 +234,74 @@ class Gs1QuickCreateApiTests(TestCase):
             format="json",
         )
         self.assertEqual(denied.status_code, 403)
+        self.assertEqual(denied.data["code"], "GS1_OWNER_FORBIDDEN")
+
+    def test_lookup_reports_missing_database_schema_with_request_id(self):
+        with mock.patch(
+            "allapp.inbound.gs1_views.get_or_fetch_lookup",
+            side_effect=ProgrammingError(
+                1146,
+                "Table 'wms.products_gs1lookupcache' doesn't exist",
+            ),
+        ):
+            response = self.client.post(
+                "/api/inbound/gs1-products/lookup/",
+                {"owner_id": self.owner.pk, "barcode": "6901234567892"},
+                format="json",
+                HTTP_X_REQUEST_ID="gs1-schema-test-1",
+            )
+
+        self.assertEqual(response.status_code, 503, response.data)
+        self.assertEqual(response.data["code"], "GS1_SCHEMA_NOT_READY")
+        self.assertIn("products.0012", response.data["detail"])
+        self.assertEqual(response.data["request_id"], "gs1-schema-test-1")
+        self.assertEqual(response["X-Request-ID"], "gs1-schema-test-1")
+
+    def test_lookup_returns_specific_provider_errors(self):
+        scenarios = (
+            ("provider_not_configured", "GS1_CONFIG_MISSING", 503),
+            ("provider_rate_limited", "GS1_RATE_LIMITED", 429),
+            ("lookup_in_progress", "GS1_LOOKUP_IN_PROGRESS", 429),
+            ("provider_invalid_response", "GS1_INVALID_RESPONSE", 502),
+            ("provider_quota_exhausted", "GS1_QUOTA_EXHAUSTED", 503),
+            ("provider_timeout", "GS1_TIMEOUT", 503),
+            ("provider_network_error", "GS1_NETWORK_ERROR", 503),
+        )
+        for index, (provider_code, api_code, http_status) in enumerate(scenarios):
+            with self.subTest(provider_code=provider_code), mock.patch(
+                "allapp.inbound.gs1_views.get_or_fetch_lookup",
+                side_effect=Gs1LookupError(
+                    f"specific {provider_code}",
+                    code=provider_code,
+                    retry_after=1 if http_status == 429 else None,
+                ),
+            ):
+                response = self.client.post(
+                    "/api/inbound/gs1-products/lookup/",
+                    {
+                        "owner_id": self.owner.pk,
+                        "barcode": f"6901234567{index:03d}",
+                    },
+                    format="json",
+                )
+                self.assertEqual(response.status_code, http_status, response.data)
+                self.assertEqual(response.data["code"], api_code)
+                self.assertEqual(response.data["detail"], f"specific {provider_code}")
+                self.assertTrue(response.data["request_id"])
+
+    def test_lookup_unexpected_error_is_logged_but_not_leaked(self):
+        with mock.patch(
+            "allapp.inbound.gs1_views.get_or_fetch_lookup",
+            side_effect=RuntimeError("database-secret-detail"),
+        ), self.assertLogs("allapp.inbound.gs1_views", level="ERROR") as logs:
+            response = self.client.post(
+                "/api/inbound/gs1-products/lookup/",
+                {"owner_id": self.owner.pk, "barcode": "6901234567892"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 500, response.data)
+        self.assertEqual(response.data["code"], "GS1_LOOKUP_INTERNAL_ERROR")
+        self.assertNotIn("database-secret-detail", response.data["detail"])
+        self.assertIn(response.data["request_id"], response.data["detail"])
+        self.assertIn("database-secret-detail", "\n".join(logs.output))

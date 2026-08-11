@@ -360,7 +360,7 @@ class OutboundProductionRemediationTests(TestCase):
     def test_warehouse_catalog_excludes_inactive_owner_or_binding(self):
         inactive_owner = Owner.objects.create(
             name="Inactive Catalog Owner",
-            code="REMINACTIVE",
+            code="REMINACT",
             is_active=False,
         )
         OwnerWarehouseBinding.objects.create(

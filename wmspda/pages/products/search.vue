@@ -9,11 +9,24 @@
   
     <view class="bar">
       <input class="input flex-input" v-model="q" placeholder="名称/编码/条码 可输入部分内容" data-testid="product-search-input" @confirm="search" />
-      <button class="btn-outline" data-testid="product-search-submit" @click="search">搜索</button>
+      <button class="btn-outline" data-testid="product-search-submit" :disabled="searching" @click="search">搜索</button>
       <button class="btn-outline" @click="quickScan">扫码</button>
     </view>
 
     <view class="content">
+      <view v-if="searching" data-testid="product-search-loading" class="search-state">
+        正在查询商品...
+      </view>
+      <view v-else-if="searchError" data-testid="product-search-error" class="search-state search-error">
+        <text class="search-state-title">{{ searchError.detail }}</text>
+        <text v-if="searchError.code" class="search-state-meta">错误代码：{{ searchError.code }}</text>
+        <text v-if="searchError.requestId" class="search-state-meta">错误编号：{{ searchError.requestId }}</text>
+        <button v-if="searchError.retryable" data-testid="product-search-retry" class="btn-outline retry-button" @click="search">重新查询</button>
+      </view>
+      <view v-else-if="emptyMessage" data-testid="product-search-empty" class="search-state">
+        {{ emptyMessage }}
+      </view>
+
       <view v-for="(p, i) in rows" :key="p?.id ?? i" :class="['row item', { 'odd': i % 2 === 0 }]">
         <!-- 商品图片 -->
         <view class="col-image">
@@ -186,6 +199,14 @@ const gs1Visible = ref(false)
 const gs1Candidate = ref<any>(null)
 const gs1Options = ref<{categories:any[]; uoms:any[]}>({ categories: [], uoms: [] })
 const gs1Submitting = ref(false)
+const searching = ref(false)
+const emptyMessage = ref('')
+const searchError = ref<null | {
+  code:string
+  detail:string
+  requestId:string
+  retryable:boolean
+}>(null)
 
 // =========================
 // 数量输入：按商品 id 记录期望数量
@@ -290,19 +311,40 @@ function displaySelectedPkg(pid:number, pkgs:any[]){
 // 搜索
 // =========================
 async function search(){
-  // 后端按owner过滤；传 owner.id
-  const res:any = await api.receive_products(q.value, 1, cart.owner.id||undefined)
+  if (!cart.owner?.id || searching.value) return
+  searching.value = true
+  searchError.value = null
+  emptyMessage.value = ''
+  list.value = { count:0, next:null, previous:null, results:[] }
+  try {
+    // 本地商品优先；只有完整 GTIN 未命中时才访问外部 GS1 服务。
+    const res:any = await api.receive_products(q.value, 1, cart.owner.id)
+    list.value = Array.isArray(res)
+      ? { count: res.length, next:null, previous:null, results: res }
+      : (res?.results ? res : { count:0, next:null, previous:null, results:[] })
 
-  // res 可能是分页结构，也可能就是数组
-  list.value = Array.isArray(res)
-    ? { count: res.length, next:null, previous:null, results: res }
-    : (res?.results ? res : { count:0, next:null, previous:null, results:[] })
+    const keyword = q.value.trim()
+    const isFullGtin = /^(?:\d{8}|\d{12}|\d{13}|\d{14}|01\d{14})$/.test(keyword)
+    if (!list.value.results.length && isFullGtin) {
+      await lookupGs1(keyword)
+    } else if (!list.value.results.length) {
+      emptyMessage.value = keyword ? '系统中未找到匹配商品' : '暂无可收货商品'
+    }
+  } catch (error:any) {
+    showSearchError(error, '商品查询失败，请稍后重试。')
+  } finally {
+    searching.value = false
+  }
+}
 
-  // 手工输入完整 GTIN 与扫码走同一条“本地优先、GS1 兜底”链路。
-  const keyword = q.value.trim()
-  const isFullGtin = /^(?:\d{8}|\d{12}|\d{13}|\d{14}|01\d{14})$/.test(keyword)
-  if (!list.value.results.length && isFullGtin) {
-    await handleBarcodeScanned(keyword)
+function showSearchError(error:any, fallback:string){
+  const data = error?.data || {}
+  const statusCode = Number(error?.statusCode || error?.code || 0)
+  searchError.value = {
+    code: String(data?.code || (statusCode ? `HTTP_${statusCode}` : 'NETWORK_ERROR')),
+    detail: String(data?.detail || error?.message || fallback),
+    requestId: String(data?.request_id || ''),
+    retryable: statusCode === 0 || statusCode === 429 || statusCode >= 500,
   }
 }
 
@@ -514,19 +556,22 @@ function goExcelImport(){
 const { quickScan } = useBarcodeScanner({ onScan: handleBarcodeScanned })
 
 async function handleBarcodeScanned(code:string){
-  q.value = code
-  if (!cart.owner?.id) return
-  uni.showLoading({ title: '识别商品中' })
+  q.value = String(code || '').trim()
+  await search()
+}
+
+async function lookupGs1(code:string){
   try {
     const result:any = await api.gs1ProductLookup(cart.owner.id, code)
     if (result?.source === 'local' && result.product) {
       list.value = { count: 1, next: null, previous: null, results: [result.product] }
+      emptyMessage.value = ''
       uni.showToast({ title: '已找到本地商品', icon: 'success' })
       return
     }
     const candidate = result?.candidate
     if (!candidate?.found) {
-      uni.showToast({ title: 'GS1 未查到该商品，请人工建档', icon: 'none' })
+      emptyMessage.value = 'GS1 服务未收录该条码，请人工建档'
       return
     }
     const options:any = await api.gs1ProductOptions(cart.owner.id)
@@ -536,8 +581,8 @@ async function handleBarcodeScanned(code:string){
       uoms: options?.uoms || [],
     }
     gs1Visible.value = true
-  } finally {
-    uni.hideLoading()
+  } catch (error:any) {
+    showSearchError(error, 'GS1 查询失败，请稍后重试。')
   }
 }
 
@@ -984,6 +1029,44 @@ function getBatch(pid: number): string {
   padding-bottom: 80rpx;
   padding-left: 2rpx;
   padding-right: 2rpx;
+}
+
+.search-state {
+  margin: 12rpx 10rpx 20rpx;
+  padding: 24rpx;
+  border: 1rpx solid #dbeafe;
+  border-radius: 12rpx;
+  background: #eff6ff;
+  color: #334155;
+  text-align: center;
+}
+
+.search-error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.search-state-title,
+.search-state-meta {
+  display: block;
+}
+
+.search-state-title {
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.search-state-meta {
+  margin-top: 8rpx;
+  color: #64748b;
+  font-size: 24rpx;
+  word-break: break-all;
+}
+
+.retry-button {
+  width: auto;
+  margin: 18rpx auto 0;
 }
 
 

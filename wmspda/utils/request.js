@@ -190,10 +190,12 @@ export function request(opts = {}) {
 
         const message = getFriendlyMessage(data, '请求失败')
 
-        uni.showToast({
-          title: message,
-          icon: 'none',
-        })
+        if (!opts.silentError) {
+          uni.showToast({
+            title: message,
+            icon: 'none',
+          })
+        }
 
         reject({
           code: statusCode,
@@ -206,10 +208,12 @@ export function request(opts = {}) {
       fail: (err) => {
         const message = '网络异常，请稍后重试'
 
-        uni.showToast({
-          title: message,
-          icon: 'none',
-        })
+        if (!opts.silentError) {
+          uni.showToast({
+            title: message,
+            icon: 'none',
+          })
+        }
 
         reject({
           code: 0,
@@ -564,6 +568,7 @@ export const api = {
   receive_products: (q = '', page = 1, owner) =>
     request({
       url: `/api/catalog/receive_products?search=${encodeURIComponent(q)}&page=${page}&owner=${owner}`,
+      silentError: true,
     }),
 
   gs1ProductLookup: (ownerId, barcode) =>
@@ -571,6 +576,7 @@ export const api = {
       url: '/api/inbound/gs1-products/lookup/',
       method: 'POST',
       data: { owner_id: ownerId, barcode },
+      silentError: true,
     }),
 
   gs1ProductOptions: (ownerId, search = '') =>

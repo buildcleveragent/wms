@@ -107,3 +107,47 @@ test('unknown GTIN can be created immediately and added to the receiving cart', 
   await expect(page.getByText('查看、提交入库单：数量:1')).toBeVisible()
   await page.screenshot({ path: '/tmp/wmspda-gs1-quick-create.png', fullPage: true })
 })
+
+test('unknown GTIN shows a specific retryable backend error and request id', async ({ page }) => {
+  test.setTimeout(180_000)
+  const runtimeErrors = []
+  let lookupCount = 0
+  page.on('pageerror', (error) => runtimeErrors.push(error.message))
+  await page.route('**/api/catalog/receive_products?**', (route) =>
+    route.fulfill({ json: { count: 0, next: null, previous: null, results: [] } }),
+  )
+  await page.route('**/api/inbound/gs1-products/lookup/', (route) => {
+    lookupCount += 1
+    return route.fulfill({
+      status: 503,
+      json: {
+        code: 'GS1_CONFIG_MISSING',
+        detail: 'GS1 查询配置缺失：尚未配置 ApiZero API Key，请管理员在系统设置中配置。',
+        request_id: 'gs1-config-test-0001',
+        retry_after: null,
+      },
+    })
+  })
+
+  await page.goto('/')
+  await page.evaluate(async () => {
+    const { useCart } = await import('/store/cart.js')
+    useCart().setOwner({ id: 7, name: '测试货主' })
+    window.location.hash = '#/pages/products/search'
+  })
+
+  const searchInput = page.getByTestId('product-search-input').locator('input')
+  await expect(searchInput).toBeVisible({ timeout: 20_000 })
+  await searchInput.fill('6921168509256')
+  await page.getByTestId('product-search-submit').click()
+
+  const errorPanel = page.getByTestId('product-search-error')
+  await expect(errorPanel).toBeVisible()
+  await expect(errorPanel).toContainText('GS1 查询配置缺失')
+  await expect(errorPanel).toContainText('GS1_CONFIG_MISSING')
+  await expect(errorPanel).toContainText('gs1-config-test-0001')
+  await page.getByTestId('product-search-retry').click()
+  await expect.poll(() => lookupCount).toBe(2)
+  expect(runtimeErrors).toEqual([])
+  await page.screenshot({ path: '/tmp/wmspda-gs1-config-error.png', fullPage: true })
+})

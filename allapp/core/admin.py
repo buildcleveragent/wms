@@ -1,7 +1,71 @@
+from django import forms
 from django.contrib import admin
 from django.db import transaction
 
-from .models import PrintConfig, SystemSetting
+from .models import PrintConfig, SecretSettingError, SystemSetting
+
+
+class SystemSettingAdminForm(forms.ModelForm):
+    value = forms.CharField(
+        label="配置值",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+
+    class Meta:
+        model = SystemSetting
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        instance = self.instance
+        self._original_secret = bool(instance.pk and instance.is_secret)
+        self._original_secret_value = instance.value if self._original_secret else ""
+        if instance.is_secret:
+            self.fields["value"].widget = forms.PasswordInput(
+                render_value=False,
+                attrs={"placeholder": "已配置；留空保持原值"},
+            )
+            self.fields["value"].help_text = "密钥将加密保存，页面不会回显原值。"
+            self.initial["value"] = ""
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("is_secret") and cleaned.get("client_visible"):
+            self.add_error("client_visible", "密钥配置禁止向前端公开。")
+        if cleaned.get("is_secret") and cleaned.get("default_value"):
+            self.add_error("default_value", "密钥配置禁止使用默认值。")
+        if (
+            cleaned.get("is_secret")
+            and not self._original_secret
+            and self.instance.pk
+            and not cleaned.get("value")
+        ):
+            self.add_error("value", "切换为密钥配置时必须输入新的密钥值。")
+        if cleaned.get("is_secret") and cleaned.get("value"):
+            candidate = SystemSetting(is_secret=True)
+            try:
+                candidate.set_secret_value(cleaned["value"])
+            except SecretSettingError as exc:
+                self.add_error("value", str(exc))
+        return cleaned
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        if instance.is_secret:
+            plaintext = self.cleaned_data.get("value") or ""
+            if plaintext:
+                instance.set_secret_value(plaintext)
+            elif self._original_secret:
+                instance.value = self._original_secret_value
+            else:
+                instance.value = ""
+            instance.client_visible = False
+            instance.default_value = ""
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
 
 
 class BaseAdmin(admin.ModelAdmin):
@@ -37,24 +101,41 @@ class BaseAdmin(admin.ModelAdmin):
 
 @admin.register(SystemSetting)
 class SystemSettingAdmin(admin.ModelAdmin):
+    form = SystemSettingAdminForm
     list_display = (
         "namespace",
         "key",
         "name",
         "value_type",
-        "value",
+        "display_value",
+        "is_secret",
         "client_visible",
         "is_active",
         "sort_order",
     )
-    list_filter = ("namespace", "value_type", "client_visible", "is_active")
+    list_filter = (
+        "namespace",
+        "value_type",
+        "is_secret",
+        "client_visible",
+        "is_active",
+    )
     search_fields = ("namespace", "key", "name", "description")
     ordering = ("namespace", "sort_order", "key")
     fieldsets = (
         ("基础信息", {"fields": ("namespace", "key", "name", "description")}),
-        ("配置值", {"fields": ("value_type", "value", "default_value", "options")}),
+        (
+            "配置值",
+            {"fields": ("value_type", "is_secret", "value", "default_value", "options")},
+        ),
         ("使用范围", {"fields": ("client_visible", "is_active", "sort_order")}),
     )
+
+    @admin.display(description="配置值")
+    def display_value(self, obj):
+        return "••••••••（已配置）" if obj.is_secret and obj.value else (
+            "（未配置）" if obj.is_secret else obj.value
+        )
 
 
 @admin.register(PrintConfig)
