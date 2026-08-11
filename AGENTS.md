@@ -6,6 +6,32 @@
 - Dependencies: pinned files in `requirements/` (`requirements.txt`, `dev.txt`). Example env in `.env.example`.
 - CI: see `.github/workflows/ci.yml` for lint, tests, coverage, image build, and deploy.
 
+## Database Test Execution
+
+- The canonical test database is MySQL 8. Do not switch database-backed tests
+  to SQLite when MySQL is unavailable.
+- Load local test credentials from `.env.test.local`. Never print database
+  passwords or commit that file.
+- `DB_TEST_NAME` must identify an isolated disposable test database and must
+  never point to a development or production schema.
+- Before running database tests, perform a bounded MySQL reachability check
+  against `DB_HOST:DB_PORT`.
+- If the connection fails with a sandbox or network permission error, request
+  scoped network escalation and retry the same check. Do not install SQLite as
+  a fallback.
+- If MySQL is not running, use the repository's `compose.test.yml` test
+  environment when Docker is available.
+- Run database tests serially first. Use parallel pytest only after the serial
+  database setup succeeds.
+- For local iteration, prefer `pytest --reuse-db`; final verification must also
+  cover clean database creation and migrations.
+- Do not wait indefinitely for database creation. Report whether the blocker is:
+  sandbox access, MySQL availability, credentials, database privileges,
+  an existing test schema, or a migration failure.
+- Never report database tests as passed when they were skipped or blocked by
+  infrastructure.
+
+
 ## Build, Test, and Development Commands
 - Setup: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements/dev.txt`
 - Configure env: `cp .env.example .env` then set `SECRET_KEY`, `DB_*`, `DEBUG`, `ALLOWED_HOSTS`.

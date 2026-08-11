@@ -721,9 +721,12 @@ class ProductExcelImportApiTests(TestCase):
             ["填写说明", "商品导入", "商品包装", "基础资料", "_meta"],
         )
         self.assertEqual(workbook["_meta"].sheet_state, "hidden")
-        self.assertEqual(workbook["_meta"]["B2"].value, "4")
+        self.assertEqual(workbook["_meta"]["B2"].value, "5")
         headers = [cell.value for cell in workbook[IMPORT_SHEET_NAME][1]]
         self.assertEqual(tuple(headers), PRODUCT_HEADERS)
+        self.assertTrue(
+            {"包装单位编码", "包装换算数量", "包装条码"}.issubset(headers)
+        )
         package_headers = [cell.value for cell in workbook[PACKAGE_SHEET_NAME][1]]
         self.assertEqual(tuple(package_headers), PACKAGE_HEADERS)
         self.assertEqual(
@@ -740,6 +743,9 @@ class ProductExcelImportApiTests(TestCase):
             if row[0].value and row[1].value
         }
         self.assertIn("货主编码", instructions["必填字段"])
+        self.assertNotIn("货主商品编码", instructions["必填字段"])
+        self.assertIn("标准贸易条码", instructions["货主商品编码规则"])
+        self.assertIn("仓库SKU编码", instructions["货主商品编码规则"])
         self.assertIn("系统按", instructions["仓库SKU编码规则"])
         self.assertIn("批次、序列号和保质期管理默认否", instructions["布尔值"])
         self.assertIn("整批不写入", instructions["重复规则"])
@@ -753,7 +759,7 @@ class ProductExcelImportApiTests(TestCase):
         code_column = PRODUCT_HEADERS.index("货主商品编码") + 1
         owner_column = PRODUCT_HEADERS.index("货主编码") + 1
         barcode_column = PRODUCT_HEADERS.index("标准贸易条码") + 1
-        self.assertEqual(
+        self.assertNotEqual(
             workbook[IMPORT_SHEET_NAME].cell(1, owner_column).fill.fgColor.rgb,
             workbook[IMPORT_SHEET_NAME].cell(1, code_column).fill.fgColor.rgb,
         )
@@ -820,6 +826,202 @@ class ProductExcelImportApiTests(TestCase):
                 object_type="",
             ).exists()
         )
+
+    def test_product_code_prefers_supplied_code_over_gtin(self):
+        response = self._post_rows(
+            [
+                self._valid_row(
+                    " OWNER-CODE-1 ",
+                    **{"标准贸易条码": "12345678"},
+                )
+            ]
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        product = Product.objects.get(owner=self.owner, code="OWNER-CODE-1")
+        self.assertEqual(product.gtin, "12345678")
+        self.assertEqual(response.data["created"][0]["code"], "OWNER-CODE-1")
+
+    def test_blank_product_code_falls_back_to_gtin(self):
+        response = self._post_rows(
+            [self._valid_row("   ", **{"标准贸易条码": "12345678"})]
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        product = Product.objects.get(owner=self.owner, code="12345678")
+        self.assertEqual(product.gtin, "12345678")
+        self.assertEqual(response.data["created"][0]["code"], "12345678")
+
+    def test_gtin_fallback_still_validates_format_and_identifier_ownership(self):
+        invalid = self._post_rows(
+            [self._valid_row("", **{"标准贸易条码": "123"})]
+        )
+
+        self.assertEqual(invalid.status_code, 400, invalid.data)
+        self.assertTrue(
+            any(
+                error["field"] == "标准贸易条码"
+                and "8/12/13/14" in error["message"]
+                for error in invalid.data["errors"]
+            )
+        )
+
+        Product.objects.create(
+            owner=self.owner,
+            code="GTIN-OWNER",
+            name="占用 GTIN 的商品",
+            category=self.category,
+            base_uom=self.uom,
+            gtin="87654321",
+            expiry_control=False,
+            expiry_basis=None,
+        )
+        occupied = self._post_rows(
+            [self._valid_row("", **{"标准贸易条码": "87654321"})]
+        )
+
+        self.assertEqual(occupied.status_code, 400, occupied.data)
+        self.assertTrue(
+            any(
+                error["field"] in {"货主商品编码", "标准贸易条码"}
+                and ("占用" in error["message"] or "已存在" in error["message"])
+                for error in occupied.data["errors"]
+            )
+        )
+        self.assertEqual(Product.objects.filter(gtin="87654321").count(), 1)
+
+    def test_blank_product_code_and_gtin_use_generated_sku(self):
+        response = self._post_rows(
+            [
+                self._valid_row("", **{"商品名称": "无码商品一"}),
+                self._valid_row("   ", **{"商品名称": "无码商品二"}),
+            ]
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        products = list(
+            Product.objects.filter(owner=self.owner).order_by("sku").values_list(
+                "code", "sku"
+            )
+        )
+        self.assertEqual(products, [("PXIA1", "PXIA1"), ("PXIA2", "PXIA2")])
+        self.assertEqual(
+            [item["code"] for item in response.data["created"]],
+            ["PXIA1", "PXIA2"],
+        )
+
+    def test_generated_code_skips_owner_identifier_collision(self):
+        existing = Product.objects.create(
+            owner=self.owner,
+            code="EXISTING-CODE",
+            name="已有商品",
+            category=self.category,
+            base_uom=self.uom,
+            expiry_control=False,
+            expiry_basis=None,
+        )
+        add_product_barcode(
+            product=existing,
+            barcode="PXIA2",
+            barcode_type=ProductBarcode.BarcodeType.OTHER,
+            is_primary=False,
+        )
+
+        response = self._post_rows(
+            [self._valid_row("", **{"商品名称": "跳号无码商品"})]
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        product = Product.objects.get(name="跳号无码商品")
+        self.assertEqual((product.code, product.sku), ("PXIA3", "PXIA3"))
+
+    def test_gtin_fallback_can_be_referenced_by_package_sheet(self):
+        workbook = Workbook()
+        product_sheet = workbook.active
+        product_sheet.title = IMPORT_SHEET_NAME
+        product_sheet.append(list(HEADERS))
+        row = self._valid_row("", **{"标准贸易条码": "12345678"})
+        product_sheet.append([row.get(header) for header in HEADERS])
+        package_sheet = workbook.create_sheet(PACKAGE_SHEET_NAME)
+        package_sheet.append(list(PACKAGE_HEADERS))
+        package_row = {
+            "货主编码": self.owner.code,
+            "货主商品编码": "12345678",
+            "包装单位编码": self.carton_uom.code,
+            "包装换算数量": 12,
+            "包装条码": "GTIN-PACKAGE-12",
+        }
+        package_sheet.append(
+            [package_row.get(header) for header in PACKAGE_HEADERS]
+        )
+        output = io.BytesIO()
+        workbook.save(output)
+
+        response = self.client.post(
+            "/api/products/import-excel/",
+            {"file": SimpleUploadedFile("gtin-package.xlsx", output.getvalue())},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        product = Product.objects.get(owner=self.owner, code="12345678")
+        self.assertTrue(
+            product.packages.filter(
+                uom=self.carton_uom, barcode="GTIN-PACKAGE-12"
+            ).exists()
+        )
+
+    def test_generated_code_product_uses_inline_package_only(self):
+        inline_response = self._post_rows(
+            [
+                self._valid_row(
+                    "",
+                    **{
+                        "商品名称": "无码同行包装",
+                        "包装单位编码": self.carton_uom.code,
+                        "包装换算数量": 12,
+                        "包装条码": "INLINE-AUTO-PACKAGE",
+                    },
+                )
+            ]
+        )
+
+        self.assertEqual(inline_response.status_code, 200, inline_response.data)
+        product = Product.objects.get(name="无码同行包装")
+        self.assertEqual(product.code, product.sku)
+        self.assertTrue(
+            product.packages.filter(barcode="INLINE-AUTO-PACKAGE").exists()
+        )
+
+        workbook = Workbook()
+        product_sheet = workbook.active
+        product_sheet.title = IMPORT_SHEET_NAME
+        product_sheet.append(list(HEADERS))
+        row = self._valid_row("", **{"商品名称": "无码包装表引用"})
+        product_sheet.append([row.get(header) for header in HEADERS])
+        package_sheet = workbook.create_sheet(PACKAGE_SHEET_NAME)
+        package_sheet.append(list(PACKAGE_HEADERS))
+        package_sheet.append(
+            [self.owner.code, "", self.carton_uom.code, 12, "AUTO-SHEET-PACKAGE"]
+        )
+        output = io.BytesIO()
+        workbook.save(output)
+
+        package_response = self.client.post(
+            "/api/products/import-excel/",
+            {"file": SimpleUploadedFile("auto-package.xlsx", output.getvalue())},
+            format="multipart",
+        )
+
+        self.assertEqual(package_response.status_code, 400, package_response.data)
+        self.assertTrue(
+            any(
+                error["field"] == "货主商品编码"
+                and "主表同行包装列" in error["message"]
+                for error in package_response.data["errors"]
+            )
+        )
+        self.assertFalse(Product.objects.filter(name="无码包装表引用").exists())
 
     def test_legacy_package_barcode_cannot_reuse_same_product_identifier(self):
         response = self._post_rows(
@@ -1389,12 +1591,12 @@ class ProductExcelImportApiTests(TestCase):
 
     def test_legacy_import_action_uses_same_service(self):
         response = self._post_rows(
-            [self._valid_row("PDA-LEGACY-ACTION")],
+            [self._valid_row("", **{"标准贸易条码": "23456789"})],
             url="/products/products/import/",
         )
 
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertTrue(Product.objects.filter(code="PDA-LEGACY-ACTION").exists())
+        self.assertTrue(Product.objects.filter(code="23456789").exists())
 
     def test_export_owner_scope_permission_and_profile_capability(self):
         OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
@@ -1425,7 +1627,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(missing.status_code, 400)
         self.assertEqual(forbidden.status_code, 403)
 
-    def test_export_v3_round_trip_preserves_multiple_packages(self):
+    def test_export_v5_round_trip_preserves_multiple_packages(self):
         product = Product.objects.create(
             owner=self.owner,
             code="PDA-EXPORT-001",
@@ -1467,7 +1669,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(exported.status_code, 200)
         self.assertIn("filename*=UTF-8", exported["Content-Disposition"])
         workbook = load_workbook(io.BytesIO(exported.content), data_only=False)
-        self.assertEqual(workbook["_meta"]["B2"].value, "4")
+        self.assertEqual(workbook["_meta"]["B2"].value, "5")
         self.assertEqual(workbook[IMPORT_SHEET_NAME]["A2"].value, self.owner.code)
         name_column = PRODUCT_HEADERS.index("商品名称") + 1
         self.assertEqual(
@@ -1516,25 +1718,27 @@ class ProductExcelImportApiTests(TestCase):
         self.assertTrue(packages[1].is_purchase_default)
         self.assertEqual(product.packages.count(), 2)
 
-    def test_v3_rejects_mixed_legacy_and_package_sheet_data(self):
+    def test_inline_and_package_sheet_data_can_mix_for_different_products(self):
         workbook = Workbook()
         product_sheet = workbook.active
         product_sheet.title = IMPORT_SHEET_NAME
         product_sheet.append(list(HEADERS))
-        row = self._valid_row(
-            "PDA-MIXED",
+        inline_row = self._valid_row(
+            "PDA-MIXED-INLINE",
             **{
                 "包装单位编码": self.carton_uom.code,
                 "包装换算数量": 12,
             },
         )
-        product_sheet.append([row.get(header) for header in HEADERS])
+        sheet_row = self._valid_row("PDA-MIXED-SHEET")
+        product_sheet.append([inline_row.get(header) for header in HEADERS])
+        product_sheet.append([sheet_row.get(header) for header in HEADERS])
         package_sheet = workbook.create_sheet(PACKAGE_SHEET_NAME)
         package_sheet.append(list(PACKAGE_HEADERS))
         package_sheet.append(
             [
                 self.owner.code,
-                "PDA-MIXED",
+                "PDA-MIXED-SHEET",
                 self.carton_uom.code,
                 12,
             ]
@@ -1548,9 +1752,50 @@ class ProductExcelImportApiTests(TestCase):
             format="multipart",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("不能同时", response.data["detail"])
-        self.assertFalse(Product.objects.filter(code="PDA-MIXED").exists())
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            Product.objects.get(code="PDA-MIXED-INLINE").packages.count(), 1
+        )
+        self.assertEqual(
+            Product.objects.get(code="PDA-MIXED-SHEET").packages.count(), 1
+        )
+
+    def test_same_product_cannot_use_inline_and_package_sheet_data(self):
+        workbook = Workbook()
+        product_sheet = workbook.active
+        product_sheet.title = IMPORT_SHEET_NAME
+        product_sheet.append(list(HEADERS))
+        row = self._valid_row(
+            "PDA-MIXED-SAME",
+            **{
+                "包装单位编码": self.carton_uom.code,
+                "包装换算数量": 12,
+            },
+        )
+        product_sheet.append([row.get(header) for header in HEADERS])
+        package_sheet = workbook.create_sheet(PACKAGE_SHEET_NAME)
+        package_sheet.append(list(PACKAGE_HEADERS))
+        package_sheet.append(
+            [self.owner.code, "PDA-MIXED-SAME", self.carton_uom.code, 24]
+        )
+        output = io.BytesIO()
+        workbook.save(output)
+
+        response = self.client.post(
+            "/api/products/import-excel/",
+            {"file": SimpleUploadedFile("mixed-same.xlsx", output.getvalue())},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertTrue(
+            any(
+                error["field"] == "货主商品编码"
+                and "不得同时" in error["message"]
+                for error in response.data["errors"]
+            )
+        )
+        self.assertFalse(Product.objects.filter(code="PDA-MIXED-SAME").exists())
 
 
 @unittest.skipUnless(
