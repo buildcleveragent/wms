@@ -22,6 +22,7 @@ from .excel_import import (
     ProductImportConflictError,
     ProductImportFileError,
     build_product_import_template,
+    product_import_warehouse_queryset,
     resolve_product_import_access,
 )
 from .identifier_excel import (
@@ -49,8 +50,10 @@ def product_template_response(user):
     return response
 
 
-def import_product_file(*, uploaded_file, user, request=None):
-    importer = ProductExcelImporter(user=user, request=request)
+def import_product_file(*, uploaded_file, user, request=None, warehouse_id=None):
+    importer = ProductExcelImporter(
+        user=user, request=request, warehouse_id=warehouse_id
+    )
     return importer.import_file(uploaded_file)
 
 
@@ -79,6 +82,7 @@ class ProductImportExcelApi(APIView):
                 uploaded_file=uploaded_file,
                 user=request.user,
                 request=request,
+                warehouse_id=request.data.get("warehouse_id"),
             )
         except ProductImportConflictError as exc:
             return Response(
@@ -94,6 +98,45 @@ class ProductImportExcelApi(APIView):
             status.HTTP_400_BAD_REQUEST if result["error_count"] else status.HTTP_200_OK
         )
         return Response(result, status=response_status)
+
+
+class ProductImportWarehousesApi(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        resolve_product_import_access(request.user)
+        warehouses = product_import_warehouse_queryset(request.user).select_related(
+            "default_receive_location"
+        )
+        results = []
+        for warehouse in warehouses:
+            location = warehouse.default_receive_location
+            receipt_ready = bool(
+                location
+                and location.warehouse_id == warehouse.pk
+                and location.is_active
+                and not location.is_deleted
+                and not location.is_disabled
+                and not location.is_frozen
+            )
+            results.append(
+                {
+                    "id": warehouse.pk,
+                    "code": warehouse.code,
+                    "name": warehouse.name,
+                    "receipt_ready": receipt_ready,
+                    "default_receive_location": (
+                        {
+                            "id": location.pk,
+                            "code": location.code,
+                            "name": location.name,
+                        }
+                        if location
+                        else None
+                    ),
+                }
+            )
+        return Response({"results": results})
 
 
 class ProductExportOwnersApi(APIView):
@@ -146,7 +189,7 @@ class ProductExportExcelApi(APIView):
                 "owner_code": owner.code,
                 "product_count": product_count,
                 "package_count": package_count,
-                "template_version": "3",
+                "template_version": "6",
             },
         )
         timestamp = timezone.now().strftime("%Y%m%d-%H%M%S")

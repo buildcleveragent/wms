@@ -223,7 +223,7 @@ class ProductCategory(BaseModel):
     MAX_DEPTH = 3
     LEVEL_NAMES = {1: "大类", 2: "中类", 3: "小类"}
 
-    code = models.CharField("分类编码", max_length=50, help_text="分类唯一编码")
+    code = models.CharField("分类编码", max_length=320, help_text="分类唯一编码")
     name = models.CharField("分类名称", max_length=50, db_index=True)
     parent = models.ForeignKey(
         "self",
@@ -448,7 +448,7 @@ class ProductUom(BaseModel):
 
     code = models.CharField(
         "单位编码",
-        max_length=20,
+        max_length=320,
         help_text="EA/PCS/CTN/PLT/KG/L 等",
         validators=[
             RegexValidator(

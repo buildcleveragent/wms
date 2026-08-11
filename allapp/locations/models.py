@@ -9,11 +9,38 @@ from allapp.core.choices import ZoneType
 class Warehouse(BaseModel):
     code = models.CharField("仓库编号", max_length=10, unique=True)
     name = models.CharField("仓库名称", max_length=30)
+    default_receive_location = models.ForeignKey(
+        "locations.Location",
+        verbose_name="默认收货库位",
+        on_delete=models.PROTECT,
+        related_name="+",
+        blank=True,
+        null=True,
+        help_text="商品批量导入自动收货使用的库位，必须属于本仓库且处于可用状态。",
+    )
     class Meta:
         verbose_name = "仓库"
         verbose_name_plural = "仓库"
         ordering = ["code"]
     def __str__(self): return f"{self.name}"
+
+    def clean(self):
+        super().clean()
+        location = self.default_receive_location
+        if location is None:
+            return
+        errors = []
+        if self.pk and location.warehouse_id != self.pk:
+            errors.append("默认收货库位必须属于当前仓库")
+        if (
+            not location.is_active
+            or location.is_deleted
+            or location.is_disabled
+            or location.is_frozen
+        ):
+            errors.append("默认收货库位必须处于启用、未删除、未禁用且未冻结状态")
+        if errors:
+            raise ValidationError({"default_receive_location": errors})
 
 class Subwarehouse(BaseModel):
     warehouse = models.ForeignKey("Warehouse", verbose_name="所属仓库", on_delete=models.PROTECT,
@@ -214,4 +241,3 @@ class Container(BaseModel):
         self._sync_warehouse_from_relations()
         self.full_clean()
         return super().save(*args, **kwargs)
-

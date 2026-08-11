@@ -65,6 +65,45 @@ class LocationsWarehouseScopeTests(TestCase):
 
         self.assertIn("warehouse", exc.exception.message_dict)
 
+    def test_warehouse_default_receive_location_must_be_local_and_usable(self):
+        local_location = Location.objects.create(
+            warehouse=self.warehouse,
+            code="SWLOC1-01-01-04",
+            name="Default receive location",
+        )
+        self.warehouse.default_receive_location = local_location
+        self.warehouse.full_clean()
+
+        local_location.is_frozen = True
+        local_location.save(update_fields=["is_frozen"])
+        with self.assertRaises(ValidationError) as unavailable_exc:
+            self.warehouse.full_clean()
+        self.assertIn(
+            "default_receive_location", unavailable_exc.exception.message_dict
+        )
+
+        other_warehouse = Warehouse.objects.create(
+            code="WH-LOC-2",
+            name="Warehouse Location 2",
+        )
+        other_subwarehouse = Subwarehouse.objects.create(
+            warehouse=other_warehouse,
+            code="SWLOC2",
+            name="Subwarehouse Location 2",
+        )
+        other_location = Location.objects.create(
+            warehouse=other_warehouse,
+            subwarehouse=other_subwarehouse,
+            code="SWLOC2-01-01-01",
+            name="Other receive location",
+        )
+        self.warehouse.default_receive_location = other_location
+        with self.assertRaises(ValidationError) as cross_warehouse_exc:
+            self.warehouse.full_clean()
+        self.assertIn(
+            "default_receive_location", cross_warehouse_exc.exception.message_dict
+        )
+
     def test_container_rejects_location_from_another_warehouse(self):
         location = Location.objects.create(
             warehouse=self.warehouse,

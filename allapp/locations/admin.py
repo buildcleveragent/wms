@@ -29,10 +29,11 @@ class FloorNoListFilter(admin.SimpleListFilter):
 ##---------- Admins ----------
 @admin.register(Warehouse)
 class WarehouseAdmin(admin.ModelAdmin):
-    fields = ("code", "name")
-    list_display = ("code", "name")
+    fields = ("code", "name", "default_receive_location")
+    list_display = ("code", "name", "default_receive_location")
     search_fields = ("code", "name")
     ordering = ("code",)
+    autocomplete_fields = ("default_receive_location",)
 
 @admin.register(Subwarehouse)
 class SubwarehouseAdmin(admin.ModelAdmin):

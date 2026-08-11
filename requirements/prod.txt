@@ -118,6 +118,8 @@ pyphen==0.17.2
     # via
     #   -c requirements/requirements.txt
     #   weasyprint
+pypinyin==0.55.0
+    # via -r requirements/requirements.in
 sentry-sdk==2.66.1
     # via -r requirements/prod.in
 sqlparse==0.5.3

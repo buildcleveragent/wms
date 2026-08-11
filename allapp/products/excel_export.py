@@ -96,13 +96,15 @@ def build_product_export_workbook(owner: Owner) -> tuple[bytes, int, int]:
     uoms = list(
         ProductUom.objects.filter(is_active=True)
         .order_by("code")
-        .values_list("code", "name")
+        .values_list("code", "name", "kind", "decimal_places")
     )
-    categories = list(
-        ProductCategory.objects.filter(is_active=True)
+    categories = [
+        (category.code, category.full_path)
+        for category in ProductCategory.objects.filter(is_active=True)
+        .select_related("parent__parent")
         .order_by("code")
-        .values_list("code", "name")
-    )
+        if category.has_active_path()
+    ]
     brands = list(
         Brand.objects.filter(is_active=True)
         .order_by("code")
@@ -173,10 +175,9 @@ def _write_safe_row(sheet, row_number, headers, values):
         if header in {
             "货主编码",
             "货主商品编码",
-            "仓库SKU编码",
-            "分类编码",
+            "分类",
             "品牌编码",
-            "基本单位编码",
+            "基本单位",
             "标准贸易条码",
             "零码",
             "箱码",
@@ -198,13 +199,15 @@ def _product_values(product):
     return {
         "货主编码": product.owner.code,
         "货主商品编码": product.code,
+        "标准贸易条码": product.gtin,
         "商品名称": product.name,
-        "分类编码": product.category.code if product.category_id else None,
-        "基本单位编码": product.base_uom.code,
-        "仓库SKU编码": product.sku,
+        "分类": product.category.full_path if product.category_id else None,
+        "基本单位": product.base_uom.name,
+        "基本单位类型": product.base_uom.get_kind_display(),
+        "单位小数位数": product.base_uom.decimal_places,
+        "基本单位数量": None,
         "规格": product.spec,
         "品牌编码": product.brand.code if product.brand_id else None,
-        "标准贸易条码": product.gtin,
         "零码": product.unit_barcode,
         "箱码": product.carton_barcode,
         "箱码对应包装单位编码": (

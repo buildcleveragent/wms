@@ -30,9 +30,25 @@
       </view>
 
       <view class="card">
-        <view class="card-title">3. 上传并导入</view>
+        <view class="card-title">3. 选择自动收货仓库（按需）</view>
+        <template v-if="canReceive">
+          <picker :range="warehouseLabels" :value="warehouseIndex" @change="selectWarehouse">
+            <view class="picker-box">{{ selectedWarehouseLabel }}</view>
+          </picker>
+          <view class="muted warehouse-help">
+            基本单位数量为空或 0 时可不选；填写正数时必须选择已配置默认收货库位的仓库。
+          </view>
+          <view v-if="unreadyWarehouseCount" class="muted">
+            另有 {{ unreadyWarehouseCount }} 个仓库尚未配置可用的默认收货库位。
+          </view>
+        </template>
+        <view v-else class="tips">当前账号没有无订单收货权限，只能导入数量为空或 0 的商品。</view>
+      </view>
+
+      <view class="card">
+        <view class="card-title">4. 上传并导入</view>
         <view class="tips">
-          系统会先校验整份文件。货主编码必须填写；货主商品编码、仓库SKU编码或条码与已有商品冲突，或任一行存在错误，整批都不会写入。
+          系统会先校验整份文件。分类和基本单位可按名称填写；任一商品、字典或自动收货发生错误，整批都不会写入。
         </view>
         <button
           class="primary-btn"
@@ -64,6 +80,13 @@
           <view class="summary-item danger">
             <text class="summary-number">{{ result.error_count || 0 }}</text>
             <text class="summary-label">错误</text>
+          </view>
+        </view>
+
+        <view v-if="result.receipts?.length" class="result-section">
+          <view class="section-heading success-text">自动收货完成</view>
+          <view v-for="receipt in result.receipts" :key="`receipt-${receipt.task_id}`" class="result-line ok-line">
+            {{ receipt.owner_code }} · {{ receipt.warehouse_code }} · 收货单 {{ receipt.task_no }} · {{ receipt.item_count }} 个商品
           </view>
         </view>
 
@@ -106,16 +129,40 @@ const selecting = ref(false)
 const uploading = ref(false)
 const result = ref(null)
 const selectedFile = reactive({ path: '', name: '', size: 0 })
+const warehouses = ref([])
+const warehouseIndex = ref(0)
 
 const profileReady = computed(() => auth.profileLoaded)
 const canImport = computed(() => auth.canImportProducts)
+const canReceive = computed(() => auth.canReceiveWithoutOrder)
 const busy = computed(() => downloading.value || selecting.value || uploading.value)
+const readyWarehouses = computed(() => warehouses.value.filter((item) => item.receipt_ready))
+const warehouseLabels = computed(() => [
+  '不选择（仅建档）',
+  ...readyWarehouses.value.map((item) => `${item.code} · ${item.name} · ${item.default_receive_location?.code || ''}`),
+])
+const selectedWarehouse = computed(() => readyWarehouses.value[warehouseIndex.value - 1] || null)
+const selectedWarehouseLabel = computed(() => warehouseLabels.value[warehouseIndex.value] || warehouseLabels.value[0])
+const unreadyWarehouseCount = computed(() => warehouses.value.filter((item) => !item.receipt_ready).length)
 
-onShow(() => {
-  auth.loadProfile({ force: true }).catch((error) => {
-    console.warn('商品导入权限资料加载失败', error)
-  })
+onShow(async () => {
+  try {
+    await auth.loadProfile({ force: true })
+    if (canReceive.value) await loadWarehouseOptions()
+  } catch (error) {
+    console.warn('商品导入权限或仓库资料加载失败', error)
+  }
 })
+
+async function loadWarehouseOptions() {
+  const data = await api.productImportWarehouses()
+  warehouses.value = Array.isArray(data?.results) ? data.results : []
+  warehouseIndex.value = 0
+}
+
+function selectWarehouse(event) {
+  warehouseIndex.value = Number(event?.detail?.value || 0)
+}
 
 function formatSize(size) {
   const bytes = Number(size || 0)
@@ -191,7 +238,10 @@ async function submitImport() {
   uploading.value = true
   result.value = null
   try {
-    result.value = await api.importProductsExcel(selectedFile.path)
+    result.value = await api.importProductsExcel(
+      selectedFile.path,
+      selectedWarehouse.value?.id || null,
+    )
     uni.showToast({
       title: `新增 ${result.value?.created_count || 0} 条，跳过 ${result.value?.skipped_count || 0} 条`,
       icon: 'none',
@@ -289,6 +339,17 @@ async function submitImport() {
   font-size: 24rpx;
   line-height: 1.65;
 }
+.picker-box {
+  min-height: 76rpx;
+  padding: 0 18rpx;
+  border: 1rpx solid #cbd5e1;
+  border-radius: 12rpx;
+  background: #fff;
+  color: #1f2937;
+  font-size: 26rpx;
+  line-height: 76rpx;
+}
+.warehouse-help { margin-top: 12rpx; }
 .denied-card { margin-top: 20rpx; border-color: #fecaca; background: #fef2f2; }
 .result-head { display: flex; align-items: center; justify-content: space-between; }
 .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12rpx; }

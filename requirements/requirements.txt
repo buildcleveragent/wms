@@ -69,6 +69,8 @@ pyjwt==2.13.0
     # via djangorestframework-simplejwt
 pyphen==0.17.2
     # via weasyprint
+pypinyin==0.55.0
+    # via -r requirements/requirements.in
 sqlparse==0.5.3
     # via django
 tablib==3.10.0

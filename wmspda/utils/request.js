@@ -359,13 +359,14 @@ export function downloadProductArchive(ownerId, ownerCode = '') {
   })
 }
 
-export function uploadProductImportExcel(filePath) {
+export function uploadProductImportExcel(filePath, warehouseId = null) {
   const token = getToken()
   return new Promise((resolve, reject) => {
     uni.uploadFile({
       url: `${BASE_URL}/api/products/import-excel/`,
       filePath,
       name: 'file',
+      formData: warehouseId ? { warehouse_id: String(warehouseId) } : {},
       header: token ? { Authorization: `Bearer ${token}` } : {},
       success: (res) => {
         let data = res.data
@@ -530,6 +531,11 @@ export const api = {
 
   downloadProductImportTemplate,
   importProductsExcel: uploadProductImportExcel,
+  productImportWarehouses: () =>
+    request({
+      url: '/api/products/import-warehouses/',
+      method: 'GET',
+    }),
   productExportOwners: (q = '', page = 1) =>
     request({
       url: `/api/products/export-owners/?search=${encodeURIComponent(q)}&page=${page}`,

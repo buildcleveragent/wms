@@ -230,6 +230,7 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
                 uploaded_file=f,
                 user=request.user,
                 request=request,
+                warehouse_id=request.data.get("warehouse_id"),
             )
         except ProductImportConflictError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)

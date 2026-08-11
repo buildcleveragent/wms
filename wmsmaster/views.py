@@ -12,8 +12,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.models import UserRoleScope
-from allapp.products.excel_import import can_import_products
 from allapp.products.excel_export import can_export_products
+from allapp.products.excel_import import can_import_products, can_receive_product_import
 
 
 @api_view(["GET"])
@@ -95,6 +95,7 @@ def profile_view(request):
                 "can_export_operations": access_scope.is_valid
                 and user.has_perm("reports.export_operations"),
                 "can_import_products": can_import_products(user),
+                "can_receive_without_order": can_receive_product_import(user),
                 "can_export_products": can_export_products(user),
                 "can_request_replenishment": settings.REPLENISHMENT_MANUAL_ENABLED
                 and is_operator

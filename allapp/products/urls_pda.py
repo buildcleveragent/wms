@@ -5,6 +5,7 @@ from .views_excel import (
     ProductExportOwnersApi,
     ProductImportExcelApi,
     ProductImportTemplateApi,
+    ProductImportWarehousesApi,
     ProductIdentifierExportApi,
     ProductIdentifierImportApi,
     ProductIdentifierTemplateApi,
@@ -28,5 +29,10 @@ urlpatterns = [
         "import-excel/",
         ProductImportExcelApi.as_view(),
         name="import-excel",
+    ),
+    path(
+        "import-warehouses/",
+        ProductImportWarehousesApi.as_view(),
+        name="import-warehouses",
     ),
 ]

@@ -25,6 +25,9 @@ export const useAuth = defineStore('auth', {
     canImportProducts: (state) =>
       state.profileLoaded === true &&
       state.profile?.capabilities?.can_import_products === true,
+    canReceiveWithoutOrder: (state) =>
+      state.profileLoaded === true &&
+      state.profile?.capabilities?.can_receive_without_order === true,
     canExportProducts: (state) =>
       state.profileLoaded === true &&
       state.profile?.capabilities?.can_export_products === true,
