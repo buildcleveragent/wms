@@ -49,6 +49,11 @@ class BusinessDataPurgeManifestTests(SimpleTestCase):
     newly_preserved = {
         "baseinfo.ownerwarehousebinding",
         "billing.billingservicecontract",
+        "products.product",
+        "products.productbarcode",
+        "products.productexternalidentifier",
+        "products.productidentifierregistry",
+        "products.productpackage",
         "reports.operatingtarget",
     }
     newly_purged = {
@@ -61,9 +66,8 @@ class BusinessDataPurgeManifestTests(SimpleTestCase):
         "inventory.inventorycostlayer",
         "inventory.inventorylayermovement",
         "inventory.inventorylayerposition",
-        "products.productbarcode",
-        "products.productexternalidentifier",
-        "products.productidentifierregistry",
+        "products.gs1lookupcache",
+        "products.gs1providerratelimit",
         "reports.alertcase",
         "reports.alertcasehistory",
         "reports.businessreviewsnapshot",
@@ -88,7 +92,7 @@ class BusinessDataPurgeManifestTests(SimpleTestCase):
         self.assertTrue(self.newly_preserved <= PRESERVED_MODEL_LABELS)
         self.assertTrue(self.newly_purged <= PURGED_MODEL_LABELS)
         self.assertIn("accounts_user", manifest.preserved_tables)
-        self.assertIn("products_product", manifest.purged_tables)
+        self.assertIn("products_product", manifest.preserved_tables)
         self.assertIn("django_migrations", manifest.preserved_tables)
 
     def test_new_unclassified_model_fails_closed(self):
@@ -310,7 +314,7 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
 
         self.execute_command()
 
-        self.assertFalse(Product.all_objects.filter(pk=self.product.pk).exists())
+        self.assertTrue(Product.all_objects.filter(pk=self.product.pk).exists())
         self.assertFalse(InventoryDetail.all_objects.exists())
         self.assertFalse(InventoryCostLayer.objects.exists())
         self.assertFalse(BillingPeriod.objects.exists())
@@ -362,7 +366,10 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
             success.metadata["backup_reference"],
             "backup-test-20260722",
         )
-        self.assertGreater(success.after["deleted_rows"]["products_product"], 0)
+        self.assertNotIn("products_product", success.after["deleted_rows"])
+        self.assertGreater(
+            success.after["deleted_rows"]["inventory_inventorydetail"], 0
+        )
 
     def test_missing_confirmation_arguments_are_rejected_before_delete(self):
         with self.assertRaisesMessage(CommandError, "正式执行缺少参数"):

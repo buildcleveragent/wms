@@ -271,7 +271,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "origin_country",
             "is_active",
             "extra",
-            "packages", "price", "min_price", "max_discount",
+            "packages", "price", "purchase_price", "min_price", "max_discount",
         ]
         read_only_fields = ("id", "sku", "created_at", "updated_at")
         extra_kwargs = {

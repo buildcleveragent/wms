@@ -120,7 +120,8 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     list_display = (
         "owner","name","spec","sku","code", "gtin", "unit_barcode", "carton_barcode",
         "carton_package",
-        "base_uom", "price", "min_price", "max_discount", "pricing_strategy",
+        "base_uom", "price", "purchase_price", "min_price", "max_discount",
+        "pricing_strategy",
         "category", "vender","brand",
         "min_stock","max_stock","weight","net_content","volume",
         "batch_control","expiry_control", "expiry_basis","shelf_life_days","pick_policy",
@@ -146,7 +147,8 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     fields = (
         "owner","name","spec","sku","code", "gtin", "unit_barcode", "carton_barcode",
         "carton_package",
-        "base_uom", "price", "min_price", "max_discount", "pricing_strategy",
+        "base_uom", "price", "purchase_price", "min_price", "max_discount",
+        "pricing_strategy",
         "category", "vender","brand",
         "min_stock","max_stock","weight","net_content","volume",
         ("batch_control","expiry_control",), "expiry_basis","shelf_life_days","pick_policy",

@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import unittest
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.apps import apps
@@ -321,6 +322,7 @@ class ProductViewSetTests(TestCase):
             "name": "新商品",
             "base_uom": self.uom.id,
             "category": self.category.id,
+            "purchase_price": "8.25",
             "is_active": True,
         }
         req = self.factory.post("/products/", data=payload, format="json")
@@ -328,6 +330,11 @@ class ProductViewSetTests(TestCase):
         resp = view(req)
         self.assertEqual(resp.status_code, 201, resp.data)
         self.assertEqual(resp.data["owner"], self.owner_a.id)
+        self.assertEqual(resp.data["purchase_price"], "8.25")
+        self.assertEqual(
+            Product.objects.get(code="SKU-NEW").purchase_price,
+            Decimal("8.25"),
+        )
 
         # 再次 list，应该能看到新商品
         view_list = ProductViewSet.as_view({"get": "list"})

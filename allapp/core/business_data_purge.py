@@ -15,7 +15,7 @@ from django.db import connections, transaction
 
 from allapp.accounts.audit import record_audit_event
 
-PURGE_MANIFEST_VERSION = "2026-08-10.1"
+PURGE_MANIFEST_VERSION = "2026-08-11.1"
 
 
 PRESERVED_MODEL_LABELS = frozenset(
@@ -53,9 +53,14 @@ PRESERVED_MODEL_LABELS = frozenset(
         "locations.location_product_categories",
         "locations.subwarehouse",
         "locations.warehouse",
-        # Reusable product dictionaries; product records themselves are purged.
+        # Product master data, packaging, and reusable dictionaries.
         "products.brand",
+        "products.product",
+        "products.productbarcode",
         "products.productcategory",
+        "products.productexternalidentifier",
+        "products.productidentifierregistry",
+        "products.productpackage",
         "products.productuom",
         "products.temperaturezone",
         # Reusable billing and strategy definitions.
@@ -100,14 +105,9 @@ PURGED_MODEL_LABELS = frozenset(
         "sessions.session",
         "token_blacklist.blacklistedtoken",
         "token_blacklist.outstandingtoken",
-        # Product master and packaging.
-        "products.product",
-        "products.productbarcode",
-        "products.productexternalidentifier",
+        # Ephemeral product lookup and provider coordination state.
         "products.gs1lookupcache",
         "products.gs1providerratelimit",
-        "products.productidentifierregistry",
-        "products.productpackage",
         # Inbound.
         "inbound.inboundorder",
         "inbound.inboundorderline",

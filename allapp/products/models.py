@@ -762,6 +762,9 @@ class Product(BaseModel):
     price = models.DecimalField(
         "默认价格", max_digits=18, decimal_places=2, null=True, blank=True, default=None
     )  # 基本价格字段
+    purchase_price = models.DecimalField(
+        "进价", max_digits=18, decimal_places=2, null=True, blank=True, default=None
+    )
     min_price = models.DecimalField(
         "最低价格", max_digits=10, decimal_places=2, blank=True, null=True
     )
