@@ -11,6 +11,8 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from allapp.baseinfo.models import Owner
+from allapp.core.admin_base import AuditStampedAdminMixin
+from allapp.core.admin_mixins import HideAuditFieldsMixin, HideAuditInlineMixin
 from allapp.products.models import Product
 
 from .models import (
@@ -49,6 +51,29 @@ def _format_validation_error(exc):
     if messages_list:
         return "；".join(str(item) for item in messages_list)
     return str(exc)
+
+
+def _move_common_fields_to_end(fields):
+    """Keep operational switches after the model's business fields."""
+    ordered_fields = list(fields)
+    trailing_fields = ("is_active", "remark")
+    return [field for field in ordered_fields if field not in trailing_fields] + [
+        field for field in trailing_fields if field in ordered_fields
+    ]
+
+
+class SaleMiniAdmin(HideAuditFieldsMixin, AuditStampedAdminMixin, admin.ModelAdmin):
+    """商城后台统一隐藏基础审计字段，并自动记录操作人。"""
+
+    def get_fields(self, request, obj=None):
+        return _move_common_fields_to_end(super().get_fields(request, obj))
+
+
+class SaleMiniInline(HideAuditInlineMixin, admin.TabularInline):
+    """商城后台内嵌表格统一隐藏基础审计字段。"""
+
+    def get_fields(self, request, obj=None):
+        return _move_common_fields_to_end(super().get_fields(request, obj))
 
 
 class SaleProductOwnerBulkForm(forms.Form):
@@ -258,7 +283,7 @@ def _apply_owner_bulk_to_product(form, user, product, config):
 
 
 @admin.register(MiniProgramUser)
-class MiniProgramUserAdmin(admin.ModelAdmin):
+class MiniProgramUserAdmin(SaleMiniAdmin):
     list_display = ("id", "owner", "customer", "user", "nickname", "phone", "is_active")
     list_filter = ("owner", "is_active")
     search_fields = (
@@ -273,7 +298,7 @@ class MiniProgramUserAdmin(admin.ModelAdmin):
 
 
 @admin.register(MiniCustomerAddress)
-class MiniCustomerAddressAdmin(admin.ModelAdmin):
+class MiniCustomerAddressAdmin(SaleMiniAdmin):
     list_display = (
         "id",
         "owner",
@@ -288,9 +313,13 @@ class MiniCustomerAddressAdmin(admin.ModelAdmin):
     search_fields = ("contact", "phone", "detail", "customer__code", "customer__name")
     raw_id_fields = ("owner", "customer", "buyer_user")
 
+    @admin.display(description="完整地址")
+    def full_address(self, obj):
+        return obj.full_address
+
 
 @admin.register(SaleMiniBanner)
-class SaleMiniBannerAdmin(admin.ModelAdmin):
+class SaleMiniBannerAdmin(SaleMiniAdmin):
     list_display = ("id", "owner", "title", "sort_order", "is_active")
     list_filter = ("owner", "is_active")
     search_fields = ("title", "link_value")
@@ -298,7 +327,7 @@ class SaleMiniBannerAdmin(admin.ModelAdmin):
 
 
 @admin.register(SaleProductConfig)
-class SaleProductConfigAdmin(admin.ModelAdmin):
+class SaleProductConfigAdmin(SaleMiniAdmin):
     change_list_template = "admin/salesapp/saleproductconfig/change_list.html"
     actions = ("mark_listed", "mark_unlisted")
     fields = (
@@ -317,14 +346,6 @@ class SaleProductConfigAdmin(admin.ModelAdmin):
         "multiple_qty",
         "sort_order",
         "remark",
-    )
-    exclude = (
-        "is_deleted",
-        "deleted_at",
-        "deleted_by",
-        "created_by",
-        "updated_by",
-        "is_active",
     )
     list_display = (
         "id",
@@ -351,12 +372,6 @@ class SaleProductConfigAdmin(admin.ModelAdmin):
 
     class Media:
         js = ("admin/js/sale_product_config.js",)
-
-    def save_model(self, request, obj, form, change):
-        if not change and not obj.created_by_id:
-            obj.created_by = request.user
-        obj.updated_by = request.user
-        super().save_model(request, obj, form, change)
 
     def get_urls(self):
         custom_urls = [
@@ -443,15 +458,14 @@ class SaleProductConfigAdmin(admin.ModelAdmin):
         self.message_user(request, f"已下架 {updated} 个商品配置。", messages.SUCCESS)
 
 
-class SaleMiniCartItemInline(admin.TabularInline):
+class SaleMiniCartItemInline(SaleMiniInline):
     model = SaleMiniCartItem
     extra = 0
     raw_id_fields = ("product",)
-    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(SaleMiniCart)
-class SaleMiniCartAdmin(admin.ModelAdmin):
+class SaleMiniCartAdmin(SaleMiniAdmin):
     list_display = ("id", "owner", "customer", "buyer_user", "is_active", "updated_at")
     list_filter = ("owner", "is_active")
     search_fields = ("customer__code", "customer__name", "buyer_user__nickname")
@@ -460,14 +474,14 @@ class SaleMiniCartAdmin(admin.ModelAdmin):
 
 
 @admin.register(SaleMiniCartItem)
-class SaleMiniCartItemAdmin(admin.ModelAdmin):
+class SaleMiniCartItemAdmin(SaleMiniAdmin):
     list_display = ("id", "cart", "product", "order_uom", "qty", "updated_at")
     search_fields = ("product__code", "product__sku", "product__name")
     raw_id_fields = ("cart", "product")
 
 
 @admin.register(SaleMiniOrderMapping)
-class SaleMiniOrderMappingAdmin(admin.ModelAdmin):
+class SaleMiniOrderMappingAdmin(SaleMiniAdmin):
     list_display = (
         "id",
         "owner",
@@ -483,7 +497,7 @@ class SaleMiniOrderMappingAdmin(admin.ModelAdmin):
 
 
 @admin.register(SaleMiniPayment)
-class SaleMiniPaymentAdmin(admin.ModelAdmin):
+class SaleMiniPaymentAdmin(SaleMiniAdmin):
     list_display = (
         "id",
         "payment_no",
@@ -531,7 +545,7 @@ class SaleMiniPaymentAdmin(admin.ModelAdmin):
 
 
 @admin.register(SaleMiniRefund)
-class SaleMiniRefundAdmin(admin.ModelAdmin):
+class SaleMiniRefundAdmin(SaleMiniAdmin):
     list_display = (
         "id",
         "refund_no",
@@ -595,7 +609,7 @@ class SaleMiniRefundAdmin(admin.ModelAdmin):
 
 
 @admin.register(SaleMiniAfterSaleRequest)
-class SaleMiniAfterSaleRequestAdmin(admin.ModelAdmin):
+class SaleMiniAfterSaleRequestAdmin(SaleMiniAdmin):
     list_display = (
         "id",
         "request_no",
@@ -617,7 +631,7 @@ class SaleMiniAfterSaleRequestAdmin(admin.ModelAdmin):
     raw_id_fields = ("owner", "customer", "buyer_user", "mapping")
 
 
-class SaleMiniProductReviewImageInline(admin.TabularInline):
+class SaleMiniProductReviewImageInline(SaleMiniInline):
     model = SaleMiniProductReviewImage
     extra = 0
     can_delete = False
@@ -636,7 +650,7 @@ class SaleMiniProductReviewImageInline(admin.TabularInline):
 
 
 @admin.register(SaleMiniProductReview)
-class SaleMiniProductReviewAdmin(admin.ModelAdmin):
+class SaleMiniProductReviewAdmin(SaleMiniAdmin):
     list_display = (
         "id",
         "product",
@@ -684,8 +698,6 @@ class SaleMiniProductReviewAdmin(admin.ModelAdmin):
         "reviewed_at",
         "reviewed_by",
         "published_at",
-        "created_at",
-        "updated_at",
     )
     fields = (
         "owner",
@@ -706,8 +718,6 @@ class SaleMiniProductReviewAdmin(admin.ModelAdmin):
         "reviewed_at",
         "reviewed_by",
         "published_at",
-        "created_at",
-        "updated_at",
     )
     inlines = [SaleMiniProductReviewImageInline]
     actions = ("publish_reviews", "reject_reviews", "hide_reviews")
@@ -770,7 +780,7 @@ class SaleMiniProductReviewAdmin(admin.ModelAdmin):
 
 
 @admin.register(SaleMiniPaymentEvent)
-class SaleMiniPaymentEventAdmin(admin.ModelAdmin):
+class SaleMiniPaymentEventAdmin(SaleMiniAdmin):
     list_display = (
         "id",
         "event_id",
@@ -787,7 +797,7 @@ class SaleMiniPaymentEventAdmin(admin.ModelAdmin):
 
 
 @admin.register(SaleMiniCouponTemplate)
-class SaleMiniCouponTemplateAdmin(admin.ModelAdmin):
+class SaleMiniCouponTemplateAdmin(SaleMiniAdmin):
     list_display = (
         "id",
         "owner",
@@ -805,7 +815,7 @@ class SaleMiniCouponTemplateAdmin(admin.ModelAdmin):
 
 
 @admin.register(SaleMiniCoupon)
-class SaleMiniCouponAdmin(admin.ModelAdmin):
+class SaleMiniCouponAdmin(SaleMiniAdmin):
     list_display = (
         "id",
         "coupon_no",
@@ -829,7 +839,7 @@ class SaleMiniCouponAdmin(admin.ModelAdmin):
 
 
 @admin.register(SaleMiniOrderAdjustment)
-class SaleMiniOrderAdjustmentAdmin(admin.ModelAdmin):
+class SaleMiniOrderAdjustmentAdmin(SaleMiniAdmin):
     list_display = (
         "id",
         "adjustment_no",
@@ -851,7 +861,7 @@ class SaleMiniOrderAdjustmentAdmin(admin.ModelAdmin):
 
 
 @admin.register(SaleMiniPointLedger)
-class SaleMiniPointLedgerAdmin(admin.ModelAdmin):
+class SaleMiniPointLedgerAdmin(SaleMiniAdmin):
     list_display = (
         "id",
         "tx_no",
@@ -870,7 +880,7 @@ class SaleMiniPointLedgerAdmin(admin.ModelAdmin):
 
 
 @admin.register(SaleMiniDistributionRecord)
-class SaleMiniDistributionRecordAdmin(admin.ModelAdmin):
+class SaleMiniDistributionRecordAdmin(SaleMiniAdmin):
     list_display = (
         "id",
         "owner",

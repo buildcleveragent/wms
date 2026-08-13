@@ -749,24 +749,27 @@ class ProductExcelImportApiTests(TestCase):
             ["填写说明", "商品导入", "商品包装", "基础资料", "_meta"],
         )
         self.assertEqual(workbook["_meta"].sheet_state, "hidden")
-        self.assertEqual(workbook["_meta"]["B2"].value, "6")
+        self.assertEqual(workbook["_meta"]["B2"].value, "8")
         headers = [cell.value for cell in workbook[IMPORT_SHEET_NAME][1]]
         self.assertEqual(tuple(headers), PRODUCT_HEADERS)
         self.assertTrue({"包装单位编码", "包装换算数量", "包装条码"}.issubset(headers))
         package_headers = [cell.value for cell in workbook[PACKAGE_SHEET_NAME][1]]
         self.assertEqual(tuple(package_headers), PACKAGE_HEADERS)
         self.assertEqual(
-            tuple(headers[:9]),
+            tuple(headers[:12]),
             (
                 "货主编码",
                 "货主商品编码",
+                "默认价格",
+                "进价",
                 "标准贸易条码",
                 "商品名称",
-                "分类",
+                "规格",
                 "基本单位",
+                "基本单位数量",
+                "分类",
                 "基本单位类型",
                 "单位小数位数",
-                "基本单位数量",
             ),
         )
         self.assertEqual(
@@ -783,6 +786,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertIn("标准贸易条码", instructions["货主商品编码规则"])
         self.assertIn("仓库SKU编码", instructions["货主商品编码规则"])
         self.assertIn("系统按", instructions["仓库SKU编码规则"])
+        self.assertIn("默认价格和进价均可留空", instructions["价格规则"])
         self.assertIn("批次、序列号和保质期管理默认否", instructions["布尔值"])
         self.assertIn("整批不写入", instructions["重复规则"])
         owner_codes = {
@@ -821,8 +825,101 @@ class ProductExcelImportApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400, response.data)
-        self.assertIn("缺少 v6 必要表头", response.data["detail"])
-        self.assertIn("货主商品编码", response.data["detail"])
+        self.assertIn("v8 模板不一致", response.data["detail"])
+
+    def test_old_and_reordered_headers_are_rejected_with_v8_guidance(self):
+        v6_headers = (
+            "货主编码",
+            "货主商品编码",
+            "标准贸易条码",
+            "商品名称",
+            "分类",
+            "基本单位",
+            "基本单位类型",
+            "单位小数位数",
+            "基本单位数量",
+            "规格",
+            "品牌编码",
+            "零码",
+            "箱码",
+            "箱码对应包装单位编码",
+            "外部系统商品编码",
+            "默认价格",
+            "最低价格",
+            "最高折扣%",
+            "重量kg",
+            "体积m³",
+            "净含量g",
+            "厂家",
+            "材质",
+            "描述",
+            "最低库存",
+            "最高库存",
+            "序列号管理",
+            "批次管理",
+            "启用",
+            "保质期管理",
+            "效期基准",
+            "保质期天数",
+            "入库有效天数",
+            "效期预警天数",
+            "FEFO",
+            "包装单位编码",
+            "包装换算数量",
+            "包装条码",
+            "采购默认",
+            "销售默认",
+        )
+        reordered_headers = list(HEADERS)
+        reordered_headers[2], reordered_headers[3] = (
+            reordered_headers[3],
+            reordered_headers[2],
+        )
+        v7_headers = list(HEADERS)
+        quantity_header = v7_headers.pop(8)
+        v7_headers.insert(11, quantity_header)
+        without_default_price = tuple(
+            header for header in HEADERS if header != "默认价格"
+        )
+        without_purchase_price = tuple(header for header in HEADERS if header != "进价")
+
+        v6_response = self._post_rows(
+            [self._valid_row("PDA-V6-HEADER")], headers=v6_headers
+        )
+        v7_response = self._post_rows(
+            [self._valid_row("PDA-V7-HEADER")], headers=tuple(v7_headers)
+        )
+        reordered_response = self._post_rows(
+            [self._valid_row("PDA-REORDERED-HEADER")],
+            headers=tuple(reordered_headers),
+        )
+        missing_default_response = self._post_rows(
+            [self._valid_row("PDA-MISSING-DEFAULT-PRICE")],
+            headers=without_default_price,
+        )
+        missing_purchase_response = self._post_rows(
+            [self._valid_row("PDA-MISSING-PURCHASE-PRICE")],
+            headers=without_purchase_price,
+        )
+
+        self.assertEqual(v6_response.status_code, 400, v6_response.data)
+        self.assertIn("v8 模板不一致", v6_response.data["detail"])
+        self.assertEqual(v7_response.status_code, 400, v7_response.data)
+        self.assertIn("v8 模板不一致", v7_response.data["detail"])
+        self.assertEqual(
+            reordered_response.status_code, 400, reordered_response.data
+        )
+        self.assertIn("v8 模板不一致", reordered_response.data["detail"])
+        self.assertEqual(
+            missing_default_response.status_code, 400, missing_default_response.data
+        )
+        self.assertIn("v8 模板不一致", missing_default_response.data["detail"])
+        self.assertEqual(
+            missing_purchase_response.status_code,
+            400,
+            missing_purchase_response.data,
+        )
+        self.assertIn("v8 模板不一致", missing_purchase_response.data["detail"])
 
     def test_category_and_base_uom_names_resolve_or_create_with_pinyin_codes(self):
         ProductCategory.objects.create(code="YINLIAOXINPIN", name="占用分类代码")
@@ -1051,6 +1148,7 @@ class ProductExcelImportApiTests(TestCase):
                     code=" pda-xlsx-happy ",
                     **{
                         "默认价格": "12.50",
+                        "进价": "8.25",
                         "最低库存": 2,
                         "最高库存": 20,
                         "序列号管理": "否",
@@ -1068,6 +1166,8 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(response.data["created_count"], 1)
         product = Product.objects.get(owner=self.owner, code="PDA-XLSX-HAPPY")
         self.assertEqual(product.sku, "PXIA1")
+        self.assertEqual(product.price, Decimal("12.50"))
+        self.assertEqual(product.purchase_price, Decimal("8.25"))
         self.assertEqual(product.created_by_id, self.user.id)
         self.assertFalse(product.expiry_control)
         self.assertFalse(product.serial_control)
@@ -1084,6 +1184,28 @@ class ProductExcelImportApiTests(TestCase):
                 object_type="",
             ).exists()
         )
+
+    def test_blank_prices_remain_null_and_do_not_backfill_each_other(self):
+        response = self._post_rows([self._valid_row("PDA-BLANK-PRICES")])
+
+        self.assertEqual(response.status_code, 200, response.data)
+        product = Product.objects.get(owner=self.owner, code="PDA-BLANK-PRICES")
+        self.assertIsNone(product.price)
+        self.assertIsNone(product.purchase_price)
+
+    def test_invalid_default_and_purchase_prices_reject_the_whole_batch(self):
+        response = self._post_rows(
+            [
+                self._valid_row("PDA-BAD-DEFAULT-PRICE", **{"默认价格": "-1"}),
+                self._valid_row("PDA-BAD-PURCHASE-PRICE", **{"进价": "invalid"}),
+                self._valid_row("PDA-BAD-PRICE-SCALE", **{"进价": "1.234"}),
+            ]
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        fields = {error["field"] for error in response.data["errors"]}
+        self.assertTrue({"默认价格", "进价"}.issubset(fields), response.data)
+        self.assertFalse(Product.objects.filter(code__startswith="PDA-BAD-").exists())
 
     def test_product_code_prefers_supplied_code_over_gtin(self):
         response = self._post_rows(
@@ -1827,7 +1949,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(no_rows_response.status_code, 400)
         self.assertIn("没有数据行", no_rows_response.data["detail"])
         self.assertEqual(missing_header_response.status_code, 400)
-        self.assertIn("缺少 v6 必要表头", missing_header_response.data["detail"])
+        self.assertIn("v8 模板不一致", missing_header_response.data["detail"])
         self.assertEqual(duplicate_header_response.status_code, 400)
         self.assertIn("表头重复", duplicate_header_response.data["detail"])
 
@@ -1890,7 +2012,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(missing.status_code, 400)
         self.assertEqual(forbidden.status_code, 403)
 
-    def test_export_v6_round_trip_preserves_multiple_packages(self):
+    def test_export_v8_round_trip_preserves_prices_and_multiple_packages(self):
         product = Product.objects.create(
             owner=self.owner,
             code="PDA-EXPORT-001",
@@ -1903,6 +2025,8 @@ class ProductExcelImportApiTests(TestCase):
             expiry_control=False,
             expiry_basis=None,
             is_active=False,
+            price=Decimal("19.90"),
+            purchase_price=Decimal("11.25"),
         )
         ProductPackage.objects.create(
             product=product,
@@ -1932,8 +2056,24 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(exported.status_code, 200)
         self.assertIn("filename*=UTF-8", exported["Content-Disposition"])
         workbook = load_workbook(io.BytesIO(exported.content), data_only=False)
-        self.assertEqual(workbook["_meta"]["B2"].value, "6")
+        self.assertEqual(workbook["_meta"]["B2"].value, "8")
         self.assertEqual(workbook[IMPORT_SHEET_NAME]["A2"].value, self.owner.code)
+        price_column = PRODUCT_HEADERS.index("默认价格") + 1
+        purchase_price_column = PRODUCT_HEADERS.index("进价") + 1
+        self.assertEqual(
+            Decimal(str(workbook[IMPORT_SHEET_NAME].cell(2, price_column).value)),
+            Decimal("19.90"),
+        )
+        self.assertEqual(
+            Decimal(
+                str(
+                    workbook[IMPORT_SHEET_NAME]
+                    .cell(2, purchase_price_column)
+                    .value
+                )
+            ),
+            Decimal("11.25"),
+        )
         name_column = PRODUCT_HEADERS.index("商品名称") + 1
         self.assertEqual(
             workbook[IMPORT_SHEET_NAME].cell(2, name_column).data_type, "s"
@@ -1975,6 +2115,8 @@ class ProductExcelImportApiTests(TestCase):
         recreated = Product.objects.get(owner=self.other_owner, code="PDA-EXPORT-001")
         self.assertFalse(recreated.is_active)
         self.assertEqual(recreated.name, "=档案商品 001")
+        self.assertEqual(recreated.price, Decimal("19.90"))
+        self.assertEqual(recreated.purchase_price, Decimal("11.25"))
         packages = list(recreated.packages.order_by("sort_order"))
         self.assertEqual(len(packages), 2)
         self.assertEqual(packages[1].qty_in_base, 12)

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 const root = path.resolve(import.meta.dirname, '../..')
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8')
 
-describe('product import v6 contracts', () => {
+describe('product import contracts', () => {
   it('exposes receipt capability and warehouse options', () => {
     const auth = read('store/auth.js')
     const request = read('utils/request.js')
@@ -21,5 +21,13 @@ describe('product import v6 contracts', () => {
     expect(page).toContain('不选择（仅建档）')
     expect(page).toContain('selectedWarehouse.value?.id || null')
     expect(page).toContain('result.receipts?.length')
+  })
+
+  it('scrolls the completed import report into view', () => {
+    const page = read('pages/products/import.vue')
+
+    expect(page).toContain('id="product-import-result"')
+    expect(page).toContain("selector: '#product-import-result'")
+    expect(page).toContain('await scrollToResult()')
   })
 })

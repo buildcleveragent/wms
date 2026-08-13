@@ -97,23 +97,30 @@ class CustomerChannel(BaseModel):
 # —— 小程序商城：买家、地址、上架配置 ——
 class MiniProgramUser(BaseModel):
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="mini_program_users"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="mini_program_users",
     )
     user = models.ForeignKey(
         User,
+        verbose_name="关联账号",
         on_delete=models.PROTECT,
         related_name="mini_program_profiles",
         null=True,
         blank=True,
     )
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="mini_program_users"
+        Customer,
+        verbose_name="客户",
+        on_delete=models.PROTECT,
+        related_name="mini_program_users",
     )
-    openid = models.CharField(max_length=128, blank=True, default="")
-    unionid = models.CharField(max_length=128, blank=True, default="")
-    nickname = models.CharField(max_length=80, blank=True, default="")
-    avatar_url = models.CharField(max_length=500, blank=True, default="")
-    phone = models.CharField(max_length=32, blank=True, default="")
+    openid = models.CharField("微信 OpenID", max_length=128, blank=True, default="")
+    unionid = models.CharField("微信 UnionID", max_length=128, blank=True, default="")
+    nickname = models.CharField("昵称", max_length=80, blank=True, default="")
+    avatar_url = models.CharField("头像地址", max_length=500, blank=True, default="")
+    phone = models.CharField("手机号", max_length=32, blank=True, default="")
 
     class Meta:
         verbose_name = "小程序用户"
@@ -138,25 +145,32 @@ class MiniProgramUser(BaseModel):
 
 class MiniCustomerAddress(BaseModel):
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="mini_customer_addresses"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="mini_customer_addresses",
     )
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="mini_addresses"
+        Customer,
+        verbose_name="客户",
+        on_delete=models.PROTECT,
+        related_name="mini_addresses",
     )
     buyer_user = models.ForeignKey(
         MiniProgramUser,
+        verbose_name="小程序用户",
         on_delete=models.PROTECT,
         related_name="addresses",
         null=True,
         blank=True,
     )
-    contact = models.CharField(max_length=80)
-    phone = models.CharField(max_length=40)
-    province = models.CharField(max_length=30, blank=True, default="")
-    city = models.CharField(max_length=30, blank=True, default="")
-    district = models.CharField(max_length=30, blank=True, default="")
-    detail = models.CharField(max_length=200)
-    is_default = models.BooleanField(default=False)
+    contact = models.CharField("联系人", max_length=80)
+    phone = models.CharField("联系电话", max_length=40)
+    province = models.CharField("省份", max_length=30, blank=True, default="")
+    city = models.CharField("城市", max_length=30, blank=True, default="")
+    district = models.CharField("区县", max_length=30, blank=True, default="")
+    detail = models.CharField("详细地址", max_length=200)
+    is_default = models.BooleanField("默认地址", default=False)
 
     class Meta:
         verbose_name = "小程序收货地址"
@@ -176,13 +190,16 @@ class MiniCustomerAddress(BaseModel):
 
 class SaleMiniBanner(BaseModel):
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_mini_banners"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_banners",
     )
-    title = models.CharField(max_length=120)
-    image_url = models.CharField(max_length=500)
-    link_type = models.CharField(max_length=30, blank=True, default="")
-    link_value = models.CharField(max_length=120, blank=True, default="")
-    sort_order = models.PositiveIntegerField(default=0)
+    title = models.CharField("标题", max_length=120)
+    image_url = models.CharField("图片地址", max_length=500)
+    link_type = models.CharField("链接类型", max_length=30, blank=True, default="")
+    link_value = models.CharField("链接内容", max_length=120, blank=True, default="")
+    sort_order = models.PositiveIntegerField("排序", default=0)
 
     class Meta:
         verbose_name = "商城轮播图"
@@ -283,13 +300,20 @@ class SaleProductConfig(BaseModel):
 
 class SaleMiniCart(BaseModel):
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_mini_carts"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_carts",
     )
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="sale_mini_carts"
+        Customer,
+        verbose_name="客户",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_carts",
     )
     buyer_user = models.ForeignKey(
         MiniProgramUser,
+        verbose_name="小程序用户",
         on_delete=models.PROTECT,
         related_name="carts",
         null=True,
@@ -316,13 +340,19 @@ class SaleMiniCart(BaseModel):
 
 class SaleMiniCartItem(BaseModel):
     cart = models.ForeignKey(
-        SaleMiniCart, on_delete=models.CASCADE, related_name="items"
+        SaleMiniCart,
+        verbose_name="购物车",
+        on_delete=models.CASCADE,
+        related_name="items",
     )
     product = models.ForeignKey(
-        Product, on_delete=models.PROTECT, related_name="sale_mini_cart_items"
+        Product,
+        verbose_name="商品",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_cart_items",
     )
-    order_uom = models.CharField(max_length=32)
-    qty = models.DecimalField(max_digits=12, decimal_places=3)
+    order_uom = models.CharField("购买单位", max_length=32)
+    qty = models.DecimalField("数量", max_digits=12, decimal_places=3)
 
     class Meta:
         verbose_name = "商城购物车商品"
@@ -357,13 +387,20 @@ class SaleMiniOrderMapping(BaseModel):
         CANCELLED = "CANCELLED", "已取消"
 
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_mini_order_mappings"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_order_mappings",
     )
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="sale_mini_order_mappings"
+        Customer,
+        verbose_name="客户",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_order_mappings",
     )
     buyer_user = models.ForeignKey(
         MiniProgramUser,
+        verbose_name="小程序用户",
         on_delete=models.PROTECT,
         related_name="order_mappings",
         null=True,
@@ -371,25 +408,32 @@ class SaleMiniOrderMapping(BaseModel):
     )
     outbound_order = models.OneToOneField(
         "outbound.OutboundOrder",
+        verbose_name="出库订单",
         on_delete=models.PROTECT,
         related_name="sale_mini_mapping",
     )
     payment_status = models.CharField(
+        "支付状态",
         max_length=20,
         choices=PaymentStatus.choices,
         default=PaymentStatus.OFFLINE,
     )
-    source = models.CharField(max_length=30, default="sale-mini")
-    goods_amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    source = models.CharField("订单来源", max_length=30, default="sale-mini")
+    goods_amount = models.DecimalField(
+        "商品金额", max_digits=18, decimal_places=2, default=0
+    )
     adjustment_amount = models.DecimalField(
+        "调整金额",
         max_digits=18,
         decimal_places=2,
         default=0,
         help_text="订单级调整金额，负数表示优惠，正数表示加价。",
     )
-    payable_amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
-    pay_deadline_at = models.DateTimeField(null=True, blank=True)
-    paid_at = models.DateTimeField(null=True, blank=True)
+    payable_amount = models.DecimalField(
+        "应付金额", max_digits=18, decimal_places=2, default=0
+    )
+    pay_deadline_at = models.DateTimeField("支付截止时间", null=True, blank=True)
+    paid_at = models.DateTimeField("支付时间", null=True, blank=True)
 
     class Meta:
         verbose_name = "商城订单映射"
@@ -416,22 +460,32 @@ class SaleMiniCouponTemplate(BaseModel):
         AMOUNT = "AMOUNT", "金额券"
 
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_mini_coupon_templates"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_coupon_templates",
     )
-    code = models.CharField(max_length=64)
-    title = models.CharField(max_length=120)
+    code = models.CharField("模板编码", max_length=64)
+    title = models.CharField("模板名称", max_length=120)
     coupon_type = models.CharField(
-        max_length=20, choices=CouponType.choices, default=CouponType.AMOUNT
+        "优惠券类型",
+        max_length=20,
+        choices=CouponType.choices,
+        default=CouponType.AMOUNT,
     )
-    threshold_amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
-    discount_amount = models.DecimalField(max_digits=18, decimal_places=2)
-    effective_from = models.DateField()
-    effective_to = models.DateField(null=True, blank=True)
-    total_limit = models.PositiveIntegerField(default=0, help_text="0 表示不限量")
+    threshold_amount = models.DecimalField(
+        "使用门槛", max_digits=18, decimal_places=2, default=0
+    )
+    discount_amount = models.DecimalField("优惠金额", max_digits=18, decimal_places=2)
+    effective_from = models.DateField("生效日期")
+    effective_to = models.DateField("失效日期", null=True, blank=True)
+    total_limit = models.PositiveIntegerField(
+        "发放总量", default=0, help_text="0 表示不限量"
+    )
     per_customer_limit = models.PositiveIntegerField(
-        default=0, help_text="0 表示不限量"
+        "每客户限领数量", default=0, help_text="0 表示不限量"
     )
-    is_stackable = models.BooleanField(default=True)
+    is_stackable = models.BooleanField("允许叠加使用", default=True)
 
     class Meta:
         verbose_name = "商城优惠券模板"
@@ -468,27 +522,38 @@ class SaleMiniCoupon(BaseModel):
         VOID = "VOID", "已作废"
 
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_mini_coupons"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_coupons",
     )
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="sale_mini_coupons"
+        Customer,
+        verbose_name="客户",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_coupons",
     )
     buyer_user = models.ForeignKey(
         MiniProgramUser,
+        verbose_name="小程序用户",
         on_delete=models.PROTECT,
         related_name="coupons",
         null=True,
         blank=True,
     )
     template = models.ForeignKey(
-        SaleMiniCouponTemplate, on_delete=models.PROTECT, related_name="coupons"
+        SaleMiniCouponTemplate,
+        verbose_name="优惠券模板",
+        on_delete=models.PROTECT,
+        related_name="coupons",
     )
-    coupon_no = models.CharField(max_length=64, unique=True)
+    coupon_no = models.CharField("优惠券编号", max_length=64, unique=True)
     status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.AVAILABLE
+        "状态", max_length=20, choices=Status.choices, default=Status.AVAILABLE
     )
     locked_mapping = models.ForeignKey(
         SaleMiniOrderMapping,
+        verbose_name="锁定订单",
         on_delete=models.PROTECT,
         related_name="locked_coupons",
         null=True,
@@ -496,14 +561,15 @@ class SaleMiniCoupon(BaseModel):
     )
     used_mapping = models.ForeignKey(
         SaleMiniOrderMapping,
+        verbose_name="使用订单",
         on_delete=models.PROTECT,
         related_name="used_coupons",
         null=True,
         blank=True,
     )
-    locked_at = models.DateTimeField(null=True, blank=True)
-    used_at = models.DateTimeField(null=True, blank=True)
-    expires_at = models.DateTimeField(null=True, blank=True)
+    locked_at = models.DateTimeField("锁定时间", null=True, blank=True)
+    used_at = models.DateTimeField("使用时间", null=True, blank=True)
+    expires_at = models.DateTimeField("过期时间", null=True, blank=True)
 
     class Meta:
         verbose_name = "商城优惠券"
@@ -534,13 +600,20 @@ class SaleMiniOrderAdjustment(BaseModel):
         REVERSED = "REVERSED", "已冲销"
 
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_mini_adjustments"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_adjustments",
     )
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="sale_mini_adjustments"
+        Customer,
+        verbose_name="客户",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_adjustments",
     )
     buyer_user = models.ForeignKey(
         MiniProgramUser,
+        verbose_name="小程序用户",
         on_delete=models.PROTECT,
         related_name="adjustments",
         null=True,
@@ -548,28 +621,32 @@ class SaleMiniOrderAdjustment(BaseModel):
     )
     mapping = models.ForeignKey(
         SaleMiniOrderMapping,
+        verbose_name="商城订单",
         on_delete=models.PROTECT,
         related_name="adjustments",
         null=True,
         blank=True,
     )
-    adjustment_no = models.CharField(max_length=64, unique=True)
-    adjustment_type = models.CharField(max_length=20, choices=AdjustmentType.choices)
-    status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.PREVIEW
+    adjustment_no = models.CharField("调整单号", max_length=64, unique=True)
+    adjustment_type = models.CharField(
+        "调整类型", max_length=20, choices=AdjustmentType.choices
     )
-    title = models.CharField(max_length=120)
+    status = models.CharField(
+        "状态", max_length=20, choices=Status.choices, default=Status.PREVIEW
+    )
+    title = models.CharField("调整说明", max_length=120)
     amount = models.DecimalField(
+        "调整金额",
         max_digits=18,
         decimal_places=2,
         help_text="有符号调整金额，负数表示减少应付。",
     )
-    source_model = models.CharField(max_length=80, blank=True, default="")
-    source_id = models.CharField(max_length=80, blank=True, default="")
-    source_code = models.CharField(max_length=120, blank=True, default="")
-    locked_at = models.DateTimeField(null=True, blank=True)
-    confirmed_at = models.DateTimeField(null=True, blank=True)
-    released_at = models.DateTimeField(null=True, blank=True)
+    source_model = models.CharField("来源模型", max_length=80, blank=True, default="")
+    source_id = models.CharField("来源记录 ID", max_length=80, blank=True, default="")
+    source_code = models.CharField("来源编号", max_length=120, blank=True, default="")
+    locked_at = models.DateTimeField("锁定时间", null=True, blank=True)
+    confirmed_at = models.DateTimeField("确认时间", null=True, blank=True)
+    released_at = models.DateTimeField("释放时间", null=True, blank=True)
 
     class Meta:
         verbose_name = "商城订单调整"
@@ -594,13 +671,20 @@ class SaleMiniPointLedger(BaseModel):
         ADJUST = "ADJUST", "调整"
 
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_mini_point_ledgers"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_point_ledgers",
     )
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="sale_mini_point_ledgers"
+        Customer,
+        verbose_name="客户",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_point_ledgers",
     )
     buyer_user = models.ForeignKey(
         MiniProgramUser,
+        verbose_name="小程序用户",
         on_delete=models.PROTECT,
         related_name="point_ledgers",
         null=True,
@@ -608,17 +692,18 @@ class SaleMiniPointLedger(BaseModel):
     )
     mapping = models.ForeignKey(
         SaleMiniOrderMapping,
+        verbose_name="商城订单",
         on_delete=models.PROTECT,
         related_name="point_ledgers",
         null=True,
         blank=True,
     )
-    tx_no = models.CharField(max_length=64, unique=True)
-    tx_type = models.CharField(max_length=20, choices=TxType.choices)
-    points_delta = models.IntegerField(default=0)
-    frozen_delta = models.IntegerField(default=0)
-    amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
-    note = models.CharField(max_length=200, blank=True, default="")
+    tx_no = models.CharField("流水号", max_length=64, unique=True)
+    tx_type = models.CharField("流水类型", max_length=20, choices=TxType.choices)
+    points_delta = models.IntegerField("积分变动", default=0)
+    frozen_delta = models.IntegerField("冻结积分变动", default=0)
+    amount = models.DecimalField("关联金额", max_digits=18, decimal_places=2, default=0)
+    note = models.CharField("说明", max_length=200, blank=True, default="")
 
     class Meta:
         verbose_name = "商城积分流水"
@@ -640,15 +725,20 @@ class SaleMiniDistributionRecord(BaseModel):
         REVERSED = "REVERSED", "已冲销"
 
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_mini_distribution_records"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_distribution_records",
     )
     customer = models.ForeignKey(
         Customer,
+        verbose_name="客户",
         on_delete=models.PROTECT,
         related_name="sale_mini_distribution_records",
     )
     buyer_user = models.ForeignKey(
         MiniProgramUser,
+        verbose_name="小程序用户",
         on_delete=models.PROTECT,
         related_name="distribution_orders",
         null=True,
@@ -656,23 +746,31 @@ class SaleMiniDistributionRecord(BaseModel):
     )
     referrer = models.ForeignKey(
         MiniProgramUser,
+        verbose_name="推荐人",
         on_delete=models.PROTECT,
         related_name="distribution_referrals",
     )
     mapping = models.OneToOneField(
         SaleMiniOrderMapping,
+        verbose_name="商城订单",
         on_delete=models.PROTECT,
         related_name="distribution_record",
     )
     status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.PENDING
+        "状态", max_length=20, choices=Status.choices, default=Status.PENDING
     )
-    commission_rate = models.DecimalField(max_digits=7, decimal_places=4, default=0)
-    base_amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
-    commission_amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
-    confirmed_at = models.DateTimeField(null=True, blank=True)
-    settled_at = models.DateTimeField(null=True, blank=True)
-    reversed_at = models.DateTimeField(null=True, blank=True)
+    commission_rate = models.DecimalField(
+        "佣金比例", max_digits=7, decimal_places=4, default=0
+    )
+    base_amount = models.DecimalField(
+        "计佣金额", max_digits=18, decimal_places=2, default=0
+    )
+    commission_amount = models.DecimalField(
+        "佣金金额", max_digits=18, decimal_places=2, default=0
+    )
+    confirmed_at = models.DateTimeField("确认时间", null=True, blank=True)
+    settled_at = models.DateTimeField("结算时间", null=True, blank=True)
+    reversed_at = models.DateTimeField("冲销时间", null=True, blank=True)
 
     class Meta:
         verbose_name = "商城分销记录"
@@ -701,53 +799,70 @@ class SaleMiniPayment(BaseModel):
         FAILED = "FAILED", "失败"
 
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_mini_payments"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_payments",
     )
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="sale_mini_payments"
+        Customer,
+        verbose_name="客户",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_payments",
     )
     buyer_user = models.ForeignKey(
         MiniProgramUser,
+        verbose_name="小程序用户",
         on_delete=models.PROTECT,
         related_name="payments",
         null=True,
         blank=True,
     )
     mapping = models.ForeignKey(
-        SaleMiniOrderMapping, on_delete=models.PROTECT, related_name="payments"
+        SaleMiniOrderMapping,
+        verbose_name="商城订单",
+        on_delete=models.PROTECT,
+        related_name="payments",
     )
-    payment_no = models.CharField(max_length=64, unique=True)
-    out_trade_no = models.CharField(max_length=64, unique=True)
+    payment_no = models.CharField("支付流水号", max_length=64, unique=True)
+    out_trade_no = models.CharField("商户支付单号", max_length=64, unique=True)
     channel = models.CharField(
-        max_length=20, choices=Channel.choices, default=Channel.WECHAT_JSAPI
+        "支付渠道", max_length=20, choices=Channel.choices, default=Channel.WECHAT_JSAPI
     )
     status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.CREATED
+        "支付状态", max_length=20, choices=Status.choices, default=Status.CREATED
     )
-    amount = models.DecimalField(max_digits=18, decimal_places=2)
-    amount_cents = models.PositiveIntegerField()
-    currency = models.CharField(max_length=8, default="CNY")
-    prepay_id = models.CharField(max_length=128, blank=True, default="")
+    amount = models.DecimalField("支付金额", max_digits=18, decimal_places=2)
+    amount_cents = models.PositiveIntegerField("支付金额（分）")
+    currency = models.CharField("币种", max_length=8, default="CNY")
+    prepay_id = models.CharField(
+        "微信预支付 ID", max_length=128, blank=True, default=""
+    )
     transaction_id = models.CharField(
+        "微信支付单号",
         max_length=128,
         blank=True,
         null=True,
         unique=True,
         default=None,
     )
-    trade_state = models.CharField(max_length=40, blank=True, default="")
-    trade_state_desc = models.CharField(max_length=200, blank=True, default="")
-    request_payload = models.JSONField(default=dict, blank=True)
-    client_pay_params = models.JSONField(default=dict, blank=True)
-    prepay_response = models.JSONField(default=dict, blank=True)
-    callback_payload = models.JSONField(default=dict, blank=True)
-    expires_at = models.DateTimeField(null=True, blank=True)
-    paid_at = models.DateTimeField(null=True, blank=True)
-    closed_at = models.DateTimeField(null=True, blank=True)
-    retry_count = models.PositiveSmallIntegerField(default=0)
-    next_reconcile_at = models.DateTimeField(null=True, blank=True)
-    last_error = models.CharField(max_length=300, blank=True, default="")
-    requires_manual_action = models.BooleanField(default=False)
+    trade_state = models.CharField(
+        "微信交易状态", max_length=40, blank=True, default=""
+    )
+    trade_state_desc = models.CharField(
+        "微信交易状态说明", max_length=200, blank=True, default=""
+    )
+    request_payload = models.JSONField("预支付请求报文", default=dict, blank=True)
+    client_pay_params = models.JSONField("小程序支付参数", default=dict, blank=True)
+    prepay_response = models.JSONField("预支付响应报文", default=dict, blank=True)
+    callback_payload = models.JSONField("支付回调报文", default=dict, blank=True)
+    expires_at = models.DateTimeField("支付过期时间", null=True, blank=True)
+    paid_at = models.DateTimeField("支付时间", null=True, blank=True)
+    closed_at = models.DateTimeField("关闭时间", null=True, blank=True)
+    retry_count = models.PositiveSmallIntegerField("重试次数", default=0)
+    next_reconcile_at = models.DateTimeField("下次对账时间", null=True, blank=True)
+    last_error = models.CharField("最后错误", max_length=300, blank=True, default="")
+    requires_manual_action = models.BooleanField("需要人工处理", default=False)
 
     class Meta:
         verbose_name = "商城支付单"
@@ -785,52 +900,64 @@ class SaleMiniRefund(BaseModel):
         FAILED = "FAILED", "失败"
 
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_mini_refunds"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_refunds",
     )
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="sale_mini_refunds"
+        Customer,
+        verbose_name="客户",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_refunds",
     )
     buyer_user = models.ForeignKey(
         MiniProgramUser,
+        verbose_name="小程序用户",
         on_delete=models.PROTECT,
         related_name="refunds",
         null=True,
         blank=True,
     )
     payment = models.ForeignKey(
-        SaleMiniPayment, on_delete=models.PROTECT, related_name="refunds"
+        SaleMiniPayment,
+        verbose_name="支付单",
+        on_delete=models.PROTECT,
+        related_name="refunds",
     )
     source = models.CharField(
+        "退款来源",
         max_length=24,
         choices=Source.choices,
         default=Source.USER_REQUEST,
     )
     idempotency_key = models.CharField(
+        "幂等键",
         max_length=128,
         unique=True,
         null=True,
         blank=True,
     )
-    refund_no = models.CharField(max_length=64, unique=True)
-    out_refund_no = models.CharField(max_length=64, unique=True)
-    refund_id = models.CharField(max_length=128, blank=True, default="")
+    refund_no = models.CharField("退款流水号", max_length=64, unique=True)
+    out_refund_no = models.CharField("商户退款单号", max_length=64, unique=True)
+    refund_id = models.CharField("微信退款单号", max_length=128, blank=True, default="")
     status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.CREATED
+        "退款状态", max_length=20, choices=Status.choices, default=Status.CREATED
     )
-    amount = models.DecimalField(max_digits=18, decimal_places=2)
-    amount_cents = models.PositiveIntegerField()
-    total_amount_cents = models.PositiveIntegerField()
-    currency = models.CharField(max_length=8, default="CNY")
-    reason = models.CharField(max_length=120, blank=True, default="")
-    request_payload = models.JSONField(default=dict, blank=True)
-    response_payload = models.JSONField(default=dict, blank=True)
-    callback_payload = models.JSONField(default=dict, blank=True)
-    requested_at = models.DateTimeField(null=True, blank=True)
-    success_at = models.DateTimeField(null=True, blank=True)
-    retry_count = models.PositiveSmallIntegerField(default=0)
-    next_retry_at = models.DateTimeField(null=True, blank=True)
-    last_error = models.CharField(max_length=300, blank=True, default="")
-    requires_manual_action = models.BooleanField(default=False)
+    amount = models.DecimalField("退款金额", max_digits=18, decimal_places=2)
+    amount_cents = models.PositiveIntegerField("退款金额（分）")
+    total_amount_cents = models.PositiveIntegerField("原订单金额（分）")
+    currency = models.CharField("币种", max_length=8, default="CNY")
+    reason = models.CharField("退款原因", max_length=120, blank=True, default="")
+    request_payload = models.JSONField("退款请求报文", default=dict, blank=True)
+    response_payload = models.JSONField("退款响应报文", default=dict, blank=True)
+    callback_payload = models.JSONField("退款回调报文", default=dict, blank=True)
+    requested_at = models.DateTimeField("申请退款时间", null=True, blank=True)
+    success_at = models.DateTimeField("退款成功时间", null=True, blank=True)
+    retry_count = models.PositiveSmallIntegerField("重试次数", default=0)
+    next_retry_at = models.DateTimeField("下次重试时间", null=True, blank=True)
+    last_error = models.CharField("最后错误", max_length=300, blank=True, default="")
+    requires_manual_action = models.BooleanField("需要人工处理", default=False)
 
     class Meta:
         verbose_name = "商城退款单"
@@ -867,13 +994,20 @@ class SaleMiniAfterSaleRequest(BaseModel):
         CLOSED = "CLOSED", "已关闭"
 
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_mini_after_sales"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_after_sales",
     )
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="sale_mini_after_sales"
+        Customer,
+        verbose_name="客户",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_after_sales",
     )
     buyer_user = models.ForeignKey(
         MiniProgramUser,
+        verbose_name="小程序用户",
         on_delete=models.PROTECT,
         related_name="after_sale_requests",
         null=True,
@@ -881,21 +1015,25 @@ class SaleMiniAfterSaleRequest(BaseModel):
     )
     mapping = models.ForeignKey(
         SaleMiniOrderMapping,
+        verbose_name="商城订单",
         on_delete=models.PROTECT,
         related_name="after_sale_requests",
     )
-    request_no = models.CharField(max_length=64, unique=True)
+    request_no = models.CharField("售后申请单号", max_length=64, unique=True)
     request_type = models.CharField(
-        max_length=20, choices=RequestType.choices, default=RequestType.REFUND
+        "售后类型",
+        max_length=20,
+        choices=RequestType.choices,
+        default=RequestType.REFUND,
     )
     status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.PENDING
+        "处理状态", max_length=20, choices=Status.choices, default=Status.PENDING
     )
-    amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
-    reason = models.CharField(max_length=300, blank=True, default="")
-    requested_at = models.DateTimeField(null=True, blank=True)
-    reviewed_at = models.DateTimeField(null=True, blank=True)
-    review_note = models.CharField(max_length=300, blank=True, default="")
+    amount = models.DecimalField("申请金额", max_digits=18, decimal_places=2, default=0)
+    reason = models.CharField("申请原因", max_length=300, blank=True, default="")
+    requested_at = models.DateTimeField("申请时间", null=True, blank=True)
+    reviewed_at = models.DateTimeField("审核时间", null=True, blank=True)
+    review_note = models.CharField("审核意见", max_length=300, blank=True, default="")
 
     class Meta:
         verbose_name = "商城售后申请"
@@ -919,31 +1057,44 @@ class SaleMiniProductReview(BaseModel):
         HIDDEN = "HIDDEN", "已隐藏"
 
     owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sale_mini_product_reviews"
+        Owner,
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_product_reviews",
     )
     customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="sale_mini_product_reviews"
+        Customer,
+        verbose_name="客户",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_product_reviews",
     )
     buyer_user = models.ForeignKey(
         MiniProgramUser,
+        verbose_name="小程序用户",
         on_delete=models.PROTECT,
         related_name="product_reviews",
     )
     mapping = models.ForeignKey(
         SaleMiniOrderMapping,
+        verbose_name="商城订单",
         on_delete=models.PROTECT,
         related_name="product_reviews",
     )
     order_line = models.OneToOneField(
         "outbound.OutboundOrderLine",
+        verbose_name="出库订单明细",
         on_delete=models.PROTECT,
         related_name="sale_mini_review",
     )
     product = models.ForeignKey(
-        Product, on_delete=models.PROTECT, related_name="sale_mini_reviews"
+        Product,
+        verbose_name="商品",
+        on_delete=models.PROTECT,
+        related_name="sale_mini_reviews",
     )
     product_config = models.ForeignKey(
         SaleProductConfig,
+        verbose_name="商城商品配置",
         on_delete=models.PROTECT,
         related_name="reviews",
     )
@@ -1013,7 +1164,10 @@ class SaleMiniProductReview(BaseModel):
 
 class SaleMiniProductReviewImage(BaseModel):
     review = models.ForeignKey(
-        SaleMiniProductReview, on_delete=models.CASCADE, related_name="images"
+        SaleMiniProductReview,
+        verbose_name="商品评价",
+        on_delete=models.CASCADE,
+        related_name="images",
     )
     image = models.ImageField("评价图片", upload_to=sale_mini_review_image_path)
     sort_order = models.PositiveSmallIntegerField("排序", default=0)
@@ -1046,11 +1200,12 @@ class SaleMiniPaymentEvent(BaseModel):
         PROCESSED = "PROCESSED", "已处理"
         FAILED = "FAILED", "处理失败"
 
-    event_id = models.CharField(max_length=128, unique=True)
-    event_type = models.CharField(max_length=80)
-    resource_type = models.CharField(max_length=80, blank=True, default="")
+    event_id = models.CharField("事件编号", max_length=128, unique=True)
+    event_type = models.CharField("事件类型", max_length=80)
+    resource_type = models.CharField("资源类型", max_length=80, blank=True, default="")
     payment = models.ForeignKey(
         SaleMiniPayment,
+        verbose_name="支付单",
         on_delete=models.PROTECT,
         related_name="events",
         null=True,
@@ -1058,22 +1213,28 @@ class SaleMiniPaymentEvent(BaseModel):
     )
     refund = models.ForeignKey(
         SaleMiniRefund,
+        verbose_name="退款单",
         on_delete=models.PROTECT,
         related_name="events",
         null=True,
         blank=True,
     )
-    out_trade_no = models.CharField(max_length=64, blank=True, default="")
-    out_refund_no = models.CharField(max_length=64, blank=True, default="")
-    payload = models.JSONField(default=dict, blank=True)
-    decrypted_payload = models.JSONField(default=dict, blank=True)
+    out_trade_no = models.CharField(
+        "商户支付单号", max_length=64, blank=True, default=""
+    )
+    out_refund_no = models.CharField(
+        "商户退款单号", max_length=64, blank=True, default=""
+    )
+    payload = models.JSONField("原始回调报文", default=dict, blank=True)
+    decrypted_payload = models.JSONField("解密后报文", default=dict, blank=True)
     process_status = models.CharField(
+        "处理状态",
         max_length=20,
         choices=ProcessStatus.choices,
         default=ProcessStatus.PENDING,
     )
-    error_message = models.CharField(max_length=300, blank=True, default="")
-    processed_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.CharField("错误信息", max_length=300, blank=True, default="")
+    processed_at = models.DateTimeField("处理时间", null=True, blank=True)
 
     class Meta:
         verbose_name = "商城支付回调事件"

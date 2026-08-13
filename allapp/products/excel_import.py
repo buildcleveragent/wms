@@ -45,26 +45,27 @@ MAX_XLSX_UNCOMPRESSED_SIZE = 50 * 1024 * 1024
 MAX_XLSX_ENTRIES = 300
 IMPORT_SHEET_NAME = "商品导入"
 PACKAGE_SHEET_NAME = "商品包装"
-TEMPLATE_VERSION = "6"
+TEMPLATE_VERSION = "8"
 
 
 BASE_PRODUCT_HEADERS = (
     "货主编码",
     "货主商品编码",
+    "默认价格",
+    "进价",
     "标准贸易条码",
     "商品名称",
-    "分类",
+    "规格",
     "基本单位",
+    "基本单位数量",
+    "分类",
     "基本单位类型",
     "单位小数位数",
-    "基本单位数量",
-    "规格",
     "品牌编码",
     "零码",
     "箱码",
     "箱码对应包装单位编码",
     "外部系统商品编码",
-    "默认价格",
     "最低价格",
     "最高折扣%",
     "重量kg",
@@ -124,9 +125,6 @@ REQUIRED_PACKAGE_HEADERS = frozenset(
     {"货主编码", "货主商品编码", "包装单位编码", "包装换算数量"}
 )
 
-REQUIRED_HEADERS = frozenset(
-    {"货主编码", "货主商品编码", "商品名称", "分类", "基本单位"}
-)
 REQUIRED_VALUE_HEADERS = frozenset({"货主编码", "商品名称", "分类", "基本单位"})
 CONDITIONAL_HEADERS = frozenset({"基本单位类型", "单位小数位数"})
 TEXT_HEADERS = frozenset(
@@ -165,6 +163,7 @@ MODEL_FIELD_LABELS = {
     "carton_package": "箱码对应包装单位编码",
     "external_code": "外部系统商品编码",
     "price": "默认价格",
+    "purchase_price": "进价",
     "min_price": "最低价格",
     "max_discount": "最高折扣%",
     "weight": "重量kg",
@@ -360,6 +359,12 @@ def _write_instruction_sheet(sheet) -> None:
         ]
     )
     sheet.append(["必填字段", "货主编码、商品名称、分类、基本单位。"])
+    sheet.append(
+        [
+            "价格规则",
+            "默认价格和进价均可留空；填写时必须为大于等于 0 的两位小数金额，且不会互相回填。",
+        ]
+    )
     sheet.append(
         [
             "分类规则",
@@ -817,19 +822,11 @@ class ProductExcelImporter:
         )
         if duplicates:
             raise ProductImportFileError(f"Excel 表头重复：{', '.join(duplicates)}。")
-        missing = [
-            header for header in REQUIRED_HEADERS if header not in nonempty_headers
-        ]
-        if missing:
-            message = (
-                f"Excel 缺少 v6 必要表头：{', '.join(sorted(missing))}。"
+        if tuple(raw_headers) != PRODUCT_HEADERS:
+            raise ProductImportFileError(
+                "Excel 商品导入表头或列顺序与 v8 模板不一致。"
                 "请重新下载最新商品批量导入模板。"
             )
-            raise ProductImportFileError(message)
-        unknown = [header for header in nonempty_headers if header not in HEADERS]
-        if unknown:
-            message = f"Excel 包含不支持的表头：{', '.join(unknown)}。"
-            raise ProductImportFileError(message)
 
         column_by_header = {
             header: index + 1 for index, header in enumerate(raw_headers) if header
@@ -1259,6 +1256,9 @@ class ProductExcelImporter:
             ),
             price=self._decimal(
                 row_number, "默认价格", values.get("默认价格"), minimum=Decimal("0")
+            ),
+            purchase_price=self._decimal(
+                row_number, "进价", values.get("进价"), minimum=Decimal("0")
             ),
             min_price=self._decimal(
                 row_number, "最低价格", values.get("最低价格"), minimum=Decimal("0")

@@ -14,7 +14,9 @@ from allapp.salesapp.models import SaleProductConfig
 class SaleProductConfigAdminBulkOwnerTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(code="ABULK", name="批量上架货主")
-        self.category = ProductCategory.objects.create(code="ABULK-CAT", name="可售分类")
+        self.category = ProductCategory.objects.create(
+            code="ABULK-CAT", name="可售分类"
+        )
         self.uom = ProductUom.objects.create(code="ABULK-EA", name="件")
         self.product_a = Product.objects.create(
             owner=self.owner,
@@ -153,7 +155,9 @@ class SaleProductConfigAdminBulkOwnerTests(TestCase):
         )
         form_fields = response.context["adminform"].form.fields
         self.assertEqual(list(form_fields)[-1], "remark")
-        self.assertEqual(form_fields["owner"].widget.widget.__class__.__name__, "Select")
+        self.assertEqual(
+            form_fields["owner"].widget.widget.__class__.__name__, "Select"
+        )
         self.assertEqual(
             form_fields["product"].widget.widget.__class__.__name__,
             "AutocompleteSelect",
@@ -224,6 +228,40 @@ class SaleProductConfigAdminBulkOwnerTests(TestCase):
         self.assertFalse(config.is_deleted)
         self.assertFalse(config.enable_qty_rules)
 
+    def test_coupon_admin_uses_chinese_labels_and_hides_audit_fields(self):
+        response = self.client.get(reverse("admin:salesapp_saleminicoupon_add"))
+
+        self.assertEqual(response.status_code, 200)
+        form_fields = response.context["adminform"].form.fields
+        self.assertTrue(
+            {
+                "is_deleted",
+                "deleted_at",
+                "deleted_by",
+                "created_at",
+                "created_by",
+                "updated_at",
+                "updated_by",
+            }.isdisjoint(form_fields)
+        )
+        expected_labels = {
+            "owner": "货主",
+            "customer": "客户",
+            "buyer_user": "小程序用户",
+            "template": "优惠券模板",
+            "coupon_no": "优惠券编号",
+            "status": "状态",
+            "locked_mapping": "锁定订单",
+            "used_mapping": "使用订单",
+            "locked_at": "锁定时间",
+            "used_at": "使用时间",
+            "expires_at": "过期时间",
+        }
+        self.assertEqual(
+            {name: form_fields[name].label for name in expected_labels},
+            expected_labels,
+        )
+
     def test_sale_product_config_admin_can_enable_quantity_rules(self):
         response = self.client.post(
             reverse("admin:salesapp_saleproductconfig_add"),
@@ -268,7 +306,9 @@ class SaleProductConfigAdminBulkOwnerTests(TestCase):
         self.assertIn(str(self.product_a.pk), result_ids)
 
     def test_owner_bulk_listing_creates_and_lists_valid_products_only(self):
-        before_available = InventoryDetail.objects.get(pk=self.inventory.pk).available_qty
+        before_available = InventoryDetail.objects.get(
+            pk=self.inventory.pk
+        ).available_qty
 
         response = self.client.post(self.bulk_url, self.bulk_payload(), follow=True)
 
@@ -293,9 +333,13 @@ class SaleProductConfigAdminBulkOwnerTests(TestCase):
 
         public_response = self.client.get("/api/sale-mini/products/")
         rows = public_response.json()["results"]
-        self.assertEqual({row["id"] for row in rows}, {self.product_a.id, self.product_b.id})
+        self.assertEqual(
+            {row["id"] for row in rows}, {self.product_a.id, self.product_b.id}
+        )
 
-    def test_owner_bulk_listing_preserves_existing_single_product_price_by_default(self):
+    def test_owner_bulk_listing_preserves_existing_single_product_price_by_default(
+        self,
+    ):
         SaleProductConfig.objects.create(
             owner=self.owner,
             product=self.product_a,

@@ -215,6 +215,7 @@ def _product_values(product):
         ),
         "外部系统商品编码": product.external_code,
         "默认价格": product.price,
+        "进价": product.purchase_price,
         "最低价格": product.min_price,
         "最高折扣%": product.max_discount,
         "重量kg": product.weight,

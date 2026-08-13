@@ -45,21 +45,12 @@
         <view v-else class="tips">当前账号没有无订单收货权限，只能导入数量为空或 0 的商品。</view>
       </view>
 
-      <view class="card">
-        <view class="card-title">4. 上传并导入</view>
-        <view class="tips">
-          系统会先校验整份文件。分类和基本单位可按名称填写；任一商品、字典或自动收货发生错误，整批都不会写入。
-        </view>
-        <button
-          class="primary-btn"
-          :disabled="!selectedFile.path || busy || !canImport"
-          @click="submitImport"
-        >
-          {{ uploading ? '正在校验并导入…' : '上传并导入商品' }}
-        </button>
-      </view>
-
-      <view v-if="result" class="card result-card">
+      <view
+        v-if="result"
+        id="product-import-result"
+        data-testid="product-import-result"
+        class="card result-card"
+      >
         <view class="result-head">
           <view class="card-title">导入结果</view>
           <text class="clear-link" @click="clearResult">清除结果</text>
@@ -111,12 +102,26 @@
           </view>
         </view>
       </view>
+
+      <view class="card">
+        <view class="card-title">4. 上传并导入</view>
+        <view class="tips">
+          系统会先校验整份文件。分类和基本单位可按名称填写；任一商品、字典或自动收货发生错误，整批都不会写入。
+        </view>
+        <button
+          class="primary-btn"
+          :disabled="!selectedFile.path || busy || !canImport"
+          @click="submitImport"
+        >
+          {{ uploading ? '正在校验并导入…' : '上传并导入商品' }}
+        </button>
+      </view>
     </template>
   </view>
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useAuth } from '@/store/auth'
 import { api } from '@/utils/request'
@@ -182,6 +187,13 @@ function clearResult() {
   result.value = null
 }
 
+async function scrollToResult() {
+  await nextTick()
+  if (typeof uni.pageScrollTo === 'function') {
+    uni.pageScrollTo({ selector: '#product-import-result', duration: 250 })
+  }
+}
+
 async function downloadTemplate() {
   if (!canImport.value || busy.value) return
   downloading.value = true
@@ -242,6 +254,7 @@ async function submitImport() {
       selectedFile.path,
       selectedWarehouse.value?.id || null,
     )
+    await scrollToResult()
     uni.showToast({
       title: `新增 ${result.value?.created_count || 0} 条，跳过 ${result.value?.skipped_count || 0} 条`,
       icon: 'none',
@@ -252,6 +265,7 @@ async function submitImport() {
     console.error('product import failed', error)
     if (error?.data && Array.isArray(error.data.errors)) {
       result.value = error.data
+      await scrollToResult()
     }
     uni.showToast({ title: error?.message || '商品导入失败', icon: 'none' })
   } finally {

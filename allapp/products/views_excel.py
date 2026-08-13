@@ -18,6 +18,7 @@ from .excel_export import (
     resolve_product_export_access,
 )
 from .excel_import import (
+    TEMPLATE_VERSION,
     ProductExcelImporter,
     ProductImportConflictError,
     ProductImportFileError,
@@ -189,7 +190,7 @@ class ProductExportExcelApi(APIView):
                 "owner_code": owner.code,
                 "product_count": product_count,
                 "package_count": package_count,
-                "template_version": "6",
+                "template_version": TEMPLATE_VERSION,
             },
         )
         timestamp = timezone.now().strftime("%Y%m%d-%H%M%S")
