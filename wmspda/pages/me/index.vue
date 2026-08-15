@@ -20,7 +20,7 @@ import { useAuth } from '@/store/auth'
 const auth = useAuth()
 const username = computed(()=> auth.user?.username )
 function goChangePassword(){ uni.navigateTo({ url:'/pages/me/change_password' }) }
-function logout(){ auth.logout(); uni.reLaunch({ url:'/pages/login' }) }
+async function logout(){ await auth.logout(); uni.reLaunch({ url:'/pages/login' }) }
 </script>
 <style>
 .menu-card{

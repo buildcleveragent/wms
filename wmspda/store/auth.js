@@ -1,5 +1,11 @@
 import { defineStore } from 'pinia'
-import { api, getToken, setToken } from '@/utils/request'
+import {
+  api,
+  clearAuthTokens,
+  getRefreshToken,
+  getToken,
+  setAuthTokens,
+} from '@/utils/request'
 
 let profilePromise = null
 let profileSequence = 0
@@ -103,7 +109,7 @@ export const useAuth = defineStore('auth', {
             if (statusCode === 401) {
               this.clearProfile()
               this.access = ''
-              setToken('')
+              clearAuthTokens()
             } else if (statusCode === 403) {
               // 403 只撤销代办能力；保留 token 和已经加载的普通功能资料。
               this.user = previousState.user
@@ -152,10 +158,10 @@ export const useAuth = defineStore('auth', {
     async login(username, password) {
       this.clearProfile()
       this.access = ''
-      setToken('')
+      clearAuthTokens()
       const result = await api.login(username, password)
       this.access = result?.access || ''
-      setToken(this.access)
+      setAuthTokens({ access: this.access, refresh: result?.refresh || '' })
       this.user = { username }
 
       // 登录成功与权限资料加载分开处理；profile 暂时不可用时仍可使用普通仓库功能。
@@ -167,10 +173,17 @@ export const useAuth = defineStore('auth', {
       return result
     },
 
-    logout() {
+    async logout() {
+      const refresh = getRefreshToken()
       this.clearProfile()
       this.access = ''
-      setToken('')
+      clearAuthTokens()
+      if (!refresh) return
+      try {
+        await api.logout(refresh)
+      } catch (error) {
+        console.warn('刷新令牌注销失败，本地登录状态已清除', error)
+      }
     },
   },
 })

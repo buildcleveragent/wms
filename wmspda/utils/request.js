@@ -13,29 +13,63 @@ const BASE_MAP = {
 export const BASE_URL = BASE_MAP.develop
 
 const PRODUCT_IMPORT_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000
+const ACCESS_TOKEN_STORAGE_KEY = 'access'
+const REFRESH_TOKEN_STORAGE_KEY = 'refresh'
 
 export function getToken() {
   try {
-    return uni.getStorageSync('access') || ''
+    return uni.getStorageSync(ACCESS_TOKEN_STORAGE_KEY) || ''
   } catch (e) {
     return ''
   }
 }
 
 export function setToken(t) {
-  uni.setStorageSync('access', t || '')
+  uni.setStorageSync(ACCESS_TOKEN_STORAGE_KEY, t || '')
 }
 
-export function clearToken() {
+export function getRefreshToken() {
   try {
-    uni.removeStorageSync('access')
+    return uni.getStorageSync(REFRESH_TOKEN_STORAGE_KEY) || ''
+  } catch (e) {
+    return ''
+  }
+}
+
+export function setAuthTokens(tokens = {}) {
+  const access = tokens?.access || ''
+  const refresh = tokens?.refresh
+
+  if (access) uni.setStorageSync(ACCESS_TOKEN_STORAGE_KEY, access)
+  else uni.removeStorageSync(ACCESS_TOKEN_STORAGE_KEY)
+
+  if (refresh !== undefined) {
+    if (refresh) uni.setStorageSync(REFRESH_TOKEN_STORAGE_KEY, refresh)
+    else uni.removeStorageSync(REFRESH_TOKEN_STORAGE_KEY)
+  }
+}
+
+export function clearAuthTokens() {
+  try {
+    uni.removeStorageSync(ACCESS_TOKEN_STORAGE_KEY)
+    uni.removeStorageSync(REFRESH_TOKEN_STORAGE_KEY)
   } catch (e) {}
 }
 
-let redirectingToLogin = false
+export function clearToken() {
+  clearAuthTokens()
+}
 
-function isLoginRequest(url = '') {
-  return url === '/api/token/' || url.includes('/api/token/')
+let redirectingToLogin = false
+let refreshPromise = null
+
+function isAuthenticationRequest(url = '') {
+  return (
+    url === '/api/token/' ||
+    url.includes('/api/token/') ||
+    url === '/api/auth/login/' ||
+    url === '/api/auth/refresh/'
+  )
 }
 
 const HTML_ERROR_MESSAGE = '后端服务错误，请联系管理员查看日志'
@@ -109,6 +143,94 @@ function redirectToLogin() {
   }, 500)
 }
 
+function expiredLoginError(data = null) {
+  return {
+    code: 401,
+    statusCode: 401,
+    authExpired: true,
+    message: '登录已超时，需要重新登录',
+    data,
+  }
+}
+
+export function refreshAccessToken() {
+  if (refreshPromise) return refreshPromise
+
+  const refresh = getRefreshToken()
+  if (!refresh) return Promise.reject(expiredLoginError())
+
+  const pending = new Promise((resolve, reject) => {
+    uni.request({
+      url: `${BASE_URL}/api/token/refresh/`,
+      method: 'POST',
+      data: { refresh },
+      header: { 'Content-Type': 'application/json' },
+      success: (res) => {
+        const statusCode = Number(res.statusCode || 0)
+        const data = res.data || {}
+        if (statusCode >= 200 && statusCode < 300 && data.access) {
+          setAuthTokens({
+            access: data.access,
+            refresh: data.refresh || refresh,
+          })
+          resolve(data.access)
+          return
+        }
+        if (statusCode === 400 || statusCode === 401 || statusCode === 403) {
+          clearAuthTokens()
+          reject(expiredLoginError(data))
+          return
+        }
+        reject({
+          code: statusCode,
+          statusCode,
+          message: getFriendlyMessage(data, '刷新登录状态失败，请稍后重试'),
+          data,
+        })
+      },
+      fail: (error) =>
+        reject({
+          code: 0,
+          statusCode: 0,
+          message: '刷新登录状态失败，请检查网络后重试',
+          data: error,
+        }),
+    })
+  })
+
+  refreshPromise = pending.then(
+    (access) => {
+      refreshPromise = null
+      return access
+    },
+    (error) => {
+      refreshPromise = null
+      throw error
+    },
+  )
+  return refreshPromise
+}
+
+function retryAfterUnauthorized(tokenUsed, retry, alreadyRetried = false) {
+  if (alreadyRetried) {
+    const error = expiredLoginError()
+    clearAuthTokens()
+    redirectToLogin()
+    return Promise.reject(error)
+  }
+
+  const currentToken = getToken()
+  const refreshOrReuse =
+    tokenUsed && currentToken && tokenUsed !== currentToken
+      ? Promise.resolve(currentToken)
+      : refreshAccessToken()
+
+  return refreshOrReuse.then(retry).catch((error) => {
+    if (error?.authExpired) redirectToLogin()
+    throw error
+  })
+}
+
 function buildQuery(params = {}) {
   const qs = Object.entries(params)
     .filter(([, v]) => v !== undefined && v !== null && v !== '')
@@ -153,8 +275,8 @@ export function withAuthToken(url) {
   return `${url}${separator}token=${encodeURIComponent(token)}`
 }
 
-export function request(opts = {}) {
-  const token = getToken()
+export function request(opts = {}, alreadyRetried = false) {
+  const token = opts.auth === false ? '' : getToken()
 
   return new Promise((resolve, reject) => {
     uni.request({
@@ -176,17 +298,17 @@ export function request(opts = {}) {
           return
         }
 
-        // 登录接口自己的 401，不做“超时跳登录”处理
-        if (statusCode === 401 && !isLoginRequest(opts.url)) {
-          const err = {
-            code: 401,
-            statusCode,
-            message: '登录已超时，需要重新登录',
-            data,
-          }
-
-          redirectToLogin()
-          reject(err)
+        // 业务请求的 access token 过期时刷新一次并自动重试原请求。
+        if (
+          statusCode === 401 &&
+          opts.auth !== false &&
+          !isAuthenticationRequest(opts.url)
+        ) {
+          retryAfterUnauthorized(
+            token,
+            () => request(opts, true),
+            alreadyRetried,
+          ).then(resolve, reject)
           return
         }
 
@@ -228,7 +350,7 @@ export function request(opts = {}) {
   })
 }
 
-export function downloadProductImportTemplate() {
+export function downloadProductImportTemplate(alreadyRetried = false) {
   const token = getToken()
   const url = `${BASE_URL}/api/products/import-template/`
 
@@ -238,8 +360,11 @@ export function downloadProductImportTemplate() {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }).then(async (response) => {
       if (response.status === 401) {
-        redirectToLogin()
-        throw { statusCode: 401, message: '登录已超时，需要重新登录' }
+        return retryAfterUnauthorized(
+          token,
+          () => downloadProductImportTemplate(true),
+          alreadyRetried,
+        )
       }
       if (!response.ok) {
         let data = null
@@ -278,7 +403,14 @@ export function downloadProductImportTemplate() {
           resolve({ tempFilePath: res.tempFilePath || '', opened: false })
           return
         }
-        if (res.statusCode === 401) redirectToLogin()
+        if (res.statusCode === 401) {
+          retryAfterUnauthorized(
+            token,
+            () => downloadProductImportTemplate(true),
+            alreadyRetried,
+          ).then(resolve, reject)
+          return
+        }
         reject({
           statusCode: res.statusCode,
           data: res.data,
@@ -293,7 +425,7 @@ export function downloadProductImportTemplate() {
   })
 }
 
-export function downloadProductArchive(ownerId, ownerCode = '') {
+export function downloadProductArchive(ownerId, ownerCode = '', alreadyRetried = false) {
   const token = getToken()
   const url = `${BASE_URL}/api/products/export-excel/?owner_id=${encodeURIComponent(ownerId)}`
 
@@ -303,8 +435,11 @@ export function downloadProductArchive(ownerId, ownerCode = '') {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }).then(async (response) => {
       if (response.status === 401) {
-        redirectToLogin()
-        throw { statusCode: 401, message: '登录已超时，需要重新登录' }
+        return retryAfterUnauthorized(
+          token,
+          () => downloadProductArchive(ownerId, ownerCode, true),
+          alreadyRetried,
+        )
       }
       if (!response.ok) {
         let data = null
@@ -348,7 +483,14 @@ export function downloadProductArchive(ownerId, ownerCode = '') {
           resolve({ tempFilePath: res.tempFilePath || '', opened: false })
           return
         }
-        if (res.statusCode === 401) redirectToLogin()
+        if (res.statusCode === 401) {
+          retryAfterUnauthorized(
+            token,
+            () => downloadProductArchive(ownerId, ownerCode, true),
+            alreadyRetried,
+          ).then(resolve, reject)
+          return
+        }
         reject({
           statusCode: res.statusCode,
           data: res.data,
@@ -361,7 +503,11 @@ export function downloadProductArchive(ownerId, ownerCode = '') {
   })
 }
 
-export function uploadProductImportExcel(filePath, warehouseId = null) {
+export function uploadProductImportExcel(
+  filePath,
+  warehouseId = null,
+  alreadyRetried = false,
+) {
   const token = getToken()
   return new Promise((resolve, reject) => {
     uni.uploadFile({
@@ -390,7 +536,14 @@ export function uploadProductImportExcel(filePath, warehouseId = null) {
           resolve(data)
           return
         }
-        if (res.statusCode === 401) redirectToLogin()
+        if (res.statusCode === 401) {
+          retryAfterUnauthorized(
+            token,
+            () => uploadProductImportExcel(filePath, warehouseId, true),
+            alreadyRetried,
+          ).then(resolve, reject)
+          return
+        }
         reject({
           statusCode: res.statusCode,
           data,
@@ -410,7 +563,7 @@ export function uploadProductImportExcel(filePath, warehouseId = null) {
   })
 }
 
-export function downloadNoOrderReceiveImportTemplate(ownerId) {
+export function downloadNoOrderReceiveImportTemplate(ownerId, alreadyRetried = false) {
   const token = getToken()
   const url = `${BASE_URL}/api/inbound/receive_without_order/import_template/?owner_id=${encodeURIComponent(ownerId)}`
 
@@ -420,8 +573,11 @@ export function downloadNoOrderReceiveImportTemplate(ownerId) {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }).then(async (response) => {
       if (response.status === 401) {
-        redirectToLogin()
-        throw { statusCode: 401, message: '登录已超时，需要重新登录' }
+        return retryAfterUnauthorized(
+          token,
+          () => downloadNoOrderReceiveImportTemplate(ownerId, true),
+          alreadyRetried,
+        )
       }
       if (!response.ok) {
         let data = null
@@ -457,7 +613,14 @@ export function downloadNoOrderReceiveImportTemplate(ownerId) {
           resolve({ tempFilePath: res.tempFilePath || '', opened: false })
           return
         }
-        if (res.statusCode === 401) redirectToLogin()
+        if (res.statusCode === 401) {
+          retryAfterUnauthorized(
+            token,
+            () => downloadNoOrderReceiveImportTemplate(ownerId, true),
+            alreadyRetried,
+          ).then(resolve, reject)
+          return
+        }
         reject({
           statusCode: res.statusCode,
           data: res.data,
@@ -469,7 +632,7 @@ export function downloadNoOrderReceiveImportTemplate(ownerId) {
   })
 }
 
-export function uploadNoOrderReceiveImportPreview(filePath, ownerId) {
+export function uploadNoOrderReceiveImportPreview(filePath, ownerId, alreadyRetried = false) {
   const token = getToken()
   return new Promise((resolve, reject) => {
     uni.uploadFile({
@@ -494,7 +657,14 @@ export function uploadNoOrderReceiveImportPreview(filePath, ownerId) {
           resolve(data)
           return
         }
-        if (res.statusCode === 401) redirectToLogin()
+        if (res.statusCode === 401) {
+          retryAfterUnauthorized(
+            token,
+            () => uploadNoOrderReceiveImportPreview(filePath, ownerId, true),
+            alreadyRetried,
+          ).then(resolve, reject)
+          return
+        }
         reject({
           statusCode: res.statusCode,
           data,
@@ -513,6 +683,16 @@ export const api = {
       url: '/api/token/',
       method: 'POST',
       data: { username, password },
+      auth: false,
+    }),
+
+  logout: (refresh) =>
+    request({
+      url: '/api/auth/logout/',
+      method: 'POST',
+      data: { refresh },
+      auth: false,
+      silentError: true,
     }),
 
   profile: () =>
