@@ -4,6 +4,9 @@
 用户权限、货主客户、仓库和商品档案以及可复用配置。命令只执行 `DELETE`，不会执行
 `DROP`、`TRUNCATE`、重置自增 ID、回退仓库SKU编码序号或回退单号序列。
 
+如果需要同时删除商品档案，请改用 `purge_business_data_new`，并遵循
+[`production-business-data-purge-new.md`](production-business-data-purge-new.md)。
+
 ## 重要限制
 
 - 当前仅支持 MySQL。

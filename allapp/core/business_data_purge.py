@@ -16,6 +16,7 @@ from django.db import connections, transaction
 from allapp.accounts.audit import record_audit_event
 
 PURGE_MANIFEST_VERSION = "2026-08-11.1"
+PURGE_BUSINESS_DATA_NEW_MANIFEST_VERSION = "2026-08-14.2"
 
 
 PRESERVED_MODEL_LABELS = frozenset(
@@ -274,6 +275,24 @@ PURGED_MODEL_LABELS = frozenset(
 )
 
 
+PRODUCT_MASTER_MODEL_LABELS = frozenset(
+    {
+        "products.product",
+        "products.productbarcode",
+        "products.productexternalidentifier",
+        "products.productidentifierregistry",
+        "products.productpackage",
+    }
+)
+
+NEW_PURGE_PRESERVED_MODEL_LABELS = frozenset(
+    PRESERVED_MODEL_LABELS - PRODUCT_MASTER_MODEL_LABELS
+)
+NEW_PURGE_PURGED_MODEL_LABELS = frozenset(
+    PURGED_MODEL_LABELS | PRODUCT_MASTER_MODEL_LABELS
+)
+
+
 EXTRA_PRESERVED_TABLES = frozenset({"django_migrations"})
 
 
@@ -344,10 +363,24 @@ def canonical_target(connection) -> str:
     return f"{host}:{port}/{name}"
 
 
-def resolve_manifest(apps_registry=django_apps) -> ResolvedManifest:
+def resolve_manifest(
+    apps_registry=django_apps,
+    *,
+    preserved_model_labels=None,
+    purged_model_labels=None,
+) -> ResolvedManifest:
     """Resolve model labels to tables and fail when classification drifts."""
 
-    overlap = PRESERVED_MODEL_LABELS & PURGED_MODEL_LABELS
+    preserved_model_labels = frozenset(
+        PRESERVED_MODEL_LABELS
+        if preserved_model_labels is None
+        else preserved_model_labels
+    )
+    purged_model_labels = frozenset(
+        PURGED_MODEL_LABELS if purged_model_labels is None else purged_model_labels
+    )
+
+    overlap = preserved_model_labels & purged_model_labels
     if overlap:
         raise PurgeConfigurationError(
             "模型同时出现在保留和清理清单: " + "、".join(sorted(overlap))
@@ -359,7 +392,7 @@ def resolve_manifest(apps_registry=django_apps) -> ResolvedManifest:
         if model._meta.managed and not model._meta.proxy
     }
     registered = frozenset(models_by_label)
-    declared = PRESERVED_MODEL_LABELS | PURGED_MODEL_LABELS
+    declared = preserved_model_labels | purged_model_labels
     unclassified = registered - declared
     stale = declared - registered
     errors = []
@@ -374,10 +407,10 @@ def resolve_manifest(apps_registry=django_apps) -> ResolvedManifest:
         label: models_by_label[label]._meta.db_table for label in sorted(registered)
     }
     preserved_tables = frozenset(
-        {label_to_table[label] for label in PRESERVED_MODEL_LABELS}
+        {label_to_table[label] for label in preserved_model_labels}
         | set(EXTRA_PRESERVED_TABLES)
     )
-    purged_tables = frozenset(label_to_table[label] for label in PURGED_MODEL_LABELS)
+    purged_tables = frozenset(label_to_table[label] for label in purged_model_labels)
     table_overlap = preserved_tables & purged_tables
     if table_overlap:
         raise PurgeConfigurationError(
@@ -387,6 +420,16 @@ def resolve_manifest(apps_registry=django_apps) -> ResolvedManifest:
         preserved_tables=preserved_tables,
         purged_tables=purged_tables,
         label_to_table=label_to_table,
+    )
+
+
+def resolve_new_purge_manifest(apps_registry=django_apps) -> ResolvedManifest:
+    """Resolve the variant that also purges product master data."""
+
+    return resolve_manifest(
+        apps_registry,
+        preserved_model_labels=NEW_PURGE_PRESERVED_MODEL_LABELS,
+        purged_model_labels=NEW_PURGE_PURGED_MODEL_LABELS,
     )
 
 
@@ -437,14 +480,13 @@ def _estimated_rows(connection) -> dict[str, int | None]:
         }
 
 
-def prepare_purge(database_alias: str = "default") -> PurgePreflightReport:
-    """Inspect the selected database without mutating it."""
-
+def _prepare_purge(
+    database_alias: str, manifest: ResolvedManifest
+) -> PurgePreflightReport:
     connection = connections[database_alias]
     if connection.vendor != "mysql":
         raise PurgeConfigurationError("purge_business_data 仅支持 MySQL。")
 
-    manifest = resolve_manifest()
     actual_tables = _actual_tables(connection)
     present_preserved = manifest.preserved_tables & actual_tables
     present_purged = manifest.purged_tables & actual_tables
@@ -467,6 +509,18 @@ def prepare_purge(database_alias: str = "default") -> PurgePreflightReport:
         foreign_key_blockers=blockers,
         estimated_rows=_estimated_rows(connection),
     )
+
+
+def prepare_purge(database_alias: str = "default") -> PurgePreflightReport:
+    """Inspect the standard purge scope without mutating the database."""
+
+    return _prepare_purge(database_alias, resolve_manifest())
+
+
+def prepare_new_purge(database_alias: str = "default") -> PurgePreflightReport:
+    """Inspect the product-master purge scope without mutating the database."""
+
+    return _prepare_purge(database_alias, resolve_new_purge_manifest())
 
 
 def ensure_preflight_allows_execution(report: PurgePreflightReport) -> None:
@@ -513,11 +567,25 @@ def _delete_table(cursor, quoted_table: str) -> int:
     return max(cursor.rowcount, 0)
 
 
+def _reset_owner_sku_sequences(database_alias: str) -> int:
+    owner_model = django_apps.get_model("baseinfo", "Owner")
+    manager = getattr(owner_model, "all_objects", owner_model._base_manager)
+    return (
+        manager.using(database_alias)
+        .exclude(next_sku_sequence=1)
+        .update(next_sku_sequence=1)
+    )
+
+
 def execute_purge(
     report: PurgePreflightReport,
     *,
     operator,
     backup_reference: str,
+    manifest_version: str = PURGE_MANIFEST_VERSION,
+    audit_action: str = "BUSINESS_DATA_PURGE",
+    audit_source: str = "purge_business_data",
+    reset_owner_sku_sequences: bool = False,
 ) -> dict[str, int]:
     """Delete all present purge tables atomically and write the success audit."""
 
@@ -525,6 +593,7 @@ def execute_purge(
     alias = report.database_alias
     connection = connections[alias]
     deleted_counts: dict[str, int] = {}
+    reset_owner_count = 0
 
     with transaction.atomic(using=alias):
         with connection.cursor() as cursor:
@@ -549,8 +618,15 @@ def execute_purge(
             finally:
                 cursor.execute(f"SET SESSION FOREIGN_KEY_CHECKS = {original_fk_checks}")
 
+        if reset_owner_sku_sequences:
+            reset_owner_count = _reset_owner_sku_sequences(alias)
+
+        after = {"deleted_rows": deleted_counts}
+        if reset_owner_sku_sequences:
+            after["reset_owner_sku_sequences"] = reset_owner_count
+
         record_audit_event(
-            action="BUSINESS_DATA_PURGE",
+            action=audit_action,
             module="core.operations",
             user=operator,
             succeeded=True,
@@ -560,13 +636,14 @@ def execute_purge(
                     for table in sorted(report.present_purged_tables)
                 }
             },
-            after={"deleted_rows": deleted_counts},
+            after=after,
             metadata={
-                "source": "purge_business_data",
+                "source": audit_source,
                 "database_alias": alias,
                 "target": report.target,
                 "backup_reference": backup_reference,
-                "manifest_version": PURGE_MANIFEST_VERSION,
+                "manifest_version": manifest_version,
+                "owner_sku_sequence_reset": reset_owner_sku_sequences,
             },
             using=alias,
         )

@@ -23,6 +23,11 @@ from allapp.core.business_data_purge import (
 
 class Command(BaseCommand):
     help = "清空易变业务数据，保留权限、基础档案、配置、表结构和迁移记录。"
+    command_name = "purge_business_data"
+    manifest_version = PURGE_MANIFEST_VERSION
+    audit_action = "BUSINESS_DATA_PURGE"
+    audit_source = "purge_business_data"
+    reset_owner_sku_sequences = False
 
     def add_arguments(self, parser):
         mode = parser.add_mutually_exclusive_group()
@@ -66,7 +71,7 @@ class Command(BaseCommand):
         alias = options["database"]
         connection = self._connection(alias)
         if connection.vendor != "mysql":
-            raise CommandError("purge_business_data 仅支持 MySQL。")
+            raise CommandError(f"{self.command_name} 仅支持 MySQL。")
 
         if not options["execute"]:
             report = self._prepare(alias)
@@ -91,6 +96,10 @@ class Command(BaseCommand):
                     report,
                     operator=operator,
                     backup_reference=backup_reference,
+                    manifest_version=self.manifest_version,
+                    audit_action=self.audit_action,
+                    audit_source=self.audit_source,
+                    reset_owner_sku_sequences=self.reset_owner_sku_sequences,
                 )
         except Exception as exc:
             self._record_failed_attempt(
@@ -113,10 +122,13 @@ class Command(BaseCommand):
             raise CommandError(f"业务数据清理失败，事务已回滚：{exc}") from exc
 
         total_rows = sum(deleted_counts.values())
+        reset_suffix = (
+            "；货主 SKU 序号已重置为 1" if self.reset_owner_sku_sequences else ""
+        )
         self.stdout.write(
             self.style.SUCCESS(
                 f"清理完成：{len(deleted_counts)} 张表，共删除 {total_rows} 行；"
-                f"清单版本 {PURGE_MANIFEST_VERSION}。"
+                f"清单版本 {self.manifest_version}{reset_suffix}。"
             )
         )
 
@@ -172,7 +184,7 @@ class Command(BaseCommand):
         self.stdout.write(f"模式: {mode}")
         self.stdout.write(f"数据库别名: {report.database_alias}")
         self.stdout.write(f"确认目标: {report.target}")
-        self.stdout.write(f"清单版本: {PURGE_MANIFEST_VERSION}")
+        self.stdout.write(f"清单版本: {self.manifest_version}")
         self.stdout.write(
             f"保留表: {len(report.present_preserved_tables)}；"
             f"清理表: {len(report.present_purged_tables)}"
@@ -187,6 +199,15 @@ class Command(BaseCommand):
         self.stdout.write("\n[保留表]")
         for table in sorted(report.present_preserved_tables):
             self.stdout.write(f"  KEEP   {table}")
+
+        if self.reset_owner_sku_sequences:
+            estimate = report.estimated_rows.get("baseinfo_owner")
+            estimate_text = "未知" if estimate is None else str(estimate)
+            self.stdout.write("\n[额外更新]")
+            self.stdout.write(
+                "  RESET  baseinfo_owner.next_sku_sequence = 1: "
+                f"约 {estimate_text} 行"
+            )
 
         missing = sorted(report.missing_preserved_tables | report.missing_purged_tables)
         if missing:
@@ -217,16 +238,16 @@ class Command(BaseCommand):
     ):
         try:
             record_audit_event(
-                action="BUSINESS_DATA_PURGE",
+                action=self.audit_action,
                 module="core.operations",
                 user=operator,
                 succeeded=False,
                 metadata={
-                    "source": "purge_business_data",
+                    "source": self.audit_source,
                     "database_alias": alias,
                     "target": target,
                     "backup_reference": backup_reference,
-                    "manifest_version": PURGE_MANIFEST_VERSION,
+                    "manifest_version": self.manifest_version,
                     "error_type": type(error).__name__,
                     "error": str(error)[:1000],
                 },

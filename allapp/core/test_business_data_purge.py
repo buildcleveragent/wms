@@ -22,13 +22,17 @@ from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.billing.enums import CalcMethod, ChargeType
 from allapp.billing.models import BillingPeriod, BillingRule, BillingServiceContract
 from allapp.core.business_data_purge import (
+    NEW_PURGE_PRESERVED_MODEL_LABELS,
+    NEW_PURGE_PURGED_MODEL_LABELS,
     PRESERVED_MODEL_LABELS,
+    PRODUCT_MASTER_MODEL_LABELS,
     PURGED_MODEL_LABELS,
     PurgeConfigurationError,
     _lock_name,
     canonical_target,
     prepare_purge,
     resolve_manifest,
+    resolve_new_purge_manifest,
 )
 from allapp.core.models import DocSequence
 from allapp.inventory.models import InventoryCostLayer, InventoryDetail
@@ -117,6 +121,18 @@ class BusinessDataPurgeManifestTests(SimpleTestCase):
 
         with self.assertRaisesMessage(PurgeConfigurationError, "未分类模型"):
             resolve_manifest(RegistryWithUnknownModel())
+
+    def test_new_purge_moves_product_master_to_purge_scope(self):
+        manifest = resolve_new_purge_manifest()
+
+        self.assertFalse(
+            NEW_PURGE_PRESERVED_MODEL_LABELS & NEW_PURGE_PURGED_MODEL_LABELS
+        )
+        self.assertTrue(PRODUCT_MASTER_MODEL_LABELS <= NEW_PURGE_PURGED_MODEL_LABELS)
+        self.assertIn("products_product", manifest.purged_tables)
+        self.assertIn("products_productpackage", manifest.purged_tables)
+        self.assertIn("products_productcategory", manifest.preserved_tables)
+        self.assertIn("accounts_user", manifest.preserved_tables)
 
 
 @skipUnless(connection.vendor == "mysql", "purge command is intentionally MySQL-only")
@@ -295,6 +311,20 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
             stdout=stdout or StringIO(),
         )
 
+    def execute_new_command(self, *, stdout=None):
+        call_command(
+            "purge_business_data_new",
+            "--execute",
+            "--confirm-target",
+            canonical_target(connection),
+            "--operator",
+            self.operator.username,
+            "--backup-reference",
+            "backup-test-new-20260814",
+            "--maintenance-confirmed",
+            stdout=stdout or StringIO(),
+        )
+
     def test_dry_run_is_read_only_and_reports_target(self):
         output = StringIO()
 
@@ -306,6 +336,17 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
         self.assertIn(canonical_target(connection), output.getvalue())
         self.assertIn("products_product", output.getvalue())
         self.assertIn("accounts_user", output.getvalue())
+
+    def test_new_dry_run_reports_sku_reset_without_changing_owner(self):
+        output = StringIO()
+
+        call_command("purge_business_data_new", "--dry-run", stdout=output)
+
+        self.assertEqual(
+            Owner.all_objects.get(pk=self.owner.pk).next_sku_sequence,
+            50,
+        )
+        self.assertIn("RESET  baseinfo_owner.next_sku_sequence = 1", output.getvalue())
 
     def test_execute_purges_business_rows_and_preserves_configuration(self):
         owner_sequence_before = Owner.all_objects.get(
@@ -370,6 +411,32 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
         self.assertGreater(
             success.after["deleted_rows"]["inventory_inventorydetail"], 0
         )
+
+    def test_new_command_also_purges_product_master(self):
+        self.execute_new_command()
+
+        self.assertFalse(Product.all_objects.filter(pk=self.product.pk).exists())
+        self.assertEqual(
+            Owner.all_objects.get(pk=self.owner.pk).next_sku_sequence,
+            1,
+        )
+        self.assertTrue(get_user_model().objects.filter(pk=self.operator.pk).exists())
+        self.assertTrue(
+            ProductCategory.all_objects.filter(pk=self.category.pk).exists()
+        )
+        self.assertTrue(ProductUom.all_objects.filter(pk=self.uom.pk).exists())
+        success = AuditEvent.objects.get(
+            action="BUSINESS_DATA_PURGE_NEW",
+            succeeded=True,
+        )
+        self.assertEqual(success.metadata["source"], "purge_business_data_new")
+        self.assertEqual(
+            success.metadata["manifest_version"],
+            "2026-08-14.2",
+        )
+        self.assertTrue(success.metadata["owner_sku_sequence_reset"])
+        self.assertEqual(success.after["reset_owner_sku_sequences"], 1)
+        self.assertGreater(success.after["deleted_rows"]["products_product"], 0)
 
     def test_missing_confirmation_arguments_are_rejected_before_delete(self):
         with self.assertRaisesMessage(CommandError, "正式执行缺少参数"):
