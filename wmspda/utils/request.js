@@ -12,6 +12,8 @@ const BASE_MAP = {
 // export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
 export const BASE_URL = BASE_MAP.develop
 
+const PRODUCT_IMPORT_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000
+
 export function getToken() {
   try {
     return uni.getStorageSync('access') || ''
@@ -366,6 +368,7 @@ export function uploadProductImportExcel(filePath, warehouseId = null) {
       url: `${BASE_URL}/api/products/import-excel/`,
       filePath,
       name: 'file',
+      timeout: PRODUCT_IMPORT_UPLOAD_TIMEOUT_MS,
       formData: warehouseId ? { warehouse_id: String(warehouseId) } : {},
       header: token ? { Authorization: `Bearer ${token}` } : {},
       success: (res) => {

@@ -15,6 +15,15 @@ describe('product import contracts', () => {
     expect(request).toContain("formData: warehouseId ? { warehouse_id: String(warehouseId) } : {}")
   })
 
+  it('allows product imports to run for up to ten minutes', () => {
+    const manifest = read('manifest.json')
+    const request = read('utils/request.js')
+
+    expect(manifest).toContain('"uploadFile" : 600000')
+    expect(request).toContain('const PRODUCT_IMPORT_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000')
+    expect(request).toContain('timeout: PRODUCT_IMPORT_UPLOAD_TIMEOUT_MS')
+  })
+
   it('keeps warehouse optional for archive-only imports', () => {
     const page = read('pages/products/import.vue')
 
