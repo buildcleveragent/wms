@@ -8,8 +8,8 @@
 	    </view>
   
     <view class="bar">
-      <input class="input flex-input" v-model="q" placeholder="名称/编码/条码 可输入部分内容" data-testid="product-search-input" @confirm="search" />
-      <button class="btn-outline" data-testid="product-search-submit" :disabled="searching" @click="search">搜索</button>
+      <input class="input flex-input" v-model="q" focus confirm-hold placeholder="名称/编码/条码 可输入部分内容" data-testid="product-search-input" @confirm="search($event)" />
+      <button class="btn-outline" data-testid="product-search-submit" :disabled="searching" @click="search()">搜索</button>
       <button class="btn-outline" @click="quickScan">扫码</button>
     </view>
 
@@ -21,7 +21,7 @@
         <text class="search-state-title">{{ searchError.detail }}</text>
         <text v-if="searchError.code" class="search-state-meta">错误代码：{{ searchError.code }}</text>
         <text v-if="searchError.requestId" class="search-state-meta">错误编号：{{ searchError.requestId }}</text>
-        <button v-if="searchError.retryable" data-testid="product-search-retry" class="btn-outline retry-button" @click="search">重新查询</button>
+        <button v-if="searchError.retryable" data-testid="product-search-retry" class="btn-outline retry-button" @click="search()">重新查询</button>
       </view>
       <view v-else-if="emptyMessage" data-testid="product-search-empty" class="search-state">
         {{ emptyMessage }}
@@ -310,30 +310,50 @@ function displaySelectedPkg(pid:number, pkgs:any[]){
 // =========================
 // 搜索
 // =========================
-async function search(){
-  if (!cart.owner?.id || searching.value) return
+let latestSearchId = 0
+
+function searchKeyword(input?: any): string {
+  if (typeof input === 'string') return input.trim()
+  const confirmedValue = input?.detail?.value
+  return String(confirmedValue ?? q.value ?? '').trim()
+}
+
+function isLatestSearch(searchId:number): boolean {
+  return searchId === latestSearchId
+}
+
+async function search(input?: any){
+  if (!cart.owner?.id) return
+  const keyword = searchKeyword(input)
+  q.value = keyword
+  const searchId = ++latestSearchId
   searching.value = true
   searchError.value = null
   emptyMessage.value = ''
   list.value = { count:0, next:null, previous:null, results:[] }
+  gs1Visible.value = false
+  gs1Candidate.value = null
+  gs1Options.value = { categories: [], uoms: [] }
   try {
     // 本地商品优先；只有完整 GTIN 未命中时才访问外部 GS1 服务。
-    const res:any = await api.receive_products(q.value, 1, cart.owner.id)
+    const res:any = await api.receive_products(keyword, 1, cart.owner.id)
+    if (!isLatestSearch(searchId)) return
     list.value = Array.isArray(res)
       ? { count: res.length, next:null, previous:null, results: res }
       : (res?.results ? res : { count:0, next:null, previous:null, results:[] })
 
-    const keyword = q.value.trim()
     const isFullGtin = /^(?:\d{8}|\d{12}|\d{13}|\d{14}|01\d{14})$/.test(keyword)
     if (!list.value.results.length && isFullGtin) {
-      await lookupGs1(keyword)
+      await lookupGs1(keyword, searchId)
     } else if (!list.value.results.length) {
       emptyMessage.value = keyword ? '系统中未找到匹配商品' : '暂无可收货商品'
     }
   } catch (error:any) {
-    showSearchError(error, '商品查询失败，请稍后重试。')
+    if (isLatestSearch(searchId)) {
+      showSearchError(error, '商品查询失败，请稍后重试。')
+    }
   } finally {
-    searching.value = false
+    if (isLatestSearch(searchId)) searching.value = false
   }
 }
 
@@ -556,13 +576,15 @@ function goExcelImport(){
 const { quickScan } = useBarcodeScanner({ onScan: handleBarcodeScanned })
 
 async function handleBarcodeScanned(code:string){
-  q.value = String(code || '').trim()
-  await search()
+  const keyword = String(code || '').trim()
+  q.value = keyword
+  await search(keyword)
 }
 
-async function lookupGs1(code:string){
+async function lookupGs1(code:string, searchId:number){
   try {
     const result:any = await api.gs1ProductLookup(cart.owner.id, code)
+    if (!isLatestSearch(searchId)) return
     if (result?.source === 'local' && result.product) {
       list.value = { count: 1, next: null, previous: null, results: [result.product] }
       emptyMessage.value = ''
@@ -575,6 +597,7 @@ async function lookupGs1(code:string){
       return
     }
     const options:any = await api.gs1ProductOptions(cart.owner.id)
+    if (!isLatestSearch(searchId)) return
     gs1Candidate.value = candidate
     gs1Options.value = {
       categories: options?.categories || [],
@@ -582,7 +605,9 @@ async function lookupGs1(code:string){
     }
     gs1Visible.value = true
   } catch (error:any) {
-    showSearchError(error, 'GS1 查询失败，请稍后重试。')
+    if (isLatestSearch(searchId)) {
+      showSearchError(error, 'GS1 查询失败，请稍后重试。')
+    }
   }
 }
 

@@ -15,7 +15,12 @@ const candidate = {
 
 test('unknown GTIN can be created immediately and added to the receiving cart', async ({ page }) => {
   test.setTimeout(180_000)
-  let quickCreatePayload = null
+  const quickCreatePayloads = []
+  const runtimeErrors = []
+  page.on('pageerror', (error) => runtimeErrors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error') runtimeErrors.push(message.text())
+  })
   await page.route('https://www.gds.org.cn/**', (route) =>
     route.fulfill({
       status: 200,
@@ -35,13 +40,17 @@ test('unknown GTIN can be created immediately and added to the receiving cart', 
   await page.route('**/api/inbound/gs1-products/options/?**', (route) =>
     route.fulfill({
       json: {
-        categories: [{ id: 21, code: 'DRINK', name: '饮品', label: '食品 / 饮品' }],
+        categories: [
+          { id: 21, code: 'DRINK', name: '饮品', label: '食品 / 饮品' },
+          { id: 22, code: 'OIL', name: '粮油', label: '食品 / 粮油' },
+          { id: 23, code: 'OFFICE', name: '办公用品', label: '办公 / 文具' },
+        ],
         uoms: [{ id: 8, code: 'BTL', name: '瓶', label: '瓶 (BTL)' }],
       },
     }),
   )
   await page.route('**/api/inbound/gs1-products/quick-create/', async (route) => {
-    quickCreatePayload = route.request().postDataJSON()
+    quickCreatePayloads.push(route.request().postDataJSON())
     await route.fulfill({
       status: 201,
       json: {
@@ -84,17 +93,24 @@ test('unknown GTIN can be created immediately and added to the receiving cart', 
   await expect(page.getByText(candidate.specification, { exact: true })).toBeVisible()
   await expect(page.getByText(/测试品牌.*测试饮品制造有限公司/)).toBeVisible()
   await expect(page.getByTestId('gs1-candidate-image')).toBeVisible()
+  await expect(page.getByTestId('gs1-category-grid')).toBeVisible()
+  await expect(page.getByTestId('gs1-category-option')).toHaveCount(3)
+  await expect(page.getByTestId('gs1-batch-switch')).toHaveCount(0)
+  await expect(page.getByTestId('gs1-expiry-switch')).toHaveCount(0)
+  await expect(page.getByTestId('gs1-lot-no')).toBeVisible()
+  await expect(page.getByTestId('gs1-expiry-fields')).toBeVisible()
 
-  await page.getByTestId('gs1-category-option').click()
+  await page.getByTestId('gs1-category-option').filter({ hasText: '食品 / 饮品' }).click()
   await page.getByTestId('gs1-uom-option').click()
   const quantityInput = page.getByTestId('gs1-quantity').locator('input')
   await expect(quantityInput).toHaveValue('1')
-  await page.getByTestId('gs1-batch-switch').click()
-  await page.getByTestId('gs1-expiry-switch').click()
+  await page.screenshot({ path: '/tmp/wmspda-gs1-quick-create-form.png', fullPage: true })
+  await page.getByTestId('gs1-expiry-fields').scrollIntoViewIfNeeded()
+  await page.screenshot({ path: '/tmp/wmspda-gs1-quick-create-tracking.png', fullPage: false })
   await page.getByTestId('gs1-submit').click()
 
   await expect(page.getByTestId('gs1-quick-create-modal')).toHaveCount(0)
-  expect(quickCreatePayload).toMatchObject({
+  expect(quickCreatePayloads[0]).toMatchObject({
     owner_id: 7,
     lookup_id: candidate.lookup_id,
     category_id: 21,
@@ -105,6 +121,25 @@ test('unknown GTIN can be created immediately and added to the receiving cart', 
   })
   await expect(page.getByText('测试饮用水', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('查看、提交入库单：数量:1')).toBeVisible()
+
+  await page.getByTestId('product-search-submit').click()
+  await expect(page.getByTestId('gs1-quick-create-modal')).toBeVisible()
+  await page.getByTestId('gs1-category-option').filter({ hasText: '食品 / 饮品' }).click()
+  await page.getByTestId('gs1-uom-option').click()
+  await page.getByTestId('gs1-lot-no').locator('input').fill('LOT-2026')
+  await page.getByText('入库日期', { exact: true }).click()
+  await page.getByTestId('gs1-inbound-valid-days').locator('input').fill('30')
+  await page.getByTestId('gs1-submit').click()
+  await expect(page.getByTestId('gs1-quick-create-modal')).toHaveCount(0)
+  expect(quickCreatePayloads[1]).toMatchObject({
+    batch_control: true,
+    lot_no: 'LOT-2026',
+    expiry_control: true,
+    expiry_basis: 'INBOUND',
+    inbound_valid_days: 30,
+  })
+  await expect(page.locator('vite-error-overlay')).toHaveCount(0)
+  expect(runtimeErrors).toEqual([])
   await page.screenshot({ path: '/tmp/wmspda-gs1-quick-create.png', fullPage: true })
 })
 

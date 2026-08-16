@@ -3,8 +3,9 @@ from urllib.parse import quote
 
 from django import forms
 from django.contrib import admin, messages
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models
+from django.forms.models import BaseInlineFormSet
 from django.http import HttpResponse
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
@@ -19,6 +20,7 @@ from .category_backfill import (
 from .identifier_services import (
     add_external_identifier, add_product_barcode, set_barcode_primary,
     set_external_primary, set_identifier_active,
+    validate_product_barcode_candidate,
 )
 from .identifier_lookup import filter_by_product_search
 from .models import (
@@ -97,12 +99,143 @@ class ProductPackageInline(admin.TabularInline):
     readonly_fields = ("volume_m3_status", "barcode")
 
 
+class ProductBarcodeAddForm(forms.ModelForm):
+    class Meta:
+        model = ProductBarcode
+        fields = (
+            "barcode",
+            "barcode_type",
+            "package",
+            "is_primary",
+            "valid_from",
+            "valid_to",
+            "is_active",
+        )
+
+    def __init__(self, *args, product=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.product = product
+        self.fields["package"].queryset = ProductPackage.all_objects.none()
+        if product and product.pk:
+            self.instance.product = product
+            self.instance.owner_id = product.owner_id
+            self.fields["package"].queryset = (
+                ProductPackage.all_objects.filter(
+                    product=product,
+                    is_active=True,
+                    is_deleted=False,
+                )
+                .select_related("product__base_uom", "uom")
+                .order_by("sort_order", "uom__code")
+            )
+
+
+class ProductBarcodeAddFormSet(BaseInlineFormSet):
+    def get_form_kwargs(self, index):
+        kwargs = super().get_form_kwargs(index)
+        kwargs["product"] = self.instance if self.instance.pk else None
+        return kwargs
+
+    @staticmethod
+    def _add_validation_error(form, error):
+        if hasattr(error, "error_dict"):
+            for field, errors in error.error_dict.items():
+                form.add_error(field if field in form.fields else None, errors)
+            return
+        form.add_error(None, error)
+
+    def clean(self):
+        super().clean()
+        seen = {}
+        for form in self.forms:
+            if form.errors or not form.cleaned_data or form.cleaned_data.get("DELETE"):
+                continue
+            data = form.cleaned_data
+            try:
+                candidate = validate_product_barcode_candidate(
+                    product=self.instance,
+                    barcode=data["barcode"],
+                    barcode_type=data["barcode_type"],
+                    package=data.get("package"),
+                    is_primary=data.get("is_primary", False),
+                    valid_from=data.get("valid_from"),
+                    valid_to=data.get("valid_to"),
+                    is_active=data.get("is_active", True),
+                )
+            except ValidationError as exc:
+                self._add_validation_error(form, exc)
+                continue
+
+            semantic_key = (candidate.package_id, candidate.qty_in_base)
+            previous = seen.get(candidate.normalized_value)
+            if previous and previous[0] != semantic_key:
+                form.add_error(
+                    "barcode",
+                    "同一批新增行中，该条码具有不同包装或换算语义。",
+                )
+                continue
+            exact_key = (
+                candidate.normalized_value,
+                candidate.barcode_type,
+                candidate.package_id,
+            )
+            if previous and exact_key in previous[1]:
+                form.add_error("barcode", "同一批新增行中已有相同条码记录。")
+                continue
+            if previous:
+                previous[1].add(exact_key)
+            else:
+                seen[candidate.normalized_value] = (semantic_key, {exact_key})
+
+    def save_new(self, form, commit=True):
+        data = form.cleaned_data
+        return add_product_barcode(
+            product=self.instance,
+            barcode=data["barcode"],
+            barcode_type=data["barcode_type"],
+            package=data.get("package"),
+            is_primary=data.get("is_primary", False),
+            valid_from=data.get("valid_from"),
+            valid_to=data.get("valid_to"),
+            is_active=data.get("is_active", True),
+        )
+
+
+class ProductBarcodeAddInline(admin.TabularInline):
+    model = ProductBarcode
+    form = ProductBarcodeAddForm
+    formset = ProductBarcodeAddFormSet
+    extra = 1
+    fields = (
+        "barcode",
+        "barcode_type",
+        "package",
+        "is_primary",
+        "valid_from",
+        "valid_to",
+        "is_active",
+    )
+    verbose_name = "新增商品条码"
+    verbose_name_plural = "新增商品条码"
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).none()
+
+    def has_add_permission(self, request, obj=None):
+        return bool(obj and obj.pk) and super().has_add_permission(request, obj)
+
+
 class ProductBarcodeHistoryInline(admin.TabularInline):
     model = ProductBarcode
     extra = 0
     can_delete = False
     fields = ("barcode", "barcode_type", "package", "qty_in_base", "is_primary", "valid_from", "valid_to", "is_active")
     readonly_fields = fields
+    verbose_name = "商品条码历史"
+    verbose_name_plural = "商品条码历史"
+
+    def has_add_permission(self, request, obj=None):
+        return False
 
 
 class ProductExternalIdentifierHistoryInline(admin.TabularInline):
@@ -116,7 +249,12 @@ class ProductExternalIdentifierHistoryInline(admin.TabularInline):
 class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     admin_priority = 1
     change_list_template = "admin/products/product/change_list.html"
-    inlines = [ProductPackageInline, ProductBarcodeHistoryInline, ProductExternalIdentifierHistoryInline]
+    inlines = [
+        ProductPackageInline,
+        ProductBarcodeAddInline,
+        ProductBarcodeHistoryInline,
+        ProductExternalIdentifierHistoryInline,
+    ]
     list_display = (
         "owner","name","spec","sku","code", "gtin", "unit_barcode", "carton_barcode",
         "carton_package",

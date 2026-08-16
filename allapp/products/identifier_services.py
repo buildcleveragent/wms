@@ -21,6 +21,7 @@ BARCODE_PROJECTIONS = {
     ProductBarcode.BarcodeType.UNIT: "unit_barcode",
     ProductBarcode.BarcodeType.CARTON: "carton_barcode",
 }
+_RESERVATION_NOT_LOADED = object()
 
 
 class IdentifierConcurrencyError(RuntimeError):
@@ -72,12 +73,23 @@ def _semantic_keys(product, normalized_value):
     return keys
 
 
-def _reserve(product, normalized_value, semantic_key, error_field="barcode"):
-    existing = (
-        ProductIdentifierRegistry.objects.select_for_update()
-        .filter(owner_id=product.owner_id, normalized_value=normalized_value)
-        .first()
-    )
+def _validate_reservation(
+    product,
+    normalized_value,
+    semantic_key,
+    error_field,
+    *,
+    existing=_RESERVATION_NOT_LOADED,
+):
+    if existing is _RESERVATION_NOT_LOADED:
+        existing = (
+            ProductIdentifierRegistry.objects.filter(
+                owner_id=product.owner_id,
+                normalized_value=normalized_value,
+            )
+            .select_related("product")
+            .first()
+        )
     if existing and existing.product_id != product.pk:
         raise ValidationError(
             {
@@ -92,6 +104,24 @@ def _reserve(product, normalized_value, semantic_key, error_field="barcode"):
                     error_field: f"标识“{normalized_value}”在同一商品中具有不同包装或换算语义。"
                 }
             )
+    return existing
+
+
+def _reserve(product, normalized_value, semantic_key, error_field="barcode"):
+    existing = (
+        ProductIdentifierRegistry.objects.select_for_update()
+        .filter(owner_id=product.owner_id, normalized_value=normalized_value)
+        .select_related("product")
+        .first()
+    )
+    _validate_reservation(
+        product,
+        normalized_value,
+        semantic_key,
+        error_field,
+        existing=existing,
+    )
+    if existing:
         return existing
     try:
         return ProductIdentifierRegistry.objects.create(
@@ -142,8 +172,7 @@ def _project_package(package, value):
         delattr(package, "_allow_identifier_projection_update")
 
 
-@transaction.atomic
-def add_product_barcode(
+def validate_product_barcode_candidate(
     *,
     product,
     barcode,
@@ -153,37 +182,23 @@ def add_product_barcode(
     valid_from=None,
     valid_to=None,
     is_active=True,
-    project=True,
 ):
-    product = Product.all_objects.select_for_update().get(pk=product.pk)
+    """Validate a prospective barcode without writing identifier history."""
     barcode_type = str(barcode_type).strip().upper()
     normalized = normalize_product_identifier(barcode)
     if not normalized:
         raise ValidationError({"barcode": "条码不能为空；退役请使用 RETIRE 操作。"})
+
     if barcode_type in {
         ProductBarcode.BarcodeType.CARTON,
         ProductBarcode.BarcodeType.PACKAGE,
     }:
         if package is None:
             raise ValidationError({"package": "该条码类型必须指定包装层级。"})
-        package = ProductPackage.all_objects.select_for_update().get(pk=package.pk)
-        if package.product_id != product.pk:
-            raise ValidationError({"package": "包装层级必须属于当前商品。"})
-        if package.is_deleted or not package.is_active:
-            raise ValidationError({"package": "包装层级必须启用且未删除。"})
         semantic_key = (package.pk, package.qty_in_base)
     else:
         semantic_key = (None, 1)
-    _reserve(product, normalized, semantic_key)
-    if ProductBarcode.all_objects.filter(
-        product=product,
-        normalized_value=normalized,
-        barcode_type=barcode_type,
-        package=package,
-    ).exists():
-        raise ValidationError(
-            {"barcode": "相同商品、类型和包装层级的该条码记录已存在。"}
-        )
+
     record = ProductBarcode(
         owner_id=product.owner_id,
         product=product,
@@ -200,6 +215,58 @@ def add_product_barcode(
     record.full_clean()
     if is_primary:
         _ensure_can_be_primary(record)
+    _validate_reservation(product, normalized, semantic_key, "barcode")
+    if ProductBarcode.all_objects.filter(
+        product=product,
+        normalized_value=normalized,
+        barcode_type=barcode_type,
+        package=package,
+    ).exists():
+        raise ValidationError(
+            {"barcode": "相同商品、类型和包装层级的该条码记录已存在。"}
+        )
+    return record
+
+
+@transaction.atomic
+def add_product_barcode(
+    *,
+    product,
+    barcode,
+    barcode_type,
+    package=None,
+    is_primary=False,
+    valid_from=None,
+    valid_to=None,
+    is_active=True,
+    project=True,
+):
+    product = Product.all_objects.select_for_update().get(pk=product.pk)
+    barcode_type = str(barcode_type).strip().upper()
+    if barcode_type in {
+        ProductBarcode.BarcodeType.CARTON,
+        ProductBarcode.BarcodeType.PACKAGE,
+    }:
+        if package is None:
+            raise ValidationError({"package": "该条码类型必须指定包装层级。"})
+        package = ProductPackage.all_objects.select_for_update().get(pk=package.pk)
+        if package.product_id != product.pk:
+            raise ValidationError({"package": "包装层级必须属于当前商品。"})
+        if package.is_deleted or not package.is_active:
+            raise ValidationError({"package": "包装层级必须启用且未删除。"})
+    record = validate_product_barcode_candidate(
+        product=product,
+        barcode=barcode,
+        barcode_type=barcode_type,
+        package=package,
+        is_primary=is_primary,
+        valid_from=valid_from,
+        valid_to=valid_to,
+        is_active=is_active,
+    )
+    semantic_key = (record.package_id, record.qty_in_base)
+    _reserve(product, record.normalized_value, semantic_key)
+    if is_primary:
         _demote(
             ProductBarcode.all_objects.select_for_update().filter(
                 product=product,
