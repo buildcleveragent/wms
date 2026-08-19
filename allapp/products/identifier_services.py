@@ -182,6 +182,8 @@ def validate_product_barcode_candidate(
     valid_from=None,
     valid_to=None,
     is_active=True,
+    remark=None,
+    actor=None,
 ):
     """Validate a prospective barcode without writing identifier history."""
     barcode_type = str(barcode_type).strip().upper()
@@ -211,6 +213,9 @@ def validate_product_barcode_candidate(
         is_active=is_active,
         valid_from=valid_from,
         valid_to=valid_to,
+        remark=remark,
+        created_by=actor,
+        updated_by=actor,
     )
     record.full_clean()
     if is_primary:
@@ -239,6 +244,8 @@ def add_product_barcode(
     valid_from=None,
     valid_to=None,
     is_active=True,
+    remark=None,
+    actor=None,
     project=True,
 ):
     product = Product.all_objects.select_for_update().get(pk=product.pk)
@@ -263,6 +270,8 @@ def add_product_barcode(
         valid_from=valid_from,
         valid_to=valid_to,
         is_active=is_active,
+        remark=remark,
+        actor=actor,
     )
     semantic_key = (record.package_id, record.qty_in_base)
     _reserve(product, record.normalized_value, semantic_key)

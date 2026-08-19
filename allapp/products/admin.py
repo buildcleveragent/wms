@@ -1,6 +1,7 @@
 from __future__ import annotations
 from urllib.parse import quote
 
+from dal import autocomplete
 from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -16,6 +17,11 @@ from .category_backfill import (
     build_category_backfill_workbook,
     import_category_backfill,
     scoped_products,
+)
+from .autocomplete import (
+    ProductBarcodeOwnerAutocomplete,
+    ProductBarcodePackageAutocomplete,
+    ProductBarcodeProductAutocomplete,
 )
 from .identifier_services import (
     add_external_identifier, add_product_barcode, set_barcode_primary,
@@ -238,6 +244,133 @@ class ProductBarcodeHistoryInline(admin.TabularInline):
         return False
 
 
+class ProductBarcodeAdminForm(forms.ModelForm):
+    """Owner-aware form for creating a barcode outside the product page."""
+
+    class Meta:
+        model = ProductBarcode
+        fields = (
+            "owner",
+            "product",
+            "barcode",
+            "barcode_type",
+            "package",
+            "is_primary",
+            "valid_from",
+            "valid_to",
+            "remark",
+            "is_active",
+        )
+        widgets = {
+            "owner": autocomplete.ModelSelect2(
+                url="admin:products_productbarcode_owner_autocomplete",
+                attrs={"data-placeholder": "搜索货主编码或名称"},
+            ),
+            "product": autocomplete.ModelSelect2(
+                url="admin:products_productbarcode_product_autocomplete",
+                forward=("owner",),
+                attrs={"data-placeholder": "先选择货主，再搜索商品"},
+            ),
+            "package": autocomplete.ModelSelect2(
+                url="admin:products_productbarcode_package_autocomplete",
+                forward=("product",),
+                attrs={"data-placeholder": "先选择商品，再搜索包装层级"},
+            ),
+        }
+
+    class Media:
+        js = ("admin/product_barcode_form.js",)
+
+    def __init__(self, *args, request=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.request = request
+        allowed_products = Product.objects.none()
+        if request is not None:
+            allowed_products = scoped_products(
+                request.user,
+                Product.objects.select_related("owner"),
+            )
+
+        product_id = self._selected_id("product")
+        owner_id = self._selected_id("owner")
+        if not self.is_bound and product_id and not owner_id:
+            selected_product = allowed_products.filter(pk=product_id).first()
+            if selected_product:
+                owner_id = selected_product.owner_id
+                self.initial["owner"] = owner_id
+
+        if "owner" in self.fields:
+            self.fields["owner"].queryset = self.fields["owner"].queryset.filter(
+                pk__in=allowed_products.values("owner_id")
+            )
+        if "product" in self.fields:
+            self.fields["product"].queryset = Product.objects.none()
+            if owner_id:
+                self.fields["product"].queryset = allowed_products.filter(
+                    owner_id=owner_id
+                ).order_by("code")
+        if "package" in self.fields:
+            self.fields["package"].queryset = ProductPackage.all_objects.none()
+            if product_id and allowed_products.filter(pk=product_id).exists():
+                self.fields["package"].queryset = (
+                    ProductPackage.all_objects.filter(
+                        product_id=product_id,
+                        is_active=True,
+                        is_deleted=False,
+                    )
+                    .select_related("product", "uom")
+                    .order_by("sort_order", "uom__code")
+                )
+
+    def _selected_id(self, field_name):
+        value = None
+        if self.is_bound:
+            value = self.data.get(self.add_prefix(field_name))
+        else:
+            value = self.initial.get(field_name)
+            if value is None:
+                value = getattr(self.instance, f"{field_name}_id", None)
+        return getattr(value, "pk", value) or None
+
+    @staticmethod
+    def _add_validation_error(form, error):
+        if hasattr(error, "error_dict"):
+            for field, errors in error.error_dict.items():
+                form.add_error(field if field in form.fields else None, errors)
+            return
+        form.add_error(None, error)
+
+    def clean(self):
+        data = super().clean()
+        if self.instance.pk:
+            return data
+
+        owner = data.get("owner")
+        product = data.get("product")
+        if owner and product and owner.pk != product.owner_id:
+            self.add_error("owner", "所选货主必须与商品货主一致。")
+
+        required_fields = {"product", "barcode", "barcode_type", "package"}
+        if not product or required_fields.intersection(self._errors):
+            return data
+        try:
+            validate_product_barcode_candidate(
+                product=product,
+                barcode=data.get("barcode"),
+                barcode_type=data.get("barcode_type"),
+                package=data.get("package"),
+                is_primary=data.get("is_primary", False),
+                valid_from=data.get("valid_from"),
+                valid_to=data.get("valid_to"),
+                is_active=data.get("is_active", True),
+                remark=data.get("remark"),
+                actor=self.request.user if self.request else None,
+            )
+        except ValidationError as exc:
+            self._add_validation_error(self, exc)
+        return data
+
+
 class ProductExternalIdentifierHistoryInline(admin.TabularInline):
     model = ProductExternalIdentifier
     extra = 0
@@ -449,17 +582,92 @@ class ProductPackageAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
 
 @admin.register(ProductBarcode)
 class ProductBarcodeAdmin(admin.ModelAdmin):
+    form = ProductBarcodeAdminForm
     list_display = ("owner", "product", "barcode", "barcode_type", "package", "qty_in_base", "is_primary", "is_active", "valid_from", "valid_to")
     list_filter = ("owner", "barcode_type", "is_primary", "is_active")
     search_fields = ("barcode", "normalized_value", "product__code", "product__name")
-    autocomplete_fields = ("product", "package")
-    readonly_fields = ("owner", "normalized_value", "qty_in_base")
+    readonly_fields = ("normalized_value", "qty_in_base")
     actions = ("make_primary", "retire", "reactivate")
+
+    add_fields = (
+        "owner",
+        "product",
+        "barcode",
+        "barcode_type",
+        "package",
+        "is_primary",
+        "valid_from",
+        "valid_to",
+        "remark",
+        "is_active",
+    )
+    change_fields = (
+        "owner",
+        "product",
+        "barcode",
+        "barcode_type",
+        "package",
+        "normalized_value",
+        "qty_in_base",
+        "is_primary",
+        "valid_from",
+        "valid_to",
+        "remark",
+        "is_active",
+    )
+
+    def get_urls(self):
+        custom_urls = [
+            path(
+                "autocomplete/owner/",
+                self.admin_site.admin_view(
+                    ProductBarcodeOwnerAutocomplete.as_view()
+                ),
+                name="products_productbarcode_owner_autocomplete",
+            ),
+            path(
+                "autocomplete/product/",
+                self.admin_site.admin_view(
+                    ProductBarcodeProductAutocomplete.as_view()
+                ),
+                name="products_productbarcode_product_autocomplete",
+            ),
+            path(
+                "autocomplete/package/",
+                self.admin_site.admin_view(
+                    ProductBarcodePackageAutocomplete.as_view()
+                ),
+                name="products_productbarcode_package_autocomplete",
+            ),
+        ]
+        return custom_urls + super().get_urls()
+
+    def get_form(self, request, obj=None, **kwargs):
+        base_form = super().get_form(request, obj, **kwargs)
+
+        class RequestAwareProductBarcodeForm(base_form):
+            def __init__(form_self, *args, **form_kwargs):
+                form_kwargs["request"] = request
+                super().__init__(*args, **form_kwargs)
+
+        return RequestAwareProductBarcodeForm
+
+    def get_fields(self, request, obj=None):
+        return self.change_fields if obj else self.add_fields
 
     def get_readonly_fields(self, request, obj=None):
         fields = list(super().get_readonly_fields(request, obj))
         if obj:
-            fields.extend(["product", "barcode", "barcode_type", "package", "is_primary"])
+            fields.extend(
+                [
+                    "owner",
+                    "product",
+                    "barcode",
+                    "barcode_type",
+                    "package",
+                    "is_primary",
+                ]
+            )
         return tuple(fields)
 
     def save_model(self, request, obj, form, change):
@@ -468,13 +676,18 @@ class ProductBarcodeAdmin(admin.ModelAdmin):
                 product=obj.product, barcode=obj.barcode,
                 barcode_type=obj.barcode_type, package=obj.package,
                 is_primary=obj.is_primary, valid_from=obj.valid_from,
-                valid_to=obj.valid_to,
+                valid_to=obj.valid_to, is_active=obj.is_active,
+                remark=obj.remark, actor=request.user,
             )
             obj.pk = saved.pk
             obj._state.adding = False
             return
+        obj.updated_by = request.user
         obj._identifier_service_write = True
-        obj.save()
+        try:
+            obj.save()
+        finally:
+            delattr(obj, "_identifier_service_write")
 
     def delete_model(self, request, obj):
         set_identifier_active(obj, False)

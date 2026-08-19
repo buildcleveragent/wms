@@ -26,6 +26,7 @@ from django.utils import timezone
 from allapp.accounts.access import AccessScope
 from allapp.core.choices import InvTxType
 from allapp.inbound.models import InboundOrder, InboundOrderLine
+from allapp.inbound.selectors import pda_no_order_receive_q
 from allapp.inventory.models import InventoryTransaction
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.identifier_lookup import product_search_q
@@ -36,6 +37,7 @@ ZERO = Decimal("0")
 VALID_DIRECTIONS = {"inbound", "outbound", "all"}
 VALID_BASES = {"actual", "plan", "inventory", "shipment"}
 VALID_EXCEPTIONS = {"", "overdue", "shortage", "difference"}
+VALID_RECEIVE_SOURCES = {"", "no_order"}
 
 
 def _today() -> date:
@@ -65,6 +67,7 @@ class OperationFilters:
     task_no: str = ""
     operator: str = ""
     exception_type: str = ""
+    receive_source: str = ""
 
     def validate(self) -> None:
         if self.direction not in VALID_DIRECTIONS:
@@ -75,6 +78,10 @@ class OperationFilters:
             )
         if self.exception_type not in VALID_EXCEPTIONS:
             raise ValueError("exception_type must be overdue, shortage or difference.")
+        if self.receive_source not in VALID_RECEIVE_SOURCES:
+            raise ValueError("receive_source must be empty or no_order.")
+        if self.receive_source and self.direction != "inbound":
+            raise ValueError("receive_source is only available for inbound metrics.")
         if self.end_date < self.start_date:
             raise ValueError("end_date must not be before start_date.")
         if self.end_date - self.start_date > timedelta(days=366):
@@ -217,6 +224,10 @@ def _task_filter(
             Q(created_by__username__icontains=filters.operator)
             | Q(picked_by__username__icontains=filters.operator)
             | Q(posted_by__username__icontains=filters.operator)
+        )
+    if filters.receive_source == "no_order":
+        qs = qs.filter(pda_no_order_receive_q()).exclude(
+            status=WmsTask.Status.CANCELLED
         )
     if "warehouse_operator" in scope.roles:
         qs = qs.filter(

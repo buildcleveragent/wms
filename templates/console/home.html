@@ -1,556 +1,396 @@
 {% extends "console/base_console.html" %}
 
-{% block title %}首页仪表盘{% endblock %}
+{% block title %}仓库运营看板{% endblock %}
 
 {% block content %}
-<div style="margin-bottom: 20px;">
-    <h1 style="margin:0 0 8px 0;">运营看板(开发中,数据为示例)</h1>
-{#    <div style="color: var(--text-secondary); font-size: 14px;">{{ current_date }} · 实时运营概览</div>#}
-</div>
+<section class="dashboard-heading">
+  <div>
+    <h1>仓库运营看板</h1>
+    <p id="dashboard-meta" class="dashboard-meta" aria-live="polite">正在加载真实运营数据…</p>
+  </div>
+  <span class="dashboard-basis">仓储近30天 · POS今日</span>
+</section>
 
-<!-- 核心KPI看板 -->
-<div class="section-title">核心运营指标</div>
-<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:24px;">
-    <!-- 库存准确率 -->
-    <div class="kpi-card">
-        <div class="kpi-header">
-            <div class="kpi-title">库存准确率</div>
-            <div class="kpi-trend positive">↑ 2.1%</div>
-        </div>
-        <div class="kpi-value" id="kpi_accuracy">99.99%</div>
-        <div class="kpi-progress">
-            <div class="kpi-progress-bar" style="width: 99.8%; background: #10b981;"></div>
-        </div>
-        <div class="kpi-target">目标: 100%</div>
-    </div>
+<div id="dashboard-error" class="dashboard-message dashboard-message-error" role="alert" hidden></div>
+<div id="dashboard-warning" class="dashboard-message dashboard-message-warning" role="status" hidden></div>
 
-    <!-- 库存周转率 -->
-    <div class="kpi-card">
-        <div class="kpi-header">
-            <div class="kpi-title">库存周转率</div>
-            <div class="kpi-trend positive">↑ 0.3</div>
-        </div>
-        <div class="kpi-value" id="kpi_turnover">5.2</div>
-        <div class="kpi-comparison">同比: 4.9</div>
-        <div class="kpi-target">行业平均: 4.8</div>
-    </div>
+<section aria-labelledby="task-summary-title">
+  <h2 id="task-summary-title" class="section-title">近30天任务完成情况</h2>
+  <div class="kpi-grid">
+    <article class="kpi-card">
+      <div class="kpi-title">上架任务</div>
+      <div class="kpi-values">
+        <div><span class="kpi-number" id="k_put_total">--</span><span>任务总数</span></div>
+        <div><span class="kpi-number kpi-number-done" id="k_put_done">--</span><span>已完成</span></div>
+      </div>
+      <div class="progress-track" aria-hidden="true"><div id="k_put_bar" class="progress-value"></div></div>
+      <div id="k_put_rate" class="kpi-rate">完成率 --</div>
+    </article>
 
-    <!-- 仓库利用率 -->
-    <div class="kpi-card">
-        <div class="kpi-header">
-            <div class="kpi-title">仓库利用率</div>
-            <div class="kpi-trend warning">↑ 5%</div>
-        </div>
-        <div class="kpi-value" id="kpi_utilization">85%</div>
-        <div class="kpi-progress">
-            <div class="kpi-progress-bar" style="width: 85%; background: #f59e0b;"></div>
-        </div>
-        <div class="kpi-target">警戒线: 90%</div>
-    </div>
+    <article class="kpi-card">
+      <div class="kpi-title">拣货任务</div>
+      <div class="kpi-values">
+        <div><span class="kpi-number" id="k_pick_total">--</span><span>任务总数</span></div>
+        <div><span class="kpi-number kpi-number-done" id="k_pick_done">--</span><span>已完成</span></div>
+      </div>
+      <div class="progress-track" aria-hidden="true"><div id="k_pick_bar" class="progress-value"></div></div>
+      <div id="k_pick_rate" class="kpi-rate">完成率 --</div>
+    </article>
+  </div>
+</section>
 
-    <!-- 订单履行率 -->
-    <div class="kpi-card">
-        <div class="kpi-header">
-            <div class="kpi-title">订单履行率</div>
-            <div class="kpi-trend positive">↑ 1.2%</div>
-        </div>
-        <div class="kpi-value" id="kpi_fulfillment">98.5%</div>
-        <div class="kpi-progress">
-            <div class="kpi-progress-bar" style="width: 98.5%; background: #3b82f6;"></div>
-        </div>
-        <div class="kpi-target">目标: 98%</div>
-    </div>
-</div>
+<section aria-labelledby="no-order-title">
+  <h2 id="no-order-title" class="section-title">无订单收货</h2>
+  <p class="section-help">按实际库存过账统计最近30天收货量。</p>
+  <div id="no-order-unavailable" class="module-message" hidden>当前账号没有仓库运营报表查看权限。</div>
+  <div id="no-order-content" class="specialty-grid">
+    <article class="fact-card">
+      <div class="fact-title">近30天无订单收货</div>
+      <div class="fact-primary"><span id="no_order_qty">--</span><small>基本单位数量</small></div>
+      <div class="fact-details">
+        <div><strong id="no_order_orders">--</strong><span>收货任务</span></div>
+        <div><strong id="no_order_lines">--</strong><span>库存事务行</span></div>
+      </div>
+    </article>
+    <article class="chart-card">
+      <div class="card-title">无订单收货趋势 <span>实际过账数量</span></div>
+      <div id="chart_no_order" class="chart" aria-label="近30天无订单收货趋势图"></div>
+    </article>
+  </div>
+</section>
 
-<!-- 库存健康度 -->
-<div class="section-title">库存健康度分析</div>
-<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:24px;">
-    <!-- ABC分类 -->
-    <div class="card">
-        <div class="card-title">
-            <span>库存ABC分类</span>
-            <span class="card-subtitle">按价值分布</span>
-        </div>
-        <div id="chart_abc" class="chart"></div>
+<section aria-labelledby="pos-title">
+  <h2 id="pos-title" class="section-title">POS 收银</h2>
+  <p class="section-help">核心指标为今日数据；趋势展示最近30天每日净销售。</p>
+  <div id="pos-unavailable" class="module-message" hidden>当前账号没有 POS 销售单查看权限。</div>
+  <div id="pos-content">
+    <div class="fact-grid">
+      <article class="fact-card compact">
+        <div class="fact-title">今日净销售</div>
+        <div class="fact-primary money" id="pos_net_amount">--</div>
+        <div class="fact-foot">销售减已完成退货</div>
+      </article>
+      <article class="fact-card compact">
+        <div class="fact-title">今日完成单</div>
+        <div class="fact-primary" id="pos_completed_count">--</div>
+        <div class="fact-foot">已完成 POS 销售单</div>
+      </article>
+      <article class="fact-card compact">
+        <div class="fact-title">今日实收</div>
+        <div class="fact-primary money" id="pos_received_amount">--</div>
+        <div class="fact-foot">不含赊销，含可归属还款</div>
+      </article>
+      <article class="fact-card compact">
+        <div class="fact-title">今日退货</div>
+        <div class="fact-primary money" id="pos_return_amount">--</div>
+        <div class="fact-foot"><span id="pos_return_count">--</span> 笔已完成退货</div>
+      </article>
     </div>
+    <div class="chart-grid pos-chart-grid">
+      <article class="chart-card">
+        <div class="card-title">POS 净销售趋势 <span>最近30天</span></div>
+        <div id="chart_pos_trend" class="chart" aria-label="最近30天POS净销售趋势图"></div>
+      </article>
+      <article class="chart-card">
+        <div class="card-title">今日收银员排名 <span>净销售额前10名</span></div>
+        <div id="chart_pos_cashiers" class="chart" aria-label="今日收银员净销售排名"></div>
+      </article>
+    </div>
+  </div>
+</section>
 
-    <!-- 库龄分析 -->
-    <div class="card">
-        <div class="card-title">
-            <span>库龄分析</span>
-            <span class="card-subtitle">识别呆滞库存</span>
-        </div>
-        <div id="chart_aging" class="chart"></div>
-    </div>
-</div>
+<section aria-labelledby="order-title">
+  <h2 id="order-title" class="section-title">订单趋势与当前积压</h2>
+  <div class="chart-grid">
+    <article class="chart-card">
+      <div class="card-title">入库订单趋势 <span>总单数 / 已关闭单数</span></div>
+      <div id="chart_in_ts" class="chart" aria-label="入库订单趋势图"></div>
+    </article>
+    <article class="chart-card">
+      <div class="card-title">未关闭入库单 <span>按审核状态</span></div>
+      <div id="chart_in_backlog" class="chart" aria-label="未关闭入库订单状态图"></div>
+    </article>
+    <article class="chart-card">
+      <div class="card-title">出库订单趋势 <span>总单数 / 已关闭单数</span></div>
+      <div id="chart_out_ts" class="chart" aria-label="出库订单趋势图"></div>
+    </article>
+    <article class="chart-card">
+      <div class="card-title">未关闭出库单 <span>按审核状态</span></div>
+      <div id="chart_out_backlog" class="chart" aria-label="未关闭出库订单状态图"></div>
+    </article>
+  </div>
+</section>
 
-<!-- 实时运营监控 -->
-<div class="section-title">实时运营监控</div>
-<div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:24px;">
-    <!-- 运营趋势 -->
-    <div class="card">
-        <div class="card-title">关键指标趋势</div>
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;padding:12px;">
-            <div class="metric-card">
-                <div class="metric-label">今日收货</div>
-                <div class="metric-value" id="metric_receive">24批次</div>
-                <div class="metric-change positive">+8%</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-label">今日发货</div>
-                <div class="metric-value" id="metric_ship">186单</div>
-                <div class="metric-change positive">+12%</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-label">今日拣货</div>
-                <div class="metric-value" id="metric_pick">152单</div>
-                <div class="metric-change negative">-3%</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-label">今日打包</div>
-                <div class="metric-value" id="metric_pack">178单</div>
-                <div class="metric-change positive">+5%</div>
-            </div>
-        </div>
-        <div id="chart_trend" class="chart" style="height:200px;"></div>
-    </div>
-
-    <!-- 异常警报 -->
-    <div class="card">
-        <div class="card-title">
-            <span>异常警报</span>
-            <span class="alert-badge">3</span>
-        </div>
-        <div class="alert-list">
-            <div class="alert-item critical">
-                <div class="alert-icon">⚠️</div>
-                <div class="alert-content">
-                    <div class="alert-title">盘点差异待审核</div>
-                    <div class="alert-desc">SKU-A2387 差异数量: 15</div>
-                </div>
-            </div>
-            <div class="alert-item warning">
-                <div class="alert-icon">🔍</div>
-                <div class="alert-content">
-                    <div class="alert-title">收货异常</div>
-                    <div class="alert-desc">PO-20240128 数量不符</div>
-                </div>
-            </div>
-            <div class="alert-item info">
-                <div class="alert-icon">⏱️</div>
-                <div class="alert-content">
-                    <div class="alert-title">订单处理延迟</div>
-                    <div class="alert-desc">5单超时未处理</div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- 效率追踪 -->
-<div class="section-title">效率与生产力</div>
-<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;">
-    <div class="card">
-        <div class="card-title">订单履行趋势</div>
-        <div id="chart_fulfillment_trend" class="chart"></div>
-    </div>
-    <div class="card">
-        <div class="card-title">库存准确率趋势</div>
-        <div id="chart_accuracy_trend" class="chart"></div>
-    </div>
-    <div class="card">
-        <div class="card-title">各区域利用率</div>
-        <div id="chart_zone_utilization" class="chart"></div>
-    </div>
-</div>
+<section aria-labelledby="efficiency-title">
+  <h2 id="efficiency-title" class="section-title">当日人效排名</h2>
+  <p class="section-help">按作业员实际完成的任务行数统计，仅展示前10名。</p>
+  <div class="rank-grid">
+    <article class="chart-card">
+      <div class="card-title">上架 <span>完成任务行数</span></div>
+      <div id="eff_put" class="chart chart-rank" aria-label="当日上架人效排名"></div>
+    </article>
+    <article class="chart-card">
+      <div class="card-title">拣选 <span>完成任务行数</span></div>
+      <div id="eff_pick" class="chart chart-rank" aria-label="当日拣选人效排名"></div>
+    </article>
+    <article class="chart-card">
+      <div class="card-title">打包 <span>完成任务行数</span></div>
+      <div id="eff_pack" class="chart chart-rank" aria-label="当日打包人效排名"></div>
+    </article>
+  </div>
+</section>
 
 <style>
-.section-title {
-    font-size: 16px;
-    font-weight: 600;
-    margin: 20px 0 12px 0;
-    color: var(--text-primary);
-}
-
-.kpi-card {
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 16px;
-    background: #fff;
-    transition: all 0.2s ease;
-}
-
-.kpi-card:hover {
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    transform: translateY(-2px);
-}
-
-.kpi-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-}
-
-.kpi-title {
-    font-size: 14px;
-    color: var(--text-secondary);
-    font-weight: 500;
-}
-
-.kpi-trend {
-    font-size: 12px;
-    font-weight: 600;
-    padding: 2px 6px;
-    border-radius: 4px;
-}
-
-.kpi-trend.positive {
-    background: #dcfce7;
-    color: #166534;
-}
-
-.kpi-trend.warning {
-    background: #fef3c7;
-    color: #92400e;
-}
-
-.kpi-trend.negative {
-    background: #fee2e2;
-    color: #991b1b;
-}
-
-.kpi-value {
-    font-size: 28px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 8px 0;
-}
-
-.kpi-progress {
-    height: 6px;
-    background: #f3f4f6;
-    border-radius: 9999px;
-    margin: 8px 0;
-}
-
-.kpi-progress-bar {
-    height: 6px;
-    border-radius: 9999px;
-    transition: width 0.3s ease;
-}
-
-.kpi-comparison, .kpi-target {
-    font-size: 12px;
-    color: var(--text-secondary);
-}
-
-.card {
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: #fff;
-}
-
-.card-title {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--line);
-    font-weight: 600;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.card-subtitle {
-    font-size: 12px;
-    color: var(--text-secondary);
-    font-weight: 400;
-}
-
-.alert-badge {
-    background: #ef4444;
-    color: white;
-    font-size: 12px;
-    padding: 2px 8px;
-    border-radius: 9999px;
-}
-
-.alert-list {
-    padding: 8px 0;
-}
-
-.alert-item {
-    display: flex;
-    align-items: flex-start;
-    padding: 12px 16px;
-    border-left: 4px solid;
-}
-
-.alert-item.critical {
-    border-left-color: #ef4444;
-    background: #fef2f2;
-}
-
-.alert-item.warning {
-    border-left-color: #f59e0b;
-    background: #fffbeb;
-}
-
-.alert-item.info {
-    border-left-color: #3b82f6;
-    background: #eff6ff;
-}
-
-.alert-icon {
-    margin-right: 12px;
-    font-size: 16px;
-}
-
-.alert-content {
-    flex: 1;
-}
-
-.alert-title {
-    font-weight: 600;
-    font-size: 14px;
-    margin-bottom: 2px;
-}
-
-.alert-desc {
-    font-size: 12px;
-    color: var(--text-secondary);
-}
-
-.metric-card {
-    text-align: center;
-    padding: 12px;
-    border-radius: 8px;
-    background: #f8fafc;
-}
-
-.metric-label {
-    font-size: 12px;
-    color: var(--text-secondary);
-    margin-bottom: 4px;
-}
-
-.metric-value {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-}
-
-.metric-change {
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.metric-change.positive {
-    color: #10b981;
-}
-
-.metric-change.negative {
-    color: #ef4444;
-}
-
-.chart {
-    width: 100%;
-    height: 300px;
-    padding: 12px;
-}
-
-@media (max-width: 1200px) {
-    .chart {
-        height: 260px;
-    }
-}
-
-@media (max-width: 768px) {
-    .chart {
-        height: 220px;
-    }
-
-    .section-title {
-        font-size: 14px;
-    }
-
-    .kpi-value {
-        font-size: 24px;
-    }
-}
+.dashboard-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;}
+.dashboard-heading h1{margin:0 0 5px;font-size:25px;line-height:1.25;}
+.dashboard-meta,.section-help{margin:0;color:var(--muted);font-size:13px;}
+.dashboard-basis{border:1px solid var(--line);border-radius:999px;background:var(--brand-weak);color:var(--brand);font-size:13px;font-weight:700;padding:6px 11px;white-space:nowrap;}
+.dashboard-message{border-radius:10px;margin:10px 0;padding:10px 12px;font-size:14px;}
+.dashboard-message-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;}
+.dashboard-message-warning{background:#fffbeb;border:1px solid #fde68a;color:#92400e;}
+.module-message{border:1px dashed var(--line);border-radius:12px;background:var(--bg);color:var(--muted);padding:24px;text-align:center;}
+.section-title{font-size:16px;margin:22px 0 10px;}
+.section-help{margin-top:-5px;margin-bottom:10px;}
+.kpi-grid,.chart-grid,.rank-grid,.fact-grid,.specialty-grid{display:grid;gap:12px;}
+.kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+.chart-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+.rank-grid{grid-template-columns:repeat(3,minmax(0,1fr));}
+.fact-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:12px;}
+.specialty-grid{grid-template-columns:minmax(230px,.7fr) minmax(0,1.5fr);}
+.kpi-card,.chart-card,.fact-card{border:1px solid var(--line);border-radius:12px;background:var(--bg);box-shadow:0 1px 2px rgba(15,23,42,.04);}
+.kpi-card{padding:15px 16px;}
+.fact-card{display:flex;flex-direction:column;padding:16px;}
+.fact-card.compact{min-height:142px;}
+.fact-title{color:var(--muted);font-size:13px;font-weight:650;}
+.fact-primary{color:var(--fg);font-size:29px;font-weight:750;line-height:1.2;margin:15px 0;}
+.fact-primary small{color:var(--muted);font-size:11px;font-weight:500;margin-left:6px;}
+.fact-primary.money{color:var(--brand);font-size:25px;}
+.fact-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:auto;}
+.fact-details>div{display:flex;flex-direction:column;color:var(--muted);font-size:11px;}
+.fact-details strong{color:var(--fg);font-size:19px;}
+.fact-foot{color:var(--muted);font-size:11px;margin-top:auto;}
+.kpi-title,.card-title{font-weight:700;}
+.kpi-values{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0;}
+.kpi-values>div{display:flex;flex-direction:column;gap:2px;color:var(--muted);font-size:12px;}
+.kpi-number{color:var(--fg);font-size:27px;font-weight:750;line-height:1.15;}
+.kpi-number-done{color:var(--brand);}
+.progress-track{height:7px;background:var(--line);border-radius:999px;overflow:hidden;}
+.progress-value{height:100%;width:0;background:var(--brand);border-radius:999px;transition:width .25s ease;}
+.kpi-rate{margin-top:7px;color:var(--muted);font-size:12px;text-align:right;}
+.card-title{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:11px 13px;font-size:14px;}
+.card-title span{color:var(--muted);font-size:11px;font-weight:500;}
+.chart{width:100%;height:285px;}
+.chart-rank{height:260px;}
+.chart-empty,.chart-failed{height:100%;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px;text-align:center;padding:20px;}
+.chart-failed{color:#b45309;}
+@media (max-width:1000px){.rank-grid{grid-template-columns:1fr;}.fact-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.chart-rank{height:230px;}}
+@media (max-width:760px){.dashboard-heading{align-items:center;}.dashboard-heading h1{font-size:21px;}.dashboard-basis{white-space:normal;text-align:center;}.kpi-grid,.chart-grid,.fact-grid,.specialty-grid{grid-template-columns:1fr;}.chart{height:240px;}.kpi-number{font-size:24px;}.fact-card.compact{min-height:126px;}}
 </style>
 
-<!-- ECharts CDN -->
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" onerror="window.dashboardChartLibraryFailed=true"></script>
 <script>
 (async function(){
-    const r = await fetch("{% url 'console:dashboard_summary' %}");
-    const {ok, data} = await r.json();
-    if(!ok){
-        console.warn("dashboard api failed");
-        return;
+  const charts = [];
+  const meta = document.getElementById('dashboard-meta');
+  const errorBox = document.getElementById('dashboard-error');
+  const warningBox = document.getElementById('dashboard-warning');
+
+  function setMessage(element, message){
+    element.textContent = message;
+    element.hidden = !message;
+  }
+  function percent(total, done){
+    return total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  }
+  function setKpi(prefix, values){
+    const total = Number(values.total || 0);
+    const done = Number(values.done || 0);
+    const rate = percent(total, done);
+    document.getElementById(`k_${prefix}_total`).textContent = total;
+    document.getElementById(`k_${prefix}_done`).textContent = done;
+    document.getElementById(`k_${prefix}_bar`).style.width = `${rate}%`;
+    document.getElementById(`k_${prefix}_rate`).textContent = `完成率 ${rate}%`;
+  }
+  function setText(id, value){
+    document.getElementById(id).textContent = value;
+  }
+  function formatMoney(value){
+    return new Intl.NumberFormat('zh-CN', {
+      style:'currency',
+      currency:'CNY',
+      minimumFractionDigits:2,
+      maximumFractionDigits:2
+    }).format(Number(value || 0));
+  }
+  function showChartState(domId, message, failed){
+    const element = document.getElementById(domId);
+    element.innerHTML = `<div class="${failed ? 'chart-failed' : 'chart-empty'}"></div>`;
+    element.firstElementChild.textContent = message;
+  }
+  function hasValues(values){
+    return Array.isArray(values) && values.some(value => Number(value) !== 0);
+  }
+  function renderLine(domId, payload){
+    if (!hasValues(payload.total) && !hasValues(payload.finished)){
+      showChartState(domId, '最近30天暂无订单数据', false);
+      return;
     }
-
-    // 核心KPI数据
-    const kpi = data.kpi || {};
-    document.getElementById('kpi_accuracy').textContent = (kpi.accuracy || 0) + '%';
-    document.getElementById('kpi_turnover').textContent = kpi.turnover || '0';
-    document.getElementById('kpi_utilization').textContent = (kpi.utilization || 0) + '%';
-    document.getElementById('kpi_fulfillment').textContent = (kpi.fulfillment || 0) + '%';
-
-    // 实时指标
-    const metrics = data.metrics || {};
-    document.getElementById('metric_receive').textContent = (metrics.receive || 0) + '批次';
-    document.getElementById('metric_ship').textContent = (metrics.ship || 0) + '单';
-    document.getElementById('metric_pick').textContent = (metrics.pick || 0) + '单';
-    document.getElementById('metric_pack').textContent = (metrics.pack || 0) + '单';
-
-    // 图表渲染函数
-    function renderPie(domId, title, data) {
-        const chart = echarts.init(document.getElementById(domId));
-        chart.setOption({
-            tooltip: {
-                trigger: 'item',
-                formatter: '{a} <br/>{b}: {c} ({d}%)'
-            },
-            legend: {
-                orient: 'vertical',
-                right: 10,
-                top: 'center'
-            },
-            series: [{
-                name: title,
-                type: 'pie',
-                radius: ['40%', '70%'],
-                avoidLabelOverlap: false,
-                itemStyle: {
-                    borderRadius: 6,
-                    borderColor: '#fff',
-                    borderWidth: 2
-                },
-                label: {
-                    show: false
-                },
-                emphasis: {
-                    label: {
-                        show: true,
-                        fontSize: 14,
-                        fontWeight: 'bold'
-                    }
-                },
-                data: data
-            }]
-        });
-        return chart;
-    }
-
-    function renderBar(domId, title, data) {
-        const chart = echarts.init(document.getElementById(domId));
-        chart.setOption({
-            tooltip: {
-                trigger: 'axis'
-            },
-            grid: {
-                left: 50,
-                right: 20,
-                top: 20,
-                bottom: 30
-            },
-            xAxis: {
-                type: 'category',
-                data: data.categories
-            },
-            yAxis: {
-                type: 'value',
-                name: '数量'
-            },
-            series: [{
-                name: title,
-                type: 'bar',
-                data: data.values,
-                itemStyle: {
-                    color: function(params) {
-                        const colors = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981'];
-                        return colors[params.dataIndex] || '#6b7280';
-                    }
-                }
-            }]
-        });
-        return chart;
-    }
-
-    function renderLine(domId, title, data) {
-        const chart = echarts.init(document.getElementById(domId));
-        chart.setOption({
-            tooltip: {
-                trigger: 'axis'
-            },
-            legend: {
-                data: data.legends || [],
-                top: 6
-            },
-            grid: {
-                left: 40,
-                right: 20,
-                top: 40,
-                bottom: 30
-            },
-            xAxis: {
-                type: 'category',
-                data: data.dates
-            },
-            yAxis: {
-                type: 'value',
-                name: data.unit || '百分比'
-            },
-            series: data.series || []
-        });
-        return chart;
-    }
-
-    // 渲染图表
-    // ABC分类图
-    const abcData = data.abc_analysis || [
-        { value: 20, name: 'A类 (20%)' },
-        { value: 30, name: 'B类 (30%)' },
-        { value: 50, name: 'C类 (50%)' }
-    ];
-    renderPie('chart_abc', 'ABC分类', abcData);
-
-    // 库龄分析
-    const agingData = data.aging_analysis || {
-        categories: ['0-30天', '31-90天', '91-180天', '180天+'],
-        values: [60, 25, 10, 5]
-    };
-    renderBar('chart_aging', '库龄分布', agingData);
-
-    // 趋势图
-    const trendData = data.trend || {
-        dates: ['01-01', '01-02', '01-03', '01-04', '01-05'],
-        series: [
-            {
-                name: '订单履行率',
-                type: 'line',
-                data: [98.2, 98.5, 98.3, 98.7, 98.5],
-                smooth: true
-            },
-            {
-                name: '库存准确率',
-                type: 'line',
-                data: [99.5, 99.6, 99.7, 99.8, 99.8],
-                smooth: true
-            }
-        ]
-    };
-    renderLine('chart_trend', '运营趋势', trendData);
-
-    // 窗口大小变化时重绘图表
-    window.addEventListener('resize', function() {
-        echarts.getInstanceByDom(document.getElementById('chart_abc'))?.resize();
-        echarts.getInstanceByDom(document.getElementById('chart_aging'))?.resize();
-        echarts.getInstanceByDom(document.getElementById('chart_trend'))?.resize();
+    const chart = echarts.init(document.getElementById(domId));
+    chart.setOption({
+      tooltip:{trigger:'axis'},
+      legend:{data:['总单数','已关闭单数'],top:8},
+      grid:{left:42,right:18,top:44,bottom:34},
+      xAxis:{type:'category',data:payload.dates,axisLabel:{formatter:value => value.slice(5)}},
+      yAxis:{type:'value',minInterval:1,name:'单数'},
+      series:[
+        {name:'总单数',type:'bar',data:payload.total,barMaxWidth:16,itemStyle:{color:'#94a3b8'}},
+        {name:'已关闭单数',type:'line',data:payload.finished,smooth:true,itemStyle:{color:'#0b5fff'}}
+      ]
     });
+    charts.push(chart);
+  }
+  function renderBacklog(domId, payload){
+    if (!payload.labels.length){
+      showChartState(domId, '当前没有未关闭订单', false);
+      return;
+    }
+    const chart = echarts.init(document.getElementById(domId));
+    chart.setOption({
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+      grid:{left:128,right:24,top:18,bottom:24},
+      xAxis:{type:'value',minInterval:1},
+      yAxis:{type:'category',data:payload.labels,inverse:true,axisLabel:{width:112,overflow:'truncate'}},
+      series:[{type:'bar',data:payload.values,barMaxWidth:22,label:{show:true,position:'right'},itemStyle:{color:'#f59e0b'}}]
+    });
+    charts.push(chart);
+  }
+  function renderRank(domId, payload){
+    if (!payload.labels.length){
+      showChartState(domId, '今日暂无已完成任务行', false);
+      return;
+    }
+    const chart = echarts.init(document.getElementById(domId));
+    chart.setOption({
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+      grid:{left:88,right:28,top:18,bottom:22},
+      xAxis:{type:'value',minInterval:1,name:'行数'},
+      yAxis:{type:'category',data:payload.labels,inverse:true,axisLabel:{width:76,overflow:'truncate'}},
+      series:[{type:'bar',data:payload.values,barMaxWidth:20,label:{show:true,position:'right'},itemStyle:{color:'#10b981'}}]
+    });
+    charts.push(chart);
+  }
+  function renderValueTrend(domId, payload, options){
+    const values = payload[options.valueKey] || [];
+    if (!hasValues(values)){
+      showChartState(domId, options.emptyMessage, false);
+      return;
+    }
+    const chart = echarts.init(document.getElementById(domId));
+    chart.setOption({
+      tooltip:{trigger:'axis',valueFormatter:value => options.money ? formatMoney(value) : `${value}`},
+      grid:{left:58,right:24,top:24,bottom:34},
+      xAxis:{type:'category',data:payload.dates || [],axisLabel:{formatter:value => value.slice(5)}},
+      yAxis:{type:'value',name:options.axisName,axisLabel:{formatter:value => options.money ? `¥${value}` : value}},
+      series:[{type:'line',data:values,smooth:true,showSymbol:false,areaStyle:{opacity:.08},itemStyle:{color:options.color}}]
+    });
+    charts.push(chart);
+  }
+  function renderCashiers(domId, rows){
+    if (!Array.isArray(rows) || !rows.length){
+      showChartState(domId, '今日暂无 POS 收银数据', false);
+      return;
+    }
+    const chart = echarts.init(document.getElementById(domId));
+    chart.setOption({
+      tooltip:{trigger:'axis',axisPointer:{type:'shadow'},valueFormatter:value => formatMoney(value)},
+      grid:{left:94,right:32,top:18,bottom:24},
+      xAxis:{type:'value',axisLabel:{formatter:value => `¥${value}`}},
+      yAxis:{type:'category',inverse:true,data:rows.map(row => row.cashier_username || '未记录'),axisLabel:{width:82,overflow:'truncate'}},
+      series:[{type:'bar',data:rows.map(row => row.net_amount),barMaxWidth:20,label:{show:true,position:'right',formatter:item => formatMoney(item.value)},itemStyle:{color:'#8b5cf6'}}]
+    });
+    charts.push(chart);
+  }
+  function renderNoOrder(payload){
+    const available = Boolean(payload.available);
+    document.getElementById('no-order-unavailable').hidden = available;
+    document.getElementById('no-order-content').hidden = !available;
+    if (!available) return;
+    const summary = payload.summary || {};
+    setText('no_order_qty', summary.qty || '0.000');
+    setText('no_order_orders', Number(summary.orders || 0));
+    setText('no_order_lines', Number(summary.lines || 0));
+  }
+  function renderPos(payload){
+    const available = Boolean(payload.available);
+    document.getElementById('pos-unavailable').hidden = available;
+    document.getElementById('pos-content').hidden = !available;
+    if (!available) return;
+    const summary = ((payload.today || {}).summary) || {};
+    setText('pos_net_amount', formatMoney(summary.net_amount));
+    setText('pos_completed_count', Number(summary.completed_count || 0));
+    setText('pos_received_amount', formatMoney(summary.received_amount));
+    setText('pos_return_amount', formatMoney(summary.return_amount));
+    setText('pos_return_count', Number(summary.return_count || 0));
+  }
+  function failAllCharts(message){
+    ['chart_no_order','chart_pos_trend','chart_pos_cashiers','chart_in_ts','chart_in_backlog','chart_out_ts','chart_out_backlog','eff_put','eff_pick','eff_pack']
+      .forEach(id => showChartState(id, message, true));
+  }
 
+  try {
+    const response = await fetch("{% url 'console:dashboard_summary' %}", {
+      headers:{'Accept':'application/json'},
+      credentials:'same-origin'
+    });
+    if (!response.ok){
+      throw new Error(response.status === 403 ? '当前账号没有有效的数据访问范围。' : `数据接口返回 ${response.status}`);
+    }
+    const payload = await response.json();
+    if (!payload.ok || !payload.data){
+      throw new Error('数据接口返回格式不正确。');
+    }
+    const data = payload.data;
+    setKpi('put', (data.kpi || {}).putaway || {});
+    setKpi('pick', (data.kpi || {}).pick || {});
+    const noOrder = data.no_order_receive || {available:false};
+    const pos = data.pos || {available:false};
+    renderNoOrder(noOrder);
+    renderPos(pos);
+    const asOf = data.data_as_of ? new Date(data.data_as_of).toLocaleString('zh-CN', {hour12:false}) : '--';
+    const range = data.range || {};
+    meta.textContent = `数据截至 ${asOf} · 统计范围 ${range.start || '--'} 至 ${range.end || '--'}`;
+
+    if (typeof window.echarts === 'undefined'){
+      setMessage(warningBox, '运营数据已加载，但图表组件加载失败，请检查服务器外网或静态资源配置。');
+      failAllCharts('图表组件不可用');
+      return;
+    }
+    if (noOrder.available){
+      renderValueTrend('chart_no_order', noOrder.trend || {dates:[],qty:[]}, {
+        valueKey:'qty', axisName:'数量', color:'#0ea5e9', money:false,
+        emptyMessage:'最近30天暂无无订单收货数据'
+      });
+    }
+    if (pos.available){
+      renderValueTrend('chart_pos_trend', pos.trend_30d || {dates:[],net_amount:[]}, {
+        valueKey:'net_amount', axisName:'金额', color:'#8b5cf6', money:true,
+        emptyMessage:'最近30天暂无 POS 净销售数据'
+      });
+      renderCashiers('chart_pos_cashiers', ((pos.today || {}).cashiers) || []);
+    }
+    renderLine('chart_in_ts', data.inbound_ts || {dates:[],total:[],finished:[]});
+    renderLine('chart_out_ts', data.outbound_ts || {dates:[],total:[],finished:[]});
+    renderBacklog('chart_in_backlog', data.inbound_backlog || {labels:[],values:[]});
+    renderBacklog('chart_out_backlog', data.outbound_backlog || {labels:[],values:[]});
+    renderRank('eff_put', data.eff_putaway || {labels:[],values:[]});
+    renderRank('eff_pick', data.eff_pick || {labels:[],values:[]});
+    renderRank('eff_pack', data.eff_pack || {labels:[],values:[]});
+    window.addEventListener('resize', () => charts.forEach(chart => chart.resize()));
+  } catch (error) {
+    meta.textContent = '运营数据加载失败';
+    setMessage(errorBox, `无法加载运营看板：${error.message}`);
+    failAllCharts('数据加载失败');
+  }
 })();
 </script>
 {% endblock %}

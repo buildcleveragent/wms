@@ -18,17 +18,12 @@ from allapp.accounts.audit import record_audit_event
 from allapp.baseinfo.models import Supplier
 from allapp.core.admin_base import AdvancedAdminBase, BaseReadonlyAdmin
 from allapp.core.formatters import format_product_qty
-from allapp.inbound.constants import (
-    PDA_NO_ORDER_RECEIVE_NOTE,
-    PDA_NO_ORDER_RECEIVE_SOURCE_APP,
-    PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
-)
 from allapp.products.models import Product
 from allapp.products.identifier_lookup import (
     UnifiedProductAdminSearchMixin,
     filter_by_product_search,
 )
-from allapp.tasking.models import WmsTask, WmsTaskLine
+from allapp.tasking.models import WmsTaskLine
 
 from .models import (
     InboundOrder,
@@ -40,6 +35,7 @@ from .models import (
     PdaNoOrderReceive,
     ReturnInspection,
 )
+from .selectors import pda_no_order_receive_q
 
 logger = logging.getLogger(__name__)
 
@@ -756,16 +752,6 @@ class MyTaskFilter(SimpleListFilter):
             return queryset  # 全部
         # 普通收货员：强制只看到自己的
         return queryset.filter(assigned_to=request.user)
-
-
-def pda_no_order_receive_q():
-    return dj_models.Q(task_type=WmsTask.TaskType.RECEIVE) & (
-        dj_models.Q(
-            source_app=PDA_NO_ORDER_RECEIVE_SOURCE_APP,
-            source_model=PDA_NO_ORDER_RECEIVE_SOURCE_MODEL,
-        )
-        | dj_models.Q(posting_note__icontains=PDA_NO_ORDER_RECEIVE_NOTE)
-    )
 
 
 class PdaNoOrderReceiveLineInline(admin.TabularInline):

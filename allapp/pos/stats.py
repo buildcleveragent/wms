@@ -7,8 +7,10 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db.models import Count, DecimalField, Q, Sum, Value
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
+
+from allapp.accounts.access import AccessScope
 
 from .models import (
     PosCustomerRepayment,
@@ -150,6 +152,38 @@ def _base_querysets(*, warehouse_id, start_at, end_at, owner_id=None, cashier_id
         line_qs = line_qs.filter(sale__cashier_id=cashier_id)
         return_line_qs = return_line_qs.filter(return_order__cashier_id=cashier_id)
         repayment_qs = repayment_qs.filter(cashier_id=cashier_id)
+    return line_qs, return_line_qs, repayment_qs
+
+
+def _scoped_base_querysets(*, access_scope, start_at, end_at):
+    """Build POS fact querysets constrained by the shared WMS tenant scope."""
+
+    line_qs = access_scope.filter_queryset(
+        PosSaleLine.objects.filter(
+            sale__created_at__gte=start_at,
+            sale__created_at__lt=end_at,
+        ),
+        owner_field="owner_id",
+        warehouse_field="sale__warehouse_id",
+    )
+    return_line_qs = access_scope.filter_queryset(
+        PosReturnLine.objects.filter(
+            return_order__created_at__gte=start_at,
+            return_order__created_at__lt=end_at,
+            return_order__status=PosReturn.Status.COMPLETED,
+        ),
+        owner_field="owner_id",
+        warehouse_field="return_order__warehouse_id",
+    )
+    repayment_qs = access_scope.filter_queryset(
+        PosCustomerRepayment.objects.filter(
+            created_at__gte=start_at,
+            created_at__lt=end_at,
+            status=PosCustomerRepayment.Status.COMPLETED,
+        ),
+        owner_field=None,
+        warehouse_field="warehouse_id",
+    )
     return line_qs, return_line_qs, repayment_qs
 
 
@@ -544,22 +578,9 @@ def _cashier_rows(line_qs, return_line_qs):
     )
 
 
-def build_pos_stats_payload(*, user, params):
-    warehouse_id = getattr(user, "warehouse_id", None)
-    if not warehouse_id:
-        raise ValidationError("当前用户未绑定仓库(warehouse)，无法查询 POS 统计。")
-
-    parsed = parse_pos_stats_params(params)
-    start_at, end_at = _date_bounds(parsed["start_date"], parsed["end_date"])
-
-    line_qs, return_line_qs, repayment_qs = _base_querysets(
-        warehouse_id=warehouse_id,
-        start_at=start_at,
-        end_at=end_at,
-        owner_id=parsed["owner_id"],
-        cashier_id=parsed["cashier_id"],
-    )
-
+def _build_pos_stats_sections(
+    *, line_qs, return_line_qs, repayment_qs, top_n=10, include_details=True
+):
     sale_qs = PosSale.objects.filter(id__in=line_qs.values("sale_id").distinct())
     return_qs = PosReturn.objects.filter(
         id__in=return_line_qs.values("return_order_id").distinct()
@@ -602,16 +623,7 @@ def build_pos_stats_payload(*, user, params):
         if row["method"] != PosPayment.Method.CREDIT
     )
 
-    return {
-        "scope": {
-            "warehouse_id": warehouse_id,
-            "owner_id": parsed["owner_id"],
-            "cashier_id": parsed["cashier_id"],
-        },
-        "period": {
-            "start_date": parsed["start_date"].isoformat(),
-            "end_date": parsed["end_date"].isoformat(),
-        },
+    payload = {
         "summary": {
             "sale_count": counts["sale_count"] or 0,
             "completed_count": counts["completed_count"] or 0,
@@ -634,7 +646,118 @@ def build_pos_stats_payload(*, user, params):
             "repayment_amount": _money_text(repayment_amount),
         },
         "payments": payment_rows,
-        "owners": _owner_rows(line_qs, return_line_qs),
-        "products": _product_rows(line_qs, return_line_qs, top_n=parsed["top_n"]),
         "cashiers": _cashier_rows(line_qs, return_line_qs),
+    }
+    if include_details:
+        payload["owners"] = _owner_rows(line_qs, return_line_qs)
+        payload["products"] = _product_rows(
+            line_qs,
+            return_line_qs,
+            top_n=top_n,
+        )
+    return payload
+
+
+def _daily_net_sales(*, line_qs, return_line_qs, start_date, end_date):
+    sales = {
+        row["day"]: row["amount"] or ZERO_MONEY
+        for row in line_qs.filter(sale__status=PosSale.Status.COMPLETED)
+        .annotate(day=TruncDate("sale__created_at"))
+        .values("day")
+        .annotate(amount=_money_sum())
+        .order_by("day")
+    }
+    returns = {
+        row["day"]: row["amount"] or ZERO_MONEY
+        for row in return_line_qs.annotate(day=TruncDate("return_order__created_at"))
+        .values("day")
+        .annotate(amount=_money_sum())
+        .order_by("day")
+    }
+    dates = []
+    values = []
+    current = start_date
+    while current <= end_date:
+        dates.append(current.isoformat())
+        values.append(
+            _money_text(
+                sales.get(current, ZERO_MONEY) - returns.get(current, ZERO_MONEY)
+            )
+        )
+        current += datetime.timedelta(days=1)
+    return {"dates": dates, "net_amount": values}
+
+
+def build_pos_stats_payload(*, user, params):
+    """Build the existing single-warehouse wmspda POS report payload."""
+
+    warehouse_id = getattr(user, "warehouse_id", None)
+    if not warehouse_id:
+        raise ValidationError("当前用户未绑定仓库(warehouse)，无法查询 POS 统计。")
+
+    parsed = parse_pos_stats_params(params)
+    start_at, end_at = _date_bounds(parsed["start_date"], parsed["end_date"])
+    line_qs, return_line_qs, repayment_qs = _base_querysets(
+        warehouse_id=warehouse_id,
+        start_at=start_at,
+        end_at=end_at,
+        owner_id=parsed["owner_id"],
+        cashier_id=parsed["cashier_id"],
+    )
+    payload = _build_pos_stats_sections(
+        line_qs=line_qs,
+        return_line_qs=return_line_qs,
+        repayment_qs=repayment_qs,
+        top_n=parsed["top_n"],
+    )
+    return {
+        "scope": {
+            "warehouse_id": warehouse_id,
+            "owner_id": parsed["owner_id"],
+            "cashier_id": parsed["cashier_id"],
+        },
+        "period": {
+            "start_date": parsed["start_date"].isoformat(),
+            "end_date": parsed["end_date"].isoformat(),
+        },
+        **payload,
+    }
+
+
+def build_pos_dashboard_payload(
+    *, access_scope: AccessScope, today: datetime.date, trend_start: datetime.date
+):
+    """Build the scoped POS snapshot and trend used by the console dashboard."""
+
+    today_start, today_end = _date_bounds(today, today)
+    today_lines, today_returns, today_repayments = _scoped_base_querysets(
+        access_scope=access_scope,
+        start_at=today_start,
+        end_at=today_end,
+    )
+    today_payload = _build_pos_stats_sections(
+        line_qs=today_lines,
+        return_line_qs=today_returns,
+        repayment_qs=today_repayments,
+        include_details=False,
+    )
+
+    trend_start_at, trend_end_at = _date_bounds(trend_start, today)
+    trend_lines, trend_returns, _ = _scoped_base_querysets(
+        access_scope=access_scope,
+        start_at=trend_start_at,
+        end_at=trend_end_at,
+    )
+    return {
+        "today": {
+            "date": today.isoformat(),
+            "summary": today_payload["summary"],
+            "cashiers": today_payload["cashiers"][:10],
+        },
+        "trend_30d": _daily_net_sales(
+            line_qs=trend_lines,
+            return_line_qs=trend_returns,
+            start_date=trend_start,
+            end_date=today,
+        ),
     }
