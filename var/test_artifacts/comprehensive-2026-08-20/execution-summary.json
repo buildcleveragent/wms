@@ -1,0 +1,81 @@
+{
+  "date": "2026-08-20",
+  "timezone": "Asia/Shanghai",
+  "commit": "2d48512cf086fc6f84e6eb9a2a8362b66e546923",
+  "branch": "main",
+  "verdict": "FAIL",
+  "environment": {
+    "python": "3.12.3",
+    "django": "5.2.5",
+    "node": "22.22.0",
+    "npm": "10.9.4",
+    "mysql": "8.0.46",
+    "redis": "7.4.10",
+    "docker": "29.2.1",
+    "docker_compose": "5.1.0",
+    "playwright": "1.61.1",
+    "database_host": "127.0.0.1",
+    "database_port": 33306,
+    "isolated_test_schema": "wms_codex_full_20260820_c"
+  },
+  "backend": {
+    "collected": 1026,
+    "passed": 1021,
+    "failed": 3,
+    "blocked": 2,
+    "parallel_run": "not_run_after_serial_gate_failure",
+    "coverage_percent": 65,
+    "coverage_scope": "aggregate_of_retained_executed_shards"
+  },
+  "frontend": {
+    "wmspda": {
+      "unit": "37/37 passed",
+      "h5_build": "passed",
+      "playwright": "8/8 passed",
+      "viewport_smoke": "3/3 passed"
+    },
+    "wmsownersale": {
+      "page_contracts": "20/20 passed",
+      "unit_full_suite": "78/79 passed; one timeout",
+      "failed_file_rerun": "7/7 passed",
+      "h5_build": "passed",
+      "mp_weixin_build": "passed"
+    },
+    "sales_miniapp": {
+      "pure_unit": "25/25 passed",
+      "h5_build": "passed",
+      "mp_weixin_build": "passed",
+      "quality_gate_note": "database/API catalog/admin/data-accuracy steps skipped"
+    },
+    "wmsbossbilling": "blocked_missing_package_manifest_and_lockfile"
+  },
+  "quality_and_security": {
+    "django_check": "passed",
+    "migration_drift": "passed",
+    "clean_mysql_migrations": "passed",
+    "lint_ratchet": "failed_20_files",
+    "bandit": {
+      "high": 6,
+      "medium": 11,
+      "low": 271
+    },
+    "python_dependency_vulnerabilities": {
+      "packages": 5,
+      "findings": 62
+    },
+    "npm_audit": {
+      "wmspda": 39,
+      "wmsownersale": 76,
+      "sales_miniapp": 74
+    },
+    "trivy": "blocked_incomplete_vulnerability_database_download"
+  },
+  "external_blockers": [
+    "50-user 30-minute and 100-user 5-minute load tests",
+    "authenticated full browser matrix for Admin and all clients",
+    "two real PDA devices and scanner/printer/RFID/NFC tests",
+    "WeChat test merchant payment and reconciliation",
+    "infrastructure RPO/RTO drill"
+  ],
+  "secrets_in_artifacts": false
+}

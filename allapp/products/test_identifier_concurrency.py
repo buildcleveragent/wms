@@ -94,9 +94,7 @@ class ProductIdentifierConcurrencyTests(TransactionTestCase):
             finally:
                 close_old_connections()
 
-        threads = [
-            threading.Thread(target=switch, args=(record.pk,)) for record in records
-        ]
+        threads = [threading.Thread(target=switch, args=(record.pk,)) for record in records]
         for thread in threads:
             thread.start()
         for thread in threads:

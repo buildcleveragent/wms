@@ -58,7 +58,7 @@ def _pick_first(row: Dict[str, Any], keys: Tuple[str, ...]) -> Any:
 
 
 def _safe_uom_code_from_name(name: str) -> str:
-    h = hashlib.md5(name.encode("utf-8")).hexdigest()[:8].upper()
+    h = hashlib.md5(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:8].upper()
     return f"UOM_{h}"
 
 
@@ -152,7 +152,10 @@ class Command(BaseCommand):
         parser.add_argument(
             "--update",
             action="store_true",
-            help="若 owner+code 已存在，是否更新 name/spec/base_uom/extra/expiry_control/shelf_life_days 等非标识字段",
+            help=(
+                "若 owner+code 已存在，是否更新 name/spec/base_uom/extra/"
+                "expiry_control/shelf_life_days 等非标识字段"
+            ),
         )
         parser.add_argument(
             "--dry-run",
@@ -170,9 +173,7 @@ class Command(BaseCommand):
         if real_name:
             return wb[real_name]
 
-        raise CommandError(
-            f"Excel 中找不到工作表：{sheet_name}，实际工作表：{wb.sheetnames}"
-        )
+        raise CommandError(f"Excel 中找不到工作表：{sheet_name}，实际工作表：{wb.sheetnames}")
 
     def get_owner(self, value: Any) -> Owner:
         key = _norm_str(value)
@@ -249,9 +250,7 @@ class Command(BaseCommand):
         code = _norm_str(value).upper()
         if not code:
             raise ValueError("category 不能为空")
-        category = ProductCategory.objects.filter(
-            code__iexact=code, is_active=True
-        ).first()
+        category = ProductCategory.objects.filter(code__iexact=code, is_active=True).first()
         if category is None or not category.has_active_path():
             raise ValueError(f"找不到分类链全部启用的分类：{code}")
         return category
@@ -274,9 +273,7 @@ class Command(BaseCommand):
 
         return headers
 
-    def row_to_dict(
-        self, headers: Dict[str, int], row_values: Tuple[Any, ...]
-    ) -> Dict[str, Any]:
+    def row_to_dict(self, headers: Dict[str, int], row_values: Tuple[Any, ...]) -> Dict[str, Any]:
         row: Dict[str, Any] = {}
 
         for key, idx in headers.items():
@@ -326,9 +323,7 @@ class Command(BaseCommand):
                 missing.append(label)
 
         if missing:
-            raise CommandError(
-                f"缺少必要列：{missing}。当前识别到的表头：{list(headers.keys())}"
-            )
+            raise CommandError(f"缺少必要列：{missing}。当前识别到的表头：{list(headers.keys())}")
 
         created = 0
         updated = 0
@@ -337,9 +332,7 @@ class Command(BaseCommand):
         errors = 0
 
         with transaction.atomic():
-            for row_no, values in enumerate(
-                ws.iter_rows(min_row=2, values_only=True), start=2
-            ):
+            for row_no, values in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
                 if values is None:
                     continue
 
@@ -415,9 +408,7 @@ class Command(BaseCommand):
                             )
 
                             if existing:
-                                gtin_conflict_qs = gtin_conflict_qs.exclude(
-                                    pk=existing.pk
-                                )
+                                gtin_conflict_qs = gtin_conflict_qs.exclude(pk=existing.pk)
 
                             gtin_conflict = gtin_conflict_qs.first()
 
@@ -490,15 +481,11 @@ class Command(BaseCommand):
 
                 except (ValidationError, IntegrityError, ValueError) as e:
                     errors += 1
-                    self.stdout.write(
-                        self.style.ERROR(f"[第 {row_no} 行] 导入失败：{e}")
-                    )
+                    self.stdout.write(self.style.ERROR(f"[第 {row_no} 行] 导入失败：{e}"))
 
                 except Exception as e:
                     errors += 1
-                    self.stdout.write(
-                        self.style.ERROR(f"[第 {row_no} 行] 未知错误：{e}")
-                    )
+                    self.stdout.write(self.style.ERROR(f"[第 {row_no} 行] 未知错误：{e}"))
 
             if dry_run:
                 transaction.set_rollback(True)
@@ -512,6 +499,4 @@ class Command(BaseCommand):
         self.stdout.write(f"errors  : {errors}")
 
         if dry_run:
-            self.stdout.write(
-                self.style.WARNING("dry-run 模式：已模拟校验，但没有写入数据库。")
-            )
+            self.stdout.write(self.style.WARNING("dry-run 模式：已模拟校验，但没有写入数据库。"))

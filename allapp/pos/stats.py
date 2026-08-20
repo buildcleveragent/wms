@@ -104,9 +104,7 @@ def parse_pos_stats_params(params):
 
 def _date_bounds(start_date, end_date):
     start_at = datetime.datetime.combine(start_date, datetime.time.min)
-    end_at = datetime.datetime.combine(
-        end_date + datetime.timedelta(days=1), datetime.time.min
-    )
+    end_at = datetime.datetime.combine(end_date + datetime.timedelta(days=1), datetime.time.min)
     if settings.USE_TZ:
         tz = timezone.get_current_timezone()
         start_at = timezone.make_aware(start_at, tz)
@@ -207,9 +205,7 @@ def _payment_rows(line_qs, return_line_qs, repayment_qs):
         .annotate(amount=_money_sum("amount"))
     }
     sale_totals = dict(
-        PosSale.objects.filter(id__in=sale_scope.keys()).values_list(
-            "id", "total_amount"
-        )
+        PosSale.objects.filter(id__in=sale_scope.keys()).values_list("id", "total_amount")
     )
     payment_lines = (
         PosPaymentLine.objects.filter(
@@ -233,14 +229,10 @@ def _payment_rows(line_qs, return_line_qs, repayment_qs):
 
     return_scope = {
         row["return_order_id"]: row["amount"] or ZERO_MONEY
-        for row in return_line_qs.values("return_order_id").annotate(
-            amount=_money_sum("amount")
-        )
+        for row in return_line_qs.values("return_order_id").annotate(amount=_money_sum("amount"))
     }
     return_totals = dict(
-        PosReturn.objects.filter(id__in=return_scope.keys()).values_list(
-            "id", "total_amount"
-        )
+        PosReturn.objects.filter(id__in=return_scope.keys()).values_list("id", "total_amount")
     )
     refunds = (
         PosRefund.objects.filter(
@@ -292,9 +284,7 @@ def _payment_rows(line_qs, return_line_qs, repayment_qs):
                 "amount": _money_text(net_amount),
             }
         )
-    return sorted(
-        payload, key=lambda item: (-Decimal(item["net_amount"]), item["method"])
-    )
+    return sorted(payload, key=lambda item: (-Decimal(item["net_amount"]), item["method"]))
 
 
 def _owner_rows(line_qs, return_line_qs):
@@ -374,9 +364,7 @@ def _owner_rows(line_qs, return_line_qs):
                 "amount": _money_text(net_amount),
             }
         )
-    return sorted(
-        rows, key=lambda item: (-Decimal(item["net_amount"]), item["owner_id"])
-    )
+    return sorted(rows, key=lambda item: (-Decimal(item["net_amount"]), item["owner_id"]))
 
 
 def _product_rows(line_qs, return_line_qs, *, top_n):
@@ -506,9 +494,7 @@ def _cashier_rows(line_qs, return_line_qs):
                 filter=Q(sale__status=PosSale.Status.VOIDED),
                 distinct=True,
             ),
-            completed_amount=_money_sum(
-                filter_expr=Q(sale__status=PosSale.Status.COMPLETED)
-            ),
+            completed_amount=_money_sum(filter_expr=Q(sale__status=PosSale.Status.COMPLETED)),
             voided_amount=_money_sum(filter_expr=Q(sale__status=PosSale.Status.VOIDED)),
         )
         .order_by()
@@ -528,9 +514,7 @@ def _cashier_rows(line_qs, return_line_qs):
         }
 
     returns = (
-        return_line_qs.values(
-            "return_order__cashier_id", "return_order__cashier__username"
-        )
+        return_line_qs.values("return_order__cashier_id", "return_order__cashier__username")
         .annotate(
             return_count=Count("return_order_id", distinct=True),
             return_amount=_money_sum(),
@@ -573,18 +557,14 @@ def _cashier_rows(line_qs, return_line_qs):
                 "net_amount": _money_text(net_amount),
             }
         )
-    return sorted(
-        rows, key=lambda item: (-Decimal(item["net_amount"]), item["cashier_id"] or 0)
-    )
+    return sorted(rows, key=lambda item: (-Decimal(item["net_amount"]), item["cashier_id"] or 0))
 
 
 def _build_pos_stats_sections(
     *, line_qs, return_line_qs, repayment_qs, top_n=10, include_details=True
 ):
     sale_qs = PosSale.objects.filter(id__in=line_qs.values("sale_id").distinct())
-    return_qs = PosReturn.objects.filter(
-        id__in=return_line_qs.values("return_order_id").distinct()
-    )
+    return_qs = PosReturn.objects.filter(id__in=return_line_qs.values("return_order_id").distinct())
     counts = sale_qs.aggregate(
         sale_count=Count("id"),
         completed_count=Count("id", filter=Q(status=PosSale.Status.COMPLETED)),
@@ -680,9 +660,7 @@ def _daily_net_sales(*, line_qs, return_line_qs, start_date, end_date):
     while current <= end_date:
         dates.append(current.isoformat())
         values.append(
-            _money_text(
-                sales.get(current, ZERO_MONEY) - returns.get(current, ZERO_MONEY)
-            )
+            _money_text(sales.get(current, ZERO_MONEY) - returns.get(current, ZERO_MONEY))
         )
         current += datetime.timedelta(days=1)
     return {"dates": dates, "net_amount": values}

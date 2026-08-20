@@ -37,9 +37,7 @@ def audit_identifier_history(apps, schema_editor):
                 f"来源={source}/{previous_source} 包装换算语义冲突"
             )
 
-    packages = {
-        package.pk: package for package in Package._base_manager.all().iterator()
-    }
+    packages = {package.pk: package for package in Package._base_manager.all().iterator()}
     for product in Product._base_manager.all().iterator():
         for field in ("code", "sku", "gtin", "unit_barcode", "external_code"):
             claim(product.owner_id, product.pk, getattr(product, field), field)
@@ -72,8 +70,7 @@ def audit_identifier_history(apps, schema_editor):
 
     if conflicts:
         raise RuntimeError(
-            "商品标识历史迁移前审计失败，需先清洗以下冲突：\n"
-            + "\n".join(conflicts[:100])
+            "商品标识历史迁移前审计失败，需先清洗以下冲突：\n" + "\n".join(conflicts[:100])
         )
 
 
@@ -98,9 +95,7 @@ def backfill_identifier_history(apps, schema_editor):
                 f"来源={source}/{previous[2]} 包装换算语义冲突"
             )
         semantic_seen.setdefault(key, (product_id, semantic, source))
-        existing = Registry.objects.filter(
-            owner_id=owner_id, normalized_value=normalized
-        ).first()
+        existing = Registry.objects.filter(owner_id=owner_id, normalized_value=normalized).first()
         if existing and existing.product_id != product_id:
             conflicts.append(
                 f"货主={owner_id} 值={normalized} 商品={product_id} 来源={source} "
@@ -135,9 +130,7 @@ def backfill_identifier_history(apps, schema_editor):
             if package_id:
                 package = Package._base_manager.get(pk=package_id)
                 qty = package.qty_in_base
-            normalized = reserve(
-                product.owner_id, product.pk, value, field, (package_id, qty)
-            )
+            normalized = reserve(product.owner_id, product.pk, value, field, (package_id, qty))
             Barcode.objects.create(
                 owner_id=product.owner_id,
                 product_id=product.pk,
@@ -162,9 +155,7 @@ def backfill_identifier_history(apps, schema_editor):
             )
 
     for package in (
-        Package._base_manager.exclude(barcode__isnull=True)
-        .exclude(barcode="")
-        .iterator()
+        Package._base_manager.exclude(barcode__isnull=True).exclude(barcode="").iterator()
     ):
         product = Product._base_manager.get(pk=package.product_id)
         normalized = reserve(
@@ -222,9 +213,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "deleted_at",
-                    models.DateTimeField(
-                        blank=True, null=True, verbose_name="删除时间"
-                    ),
+                    models.DateTimeField(blank=True, null=True, verbose_name="删除时间"),
                 ),
                 (
                     "created_at",
@@ -240,16 +229,12 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "remark",
-                    models.CharField(
-                        blank=True, max_length=200, null=True, verbose_name="备注"
-                    ),
+                    models.CharField(blank=True, max_length=200, null=True, verbose_name="备注"),
                 ),
                 ("barcode", models.CharField(max_length=50, verbose_name="条码")),
                 (
                     "normalized_value",
-                    models.CharField(
-                        editable=False, max_length=50, verbose_name="标准化条码"
-                    ),
+                    models.CharField(editable=False, max_length=50, verbose_name="标准化条码"),
                 ),
                 (
                     "barcode_type",
@@ -267,9 +252,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "qty_in_base",
-                    models.PositiveIntegerField(
-                        default=1, verbose_name="基础单位换算快照"
-                    ),
+                    models.PositiveIntegerField(default=1, verbose_name="基础单位换算快照"),
                 ),
                 (
                     "is_primary",
@@ -277,15 +260,11 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "valid_from",
-                    models.DateTimeField(
-                        blank=True, null=True, verbose_name="生效时间"
-                    ),
+                    models.DateTimeField(blank=True, null=True, verbose_name="生效时间"),
                 ),
                 (
                     "valid_to",
-                    models.DateTimeField(
-                        blank=True, null=True, verbose_name="失效时间"
-                    ),
+                    models.DateTimeField(blank=True, null=True, verbose_name="失效时间"),
                 ),
                 (
                     "created_by",
@@ -410,9 +389,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "deleted_at",
-                    models.DateTimeField(
-                        blank=True, null=True, verbose_name="删除时间"
-                    ),
+                    models.DateTimeField(blank=True, null=True, verbose_name="删除时间"),
                 ),
                 (
                     "created_at",
@@ -428,9 +405,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "remark",
-                    models.CharField(
-                        blank=True, max_length=200, null=True, verbose_name="备注"
-                    ),
+                    models.CharField(blank=True, max_length=200, null=True, verbose_name="备注"),
                 ),
                 (
                     "source_system",
@@ -442,9 +417,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "normalized_value",
-                    models.CharField(
-                        editable=False, max_length=50, verbose_name="标准化外部编码"
-                    ),
+                    models.CharField(editable=False, max_length=50, verbose_name="标准化外部编码"),
                 ),
                 (
                     "is_primary",
@@ -452,15 +425,11 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "valid_from",
-                    models.DateTimeField(
-                        blank=True, null=True, verbose_name="生效时间"
-                    ),
+                    models.DateTimeField(blank=True, null=True, verbose_name="生效时间"),
                 ),
                 (
                     "valid_to",
-                    models.DateTimeField(
-                        blank=True, null=True, verbose_name="失效时间"
-                    ),
+                    models.DateTimeField(blank=True, null=True, verbose_name="失效时间"),
                 ),
                 (
                     "created_by",

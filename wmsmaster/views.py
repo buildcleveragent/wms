@@ -29,17 +29,13 @@ def profile_view(request):
 
     menus = []  # 初始化菜单列表
     if "inbound.view_receiving" in perms:
-        menus.append(
-            {"path": "/inbound/receiving", "title": "收货看板", "icon": "el-icon-menu"}
-        )
+        menus.append({"path": "/inbound/receiving", "title": "收货看板", "icon": "el-icon-menu"})
     if "inventory.view_detail" in perms:
         menus.append({"path": "/inventory", "title": "库存管理", "icon": "el-icon-box"})
 
     # 添加其他菜单项（根据权限动态生成）
     if any(p.startswith("billing.") for p in perms):
-        menus.append(
-            {"path": "/admin/billing/", "title": "计费", "icon": "el-icon-credit-card"}
-        )
+        menus.append({"path": "/admin/billing/", "title": "计费", "icon": "el-icon-credit-card"})
 
     can_process_warehouse_assisted_outbound = (
         bool(access_scope.warehouse_ids)
@@ -88,10 +84,11 @@ def profile_view(request):
                 and user.has_perm("reports.view_warehouse_operations"),
                 "can_view_owner_operations": is_owner_role
                 and user.has_perm("reports.view_owner_operations"),
-                "can_view_boss_dashboard": is_boss
-                and user.has_perm("reports.view_boss_dashboard"),
+                "can_view_boss_dashboard": is_boss and user.has_perm("reports.view_boss_dashboard"),
                 "can_view_warehouse_finance": is_boss
                 and user.has_perm("reports.view_warehouse_finance"),
+                "can_create_business_review_snapshot": is_boss
+                and user.has_perm("reports.create_business_review_snapshot"),
                 "can_export_operations": access_scope.is_valid
                 and user.has_perm("reports.export_operations"),
                 "can_import_products": can_import_products(user),
@@ -211,7 +208,5 @@ def health_ready_view(request):
             cursor.execute("SELECT 1")
             cursor.fetchone()
     except Exception:
-        return Response(
-            {"status": "unavailable"}, status=status.HTTP_503_SERVICE_UNAVAILABLE
-        )
+        return Response({"status": "unavailable"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     return Response({"status": "ok"})

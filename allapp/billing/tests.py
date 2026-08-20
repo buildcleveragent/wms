@@ -154,9 +154,7 @@ class BillingServiceTests(TestCase):
     ):
         from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 
-        uom = ProductUom.objects.create(
-            code=f"PCS-{suffix}", name=f"件-{suffix}", is_active=True
-        )
+        uom = ProductUom.objects.create(code=f"PCS-{suffix}", name=f"件-{suffix}", is_active=True)
         product = Product.objects.create(
             owner=self.owner,
             code=f"SKU-{suffix}",
@@ -231,12 +229,8 @@ class BillingServiceTests(TestCase):
         task = self._create_task("TASK-ORDER-1")
         line1 = WmsTaskLine.objects.create(task=task)
         line2 = WmsTaskLine.objects.create(task=task)
-        self._create_scan_log(
-            task, line1, service_date, fp="fp-order-1", label_key="LBL-ORDER-1"
-        )
-        self._create_scan_log(
-            task, line2, service_date, fp="fp-order-2", label_key="LBL-ORDER-2"
-        )
+        self._create_scan_log(task, line1, service_date, fp="fp-order-1", label_key="LBL-ORDER-1")
+        self._create_scan_log(task, line2, service_date, fp="fp-order-2", label_key="LBL-ORDER-2")
 
         def resolver(task_line):
             return {"order_ids": {1000 + task_line.id}}
@@ -264,12 +258,8 @@ class BillingServiceTests(TestCase):
     def test_accrue_order_processing_selects_rule_by_service_date(self):
         day1 = datetime.date(2026, 3, 1)
         day2 = datetime.date(2026, 3, 2)
-        self._create_rule(
-            calc_method=CalcMethod.PER_ORDER, unit_price="10.00", effective_to=day1
-        )
-        self._create_rule(
-            calc_method=CalcMethod.PER_ORDER, unit_price="20.00", effective_from=day2
-        )
+        self._create_rule(calc_method=CalcMethod.PER_ORDER, unit_price="10.00", effective_to=day1)
+        self._create_rule(calc_method=CalcMethod.PER_ORDER, unit_price="20.00", effective_from=day2)
 
         task = self._create_task("TASK-ORDER-2")
         line1 = WmsTaskLine.objects.create(task=task)
@@ -341,18 +331,14 @@ class BillingServiceTests(TestCase):
             suffix="CHAIN",
         )
 
-        pick_task = self._create_task(
-            "TASK-PICK-CHAIN", task_type=WmsTask.TaskType.PICK
-        )
+        pick_task = self._create_task("TASK-PICK-CHAIN", task_type=WmsTask.TaskType.PICK)
         pick_line = WmsTaskLine.objects.create(
             task=pick_task,
             product=product,
             src_model="OutboundOrderLine",
             src_id=order_line.id,
         )
-        review_task = self._create_task(
-            "TASK-REVIEW-CHAIN", task_type=WmsTask.TaskType.REVIEW
-        )
+        review_task = self._create_task("TASK-REVIEW-CHAIN", task_type=WmsTask.TaskType.REVIEW)
         review_line = WmsTaskLine.objects.create(
             task=review_task,
             product=product,
@@ -470,9 +456,9 @@ class BillingServiceTests(TestCase):
             service_date + datetime.timedelta(days=1),
         )
 
-        total = BillingAccrual.objects.filter(period=period).aggregate(
-            total=models.Sum("amount")
-        )["total"]
+        total = BillingAccrual.objects.filter(period=period).aggregate(total=models.Sum("amount"))[
+            "total"
+        ]
         self.assertEqual(period.status, PeriodStatus.CLOSED)
         self.assertEqual(total, Decimal("100.00"))
 
@@ -515,12 +501,8 @@ class BillingServiceTests(TestCase):
             start_date + datetime.timedelta(days=2),
         )
 
-        accruals = list(
-            BillingAccrual.objects.filter(period=period).order_by("service_date", "id")
-        )
-        self.assertEqual(
-            sum((a.amount for a in accruals), Decimal("0.00")), Decimal("30.00")
-        )
+        accruals = list(BillingAccrual.objects.filter(period=period).order_by("service_date", "id"))
+        self.assertEqual(sum((a.amount for a in accruals), Decimal("0.00")), Decimal("30.00"))
         self.assertTrue(all(a.amount >= 0 for a in accruals))
 
     def test_lock_period_rejects_non_open_period(self):
@@ -569,9 +551,7 @@ class BillingServiceTests(TestCase):
             service_date=datetime.date(2026, 3, 6),
             fingerprint="acc-lock-gate-fail",
         )
-        BillingAccrual.objects.filter(pk=accrual.pk).update(
-            charge_type=ChargeType.STORAGE
-        )
+        BillingAccrual.objects.filter(pk=accrual.pk).update(charge_type=ChargeType.STORAGE)
 
         with self.assertRaises(ValueError) as exc:
             lock_period(
@@ -656,9 +636,7 @@ class BillingServiceTests(TestCase):
             status=AccrualStatus.LOCKED,
             fingerprint="acc-invoice-gate-fail",
         )
-        BillingAccrual.objects.filter(pk=accrual.pk).update(
-            charge_type=ChargeType.STORAGE
-        )
+        BillingAccrual.objects.filter(pk=accrual.pk).update(charge_type=ChargeType.STORAGE)
 
         with self.assertRaises(ValueError) as exc:
             generate_invoice_for_period(
@@ -704,9 +682,7 @@ class BillingServiceTests(TestCase):
         self.assertEqual(bill.tax_total, Decimal("1.80"))
         self.assertEqual(bill.total, Decimal("31.83"))
         self.assertEqual(
-            list(
-                bill.lines.order_by("service_date").values_list("amount", "tax_amount")
-            ),
+            list(bill.lines.order_by("service_date").values_list("amount", "tax_amount")),
             [
                 (Decimal("10.01"), Decimal("0.60")),
                 (Decimal("20.02"), Decimal("1.20")),
@@ -790,22 +766,18 @@ class BillingServiceTests(TestCase):
         self.assertEqual(accrual.amount, Decimal("10.00"))
 
     def test_handler_triggers_review_order_processing_with_allowed_methods(self):
-        review_task = self._create_task(
-            "TASK-REVIEW-AUTO", task_type=WmsTask.TaskType.REVIEW
-        )
+        review_task = self._create_task("TASK-REVIEW-AUTO", task_type=WmsTask.TaskType.REVIEW)
         handler = DefaultPostingHandler()
         now_ts = timezone.make_aware(datetime.datetime(2026, 3, 7, 10, 0, 0))
 
-        with mock.patch.object(
-            DefaultPostingHandler, "_handle_atomic", return_value=1
-        ), mock.patch(
-            "allapp.billing.services.accrue_for_posting"
-        ) as accrue_for_posting_mock, mock.patch(
-            "allapp.billing.services.accrue_order_processing_for_task"
-        ) as accrue_for_task_mock:
-            affected = handler.handle(
-                task=review_task, now=now_ts, note="AUTO", by_user=self.user
-            )
+        with (
+            mock.patch.object(DefaultPostingHandler, "_handle_atomic", return_value=1),
+            mock.patch("allapp.billing.services.accrue_for_posting") as accrue_for_posting_mock,
+            mock.patch(
+                "allapp.billing.services.accrue_order_processing_for_task"
+            ) as accrue_for_task_mock,
+        ):
+            affected = handler.handle(task=review_task, now=now_ts, note="AUTO", by_user=self.user)
 
         self.assertEqual(affected, 1)
         accrue_for_posting_mock.assert_called_once()
@@ -825,16 +797,14 @@ class BillingServiceTests(TestCase):
         handler = DefaultPostingHandler()
         now_ts = timezone.make_aware(datetime.datetime(2026, 3, 8, 10, 0, 0))
 
-        with mock.patch.object(
-            DefaultPostingHandler, "_handle_atomic", return_value=1
-        ), mock.patch(
-            "allapp.billing.services.accrue_for_posting"
-        ) as accrue_for_posting_mock, mock.patch(
-            "allapp.billing.services.accrue_order_processing_for_task"
-        ) as accrue_for_task_mock:
-            affected = handler.handle(
-                task=pick_task, now=now_ts, note="AUTO", by_user=self.user
-            )
+        with (
+            mock.patch.object(DefaultPostingHandler, "_handle_atomic", return_value=1),
+            mock.patch("allapp.billing.services.accrue_for_posting") as accrue_for_posting_mock,
+            mock.patch(
+                "allapp.billing.services.accrue_order_processing_for_task"
+            ) as accrue_for_task_mock,
+        ):
+            affected = handler.handle(task=pick_task, now=now_ts, note="AUTO", by_user=self.user)
 
         self.assertEqual(affected, 1)
         accrue_for_posting_mock.assert_called_once()
@@ -912,31 +882,25 @@ class BillingServiceTests(TestCase):
 
         self.assertEqual(events, 1)
         self.assertEqual(accruals, 1)
-        accrual = BillingAccrual.objects.get(
-            rule__calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT
-        )
+        accrual = BillingAccrual.objects.get(rule__calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT)
 
         # 当前 task 真实金额 = 2 * 15 = 30，不应使用 9999 的日指标
         self.assertEqual(accrual.quantity, Decimal("30.00"))
         self.assertEqual(accrual.amount, Decimal("3.00"))
 
     def test_handler_triggers_review_task_level_order_processing(self):
-        review_task = self._create_task(
-            "TASK-REVIEW-TASK-LEVEL", task_type=WmsTask.TaskType.REVIEW
-        )
+        review_task = self._create_task("TASK-REVIEW-TASK-LEVEL", task_type=WmsTask.TaskType.REVIEW)
         handler = DefaultPostingHandler()
         now_ts = timezone.make_aware(datetime.datetime(2026, 3, 10, 10, 0, 0))
 
-        with mock.patch.object(
-            DefaultPostingHandler, "_handle_atomic", return_value=1
-        ), mock.patch(
-            "allapp.billing.services.accrue_for_posting"
-        ) as accrue_for_posting_mock, mock.patch(
-            "allapp.billing.services.accrue_order_processing_for_task"
-        ) as accrue_for_task_mock:
-            affected = handler.handle(
-                task=review_task, now=now_ts, note="AUTO", by_user=self.user
-            )
+        with (
+            mock.patch.object(DefaultPostingHandler, "_handle_atomic", return_value=1),
+            mock.patch("allapp.billing.services.accrue_for_posting") as accrue_for_posting_mock,
+            mock.patch(
+                "allapp.billing.services.accrue_order_processing_for_task"
+            ) as accrue_for_task_mock,
+        ):
+            affected = handler.handle(task=review_task, now=now_ts, note="AUTO", by_user=self.user)
 
         self.assertEqual(affected, 1)
         accrue_for_posting_mock.assert_called_once()
@@ -1000,12 +964,8 @@ class BillingServiceTests(TestCase):
             warehouse_id=self.warehouse.id,
             bootstrap=True,
         )
-        accrue_storage_for_date(
-            self.owner.id, self.warehouse.id, service_date, by_user=self.user
-        )
-        accrue_storage_for_date(
-            other_owner.id, self.warehouse.id, service_date, by_user=self.user
-        )
+        accrue_storage_for_date(self.owner.id, self.warehouse.id, service_date, by_user=self.user)
+        accrue_storage_for_date(other_owner.id, self.warehouse.id, service_date, by_user=self.user)
 
         self.assertEqual(BillingEvent.objects.count(), 2)
         self.assertEqual(BillingAccrual.objects.count(), 2)
@@ -1216,15 +1176,11 @@ class BillingServiceTests(TestCase):
 
         # lock 后应有 1 条 LOCKED + 1 条 VOID
         self.assertEqual(
-            BillingAccrual.objects.filter(
-                period=period, status=AccrualStatus.LOCKED
-            ).count(),
+            BillingAccrual.objects.filter(period=period, status=AccrualStatus.LOCKED).count(),
             1,
         )
         self.assertEqual(
-            BillingAccrual.objects.filter(
-                period=period, status=AccrualStatus.VOID
-            ).count(),
+            BillingAccrual.objects.filter(period=period, status=AccrualStatus.VOID).count(),
             1,
         )
 
@@ -1234,9 +1190,7 @@ class BillingServiceTests(TestCase):
         # VOID accrual 应已与 period 解绑
         self.assertEqual(BillingAccrual.objects.filter(period=period).count(), 0)
         self.assertEqual(
-            BillingAccrual.objects.filter(
-                status=AccrualStatus.VOID, period__isnull=True
-            ).count(),
+            BillingAccrual.objects.filter(status=AccrualStatus.VOID, period__isnull=True).count(),
             1,
         )
 
@@ -1394,9 +1348,7 @@ class BillingServiceTests(TestCase):
             acc_fingerprint="fp-period-cap-2",
         )
 
-        period = lock_period(
-            self.owner.id, self.warehouse.id, "T-PCAP", service_date, service_date
-        )
+        period = lock_period(self.owner.id, self.warehouse.id, "T-PCAP", service_date, service_date)
 
         # 两条有效 accrual 各 10 = 20，cap = 25 → 不应被截断
         locked = BillingAccrual.objects.filter(
@@ -1564,9 +1516,7 @@ class BillingServiceTests(TestCase):
             1,
         )
         self.assertEqual(
-            BillingAccrual.objects.get(
-                acc_fingerprint=f"{original.acc_fingerprint}|REV"
-            ).pk,
+            BillingAccrual.objects.get(acc_fingerprint=f"{original.acc_fingerprint}|REV").pk,
             existing.pk,
         )
         period.refresh_from_db()
@@ -1792,15 +1742,9 @@ class BillingServiceTests(TestCase):
 class BillingModelGuardrailTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Guardrail", code="OWGRD")
-        self.other_owner = Owner.objects.create(
-            name="Owner Guardrail Other", code="OWGRX"
-        )
-        self.warehouse = Warehouse.objects.create(
-            code="WHGR1", name="Warehouse Guardrail 1"
-        )
-        self.other_warehouse = Warehouse.objects.create(
-            code="WHGR2", name="Warehouse Guardrail 2"
-        )
+        self.other_owner = Owner.objects.create(name="Owner Guardrail Other", code="OWGRX")
+        self.warehouse = Warehouse.objects.create(code="WHGR1", name="Warehouse Guardrail 1")
+        self.other_warehouse = Warehouse.objects.create(code="WHGR2", name="Warehouse Guardrail 2")
         self.user = get_user_model().objects.create_user(
             username="billing-guardrail-user",
             password="x",
@@ -1870,9 +1814,7 @@ class BillingModelGuardrailTests(TestCase):
             )
 
     def test_billing_rule_tier_rejects_overlapping_ranges(self):
-        rule = self._create_rule(
-            charge_type=ChargeType.STORAGE, calc_method=CalcMethod.PER_CBM_DAY
-        )
+        rule = self._create_rule(charge_type=ChargeType.STORAGE, calc_method=CalcMethod.PER_CBM_DAY)
         BillingRuleTier.objects.create(
             rule=rule,
             threshold_from=Decimal("0.0000"),
@@ -2290,9 +2232,7 @@ class BillingModelGuardrailTests(TestCase):
 
     def test_billline_rejects_amount_fields_that_do_not_match_accrual(self):
         period = self._create_period(label="2026-05-BILLLINE")
-        accrual = self._create_accrual(
-            period=period, fingerprint="guardrail-acc-billline"
-        )
+        accrual = self._create_accrual(period=period, fingerprint="guardrail-acc-billline")
         bill = Bill.objects.create(
             owner=self.owner,
             warehouse=self.warehouse,
@@ -2351,9 +2291,7 @@ class BillingModelGuardrailTests(TestCase):
 
     def test_billline_rejects_negative_values(self):
         period = self._create_period(label="2026-05-BLLNNEG")
-        accrual = self._create_accrual(
-            period=period, fingerprint="guardrail-acc-billline-nonneg"
-        )
+        accrual = self._create_accrual(period=period, fingerprint="guardrail-acc-billline-nonneg")
         bill = Bill.objects.create(
             owner=self.owner,
             warehouse=self.warehouse,
@@ -2493,9 +2431,7 @@ class BillingApiTests(TestCase):
         self.other_owner = Owner.objects.create(name="Owner Other", code="OWOTH")
         self.warehouse = Warehouse.objects.create(code="WHAPI", name="Warehouse API")
         OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
-        OwnerWarehouseBinding.objects.create(
-            owner=self.other_owner, warehouse=self.warehouse
-        )
+        OwnerWarehouseBinding.objects.create(owner=self.other_owner, warehouse=self.warehouse)
         self.user = get_user_model().objects.create_user(
             username="billing-api-user",
             password="x",
@@ -2565,9 +2501,7 @@ class BillingApiTests(TestCase):
         )
         return user
 
-    def _create_rule(
-        self, *, owner=None, calc_method=CalcMethod.PER_ORDER, unit_price="10.00"
-    ):
+    def _create_rule(self, *, owner=None, calc_method=CalcMethod.PER_ORDER, unit_price="10.00"):
         return BillingRule.objects.create(
             owner=owner or self.owner,
             warehouse=self.warehouse,
@@ -2782,9 +2716,7 @@ class BillingApiTests(TestCase):
             service_date=datetime.date(2026, 4, 3),
             fingerprint="acc-lock-api-gate",
         )
-        BillingAccrual.objects.filter(pk=accrual.pk).update(
-            charge_type=ChargeType.STORAGE
-        )
+        BillingAccrual.objects.filter(pk=accrual.pk).update(charge_type=ChargeType.STORAGE)
 
         response = self.client.post(f"/api/billing/periods/{period.id}/lock/")
 
@@ -2809,9 +2741,7 @@ class BillingApiTests(TestCase):
             status=AccrualStatus.LOCKED,
             fingerprint="acc-invoice-api-gate",
         )
-        BillingAccrual.objects.filter(pk=accrual.pk).update(
-            charge_type=ChargeType.STORAGE
-        )
+        BillingAccrual.objects.filter(pk=accrual.pk).update(charge_type=ChargeType.STORAGE)
 
         response = self.client.post(
             f"/api/billing/periods/{period.id}/invoice/",
@@ -2886,9 +2816,7 @@ class BillingApiTests(TestCase):
         sheet = workbook["Bills"]
         self.assertEqual(sheet["A2"].value, bill.invoice_no)
         headers = {cell.value: cell.column for cell in sheet[1]}
-        self.assertEqual(
-            sheet.cell(row=2, column=headers["Period"]).value, period.label
-        )
+        self.assertEqual(sheet.cell(row=2, column=headers["Period"]).value, period.label)
 
     def test_bill_detail_export_endpoint_returns_line_workbook(self):
         period = BillingPeriod.objects.create(
@@ -2976,9 +2904,7 @@ class BillingApiTests(TestCase):
         self.assertEqual(detail_response.status_code, 404)
 
     def test_superuser_can_create_period_for_explicit_warehouse(self):
-        other_warehouse = Warehouse.objects.create(
-            code="WHAPI2", name="Warehouse API 2"
-        )
+        other_warehouse = Warehouse.objects.create(code="WHAPI2", name="Warehouse API 2")
         superuser = get_user_model().objects.create_superuser(
             username="billing-api-superuser",
             password="x",
@@ -3020,9 +2946,7 @@ class BillingApiTests(TestCase):
             calc_method=CalcMethod.PER_ORDER,
             unit_price=Decimal("35.00"),
         )
-        other_warehouse = Warehouse.objects.create(
-            code="WHAPI3", name="Warehouse API 3"
-        )
+        other_warehouse = Warehouse.objects.create(code="WHAPI3", name="Warehouse API 3")
         ignored_rule = BillingRule.objects.create(
             owner=self.other_owner,
             warehouse=other_warehouse,
@@ -3135,15 +3059,11 @@ class BillingApiTests(TestCase):
         self.assertEqual(response.data["summary"]["accrual_count"], 1)
         self.assertNotIn("quantity_total", response.data["summary"])
         self.assertEqual(
-            Decimal(
-                str(response.data["summary"]["accruals_by_currency"][0]["subtotal"])
-            ),
+            Decimal(str(response.data["summary"]["accruals_by_currency"][0]["subtotal"])),
             Decimal("0.00"),
         )
         self.assertEqual(
-            Decimal(
-                str(response.data["summary"]["accruals_by_currency"][0]["tax_total"])
-            ),
+            Decimal(str(response.data["summary"]["accruals_by_currency"][0]["tax_total"])),
             Decimal("0.00"),
         )
         self.assertEqual(
@@ -3154,9 +3074,7 @@ class BillingApiTests(TestCase):
         self.assertEqual(response.data["recent_accruals"][0]["id"], active.id)
 
         self.assertEqual(len(response.data["by_owner"]), 1)
-        self.assertEqual(
-            Decimal(str(response.data["by_owner"][0]["total"])), Decimal("0.00")
-        )
+        self.assertEqual(Decimal(str(response.data["by_owner"][0]["total"])), Decimal("0.00"))
         self.assertEqual(
             Decimal(str(response.data["by_charge_type"][0]["total"])),
             Decimal("0.00"),
@@ -3166,8 +3084,7 @@ class BillingApiTests(TestCase):
             Decimal("0.00"),
         )
         status_totals = {
-            row["status"]: Decimal(str(row["total"]))
-            for row in response.data["by_status"]
+            row["status"]: Decimal(str(row["total"])) for row in response.data["by_status"]
         }
         self.assertEqual(status_totals[AccrualStatus.OPEN], Decimal("20.00"))
         self.assertEqual(status_totals[AccrualStatus.VOID], Decimal("-20.00"))
@@ -3236,9 +3153,7 @@ class BillingApiTests(TestCase):
     def test_warehouse_boss_scope_mode_keeps_multi_owner_view_for_owner_bound_user(
         self,
     ):
-        boss = self._warehouse_boss(
-            "billing-owner-bound-warehouse-boss", owner=self.owner
-        )
+        boss = self._warehouse_boss("billing-owner-bound-warehouse-boss", owner=self.owner)
         client = APIClient()
         client.force_authenticate(boss)
 
@@ -3303,12 +3218,8 @@ class BillingWriteScopeTests(TestCase):
 
     def setUp(self):
         self.owner = Owner.objects.create(name="Billing Write Owner", code="BILWOWN")
-        self.other_owner = Owner.objects.create(
-            name="Billing Write Other Owner", code="BILWOTH"
-        )
-        self.warehouse = Warehouse.objects.create(
-            code="BILWWH", name="Billing Write Warehouse"
-        )
+        self.other_owner = Owner.objects.create(name="Billing Write Other Owner", code="BILWOTH")
+        self.warehouse = Warehouse.objects.create(code="BILWWH", name="Billing Write Warehouse")
         self.other_warehouse = Warehouse.objects.create(
             code="BILWWH2", name="Billing Write Other Warehouse"
         )
@@ -3384,9 +3295,7 @@ class BillingWriteScopeTests(TestCase):
             role=UserRoleScope.Role.OWNER_MANAGER,
             owner=self.owner,
         )
-        unbound_scoped.user_permissions.add(
-            Permission.objects.get(codename="change_billingperiod")
-        )
+        unbound_scoped.user_permissions.add(Permission.objects.get(codename="change_billingperiod"))
         client = APIClient()
         client.force_authenticate(unbound_scoped)
 
@@ -3407,9 +3316,7 @@ class BillingWriteScopeTests(TestCase):
             owner=self.owner,
             warehouse=self.warehouse,
         )
-        legacy_user.user_permissions.add(
-            Permission.objects.get(codename="add_billingmetricdaily")
-        )
+        legacy_user.user_permissions.add(Permission.objects.get(codename="add_billingmetricdaily"))
         client = APIClient()
         client.force_authenticate(legacy_user)
 
@@ -3503,9 +3410,7 @@ class BillingMetricGenerationTests(TestCase):
             role=UserRoleScope.Role.OWNER_MANAGER,
             owner=self.owner,
         )
-        self.user.user_permissions.add(
-            Permission.objects.get(codename="change_billingperiod")
-        )
+        self.user.user_permissions.add(Permission.objects.get(codename="change_billingperiod"))
         self.client = APIClient()
         self.client.force_authenticate(self.user)
         self.uom = ProductUom.objects.create(code="PCS-MT", name="件", is_active=True)
@@ -3554,9 +3459,7 @@ class BillingMetricGenerationTests(TestCase):
             damaged_qty=Decimal("0"),
         )
 
-    def _create_outbound_order(
-        self, service_date: datetime.date, *, qty="3.000", price="10.0000"
-    ):
+    def _create_outbound_order(self, service_date: datetime.date, *, qty="3.000", price="10.0000"):
         from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 
         order = OutboundOrder.objects.create(
@@ -3606,9 +3509,7 @@ class BillingMetricGenerationTests(TestCase):
         self._create_inventory(location=self.location2, qty="1.0000")
         self._create_outbound_order(service_date, qty="3.000", price="10.0000")
 
-        summary = generate_metrics_for_date(
-            self.owner.id, self.warehouse.id, service_date
-        )
+        summary = generate_metrics_for_date(self.owner.id, self.warehouse.id, service_date)
 
         self.assertEqual(summary["created"], 3)
         self.assertEqual(summary["unsupported"], 1)
@@ -3659,12 +3560,8 @@ class BillingMetricGenerationTests(TestCase):
         self._create_inventory(location=self.location1, qty="3.0000")
         self._create_outbound_order(service_date, qty="5.000", price="12.0000")
 
-        first = generate_metrics_for_date(
-            self.owner.id, self.warehouse.id, service_date
-        )
-        second = generate_metrics_for_date(
-            self.owner.id, self.warehouse.id, service_date
-        )
+        first = generate_metrics_for_date(self.owner.id, self.warehouse.id, service_date)
+        second = generate_metrics_for_date(self.owner.id, self.warehouse.id, service_date)
 
         self.assertEqual(first["created"], 3)
         self.assertEqual(second["created"], 0)
@@ -3891,9 +3788,7 @@ class BillingMetricGenerationTests(TestCase):
 
 class BillingSchedulerConcurrencyTests(TransactionTestCase):
     def setUp(self):
-        self.owner = Owner.objects.create(
-            name="Owner Billing Concurrent", code="OWN-BILL-C"
-        )
+        self.owner = Owner.objects.create(name="Owner Billing Concurrent", code="OWN-BILL-C")
         self.warehouse = Warehouse.objects.create(
             code="WH-BILL-C", name="Warehouse Billing Concurrent"
         )
@@ -3907,9 +3802,7 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
         results = [None, None]
         errors = []
 
-        def fake_generate_metrics_for_date(
-            owner_id, warehouse_id, requested_date, **kwargs
-        ):
+        def fake_generate_metrics_for_date(owner_id, warehouse_id, requested_date, **kwargs):
             nonlocal generation_calls
             with generation_lock:
                 generation_calls += 1
@@ -3943,18 +3836,19 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
             finally:
                 close_old_connections()
 
-        with mock.patch(
-            "allapp.billing.services.metrics.generate_metrics_for_date",
-            side_effect=fake_generate_metrics_for_date,
-        ), mock.patch(
-            "allapp.billing.services.metrics._billing_accuracy_gate_enabled",
-            return_value=False,
+        with (
+            mock.patch(
+                "allapp.billing.services.metrics.generate_metrics_for_date",
+                side_effect=fake_generate_metrics_for_date,
+            ),
+            mock.patch(
+                "allapp.billing.services.metrics._billing_accuracy_gate_enabled",
+                return_value=False,
+            ),
         ):
             thread1 = threading.Thread(target=invoke, args=(0,))
             thread1.start()
-            self.assertTrue(
-                generation_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS)
-            )
+            self.assertTrue(generation_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS))
 
             thread2 = threading.Thread(target=invoke, args=(1,))
             thread2.start()
@@ -4054,9 +3948,7 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
             if current_call == 1:
                 create_entered.set()
                 if not release_create.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS):
-                    raise AssertionError(
-                        "timed out waiting to release metric concurrent test"
-                    )
+                    raise AssertionError("timed out waiting to release metric concurrent test")
             return real_metric_create(*args, **kwargs)
 
         def invoke(index):
@@ -4079,9 +3971,7 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
         ):
             thread1 = threading.Thread(target=invoke, args=(0,))
             thread1.start()
-            self.assertTrue(
-                create_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS)
-            )
+            self.assertTrue(create_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS))
 
             thread2 = threading.Thread(target=invoke, args=(1,))
             thread2.start()
@@ -4171,12 +4061,15 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
         def fake_recover_existing_metric(_metric_filter):
             return real_metric_create(**metric_create_kwargs)
 
-        with mock.patch(
-            "allapp.billing.services._metrics.BillingMetricDaily.objects.create",
-            side_effect=fake_metric_create,
-        ), mock.patch(
-            "allapp.billing.services._metrics._recover_existing_metric_after_create_race",
-            side_effect=fake_recover_existing_metric,
+        with (
+            mock.patch(
+                "allapp.billing.services._metrics.BillingMetricDaily.objects.create",
+                side_effect=fake_metric_create,
+            ),
+            mock.patch(
+                "allapp.billing.services._metrics._recover_existing_metric_after_create_race",
+                side_effect=fake_recover_existing_metric,
+            ),
         ):
             summary = generate_metrics_for_date(
                 self.owner.id,
@@ -4199,9 +4092,7 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
 class BillingSettlementConcurrencyTests(TransactionTestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Billing Settle C", code="OWBSC")
-        self.warehouse = Warehouse.objects.create(
-            code="WHBSC", name="Warehouse Billing Settle C"
-        )
+        self.warehouse = Warehouse.objects.create(code="WHBSC", name="Warehouse Billing Settle C")
         self.user = get_user_model().objects.create_user(
             username="billing-settle-concurrent-user",
             password="x",
@@ -4283,12 +4174,8 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
         def fake_save_adjusted_accrual(accrual, new_amount):
             if not adjustment_entered.is_set():
                 adjustment_entered.set()
-                if not release_adjustment.wait(
-                    timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS
-                ):
-                    raise AssertionError(
-                        "timed out waiting to release concurrent lock_period test"
-                    )
+                if not release_adjustment.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS):
+                    raise AssertionError("timed out waiting to release concurrent lock_period test")
             return real_save_adjusted_accrual(accrual, new_amount)
 
         def invoke(index):
@@ -4312,9 +4199,7 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
         ):
             thread1 = threading.Thread(target=invoke, args=(0,))
             thread1.start()
-            self.assertTrue(
-                adjustment_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS)
-            )
+            self.assertTrue(adjustment_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS))
 
             thread2 = threading.Thread(target=invoke, args=(1,))
             thread2.start()
@@ -4330,18 +4215,14 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
             warehouse=self.warehouse,
             label="2026-04-CONC-LOCK",
         )
-        accruals = list(
-            BillingAccrual.objects.filter(period=period).order_by("service_date", "id")
-        )
+        accruals = list(BillingAccrual.objects.filter(period=period).order_by("service_date", "id"))
 
         self.assertEqual(sum(result is not None for result in results), 1)
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], ValueError)
         self.assertIn("already", str(errors[0]))
         self.assertEqual(period.status, PeriodStatus.CLOSED)
-        self.assertEqual(
-            sum((a.amount for a in accruals), Decimal("0.00")), Decimal("100.00")
-        )
+        self.assertEqual(sum((a.amount for a in accruals), Decimal("0.00")), Decimal("100.00"))
         self.assertTrue(all(a.status == AccrualStatus.LOCKED for a in accruals))
         self.assertEqual(
             BillingPeriod.objects.filter(
@@ -4381,9 +4262,7 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
             if not billline_entered.is_set():
                 billline_entered.set()
                 if not release_billline.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS):
-                    raise AssertionError(
-                        "timed out waiting to release concurrent invoice test"
-                    )
+                    raise AssertionError("timed out waiting to release concurrent invoice test")
             return real_billline_bulk_create(*args, **kwargs)
 
         def invoke(index, invoice_no):
@@ -4406,9 +4285,7 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
         ):
             thread1 = threading.Thread(target=invoke, args=(0, "INV-CONC-1"))
             thread1.start()
-            self.assertTrue(
-                billline_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS)
-            )
+            self.assertTrue(billline_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS))
 
             thread2 = threading.Thread(target=invoke, args=(1, "INV-CONC-2"))
             thread2.start()
@@ -4438,9 +4315,7 @@ class BillingSettlementConcurrencyTests(TransactionTestCase):
 class BillingConsolePageTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Console", code="OWCON")
-        self.warehouse = Warehouse.objects.create(
-            code="WHCON", name="Warehouse Console"
-        )
+        self.warehouse = Warehouse.objects.create(code="WHCON", name="Warehouse Console")
         self.user = get_user_model().objects.create_user(
             username="billing-console-user",
             password="x",
@@ -4559,9 +4434,7 @@ class BillingConsolePageTests(TestCase):
         self.assertContains(response, self.period.label)
         self.assertContains(response, self.bill.invoice_no)
         self.assertContains(response, "¥92.00")
-        self.assertContains(
-            response, reverse("console:billing_bill_detail", args=[self.bill.id])
-        )
+        self.assertContains(response, reverse("console:billing_bill_detail", args=[self.bill.id]))
 
     def test_bill_detail_page_filters_lines_by_charge_type(self):
         response = self.client.get(

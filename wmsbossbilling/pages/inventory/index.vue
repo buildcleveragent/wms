@@ -39,7 +39,7 @@
     <view v-if="loading" class="loading-banner">正在同步库存与库容...</view>
     <BossDataStatus :meta="payload?.meta" :error="dataError" :stale="stale" />
 
-    <template v-else>
+    <template v-if="!loading">
       <view class="kpi-grid">
         <view class="kpi-card blue">
           <view class="kpi-label">库存数量（按基本单位）</view>

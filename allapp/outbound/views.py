@@ -51,9 +51,7 @@ from allapp.outbound import services as outbound_services
 from allapp.outbound.assisted_history import (
     assisted_history_queryset,
 )
-from allapp.outbound.assisted_history import (
-    build_stats as build_assisted_outbound_stats,
-)
+from allapp.outbound.assisted_history import build_stats as build_assisted_outbound_stats
 from allapp.outbound.assisted_history import (
     filter_history_queryset,
 )
@@ -145,9 +143,9 @@ def confirm_pricing(self, request, pk=None):
         line = lines_map[item["line_id"]]
         line.base_price = item["base_price"]
 
-        line_amount = (
-            Decimal(line.base_qty or 0) * Decimal(line.base_price or 0)
-        ).quantize(Decimal("0.01"))
+        line_amount = (Decimal(line.base_qty or 0) * Decimal(line.base_price or 0)).quantize(
+            Decimal("0.01")
+        )
         line.final_line_amount = line_amount
         line.save(update_fields=["base_price", "final_line_amount", "updated_at"])
         total_amount += line_amount
@@ -217,9 +215,7 @@ class StaleOrderEdit(APIException):
         detail = {
             "code": self.default_code,
             "detail": self.default_detail,
-            "current_updated_at": serializers.DateTimeField().to_representation(
-                current_updated_at
-            ),
+            "current_updated_at": serializers.DateTimeField().to_representation(current_updated_at),
         }
         super().__init__(detail=detail, code=self.default_code)
 
@@ -259,13 +255,9 @@ def _parse_catalog_id(value, field_name):
         raise ValidationError({field_name: "必须是有效整数。"})
 
 
-def _resolve_product_owner_scope(
-    request, *, param_name="owner", default_to_user_owner=True
-):
+def _resolve_product_owner_scope(request, *, param_name="owner", default_to_user_owner=True):
     scope = _catalog_scope(request)
-    requested_owner = _parse_catalog_id(
-        request.query_params.get(param_name), param_name
-    )
+    requested_owner = _parse_catalog_id(request.query_params.get(param_name), param_name)
     allowed_owner_ids = _catalog_owner_ids(scope)
     if scope.is_global:
         if requested_owner:
@@ -282,9 +274,7 @@ def _resolve_product_owner_scope(
 
 def _resolve_inventory_warehouse_scope(request):
     scope = _catalog_scope(request)
-    requested_wh = _parse_catalog_id(
-        request.query_params.get("warehouse_id"), "warehouse_id"
-    )
+    requested_wh = _parse_catalog_id(request.query_params.get("warehouse_id"), "warehouse_id")
     if scope.is_global:
         return frozenset({requested_wh}) if requested_wh else None
     if scope.warehouse_ids:
@@ -360,9 +350,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 user=request.user,
                 warehouse_id=request.query_params.get("warehouse_id"),
             )
-            logger.warning(
-                "outbound.product_list.owner_missing %s", ctx_text, extra=ctx
-            )
+            logger.warning("outbound.product_list.owner_missing %s", ctx_text, extra=ctx)
             return Response([])
         ctx, ctx_text = build_log_payload(
             user=request.user,
@@ -440,9 +428,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         if warehouse_ids is not None:
             inventory = inventory.filter(warehouse_id__in=warehouse_ids)
         inventory = (
-            inventory.values("product_id")
-            .annotate(total=Sum("available_qty"))
-            .values("total")[:1]
+            inventory.values("product_id").annotate(total=Sum("available_qty")).values("total")[:1]
         )
         qs = qs.annotate(
             available=Coalesce(
@@ -523,9 +509,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
         def default_selected_index(packaging, unit_opts):
             # 优先选择 is_sales_default 的包装；否则 0（通常为基本单位）
-            sales_pkg_id = next(
-                (r["id"] for r in packaging if r.get("is_sales_default")), None
-            )
+            sales_pkg_id = next((r["id"] for r in packaging if r.get("is_sales_default")), None)
             if sales_pkg_id is not None:
                 for i, o in enumerate(unit_opts):
                     if o["package_id"] == sales_pkg_id:
@@ -570,15 +554,11 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "name": p.name or "",
                     "spec": p.spec,
                     "base_unit": getattr(getattr(p, "base_uom", None), "code", None),
-                    "base_unit_name": getattr(
-                        getattr(p, "base_uom", None), "name", None
-                    ),
+                    "base_unit_name": getattr(getattr(p, "base_uom", None), "name", None),
                     "carton_unit": carton_unit,
                     "carton_conv": carton_conv,
                     "available": p.available,
-                    "price": getattr(p, "price", None)
-                    or getattr(p, "sale_price", None)
-                    or 0,
+                    "price": getattr(p, "price", None) or getattr(p, "sale_price", None) or 0,
                     "product_image_url": product_image_url,
                     "gtin": p.gtin,
                     "aux_uom_name": aux_uom_name,
@@ -586,18 +566,14 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "max_discount": p.max_discount,
                     "product_min_price": p.min_price,
                     "minimum_sale_price": (
-                        format(lowest_price, ".4f")
-                        if lowest_price is not None
-                        else None
+                        format(lowest_price, ".4f") if lowest_price is not None else None
                     ),
                     "unitOptions": unit_opts,
                     "selectedUnitIndex": sel_idx,
                     "base_quantity": 0,
                 }
             )
-        logger.debug(
-            "outbound.product_list.response %s count=%s", ctx_text, len(data), extra=ctx
-        )
+        logger.debug("outbound.product_list.response %s count=%s", ctx_text, len(data), extra=ctx)
         return self.get_paginated_response(data)
 
 
@@ -619,9 +595,7 @@ class CustomerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     qs = qs.filter(Q(salesperson=user) | Q(code__iexact="CASH"))
             else:
                 param_name = (
-                    "owner_id"
-                    if self.request.query_params.get("owner_id") is not None
-                    else "owner"
+                    "owner_id" if self.request.query_params.get("owner_id") is not None else "owner"
                 )
                 owner_id = _resolve_product_owner_scope(
                     self.request,
@@ -714,9 +688,7 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         owner_id = _resolve_product_owner_scope(request, param_name="owner")
         if not owner_id:
             ctx, ctx_text = build_log_payload(user=request.user)
-            logger.warning(
-                "outbound.receive_product_list.owner_missing %s", ctx_text, extra=ctx
-            )
+            logger.warning("outbound.receive_product_list.owner_missing %s", ctx_text, extra=ctx)
             return Response([])
         ctx, ctx_text = build_log_payload(user=request.user, owner_id=owner_id)
 
@@ -839,9 +811,7 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
         def default_selected_index(packaging, unit_opts):
             # 优先选择 is_sales_default 的包装；否则 0（通常为基本单位）
-            sales_pkg_id = next(
-                (r["id"] for r in packaging if r.get("is_sales_default")), None
-            )
+            sales_pkg_id = next((r["id"] for r in packaging if r.get("is_sales_default")), None)
             if sales_pkg_id is not None:
                 for i, o in enumerate(unit_opts):
                     if o["package_id"] == sales_pkg_id:
@@ -886,14 +856,10 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "name": p.name or "",
                     "spec": p.spec,
                     "base_unit": getattr(getattr(p, "base_uom", None), "code", None),
-                    "base_unit_name": getattr(
-                        getattr(p, "base_uom", None), "name", None
-                    ),
+                    "base_unit_name": getattr(getattr(p, "base_uom", None), "name", None),
                     "carton_unit": carton_unit,
                     "carton_conv": carton_conv,
-                    "price": getattr(p, "price", None)
-                    or getattr(p, "sale_price", None)
-                    or 0,
+                    "price": getattr(p, "price", None) or getattr(p, "sale_price", None) or 0,
                     "product_image_url": product_image_url,
                     "gtin": p.gtin,
                     "aux_uom_name": aux_uom_name,
@@ -901,9 +867,7 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "max_discount": p.max_discount,
                     "product_min_price": p.min_price,
                     "minimum_sale_price": (
-                        format(lowest_price, ".4f")
-                        if lowest_price is not None
-                        else None
+                        format(lowest_price, ".4f") if lowest_price is not None else None
                     ),
                     "packaging": packaging,  # 包装信息返回，包括 id
                     # === 新增：用于前端单选/回填到购物车
@@ -964,9 +928,7 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         search = (request.query_params.get("search") or "").strip()
         if search:
             qs = qs.filter(Q(code__icontains=search) | Q(name__icontains=search))
-        return Response(
-            [{"id": owner.id, "code": owner.code, "name": owner.name} for owner in qs]
-        )
+        return Response([{"id": owner.id, "code": owner.code, "name": owner.name} for owner in qs])
 
     @action(detail=False, methods=["get"])
     def customers(self, request):
@@ -980,10 +942,7 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         if search:
             qs = qs.filter(Q(code__icontains=search) | Q(name__icontains=search))
         return Response(
-            [
-                {"id": customer.id, "code": customer.code, "name": customer.name}
-                for customer in qs
-            ]
+            [{"id": customer.id, "code": customer.code, "name": customer.name} for customer in qs]
         )
 
     @action(detail=False, methods=["get"], url_path="history-options")
@@ -998,15 +957,11 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         page = self.paginate_queryset(qs)
         if page is None:
             return Response([serialize_history_order(order) for order in qs])
-        return self.get_paginated_response(
-            [serialize_history_order(order) for order in page]
-        )
+        return self.get_paginated_response([serialize_history_order(order) for order in page])
 
     @action(detail=False, methods=["get"])
     def stats(self, request):
-        return Response(
-            build_assisted_outbound_stats(request.user, request.query_params)
-        )
+        return Response(build_assisted_outbound_stats(request.user, request.query_params))
 
     @action(detail=False, methods=["get"])
     def products(self, request):
@@ -1130,9 +1085,7 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
     def _canonical_datetime(value):
         if value in (None, ""):
             return None
-        parsed = (
-            value if isinstance(value, datetime) else parse_datetime(str(value).strip())
-        )
+        parsed = value if isinstance(value, datetime) else parse_datetime(str(value).strip())
         if parsed is None:
             return str(value).strip()
         if timezone.is_naive(parsed):
@@ -1271,6 +1224,7 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
             or not self._supplied_prices_match(payload, order)
         ):
             raise IdempotencyConflict()
+        outbound_services.require_assisted_owner_warehouse(order.owner, warehouse_id)
         task = (
             WmsTask.objects.filter(task_type=WmsTask.TaskType.PICK)
             .filter(outbound_services._task_source_q(order))
@@ -1284,9 +1238,7 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
     def create(self, request, *args, **kwargs):
         existing = self._idempotent_result(request.data, request.user)
         if existing:
-            return self._response(
-                *existing, idempotent=True, http_status=status.HTTP_200_OK
-            )
+            return self._response(*existing, idempotent=True, http_status=status.HTTP_200_OK)
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -1540,9 +1492,7 @@ class OutboundOrderViewSet(
             raise self._duplicate_source_error(duplicate)
 
         if order.idempotency_fingerprint == fingerprint:
-            data = dict(
-                OutboundOrderReadSerializer(order, context={"request": request}).data
-            )
+            data = dict(OutboundOrderReadSerializer(order, context={"request": request}).data)
             data["changed"] = False
             return Response(data)
 
@@ -1609,9 +1559,7 @@ class OutboundOrderViewSet(
                 )
             except DjangoValidationError as exc:
                 errors = [{} for _ in validated["items"]]
-                errors[index] = (
-                    OutboundOrderCreateSerializer._line_model_validation_detail(exc)
-                )
+                errors[index] = OutboundOrderCreateSerializer._line_model_validation_detail(exc)
                 raise ValidationError({"items": errors}) from exc
 
         record_audit_event(
@@ -1628,9 +1576,7 @@ class OutboundOrderViewSet(
             },
         )
         order.refresh_from_db()
-        data = dict(
-            OutboundOrderReadSerializer(order, context={"request": request}).data
-        )
+        data = dict(OutboundOrderReadSerializer(order, context={"request": request}).data)
         data["changed"] = True
         return Response(data)
 
@@ -1640,11 +1586,7 @@ class OutboundOrderViewSet(
         self._require_owner_buyer("outbound.orders.edit_context")
         self._editable_order_error(order, request.user)
 
-        lines = list(
-            order.lines.select_related("product", "product__base_uom").order_by(
-                "line_no"
-            )
-        )
+        lines = list(order.lines.select_related("product", "product__base_uom").order_by("line_no"))
         product_ids = [line.product_id for line in lines]
         available = {
             row["product_id"]: row["available"] or Decimal("0")
@@ -1695,9 +1637,7 @@ class OutboundOrderViewSet(
                     "min_price": product.min_price,
                     "product_min_price": product.min_price,
                     "minimum_sale_price": (
-                        format(lowest_price, ".4f")
-                        if lowest_price is not None
-                        else None
+                        format(lowest_price, ".4f") if lowest_price is not None else None
                     ),
                     "max_discount": product.max_discount,
                     "qty": line.base_qty,
@@ -1801,9 +1741,7 @@ class OutboundOrderViewSet(
         date_from = request.query_params.get("date_from") or request.query_params.get(
             "biz_date_from"
         )
-        date_to = request.query_params.get("date_to") or request.query_params.get(
-            "biz_date_to"
-        )
+        date_to = request.query_params.get("date_to") or request.query_params.get("biz_date_to")
         if date_from:
             parsed = parse_date(date_from)
             if parsed is None:
@@ -1824,14 +1762,8 @@ class OutboundOrderViewSet(
         if overdue is not None:
             if overdue.lower() not in {"1", "0", "true", "false"}:
                 raise ValidationError({"overdue": "必须为 true/false 或 1/0。"})
-            overdue_q = Q(etd__lt=timezone.now(), is_closed=False) & ~Q(
-                approval_status="CANCELLED"
-            )
-            qs = (
-                qs.filter(overdue_q)
-                if overdue.lower() in {"1", "true"}
-                else qs.exclude(overdue_q)
-            )
+            overdue_q = Q(etd__lt=timezone.now(), is_closed=False) & ~Q(approval_status="CANCELLED")
+            qs = qs.filter(overdue_q) if overdue.lower() in {"1", "true"} else qs.exclude(overdue_q)
 
         if task_no or task_status or waybill_no:
             task_qs = WmsTask.objects.filter(
@@ -1842,9 +1774,7 @@ class OutboundOrderViewSet(
             if task_status:
                 task_qs = task_qs.filter(status=task_status)
             if waybill_no:
-                task_qs = task_qs.filter(
-                    lines__dispatchlineextra__waybill_no__icontains=waybill_no
-                )
+                task_qs = task_qs.filter(lines__dispatchlineextra__waybill_no__icontains=waybill_no)
             task_order_ids = task_qs.annotate(
                 _source_order_id=Cast(
                     "source_pk",
@@ -1924,9 +1854,7 @@ class OutboundOrderViewSet(
 
     @staticmethod
     def _standard_order_response(order, request, *, replayed, http_status):
-        data = dict(
-            OutboundOrderReadSerializer(order, context={"request": request}).data
-        )
+        data = dict(OutboundOrderReadSerializer(order, context={"request": request}).data)
         data["idempotent"] = replayed
         data["replayed"] = replayed
         return Response(data, status=http_status)
@@ -1980,9 +1908,7 @@ class OutboundOrderViewSet(
     def create(self, request, *args, **kwargs):
         self._require_owner_buyer("outbound.orders.create")
         key = self._standard_order_idempotency_key(request)
-        ser = OutboundOrderCreateSerializer(
-            data=request.data, context={"request": request}
-        )
+        ser = OutboundOrderCreateSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
         fingerprint = self._standard_order_fingerprint(ser.validated_data)
         owner_id = ser.validated_data["owner_id__from_user"]
@@ -2077,9 +2003,7 @@ class OutboundOrderViewSet(
                 "approval_status": order.approval_status,
             },
         )
-        return Response(
-            OutboundOrderReadSerializer(order, context={"request": request}).data
-        )
+        return Response(OutboundOrderReadSerializer(order, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="owner-approve")
     @transaction.atomic
@@ -2107,9 +2031,7 @@ class OutboundOrderViewSet(
             before=before,
             after={"approval_status": order.approval_status},
         )
-        return Response(
-            OutboundOrderReadSerializer(order, context={"request": request}).data
-        )
+        return Response(OutboundOrderReadSerializer(order, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="owner-reject")
     @transaction.atomic
@@ -2178,9 +2100,7 @@ class OutboundOrderViewSet(
         )
         data = OutboundOrderReadSerializer(order, context={"request": request}).data
         if order.approval_status == "WHS_PENDING":
-            data["replenishment_wait"] = outbound_services.replenishment_waiting_detail(
-                order
-            )
+            data["replenishment_wait"] = outbound_services.replenishment_waiting_detail(order)
         return Response(data)
 
     @action(detail=True, methods=["post"], url_path="withdraw")
@@ -2215,9 +2135,7 @@ class OutboundOrderViewSet(
                 "approval_status": order.approval_status,
             },
         )
-        return Response(
-            OutboundOrderReadSerializer(order, context={"request": request}).data
-        )
+        return Response(OutboundOrderReadSerializer(order, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="cancel")
     @transaction.atomic
@@ -2356,15 +2274,11 @@ class OutboundOrderViewSet(
             )
 
         cash_customer = (
-            Customer.objects.filter(owner_id=owner_id, code="CASH")
-            .order_by("id")
-            .first()
+            Customer.objects.filter(owner_id=owner_id, code="CASH").order_by("id").first()
         )
         if not cash_customer:
             return Response(
-                {
-                    "detail": f"当前货主[{owner_id}]下不存在 code=CASH 的散客客户，请先创建"
-                },
+                {"detail": f"当前货主[{owner_id}]下不存在 code=CASH 的散客客户，请先创建"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -2407,9 +2321,7 @@ class OutboundOrderViewSet(
             filename=filename,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        response["Content-Disposition"] = (
-            f"attachment; filename*=UTF-8''{quote(filename)}"
-        )
+        response["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
         return response
 
 
@@ -2504,9 +2416,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 qs,
                 warehouse_id=warehouse_id,
             ).values("pk")
-            legacy = legacy.filter(
-                ~Q(pk__in=assisted_task_ids) | Q(pk__in=strict.values("pk"))
-            )
+            legacy = legacy.filter(~Q(pk__in=assisted_task_ids) | Q(pk__in=strict.values("pk")))
         return apply_legacy_scope(
             base_qs=legacy,
             scoped_qs=strict,
@@ -2580,9 +2490,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             .order_by("id")
         )
         data = PickTaskLineSerializer(lines, many=True).data
-        logger.debug(
-            "outbound.pick.lines.response %s count=%s", ctx_text, len(data), extra=ctx
-        )
+        logger.debug("outbound.pick.lines.response %s count=%s", ctx_text, len(data), extra=ctx)
         return Response(data)
 
     @action(methods=["post"], detail=True)
@@ -2645,9 +2553,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 by_user=request.user,
             )
         except DjangoValidationError as exc:
-            logger.warning(
-                "outbound.pick.create_review.rejected %s", ctx_text, extra=ctx
-            )
+            logger.warning("outbound.pick.create_review.rejected %s", ctx_text, extra=ctx)
             raise ValidationError(
                 exc.message_dict if hasattr(exc, "message_dict") else exc.messages
             ) from exc
@@ -2754,9 +2660,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 and picker.id == request.user.id
                 and not can_self_review_assisted_task(request.user, task)
             ):
-                logger.warning(
-                    "outbound.pick.post.self_review_blocked %s", ctx_text, extra=ctx
-                )
+                logger.warning("outbound.pick.post.self_review_blocked %s", ctx_text, extra=ctx)
                 raise ValidationError("拣货人不能作为本任务的复核人。")
             if review_task is None:
                 raise ValidationError("缺少实际 REVIEW 任务，不能复核过账。")
@@ -2790,10 +2694,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             journal = PostingJournal.objects.select_for_update().get(
                 src_model="WmsTask", src_id=task.id, tx_type="POST"
             )
-            if (
-                journal.status != "POSTED"
-                or task.posting_status != WmsTask.PostingStatus.POSTED
-            ):
+            if journal.status != "POSTED" or task.posting_status != WmsTask.PostingStatus.POSTED:
                 raise ValidationError("过账处理未将任务及日记账确认为 POSTED。")
             if review_task is None:
                 raise ValidationError("复核任务不存在，不能完成出库链。")

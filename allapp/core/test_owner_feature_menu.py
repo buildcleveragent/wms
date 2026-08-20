@@ -50,9 +50,7 @@ class OwnerFeatureMenuContractTests(SimpleTestCase):
         self.assertTrue(feature_routes.issubset(declared_routes))
         for route in feature_routes:
             with self.subTest(route=route):
-                self.assertTrue(
-                    (CLIENT_ROOT / f"{route.removeprefix('/')}.vue").is_file()
-                )
+                self.assertTrue((CLIENT_ROOT / f"{route.removeprefix('/')}.vue").is_file())
 
     def test_feature_keys_and_paths_are_unique(self):
         keys = [key for key, _ in self.items]

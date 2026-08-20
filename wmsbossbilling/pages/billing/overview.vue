@@ -50,12 +50,12 @@
     <view v-if="loading" class="loading-banner">正在同步仓库计费数据...</view>
     <BossDataStatus :meta="payload?.meta" :error="dataError" :stale="stale" />
 
-    <view v-else-if="!hasAnyData" class="empty-card">
+    <view v-if="!loading && !hasAnyData" class="empty-card">
       <view class="empty-title">当前范围没有计费数据</view>
       <view class="empty-desc">可以切换货主、日期、收费类型或状态后继续查看。</view>
     </view>
 
-    <template v-else>
+    <template v-if="!loading && hasAnyData">
       <view class="kpi-grid">
         <view class="kpi-card blue">
           <view class="kpi-label">货主数</view>

@@ -172,9 +172,7 @@ class DashboardSummaryConsoleTests(TestCase):
 
         def make_receive(task_no, qty, **task_fields):
             task_status = task_fields.pop("status", WmsTask.Status.COMPLETED)
-            posting_status = task_fields.pop(
-                "posting_status", WmsTask.PostingStatus.POSTED
-            )
+            posting_status = task_fields.pop("posting_status", WmsTask.PostingStatus.POSTED)
             if task_status == WmsTask.Status.CANCELLED:
                 review_status = WmsTask.ReviewStatus.NONE
                 posting_status = WmsTask.PostingStatus.NONE
@@ -191,9 +189,7 @@ class DashboardSummaryConsoleTests(TestCase):
                 review_status=review_status,
                 posting_status=posting_status,
                 posted_at=(
-                    timezone.now()
-                    if posting_status == WmsTask.PostingStatus.POSTED
-                    else None
+                    timezone.now() if posting_status == WmsTask.PostingStatus.POSTED else None
                 ),
                 created_by=self.user,
                 **task_fields,
@@ -311,9 +307,7 @@ class DashboardSummaryConsoleTests(TestCase):
         self.assertEqual(payload["today"]["summary"]["net_amount"], "12.00")
         self.assertEqual(payload["today"]["summary"]["received_amount"], "12.00")
         self.assertEqual(payload["trend_30d"]["net_amount"][-1], "12.00")
-        self.assertEqual(
-            payload["today"]["cashiers"][0]["cashier_username"], self.user.username
-        )
+        self.assertEqual(payload["today"]["cashiers"][0]["cashier_username"], self.user.username)
 
     def test_orders_use_biz_date_close_flag_status_labels_and_scope(self):
         supplier = Supplier.objects.create(
@@ -750,9 +744,7 @@ class SaleMiniProductListingConsoleTests(TestCase):
     def test_bulk_list_creates_config_and_public_product_without_changing_inventory(
         self,
     ):
-        before_available = InventoryDetail.objects.get(
-            pk=self.inventory.pk
-        ).available_qty
+        before_available = InventoryDetail.objects.get(pk=self.inventory.pk).available_qty
 
         response = self.client.post(
             self.url,
@@ -807,9 +799,7 @@ class SaleMiniProductListingConsoleTests(TestCase):
             min_order_qty=Decimal("1.000"),
             multiple_qty=Decimal("1.000"),
         )
-        before_available = InventoryDetail.objects.get(
-            pk=self.inventory.pk
-        ).available_qty
+        before_available = InventoryDetail.objects.get(pk=self.inventory.pk).available_qty
 
         self.client.post(
             self.url,

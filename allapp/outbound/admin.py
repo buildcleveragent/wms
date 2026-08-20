@@ -207,9 +207,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         """
 
         scope = AccessScope.for_user(request.user)
-        if not scope.is_valid or (
-            not scope.is_global and scope.source != "user_role_scope"
-        ):
+        if not scope.is_valid or (not scope.is_global and scope.source != "user_role_scope"):
             raise PermissionDenied("必须配置有效的显式角色范围后才能保存出库订单。")
         if not scope.allows(
             owner_id=order.owner_id,
@@ -227,9 +225,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         if change:
             persisted = (
                 type(obj)
-                .objects.only(
-                    "submit_status", "approval_status", "is_closed", "close_reason"
-                )
+                .objects.only("submit_status", "approval_status", "is_closed", "close_reason")
                 .get(pk=obj.pk)
             )
             changed_workflow_fields = []
@@ -240,8 +236,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                 changed_workflow_fields.append("close_reason")
             if changed_workflow_fields:
                 raise PermissionDenied(
-                    "订单工作流状态只能通过受控业务动作变更："
-                    + "、".join(changed_workflow_fields)
+                    "订单工作流状态只能通过受控业务动作变更：" + "、".join(changed_workflow_fields)
                 )
         if not change and not obj.created_by_id:
             obj.created_by = request.user
@@ -328,9 +323,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
             except Exception as exc:  # noqa: BLE001 - display per-order failure
                 errors.append(f"{order.order_no}: {exc}")
         if ok:
-            self.message_user(
-                request, f"已安全撤回并释放分配：{ok} 张", messages.SUCCESS
-            )
+            self.message_user(request, f"已安全撤回并释放分配：{ok} 张", messages.SUCCESS)
         if errors:
             self.message_user(request, "；".join(errors)[:2000], messages.ERROR)
 
@@ -553,9 +546,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
 
     @admin.action(description="重开订单")
     def action_reopen(self, request, queryset):
-        raise PermissionDenied(
-            "已发运关闭的订单不能通过后台重开；请走受控的逆向业务流程。"
-        )
+        raise PermissionDenied("已发运关闭的订单不能通过后台重开；请走受控的逆向业务流程。")
 
     @admin.action(description="仓库管理员一键确认（货主+仓库审核并发布拣货任务）")
     def action_wh_full_approve_and_release(self, request, queryset):
@@ -585,9 +576,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                 except Exception as e:  # noqa: BLE001 - 呈现到 admin 消息
                     messages.warning(request, f"{obj}: 变更失败 - {e}")
         if ok:
-            self.message_user(
-                request, f"{success_msg}：{ok} 条", level=messages.SUCCESS
-            )
+            self.message_user(request, f"{success_msg}：{ok} 条", level=messages.SUCCESS)
         else:
             self.message_user(request, "无记录被变更", level=messages.WARNING)
 

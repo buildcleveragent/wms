@@ -33,9 +33,7 @@ class ProductExportAccess:
 def resolve_product_export_access(user) -> ProductExportAccess:
     if not user or not getattr(user, "is_authenticated", False):
         raise PermissionDenied("请先登录。")
-    if not (
-        getattr(user, "is_superuser", False) or user.has_perm("products.view_product")
-    ):
+    if not (getattr(user, "is_superuser", False) or user.has_perm("products.view_product")):
         raise PermissionDenied("当前账号没有商品查看权限。")
     if can_view_all_owner_products(user):
         return ProductExportAccess(allowed_owner_ids=None)
@@ -72,9 +70,7 @@ def export_owner_queryset(user, *, search=""):
         queryset = queryset.filter(pk__in=access.allowed_owner_ids)
     search = (search or "").strip()
     if search:
-        queryset = queryset.filter(
-            Q(code__icontains=search) | Q(name__icontains=search)
-        )
+        queryset = queryset.filter(Q(code__icontains=search) | Q(name__icontains=search))
     return queryset
 
 
@@ -105,11 +101,7 @@ def build_product_export_workbook(owner: Owner) -> tuple[bytes, int, int]:
         .order_by("code")
         if category.has_active_path()
     ]
-    brands = list(
-        Brand.objects.filter(is_active=True)
-        .order_by("code")
-        .values_list("code", "name")
-    )
+    brands = list(Brand.objects.filter(is_active=True).order_by("code").values_list("code", "name"))
 
     workbook = Workbook()
     instructions = workbook.active

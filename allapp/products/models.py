@@ -68,9 +68,7 @@ class ProductQuerySet(models.QuerySet):
         return super().bulk_update(objs, fields, batch_size=batch_size)
 
     def bulk_create(self, *args, **kwargs):
-        raise ValueError(
-            "Product 不支持 bulk_create()；请逐个调用 save() 以同步商品标识注册表。"
-        )
+        raise ValueError("Product 不支持 bulk_create()；请逐个调用 save() 以同步商品标识注册表。")
 
     def delete(self):
         raise ValidationError("商品包含永久标识占用，不允许硬删除；请使用软删除。")
@@ -91,8 +89,7 @@ class ImmutableIdentifierQuerySet(models.QuerySet):
         blocked = set(kwargs).intersection(self.immutable_fields)
         if blocked:
             raise ValueError(
-                "标识身份字段不能通过 QuerySet.update() 修改："
-                + ", ".join(sorted(blocked))
+                "标识身份字段不能通过 QuerySet.update() 修改：" + ", ".join(sorted(blocked))
             )
         return super().update(**kwargs)
 
@@ -165,10 +162,7 @@ class ProductPackageQuerySet(models.QuerySet):
                     carton_package_id__in=[obj.pk for obj in objs if obj.pk]
                 ).values_list("carton_package_id", flat=True)
             )
-            if any(
-                obj.pk in bound_ids and (obj.is_deleted or not obj.is_active)
-                for obj in objs
-            ):
+            if any(obj.pk in bound_ids and (obj.is_deleted or not obj.is_active) for obj in objs):
                 raise ValidationError("包含已绑定商品箱码的包装层级，不能停用或删除。")
         return super().bulk_update(objs, fields, batch_size=batch_size)
 
@@ -248,11 +242,11 @@ class ProductCategory(BaseModel):
         ordering = ["sort_order", "code"]
         constraints = [
             models.UniqueConstraint(fields=["code"], name="uniq_category_code"),
-            models.CheckConstraint(
-                check=~Q(code=""), name="chk_category_code_not_empty"
-            ),
+            models.CheckConstraint(condition=~Q(code=""), name="chk_category_code_not_empty"),
             # 可选：DB 级防自指（仍需在 clean() 防止“成环”）
-            # models.CheckConstraint(check=~Q(id=F("parent")), name="chk_category_no_self_parent"),
+            # models.CheckConstraint(
+            #     condition=~Q(id=F("parent")), name="chk_category_no_self_parent"
+            # ),
             # 可选：同层重名禁止
             # models.UniqueConstraint(fields=["parent", "name"], name="ux_cat_parent_name"),
         ]
@@ -295,9 +289,7 @@ class ProductCategory(BaseModel):
         return " > ".join(node.name for node in self.ancestor_chain())
 
     def has_active_path(self):
-        return all(
-            node.is_active and not node.is_deleted for node in self.ancestor_chain()
-        )
+        return all(node.is_active and not node.is_deleted for node in self.ancestor_chain())
 
     def descendant_ids(self, *, include_self=True):
         """Collect descendant ids without a tree dependency; depth is capped at three."""
@@ -309,9 +301,7 @@ class ProductCategory(BaseModel):
         while frontier:
             visited.update(frontier)
             children = set(
-                type(self)
-                .objects.filter(parent_id__in=frontier)
-                .values_list("id", flat=True)
+                type(self).objects.filter(parent_id__in=frontier).values_list("id", flat=True)
             )
             children -= visited
             found.update(children)
@@ -391,9 +381,7 @@ class ProductCategory(BaseModel):
             descendant_distance = 0
             while frontier:
                 children = set(
-                    type(self)
-                    .objects.filter(parent_id__in=frontier)
-                    .values_list("id", flat=True)
+                    type(self).objects.filter(parent_id__in=frontier).values_list("id", flat=True)
                 )
                 children -= visited
                 if not children:
@@ -411,9 +399,7 @@ class ProductCategory(BaseModel):
 class Brand(BaseModel):
     code = models.CharField("品牌编码", max_length=50, help_text="全局唯一")
     name = models.CharField("品牌名称", max_length=100)
-    remark = models.CharField(
-        "备注", max_length=255, blank=True
-    )  # 如需 NULL -> null=True
+    remark = models.CharField("备注", max_length=255, blank=True)  # 如需 NULL -> null=True
 
     class Meta:
         verbose_name = "品牌"
@@ -421,7 +407,7 @@ class Brand(BaseModel):
         ordering = ["code"]
         constraints = [
             models.UniqueConstraint(fields=["code"], name="uniq_brand_code"),
-            models.CheckConstraint(check=~Q(code=""), name="chk_brand_code_not_empty"),
+            models.CheckConstraint(condition=~Q(code=""), name="chk_brand_code_not_empty"),
         ]
         indexes = [
             models.Index(fields=["is_active", "code"], name="idx_brand_active_code"),
@@ -451,9 +437,7 @@ class ProductUom(BaseModel):
         max_length=320,
         help_text="EA/PCS/CTN/PLT/KG/L 等",
         validators=[
-            RegexValidator(
-                r"^[A-Za-z0-9_\-\*]+$", "仅允许字母、数字、下划线、连字符、星号"
-            )
+            RegexValidator(r"^[A-Za-z0-9_\-\*]+$", "仅允许字母、数字、下划线、连字符、星号")
         ],
     )
     name = models.CharField("单位名称", max_length=50)
@@ -466,9 +450,7 @@ class ProductUom(BaseModel):
         AREA = "AREA", "面积"
         OTHER = "OTHER", "其他"
 
-    kind = models.CharField(
-        "类型", max_length=12, choices=Kind.choices, default=Kind.COUNT
-    )
+    kind = models.CharField("类型", max_length=12, choices=Kind.choices, default=Kind.COUNT)
 
     # 小数位数：建议用 SmallInteger + 上界 6（按你系统的统一精度）
     decimal_places = models.PositiveSmallIntegerField(
@@ -481,10 +463,10 @@ class ProductUom(BaseModel):
         ordering = ["code"]
         constraints = [
             models.UniqueConstraint(fields=["code"], name="uniq_uom_code"),
-            models.CheckConstraint(check=~Q(code=""), name="chk_uom_code_not_empty"),
+            models.CheckConstraint(condition=~Q(code=""), name="chk_uom_code_not_empty"),
             # 双保险（如果不想用 MaxValueValidator，可以改用 DB 约束）：
             # models.CheckConstraint(
-            #     check=Q(decimal_places__gte=0) & Q(decimal_places__lte=6),
+            #     condition=Q(decimal_places__gte=0) & Q(decimal_places__lte=6),
             #     name="chk_uom_dp_0_6"
             # )
         ]
@@ -559,16 +541,17 @@ class TemperatureZone(BaseModel):
         constraints = [
             models.UniqueConstraint(fields=["code"], name="uniq_tempzone_code"),
             models.CheckConstraint(
-                check=Q(min_temp__lte=F("max_temp")), name="chk_tempzone_min_le_max"
+                condition=Q(min_temp__lte=F("max_temp")), name="chk_tempzone_min_le_max"
             ),
             # 可选：DB 端再兜一层合理范围（和字段 validators 二选一/都保留都行）
             # models.CheckConstraint(
-            #     check=Q(min_temp__gte=Decimal("-100.00")) & Q(max_temp__lte=Decimal("100.00")),
+            #     condition=(
+            #         Q(min_temp__gte=Decimal("-100.00"))
+            #         & Q(max_temp__lte=Decimal("100.00"))
+            #     ),
             #     name="chk_tempzone_range",
             # ),
-            models.CheckConstraint(
-                check=~Q(code=""), name="chk_tempzone_code_not_empty"
-            ),
+            models.CheckConstraint(condition=~Q(code=""), name="chk_tempzone_code_not_empty"),
         ]
         indexes = [
             models.Index(fields=["is_active"]),
@@ -812,12 +795,8 @@ class Product(BaseModel):
         null=True,
         validators=[RegexValidator(r"^[A-Z]{2}$", "必须为两位大写字母的 ISO-2 代码")],
     )
-    external_code = models.CharField(
-        "外部系统商品编码", max_length=50, blank=True, null=True
-    )
-    extra = models.JSONField(
-        "扩展属性", blank=True, null=False, default=dict
-    )  # 建议默认空 dict
+    external_code = models.CharField("外部系统商品编码", max_length=50, blank=True, null=True)
+    extra = models.JSONField("扩展属性", blank=True, null=False, default=dict)  # 建议默认空 dict
     material_quality = models.CharField("材质", max_length=20, blank=True, null=True)
     vender = models.CharField("厂家", max_length=200, blank=True, null=True)
 
@@ -830,7 +809,7 @@ class Product(BaseModel):
             ("manage_all_owner_products", "可处理所有货主商品"),
         ]
         constraints = [
-            models.CheckConstraint(check=~Q(code=""), name="chk_prod_code_not_empty"),
+            models.CheckConstraint(condition=~Q(code=""), name="chk_prod_code_not_empty"),
             models.UniqueConstraint(fields=["owner", "code"], name="uniq_owner_code"),
             models.UniqueConstraint(fields=["owner", "sku"], name="uniq_owner_sku"),
             models.UniqueConstraint(fields=["owner", "gtin"], name="uniq_owner_gtin"),
@@ -845,15 +824,15 @@ class Product(BaseModel):
             ),
             # 关键业务约束（MySQL 8 支持 CHECK）
             models.CheckConstraint(
-                check=Q(min_pick_multiple__gte=1), name="chk_min_pick_multiple_ge_1"
+                condition=Q(min_pick_multiple__gte=1), name="chk_min_pick_multiple_ge_1"
             ),
             # models.CheckConstraint(
-            #     check=(Q(temperature_min__isnull=True) | Q(temperature_max__isnull=True) |
+            #     condition=(Q(temperature_min__isnull=True) | Q(temperature_max__isnull=True) |
             #            Q(temperature_min__lte=models.F("temperature_max"))),
             #     name="chk_temp_min_le_max_or_null",
             # ),
             models.CheckConstraint(
-                check=(
+                condition=(
                     Q(min_stock__isnull=True)
                     | Q(max_stock__isnull=True)
                     | Q(min_stock__lt=models.F("max_stock"))
@@ -861,15 +840,15 @@ class Product(BaseModel):
                 name="chk_min_stock_lt_max",
             ),
             models.CheckConstraint(
-                check=(~Q(pick_policy="AUX_ONLY") | Q(break_box_allowed=False)),
+                condition=(~Q(pick_policy="AUX_ONLY") | Q(break_box_allowed=False)),
                 name="chk_aux_only_no_break",
             ),
             models.CheckConstraint(
-                check=(Q(expiry_control=False) | Q(expiry_basis__isnull=False)),
+                condition=(Q(expiry_control=False) | Q(expiry_basis__isnull=False)),
                 name="chk_expiry_requires_basis",
             ),
             models.CheckConstraint(
-                check=(
+                condition=(
                     Q(expiry_control=False)
                     | (Q(expiry_basis="MFG") & Q(shelf_life_days__gt=0))
                     | (Q(expiry_basis="INBOUND") & Q(inbound_valid_days__gt=0))
@@ -878,7 +857,7 @@ class Product(BaseModel):
             ),
             models.CheckConstraint(
                 name="chk_expiry_warning_bounds",
-                check=(
+                condition=(
                     Q(expiry_control=False)
                     | Q(expiry_warning_days__isnull=True)
                     | (
@@ -906,12 +885,8 @@ class Product(BaseModel):
             ),  # LIKE 'xxx%' 前缀有效
             models.Index(fields=["category"]),
             models.Index(fields=["brand"]),
-            models.Index(
-                fields=["owner", "category", "is_active"], name="owner_category_active"
-            ),
-            models.Index(
-                fields=["owner", "brand", "is_active"], name="owner_brand_active"
-            ),
+            models.Index(fields=["owner", "category", "is_active"], name="owner_category_active"),
+            models.Index(fields=["owner", "brand", "is_active"], name="owner_brand_active"),
             models.Index(
                 fields=["owner", "is_active", "batch_control"],
                 name="owner_active_batch_idx",
@@ -989,11 +964,7 @@ class Product(BaseModel):
                         stable_changes.append(field)
                 if stable_changes:
                     raise ValidationError(
-                        {
-                            stable_changes[
-                                0
-                            ]: "货主、货主商品编码和仓库SKU编码创建后不可修改。"
-                        }
+                        {stable_changes[0]: "货主、货主商品编码和仓库SKU编码创建后不可修改。"}
                     )
 
                 projection_changes = [
@@ -1015,9 +986,7 @@ class Product(BaseModel):
                     )
                 validate_carton_binding = bool(projection_changes)
 
-            if validate_carton_binding and (
-                self.carton_barcode or self.carton_package_id
-            ):
+            if validate_carton_binding and (self.carton_barcode or self.carton_package_id):
                 if not self.carton_barcode or not self.carton_package_id:
                     raise ValidationError(
                         {"carton_package": "箱码和箱码对应包装层级必须同时设置。"}
@@ -1026,20 +995,14 @@ class Product(BaseModel):
                     pk=self.carton_package_id
                 )
                 if not self.pk or package.product_id != self.pk:
-                    raise ValidationError(
-                        {"carton_package": "箱码对应包装层级必须属于当前商品。"}
-                    )
+                    raise ValidationError({"carton_package": "箱码对应包装层级必须属于当前商品。"})
                 if package.is_deleted or not package.is_active:
-                    raise ValidationError(
-                        {"carton_package": "箱码对应包装层级必须启用且未删除。"}
-                    )
+                    raise ValidationError({"carton_package": "箱码对应包装层级必须启用且未删除。"})
 
             result = super().save(*args, **kwargs)
 
             if adding:
-                Owner.all_objects.filter(pk=owner.pk).update(
-                    next_sku_sequence=sequence + 1
-                )
+                Owner.all_objects.filter(pk=owner.pk).update(next_sku_sequence=sequence + 1)
                 owner.next_sku_sequence = sequence + 1
                 if "owner" in self._state.fields_cache:
                     self._state.fields_cache["owner"] = owner
@@ -1116,14 +1079,10 @@ class Product(BaseModel):
             != normalize_product_identifier(original_binding["carton_barcode"])
             or self.carton_package_id != original_binding["carton_package_id"]
         )
-        if binding_changed and bool(self.carton_barcode) != bool(
-            self.carton_package_id
-        ):
+        if binding_changed and bool(self.carton_barcode) != bool(self.carton_package_id):
             errors["carton_package"] = "箱码和箱码对应包装层级必须同时设置。"
         elif binding_changed and self.carton_package_id:
-            package = ProductPackage.all_objects.filter(
-                pk=self.carton_package_id
-            ).first()
+            package = ProductPackage.all_objects.filter(pk=self.carton_package_id).first()
             if package is None or (self.pk and package.product_id != self.pk):
                 errors["carton_package"] = "箱码对应包装层级必须属于当前商品。"
             elif package.is_deleted or not package.is_active:
@@ -1149,9 +1108,7 @@ class Product(BaseModel):
             and self.max_stock is not None
             and self.min_stock >= self.max_stock
         ):
-            errors["min_stock"] = (
-                "最低库存必须小于最高库存（或将最高库存留空表示不设上限）。"
-            )
+            errors["min_stock"] = "最低库存必须小于最高库存（或将最高库存留空表示不设上限）。"
 
         # 基本单位类型
         # if self.base_uom and self.base_uom.kind not in ("COUNT", "WEIGHT", "VOLUME"):
@@ -1169,22 +1126,16 @@ class Product(BaseModel):
                         self.expiry_warning_days <= 0
                         or self.expiry_warning_days >= self.shelf_life_days
                     ):
-                        errors["expiry_warning_days"] = (
-                            "预警天数必须在 1 ~ 保质期天数-1 之间。"
-                        )
+                        errors["expiry_warning_days"] = "预警天数必须在 1 ~ 保质期天数-1 之间。"
             if self.expiry_basis == "INBOUND":
                 if not self.inbound_valid_days or self.inbound_valid_days <= 0:
-                    errors["inbound_valid_days"] = (
-                        "按入库日期管理时，入库有效天数必须 > 0。"
-                    )
+                    errors["inbound_valid_days"] = "按入库日期管理时，入库有效天数必须 > 0。"
                 if self.expiry_warning_days is not None:
                     if (
                         self.expiry_warning_days <= 0
                         or self.expiry_warning_days >= self.inbound_valid_days
                     ):
-                        errors["expiry_warning_days"] = (
-                            "预警天数必须在 1 ~ 入库有效天数-1 之间。"
-                        )
+                        errors["expiry_warning_days"] = "预警天数必须在 1 ~ 入库有效天数-1 之间。"
         # else:
         #     # 关闭效期时，统一清理相关字段，避免脏数据
         #     self.expiry_basis = None
@@ -1274,9 +1225,7 @@ class Product(BaseModel):
                     errors[field] = f"该货主下标识“{value}”已被{source}占用。"
 
         if self.pk:
-            orig = (
-                type(self).all_objects.only("owner_id", "code", "sku").get(pk=self.pk)
-            )
+            orig = type(self).all_objects.only("owner_id", "code", "sku").get(pk=self.pk)
 
             def _norm(x):
                 if isinstance(x, str):
@@ -1416,9 +1365,7 @@ class ProductBarcode(BaseModel):
     )
     barcode = models.CharField("条码", max_length=50)
     normalized_value = models.CharField("标准化条码", max_length=50, editable=False)
-    barcode_type = models.CharField(
-        "条码类型", max_length=12, choices=BarcodeType.choices
-    )
+    barcode_type = models.CharField("条码类型", max_length=12, choices=BarcodeType.choices)
     package = models.ForeignKey(
         "ProductPackage",
         on_delete=models.PROTECT,
@@ -1445,10 +1392,10 @@ class ProductBarcode(BaseModel):
                 name="uniq_primary_product_barcode_scope",
             ),
             models.CheckConstraint(
-                check=Q(qty_in_base__gt=0), name="chk_product_barcode_qty_gt_0"
+                condition=Q(qty_in_base__gt=0), name="chk_product_barcode_qty_gt_0"
             ),
             models.CheckConstraint(
-                check=Q(valid_from__isnull=True)
+                condition=Q(valid_from__isnull=True)
                 | Q(valid_to__isnull=True)
                 | Q(valid_from__lte=F("valid_to")),
                 name="chk_product_barcode_valid_range",
@@ -1533,9 +1480,7 @@ class ProductBarcode(BaseModel):
                 original.qty_in_base,
             )
             if immutable != old:
-                raise ValidationError(
-                    "条码、商品、类型、包装和换算快照创建后不可修改。"
-                )
+                raise ValidationError("条码、商品、类型、包装和换算快照创建后不可修改。")
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -1587,7 +1532,7 @@ class ProductExternalIdentifier(BaseModel):
                 name="uniq_primary_external_identifier_source",
             ),
             models.CheckConstraint(
-                check=Q(valid_from__isnull=True)
+                condition=Q(valid_from__isnull=True)
                 | Q(valid_to__isnull=True)
                 | Q(valid_from__lte=F("valid_to")),
                 name="chk_external_identifier_valid_range",
@@ -1684,15 +1629,9 @@ class ProductPackage(BaseModel):
     qty_in_base = models.PositiveIntegerField("换算数量")
 
     barcode = models.CharField("层级条码", max_length=50, blank=True, null=True)
-    length_cm = models.DecimalField(
-        "长(cm)", max_digits=8, decimal_places=2, blank=True, null=True
-    )
-    width_cm = models.DecimalField(
-        "宽(cm)", max_digits=8, decimal_places=2, blank=True, null=True
-    )
-    height_cm = models.DecimalField(
-        "高(cm)", max_digits=8, decimal_places=2, blank=True, null=True
-    )
+    length_cm = models.DecimalField("长(cm)", max_digits=8, decimal_places=2, blank=True, null=True)
+    width_cm = models.DecimalField("宽(cm)", max_digits=8, decimal_places=2, blank=True, null=True)
+    height_cm = models.DecimalField("高(cm)", max_digits=8, decimal_places=2, blank=True, null=True)
     gross_weight_kg = models.DecimalField(
         "毛重(kg)", max_digits=10, decimal_places=3, blank=True, null=True
     )
@@ -1715,12 +1654,8 @@ class ProductPackage(BaseModel):
     )
 
     is_pickable = models.BooleanField("可直接拣配", default=False)
-    is_purchase_default = models.BooleanField(
-        "采购辅助单位", null=True, blank=True, default=None
-    )
-    is_sales_default = models.BooleanField(
-        "销售辅助单位", null=True, blank=True, default=None
-    )
+    is_purchase_default = models.BooleanField("采购辅助单位", null=True, blank=True, default=None)
+    is_sales_default = models.BooleanField("销售辅助单位", null=True, blank=True, default=None)
 
     sort_order = models.PositiveIntegerField("排序", default=0)
 
@@ -1748,13 +1683,11 @@ class ProductPackage(BaseModel):
                 fields=["product", "is_sales_default", "is_deleted"],
                 name="uniq_prod_sales_default_true",
             ),
-            models.CheckConstraint(
-                check=Q(qty_in_base__gt=0), name="chk_qty_in_base_gt_0"
-            ),
+            models.CheckConstraint(condition=Q(qty_in_base__gt=0), name="chk_qty_in_base_gt_0"),
             # 尺寸三者要么都为空，要么都 >0（可按需保留）
             models.CheckConstraint(
                 name="chk_dims_all_or_none",
-                check=(
+                condition=(
                     (
                         Q(length_cm__isnull=True)
                         & Q(width_cm__isnull=True)
@@ -1766,19 +1699,15 @@ class ProductPackage(BaseModel):
             # 体积、毛重非负（NULL 允许）
             models.CheckConstraint(
                 name="chk_nonneg_weight_volume",
-                check=(Q(gross_weight_kg__isnull=True) | Q(gross_weight_kg__gte=0))
+                condition=(Q(gross_weight_kg__isnull=True) | Q(gross_weight_kg__gte=0))
                 & (Q(volume_m3__isnull=True) | Q(volume_m3__gte=0)),
             ),
             # 可选：同一商品同条码唯一（允许多个 NULL）
-            models.UniqueConstraint(
-                fields=["product", "barcode"], name="uni_pkg_pro_barcode"
-            ),
+            models.UniqueConstraint(fields=["product", "barcode"], name="uni_pkg_pro_barcode"),
         ]
         indexes = [
             models.Index(fields=["product", "uom"]),  # ✅
-            models.Index(
-                fields=["product", "sort_order"], name="idx_pkg_prod_sort"
-            ),  # ✅ 去重
+            models.Index(fields=["product", "sort_order"], name="idx_pkg_prod_sort"),  # ✅ 去重
             models.Index(fields=["barcode"]),
             models.Index(fields=["is_active"]),
         ]
@@ -1799,9 +1728,7 @@ class ProductPackage(BaseModel):
                 and (self.width_cm and self.width_cm > 0)
                 and (self.height_cm and self.height_cm > 0)
             ):
-                calc = (self.length_cm * self.width_cm * self.height_cm) / Decimal(
-                    "1000000"
-                )
+                calc = (self.length_cm * self.width_cm * self.height_cm) / Decimal("1000000")
                 calc_q = calc.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
                 if self.volume_m3 is None:
                     self.volume_m3 = calc_q
@@ -1830,24 +1757,18 @@ class ProductPackage(BaseModel):
                     .only("pk", "product_id", "barcode", "is_active", "is_deleted")
                     .get(pk=self.pk)
                 )
-                if normalize_product_identifier(
-                    self.barcode
-                ) != normalize_product_identifier(original.barcode) and not getattr(
-                    self, "_allow_identifier_projection_update", False
-                ):
+                if normalize_product_identifier(self.barcode) != normalize_product_identifier(
+                    original.barcode
+                ) and not getattr(self, "_allow_identifier_projection_update", False):
                     raise ValidationError(
                         {
                             "barcode": "该字段是主值投影，不能直接修改；请通过商品条码维护接口追加、设主或退役。"
                         }
                     )
                 if Product.all_objects.filter(carton_package_id=self.pk).exists() and (
-                    self.product_id != original.product_id
-                    or self.is_deleted
-                    or not self.is_active
+                    self.product_id != original.product_id or self.is_deleted or not self.is_active
                 ):
-                    raise ValidationError(
-                        "该包装层级已绑定商品箱码，不能转移、停用或删除。"
-                    )
+                    raise ValidationError("该包装层级已绑定商品箱码，不能转移、停用或删除。")
             result = super().save(*args, **kwargs)
             if adding and self.barcode:
                 from .identifier_services import bootstrap_package_identifier
@@ -1864,13 +1785,9 @@ class ProductPackage(BaseModel):
             self.barcode = self.barcode.strip() or None
 
         if self.pk and Product.all_objects.filter(carton_package_id=self.pk).exists():
-            original = (
-                type(self).all_objects.filter(pk=self.pk).only("product_id").first()
-            )
+            original = type(self).all_objects.filter(pk=self.pk).only("product_id").first()
             if original and (
-                self.product_id != original.product_id
-                or self.is_deleted
-                or not self.is_active
+                self.product_id != original.product_id or self.is_deleted or not self.is_active
             ):
                 errors["__all__"] = "该包装层级已绑定商品箱码，不能转移、停用或删除。"
 

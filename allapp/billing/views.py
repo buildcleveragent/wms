@@ -121,9 +121,9 @@ class PaymentReceiptViewSet(viewsets.ModelViewSet):
     ordering = ["-receipt_date", "-id"]
 
     def get_queryset(self):
-        qs = PaymentReceipt.objects.select_related(
-            "owner", "warehouse"
-        ).prefetch_related("allocations")
+        qs = PaymentReceipt.objects.select_related("owner", "warehouse").prefetch_related(
+            "allocations"
+        )
         return AccessScope.for_user(self.request.user).filter_queryset(
             qs, owner_field="owner_id", warehouse_field="warehouse_id"
         )
@@ -155,9 +155,7 @@ class PaymentReceiptViewSet(viewsets.ModelViewSet):
         try:
             receipt = post_receipt(self.get_object().pk, by_user=request.user)
         except ValueError as exc:
-            return Response(
-                {"code": "PAYMENT_POST_BLOCKED", "detail": str(exc)}, status=409
-            )
+            return Response({"code": "PAYMENT_POST_BLOCKED", "detail": str(exc)}, status=409)
         return Response(self.get_serializer(receipt).data)
 
     @action(detail=True, methods=["post"])
@@ -180,9 +178,7 @@ class PaymentReceiptViewSet(viewsets.ModelViewSet):
                 by_user=request.user,
             )
         except ValueError as exc:
-            return Response(
-                {"code": "PAYMENT_REVERSE_BLOCKED", "detail": str(exc)}, status=409
-            )
+            return Response({"code": "PAYMENT_REVERSE_BLOCKED", "detail": str(exc)}, status=409)
         return Response(self.get_serializer(reversal).data, status=201)
 
 
@@ -402,15 +398,9 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
         if not scope.is_valid:
             raise PermissionDenied("No valid billing data scope.")
         if not request.user.is_superuser:
-            if scope.warehouse_ids and not request.user.has_perm(
-                "reports.view_warehouse_finance"
-            ):
-                raise PermissionDenied(
-                    "No permission to view warehouse financial data."
-                )
-            if scope.owner_ids and not request.user.has_perm(
-                "accounts.view_owner_financials"
-            ):
+            if scope.warehouse_ids and not request.user.has_perm("reports.view_warehouse_finance"):
+                raise PermissionDenied("No permission to view warehouse financial data.")
+            if scope.owner_ids and not request.user.has_perm("accounts.view_owner_financials"):
                 raise PermissionDenied("No permission to view owner financial data.")
 
         if owner_raw and not owner_raw.isdigit():
@@ -435,9 +425,7 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
             }
             raise exc
         if warehouse_id and not scope.allows(warehouse_id=warehouse_id):
-            exc = PermissionDenied(
-                "No access to other warehouses in billing dashboard."
-            )
+            exc = PermissionDenied("No access to other warehouses in billing dashboard.")
             exc.detail = {
                 "code": "SCOPE_FORBIDDEN",
                 "detail": "No access to other warehouses in billing dashboard.",
@@ -445,15 +433,9 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
             raise exc
 
         current = timezone.now()
-        today = (
-            timezone.localtime(current).date()
-            if timezone.is_aware(current)
-            else current.date()
-        )
+        today = timezone.localtime(current).date() if timezone.is_aware(current) else current.date()
         date_to = parse_date(date_to_raw) if date_to_raw else today
-        date_from = (
-            parse_date(date_from_raw) if date_from_raw else date_to.replace(day=1)
-        )
+        date_from = parse_date(date_from_raw) if date_from_raw else date_to.replace(day=1)
         if date_from_raw and date_from is None:
             return Response(
                 {"detail": "date_from must be YYYY-MM-DD."},
@@ -553,13 +535,9 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
         scope_owner_name = ""
         if scope_owner_id:
             scope_owner_name = owner_options_map.get(scope_owner_id, {}).get("name", "")
-            if not scope_owner_name and (
-                scope.is_global or scope_owner_id in scope.owner_ids
-            ):
+            if not scope_owner_name and (scope.is_global or scope_owner_id in scope.owner_ids):
                 scope_owner_name = (
-                    Owner.objects.filter(pk=scope_owner_id)
-                    .values_list("name", flat=True)
-                    .first()
+                    Owner.objects.filter(pk=scope_owner_id).values_list("name", flat=True).first()
                     or ""
                 )
 
@@ -600,9 +578,7 @@ class BillingRuleViewSet(
     OwnerWarehouseScopedQuerysetMixin, OwnerWarehouseSaveMixin, viewsets.ModelViewSet
 ):
     queryset = (
-        BillingRule.objects.select_related("owner", "warehouse")
-        .prefetch_related("tiers")
-        .all()
+        BillingRule.objects.select_related("owner", "warehouse").prefetch_related("tiers").all()
     )
     serializer_class = BillingRuleSerializer
     filter_backends = [
@@ -628,17 +604,14 @@ class BillingRuleViewSet(
         request = getattr(self, "request", None)
         user = getattr(request, "user", None)
         scope = AccessScope.for_user(user)
-        scoped = scope.filter_queryset(
-            qs, owner_field="owner_id", warehouse_field="warehouse_id"
-        )
+        scoped = scope.filter_queryset(qs, owner_field="owner_id", warehouse_field="warehouse_id")
         # Global rate cards carry no tenant data. They are intentionally
         # readable so a scoped finance user can understand which fallback
         # rule applies, but `_validate_rule_write_scope` still rejects every
         # mutation of them.
         if request and request.method in permissions.SAFE_METHODS and scope.is_valid:
             return qs.filter(
-                Q(owner__isnull=True, warehouse__isnull=True)
-                | Q(pk__in=scoped.values("pk"))
+                Q(owner__isnull=True, warehouse__isnull=True) | Q(pk__in=scoped.values("pk"))
             )
         return scoped
 
@@ -794,9 +767,7 @@ class BillingMetricDailyViewSet(
         return Response(summary)
 
 
-class BillingEventViewSet(
-    OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet
-):
+class BillingEventViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
     queryset = BillingEvent.objects.select_related(
         "owner",
         "warehouse",
@@ -854,9 +825,7 @@ class BillingEventViewSet(
         )
 
 
-class BillingAccrualViewSet(
-    OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet
-):
+class BillingAccrualViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewSet):
     queryset = (
         BillingAccrual.objects.select_related(
             "owner",
@@ -924,9 +893,7 @@ class BillingPeriodViewSet(
         scoped = self.get_object()
         period = BillingPeriod.objects.select_for_update().get(pk=scoped.pk)
         immutable_scope = set()
-        if "owner" in request.data and str(request.data.get("owner")) != str(
-            period.owner_id
-        ):
+        if "owner" in request.data and str(request.data.get("owner")) != str(period.owner_id):
             immutable_scope.add("owner")
         if "warehouse" in request.data and str(request.data.get("warehouse")) != str(
             period.warehouse_id
@@ -1046,9 +1013,7 @@ class BillingPeriodViewSet(
             return None
         allowed = ", ".join(allowed_statuses)
         return Response(
-            {
-                "detail": f"该操作仅允许在账期状态 {allowed} 时执行，当前为 {period.status}。"
-            },
+            {"detail": f"该操作仅允许在账期状态 {allowed} 时执行，当前为 {period.status}。"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -1096,15 +1061,9 @@ class BillingPeriodViewSet(
 
         data = {
             "period": self.get_serializer(period).data,
-            "scope": (
-                "open_unlocked"
-                if period.status == PeriodStatus.OPEN
-                else "period_locked"
-            ),
+            "scope": ("open_unlocked" if period.status == PeriodStatus.OPEN else "period_locked"),
             "accrual_count": len(accruals),
-            "quantity_total": sum(
-                (Decimal(a.quantity) for a in accruals), Decimal("0.0000")
-            ),
+            "quantity_total": sum((Decimal(a.quantity) for a in accruals), Decimal("0.0000")),
             "subtotal": subtotal,
             "tax_total": tax_total,
             "total": subtotal + tax_total,
@@ -1128,9 +1087,7 @@ class BillingPeriodViewSet(
             overwrite=bool(request.data.get("overwrite", False)),
             allow_area_fallback=bool(request.data.get("allow_area_fallback", False)),
         )
-        return Response(
-            {"period": self.get_serializer(period).data, "summary": summary}
-        )
+        return Response({"period": self.get_serializer(period).data, "summary": summary})
 
     @action(detail=True, methods=["post"], url_path="accrue-storage")
     @transaction.atomic
@@ -1151,9 +1108,7 @@ class BillingPeriodViewSet(
                 period.owner_id,
                 period.warehouse_id,
                 service_date,
-                allow_area_fallback=bool(
-                    request.data.get("allow_area_fallback", False)
-                ),
+                allow_area_fallback=bool(request.data.get("allow_area_fallback", False)),
             )
             total_metrics_created += metric_summary["created"]
             total_metrics_updated += metric_summary["updated"]
@@ -1254,9 +1209,7 @@ class BillingPeriodViewSet(
                 ).count()
                 + 1
             )
-            invoice_no = (
-                f"INV-{period.label}-{period.owner_id}-{period.warehouse_id}-{seq:04d}"
-            )
+            invoice_no = f"INV-{period.label}-{period.owner_id}-{period.warehouse_id}-{seq:04d}"
 
         try:
             bill = generate_invoice_for_period(
@@ -1299,9 +1252,7 @@ class BillingPeriodViewSet(
     def unlock(self, request, pk=None):
         _require_billing_perm(request, "change_billingperiod")
         period = self.get_object()
-        blocked = self._guard_status(
-            period, [PeriodStatus.CLOSED, PeriodStatus.INVOICED]
-        )
+        blocked = self._guard_status(period, [PeriodStatus.CLOSED, PeriodStatus.INVOICED])
         if blocked is not None:
             return blocked
 
@@ -1461,9 +1412,7 @@ class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewS
         summary_sheet.append(["Payment Status", bill.payment_status])
         summary_sheet.append(["Paid Amount", bill.paid_amount])
         summary_sheet.append(["Outstanding Amount", bill.outstanding_amount])
-        summary_sheet.append(
-            ["Owner", getattr(bill.owner, "name", "") if bill.owner_id else ""]
-        )
+        summary_sheet.append(["Owner", getattr(bill.owner, "name", "") if bill.owner_id else ""])
         summary_sheet.append(
             [
                 "Warehouse",
@@ -1473,12 +1422,8 @@ class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewS
         summary_sheet.append(
             ["Period", getattr(bill.period, "label", "") if bill.period_id else ""]
         )
-        summary_sheet.append(
-            ["Issue Date", bill.issue_date.isoformat() if bill.issue_date else ""]
-        )
-        summary_sheet.append(
-            ["Due Date", bill.due_date.isoformat() if bill.due_date else ""]
-        )
+        summary_sheet.append(["Issue Date", bill.issue_date.isoformat() if bill.issue_date else ""])
+        summary_sheet.append(["Due Date", bill.due_date.isoformat() if bill.due_date else ""])
         summary_sheet.append(["Currency", bill.currency])
         summary_sheet.append(["Subtotal", Decimal(bill.subtotal)])
         summary_sheet.append(["Tax Total", Decimal(bill.tax_total)])
@@ -1516,6 +1461,4 @@ class BillViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ReadOnlyModelViewS
             ch if ch.isalnum() or ch in ("-", "_") else "-"
             for ch in bill.invoice_no or f"bill-{bill.id}"
         )
-        return self._xlsx_response(
-            workbook, f"{invoice_token or f'bill-{bill.id}'}.xlsx"
-        )
+        return self._xlsx_response(workbook, f"{invoice_token or f'bill-{bill.id}'}.xlsx")

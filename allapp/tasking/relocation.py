@@ -52,9 +52,7 @@ def _snapshot(detail: InventoryDetail) -> dict:
         "location_id": detail.location_id,
         "container_id": detail.container_id,
         "batch_no": detail.batch_no or "",
-        "production_date": (
-            detail.production_date.isoformat() if detail.production_date else None
-        ),
+        "production_date": (detail.production_date.isoformat() if detail.production_date else None),
         "expiry_date": detail.expiry_date.isoformat() if detail.expiry_date else None,
         "serial_no": detail.serial_no or "",
         "zone_type": detail.zone_type,
@@ -112,9 +110,7 @@ def _validate_target_capacity(lines: list[RelocationRequestLine]) -> None:
     if not lines:
         raise ValidationError("移库申请没有有效明细。")
 
-    location_deltas = defaultdict(
-        lambda: {"volume": Decimal("0"), "weight": Decimal("0")}
-    )
+    location_deltas = defaultdict(lambda: {"volume": Decimal("0"), "weight": Decimal("0")})
     container_deltas = defaultdict(lambda: Decimal("0"))
     target_container_ids: set[int] = set()
     products_by_location: dict[int, set[int]] = defaultdict(set)
@@ -141,39 +137,27 @@ def _validate_target_capacity(lines: list[RelocationRequestLine]) -> None:
                 container_deltas[detail.container_id] -= weight
 
     for location_id, target in target_locations.items():
-        configured_categories = set(
-            target.product_categories.values_list("pk", flat=True)
-        )
+        configured_categories = set(target.product_categories.values_list("pk", flat=True))
         if configured_categories:
             invalid = (
-                InventoryDetail.objects.filter(
-                    product_id__in=products_by_location[location_id]
-                )
+                InventoryDetail.objects.filter(product_id__in=products_by_location[location_id])
                 .exclude(product__category_id__in=configured_categories)
                 .exists()
             )
             if invalid:
-                raise ValidationError(
-                    f"目标库位 {target.code} 不允许存放申请中的商品分类。"
-                )
+                raise ValidationError(f"目标库位 {target.code} 不允许存放申请中的商品分类。")
 
         current = list(
-            InventoryDetail.objects.filter(
-                location_id=location_id, is_active=True
-            ).select_related("product")
+            InventoryDetail.objects.filter(location_id=location_id, is_active=True).select_related(
+                "product"
+            )
         )
         current_volume = sum(
-            (
-                Decimal(row.product.volume or 0) * Decimal(row.onhand_qty or 0)
-                for row in current
-            ),
+            (Decimal(row.product.volume or 0) * Decimal(row.onhand_qty or 0) for row in current),
             Decimal("0"),
         )
         current_weight = sum(
-            (
-                Decimal(row.product.weight or 0) * Decimal(row.onhand_qty or 0)
-                for row in current
-            ),
+            (Decimal(row.product.weight or 0) * Decimal(row.onhand_qty or 0) for row in current),
             Decimal("0"),
         )
         delta = location_deltas[location_id]
@@ -193,9 +177,7 @@ def _validate_target_capacity(lines: list[RelocationRequestLine]) -> None:
         if container.max_gross_kg is None:
             continue
         tree_ids = container_tree_ids(container)
-        incoming_weight = sum(
-            (container_deltas[item_id] for item_id in tree_ids), Decimal("0")
-        )
+        incoming_weight = sum((container_deltas[item_id] for item_id in tree_ids), Decimal("0"))
         current_weight = sum(
             (
                 Decimal(row.product.weight or 0) * Decimal(row.onhand_qty or 0)
@@ -264,10 +246,7 @@ def _validate_parent_container_capacity(
         Decimal("0"),
     )
     if (
-        current_inventory_weight
-        + current_tare
-        + incoming_inventory_weight
-        + incoming_tare
+        current_inventory_weight + current_tare + incoming_inventory_weight + incoming_tare
         > Decimal(parent.max_gross_kg)
     ):
         raise ValidationError(f"目标父容器 {parent.container_no} 超出最大毛重。")
@@ -337,12 +316,8 @@ def create_layer_request(
             raise ValidationError("来源库存超出申请货主或仓库范围。")
         _validate_location(detail.location, warehouse.pk, label="来源库位")
         _validate_location(target, warehouse.pk, label="目标库位")
-        _validate_container_scope(
-            detail.container, owner_id=owner.pk, warehouse_id=warehouse.pk
-        )
-        _validate_container_scope(
-            target_container, owner_id=owner.pk, warehouse_id=warehouse.pk
-        )
+        _validate_container_scope(detail.container, owner_id=owner.pk, warehouse_id=warehouse.pk)
+        _validate_container_scope(target_container, owner_id=owner.pk, warehouse_id=warehouse.pk)
         if target_container and target_container.location_id != target.pk:
             raise ValidationError("目标容器不在目标库位。")
         if detail.container_id and detail.container.children.exists():
@@ -351,9 +326,7 @@ def create_layer_request(
             Decimal(value or 0) != 0
             for value in (detail.allocated_qty, detail.locked_qty, detail.damaged_qty)
         ):
-            raise ValidationError(
-                f"来源库存 {detail.pk} 已分配、锁定或损坏，不能移库。"
-            )
+            raise ValidationError(f"来源库存 {detail.pk} 已分配、锁定或损坏，不能移库。")
         if qty <= 0 or qty > q3(detail.available_qty):
             raise ValidationError(
                 f"来源库存 {detail.pk} 可移数量不足；当前最多 {q3(detail.available_qty)}。"
@@ -376,9 +349,7 @@ def create_layer_request(
         )
     _validate_target_capacity(
         list(
-            request.lines.select_related(
-                "inventory_detail__product", "to_location", "to_container"
-            )
+            request.lines.select_related("inventory_detail__product", "to_location", "to_container")
         )
     )
     return request
@@ -406,16 +377,10 @@ def create_container_request(
     tree_ids = container_tree_ids(root, lock=True)
     if Container.objects.filter(pk__in=tree_ids, is_active=False).exists():
         raise ValidationError("来源容器树中存在已停用容器。")
-    if (
-        Container.objects.filter(pk__in=tree_ids)
-        .exclude(location_id=root.location_id)
-        .exists()
-    ):
+    if Container.objects.filter(pk__in=tree_ids).exclude(location_id=root.location_id).exists():
         raise ValidationError("容器树中存在与根容器位置不一致的容器。")
     if target_parent_container:
-        parent = Container.objects.select_for_update().get(
-            pk=target_parent_container.pk
-        )
+        parent = Container.objects.select_for_update().get(pk=target_parent_container.pk)
         _validate_container_scope(parent, owner_id=owner.pk, warehouse_id=warehouse.pk)
         if parent.pk in tree_ids:
             raise ValidationError("目标父容器不能属于待移动容器树。")
@@ -456,9 +421,7 @@ def create_container_request(
             Decimal(value or 0) != 0
             for value in (detail.allocated_qty, detail.locked_qty, detail.damaged_qty)
         ):
-            raise ValidationError(
-                f"库存层 {detail.pk} 已分配、锁定或损坏，不能整容器移动。"
-            )
+            raise ValidationError(f"库存层 {detail.pk} 已分配、锁定或损坏，不能整容器移动。")
         RelocationRequestLine.objects.create(
             request=request,
             inventory_detail=detail,
@@ -471,9 +434,7 @@ def create_container_request(
         )
     _validate_target_capacity(
         list(
-            request.lines.select_related(
-                "inventory_detail__product", "to_location", "to_container"
-            )
+            request.lines.select_related("inventory_detail__product", "to_location", "to_container")
         )
     )
     return request
@@ -486,9 +447,7 @@ def _release_task(task: WmsTask, *, by_user) -> None:
     task.released_at = now
     task.updated_by = by_user
     task.save(update_fields=["status", "released_at", "updated_by", "updated_at"])
-    task.lines.update(
-        status=WmsTaskLine.Status.RELEASED, updated_by=by_user, updated_at=now
-    )
+    task.lines.update(status=WmsTaskLine.Status.RELEASED, updated_by=by_user, updated_at=now)
     TaskStatusLog.objects.create(
         task=task,
         old_status=old,
@@ -501,9 +460,7 @@ def _release_task(task: WmsTask, *, by_user) -> None:
 @transaction.atomic
 def approve_request(request_id: int, *, by_user, note: str = "") -> WmsTask:
     warehouse_id = (
-        RelocationRequest.objects.filter(pk=request_id)
-        .values_list("warehouse_id", flat=True)
-        .get()
+        RelocationRequest.objects.filter(pk=request_id).values_list("warehouse_id", flat=True).get()
     )
     lock_warehouses_for_inventory_write(warehouse_id)
     request = (
@@ -517,10 +474,7 @@ def approve_request(request_id: int, *, by_user, note: str = "") -> WmsTask:
         )
         .get(pk=request_id)
     )
-    if (
-        request.status == RelocationRequest.Status.APPROVED
-        and request.generated_task_id
-    ):
+    if request.status == RelocationRequest.Status.APPROVED and request.generated_task_id:
         return request.generated_task
     if request.status != RelocationRequest.Status.PENDING:
         raise ValidationError("只有待审核的移库申请可以批准。")
@@ -550,9 +504,7 @@ def approve_request(request_id: int, *, by_user, note: str = "") -> WmsTask:
             .exists()
         ):
             raise ValidationError("来源容器树位置已变化，请重新提交。")
-        if any(
-            line.inventory_detail.container_id not in current_tree for line in lines
-        ):
+        if any(line.inventory_detail.container_id not in current_tree for line in lines):
             raise ValidationError("来源容器树结构已变化，请重新提交。")
         if request.target_parent_container_id:
             parent = Container.objects.select_for_update().get(
@@ -585,10 +537,7 @@ def approve_request(request_id: int, *, by_user, note: str = "") -> WmsTask:
         qty = q3(req_line.requested_qty)
         _validate_location(detail.location, request.warehouse_id, label="来源库位")
         _validate_location(req_line.to_location, request.warehouse_id, label="目标库位")
-        if (
-            detail.owner_id != request.owner_id
-            or detail.warehouse_id != request.warehouse_id
-        ):
+        if detail.owner_id != request.owner_id or detail.warehouse_id != request.warehouse_id:
             raise ValidationError("来源库存超出申请范围。")
         if qty > q3(detail.available_qty):
             raise ValidationError(
@@ -598,26 +547,17 @@ def approve_request(request_id: int, *, by_user, note: str = "") -> WmsTask:
             Decimal(value or 0) != 0
             for value in (detail.allocated_qty, detail.locked_qty, detail.damaged_qty)
         ):
-            raise ValidationError(
-                f"来源库存 {detail.pk} 已分配、锁定或损坏，不能移库。"
-            )
-        if request.mode == RelocationRequest.Mode.CONTAINER and qty != q3(
-            detail.onhand_qty
-        ):
+            raise ValidationError(f"来源库存 {detail.pk} 已分配、锁定或损坏，不能移库。")
+        if request.mode == RelocationRequest.Mode.CONTAINER and qty != q3(detail.onhand_qty):
             raise ValidationError("整容器申请的库存数量已变化，请重新提交。")
         if req_line.source_snapshot != _snapshot(detail):
-            raise ValidationError(
-                f"来源库存 {detail.pk} 的批次、位置或容器已变化，请重新提交。"
-            )
+            raise ValidationError(f"来源库存 {detail.pk} 的批次、位置或容器已变化，请重新提交。")
         _validate_container_scope(
             req_line.to_container,
             owner_id=request.owner_id,
             warehouse_id=request.warehouse_id,
         )
-        if (
-            req_line.to_container
-            and req_line.to_container.location_id != req_line.to_location_id
-        ):
+        if req_line.to_container and req_line.to_container.location_id != req_line.to_location_id:
             if request.mode != RelocationRequest.Mode.CONTAINER:
                 raise ValidationError("目标容器不在目标库位。")
 
@@ -784,10 +724,7 @@ def cancel_request(request_id: int, *, by_user):
     obj = RelocationRequest.objects.select_for_update().get(pk=request_id)
     if obj.status != RelocationRequest.Status.PENDING:
         raise ValidationError("只有待审核的移库申请可以取消。")
-    if (
-        obj.trigger == RelocationRequest.Trigger.REQUEST
-        and obj.created_by_id != by_user.pk
-    ):
+    if obj.trigger == RelocationRequest.Trigger.REQUEST and obj.created_by_id != by_user.pk:
         raise PermissionDenied("只能取消本人提交的移库申请。")
     obj.status = RelocationRequest.Status.CANCELLED
     obj.updated_by = by_user
@@ -796,9 +733,7 @@ def cancel_request(request_id: int, *, by_user):
 
 
 def _canonical_payload(payload: dict) -> str:
-    return json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    )
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 @transaction.atomic
@@ -816,9 +751,7 @@ def record_relocation(
     from_container_code: str = "",
     to_container_code: str = "",
 ):
-    task = WmsTask.objects.select_for_update().get(
-        pk=task_id, task_type=WmsTask.TaskType.RELOC
-    )
+    task = WmsTask.objects.select_for_update().get(pk=task_id, task_type=WmsTask.TaskType.RELOC)
     line = (
         WmsTaskLine.objects.select_for_update()
         .select_related("product", "from_location", "to_location", "reloclineextra")
@@ -844,12 +777,8 @@ def record_relocation(
         "from_container": from_container_scan,
         "to_container": to_container_scan,
     }
-    payload_hash = hashlib.sha256(
-        _canonical_payload(payload).encode("utf-8")
-    ).hexdigest()
-    fp = hashlib.sha256(
-        f"reloc:{task.pk}:{by_user.pk}:{request_id}".encode("utf-8")
-    ).hexdigest()
+    payload_hash = hashlib.sha256(_canonical_payload(payload).encode("utf-8")).hexdigest()
+    fp = hashlib.sha256(f"reloc:{task.pk}:{by_user.pk}:{request_id}".encode("utf-8")).hexdigest()
     expected_remark = f"IDEMPOTENCY:{payload_hash}"
     existing = TaskScanLog.objects.filter(fp=fp).first()
     if existing:
@@ -871,14 +800,10 @@ def record_relocation(
     if to_code != (line.to_location.code or "").strip().upper():
         raise ValidationError("扫描的目标库位与任务不一致。")
     expected_from_container = (
-        (extra.from_container.container_no if extra.from_container_id else "")
-        .strip()
-        .upper()
+        (extra.from_container.container_no if extra.from_container_id else "").strip().upper()
     )
     expected_to_container = (
-        (extra.to_container.container_no if extra.to_container_id else "")
-        .strip()
-        .upper()
+        (extra.to_container.container_no if extra.to_container_id else "").strip().upper()
     )
     if from_container_scan != expected_from_container:
         raise ValidationError("扫描的来源容器与任务不一致。")
@@ -891,14 +816,10 @@ def record_relocation(
         line.product.carton_barcode,
     }
     product_codes.update(
-        line.product.packages.exclude(barcode__isnull=True).values_list(
-            "barcode", flat=True
-        )
+        line.product.packages.exclude(barcode__isnull=True).values_list("barcode", flat=True)
     )
     valid_codes = {str(value).strip().upper() for value in product_codes if value}
-    valid_codes.update(
-        value for value in (expected_from_container, expected_to_container) if value
-    )
+    valid_codes.update(value for value in (expected_from_container, expected_to_container) if value)
     if scanned not in valid_codes:
         raise ValidationError("扫描的商品或容器与任务行不一致。")
     if move_qty <= 0:
@@ -986,9 +907,7 @@ def record_relocation(
                 "updated_at",
             ]
         )
-        TaskAssignment.objects.filter(task=task, finished_at__isnull=True).update(
-            finished_at=now
-        )
+        TaskAssignment.objects.filter(task=task, finished_at__isnull=True).update(finished_at=now)
         TaskStatusLog.objects.create(
             task=task,
             old_status=old,
@@ -1004,9 +923,7 @@ def record_relocation(
 
 @transaction.atomic
 def report_exception(task_id: int, *, by_user, code: str, note: str):
-    task = WmsTask.objects.select_for_update().get(
-        pk=task_id, task_type=WmsTask.TaskType.RELOC
-    )
+    task = WmsTask.objects.select_for_update().get(pk=task_id, task_type=WmsTask.TaskType.RELOC)
     if task.status != WmsTask.Status.IN_PROGRESS:
         raise ValidationError("只有执行中的移库任务可以报告异常。")
     if not TaskAssignment.objects.filter(
@@ -1031,14 +948,9 @@ def report_exception(task_id: int, *, by_user, code: str, note: str):
 
 @transaction.atomic
 def resume_task(task_id: int, *, by_user):
-    task = WmsTask.objects.select_for_update().get(
-        pk=task_id, task_type=WmsTask.TaskType.RELOC
-    )
+    task = WmsTask.objects.select_for_update().get(pk=task_id, task_type=WmsTask.TaskType.RELOC)
     extra = RelocTaskExtra.objects.select_for_update().get(task=task)
-    if (
-        task.status != WmsTask.Status.IN_PROGRESS
-        or extra.execution_state != "EXCEPTION"
-    ):
+    if task.status != WmsTask.Status.IN_PROGRESS or extra.execution_state != "EXCEPTION":
         raise ValidationError("当前任务不处于可恢复的异常状态。")
     extra.execution_state = "WORKING"
     extra.exception_code = ""
@@ -1062,13 +974,9 @@ def resume_task(task_id: int, *, by_user):
 
 @transaction.atomic
 def void_task(task_id: int, *, by_user, note: str):
-    warehouse_id = (
-        WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
-    )
+    warehouse_id = WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
     lock_warehouses_for_inventory_write(warehouse_id)
-    task = WmsTask.objects.select_for_update().get(
-        pk=task_id, task_type=WmsTask.TaskType.RELOC
-    )
+    task = WmsTask.objects.select_for_update().get(pk=task_id, task_type=WmsTask.TaskType.RELOC)
     if task.warehouse_id != warehouse_id:
         raise ValidationError("移库任务仓库在作废期间发生变化，请重试。")
     if task.posting_status == WmsTask.PostingStatus.POSTED:
@@ -1080,9 +988,7 @@ def void_task(task_id: int, *, by_user, note: str):
         .order_by("inventory_detail_id")
     )
     for reservation in reservations:
-        detail = InventoryDetail.objects.select_for_update().get(
-            pk=reservation.inventory_detail_id
-        )
+        detail = InventoryDetail.objects.select_for_update().get(pk=reservation.inventory_detail_id)
         if Decimal(detail.locked_qty or 0) < Decimal(reservation.qty):
             raise ValidationError("来源库存锁定量异常，不能自动作废。")
         detail.locked_qty = Decimal(detail.locked_qty or 0) - Decimal(reservation.qty)
@@ -1090,9 +996,7 @@ def void_task(task_id: int, *, by_user, note: str):
         reservation.status = RelocationReservation.Status.RELEASED
         reservation.released_at = timezone.now()
         reservation.updated_by = by_user
-        reservation.save(
-            update_fields=["status", "released_at", "updated_by", "updated_at"]
-        )
+        reservation.save(update_fields=["status", "released_at", "updated_by", "updated_at"])
     TaskScanLog.objects.filter(task=task, posted_at__isnull=True).update(
         status=TaskScanLog.ScanStatus.IGNORED,
         void_reason=(note or "移库任务整单作废")[:50],
@@ -1149,9 +1053,7 @@ def void_task(task_id: int, *, by_user, note: str):
     return task
 
 
-def _detail_lookup(
-    detail: InventoryDetail, *, location_id: int, container_id: int | None
-) -> dict:
+def _detail_lookup(detail: InventoryDetail, *, location_id: int, container_id: int | None) -> dict:
     return {
         "owner_id": detail.owner_id,
         "warehouse_id": detail.warehouse_id,
@@ -1219,19 +1121,11 @@ def post_relocation_inventory(
             raise ValidationError("来源容器树中存在已停用容器。")
         if root.location_id != lines[0].from_location_id:
             raise ValidationError("来源根容器位置已变化。")
-        if (
-            Container.objects.filter(pk__in=tree_ids)
-            .exclude(location_id=root.location_id)
-            .exists()
-        ):
+        if Container.objects.filter(pk__in=tree_ids).exclude(location_id=root.location_id).exists():
             raise ValidationError("来源容器树位置已变化。")
-        _validate_parent_container_capacity(
-            extra.target_parent_container, moving_tree_ids=tree_ids
-        )
+        _validate_parent_container_capacity(extra.target_parent_container, moving_tree_ids=tree_ids)
         if extra.target_parent_container_id:
-            parent = Container.objects.select_for_update().get(
-                pk=extra.target_parent_container_id
-            )
+            parent = Container.objects.select_for_update().get(pk=extra.target_parent_container_id)
             _validate_container_scope(
                 parent, owner_id=task.owner_id, warehouse_id=task.warehouse_id
             )
@@ -1359,10 +1253,11 @@ def post_relocation_inventory(
             target.onhand_qty = Decimal(target.onhand_qty or 0) + qty
             target.save()
 
-        pair_id = hashlib.md5(f"reloc:{task.pk}:{line.pk}".encode("utf-8")).hexdigest()
+        pair_id = hashlib.md5(
+            f"reloc:{task.pk}:{line.pk}".encode("utf-8"), usedforsecurity=False
+        ).hexdigest()
         pair_uuid = (
-            f"{pair_id[:8]}-{pair_id[8:12]}-{pair_id[12:16]}-"
-            f"{pair_id[16:20]}-{pair_id[20:32]}"
+            f"{pair_id[:8]}-{pair_id[8:12]}-{pair_id[12:16]}-" f"{pair_id[16:20]}-{pair_id[20:32]}"
         )
         common = {
             "owner_id": task.owner_id,
@@ -1388,9 +1283,7 @@ def post_relocation_inventory(
             zone_type=line.from_location.zone_type,
             container=line_extra.from_container,
             container_no=(
-                line_extra.from_container.container_no
-                if line_extra.from_container_id
-                else ""
+                line_extra.from_container.container_no if line_extra.from_container_id else ""
             ),
             qty_delta=-qty,
             **common,
@@ -1402,9 +1295,7 @@ def post_relocation_inventory(
             zone_type=line.to_location.zone_type,
             container=line_extra.to_container,
             container_no=(
-                line_extra.to_container.container_no
-                if line_extra.to_container_id
-                else ""
+                line_extra.to_container.container_no if line_extra.to_container_id else ""
             ),
             qty_delta=qty,
             **common,

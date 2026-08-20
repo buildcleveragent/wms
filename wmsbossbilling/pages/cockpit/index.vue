@@ -10,7 +10,7 @@
     <boss-data-status :meta="payload?.meta" :error="error" />
     <view class="toolbar">
       <text class="asof">数据截至 {{ payload?.meta?.generated_at || '-' }}</text>
-      <button size="mini" class="snapshot" @click="createSnapshot">创建例会快照</button>
+      <button v-if="auth.user?.capabilities?.can_create_business_review_snapshot" size="mini" class="snapshot" @click="createSnapshot">创建例会快照</button>
       <button v-if="tab === 'operations'" size="mini" class="snapshot" @click="exportOperations">导出运营明细</button>
       <button v-else-if="tab !== 'cases'" size="mini" class="snapshot" @click="exportCurrent">导出当前报表</button>
     </view>

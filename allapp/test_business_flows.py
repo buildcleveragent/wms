@@ -210,9 +210,7 @@ class BusinessFlowTests(TestCase):
             code="FLOWSUP",
             name="Flow Supplier",
         )
-        self.base_uom = ProductUom.objects.create(
-            code="PCS", name="Piece", decimal_places=0
-        )
+        self.base_uom = ProductUom.objects.create(code="PCS", name="Piece", decimal_places=0)
 
     def api_client_for(self, user):
         client = APIClient()
@@ -417,9 +415,9 @@ class BusinessFlowTests(TestCase):
             )
         )
         tx_batches = set(
-            InventoryTransaction.objects.filter(
-                src_model="WmsTask", src_id=task.id
-            ).values_list("posting_batch", flat=True)
+            InventoryTransaction.objects.filter(src_model="WmsTask", src_id=task.id).values_list(
+                "posting_batch", flat=True
+            )
         )
         self.assertEqual(len(scan_batches), 1, scan_batches)
         self.assertEqual(scan_batches, tx_batches)
@@ -452,12 +450,8 @@ class BusinessFlowTests(TestCase):
         receive_extra._by_user = operator
         receive_extra.save()
 
-        approve_task(
-            receive_task.id, by_user=self.superuser, note="formal inbound approve"
-        )
-        _run_posting_handler(
-            receive_task.id, by_user=self.superuser, note="formal inbound post"
-        )
+        approve_task(receive_task.id, by_user=self.superuser, note="formal inbound approve")
+        _run_posting_handler(receive_task.id, by_user=self.superuser, note="formal inbound post")
         receive_task.refresh_from_db()
         self.assert_posting_batch_aligned(receive_task)
         return receive_task
@@ -480,9 +474,7 @@ class BusinessFlowTests(TestCase):
 
         putaway_task.release()
         putaway_line = putaway_task.lines.get(product=product)
-        WmsTaskLine.objects.filter(pk=putaway_line.id).update(
-            to_location_id=to_location.id
-        )
+        WmsTaskLine.objects.filter(pk=putaway_line.id).update(to_location_id=to_location.id)
         putaway_line.refresh_from_db()
         self.assign_task_line(putaway_task, putaway_line, operator)
 
@@ -508,9 +500,7 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(putaway_task.review_status, WmsTask.ReviewStatus.PENDING)
 
         approve_task(putaway_task.id, by_user=self.superuser, note="putaway approve")
-        _run_posting_handler(
-            putaway_task.id, by_user=self.superuser, note="putaway post"
-        )
+        _run_posting_handler(putaway_task.id, by_user=self.superuser, note="putaway post")
         putaway_task.refresh_from_db()
         self.assert_posting_batch_aligned(putaway_task)
         return putaway_task
@@ -651,18 +641,14 @@ class BusinessFlowTests(TestCase):
         released = unallocate_for_order(order)
 
         detail.refresh_from_db()
-        task = WmsTask.objects.get(
-            task_type=WmsTask.TaskType.PICK, source_pk=str(order.id)
-        )
+        task = WmsTask.objects.get(task_type=WmsTask.TaskType.PICK, source_pk=str(order.id))
 
         self.assertEqual(released, Decimal("4.000"))
         self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
         self.assertEqual(detail.available_qty, Decimal("6.0000"))
         self.assertEqual(task.status, WmsTask.Status.CANCELLED)
         self.assertTrue(task.lines.exists())
-        self.assertFalse(
-            task.lines.exclude(status=WmsTaskLine.Status.CANCELLED).exists()
-        )
+        self.assertFalse(task.lines.exclude(status=WmsTaskLine.Status.CANCELLED).exists())
 
     def test_flow_4_quick_adjust_updates_inventory_and_company_report(self):
         product = self.create_product("ADJSKU")
@@ -776,9 +762,7 @@ class BusinessFlowTests(TestCase):
             format="json",
         )
         self.assertEqual(scan_response.status_code, 200, scan_response.json())
-        self.assertEqual(
-            Decimal(str(scan_response.json()["line"]["qty_done"])), Decimal("2.000")
-        )
+        self.assertEqual(Decimal(str(scan_response.json()["line"]["qty_done"])), Decimal("2.000"))
 
         review_response = client.post(
             f"/api/pda/pick-tasks/{task.id}/create-review-task/",
@@ -881,12 +865,8 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(receive_task.status, WmsTask.Status.COMPLETED)
         self.assertEqual(receive_task.review_status, WmsTask.ReviewStatus.PENDING)
 
-        approve_task(
-            receive_task.id, by_user=self.superuser, note="formal inbound approve"
-        )
-        _run_posting_handler(
-            receive_task.id, by_user=self.superuser, note="formal inbound post"
-        )
+        approve_task(receive_task.id, by_user=self.superuser, note="formal inbound approve")
+        _run_posting_handler(receive_task.id, by_user=self.superuser, note="formal inbound post")
 
         receive_task.refresh_from_db()
         inbound_detail = InventoryDetail.objects.get(
@@ -997,9 +977,7 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(receive_task.posting_status, WmsTask.PostingStatus.POSTED)
         self.assertEqual(receive_detail.onhand_qty, Decimal("5.0000"))
 
-        putaway_task = self.complete_putaway(
-            product, "5.000", to_location=self.pick_location
-        )
+        putaway_task = self.complete_putaway(product, "5.000", to_location=self.pick_location)
 
         receive_detail.refresh_from_db()
         putaway_detail = InventoryDetail.objects.get(
@@ -1103,15 +1081,9 @@ class BusinessFlowTests(TestCase):
             name="Overflow Location",
         )
 
-        detail_a_primary = self.seed_inventory(
-            product_a, "4.0000", location=self.pick_location
-        )
-        detail_a_overflow = self.seed_inventory(
-            product_a, "3.0000", location=overflow_location
-        )
-        detail_b = self.seed_inventory(
-            product_b, "4.0000", location=self.adjust_location
-        )
+        detail_a_primary = self.seed_inventory(product_a, "4.0000", location=self.pick_location)
+        detail_a_overflow = self.seed_inventory(product_a, "3.0000", location=overflow_location)
+        detail_b = self.seed_inventory(product_b, "4.0000", location=self.adjust_location)
 
         owner_client = self.api_client_for(self.owner_user)
         create_response = owner_client.post(
@@ -1150,18 +1122,12 @@ class BusinessFlowTests(TestCase):
             by_user=self.superuser,
         )
         task_lines = list(pick_task.lines.order_by("id"))
-        product_a_lines = [
-            line for line in task_lines if line.product_id == product_a.id
-        ]
-        product_b_lines = [
-            line for line in task_lines if line.product_id == product_b.id
-        ]
+        product_a_lines = [line for line in task_lines if line.product_id == product_a.id]
+        product_b_lines = [line for line in task_lines if line.product_id == product_b.id]
 
         self.assertEqual(len(task_lines), 3)
         self.assertEqual(len(product_a_lines), 2)
-        self.assertEqual(
-            sum(line.qty_plan for line in product_a_lines), Decimal("6.000")
-        )
+        self.assertEqual(sum(line.qty_plan for line in product_a_lines), Decimal("6.000"))
         self.assertEqual(
             {line.from_location_id for line in product_a_lines},
             {self.pick_location.id, overflow_location.id},
@@ -1207,15 +1173,11 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(detail_b.onhand_qty, Decimal("0.0000"))
         self.assertEqual(detail_b.available_qty, Decimal("0.0000"))
         self.assertEqual(
-            InventorySummary.objects.get(
-                owner=self.owner, product=product_a
-            ).onhand_qty,
+            InventorySummary.objects.get(owner=self.owner, product=product_a).onhand_qty,
             Decimal("1.0000"),
         )
         self.assertEqual(
-            InventorySummary.objects.get(
-                owner=self.owner, product=product_b
-            ).onhand_qty,
+            InventorySummary.objects.get(owner=self.owner, product=product_b).onhand_qty,
             Decimal("0.0000"),
         )
         self.assertEqual(
@@ -1253,9 +1215,7 @@ class BusinessFlowTests(TestCase):
 
         inbound_order = self.create_formal_inbound_order(product, "5.000")
         self.complete_formal_receive(inbound_order, product, "5.000")
-        putaway_task = self.complete_putaway(
-            product, "5.000", to_location=self.pick_location
-        )
+        putaway_task = self.complete_putaway(product, "5.000", to_location=self.pick_location)
 
         BillingRule.objects.create(
             owner=self.owner,

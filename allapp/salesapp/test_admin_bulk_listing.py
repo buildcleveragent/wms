@@ -14,9 +14,7 @@ from allapp.salesapp.models import SaleProductConfig
 class SaleProductConfigAdminBulkOwnerTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(code="ABULK", name="批量上架货主")
-        self.category = ProductCategory.objects.create(
-            code="ABULK-CAT", name="可售分类"
-        )
+        self.category = ProductCategory.objects.create(code="ABULK-CAT", name="可售分类")
         self.uom = ProductUom.objects.create(code="ABULK-EA", name="件")
         self.product_a = Product.objects.create(
             owner=self.owner,
@@ -150,14 +148,10 @@ class SaleProductConfigAdminBulkOwnerTests(TestCase):
             "updated_by",
             "is_active",
         }
-        self.assertTrue(
-            hidden_fields.isdisjoint(response.context["adminform"].form.fields)
-        )
+        self.assertTrue(hidden_fields.isdisjoint(response.context["adminform"].form.fields))
         form_fields = response.context["adminform"].form.fields
         self.assertEqual(list(form_fields)[-1], "remark")
-        self.assertEqual(
-            form_fields["owner"].widget.widget.__class__.__name__, "Select"
-        )
+        self.assertEqual(form_fields["owner"].widget.widget.__class__.__name__, "Select")
         self.assertEqual(
             form_fields["product"].widget.widget.__class__.__name__,
             "AutocompleteSelect",
@@ -306,9 +300,7 @@ class SaleProductConfigAdminBulkOwnerTests(TestCase):
         self.assertIn(str(self.product_a.pk), result_ids)
 
     def test_owner_bulk_listing_creates_and_lists_valid_products_only(self):
-        before_available = InventoryDetail.objects.get(
-            pk=self.inventory.pk
-        ).available_qty
+        before_available = InventoryDetail.objects.get(pk=self.inventory.pk).available_qty
 
         response = self.client.post(self.bulk_url, self.bulk_payload(), follow=True)
 
@@ -333,9 +325,7 @@ class SaleProductConfigAdminBulkOwnerTests(TestCase):
 
         public_response = self.client.get("/api/sale-mini/products/")
         rows = public_response.json()["results"]
-        self.assertEqual(
-            {row["id"] for row in rows}, {self.product_a.id, self.product_b.id}
-        )
+        self.assertEqual({row["id"] for row in rows}, {self.product_a.id, self.product_b.id})
 
     def test_owner_bulk_listing_preserves_existing_single_product_price_by_default(
         self,

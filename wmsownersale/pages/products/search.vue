@@ -92,6 +92,7 @@ import { useCart } from '@/store/cart'
 import { enforceMinimumPrice, initializePriceGuard } from '@/utils/pricing'
 import { previewBaseQuantity, validateDesiredQuantity } from '@/utils/quantity'
 import { api } from '@/utils/request'
+import { mergeUniqueById } from '@/utils/pagination'
 // #ifndef H5
 import { scanOne } from '@/utils/scan'
 // #endif
@@ -156,7 +157,7 @@ async function loadProducts({ reset = false } = {}) {
       : [...list.value.results, ...normalized.results]
     list.value = {
       ...normalized,
-      results: Array.from(new Map(merged.map(item => [String(item.id), item])).values()),
+      results: mergeUniqueById([], merged),
     }
     currentPage.value = page
   } catch (error: any) {

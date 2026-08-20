@@ -38,6 +38,7 @@ auth.json
 
 # Virtual environments
 .venv/
+.venv.*/
 venv/
 ENV/
 env/
@@ -131,6 +132,8 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 junit.xml
+test-results/
+playwright-report/
 
 # =========================
 # Local only

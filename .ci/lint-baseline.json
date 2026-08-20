@@ -1,13 +1,4 @@
 {
-  "toolchain": {
-    "black": "25.1.0",
-    "configs": {
-      "pyproject.toml": "995d6e6ac2241e660d45d29853b3e855a606201d30a1997128ee7305fa42283f"
-    },
-    "flake8": "7.3.0",
-    "isort": "6.0.1",
-    "ruff": "0.12.9"
-  },
   "files": {
     "allapp/__init__.py": {
       "findings": {
@@ -69,7 +60,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "45b04823a07c4b70394f01efe392164791c1e35f6034c3e13f20c137cba2d125"
+      "sha256": "091824b7ee2a7343bf2b0af34bb22af63a35e155cd90c53c9ce7f25c8932478f"
     },
     "allapp/accounts/client_ip.py": {
       "findings": {
@@ -262,7 +253,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "793a12b96316e23ddb0a6efc2094a1f102adf63aad8a2cf725a4f1dfebd1d14a"
+      "sha256": "f6ec5268a1903c66d633c882aa9791c01c3fa81b8986123db1408e6580614f33"
     },
     "allapp/accounts/serializers.py": {
       "findings": {
@@ -440,25 +431,12 @@
     },
     "allapp/baseinfo/admin.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "129:101:E501:line too long (109 > 100 characters)",
-          "143:101:E501:line too long (103 > 100 characters)",
-          "153:101:E501:line too long (130 > 100 characters)",
-          "30:38:E231:missing whitespace after ','",
-          "68:1:E302:expected 2 blank lines, found 1",
-          "70:101:E501:line too long (119 > 100 characters)",
-          "85:1:E302:expected 2 blank lines, found 1",
-          "87:101:E501:line too long (105 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "67c8aa2b360fcef39ef5efb16df6da7eef477ac4c97f4857c7867671323f207a"
+      "sha256": "4af6beb5f2fc5ce008f190d35149ac1aa17ec570276d38eee49ac5d29c58c265"
     },
     "allapp/baseinfo/apps.py": {
       "findings": {
@@ -560,60 +538,21 @@
     },
     "allapp/baseinfo/models.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "100:1:E265:block comment should start with '# '",
-          "104:1:E302:expected 2 blank lines, found 1",
-          "132:10:E221:multiple spaces before operator",
-          "134:7:E221:multiple spaces before operator",
-          "135:10:E221:multiple spaces before operator",
-          "140:101:E501:line too long (112 > 100 characters)",
-          "141:101:E501:line too long (110 > 100 characters)",
-          "144:14:E221:multiple spaces before operator",
-          "152:101:E501:line too long (118 > 100 characters)",
-          "19:1:E302:expected 2 blank lines, found 1",
-          "200:101:E501:line too long (108 > 100 characters)",
-          "204:1:W293:blank line contains whitespace",
-          "233:1:E302:expected 2 blank lines, found 1",
-          "236:101:E501:line too long (119 > 100 characters)",
-          "239:101:E501:line too long (104 > 100 characters)",
-          "240:101:E501:line too long (105 > 100 characters)",
-          "262:10:E131:continuation line unaligned for hanging indent",
-          "262:15:E251:unexpected spaces around keyword / parameter equals",
-          "262:17:E251:unexpected spaces around keyword / parameter equals",
-          "262:28:E251:unexpected spaces around keyword / parameter equals",
-          "262:30:E251:unexpected spaces around keyword / parameter equals",
-          "265:5:E301:expected 1 blank line, found 0",
-          "282:1:E302:expected 2 blank lines, found 1",
-          "333:101:E501:line too long (110 > 100 characters)",
-          "343:1:E302:expected 2 blank lines, found 1",
-          "344:101:E501:line too long (123 > 100 characters)",
-          "348:101:E501:line too long (104 > 100 characters)",
-          "366:1:E302:expected 2 blank lines, found 1",
-          "367:101:E501:line too long (154 > 100 characters)",
-          "367:130:E231:missing whitespace after ','",
-          "369:101:E501:line too long (106 > 100 characters)",
-          "370:101:E501:line too long (105 > 100 characters)",
-          "384:1:E302:expected 2 blank lines, found 1",
-          "385:101:E501:line too long (154 > 100 characters)",
-          "396:101:E501:line too long (104 > 100 characters)",
-          "399:101:E501:line too long (103 > 100 characters)",
-          "401:101:E501:line too long (150 > 100 characters)",
-          "406:101:E501:line too long (133 > 100 characters)",
-          "417:1:E302:expected 2 blank lines, found 1",
-          "430:1:E302:expected 2 blank lines, found 1",
-          "443:1:E302:expected 2 blank lines, found 1",
-          "444:101:E501:line too long (117 > 100 characters)",
-          "61:5:E301:expected 1 blank line, found 0"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "bf12d6aea843c10ffdec8bce6795bec4bd51dbc773316f7d7af012edd5a8ad2e"
+      "sha256": "ab605dfcb9d52a4d735cb7de27b72910a9cc544aed0be1e184cfd3caf3b9f58b"
+    },
+    "allapp/baseinfo/owner_warehouse_access.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "302cd618227123c1d822b8f6380b4cc1ff518bc0b2ad87e0e0b19413fed550a3"
     },
     "allapp/baseinfo/tests.py": {
       "findings": {
@@ -928,15 +867,11 @@
     "allapp/billing/models.py": {
       "findings": {
         "black": [],
-        "flake8": [
-          "207:101:E501:line too long (159 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "c582f613827cadff664fabd1115bf7a5e186f974a2387bb5dd3617db9db806b0"
+      "sha256": "ac0fa031dbec9d45b7a9603824b87fd8221fb2e73a3dada2d640dbb5067fd649"
     },
     "allapp/billing/resolvers.py": {
       "findings": {
@@ -1107,15 +1042,11 @@
     "allapp/billing/services/metrics.py": {
       "findings": {
         "black": [],
-        "flake8": [
-          "130:101:E501:line too long (103 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "3bb540b5cf40c5459bc4dede3e07c10644f88b120bb307e27c83cb51c532b53d"
+      "sha256": "4687ee6a302f623a4781c238d269fc8dfbc054475ae0a49ba6afa0355e9d2836"
     },
     "allapp/billing/services/period.py": {
       "findings": {
@@ -1176,12 +1107,10 @@
       "findings": {
         "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "c688b1a4d696b6d0be221b31cee5cb2ece2b0135fbdec2274d15761a35ca099e"
+      "sha256": "0d8cfe57750d412e70e395179acae93d01a7740ca4cc8ebdf863ea5477d01652"
     },
     "allapp/billing/urls.py": {
       "findings": {
@@ -1203,15 +1132,11 @@
     "allapp/billing/views.py": {
       "findings": {
         "black": [],
-        "flake8": [
-          "1360:101:E501:line too long (121 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "a9385cd21f7836fd56165281de94bf1ab97f5885b0f489b55dc95bdbbe1293c5"
+      "sha256": "da65cbb969044d37ceb0e2b9c99513597dce928aba0f272d6f6c395d6109217d"
     },
     "allapp/console/__init__.py": {
       "findings": {
@@ -1354,7 +1279,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "f67512be18808e56806bebe6407a7da400703cd92acbad1db7ea4cb858ddc014"
+      "sha256": "1154e22c07acfd4dbf5621a6083a0903f27fa33d02dd19747320ffd4aa662814"
     },
     "allapp/console/urls.py": {
       "findings": {
@@ -1415,27 +1340,12 @@
     },
     "allapp/console/views_dashboard.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "100:101:E501:line too long (120 > 100 characters)",
-          "113:1:E302:expected 2 blank lines, found 1",
-          "136:1:E302:expected 2 blank lines, found 1",
-          "151:101:E501:line too long (113 > 100 characters)",
-          "29:1:E302:expected 2 blank lines, found 1",
-          "36:1:E302:expected 2 blank lines, found 1",
-          "42:1:E305:expected 2 blank lines after class or function definition, found 1",
-          "57:101:E501:line too long (136 > 100 characters)",
-          "64:101:E501:line too long (136 > 100 characters)",
-          "70:1:E302:expected 2 blank lines, found 1",
-          "81:101:E501:line too long (130 > 100 characters)",
-          "92:101:E501:line too long (103 > 100 characters)"
-        ],
+        "black": [],
+        "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "847b5de717bea4a8509d058c887e52bca7349b505ea0cbdb8540c951d9796943"
+      "sha256": "3da8619137b405f60db47f37af8853fc803f6b71286f1a1bcdacaec3cab92e9b"
     },
     "allapp/console/views_op.py": {
       "findings": {
@@ -1636,7 +1546,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "6bbacabda78b6d0e7b074cb35709a734815efcd33d7c8eb921c1f4325f8b6369"
+      "sha256": "10c0d6319a8be3f8967a363f2ac13831af1e4e0ea2b4922a2e17fb1088d71789"
     },
     "allapp/core/admin_base.py": {
       "findings": {
@@ -1659,28 +1569,12 @@
     },
     "allapp/core/admin_mixins.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "11:1:E302:expected 2 blank lines, found 1",
-          "26:101:E501:line too long (104 > 100 characters)",
-          "37:1:E303:too many blank lines (3)",
-          "62:1:E302:expected 2 blank lines, found 1",
-          "66:1:E302:expected 2 blank lines, found 1",
-          "73:1:E302:expected 2 blank lines, found 1",
-          "8:1:F811:redefinition of unused 'forms' from line 3",
-          "9:1:F811:redefinition of unused 'TrimDecimalWidget' from line 5"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
-        "ruff": [
-          "8:20:F811:Redefinition of unused `forms` from line 3",
-          "9:39:F811:Redefinition of unused `TrimDecimalWidget` from line 5"
-        ]
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
       },
-      "sha256": "8e5341055b2c50017b533acec951820d8661d662840bcbda95c328a04c3b83d7"
+      "sha256": "aab4650c3773139041cd5c02f523da30502057d802e8a9e52dc265949b923882"
     },
     "allapp/core/admin_order.py": {
       "findings": {
@@ -1699,6 +1593,15 @@
         "ruff": []
       },
       "sha256": "4cb951d6d9a6bdf1cf0f06d9ac66c2143ddcbcfbb2f958949d9ddbce6d897670"
+    },
+    "allapp/core/admin_tenant.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "fdb7c0e9bf2c1fcec5f183c8736661e051e0146266c95e825e11226e1370df84"
     },
     "allapp/core/admin_widgets.py": {
       "findings": {
@@ -1825,7 +1728,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "acec4d07def72568aa4541e3c9900cd3cf18c7a7d3eba34f7f23747696502d9e"
+      "sha256": "a7778bf29b0eda5a2956cd79ef01c84cbd59926346550160437e6da8921dd4ff"
     },
     "allapp/core/choices.py": {
       "findings": {
@@ -1861,12 +1764,10 @@
       "findings": {
         "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "b797d1f7a0aa4063484a027ae9ed6d23dbe3560738a4288d7d9f005f21f0b3c1"
+      "sha256": "6bf88384b0ee71c66c3203822b9e0e8a726302254eaa2e526edd364e75a55af8"
     },
     "allapp/core/data_accuracy_cleanup.py": {
       "findings": {
@@ -2004,7 +1905,16 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "5662d4fdb0624e8a3ee3d55490d8df521982ea3a5810014ac57b387835216f9d"
+      "sha256": "8575b183f89066da08201a22e35a7de4cdf1eecc78cc0ba715707411e23a50dc"
+    },
+    "allapp/core/management/commands/purge_business_data_new.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "267b693f367d10e4b81c3351f58aa8ab0f1c2bfe9717b87fc16f4b54164ab00d"
     },
     "allapp/core/management/commands/reconcile_data_accuracy.py": {
       "findings": {
@@ -2093,6 +2003,24 @@
       },
       "sha256": "404d0794f3d18aa1f7cdc7e062a9eb6277ab5a876a3d4406d5810074c1d9ef58"
     },
+    "allapp/core/migrations/0006_systemsetting_secret_and_gs1_config.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "f365750e6a20877e00fcdb2a95dd8a32b065e531c94a306a9d5d0835f12f8454"
+    },
+    "allapp/core/migrations/0007_remove_obsolete_gs1_enabled_setting.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "e33f78045b446ea84b3ad050ce256f4061aea20a4f36593b5aa487ca3e71da07"
+    },
     "allapp/core/migrations/__init__.py": {
       "findings": {
         "black": [],
@@ -2105,13 +2033,11 @@
     "allapp/core/models.py": {
       "findings": {
         "black": [],
-        "flake8": [
-          "404:101:E501:line too long (107 > 100 characters)"
-        ],
+        "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "f9c011261c7d0ae344bfc989c97c37f5f4cba23e86503c061bcc30860c3833a2"
+      "sha256": "fa8c6a4e24b669cda3720eb9b8354886935ffdb8c6187ca06ac4c0dd40b5855b"
     },
     "allapp/core/preserved_data_transfer.py": {
       "findings": {
@@ -2120,7 +2046,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "22ae5242c905e2ebfc5de3943e5ea9331734ce4144b66a9088cd72bb1f58bb3a"
+      "sha256": "f0c718e5fc8c461f3532b720cc599d006357e2b09ee37069db42773818203180"
     },
     "allapp/core/printing.py": {
       "findings": {
@@ -2147,7 +2073,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "9d408ec6ed96016f86ab321db83cefdc07e343071e6ce0ccfba4fe0d3b5a21af"
+      "sha256": "2d09ff96d2a0b6f26a96342819cc76d27d4e67d39bb85657539d3cbc06e37d2e"
     },
     "allapp/core/test_client_manifests.py": {
       "findings": {
@@ -2169,16 +2095,12 @@
     },
     "allapp/core/test_owner_feature_menu.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "b83d627f0cd96ad86d9efa99f6d41c1818fa7340e7b2f7a7c7b7392583f34e91"
+      "sha256": "429c9a010c1ad2249d74d7a92f5d2285da8867efbbd233240b6f48dcb9930a91"
     },
     "allapp/core/test_preserved_data_transfer.py": {
       "findings": {
@@ -2187,7 +2109,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "01cdaffb5485e492def1345c403b0f8b595493c6e3f6bd9811be7b787ed281d2"
+      "sha256": "f275c5cca55211a480b981d6575ca20b8d90b2d26678074fd1c17c7898989fc2"
     },
     "allapp/core/test_printing.py": {
       "findings": {
@@ -2198,16 +2120,32 @@
       },
       "sha256": "15afdb6f2670af76df6e592a87aaac17fc720fe48a4c0b7bf412a5aeaf059c4d"
     },
-    "allapp/core/tests.py": {
+    "allapp/core/test_url_security.py": {
       "findings": {
         "black": [],
-        "flake8": [
-          "734:101:E501:line too long (110 > 100 characters)"
-        ],
+        "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "5a9291377a1fb588b13b7a31030eee4b578415f86b4245298a4efa2b3e793224"
+      "sha256": "a708750752042ab2c710c7c03f8f0802937e93f2bdb38e53bb7eb4fca897c242"
+    },
+    "allapp/core/tests.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "367ef70c05cfb865ae4241869c13633a93c26e4c250115f8ce9effe52bebfb92"
+    },
+    "allapp/core/url_security.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "fe8c6ab592331c0955415c33e34c4c186b349388ffcc3988a9fc712b695c0c5f"
     },
     "allapp/core/urls.py": {
       "findings": {
@@ -2229,19 +2167,12 @@
     },
     "allapp/core/utils/constraints.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "1:1:E265:block comment should start with '# '",
-          "4:1:E302:expected 2 blank lines, found 1"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "0d29bb6ac8e93bd7360ee86717c509a240e060d77970207eb0cf25005a9adfd9"
+      "sha256": "7f327da015660159b44e7abc0782cdc0b799214c25185bfff366c4905890836e"
     },
     "allapp/core/utils/log_context.py": {
       "findings": {
@@ -2300,7 +2231,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "9b1ce13c1fd707b1d8fc49870a4972be8d8af4f5989be65efafceeb6b62d0e71"
+      "sha256": "faeb68410d1382c5a43161f822fd2740c1806b87f40f84378da35fa6842de9c3"
     },
     "allapp/core/views/views_mixins.py": {
       "findings": {
@@ -2449,40 +2380,12 @@
     },
     "allapp/inbound/admin.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "1087:1:E302:expected 2 blank lines, found 1",
-          "1093:1:E302:expected 2 blank lines, found 1",
-          "109:101:E501:line too long (107 > 100 characters)",
-          "1105:10:E131:continuation line unaligned for hanging indent",
-          "1140:101:E501:line too long (105 > 100 characters)",
-          "180:42:E231:missing whitespace after ','",
-          "185:101:E501:line too long (111 > 100 characters)",
-          "206:101:E501:line too long (115 > 100 characters)",
-          "209:101:E501:line too long (173 > 100 characters)",
-          "209:34:E231:missing whitespace after ','",
-          "209:50:E231:missing whitespace after ','",
-          "209:68:E231:missing whitespace after ','",
-          "210:9:E128:continuation line under-indented for visual indent",
-          "266:101:E501:line too long (101 > 100 characters)",
-          "273:5:E303:too many blank lines (2)",
-          "277:101:E501:line too long (131 > 100 characters)",
-          "277:102:E231:missing whitespace after ','",
-          "520:51:E231:missing whitespace after ','",
-          "521:18:E221:multiple spaces before operator",
-          "521:48:E231:missing whitespace after ','",
-          "73:1:E302:expected 2 blank lines, found 1",
-          "77:38:E231:missing whitespace after ','",
-          "967:1:E302:expected 2 blank lines, found 1"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "361a94ddc034630244a08139175246b9fe84bcf192332041df33d4e003f81009"
+      "sha256": "49adadce1f2fb09af139aef7daa87c7b48a7a4315aafb7a23b62a67e9af37e74"
     },
     "allapp/inbound/apps.py": {
       "findings": {
@@ -2522,7 +2425,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "ef4231e9559190df5d6db909bdb4f92f813f934ae04eb3b4552746b26abe7dd1"
+      "sha256": "4d8e13f5042d1be5803f3bed373d1bd5cda70943608da958d6c6d22684c66840"
     },
     "allapp/inbound/export_print.py": {
       "findings": {
@@ -2581,6 +2484,24 @@
         ]
       },
       "sha256": "b05a65a259312bb169ef2590f0e22fd7eec6eede9c45d26c2e17f1aa25d20dbc"
+    },
+    "allapp/inbound/gs1_services.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "ae27df3c14bba6ec0e91c40e326342146aa925ebaf292d12ecc7e8ce62eeda6f"
+    },
+    "allapp/inbound/gs1_views.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "764043f9c3b123a5732c6c9e9224d1c2afed56d560f08995a34819072eaf052d"
     },
     "allapp/inbound/migrations/0001_initial.py": {
       "findings": {
@@ -2642,120 +2563,21 @@
     },
     "allapp/inbound/models.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "100:84:E202:whitespace before ')'",
-          "1020:101:E501:line too long (109 > 100 characters)",
-          "1031:101:E501:line too long (102 > 100 characters)",
-          "1032:101:E501:line too long (103 > 100 characters)",
-          "1081:1:E302:expected 2 blank lines, found 1",
-          "1082:101:E501:line too long (104 > 100 characters)",
-          "1084:101:E501:line too long (113 > 100 characters)",
-          "1110:101:E501:line too long (121 > 100 characters)",
-          "1116:101:E501:line too long (103 > 100 characters)",
-          "1142:101:E501:line too long (112 > 100 characters)",
-          "122:101:E501:line too long (107 > 100 characters)",
-          "131:101:E501:line too long (131 > 100 characters)",
-          "131:64:E231:missing whitespace after ','",
-          "136:17:E265:block comment should start with '# '",
-          "137:22:E251:unexpected spaces around keyword / parameter equals",
-          "137:24:E251:unexpected spaces around keyword / parameter equals",
-          "13:41:E231:missing whitespace after ','",
-          "19:1:E302:expected 2 blank lines, found 1",
-          "21:101:E501:line too long (110 > 100 characters)",
-          "246:101:E501:line too long (112 > 100 characters)",
-          "24:1:E305:expected 2 blank lines after class or function definition, found 1",
-          "253:101:E501:line too long (102 > 100 characters)",
-          "26:1:E302:expected 2 blank lines, found 1",
-          "306:70:E231:missing whitespace after ','",
-          "313:101:E501:line too long (128 > 100 characters)",
-          "367:5:E265:block comment should start with '# '",
-          "368:5:E265:block comment should start with '# '",
-          "39:101:E501:line too long (113 > 100 characters)",
-          "423:40:E225:missing whitespace around operator",
-          "439:101:E501:line too long (109 > 100 characters)",
-          "439:21:E117:over-indented",
-          "446:5:E265:block comment should start with '# '",
-          "465:101:E501:line too long (104 > 100 characters)",
-          "46:101:E501:line too long (116 > 100 characters)",
-          "480:1:E302:expected 2 blank lines, found 1",
-          "491:101:E501:line too long (147 > 100 characters)",
-          "491:74:E231:missing whitespace after ','",
-          "492:101:E501:line too long (125 > 100 characters)",
-          "493:101:E501:line too long (135 > 100 characters)",
-          "493:77:E231:missing whitespace after ','",
-          "494:101:E501:line too long (131 > 100 characters)",
-          "494:73:E231:missing whitespace after ','",
-          "500:101:E501:line too long (108 > 100 characters)",
-          "501:101:E501:line too long (117 > 100 characters)",
-          "502:101:E501:line too long (115 > 100 characters)",
-          "50:1:E302:expected 2 blank lines, found 1",
-          "538:101:E501:line too long (102 > 100 characters)",
-          "578:1:E302:expected 2 blank lines, found 1",
-          "627:101:E501:line too long (108 > 100 characters)",
-          "628:101:E501:line too long (102 > 100 characters)",
-          "659:101:E501:line too long (107 > 100 characters)",
-          "686:101:E501:line too long (161 > 100 characters)",
-          "686:9:E265:block comment should start with '# '",
-          "687:101:E501:line too long (115 > 100 characters)",
-          "70:33:E225:missing whitespace around operator",
-          "725:101:E501:line too long (122 > 100 characters)",
-          "739:5:E303:too many blank lines (2)",
-          "740:5:E301:expected 1 blank line, found 0",
-          "76:101:E501:line too long (106 > 100 characters)",
-          "778:101:E501:line too long (103 > 100 characters)",
-          "789:1:E302:expected 2 blank lines, found 1",
-          "79:101:E501:line too long (122 > 100 characters)",
-          "79:92:E231:missing whitespace after ','",
-          "80:101:E501:line too long (130 > 100 characters)",
-          "814:101:E501:line too long (108 > 100 characters)",
-          "81:101:E501:line too long (131 > 100 characters)",
-          "81:75:E231:missing whitespace after ','",
-          "820:101:E501:line too long (103 > 100 characters)",
-          "821:101:E501:line too long (107 > 100 characters)",
-          "85:101:E501:line too long (108 > 100 characters)",
-          "86:101:E501:line too long (117 > 100 characters)",
-          "872:1:E302:expected 2 blank lines, found 1",
-          "878:101:E501:line too long (108 > 100 characters)",
-          "879:101:E501:line too long (133 > 100 characters)",
-          "888:30:E231:missing whitespace after ','",
-          "888:36:E231:missing whitespace after ','",
-          "888:41:E231:missing whitespace after ','",
-          "888:47:E231:missing whitespace after ','",
-          "888:52:E231:missing whitespace after ','",
-          "888:60:E231:missing whitespace after ','",
-          "888:65:E231:missing whitespace after ','",
-          "889:101:E501:line too long (103 > 100 characters)",
-          "892:19:E231:missing whitespace after ','",
-          "893:21:E231:missing whitespace after ','",
-          "894:18:E231:missing whitespace after ','",
-          "895:17:E231:missing whitespace after ','",
-          "896:15:E231:missing whitespace after ','",
-          "89:101:E501:line too long (115 > 100 characters)",
-          "902:30:E231:missing whitespace after ','",
-          "902:50:E231:missing whitespace after ','",
-          "902:68:E231:missing whitespace after ','",
-          "903:101:E501:line too long (105 > 100 characters)",
-          "905:101:E501:line too long (131 > 100 characters)",
-          "907:101:E501:line too long (174 > 100 characters)",
-          "90:101:E501:line too long (123 > 100 characters)",
-          "937:101:E501:line too long (107 > 100 characters)",
-          "964:101:E501:line too long (105 > 100 characters)",
-          "96:101:E501:line too long (187 > 100 characters)",
-          "96:186:E202:whitespace before ')'",
-          "986:1:E302:expected 2 blank lines, found 1",
-          "999:101:E501:line too long (102 > 100 characters)",
-          "99:101:E501:line too long (189 > 100 characters)",
-          "99:188:E202:whitespace before ')'"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "9ce401bd9be6b16912596361294efbf70e84e467e6fd0bea552fd150f223f6a1"
+      "sha256": "c37585ae04b5ce53467d5465f72cc32ff72004a4f5305f670a5cb4a3b7fe18aa"
+    },
+    "allapp/inbound/no_order_access.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "b86e67cfb3483e76d4cfd78c862339e4c440fafcd1a1c0f66a0627c2f3a9587c"
     },
     "allapp/inbound/permissions.py": {
       "findings": {
@@ -2769,6 +2591,15 @@
         "ruff": []
       },
       "sha256": "712121d041960ead9fc880972f90db1d3940ff407480fce33dc4aaf480a9b5f6"
+    },
+    "allapp/inbound/selectors.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "c5be8b975f13038cc5553551b264058bc7860a3b8a1deae0789cee1923e33768"
     },
     "allapp/inbound/serializers.py": {
       "findings": {
@@ -2800,7 +2631,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "f741d06d940a0b1c0857150c42a36cce3a778552a821f81e104809490c50f307"
+      "sha256": "c1b88202045d9a46ff8b668ac50248531f553821ead0a6d05376232aa88bc462"
     },
     "allapp/inbound/test_excel_import.py": {
       "findings": {
@@ -2809,7 +2640,16 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "d060f0a99658369b819f5863d97db77052997f5d95b818339889ed141a7cef2e"
+      "sha256": "217a88eba817cb71405bcd0aa23f308a0ee55e5759315db8228c6b56d1613cc9"
+    },
+    "allapp/inbound/test_gs1_quick_create.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "4756c07e47b57a928a6c82142a955f963d8b8a65247692df306ab8b900cb33ed"
     },
     "allapp/inbound/test_order_and_pda_api.py": {
       "findings": {
@@ -2826,31 +2666,19 @@
       "findings": {
         "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "115bb0eb988bff32859fd8abe4bc433c58a6ad979624b1978ea2f3a675aa0bf0"
+      "sha256": "0363a26371b4df0c36a0cad92ecd286e169a885a89b5814c48c004400dece2dd"
     },
     "allapp/inbound/tests.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "45:101:E501:line too long (106 > 100 characters)",
-          "701:101:E501:line too long (103 > 100 characters)",
-          "702:101:E501:line too long (119 > 100 characters)",
-          "703:101:E501:line too long (106 > 100 characters)",
-          "758:101:E501:line too long (101 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "0bf205ded9e439ed7dfb59d8897142e80ce11414aa25ce61181d497de856cb27"
+      "sha256": "a3df3b09c9eb1c79fba7495a0fb70bfbdea99ac5d13d3d6e98b8d9314d2f220a"
     },
     "allapp/inbound/urls.py": {
       "findings": {
@@ -2859,18 +2687,16 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "0987bc9c9da97694b698312d2b3993736529167c34a6832558805c32b95b2b3d"
+      "sha256": "a808bf7cf89f35af3dbb7e70b24a413069bdf3881a16b36d5314956d135c1601"
     },
     "allapp/inbound/views.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "d7c6d8d40745f19c90d8d7864e23af72e5fff5c7b2cfa088b87fe477b7efb560"
+      "sha256": "75b54b88b3c1461624c188f0e85b98f1e37f294dcec97b796b9a9fac26aae1b3"
     },
     "allapp/inventory/__init__.py": {
       "findings": {
@@ -2958,7 +2784,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "1aa7d86e44df561370171366eb881542884c04affb07ebdeaa5cdb5a1b886b0e"
     },
     "allapp/inventory/management/__init__.py": {
       "findings": {
@@ -3197,17 +3023,11 @@
     "allapp/inventory/models.py": {
       "findings": {
         "black": [],
-        "flake8": [
-          "364:101:E501:line too long (102 > 100 characters)",
-          "486:101:E501:line too long (118 > 100 characters)",
-          "785:101:E501:line too long (104 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "56ee0c4febfecac74a686750176a8487f9010402d31541bac654ed5cd3da07ec"
+      "sha256": "03bbf508f4571509ec425ea9ad0bbc1f7a210bf88028c8be3003c049546b1f16"
     },
     "allapp/inventory/serializers.py": {
       "findings": {
@@ -3237,31 +3057,16 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "26a8dadcd9e3150b8d2903e14e1da91041b1486c7c632827c4de52cedae77dec"
+      "sha256": "f87f8f9d73613a77f2c6f0e984526045a492ab3a7779e576803e1a210f108e8d"
     },
     "allapp/inventory/services_quick_adjust.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "119:1:E303:too many blank lines (4)",
-          "120:1:E302:expected 2 blank lines, found 4",
-          "37:1:E302:expected 2 blank lines, found 1",
-          "3:34:E271:multiple spaces after keyword",
-          "3:43:E231:missing whitespace after ','",
-          "3:55:E231:missing whitespace after ','",
-          "46:101:E501:line too long (104 > 100 characters)",
-          "51:101:E501:line too long (113 > 100 characters)",
-          "71:15:E251:unexpected spaces around keyword / parameter equals",
-          "71:17:E251:unexpected spaces around keyword / parameter equals"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "d4a6197ea0955b6b094bfa85f79b70bccef376b9e4f2ee31d071a54bfbf36a68"
+      "sha256": "9c3abcca4c02a005e2208a03e8dbb739032cb028e17185d55d82b6bc18de8a34"
     },
     "allapp/inventory/snapshot_services.py": {
       "findings": {
@@ -3294,7 +3099,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "bc89fdd554de709883aba1a812e69e9d8dbd1dcc7e93e1eb65edf8e283f7ea88"
     },
     "allapp/inventory/test_management_commands.py": {
       "findings": {
@@ -3307,6 +3112,15 @@
         "ruff": []
       },
       "sha256": "42d3800a6c23bfa409a723871bc86ac9cca4a6cd7d22369c92cab106b0a60386"
+    },
+    "allapp/inventory/test_owner_invariants.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "d7ae88b985aaf125c67f67809949a3cae2bf0505f48dc1321b7bb4e29040e051"
     },
     "allapp/inventory/test_owner_summary_pagination.py": {
       "findings": {
@@ -3337,7 +3151,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "04c3abfb0d97657dff1db6c98ce715645595b0fdd84d8099c2745de68ee6b165"
+      "sha256": "aea962750419b559eb7a8092f1e37b940bc5f94e6532ca9a8648f72b9d982ea1"
     },
     "allapp/inventory/tests.py": {
       "findings": {
@@ -3425,26 +3239,12 @@
     },
     "allapp/labeling/models.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "21:1:E302:expected 2 blank lines, found 1",
-          "3:1:F401:'django.db.models.UniqueConstraint' imported but unused",
-          "51:1:E302:expected 2 blank lines, found 1",
-          "58:101:E501:line too long (132 > 100 characters)",
-          "5:1:E302:expected 2 blank lines, found 1",
-          "60:101:E501:line too long (116 > 100 characters)",
-          "82:1:E302:expected 2 blank lines, found 1"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
-        "ruff": [
-          "3:50:F401:`django.db.models.UniqueConstraint` imported but unused"
-        ]
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
       },
-      "sha256": "9d7dd65b3c027282d17d6b737e57bcef56eaad132d4bbdc9df24f4993a80dd0e"
+      "sha256": "3d924ded66184cfb73640da472afa9b47b545f98c081797b22723afc19680b47"
     },
     "allapp/labeling/tests.py": {
       "findings": {
@@ -3466,41 +3266,12 @@
     },
     "allapp/locations/admin.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "10:1:E302:expected 2 blank lines, found 1",
-          "29:1:E265:block comment should start with '# '",
-          "30:1:E302:expected 2 blank lines, found 1",
-          "37:1:E302:expected 2 blank lines, found 1",
-          "40:101:E501:line too long (103 > 100 characters)",
-          "40:90:E231:missing whitespace after ','",
-          "42:36:E231:missing whitespace after ','",
-          "65:1:E303:too many blank lines (3)",
-          "69:1:E302:expected 2 blank lines, found 1",
-          "73:1:E302:expected 2 blank lines, found 1",
-          "77:1:E302:expected 2 blank lines, found 1",
-          "81:1:E302:expected 2 blank lines, found 1",
-          "84:101:E501:line too long (136 > 100 characters)",
-          "84:109:E231:missing whitespace after ','",
-          "84:65:E231:missing whitespace after ','",
-          "84:78:E231:missing whitespace after ','",
-          "8:44:E231:missing whitespace after ','",
-          "8:53:E231:missing whitespace after ','",
-          "90:51:E231:missing whitespace after ','",
-          "90:64:E231:missing whitespace after ','",
-          "90:73:E231:missing whitespace after ','",
-          "95:101:E501:line too long (121 > 100 characters)",
-          "95:75:E231:missing whitespace after ','",
-          "95:88:E231:missing whitespace after ','"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "950056a1efe81c795aed1fbeb74d7f0a8c11c5c73b909424aa0fabad62cbc6c4"
+      "sha256": "0a4184970a97ea69100f52d70b1ab7ba58f97b2bb3c5828bdae5d217fb0e273e"
     },
     "allapp/locations/apps.py": {
       "findings": {
@@ -3551,6 +3322,15 @@
       },
       "sha256": "83d837018fdefcb830ce08476ae28ee6513aa0a407ac40a54eb6b3700e2e9c83"
     },
+    "allapp/locations/migrations/0005_warehouse_default_receive_location.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "51615ddf8cf64c11bd5a65617dd3461d10f8de178ef64c98118313109168ea22"
+    },
     "allapp/locations/migrations/__init__.py": {
       "findings": {
         "black": [],
@@ -3562,61 +3342,21 @@
     },
     "allapp/locations/models.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "103:30:E225:missing whitespace around operator",
-          "104:101:E501:line too long (104 > 100 characters)",
-          "106:16:E111:indentation is not a multiple of 4",
-          "113:25:E225:missing whitespace around operator",
-          "12:5:E301:expected 1 blank line, found 0",
-          "134:1:E302:expected 2 blank lines, found 1",
-          "140:15:E221:multiple spaces before operator",
-          "142:101:E501:line too long (101 > 100 characters)",
-          "143:101:E501:line too long (119 > 100 characters)",
-          "143:10:E221:multiple spaces before operator",
-          "145:10:E221:multiple spaces before operator",
-          "147:17:E221:multiple spaces before operator",
-          "150:101:E501:line too long (124 > 100 characters)",
-          "151:101:E501:line too long (135 > 100 characters)",
-          "151:11:E221:multiple spaces before operator",
-          "154:13:E221:multiple spaces before operator",
-          "156:101:E501:line too long (101 > 100 characters)",
-          "156:12:E221:multiple spaces before operator",
-          "157:101:E501:line too long (106 > 100 characters)",
-          "164:101:E501:line too long (101 > 100 characters)",
-          "16:5:E301:expected 1 blank line, found 0",
-          "18:1:E302:expected 2 blank lines, found 1",
-          "217:1:W391:blank line at end of file",
-          "24:5:E301:expected 1 blank line, found 0",
-          "28:5:E301:expected 1 blank line, found 0",
-          "42:1:E302:expected 2 blank lines, found 1",
-          "44:101:E501:line too long (119 > 100 characters)",
-          "46:35:E128:continuation line under-indented for visual indent",
-          "50:101:E501:line too long (111 > 100 characters)",
-          "56:101:E501:line too long (107 > 100 characters)",
-          "57:101:E501:line too long (107 > 100 characters)",
-          "67:101:E501:line too long (136 > 100 characters)",
-          "9:1:E302:expected 2 blank lines, found 1"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
-        "ruff": []
-      },
-      "sha256": "8b43ea11d0ceef2043c136380eb2be48a706bc4e912ed34cb9e83247a178a2c2"
-    },
-    "allapp/locations/tests.py": {
-      "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "671a18cd9267ff7ed125e3cb5c4393cd98c1865f0cc9a47435e879b2a572a0ad"
+      "sha256": "7aa640026249b34701add30431ddc9b7e4e9c88d35dad8117838d0795238b889"
+    },
+    "allapp/locations/tests.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "b0882416b09c1a86f0fe37d33ecb7de51b56ef1c44f08d27db9d87206e6ff0a0"
     },
     "allapp/locations/views.py": {
       "findings": {
@@ -3642,25 +3382,12 @@
     },
     "allapp/outbound/admin.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "14:1:F401:'..tasking.models.WmsTask' imported but unused",
-          "24:1:E302:expected 2 blank lines, found 1",
-          "42:1:E302:expected 2 blank lines, found 1",
-          "49:1:E302:expected 2 blank lines, found 1",
-          "530:1:E303:too many blank lines (4)",
-          "552:5:E301:expected 1 blank line, found 0"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
-        "ruff": [
-          "14:30:F401:`..tasking.models.WmsTask` imported but unused"
-        ]
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
       },
-      "sha256": "8152baa886415dee4f1447cc14b9c40ce5d2da7cce9a4b204654fdd70cec54cc"
+      "sha256": "e3efc0ebac4307932b961c240856ac13c9c505cf89aa6c6a4f88a93de8c4a47f"
     },
     "allapp/outbound/apps.py": {
       "findings": {
@@ -3767,18 +3494,12 @@
     },
     "allapp/outbound/management/commands/release_to_pick.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "34:101:E501:line too long (105 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "3ad314522f9a76289cca9fb92299d7e67005fe2615fdaed5ad861b8b15b15f4e"
+      "sha256": "c2632a59652e7f95015e51a87003632fa88115da8f3df4892ef458e2e09dbd0c"
     },
     "allapp/outbound/migrations/0001_initial.py": {
       "findings": {
@@ -3860,91 +3581,12 @@
     },
     "allapp/outbound/models.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "10:1:F811:redefinition of unused 'Decimal' from line 3",
-          "11:34:E231:missing whitespace after ','",
-          "13:1:F811:redefinition of unused 'ValidationError' from line 4",
-          "16:1:F401:'allapp.products.models.Product' imported but unused",
-          "16:1:F401:'allapp.products.models.ProductPackage' imported but unused",
-          "16:1:F401:'allapp.products.models.ProductUom' imported but unused",
-          "17:1:F401:'allapp.inbound.models.InboundOrder' imported but unused",
-          "17:1:F401:'allapp.inbound.models.InboundOrderLine' imported but unused",
-          "18:1:F401:'allapp.baseinfo.models.Supplier' imported but unused",
-          "199:101:E501:line too long (104 > 100 characters)",
-          "20:1:F811:redefinition of unused 'PricingStatus' from line 2",
-          "218:32:E231:missing whitespace after ','",
-          "218:49:E231:missing whitespace after ','",
-          "219:30:E231:missing whitespace after ','",
-          "219:45:E231:missing whitespace after ','",
-          "219:60:E231:missing whitespace after ','",
-          "221:13:E131:continuation line unaligned for hanging indent",
-          "226:13:E131:continuation line unaligned for hanging indent",
-          "230:101:E501:line too long (113 > 100 characters)",
-          "231:101:E501:line too long (112 > 100 characters)",
-          "234:13:E131:continuation line unaligned for hanging indent",
-          "238:13:E131:continuation line unaligned for hanging indent",
-          "23:1:E302:expected 2 blank lines, found 1",
-          "242:13:E131:continuation line unaligned for hanging indent",
-          "454:1:E302:expected 2 blank lines, found 1",
-          "469:101:E501:line too long (124 > 100 characters)",
-          "469:76:E231:missing whitespace after ','",
-          "472:101:E501:line too long (128 > 100 characters)",
-          "474:101:E501:line too long (111 > 100 characters)",
-          "480:101:E501:line too long (104 > 100 characters)",
-          "497:101:E501:line too long (105 > 100 characters)",
-          "498:101:E501:line too long (108 > 100 characters)",
-          "500:101:E501:line too long (114 > 100 characters)",
-          "54:5:E303:too many blank lines (3)",
-          "556:101:E501:line too long (103 > 100 characters)",
-          "569:101:E501:line too long (105 > 100 characters)",
-          "602:1:E265:block comment should start with '# '",
-          "603:1:E302:expected 2 blank lines, found 1",
-          "611:16:E221:multiple spaces before operator",
-          "612:16:E221:multiple spaces before operator",
-          "614:20:E221:multiple spaces before operator",
-          "616:101:E501:line too long (106 > 100 characters)",
-          "619:12:E221:multiple spaces before operator",
-          "621:15:E221:multiple spaces before operator",
-          "623:12:E221:multiple spaces before operator",
-          "664:1:E265:block comment should start with '# '",
-          "665:1:E302:expected 2 blank lines, found 1",
-          "684:18:E221:multiple spaces before operator",
-          "691:11:E221:multiple spaces before operator",
-          "692:9:E221:multiple spaces before operator",
-          "69:101:E501:line too long (124 > 100 characters)",
-          "701:101:E501:line too long (103 > 100 characters)",
-          "705:101:E501:line too long (108 > 100 characters)",
-          "70:101:E501:line too long (153 > 100 characters)",
-          "71:101:E501:line too long (133 > 100 characters)",
-          "733:1:E402:module level import not at top of file",
-          "735:1:E302:expected 2 blank lines, found 1",
-          "741:1:E302:expected 2 blank lines, found 1",
-          "747:1:E302:expected 2 blank lines, found 1",
-          "82:101:E501:line too long (107 > 100 characters)",
-          "83:101:E501:line too long (117 > 100 characters)",
-          "86:101:E501:line too long (115 > 100 characters)",
-          "87:101:E501:line too long (127 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
-        "ruff": [
-          "10:21:F811:Redefinition of unused `Decimal` from line 3",
-          "13:36:F811:Redefinition of unused `ValidationError` from line 4",
-          "16:36:F401:`allapp.products.models.Product` imported but unused",
-          "16:45:F401:`allapp.products.models.ProductPackage` imported but unused",
-          "16:61:F401:`allapp.products.models.ProductUom` imported but unused",
-          "17:35:F401:`allapp.inbound.models.InboundOrder` imported but unused",
-          "17:49:F401:`allapp.inbound.models.InboundOrderLine` imported but unused",
-          "18:36:F401:`allapp.baseinfo.models.Supplier` imported but unused",
-          "20:35:F811:Redefinition of unused `PricingStatus` from line 2",
-          "733:1:E402:Module level import not at top of file"
-        ]
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
       },
-      "sha256": "72cb780edbf385661edaa3eec5057462c2a1d3ea9643fb5ccb796556d14f7687"
+      "sha256": "096119df2354addd3c21f437396c8e03067184d9169efeb63b7db056b5b69547"
     },
     "allapp/outbound/serializers.py": {
       "findings": {
@@ -4073,7 +3715,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "9fca9841860c2a9a175dd860b9ad562daf62aa29f81bdcb6b40017db7ac3a49a"
+      "sha256": "602271335302af60e77ad3bea5ff8f758c57d286e43be7661934cd2790d53bf8"
     },
     "allapp/outbound/test_assisted_flow.py": {
       "findings": {
@@ -4082,7 +3724,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "bf31942e8d12793c5cc14011c252709b46eb8529bc57f4e65d66f501a8cd17d7"
+      "sha256": "be68cee8c8e60e4ff45a48367e072100d3ae54b41cc91d021e3647092361b43a"
     },
     "allapp/outbound/test_assisted_history.py": {
       "findings": {
@@ -4154,16 +3796,12 @@
     },
     "allapp/outbound/test_drop_ship_client_contract.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "3348d9c8f485d4e6d7daf360e48d13c64a7719e9a56dc10a4a3c5bd36d53d00a"
+      "sha256": "4b5ea339aba4e9f88c3f94cdc08673c9b39b358536fa92d99942c693d6f57816"
     },
     "allapp/outbound/test_drop_ship_import_security.py": {
       "findings": {
@@ -4189,19 +3827,12 @@
     },
     "allapp/outbound/test_owner_cart_isolation_client_contract.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "40:101:E501:line too long (102 > 100 characters)",
-          "75:101:E501:line too long (113 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "8cc8677306fd93533bafa104b4078af6ef9ef558f26ee71fc8d6a21e77645897"
+      "sha256": "aa362c9b919873af87f2b5a0b5b9d6380e6b7a57590676601039e5784454b3f2"
     },
     "allapp/outbound/test_owner_order_edit_client_contract.py": {
       "findings": {
@@ -4216,16 +3847,12 @@
     },
     "allapp/outbound/test_owner_order_idempotency_client_contract.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "70bde469bf2fe61e97f8da1004a9ced916998569e7f8675b88cf4114eecd4354"
+      "sha256": "926da692b0134ad04212185b28bed2c48f081d01479942ad48c4b75c6cb3391e"
     },
     "allapp/outbound/test_owner_order_review_state_machine.py": {
       "findings": {
@@ -4240,12 +3867,10 @@
       "findings": {
         "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "b6606ce97a9ad1c1ddf5771bf82abaff3b6cb8703b66c1ff9f2352a2d95ba9ac"
+      "sha256": "702222ae45330d28b6a29e9bef361eb38427c0e17ac77ae59266df9431ae5fac"
     },
     "allapp/outbound/test_owner_supplier_scope.py": {
       "findings": {
@@ -4289,14 +3914,21 @@
     },
     "allapp/outbound/test_production_remediation.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "c9c7f8a72d2bda5f87bb0c56628fe4832e6f77e89a732558b8c30941df48fb26"
+      "sha256": "89afec788a519e1afd0124df7c9f9e549b08873344c2c3047cad1976898c789c"
+    },
+    "allapp/outbound/test_release_to_pick_command.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "32fd1d97644a4705908cd0abdf2508f875149efdf94b6fface0f2f3d111acfa3"
     },
     "allapp/outbound/test_sale_price_guards.py": {
       "findings": {
@@ -4362,77 +3994,12 @@
     },
     "allapp/outbound/views.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "1227:101:E501:line too long (102 > 100 characters)",
-          "167:1:E303:too many blank lines (3)",
-          "178:1:E302:expected 2 blank lines, found 1",
-          "2235:101:E501:line too long (102 > 100 characters)",
-          "2263:101:E501:line too long (116 > 100 characters)",
-          "2278:1:E302:expected 2 blank lines, found 1",
-          "2310:1:E302:expected 2 blank lines, found 1",
-          "358:16:E221:multiple spaces before operator",
-          "401:101:E501:line too long (126 > 100 characters)",
-          "401:111:E231:missing whitespace after ','",
-          "401:68:E231:missing whitespace after ','",
-          "401:84:E231:missing whitespace after ','",
-          "401:91:E231:missing whitespace after ','",
-          "401:99:E231:missing whitespace after ','",
-          "402:100:E231:missing whitespace after ','",
-          "402:101:E501:line too long (119 > 100 characters)",
-          "402:37:E231:missing whitespace after ','",
-          "445:48:E231:missing whitespace after ','",
-          "449:9:E303:too many blank lines (2)",
-          "505:9:E303:too many blank lines (2)",
-          "512:13:E303:too many blank lines (2)",
-          "516:15:E111:indentation is not a multiple of 4",
-          "516:27:E231:missing whitespace after ','",
-          "516:43:E225:missing whitespace around operator",
-          "518:15:E111:indentation is not a multiple of 4",
-          "518:27:E225:missing whitespace around operator",
-          "519:15:E111:indentation is not a multiple of 4",
-          "519:30:E225:missing whitespace around operator",
-          "548:40:E231:missing whitespace after ':'",
-          "549:27:E231:missing whitespace after ':'",
-          "550:35:E231:missing whitespace after ':'",
-          "551:38:E231:missing whitespace after ':'",
-          "564:1:E302:expected 2 blank lines, found 1",
-          "593:101:E501:line too long (113 > 100 characters)",
-          "610:1:E302:expected 2 blank lines, found 1",
-          "635:1:E302:expected 2 blank lines, found 1",
-          "663:1:E302:expected 2 blank lines, found 1",
-          "668:16:E221:multiple spaces before operator",
-          "695:9:E303:too many blank lines (2)",
-          "698:101:E501:line too long (120 > 100 characters)",
-          "699:101:E501:line too long (121 > 100 characters)",
-          "712:9:E303:too many blank lines (2)",
-          "718:9:E303:too many blank lines (3)",
-          "726:48:E231:missing whitespace after ','",
-          "784:9:E303:too many blank lines (2)",
-          "794:15:E111:indentation is not a multiple of 4",
-          "794:27:E231:missing whitespace after ','",
-          "794:43:E225:missing whitespace around operator",
-          "796:15:E111:indentation is not a multiple of 4",
-          "796:27:E225:missing whitespace around operator",
-          "797:15:E111:indentation is not a multiple of 4",
-          "797:30:E225:missing whitespace around operator",
-          "805:13:E303:too many blank lines (2)",
-          "815:36:E231:missing whitespace after ':'",
-          "816:23:E231:missing whitespace after ':'",
-          "817:31:E231:missing whitespace after ':'",
-          "818:34:E231:missing whitespace after ':'",
-          "826:32:E231:missing whitespace after ':'",
-          "829:101:E501:line too long (106 > 100 characters)",
-          "832:1:E302:expected 2 blank lines, found 1"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "229f13ddcb1ce0b879c7e6ffb8dbb46339c5184f18e92309c46ce80f9a7b32d7"
+      "sha256": "62e8e9c7dcdefe71070a8f778aa5a9aa8cdaff5a072e2020d23465ef1752b5e7"
     },
     "allapp/outbound/warehouse_access.py": {
       "findings": {
@@ -4441,7 +4008,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "4d6516da34e5459b637c19d97908665822eccc8dbe6fd55ccc95d1025978fe14"
+      "sha256": "4a26761e875c04ac47d19bfef75b6a184f771e6d0e900debbe503b2a3a509291"
     },
     "allapp/pos/__init__.py": {
       "findings": {
@@ -4641,7 +4208,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "898c3c3f01ecb7348ef3532bd01aa7ee5de093951d31c18f7ae930bf53e9ce69"
+      "sha256": "84dec3724317def05a28351899e28783a32e103d288015bbf9f6ae0dc13c5eeb"
     },
     "allapp/pos/shift_services.py": {
       "findings": {
@@ -4659,7 +4226,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "9c1ba8e9d67c222f54e1f3a318ffcd4a513cadfe0dadce8261b01907f5928cbb"
+      "sha256": "4f49d1628dd330e7ed061032f582ff32e2d6fc0c096332e3c894fb3820805e0d"
     },
     "allapp/pos/test_checkout_concurrency.py": {
       "findings": {
@@ -4668,7 +4235,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "0d51560248caab94a3d52c389c8a7930ed0db75613d2bd0f49e94976f90024e8"
+      "sha256": "2c50da459317abb597ea7b498de84a646444debace243e11962c5796c9e3d3ac"
     },
     "allapp/pos/tests.py": {
       "findings": {
@@ -4677,7 +4244,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "8d46085f7e97cc7e07ec28bf51706ead346d93179ce928dcb00b0af2cc0649c6"
+      "sha256": "2f074a58b685d7c524595f00687034e6e23b793bd2dae1ec3064bca25adc735d"
     },
     "allapp/pos/urls.py": {
       "findings": {
@@ -4695,7 +4262,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "36ab0ad53c912d4883677ada9bd3b842d84282fa74f0f8a7f8cd48eef2de8fcb"
+      "sha256": "47222ac96c4beeb93982cf0fc3d38df35c2e9cdcdbd4b783fca06283ed41bb3e"
     },
     "allapp/products/__init__.py": {
       "findings": {
@@ -4706,66 +4273,23 @@
       },
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
-    "allapp/products/admin.py": {
+    "allapp/products/access.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "104:101:E501:line too long (119 > 100 characters)",
-          "115:1:E302:expected 2 blank lines, found 1",
-          "116:37:E231:missing whitespace after ','",
-          "119:101:E501:line too long (105 > 100 characters)",
-          "121:16:E231:missing whitespace after ','",
-          "121:23:E231:missing whitespace after ','",
-          "121:30:E231:missing whitespace after ','",
-          "121:36:E231:missing whitespace after ','",
-          "124:29:E231:missing whitespace after ','",
-          "125:20:E231:missing whitespace after ','",
-          "125:32:E231:missing whitespace after ','",
-          "125:41:E231:missing whitespace after ','",
-          "125:55:E231:missing whitespace after ','",
-          "126:24:E231:missing whitespace after ','",
-          "126:57:E231:missing whitespace after ','",
-          "126:75:E231:missing whitespace after ','",
-          "131:37:E231:missing whitespace after ','",
-          "136:1:W293:blank line contains whitespace",
-          "147:16:E231:missing whitespace after ','",
-          "147:23:E231:missing whitespace after ','",
-          "147:30:E231:missing whitespace after ','",
-          "147:36:E231:missing whitespace after ','",
-          "150:29:E231:missing whitespace after ','",
-          "151:20:E231:missing whitespace after ','",
-          "151:32:E231:missing whitespace after ','",
-          "151:41:E231:missing whitespace after ','",
-          "151:55:E231:missing whitespace after ','",
-          "152:25:E231:missing whitespace after ','",
-          "152:60:E231:missing whitespace after ','",
-          "152:78:E231:missing whitespace after ','",
-          "252:101:E501:line too long (133 > 100 characters)",
-          "258:101:E501:line too long (128 > 100 characters)",
-          "276:1:E302:expected 2 blank lines, found 1",
-          "277:44:E231:missing whitespace after ','",
-          "286:101:E501:line too long (110 > 100 characters)",
-          "28:74:E231:missing whitespace after ','",
-          "312:101:E501:line too long (145 > 100 characters)",
-          "360:101:E501:line too long (126 > 100 characters)",
-          "362:101:E501:line too long (108 > 100 characters)",
-          "45:1:E302:expected 2 blank lines, found 1",
-          "46:45:E231:missing whitespace after ','",
-          "68:1:E302:expected 2 blank lines, found 1",
-          "69:35:E231:missing whitespace after ','",
-          "77:1:E302:expected 2 blank lines, found 1",
-          "78:40:E231:missing whitespace after ','",
-          "80:101:E501:line too long (116 > 100 characters)",
-          "86:1:E302:expected 2 blank lines, found 1"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "67dd1894a2462467fde337086bbc7990c256fdd9d4b1f72df5b276e15093255f"
+      "sha256": "c239765f778db807ad3e5ba44808ac0399a8d0359510385b51aab2750c768925"
+    },
+    "allapp/products/admin.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "fc02bde69dcdb2afde88a6f2a51795e2f037c4900b2d31d132581a046c242462"
     },
     "allapp/products/apps.py": {
       "findings": {
@@ -4786,25 +4310,19 @@
       "findings": {
         "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "5bfd9dad4de6bdaaae2f801fe20e1027520c87800f33e4a796c55b054cb6544f"
+      "sha256": "a830fc630a73c5c59f43d2349e1c9ffde5aa235251f73cd8de6d0aee3863f205"
     },
     "allapp/products/category_backfill.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "fdc242b63285f8f448d31957d4c8b710d8de8a155297c7918fb32f181bb9b01f"
+      "sha256": "170e394e84d6ec3174899a52eda8c78fd494eb94f296a83d529f25a7b257df86"
     },
     "allapp/products/excel_export.py": {
       "findings": {
@@ -4813,20 +4331,16 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "e2ec88d0e3c4b6f76bf7960555f7dbc0b68cae4b7b8da2ae88eff6b6b62704a5"
+      "sha256": "68fd66325a8fe609c91b5af011b702501e65c82e76b615e7bc12566b52b28516"
     },
     "allapp/products/excel_import.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "d56a0874c6b0c74baa4bd2932a5072353fa6e27e5c4b0ac293f14b5ba5336048"
+      "sha256": "e7442586618529b43bea071747dfbbe37edd6e4a79681a67adfc025a3adaab51"
     },
     "allapp/products/forms.py": {
       "findings": {
@@ -4844,6 +4358,15 @@
       },
       "sha256": "3e3f6d14f3d79129d38cb674fb6b178cc6d519fa6b9f0e7719831928bca26a40"
     },
+    "allapp/products/gs1.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "c0b1110c2ba3ca35c521d350ba5a52d2cc1c7ca725cb90876955b70c45d23090"
+    },
     "allapp/products/identifier_excel.py": {
       "findings": {
         "black": [],
@@ -4851,7 +4374,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "88841993805b9639624c3a1cd4b7738d521daaf6e1e8cd0628eebe3a30595d92"
     },
     "allapp/products/identifier_lookup.py": {
       "findings": {
@@ -4860,7 +4383,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "2185e791594bd9f71014ca3aa522d18f498d041800f17938f4fb66c50e7e8607"
     },
     "allapp/products/identifier_services.py": {
       "findings": {
@@ -4869,7 +4392,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "77a252a802942a4990cca70abd9c86051f6e91044dcfe2bb215f20fb47b20b18"
     },
     "allapp/products/management/__init__.py": {
       "findings": {
@@ -4891,18 +4414,12 @@
     },
     "allapp/products/management/commands/_backup.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "474:101:E501:line too long (117 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "60f41201a8b836564cfd2727bd74854120a87b2a9a296564ce8df553340fc106"
+      "sha256": "acc609f8be1d3f14a694e1368520ada0d706c2476e93ac3292b2cb9a8e82dabd"
     },
     "allapp/products/management/commands/audit_carton_package_bindings.py": {
       "findings": {
@@ -4917,21 +4434,21 @@
     },
     "allapp/products/management/commands/audit_product_identifier_history.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "18:101:E501:line too long (111 > 100 characters)",
-          "19:101:E501:line too long (122 > 100 characters)",
-          "21:101:E501:line too long (130 > 100 characters)",
-          "24:101:E501:line too long (123 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "a48b6075185b63ca8eff6c5cb9bff1963cfeb71b9db97aa567c57b8dd7ce7a9c"
+    },
+    "allapp/products/management/commands/check_gs1_configuration.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "f5147b1115119a09f67242d2e4175aa8b22c5547da82fd2bb22828117071cb3c"
     },
     "allapp/products/management/commands/export_products_excel.py": {
       "findings": {
@@ -4949,28 +4466,20 @@
     "allapp/products/management/commands/import_product_master_sheet.py": {
       "findings": {
         "black": [],
-        "flake8": [
-          "155:101:E501:line too long (104 > 100 characters)"
-        ],
+        "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "38475f6fd2dae68a4d8d9d4cd9536e7dff78e0fc4f94e9531685a08b5b962334"
+      "sha256": "619a9a4f1c34f88b484a6cd8c024cb0406a57f2b904ebedbe31bc2cf5c390dff"
     },
     "allapp/products/management/commands/import_products_excel.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "121:101:E501:line too long (107 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "66017c77075c89a17fa3b953679410b952cfa39c8dc9dca73b01d6fbef167349"
+      "sha256": "2b56c3cf160d843a66249fb21ae672c3766133bf2343f3edafb02a8e06d05998"
     },
     "allapp/products/management/commands/seed_test_product_categories.py": {
       "findings": {
@@ -5089,7 +4598,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "ca7ff5ebea8f52ac5ff2dcd3b82c5d696fbd7a01d557935f3387f5bf54ecd74c"
     },
     "allapp/products/migrations/0010_remove_productbarcode_uniq_primary_product_barcode_scope_and_more.py": {
       "findings": {
@@ -5098,7 +4607,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "8d32ddecd520cc0dbbc2d6cd376d4beef0f550538c13f6b9aa3007ced098e7e3"
     },
     "allapp/products/migrations/0011_identifier_normalized_value_indexes.py": {
       "findings": {
@@ -5107,7 +4616,34 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "a893c90518162cc0f545abf4e413f06c56682aaeb79c5f5681a25a98ce5c3650"
+    },
+    "allapp/products/migrations/0012_gs1_lookup_cache_and_sku_format.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "264caa0267027ac73e34bc758d1f22bad5f290e320af5200bb21f8a14e0c22d2"
+    },
+    "allapp/products/migrations/0013_expand_category_uom_codes.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "aa580fa22dfd0a0419a07612d1ff844e0b755316f916c60007ee02cb425530f8"
+    },
+    "allapp/products/migrations/0014_product_purchase_price.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "8bbd87f90cead1b6288782a7e061a14074b1183e685d630d2b6dbc0b9fdc0a85"
     },
     "allapp/products/migrations/__init__.py": {
       "findings": {
@@ -5121,22 +4657,11 @@
     "allapp/products/models.py": {
       "findings": {
         "black": [],
-        "flake8": [
-          "1165:101:E501:line too long (131 > 100 characters)",
-          "1651:101:E501:line too long (116 > 100 characters)",
-          "1652:101:E501:line too long (110 > 100 characters)",
-          "1700:101:E501:line too long (107 > 100 characters)",
-          "1867:101:E501:line too long (101 > 100 characters)",
-          "1890:101:E501:line too long (115 > 100 characters)",
-          "1896:101:E501:line too long (110 > 100 characters)",
-          "788:101:E501:line too long (109 > 100 characters)",
-          "789:101:E501:line too long (109 > 100 characters)",
-          "907:101:E501:line too long (106 > 100 characters)"
-        ],
+        "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "8d4b990ee4ab7703fe1920c751421ec051c45d2f111ddf827a022354d9bee802"
+      "sha256": "b9680dc508d4095538b81a170d4752adb8a0cc3cac237bd9f09810b5d896bcfc"
     },
     "allapp/products/permissions.py": {
       "findings": {
@@ -5160,23 +4685,30 @@
     },
     "allapp/products/serializers.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "153:101:E501:line too long (131 > 100 characters)",
-          "212:101:E501:line too long (201 > 100 characters)",
-          "25:1:E302:expected 2 blank lines, found 1",
-          "294:101:E501:line too long (105 > 100 characters)",
-          "300:101:E501:line too long (106 > 100 characters)",
-          "335:101:E501:line too long (106 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "65d11c63ad8c83c000023b0bbddc25d0146444aed2f3173c52de34caba0faf01"
+      "sha256": "6d48d27bc2f0d076a97c620e7a6ac65f2866140d5c980576a77ea6dee306c550"
+    },
+    "allapp/products/test_admin_product_barcodes.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "24309b2cbc800ea0748f069e186493c7d3427f78bffd5f597ad3871cca91a1ec"
+    },
+    "allapp/products/test_gs1.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "20edb763cd1ab6f68c1c2d42a1da03f0c12bf1226d22f00c0765f71c76417307"
     },
     "allapp/products/test_identifier_concurrency.py": {
       "findings": {
@@ -5185,7 +4717,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "d4f095869f6d676d6fab1cef3f6c32e17c4bb1389d91e7f79487f7e2a4ca46dd"
     },
     "allapp/products/test_identifier_lookup.py": {
       "findings": {
@@ -5194,7 +4726,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "2a2540b21f44e767082884cab201ec6c4b86a3f0b621cbb09ef5ffd5bfab97bf"
     },
     "allapp/products/test_identifier_management.py": {
       "findings": {
@@ -5203,7 +4735,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "69bab1449792d49f00b05f6f6e3b18f4877d3e85bbb49c4979bf4ac2021ce0ed"
     },
     "allapp/products/test_identifier_migrations.py": {
       "findings": {
@@ -5212,7 +4744,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "43487b05512a41ba51868a805f5243513e96ee543df564e2d8ad77da0929a019"
     },
     "allapp/products/test_identifier_registry.py": {
       "findings": {
@@ -5288,7 +4820,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "998f8b3b08b3e96884580be0699f479902b40f496b228874d266aa0f5939ae40"
+      "sha256": "f2310213407ad27db0764f71945a4ae04d40db9e3ac256a2eb07a08b54abd677"
     },
     "allapp/products/tests.py": {
       "findings": {
@@ -5297,7 +4829,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "1f7978c2b88bd88766afbf4ffdbf42dca7413d5e9028bbe4183eadce3209602c"
+      "sha256": "f0e16d80a8a4390051cf816dde6f2d9345e5fc4002583fccb5d6fa10c63b64e4"
     },
     "allapp/products/urls.py": {
       "findings": {
@@ -5321,29 +4853,19 @@
       "findings": {
         "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "3f617ac4b723a956dee5768d1ac7847a50f8f5ee4379d681c3f50751f715894d"
     },
     "allapp/products/urls_pda.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "17:101:E501:line too long (113 > 100 characters)",
-          "18:101:E501:line too long (107 > 100 characters)",
-          "19:101:E501:line too long (107 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "44fe152aadf10d5fccaeb5ff7b16be59f7cacaa1802bc12b855c734c088eeab0"
+      "sha256": "cfe9f699cef1618f28eefe3095382bd0e9e8c19474fcc0d3657e55592787d82f"
     },
     "allapp/products/views.py": {
       "findings": {
@@ -5352,23 +4874,16 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "50a1a19de2f7944514e5b35b777a28da346c76148a9c974ad13d637587133f01"
+      "sha256": "97f5c714f2cd33b8bbc807f8a7a64e02f98c8ee53abffc7a96a470ce30f20308"
     },
     "allapp/products/views_excel.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "173:101:E501:line too long (196 > 100 characters)",
-          "201:101:E501:line too long (102 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "abafd6164df60561cfad9cdb0e51209fd8d597e5ac9738da30b6c988796da727"
+      "sha256": "894892b34ca0ddb4cd9f03e6dce8de5eeb1f4f961b430fb22e0b8bfefac5891e"
     },
     "allapp/reports/__init__.py": {
       "findings": {
@@ -5441,7 +4956,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "095eab5fec37948db83d38fe2e618c56185f37370e053482269c5102c1a1eb19"
+      "sha256": "338c062163b1aacc55bac2b5e45dd63c3f81c7a89f3e43915054184cd5326fff"
     },
     "allapp/reports/apps.py": {
       "findings": {
@@ -5467,51 +4982,12 @@
     },
     "allapp/reports/dispatch_note_builder.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "102:23:E702:multiple statements on one line (semicolon)",
-          "102:43:E702:multiple statements on one line (semicolon)",
-          "102:59:E702:multiple statements on one line (semicolon)",
-          "109:48:E702:multiple statements on one line (semicolon)",
-          "10:1:F401:'django.utils.timezone' imported but unused",
-          "115:101:E501:line too long (101 > 100 characters)",
-          "152:29:E702:multiple statements on one line (semicolon)",
-          "168:101:E501:line too long (105 > 100 characters)",
-          "19:1:E302:expected 2 blank lines, found 1",
-          "1:1:E266:too many leading '#' for block comment",
-          "23:5:E306:expected 1 blank line before a nested definition, found 0",
-          "24:15:E702:multiple statements on one line (semicolon)",
-          "26:23:E702:multiple statements on one line (semicolon)",
-          "30:10:E702:multiple statements on one line (semicolon)",
-          "32:25:E702:multiple statements on one line (semicolon)",
-          "39:26:E702:multiple statements on one line (semicolon)",
-          "43:1:E305:expected 2 blank lines after class or function definition, found 1",
-          "45:1:E302:expected 2 blank lines, found 1",
-          "56:1:E302:expected 2 blank lines, found 1",
-          "68:1:E302:expected 2 blank lines, found 1",
-          "81:1:E302:expected 2 blank lines, found 1",
-          "92:101:E501:line too long (104 > 100 characters)"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
-        "ruff": [
-          "102:23:E702:Multiple statements on one line (semicolon)",
-          "102:43:E702:Multiple statements on one line (semicolon)",
-          "102:59:E702:Multiple statements on one line (semicolon)",
-          "109:48:E702:Multiple statements on one line (semicolon)",
-          "10:26:F401:`django.utils.timezone` imported but unused",
-          "152:29:E702:Multiple statements on one line (semicolon)",
-          "24:15:E702:Multiple statements on one line (semicolon)",
-          "26:23:E702:Multiple statements on one line (semicolon)",
-          "30:10:E702:Multiple statements on one line (semicolon)",
-          "32:25:E702:Multiple statements on one line (semicolon)",
-          "39:26:E702:Multiple statements on one line (semicolon)"
-        ]
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
       },
-      "sha256": "68cde1ecc112f1d5845d8d20184894b04e217ad0bc5aa3f3c0e0cb6f67ab5508"
+      "sha256": "82b0f2a880618a8baad15b27397b89e36665a8188ea91778bb548225364eb15c"
     },
     "allapp/reports/etl_operations.py": {
       "findings": {
@@ -5576,6 +5052,15 @@
         ]
       },
       "sha256": "8cc522c51aeaea6685729acfea84711c510c86c1d6127b3441b3d773e9045015"
+    },
+    "allapp/reports/management/commands/audit_dispatch_note_snapshots.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "1a006d2b94ca4bf66db0230921f6d2f3fb566c836936bb837a34dc6437460e90"
     },
     "allapp/reports/management/commands/backfill_dispatch_snapshots.py": {
       "findings": {
@@ -5753,6 +5238,15 @@
       },
       "sha256": "18df55adb11bc4aceb96f60a6873d7df8bf10e619e7b93124db39d8701d639d5"
     },
+    "allapp/reports/migrations/0008_business_review_snapshot_permission.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "f7cc3b998247f6a65d4b373acfd5bb69b8e0d2022d7b8827dd2050f1ac263003"
+    },
     "allapp/reports/migrations/__init__.py": {
       "findings": {
         "black": [],
@@ -5766,32 +5260,19 @@
       "findings": {
         "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "ee4f6516b4746600e37326b81e6dc76c419d28d2b296164a9f4ea6a0bceae779"
+      "sha256": "04a06f42e597bd759bd73c3ff4e7facec99cca371157d48320f52736becd9bba"
     },
     "allapp/reports/services.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "17:101:E501:line too long (110 > 100 characters)",
-          "1:1:E266:too many leading '#' for block comment",
-          "3:15:E401:multiple imports on one line",
-          "8:1:E302:expected 2 blank lines, found 1"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
-        "ruff": [
-          "3:1:E401:Multiple imports on one line"
-        ]
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
       },
-      "sha256": "b2a660159eb775f93729ce25321749003d36b1f1ddeba185e210cb4c586f0db5"
+      "sha256": "0eb4100ad681a8a27bca414a694464281f607e9787d4b2ee9be5848f57a53469"
     },
     "allapp/reports/services_alert_cases.py": {
       "findings": {
@@ -5826,12 +5307,10 @@
       "findings": {
         "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "c0d0a697276720f1b843836665ce16fd2dbde6a8d10e32f01681790c799fec2a"
+      "sha256": "2e11d00d8075104b020656a13547e632c989746604c20d6d2906af0c13d3f850"
     },
     "allapp/reports/services_pda.py": {
       "findings": {
@@ -5863,7 +5342,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "3de7091c09446968d81134c4cc576e791aaf7aabe555bd28250e5f6ddf199b4a"
+      "sha256": "96ea29b9444004ae4ae1bac2f02e7c4d5295fda7b6ede9750e34635cbfa0d52a"
     },
     "allapp/reports/test_management_commands.py": {
       "findings": {
@@ -5896,7 +5375,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "6cc9bdb45d86e2efc2e6a1ec9535dbd2b8c62ca750c833dc55c2479af30e1f56"
+      "sha256": "82e2ca3e0818cc446f7fe628c5fbf0dcf7380d10db21fc987dc7efe702784c80"
     },
     "allapp/reports/urls.py": {
       "findings": {
@@ -5926,19 +5405,12 @@
     },
     "allapp/reports/views.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "14:1:E302:expected 2 blank lines, found 1",
-          "1:1:E266:too many leading '#' for block comment"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "bed31000010969a43091eb85e369cc5a1b1ad01c018c2a377b546e9f2e877310"
+      "sha256": "6a99ad23129e96b58cf01b2681912344e97da170b508dfdca54586eae742f96e"
     },
     "allapp/reports/views_boss.py": {
       "findings": {
@@ -5953,12 +5425,10 @@
       "findings": {
         "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "16d4af2eaa5f02a76d28412f20653ef9c2b4287e96a29abe722ba807542db8f4"
+      "sha256": "16f8aedd2c58ed22aa83e9d391aecbf73fc9ee396f526ede3a889b6156697e25"
     },
     "allapp/reports/views_operations.py": {
       "findings": {
@@ -5996,13 +5466,11 @@
     "allapp/salesapp/admin.py": {
       "findings": {
         "black": [],
-        "flake8": [
-          "632:101:E501:line too long (103 > 100 characters)"
-        ],
+        "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "52a4d01d2b3c12a3dd23b21b37fc4783ef6d04dc2eba3560df9bf5a4b50e9235"
+      "sha256": "911b1247b8c68b09068a08b2552b7ee4999beb3cbd06a77325e49d64ca1aed72"
     },
     "allapp/salesapp/apps.py": {
       "findings": {
@@ -6338,6 +5806,15 @@
       },
       "sha256": "9804fb1b3c1a21b934450ef2f73cbe8d0582efce93513522953c922edaa26c87"
     },
+    "allapp/salesapp/migrations/0013_localize_admin_fields.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "c052e2ce58f31daf39dbe2ed639122a70084c2d9575d69e08aa27a94ccdc4f37"
+    },
     "allapp/salesapp/migrations/__init__.py": {
       "findings": {
         "black": [],
@@ -6354,18 +5831,16 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "9ec4a33b9426fb8ae99746bca2caf78c3bce0607e99ec6a75523aae13b9f407c"
+      "sha256": "b2b62582e391e4a9f53d49af8e47665db89e4d7cf0eb16ba9cd442cfe13a399c"
     },
     "allapp/salesapp/salemini_api.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "34db2539ea7f440ab339f00baae76623509ebf5af200cbde92ece2b740b59dc5"
+      "sha256": "3965cff0320d8b064bbb59d652ee3ec3bf11d6160741f464742af45002620514"
     },
     "allapp/salesapp/salemini_review_api.py": {
       "findings": {
@@ -6423,14 +5898,12 @@
     },
     "allapp/salesapp/services_salemini_payments.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "14ddcbf6a86477d76d71821947e766ebcd550d3ba4e4c54f8e315201d677acdb"
+      "sha256": "50e60946ba00671df35ddbd2bdbbc16bb2891603cb24f8d3e9aaf56c17d5743a"
     },
     "allapp/salesapp/services_salemini_reviews.py": {
       "findings": {
@@ -6462,25 +5935,30 @@
     },
     "allapp/salesapp/services_wechat_pay.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "489b98ccbee3173bc97fffdb680a92d0a0435acc817c575171359b1d5ffd5aff"
+      "sha256": "4963bca920a8e0d423d83b7980254dd26e7f748aa1788bfb7c22f91d83292c36"
     },
     "allapp/salesapp/test_admin_bulk_listing.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "c8fd9062198bb4fae156148f77bc9e421654a8f4e3fed0f6cf46a71c9a02e7ab"
+      "sha256": "992751766f3fec3cf50deef5e0c7c0134d5093b889f6d94341914879d26c90fc"
+    },
+    "allapp/salesapp/test_admin_localization.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "cf51595d98b2b04a2008b91367af80599baf89ccee9cb420e982329d619d77e2"
     },
     "allapp/salesapp/test_legacy_api_retirement.py": {
       "findings": {
@@ -6935,7 +6413,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "4e96f59e133260f8b2350d1e68bc78d8f6cfd3d8938de7d52c73182e0dfe0563"
+      "sha256": "6d4922e7d2faf7ca45f0b478504b94a8d4ffef330339673216aa508f56c8dff0"
     },
     "allapp/tasking/management/__init__.py": {
       "findings": {
@@ -7198,456 +6676,12 @@
     },
     "allapp/tasking/models.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "100:101:E501:line too long (115 > 100 characters)",
-          "100:79:E231:missing whitespace after ','",
-          "1018:14:E225:missing whitespace around operator",
-          "1018:27:E231:missing whitespace after ','",
-          "1018:39:E231:missing whitespace after ','",
-          "101:101:E501:line too long (105 > 100 characters)",
-          "1022:16:E114:indentation is not a multiple of 4 (comment)",
-          "1022:16:E117:over-indented (comment)",
-          "1043:21:F401:'allapp.tasking.services.finalize_receive_line' imported but unused",
-          "1046:101:E501:line too long (103 > 100 characters)",
-          "104:16:E221:multiple spaces before operator",
-          "1054:1:E302:expected 2 blank lines, found 1",
-          "1058:27:E231:missing whitespace after ','",
-          "1058:33:E231:missing whitespace after ','",
-          "1058:42:E231:missing whitespace after ','",
-          "1058:48:E231:missing whitespace after ','",
-          "1058:59:E231:missing whitespace after ','",
-          "105:15:E221:multiple spaces before operator",
-          "1062:14:E221:multiple spaces before operator",
-          "1063:14:E221:multiple spaces before operator",
-          "106:16:E221:multiple spaces before operator",
-          "1081:41:E701:multiple statements on one line (colon)",
-          "1081:57:E221:multiple spaces before operator",
-          "1082:44:E231:missing whitespace after ':'",
-          "1082:44:E701:multiple statements on one line (colon)",
-          "1082:60:E225:missing whitespace around operator",
-          "1086:1:E302:expected 2 blank lines, found 0",
-          "1095:13:E221:multiple spaces before operator",
-          "1099:14:E221:multiple spaces before operator",
-          "1182:14:E225:missing whitespace around operator",
-          "1182:27:E231:missing whitespace after ','",
-          "1182:40:E231:missing whitespace after ','",
-          "1186:16:E114:indentation is not a multiple of 4 (comment)",
-          "1186:16:E117:over-indented (comment)",
-          "11:1:F401:'allapp.core.models.UserStampedMixin' imported but unused",
-          "1207:21:F401:'allapp.tasking.services.finalize_receive_line' imported but unused",
-          "1218:101:E501:line too long (110 > 100 characters)",
-          "1218:31:E225:missing whitespace around operator",
-          "1227:30:E111:indentation is not a multiple of 4",
-          "1227:30:E117:over-indented",
-          "1228:30:E111:indentation is not a multiple of 4",
-          "1229:30:E111:indentation is not a multiple of 4",
-          "1235:30:E111:indentation is not a multiple of 4",
-          "1236:30:E111:indentation is not a multiple of 4",
-          "1249:32:E231:missing whitespace after ','",
-          "126:101:E501:line too long (123 > 100 characters)",
-          "1271:101:E501:line too long (103 > 100 characters)",
-          "1289:101:E501:line too long (124 > 100 characters)",
-          "1317:41:E231:missing whitespace after ','",
-          "1317:46:E231:missing whitespace after ','",
-          "131:101:E501:line too long (117 > 100 characters)",
-          "1320:13:F841:local variable 'rl' is assigned to but never used",
-          "1320:15:E225:missing whitespace around operator",
-          "1332:101:E501:line too long (115 > 100 characters)",
-          "1360:1:E302:expected 2 blank lines, found 1",
-          "137:23:E131:continuation line unaligned for hanging indent",
-          "1387:1:E302:expected 2 blank lines, found 0",
-          "1391:17:E221:multiple spaces before operator",
-          "1407:101:E501:line too long (103 > 100 characters)",
-          "1409:101:E501:line too long (143 > 100 characters)",
-          "1409:22:E225:missing whitespace around operator",
-          "143:101:E501:line too long (129 > 100 characters)",
-          "143:74:E231:missing whitespace after ','",
-          "144:43:E231:missing whitespace after ','",
-          "1481:11:E271:multiple spaces after keyword",
-          "148:101:E501:line too long (119 > 100 characters)",
-          "148:47:E231:missing whitespace after ','",
-          "14:1:F811:redefinition of unused 'ExpressionWrapper' from line 8",
-          "14:1:F811:redefinition of unused 'F' from line 8",
-          "14:1:F811:redefinition of unused 'Q' from line 8",
-          "1561:101:E501:line too long (130 > 100 characters)",
-          "156:101:E501:line too long (121 > 100 characters)",
-          "156:104:E231:missing whitespace after ','",
-          "1607:1:E302:expected 2 blank lines, found 1",
-          "1615:25:E221:multiple spaces before operator",
-          "1617:19:E221:multiple spaces before operator",
-          "1618:22:E221:multiple spaces before operator",
-          "1620:101:E501:line too long (101 > 100 characters)",
-          "1621:101:E501:line too long (106 > 100 characters)",
-          "1621:16:E221:multiple spaces before operator",
-          "1638:101:E501:line too long (120 > 100 characters)",
-          "163:101:E501:line too long (115 > 100 characters)",
-          "163:98:E231:missing whitespace after ','",
-          "1653:101:E501:line too long (106 > 100 characters)",
-          "165:101:E501:line too long (109 > 100 characters)",
-          "1662:5:E303:too many blank lines (2)",
-          "1715:101:E501:line too long (117 > 100 characters)",
-          "179:101:E501:line too long (104 > 100 characters)",
-          "1828:1:E302:expected 2 blank lines, found 1",
-          "1846:101:E501:line too long (104 > 100 characters)",
-          "188:101:E501:line too long (114 > 100 characters)",
-          "1904:1:E302:expected 2 blank lines, found 1",
-          "1906:12:E221:multiple spaces before operator",
-          "1908:14:E221:multiple spaces before operator",
-          "1948:1:E302:expected 2 blank lines, found 1",
-          "1954:20:E221:multiple spaces before operator",
-          "1962:101:E501:line too long (107 > 100 characters)",
-          "2012:1:E302:expected 2 blank lines, found 1",
-          "2014:16:E221:multiple spaces before operator",
-          "2016:18:E225:missing whitespace around operator",
-          "2017:12:E221:multiple spaces before operator",
-          "2051:1:E302:expected 2 blank lines, found 1",
-          "2060:15:E221:multiple spaces before operator",
-          "2061:15:E221:multiple spaces before operator",
-          "2064:101:E501:line too long (134 > 100 characters)",
-          "2065:13:E221:multiple spaces before operator",
-          "2066:16:E221:multiple spaces before operator",
-          "2127:28:E701:multiple statements on one line (colon)",
-          "2128:29:E701:multiple statements on one line (colon)",
-          "2129:27:E701:multiple statements on one line (colon)",
-          "2129:46:E221:multiple spaces before operator",
-          "2130:27:E701:multiple statements on one line (colon)",
-          "2130:46:E221:multiple spaces before operator",
-          "2137:9:E303:too many blank lines (2)",
-          "2164:21:F401:'allapp.tasking.services.finalize_receive_line' imported but unused",
-          "2175:101:E501:line too long (112 > 100 characters)",
-          "21:1:F401:'allapp.inventory.models.PostingJournal' imported but unused",
-          "231:101:E501:line too long (103 > 100 characters)",
-          "235:101:E501:line too long (112 > 100 characters)",
-          "235:14:E111:indentation is not a multiple of 4",
-          "235:14:E117:over-indented",
-          "2400:5:F811:redefinition of unused 'request' from line 4",
-          "2408:13:E221:multiple spaces before operator",
-          "2409:13:E221:multiple spaces before operator",
-          "2419:101:E501:line too long (113 > 100 characters)",
-          "241:1:E302:expected 2 blank lines, found 1",
-          "2443:1:E302:expected 2 blank lines, found 0",
-          "244:17:E221:multiple spaces before operator",
-          "2458:11:E221:multiple spaces before operator",
-          "245:14:E221:multiple spaces before operator",
-          "246:14:E221:multiple spaces before operator",
-          "247:17:E221:multiple spaces before operator",
-          "249:18:E221:multiple spaces before operator",
-          "250:18:E221:multiple spaces before operator",
-          "252:101:E501:line too long (118 > 100 characters)",
-          "2530:1:E302:expected 2 blank lines, found 1",
-          "253:101:E501:line too long (121 > 100 characters)",
-          "253:51:E231:missing whitespace after ','",
-          "253:76:E231:missing whitespace after ','",
-          "253:98:E231:missing whitespace after ','",
-          "2543:13:E221:multiple spaces before operator",
-          "2544:13:E221:multiple spaces before operator",
-          "2553:5:F811:redefinition of unused 'request' from line 4",
-          "255:101:E501:line too long (155 > 100 characters)",
-          "255:105:E231:missing whitespace after ','",
-          "255:131:E231:missing whitespace after ','",
-          "255:59:E231:missing whitespace after ','",
-          "255:84:E231:missing whitespace after ','",
-          "255:94:E231:missing whitespace after ','",
-          "256:101:E501:line too long (153 > 100 characters)",
-          "256:104:E231:missing whitespace after ','",
-          "256:128:E231:missing whitespace after ','",
-          "256:57:E231:missing whitespace after ','",
-          "256:93:E231:missing whitespace after ','",
-          "258:45:E231:missing whitespace after ','",
-          "258:59:E231:missing whitespace after ','",
-          "258:76:E231:missing whitespace after ','",
-          "259:46:E231:missing whitespace after ','",
-          "259:78:E231:missing whitespace after ','",
-          "260:101:E501:line too long (114 > 100 characters)",
-          "2620:1:E302:expected 2 blank lines, found 0",
-          "2639:11:E221:multiple spaces before operator",
-          "264:101:E501:line too long (111 > 100 characters)",
-          "266:38:E231:missing whitespace after ','",
-          "266:82:E202:whitespace before ')'",
-          "269:101:E501:line too long (139 > 100 characters)",
-          "269:70:E231:missing whitespace after ','",
-          "269:81:E231:missing whitespace after ','",
-          "2702:101:E501:line too long (108 > 100 characters)",
-          "270:101:E501:line too long (103 > 100 characters)",
-          "272:101:E501:line too long (113 > 100 characters)",
-          "272:41:E231:missing whitespace after ','",
-          "272:55:E231:missing whitespace after ','",
-          "273:101:E501:line too long (108 > 100 characters)",
-          "273:44:E231:missing whitespace after ','",
-          "276:101:E231:missing whitespace after ','",
-          "276:101:E501:line too long (128 > 100 characters)",
-          "276:55:E231:missing whitespace after ','",
-          "276:80:E231:missing whitespace after ','",
-          "276:90:E231:missing whitespace after ','",
-          "277:57:E231:missing whitespace after ','",
-          "277:67:E231:missing whitespace after ','",
-          "2798:101:E501:line too long (101 > 100 characters)",
-          "27:1:E302:expected 2 blank lines, found 1",
-          "280:53:E231:missing whitespace after ','",
-          "280:67:E231:missing whitespace after ','",
-          "281:9:E128:continuation line under-indented for visual indent",
-          "2830:5:F811:redefinition of unused 'request' from line 4",
-          "2834:101:E501:line too long (102 > 100 characters)",
-          "287:101:E501:line too long (106 > 100 characters)",
-          "287:104:E202:whitespace before ')'",
-          "287:81:E231:missing whitespace after ','",
-          "288:101:E501:line too long (104 > 100 characters)",
-          "2905:101:E501:line too long (101 > 100 characters)",
-          "2939:1:E302:expected 2 blank lines, found 1",
-          "294:101:E501:line too long (102 > 100 characters)",
-          "3006:101:E501:line too long (101 > 100 characters)",
-          "3041:1:E302:expected 2 blank lines, found 1",
-          "3044:14:E221:multiple spaces before operator",
-          "3045:15:E221:multiple spaces before operator",
-          "3046:14:E221:multiple spaces before operator",
-          "3048:11:E221:multiple spaces before operator",
-          "3050:11:E221:multiple spaces before operator",
-          "3054:101:E501:line too long (103 > 100 characters)",
-          "3054:13:E221:multiple spaces before operator",
-          "3055:101:E501:line too long (104 > 100 characters)",
-          "3055:13:E221:multiple spaces before operator",
-          "3057:101:E501:line too long (133 > 100 characters)",
-          "3057:110:E231:missing whitespace after ','",
-          "3057:17:E225:missing whitespace around operator",
-          "3057:35:E201:whitespace after '('",
-          "3058:101:E501:line too long (115 > 100 characters)",
-          "3058:31:E201:whitespace after '('",
-          "3058:98:E231:missing whitespace after ','",
-          "3059:101:E501:line too long (108 > 100 characters)",
-          "3059:15:E225:missing whitespace around operator",
-          "3059:33:E201:whitespace after '('",
-          "3059:83:E231:missing whitespace after ','",
-          "305:101:E501:line too long (102 > 100 characters)",
-          "3097:5:E303:too many blank lines (2)",
-          "30:1:E302:expected 2 blank lines, found 1",
-          "3105:26:E272:multiple spaces before keyword",
-          "3120:30:E225:missing whitespace around operator",
-          "3128:9:E306:expected 1 blank line before a nested definition, found 0",
-          "3133:11:E271:multiple spaces after keyword",
-          "320:101:E501:line too long (103 > 100 characters)",
-          "3241:1:E302:expected 2 blank lines, found 1",
-          "3245:101:E501:line too long (104 > 100 characters)",
-          "3246:101:E501:line too long (106 > 100 characters)",
-          "3276:1:E302:expected 2 blank lines, found 0",
-          "3280:101:E501:line too long (105 > 100 characters)",
-          "3318:101:E501:line too long (117 > 100 characters)",
-          "3322:101:E501:line too long (112 > 100 characters)",
-          "3336:1:E302:expected 2 blank lines, found 1",
-          "3351:101:E501:line too long (116 > 100 characters)",
-          "3378:1:E302:expected 2 blank lines, found 0",
-          "3392:13:E221:multiple spaces before operator",
-          "3394:13:E221:multiple spaces before operator",
-          "3397:16:E221:multiple spaces before operator",
-          "3466:1:E265:block comment should start with '# '",
-          "3467:1:E302:expected 2 blank lines, found 1",
-          "3468:27:E231:missing whitespace after ','",
-          "3468:45:E231:missing whitespace after ','",
-          "3468:60:E231:missing whitespace after ','",
-          "3468:76:E231:missing whitespace after ','",
-          "3469:11:E221:multiple spaces before operator",
-          "3469:23:E231:missing whitespace after ','",
-          "3469:41:E231:missing whitespace after ','",
-          "3470:26:E231:missing whitespace after ','",
-          "3470:44:E231:missing whitespace after ','",
-          "3470:61:E231:missing whitespace after ','",
-          "3470:7:E221:multiple spaces before operator",
-          "3472:101:E501:line too long (124 > 100 characters)",
-          "3473:101:E501:line too long (125 > 100 characters)",
-          "3474:101:E501:line too long (103 > 100 characters)",
-          "3477:101:E501:line too long (101 > 100 characters)",
-          "3478:101:E501:line too long (105 > 100 characters)",
-          "3478:10:E221:multiple spaces before operator",
-          "3480:10:E221:multiple spaces before operator",
-          "3484:101:E501:line too long (107 > 100 characters)",
-          "3485:17:E221:multiple spaces before operator",
-          "3487:16:E221:multiple spaces before operator",
-          "3497:101:E501:line too long (117 > 100 characters)",
-          "34:16:E221:multiple spaces before operator",
-          "3503:101:E501:line too long (107 > 100 characters)",
-          "3524:101:E501:line too long (105 > 100 characters)",
-          "3532:101:E501:line too long (102 > 100 characters)",
-          "354:1:E302:expected 2 blank lines, found 1",
-          "3552:101:E501:line too long (141 > 100 characters)",
-          "3553:101:E501:line too long (106 > 100 characters)",
-          "357:101:E501:line too long (124 > 100 characters)",
-          "357:47:E231:missing whitespace after ','",
-          "358:101:E501:line too long (153 > 100 characters)",
-          "359:101:E501:line too long (138 > 100 characters)",
-          "359:115:E231:missing whitespace after ','",
-          "359:58:E231:missing whitespace after ','",
-          "359:83:E231:missing whitespace after ','",
-          "35:16:E221:multiple spaces before operator",
-          "36:13:E221:multiple spaces before operator",
-          "375:101:E501:line too long (108 > 100 characters)",
-          "37:15:E221:multiple spaces before operator",
-          "380:23:E131:continuation line unaligned for hanging indent",
-          "388:101:E501:line too long (101 > 100 characters)",
-          "38:13:E221:multiple spaces before operator",
-          "39:13:E221:multiple spaces before operator",
-          "401:1:E302:expected 2 blank lines, found 1",
-          "40:17:E221:multiple spaces before operator",
-          "41:15:E221:multiple spaces before operator",
-          "42:14:E221:multiple spaces before operator",
-          "43:14:E221:multiple spaces before operator",
-          "44:14:E221:multiple spaces before operator",
-          "45:15:E221:multiple spaces before operator",
-          "474:101:E501:line too long (103 > 100 characters)",
-          "476:1:E302:expected 2 blank lines, found 1",
-          "487:13:E221:multiple spaces before operator",
-          "489:12:E221:multiple spaces before operator",
-          "48:17:E221:multiple spaces before operator",
-          "490:12:E221:multiple spaces before operator",
-          "499:101:E501:line too long (108 > 100 characters)",
-          "499:10:E221:multiple spaces before operator",
-          "499:51:E231:missing whitespace after ','",
-          "499:76:E231:missing whitespace after ','",
-          "499:94:E231:missing whitespace after ','",
-          "49:14:E221:multiple spaces before operator",
-          "4:1:F401:'django.template.context_processors.request' imported but unused",
-          "500:101:E501:line too long (113 > 100 characters)",
-          "500:56:E231:missing whitespace after ','",
-          "500:81:E231:missing whitespace after ','",
-          "500:99:E231:missing whitespace after ','",
-          "501:101:E501:line too long (120 > 100 characters)",
-          "501:69:E231:missing whitespace after ','",
-          "502:101:E501:line too long (153 > 100 characters)",
-          "502:79:E231:missing whitespace after ','",
-          "503:101:E501:line too long (134 > 100 characters)",
-          "503:73:E231:missing whitespace after ','",
-          "50:14:E221:multiple spaces before operator",
-          "511:101:E501:line too long (124 > 100 characters)",
-          "511:76:E231:missing whitespace after ','",
-          "514:12:E221:multiple spaces before operator",
-          "517:101:E501:line too long (114 > 100 characters)",
-          "517:79:E231:missing whitespace after ','",
-          "518:101:E501:line too long (140 > 100 characters)",
-          "518:126:E231:missing whitespace after ','",
-          "518:55:E231:missing whitespace after ','",
-          "519:101:E501:line too long (159 > 100 characters)",
-          "519:80:E231:missing whitespace after ','",
-          "51:17:E221:multiple spaces before operator",
-          "524:5:E303:too many blank lines (2)",
-          "525:101:E501:line too long (106 > 100 characters)",
-          "526:13:E221:multiple spaces before operator",
-          "526:82:E261:at least two spaces before inline comment",
-          "527:13:E221:multiple spaces before operator",
-          "528:101:E501:line too long (106 > 100 characters)",
-          "528:13:E221:multiple spaces before operator",
-          "532:101:E501:line too long (110 > 100 characters)",
-          "532:12:E221:multiple spaces before operator",
-          "533:101:E501:line too long (115 > 100 characters)",
-          "533:13:E221:multiple spaces before operator",
-          "534:101:E501:line too long (113 > 100 characters)",
-          "537:11:E221:multiple spaces before operator",
-          "538:13:E221:multiple spaces before operator",
-          "539:13:E221:multiple spaces before operator",
-          "53:18:E221:multiple spaces before operator",
-          "540:14:E221:multiple spaces before operator",
-          "543:101:E501:line too long (118 > 100 characters)",
-          "544:16:E225:missing whitespace around operator",
-          "546:14:E221:multiple spaces before operator",
-          "548:101:E501:line too long (133 > 100 characters)",
-          "548:62:E231:missing whitespace after ','",
-          "54:18:E221:multiple spaces before operator",
-          "550:11:E221:multiple spaces before operator",
-          "551:101:E501:line too long (167 > 100 characters)",
-          "551:84:E231:missing whitespace after ','",
-          "555:101:E501:line too long (167 > 100 characters)",
-          "555:92:E231:missing whitespace after ','",
-          "557:53:E231:missing whitespace after ','",
-          "558:9:E128:continuation line under-indented for visual indent",
-          "573:101:E501:line too long (124 > 100 characters)",
-          "57:12:E221:multiple spaces before operator",
-          "582:101:E501:line too long (112 > 100 characters)",
-          "582:60:E231:missing whitespace after ','",
-          "583:101:E501:line too long (115 > 100 characters)",
-          "583:61:E231:missing whitespace after ','",
-          "584:101:E501:line too long (133 > 100 characters)",
-          "584:61:E231:missing whitespace after ','",
-          "585:101:E501:line too long (115 > 100 characters)",
-          "585:61:E231:missing whitespace after ','",
-          "586:63:E231:missing whitespace after ','",
-          "58:12:E221:multiple spaces before operator",
-          "592:101:E501:line too long (101 > 100 characters)",
-          "651:101:E501:line too long (102 > 100 characters)",
-          "696:1:E302:expected 2 blank lines, found 0",
-          "706:27:E231:missing whitespace after ','",
-          "730:1:E302:expected 2 blank lines, found 1",
-          "732:101:E501:line too long (133 > 100 characters)",
-          "732:109:E231:missing whitespace after ','",
-          "732:132:E202:whitespace before ')'",
-          "732:58:E231:missing whitespace after ','",
-          "734:13:E221:multiple spaces before operator",
-          "735:14:E221:multiple spaces before operator",
-          "757:1:E302:expected 2 blank lines, found 0",
-          "762:11:E221:multiple spaces before operator",
-          "767:101:E501:line too long (103 > 100 characters)",
-          "767:11:E221:multiple spaces before operator",
-          "786:101:E501:line too long (108 > 100 characters)",
-          "78:101:E501:line too long (151 > 100 characters)",
-          "78:105:E231:missing whitespace after ','",
-          "78:60:E231:missing whitespace after ','",
-          "79:101:E501:line too long (164 > 100 characters)",
-          "79:107:E231:missing whitespace after ','",
-          "81:60:E231:missing whitespace after ','",
-          "837:42:E701:multiple statements on one line (colon)",
-          "838:40:E701:multiple statements on one line (colon)",
-          "838:54:E221:multiple spaces before operator",
-          "83:101:E501:line too long (105 > 100 characters)",
-          "848:10:E111:indentation is not a multiple of 4",
-          "849:10:E111:indentation is not a multiple of 4",
-          "84:37:E127:continuation line over-indented for visual indent",
-          "87:101:E501:line too long (153 > 100 characters)",
-          "87:106:E231:missing whitespace after ','",
-          "87:61:E231:missing whitespace after ','",
-          "88:101:E501:line too long (161 > 100 characters)",
-          "88:106:E231:missing whitespace after ','",
-          "88:84:E231:missing whitespace after ','",
-          "89:60:E231:missing whitespace after ','",
-          "907:101:E501:line too long (106 > 100 characters)",
-          "90:101:E501:line too long (108 > 100 characters)",
-          "90:59:E231:missing whitespace after ','",
-          "90:97:E231:missing whitespace after ','",
-          "925:1:E302:expected 2 blank lines, found 1",
-          "92:101:E501:line too long (116 > 100 characters)",
-          "92:73:E231:missing whitespace after ','",
-          "93:101:E501:line too long (125 > 100 characters)",
-          "93:82:E231:missing whitespace after ','",
-          "943:1:E302:expected 2 blank lines, found 0",
-          "95:101:E501:line too long (101 > 100 characters)",
-          "966:11:E221:multiple spaces before operator"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
-        "ruff": [
-          "1043:57:F401:`allapp.tasking.services.finalize_receive_line` imported but unused",
-          "1081:41:E701:Multiple statements on one line (colon)",
-          "1082:44:E701:Multiple statements on one line (colon)",
-          "11:61:F401:`allapp.core.models.UserStampedMixin` imported but unused",
-          "1207:57:F401:`allapp.tasking.services.finalize_receive_line` imported but unused",
-          "1320:13:F841:Local variable `rl` is assigned to but never used",
-          "14:30:F811:Redefinition of unused `Q` from line 8",
-          "14:33:F811:Redefinition of unused `F` from line 8",
-          "14:69:F811:Redefinition of unused `ExpressionWrapper` from line 8",
-          "2127:28:E701:Multiple statements on one line (colon)",
-          "2128:29:E701:Multiple statements on one line (colon)",
-          "2129:27:E701:Multiple statements on one line (colon)",
-          "2130:27:E701:Multiple statements on one line (colon)",
-          "2164:57:F401:`allapp.tasking.services.finalize_receive_line` imported but unused",
-          "21:37:F401:`allapp.inventory.models.PostingJournal` imported but unused",
-          "2400:5:F811:Redefinition of unused `request` from line 4",
-          "2553:5:F811:Redefinition of unused `request` from line 4",
-          "2830:5:F811:Redefinition of unused `request` from line 4",
-          "4:48:F401:`django.template.context_processors.request` imported but unused",
-          "837:42:E701:Multiple statements on one line (colon)",
-          "838:40:E701:Multiple statements on one line (colon)"
-        ]
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
       },
-      "sha256": "0a1eca25d0e11ed6aa52f603dab98ce59f817b015ecf9e98296d3fbe4a8c5ce6"
+      "sha256": "e1e4630fed090228306965c30908e8c838d61dc1b9a3b23bee72fae71e1da4ff"
     },
     "allapp/tasking/plugins/__init__.py": {
       "findings": {
@@ -7700,7 +6734,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "419872f5d671a8d941ac99ef84766bed2a2c42c12bc3ea2f3774fb1e550cf6b8"
+      "sha256": "d30ae352ec1a638a6df2acf762410e3434ce551c1a38ffe75ee4c56c66359729"
     },
     "allapp/tasking/plugins/handlerslocked.py": {
       "findings": {
@@ -7808,31 +6842,12 @@
     },
     "allapp/tasking/receiving/rcv_scan.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "16:1:E302:expected 2 blank lines, found 1",
-          "21:22:E261:at least two spaces before inline comment",
-          "26:1:E302:expected 2 blank lines, found 1",
-          "31:43:E231:missing whitespace after ','",
-          "33:1:E302:expected 2 blank lines, found 1",
-          "44:1:E302:expected 2 blank lines, found 1",
-          "58:101:E501:line too long (109 > 100 characters)",
-          "58:1:E302:expected 2 blank lines, found 1",
-          "5:1:F401:'django.utils.timezone' imported but unused",
-          "63:1:E302:expected 2 blank lines, found 1",
-          "8:1:F401:'allapp.tasking.utils.bind_triplet_from' imported but unused"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
-        "ruff": [
-          "5:26:F401:`django.utils.timezone` imported but unused",
-          "8:34:F401:`allapp.tasking.utils.bind_triplet_from` imported but unused"
-        ]
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
       },
-      "sha256": "fbaab04f1cbe0f05d3a8d8e40c00a256b9aa8518afad4e8a16b88f9a60bd3d08"
+      "sha256": "97b3f4ee0bdf6bf5f11fe6080ddae2c7951267cd543056f904915e27acc21a4a"
     },
     "allapp/tasking/receiving/rcv_services.py": {
       "findings": {
@@ -7860,7 +6875,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "a23e5e691b613461fbbb3b94cb84ace71c0d725d3ce6e564c0cb8a59670a05d5"
+      "sha256": "bbd074372f1fcbc836d99f6933fba93ccdf6c658807f3970b062fdd8220dd1ed"
     },
     "allapp/tasking/replenishment.py": {
       "findings": {
@@ -7869,7 +6884,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "ee57b7f5aa5d52e80b37ac0ba39e10da504cb69f9031ffbfdaa52cb754969cd5"
+      "sha256": "fc9cc4ce7370942bf919722a4d44eafe61f660f334860342509aa6d86e9a65f7"
     },
     "allapp/tasking/serializers.py": {
       "findings": {
@@ -7919,17 +6934,11 @@
     "allapp/tasking/services.py": {
       "findings": {
         "black": [],
-        "flake8": [
-          "1476:1:E304:blank lines found after function decorator",
-          "1569:1:E304:blank lines found after function decorator",
-          "1608:101:E501:line too long (105 > 100 characters)",
-          "1665:101:E501:line too long (124 > 100 characters)",
-          "1868:101:E501:line too long (101 > 100 characters)"
-        ],
+        "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "3a5529df31a0c7f4e57592e0b49169140bd2ffa701e2ecf9e6e3da02286407d1"
+      "sha256": "af900e3c83a7190f1f47cf69e5cfd964744c92465f6e73f07cff416e90e55702"
     },
     "allapp/tasking/services_dispatch.py": {
       "findings": {
@@ -7950,21 +6959,12 @@
     },
     "allapp/tasking/services_posting.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
-        "flake8": [
-          "13:14:E221:multiple spaces before operator",
-          "14:14:E221:multiple spaces before operator",
-          "16:1:E302:expected 2 blank lines, found 1",
-          "19:1:E302:expected 2 blank lines, found 1"
-        ],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "black": [],
+        "flake8": [],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "759925baee36140fe50183f6763a72e7b00f4c8d7cce310923bdf6d1a591493f"
+      "sha256": "4c364c2d5df02ba1bafcf0c7a2b51c02d40f2cd1017b524183347b59a5872cd9"
     },
     "allapp/tasking/templatetags/__init__.py": {
       "findings": {
@@ -8047,14 +7047,12 @@
     },
     "allapp/tasking/tests.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": "50ccab6c4d7e572e194f4578f980871413aab0baa48307e77f313be80032d9df"
+      "sha256": "33aea888826dd92b04d15f1b46f57639b8f9a04324836e13fbf6ecf0801dda76"
     },
     "allapp/tasking/urls.py": {
       "findings": {
@@ -8200,12 +7198,10 @@
       "findings": {
         "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "885055b6dbaf72e9f3f2c7e50013975cb06dad9cbae26dadf4a2d81c747ed68f"
+      "sha256": "492290bb792b51f7c995e4217aa34b125a28bbc1937aad559e83af82b2c1c469"
     },
     "docs/build_user_manual.py": {
       "findings": {
@@ -8265,16 +7261,23 @@
       },
       "sha256": "10ce4d1ebc973409292cd14f0f49f82fe74cb3a16fb4880b31e08ad8c33e789e"
     },
-    "scripts/lint_ratchet.py": {
+    "scripts/identifier_migration_scenario.py": {
       "findings": {
-        "black": [
-          "would-reformat"
-        ],
+        "black": [],
         "flake8": [],
         "isort": [],
         "ruff": []
       },
-      "sha256": ""
+      "sha256": "11d094cefa26f42848e05c2602bd489f364821493be2768c09cb178c315349e0"
+    },
+    "scripts/lint_ratchet.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "12eedf632866ad01dac725f972c5d7083b0df1fbc6d3a417de3b5f3585bbeecb"
     },
     "scripts/putaway_load_test.py": {
       "findings": {
@@ -8286,6 +7289,15 @@
         "ruff": []
       },
       "sha256": "fba49c7d6ce18ddd6a17be22ddbcb8aff851ba4c2b202c83ef8ed1dff6a73353"
+    },
+    "scripts/validate_security_exceptions.py": {
+      "findings": {
+        "black": [],
+        "flake8": [],
+        "isort": [],
+        "ruff": []
+      },
+      "sha256": "e700ffa6483561122ba96b25dee2bdf08175b26b4f5b497b71df6342ebb17df3"
     },
     "var/data-accuracy/validate_foundation_data_accuracy.py": {
       "findings": {
@@ -8360,7 +7372,7 @@
         "isort": [],
         "ruff": []
       },
-      "sha256": "bd79dfa7a51bcf1cbff4a0cca375fd836fe851e4a76760d3b0008caa962243f3"
+      "sha256": "be0ab2027198d63a6a110158b4e5216595edaad197a905906f2b834783036fa7"
     },
     "wmsmaster/urls.py": {
       "findings": {
@@ -8379,12 +7391,10 @@
       "findings": {
         "black": [],
         "flake8": [],
-        "isort": [
-          "incorrect-import-order"
-        ],
+        "isort": [],
         "ruff": []
       },
-      "sha256": "3845b0cb927cbda28c1756890ab0fd81ccb76e1bcc466fb0937d4192440173d5"
+      "sha256": "2377a43197244c14f198476e569a1e13972a9f8d8f4a398c3bcde2d77b83a186"
     },
     "wmsmaster/wsgi.py": {
       "findings": {
@@ -8399,5 +7409,14 @@
     }
   },
   "policy": "Changed and new files must be clean; unchanged debt may only decrease.",
+  "toolchain": {
+    "black": "26.5.1",
+    "configs": {
+      "pyproject.toml": "eb98bc9d0775bc5143f80f579f2841f19581fc8eec8cfd56fa31359528d278ef"
+    },
+    "flake8": "7.3.0",
+    "isort": "8.0.1",
+    "ruff": "0.16.3"
+  },
   "version": 1
 }

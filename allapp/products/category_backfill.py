@@ -12,9 +12,9 @@ from openpyxl.utils import get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.worksheet.datavalidation import DataValidation
 
-from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 
+from .access import allowed_product_owner_ids, scoped_product_queryset
 from .excel_import import (
     MAX_IMPORT_FILE_SIZE,
     MAX_IMPORT_ROWS,
@@ -22,8 +22,6 @@ from .excel_import import (
     MAX_XLSX_UNCOMPRESSED_SIZE,
 )
 from .models import Product, ProductCategory
-from .permissions import can_manage_all_owner_products
-
 
 SHEET_NAME = "商品分类补录"
 HEADERS = ("货主编码", "货主商品编码", "商品名称", "当前分类路径", "目标分类编码")
@@ -34,30 +32,19 @@ class CategoryBackfillError(ValueError):
 
 
 def allowed_owner_ids(user):
-    if can_manage_all_owner_products(user):
-        return None
-    scope = AccessScope.for_user(user)
-    if not scope.is_valid or not scope.single_owner_id:
-        return set()
-    return {scope.single_owner_id}
+    return allowed_product_owner_ids(user, for_write=True)
 
 
 def scoped_products(user, queryset=None):
-    queryset = queryset if queryset is not None else Product.objects.all()
-    owner_ids = allowed_owner_ids(user)
-    if owner_ids is None:
-        return queryset
-    if not owner_ids:
-        return queryset.none()
-    return queryset.filter(owner_id__in=owner_ids)
+    return scoped_product_queryset(user, queryset, for_write=True)
 
 
 def active_categories():
     return [
         category
-        for category in ProductCategory.objects.select_related(
-            "parent", "parent__parent"
-        ).order_by("sort_order", "code")
+        for category in ProductCategory.objects.select_related("parent", "parent__parent").order_by(
+            "sort_order", "code"
+        )
         if category.has_active_path()
     ]
 
@@ -199,9 +186,7 @@ def import_category_backfill(uploaded_file, *, user, request=None):
             continue
         category = categories.get(category_code)
         if category is None:
-            errors.append(
-                f"第 {row_number} 行：分类不存在或分类链已停用 {category_code}"
-            )
+            errors.append(f"第 {row_number} 行：分类不存在或分类链已停用 {category_code}")
             continue
         updates.append((product, category, row_number))
 

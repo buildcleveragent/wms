@@ -97,9 +97,7 @@ class BackupPreflightReport:
     @property
     def blocking_messages(self) -> tuple[str, ...]:
         messages = [f"未分类数据库表: {table}" for table in sorted(self.unknown_tables)]
-        messages.extend(
-            f"缺失数据库表: {table}" for table in sorted(self.missing_tables)
-        )
+        messages.extend(f"缺失数据库表: {table}" for table in sorted(self.missing_tables))
         messages.extend(
             f"备份表不是 InnoDB: {table} ({engine or 'UNKNOWN'})"
             for table, engine in self.non_innodb_tables
@@ -139,9 +137,7 @@ class RestorePreflightReport:
     @property
     def blocking_messages(self) -> tuple[str, ...]:
         messages = [f"未分类数据库表: {table}" for table in sorted(self.unknown_tables)]
-        messages.extend(
-            f"缺失数据库表: {table}" for table in sorted(self.missing_tables)
-        )
+        messages.extend(f"缺失数据库表: {table}" for table in sorted(self.missing_tables))
         messages.extend(
             f"恢复表不是 InnoDB: {table} ({engine or 'UNKNOWN'})"
             for table, engine in self.non_innodb_tables
@@ -166,21 +162,15 @@ def resolve_transfer_scope() -> TransferScope:
     manifest = resolve_manifest()
     if not EXCLUDED_HISTORY_MODEL_LABELS <= set(manifest.label_to_table):
         missing = EXCLUDED_HISTORY_MODEL_LABELS - set(manifest.label_to_table)
-        raise PurgeConfigurationError(
-            "备份排除清单包含不存在模型: " + "、".join(sorted(missing))
-        )
+        raise PurgeConfigurationError("备份排除清单包含不存在模型: " + "、".join(sorted(missing)))
     selected_labels = frozenset(
         label
         for label in manifest.label_to_table
         if label not in EXCLUDED_HISTORY_MODEL_LABELS
         and manifest.label_to_table[label] in manifest.preserved_tables
     )
-    selected_tables = frozenset(
-        manifest.label_to_table[label] for label in selected_labels
-    )
-    table_to_label = {
-        manifest.label_to_table[label]: label for label in selected_labels
-    }
+    selected_tables = frozenset(manifest.label_to_table[label] for label in selected_labels)
+    table_to_label = {manifest.label_to_table[label]: label for label in selected_labels}
     if len(table_to_label) != len(selected_labels):
         raise PurgeConfigurationError("多个保留模型映射到同一备份表。")
     return TransferScope(
@@ -208,8 +198,9 @@ def _table_engines(connection, tables: frozenset[str]) -> dict[str, str | None]:
     if not tables:
         return {}
     placeholders = ", ".join(["%s"] * len(tables))
+    # Only the placeholder count is composed; all table-name values remain bound.
     query = (
-        "SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES "
+        "SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES "  # nosec B608
         "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (" + placeholders + ")"
     )
     with connection.cursor() as cursor:
@@ -224,7 +215,8 @@ def _row_counts(connection, tables: frozenset[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
     with connection.cursor() as cursor:
         for table in sorted(tables):
-            cursor.execute(f"SELECT COUNT(*) FROM {connection.ops.quote_name(table)}")
+            # table comes from the closed transfer manifest and is identifier-quoted.
+            cursor.execute(f"SELECT COUNT(*) FROM {connection.ops.quote_name(table)}")  # nosec B608
             counts[table] = int(cursor.fetchone()[0])
     return counts
 
@@ -233,9 +225,7 @@ def _missing_tools(*names: str) -> tuple[str, ...]:
     return tuple(name for name in names if shutil.which(name) is None)
 
 
-def _schema_signature(
-    *, scope: TransferScope, migrations: tuple[tuple[str, str], ...]
-) -> str:
+def _schema_signature(*, scope: TransferScope, migrations: tuple[tuple[str, str], ...]) -> str:
     payload = {
         "manifest_version": PURGE_MANIFEST_VERSION,
         "models": [
@@ -332,9 +322,7 @@ def mysql_defaults_file(connection, directory: Path):
         ):
             if ssl.get(source):
                 values[target] = ssl[source]
-        lines.extend(
-            f"{key}={_quote_option_file_value(value)}" for key, value in values.items()
-        )
+        lines.extend(f"{key}={_quote_option_file_value(value)}" for key, value in values.items())
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write("\n".join(lines) + "\n")
         yield path
@@ -408,9 +396,7 @@ def validate_dump_sql(
         if count > 0 and table not in seen_tables
     }
     if missing_data_tables:
-        return False, "有数据但 SQL 中没有 INSERT: " + "、".join(
-            sorted(missing_data_tables)
-        )
+        return False, "有数据但 SQL 中没有 INSERT: " + "、".join(sorted(missing_data_tables))
     return True, ""
 
 
@@ -428,9 +414,7 @@ def execute_backup(
         raise PreservedDataBlockedError(f"输出父目录不存在: {output_path.parent}")
 
     connection = connections[report.database_alias]
-    temporary = Path(
-        tempfile.mkdtemp(prefix=f".{output_path.name}.", dir=output_path.parent)
-    )
+    temporary = Path(tempfile.mkdtemp(prefix=f".{output_path.name}.", dir=output_path.parent))
     os.chmod(temporary, 0o700)
     sql_path = temporary / SQL_FILENAME
     try:
@@ -450,9 +434,7 @@ def execute_backup(
                     process.kill()
                     process.wait()
                     raise PreservedDataToolError("无法读取 mysqldump 标准输出。")
-                with process.stdout, gzip.open(
-                    sql_path, "wb", compresslevel=6
-                ) as output:
+                with process.stdout, gzip.open(sql_path, "wb", compresslevel=6) as output:
                     shutil.copyfileobj(process.stdout, output, length=1024 * 1024)
                 return_code = process.wait()
         os.chmod(sql_path, 0o600)
@@ -494,12 +476,8 @@ def execute_backup(
                 }
                 for table in sorted(report.scope.selected_tables)
             ],
-            "migrations": [
-                {"app": app, "name": name} for app, name in report.migrations
-            ],
-            "schema_signature": _schema_signature(
-                scope=report.scope, migrations=report.migrations
-            ),
+            "migrations": [{"app": app, "name": name} for app, name in report.migrations],
+            "schema_signature": _schema_signature(scope=report.scope, migrations=report.migrations),
             "sql": {
                 "filename": SQL_FILENAME,
                 "sha256": sql_hash,
@@ -509,9 +487,7 @@ def execute_backup(
         }
         manifest_path = temporary / MANIFEST_FILENAME
         with manifest_path.open("w", encoding="utf-8") as handle:
-            json.dump(
-                manifest_data, handle, ensure_ascii=False, indent=2, sort_keys=True
-            )
+            json.dump(manifest_data, handle, ensure_ascii=False, indent=2, sort_keys=True)
             handle.write("\n")
         os.chmod(manifest_path, 0o600)
         os.replace(temporary, output_path)
@@ -559,16 +535,12 @@ def _load_manifest(bundle_path: Path) -> dict[str, Any]:
 
 def _manifest_migrations(data: dict[str, Any]) -> tuple[tuple[str, str], ...]:
     try:
-        return tuple(
-            sorted((str(item["app"]), str(item["name"])) for item in data["migrations"])
-        )
+        return tuple(sorted((str(item["app"]), str(item["name"])) for item in data["migrations"]))
     except (KeyError, TypeError) as exc:
         raise PreservedDataBlockedError("备份清单 migrations 格式无效。") from exc
 
 
-def _validate_manifest_scope(
-    data: dict[str, Any], scope: TransferScope
-) -> dict[str, int]:
+def _validate_manifest_scope(data: dict[str, Any], scope: TransferScope) -> dict[str, int]:
     if data.get("format_version") != TRANSFER_FORMAT_VERSION:
         raise PreservedDataBlockedError("不支持的备份格式版本。")
     if data.get("purge_manifest_version") != PURGE_MANIFEST_VERSION:
@@ -594,16 +566,14 @@ def _validate_manifest_scope(
     try:
         entries = data["selected_models"]
         mapping = {
-            str(item["label"]): (str(item["table"]), int(item["row_count"]))
-            for item in entries
+            str(item["label"]): (str(item["table"]), int(item["row_count"])) for item in entries
         }
     except (KeyError, TypeError, ValueError) as exc:
         raise PreservedDataBlockedError("备份模型清单格式无效。") from exc
     if not isinstance(entries, list) or len(entries) != len(mapping):
         raise PreservedDataBlockedError("备份模型清单包含重复项。")
     expected_mapping = {
-        label: scope.manifest.label_to_table[label]
-        for label in scope.selected_model_labels
+        label: scope.manifest.label_to_table[label] for label in scope.selected_model_labels
     }
     if set(mapping) != set(expected_mapping) or any(
         mapping[label][0] != table for label, table in expected_mapping.items()
@@ -625,9 +595,7 @@ def prepare_restore(
     data = _load_manifest(bundle_path)
     expected_counts = _validate_manifest_scope(data, scope)
     backup_migrations = _manifest_migrations(data)
-    if data.get("schema_signature") != _schema_signature(
-        scope=scope, migrations=backup_migrations
-    ):
+    if data.get("schema_signature") != _schema_signature(scope=scope, migrations=backup_migrations):
         raise PreservedDataBlockedError("备份 schema_signature 无效。")
 
     actual = _actual_tables(connection)
@@ -637,8 +605,7 @@ def prepare_restore(
     counted_tables = frozenset(present_classified - {"django_migrations"})
     current_counts = _row_counts(connection, counted_tables)
     replaceable_tables = {
-        scope.manifest.label_to_table[label]
-        for label in RESTORE_REPLACEABLE_MODEL_LABELS
+        scope.manifest.label_to_table[label] for label in RESTORE_REPLACEABLE_MODEL_LABELS
     }
     nonempty_forbidden = tuple(
         (table, count)
@@ -697,19 +664,21 @@ def _restore_header(connection, tables: frozenset[str]) -> bytes:
         "SET SESSION autocommit = 0;",
         "START TRANSACTION;",
         "SET @WMS_OLD_SQL_MODE = @@SESSION.SQL_MODE;",
-        "SET SESSION SQL_MODE = CONCAT_WS(',', @@SESSION.SQL_MODE, "
-        "'NO_AUTO_VALUE_ON_ZERO');",
+        "SET SESSION SQL_MODE = CONCAT_WS(',', @@SESSION.SQL_MODE, " "'NO_AUTO_VALUE_ON_ZERO');",
         "SET SESSION FOREIGN_KEY_CHECKS = 0;",
     ]
     statements.extend(
-        f"DELETE FROM {connection.ops.quote_name(table)};" for table in sorted(tables)
+        # tables is the validated closed transfer scope; every identifier is quoted.
+        f"DELETE FROM {connection.ops.quote_name(table)};"  # nosec B608
+        for table in sorted(tables)
     )
     return ("\n".join(statements) + "\n").encode()
 
 
 def _restore_footer(connection, row_counts: dict[str, int]) -> bytes:
+    # Each table is from the closed transfer manifest and quote_name escapes the identifier.
     statements = [
-        "SELECT JSON_EXTRACT("
+        "SELECT JSON_EXTRACT("  # nosec B608
         f"IF(COUNT(*) = {count}, 'null', 'WMS_ROW_COUNT_MISMATCH'), '$') "
         f"FROM {connection.ops.quote_name(table)};"
         for table, count in sorted(row_counts.items())
@@ -759,14 +728,10 @@ def execute_restore(
                 try:
                     if process.stdin is None:  # pragma: no cover - defensive
                         raise PreservedDataToolError("无法打开 mysql 标准输入。")
-                    process.stdin.write(
-                        _restore_header(connection, report.scope.selected_tables)
-                    )
+                    process.stdin.write(_restore_header(connection, report.scope.selected_tables))
                     with gzip.open(report.sql_path, "rb") as sql_input:
                         shutil.copyfileobj(sql_input, process.stdin, length=1024 * 1024)
-                    process.stdin.write(
-                        _restore_footer(connection, report.expected_row_counts)
-                    )
+                    process.stdin.write(_restore_footer(connection, report.expected_row_counts))
                     process.stdin.close()
                     return_code = process.wait()
                 except Exception:

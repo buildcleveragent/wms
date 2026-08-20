@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from urllib.parse import quote
 
 from dal import autocomplete
@@ -12,28 +13,42 @@ from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 
+from allapp.core.admin_base import AdvancedAdminBase, BaseReadonlyAdmin, DeletedStatusFilter
+from allapp.core.admin_tenant import (
+    TenantScopedAdminMixin,
+    TenantScopedInlineMixin,
+    admin_object_in_scope,
+)
+
+from .autocomplete import (
+    ProductBarcodeOwnerAutocomplete,
+    ProductBarcodePackageAutocomplete,
+    ProductBarcodeProductAutocomplete,
+)
 from .category_backfill import (
     CategoryBackfillError,
     build_category_backfill_workbook,
     import_category_backfill,
     scoped_products,
 )
-from .autocomplete import (
-    ProductBarcodeOwnerAutocomplete,
-    ProductBarcodePackageAutocomplete,
-    ProductBarcodeProductAutocomplete,
-)
+from .identifier_lookup import filter_by_product_search
 from .identifier_services import (
-    add_external_identifier, add_product_barcode, set_barcode_primary,
-    set_external_primary, set_identifier_active,
+    add_external_identifier,
+    add_product_barcode,
+    set_barcode_primary,
+    set_external_primary,
+    set_identifier_active,
     validate_product_barcode_candidate,
 )
-from .identifier_lookup import filter_by_product_search
 from .models import (
-    ProductCategory, Brand, ProductUom, Product, ProductPackage,
-    ProductBarcode, ProductExternalIdentifier,
+    Brand,
+    Product,
+    ProductBarcode,
+    ProductCategory,
+    ProductExternalIdentifier,
+    ProductPackage,
+    ProductUom,
 )
-from allapp.core.admin_base import AdvancedAdminBase, DeletedStatusFilter,BaseReadonlyAdmin
 
 
 class CategoryCompletionFilter(admin.SimpleListFilter):
@@ -50,12 +65,18 @@ class CategoryCompletionFilter(admin.SimpleListFilter):
             return queryset.filter(category__isnull=False)
         return queryset
 
+
 @admin.register(ProductCategory)
-class ProductCategoryAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
+class ProductCategoryAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
     admin_priority = 4
     list_display = (
-        "code", "name", "level_label", "category_path", "parent",
-        "sort_order", "is_active",
+        "code",
+        "name",
+        "level_label",
+        "category_path",
+        "parent",
+        "sort_order",
+        "is_active",
     )
     list_filter = (DeletedStatusFilter, "is_active", "parent")
     search_fields = ("code", "name")
@@ -73,8 +94,9 @@ class ProductCategoryAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     def category_path(self, obj):
         return obj.full_path
 
+
 @admin.register(Brand)
-class BrandAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
+class BrandAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
     admin_priority = 5
     fields = ("code", "name", "remark", "is_active")
     list_display = ("code", "name", "is_active", "is_deleted", "created_at", "updated_at")
@@ -82,24 +104,49 @@ class BrandAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     search_fields = ("code", "name")
     ordering = ("code",)
 
+
 @admin.register(ProductUom)
-class ProductUomAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
+class ProductUomAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
     admin_priority = 3
-    list_display = ("code", "name", "kind", "decimal_places", "is_active", "is_deleted", "created_at", "updated_at")
+    list_display = (
+        "code",
+        "name",
+        "kind",
+        "decimal_places",
+        "is_active",
+        "is_deleted",
+        "created_at",
+        "updated_at",
+    )
     list_filter = (DeletedStatusFilter, "is_active", "kind")
     search_fields = ("code", "name")
     ordering = ("code",)
-    fields = ("code", "name", "kind", "decimal_places",)
+    fields = (
+        "code",
+        "name",
+        "kind",
+        "decimal_places",
+    )
 
-class ProductPackageInline(admin.TabularInline):
+
+class ProductPackageInline(TenantScopedInlineMixin, admin.TabularInline):
     model = ProductPackage
     extra = 1
     autocomplete_fields = ("uom",)
     fields = (
-        "uom", "qty_in_base", "barcode",
-        "length_cm", "width_cm", "height_cm",
-        "gross_weight_kg", "volume_auto", "volume_m3", "volume_m3_status",
-        "is_pickable", "is_purchase_default", "is_sales_default",
+        "uom",
+        "qty_in_base",
+        "barcode",
+        "length_cm",
+        "width_cm",
+        "height_cm",
+        "gross_weight_kg",
+        "volume_auto",
+        "volume_m3",
+        "volume_m3_status",
+        "is_pickable",
+        "is_purchase_default",
+        "is_sales_default",
         "sort_order",
     )
     readonly_fields = ("volume_m3_status", "barcode")
@@ -207,7 +254,7 @@ class ProductBarcodeAddFormSet(BaseInlineFormSet):
         )
 
 
-class ProductBarcodeAddInline(admin.TabularInline):
+class ProductBarcodeAddInline(TenantScopedInlineMixin, admin.TabularInline):
     model = ProductBarcode
     form = ProductBarcodeAddForm
     formset = ProductBarcodeAddFormSet
@@ -231,11 +278,20 @@ class ProductBarcodeAddInline(admin.TabularInline):
         return bool(obj and obj.pk) and super().has_add_permission(request, obj)
 
 
-class ProductBarcodeHistoryInline(admin.TabularInline):
+class ProductBarcodeHistoryInline(TenantScopedInlineMixin, admin.TabularInline):
     model = ProductBarcode
     extra = 0
     can_delete = False
-    fields = ("barcode", "barcode_type", "package", "qty_in_base", "is_primary", "valid_from", "valid_to", "is_active")
+    fields = (
+        "barcode",
+        "barcode_type",
+        "package",
+        "qty_in_base",
+        "is_primary",
+        "valid_from",
+        "valid_to",
+        "is_active",
+    )
     readonly_fields = fields
     verbose_name = "商品条码历史"
     verbose_name_plural = "商品条码历史"
@@ -371,15 +427,16 @@ class ProductBarcodeAdminForm(forms.ModelForm):
         return data
 
 
-class ProductExternalIdentifierHistoryInline(admin.TabularInline):
+class ProductExternalIdentifierHistoryInline(TenantScopedInlineMixin, admin.TabularInline):
     model = ProductExternalIdentifier
     extra = 0
     can_delete = False
     fields = ("source_system", "external_code", "is_primary", "valid_from", "valid_to", "is_active")
     readonly_fields = fields
 
+
 @admin.register(Product)
-class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
+class ProductAdmin(TenantScopedAdminMixin, AdvancedAdminBase, BaseReadonlyAdmin):
     admin_priority = 1
     change_list_template = "admin/products/product/change_list.html"
     inlines = [
@@ -389,49 +446,111 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         ProductExternalIdentifierHistoryInline,
     ]
     list_display = (
-        "owner","name","spec","sku","code", "gtin", "unit_barcode", "carton_barcode",
+        "owner",
+        "name",
+        "spec",
+        "sku",
+        "code",
+        "gtin",
+        "unit_barcode",
+        "carton_barcode",
         "carton_package",
-        "base_uom", "price", "purchase_price", "min_price", "max_discount",
+        "base_uom",
+        "price",
+        "purchase_price",
+        "min_price",
+        "max_discount",
         "pricing_strategy",
-        "category", "vender","brand",
-        "min_stock","max_stock","weight","net_content","volume",
-        "batch_control","expiry_control", "expiry_basis","shelf_life_days","pick_policy",
-        "product_image", "material_quality",
+        "category",
+        "vender",
+        "brand",
+        "min_stock",
+        "max_stock",
+        "weight",
+        "net_content",
+        "volume",
+        "batch_control",
+        "expiry_control",
+        "expiry_basis",
+        "shelf_life_days",
+        "pick_policy",
+        "product_image",
+        "material_quality",
     )
     list_filter = (
-        DeletedStatusFilter, CategoryCompletionFilter, "is_active",
-        "owner", "category", "brand","spec",
-        "batch_control", "serial_control", "expiry_control", "pick_policy",
+        DeletedStatusFilter,
+        CategoryCompletionFilter,
+        "is_active",
+        "owner",
+        "category",
+        "brand",
+        "spec",
+        "batch_control",
+        "serial_control",
+        "expiry_control",
+        "pick_policy",
     )
 
     list_display_links = ("name",)
-    
+
     search_fields = ("code", "name", "spec", "sku")
     autocomplete_fields = (
-        "owner", "category", "brand", "base_uom", "replenish_uom", "carton_package",
+        "owner",
+        "category",
+        "brand",
+        "base_uom",
+        "replenish_uom",
+        "carton_package",
     )
     list_select_related = (
-        "owner", "category", "brand", "base_uom", "replenish_uom", "carton_package",
+        "owner",
+        "category",
+        "brand",
+        "base_uom",
+        "replenish_uom",
+        "carton_package",
     )
     ordering = ("owner", "code")
     readonly_fields = ("sku", "gtin", "unit_barcode", "carton_barcode", "external_code")
     fields = (
-        "owner","name","spec","sku","code", "gtin", "unit_barcode", "carton_barcode",
+        "owner",
+        "name",
+        "spec",
+        "sku",
+        "code",
+        "gtin",
+        "unit_barcode",
+        "carton_barcode",
         "carton_package",
-        "base_uom", "price", "purchase_price", "min_price", "max_discount",
+        "base_uom",
+        "price",
+        "purchase_price",
+        "min_price",
+        "max_discount",
         "pricing_strategy",
-        "category", "vender","brand",
-        "min_stock","max_stock","weight","net_content","volume",
-        ("batch_control","expiry_control",), "expiry_basis","shelf_life_days","pick_policy",
-        "product_image", "material_quality",
+        "category",
+        "vender",
+        "brand",
+        "min_stock",
+        "max_stock",
+        "weight",
+        "net_content",
+        "volume",
+        (
+            "batch_control",
+            "expiry_control",
+        ),
+        "expiry_basis",
+        "shelf_life_days",
+        "pick_policy",
+        "product_image",
+        "material_quality",
     )
 
     def get_search_results(self, request, queryset, search_term):
         """Use the same full-phrase, current-identifier search as the API."""
         return (
-            filter_by_product_search(
-                queryset, search_term, product_field="pk"
-            ),
+            filter_by_product_search(queryset, search_term, product_field="pk"),
             False,
         )
 
@@ -452,9 +571,7 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
-        extra_context["category_backfill_url"] = reverse(
-            "admin:products_product_category_backfill"
-        )
+        extra_context["category_backfill_url"] = reverse("admin:products_product_category_backfill")
         return super().changelist_view(request, extra_context=extra_context)
 
     def category_backfill_export_view(self, request):
@@ -462,21 +579,16 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
             raise PermissionDenied
         products = scoped_products(
             request.user,
-            Product.objects.filter(category__isnull=True).order_by(
-                "owner__code", "code"
-            ),
+            Product.objects.filter(category__isnull=True).order_by("owner__code", "code"),
         )
         content = build_category_backfill_workbook(products)
         response = HttpResponse(
             content,
-            content_type=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ),
+            content_type=("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         )
         filename = quote("商品分类补录.xlsx")
         response["Content-Disposition"] = (
-            "attachment; filename=product_category_backfill.xlsx; "
-            f"filename*=UTF-8''{filename}"
+            "attachment; filename=product_category_backfill.xlsx; " f"filename*=UTF-8''{filename}"
         )
         return response
 
@@ -507,9 +619,7 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
             "opts": self.model._meta,
             "title": "商品分类批量补录",
             "form": form,
-            "export_url": reverse(
-                "admin:products_product_category_backfill_export"
-            ),
+            "export_url": reverse("admin:products_product_category_backfill_export"),
         }
         return TemplateResponse(
             request,
@@ -522,51 +632,74 @@ class ProductAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     #         'fields': ('owner', 'name', 'code', 'spec', 'sku')
     #     }),
     #     ('分类信息', {
-    #         'fields': ('category', 'brand', 'base_uom', 'price', 'min_price', 'max_discount', 'pricing_strategy', 'replenish_uom'),
+    #         'fields': (
+    #             'category', 'brand', 'base_uom', 'price', 'min_price',
+    #             'max_discount', 'pricing_strategy', 'replenish_uom'
+    #         ),
     #     }),
     #     ('条形码', {
     #         'fields': ('gtin', 'unit_barcode', 'carton_barcode'),
     #     }),
     #     ('控制参数', {
-    #         'fields': ('batch_control', 'serial_control', 'expiry_control', 'expiry_basis', 'shelf_life_days', 'pick_policy'),
+    #         'fields': (
+    #             'batch_control', 'serial_control', 'expiry_control',
+    #             'expiry_basis', 'shelf_life_days', 'pick_policy'
+    #         ),
     #     }),
     #     ('其他信息', {
     #         'fields': ('image', 'vender', 'material_quality', 'net_content'),
     #     }),
     # )
-    def has_view_permission(self, request, obj=None):
-        return True
-
-    def has_view_or_change_permission(self, request, obj=None):
-        # Django 5.x 的 Autocomplete 调这个；我们显式放行
-        return True
-
     class Media:
-        css = {
-            "all": ("admin/product_changelist_fix.css",)
-        }
+        css = {"all": ("admin/product_changelist_fix.css",)}
+
 
 @admin.register(ProductPackage)
-class ProductPackageAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
+class ProductPackageAdmin(TenantScopedAdminMixin, AdvancedAdminBase, BaseReadonlyAdmin):
     admin_priority = 2
     list_display = (
-        "product", "uom", "qty_in_base", "barcode",
-        "volume_m3", "volume_m3_status",
-        "is_pickable", "is_purchase_default", "is_sales_default",
-        "sort_order", "is_active", "is_deleted",
-        "created_at", "updated_at",
+        "product",
+        "uom",
+        "qty_in_base",
+        "barcode",
+        "volume_m3",
+        "volume_m3_status",
+        "is_pickable",
+        "is_purchase_default",
+        "is_sales_default",
+        "sort_order",
+        "is_active",
+        "is_deleted",
+        "created_at",
+        "updated_at",
     )
-    list_filter = (DeletedStatusFilter, "is_active", "is_pickable", "is_purchase_default", "is_sales_default")
+    list_filter = (
+        DeletedStatusFilter,
+        "is_active",
+        "is_pickable",
+        "is_purchase_default",
+        "is_sales_default",
+    )
     search_fields = ("product__code", "product__name", "barcode", "uom__code")
     autocomplete_fields = ("product", "uom")
     list_select_related = ("product", "uom")
     ordering = ("product", "sort_order", "uom")
     fields = (
-        "product", "uom", "qty_in_base", "barcode",
-        "length_cm", "width_cm", "height_cm",
-        "gross_weight_kg", "volume_auto", "volume_m3",
-        "is_pickable", "is_purchase_default", "is_sales_default",
-        "sort_order", "is_active",
+        "product",
+        "uom",
+        "qty_in_base",
+        "barcode",
+        "length_cm",
+        "width_cm",
+        "height_cm",
+        "gross_weight_kg",
+        "volume_auto",
+        "volume_m3",
+        "is_pickable",
+        "is_purchase_default",
+        "is_sales_default",
+        "sort_order",
+        "is_active",
     )
     readonly_fields = ("barcode",)
 
@@ -575,15 +708,24 @@ class ProductPackageAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
     }
 
     class Media:
-        css = {
-            "all": ("admin_custom.css",)  # 放在 STATIC 下
-        }
+        css = {"all": ("admin_custom.css",)}  # 放在 STATIC 下
 
 
 @admin.register(ProductBarcode)
-class ProductBarcodeAdmin(admin.ModelAdmin):
+class ProductBarcodeAdmin(TenantScopedAdminMixin, admin.ModelAdmin):
     form = ProductBarcodeAdminForm
-    list_display = ("owner", "product", "barcode", "barcode_type", "package", "qty_in_base", "is_primary", "is_active", "valid_from", "valid_to")
+    list_display = (
+        "owner",
+        "product",
+        "barcode",
+        "barcode_type",
+        "package",
+        "qty_in_base",
+        "is_primary",
+        "is_active",
+        "valid_from",
+        "valid_to",
+    )
     list_filter = ("owner", "barcode_type", "is_primary", "is_active")
     search_fields = ("barcode", "normalized_value", "product__code", "product__name")
     readonly_fields = ("normalized_value", "qty_in_base")
@@ -620,23 +762,17 @@ class ProductBarcodeAdmin(admin.ModelAdmin):
         custom_urls = [
             path(
                 "autocomplete/owner/",
-                self.admin_site.admin_view(
-                    ProductBarcodeOwnerAutocomplete.as_view()
-                ),
+                self.admin_site.admin_view(ProductBarcodeOwnerAutocomplete.as_view()),
                 name="products_productbarcode_owner_autocomplete",
             ),
             path(
                 "autocomplete/product/",
-                self.admin_site.admin_view(
-                    ProductBarcodeProductAutocomplete.as_view()
-                ),
+                self.admin_site.admin_view(ProductBarcodeProductAutocomplete.as_view()),
                 name="products_productbarcode_product_autocomplete",
             ),
             path(
                 "autocomplete/package/",
-                self.admin_site.admin_view(
-                    ProductBarcodePackageAutocomplete.as_view()
-                ),
+                self.admin_site.admin_view(ProductBarcodePackageAutocomplete.as_view()),
                 name="products_productbarcode_package_autocomplete",
             ),
         ]
@@ -671,13 +807,22 @@ class ProductBarcodeAdmin(admin.ModelAdmin):
         return tuple(fields)
 
     def save_model(self, request, obj, form, change):
+        if not scoped_products(request.user).filter(pk=obj.product_id).exists():
+            raise PermissionDenied("Object is outside the active tenant scope.")
+        if change and not admin_object_in_scope(request.user, obj, for_write=True):
+            raise PermissionDenied("Object is outside the active tenant scope.")
         if not change:
             saved = add_product_barcode(
-                product=obj.product, barcode=obj.barcode,
-                barcode_type=obj.barcode_type, package=obj.package,
-                is_primary=obj.is_primary, valid_from=obj.valid_from,
-                valid_to=obj.valid_to, is_active=obj.is_active,
-                remark=obj.remark, actor=request.user,
+                product=obj.product,
+                barcode=obj.barcode,
+                barcode_type=obj.barcode_type,
+                package=obj.package,
+                is_primary=obj.is_primary,
+                valid_from=obj.valid_from,
+                valid_to=obj.valid_to,
+                is_active=obj.is_active,
+                remark=obj.remark,
+                actor=request.user,
             )
             obj.pk = saved.pk
             obj._state.adding = False
@@ -709,10 +854,25 @@ class ProductBarcodeAdmin(admin.ModelAdmin):
 
 
 @admin.register(ProductExternalIdentifier)
-class ProductExternalIdentifierAdmin(admin.ModelAdmin):
-    list_display = ("owner", "product", "source_system", "external_code", "is_primary", "is_active", "valid_from", "valid_to")
+class ProductExternalIdentifierAdmin(TenantScopedAdminMixin, admin.ModelAdmin):
+    list_display = (
+        "owner",
+        "product",
+        "source_system",
+        "external_code",
+        "is_primary",
+        "is_active",
+        "valid_from",
+        "valid_to",
+    )
     list_filter = ("owner", "source_system", "is_primary", "is_active")
-    search_fields = ("source_system", "external_code", "normalized_value", "product__code", "product__name")
+    search_fields = (
+        "source_system",
+        "external_code",
+        "normalized_value",
+        "product__code",
+        "product__name",
+    )
     autocomplete_fields = ("product",)
     readonly_fields = ("owner", "normalized_value")
     actions = ("make_primary", "retire", "reactivate")
@@ -724,17 +884,27 @@ class ProductExternalIdentifierAdmin(admin.ModelAdmin):
         return tuple(fields)
 
     def save_model(self, request, obj, form, change):
+        if not scoped_products(request.user).filter(pk=obj.product_id).exists():
+            raise PermissionDenied("Object is outside the active tenant scope.")
+        if change and not admin_object_in_scope(request.user, obj, for_write=True):
+            raise PermissionDenied("Object is outside the active tenant scope.")
         if not change:
             saved = add_external_identifier(
-                product=obj.product, source_system=obj.source_system,
-                external_code=obj.external_code, is_primary=obj.is_primary,
-                valid_from=obj.valid_from, valid_to=obj.valid_to,
+                product=obj.product,
+                source_system=obj.source_system,
+                external_code=obj.external_code,
+                is_primary=obj.is_primary,
+                valid_from=obj.valid_from,
+                valid_to=obj.valid_to,
             )
             obj.pk = saved.pk
             obj._state.adding = False
             return
         obj._identifier_service_write = True
-        obj.save()
+        try:
+            obj.save()
+        finally:
+            delattr(obj, "_identifier_service_write")
 
     def delete_model(self, request, obj):
         set_identifier_active(obj, False)

@@ -1,9 +1,9 @@
 # allapp/reports/models.py
-from django.db import models
-from django.db.models import Q, F, CheckConstraint, UniqueConstraint
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.conf import settings
+from django.db import models
+from django.db.models import CheckConstraint, F, Q, UniqueConstraint
 
 
 # ===========================
@@ -28,7 +28,7 @@ class Scd2Mixin(models.Model):
         constraints = [
             # 区间右开；允许 open-ended
             CheckConstraint(
-                check=Q(valid_to__isnull=True) | Q(valid_to__gt=F("valid_from")),
+                condition=Q(valid_to__isnull=True) | Q(valid_to__gt=F("valid_from")),
                 name="chk_scd2_rng_ok",
             ),
         ]
@@ -221,9 +221,7 @@ class FactInventorySnapshotDaily(models.Model):
     库存日快照：按日 owner/warehouse/location/product/lot 聚合的库存状态。
     """
 
-    snapshot_date = models.ForeignKey(
-        DateDim, on_delete=models.PROTECT, to_field="date_key"
-    )
+    snapshot_date = models.ForeignKey(DateDim, on_delete=models.PROTECT, to_field="date_key")
     owner = models.ForeignKey(OwnerDim, on_delete=models.PROTECT)
     warehouse = models.ForeignKey(WarehouseDim, on_delete=models.PROTECT)
     location_id = models.BigIntegerField()  # 不建维，直接存业务库 location.pk
@@ -265,7 +263,7 @@ class FactInventorySnapshotDaily(models.Model):
                 name="uq_inv_snap_key",
             ),
             CheckConstraint(
-                check=Q(qty_onhand__gte=0)
+                condition=Q(qty_onhand__gte=0)
                 & Q(qty_alloc__gte=0)
                 & Q(qty_available__gte=0)
                 & Q(qty_damage__gte=0)
@@ -294,13 +292,9 @@ class FactInventoryTxn(models.Model):
     location_id = models.BigIntegerField(null=True, blank=True)
     product = models.ForeignKey(ProductDim, on_delete=models.PROTECT)
     lot_no = models.CharField(max_length=60, blank=True)
-    reason = models.ForeignKey(
-        ReasonDim, on_delete=models.PROTECT, null=True, blank=True
-    )
+    reason = models.ForeignKey(ReasonDim, on_delete=models.PROTECT, null=True, blank=True)
 
-    order_type = models.CharField(
-        max_length=20
-    )  # INBOUND/OUTBOUND/TRANSFER/COUNT/ADJUST...
+    order_type = models.CharField(max_length=20)  # INBOUND/OUTBOUND/TRANSFER/COUNT/ADJUST...
     order_id = models.BigIntegerField(null=True, blank=True)
 
     qty_delta = models.DecimalField(max_digits=18, decimal_places=3)  # 可为负
@@ -311,7 +305,7 @@ class FactInventoryTxn(models.Model):
         verbose_name_plural = "库存交易事实"
         constraints = [
             CheckConstraint(
-                check=~(Q(qty_delta=0) & Q(amount_delta=0)),
+                condition=~(Q(qty_delta=0) & Q(amount_delta=0)),
                 name="chk_txn_nonzero",
             ),
         ]
@@ -319,9 +313,7 @@ class FactInventoryTxn(models.Model):
             models.Index(fields=["owner", "occurred_at"], name="idx_txn_owner_time"),
             models.Index(fields=["warehouse", "occurred_at"], name="idx_txn_wh_time"),
             models.Index(fields=["product", "occurred_at"], name="idx_txn_prod_time"),
-            models.Index(
-                fields=["order_type", "occurred_at"], name="idx_txn_otype_time"
-            ),
+            models.Index(fields=["order_type", "occurred_at"], name="idx_txn_otype_time"),
         ]
 
 
@@ -334,9 +326,7 @@ class FactInboundLine(models.Model):
     order_id = models.BigIntegerField()
     owner = models.ForeignKey(OwnerDim, on_delete=models.PROTECT)
     warehouse = models.ForeignKey(WarehouseDim, on_delete=models.PROTECT)
-    supplier = models.ForeignKey(
-        SupplierDim, on_delete=models.PROTECT, null=True, blank=True
-    )
+    supplier = models.ForeignKey(SupplierDim, on_delete=models.PROTECT, null=True, blank=True)
     product = models.ForeignKey(ProductDim, on_delete=models.PROTECT)
 
     order_date = models.ForeignKey(
@@ -397,9 +387,7 @@ class FactOutboundLine(models.Model):
     order_id = models.BigIntegerField()
     owner = models.ForeignKey(OwnerDim, on_delete=models.PROTECT)
     warehouse = models.ForeignKey(WarehouseDim, on_delete=models.PROTECT)
-    customer = models.ForeignKey(
-        CustomerDim, on_delete=models.PROTECT, null=True, blank=True
-    )
+    customer = models.ForeignKey(CustomerDim, on_delete=models.PROTECT, null=True, blank=True)
     product = models.ForeignKey(ProductDim, on_delete=models.PROTECT)
 
     order_date = models.ForeignKey(
@@ -458,12 +446,8 @@ class FactOutboundOrderSLA(models.Model):
     order_id = models.BigIntegerField(unique=True)
     owner = models.ForeignKey(OwnerDim, on_delete=models.PROTECT)
     warehouse = models.ForeignKey(WarehouseDim, on_delete=models.PROTECT)
-    customer = models.ForeignKey(
-        CustomerDim, null=True, blank=True, on_delete=models.PROTECT
-    )
-    order_date = models.ForeignKey(
-        DateDim, on_delete=models.PROTECT, to_field="date_key"
-    )
+    customer = models.ForeignKey(CustomerDim, null=True, blank=True, on_delete=models.PROTECT)
+    order_date = models.ForeignKey(DateDim, on_delete=models.PROTECT, to_field="date_key")
     etd = models.DateTimeField(null=True, blank=True)
     shipped_at = models.DateTimeField(null=True, blank=True)
     planned_qty = models.DecimalField(max_digits=18, decimal_places=3, default=0)
@@ -493,14 +477,10 @@ class FactBilling(models.Model):
     """
 
     owner = models.ForeignKey(OwnerDim, on_delete=models.PROTECT)
-    warehouse = models.ForeignKey(
-        WarehouseDim, on_delete=models.PROTECT, null=True, blank=True
-    )
+    warehouse = models.ForeignKey(WarehouseDim, on_delete=models.PROTECT, null=True, blank=True)
     date = models.ForeignKey(DateDim, on_delete=models.PROTECT, to_field="date_key")
 
-    fee_type = models.CharField(
-        max_length=30
-    )  # STORAGE/OPERATION/DELIVERY/OUTBOUND_VALUE...
+    fee_type = models.CharField(max_length=30)  # STORAGE/OPERATION/DELIVERY/OUTBOUND_VALUE...
     # Reversals are represented as negative facts so financial reconciliation
     # remains additive and does not need special-case subtraction.
     amount = models.DecimalField(max_digits=18, decimal_places=2)
@@ -553,7 +533,7 @@ class AggThroughputDaily(models.Model):
         constraints = [
             UniqueConstraint(fields=["date", "owner", "warehouse"], name="uq_tput_key"),
             CheckConstraint(
-                check=Q(inbound_lines__gte=0) & Q(outbound_lines__gte=0),
+                condition=Q(inbound_lines__gte=0) & Q(outbound_lines__gte=0),
                 name="chk_tput_cnt_ge0",
             ),
         ]
@@ -580,9 +560,7 @@ class AggOTIFDaily(models.Model):
         constraints = [
             UniqueConstraint(fields=["date", "owner", "customer"], name="uq_otif_key"),
             CheckConstraint(
-                check=Q(orders__gte=0)
-                & Q(orders_on_time__gte=0)
-                & Q(orders_in_full__gte=0),
+                condition=Q(orders__gte=0) & Q(orders_on_time__gte=0) & Q(orders_in_full__gte=0),
                 name="chk_otif_ge0",
             ),
         ]
@@ -600,9 +578,7 @@ class AggInventoryAging(models.Model):
     warehouse = models.ForeignKey(WarehouseDim, on_delete=models.PROTECT)
     product = models.ForeignKey(ProductDim, on_delete=models.PROTECT)
 
-    band = models.CharField(
-        max_length=20
-    )  # e.g. "0-7","8-15","16-30","31-60","61-90","90+"
+    band = models.CharField(max_length=20)  # e.g. "0-7","8-15","16-30","31-60","61-90","90+"
     qty = models.DecimalField(
         max_digits=18, decimal_places=3, default=0, validators=[MinValueValidator(0)]
     )
@@ -631,9 +607,7 @@ class AggBillingDaily(models.Model):
 
     date = models.ForeignKey(DateDim, on_delete=models.PROTECT, to_field="date_key")
     owner = models.ForeignKey(OwnerDim, on_delete=models.PROTECT)
-    warehouse = models.ForeignKey(
-        WarehouseDim, on_delete=models.PROTECT, null=True, blank=True
-    )
+    warehouse = models.ForeignKey(WarehouseDim, on_delete=models.PROTECT, null=True, blank=True)
     fee_type = models.CharField(max_length=30)
 
     amount = models.DecimalField(max_digits=18, decimal_places=2)
@@ -642,9 +616,7 @@ class AggBillingDaily(models.Model):
         verbose_name = "计费日汇总"
         verbose_name_plural = "计费日汇总"
         constraints = [
-            UniqueConstraint(
-                fields=["date", "owner", "warehouse", "fee_type"], name="uq_bill_key"
-            ),
+            UniqueConstraint(fields=["date", "owner", "warehouse", "fee_type"], name="uq_bill_key"),
         ]
         indexes = [
             models.Index(fields=["owner", "date"], name="idx_bill_owner_date"),
@@ -660,9 +632,7 @@ class EtlWatermark(models.Model):
     增量抽取水位：存放各域的最后同步点（时间戳或自增ID）
     """
 
-    domain = models.CharField(
-        max_length=40, unique=True
-    )  # e.g. 'inbound_line', 'inventory_txn'
+    domain = models.CharField(max_length=40, unique=True)  # e.g. 'inbound_line', 'inventory_txn'
     watermark_value = models.CharField(max_length=64)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -726,9 +696,7 @@ class ReportSnapshot(models.Model):
     """通用报表快照：冻结渲染上下文与关键抬头字段。
     可用于配送单、收货单、盘点单等。"""
 
-    owner = models.ForeignKey(
-        "baseinfo.Owner", verbose_name="货主", on_delete=models.PROTECT
-    )
+    owner = models.ForeignKey("baseinfo.Owner", verbose_name="货主", on_delete=models.PROTECT)
     warehouse = models.ForeignKey(
         "locations.Warehouse", verbose_name="出库", on_delete=models.PROTECT
     )
@@ -743,9 +711,7 @@ class ReportSnapshot(models.Model):
 
     payload = models.JSONField("渲染数据快照")  # 存 header/items 等
     html = models.TextField("HTML快照", blank=True, default="")
-    amount_total = models.DecimalField(
-        "金额合计", max_digits=18, decimal_places=2, default=0
-    )
+    amount_total = models.DecimalField("金额合计", max_digits=18, decimal_places=2, default=0)
     amount_upper = models.CharField("金额大写", max_length=60, blank=True, default="")
 
     fp = models.CharField("指纹", max_length=64, unique=True)  # sha256(payload+tpl_ver)
@@ -759,14 +725,12 @@ class ReportSnapshot(models.Model):
         verbose_name_plural = "报表快照"
         constraints = [
             models.CheckConstraint(
-                name="ck_rpt_amt_nonneg", check=models.Q(amount_total__gte=0)
+                name="ck_rpt_amt_nonneg", condition=models.Q(amount_total__gte=0)
             ),
         ]
         indexes = [
             models.Index(fields=["doc_type", "doc_no"], name="ix_rpt_doctype_no"),
-            models.Index(
-                fields=["owner", "warehouse", "created_at"], name="ix_rpt_own_wh_time"
-            ),
+            models.Index(fields=["owner", "warehouse", "created_at"], name="ix_rpt_own_wh_time"),
         ]
 
     def __str__(self):
@@ -792,9 +756,7 @@ class OperatingTarget(models.Model):
 
     month = models.DateField()
     warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT)
-    owner = models.ForeignKey(
-        "baseinfo.Owner", null=True, blank=True, on_delete=models.PROTECT
-    )
+    owner = models.ForeignKey("baseinfo.Owner", null=True, blank=True, on_delete=models.PROTECT)
     owner_scope_id = models.PositiveBigIntegerField(default=0, editable=False)
     metric = models.CharField(max_length=40, choices=Metric.choices)
     currency = models.CharField(max_length=8, blank=True, default="")
@@ -818,9 +780,7 @@ class OperatingTarget(models.Model):
                 ],
                 name="ux_operating_target_scope",
             ),
-            CheckConstraint(
-                condition=Q(target_value__gte=0), name="chk_operating_target_nonneg"
-            ),
+            CheckConstraint(condition=Q(target_value__gte=0), name="chk_operating_target_nonneg"),
         ]
 
     def clean(self):
@@ -859,9 +819,7 @@ class AlertCase(models.Model):
     alert_type = models.CharField(max_length=60, db_index=True)
     source_type = models.CharField(max_length=60)
     source_id = models.CharField(max_length=80)
-    owner = models.ForeignKey(
-        "baseinfo.Owner", null=True, blank=True, on_delete=models.PROTECT
-    )
+    owner = models.ForeignKey("baseinfo.Owner", null=True, blank=True, on_delete=models.PROTECT)
     warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT)
     severity = models.CharField(max_length=20, choices=Severity.choices)
     title = models.CharField(max_length=200)
@@ -876,9 +834,7 @@ class AlertCase(models.Model):
         related_name="assigned_alert_cases",
     )
     due_at = models.DateTimeField(null=True, blank=True)
-    status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.OPEN
-    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
     resolved_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -887,12 +843,8 @@ class AlertCase(models.Model):
     class Meta:
         permissions = [("manage_alert_cases", "处置经营预警")]
         indexes = [
-            models.Index(
-                fields=["warehouse", "status", "severity"], name="ix_alert_scope_state"
-            ),
-            models.Index(
-                fields=["alert_type", "last_seen_at"], name="ix_alert_type_seen"
-            ),
+            models.Index(fields=["warehouse", "status", "severity"], name="ix_alert_scope_state"),
+            models.Index(fields=["alert_type", "last_seen_at"], name="ix_alert_type_seen"),
         ]
 
 
@@ -905,9 +857,7 @@ class AlertCaseHistoryQuerySet(models.QuerySet):
 
 
 class AlertCaseHistory(models.Model):
-    case = models.ForeignKey(
-        AlertCase, on_delete=models.PROTECT, related_name="history"
-    )
+    case = models.ForeignKey(AlertCase, on_delete=models.PROTECT, related_name="history")
     action = models.CharField(max_length=40)
     from_status = models.CharField(max_length=20, blank=True, default="")
     to_status = models.CharField(max_length=20, blank=True, default="")
@@ -951,9 +901,7 @@ class BusinessReviewSnapshot(models.Model):
         related_name="business_review_snapshots",
     )
     warehouse_ids = models.JSONField(default=list)
-    owner = models.ForeignKey(
-        "baseinfo.Owner", null=True, blank=True, on_delete=models.PROTECT
-    )
+    owner = models.ForeignKey("baseinfo.Owner", null=True, blank=True, on_delete=models.PROTECT)
     date_from = models.DateField()
     date_to = models.DateField()
     data_as_of = models.DateTimeField()
@@ -973,11 +921,13 @@ class BusinessReviewSnapshot(models.Model):
     objects = BusinessReviewSnapshotQuerySet.as_manager()
 
     class Meta:
-        indexes = [
-            models.Index(
-                fields=["created_by", "created_at"], name="ix_review_creator_time"
+        permissions = [
+            (
+                "create_business_review_snapshot",
+                "可创建并分享不可变经营例会快照",
             )
         ]
+        indexes = [models.Index(fields=["created_by", "created_at"], name="ix_review_creator_time")]
 
     def save(self, *args, **kwargs):
         if self.pk:
@@ -1013,9 +963,7 @@ class TaskStateSnapshotDaily(models.Model):
     captured_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        constraints = [
-            UniqueConstraint(fields=["snapshot_date", "task"], name="ux_task_state_day")
-        ]
+        constraints = [UniqueConstraint(fields=["snapshot_date", "task"], name="ux_task_state_day")]
         indexes = [
             models.Index(
                 fields=["warehouse", "snapshot_date", "status"],

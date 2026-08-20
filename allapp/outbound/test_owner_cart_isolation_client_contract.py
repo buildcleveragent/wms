@@ -22,23 +22,15 @@ class OwnerCartIsolationClientContractTests(SimpleTestCase):
     def test_customer_switch_clears_items_and_rotates_key_only_for_new_id(self):
         source = self.read("store/cart.js")
         block = source[
-            source.index("    setCustomer(record) {") : source.index(
-                "    addItem(product) {"
-            )
+            source.index("    setCustomer(record) {") : source.index("    addItem(product) {")
         ]
 
-        self.assertLess(
-            block.index("normalizeSelectedCustomer"), block.index("if (!customer)")
-        )
-        self.assertLess(
-            block.index("if (!customer)"), block.index("previousCustomerId")
-        )
+        self.assertLess(block.index("normalizeSelectedCustomer"), block.index("if (!customer)"))
+        self.assertLess(block.index("if (!customer)"), block.index("previousCustomerId"))
         self.assertIn("String(previousCustomerId) !== String(customer.id)", block)
         self.assertIn("this.items = []", block)
         self.assertIn("this.idempotency_key = createIdempotencyKey()", block)
-        self.assertLess(
-            block.index("this.items = []"), block.index("this.customer = customer")
-        )
+        self.assertLess(block.index("this.items = []"), block.index("this.customer = customer"))
         self.assertLess(
             block.index("this.idempotency_key = createIdempotencyKey()"),
             block.index("this.customer = customer"),
@@ -47,9 +39,7 @@ class OwnerCartIsolationClientContractTests(SimpleTestCase):
     def test_full_reset_and_compatibility_clear_remove_all_context(self):
         source = self.read("store/cart.js")
         reset_block = source[
-            source.index("    resetOrder() {") : source.index(
-                "    ensureIdempotencyKey() {"
-            )
+            source.index("    resetOrder() {") : source.index("    ensureIdempotencyKey() {")
         ]
 
         for assignment in (
@@ -64,9 +54,7 @@ class OwnerCartIsolationClientContractTests(SimpleTestCase):
             with self.subTest(assignment=assignment):
                 self.assertIn(assignment, reset_block)
         clear_block = source[
-            source.index("    clear() {") : source.index(
-                "\n    },", source.index("    clear() {")
-            )
+            source.index("    clear() {") : source.index("\n    },", source.index("    clear() {"))
         ]
         self.assertIn("this.resetOrder()", clear_block)
 
@@ -74,19 +62,13 @@ class OwnerCartIsolationClientContractTests(SimpleTestCase):
         source = self.read("store/auth.js")
         login_block = source[source.index("async login") : source.index("logout()")]
         logout_block = source[source.index("logout()") :]
-        clear_block = source[
-            source.index("clearLocalSession()") : source.index("async logout()")
-        ]
+        clear_block = source[source.index("clearLocalSession()") : source.index("async logout()")]
 
         self.assertIn("import { useCart } from '@/store/cart'", source)
-        self.assertIn(
-            "const profile = await api.authProfileWithAccess(access)", login_block
-        )
+        self.assertIn("const profile = await api.authProfileWithAccess(access)", login_block)
         self.assertIn("useCart().resetOrder()", login_block)
         self.assertLess(
-            login_block.index(
-                "const profile = await api.authProfileWithAccess(access)"
-            ),
+            login_block.index("const profile = await api.authProfileWithAccess(access)"),
             login_block.index("useCart().resetOrder()"),
         )
         self.assertLess(
@@ -117,9 +99,7 @@ class OwnerCartIsolationClientContractTests(SimpleTestCase):
 
     def test_warehouse_selection_starts_context_for_authenticated_user(self):
         source = self.read("pages/warehouses/select.vue")
-        begin_block = source[
-            source.index("cart.beginOrder") : source.index("uni.redirectTo")
-        ]
+        begin_block = source[source.index("cart.beginOrder") : source.index("uni.redirectTo")]
 
         self.assertIn("user_id: auth.user?.id", begin_block)
         self.assertIn("owner_id: auth.user?.owner_id", begin_block)

@@ -3,7 +3,7 @@ from decimal import Decimal
 from io import StringIO
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.test import TestCase
@@ -42,7 +42,9 @@ from allapp.products.identifier_services import (
     set_identifier_active,
 )
 from allapp.products.models import Product, ProductBarcode, ProductUom
-from allapp.reports.models import ReportSnapshot
+from allapp.reports.dispatch_note_builder import build_dispatch_note
+from allapp.reports.models import BusinessReviewSnapshot, ReportSnapshot
+from allapp.reports.services import snapshot_dispatch_note
 from allapp.tasking.models import WmsTask
 
 
@@ -71,17 +73,82 @@ def _currency_total(groups, currency="CNY"):
 class ReportsWarehouseScopeTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Report", code="OWN-RPT")
-        self.warehouse = Warehouse.objects.create(
-            code="WH-RPT", name="Warehouse Report"
-        )
-        self.user = get_user_model().objects.create_user(
-            username="report-user", password="x"
-        )
+        self.warehouse = Warehouse.objects.create(code="WH-RPT", name="Warehouse Report")
+        self.user = get_user_model().objects.create_user(username="report-user", password="x")
         self.staff_user = get_user_model().objects.create_superuser(
             username="report-staff",
             email="report-staff@example.com",
             password="x",
         )
+
+    def _create_dispatch_task(
+        self,
+        *,
+        status=WmsTask.Status.COMPLETED,
+        qty_plan=Decimal("2.000"),
+        qty_done=Decimal("2.000"),
+        base_price=Decimal("12.5000"),
+    ):
+        uom = ProductUom.objects.create(
+            code=f"PCS-RPT-{ProductUom.objects.count()}", name="件", is_active=True
+        )
+        product = Product.objects.create(
+            owner=self.owner,
+            code=f"SKU-RPT-{Product.objects.count()}",
+            name="配送单商品",
+            sku=f"SKU-RPT-{Product.objects.count()}",
+            base_uom=uom,
+            volume=Decimal("0.100000"),
+            price=Decimal("999.00"),
+        )
+        customer = Customer.objects.create(
+            owner=self.owner,
+            code=f"CUST-RPT-{Customer.objects.count()}",
+            name="配送客户",
+            salesperson=self.staff_user,
+        )
+        order = OutboundOrder.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            customer=customer,
+            order_no=f"ORDER-RPT-{OutboundOrder.objects.count()}",
+            ship_to="测试收货地址",
+            contact="测试联系人",
+            memo="配送备注",
+            created_by=self.staff_user,
+        )
+        order_line = OutboundOrderLine.objects.create(
+            order=order,
+            product=product,
+            line_no=10,
+            base_qty=qty_plan,
+            base_price=base_price,
+            base_uom=uom,
+        )
+        completed = status == WmsTask.Status.COMPLETED
+        task = WmsTask.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            task_no=f"DISPATCH-RPT-{WmsTask.objects.count()}",
+            task_type=WmsTask.TaskType.DISPATCH,
+            status=status,
+            review_status=(
+                WmsTask.ReviewStatus.APPROVED if completed else WmsTask.ReviewStatus.NONE
+            ),
+            posting_status=(
+                WmsTask.PostingStatus.POSTED if completed else WmsTask.PostingStatus.NONE
+            ),
+            source_model="outbound.OutboundOrder",
+            source_pk=str(order.pk),
+        )
+        task.lines.create(
+            product=product,
+            qty_plan=qty_plan,
+            qty_done=qty_done,
+            src_model="outboundorderline",
+            src_id=order_line.pk,
+        )
+        return task
 
     def test_report_snapshot_requires_explicit_warehouse(self):
         with self.assertRaises(ValidationError) as exc:
@@ -98,28 +165,7 @@ class ReportsWarehouseScopeTests(TestCase):
         self.assertIn("warehouse", exc.exception.message_dict)
 
     def test_dispatch_note_html_renders_task_lines_for_staff_user(self):
-        uom = ProductUom.objects.create(code="PCS-RPT", name="件", is_active=True)
-        product = Product.objects.create(
-            owner=self.owner,
-            code="SKU-RPT-DISP",
-            name="配送单商品",
-            sku="SKU-RPT-DISP",
-            base_uom=uom,
-            volume=Decimal("0.100000"),
-            price=Decimal("10.00"),
-        )
-        task = WmsTask.objects.create(
-            owner=self.owner,
-            warehouse=self.warehouse,
-            task_no="DISPATCH-RPT-1",
-            task_type=WmsTask.TaskType.DISPATCH,
-            status=WmsTask.Status.COMPLETED,
-            review_status=WmsTask.ReviewStatus.APPROVED,
-            posting_status=WmsTask.PostingStatus.POSTED,
-        )
-        task.lines.create(
-            product=product, qty_plan=Decimal("2.000"), qty_done=Decimal("2.000")
-        )
+        task = self._create_dispatch_task()
         self.client.force_login(self.staff_user)
 
         response = self.client.get(f"/reports/dispatch/{task.id}/")
@@ -127,6 +173,70 @@ class ReportsWarehouseScopeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Owner Report")
         self.assertContains(response, "配送单商品")
+        self.assertContains(response, "25.00")
+        self.assertNotContains(response, "999.00")
+
+    def test_dispatch_note_uses_done_qty_for_final_and_plan_qty_for_preview(self):
+        final_task = self._create_dispatch_task(qty_plan=Decimal("3"), qty_done=Decimal("1"))
+        preview_task = self._create_dispatch_task(
+            status=WmsTask.Status.IN_PROGRESS,
+            qty_plan=Decimal("3"),
+            qty_done=Decimal("1"),
+        )
+
+        final_note = build_dispatch_note(final_task.pk)
+        preview_note = build_dispatch_note(preview_task.pk)
+
+        self.assertFalse(final_note.is_preview)
+        self.assertEqual(final_note.total_amount, Decimal("12.50"))
+        self.assertTrue(preview_note.is_preview)
+        self.assertEqual(preview_note.total_amount, Decimal("37.50"))
+        with self.assertRaisesMessage(ValueError, "不能定稿"):
+            snapshot_dispatch_note(preview_task, self.staff_user, finalize=True)
+
+    def test_zero_base_price_is_a_valid_final_dispatch_note(self):
+        task = self._create_dispatch_task(base_price=Decimal("0"))
+
+        note = build_dispatch_note(task.pk)
+
+        self.assertEqual(note.total_amount, Decimal("0.00"))
+        self.assertEqual(note.items[0].price, Decimal("0"))
+
+    def test_snapshot_is_v2_and_does_not_modify_v1(self):
+        task = self._create_dispatch_task()
+        v1 = ReportSnapshot.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
+            src_model="WmsTask",
+            src_id=task.pk,
+            doc_type="DISPATCH_NOTE",
+            doc_no="LEGACY-RPT",
+            tpl_ver="v1",
+            payload={"header": {}, "items": []},
+            amount_total=Decimal("0"),
+            fp="legacy-report-v1",
+            created_by=self.staff_user,
+        )
+
+        v2 = snapshot_dispatch_note(task, self.staff_user, finalize=True)
+
+        v1.refresh_from_db()
+        self.assertEqual(v1.tpl_ver, "v1")
+        self.assertEqual(v1.amount_total, Decimal("0"))
+        self.assertEqual(v2.tpl_ver, "v2")
+        self.assertTrue(v2.is_final)
+        self.assertEqual(v2.payload["snapshot_version"], "v2")
+        self.assertEqual(v2.amount_total, Decimal("25.00"))
+
+    def test_invalid_dispatch_source_returns_conflict_instead_of_zero_document(self):
+        task = self._create_dispatch_task()
+        WmsTask.objects.filter(pk=task.pk).update(source_pk="99999999")
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(f"/reports/dispatch/{task.id}/")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(response, "不一致", status_code=409)
 
     def test_dispatch_note_html_returns_404_for_missing_task(self):
         self.client.force_login(self.staff_user)
@@ -144,16 +254,10 @@ class BossDashboardApiTests(TestCase):
 
         self.owner = Owner.objects.create(name="Owner Boss A", code="OWBSA")
         self.other_owner = Owner.objects.create(name="Owner Boss B", code="OWBSB")
-        self.warehouse = Warehouse.objects.create(
-            code="WHBOSS1", name="Warehouse Boss 1"
-        )
-        self.other_warehouse = Warehouse.objects.create(
-            code="WHBOSS2", name="Warehouse Boss 2"
-        )
+        self.warehouse = Warehouse.objects.create(code="WHBOSS1", name="Warehouse Boss 1")
+        self.other_warehouse = Warehouse.objects.create(code="WHBOSS2", name="Warehouse Boss 2")
         OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
-        OwnerWarehouseBinding.objects.create(
-            owner=self.other_owner, warehouse=self.warehouse
-        )
+        OwnerWarehouseBinding.objects.create(owner=self.other_owner, warehouse=self.warehouse)
 
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
@@ -177,9 +281,7 @@ class BossDashboardApiTests(TestCase):
             name="Boss Location 2",
             max_volume_m3=Decimal("5.000"),
         )
-        Location.objects.filter(pk=self.location_2.pk).update(
-            max_volume_m3=Decimal("2.000")
-        )
+        Location.objects.filter(pk=self.location_2.pk).update(max_volume_m3=Decimal("2.000"))
         self.location_2.max_volume_m3 = Decimal("2.000")
         self.other_location = Location.objects.create(
             warehouse=self.other_warehouse,
@@ -188,12 +290,8 @@ class BossDashboardApiTests(TestCase):
             max_volume_m3=Decimal("7.000"),
         )
 
-        self.uom_a = ProductUom.objects.create(
-            code="PCS-BOSA", name="件-A", is_active=True
-        )
-        self.uom_b = ProductUom.objects.create(
-            code="PCS-BOSB", name="件-B", is_active=True
-        )
+        self.uom_a = ProductUom.objects.create(code="PCS-BOSA", name="件-A", is_active=True)
+        self.uom_b = ProductUom.objects.create(code="PCS-BOSB", name="件-B", is_active=True)
         self.product_a = Product.objects.create(
             owner=self.owner,
             code="SKU-BOSS-A",
@@ -509,6 +607,26 @@ class BossDashboardApiTests(TestCase):
             status=ReviewDifference.Status.PENDING,
         )
 
+    def test_review_snapshot_creation_requires_dedicated_capability(self):
+        permission = Permission.objects.get(
+            content_type__app_label="reports",
+            codename="create_business_review_snapshot",
+        )
+        for group in self.user.groups.all():
+            group.permissions.remove(permission)
+        for cache_name in ("_perm_cache", "_group_perm_cache", "_user_perm_cache"):
+            if hasattr(self.user, cache_name):
+                delattr(self.user, cache_name)
+
+        response = self.client.post(
+            "/api/reports/boss/review-snapshots/",
+            {"warehouse": self.warehouse.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(BusinessReviewSnapshot.objects.exists())
+
     def test_boss_home_api_returns_scoped_summary(self):
         response = self.client.get("/api/reports/boss/home/")
 
@@ -522,21 +640,13 @@ class BossDashboardApiTests(TestCase):
             Decimal("165.00"),
         )
         self.assertEqual(
-            Decimal(
-                str(
-                    response.data["summary"]["overdue_receivables_by_currency"][0][
-                        "total"
-                    ]
-                )
-            ),
+            Decimal(str(response.data["summary"]["overdue_receivables_by_currency"][0]["total"])),
             Decimal("110.00"),
         )
         self.assertGreater(response.data["summary"]["open_alert_count"], 0)
         self.assertEqual(len(response.data["owner_options"]), 2)
         self.assertEqual(
-            response.data["rankings"]["revenue_contribution_by_currency"][0]["rows"][0][
-                "owner"
-            ],
+            response.data["rankings"]["revenue_contribution_by_currency"][0]["rows"][0]["owner"],
             self.owner.id,
         )
         attention_keys = [item["key"] for item in response.data["attention_items"]]
@@ -548,9 +658,7 @@ class BossDashboardApiTests(TestCase):
             UserRoleScope.Role.WAREHOUSE_BOSS,
             warehouse=self.other_warehouse,
         )
-        OwnerWarehouseBinding.objects.create(
-            owner=self.owner, warehouse=self.other_warehouse
-        )
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.other_warehouse)
         usd_rule = BillingRule.objects.create(
             owner=self.owner,
             warehouse=self.other_warehouse,
@@ -601,17 +709,11 @@ class BossDashboardApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            {
-                row["currency"]
-                for row in response.data["summary"]["accruals_by_currency"]
-            },
+            {row["currency"] for row in response.data["summary"]["accruals_by_currency"]},
             {"CNY", "USD"},
         )
         self.assertEqual(
-            {
-                row["currency"]
-                for row in response.data["summary"]["issued_bills_by_currency"]
-            },
+            {row["currency"] for row in response.data["summary"]["issued_bills_by_currency"]},
             {"CNY"},
         )
         self.assertEqual(
@@ -666,15 +768,11 @@ class BossDashboardApiTests(TestCase):
             Decimal("0.00"),
         )
         self.assertEqual(
-            _currency_total(
-                response.data["summary"]["overdue_receivables_by_currency"]
-            ),
+            _currency_total(response.data["summary"]["overdue_receivables_by_currency"]),
             Decimal("0.00"),
         )
         today_trend = next(
-            row
-            for row in response.data["trend_7d"]
-            if str(row["date"]) == self.today.isoformat()
+            row for row in response.data["trend_7d"] if str(row["date"]) == self.today.isoformat()
         )
         self.assertEqual(
             _currency_total(today_trend["accruals_by_currency"]),
@@ -713,9 +811,7 @@ class BossDashboardApiTests(TestCase):
         self.assertEqual(missing["items"][0]["status"], BillStatus.PAID)
 
     def test_boss_alert_api_respects_owner_filter(self):
-        response = self.client.get(
-            "/api/reports/boss/alerts/", {"owner": self.owner.id}
-        )
+        response = self.client.get("/api/reports/boss/alerts/", {"owner": self.owner.id})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["scope"]["owner"], self.owner.id)
@@ -759,19 +855,13 @@ class BossDashboardApiTests(TestCase):
         self.assertEqual(response.data["summary"]["hot_location_count"], 1)
         self.assertEqual(response.data["summary"]["cold_location_count"], 1)
         self.assertEqual(response.data["owner_rankings"][0]["owner"], self.owner.id)
-        self.assertEqual(
-            response.data["expiring_items"][0]["location_code"], self.location_2.code
-        )
-        self.assertEqual(
-            response.data["stale_items"][0]["location_code"], self.location.code
-        )
+        self.assertEqual(response.data["expiring_items"][0]["location_code"], self.location_2.code)
+        self.assertEqual(response.data["stale_items"][0]["location_code"], self.location.code)
         self.assertEqual(
             response.data["high_heat_locations"][0]["location_code"],
             self.location_2.code,
         )
-        self.assertEqual(
-            response.data["cold_locations"][0]["location_code"], self.location.code
-        )
+        self.assertEqual(response.data["cold_locations"][0]["location_code"], self.location.code)
 
     def test_boss_inventory_detail_uses_global_scope_and_base_unit(self):
         response = self.client.get(
@@ -860,9 +950,7 @@ class BossDashboardApiTests(TestCase):
         self.assertEqual(response.data["summary"]["quantity_by_uom"], [])
 
     def test_boss_inventory_api_respects_owner_filter(self):
-        response = self.client.get(
-            "/api/reports/boss/inventory/", {"owner": self.owner.id}
-        )
+        response = self.client.get("/api/reports/boss/inventory/", {"owner": self.owner.id})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["scope"]["owner"], self.owner.id)
@@ -976,9 +1064,7 @@ class BossDashboardApiTests(TestCase):
         client = APIClient()
         client.force_authenticate(scoped_user)
 
-        response = client.get(
-            "/api/reports/boss/inventory/", {"owner": self.other_owner.id}
-        )
+        response = client.get("/api/reports/boss/inventory/", {"owner": self.other_owner.id})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["scope"]["owner"], self.other_owner.id)
@@ -988,12 +1074,8 @@ class BossDashboardApiTests(TestCase):
     def test_multi_warehouse_boss_owner_options_fail_closed_without_activity(self):
         """No fact rows must not turn an authorized warehouse list into all owners."""
 
-        empty_warehouse_a = Warehouse.objects.create(
-            code="WHBEMPA", name="Boss Empty Warehouse A"
-        )
-        empty_warehouse_b = Warehouse.objects.create(
-            code="WHBEMPB", name="Boss Empty Warehouse B"
-        )
+        empty_warehouse_a = Warehouse.objects.create(code="WHBEMPA", name="Boss Empty Warehouse A")
+        empty_warehouse_b = Warehouse.objects.create(code="WHBEMPB", name="Boss Empty Warehouse B")
         Owner.objects.create(name="Unrelated Owner", code="OWBUNR")
         scoped_user = get_user_model().objects.create_user(
             username="boss-dashboard-empty-multi",
@@ -1022,13 +1104,9 @@ class PdaThroughputApiTests(TestCase):
     def setUp(self):
         call_command("sync_wms_role_groups", stdout=StringIO())
         self.owner = Owner.objects.create(name="Owner PDA Report", code="OWPDA")
-        self.other_owner = Owner.objects.create(
-            name="Owner PDA Report Other", code="OWPDO"
-        )
+        self.other_owner = Owner.objects.create(name="Owner PDA Report Other", code="OWPDO")
         self.warehouse = Warehouse.objects.create(code="WHPDA1", name="Warehouse PDA 1")
-        self.other_warehouse = Warehouse.objects.create(
-            code="WHPDA2", name="Warehouse PDA 2"
-        )
+        self.other_warehouse = Warehouse.objects.create(code="WHPDA2", name="Warehouse PDA 2")
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="SWPDA1",
@@ -1215,9 +1293,7 @@ class PdaThroughputApiTests(TestCase):
             status=WmsTask.Status.COMPLETED,
             review_status=WmsTask.ReviewStatus.APPROVED,
             posting_status=posting_status,
-            posted_at=(
-                posted_at if posting_status == WmsTask.PostingStatus.POSTED else None
-            ),
+            posted_at=(posted_at if posting_status == WmsTask.PostingStatus.POSTED else None),
             ref_no=ref_no,
             source_app=source_app,
             source_model=source_model,
@@ -1285,9 +1361,7 @@ class PdaThroughputApiTests(TestCase):
         return line
 
     def _create_dispatch_for_line(self, line):
-        finished_at = datetime.datetime.combine(
-            line.order.biz_date, datetime.time(hour=15)
-        )
+        finished_at = datetime.datetime.combine(line.order.biz_date, datetime.time(hour=15))
         task = WmsTask.objects.create(
             owner=line.order.owner,
             warehouse=line.order.warehouse,
@@ -1486,12 +1560,8 @@ class PdaThroughputApiTests(TestCase):
         self.assertEqual(response.data["summary"]["outbound_qty"], "4.000")
         self.assertEqual(response.data["summary"]["item_count"], 2)
 
-        inbound = [
-            item for item in response.data["items"] if item["kind"] == "inbound"
-        ][0]
-        outbound = [
-            item for item in response.data["items"] if item["kind"] == "outbound"
-        ][0]
+        inbound = [item for item in response.data["items"] if item["kind"] == "inbound"][0]
+        outbound = [item for item in response.data["items"] if item["kind"] == "outbound"][0]
         self.assertEqual(inbound["source_type"], "收货任务")
         self.assertEqual(inbound["source_no"], "INB-PDA-RPT-1")
         self.assertEqual(inbound["task_no"], "RK-PDA-RPT-FORMAL")
@@ -1528,9 +1598,7 @@ class PdaThroughputApiTests(TestCase):
         self.assertEqual(response.data["summary"]["inbound_qty"], "13.000")
         self.assertEqual(response.data["summary"]["outbound_qty"], "0.000")
         self.assertEqual(response.data["summary"]["item_count"], 2)
-        no_order = [
-            item for item in response.data["items"] if item["task_no"] == task.task_no
-        ][0]
+        no_order = [item for item in response.data["items"] if item["task_no"] == task.task_no][0]
         self.assertEqual(no_order["source_type"], "无订单收货")
         self.assertEqual(no_order["source_no"], task.task_no)
         self.assertEqual(no_order["qty"], "3.000")
@@ -1579,9 +1647,7 @@ class PdaThroughputApiTests(TestCase):
         self.assertEqual(inbound_response.data["summary"]["outbound_qty"], "0.000")
         self.assertEqual(inbound_response.data["summary"]["item_count"], 1)
         self.assertEqual(inbound_response.data["items"][0]["kind"], "inbound")
-        self.assertEqual(
-            inbound_response.data["items"][0]["owner"], self.other_owner.id
-        )
+        self.assertEqual(inbound_response.data["items"][0]["owner"], self.other_owner.id)
 
         self.assertEqual(outbound_response.status_code, 200)
         self.assertEqual(outbound_response.data["summary"]["inbound_qty"], "0.000")
@@ -1754,9 +1820,7 @@ class PdaThroughputApiTests(TestCase):
             own_response.data["owner_options"],
             [{"id": self.owner.id, "name": self.owner.name}],
         )
-        self.assertEqual(
-            {row["owner"] for row in own_response.data["by_owner"]}, {self.owner.id}
-        )
+        self.assertEqual({row["owner"] for row in own_response.data["by_owner"]}, {self.owner.id})
 
     def test_throughput_details_reject_other_owner_for_owner_scoped_user(self):
         owner_only_user = get_user_model().objects.create_user(

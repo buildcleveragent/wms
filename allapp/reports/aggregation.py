@@ -64,12 +64,8 @@ def refresh_daily_aggregates(dates: Iterable[date]) -> int:
         for row in FactOutboundLine.objects.filter(
             ship_date=date_dim, customer_id__isnull=False
         ).values("owner_id", "customer_id", "order_id", "on_time", "in_full"):
-            order_rows[(row["owner_id"], row["customer_id"], row["order_id"])].append(
-                row
-            )
-        otif = defaultdict(
-            lambda: {"orders": 0, "orders_on_time": 0, "orders_in_full": 0}
-        )
+            order_rows[(row["owner_id"], row["customer_id"], row["order_id"])].append(row)
+        otif = defaultdict(lambda: {"orders": 0, "orders_on_time": 0, "orders_in_full": 0})
         for (owner_id, customer_id, _order_id), lines in order_rows.items():
             bucket = otif[(owner_id, customer_id)]
             bucket["orders"] += 1
@@ -115,8 +111,8 @@ def refresh_all_daily_aggregates() -> int:
         (AggBillingDaily, "date__date"),
     ):
         dates.update(
-            model.objects.exclude(
-                **{f"{field.split('__')[0]}__isnull": True}
-            ).values_list(field, flat=True)
+            model.objects.exclude(**{f"{field.split('__')[0]}__isnull": True}).values_list(
+                field, flat=True
+            )
         )
     return refresh_daily_aggregates(dates)

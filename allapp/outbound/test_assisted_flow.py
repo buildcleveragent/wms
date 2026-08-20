@@ -10,7 +10,7 @@ from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from allapp.accounts.models import UserRoleScope
-from allapp.baseinfo.models import Customer, Owner
+from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.core.models import PrintConfig
 from allapp.inventory.models import (
     InventoryDetail,
@@ -50,6 +50,10 @@ class AssistedOutboundFlowTests(TestCase):
         self.warehouse = Warehouse.objects.create(
             code="AFW-WH",
             name="Assisted flow warehouse",
+        )
+        self.binding = OwnerWarehouseBinding.objects.create(
+            owner=self.owner,
+            warehouse=self.warehouse,
         )
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
@@ -157,33 +161,23 @@ class AssistedOutboundFlowTests(TestCase):
             self.operator.id,
         )
 
-        own_print_request = self.factory.get(
-            f"/api/outbound/pda/pick-tasks/{task.id}/print/"
-        )
+        own_print_request = self.factory.get(f"/api/outbound/pda/pick-tasks/{task.id}/print/")
         own_print_request.user = self.operator
         self.assertEqual(pick_task_print(own_print_request, task.id).status_code, 200)
 
-        other_warehouse = Warehouse.objects.create(
-            code="AFW-PRT-O", name="Print other warehouse"
-        )
+        other_warehouse = Warehouse.objects.create(code="AFW-PRT-O", name="Print other warehouse")
         cross_warehouse_user = get_user_model().objects.create_user(
             username="assisted-flow-print-cross", warehouse=other_warehouse
         )
-        cross_warehouse_user.user_permissions.add(
-            _permission("tasking", "view_wmstask")
-        )
+        cross_warehouse_user.user_permissions.add(_permission("tasking", "view_wmstask"))
         UserRoleScope.objects.create(
             user=cross_warehouse_user,
             role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
             warehouse=other_warehouse,
         )
-        denied_print_request = self.factory.get(
-            f"/api/outbound/pda/pick-tasks/{task.id}/print/"
-        )
+        denied_print_request = self.factory.get(f"/api/outbound/pda/pick-tasks/{task.id}/print/")
         denied_print_request.user = cross_warehouse_user
-        self.assertEqual(
-            pick_task_print(denied_print_request, task.id).status_code, 404
-        )
+        self.assertEqual(pick_task_print(denied_print_request, task.id).status_code, 404)
 
     def test_request_id_same_payload_replays_and_changed_payload_conflicts(self):
         request_id = uuid4()
@@ -211,9 +205,7 @@ class AssistedOutboundFlowTests(TestCase):
         first = self._create(payload)
         changed = {
             **payload,
-            "items": [
-                {"product_id": self.product.id, "qty": "2.000", "price": "9.5000"}
-            ],
+            "items": [{"product_id": self.product.id, "qty": "2.000", "price": "9.5000"}],
         }
 
         conflict = self._create(changed)
@@ -257,6 +249,33 @@ class AssistedOutboundFlowTests(TestCase):
         self.assertEqual(opted_out.status_code, 400, opted_out.data)
         self.owner.allow_warehouse_assisted_outbound = True
         self.owner.save(update_fields=["allow_warehouse_assisted_outbound"])
+
+    def test_catalog_create_and_replay_reject_revoked_binding(self):
+        request_id = uuid4()
+        payload = self._payload(request_id=request_id)
+        first = self._create(payload)
+        self.assertEqual(first.status_code, 201, first.data)
+
+        self.binding.is_active = False
+        self.binding.save(update_fields=["is_active", "updated_at"])
+        catalog_view = AssistedOutboundOrderViewSet.as_view({"get": "products"})
+        catalog = catalog_view(
+            self._request(
+                "get",
+                (
+                    "/api/outbound/assisted-orders/products/"
+                    f"?owner_id={self.owner.id}&search={self.product.sku}"
+                ),
+            )
+        )
+        replay = self._create(payload)
+        changed_request = self._payload(request_id=uuid4())
+        changed_request["src_bill_no"] = "ASSIST-SOURCE-REVOKED"
+        create = self._create(changed_request)
+
+        self.assertEqual(catalog.status_code, 403, catalog.data)
+        self.assertEqual(replay.status_code, 403, replay.data)
+        self.assertEqual(create.status_code, 403, create.data)
 
     def test_missing_price_is_allowed_and_supplied_price_is_used(self):
         self.product.price = None
@@ -375,16 +394,12 @@ class AssistedOutboundFlowTests(TestCase):
         product_data = next(row for row in catalog.data if row["id"] == self.product.id)
         self.assertEqual(product_data["gtin"], self.product.gtin)
         package_option = next(
-            option
-            for option in product_data["unitOptions"]
-            if option["package_id"] == package.id
+            option for option in product_data["unitOptions"] if option["package_id"] == package.id
         )
         self.assertEqual(package_option["label"], "箱")
         self.assertEqual(package_option["multiplier"], 4)
         self.assertEqual(
-            product_data["unitOptions"][product_data["selectedUnitIndex"]][
-                "package_id"
-            ],
+            product_data["unitOptions"][product_data["selectedUnitIndex"]]["package_id"],
             package.id,
         )
 
@@ -429,9 +444,7 @@ class AssistedOutboundFlowTests(TestCase):
         self.detail.refresh_from_db()
         self.assertEqual(self.detail.allocated_qty, Decimal("8.0000"))
 
-        print_request = self.factory.get(
-            f"/api/pda/pick-tasks/{created.data['task_id']}/print/"
-        )
+        print_request = self.factory.get(f"/api/pda/pick-tasks/{created.data['task_id']}/print/")
         print_request.user = self.operator
         PrintConfig.objects.create(
             code="outbound_assisted_test",
@@ -516,9 +529,7 @@ class AssistedOutboundFlowTests(TestCase):
         self.assertEqual(response.status_code, 400, response.data)
         self.assertIn("包装数量换算不一致", str(response.data))
         self.assertFalse(
-            OutboundOrder.objects.filter(
-                assistance_request_id=payload["request_id"]
-            ).exists()
+            OutboundOrder.objects.filter(assistance_request_id=payload["request_id"]).exists()
         )
 
     def test_rejects_cross_owner_customer_and_cash_without_recipient_fields(self):
@@ -735,9 +746,7 @@ class AssistedOutboundFlowTests(TestCase):
         self.assertEqual(task.approved_by_id, original_reviewer.id)
         self.assertEqual(task.posted_by_id, self.operator.id)
         self.assertEqual(
-            PostingJournal.objects.get(
-                src_model="WmsTask", src_id=task.id, tx_type="POST"
-            ).status,
+            PostingJournal.objects.get(src_model="WmsTask", src_id=task.id, tx_type="POST").status,
             "FAILED",
         )
 
@@ -756,11 +765,14 @@ class AssistedOutboundFlowTests(TestCase):
             )
             return {"ok": True, "tx_created": 1}
 
-        with mock.patch(
-            "allapp.outbound.views._run_posting_handler",
-            side_effect=mark_posted,
-        ), mock.patch(
-            "allapp.outbound.views.outbound_services.close_assisted_order_for_posted_task"
+        with (
+            mock.patch(
+                "allapp.outbound.views._run_posting_handler",
+                side_effect=mark_posted,
+            ),
+            mock.patch(
+                "allapp.outbound.views.outbound_services.close_assisted_order_for_posted_task"
+            ),
         ):
             response = post_view(
                 self._request("post", f"/api/pda/pick-tasks/{task.id}/post/"),
@@ -772,9 +784,7 @@ class AssistedOutboundFlowTests(TestCase):
         self.assertEqual(task.approved_by_id, original_reviewer.id)
         self.assertEqual(task.posted_by_id, self.operator.id)
         self.assertEqual(
-            PostingJournal.objects.get(
-                src_model="WmsTask", src_id=task.id, tx_type="POST"
-            ).status,
+            PostingJournal.objects.get(src_model="WmsTask", src_id=task.id, tx_type="POST").status,
             "POSTED",
         )
 

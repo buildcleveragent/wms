@@ -9,7 +9,6 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
 
-
 SECRET_VALUE_PREFIX = "fernet:v1:"
 
 
@@ -23,9 +22,7 @@ def _secret_fernet():
         django_secret = str(getattr(settings, "SECRET_KEY", "") or "")
         if not django_secret:
             raise SecretSettingError("系统设置加密基础密钥未配置。")
-        digest = hashlib.sha256(
-            f"wms-system-setting:v1:{django_secret}".encode("utf-8")
-        ).digest()
+        digest = hashlib.sha256(f"wms-system-setting:v1:{django_secret}".encode("utf-8")).digest()
         key = base64.urlsafe_b64encode(digest).decode("ascii")
     try:
         return Fernet(key.encode("ascii"))
@@ -144,9 +141,7 @@ class SystemSetting(TimeStampedMixin):
     INTEGRATION_NAMESPACE = "integration"
     APIZERO_GS1_API_KEY = "apizero_gs1_api_key"
 
-    namespace = models.CharField(
-        "命名空间", max_length=50, default="global", db_index=True
-    )
+    namespace = models.CharField("命名空间", max_length=50, default="global", db_index=True)
     key = models.CharField("配置键", max_length=100)
     name = models.CharField("名称", max_length=100)
     value_type = models.CharField(
@@ -165,9 +160,7 @@ class SystemSetting(TimeStampedMixin):
         verbose_name = "系统设置"
         verbose_name_plural = "系统设置"
         constraints = [
-            models.UniqueConstraint(
-                fields=["namespace", "key"], name="uq_system_setting_key"
-            ),
+            models.UniqueConstraint(fields=["namespace", "key"], name="uq_system_setting_key"),
         ]
         indexes = [
             models.Index(
@@ -191,11 +184,7 @@ class SystemSetting(TimeStampedMixin):
             raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
-        if (
-            self.is_secret
-            and self.value
-            and not self.value.startswith(SECRET_VALUE_PREFIX)
-        ):
+        if self.is_secret and self.value and not self.value.startswith(SECRET_VALUE_PREFIX):
             raise SecretSettingError("密钥配置必须通过 set_secret_value() 加密写入。")
         super().save(*args, **kwargs)
 
@@ -248,9 +237,7 @@ class SystemSetting(TimeStampedMixin):
 
     @classmethod
     def get_value(cls, namespace, key, default=None):
-        setting = cls.objects.filter(
-            namespace=namespace, key=key, is_active=True
-        ).first()
+        setting = cls.objects.filter(namespace=namespace, key=key, is_active=True).first()
         if not setting:
             return default
         if setting.is_secret:
@@ -314,9 +301,7 @@ class PrintConfig(TimeStampedMixin):
     paper_mode = models.CharField("前端纸型标识", max_length=50, default="a4_landscape")
     paper_width = models.CharField("纸张宽度", max_length=30, default="A4")
     paper_height = models.CharField("纸张高度", max_length=30, default="landscape")
-    page_size_css = models.CharField(
-        "CSS纸张尺寸", max_length=80, default="A4 landscape"
-    )
+    page_size_css = models.CharField("CSS纸张尺寸", max_length=80, default="A4 landscape")
     page_margin = models.CharField("页面边距", max_length=30, default="0")
     sheet_width = models.CharField("单据宽度", max_length=30, default="98%")
     sheet_padding_top = models.CharField("上边距", max_length=30, default="1mm")
@@ -330,9 +315,7 @@ class PrintConfig(TimeStampedMixin):
         help_text="使用逗号分隔字体名称，不需要引号。",
     )
     body_font_size = models.CharField("正文字号", max_length=30, default="22px")
-    company_font_size = models.CharField(
-        "公司/仓库名字号", max_length=30, default="36px"
-    )
+    company_font_size = models.CharField("公司/仓库名字号", max_length=30, default="36px")
     title_font_size = models.CharField("标题字号", max_length=30, default="24px")
     meta_font_size = models.CharField("单据信息字号", max_length=30, default="22px")
     table_font_size = models.CharField("表格字号", max_length=30, default="22px")
@@ -344,9 +327,7 @@ class PrintConfig(TimeStampedMixin):
     table_line_height = models.CharField("表格行高", max_length=20, default="1.05")
     money_line_height = models.CharField("金额汇总行高", max_length=20, default="1.15")
     footer_line_height = models.CharField("底部信息行高", max_length=20, default="1.12")
-    table_cell_padding = models.CharField(
-        "表格单元格内边距", max_length=40, default="1px 2px"
-    )
+    table_cell_padding = models.CharField("表格单元格内边距", max_length=40, default="1px 2px")
     money_gap = models.CharField("金额汇总列间距", max_length=30, default="6px")
     money_margin_top = models.CharField("金额汇总上间距", max_length=30, default="5px")
     extra = models.JSONField("扩展配置", default=dict, blank=True)
@@ -469,9 +450,7 @@ class DocSequence(models.Model):
     warehouse = models.ForeignKey(
         "locations.Warehouse", on_delete=models.PROTECT, null=True, blank=True
     )
-    owner = models.ForeignKey(
-        "baseinfo.Owner", on_delete=models.PROTECT, null=True, blank=True
-    )
+    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, null=True, blank=True)
     next_no = models.BigIntegerField(default=1)  # 下一个可用序号(从1开始)
 
     objects = DocSequenceManager()
@@ -495,7 +474,10 @@ class DocSequence(models.Model):
         verbose_name_plural = "单据序列"
 
     def __str__(self):
-        return f"{self.doc_type}-{self.biz_date} [{self.warehouse_id}/{self.owner_id}] next={self.next_no}"
+        return (
+            f"{self.doc_type}-{self.biz_date} "
+            f"[{self.warehouse_id}/{self.owner_id}] next={self.next_no}"
+        )
 
     # —— 类方法：对外提供数字 & 成品单号 —— #
     @classmethod
@@ -526,9 +508,7 @@ class DocSequence(models.Model):
         例: INB-20250829-WH01-OWN01-00001
         """
         biz_date = biz_date or date.today()
-        n = cls.next_number(
-            doc_type=doc_type, warehouse=warehouse, owner=owner, biz_date=biz_date
-        )
+        n = cls.next_number(doc_type=doc_type, warehouse=warehouse, owner=owner, biz_date=biz_date)
 
         width = cls.DEFAULT_WIDTH if width is None else width
         fmt = cls.DEFAULT_FMT if fmt is None else fmt
@@ -541,9 +521,7 @@ class DocSequence(models.Model):
         own = own_get(owner)
         seq_str = f"{n:0{width}d}"  # 固定位数，零填充
 
-        return fmt.format(
-            prefix=prefix, yyyy=yyyy, mm=mm, dd=dd, wh=wh, own=own, seq=seq_str
-        )
+        return fmt.format(prefix=prefix, yyyy=yyyy, mm=mm, dd=dd, wh=wh, own=own, seq=seq_str)
 
 
 # =============================================================

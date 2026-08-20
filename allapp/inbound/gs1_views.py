@@ -105,10 +105,7 @@ def _schema_is_missing(exc):
     message = str(exc).lower()
     return "no such table" in message or (
         "doesn't exist" in message
-        and (
-            "products_gs1lookupcache" in message
-            or "products_gs1providerratelimit" in message
-        )
+        and ("products_gs1lookupcache" in message or "products_gs1providerratelimit" in message)
     )
 
 
@@ -138,31 +135,21 @@ class QuickCreateInputSerializer(serializers.Serializer):
         max_digits=18, decimal_places=4, min_value=Decimal("0.0001")
     )
     batch_control = serializers.BooleanField(default=True)
-    lot_no = serializers.CharField(
-        max_length=50, allow_blank=True, required=False, default=""
-    )
+    lot_no = serializers.CharField(max_length=50, allow_blank=True, required=False, default="")
     expiry_control = serializers.BooleanField(default=True)
     expiry_basis = serializers.ChoiceField(
         choices=("MFG", "INBOUND"), required=False, allow_null=True
     )
-    shelf_life_days = serializers.IntegerField(
-        min_value=1, required=False, allow_null=True
-    )
-    inbound_valid_days = serializers.IntegerField(
-        min_value=1, required=False, allow_null=True
-    )
-    expiry_warning_days = serializers.IntegerField(
-        min_value=1, required=False, allow_null=True
-    )
+    shelf_life_days = serializers.IntegerField(min_value=1, required=False, allow_null=True)
+    inbound_valid_days = serializers.IntegerField(min_value=1, required=False, allow_null=True)
+    expiry_warning_days = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     mfg_date = serializers.DateField(required=False, allow_null=True)
     exp_date = serializers.DateField(required=False, allow_null=True)
 
     def validate(self, attrs):
         attrs["lot_no"] = (attrs.get("lot_no") or "").strip().upper()
         if attrs["batch_control"] and not attrs["lot_no"]:
-            raise serializers.ValidationError(
-                {"lot_no": "启用批次管理时必须填写本次批号。"}
-            )
+            raise serializers.ValidationError({"lot_no": "启用批次管理时必须填写本次批号。"})
         if not attrs["batch_control"]:
             attrs["lot_no"] = ""
         if not attrs["expiry_control"]:
@@ -179,14 +166,10 @@ class QuickCreateInputSerializer(serializers.Serializer):
 
         basis = attrs.get("expiry_basis")
         if not basis:
-            raise serializers.ValidationError(
-                {"expiry_basis": "启用效期管理时必须选择效期基准。"}
-            )
+            raise serializers.ValidationError({"expiry_basis": "启用效期管理时必须选择效期基准。"})
         if basis == "MFG":
             if not attrs.get("shelf_life_days"):
-                raise serializers.ValidationError(
-                    {"shelf_life_days": "请输入保质期天数。"}
-                )
+                raise serializers.ValidationError({"shelf_life_days": "请输入保质期天数。"})
             if not attrs.get("mfg_date"):
                 raise serializers.ValidationError({"mfg_date": "请输入本次生产日期。"})
             if not attrs.get("exp_date"):
@@ -195,9 +178,7 @@ class QuickCreateInputSerializer(serializers.Serializer):
             limit = attrs["shelf_life_days"]
         else:
             if not attrs.get("inbound_valid_days"):
-                raise serializers.ValidationError(
-                    {"inbound_valid_days": "请输入入库有效天数。"}
-                )
+                raise serializers.ValidationError({"inbound_valid_days": "请输入入库有效天数。"})
             attrs["shelf_life_days"] = None
             limit = attrs["inbound_valid_days"]
         if (
@@ -205,9 +186,7 @@ class QuickCreateInputSerializer(serializers.Serializer):
             and attrs.get("exp_date")
             and attrs["exp_date"] < attrs["mfg_date"]
         ):
-            raise serializers.ValidationError(
-                {"exp_date": "到期日期不得早于生产日期。"}
-            )
+            raise serializers.ValidationError({"exp_date": "到期日期不得早于生产日期。"})
         warning = attrs.get("expiry_warning_days")
         if warning is not None and warning >= limit:
             raise serializers.ValidationError(
@@ -244,9 +223,7 @@ class Gs1LookupApi(Gs1LookupErrorContractMixin, APIView):
             if local is not None:
                 return _with_lookup_request_id(
                     request,
-                    Response(
-                        {"source": "local", "product": receive_product_card(local)}
-                    ),
+                    Response({"source": "local", "product": receive_product_card(local)}),
                 )
             cache, cache_hit = get_or_fetch_lookup(values["barcode"])
         except ValueError as exc:
@@ -351,9 +328,7 @@ class Gs1OptionsApi(APIView):
         ).select_related("parent", "parent__parent")
         uoms = ProductUom.objects.filter(is_active=True, is_deleted=False)
         if search:
-            categories = categories.filter(
-                Q(code__icontains=search) | Q(name__icontains=search)
-            )
+            categories = categories.filter(Q(code__icontains=search) | Q(name__icontains=search))
             uoms = uoms.filter(Q(code__icontains=search) | Q(name__icontains=search))
         category_data = [
             {"id": row.pk, "code": row.code, "name": row.name, "label": row.full_path}
@@ -395,12 +370,8 @@ class Gs1QuickCreateApi(APIView):
             "product_id": product.pk,
             "quantity": format(values["quantity"], "f"),
             "lot_no": values.get("lot_no") or "",
-            "mfg_date": (
-                values["mfg_date"].isoformat() if values.get("mfg_date") else None
-            ),
-            "exp_date": (
-                values["exp_date"].isoformat() if values.get("exp_date") else None
-            ),
+            "mfg_date": (values["mfg_date"].isoformat() if values.get("mfg_date") else None),
+            "exp_date": (values["exp_date"].isoformat() if values.get("exp_date") else None),
         }
         return Response(
             {

@@ -27,13 +27,12 @@ from .excel_import import (
     resolve_product_import_access,
 )
 from .identifier_excel import (
-    IdentifierExcelError,
     IdentifierExcelConflictError,
+    IdentifierExcelError,
     build_identifier_export,
     build_identifier_template,
     import_identifier_workbook,
 )
-
 
 XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 TEMPLATE_FILENAME = "商品批量导入模板.xlsx"
@@ -44,17 +43,14 @@ def product_template_response(user):
     response = HttpResponse(content, content_type=XLSX_CONTENT_TYPE)
     encoded_filename = quote(TEMPLATE_FILENAME)
     response["Content-Disposition"] = (
-        "attachment; filename=product_import_template.xlsx; "
-        f"filename*=UTF-8''{encoded_filename}"
+        "attachment; filename=product_import_template.xlsx; " f"filename*=UTF-8''{encoded_filename}"
     )
     response["Cache-Control"] = "private, no-store"
     return response
 
 
 def import_product_file(*, uploaded_file, user, request=None, warehouse_id=None):
-    importer = ProductExcelImporter(
-        user=user, request=request, warehouse_id=warehouse_id
-    )
+    importer = ProductExcelImporter(user=user, request=request, warehouse_id=warehouse_id)
     return importer.import_file(uploaded_file)
 
 
@@ -162,8 +158,7 @@ class ProductExportOwnersApi(APIView):
                 "page_size": self.page_size,
                 "next": page + 1 if start + self.page_size < count else None,
                 "results": [
-                    {"id": owner.pk, "code": owner.code, "name": owner.name}
-                    for owner in owners
+                    {"id": owner.pk, "code": owner.code, "name": owner.name} for owner in owners
                 ],
             }
         )
@@ -214,7 +209,11 @@ class ProductIdentifierTemplateApi(APIView):
     def get(self, request):
         resolve_product_import_access(request.user)
         response = HttpResponse(build_identifier_template(), content_type=XLSX_CONTENT_TYPE)
-        response["Content-Disposition"] = "attachment; filename=product_identifier_maintenance.xlsx; filename*=UTF-8''%E5%95%86%E5%93%81%E6%A0%87%E8%AF%86%E7%BB%B4%E6%8A%A4%E6%A8%A1%E6%9D%BF.xlsx"
+        response["Content-Disposition"] = (
+            "attachment; filename=product_identifier_maintenance.xlsx; "
+            "filename*=UTF-8''%E5%95%86%E5%93%81%E6%A0%87%E8%AF%86%E7%BB%B4%E6%8A%A4"
+            "%E6%A8%A1%E6%9D%BF.xlsx"
+        )
         return response
 
 
@@ -239,10 +238,14 @@ class ProductIdentifierImportApi(APIView):
         except (TypeError, ValueError):
             return Response({"detail": "请选择有效货主。"}, status=status.HTTP_400_BAD_REQUEST)
         if not access.allows_owner(owner_id):
-            return Response({"detail": "无权维护该货主的商品标识。"}, status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {"detail": "无权维护该货主的商品标识。"}, status=status.HTTP_403_FORBIDDEN
+            )
         uploaded = request.FILES.get("file")
         if uploaded is None:
-            return Response({"detail": "请上传 Excel 文件，字段名为 file。"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "请上传 Excel 文件，字段名为 file。"}, status=status.HTTP_400_BAD_REQUEST
+            )
         try:
             result = import_identifier_workbook(uploaded, owner=Owner.objects.get(pk=owner_id))
         except IdentifierExcelConflictError as exc:

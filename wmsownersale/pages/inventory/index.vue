@@ -97,6 +97,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { onPullDownRefresh, onReachBottom, onUnload } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
+import { mergeUniqueById } from '@/utils/pagination'
 
 const PAGE_SIZE = 50
 
@@ -125,26 +126,6 @@ function isBusy() {
   return loading.value || loadingMore.value || refreshing.value
 }
 
-function mergeById(current, incoming) {
-  const seen = new Set(
-    current
-      .filter((item) => item?.id !== undefined && item?.id !== null)
-      .map((item) => String(item.id)),
-  )
-  const merged = [...current]
-  incoming.forEach((item) => {
-    if (item?.id === undefined || item?.id === null) {
-      merged.push(item)
-      return
-    }
-    const id = String(item.id)
-    if (seen.has(id)) return
-    seen.add(id)
-    merged.push(item)
-  })
-  return merged
-}
-
 async function loadFirst({ refresh = false } = {}) {
   const generation = ++requestGeneration
   const search = q.value
@@ -167,7 +148,7 @@ async function loadFirst({ refresh = false } = {}) {
     if (!active || generation !== requestGeneration) return
 
     const list = Array.isArray(res?.results) ? res.results : []
-    rows.value = mergeById([], list)
+    rows.value = mergeUniqueById([], list, { replace: false })
     total.value = Number.isFinite(Number(res?.count)) ? Number(res.count) : rows.value.length
     hasNext.value = Boolean(res?.next)
     page.value = 2
@@ -209,7 +190,7 @@ async function loadMore() {
     if (!active || generation !== requestGeneration) return
 
     const list = Array.isArray(res?.results) ? res.results : []
-    rows.value = mergeById(rows.value, list)
+    rows.value = mergeUniqueById(rows.value, list, { replace: false })
     total.value = Number.isFinite(Number(res?.count)) ? Number(res.count) : total.value
     hasNext.value = Boolean(res?.next)
     page.value = requestedPage + 1

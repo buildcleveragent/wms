@@ -31,9 +31,7 @@ def owner_queryset_for_warehouses(warehouse_ids: Iterable[int]):
 def owner_ids_for_warehouses(warehouse_ids: Iterable[int]) -> frozenset[int]:
     """Return IDs from explicit active owner-to-warehouse bindings."""
 
-    return frozenset(
-        owner_queryset_for_warehouses(warehouse_ids).values_list("id", flat=True)
-    )
+    return frozenset(owner_queryset_for_warehouses(warehouse_ids).values_list("id", flat=True))
 
 
 def owner_warehouse_queryset(owner_id):

@@ -23,7 +23,6 @@ from allapp.reports.services_operations import (
 )
 from allapp.tasking.models import WmsTask, WmsTaskLine
 
-
 DASHBOARD_DAYS = 30
 
 
@@ -152,9 +151,9 @@ def orders_timeseries(
 ) -> dict[str, list[Any]]:
     """Return daily order cohorts using biz_date and the authoritative close flag."""
 
-    queryset = scope.filter_queryset(
-        model.objects.filter(biz_date__range=(start, end))
-    ).exclude(approval_status="CANCELLED")
+    queryset = scope.filter_queryset(model.objects.filter(biz_date__range=(start, end))).exclude(
+        approval_status="CANCELLED"
+    )
     rows = (
         queryset.values("biz_date")
         .annotate(
@@ -197,8 +196,7 @@ def backlog_by_status(model, scope: AccessScope) -> dict[str, list[Any]]:
     return {
         "statuses": [row["approval_status"] for row in rows],
         "labels": [
-            status_labels.get(row["approval_status"], row["approval_status"])
-            for row in rows
+            status_labels.get(row["approval_status"], row["approval_status"]) for row in rows
         ],
         "values": [int(row["count"]) for row in rows],
     }
@@ -229,8 +227,7 @@ def efficiency_ranking(
     )
     return {
         "labels": [
-            row["finished_by__username"] or f"用户 #{row['finished_by_id']}"
-            for row in rows
+            row["finished_by__username"] or f"用户 #{row['finished_by_id']}" for row in rows
         ],
         "values": [int(row["count"]) for row in rows],
         "unit": "完成任务行数",

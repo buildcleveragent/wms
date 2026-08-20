@@ -37,7 +37,7 @@
     <view v-if="loading" class="loading-banner">正在同步预警中心...</view>
     <BossDataStatus :meta="payload?.meta" :error="dataError" :stale="stale" />
 
-    <template v-else>
+    <template v-if="!loading">
       <view class="summary-grid">
         <view class="summary-card danger">
           <view class="summary-label">高风险</view>

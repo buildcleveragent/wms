@@ -1,61 +1,60 @@
 # allapp/tasking/models.py
 import logging
-
-from django.template.context_processors import request
-
-from allapp.core.utils.log_context import build_log_payload
-from allapp.tasking.utils import get_task_status_via_line
-from django.db.models import F, Q, ExpressionWrapper, DecimalField
-from django.contrib.contenttypes.models import ContentType
 from datetime import datetime
-from allapp.core.models import BaseModel, TimeStampedMixin, UserStampedMixin, DocSequence
-from allapp.core.choices import ZoneType
-from django.utils import timezone
-from django.db.models import Q, F, Case, When, Value, IntegerField, ExpressionWrapper
-from django.contrib.contenttypes.fields import GenericForeignKey
-from django.db import models, transaction
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
+
 from django.conf import settings
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
+from django.db import models, transaction
+from django.db.models import Case, DecimalField, ExpressionWrapper, F, IntegerField, Q, Value, When
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from allapp.inventory.models import PostingJournal
+
+from allapp.core.choices import ZoneType
+from allapp.core.models import BaseModel, DocSequence, TimeStampedMixin
+from allapp.core.utils.log_context import build_log_payload
 from allapp.products.models import ProductUom
+from allapp.tasking.utils import get_task_status_via_line
 
 DEC_QTY = dict(max_digits=18, decimal_places=4)
 logger = logging.getLogger(__name__)
 
+
 def _norm(s):
     return (s or "").strip().upper() or None
+
 
 class WmsTask(BaseModel):
     """任务头（统一承载：类型/状态/优先级/计划时间/来源快照/组号等）"""
 
     class TaskType(models.TextChoices):
-        RECEIVE   = "RECEIVE",   "收货"
-        PUTAWAY   = "PUTAWAY",   "上架"
-        PICK      = "PICK",      "拣货"
-        REVIEW    = "REVIEW",    "复核"
-        PACK      = "PACK",      "打包"
-        LOAD      = "LOAD",      "装车"
-        DISPATCH  = "DISPATCH",  "发运"
-        REPLEN    = "REPLEN",    "补货"
-        RELOC     = "RELOC",     "移位"
-        COUNT     = "COUNT",     "盘点"
-        OTHER     = "OTHER",     "其他"
-        ADJUST    = "ADJUST",    "调整"
+        RECEIVE = "RECEIVE", "收货"
+        PUTAWAY = "PUTAWAY", "上架"
+        PICK = "PICK", "拣货"
+        REVIEW = "REVIEW", "复核"
+        PACK = "PACK", "打包"
+        LOAD = "LOAD", "装车"
+        DISPATCH = "DISPATCH", "发运"
+        REPLEN = "REPLEN", "补货"
+        RELOC = "RELOC", "移位"
+        COUNT = "COUNT", "盘点"
+        OTHER = "OTHER", "其他"
+        ADJUST = "ADJUST", "调整"
 
     class Status(models.TextChoices):
-        RESERVED    = "RESERVED",    "冻结预订"
-        DRAFT       = "DRAFT",       "草稿"
-        READY       = "READY",       "待发布"
-        RELEASED    = "RELEASED",    "已发布"
+        RESERVED = "RESERVED", "冻结预订"
+        DRAFT = "DRAFT", "草稿"
+        READY = "READY", "待发布"
+        RELEASED = "RELEASED", "已发布"
         IN_PROGRESS = "IN_PROGRESS", "执行中"
-        COMPLETED   = "COMPLETED",   "已完成"
-        CANCELLED   = "CANCELLED",   "已取消"
+        COMPLETED = "COMPLETED", "已完成"
+        CANCELLED = "CANCELLED", "已取消"
 
     class Priority(models.IntegerChoices):
-        LOW  = 1, "低"
-        MED  = 2, "中"
+        LOW = 1, "低"
+        MED = 2, "中"
         HIGH = 3, "高"
 
     class ReviewStatus(models.TextChoices):
@@ -75,35 +74,84 @@ class WmsTask(BaseModel):
         NEED_RECOUNT = "NEED_RECOUNT", "需复盘"
 
     # 审核
-    review_status = models.CharField(verbose_name=_("审核状态"),max_length=50,  choices=ReviewStatus.choices,default=ReviewStatus.NOT_READY, db_index=True)
-    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name=_("审核人"), null=True, blank=True,on_delete=models.SET_NULL, related_name="tasks_approved")
+    review_status = models.CharField(
+        verbose_name=_("审核状态"),
+        max_length=50,
+        choices=ReviewStatus.choices,
+        default=ReviewStatus.NOT_READY,
+        db_index=True,
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("审核人"),
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="tasks_approved",
+    )
     approved_at = models.DateTimeField(verbose_name=_("审核时间"), null=True, blank=True)
-    approval_note = models.CharField(verbose_name=_("审核备注"),max_length=200,  blank=True, default="")
+    approval_note = models.CharField(
+        verbose_name=_("审核备注"), max_length=200, blank=True, default=""
+    )
 
-    picked_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name=_("拣货人"), null=True, blank=True,
-                                    on_delete=models.SET_NULL, related_name="tasks_picked_by")
+    picked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("拣货人"),
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="tasks_picked_by",
+    )
 
     # 过账
-    posting_status = models.CharField(verbose_name=_("过账状态"),max_length=50, choices=PostingStatus.choices,default=PostingStatus.NOT_READY, db_index=True)
-    posted_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name=_("过账经手人"),null=True, blank=True,on_delete=models.SET_NULL, related_name="tasks_posted")
-    posted_at = models.DateTimeField(verbose_name=_("过账时间"),null=True, blank=True)
-    posting_note = models.CharField(verbose_name=_("过账备注"),max_length=200, blank=True, null=True,default="")
+    posting_status = models.CharField(
+        verbose_name=_("过账状态"),
+        max_length=50,
+        choices=PostingStatus.choices,
+        default=PostingStatus.NOT_READY,
+        db_index=True,
+    )
+    posted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("过账经手人"),
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="tasks_posted",
+    )
+    posted_at = models.DateTimeField(verbose_name=_("过账时间"), null=True, blank=True)
+    posting_note = models.CharField(
+        verbose_name=_("过账备注"), max_length=200, blank=True, null=True, default=""
+    )
 
-    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT,related_name="tasks", verbose_name=_("货主"))
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT,related_name="tasks", verbose_name=_("仓库"))
+    owner = models.ForeignKey(
+        "baseinfo.Owner", on_delete=models.PROTECT, related_name="tasks", verbose_name=_("货主")
+    )
+    warehouse = models.ForeignKey(
+        "locations.Warehouse",
+        on_delete=models.PROTECT,
+        related_name="tasks",
+        verbose_name=_("仓库"),
+    )
 
-    task_group_no = models.CharField(_("计划组号"), max_length=40, blank=True, default="", db_index=True)
+    task_group_no = models.CharField(
+        _("计划组号"), max_length=40, blank=True, default="", db_index=True
+    )
     released_at = models.DateTimeField(_("发布时间"), null=True, blank=True)
 
     task_no = models.CharField(_("任务号"), max_length=100, unique=True)
     task_type = models.CharField(_("任务类型"), max_length=12, choices=TaskType.choices)
-    status = models.CharField(_("任务状态"), max_length=16, choices=Status.choices,db_index=True, default=Status.DRAFT)
-    priority = models.PositiveSmallIntegerField(_("优先级"), choices=Priority.choices, default=Priority.MED)
+    status = models.CharField(
+        _("任务状态"), max_length=16, choices=Status.choices, db_index=True, default=Status.DRAFT
+    )
+    priority = models.PositiveSmallIntegerField(
+        _("优先级"), choices=Priority.choices, default=Priority.MED
+    )
 
     planned_start = models.DateTimeField(_("计划开始时间"), null=True, blank=True)
-    planned_end   = models.DateTimeField(_("计划结束时间"), null=True, blank=True)
-    started_at    = models.DateTimeField(_("实际开始时间"), null=True, blank=True)
-    finished_at   = models.DateTimeField(_("实际完成时间"), null=True, blank=True)
+    planned_end = models.DateTimeField(_("计划结束时间"), null=True, blank=True)
+    started_at = models.DateTimeField(_("实际开始时间"), null=True, blank=True)
+    finished_at = models.DateTimeField(_("实际完成时间"), null=True, blank=True)
 
     ref_no = models.CharField(_("来源单号"), max_length=60, blank=True, default="")
     source_app = models.CharField(_("来源应用"), max_length=40, blank=True, default="")
@@ -117,52 +165,85 @@ class WmsTask(BaseModel):
         verbose_name_plural = "任务"
         ordering = ["-created_at", "-id"]
         permissions = [
-            ("taskconfirm_as_wh_manager",  _("仓管任务发布权")),
+            ("taskconfirm_as_wh_manager", _("仓管任务发布权")),
             ("claim_task_as_wh_operator", "仓库操作权"),
         ]
         constraints = [
             # 计划时间先后
             models.CheckConstraint(
-                check=Q(planned_end__isnull=True) | Q(planned_start__isnull=True) | Q(planned_end__gte=F("planned_start")),
+                condition=Q(planned_end__isnull=True)
+                | Q(planned_start__isnull=True)
+                | Q(planned_end__gte=F("planned_start")),
                 name="chk_task_plan_ok",
             ),
             # 实际时间先后（可选）
             models.CheckConstraint(
-                check=Q(finished_at__isnull=True) | Q(started_at__isnull=True) | Q(finished_at__gte=F("started_at")),
+                condition=Q(finished_at__isnull=True)
+                | Q(started_at__isnull=True)
+                | Q(finished_at__gte=F("started_at")),
                 name="chk_task_actual_ok",
             ),
             # 发布时间与状态一致性（避免 Meta 里引用 Status 枚举，直接用字符串）
             models.CheckConstraint(
-                check=Q(released_at__isnull=True) |
-                      Q(status__in=["RELEASED", "IN_PROGRESS", "COMPLETED", "CANCELLED"]),
+                condition=Q(released_at__isnull=True)
+                | Q(status__in=["RELEASED", "IN_PROGRESS", "COMPLETED", "CANCELLED"]),
                 name="chk_task_release_status_ok",
             ),
             models.CheckConstraint(
                 name="ck_task_type_valid",
-                check=Q(
-                    task_type__in=["RECEIVE", "PUTAWAY", "PICK", "REVIEW","PACK", "LOAD", "DISPATCH", "REPLEN", "RELOC", "COUNT",
-                                   "OTHER","ADJUST"]),
+                condition=Q(
+                    task_type__in=[
+                        "RECEIVE",
+                        "PUTAWAY",
+                        "PICK",
+                        "REVIEW",
+                        "PACK",
+                        "LOAD",
+                        "DISPATCH",
+                        "REPLEN",
+                        "RELOC",
+                        "COUNT",
+                        "OTHER",
+                        "ADJUST",
+                    ]
+                ),
             ),
             models.CheckConstraint(
                 name="ck_task_status_valid",
-                check=Q(status__in=["RESERVED","DRAFT", "READY", "RELEASED", "IN_PROGRESS", "COMPLETED", "CANCELLED"]),
+                condition=Q(
+                    status__in=[
+                        "RESERVED",
+                        "DRAFT",
+                        "READY",
+                        "RELEASED",
+                        "IN_PROGRESS",
+                        "COMPLETED",
+                        "CANCELLED",
+                    ]
+                ),
             ),
             # 只有 COMPLETED 才允许 APPROVED/REJECTED/POSTED
             models.CheckConstraint(
                 name="ck_task_review_after_completed",
-                check=(
-                        (~Q(status="COMPLETED") & Q(review_status__in=["NONE", "NOT_READY"]))
-                        |
-                        (Q(status="COMPLETED") & Q(review_status__in=["PENDING", "APPROVED", "REJECTED","NEED_RECOUNT"]))
+                condition=(
+                    (~Q(status="COMPLETED") & Q(review_status__in=["NONE", "NOT_READY"]))
+                    | (
+                        Q(status="COMPLETED")
+                        & Q(review_status__in=["PENDING", "APPROVED", "REJECTED", "NEED_RECOUNT"])
+                    )
                 ),
-                            ),
-
+            ),
             models.CheckConstraint(
                 name="ck_task_posting_after_approved",
-                check=(
-                        (~Q(review_status="APPROVED") & Q(posting_status__in=["NONE", "NOT_READY","NEED_RECOUNT"]))
-                        |
-                        (Q(review_status="APPROVED") & Q(posting_status__in=["PENDING", "POSTED", "FAILED"]))
+                condition=(
+                    (
+                        ~Q(review_status="APPROVED")
+                        & Q(posting_status__in=["NONE", "NOT_READY", "NEED_RECOUNT"])
+                    )
+                    | (
+                        Q(review_status="APPROVED")
+                        & Q(posting_status__in=["PENDING", "POSTED", "FAILED"])
+                    )
                 ),
             ),
         ]
@@ -176,7 +257,9 @@ class WmsTask(BaseModel):
                 fields=["task_type", "status", "warehouse", "finished_at", "id"],
                 name="ix_task_tt_st_wh_fin",
             ),
-            models.Index(fields=["owner", "warehouse", "task_type", "status"], name="ix_task_wh_tt_st"),
+            models.Index(
+                fields=["owner", "warehouse", "task_type", "status"], name="ix_task_wh_tt_st"
+            ),
             models.Index(fields=["owner", "warehouse", "status"], name="idx_task_wh_st"),
             models.Index(fields=["task_type", "status"], name="idx_task_tt_st"),
             models.Index(fields=["task_group_no", "status"], name="ix_task_grp_st"),
@@ -185,7 +268,10 @@ class WmsTask(BaseModel):
                 name="ix_task_wh_type_src",
             ),
             # 如果确实需要结合 id 的覆盖/排序再加下面这一条；否则可以去掉
-            # models.Index(fields=["owner", "warehouse", "task_type", "status", "id"], name="ix_tsk_wh_tt_st_id"),
+            # models.Index(
+            #     fields=["owner", "warehouse", "task_type", "status", "id"],
+            #     name="ix_tsk_wh_tt_st_id",
+            # ),
         ]
 
     def __str__(self):
@@ -228,70 +314,164 @@ class WmsTask(BaseModel):
         self.status = self.Status.RELEASED
         if hasattr(self, "released_at"):
             self.released_at = timezone.now()
-        self.save(update_fields=["status"] + (["released_at"] if hasattr(self, "released_at") else []))
+        self.save(
+            update_fields=["status"] + (["released_at"] if hasattr(self, "released_at") else [])
+        )
 
         # 可选：写状态日志（没有该表就忽略）
         try:
-             TaskStatusLog.objects.create(task=self, old_status=old, new_status=self.status, changed_by=by_user)
+            TaskStatusLog.objects.create(
+                task=self, old_status=old, new_status=self.status, changed_by=by_user
+            )
         except Exception:
             pass
 
         return self
 
+
 class WmsTaskLine(BaseModel):
     """任务行（明细）——承载商品、库位、数量与来源信息"""
+
     class Status(models.TextChoices):
-        RESERVED    = "RESERVED", "冻结预订"
-        DRAFT       = "DRAFT",       "草稿"
-        READY       = "READY",       "待发布"
-        RELEASED    = "RELEASED",    "已发布"
+        RESERVED = "RESERVED", "冻结预订"
+        DRAFT = "DRAFT", "草稿"
+        READY = "READY", "待发布"
+        RELEASED = "RELEASED", "已发布"
         IN_PROGRESS = "IN_PROGRESS", "执行中"
-        COMPLETED   = "COMPLETED",   "已完成"
-        CANCELLED   = "CANCELLED",   "已取消"
+        COMPLETED = "COMPLETED", "已完成"
+        CANCELLED = "CANCELLED", "已取消"
 
-    task = models.ForeignKey("tasking.WmsTask", on_delete=models.PROTECT, related_name="lines", verbose_name=_("任务"),)
-    product = models.ForeignKey("products.Product",on_delete=models.PROTECT,null=True, blank=True,verbose_name=_("商品"), )
+    task = models.ForeignKey(
+        "tasking.WmsTask",
+        on_delete=models.PROTECT,
+        related_name="lines",
+        verbose_name=_("任务"),
+    )
+    product = models.ForeignKey(
+        "products.Product",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        verbose_name=_("商品"),
+    )
 
-    from_location = models.ForeignKey("locations.Location",on_delete=models.PROTECT,null=True,blank=True,related_name="from_lines",verbose_name=_("来源库位"),)
-    to_location = models.ForeignKey("locations.Location",on_delete=models.PROTECT, null=True,blank=True,related_name="to_lines",verbose_name=_("去向库位"), )
+    from_location = models.ForeignKey(
+        "locations.Location",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="from_lines",
+        verbose_name=_("来源库位"),
+    )
+    to_location = models.ForeignKey(
+        "locations.Location",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="to_lines",
+        verbose_name=_("去向库位"),
+    )
 
-    qty_plan = models.DecimalField(_("计划数量"),max_digits=18,decimal_places=3,default=0,)
-    qty_done = models.DecimalField(_("已执行数量"),max_digits=18, decimal_places=3,default=0,)
-    status = models.CharField(_("状态"), max_length=16, choices=Status.choices, db_index=True, default=Status.DRAFT)
+    qty_plan = models.DecimalField(
+        _("计划数量"),
+        max_digits=18,
+        decimal_places=3,
+        default=0,
+    )
+    qty_done = models.DecimalField(
+        _("已执行数量"),
+        max_digits=18,
+        decimal_places=3,
+        default=0,
+    )
+    status = models.CharField(
+        _("状态"), max_length=16, choices=Status.choices, db_index=True, default=Status.DRAFT
+    )
     # 或者不用枚举，也可用时间戳表达完成：
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
-    finished_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    finished_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL
+    )
 
-    remark = models.CharField(_("备注"),max_length=200, blank=True,  default="",    )
+    remark = models.CharField(
+        _("备注"),
+        max_length=200,
+        blank=True,
+        default="",
+    )
 
     # 业务来源（可选；与 bound_* 语义区分开）
-    src_model = models.CharField(_("来源模型"), max_length=40, blank=True,default="",help_text=_("记录来源单据的模型名称（如 inbound.InboundOrderLine ）"), )
-    src_id = models.BigIntegerField(_("来源ID"), null=True, blank=True, help_text=_("记录来源单据行或记录的主键ID"), )
+    src_model = models.CharField(
+        _("来源模型"),
+        max_length=40,
+        blank=True,
+        default="",
+        help_text=_("记录来源单据的模型名称（如 inbound.InboundOrderLine ）"),
+    )
+    src_id = models.BigIntegerField(
+        _("来源ID"),
+        null=True,
+        blank=True,
+        help_text=_("记录来源单据行或记录的主键ID"),
+    )
 
-    rule_key = models.CharField(_("规则键"),max_length=50,blank=True, default="", help_text=_("用于记录分配/策略命中的规则标识"), )
-    plan_meta = models.JSONField(_("计划元数据"),default=dict, blank=True, help_text=_("用于保存与计划相关的额外字段（JSON）"), )
+    rule_key = models.CharField(
+        _("规则键"),
+        max_length=50,
+        blank=True,
+        default="",
+        help_text=_("用于记录分配/策略命中的规则标识"),
+    )
+    plan_meta = models.JSONField(
+        _("计划元数据"),
+        default=dict,
+        blank=True,
+        help_text=_("用于保存与计划相关的额外字段（JSON）"),
+    )
 
     # 绑定执行对象（如容器/托盘/拣货箱等）
-    bound_content_type = models.ForeignKey(ContentType,on_delete=models.PROTECT,null=True,blank=True,verbose_name=_("绑定对象类型"), )
-    bound_object_id = models.BigIntegerField(_("绑定对象ID"),null=True,blank=True,)
+    bound_content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        verbose_name=_("绑定对象类型"),
+    )
+    bound_object_id = models.BigIntegerField(
+        _("绑定对象ID"),
+        null=True,
+        blank=True,
+    )
     bound_object = GenericForeignKey("bound_content_type", "bound_object_id")
 
-    scan_snapshot_rev = models.IntegerField("收货快照版本",db_index=True,default=0,
-        help_text="该任务行的收货事实快照版本号；每次保存重建快照时自增，用于生成/区分 TaskScanLog。")
+    scan_snapshot_rev = models.IntegerField(
+        "收货快照版本",
+        db_index=True,
+        default=0,
+        help_text="该任务行的收货事实快照版本号；每次保存重建快照时自增，用于生成/区分 TaskScanLog。",
+    )
 
     class Meta:
         verbose_name = _("任务行")
         verbose_name_plural = _("任务行")
         constraints = [
-            models.CheckConstraint(check=Q(qty_plan__gte=0) & Q(qty_done__gte=0),name="ck_tl_qty_ge0",  ),
-            models.CheckConstraint(name="ck_tline_snaprev_nonneg", check=Q(scan_snapshot_rev__gte=0), ),
+            models.CheckConstraint(
+                condition=Q(qty_plan__gte=0) & Q(qty_done__gte=0),
+                name="ck_tl_qty_ge0",
+            ),
+            models.CheckConstraint(
+                name="ck_tline_snaprev_nonneg",
+                condition=Q(scan_snapshot_rev__gte=0),
+            ),
         ]
         indexes = [
             models.Index(fields=["task", "product"], name="ix_tl_task_prod"),
             models.Index(fields=["from_location"], name="ix_tl_from_loc"),
             models.Index(fields=["to_location"], name="ix_tl_to_loc"),
-            models.Index(fields=["bound_content_type", "bound_object_id"], name="ix_tl_bound_ct_oid"),
+            models.Index(
+                fields=["bound_content_type", "bound_object_id"], name="ix_tl_bound_ct_oid"
+            ),
             models.Index(fields=["src_model", "src_id"], name="ix_tl_src_model_id"),
             # models.Index(fields=["scan_snapshot_rev"], name="idx_tline_snaprev"),
         ]
@@ -302,7 +482,10 @@ class WmsTaskLine(BaseModel):
     @property
     def is_finished(self):
         # return bool(self.finished_at) or self.status == self.Status.DONE
-        return bool(self.finished_at) or self.status in (self.Status.COMPLETED, self.Status.CANCELLED)
+        return bool(self.finished_at) or self.status in (
+            self.Status.COMPLETED,
+            self.Status.CANCELLED,
+        )
 
     @property
     def qty_pending(self):
@@ -311,13 +494,23 @@ class WmsTaskLine(BaseModel):
     def clean(self):
         errs = {}
 
+        if self.task_id and self.product_id:
+            task_owner_id = getattr(self.task, "owner_id", None)
+            product_owner_id = getattr(self.product, "owner_id", None)
+            if task_owner_id and product_owner_id and task_owner_id != product_owner_id:
+                errs["product"] = _("商品货主必须与任务货主一致。")
+
         wh_id = getattr(self.task, "warehouse_id", None)
         for loc in (self.from_location, self.to_location):
             if loc and wh_id and loc.warehouse_id != wh_id:
                 raise ValidationError({"__all__": _("任务行库位必须与任务仓库一致")})
 
         # 1) 基本数量逻辑（如不允许超量，打开下面一行）
-        # if self.qty_plan is not None and self.qty_done is not None and self.qty_done > self.qty_plan:
+        # if (
+        #     self.qty_plan is not None
+        #     and self.qty_done is not None
+        #     and self.qty_done > self.qty_plan
+        # ):
         #     errs["qty_done"] = _("已执行数量不可超过计划数量。")
 
         # 2) 仓库一致性（跨表校验）
@@ -351,12 +544,38 @@ class WmsTaskLine(BaseModel):
         if errs:
             raise ValidationError(errs)
 
+    def save(self, *args, **kwargs):
+        if self.task_id and self.product_id:
+            task_owner_id = getattr(self.task, "owner_id", None)
+            product_owner_id = getattr(self.product, "owner_id", None)
+            if task_owner_id and product_owner_id and task_owner_id != product_owner_id:
+                raise ValidationError({"product": _("商品货主必须与任务货主一致。")})
+        return super().save(*args, **kwargs)
+
+
 class TaskAssignment(TimeStampedMixin):
     """任务领用/指派（同一任务与同一人唯一）"""
 
-    task = models.ForeignKey("tasking.WmsTask",on_delete=models.PROTECT, related_name="assignments", verbose_name=_("任务"), )
-    line = models.ForeignKey("tasking.WmsTaskLine", null=True, blank=True, on_delete=models.PROTECT, related_name="assignments", verbose_name=_("任务明细"),)
-    assignee = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT,related_name="task_assignments",verbose_name=_("作业员"),)
+    task = models.ForeignKey(
+        "tasking.WmsTask",
+        on_delete=models.PROTECT,
+        related_name="assignments",
+        verbose_name=_("任务"),
+    )
+    line = models.ForeignKey(
+        "tasking.WmsTaskLine",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="assignments",
+        verbose_name=_("任务明细"),
+    )
+    assignee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="task_assignments",
+        verbose_name=_("作业员"),
+    )
 
     accepted_at = models.DateTimeField(_("领取时间"), null=True, blank=True)
     finished_at = models.DateTimeField(_("完成时间"), null=True, blank=True)
@@ -365,31 +584,33 @@ class TaskAssignment(TimeStampedMixin):
         # 保障“行属于任务”
         if self.line_id and self.line.task_id != self.task_id:
             from django.core.exceptions import ValidationError
+
             raise ValidationError({"line": "所选行不属于当前任务。"})
 
     class Meta:
         verbose_name = "任务指派"
         verbose_name_plural = "任务指派"
         constraints = [
-            # 同一 task/assignee/line 唯一（历史可多条，活动状态靠 finished_at 控制）,但不支持1人认领多次
-            # models.UniqueConstraint(fields=["task", "assignee", "line"], name="ux_assign_task_user_line"),
+            # 同一 task/assignee/line 唯一；历史可多条，活动状态由 finished_at 控制。
+            # models.UniqueConstraint(
+            #     fields=["task", "assignee", "line"], name="ux_assign_task_user_line"
+            # ),
             # 时间一致性
             models.CheckConstraint(
                 name="ck_assign_time_flow",
-                check=Q(finished_at__isnull=True) |
-                      (Q(accepted_at__isnull=False) & Q(finished_at__gte=F("accepted_at"))),
+                condition=Q(finished_at__isnull=True)
+                | (Q(accepted_at__isnull=False) & Q(finished_at__gte=F("accepted_at"))),
             ),
         ]
         indexes = [
             # 行 → 活动指派（抢单/认领、放回都命中）
             models.Index(fields=["line", "finished_at"], name="idx_assign_line_active"),
-
             # 任务头 → 活动头级指派（判断是否允许抢单头、发布为抢单等）
-            models.Index(fields=["task", "finished_at", "line"], name="idx_assign_task_head_active"),
-
+            models.Index(
+                fields=["task", "finished_at", "line"], name="idx_assign_task_head_active"
+            ),
             # 人 → 活动指派（“我的任务/行”视图）
             models.Index(fields=["assignee", "finished_at"], name="idx_assign_user_active"),
-
             # 报表/排序常用（谁先领，用于时间排序）
             models.Index(fields=["assignee", "accepted_at"], name="idx_assign_user_accept"),
         ]
@@ -397,6 +618,7 @@ class TaskAssignment(TimeStampedMixin):
 
     def __str__(self):
         return f"{getattr(self.task, 'task_no', self.task_id)} -> {self.assignee_id}"
+
 
 class TaskStatusLog(models.Model):
     """任务状态变更审计"""
@@ -417,7 +639,8 @@ class TaskStatusLog(models.Model):
     changed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
-        null=True, blank=True,
+        null=True,
+        blank=True,
         verbose_name=_("变更人"),
         related_name="task_status_changes",
     )
@@ -430,19 +653,19 @@ class TaskStatusLog(models.Model):
         ordering = ["-changed_at", "-id"]
         indexes = [
             models.Index(fields=["task", "changed_at"], name="idx_tlog_task_time"),
-            models.Index(fields=["task", "new_status"], name="idx_tlog_task_newst"),   # 常见过滤
-            models.Index(fields=["changed_by"], name="idx_tlog_by"),                    # 按人查（可选）
+            models.Index(fields=["task", "new_status"], name="idx_tlog_task_newst"),  # 常见过滤
+            models.Index(fields=["changed_by"], name="idx_tlog_by"),  # 按人查（可选）
         ]
         constraints = [
             # 旧状态 != 新状态
             models.CheckConstraint(
                 name="ck_tlog_old_ne_new",
-                check=~Q(old_status=models.F("new_status")),
+                condition=~Q(old_status=models.F("new_status")),
             ),
             # 兜底：两边都必须是合法取值（与 choices 保持一致，使用字面量避免内嵌类作用域问题）
             models.CheckConstraint(
                 name="ck_tlog_old_in_set",
-                check=Q(
+                condition=Q(
                     old_status__in=[
                         "RESERVED",
                         "DRAFT",
@@ -456,7 +679,7 @@ class TaskStatusLog(models.Model):
             ),
             models.CheckConstraint(
                 name="ck_tlog_new_in_set",
-                check=Q(
+                condition=Q(
                     new_status__in=[
                         "RESERVED",
                         "DRAFT",
@@ -471,10 +694,14 @@ class TaskStatusLog(models.Model):
         ]
 
     def __str__(self):
-        return f"{getattr(self.task, 'task_no', self.task_id)}: {self.old_status} -> {self.new_status}"
+        return (
+            f"{getattr(self.task, 'task_no', self.task_id)}: {self.old_status} -> {self.new_status}"
+        )
+
 
 class TaskScanLog(TimeStampedMixin):
     """任务扫描/WIP事实记录（幂等、可回放、可复核；过账成功时据此落账）"""
+
     # —— 扫描结果态 —— #
     class ScanStatus(models.TextChoices):
         OK = "OK", "成功"
@@ -484,23 +711,43 @@ class TaskScanLog(TimeStampedMixin):
 
     # —— 录入来源与操作者 —— #
     class Method(models.TextChoices):
-        SCAN   = "SCAN",   "扫码"
+        SCAN = "SCAN", "扫码"
         MANUAL = "MANUAL", "手工"
-        API    = "API",    "系统导入"
-        WEB    = "WEB",    "网页"
+        API = "API", "系统导入"
+        WEB = "WEB", "网页"
 
         # —— 复核流程 —— #
+
     class ReviewStatus(models.TextChoices):
         NONE = "NONE", "不需复核"
         PENDING = "PENDING", "待复核"
         APPROVED = "APPROVED", "已通过"
         REJECTED = "REJECTED", "已驳回"
+
     # —— 归属 —— #
-    owner     = models.ForeignKey("baseinfo.Owner",on_delete=models.PROTECT,verbose_name="货主",db_index=True)
-    warehouse = models.ForeignKey("locations.Warehouse",on_delete=models.PROTECT,verbose_name="仓库",db_index=True)
-    task = models.ForeignKey("tasking.WmsTask", verbose_name=_("任务"),on_delete=models.PROTECT, related_name="scan_logs")
-    task_line = models.ForeignKey("tasking.WmsTaskLine", verbose_name=_("任务行"),on_delete=models.PROTECT, null=True, blank=True, related_name="scan_logs")
-    product = models.ForeignKey("products.Product", verbose_name=_("商品"),on_delete=models.PROTECT, null=True, blank=True)  # ✅ 允许未知SKU
+    owner = models.ForeignKey(
+        "baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主", db_index=True
+    )
+    warehouse = models.ForeignKey(
+        "locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库", db_index=True
+    )
+    task = models.ForeignKey(
+        "tasking.WmsTask",
+        verbose_name=_("任务"),
+        on_delete=models.PROTECT,
+        related_name="scan_logs",
+    )
+    task_line = models.ForeignKey(
+        "tasking.WmsTaskLine",
+        verbose_name=_("任务行"),
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="scan_logs",
+    )
+    product = models.ForeignKey(
+        "products.Product", verbose_name=_("商品"), on_delete=models.PROTECT, null=True, blank=True
+    )  # ✅ 允许未知SKU
     product_package = models.ForeignKey(
         "products.ProductPackage",
         verbose_name=_("解析包装层级"),
@@ -508,57 +755,113 @@ class TaskScanLog(TimeStampedMixin):
         null=True,
         blank=True,
     )
-    location = models.ForeignKey("locations.Location", verbose_name=_("库位"),on_delete=models.PROTECT, null=True, blank=True)
+    location = models.ForeignKey(
+        "locations.Location",
+        verbose_name=_("库位"),
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
 
     # —— 扫码/标签 —— #
-    barcode   = models.CharField(_("条码"), max_length=128, blank=True, null=True, db_index=True)
+    barcode = models.CharField(_("条码"), max_length=128, blank=True, null=True, db_index=True)
     label_key = models.CharField(_("箱标/序列唯一键"), max_length=64, blank=True, null=True)
 
-    method = models.CharField(_("录入方式"), max_length=10, choices=Method.choices,default=Method.SCAN, db_index=True)
-    source = models.CharField(_("来源终端"), max_length=10,choices=[("PDA", "PDA"), ("PC", "PC"), ("WEB", "WEB"), ("API", "API")],default="PDA")
-    by_user = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name=_("操作人"),on_delete=models.SET_NULL, null=True, blank=True, related_name="task_scan_ops")
+    method = models.CharField(
+        _("录入方式"), max_length=10, choices=Method.choices, default=Method.SCAN, db_index=True
+    )
+    source = models.CharField(
+        _("来源终端"),
+        max_length=10,
+        choices=[("PDA", "PDA"), ("PC", "PC"), ("WEB", "WEB"), ("API", "API")],
+        default="PDA",
+    )
+    by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("操作人"),
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="task_scan_ops",
+    )
     device_id = models.CharField(_("设备ID"), max_length=64, blank=True, null=True)
     client_ts = models.DateTimeField(_("端上时间"), null=True, blank=True)
 
-
     # —— 解析快照 —— #
-    code_type = models.CharField(_("码类型"), max_length=16, blank=True, null=True)   # UNIT/LPN/SSCC/GTIN...
-    uom_code  = models.CharField(_("解析单位"), max_length=20, blank=True, null=True) # EA/CS/LPN...
-    uom_name  = models.CharField(_("解析单位名称"), max_length=50, blank=True, null=True)
-    pack_qty  = models.DecimalField(_("换算(包→基本)"), max_digits=14, decimal_places=6, null=True, blank=True)
+    code_type = models.CharField(
+        _("码类型"), max_length=16, blank=True, null=True
+    )  # UNIT/LPN/SSCC/GTIN...
+    uom_code = models.CharField(_("解析单位"), max_length=20, blank=True, null=True)  # EA/CS/LPN...
+    uom_name = models.CharField(_("解析单位名称"), max_length=50, blank=True, null=True)
+    pack_qty = models.DecimalField(
+        _("换算(包→基本)"), max_digits=14, decimal_places=6, null=True, blank=True
+    )
     matched_fields = models.JSONField(_("命中标识字段"), default=list, blank=True)
 
     # —— 数量（基本单位） —— #
-    qty_aux        = models.DecimalField(_("包数(+/-)"), max_digits=18, decimal_places=3, null=True, blank=True)
-    qty_base       = models.DecimalField(_("本次基本单位数(+/-)"), max_digits=18, decimal_places=6, null=True, blank=True)
-    qty_base_delta = models.DecimalField(_("本次增量(基本单位)"), max_digits=18, decimal_places=6, null=True, blank=True)
+    qty_aux = models.DecimalField(
+        _("包数(+/-)"), max_digits=18, decimal_places=3, null=True, blank=True
+    )
+    qty_base = models.DecimalField(
+        _("本次基本单位数(+/-)"), max_digits=18, decimal_places=6, null=True, blank=True
+    )
+    qty_base_delta = models.DecimalField(
+        _("本次增量(基本单位)"), max_digits=18, decimal_places=6, null=True, blank=True
+    )
 
     # —— 批次/日期/容器 —— #
-    lot_no       = models.CharField(_("批号"), max_length=60, blank=True, null=True)
-    mfg_date     = models.DateField(_("生产日期"), blank=True, null=True)
-    exp_date     = models.DateField(_("有效期至"), blank=True, null=True)
-    serial_no    = models.CharField(_("序列号"), max_length=80, blank=True, null=True)
+    lot_no = models.CharField(_("批号"), max_length=60, blank=True, null=True)
+    mfg_date = models.DateField(_("生产日期"), blank=True, null=True)
+    exp_date = models.DateField(_("有效期至"), blank=True, null=True)
+    serial_no = models.CharField(_("序列号"), max_length=80, blank=True, null=True)
     container_no = models.CharField(_("容器/托盘号"), max_length=60, blank=True, null=True)
 
-    status = models.CharField(_("结果"), max_length=8, choices=ScanStatus.choices, default=ScanStatus.OK, db_index=True)
-    void_reason=models.CharField(_("作废原因"), max_length=50, blank=True, null=True)
+    status = models.CharField(
+        _("结果"), max_length=8, choices=ScanStatus.choices, default=ScanStatus.OK, db_index=True
+    )
+    void_reason = models.CharField(_("作废原因"), max_length=50, blank=True, null=True)
     error_code = models.CharField(_("错误码"), max_length=30, blank=True, null=True)
-    error_msg  = models.CharField(_("错误信息"), max_length=200, blank=True, null=True)
+    error_msg = models.CharField(_("错误信息"), max_length=200, blank=True, null=True)
 
-    review_status = models.CharField(_("复核状态"), max_length=10,choices=ReviewStatus.choices, default=ReviewStatus.NONE, db_index=True)
+    review_status = models.CharField(
+        _("复核状态"),
+        max_length=10,
+        choices=ReviewStatus.choices,
+        default=ReviewStatus.NONE,
+        db_index=True,
+    )
     reason_code = models.CharField(_("原因代码"), max_length=20, blank=True, null=True)
-    remark      = models.CharField(_("备注"), max_length=200, blank=True, null=True)
-    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name=_("复核人"),on_delete=models.SET_NULL, null=True, blank=True, related_name="task_scan_reviews")
+    remark = models.CharField(_("备注"), max_length=200, blank=True, null=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name=_("复核人"),
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="task_scan_reviews",
+    )
     reviewed_at = models.DateTimeField(_("复核时间"), null=True, blank=True)
 
     # —— 过账关联 & 幂等 —— #
-    posting_journal = models.ForeignKey("inventory.PostingJournal", verbose_name=_("过账日记账"),on_delete=models.SET_NULL, null=True, blank=True, related_name="scan_logs")
+    posting_journal = models.ForeignKey(
+        "inventory.PostingJournal",
+        verbose_name=_("过账日记账"),
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scan_logs",
+    )
     fp = models.CharField(_("去重指纹"), max_length=64, db_index=True)
-    scan_snapshot_rev = models.IntegerField("收货快照版本",db_index=True,
-        help_text="该任务行的收货事实快照版本号；每次保存重建快照时自增，用于生成/区分 TaskScanLog。")
+    scan_snapshot_rev = models.IntegerField(
+        "收货快照版本",
+        db_index=True,
+        help_text="该任务行的收货事实快照版本号；每次保存重建快照时自增，用于生成/区分 TaskScanLog。",
+    )
 
     posted_at = models.DateTimeField("过账时间", null=True, blank=True, db_index=True)
-    posting_batch = models.CharField("过账批次", max_length=40, null=True, blank=True, db_index=True)
+    posting_batch = models.CharField(
+        "过账批次", max_length=40, null=True, blank=True, db_index=True
+    )
     # 可与 posting_journal 并存；posted_at/批次是“冗余打点”，查询更快
 
     class Meta:
@@ -569,27 +872,40 @@ class TaskScanLog(TimeStampedMixin):
             # 成功记录必须有非零增量；非成功可为空或0
             models.UniqueConstraint(fields=["fp"], name="ux_tscan_fp"),
             models.UniqueConstraint(fields=["task", "label_key"], name="ux_tscan_task_label"),
-
-            # models.CheckConstraint(name="ck_tscan_ok_qty",check=Q(status="OK") & ~Q(qty_base_delta=0) | ~Q(status="OK"),),
+            # models.CheckConstraint(
+            #     name="ck_tscan_ok_qty",
+            #     condition=Q(status="OK") & ~Q(qty_base_delta=0) | ~Q(status="OK"),
+            # ),
             models.CheckConstraint(
                 name="ck_tscan_ok_qty",
-                check=(
-                        ~Q(status="OK") |
-                        Q(qty_base_delta__isnull=False) |
-                        Q(qty_base__isnull=False)
+                condition=(
+                    ~Q(status="OK") | Q(qty_base_delta__isnull=False) | Q(qty_base__isnull=False)
                 ),
             ),
-            models.CheckConstraint(name="ck_tscan_pack_pos",check=Q(pack_qty__isnull=True) | Q(pack_qty__gt=0)),
-            models.CheckConstraint(name="ck_tscan_method_ok",check=Q(method__in=["SCAN", "MANUAL", "API", "WEB"])),
-            models.CheckConstraint(name="ck_tscan_review_ok",check=Q(review_status__in=["NONE", "PENDING", "APPROVED", "REJECTED"])),
-            models.CheckConstraint(name="ck_tscan_status_ok",check=Q(status__in=["OK", "FAIL", "DUP", "IGNORED"])),
-            models.CheckConstraint(name="ck_tl_snaprev_nonneg",check=Q(scan_snapshot_rev__gte=0)),
+            models.CheckConstraint(
+                name="ck_tscan_pack_pos", condition=Q(pack_qty__isnull=True) | Q(pack_qty__gt=0)
+            ),
+            models.CheckConstraint(
+                name="ck_tscan_method_ok", condition=Q(method__in=["SCAN", "MANUAL", "API", "WEB"])
+            ),
+            models.CheckConstraint(
+                name="ck_tscan_review_ok",
+                condition=Q(review_status__in=["NONE", "PENDING", "APPROVED", "REJECTED"]),
+            ),
+            models.CheckConstraint(
+                name="ck_tscan_status_ok", condition=Q(status__in=["OK", "FAIL", "DUP", "IGNORED"])
+            ),
+            models.CheckConstraint(
+                name="ck_tl_snaprev_nonneg", condition=Q(scan_snapshot_rev__gte=0)
+            ),
         ]
         indexes = [
             models.Index(fields=["task_line", "created_at"], name="ix_tscan_line_time"),
             models.Index(fields=["by_user", "created_at"], name="ix_tscan_user_time"),
             models.Index(fields=["task"], name="ix_tscan_task"),
-            models.Index(fields=["product", "lot_no", "exp_date", "location"], name="ix_tscan_plxl"),
+            models.Index(
+                fields=["product", "lot_no", "exp_date", "location"], name="ix_tscan_plxl"
+            ),
             models.Index(fields=["container_no"], name="ix_tscan_container"),
             # models.Index(fields=["scan_snapshot_rev"], name="idx_scanlog_snaprev2"),
         ]
@@ -607,7 +923,9 @@ class TaskScanLog(TimeStampedMixin):
     def clean(self):
         self._sync_scope_from_relations()
 
-        def _norm(s): return (s or "").strip()
+        def _norm(s):
+            return (s or "").strip()
+
         if isinstance(self.barcode, str):
             self.barcode = _norm(self.barcode) or None
         if isinstance(self.label_key, str):
@@ -648,7 +966,11 @@ class TaskScanLog(TimeStampedMixin):
             if self.warehouse_id and self.warehouse_id != self.task.warehouse_id:
                 errors["warehouse"] = _("扫描记录仓库必须与任务仓库一致。")
 
-        if self.location_id and self.warehouse_id and self.location.warehouse_id != self.warehouse_id:
+        if (
+            self.location_id
+            and self.warehouse_id
+            and self.location.warehouse_id != self.warehouse_id
+        ):
             errors["location"] = _("扫描记录库位必须属于当前仓库。")
 
         if errors:
@@ -667,8 +989,9 @@ class TaskExtraBase(models.Model):
     - 可在子类中冗余 owner/warehouse（若需要）
     - 校验任务类型匹配
     """
+
     task = models.OneToOneField(
-        "tasking.WmsTask",                 # ✅ 用字符串路径更稳
+        "tasking.WmsTask",  # ✅ 用字符串路径更稳
         on_delete=models.PROTECT,
         related_name="%(class)s",
         verbose_name="任务",
@@ -685,7 +1008,7 @@ class TaskExtraBase(models.Model):
         super().clean()
         if self.task_id:
             et = self.expected_task_type()
-            if et and self.task.task_type != et:   # ✅ 修正字段名
+            if et and self.task.task_type != et:  # ✅ 修正字段名
                 raise ValidationError(
                     f"任务头 Extra 类型({et})与任务类型({self.task.task_type})不匹配"
                 )
@@ -693,24 +1016,29 @@ class TaskExtraBase(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
 class TaskLineExtraBase(models.Model):
     """
     行级 Extra 抽象基类：
     - 与 WmsTaskLine 一对一
     - 校验行所属任务类型（可由子类覆盖 expected_task_type）
     """
+
     line = models.OneToOneField(
-        "tasking.WmsTaskLine",             # ✅ 用字符串路径更稳
+        "tasking.WmsTaskLine",  # ✅ 用字符串路径更稳
         on_delete=models.PROTECT,
         related_name="%(class)s",
-        verbose_name="任务行",null=True, blank=True,
+        verbose_name="任务行",
+        null=True,
+        blank=True,
     )
 
     class Meta:
         abstract = True
 
     @classmethod
-    def expected_task_type(cls) -> str | None:   # 若 <3.10 改成 Optional[str]
+    def expected_task_type(cls) -> str | None:  # 若 <3.10 改成 Optional[str]
         return None
 
     def clean(self):
@@ -725,15 +1053,24 @@ class TaskLineExtraBase(models.Model):
         self.full_clean()
         return super().save(*args, **kwargs)
 
+
 # ========= 各类型Extra 头部和行明细 =========
 # ==收货
 class ReceiveTaskExtra(TaskExtraBase):
     """收货头：预约/承运/供应商/收货模式等（行默认值与校验策略的来源）"""
-    receive_mode = models.CharField("收货模式", max_length=10,choices=[("WITH_ASN", "按入库订单核对"), ("BLIND", "盲收")],default="WITH_ASN",    )
+
+    receive_mode = models.CharField(
+        "收货模式",
+        max_length=10,
+        choices=[("WITH_ASN", "按入库订单核对"), ("BLIND", "盲收")],
+        default="WITH_ASN",
+    )
     appt_start = models.DateTimeField("预约开始", null=True, blank=True)  # ← 去掉 db_index
-    appt_end   = models.DateTimeField("预约结束", null=True, blank=True)
-    dock_code  = models.CharField("月台编码", max_length=20, blank=True, default="")
-    vehicle_no = models.CharField("车牌号", max_length=20, blank=True, default="")   # ← 去掉 db_index
+    appt_end = models.DateTimeField("预约结束", null=True, blank=True)
+    dock_code = models.CharField("月台编码", max_length=20, blank=True, default="")
+    vehicle_no = models.CharField(
+        "车牌号", max_length=20, blank=True, default=""
+    )  # ← 去掉 db_index
     qc_required = models.BooleanField("是否质检", default=False)
 
     class Meta:
@@ -754,19 +1091,24 @@ class ReceiveTaskExtra(TaskExtraBase):
         super().clean()
         if self.appt_start and self.appt_end and self.appt_end < self.appt_start:
             raise ValidationError({"appt_end": "预约结束时间不能早于开始时间"})
+
+
 class ReceiveLineExtra(TaskLineExtraBase):
     """收货：批/效期 + 合格/破损/拒收 + 异常原因（行完成→PostingHandler 入账）"""
+
     from_lpn = models.CharField("上游容器号", max_length=40, null=True, blank=True, db_index=True)
 
     # 批/效期域
-    lot_no   = models.CharField("批号", max_length=60, null=True, blank=True, db_index=True)
+    lot_no = models.CharField("批号", max_length=60, null=True, blank=True, db_index=True)
     mfg_date = models.DateField("生产日期", null=True, blank=True)
     exp_date = models.DateField("有效期至", null=True, blank=True)
 
     # 数量（建议在服务层同步到 WmsTaskLine.qty_done）
-    qty_ok   = models.DecimalField("合格数",  max_digits=14, decimal_places=3, default=0)   # ← 与全局对齐为 3 位
-    qty_damage = models.DecimalField("破损数",  max_digits=14, decimal_places=3, default=0)
-    qty_reject = models.DecimalField("拒收数",  max_digits=14, decimal_places=3, default=0)
+    qty_ok = models.DecimalField(
+        "合格数", max_digits=14, decimal_places=3, default=0
+    )  # ← 与全局对齐为 3 位
+    qty_damage = models.DecimalField("破损数", max_digits=14, decimal_places=3, default=0)
+    qty_reject = models.DecimalField("拒收数", max_digits=14, decimal_places=3, default=0)
 
     # 异常原因（可选）
     damage_reason_code = models.CharField("破损原因", max_length=20, blank=True, default="")
@@ -777,13 +1119,17 @@ class ReceiveLineExtra(TaskLineExtraBase):
         verbose_name_plural = "收货扩展"
         constraints = [
             # OneToOne 已唯一，不再额外加 UniqueConstraint(line)
-            models.CheckConstraint(check=models.Q(qty_ok__gte=0),   name="ck_rcv_qd_ge0"),
-            models.CheckConstraint(check=models.Q(qty_damage__gte=0), name="ck_rcv_qdmg_ge0"),
-            models.CheckConstraint(check=models.Q(qty_reject__gte=0), name="ck_rcv_qrej_ge0"),
+            models.CheckConstraint(condition=models.Q(qty_ok__gte=0), name="ck_rcv_qd_ge0"),
+            models.CheckConstraint(condition=models.Q(qty_damage__gte=0), name="ck_rcv_qdmg_ge0"),
+            models.CheckConstraint(condition=models.Q(qty_reject__gte=0), name="ck_rcv_qrej_ge0"),
             # 至少有一个数量 > 0（可选，按业务需求）
             # models.CheckConstraint(
             #     name="ck_rcv_any_qty_pos",
-            #     check=(models.Q(qty_done__gt=0) | models.Q(qty_damage__gt=0) | models.Q(qty_reject__gt=0))
+            #     condition=(
+            #         models.Q(qty_done__gt=0)
+            #         | models.Q(qty_damage__gt=0)
+            #         | models.Q(qty_reject__gt=0)
+            #     )
             # ),
         ]
         indexes = [
@@ -816,10 +1162,7 @@ class ReceiveLineExtra(TaskLineExtraBase):
         task_id = getattr(line, "task_id", None)
         if task_id:
             # from allapp.tasking.models import WmsTask  # 就地导入避免循环依赖
-            return (WmsTask.objects
-                    .filter(pk=task_id)
-                    .values_list("status", flat=True)
-                    .first())
+            return WmsTask.objects.filter(pk=task_id).values_list("status", flat=True).first()
         return None
 
     @classmethod
@@ -834,8 +1177,11 @@ class ReceiveLineExtra(TaskLineExtraBase):
         # 归一化
         def _norm(s):
             return (s or "").strip().upper() or None
-        if isinstance(self.from_lpn, str): self.from_lpn = _norm(self.from_lpn)
-        if isinstance(self.lot_no, str):  self.lot_no  = _norm(self.lot_no)
+
+        if isinstance(self.from_lpn, str):
+            self.from_lpn = _norm(self.from_lpn)
+        if isinstance(self.lot_no, str):
+            self.lot_no = _norm(self.lot_no)
 
         # 日期先后
         if self.mfg_date and self.exp_date and self.exp_date < self.mfg_date:
@@ -845,28 +1191,30 @@ class ReceiveLineExtra(TaskLineExtraBase):
         # is_final = task_status in (WmsTask.Status.COMPLETED)
         is_final = (task_status or "") == WmsTask.Status.COMPLETED
         if is_final:
-         p = getattr(self.line, "product", None)
-         if p:
-            if getattr(p, "batch_control", False):
-                if not self.lot_no:
-                    raise ValidationError({"lot_no": "该商品启用批次管理，必须录入批号"})
-            # else:
-            #     if self.lot_no:
-            #         raise ValidationError({"lot_no": "该商品未启用批次管理，批号必须留空"})
+            p = getattr(self.line, "product", None)
+            if p:
+                if getattr(p, "batch_control", False):
+                    if not self.lot_no:
+                        raise ValidationError({"lot_no": "该商品启用批次管理，必须录入批号"})
+                # else:
+                #     if self.lot_no:
+                #         raise ValidationError({"lot_no": "该商品未启用批次管理，批号必须留空"})
 
-            if getattr(p, "expiry_control", False):
-                if not self.exp_date:
-                    raise ValidationError({"exp_date": "该商品启用效期管理，必须录入有效期"})
-            # else:
-            #     if self.mfg_date or self.exp_date:
-            #         raise ValidationError({"exp_date": "该商品未启用效期管理，生产/到期日必须留空"})
+                if getattr(p, "expiry_control", False):
+                    if not self.exp_date:
+                        raise ValidationError({"exp_date": "该商品启用效期管理，必须录入有效期"})
+                # else:
+                #     if self.mfg_date or self.exp_date:
+                #         raise ValidationError({"exp_date": "该商品未启用效期管理，生产/到期日必须留空"})
 
     def _calc_total_processed(self) -> Decimal:
         """按业务口径，行的完成进度 = 合格 + 破损 + 拒收"""
         z = Decimal("0")
-        return (Decimal(self.qty_ok or 0)
-                + Decimal(self.qty_damage or 0)
-                + Decimal(self.qty_reject or 0)) or z
+        return (
+            Decimal(self.qty_ok or 0)
+            + Decimal(self.qty_damage or 0)
+            + Decimal(self.qty_reject or 0)
+        ) or z
 
     @transaction.atomic
     def save(self, *args, **kwargs):
@@ -882,9 +1230,7 @@ class ReceiveLineExtra(TaskLineExtraBase):
             total = self._calc_total_processed()
 
             # 行级并发保护（可选）
-            (WmsTaskLine.objects
-             .filter(pk=line_id)
-             .update(qty_done=total))
+            (WmsTaskLine.objects.filter(pk=line_id).update(qty_done=total))
 
             # 若当前实例里还要马上读取最新值，手动回填：
             if line is not None:
@@ -895,16 +1241,19 @@ class ReceiveLineExtra(TaskLineExtraBase):
                 qty_plan = getattr(line, "qty_plan", None)
                 if qty_plan is None:
                     # 无计划也可按“>0即完成”的口径触发；如不需要可去掉
-                    should_finish = (total > 0)
+                    should_finish = total > 0
                 else:
-                    should_finish = (total >= qty_plan)
+                    should_finish = total >= qty_plan
 
                 if should_finish:
                     # by_user 从线程本地/请求上下文取；Admin 场景下可在表单保存 hook 内注入
                     by_user = getattr(self, "_by_user", None)  # 可由 Admin formset 注入
                     from allapp.tasking.services import finalize_receive_line
+
                     try:
-                        finalize_receive_line(self.line_id, by_user=by_user, trigger="AUTO_ON_REACH_PLAN")
+                        finalize_receive_line(
+                            self.line_id, by_user=by_user, trigger="AUTO_ON_REACH_PLAN"
+                        )
                     except ValidationError:
                         # 不阻断保存；把错误交给上游 Admin 动作提示即可
                         pass
@@ -918,16 +1267,20 @@ class ReceiveLineExtra(TaskLineExtraBase):
         ret = super().delete(*args, **kwargs)
         if line_id:
             from allapp.tasking.models import WmsTaskLine
+
             WmsTaskLine.objects.filter(pk=line_id).update(qty_done=0)
         return ret
+
 
 # == 上架头 ==
 class PutawayTaskExtra(TaskExtraBase):
     """上架头：策略/目标区域/是否可混放等"""
+
     strategy = models.CharField(
-        "上架策略", max_length=10,
+        "上架策略",
+        max_length=10,
         choices=[("DIRECT", "直上"), ("RULE", "规则"), ("MANUAL", "人工")],
-        default="RULE"
+        default="RULE",
     )
 
     class Meta:
@@ -939,6 +1292,8 @@ class PutawayTaskExtra(TaskExtraBase):
     @classmethod
     def expected_task_type(cls):
         return "PUTAWAY"
+
+
 # == 上架行 ==
 class PutawayLineExtra(TaskLineExtraBase):
     """上架：建议/目标库位、来源/目标容器号、移位数量（事实在行层）"""
@@ -947,7 +1302,8 @@ class PutawayLineExtra(TaskLineExtraBase):
     plan_to_location = models.ForeignKey(
         "locations.Location",
         on_delete=models.PROTECT,
-        null=True, blank=True,
+        null=True,
+        blank=True,
         related_name="putaway_plan_targets",
         verbose_name="建议库位",
     )
@@ -956,14 +1312,15 @@ class PutawayLineExtra(TaskLineExtraBase):
     to_location = models.ForeignKey(
         "locations.Location",
         on_delete=models.PROTECT,
-        null=True, blank=True,
+        null=True,
+        blank=True,
         related_name="putaway_done_targets",
         verbose_name="目标库位",
     )
 
     # 容器（使用 NULL 表达“无值”，更易于唯一/索引语义）
     from_lpn = models.CharField("上游容器号", max_length=40, null=True, blank=True)
-    to_lpn   = models.CharField("目标容器号", max_length=40, null=True, blank=True)
+    to_lpn = models.CharField("目标容器号", max_length=40, null=True, blank=True)
 
     # 数量：若你用 WmsTaskLine.qty_done 作唯一完成量，这里可删；保留则务必同步
     qty_moved = models.DecimalField("移入数", max_digits=14, decimal_places=3, default=0)
@@ -973,7 +1330,7 @@ class PutawayLineExtra(TaskLineExtraBase):
         verbose_name_plural = "上架扩展"
         constraints = [
             # OneToOne(line) 已唯一，不再重复
-            models.CheckConstraint(check=models.Q(qty_moved__gte=0), name="ck_put_qmv_ge0"),
+            models.CheckConstraint(condition=models.Q(qty_moved__gte=0), name="ck_put_qmv_ge0"),
         ]
         indexes = [
             models.Index(fields=["plan_to_location"], name="ix_put_ploc"),
@@ -1015,14 +1372,12 @@ class PutawayLineExtra(TaskLineExtraBase):
 
         # 2) 先保存扩展本身
         ret = super().save(*args, **kwargs)
-        total=getattr(self,'qty_moved',None)
+        total = getattr(self, "qty_moved", None)
         # 3) 同步到任务行进度（覆盖式重算）
         line = getattr(self, "line", None)
         if line_id := getattr(self, "line_id", None):
-               # 行级并发保护（可选）
-            (WmsTaskLine.objects
-             .filter(pk=line_id)
-             .update(qty_done=total))
+            # 行级并发保护（可选）
+            (WmsTaskLine.objects.filter(pk=line_id).update(qty_done=total))
 
             # 若当前实例里还要马上读取最新值，手动回填：
             if line is not None:
@@ -1033,40 +1388,45 @@ class PutawayLineExtra(TaskLineExtraBase):
                 qty_plan = getattr(line, "qty_plan", None)
                 if qty_plan is None:
                     # 无计划也可按“>0即完成”的口径触发；如不需要可去掉
-                    should_finish = (total > 0)
+                    should_finish = total > 0
                 else:
-                    should_finish = (total >= qty_plan)
+                    should_finish = total >= qty_plan
 
                 if should_finish:
                     # by_user 从线程本地/请求上下文取；Admin 场景下可在表单保存 hook 内注入
                     by_user = getattr(self, "_by_user", None)  # 可由 Admin formset 注入
-                    from allapp.tasking.services import finalize_receive_line
+
                     try:
                         from allapp.tasking.services import finalize_task_line
-                        finalize_task_line(self.line_id, by_user=by_user, trigger="AUTO_ON_REACH_PLAN")
+
+                        finalize_task_line(
+                            self.line_id, by_user=by_user, trigger="AUTO_ON_REACH_PLAN"
+                        )
                     except ValidationError:
                         # 不阻断保存；把错误交给上游 Admin 动作提示即可
                         pass
 
         return ret
 
+
 # ==拣货
 class PickTaskExtra(TaskExtraBase):
-    wave_no = models.CharField("波次号", max_length=30, blank=True, default="")   # 去掉 db_index
+    wave_no = models.CharField("波次号", max_length=30, blank=True, default="")  # 去掉 db_index
     pick_mode = models.CharField(
-        "拣货模式", max_length=10,
-        choices=[("SINGLE","单单"),("BATCH","批量"),("CLUSTER","多单汇拣")],
-        default="SINGLE"
+        "拣货模式",
+        max_length=10,
+        choices=[("SINGLE", "单单"), ("BATCH", "批量"), ("CLUSTER", "多单汇拣")],
+        default="SINGLE",
     )
     route_code = models.CharField("拣货路径", max_length=20, blank=True, default="")
-    ship_date  = models.DateField("计划出库日", null=True, blank=True)           # 去掉 db_index
-    cutoff_at  = models.DateTimeField("截单时间", null=True, blank=True)
+    ship_date = models.DateField("计划出库日", null=True, blank=True)  # 去掉 db_index
+    cutoff_at = models.DateTimeField("截单时间", null=True, blank=True)
 
     class Meta:
         verbose_name = "拣货任务头扩展"
         verbose_name_plural = "拣货任务头扩展"
         indexes = [
-            models.Index(fields=["wave_no"],   name="ix_piktsk_wave"),
+            models.Index(fields=["wave_no"], name="ix_piktsk_wave"),
             models.Index(fields=["ship_date"], name="ix_piktsk_sdt"),
         ]
 
@@ -1078,42 +1438,49 @@ class PickTaskExtra(TaskExtraBase):
 
         super().clean()
         # 规范化
-        if isinstance(self.wave_no, str):   self.wave_no   = self.wave_no.strip().upper()
-        if isinstance(self.route_code, str):self.route_code= self.route_code.strip().upper()
+        if isinstance(self.wave_no, str):
+            self.wave_no = self.wave_no.strip().upper()
+        if isinstance(self.route_code, str):
+            self.route_code = self.route_code.strip().upper()
         # 时间先后
         if self.ship_date and self.cutoff_at and self.cutoff_at.date() < self.ship_date:
             raise ValidationError({"cutoff_at": "截单时间不得早于计划出库日"})
+
+
 class PickLineExtra(TaskLineExtraBase):
     from_location = models.ForeignKey(
         "locations.Location",
         on_delete=models.PROTECT,
         related_name="pick_sources",
         verbose_name="拣货库位",
-        null=True, blank=True,
+        null=True,
+        blank=True,
     )
     # 允许 NULL；统一到 clean() 里 trim/upper
-    from_lpn        = models.CharField("上游容器号", max_length=40, null=True, blank=True)
+    from_lpn = models.CharField("上游容器号", max_length=40, null=True, blank=True)
     to_container_no = models.CharField("目标容器/拣货框", max_length=40, null=True, blank=True)
 
-    qty_picked = models.DecimalField("拣出数", max_digits=18, decimal_places=3, default=0)  # 统一 3 位
-    qty_short  = models.DecimalField("短拣数",  max_digits=18, decimal_places=3, default=0)
+    qty_picked = models.DecimalField(
+        "拣出数", max_digits=18, decimal_places=3, default=0
+    )  # 统一 3 位
+    qty_short = models.DecimalField("短拣数", max_digits=18, decimal_places=3, default=0)
     short_reason = models.CharField("短拣原因", max_length=40, blank=True, default="")
 
     class Meta:
         verbose_name = "拣货扩展"
         verbose_name_plural = "拣货扩展"
         constraints = [
-            models.CheckConstraint(check=models.Q(qty_picked__gte=0), name="ck_pik_qpk_ge0"),
-            models.CheckConstraint(check=models.Q(qty_short__gte=0),  name="ck_pik_qsh_ge0"),
+            models.CheckConstraint(condition=models.Q(qty_picked__gte=0), name="ck_pik_qpk_ge0"),
+            models.CheckConstraint(condition=models.Q(qty_short__gte=0), name="ck_pik_qsh_ge0"),
             models.CheckConstraint(  # DB 兜底：短拣>0 则 reason 非空串
                 name="ck_pik_short_reason",
-                check=(models.Q(qty_short=0) | ~models.Q(short_reason="")),
+                condition=(models.Q(qty_short=0) | ~models.Q(short_reason="")),
             ),
         ]
         indexes = [
-            models.Index(fields=["from_location"],             name="ix_pik_floc"),
-            models.Index(fields=["from_lpn"],                  name="ix_pik_flpn"),
-            models.Index(fields=["to_container_no"],           name="ix_pik_tcont"),
+            models.Index(fields=["from_location"], name="ix_pik_floc"),
+            models.Index(fields=["from_lpn"], name="ix_pik_flpn"),
+            models.Index(fields=["to_container_no"], name="ix_pik_tcont"),
             models.Index(fields=["from_location", "from_lpn"], name="ix_pik_floc_lpn"),
         ]
 
@@ -1139,10 +1506,7 @@ class PickLineExtra(TaskLineExtraBase):
         task_id = getattr(line, "task_id", None)
         if task_id:
             # from allapp.tasking.models import WmsTask  # 就地导入避免循环依赖
-            return (WmsTask.objects
-                    .filter(pk=task_id)
-                    .values_list("status", flat=True)
-                    .first())
+            return WmsTask.objects.filter(pk=task_id).values_list("status", flat=True).first()
         return None
 
     @classmethod
@@ -1179,14 +1543,12 @@ class PickLineExtra(TaskLineExtraBase):
 
         # 2) 先保存扩展本身
         ret = super().save(*args, **kwargs)
-        total=getattr(self,'qty_picked',None)
+        total = getattr(self, "qty_picked", None)
         # 3) 同步到任务行进度（覆盖式重算）
         line = getattr(self, "line", None)
         if line_id := getattr(self, "line_id", None):
-               # 行级并发保护（可选）
-            (WmsTaskLine.objects
-             .filter(pk=line_id)
-             .update(qty_done=total))
+            # 行级并发保护（可选）
+            (WmsTaskLine.objects.filter(pk=line_id).update(qty_done=total))
 
             # 若当前实例(内存中的,上面是直接操作数据库)里还要马上读取最新值，手动回填：
             if line is not None:
@@ -1197,16 +1559,17 @@ class PickLineExtra(TaskLineExtraBase):
                 qty_plan = getattr(line, "qty_plan", None)
                 if qty_plan is None:
                     # 无计划也可按“>0即完成”的口径触发；如不需要可去掉
-                    should_finish = (total > 0)
+                    should_finish = total > 0
                 else:
-                    should_finish = (total >= qty_plan)
+                    should_finish = total >= qty_plan
 
                 if should_finish:
                     # by_user 从线程本地/请求上下文取；Admin 场景下可在表单保存 hook 内注入
                     by_user = getattr(self, "_by_user", None)  # 可由 Admin formset 注入
-                    from allapp.tasking.services import finalize_receive_line
+
                     try:
                         from allapp.tasking.services import finalize_task_line
+
                         task = getattr(line, "task", None)
                         ctx, ctx_text = build_log_payload(task=task, user=by_user)
                         logger.info(
@@ -1215,7 +1578,9 @@ class PickLineExtra(TaskLineExtraBase):
                             self.line_id,
                             extra=ctx,
                         )
-                        result=finalize_task_line(self.line_id, by_user=by_user, trigger="AUTO_ON_REACH_PLAN")
+                        result = finalize_task_line(
+                            self.line_id, by_user=by_user, trigger="AUTO_ON_REACH_PLAN"
+                        )
                         logger.info(
                             "tasking.pick.auto_finalize.completed %s line_id=%s task_status=%s",
                             ctx_text,
@@ -1224,21 +1589,21 @@ class PickLineExtra(TaskLineExtraBase):
                             extra=ctx,
                         )
                         if result and result.get("task_status") == "COMPLETED":
-                             task = getattr(line, "task", None)
-                             ctx, ctx_text = build_log_payload(task=task, user=by_user)
-                             logger.info(
-                                 "tasking.review_task.auto_create.begin %s source_line_id=%s",
-                                 ctx_text,
-                                 self.line_id,
-                                 extra=ctx,
-                             )
-                             self.create_review_task(task)
-                             logger.info(
-                                 "tasking.review_task.auto_create.completed %s source_line_id=%s",
-                                 ctx_text,
-                                 self.line_id,
-                                 extra=ctx,
-                             )
+                            task = getattr(line, "task", None)
+                            ctx, ctx_text = build_log_payload(task=task, user=by_user)
+                            logger.info(
+                                "tasking.review_task.auto_create.begin %s source_line_id=%s",
+                                ctx_text,
+                                self.line_id,
+                                extra=ctx,
+                            )
+                            self.create_review_task(task)
+                            logger.info(
+                                "tasking.review_task.auto_create.completed %s source_line_id=%s",
+                                ctx_text,
+                                self.line_id,
+                                extra=ctx,
+                            )
                     except ValidationError:
                         # 不阻断保存；把错误交给上游 Admin 动作提示即可
                         pass
@@ -1246,7 +1611,7 @@ class PickLineExtra(TaskLineExtraBase):
         return ret
 
     @transaction.atomic
-    def create_review_task(self,task):
+    def create_review_task(self, task):
         """
         创建复核任务，当拣货任务完成时调用。
         :param task: 完成的拣货任务对象
@@ -1256,10 +1621,10 @@ class PickLineExtra(TaskLineExtraBase):
 
         # 创建复核任务
         # 获取需要的字段，确保 task 是一个 WmsTask 对象
-        owner = task.owner if hasattr(task, 'owner') else None
-        warehouse = task.warehouse if hasattr(task, 'warehouse') else None
-        created_by = task.created_by if hasattr(task, 'created_by') else None
-        task_lines = task.lines if hasattr(task, 'lines') else None
+        owner = task.owner if hasattr(task, "owner") else None
+        warehouse = task.warehouse if hasattr(task, "warehouse") else None
+        created_by = task.created_by if hasattr(task, "created_by") else None
+        task_lines = task.lines if hasattr(task, "lines") else None
         biz_date = task.finished_at if task.finished_at else datetime.today().date()
 
         task_no = DocSequence.next_code(
@@ -1268,7 +1633,9 @@ class PickLineExtra(TaskLineExtraBase):
             owner=owner,
             biz_date=biz_date,
         )
-        ctx, ctx_text = build_log_payload(task=task, owner=owner, warehouse=warehouse, user=created_by)
+        ctx, ctx_text = build_log_payload(
+            task=task, owner=owner, warehouse=warehouse, user=created_by
+        )
         logger.info(
             "tasking.review_task.create.begin %s source_task_type=%s",
             ctx_text,
@@ -1286,7 +1653,9 @@ class PickLineExtra(TaskLineExtraBase):
             # review_status=WmsTask.ReviewStatus.NOT_READY,
             # posting_status=WmsTask.PostingStatus.NOT_READY,
         )
-        review_ctx, review_ctx_text = build_log_payload(task=review_task, owner=owner, warehouse=warehouse, user=created_by)
+        review_ctx, review_ctx_text = build_log_payload(
+            task=review_task, owner=owner, warehouse=warehouse, user=created_by
+        )
         logger.info(
             "tasking.review_task.create.created %s source_task_id=%s source_task_no=%s",
             review_ctx_text,
@@ -1314,10 +1683,10 @@ class PickLineExtra(TaskLineExtraBase):
                 to_location=task_line.to_location,  # 如果有位置的话
                 status=WmsTaskLine.Status.DRAFT,  # 设置为待处理状态
                 src_model="wmstaskline",
-                src_id=getattr(task_line,"id",None)  # 关联拣货任务行
+                src_id=getattr(task_line, "id", None),  # 关联拣货任务行
             )
             # 为每个任务行创建额外的行信息（extraline）
-            rl=ReviewLineExtra.objects.create(
+            ReviewLineExtra.objects.create(
                 line=review_task_line,
                 # 根据需要设置行的额外信息
                 qty_plan_origin=task_line.qty_plan,  # 复制拣货数量到复核任务
@@ -1329,7 +1698,8 @@ class PickLineExtra(TaskLineExtraBase):
             )
             copied_lines += 1
             logger.debug(
-                "tasking.review_task.create.line_copied %s line_id=%s source_line_id=%s qty_plan=%s qty_picked=%s",
+                "tasking.review_task.create.line_copied %s line_id=%s "
+                "source_line_id=%s qty_plan=%s qty_picked=%s",
                 review_ctx_text,
                 review_task_line.id,
                 task_line.id,
@@ -1353,16 +1723,19 @@ class PickLineExtra(TaskLineExtraBase):
         ret = super().delete(*args, **kwargs)
         if line_id:
             from allapp.tasking.models import WmsTaskLine
+
             WmsTaskLine.objects.filter(pk=line_id).update(qty_done=0)
         return ret
+
 
 # ==复核
 class ReviewTaskExtra(TaskExtraBase):
     # 复核任务头扩展
     review_type = models.CharField(
-        "复核类型", max_length=20,
+        "复核类型",
+        max_length=20,
         choices=[("SINGLE", "单次复核"), ("BATCH", "批量复核")],
-        default="SINGLE"
+        default="SINGLE",
     )
     review_date = models.DateField("复核日期", null=True, blank=True)
     reviewer = models.CharField("复核员", max_length=50, blank=True, default="")
@@ -1384,36 +1757,51 @@ class ReviewTaskExtra(TaskExtraBase):
         super().clean()
         if self.review_date and self.review_date < timezone.now().date():
             raise ValidationError({"review_date": "复核日期不能早于今天"})
+
+
 class ReviewLineExtra(TaskLineExtraBase):
     # 复核行扩展
     class REVIEW_Status(models.TextChoices):
         UNREVIEWED = "UnREVIEW", "未审核"
-        REVIEWED       = "REVIEWED",       "已审核"
+        REVIEWED = "REVIEWED", "已审核"
 
     from_location = models.ForeignKey(
         "locations.Location",
         on_delete=models.PROTECT,
         related_name="review_sources",
         verbose_name="复核库位",
-        null=True, blank=True,
+        null=True,
+        blank=True,
     )
     from_lpn = models.CharField("上游容器号", max_length=40, null=True, blank=True)
     to_container_no = models.CharField("目标容器号", max_length=40, null=True, blank=True)
 
     qty_plan_origin = models.DecimalField("拣货计划数", max_digits=18, decimal_places=4, default=0)
-    qty_picked_origin = models.DecimalField("拣货记录数", max_digits=18, decimal_places=4, default=0)
+    qty_picked_origin = models.DecimalField(
+        "拣货记录数", max_digits=18, decimal_places=4, default=0
+    )
     qty_reviewed = models.DecimalField("复核数", max_digits=18, decimal_places=4, default=0)
-    qty_discrepancy_plan = models.DecimalField("与计划差异", max_digits=18, decimal_places=4, default=0)
-    qty_discrepancy_picked = models.DecimalField("与拣货记录差异", max_digits=18, decimal_places=4, default=0)
+    qty_discrepancy_plan = models.DecimalField(
+        "与计划差异", max_digits=18, decimal_places=4, default=0
+    )
+    qty_discrepancy_picked = models.DecimalField(
+        "与拣货记录差异", max_digits=18, decimal_places=4, default=0
+    )
     discrepancy_reason = models.CharField("差异原因", max_length=40, blank=True, default="")
-    review_status_rev= models.CharField(_("状态"), max_length=16, choices=REVIEW_Status.choices, db_index=True, default=REVIEW_Status.UNREVIEWED)
+    review_status_rev = models.CharField(
+        _("状态"),
+        max_length=16,
+        choices=REVIEW_Status.choices,
+        db_index=True,
+        default=REVIEW_Status.UNREVIEWED,
+    )
 
     class Meta:
         verbose_name = "复核任务扩展"
         verbose_name_plural = "复核任务扩展"
         constraints = [
-            models.CheckConstraint(check=models.Q(qty_reviewed__gte=0), name="ck_rv_qr_ge0"),
-               ]
+            models.CheckConstraint(condition=models.Q(qty_reviewed__gte=0), name="ck_rv_qr_ge0"),
+        ]
         indexes = [
             models.Index(fields=["from_location"], name="ix_rv_floc"),
             models.Index(fields=["from_lpn"], name="ix_rv_flpn"),
@@ -1442,10 +1830,7 @@ class ReviewLineExtra(TaskLineExtraBase):
         task_id = getattr(line, "task_id", None)
         if task_id:
             # from allapp.tasking.models import WmsTask  # 就地导入避免循环依赖
-            return (WmsTask.objects
-                    .filter(pk=task_id)
-                    .values_list("status", flat=True)
-                    .first())
+            return WmsTask.objects.filter(pk=task_id).values_list("status", flat=True).first()
         return None
 
     @classmethod
@@ -1478,7 +1863,7 @@ class ReviewLineExtra(TaskLineExtraBase):
 
         update_fields = kwargs.get("update_fields")
 
-        if  _to_dec(self.qty_reviewed) > 0:
+        if _to_dec(self.qty_reviewed) > 0:
             self.review_status_rev = self.REVIEW_Status.REVIEWED
             if update_fields is not None:
                 update_fields = set(update_fields)
@@ -1505,13 +1890,14 @@ class ReviewLineExtra(TaskLineExtraBase):
         if has_discrepancy and line and task:
             product = getattr(line, "product", None)
             location = (
-                    self.from_location
-                    or getattr(line, "from_location", None)
-                    or getattr(line, "to_location", None)
+                self.from_location
+                or getattr(line, "from_location", None)
+                or getattr(line, "to_location", None)
             )
 
             if product and location:
                 from allapp.inventory.models import ReviewDifference, ReviewDifferenceLine
+
                 biz_date = datetime.today().date()
                 order_no = DocSequence.next_code(
                     doc_type="FH",
@@ -1542,9 +1928,7 @@ class ReviewLineExtra(TaskLineExtraBase):
                 def _quantize_4(value: Decimal) -> Decimal:
                     return value.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
-                quantity_difference = (
-                    discrepancy_picked if discrepancy_picked else discrepancy_plan
-                )
+                quantity_difference = discrepancy_picked if discrepancy_picked else discrepancy_plan
 
                 ReviewDifferenceLine.objects.create(
                     recheck_order=review_diff,
@@ -1558,7 +1942,8 @@ class ReviewLineExtra(TaskLineExtraBase):
                     status=ReviewDifference.Status.PENDING,
                 )
                 logger.warning(
-                    "tasking.review_line.discrepancy_created %s line_id=%s review_diff_id=%s qty_plan_diff=%s qty_picked_diff=%s",
+                    "tasking.review_line.discrepancy_created %s line_id=%s "
+                    "review_diff_id=%s qty_plan_diff=%s qty_picked_diff=%s",
                     ctx_text,
                     line.id,
                     review_diff.id,
@@ -1569,8 +1954,7 @@ class ReviewLineExtra(TaskLineExtraBase):
         if task:
             line_ids = task.lines.values_list("id", flat=True)
             pending_exists = (
-                self.__class__.objects
-                .filter(line_id__in=line_ids)
+                self.__class__.objects.filter(line_id__in=line_ids)
                 .exclude(review_status_rev=self.REVIEW_Status.REVIEWED)
                 .exists()
             )
@@ -1600,25 +1984,32 @@ class ReviewLineExtra(TaskLineExtraBase):
         ret = super().delete(*args, **kwargs)
         if line_id:
             from allapp.tasking.models import WmsTaskLine
+
             WmsTaskLine.objects.filter(pk=line_id).update(qty_done=0)
         return ret
+
 
 # ==打包
 class PackTaskExtra(TaskExtraBase):
     """打包头：承运/服务/标签模板/默认包材 + 复核策略"""
+
     PACK_CHECK_POLICY = [
         ("SELF", "自检（不需二次复核）"),
         ("DOUBLE", "双人全检"),
         ("RANDOM", "抽检"),
         ("NONE", "不复核"),
     ]
-    default_carrier_code  = models.CharField("默认承运商", max_length=20, blank=True, default="")
+    default_carrier_code = models.CharField("默认承运商", max_length=20, blank=True, default="")
     default_service_level = models.CharField("默认服务级别", max_length=20, blank=True, default="")
-    label_tpl_code        = models.CharField("标签模板", max_length=40, blank=True, default="")
-    default_pack_code     = models.CharField("默认包材", max_length=30, blank=True, default="")
+    label_tpl_code = models.CharField("标签模板", max_length=40, blank=True, default="")
+    default_pack_code = models.CharField("默认包材", max_length=30, blank=True, default="")
 
-    check_policy = models.CharField("复核策略", max_length=10, choices=PACK_CHECK_POLICY, default="SELF")
-    check_ratio  = models.DecimalField("抽检比例(0~1]", max_digits=4, decimal_places=3, null=True, blank=True)
+    check_policy = models.CharField(
+        "复核策略", max_length=10, choices=PACK_CHECK_POLICY, default="SELF"
+    )
+    check_ratio = models.DecimalField(
+        "抽检比例(0~1]", max_digits=4, decimal_places=3, null=True, blank=True
+    )
 
     class Meta:
         verbose_name = "打包任务头扩展"
@@ -1628,14 +2019,18 @@ class PackTaskExtra(TaskExtraBase):
             # 服务级别 ⇒ 必须有承运商
             models.CheckConstraint(
                 name="ck_pak_srv_car",
-                check=(models.Q(default_service_level="") | ~models.Q(default_carrier_code="")),
+                condition=(models.Q(default_service_level="") | ~models.Q(default_carrier_code="")),
             ),
             # RANDOM ⇒ 0<ratio<=1；非 RANDOM ⇒ ratio 可空
             models.CheckConstraint(
                 name="ck_pak_chk_ratio",
-                check=(
+                condition=(
                     ~models.Q(check_policy="RANDOM")
-                    | (models.Q(check_ratio__isnull=False) & models.Q(check_ratio__gt=0) & models.Q(check_ratio__lte=1))
+                    | (
+                        models.Q(check_ratio__isnull=False)
+                        & models.Q(check_ratio__gt=0)
+                        & models.Q(check_ratio__lte=1)
+                    )
                 ),
             ),
         ]
@@ -1645,19 +2040,24 @@ class PackTaskExtra(TaskExtraBase):
         ]
 
     @classmethod
-    def expected_task_type(cls): return "PACK"
+    def expected_task_type(cls):
+        return "PACK"
 
     def clean(self):
         super().clean()
         # 规范化，避免空格绕过约束
-        for f in ("default_carrier_code", "default_service_level", "label_tpl_code", "default_pack_code"):
+        for f in (
+            "default_carrier_code",
+            "default_service_level",
+            "label_tpl_code",
+            "default_pack_code",
+        ):
             v = getattr(self, f, "")
             if isinstance(v, str):
                 setattr(self, f, v.strip().upper())
         # RANDOM 必须给比例；其余可空（DB 已兜底，这里给更友好的报错）
         if self.check_policy == "RANDOM" and not self.check_ratio:
             raise ValidationError({"check_ratio": "抽检策略为 RANDOM 时必须填写抽检比例(0~1]"})
-
 
     @transaction.atomic
     def save(self, *args, **kwargs):
@@ -1670,15 +2070,17 @@ class PackTaskExtra(TaskExtraBase):
             return None
 
         if not isinstance(review_task, WmsTask):
-            review_task = (WmsTask.objects
-                           .select_related("owner", "warehouse")
-                           .filter(pk=getattr(review_task, "pk", review_task))
-                           .first())
+            review_task = (
+                WmsTask.objects.select_related("owner", "warehouse")
+                .filter(pk=getattr(review_task, "pk", review_task))
+                .first()
+            )
         else:
-            review_task = (WmsTask.objects
-                           .select_related("owner", "warehouse")
-                           .filter(pk=review_task.pk)
-                           .first())
+            review_task = (
+                WmsTask.objects.select_related("owner", "warehouse")
+                .filter(pk=review_task.pk)
+                .first()
+            )
 
         if not review_task:
             return None
@@ -1687,11 +2089,9 @@ class PackTaskExtra(TaskExtraBase):
         if review_status != WmsTask.ReviewStatus.APPROVED:
             return None
 
-        line_extras = (
-            ReviewLineExtra.objects
-            .select_related("line__product", "line__from_location", "line__to_location")
-            .filter(line__task=review_task)
-        )
+        line_extras = ReviewLineExtra.objects.select_related(
+            "line__product", "line__from_location", "line__to_location"
+        ).filter(line__task=review_task)
 
         pack_payload: list[dict] = []
         dispatch_payload: list[dict] = []
@@ -1712,7 +2112,8 @@ class PackTaskExtra(TaskExtraBase):
                 "product_id": line.product_id,
                 "qty": qty,
                 "src_line_id": line.id,
-                "from_location_id": getattr(line, "to_location_id", None) or getattr(line, "from_location_id", None),
+                "from_location_id": getattr(line, "to_location_id", None)
+                or getattr(line, "from_location_id", None),
                 "to_location_id": None,
             }
 
@@ -1825,13 +2226,15 @@ class PackTaskExtra(TaskExtraBase):
 
         return created or None
 
+
 class PackLineExtra(TaskLineExtraBase):
     to_container = models.ForeignKey(
         "locations.Container",
         on_delete=models.PROTECT,
-        null=True, blank=True,
+        null=True,
+        blank=True,
         related_name="pack_main_lines",
-        verbose_name="主容器"
+        verbose_name="主容器",
     )
     # 建议去掉字段层 db_index，统一在 Meta.indexes 建索引
     to_container_no = models.CharField("主容器号(冗余)", max_length=60, blank=True, default="")
@@ -1840,10 +2243,13 @@ class PackLineExtra(TaskLineExtraBase):
     aux_uom = models.ForeignKey(
         "products.ProductPackage",
         on_delete=models.PROTECT,
-        null=True, blank=True,
-        verbose_name="包装单位(快照)"
+        null=True,
+        blank=True,
+        verbose_name="包装单位(快照)",
     )
-    ratio = models.DecimalField("换算率(包装→基本,快照)", max_digits=14, decimal_places=4, null=True, blank=True)
+    ratio = models.DecimalField(
+        "换算率(包装→基本,快照)", max_digits=14, decimal_places=4, null=True, blank=True
+    )
 
     class Meta:
         verbose_name = "打包扩展"
@@ -1851,8 +2257,8 @@ class PackLineExtra(TaskLineExtraBase):
         constraints = [
             # OneToOne(line) 已唯一，去掉重复 UniqueConstraint
             models.CheckConstraint(
-                check=models.Q(ratio__isnull=True) | models.Q(ratio__gt=0),
-                name="ck_pack_ratio_pos"
+                condition=models.Q(ratio__isnull=True) | models.Q(ratio__gt=0),
+                name="ck_pack_ratio_pos",
             ),
         ]
         indexes = [
@@ -1861,7 +2267,8 @@ class PackLineExtra(TaskLineExtraBase):
         ]
 
     @classmethod
-    def expected_task_type(cls): return "PACK"
+    def expected_task_type(cls):
+        return "PACK"
 
     def clean(self):
         super().clean()
@@ -1900,26 +2307,29 @@ class PackLineExtra(TaskLineExtraBase):
         self.full_clean()
         return super().save(*args, **kwargs)
 
+
 # ==装车
 class LoadTaskExtra(TaskExtraBase):
     """装车任务头扩展"""
-    trip_no    = models.CharField("车次号",   max_length=40, blank=True, default="")
-    vehicle_no = models.CharField("车牌号",   max_length=20, blank=True, default="")
-    dock_code  = models.CharField("月台编码", max_length=20, blank=True, default="")
+
+    trip_no = models.CharField("车次号", max_length=40, blank=True, default="")
+    vehicle_no = models.CharField("车牌号", max_length=20, blank=True, default="")
+    dock_code = models.CharField("月台编码", max_length=20, blank=True, default="")
     depart_eta = models.DateTimeField("预计发车", null=True, blank=True)
 
     class Meta:
         verbose_name = "装车任务头扩展"
         verbose_name_plural = "装车任务头扩展"
         indexes = [
-            models.Index(fields=["trip_no"],    name="ix_loadtsk_trip"),
+            models.Index(fields=["trip_no"], name="ix_loadtsk_trip"),
             models.Index(fields=["vehicle_no"], name="ix_loadtsk_veh"),
-            models.Index(fields=["dock_code"],  name="ix_loadtsk_dock"),
+            models.Index(fields=["dock_code"], name="ix_loadtsk_dock"),
             models.Index(fields=["depart_eta"], name="ix_loadtsk_eta"),
         ]
 
     @classmethod
-    def expected_task_type(cls): return "LOAD"
+    def expected_task_type(cls):
+        return "LOAD"
 
     def clean(self):
         super().clean()
@@ -1945,21 +2355,33 @@ class LoadTaskExtra(TaskExtraBase):
         self.full_clean()
         return super().save(*args, **kwargs)
 
+
 class LoadLineExtra(TaskLineExtraBase):
     """装车行扩展"""
+
     to_container = models.ForeignKey(
-        "locations.Container", on_delete=models.PROTECT,
-        null=True, blank=True, related_name="load_lines", verbose_name="目标容器"
+        "locations.Container",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="load_lines",
+        verbose_name="目标容器",
     )
-    to_container_no   = models.CharField("目标容器号(冗余)", max_length=60, blank=True, default="")
+    to_container_no = models.CharField("目标容器号(冗余)", max_length=60, blank=True, default="")
     container_seal_no = models.CharField("容器封签号(可选)", max_length=30, blank=True, default="")
 
     loaded_at = models.DateTimeField("装载时间", null=True, blank=True)
     loaded_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
-        null=True, blank=True, related_name="loaded_lines", verbose_name="装载人"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="loaded_lines",
+        verbose_name="装载人",
     )
-    gross_weight_kg = models.DecimalField("毛重(kg)", max_digits=10, decimal_places=3, null=True, blank=True)
+    gross_weight_kg = models.DecimalField(
+        "毛重(kg)", max_digits=10, decimal_places=3, null=True, blank=True
+    )
 
     class Meta:
         verbose_name = "装车扩展"
@@ -1967,18 +2389,19 @@ class LoadLineExtra(TaskLineExtraBase):
         constraints = [
             # OneToOne(line) 已唯一，去掉重复 UniqueConstraint
             models.CheckConstraint(
-                check=models.Q(gross_weight_kg__isnull=True) | models.Q(gross_weight_kg__gte=0),
+                condition=models.Q(gross_weight_kg__isnull=True) | models.Q(gross_weight_kg__gte=0),
                 name="ck_load_gw_nonneg",
             ),
         ]
         indexes = [
-            models.Index(fields=["to_container"],      name="ix_loa_tcont"),
-            models.Index(fields=["to_container_no"],   name="ix_loa_tcontno"),
+            models.Index(fields=["to_container"], name="ix_loa_tcont"),
+            models.Index(fields=["to_container_no"], name="ix_loa_tcontno"),
             models.Index(fields=["container_seal_no"], name="ix_loa_cseal"),
         ]
 
     @classmethod
-    def expected_task_type(cls): return "LOAD"
+    def expected_task_type(cls):
+        return "LOAD"
 
     def clean(self):
         super().clean()
@@ -2008,13 +2431,15 @@ class LoadLineExtra(TaskLineExtraBase):
         self.full_clean()
         return super().save(*args, **kwargs)
 
+
 # ==发运
 class DispatchTaskExtra(TaskExtraBase):
     """发运头：交接清单/承运/服务/波次"""
-    manifest_no  = models.CharField("交接清单号", max_length=40, blank=True, default="")
-    carrier_code = models.CharField("承运商",     max_length=20, blank=True, default="")
-    service_level= models.CharField("服务级别",   max_length=20, blank=True, default="")
-    wave_no      = models.CharField("波次号",     max_length=30, blank=True, default="")
+
+    manifest_no = models.CharField("交接清单号", max_length=40, blank=True, default="")
+    carrier_code = models.CharField("承运商", max_length=20, blank=True, default="")
+    service_level = models.CharField("服务级别", max_length=20, blank=True, default="")
+    wave_no = models.CharField("波次号", max_length=30, blank=True, default="")
 
     class Meta:
         verbose_name = "发运任务头扩展"
@@ -2023,13 +2448,13 @@ class DispatchTaskExtra(TaskExtraBase):
             models.UniqueConstraint(fields=["task"], name="ux_dsptsk_task"),
             models.CheckConstraint(
                 name="ck_dsp_srv_car",
-                check=(models.Q(service_level="") | ~models.Q(carrier_code="")),
+                condition=(models.Q(service_level="") | ~models.Q(carrier_code="")),
             ),
         ]
         indexes = [
-            models.Index(fields=["manifest_no"],  name="ix_dsptsk_man"),
+            models.Index(fields=["manifest_no"], name="ix_dsptsk_man"),
             models.Index(fields=["carrier_code"], name="ix_dsptsk_car"),
-            models.Index(fields=["wave_no"],      name="ix_dsptsk_wave"),
+            models.Index(fields=["wave_no"], name="ix_dsptsk_wave"),
         ]
 
     @classmethod
@@ -2048,27 +2473,42 @@ class DispatchTaskExtra(TaskExtraBase):
         self.full_clean()
         return super().save(*args, **kwargs)
 
+
 class DispatchLineExtra(TaskLineExtraBase):
     """发运行扩展：包裹容器+运单信息+交接审计"""
+
     package_container = models.ForeignKey(
-        "locations.Container", on_delete=models.PROTECT,
-        null=True, blank=True, related_name="dispatch_lines", verbose_name="包裹容器"
+        "locations.Container",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="dispatch_lines",
+        verbose_name="包裹容器",
     )
     package_lpn = models.CharField("包裹LPN", max_length=60, blank=True, default="")
 
     carrier_code = models.CharField("承运商(可覆盖头)", max_length=20, blank=True, default="")
-    waybill_no   = models.CharField("运单号", max_length=80, blank=True, default="")
-    route_code   = models.CharField("线路编码(可覆盖头)", max_length=20, blank=True, default="")
+    waybill_no = models.CharField("运单号", max_length=80, blank=True, default="")
+    route_code = models.CharField("线路编码(可覆盖头)", max_length=20, blank=True, default="")
 
     qty_dispatch = models.DecimalField("发运数", max_digits=18, decimal_places=4, default=0)
-    base_uom = models.ForeignKey(ProductUom, verbose_name="基本单位" , on_delete=models.PROTECT, related_name="dispatch_base_of_products")
-    piece_no     = models.PositiveIntegerField("分件序号", null=True, blank=True)
-    piece_total  = models.PositiveIntegerField("总件数",   null=True, blank=True)
+    base_uom = models.ForeignKey(
+        ProductUom,
+        verbose_name="基本单位",
+        on_delete=models.PROTECT,
+        related_name="dispatch_base_of_products",
+    )
+    piece_no = models.PositiveIntegerField("分件序号", null=True, blank=True)
+    piece_total = models.PositiveIntegerField("总件数", null=True, blank=True)
 
     handed_over_at = models.DateTimeField("交接时间", null=True, blank=True)
     handed_over_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
-        null=True, blank=True, related_name="dispatch_handover_done", verbose_name="交接人"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="dispatch_handover_done",
+        verbose_name="交接人",
     )
 
     class Meta:
@@ -2078,15 +2518,15 @@ class DispatchLineExtra(TaskLineExtraBase):
             # OneToOne(line) 已唯一，这里不再重复 UniqueConstraint
             models.CheckConstraint(
                 name="ck_dsp_piece_consistency",
-                check=(
-                    (Q(piece_no__isnull=True) & Q(piece_total__isnull=True)) |
-                    (Q(piece_no__gt=0) & Q(piece_total__gt=0) & Q(piece_no__lte=F("piece_total")))
+                condition=(
+                    (Q(piece_no__isnull=True) & Q(piece_total__isnull=True))
+                    | (Q(piece_no__gt=0) & Q(piece_total__gt=0) & Q(piece_no__lte=F("piece_total")))
                 ),
             ),
         ]
         indexes = [
             models.Index(fields=["package_container"], name="ix_dsp_pkg_cont"),
-            models.Index(fields=["package_lpn"],       name="ix_dsp_pkg_lpn"),
+            models.Index(fields=["package_lpn"], name="ix_dsp_pkg_lpn"),
             models.Index(fields=["carrier_code", "waybill_no"], name="ix_dsp_car_wb"),
             models.Index(fields=["route_code"], name="ix_dsp_route"),
         ]
@@ -2124,26 +2564,27 @@ class DispatchLineExtra(TaskLineExtraBase):
         # 1) 严格校验
         self.full_clean()
         # 归一化编码：LPN/承运/线路常用大写，运单号保持大小写但去空格
-        if self.package_lpn: self.package_lpn = self.package_lpn.strip().upper()
-        if self.carrier_code: self.carrier_code = self.carrier_code.strip().upper()
-        if self.route_code:   self.route_code   = self.route_code.strip().upper()
-        if self.waybill_no:   self.waybill_no   = self.waybill_no.strip()
+        if self.package_lpn:
+            self.package_lpn = self.package_lpn.strip().upper()
+        if self.carrier_code:
+            self.carrier_code = self.carrier_code.strip().upper()
+        if self.route_code:
+            self.route_code = self.route_code.strip().upper()
+        if self.waybill_no:
+            self.waybill_no = self.waybill_no.strip()
 
         # 有容器但没填 LPN 时，冗余回填
         if self.package_container_id and not self.package_lpn:
             self.package_lpn = (self.package_container.container_no or "").strip().upper()
 
-
         # 2) 先保存扩展本身
         ret = super().save(*args, **kwargs)
-        total = getattr(self, 'qty_dispatch', None)
+        total = getattr(self, "qty_dispatch", None)
         # 3) 同步到任务行进度（覆盖式重算）
         line = getattr(self, "line", None)
         if line_id := getattr(self, "line_id", None):
             # 行级并发保护（可选）
-            (WmsTaskLine.objects
-             .filter(pk=line_id)
-             .update(qty_done=total))
+            (WmsTaskLine.objects.filter(pk=line_id).update(qty_done=total))
 
             # 若当前实例(内存中的,上面是直接操作数据库)里还要马上读取最新值，手动回填：
             if line is not None:
@@ -2154,16 +2595,17 @@ class DispatchLineExtra(TaskLineExtraBase):
                 qty_plan = getattr(line, "qty_plan", None)
                 if qty_plan is None:
                     # 无计划也可按“>0即完成”的口径触发；如不需要可去掉
-                    should_finish = (total > 0)
+                    should_finish = total > 0
                 else:
-                    should_finish = (total >= qty_plan)
+                    should_finish = total >= qty_plan
 
                 if should_finish:
                     # by_user 从线程本地/请求上下文取；Admin 场景下可在表单保存 hook 内注入
                     by_user = getattr(self, "_by_user", None)  # 可由 Admin formset 注入
-                    from allapp.tasking.services import finalize_receive_line
+
                     try:
                         from allapp.tasking.services import finalize_task_line
+
                         task = getattr(line, "task", None)
                         ctx, ctx_text = build_log_payload(task=task, user=by_user)
                         logger.info(
@@ -2172,7 +2614,9 @@ class DispatchLineExtra(TaskLineExtraBase):
                             self.line_id,
                             extra=ctx,
                         )
-                        result = finalize_task_line(self.line_id, by_user=by_user, trigger="AUTO_ON_REACH_PLAN")
+                        result = finalize_task_line(
+                            self.line_id, by_user=by_user, trigger="AUTO_ON_REACH_PLAN"
+                        )
                         logger.info(
                             "tasking.line.auto_finalize.completed %s line_id=%s task_status=%s",
                             ctx_text,
@@ -2232,7 +2676,7 @@ class ReplenishmentPolicy(BaseModel):
                 name="ux_replen_policy_scope",
             ),
             models.CheckConstraint(
-                check=Q(min_qty__gte=0) & Q(target_qty__gt=F("min_qty")),
+                condition=Q(min_qty__gte=0) & Q(target_qty__gt=F("min_qty")),
                 name="ck_replen_policy_qty",
             ),
         ]
@@ -2241,9 +2685,7 @@ class ReplenishmentPolicy(BaseModel):
                 fields=["warehouse", "owner", "product", "is_active"],
                 name="ix_replen_policy_scope",
             ),
-            models.Index(
-                fields=["target_location", "is_active"], name="ix_replen_policy_target"
-            ),
+            models.Index(fields=["target_location", "is_active"], name="ix_replen_policy_target"),
         ]
         permissions = [
             ("manage_replenishment_policy", "管理补货策略"),
@@ -2276,9 +2718,12 @@ class ReplenishmentPolicy(BaseModel):
             ):
                 errors["target_location"] = "目标库位已停用或冻结。"
         if self.product_id and self.replenish_uom_id:
-            if not self.replenish_uom.is_active or not self.product.packages.filter(
-                uom_id=self.replenish_uom_id, is_active=True
-            ).exists():
+            if (
+                not self.replenish_uom.is_active
+                or not self.product.packages.filter(
+                    uom_id=self.replenish_uom_id, is_active=True
+                ).exists()
+            ):
                 errors["replenish_uom"] = "补货单位必须存在于商品包装层级中。"
         if self.source_zone_type == ZoneType.PICK:
             errors["source_zone_type"] = "来源区域不能是拣选区。"
@@ -2335,15 +2780,13 @@ class ReplenishmentRequest(BaseModel):
         verbose_name = "补货申请"
         verbose_name_plural = "补货申请"
         indexes = [
-            models.Index(
-                fields=["warehouse", "status", "created_at"], name="ix_replen_req_queue"
-            ),
+            models.Index(fields=["warehouse", "status", "created_at"], name="ix_replen_req_queue"),
             models.Index(
                 fields=["created_by", "status", "created_at"], name="ix_replen_req_creator"
             ),
         ]
         constraints = [
-            models.CheckConstraint(check=Q(requested_qty__gt=0), name="ck_replen_req_qty")
+            models.CheckConstraint(condition=Q(requested_qty__gt=0), name="ck_replen_req_qty")
         ]
         permissions = [
             ("request_replenishment", "申请补货"),
@@ -2385,10 +2828,12 @@ class ReplenishmentRequest(BaseModel):
 
 class ReplenishTaskExtra(TaskExtraBase):
     """补货头：触发类型/默认来源目标区域/策略码（头部只放默认与策略）"""
+
     trigger = models.CharField(
-        "触发类型", max_length=10,
+        "触发类型",
+        max_length=10,
         choices=[("MINMAX", "最小最大"), ("DEMAND", "需求驱动"), ("MANUAL", "手工申请")],
-        default="MINMAX"
+        default="MINMAX",
     )
     policy = models.ForeignKey(
         "tasking.ReplenishmentPolicy",
@@ -2405,8 +2850,8 @@ class ReplenishTaskExtra(TaskExtraBase):
         related_name="task_extra",
     )
     demand_order_ids = models.JSONField("关联需求订单ID", default=list, blank=True)
-    src_zone    = models.CharField("默认来源区域", max_length=20, blank=True, default="")
-    dst_zone    = models.CharField("默认目标区域", max_length=20, blank=True, default="")
+    src_zone = models.CharField("默认来源区域", max_length=20, blank=True, default="")
+    dst_zone = models.CharField("默认目标区域", max_length=20, blank=True, default="")
     policy_code = models.CharField("策略码", max_length=20, blank=True, default="")
 
     class Meta:
@@ -2416,12 +2861,16 @@ class ReplenishTaskExtra(TaskExtraBase):
             models.UniqueConstraint(fields=["task"], name="ux_rpltsk_task"),
             models.CheckConstraint(
                 name="ck_rpl_zones_diff",
-                check=(models.Q(src_zone="") | models.Q(dst_zone="") | ~models.Q(src_zone=models.F("dst_zone"))),
+                condition=(
+                    models.Q(src_zone="")
+                    | models.Q(dst_zone="")
+                    | ~models.Q(src_zone=models.F("dst_zone"))
+                ),
             ),
         ]
         indexes = [
-            models.Index(fields=["src_zone"],    name="ix_rpltsk_src"),
-            models.Index(fields=["dst_zone"],    name="ix_rpltsk_dst"),
+            models.Index(fields=["src_zone"], name="ix_rpltsk_src"),
+            models.Index(fields=["dst_zone"], name="ix_rpltsk_dst"),
             models.Index(fields=["policy_code"], name="ix_rpltsk_pol"),
         ]
 
@@ -2440,22 +2889,30 @@ class ReplenishTaskExtra(TaskExtraBase):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
 class ReplenishLineExtra(TaskLineExtraBase):
     """补货：来源/目标库位与（可选）LPN，及移动数量（基本单位）"""
 
     from_location = models.ForeignKey(
-        "locations.Location", on_delete=models.PROTECT,
-        related_name="replen_sources", verbose_name="来源库位",
-        null=True, blank=True,
+        "locations.Location",
+        on_delete=models.PROTECT,
+        related_name="replen_sources",
+        verbose_name="来源库位",
+        null=True,
+        blank=True,
     )
     to_location = models.ForeignKey(
-        "locations.Location", on_delete=models.PROTECT,
-        related_name="replen_targets", verbose_name="目标库位",
-        null=True, blank=True,
+        "locations.Location",
+        on_delete=models.PROTECT,
+        related_name="replen_targets",
+        verbose_name="目标库位",
+        null=True,
+        blank=True,
     )
 
     from_lpn = models.CharField("上游容器号", max_length=40, blank=True, default="", db_index=True)
-    to_lpn   = models.CharField("目标容器号", max_length=40, blank=True, default="", db_index=True)
+    to_lpn = models.CharField("目标容器号", max_length=40, blank=True, default="", db_index=True)
 
     # 展开 DEC_QTY
     qty_move = models.DecimalField("补货数", max_digits=14, decimal_places=4, default=0)
@@ -2465,21 +2922,21 @@ class ReplenishLineExtra(TaskLineExtraBase):
         verbose_name_plural = "补货扩展"
         constraints = [
             # line 是 OneToOne，不需要再加唯一约束
-            models.CheckConstraint(check=Q(qty_move__gte=0), name="ck_rpl_qmv_ge0"),
+            models.CheckConstraint(condition=Q(qty_move__gte=0), name="ck_rpl_qmv_ge0"),
             models.CheckConstraint(
                 name="ck_rpl_has_from",
-                check=Q(from_location__isnull=False) | ~Q(from_lpn=""),
+                condition=Q(from_location__isnull=False) | ~Q(from_lpn=""),
             ),
             models.CheckConstraint(
                 name="ck_rpl_has_to",
-                check=Q(to_location__isnull=False) | ~Q(to_lpn=""),
+                condition=Q(to_location__isnull=False) | ~Q(to_lpn=""),
             ),
         ]
         indexes = [
             models.Index(fields=["from_location"], name="ix_rpl_floc"),
-            models.Index(fields=["to_location"],   name="ix_rpl_tloc"),
-            models.Index(fields=["from_lpn"],      name="ix_rpl_flpn"),
-            models.Index(fields=["to_lpn"],        name="ix_rpl_tlpn"),
+            models.Index(fields=["to_location"], name="ix_rpl_tloc"),
+            models.Index(fields=["from_lpn"], name="ix_rpl_flpn"),
+            models.Index(fields=["to_lpn"], name="ix_rpl_tlpn"),
             models.Index(fields=["from_location", "to_location"], name="ix_rpl_floc_tloc"),
         ]
 
@@ -2504,13 +2961,16 @@ class ReplenishLineExtra(TaskLineExtraBase):
         f_lpn = (self.from_lpn or "").strip().upper()
         t_lpn = (self.to_lpn or "").strip().upper()
         same_loc = (
-            self.from_location_id and self.to_location_id and
-            self.from_location_id == self.to_location_id
+            self.from_location_id
+            and self.to_location_id
+            and self.from_location_id == self.to_location_id
         ) or (not self.from_location_id and not self.to_location_id)
-        same_lpn = (f_lpn == t_lpn)
+        same_lpn = f_lpn == t_lpn
 
         if same_loc and same_lpn:
-            raise ValidationError({"__all__": "来源与目标完全一致，无法补货（请变更库位或LPN其一）"})
+            raise ValidationError(
+                {"__all__": "来源与目标完全一致，无法补货（请变更库位或LPN其一）"}
+            )
 
         # （可选）若要强制 >0：
         # from decimal import Decimal
@@ -2526,6 +2986,7 @@ class ReplenishLineExtra(TaskLineExtraBase):
         self.full_clean()
         return super().save(*args, **kwargs)
 
+
 # ==移位
 class RelocTaskExtra(TaskExtraBase):
     class Trigger(models.TextChoices):
@@ -2540,8 +3001,8 @@ class RelocTaskExtra(TaskExtraBase):
         DONE = "DONE", "已完成"
 
     """移仓/移库任务头：默认来源/目标区域 + 策略/原因"""
-    src_zone    = models.CharField("默认来源区域", max_length=20, blank=True, default="")
-    dst_zone    = models.CharField("默认目标区域", max_length=20, blank=True, default="")
+    src_zone = models.CharField("默认来源区域", max_length=20, blank=True, default="")
+    dst_zone = models.CharField("默认目标区域", max_length=20, blank=True, default="")
     policy_code = models.CharField("策略码", max_length=20, blank=True, default="")
     reason_code = models.CharField("原因码", max_length=20, blank=True, default="")
     trigger = models.CharField(
@@ -2596,8 +3057,8 @@ class RelocTaskExtra(TaskExtraBase):
             models.UniqueConstraint(fields=["task"], name="ux_rlctsk_task"),
         ]
         indexes = [
-            models.Index(fields=["src_zone"],    name="ix_rlctsk_src"),
-            models.Index(fields=["dst_zone"],    name="ix_rlctsk_dst"),
+            models.Index(fields=["src_zone"], name="ix_rlctsk_src"),
+            models.Index(fields=["dst_zone"], name="ix_rlctsk_dst"),
             models.Index(fields=["policy_code"], name="ix_rlctsk_pol"),
             models.Index(fields=["reason_code"], name="ix_rlctsk_rsn"),
         ]
@@ -2617,6 +3078,8 @@ class RelocTaskExtra(TaskExtraBase):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
 class RelocLineExtra(TaskLineExtraBase):
     """
     移仓/移库 行 Extra（轻量）：
@@ -2624,19 +3087,26 @@ class RelocLineExtra(TaskLineExtraBase):
     - 移动数量（基本单位）
     - 行级原因码（覆盖头部 reason_code）
     """
+
     from_location = models.ForeignKey(
-        "locations.Location", on_delete=models.PROTECT,
-        related_name="reloc_sources", verbose_name="来源库位",
-        null=True, blank=True,
+        "locations.Location",
+        on_delete=models.PROTECT,
+        related_name="reloc_sources",
+        verbose_name="来源库位",
+        null=True,
+        blank=True,
     )
     to_location = models.ForeignKey(
-        "locations.Location", on_delete=models.PROTECT,
-        related_name="reloc_targets", verbose_name="目标库位",
-        null=True, blank=True,
+        "locations.Location",
+        on_delete=models.PROTECT,
+        related_name="reloc_targets",
+        verbose_name="目标库位",
+        null=True,
+        blank=True,
     )
 
     from_lpn = models.CharField("上游容器号", max_length=60, blank=True, default="", db_index=True)
-    to_lpn   = models.CharField("目标容器号", max_length=60, blank=True, default="", db_index=True)
+    to_lpn = models.CharField("目标容器号", max_length=60, blank=True, default="", db_index=True)
     from_container = models.ForeignKey(
         "locations.Container",
         on_delete=models.PROTECT,
@@ -2662,21 +3132,21 @@ class RelocLineExtra(TaskLineExtraBase):
         verbose_name_plural = "移库扩展"
         constraints = [
             # line 是 OneToOne，无需再加唯一约束
-            models.CheckConstraint(check=Q(qty_move__gte=0), name="ck_rlc_qmv_ge0"),
+            models.CheckConstraint(condition=Q(qty_move__gte=0), name="ck_rlc_qmv_ge0"),
             models.CheckConstraint(
                 name="ck_rlc_has_from",
-                check=Q(from_location__isnull=False) | ~Q(from_lpn=""),
+                condition=Q(from_location__isnull=False) | ~Q(from_lpn=""),
             ),
             models.CheckConstraint(
                 name="ck_rlc_has_to",
-                check=Q(to_location__isnull=False) | ~Q(to_lpn=""),
+                condition=Q(to_location__isnull=False) | ~Q(to_lpn=""),
             ),
         ]
         indexes = [
             models.Index(fields=["from_location"], name="ix_rlc_floc"),
-            models.Index(fields=["to_location"],   name="ix_rlc_tloc"),
-            models.Index(fields=["from_lpn"],      name="ix_rlc_flpn"),
-            models.Index(fields=["to_lpn"],        name="ix_rlc_tlpn"),
+            models.Index(fields=["to_location"], name="ix_rlc_tloc"),
+            models.Index(fields=["from_lpn"], name="ix_rlc_flpn"),
+            models.Index(fields=["to_lpn"], name="ix_rlc_tlpn"),
             models.Index(fields=["from_location", "to_location"], name="ix_rlc_floc_tloc"),
         ]
 
@@ -2699,11 +3169,17 @@ class RelocLineExtra(TaskLineExtraBase):
         f_lpn = (self.from_lpn or "").strip().upper()
         t_lpn = (self.to_lpn or "").strip().upper()
         same_loc = (
-            (self.from_location_id and self.to_location_id and self.from_location_id == self.to_location_id)
+            (
+                self.from_location_id
+                and self.to_location_id
+                and self.from_location_id == self.to_location_id
+            )
         ) or (not self.from_location_id and not self.to_location_id)
-        same_lpn = (f_lpn == t_lpn)
+        same_lpn = f_lpn == t_lpn
         if same_loc and same_lpn:
-            raise ValidationError({"__all__": "来源与目标完全一致，无法移库（请变更库位或LPN其一）"})
+            raise ValidationError(
+                {"__all__": "来源与目标完全一致，无法移库（请变更库位或LPN其一）"}
+            )
 
         # 3) 与任务头默认区域的软一致性（仅当你能拿到头部 Extra）
         #    注意 related_name="%(class)s" 生成的是小写名：reloctaskextra
@@ -2795,7 +3271,9 @@ class RelocationRequest(BaseModel):
         verbose_name_plural = "移库申请"
         indexes = [
             models.Index(fields=["warehouse", "status", "created_at"], name="ix_reloc_req_queue"),
-            models.Index(fields=["created_by", "status", "created_at"], name="ix_reloc_req_creator"),
+            models.Index(
+                fields=["created_by", "status", "created_at"], name="ix_reloc_req_creator"
+            ),
         ]
         permissions = [
             ("request_relocation", "申请移库"),
@@ -2831,7 +3309,9 @@ class RelocationRequestLine(BaseModel):
         "tasking.RelocationRequest", on_delete=models.PROTECT, related_name="lines"
     )
     inventory_detail = models.ForeignKey(
-        "inventory.InventoryDetail", on_delete=models.PROTECT, related_name="relocation_request_lines"
+        "inventory.InventoryDetail",
+        on_delete=models.PROTECT,
+        related_name="relocation_request_lines",
     )
     requested_qty = models.DecimalField("申请数量", max_digits=18, decimal_places=4)
     to_location = models.ForeignKey(
@@ -2850,7 +3330,7 @@ class RelocationRequestLine(BaseModel):
         verbose_name = "移库申请行"
         verbose_name_plural = "移库申请行"
         constraints = [
-            models.CheckConstraint(check=Q(requested_qty__gt=0), name="ck_reloc_req_line_qty")
+            models.CheckConstraint(condition=Q(requested_qty__gt=0), name="ck_reloc_req_line_qty")
         ]
         indexes = [
             models.Index(fields=["request", "inventory_detail"], name="ix_reloc_req_line_src")
@@ -2902,7 +3382,9 @@ class RelocationReservation(BaseModel):
         "tasking.WmsTaskLine", on_delete=models.PROTECT, related_name="relocation_reservation"
     )
     inventory_detail = models.ForeignKey(
-        "inventory.InventoryDetail", on_delete=models.PROTECT, related_name="relocation_reservations"
+        "inventory.InventoryDetail",
+        on_delete=models.PROTECT,
+        related_name="relocation_reservations",
     )
     qty = models.DecimalField("预留数量", max_digits=18, decimal_places=4)
     status = models.CharField(
@@ -2914,9 +3396,7 @@ class RelocationReservation(BaseModel):
     class Meta:
         verbose_name = "移库预留"
         verbose_name_plural = "移库预留"
-        constraints = [
-            models.CheckConstraint(check=Q(qty__gt=0), name="ck_reloc_res_qty")
-        ]
+        constraints = [models.CheckConstraint(condition=Q(qty__gt=0), name="ck_reloc_res_qty")]
         indexes = [
             models.Index(fields=["inventory_detail", "status"], name="ix_reloc_res_src_status")
         ]
@@ -2935,17 +3415,22 @@ class RelocationReservation(BaseModel):
         self.full_clean()
         return super().save(*args, **kwargs)
 
+
 # ==盘点头
 class CountTaskExtra(TaskExtraBase):
     """盘点头：范围/方式/是否冻结/复盘阈值等（统一任务级过账）"""
+
     scope = models.CharField(
-        "盘点范围", max_length=10,
+        "盘点范围",
+        max_length=10,
         choices=[("LOC", "库位"), ("ZONE", "区域"), ("SKU", "商品"), ("ALL", "全仓")],
-        default="LOC"
+        default="LOC",
     )
     blind = models.BooleanField("盲盘", default=True)
     freeze = models.BooleanField("冻结库存", default=True)
-    recount_threshold = models.DecimalField("复盘阈值(绝对数)", max_digits=14, decimal_places=4, default=0)
+    recount_threshold = models.DecimalField(
+        "复盘阈值(绝对数)", max_digits=14, decimal_places=4, default=0
+    )
     scope_payload = models.JSONField("盘点范围条件", default=dict, blank=True)
     root_task = models.ForeignKey(
         "tasking.WmsTask",
@@ -2974,7 +3459,7 @@ class CountTaskExtra(TaskExtraBase):
             # models.UniqueConstraint(fields=["task"], name="ux_cnttsk_task"),
             models.CheckConstraint(
                 name="ck_cnt_recount_ge0",
-                check=Q(recount_threshold__gte=0),
+                condition=Q(recount_threshold__gte=0),
             ),
         ]
         indexes = [
@@ -3003,8 +3488,12 @@ class CountScopeLock(models.Model):
         verbose_name="当前盘点任务",
     )
     owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
-    location = models.ForeignKey("locations.Location", on_delete=models.PROTECT, verbose_name="库位")
+    warehouse = models.ForeignKey(
+        "locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库"
+    )
+    location = models.ForeignKey(
+        "locations.Location", on_delete=models.PROTECT, verbose_name="库位"
+    )
     product = models.ForeignKey(
         "products.Product", on_delete=models.PROTECT, null=True, blank=True, verbose_name="商品"
     )
@@ -3037,52 +3526,74 @@ class CountScopeLock(models.Model):
     def __str__(self):
         return self.lock_key
 
+
 # ==盘点行
 class CountLineExtra(TaskLineExtraBase):
     """盘点：账面/实盘/差异 + 可选批次/效期/LPN"""
-    class CountOrder(models.TextChoices):
-        FIRST   = "FIRST",   "首次盘点"
-        SECOND  = "SECOND",  "第二次盘点"
-        THIRD   = "THIRD",   "第三次盘点"
 
-    lot_no   = models.CharField("批号", max_length=60, blank=True, default="", db_index=True)
+    class CountOrder(models.TextChoices):
+        FIRST = "FIRST", "首次盘点"
+        SECOND = "SECOND", "第二次盘点"
+        THIRD = "THIRD", "第三次盘点"
+
+    lot_no = models.CharField("批号", max_length=60, blank=True, default="", db_index=True)
     exp_date = models.DateField("有效期至", null=True, blank=True, db_index=True)
-    lpn_no   = models.CharField("LPN/容器号", max_length=60, blank=True, default="", db_index=True)
+    lpn_no = models.CharField("LPN/容器号", max_length=60, blank=True, default="", db_index=True)
 
     # 展开 DEC_QTY，避免未定义
-    qty_counted = models.DecimalField("实盘数", max_digits=18, decimal_places=4, default=Decimal("0"))
-    qty_book    = models.DecimalField("账面数(快照)", max_digits=18, decimal_places=4, default=Decimal("0"))
-    qty_diff    = models.DecimalField("差异=实盘-账面", max_digits=18, decimal_places=4, default=Decimal("0"))
+    qty_counted = models.DecimalField(
+        "实盘数", max_digits=18, decimal_places=4, default=Decimal("0")
+    )
+    qty_book = models.DecimalField(
+        "账面数(快照)", max_digits=18, decimal_places=4, default=Decimal("0")
+    )
+    qty_diff = models.DecimalField(
+        "差异=实盘-账面", max_digits=18, decimal_places=4, default=Decimal("0")
+    )
 
-    count_status=models.CharField( "是否已盘点", max_length=20, choices=[("NOT_COUNTED", "未盘"), ("COUNTED", "已盘")],default="NOT_COUNTED",)
-    method = models.CharField( "盘点方式", max_length=10, choices=[("BLIND", "盲盘"), ("VERIFY", "明盘")],default="BLIND",)
-    countorder=models.CharField( "盘点次序", max_length=10, choices=CountOrder.choices,default=CountOrder.FIRST)
+    count_status = models.CharField(
+        "是否已盘点",
+        max_length=20,
+        choices=[("NOT_COUNTED", "未盘"), ("COUNTED", "已盘")],
+        default="NOT_COUNTED",
+    )
+    method = models.CharField(
+        "盘点方式",
+        max_length=10,
+        choices=[("BLIND", "盲盘"), ("VERIFY", "明盘")],
+        default="BLIND",
+    )
+    countorder = models.CharField(
+        "盘点次序", max_length=10, choices=CountOrder.choices, default=CountOrder.FIRST
+    )
 
     class Meta:
         verbose_name = "盘点扩展"
         verbose_name_plural = "盘点扩展"
         constraints = [
             # line 是 OneToOne，无需再加唯一约束
-            models.CheckConstraint(check=Q(qty_counted__gte=0), name="ck_cnt_qc_ge0"),
-            models.CheckConstraint(check=Q(qty_book__gte=0),    name="ck_cnt_qb_ge0"),
+            models.CheckConstraint(condition=Q(qty_counted__gte=0), name="ck_cnt_qc_ge0"),
+            models.CheckConstraint(condition=Q(qty_book__gte=0), name="ck_cnt_qb_ge0"),
             # models.CheckConstraint(
             #     name="ck_cnt_diff_eq_c_minus_b",
-            #     check=Q(qty_diff=F("qty_counted") - F("qty_book")),
+            #     condition=Q(qty_diff=F("qty_counted") - F("qty_book")),
             # ),
             models.CheckConstraint(
                 name="ck_cnt_diff_eq_c_minus_b",
-                check=Q(
+                condition=Q(
                     qty_diff=ExpressionWrapper(
                         F("qty_counted") - F("qty_book"),
-                        output_field=DecimalField(max_digits=18, decimal_places=3),  # 按你的字段精度
+                        output_field=DecimalField(
+                            max_digits=18, decimal_places=3
+                        ),  # 按你的字段精度
                     )
                 ),
             ),
         ]
         indexes = [
-            models.Index(fields=["lot_no"],  name="ix_cnt_lot"),
+            models.Index(fields=["lot_no"], name="ix_cnt_lot"),
             models.Index(fields=["exp_date"], name="ix_cnt_exp"),
-            models.Index(fields=["lpn_no"],  name="ix_cnt_lpn"),
+            models.Index(fields=["lpn_no"], name="ix_cnt_lpn"),
         ]
 
     def _get_task_status(self):
@@ -3093,7 +3604,6 @@ class CountLineExtra(TaskLineExtraBase):
     def expected_task_type(cls):
         return "COUNT"
 
-
     def clean(self):
         super().clean()
         # 若需要：校验库位属于任务仓库
@@ -3102,7 +3612,7 @@ class CountLineExtra(TaskLineExtraBase):
             if loc_wh and loc_wh != self.line.task.warehouse_id:
                 raise ValidationError({"__all__": "盘点库位不属于该任务仓库"})
         c = self.qty_counted or Decimal("0")
-        b = self.qty_book    or Decimal("0")
+        b = self.qty_book or Decimal("0")
         # 精度按你的字段 decimal_places 量化（假设 3 位）
         self.qty_diff = (c - b).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
         task = getattr(getattr(self, "line", None), "task", None)
@@ -3117,20 +3627,21 @@ class CountLineExtra(TaskLineExtraBase):
             extra=ctx,
         )
         if self.qty_counted > 0:
-            self.count_status="COUNTED"
+            self.count_status = "COUNTED"
 
     @transaction.atomic
     def save(self, *args, **kwargs):
-        by_user = kwargs.pop("by_user", None)   # 调用方传入 request.user
+        by_user = kwargs.pop("by_user", None)  # 调用方传入 request.user
 
         if self.lot_no:
             self.lot_no = self.lot_no.strip().upper()
+
         def _to_dec(x):
             return x if isinstance(x, Decimal) else Decimal(x or 0)
 
         update_fields = kwargs.get("update_fields")
 
-        if  _to_dec(self.qty_counted) > 0:
+        if _to_dec(self.qty_counted) > 0:
             self.count_status = "COUNTED"
             if update_fields is not None:
                 update_fields = set(update_fields)
@@ -3237,13 +3748,19 @@ class CountLineExtra(TaskLineExtraBase):
         # logger.debug("COUNTALINEEXTRA save completed")
         # return ret
 
+
 # == 质检头 ==
 class QCTaskExtra(TaskExtraBase):
     """质检头：策略/默认参数"""
+
     QC_POLICY = [("ALL", "全检"), ("RANDOM", "抽检"), ("NONE", "不检")]
 
-    policy = models.CharField("质检策略", max_length=10, choices=QC_POLICY, default="RANDOM", db_index=True)
-    sample_ratio = models.DecimalField("抽检比例(0~1]", max_digits=4, decimal_places=3, null=True, blank=True)
+    policy = models.CharField(
+        "质检策略", max_length=10, choices=QC_POLICY, default="RANDOM", db_index=True
+    )
+    sample_ratio = models.DecimalField(
+        "抽检比例(0~1]", max_digits=4, decimal_places=3, null=True, blank=True
+    )
     quarantine_zone = models.CharField("隔离区域", max_length=20, blank=True, default="")
     require_photo = models.BooleanField("需拍照留存", default=False)
 
@@ -3256,7 +3773,7 @@ class QCTaskExtra(TaskExtraBase):
             # RANDOM 时 0<ratio<=1；非 RANDOM 时不强制
             models.CheckConstraint(
                 name="ck_qc_ratio",
-                check=(~Q(policy="RANDOM")) | (Q(sample_ratio__gt=0) & Q(sample_ratio__lte=1)),
+                condition=(~Q(policy="RANDOM")) | (Q(sample_ratio__gt=0) & Q(sample_ratio__lte=1)),
             ),
         ]
         indexes = [
@@ -3272,18 +3789,31 @@ class QCTaskExtra(TaskExtraBase):
         if self.policy == "RANDOM":
             if self.sample_ratio is None or not (Decimal("0") < self.sample_ratio <= Decimal("1")):
                 raise ValidationError({"sample_ratio": "抽检策略下，抽检比例必须在 (0, 1]。"})
+
+
 # == 质检行 ==
 class QCLineExtra(TaskLineExtraBase):
     """质检行：检验结果与数量、去向等"""
+
     RESULT = [("", "未判定"), ("PASS", "合格"), ("REJECT", "不合格"), ("REWORK", "返工")]
 
-    result = models.CharField("结果", max_length=10, choices=RESULT, blank=True, default="", db_index=True)
-    qty_checked = models.DecimalField("检验数", max_digits=14, decimal_places=4, default=Decimal("0"))
+    result = models.CharField(
+        "结果", max_length=10, choices=RESULT, blank=True, default="", db_index=True
+    )
+    qty_checked = models.DecimalField(
+        "检验数", max_digits=14, decimal_places=4, default=Decimal("0")
+    )
     qty_pass = models.DecimalField("合格数", max_digits=14, decimal_places=4, default=Decimal("0"))
-    qty_reject = models.DecimalField("不合格数", max_digits=14, decimal_places=4, default=Decimal("0"))
+    qty_reject = models.DecimalField(
+        "不合格数", max_digits=14, decimal_places=4, default=Decimal("0")
+    )
     reason_code = models.CharField("不合格原因", max_length=20, blank=True, default="")
     to_quarantine_loc = models.ForeignKey(
-        "locations.Location", on_delete=models.PROTECT, null=True, blank=True, verbose_name="隔离库位"
+        "locations.Location",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        verbose_name="隔离库位",
     )
 
     class Meta:
@@ -3294,12 +3824,12 @@ class QCLineExtra(TaskLineExtraBase):
             # models.UniqueConstraint(fields=["line"], name="ux_qc_extra_line"),
             models.CheckConstraint(
                 name="ck_qc_num_ge0",
-                check=Q(qty_checked__gte=0) & Q(qty_pass__gte=0) & Q(qty_reject__gte=0),
+                condition=Q(qty_checked__gte=0) & Q(qty_pass__gte=0) & Q(qty_reject__gte=0),
             ),
             # 若希望严格等式可用以下约束（MySQL 8.0.16+ 生效）：
             models.CheckConstraint(
                 name="ck_qc_eq_checked_sum",
-                check=Q(qty_checked=F("qty_pass") + F("qty_reject")),
+                condition=Q(qty_checked=F("qty_pass") + F("qty_reject")),
             ),
         ]
         indexes = [
@@ -3315,12 +3845,18 @@ class QCLineExtra(TaskLineExtraBase):
         super().clean()
 
         # 1) 等式/边界的人类可读校验（与 DB 约束一致）
-        if (self.qty_checked or Decimal("0")) != (self.qty_pass or Decimal("0")) + (self.qty_reject or Decimal("0")):
+        if (self.qty_checked or Decimal("0")) != (self.qty_pass or Decimal("0")) + (
+            self.qty_reject or Decimal("0")
+        ):
             raise ValidationError({"qty_checked": "检验数必须等于 合格数 + 不合格数。"})
 
         # 2) 不合格/返工需给原因（按需放宽）
-        if (self.result in ("REJECT", "REWORK") or (self.qty_reject or 0) > 0) and not self.reason_code.strip():
-            raise ValidationError({"reason_code": "存在不合格数量或结果为不合格/返工时，必须填写原因。"})
+        if (
+            self.result in ("REJECT", "REWORK") or (self.qty_reject or 0) > 0
+        ) and not self.reason_code.strip():
+            raise ValidationError(
+                {"reason_code": "存在不合格数量或结果为不合格/返工时，必须填写原因。"}
+            )
 
         # 3) 隔离库位必须在任务仓库
         if self.to_quarantine_loc_id and self.line_id:
@@ -3332,10 +3868,16 @@ class QCLineExtra(TaskLineExtraBase):
         self.full_clean()
         return super().save(*args, **kwargs)
 
+
 # ==库存调整(含报损) 任务头==
 class AdjustTaskExtra(TaskExtraBase):
     ADJ_MODE = [("GENERAL", "一般调整"), ("SCRAP", "报损")]
-    ADJ_SCAN_POLICY = [("NONE", "不扫码"), ("LOC", "扫库位"), ("LOC_LPN", "库位+LPN"), ("DOUBLE", "双人复核")]
+    ADJ_SCAN_POLICY = [
+        ("NONE", "不扫码"),
+        ("LOC", "扫库位"),
+        ("LOC_LPN", "库位+LPN"),
+        ("DOUBLE", "双人复核"),
+    ]
 
     # 统一处置枚举（头/行共用）
     class DisposalChoices(models.TextChoices):
@@ -3347,8 +3889,12 @@ class AdjustTaskExtra(TaskExtraBase):
         DONATE = "DONATE", "捐赠"
         RECYCLE = "RECYCLE", "回收"
 
-    mode = models.CharField("模式", max_length=10, choices=ADJ_MODE, default="GENERAL", db_index=True)
-    scan_policy = models.CharField("扫码策略", max_length=10, choices=ADJ_SCAN_POLICY, default="LOC_LPN", db_index=True)
+    mode = models.CharField(
+        "模式", max_length=10, choices=ADJ_MODE, default="GENERAL", db_index=True
+    )
+    scan_policy = models.CharField(
+        "扫码策略", max_length=10, choices=ADJ_SCAN_POLICY, default="LOC_LPN", db_index=True
+    )
     require_photo = models.BooleanField("需拍照", default=False)
     default_reason_code = models.CharField("默认原因码", max_length=20, blank=True, default="")
     # 与行枚举一致
@@ -3373,10 +3919,12 @@ class AdjustTaskExtra(TaskExtraBase):
         ]
 
     @classmethod
-    def expected_task_type(cls): return "ADJUST"
+    def expected_task_type(cls):
+        return "ADJUST"
+
+
 # ==库存调整行==
 class AdjustLineExtra(TaskLineExtraBase):
-
     """库存调整行(含报损)：定位 + 数量 + 原因/处置快照"""
 
     # 统一处置枚举（头/行共用）
@@ -3389,12 +3937,13 @@ class AdjustLineExtra(TaskLineExtraBase):
         DONATE = "DONATE", "捐赠"
         RECYCLE = "RECYCLE", "回收"
 
-    location  = models.ForeignKey("locations.Location", on_delete=models.PROTECT,
-                                  null=True, blank=True, verbose_name="库位")
-    lpn_code  = models.CharField("LPN", max_length=40, blank=True, default="", db_index=True)
+    location = models.ForeignKey(
+        "locations.Location", on_delete=models.PROTECT, null=True, blank=True, verbose_name="库位"
+    )
+    lpn_code = models.CharField("LPN", max_length=40, blank=True, default="", db_index=True)
     delta_qty = models.DecimalField("调整数量(+增/-减)", max_digits=14, decimal_places=4)
 
-    reason_code   = models.CharField("原因码(快照)", max_length=20, blank=True, default="")
+    reason_code = models.CharField("原因码(快照)", max_length=20, blank=True, default="")
     disposal_code = models.CharField(
         "处置方式(快照)",
         max_length=10,
@@ -3405,8 +3954,7 @@ class AdjustLineExtra(TaskLineExtraBase):
     need_photo = models.BooleanField("需照片(快照)", default=False)
     checked = models.BooleanField("已复核", default=False, db_index=True)
     checked_by = models.ForeignKey(
-        "accounts.User", on_delete=models.PROTECT,
-        null=True, blank=True, verbose_name="复核人"
+        "accounts.User", on_delete=models.PROTECT, null=True, blank=True, verbose_name="复核人"
     )
     checked_at = models.DateTimeField("复核时间", null=True, blank=True)
 
@@ -3417,16 +3965,16 @@ class AdjustLineExtra(TaskLineExtraBase):
             # OneToOne 天然唯一；这条可删
             # models.UniqueConstraint(fields=["line"], name="ux_adj_extra_line"),
             # 调整数量不可为 0
-            models.CheckConstraint(name="ck_adj_delta_ne0", check=~Q(delta_qty=0)),
+            models.CheckConstraint(name="ck_adj_delta_ne0", condition=~Q(delta_qty=0)),
             # 若填了处置方式(非空)，数量必须为负（报损类）
             models.CheckConstraint(
                 name="ck_adj_scrap_neg",
-                check=Q(disposal_code="") | Q(delta_qty__lt=0),
+                condition=Q(disposal_code="") | Q(delta_qty__lt=0),
             ),
             # 至少定位到库位或 LPN 之一
             models.CheckConstraint(
                 name="ck_adj_loc_or_lpn",
-                check=Q(location__isnull=False) | ~Q(lpn_code=""),
+                condition=Q(location__isnull=False) | ~Q(lpn_code=""),
             ),
         ]
         indexes = [
@@ -3437,7 +3985,8 @@ class AdjustLineExtra(TaskLineExtraBase):
         ]
 
     @classmethod
-    def expected_task_type(cls): return "ADJUST"
+    def expected_task_type(cls):
+        return "ADJUST"
 
     def clean(self):
         super().clean()
@@ -3463,28 +4012,50 @@ class AdjustLineExtra(TaskLineExtraBase):
         self.full_clean()
         return super().save(*args, **kwargs)
 
-#容器使用
+
+# 容器使用
 class ContainerUsage(BaseModel):
-    PURPOSE = [("OUTBOUND","出库"), ("INBOUND","入库"), ("MOVE","移库"), ("COUNT","盘点")]
-    STATUS  = [("OPEN","进行中"), ("CLOSED","已结束")]
-    QC      = [("PENDING","待复核"), ("PASSED","通过"), ("FAILED","未过")]
+    PURPOSE = [("OUTBOUND", "出库"), ("INBOUND", "入库"), ("MOVE", "移库"), ("COUNT", "盘点")]
+    STATUS = [("OPEN", "进行中"), ("CLOSED", "已结束")]
+    QC = [("PENDING", "待复核"), ("PASSED", "通过"), ("FAILED", "未过")]
 
-    container = models.ForeignKey("locations.Container", on_delete=models.PROTECT, related_name="usages", verbose_name="容器")
-    task = models.ForeignKey("tasking.WmsTask", on_delete=models.PROTECT, related_name="container_usages", verbose_name="任务")
-    purpose = models.CharField("用途", max_length=10, choices=PURPOSE, db_index=True, default="OUTBOUND")
-    status = models.CharField("使用状态", max_length=8, choices=STATUS, db_index=True, default="OPEN")
+    container = models.ForeignKey(
+        "locations.Container", on_delete=models.PROTECT, related_name="usages", verbose_name="容器"
+    )
+    task = models.ForeignKey(
+        "tasking.WmsTask",
+        on_delete=models.PROTECT,
+        related_name="container_usages",
+        verbose_name="任务",
+    )
+    purpose = models.CharField(
+        "用途", max_length=10, choices=PURPOSE, db_index=True, default="OUTBOUND"
+    )
+    status = models.CharField(
+        "使用状态", max_length=8, choices=STATUS, db_index=True, default="OPEN"
+    )
 
-    qc_status = models.CharField("复核状态", max_length=10, choices=QC, default="PENDING", db_index=True)
-    qc_by  = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
-                               related_name="container_usages_qc_by", verbose_name="复核人")
-    qc_at  = models.DateTimeField("复核时间", null=True, blank=True)
+    qc_status = models.CharField(
+        "复核状态", max_length=10, choices=QC, default="PENDING", db_index=True
+    )
+    qc_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="container_usages_qc_by",
+        verbose_name="复核人",
+    )
+    qc_at = models.DateTimeField("复核时间", null=True, blank=True)
     qc_note = models.CharField("复核备注", max_length=120, blank=True, default="")
     on_hold = models.BooleanField("拦截发运", default=False)
 
-    gross_weight_kg = models.DecimalField("毛重(kg)", max_digits=10, decimal_places=3, null=True, blank=True)
-    carrier_code  = models.CharField("承运商", max_length=20, blank=True, default="")
+    gross_weight_kg = models.DecimalField(
+        "毛重(kg)", max_digits=10, decimal_places=3, null=True, blank=True
+    )
+    carrier_code = models.CharField("承运商", max_length=20, blank=True, default="")
     service_level = models.CharField("服务级别", max_length=20, blank=True, default="")
-    tracking_no   = models.CharField("运单号", max_length=50, blank=True, default="", db_index=True)
+    tracking_no = models.CharField("运单号", max_length=50, blank=True, default="", db_index=True)
 
     closed_at = models.DateTimeField("结束时间", null=True, blank=True)
     memo = models.CharField("备注", max_length=120, blank=True, default="")
@@ -3494,34 +4065,39 @@ class ContainerUsage(BaseModel):
         verbose_name_plural = "容器使用"
         constraints = [
             # 同一任务+容器+用途唯一
-            models.UniqueConstraint(fields=["task", "container", "purpose"], name="ux_usage_task_container_purpose"),
-
+            models.UniqueConstraint(
+                fields=["task", "container", "purpose"], name="ux_usage_task_container_purpose"
+            ),
             # 同一容器+用途下，最多一条 OPEN（表达式唯一；MySQL 8 需确认支持）
             models.UniqueConstraint(
                 F("container"),
                 F("purpose"),
-                Case(When(status="OPEN", then=Value(1)), default=Value(None), output_field=IntegerField()),
+                Case(
+                    When(status="OPEN", then=Value(1)),
+                    default=Value(None),
+                    output_field=IntegerField(),
+                ),
                 name="ux_usage_cont_purp_open",
             ),
-
             # 状态-时间成对
             models.CheckConstraint(
                 name="ck_usage_open_no_closed_at",
-                check=Q(status="OPEN", closed_at__isnull=True) | ~Q(status="OPEN"),
+                condition=Q(status="OPEN", closed_at__isnull=True) | ~Q(status="OPEN"),
             ),
             models.CheckConstraint(
                 name="ck_usage_closed_has_closed_at",
-                check=Q(status="CLOSED", closed_at__isnull=False) | ~Q(status="CLOSED"),
+                condition=Q(status="CLOSED", closed_at__isnull=False) | ~Q(status="CLOSED"),
             ),
-
             # 毛重非负
             models.CheckConstraint(
-                check=Q(gross_weight_kg__isnull=True) | Q(gross_weight_kg__gte=0),
+                condition=Q(gross_weight_kg__isnull=True) | Q(gross_weight_kg__gte=0),
                 name="ck_usage_gw_nonneg",
             ),
         ]
         indexes = [
-            models.Index(fields=["container", "purpose", "status"], name="ix_usage_cont_purpose_status"),
+            models.Index(
+                fields=["container", "purpose", "status"], name="ix_usage_cont_purpose_status"
+            ),
             models.Index(fields=["task", "purpose"], name="ix_usage_task_purpose"),
             models.Index(fields=["carrier_code", "tracking_no"], name="ix_usage_carrier_track"),
         ]
@@ -3529,7 +4105,9 @@ class ContainerUsage(BaseModel):
     def clean(self):
         super().clean()
         # 仓库一致
-        if getattr(self.task, "warehouse_id", None) and getattr(self.container, "warehouse_id", None):
+        if getattr(self.task, "warehouse_id", None) and getattr(
+            self.container, "warehouse_id", None
+        ):
             if self.task.warehouse_id != self.container.warehouse_id:
                 raise ValidationError({"task": "任务仓库与容器所属仓库不一致"})
 
@@ -3549,8 +4127,13 @@ class ContainerUsage(BaseModel):
                 limit = Decimal(tare) + Decimal(payload)
                 if gw > limit:
                     raise ValidationError({"gross_weight_kg": "毛重超过容器额定承重上限"})
-            if getattr(self.container, "rated_payload_kg", None) is not None and getattr(self.container, "tare_weight_kg", None) is not None:
-                if gw - Decimal(self.container.tare_weight_kg) > Decimal(self.container.rated_payload_kg):
+            if (
+                getattr(self.container, "rated_payload_kg", None) is not None
+                and getattr(self.container, "tare_weight_kg", None) is not None
+            ):
+                if gw - Decimal(self.container.tare_weight_kg) > Decimal(
+                    self.container.rated_payload_kg
+                ):
                     raise ValidationError({"gross_weight_kg": "净载超过容器额定载重上限"})
 
     def save(self, *args, **kwargs):

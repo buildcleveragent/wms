@@ -7,9 +7,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 class DropShipClientContractTests(SimpleTestCase):
     def test_upload_sends_selected_warehouse_as_multipart_form_data(self):
-        request_source = (
-            REPO_ROOT / "wmsownersale" / "utils" / "request.js"
-        ).read_text(encoding="utf-8")
+        request_source = (REPO_ROOT / "wmsownersale" / "utils" / "request.js").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("importDropShipExcel(filePath, warehouseId)", request_source)
         self.assertIn("formData:", request_source)
@@ -20,9 +20,9 @@ class DropShipClientContractTests(SimpleTestCase):
         page_source = (
             REPO_ROOT / "wmsownersale" / "pages" / "orders" / "import_drop_ship.vue"
         ).read_text(encoding="utf-8")
-        picker_source = (
-            REPO_ROOT / "wmsownersale" / "utils" / "filePicker.js"
-        ).read_text(encoding="utf-8")
+        picker_source = (REPO_ROOT / "wmsownersale" / "utils" / "filePicker.js").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("chooseExcelFile", page_source)
         self.assertIn("extension: ['.xlsx']", picker_source)

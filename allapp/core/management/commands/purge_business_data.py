@@ -122,9 +122,7 @@ class Command(BaseCommand):
             raise CommandError(f"业务数据清理失败，事务已回滚：{exc}") from exc
 
         total_rows = sum(deleted_counts.values())
-        reset_suffix = (
-            "；货主 SKU 序号已重置为 1" if self.reset_owner_sku_sequences else ""
-        )
+        reset_suffix = "；货主 SKU 序号已重置为 1" if self.reset_owner_sku_sequences else ""
         self.stdout.write(
             self.style.SUCCESS(
                 f"清理完成：{len(deleted_counts)} 张表，共删除 {total_rows} 行；"
@@ -164,8 +162,7 @@ class Command(BaseCommand):
             raise CommandError("正式执行缺少参数：" + "、".join(missing))
         if options["confirm_target"].strip() != expected_target:
             raise CommandError(
-                "目标库确认不匹配。请先 dry-run，并精确输入："
-                f"--confirm-target {expected_target}"
+                "目标库确认不匹配。请先 dry-run，并精确输入：" f"--confirm-target {expected_target}"
             )
 
     def _operator(self, alias, username):
@@ -205,8 +202,7 @@ class Command(BaseCommand):
             estimate_text = "未知" if estimate is None else str(estimate)
             self.stdout.write("\n[额外更新]")
             self.stdout.write(
-                "  RESET  baseinfo_owner.next_sku_sequence = 1: "
-                f"约 {estimate_text} 行"
+                "  RESET  baseinfo_owner.next_sku_sequence = 1: " f"约 {estimate_text} 行"
             )
 
         missing = sorted(report.missing_preserved_tables | report.missing_purged_tables)
@@ -220,9 +216,7 @@ class Command(BaseCommand):
             for message in report.blocking_messages:
                 self.stdout.write(f"  BLOCK  {message}")
             if dry_run:
-                self.stdout.write(
-                    self.style.WARNING("预检发现阻塞问题；未写入数据库。")
-                )
+                self.stdout.write(self.style.WARNING("预检发现阻塞问题；未写入数据库。"))
         else:
             suffix = "未写入数据库。" if dry_run else "允许进入事务清理。"
             self.stdout.write(self.style.SUCCESS(f"预检通过；{suffix}"))

@@ -180,11 +180,7 @@ def _idempotency_fingerprint(
                 "qty": str(_q3(item["qty"])),
                 "price": str(_price(item["price"])),
             },
-            **(
-                {"amount": str(_money(item["amount"]))}
-                if item.get("amount") is not None
-                else {}
-            ),
+            **({"amount": str(_money(item["amount"]))} if item.get("amount") is not None else {}),
         )
         for item in items
     ]
@@ -218,9 +214,7 @@ def _idempotency_fingerprint(
         ],
         "items": canonical_items,
     }
-    encoded = json.dumps(
-        canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
+    encoded = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
@@ -240,22 +234,16 @@ def _return_fingerprint(*, sale_id, reason, lines, refunds):
                 "method": (item.get("method") or "").strip().upper(),
                 "amount": str(_money(item.get("amount"))),
                 "reference_no": (item.get("reference_no") or "").strip(),
-                "status": (item.get("status") or PosRefund.Status.REFUNDED)
-                .strip()
-                .upper(),
+                "status": (item.get("status") or PosRefund.Status.REFUNDED).strip().upper(),
             }
             for item in refunds
         ],
     }
-    encoded = json.dumps(
-        canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
+    encoded = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _audit(
-    *, action, user, sale=None, return_order=None, shift=None, reason="", metadata=None
-):
+def _audit(*, action, user, sale=None, return_order=None, shift=None, reason="", metadata=None):
     return PosAuditLog.objects.create(
         action=action,
         sale=sale,
@@ -269,23 +257,19 @@ def _audit(
 
 def _cash_customer(owner_id, user):
     Customer = apps.get_model("baseinfo", "Customer")
-    customer = (
-        Customer.objects.filter(owner_id=owner_id, code="CASH").order_by("id").first()
-    )
+    customer = Customer.objects.filter(owner_id=owner_id, code="CASH").order_by("id").first()
     if customer:
         return customer
-    return Customer.objects.create(
-        owner_id=owner_id, code="CASH", name="散客", salesperson=user
-    )
+    return Customer.objects.create(owner_id=owner_id, code="CASH", name="散客", salesperson=user)
 
 
 def _load_products(items):
     product_ids = [item["product_id"] for item in items]
     products = {
         product.id: product
-        for product in Product.objects.filter(
-            id__in=product_ids, is_active=True
-        ).select_related("owner", "base_uom")
+        for product in Product.objects.filter(id__in=product_ids, is_active=True).select_related(
+            "owner", "base_uom"
+        )
     }
     missing = [product_id for product_id in product_ids if product_id not in products]
     if missing:
@@ -356,18 +340,14 @@ def _available_qty(owner_id, warehouse_id, product_id, *, zone_type=None):
     }
     if zone_type is not None:
         filters["zone_type"] = zone_type
-    result = InventoryDetail.objects.filter(**filters).aggregate(
-        total=Sum("available_qty")
-    )
+    result = InventoryDetail.objects.filter(**filters).aggregate(total=Sum("available_qty"))
     return result["total"] or ZERO
 
 
 def _validate_stock(qty_by_product, products, warehouse_id, *, zone_type=None):
     for product_id, required_qty in qty_by_product.items():
         product = products[product_id]
-        available = _available_qty(
-            product.owner_id, warehouse_id, product_id, zone_type=zone_type
-        )
+        available = _available_qty(product.owner_id, warehouse_id, product_id, zone_type=zone_type)
         if available < required_qty:
             _error(
                 "items",
@@ -460,9 +440,7 @@ def _normalize_payment_lines(payment, payments, total_amount, *, allow_credit=Fa
         )
 
     if paid_amount != total_amount:
-        _error(
-            "payments", f"支付明细合计 {paid_amount} 必须等于应收金额 {total_amount}。"
-        )
+        _error("payments", f"支付明细合计 {paid_amount} 必须等于应收金额 {total_amount}。")
     return result
 
 
@@ -476,12 +454,8 @@ def _payment_summary_from_lines(payment_lines, total_amount):
     return {
         "method": method,
         "amount_due": total_amount,
-        "amount_received": _money(
-            sum((line["amount_received"] for line in payment_lines), ZERO)
-        ),
-        "change_amount": _money(
-            sum((line["change_amount"] for line in payment_lines), ZERO)
-        ),
+        "amount_received": _money(sum((line["amount_received"] for line in payment_lines), ZERO)),
+        "change_amount": _money(sum((line["change_amount"] for line in payment_lines), ZERO)),
         "reference_no": reference_no,
     }
 
@@ -514,9 +488,7 @@ def _normalize_refunds(refunds, total_amount):
             }
         )
     if refund_total != total_amount:
-        _error(
-            "refunds", f"退款明细合计 {refund_total} 必须等于退货金额 {total_amount}。"
-        )
+        _error("refunds", f"退款明细合计 {refund_total} 必须等于退货金额 {total_amount}。")
     return result
 
 
@@ -546,10 +518,7 @@ def _refresh_summaries(pairs):
         summary.locked_qty = aggregates["locked"] or ZERO
         summary.damaged_qty = aggregates["damaged"] or ZERO
         summary.available_qty = (
-            summary.onhand_qty
-            - summary.allocated_qty
-            - summary.locked_qty
-            - summary.damaged_qty
+            summary.onhand_qty - summary.allocated_qty - summary.locked_qty - summary.damaged_qty
         )
         summary.save()
 
@@ -619,10 +588,7 @@ def _deduct_stock_for_line(sale_line, warehouse_id, sale_no, now, *, zone_type=N
 
         detail.onhand_qty = _q4(detail.onhand_qty - take)
         detail.available_qty = _q4(
-            detail.onhand_qty
-            - detail.allocated_qty
-            - detail.locked_qty
-            - detail.damaged_qty
+            detail.onhand_qty - detail.allocated_qty - detail.locked_qty - detail.damaged_qty
         )
         detail.save()
         _insert_inventory_tx(
@@ -733,9 +699,7 @@ def _create_pos_pick_tasks_and_post(
         for detail in candidates:
             if remaining <= 0:
                 break
-            allocatable = _floor_task_qty(
-                min(_q4(detail.available_qty), _q4(detail.onhand_qty))
-            )
+            allocatable = _floor_task_qty(min(_q4(detail.available_qty), _q4(detail.onhand_qty)))
             if allocatable <= 0:
                 continue
             take = _floor_task_qty(min(allocatable, remaining))
@@ -791,9 +755,7 @@ def _create_pos_pick_tasks_and_post(
                 f"{sale_line.product.code} 可售库存不足，缺口 {remaining}。",
             )
 
-    for task in sorted(
-        tasks_by_order.values(), key=lambda value: (value.owner_id, value.id)
-    ):
+    for task in sorted(tasks_by_order.values(), key=lambda value: (value.owner_id, value.id)):
         task.status = WmsTask.Status.COMPLETED
         task.review_status = WmsTask.ReviewStatus.APPROVED
         task.posting_status = WmsTask.PostingStatus.PENDING
@@ -845,9 +807,7 @@ def _create_pos_pick_tasks_and_post(
             scan_snapshot_rev=0,
         )
 
-    for task in sorted(
-        tasks_by_order.values(), key=lambda value: (value.owner_id, value.id)
-    ):
+    for task in sorted(tasks_by_order.values(), key=lambda value: (value.owner_id, value.id)):
         affected = execute_posting_handler(
             task,
             note="POS销售自动出库",
@@ -875,10 +835,7 @@ def _lock_original_inventory_details(*, sale_no, sale_lines, resolved_layers):
                 raise ValidationError("原销售库存层被多个货主、商品或仓库错误引用")
 
     lock_active_inventory_details_for_update(
-        {
-            (owner_id, product_id)
-            for owner_id, product_id, _warehouse_id in detail_specs.values()
-        }
+        {(owner_id, product_id) for owner_id, product_id, _warehouse_id in detail_specs.values()}
     )
     details = {}
     for detail_id, (owner_id, product_id, warehouse_id) in sorted(
@@ -896,9 +853,7 @@ def _lock_original_inventory_details(*, sale_no, sale_lines, resolved_layers):
             or detail.product_id != product_id
             or detail.warehouse_id != warehouse_id
         ):
-            raise ValidationError(
-                f"{sale_no} 原销售库存层 {detail_id} 与销售商品归属不一致"
-            )
+            raise ValidationError(f"{sale_no} 原销售库存层 {detail_id} 与销售商品归属不一致")
         details[detail_id] = detail
     return details
 
@@ -907,9 +862,9 @@ def _restore_stock_from_sale(sale, user, reason):
     now = timezone.now()
     batch_no = f"{sale.sale_no}-VOID"
     sale_lines = list(
-        sale.lines.select_related(
-            "sale", "product", "outbound_order_line__order"
-        ).order_by("owner_id", "product_id", "line_no", "id")
+        sale.lines.select_related("sale", "product", "outbound_order_line__order").order_by(
+            "owner_id", "product_id", "line_no", "id"
+        )
     )
     resolved = resolve_sale_issue_layers(sale_lines, for_update=True)
     details = _lock_original_inventory_details(
@@ -919,9 +874,7 @@ def _restore_stock_from_sale(sale, user, reason):
     )
     line_by_id = {line.id: line for line in sale_lines}
     entries = [
-        (line_by_id[line_id], layer)
-        for line_id, layers in resolved.items()
-        for layer in layers
+        (line_by_id[line_id], layer) for line_id, layers in resolved.items() for layer in layers
     ]
     entries.sort(
         key=lambda item: (
@@ -938,10 +891,7 @@ def _restore_stock_from_sale(sale, user, reason):
         qty = layer.qty
         detail.onhand_qty = _q4(detail.onhand_qty + qty)
         detail.available_qty = _q4(
-            detail.onhand_qty
-            - detail.allocated_qty
-            - detail.locked_qty
-            - detail.damaged_qty
+            detail.onhand_qty - detail.allocated_qty - detail.locked_qty - detail.damaged_qty
         )
         detail.save()
         InventoryTransaction.objects.create(
@@ -987,9 +937,7 @@ def _returned_totals_by_sale_line(sale_line_ids):
     }
 
 
-def _allocated_return_amount(
-    *, sale_qty, sale_amount, returned_qty, returned_amount, return_qty
-):
+def _allocated_return_amount(*, sale_qty, sale_amount, returned_qty, returned_amount, return_qty):
     sale_qty = _q3(sale_qty)
     sale_amount = _money(sale_amount)
     returned_qty = _q3(returned_qty)
@@ -1039,9 +987,7 @@ def _restore_stock_for_return_lines(return_lines, return_no, now):
             restored[(prior_line_map[tx.src_id], tx.src_line_id)] += tx.qty_delta
 
     planned = []
-    for return_line in sorted(
-        return_lines, key=lambda value: (value.line_no, value.id)
-    ):
+    for return_line in sorted(return_lines, key=lambda value: (value.line_no, value.id)):
         sale_line = sale_lines[return_line.sale_line_id]
         issued_by_detail = defaultdict(lambda: ZERO)
         first_issue_id = {}
@@ -1093,10 +1039,7 @@ def _restore_stock_for_return_lines(return_lines, return_no, now):
         detail = details[detail_id]
         detail.onhand_qty = _q4(detail.onhand_qty + qty)
         detail.available_qty = _q4(
-            detail.onhand_qty
-            - detail.allocated_qty
-            - detail.locked_qty
-            - detail.damaged_qty
+            detail.onhand_qty - detail.allocated_qty - detail.locked_qty - detail.damaged_qty
         )
         detail.save()
         InventoryTransaction.objects.create(
@@ -1225,9 +1168,7 @@ def _customer_cumulative_debt(sale):
 
 
 def _sale_receipt_customer(sale):
-    return getattr(sale, "pos_customer", None) or getattr(
-        sale, "selected_customer", None
-    )
+    return getattr(sale, "pos_customer", None) or getattr(sale, "selected_customer", None)
 
 
 def build_receipt(sale):
@@ -1247,9 +1188,7 @@ def build_receipt(sale):
     sale_lines = list(sale.lines.select_related("product").order_by("line_no"))
     orders = [
         link.outbound_order
-        for link in sale.sale_orders.select_related("outbound_order", "owner").order_by(
-            "owner_id"
-        )
+        for link in sale.sale_orders.select_related("outbound_order", "owner").order_by("owner_id")
     ]
     return {
         "sale_no": sale.sale_no,
@@ -1304,9 +1243,7 @@ def result_for_sale(sale):
     )
     orders = [
         link.outbound_order
-        for link in sale.sale_orders.select_related("outbound_order").order_by(
-            "owner_id"
-        )
+        for link in sale.sale_orders.select_related("outbound_order").order_by("owner_id")
     ]
     return {
         "sale": sale,
@@ -1326,9 +1263,7 @@ def result_for_return(return_order):
 
 
 @transaction.atomic
-def create_customer_repayment(
-    *, user, customer_id, amount, method, reference_no="", remark=""
-):
+def create_customer_repayment(*, user, customer_id, amount, method, reference_no="", remark=""):
     warehouse_id = getattr(user, "warehouse_id", None)
     if not warehouse_id:
         raise ValidationError("当前用户未绑定仓库(warehouse)，无法记录客户还款。")
@@ -1352,9 +1287,7 @@ def create_customer_repayment(
     if amount <= ZERO:
         _error("amount", "还款金额必须大于 0。")
 
-    debt_before = customer_pos_debt_balance(
-        customer_id=customer.id, warehouse_id=warehouse_id
-    )
+    debt_before = customer_pos_debt_balance(customer_id=customer.id, warehouse_id=warehouse_id)
     if amount > debt_before:
         _error("amount", f"还款金额不能大于累计欠款 {debt_before}。")
 
@@ -1370,9 +1303,7 @@ def create_customer_repayment(
         remark=(remark or "").strip(),
         created_by=user if user and user.is_authenticated else None,
     )
-    debt_after = customer_pos_debt_balance(
-        customer_id=customer.id, warehouse_id=warehouse_id
-    )
+    debt_after = customer_pos_debt_balance(customer_id=customer.id, warehouse_id=warehouse_id)
     PosAuditLog.objects.create(
         action=PosAuditLog.Action.REPAYMENT,
         shift=shift,
@@ -1459,18 +1390,11 @@ def _create_pos_sale_once(
     idempotency_key = (idempotency_key or "").strip() or None
     if idempotency_key:
         existing = (
-            PosSale.objects.select_for_update()
-            .filter(idempotency_key=idempotency_key)
-            .first()
+            PosSale.objects.select_for_update().filter(idempotency_key=idempotency_key).first()
         )
         if existing:
-            if (
-                existing.idempotency_fingerprint
-                and existing.idempotency_fingerprint != fingerprint
-            ):
-                _error(
-                    "idempotency_key", "同一幂等键对应的收银内容不一致，请刷新后重试。"
-                )
+            if existing.idempotency_fingerprint and existing.idempotency_fingerprint != fingerprint:
+                _error("idempotency_key", "同一幂等键对应的收银内容不一致，请刷新后重试。")
             return result_for_sale(existing)
 
     shift = current_shift_for_user(user, for_update=True)
@@ -1504,16 +1428,12 @@ def _create_pos_sale_once(
     duplicate_owner_ids = [
         owner_id
         for owner_id in owner_ids
-        if OutboundOrder.objects.filter(
-            owner_id=owner_id, src_bill_no=receipt_no
-        ).exists()
+        if OutboundOrder.objects.filter(owner_id=owner_id, src_bill_no=receipt_no).exists()
     ]
     if duplicate_owner_ids:
         _error("src_bill_no", "POS 小票号/外部单号已存在。")
 
-    customers_by_owner = {
-        owner_id: _cash_customer(owner_id, user) for owner_id in owner_ids
-    }
+    customers_by_owner = {owner_id: _cash_customer(owner_id, user) for owner_id in owner_ids}
 
     sale = PosSale.objects.create(
         sale_no=sale_no,
@@ -1673,29 +1593,18 @@ def _create_pos_return_once(
     idempotency_key = (idempotency_key or "").strip() or None
     if idempotency_key:
         existing = (
-            PosReturn.objects.select_for_update()
-            .filter(idempotency_key=idempotency_key)
-            .first()
+            PosReturn.objects.select_for_update().filter(idempotency_key=idempotency_key).first()
         )
         if existing:
-            if (
-                existing.idempotency_fingerprint
-                and existing.idempotency_fingerprint != fingerprint
-            ):
-                _error(
-                    "idempotency_key", "同一幂等键对应的退货内容不一致，请刷新后重试。"
-                )
+            if existing.idempotency_fingerprint and existing.idempotency_fingerprint != fingerprint:
+                _error("idempotency_key", "同一幂等键对应的退货内容不一致，请刷新后重试。")
             return result_for_return(existing)
 
     shift = current_shift_for_user(user, for_update=True)
     if not shift:
         raise ValidationError("当前收银员没有进行中的 POS 班次，请先开班。")
 
-    sale = (
-        PosSale.objects.select_for_update()
-        .filter(pk=sale_id, warehouse_id=warehouse_id)
-        .first()
-    )
+    sale = PosSale.objects.select_for_update().filter(pk=sale_id, warehouse_id=warehouse_id).first()
     if not sale:
         raise ValidationError("POS 销售单不存在或无权退货。")
     if sale.status != PosSale.Status.COMPLETED:
@@ -1825,9 +1734,7 @@ def _create_pos_return_once(
 
 
 def void_pos_sale(*, sale_id, user, reason=""):
-    warehouse_id = (
-        PosSale.objects.filter(pk=sale_id).values_list("warehouse_id", flat=True).get()
-    )
+    warehouse_id = PosSale.objects.filter(pk=sale_id).values_list("warehouse_id", flat=True).get()
     return run_inventory_write_with_retry(
         lambda: _void_pos_sale_once(
             sale_id=sale_id,
@@ -1842,16 +1749,12 @@ def void_pos_sale(*, sale_id, user, reason=""):
 @transaction.atomic
 def _void_pos_sale_once(*, sale_id, warehouse_id, user, reason=""):
     lock_warehouses_for_inventory_write(warehouse_id)
-    sale = PosSale.objects.select_for_update().get(
-        pk=sale_id, warehouse_id=warehouse_id
-    )
+    sale = PosSale.objects.select_for_update().get(pk=sale_id, warehouse_id=warehouse_id)
     if sale.status == PosSale.Status.VOIDED:
         raise ValidationError("POS 销售单已撤销。")
     if (
         sale.shift_id
-        and PosShift.objects.filter(
-            pk=sale.shift_id, status=PosShift.Status.CLOSED
-        ).exists()
+        and PosShift.objects.filter(pk=sale.shift_id, status=PosShift.Status.CLOSED).exists()
     ):
         raise ValidationError("该 POS 销售单所属班次已交班，不能作废。")
     if PosReturn.objects.filter(sale=sale, status=PosReturn.Status.COMPLETED).exists():
@@ -1888,9 +1791,7 @@ def _void_pos_sale_once(*, sale_id, warehouse_id, user, reason=""):
     sale.voided_at = timezone.now()
     sale.voided_by = user if user and user.is_authenticated else None
     sale.void_reason = (reason or "").strip()
-    sale.save(
-        update_fields=["status", "voided_at", "voided_by", "void_reason", "updated_at"]
-    )
+    sale.save(update_fields=["status", "voided_at", "voided_by", "void_reason", "updated_at"])
     _audit(
         action=PosAuditLog.Action.VOID,
         user=user,

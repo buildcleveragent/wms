@@ -6,6 +6,7 @@ ENV_FILE="${ROOT_DIR}/.env.test.local"
 COMPOSE_FILE="${ROOT_DIR}/compose.test.yml"
 FRESH_DATABASE=false
 REUSE_DATABASE=true
+MIGRATE_ONLY=false
 
 while [[ "${1:-}" == --* ]]; do
   case "${1}" in
@@ -14,6 +15,9 @@ while [[ "${1:-}" == --* ]]; do
       ;;
     --clean)
       REUSE_DATABASE=false
+      ;;
+    --migrate-only)
+      MIGRATE_ONLY=true
       ;;
     *)
       break
@@ -74,6 +78,14 @@ docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" \
 # explicit and never fall back to a development database credential.
 export DB_USER=root
 export DB_PASSWORD="${MYSQL_ROOT_PASSWORD}"
+if [[ "${MIGRATE_ONLY}" == "true" ]]; then
+  started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  started_seconds="${SECONDS}"
+  echo "Starting isolated MySQL migrations at ${started_at}."
+  "${ROOT_DIR}/.venv/bin/python" manage.py migrate --noinput --verbosity 2
+  echo "Completed isolated MySQL migrations in $((SECONDS - started_seconds)) seconds."
+  exit 0
+fi
 PYTEST_BIN="${WMS_TEST_PYTEST_BIN:-${ROOT_DIR}/.venv/bin/pytest}"
 if [[ ! -x "${PYTEST_BIN}" ]]; then
   echo "拒绝执行：pytest 可执行文件不存在或不可执行：${PYTEST_BIN}" >&2

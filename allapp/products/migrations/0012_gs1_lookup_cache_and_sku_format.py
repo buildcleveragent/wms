@@ -20,9 +20,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="product",
             name="vender",
-            field=models.CharField(
-                blank=True, max_length=200, null=True, verbose_name="厂家"
-            ),
+            field=models.CharField(blank=True, max_length=200, null=True, verbose_name="厂家"),
         ),
         migrations.CreateModel(
             name="Gs1LookupCache",
@@ -38,9 +36,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "canonical_gtin",
-                    models.CharField(
-                        max_length=14, unique=True, verbose_name="标准 GTIN-14"
-                    ),
+                    models.CharField(max_length=14, unique=True, verbose_name="标准 GTIN-14"),
                 ),
                 (
                     "query_code",
@@ -69,21 +65,15 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "payload",
-                    models.JSONField(
-                        blank=True, default=dict, verbose_name="服务商响应数据"
-                    ),
+                    models.JSONField(blank=True, default=dict, verbose_name="服务商响应数据"),
                 ),
                 (
                     "provider_code",
-                    models.IntegerField(
-                        blank=True, null=True, verbose_name="服务商状态码"
-                    ),
+                    models.IntegerField(blank=True, null=True, verbose_name="服务商状态码"),
                 ),
                 (
                     "provider_message",
-                    models.CharField(
-                        blank=True, max_length=200, verbose_name="服务商消息"
-                    ),
+                    models.CharField(blank=True, max_length=200, verbose_name="服务商消息"),
                 ),
                 (
                     "provider_request_id",
@@ -96,9 +86,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "fetched_at",
-                    models.DateTimeField(
-                        blank=True, null=True, verbose_name="查询时间"
-                    ),
+                    models.DateTimeField(blank=True, null=True, verbose_name="查询时间"),
                 ),
                 (
                     "expires_at",
@@ -106,9 +94,7 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "lease_until",
-                    models.DateTimeField(
-                        blank=True, null=True, verbose_name="查询租约到期"
-                    ),
+                    models.DateTimeField(blank=True, null=True, verbose_name="查询租约到期"),
                 ),
                 (
                     "created_at",

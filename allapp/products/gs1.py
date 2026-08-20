@@ -17,6 +17,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from allapp.core.models import SecretSettingError, SystemSetting
+from allapp.core.url_security import require_https_endpoint
 
 from .models import Gs1LookupCache, Gs1ProviderRateLimit
 
@@ -129,8 +130,10 @@ def _provider_request(query_code: str) -> dict:
         )
 
     _reserve_provider_slot()
-    endpoint = getattr(
-        settings, "APIZERO_GS1_URL", "https://v1.apizero.cn/api/barcode-gs1"
+    endpoint = require_https_endpoint(
+        getattr(settings, "APIZERO_GS1_URL", "https://v1.apizero.cn/api/barcode-gs1"),
+        setting_name="APIZERO_GS1_URL",
+        allowed_hosts=getattr(settings, "APIZERO_GS1_ALLOWED_HOSTS", ("v1.apizero.cn",)),
     )
     query = url_parse.urlencode({"code": query_code, "key": api_key})
     req = url_request.Request(
@@ -139,7 +142,8 @@ def _provider_request(query_code: str) -> dict:
         method="GET",
     )
     try:
-        with url_request.urlopen(
+        # The endpoint is restricted to HTTPS and an explicit host allowlist.
+        with url_request.urlopen(  # nosec B310
             req, timeout=float(getattr(settings, "APIZERO_GS1_TIMEOUT", 5.0))
         ) as response:
             body = response.read().decode("utf-8")
@@ -155,14 +159,10 @@ def _provider_request(query_code: str) -> dict:
             code="provider_network_error",
         ) from exc
     except (TimeoutError, socket.timeout) as exc:
-        raise Gs1LookupError(
-            "GS1 查询超时，请稍后重试。", code="provider_timeout"
-        ) from exc
+        raise Gs1LookupError("GS1 查询超时，请稍后重试。", code="provider_timeout") from exc
     except url_error.URLError as exc:
         if isinstance(exc.reason, (TimeoutError, socket.timeout)):
-            raise Gs1LookupError(
-                "GS1 查询超时，请稍后重试。", code="provider_timeout"
-            ) from exc
+            raise Gs1LookupError("GS1 查询超时，请稍后重试。", code="provider_timeout") from exc
         raise Gs1LookupError(
             "无法连接 GS1 查询服务，请检查网络后重试。",
             code="provider_network_error",
@@ -183,9 +183,7 @@ def _provider_request(query_code: str) -> dict:
             "GS1 查询服务返回了无效数据。", code="provider_invalid_response"
         ) from exc
     if not isinstance(result, dict):
-        raise Gs1LookupError(
-            "GS1 查询服务返回了无效数据。", code="provider_invalid_response"
-        )
+        raise Gs1LookupError("GS1 查询服务返回了无效数据。", code="provider_invalid_response")
     try:
         provider_code = int(result.get("code", -1))
     except (TypeError, ValueError) as exc:
@@ -208,9 +206,7 @@ def _provider_request(query_code: str) -> dict:
         )
         raise Gs1LookupError(message, code=code, retry_after=retry_after)
     if not isinstance(result.get("data"), dict):
-        raise Gs1LookupError(
-            "GS1 查询服务返回了无效数据。", code="provider_invalid_response"
-        )
+        raise Gs1LookupError("GS1 查询服务返回了无效数据。", code="provider_invalid_response")
     return result
 
 

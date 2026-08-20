@@ -66,6 +66,7 @@ ROLE_GROUP_TEMPLATES = {
             "reports.view_warehouse_operations",
             "reports.view_warehouse_finance",
             "reports.export_operations",
+            "reports.create_business_review_snapshot",
         ),
     ),
     UserRoleScope.Role.OWNER_MANAGER: RoleGroupTemplate(
@@ -174,9 +175,7 @@ def infer_user_group_roles(user) -> frozenset[str]:
 
     group_names = set(user.groups.values_list("name", flat=True))
     return frozenset(
-        role
-        for role, aliases in ROLE_GROUP_ALIASES.items()
-        if group_names.intersection(aliases)
+        role for role, aliases in ROLE_GROUP_ALIASES.items() if group_names.intersection(aliases)
     )
 
 
@@ -197,9 +196,7 @@ def infer_legacy_user_roles(user) -> frozenset[str]:
     # direct-permission change within the current request/transaction.
     permissions = {
         f"{app_label}.{codename}"
-        for app_label, codename in Permission.objects.filter(
-            Q(user=user) | Q(group__user=user)
-        )
+        for app_label, codename in Permission.objects.filter(Q(user=user) | Q(group__user=user))
         .values_list("content_type__app_label", "codename")
         .distinct()
     }

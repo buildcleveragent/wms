@@ -1,0 +1,50 @@
+name: wms-production
+
+x-wms-service: &wms-service
+  image: ${WMS_IMAGE:?WMS_IMAGE must be an immutable repository@sha256 digest}
+  env_file:
+    - ${WMS_ENV_FILE:-/etc/wms/wms.env}
+  user: "10001:10001"
+  init: true
+  volumes:
+    - wms-static:/app/staticfiles
+    - wms-media:/app/media
+
+services:
+  web:
+    <<: *wms-service
+    command: /app/docker/start-web.sh
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WMS_WEB_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz/ready', timeout=5)"
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 30s
+
+  scheduler:
+    <<: *wms-service
+    command: /app/docker/start-scheduler.sh
+    restart: unless-stopped
+
+  sale-mini-expire:
+    <<: *wms-service
+    command: python manage.py expire_sale_mini_orders --limit 200
+    restart: "no"
+    profiles: [oneshot]
+
+  sale-mini-reconcile:
+    <<: *wms-service
+    command: python manage.py reconcile_sale_mini_payments --limit 200
+    restart: "no"
+    profiles: [oneshot]
+
+volumes:
+  wms-static:
+  wms-media:

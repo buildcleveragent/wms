@@ -39,7 +39,7 @@
     <view v-if="loading" class="loading-banner">正在同步仓储经营分析中心数据...</view>
     <BossDataStatus :meta="payload?.meta" :error="dataError" :stale="stale" />
 
-    <template v-else>
+    <template v-if="!loading">
       <view class="kpi-grid">
         <view class="kpi-card blue">
           <view class="kpi-label">今日实际收发量</view>

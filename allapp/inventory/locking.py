@@ -68,9 +68,7 @@ def lock_warehouses_for_inventory_write(
         raise ValueError("至少需要一个仓库 ID。")
 
     warehouses = list(
-        Warehouse.objects.select_for_update()
-        .filter(pk__in=normalized_ids)
-        .order_by("id")
+        Warehouse.objects.select_for_update().filter(pk__in=normalized_ids).order_by("id")
     )
     if len(warehouses) != len(normalized_ids):
         found = {warehouse.id for warehouse in warehouses}

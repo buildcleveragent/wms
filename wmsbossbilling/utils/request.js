@@ -1,22 +1,5 @@
-const runtimeEnv = import.meta.env || {}
-const configuredBase = String(runtimeEnv.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
-const isDevelopment = !!runtimeEnv.DEV
-const isLocalHttp = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(configuredBase)
-
-if (configuredBase && !/^https:\/\//i.test(configuredBase) && !(isDevelopment && isLocalHttp)) {
-  throw new Error('VITE_API_BASE_URL must use HTTPS outside local development.')
-}
-
-// H5 defaults to the same origin. Native app and mini-program builds must inject
-// VITE_API_BASE_URL because they do not have a browser origin.
-let resolvedBase = configuredBase
-// #ifndef H5
-if (!resolvedBase) {
-  throw new Error('VITE_API_BASE_URL is required for App and mini-program builds.')
-}
-// #endif
-
-export const BASE_URL = resolvedBase
+export { BASE_URL } from './api-base'
+import { BASE_URL } from './api-base'
 
 const ACCESS_KEY = 'access'
 const REFRESH_KEY = 'refresh'

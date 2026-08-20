@@ -25,9 +25,7 @@ def resolve_no_order_receive_scope(user, owner_id, warehouse_id=None):
     try:
         resolved_warehouse_id = int(resolved_warehouse_id)
     except (TypeError, ValueError) as exc:
-        raise ValidationError(
-            "必须提供 warehouse_id；仅单一仓库范围账号可自动确定仓库"
-        ) from exc
+        raise ValidationError("必须提供 warehouse_id；仅单一仓库范围账号可自动确定仓库") from exc
 
     if not scope.allows(
         owner_id=owner_id,

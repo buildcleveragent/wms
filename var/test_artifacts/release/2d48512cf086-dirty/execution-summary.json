@@ -1,0 +1,61 @@
+{
+  "baseline_commit": "2d48512cf086",
+  "worktree": "dirty",
+  "release_conclusion": "FAIL",
+  "environment": {
+    "python_local": "3.12.3",
+    "python_ci_container": "3.12.13",
+    "mysql": "8.0.46",
+    "redis": "7.4.7",
+    "node_local": "22.22.0",
+    "node_ci": "20"
+  },
+  "backend": {
+    "serial": {
+      "tests_passed": 1044,
+      "subtests_passed": 943,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 9510.77
+    },
+    "identifier_migrations": {
+      "tests_passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 269.56
+    },
+    "coverage_parallel": {
+      "workers": 4,
+      "mysql_schemas": 4,
+      "migrations_per_schema": 124,
+      "tests_passed": 1044,
+      "subtests_passed": 943,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 14947.17,
+      "production_code_percent": 71.69,
+      "hard_gate_percent": 70
+    }
+  },
+  "security": {
+    "bandit_high": 0,
+    "bandit_medium": 0,
+    "bandit_low": 25,
+    "pip_audit_unhandled": 0,
+    "pip_audit_ignored": [
+      "PYSEC-2026-3412"
+    ],
+    "exception_expiry": "2026-09-19",
+    "trivy": "BLOCKED"
+  },
+  "remaining_hard_gates": [
+    "final clean commit CI and candidate image",
+    "Trivy filesystem and image scans",
+    "credential rotation and session revocation",
+    "real WeChat AppIDs, HTTPS domains, merchant payment and reconciliation",
+    "two physical PDA devices, scanners and Bluetooth printers",
+    "50-user sustained and 100-user peak performance tests",
+    "system-level fault injection",
+    "MySQL and media recovery drill meeting RPO/RTO"
+  ]
+}

@@ -74,11 +74,7 @@ def _datetime(value):
 def _excel_datetime(value):
     if value is None:
         return None
-    return (
-        timezone.localtime(value).replace(tzinfo=None)
-        if timezone.is_aware(value)
-        else value
-    )
+    return timezone.localtime(value).replace(tzinfo=None) if timezone.is_aware(value) else value
 
 
 def build_identifier_template():
@@ -121,9 +117,9 @@ def build_identifier_export(owner):
         )
     external_sheet = workbook.create_sheet(EXTERNAL_SHEET)
     external_sheet.append(EXTERNAL_HEADERS)
-    for record in ProductExternalIdentifier.all_objects.filter(
-        owner=owner
-    ).select_related("product"):
+    for record in ProductExternalIdentifier.all_objects.filter(owner=owner).select_related(
+        "product"
+    ):
         external_sheet.append(
             [
                 "",
@@ -145,9 +141,7 @@ def build_identifier_export(owner):
 def _rows(sheet, headers):
     actual = [cell.value for cell in sheet[1]]
     if actual[: len(headers)] != headers:
-        raise IdentifierExcelError(
-            f"工作表“{sheet.title}”表头必须为：{'、'.join(headers)}"
-        )
+        raise IdentifierExcelError(f"工作表“{sheet.title}”表头必须为：{'、'.join(headers)}")
     for number, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), 2):
         if not any(value not in (None, "") for value in values):
             continue
@@ -215,9 +209,7 @@ def import_identifier_workbook(uploaded_file, *, owner):
                     is_active=_bool(row["启用状态"], True),
                 )
             else:
-                record = ProductExternalIdentifier.all_objects.get(
-                    pk=row["记录ID"], owner=owner
-                )
+                record = ProductExternalIdentifier.all_objects.get(pk=row["记录ID"], owner=owner)
                 if action == "SET_PRIMARY":
                     set_external_primary(record)
                 elif action == "RETIRE":
@@ -235,8 +227,6 @@ def import_identifier_workbook(uploaded_file, *, owner):
         messages = getattr(exc, "messages", None)
         detail = "；".join(messages) if messages else str(exc)
         if isinstance(exc, IdentifierConcurrencyError):
-            raise IdentifierExcelConflictError(
-                f"第 {row_number} 行并发冲突：{detail}"
-            ) from exc
+            raise IdentifierExcelConflictError(f"第 {row_number} 行并发冲突：{detail}") from exc
         raise IdentifierExcelError(f"第 {row_number} 行处理失败：{detail}") from exc
     return {"changed_count": changed}

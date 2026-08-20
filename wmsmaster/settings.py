@@ -85,9 +85,7 @@ def _validated_login_rate(name, default):
         }:
             raise ValueError
     except (TypeError, ValueError):
-        raise ImproperlyConfigured(
-            f"{name} 必须是正整数/时间单位，例如 5/min。"
-        ) from None
+        raise ImproperlyConfigured(f"{name} 必须是正整数/时间单位，例如 5/min。") from None
     return value
 
 
@@ -108,13 +106,14 @@ REPLENISHMENT_DEMAND_ENABLED = env.bool("REPLENISHMENT_DEMAND_ENABLED", default=
 RELOCATION_REQUEST_ENABLED = env.bool("RELOCATION_REQUEST_ENABLED", default=False)
 RELOCATION_PDA_ENABLED = env.bool("RELOCATION_PDA_ENABLED", default=False)
 RELOCATION_CONTAINER_ENABLED = env.bool("RELOCATION_CONTAINER_ENABLED", default=False)
-APIZERO_GS1_URL = env(
-    "APIZERO_GS1_URL", default="https://v1.apizero.cn/api/barcode-gs1"
+APIZERO_GS1_URL = env("APIZERO_GS1_URL", default="https://v1.apizero.cn/api/barcode-gs1")
+APIZERO_GS1_ALLOWED_HOSTS = tuple(
+    value.strip().lower()
+    for value in env.list("APIZERO_GS1_ALLOWED_HOSTS", default=["v1.apizero.cn"])
+    if value.strip()
 )
 APIZERO_GS1_TIMEOUT = env.float("APIZERO_GS1_TIMEOUT", default=5.0)
-SYSTEM_SETTING_ENCRYPTION_KEY = env(
-    "SYSTEM_SETTING_ENCRYPTION_KEY", default=""
-).strip()
+SYSTEM_SETTING_ENCRYPTION_KEY = env("SYSTEM_SETTING_ENCRYPTION_KEY", default="").strip()
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env("SECRET_KEY", default="").strip()
@@ -276,9 +275,7 @@ MIDDLEWARE = [
 if ENABLE_DEBUG_TOOLBAR:
     MIDDLEWARE.insert(8, "debug_toolbar.middleware.DebugToolbarMiddleware")
 
-INTERNAL_IPS = (
-    _csv_env("INTERNAL_IPS", default=["127.0.0.1"]) if ENABLE_DEBUG_TOOLBAR else []
-)
+INTERNAL_IPS = _csv_env("INTERNAL_IPS", default=["127.0.0.1"]) if ENABLE_DEBUG_TOOLBAR else []
 
 # 允许指定的域访问（修改为你的前端 URL）
 
@@ -341,9 +338,7 @@ db_test = {}
 db_test_name = env("DB_TEST_NAME", default="").strip()
 if db_test_name:
     db_test["NAME"] = db_test_name
-if DB_ENGINE == "django.db.backends.mysql" and env.bool(
-    "DB_TEST_DISABLE_FK_CHECKS", default=False
-):
+if DB_ENGINE == "django.db.backends.mysql" and env.bool("DB_TEST_DISABLE_FK_CHECKS", default=False):
     db_test["OPTIONS"] = {
         "init_command": "SET foreign_key_checks = 0;",
     }
@@ -354,9 +349,7 @@ DATABASES = {
         "NAME": DB_NAME,  # 数据库名
         "USER": env("DB_USER", default="wmsuser"),  # MySQL 用户
         "PASSWORD": env("DB_PASSWORD", default=""),  # 密码
-        "HOST": env(
-            "DB_HOST", default="127.0.0.1"
-        ),  # 主机（本机用 localhost 或 127.0.0.1）
+        "HOST": env("DB_HOST", default="127.0.0.1"),  # 主机（本机用 localhost 或 127.0.0.1）
         "PORT": env("DB_PORT", default="3306"),  # 端口
         "OPTIONS": db_options,
         "TEST": db_test,
@@ -450,11 +443,7 @@ TASKING_DEFAULT_PUTAWAY_FROM_LOCATION_ID = 2  # 替换为你“待上架暂存�
 
 ALLOWED_HOSTS = _csv_env(
     "ALLOWED_HOSTS",
-    default=(
-        []
-        if IS_PRODUCTION
-        else ["127.0.0.1", "localhost", "testserver", "192.168.1.128"]
-    ),
+    default=([] if IS_PRODUCTION else ["127.0.0.1", "localhost", "testserver", "192.168.1.128"]),
 )
 CSRF_TRUSTED_ORIGINS = _csv_env(
     "CSRF_TRUSTED_ORIGINS",
@@ -475,9 +464,7 @@ SECURE_PROXY_SSL_HEADER = (
     if env.bool("TRUST_PROXY_SSL_HEADER", default=IS_PRODUCTION)
     else None
 )
-SECURE_HSTS_SECONDS = env.int(
-    "SECURE_HSTS_SECONDS", default=31536000 if IS_PRODUCTION else 0
-)
+SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=31536000 if IS_PRODUCTION else 0)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = IS_PRODUCTION and env.bool(
     "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True
 )
@@ -496,24 +483,18 @@ OUTBOUND_LEGACY_AUTHZ_MODE = _validated_choice(
 )
 # Explicit UserRoleScope rows are mandatory by default.  This switch exists only
 # for a time-bounded migration rollback and must never be enabled in production.
-WMS_ACCESS_SCOPE_LEGACY_FALLBACK = env.bool(
-    "WMS_ACCESS_SCOPE_LEGACY_FALLBACK", default=False
-)
+WMS_ACCESS_SCOPE_LEGACY_FALLBACK = env.bool("WMS_ACCESS_SCOPE_LEGACY_FALLBACK", default=False)
 if IS_PRODUCTION and WMS_ACCESS_SCOPE_LEGACY_FALLBACK:
     raise ImproperlyConfigured("生产环境禁止启用 WMS_ACCESS_SCOPE_LEGACY_FALLBACK。")
 COUNT_MAX_TIMES = 2
 BILLING_TASKLINE_ORDER_RESOLVER = "allapp.billing.resolvers:taskline_to_order_mapping"
-BILLING_METRIC_SCHEDULER_ENABLED = env.bool(
-    "BILLING_METRIC_SCHEDULER_ENABLED", default=True
-)
+BILLING_METRIC_SCHEDULER_ENABLED = env.bool("BILLING_METRIC_SCHEDULER_ENABLED", default=True)
 BILLING_METRIC_SCHEDULER_HOUR = env.int("BILLING_METRIC_SCHEDULER_HOUR", default=1)
 BILLING_METRIC_SCHEDULER_MINUTE = env.int("BILLING_METRIC_SCHEDULER_MINUTE", default=5)
 BILLING_METRIC_SCHEDULER_LOOKBACK_DAYS = env.int(
     "BILLING_METRIC_SCHEDULER_LOOKBACK_DAYS", default=3
 )
-BILLING_METRIC_SCHEDULER_POLL_SECONDS = env.int(
-    "BILLING_METRIC_SCHEDULER_POLL_SECONDS", default=60
-)
+BILLING_METRIC_SCHEDULER_POLL_SECONDS = env.int("BILLING_METRIC_SCHEDULER_POLL_SECONDS", default=60)
 BILLING_METRIC_SCHEDULER_STALE_MINUTES = env.int(
     "BILLING_METRIC_SCHEDULER_STALE_MINUTES", default=180
 )

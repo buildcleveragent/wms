@@ -140,13 +140,9 @@ class NoOrderReceiveExcelImportTests(TestCase):
                 "有效截止日期",
             ],
         )
-        metadata = dict(
-            workbook["_meta"].iter_rows(min_col=1, max_col=2, values_only=True)
-        )
+        metadata = dict(workbook["_meta"].iter_rows(min_col=1, max_col=2, values_only=True))
         self.assertEqual(metadata["owner_id"], self.owner.id)
-        reference_rows = list(
-            workbook["商品单位参考"].iter_rows(min_row=2, values_only=True)
-        )
+        reference_rows = list(workbook["商品单位参考"].iter_rows(min_row=2, values_only=True))
         self.assertIn(
             (
                 "EXSKU1",
@@ -200,24 +196,16 @@ class NoOrderReceiveExcelImportTests(TestCase):
 
         self.assertEqual(response.status_code, 400, response.data)
         self.assertTrue(
-            any(
-                "序列号管理商品暂不支持" in error["message"]
-                for error in response.data["errors"]
-            )
+            any("序列号管理商品暂不支持" in error["message"] for error in response.data["errors"])
         )
         self.assertFalse(WmsTask.objects.exists())
 
     def test_formula_cells_are_rejected(self):
-        response = self._preview(
-            [['=CONCAT("EX","SKU1")', "Excel Product", "1", "EA", "", "", ""]]
-        )
+        response = self._preview([['=CONCAT("EX","SKU1")', "Excel Product", "1", "EA", "", "", ""]])
 
         self.assertEqual(response.status_code, 400, response.data)
         self.assertTrue(
-            any(
-                error["message"] == "不允许使用公式"
-                for error in response.data["errors"]
-            )
+            any(error["message"] == "不允许使用公式" for error in response.data["errors"])
         )
 
     def test_batch_and_expiry_control_require_tracking_fields(self):
@@ -331,6 +319,4 @@ class NoOrderReceiveExcelImportTests(TestCase):
             product=self.product,
         )
         self.assertEqual(detail.onhand_qty, Decimal("24.0000"))
-        self.assertEqual(
-            WmsTask.objects.filter(task_type=WmsTask.TaskType.RECEIVE).count(), 1
-        )
+        self.assertEqual(WmsTask.objects.filter(task_type=WmsTask.TaskType.RECEIVE).count(), 1)

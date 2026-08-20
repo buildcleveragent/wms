@@ -8,11 +8,11 @@ from django.db.models import DecimalField, ExpressionWrapper, F
 from allapp.billing.enums import AccrualStatus, BillStatus, PricingStatus
 from allapp.billing.models import (
     Bill,
-    BillLine,
     BillingAccrual,
     BillingEvent,
     BillingMetricDaily,
     BillingPeriod,
+    BillLine,
     qmoney,
 )
 from allapp.inventory.models import (
@@ -20,6 +20,7 @@ from allapp.inventory.models import (
     InventorySummary,
     InventoryTransaction,
 )
+from allapp.tasking.models import WmsTaskLine
 
 
 def _q4(value: Any) -> Decimal:
@@ -76,9 +77,7 @@ def _build_check(
 
 
 def _build_skipped_check(name: str, note: str) -> CheckResult:
-    return CheckResult(
-        name=name, ok=True, issue_count=0, samples=[], note=note, skipped=True
-    )
+    return CheckResult(name=name, ok=True, issue_count=0, samples=[], note=note, skipped=True)
 
 
 def _inventory_detail_queryset(*, owner_id=None, warehouse_id=None):
@@ -98,9 +97,7 @@ def _inventory_summary_queryset(*, owner_id=None):
 
 
 def _inventory_transaction_queryset(*, owner_id=None, warehouse_id=None):
-    queryset = InventoryTransaction.objects.filter(
-        is_active=True, posted_at__isnull=False
-    )
+    queryset = InventoryTransaction.objects.filter(is_active=True, posted_at__isnull=False)
     if owner_id:
         queryset = queryset.filter(owner_id=owner_id)
     if warehouse_id:
@@ -174,6 +171,71 @@ def reconcile_inventory_accuracy(
 ) -> Dict[str, Any]:
     checks = []
 
+    task_line_scope = WmsTaskLine.objects.filter(is_active=True)
+    if owner_id:
+        task_line_scope = task_line_scope.filter(task__owner_id=owner_id)
+    if warehouse_id:
+        task_line_scope = task_line_scope.filter(task__warehouse_id=warehouse_id)
+    task_line_owner_issues = list(
+        task_line_scope.exclude(product_id__isnull=True)
+        .exclude(task__owner_id=F("product__owner_id"))
+        .values(
+            "id",
+            "task_id",
+            "task__owner_id",
+            "task__warehouse_id",
+            "product_id",
+            "product__owner_id",
+        )
+    )
+    checks.append(
+        _build_check(
+            "task_line_product_owner_consistency",
+            task_line_owner_issues,
+            limit=limit,
+            note="Read-only audit; owner repairs require explicit business approval.",
+        )
+    )
+
+    detail_owner_issues = list(
+        _inventory_detail_queryset(owner_id=owner_id, warehouse_id=warehouse_id)
+        .exclude(owner_id=F("product__owner_id"))
+        .values("id", "owner_id", "warehouse_id", "product_id", "product__owner_id")
+    )
+    checks.append(
+        _build_check(
+            "inventory_detail_product_owner_consistency",
+            detail_owner_issues,
+            limit=limit,
+        )
+    )
+
+    transaction_owner_issues = list(
+        _inventory_transaction_queryset(owner_id=owner_id, warehouse_id=warehouse_id)
+        .exclude(owner_id=F("product__owner_id"))
+        .values("id", "owner_id", "warehouse_id", "product_id", "product__owner_id")
+    )
+    checks.append(
+        _build_check(
+            "inventory_transaction_product_owner_consistency",
+            transaction_owner_issues,
+            limit=limit,
+        )
+    )
+
+    summary_owner_issues = list(
+        _inventory_summary_queryset(owner_id=owner_id)
+        .exclude(owner_id=F("product__owner_id"))
+        .values("id", "owner_id", "product_id", "product__owner_id")
+    )
+    checks.append(
+        _build_check(
+            "inventory_summary_product_owner_consistency",
+            summary_owner_issues,
+            limit=limit,
+        )
+    )
+
     detail_expected_available = ExpressionWrapper(
         F("onhand_qty") - F("allocated_qty") - F("locked_qty") - F("damaged_qty"),
         output_field=DecimalField(max_digits=18, decimal_places=4),
@@ -197,9 +259,7 @@ def reconcile_inventory_accuracy(
         )
     )
     checks.append(
-        _build_check(
-            "inventory_detail_available_identity", detail_identity_issues, limit=limit
-        )
+        _build_check("inventory_detail_available_identity", detail_identity_issues, limit=limit)
     )
 
     summary_expected_available = ExpressionWrapper(
@@ -223,9 +283,7 @@ def reconcile_inventory_accuracy(
         )
     )
     checks.append(
-        _build_check(
-            "inventory_summary_available_identity", summary_identity_issues, limit=limit
-        )
+        _build_check("inventory_summary_available_identity", summary_identity_issues, limit=limit)
     )
 
     if warehouse_id:
@@ -338,14 +396,10 @@ def reconcile_inventory_accuracy(
                     }
                 )
 
-        checks.append(
-            _build_check("inventory_summary_vs_detail", parity_issues, limit=limit)
-        )
+        checks.append(_build_check("inventory_summary_vs_detail", parity_issues, limit=limit))
 
     detail_replay_buckets = {}
-    for row in _inventory_detail_queryset(
-        owner_id=owner_id, warehouse_id=warehouse_id
-    ).values(
+    for row in _inventory_detail_queryset(owner_id=owner_id, warehouse_id=warehouse_id).values(
         "owner_id",
         "warehouse_id",
         "location_id",
@@ -375,9 +429,7 @@ def reconcile_inventory_accuracy(
         bucket["detail_rows"] += 1
 
     tx_replay_buckets = {}
-    for row in _inventory_transaction_queryset(
-        owner_id=owner_id, warehouse_id=warehouse_id
-    ).values(
+    for row in _inventory_transaction_queryset(owner_id=owner_id, warehouse_id=warehouse_id).values(
         "owner_id",
         "warehouse_id",
         "location_id",
@@ -414,9 +466,7 @@ def reconcile_inventory_accuracy(
         detail_bucket = detail_replay_buckets.get(
             key, {"onhand_qty": Decimal("0.0000"), "detail_rows": 0}
         )
-        tx_bucket = tx_replay_buckets.get(
-            key, {"qty_delta": Decimal("0.0000"), "tx_rows": 0}
-        )
+        tx_bucket = tx_replay_buckets.get(key, {"qty_delta": Decimal("0.0000"), "tx_rows": 0})
         detail_qty = _q4(detail_bucket["onhand_qty"])
         replay_qty = _q4(tx_bucket["qty_delta"])
         if detail_qty == replay_qty:
@@ -451,9 +501,9 @@ def reconcile_inventory_accuracy(
     )
 
     tracking_details = list(
-        _inventory_detail_queryset(
-            owner_id=owner_id, warehouse_id=warehouse_id
-        ).select_related("product")
+        _inventory_detail_queryset(owner_id=owner_id, warehouse_id=warehouse_id).select_related(
+            "product"
+        )
     )
     tracking_transactions = list(
         _inventory_transaction_queryset(
@@ -485,10 +535,7 @@ def reconcile_inventory_accuracy(
         if getattr(product, "expiry_control", False):
             if not detail.expiry_date:
                 expiry_problems.append("missing_expiry_date")
-            if (
-                getattr(product, "expiry_basis", None) == "MFG"
-                and not detail.production_date
-            ):
+            if getattr(product, "expiry_basis", None) == "MFG" and not detail.production_date:
                 expiry_problems.append("missing_production_date")
         if (
             detail.production_date
@@ -552,16 +599,9 @@ def reconcile_inventory_accuracy(
         if getattr(product, "expiry_control", False):
             if not tx.expiry_date:
                 expiry_problems.append("missing_expiry_date")
-            if (
-                getattr(product, "expiry_basis", None) == "MFG"
-                and not tx.production_date
-            ):
+            if getattr(product, "expiry_basis", None) == "MFG" and not tx.production_date:
                 expiry_problems.append("missing_production_date")
-        if (
-            tx.production_date
-            and tx.expiry_date
-            and tx.expiry_date < tx.production_date
-        ):
+        if tx.production_date and tx.expiry_date and tx.expiry_date < tx.production_date:
             expiry_problems.append("expiry_before_production_date")
         if expiry_problems:
             expiry_issues.append(
@@ -602,15 +642,9 @@ def reconcile_inventory_accuracy(
                 )
             )
 
-    checks.append(
-        _build_check("inventory_batch_tracking_integrity", batch_issues, limit=limit)
-    )
-    checks.append(
-        _build_check("inventory_expiry_tracking_integrity", expiry_issues, limit=limit)
-    )
-    checks.append(
-        _build_check("inventory_serial_tracking_integrity", serial_issues, limit=limit)
-    )
+    checks.append(_build_check("inventory_batch_tracking_integrity", batch_issues, limit=limit))
+    checks.append(_build_check("inventory_expiry_tracking_integrity", expiry_issues, limit=limit))
+    checks.append(_build_check("inventory_serial_tracking_integrity", serial_issues, limit=limit))
 
     issue_count = sum(check.issue_count for check in checks)
     return {
@@ -646,12 +680,10 @@ def _billing_accrual_queryset(
     return queryset
 
 
-def _billing_line_queryset(
-    *, owner_id=None, warehouse_id=None, service_date=None, period_id=None
-):
-    queryset = BillLine.objects.select_related(
-        "bill", "bill__period", "accrual"
-    ).exclude(bill__status=BillStatus.VOID)
+def _billing_line_queryset(*, owner_id=None, warehouse_id=None, service_date=None, period_id=None):
+    queryset = BillLine.objects.select_related("bill", "bill__period", "accrual").exclude(
+        bill__status=BillStatus.VOID
+    )
     if owner_id:
         queryset = queryset.filter(bill__owner_id=owner_id)
     if warehouse_id:
@@ -663,9 +695,7 @@ def _billing_line_queryset(
     return queryset
 
 
-def _billing_bill_queryset(
-    *, owner_id=None, warehouse_id=None, service_date=None, period_id=None
-):
+def _billing_bill_queryset(*, owner_id=None, warehouse_id=None, service_date=None, period_id=None):
     queryset = Bill.objects.select_related("period").prefetch_related("lines")
     if owner_id:
         queryset = queryset.filter(owner_id=owner_id)
@@ -698,13 +728,9 @@ def reconcile_billing_accuracy(
             owner_id=owner_id, warehouse_id=warehouse_id, service_date=service_date
         )
         .filter(value__lt=0)
-        .values(
-            "id", "owner_id", "warehouse_id", "service_date", "metric_type", "value"
-        )
+        .values("id", "owner_id", "warehouse_id", "service_date", "metric_type", "value")
     )
-    checks.append(
-        _build_check("billing_metric_non_negative", metric_issues, limit=limit)
-    )
+    checks.append(_build_check("billing_metric_non_negative", metric_issues, limit=limit))
 
     accrual_issues = []
     accruals = list(
@@ -725,10 +751,7 @@ def reconcile_billing_accuracy(
             problems.append("unit_price_negative")
         if accrual.tax_amount < 0 and not accrual.is_reversal:
             problems.append("tax_amount_negative")
-        if (
-            accrual.rule.owner_id is not None
-            and accrual.rule.owner_id != accrual.owner_id
-        ):
+        if accrual.rule.owner_id is not None and accrual.rule.owner_id != accrual.owner_id:
             problems.append("rule_owner_mismatch")
         if (
             accrual.rule.warehouse_id is not None
@@ -737,11 +760,7 @@ def reconcile_billing_accuracy(
             problems.append("rule_warehouse_mismatch")
         if accrual.rule.charge_type != accrual.charge_type:
             problems.append("rule_charge_type_mismatch")
-        if (
-            accrual.rule.currency
-            and accrual.currency
-            and accrual.rule.currency != accrual.currency
-        ):
+        if accrual.rule.currency and accrual.currency and accrual.rule.currency != accrual.currency:
             problems.append("rule_currency_mismatch")
         if accrual.period_id:
             if (
@@ -749,11 +768,7 @@ def reconcile_billing_accuracy(
                 or accrual.period.warehouse_id != accrual.warehouse_id
             ):
                 problems.append("period_scope_mismatch")
-            if not (
-                accrual.period.start_date
-                <= accrual.service_date
-                <= accrual.period.end_date
-            ):
+            if not (accrual.period.start_date <= accrual.service_date <= accrual.period.end_date):
                 problems.append("service_date_outside_period")
             if (
                 accrual.period.currency
@@ -782,9 +797,7 @@ def reconcile_billing_accuracy(
                     "problems": ",".join(problems),
                 }
             )
-    checks.append(
-        _build_check("billing_accrual_consistency", accrual_issues, limit=limit)
-    )
+    checks.append(_build_check("billing_accrual_consistency", accrual_issues, limit=limit))
 
     event_qs = BillingEvent.objects.prefetch_related("billingaccrual_set")
     if owner_id:
@@ -796,9 +809,7 @@ def reconcile_billing_accuracy(
     if period_id:
         period = BillingPeriod.objects.filter(pk=period_id).first()
         if period:
-            event_qs = event_qs.filter(
-                service_date__range=(period.start_date, period.end_date)
-            )
+            event_qs = event_qs.filter(service_date__range=(period.start_date, period.end_date))
     event_issues = []
     for event in event_qs:
         valid_accruals = [
@@ -812,9 +823,7 @@ def reconcile_billing_accuracy(
         if event.pricing_status == PricingStatus.ACCRUED and not valid_accruals:
             problems.append("active_accrual_missing")
         if event.pricing_status == PricingStatus.NO_CHARGE and (
-            not event.pricing_rule_id
-            or not event.pricing_reason
-            or not event.pricing_detail
+            not event.pricing_rule_id or not event.pricing_reason or not event.pricing_detail
         ):
             problems.append("no_charge_evidence_missing")
         if problems:
@@ -828,9 +837,7 @@ def reconcile_billing_accuracy(
                     "problems": ",".join(problems),
                 }
             )
-    checks.append(
-        _build_check("billing_event_pricing_completeness", event_issues, limit=limit)
-    )
+    checks.append(_build_check("billing_event_pricing_completeness", event_issues, limit=limit))
 
     locked_linkage_qs = BillingAccrual.objects.filter(
         status=AccrualStatus.LOCKED, period__isnull=True
@@ -862,25 +869,16 @@ def reconcile_billing_accuracy(
             (Decimal(line.tax_amount or 0) for line in bill.lines.all()),
             Decimal("0.00"),
         )
-        expected_total = qmoney(
-            Decimal(bill.subtotal or 0) + Decimal(bill.tax_total or 0)
-        )
+        expected_total = qmoney(Decimal(bill.subtotal or 0) + Decimal(bill.tax_total or 0))
         if bill.subtotal < 0:
             problems.append("subtotal_negative")
         if bill.tax_total < 0:
             problems.append("tax_total_negative")
         if bill.total < 0:
             problems.append("total_negative")
-        if (
-            bill.period.owner_id != bill.owner_id
-            or bill.period.warehouse_id != bill.warehouse_id
-        ):
+        if bill.period.owner_id != bill.owner_id or bill.period.warehouse_id != bill.warehouse_id:
             problems.append("period_scope_mismatch")
-        if (
-            bill.currency
-            and bill.period.currency
-            and bill.currency != bill.period.currency
-        ):
+        if bill.currency and bill.period.currency and bill.currency != bill.period.currency:
             problems.append("period_currency_mismatch")
         if bill.due_date and bill.issue_date and bill.due_date < bill.issue_date:
             problems.append("due_date_before_issue_date")
@@ -951,18 +949,14 @@ def reconcile_billing_accuracy(
                     "problems": ",".join(problems),
                 }
             )
-    checks.append(
-        _build_check("bill_line_matches_accrual", bill_line_issues, limit=limit)
-    )
+    checks.append(_build_check("bill_line_matches_accrual", bill_line_issues, limit=limit))
 
     line_counts = {}
     line_count_queryset = BillLine.objects.exclude(bill__status=BillStatus.VOID)
     if owner_id:
         line_count_queryset = line_count_queryset.filter(bill__owner_id=owner_id)
     if warehouse_id:
-        line_count_queryset = line_count_queryset.filter(
-            bill__warehouse_id=warehouse_id
-        )
+        line_count_queryset = line_count_queryset.filter(bill__warehouse_id=warehouse_id)
     if service_date:
         line_count_queryset = line_count_queryset.filter(service_date=service_date)
     if period_id:
@@ -973,11 +967,7 @@ def reconcile_billing_accuracy(
     invoicing_issues = []
     for accrual in accruals:
         line_count = line_counts.get(accrual.id, 0)
-        if (
-            accrual.status == AccrualStatus.INVOICED
-            and accrual.period_id
-            and line_count != 1
-        ):
+        if accrual.status == AccrualStatus.INVOICED and accrual.period_id and line_count != 1:
             invoicing_issues.append(
                 {
                     "accrual_id": accrual.id,
@@ -995,9 +985,7 @@ def reconcile_billing_accuracy(
                     "issue": "non_invoiced_accrual_should_not_have_bill_line",
                 }
             )
-    checks.append(
-        _build_check("billing_invoiced_accrual_linkage", invoicing_issues, limit=limit)
-    )
+    checks.append(_build_check("billing_invoiced_accrual_linkage", invoicing_issues, limit=limit))
 
     issue_count = sum(check.issue_count for check in checks)
     return {
@@ -1018,9 +1006,7 @@ def reconcile_data_accuracy(
     limit: int = 20,
 ) -> Dict[str, Any]:
     if not include_inventory and not include_billing:
-        raise ValueError(
-            "At least one of include_inventory or include_billing must be True."
-        )
+        raise ValueError("At least one of include_inventory or include_billing must be True.")
 
     result = {
         "scope": {

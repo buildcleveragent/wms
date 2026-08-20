@@ -115,8 +115,7 @@ class UnifiedProductAdminSearchMixin:
     def get_search_fields(self, request):
         fields = super().get_search_fields(request)
         relation_paths = {
-            path[:-3] if path.endswith("_id") else path
-            for path in self.product_search_paths
+            path[:-3] if path.endswith("_id") else path for path in self.product_search_paths
         }
         return tuple(
             field
@@ -141,8 +140,7 @@ class UnifiedProductAdminSearchMixin:
             product_match |= product_search_q(term, product_field=path, at=at)
         return (
             default_results | queryset.filter(product_match),
-            may_have_duplicates
-            or any("__" in path for path in self.product_search_paths),
+            may_have_duplicates or any("__" in path for path in self.product_search_paths),
         )
 
 
@@ -192,9 +190,9 @@ def get_exact_identifier_sources(owner_id, value, *, at=None) -> ExactIdentifier
     """
     normalized = normalize_product_identifier(value)
     at = at or timezone.now()
-    registry = ProductIdentifierRegistry.objects.select_related(
-        "product__base_uom"
-    ).get(owner_id=owner_id, normalized_value=normalized)
+    registry = ProductIdentifierRegistry.objects.select_related("product__base_uom").get(
+        owner_id=owner_id, normalized_value=normalized
+    )
     product = registry.product
     stable_fields = tuple(
         (field, code_type)
@@ -207,14 +205,10 @@ def get_exact_identifier_sources(owner_id, value, *, at=None) -> ExactIdentifier
         .select_related("package__uom")
     )
     external_identifiers = tuple(
-        effective_external_identifiers(at=at).filter(
-            product=product, normalized_value=normalized
-        )
+        effective_external_identifiers(at=at).filter(product=product, normalized_value=normalized)
     )
     has_history = (
-        ProductBarcode.all_objects.filter(
-            product=product, normalized_value=normalized
-        ).exists()
+        ProductBarcode.all_objects.filter(product=product, normalized_value=normalized).exists()
         or ProductExternalIdentifier.all_objects.filter(
             product=product, normalized_value=normalized
         ).exists()

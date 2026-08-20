@@ -1,19 +1,6 @@
 import { useCart } from '@/store/cart'
-
-const ENV =
-  (uni.getAccountInfoSync && uni.getAccountInfoSync().miniProgram?.envVersion) ||
-  'develop'
-
-const BASE_MAP = {
-  develop: 'http://192.168.1.6:8001',
-  develop2: 'http://192.168.1.9:8001',
-  mobilephone: 'http://8.148.198.200:8080',
-  owner: 'http://8.148.198.200:8080',
-  onsite: 'http://192.168.2.6:8001',
-}
-
-// export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
-export const BASE_URL = BASE_MAP.develop
+export { BASE_URL } from './api-base'
+import { BASE_URL } from './api-base'
 
 export function getAccessToken() {
   try {

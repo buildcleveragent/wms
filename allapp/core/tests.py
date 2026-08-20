@@ -21,8 +21,8 @@ from allapp.billing.models import (
     BillingRule,
     BillLine,
 )
-from allapp.core.choices import InvTxType
 from allapp.core.admin import SystemSettingAdminForm
+from allapp.core.choices import InvTxType
 from allapp.core.models import (
     SECRET_VALUE_PREFIX,
     DocSequence,
@@ -37,7 +37,6 @@ from allapp.inventory.models import (
 )
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product, ProductUom
-
 
 TEST_SYSTEM_SETTING_KEY = Fernet.generate_key().decode("ascii")
 
@@ -63,9 +62,7 @@ class SystemSettingSecretTests(TestCase):
         self.assertTrue(setting.value.startswith(SECRET_VALUE_PREFIX))
         self.assertNotIn("provider-secret-value", setting.value)
         self.assertEqual(setting.effective_value(), "")
-        self.assertIsNone(
-            SystemSetting.get_value(setting.namespace, setting.key, None)
-        )
+        self.assertIsNone(SystemSetting.get_value(setting.namespace, setting.key, None))
         self.assertEqual(
             SystemSetting.get_secret_value(setting.namespace, setting.key),
             "provider-secret-value",
@@ -87,9 +84,7 @@ class SystemSettingSecretTests(TestCase):
         ):
             with self.assertRaisesRegex(SecretSettingError, "无法解密"):
                 setting.secret_value()
-        with override_settings(
-            SYSTEM_SETTING_ENCRYPTION_KEY=Fernet.generate_key().decode()
-        ):
+        with override_settings(SYSTEM_SETTING_ENCRYPTION_KEY=Fernet.generate_key().decode()):
             with self.assertRaisesRegex(SecretSettingError, "无法解密"):
                 setting.secret_value()
 
@@ -376,9 +371,7 @@ class PrintConfigApiTests(TestCase):
 class DataAccuracyCommandTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Accuracy Owner", code="ACC-OWN")
-        self.warehouse = Warehouse.objects.create(
-            code="ACC-WH", name="Accuracy Warehouse"
-        )
+        self.warehouse = Warehouse.objects.create(code="ACC-WH", name="Accuracy Warehouse")
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="ACC01",
@@ -389,9 +382,7 @@ class DataAccuracyCommandTests(TestCase):
             code="ACC01-01-01-01",
             name="Accuracy Location",
         )
-        self.base_uom = ProductUom.objects.create(
-            code="PCS-ACC", name="Piece", decimal_places=0
-        )
+        self.base_uom = ProductUom.objects.create(code="PCS-ACC", name="Piece", decimal_places=0)
         self.product = Product.objects.create(
             owner=self.owner,
             code="ACC-SKU",
@@ -567,10 +558,12 @@ class DataAccuracyCommandTests(TestCase):
         payload = json.loads(out.getvalue())
         self.assertFalse(payload["ok"])
         self.assertGreater(payload["issue_count"], 0)
-        self.assertEqual(
-            payload["inventory"]["checks"][2]["name"], "inventory_summary_vs_detail"
+        summary_check = next(
+            check
+            for check in payload["inventory"]["checks"]
+            if check["name"] == "inventory_summary_vs_detail"
         )
-        self.assertFalse(payload["inventory"]["checks"][2]["ok"])
+        self.assertFalse(summary_check["ok"])
 
         with self.assertRaises(CommandError):
             call_command(
@@ -599,9 +592,7 @@ class DataAccuracyCommandTests(TestCase):
 
         payload = json.loads(out.getvalue())
         self.assertFalse(payload["ok"])
-        check_names = [
-            check["name"] for check in payload["billing"]["checks"] if not check["ok"]
-        ]
+        check_names = [check["name"] for check in payload["billing"]["checks"] if not check["ok"]]
         self.assertIn("bill_header_totals", check_names)
 
     def test_reconcile_data_accuracy_command_detects_inventory_transaction_replay_mismatch(
@@ -649,9 +640,7 @@ class DataAccuracyCommandTests(TestCase):
             "detail_onhand_replay_mismatch",
         )
         self.assertEqual(
-            checks["inventory_transaction_replay_onhand"]["samples"][0][
-                "replayed_onhand_qty"
-            ],
+            checks["inventory_transaction_replay_onhand"]["samples"][0]["replayed_onhand_qty"],
             "4.0000",
         )
 
@@ -885,15 +874,11 @@ class DataAccuracyCommandTests(TestCase):
             )
 
             self.assertIn(str(output_dir), out.getvalue())
-            scope_payload = json.loads(
-                (output_dir / "scope.json").read_text(encoding="utf-8")
-            )
+            scope_payload = json.loads((output_dir / "scope.json").read_text(encoding="utf-8"))
             self.assertEqual(scope_payload["owner"]["id"], self.owner.id)
             self.assertEqual(scope_payload["warehouse"]["id"], self.warehouse.id)
             self.assertEqual(scope_payload["period"]["id"], self.period.id)
-            self.assertEqual(
-                scope_payload["service_date"], self.period.end_date.isoformat()
-            )
+            self.assertEqual(scope_payload["service_date"], self.period.end_date.isoformat())
             self.assertEqual(scope_payload["shadow_run_days"], 5)
 
             commands = (output_dir / "commands.sh").read_text(encoding="utf-8")
@@ -919,10 +904,7 @@ class DataAccuracyCommandTests(TestCase):
             self.assertIn(self.period.label, runbook)
 
             daily_record_rows = (
-                (output_dir / "daily-record.csv")
-                .read_text(encoding="utf-8")
-                .strip()
-                .splitlines()
+                (output_dir / "daily-record.csv").read_text(encoding="utf-8").strip().splitlines()
             )
             self.assertEqual(len(daily_record_rows), 10)
             self.assertIn(
@@ -935,9 +917,7 @@ class DataAccuracyCommandTests(TestCase):
     def test_generate_data_accuracy_workpack_command_rejects_period_scope_mismatch(
         self,
     ):
-        other_warehouse = Warehouse.objects.create(
-            code="ACC-WH-02", name="Other Warehouse"
-        )
+        other_warehouse = Warehouse.objects.create(code="ACC-WH-02", name="Other Warehouse")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             with self.assertRaises(CommandError):

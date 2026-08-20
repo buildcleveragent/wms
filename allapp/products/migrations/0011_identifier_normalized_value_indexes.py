@@ -16,14 +16,10 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="productbarcode",
-            index=models.Index(
-                fields=["normalized_value"], name="prod_barcode_norm_idx"
-            ),
+            index=models.Index(fields=["normalized_value"], name="prod_barcode_norm_idx"),
         ),
         migrations.AddIndex(
             model_name="productexternalidentifier",
-            index=models.Index(
-                fields=["normalized_value"], name="prod_extident_norm_idx"
-            ),
+            index=models.Index(fields=["normalized_value"], name="prod_extident_norm_idx"),
         ),
     ]

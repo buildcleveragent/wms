@@ -1,26 +1,28 @@
 # allapp/tasking/rcv_scan.py
+import hashlib
 from dataclasses import dataclass
 from decimal import Decimal
-from django.db import transaction
-from django.utils import timezone
+
 from django.core.exceptions import ValidationError
-from allapp.tasking.models import WmsTask, WmsTaskLine, TaskStatus, TaskScanLog, TaskType
-from allapp.tasking.utils import bind_triplet_from
-import hashlib
+from django.db import transaction
+
+from allapp.tasking.models import TaskScanLog, TaskStatus, TaskType, WmsTask, WmsTaskLine
 
 # —— 可配置容差（基于你项目 settings 或策略中心读取） —— #
-OVER_ABS = Decimal("0")      # 绝对容差（件）
-OVER_PCT = Decimal("0.00")   # 百分比容差（如 0.02 表示 2%）
-OVER_MODE = "block"          # 'block' | 'allow' | 'need_approval'
+OVER_ABS = Decimal("0")  # 绝对容差（件）
+OVER_PCT = Decimal("0.00")  # 百分比容差（如 0.02 表示 2%）
+OVER_MODE = "block"  # 'block' | 'allow' | 'need_approval'
+
 
 @dataclass
 class ScanResult:
     product_id: int
-    code_type: str    # 'UNIT' | 'CARTON' | 'LPN' | 'SSCC' | ...
-    uom_code: str     # 'EA'/'CS' 等
-    pack_qty: Decimal # 1 for EA；箱转件因子（如 12）
+    code_type: str  # 'UNIT' | 'CARTON' | 'LPN' | 'SSCC' | ...
+    uom_code: str  # 'EA'/'CS' 等
+    pack_qty: Decimal  # 1 for EA；箱转件因子（如 12）
     lot_no: str | None = None
     exp_date: str | None = None
+
 
 # —— 你已有产品/包装模型，按你的字段实现以下三函数 —— #
 def classify_barcode(barcode: str) -> str:
@@ -28,7 +30,8 @@ def classify_barcode(barcode: str) -> str:
     # TODO: 用你项目里 ProductUom / ProductBarcode 实表校验
     if barcode.startswith("LPN"):
         return "LPN"
-    return "CARTON" if len(barcode) in (12,14) else "UNIT"
+    return "CARTON" if len(barcode) in (12, 14) else "UNIT"
+
 
 def resolve_product_pack(owner_id: int, barcode: str, code_type: str) -> tuple[int, str, Decimal]:
     """
@@ -41,13 +44,15 @@ def resolve_product_pack(owner_id: int, barcode: str, code_type: str) -> tuple[i
     # ProductBarcode(owner=..., barcode=...).select_related('product','uom').first()
     raise NotImplementedError
 
+
 def fefo_or_default_allocation(task: WmsTask, product_id: int) -> WmsTaskLine | None:
     """为该 SKU 选择/创建一个任务行：优先选还未完成的行；无单可新建（手工收货）"""
-    tl = (task.lines
-          .select_for_update()
-          .filter(product_id=product_id)
-          .order_by("id")  # 收货不需要 FEFO；如你要“按托/LPN拆行”，可在创建时就按策略拆好
-          .first())
+    tl = (
+        task.lines.select_for_update()
+        .filter(product_id=product_id)
+        .order_by("id")  # 收货不需要 FEFO；如你要“按托/LPN拆行”，可在创建时就按策略拆好
+        .first()
+    )
     if tl:
         return tl
     # 无行：允许手工收货时自动建一条“未绑定”的行
@@ -55,14 +60,24 @@ def fefo_or_default_allocation(task: WmsTask, product_id: int) -> WmsTaskLine | 
         task=task, product_id=product_id, qty_plan=Decimal("0"), qty_done=Decimal("0")
     )
 
-def _fingerprint(task_id: int, code: str, qty: Decimal, location_id: int | None, user_id: int | None) -> str:
+
+def _fingerprint(
+    task_id: int, code: str, qty: Decimal, location_id: int | None, user_id: int | None
+) -> str:
     """构造幂等指纹（按你的口径可加入时间桶/设备号）"""
     raw = f"RCV|{task_id}|{code}|{qty}|{location_id or 0}|{user_id or 0}"
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+    return hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
+
 
 @transaction.atomic
-def rcv_scan(*, task_id: int, barcode: str, qty: Decimal = Decimal("1"),
-             location_id: int | None = None, user=None) -> dict:
+def rcv_scan(
+    *,
+    task_id: int,
+    barcode: str,
+    qty: Decimal = Decimal("1"),
+    location_id: int | None = None,
+    user=None,
+) -> dict:
     """
     扫码闭环：校验任务→解析条码→换算数量→选择/建行→幂等去重→写行/记审计
     返回：本次增量与行完成情况（便于前端刷新）
@@ -104,14 +119,22 @@ def rcv_scan(*, task_id: int, barcode: str, qty: Decimal = Decimal("1"),
     tline.save(update_fields=["qty_done", "updated_at"])
 
     TaskScanLog.objects.create(
-        task=task, task_line=tline, code=barcode, qty=inc_qty,
-        code_type=code_type, uom_code=uom_code, pack_qty=pack_qty,
-        location_id=location_id, by_user=user, fp=fp,
+        task=task,
+        task_line=tline,
+        code=barcode,
+        qty=inc_qty,
+        code_type=code_type,
+        uom_code=uom_code,
+        pack_qty=pack_qty,
+        location_id=location_id,
+        by_user=user,
+        fp=fp,
     )
 
     # 6) 自动进入 IN_PROGRESS（若仍为 RELEASED/CLAIMED）
     if task.status in (TaskStatus.RELEASED, TaskStatus.CLAIMED):
         from .services import start_task
+
         start_task(task.id, user)
 
     return {"line_id": tline.id, "qty_done": str(tline.qty_done), "inc_qty": str(inc_qty)}

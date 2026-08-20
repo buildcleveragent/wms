@@ -190,9 +190,7 @@ def _params_from_extra(extra: CountTaskExtra) -> CountScopeParams:
 def _rebuild_count_lines(task: WmsTask, params: CountScopeParams) -> tuple[int, bool]:
     if task.status not in {WmsTask.Status.DRAFT, WmsTask.Status.READY}:
         raise ValidationError("只有草稿或待发布盘点任务可以刷新范围。")
-    details = list(
-        _inventory_queryset(params).select_for_update()[: params.max_lines + 1]
-    )
+    details = list(_inventory_queryset(params).select_for_update()[: params.max_lines + 1])
     truncated = len(details) > params.max_lines
     details = details[: params.max_lines]
     if not details:
@@ -292,9 +290,7 @@ def create_lines_from_scope(*, created_by, **raw):
     return task, created, truncated, []
 
 
-def _lock_key(
-    *, owner_id, warehouse_id, location_id, product_id=None, batch_no=""
-) -> str:
+def _lock_key(*, owner_id, warehouse_id, location_id, product_id=None, batch_no="") -> str:
     return ":".join(
         [
             str(owner_id),
@@ -348,9 +344,7 @@ def _locks_overlap(existing: CountScopeLock, candidate: dict) -> bool:
         return False
     existing_batch = (existing.batch_no or "").upper()
     candidate_batch = (candidate["batch_no"] or "").upper()
-    return (
-        not existing_batch or not candidate_batch or existing_batch == candidate_batch
-    )
+    return not existing_batch or not candidate_batch or existing_batch == candidate_batch
 
 
 def _assert_no_inflight_conflicts(task: WmsTask, candidates: list[dict]):
@@ -365,18 +359,14 @@ def _assert_no_inflight_conflicts(task: WmsTask, candidates: list[dict]):
                 WmsTask.Status.IN_PROGRESS,
             ],
         )
-        .filter(
-            Q(from_location_id__in=location_ids) | Q(to_location_id__in=location_ids)
-        )
+        .filter(Q(from_location_id__in=location_ids) | Q(to_location_id__in=location_ids))
         .exclude(task_id=task.id)
     )
     product_ids = {row["product_id"] for row in candidates if row["product_id"]}
     if product_ids and all(row["product_id"] for row in candidates):
         qs = qs.filter(product_id__in=product_ids)
     conflict = (
-        qs.select_related("task", "from_location", "to_location")
-        .order_by("task_id", "id")
-        .first()
+        qs.select_related("task", "from_location", "to_location").order_by("task_id", "id").first()
     )
     if conflict:
         conflict_location = (
@@ -393,9 +383,7 @@ def _assert_no_inflight_conflicts(task: WmsTask, candidates: list[dict]):
 def release_count_task(task_id: int, *, by_user) -> WmsTask:
     if not _manager_allowed(by_user):
         raise PermissionDenied("无盘点发布权限。")
-    warehouse_id = (
-        WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
-    )
+    warehouse_id = WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
     lock_warehouses_for_inventory_write(warehouse_id)
     task = (
         WmsTask.objects.select_for_update()
@@ -429,10 +417,7 @@ def release_count_task(task_id: int, *, by_user) -> WmsTask:
     root_task = extra.root_task or task
     try:
         CountScopeLock.objects.bulk_create(
-            [
-                CountScopeLock(root_task=root_task, active_task=task, **row)
-                for row in candidates
-            ]
+            [CountScopeLock(root_task=root_task, active_task=task, **row) for row in candidates]
         )
     except IntegrityError as exc:
         raise ValidationError("盘点范围已被其他任务冻结，请刷新后重试。") from exc
@@ -502,9 +487,7 @@ def release_count_locks(task: WmsTask, *, by_user=None) -> int:
 
 def _mark_count_post_failed(task: WmsTask, *, by_user, exc: Exception):
     message = (str(exc) or "盘点过账失败")[:200]
-    WmsTask.objects.filter(pk=task.pk).exclude(
-        posting_status=WmsTask.PostingStatus.POSTED
-    ).update(
+    WmsTask.objects.filter(pk=task.pk).exclude(posting_status=WmsTask.PostingStatus.POSTED).update(
         posting_status=WmsTask.PostingStatus.FAILED,
         posting_note=message,
         posted_by=by_user,
@@ -520,9 +503,7 @@ def _mark_count_post_failed(task: WmsTask, *, by_user, exc: Exception):
 
 @transaction.atomic
 def claim_count_task(task_id: int, *, by_user) -> TaskAssignment:
-    task = WmsTask.objects.select_for_update().get(
-        pk=task_id, task_type=WmsTask.TaskType.COUNT
-    )
+    task = WmsTask.objects.select_for_update().get(pk=task_id, task_type=WmsTask.TaskType.COUNT)
     if task.status != WmsTask.Status.RELEASED:
         raise ValidationError("仅已发布盘点任务可以认领。")
     active = (
@@ -564,9 +545,7 @@ def record_count(
 ) -> dict:
     if not (client_seq or "").strip():
         raise ValidationError({"client_seq": "缺少幂等序号。"})
-    task = WmsTask.objects.select_for_update().get(
-        pk=task_id, task_type=WmsTask.TaskType.COUNT
-    )
+    task = WmsTask.objects.select_for_update().get(pk=task_id, task_type=WmsTask.TaskType.COUNT)
     _assert_operator(task, by_user)
     if task.status not in {WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS}:
         raise ValidationError("盘点任务当前状态不允许录入。")
@@ -579,9 +558,7 @@ def record_count(
     counted = _q4(qty_counted)
     if counted < 0:
         raise ValidationError({"qty_counted": "实盘数量不能为负数。"})
-    fp = hashlib.sha256(
-        f"COUNT:{task.id}:{line.id}:{client_seq.strip()}".encode()
-    ).hexdigest()
+    fp = hashlib.sha256(f"COUNT:{task.id}:{line.id}:{client_seq.strip()}".encode()).hexdigest()
     prior = TaskScanLog.objects.filter(fp=fp).first()
     if prior:
         return {
@@ -749,9 +726,7 @@ def _create_recount(task: WmsTask, extras: list[CountLineExtra], *, by_user) -> 
 
 @transaction.atomic
 def submit_count_task(task_id: int, *, by_user) -> dict:
-    warehouse_id = (
-        WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
-    )
+    warehouse_id = WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
     lock_warehouses_for_inventory_write(warehouse_id)
     task = (
         WmsTask.objects.select_for_update()
@@ -771,9 +746,9 @@ def submit_count_task(task_id: int, *, by_user) -> dict:
     )
     if not extras or any(extra.count_status != "COUNTED" for extra in extras):
         raise ValidationError("仍有未盘点明细，不能提交。")
-    if TaskScanLog.objects.filter(
-        task=task, status=TaskScanLog.ScanStatus.OK
-    ).count() != len(extras):
+    if TaskScanLog.objects.filter(task=task, status=TaskScanLog.ScanStatus.OK).count() != len(
+        extras
+    ):
         raise ValidationError("盘点有效快照数量与任务行不一致。")
     _assert_snapshot_unchanged(task)
     count_extra = CountTaskExtra.objects.select_for_update().get(task=task)
@@ -808,14 +783,10 @@ def submit_count_task(task_id: int, *, by_user) -> dict:
     WmsTask.objects.filter(pk=task.pk).update(
         status=WmsTask.Status.COMPLETED,
         review_status=(
-            WmsTask.ReviewStatus.PENDING
-            if differences
-            else WmsTask.ReviewStatus.APPROVED
+            WmsTask.ReviewStatus.PENDING if differences else WmsTask.ReviewStatus.APPROVED
         ),
         posting_status=(
-            WmsTask.PostingStatus.NOT_READY
-            if differences
-            else WmsTask.PostingStatus.PENDING
+            WmsTask.PostingStatus.NOT_READY if differences else WmsTask.PostingStatus.PENDING
         ),
         finished_at=now,
         approved_by=None if differences else by_user,
@@ -837,9 +808,7 @@ def submit_count_task(task_id: int, *, by_user) -> dict:
 
     from allapp.inventory import services as inventory_services
 
-    scans = list(
-        TaskScanLog.objects.filter(task=task, status=TaskScanLog.ScanStatus.OK)
-    )
+    scans = list(TaskScanLog.objects.filter(task=task, status=TaskScanLog.ScanStatus.OK))
     try:
         result = inventory_services.post_task(
             task=task, user=by_user, scans=scans, note="盘点无差异自动闭环"
@@ -855,9 +824,7 @@ def submit_count_task(task_id: int, *, by_user) -> dict:
 def approve_count_task(task_id: int, *, by_user, note="") -> WmsTask:
     if not _manager_allowed(by_user):
         raise PermissionDenied("无盘点审核权限。")
-    task = WmsTask.objects.select_for_update().get(
-        pk=task_id, task_type=WmsTask.TaskType.COUNT
-    )
+    task = WmsTask.objects.select_for_update().get(pk=task_id, task_type=WmsTask.TaskType.COUNT)
     if (
         task.status != WmsTask.Status.COMPLETED
         or task.review_status != WmsTask.ReviewStatus.PENDING
@@ -881,9 +848,7 @@ def reject_count_task(task_id: int, *, by_user, note: str) -> WmsTask:
         raise PermissionDenied("无盘点审核权限。")
     if not (note or "").strip():
         raise ValidationError({"note": "驳回原因不能为空。"})
-    task = WmsTask.objects.select_for_update().get(
-        pk=task_id, task_type=WmsTask.TaskType.COUNT
-    )
+    task = WmsTask.objects.select_for_update().get(pk=task_id, task_type=WmsTask.TaskType.COUNT)
     if (
         task.status != WmsTask.Status.COMPLETED
         or task.review_status != WmsTask.ReviewStatus.PENDING
@@ -905,14 +870,10 @@ def post_count_task(task_id: int, *, by_user, note="") -> dict:
     if not _manager_allowed(by_user):
         raise PermissionDenied("无盘点过账权限。")
     with transaction.atomic():
-        task = WmsTask.objects.select_for_update().get(
-            pk=task_id, task_type=WmsTask.TaskType.COUNT
-        )
+        task = WmsTask.objects.select_for_update().get(pk=task_id, task_type=WmsTask.TaskType.COUNT)
         if task.review_status != WmsTask.ReviewStatus.APPROVED:
             raise ValidationError("盘点任务尚未审核通过。")
-        scans = list(
-            TaskScanLog.objects.filter(task=task, status=TaskScanLog.ScanStatus.OK)
-        )
+        scans = list(TaskScanLog.objects.filter(task=task, status=TaskScanLog.ScanStatus.OK))
     from allapp.inventory import services as inventory_services
 
     try:
@@ -931,9 +892,7 @@ def post_count_task(task_id: int, *, by_user, note="") -> dict:
 def cancel_count_task(task_id: int, *, by_user, note="") -> WmsTask:
     if not _manager_allowed(by_user):
         raise PermissionDenied("无盘点取消权限。")
-    task = WmsTask.objects.select_for_update().get(
-        pk=task_id, task_type=WmsTask.TaskType.COUNT
-    )
+    task = WmsTask.objects.select_for_update().get(pk=task_id, task_type=WmsTask.TaskType.COUNT)
     if task.posting_status == WmsTask.PostingStatus.POSTED:
         raise ValidationError("已过账盘点任务不能取消。")
     if task.status == WmsTask.Status.COMPLETED:

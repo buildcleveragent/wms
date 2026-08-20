@@ -61,9 +61,7 @@ class IdentifierManagementApiTests(TestCase):
             expiry_control=False,
             expiry_basis=None,
         )
-        cls.user = get_user_model().objects.create_user(
-            username="identifier-manager", password="x"
-        )
+        cls.user = get_user_model().objects.create_user(username="identifier-manager", password="x")
         UserRoleScope.objects.create(
             user=cls.user,
             role=UserRoleScope.Role.OWNER_MANAGER,
@@ -170,9 +168,7 @@ class IdentifierManagementApiTests(TestCase):
         )
         listing = self.client.get("/api/product-barcodes/")
         self.assertEqual(listing.status_code, 200)
-        items = (
-            listing.data["results"] if isinstance(listing.data, dict) else listing.data
-        )
+        items = listing.data["results"] if isinstance(listing.data, dict) else listing.data
         ids = {item["id"] for item in items}
         self.assertNotIn(foreign.pk, ids)
         self.assertEqual(
@@ -212,16 +208,10 @@ class IdentifierManagementApiTests(TestCase):
         record_id = created.data["id"]
         self.assertEqual(created.data["normalized_value"], "IDM-OMS-1")
 
-        retired = self.client.post(
-            f"/api/product-external-identifiers/{record_id}/retire/"
-        )
+        retired = self.client.post(f"/api/product-external-identifiers/{record_id}/retire/")
         self.assertEqual(retired.status_code, 200, retired.data)
-        self.assertFalse(
-            ProductExternalIdentifier.all_objects.get(pk=record_id).is_active
-        )
-        reactivated = self.client.post(
-            f"/api/product-external-identifiers/{record_id}/reactivate/"
-        )
+        self.assertFalse(ProductExternalIdentifier.all_objects.get(pk=record_id).is_active)
+        reactivated = self.client.post(f"/api/product-external-identifiers/{record_id}/reactivate/")
         self.assertEqual(reactivated.status_code, 200, reactivated.data)
 
 
@@ -244,9 +234,7 @@ class IdentifierMaintenanceExcelTests(TestCase):
             uom=cls.carton,
             qty_in_base=30,
         )
-        cls.user = get_user_model().objects.create_user(
-            username="identifier-excel", password="x"
-        )
+        cls.user = get_user_model().objects.create_user(username="identifier-excel", password="x")
         UserRoleScope.objects.create(
             user=cls.user,
             role=UserRoleScope.Role.OWNER_MANAGER,
@@ -273,9 +261,7 @@ class IdentifierMaintenanceExcelTests(TestCase):
         uploaded = SimpleUploadedFile(
             "identifier-maintenance.xlsx",
             stream.getvalue(),
-            content_type=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ),
+            content_type=("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         )
         return self.client.post(
             "/api/products/identifier-maintenance-import/",
@@ -285,12 +271,8 @@ class IdentifierMaintenanceExcelTests(TestCase):
 
     def test_template_import_actions_and_export_include_conversion_snapshot(self):
         workbook = load_workbook(io.BytesIO(build_identifier_template()))
-        self.assertEqual(
-            [cell.value for cell in workbook[BARCODE_SHEET][1]], BARCODE_HEADERS
-        )
-        self.assertEqual(
-            [cell.value for cell in workbook[EXTERNAL_SHEET][1]], EXTERNAL_HEADERS
-        )
+        self.assertEqual([cell.value for cell in workbook[BARCODE_SHEET][1]], BARCODE_HEADERS)
+        self.assertEqual([cell.value for cell in workbook[EXTERNAL_SHEET][1]], EXTERNAL_HEADERS)
         barcode_row = {header: "" for header in BARCODE_HEADERS}
         barcode_row.update(
             {
@@ -303,9 +285,7 @@ class IdentifierMaintenanceExcelTests(TestCase):
                 "启用状态": "是",
             }
         )
-        workbook[BARCODE_SHEET].append(
-            [barcode_row[header] for header in BARCODE_HEADERS]
-        )
+        workbook[BARCODE_SHEET].append([barcode_row[header] for header in BARCODE_HEADERS])
         external_row = {header: "" for header in EXTERNAL_HEADERS}
         external_row.update(
             {
@@ -317,9 +297,7 @@ class IdentifierMaintenanceExcelTests(TestCase):
                 "启用状态": "是",
             }
         )
-        workbook[EXTERNAL_SHEET].append(
-            [external_row[header] for header in EXTERNAL_HEADERS]
-        )
+        workbook[EXTERNAL_SHEET].append([external_row[header] for header in EXTERNAL_HEADERS])
 
         imported = self._upload(workbook)
 
@@ -328,13 +306,9 @@ class IdentifierMaintenanceExcelTests(TestCase):
         barcode = ProductBarcode.objects.get(normalized_value="IDX-BOX-30")
         self.assertEqual(barcode.qty_in_base, 30)
         self.assertTrue(
-            ProductExternalIdentifier.objects.filter(
-                normalized_value="IDX-OMS-1"
-            ).exists()
+            ProductExternalIdentifier.objects.filter(normalized_value="IDX-OMS-1").exists()
         )
-        exported = load_workbook(
-            io.BytesIO(build_identifier_export(self.owner)), data_only=True
-        )
+        exported = load_workbook(io.BytesIO(build_identifier_export(self.owner)), data_only=True)
         header_index = {cell.value: cell.column for cell in exported[BARCODE_SHEET][1]}
         barcode_rows = {
             exported[BARCODE_SHEET].cell(row, header_index["条码"]).value: row

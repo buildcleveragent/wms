@@ -1,23 +1,19 @@
-from django.utils import timezone
-from allapp.outbound.enums import PricingStatus
-from decimal import Decimal
-from django.core.exceptions import ValidationError
 from datetime import date
-from allapp.outbound import services as ob_services
-from django.contrib.contenttypes.models import ContentType
-from django.db.models import Q, F, Max
-from django.contrib.contenttypes.fields import GenericForeignKey
 from decimal import Decimal
-from django.db import transaction,models
+
 from django.conf import settings
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
+from django.db import models, transaction
+from django.db.models import F, Max, Q
+from django.utils import timezone
 
-from allapp.products.models import Product, ProductPackage, ProductUom
-from allapp.inbound.models import InboundOrder, InboundOrderLine
-from allapp.baseinfo.models import Supplier
 from allapp.core.models import BaseModel, DocSequence
+from allapp.outbound import services as ob_services
 from allapp.outbound.enums import PricingStatus
+
 
 # ===================== 订单:出库订单 =====================
 class OutboundOrder(BaseModel):
@@ -25,9 +21,7 @@ class OutboundOrder(BaseModel):
         STANDARD = "STANDARD", "标准出库"
         WAREHOUSE_ASSISTED = "WAREHOUSE_ASSISTED", "仓库代办出库"
 
-    SUBMIT_CHOICES = [
-        ("SUBMITTED", "已提交"), ("DRAFT", "未提交")
-    ]
+    SUBMIT_CHOICES = [("SUBMITTED", "已提交"), ("DRAFT", "未提交")]
     APPROVAL_CHOICES = [
         ("OWNER_PENDING", "待货主管理员审核"),
         ("OWNER_APPROVED", "货主管理员已审核通过"),
@@ -49,42 +43,68 @@ class OutboundOrder(BaseModel):
         ("SUPPLIER_RETURN", "退回供应商"),
     ]
 
-
-
     created_at = models.DateTimeField("制表时间", auto_now_add=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         verbose_name="制表人",
         on_delete=models.PROTECT,
-        blank=True, null=True,
+        blank=True,
+        null=True,
         related_name="%(class)s_created",
     )
 
     # 当 outbound_type=SUPPLIER_RETURN 才会用到 supplier；否则用 customer
     supplier = models.ForeignKey(
-        "baseinfo.Supplier", on_delete=models.PROTECT, null=True, blank=True,
-        related_name="outbound_returns", verbose_name="供应商"
+        "baseinfo.Supplier",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="outbound_returns",
+        verbose_name="供应商",
     )
 
-    owner = models.ForeignKey("baseinfo.Owner", verbose_name="货主", on_delete=models.PROTECT, related_name="outbound_orders")
-    customer = models.ForeignKey("baseinfo.Customer", verbose_name="客户", on_delete=models.PROTECT, related_name="outbound_orders", blank=True, null=True)
-    warehouse = models.ForeignKey("locations.Warehouse", verbose_name="仓库", on_delete=models.PROTECT, related_name="outbound_orders")
+    owner = models.ForeignKey(
+        "baseinfo.Owner",
+        verbose_name="货主",
+        on_delete=models.PROTECT,
+        related_name="outbound_orders",
+    )
+    customer = models.ForeignKey(
+        "baseinfo.Customer",
+        verbose_name="客户",
+        on_delete=models.PROTECT,
+        related_name="outbound_orders",
+        blank=True,
+        null=True,
+    )
+    warehouse = models.ForeignKey(
+        "locations.Warehouse",
+        verbose_name="仓库",
+        on_delete=models.PROTECT,
+        related_name="outbound_orders",
+    )
 
     order_no = models.CharField("订单编号", max_length=100, unique=True)  # 去掉多余 db_index=True
     biz_date = models.DateField("日期", default=date.today)
     src_bill_no = models.CharField("源单号", max_length=100, blank=True, null=True)
-    idempotency_key = models.CharField(
-        "幂等键", max_length=64, blank=True, null=True
-    )
+    idempotency_key = models.CharField("幂等键", max_length=64, blank=True, null=True)
     idempotency_fingerprint = models.CharField(
         "幂等请求指纹", max_length=64, blank=True, default=""
     )
-    outbound_type = models.CharField("出库类型", max_length=15, choices=OUTBOUND_TYPE_CHOICES, default="SALES")
-    delivery_method = models.CharField("交货方式", max_length=15, choices=DELIVERY_METHOD_CHOICES, blank=True, null=True)
+    outbound_type = models.CharField(
+        "出库类型", max_length=15, choices=OUTBOUND_TYPE_CHOICES, default="SALES"
+    )
+    delivery_method = models.CharField(
+        "交货方式", max_length=15, choices=DELIVERY_METHOD_CHOICES, blank=True, null=True
+    )
     etd = models.DateTimeField("预计发货时间", blank=True, null=True)
 
-    submit_status = models.CharField("提交状态", max_length=15, choices=SUBMIT_CHOICES, default="DRAFT", db_index=True)
-    approval_status = models.CharField("审核状态", max_length=15, choices=APPROVAL_CHOICES, default="OWNER_PENDING", db_index=True)
+    submit_status = models.CharField(
+        "提交状态", max_length=15, choices=SUBMIT_CHOICES, default="DRAFT", db_index=True
+    )
+    approval_status = models.CharField(
+        "审核状态", max_length=15, choices=APPROVAL_CHOICES, default="OWNER_PENDING", db_index=True
+    )
     owner_reject_reason = models.CharField(
         "货主管理员退回原因", max_length=200, blank=True, default=""
     )
@@ -105,12 +125,8 @@ class OutboundOrder(BaseModel):
         related_name="warehouse_assisted_outbound_orders",
     )
     assisted_at = models.DateTimeField("代办时间", blank=True, null=True)
-    assistance_reason = models.CharField(
-        "代办原因", max_length=200, blank=True, default=""
-    )
-    assistance_request_id = models.UUIDField(
-        "代办请求 ID", blank=True, null=True, unique=True
-    )
+    assistance_reason = models.CharField("代办原因", max_length=200, blank=True, default="")
+    assistance_request_id = models.UUIDField("代办请求 ID", blank=True, null=True, unique=True)
 
     ship_to = models.CharField("收货地址", max_length=200, blank=True, null=True)
     contact = models.CharField("联系人", max_length=80, blank=True, null=True)
@@ -123,7 +139,9 @@ class OutboundOrder(BaseModel):
     approved_by_ownermanager = models.ForeignKey(
         settings.AUTH_USER_MODEL,  # ✅ 统一用户模型
         verbose_name="货主管理员审核人",
-        on_delete=models.PROTECT, blank=True, null=True,
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
         related_name="appr_by_owner_out_ord",
     )
     approved_at_ownermanager = models.DateTimeField("货主管理员审核时间", blank=True, null=True)
@@ -131,7 +149,9 @@ class OutboundOrder(BaseModel):
     approved_by_warehouse = models.ForeignKey(
         settings.AUTH_USER_MODEL,  # ✅ 统一用户模型
         verbose_name="仓库管理员审核人",
-        on_delete=models.PROTECT, blank=True, null=True,
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
         related_name="appr_by_wh_out_orders",
     )
     approved_at_warehouse = models.DateTimeField("仓库管理员审核时间", blank=True, null=True)
@@ -175,7 +195,7 @@ class OutboundOrder(BaseModel):
         verbose_name_plural = "出库订单"
         permissions = [
             ("approve_outbound_as_owner_manager", "货主管理员可执行出库审核动作"),
-            ("approve_outbound_as_wh_manager",   "仓库管理员可执行出库确认动作"),
+            ("approve_outbound_as_wh_manager", "仓库管理员可执行出库确认动作"),
             ("submit_outbound_as_owner_buyers", "货主业务员可提交出库订单"),
             (
                 "process_warehouse_assisted_outbound",
@@ -196,7 +216,9 @@ class OutboundOrder(BaseModel):
                 fields=["warehouse", "biz_date", "approval_status", "id"],
                 name="ix_out_wh_date_appr",
             ),
-            models.Index(fields=["owner", "biz_date", "submit_status"], name="idx_out_owner_date_stat"),
+            models.Index(
+                fields=["owner", "biz_date", "submit_status"], name="idx_out_owner_date_stat"
+            ),
             models.Index(fields=["approval_status"], name="idx_out_appr_stat"),
             models.Index(fields=["customer", "biz_date"], name="idx_out_cust_date"),
             models.Index(
@@ -208,27 +230,43 @@ class OutboundOrder(BaseModel):
             # models.Index(fields=["supplier", "biz_date"], name="idx_out_supp_date"),
         ]
         constraints = [
-           models.CheckConstraint(
-            name="ck_o_submit_valid",
-            check=Q(submit_status__in=["DRAFT", "SUBMITTED"]),
-           ),
-           models.CheckConstraint(
-            name="ox_valid_approval",
-            check=Q(approval_status__in=[
-                "OWNER_PENDING","OWNER_APPROVED","OWNER_REJECTED",
-                "WHS_PENDING","WHS_APPROVED","WHS_REJECTED","CANCELLED"]),
+            models.CheckConstraint(
+                name="ck_o_submit_valid",
+                condition=Q(submit_status__in=["DRAFT", "SUBMITTED"]),
+            ),
+            models.CheckConstraint(
+                name="ox_valid_approval",
+                condition=Q(
+                    approval_status__in=[
+                        "OWNER_PENDING",
+                        "OWNER_APPROVED",
+                        "OWNER_REJECTED",
+                        "WHS_PENDING",
+                        "WHS_APPROVED",
+                        "WHS_REJECTED",
+                        "CANCELLED",
+                    ]
+                ),
             ),
             # 已关闭订单不能是已取消
             models.CheckConstraint(
-                check=~(Q(is_closed=True) & Q(approval_status="CANCELLED")),
+                condition=~(Q(is_closed=True) & Q(approval_status="CANCELLED")),
                 name="ox_close_appr_chk",
             ),
             # 退供：supplier 必填、customer 为空；非退供：customer 必填、supplier 为空
             models.CheckConstraint(
                 name="ox_rtv_partner_chk",
-                check=(
-                    (Q(outbound_type="SUPPLIER_RETURN") & Q(supplier__isnull=False) & Q(customer__isnull=True)) |
-                    (~Q(outbound_type="SUPPLIER_RETURN") & Q(customer__isnull=False) & Q(supplier__isnull=True))
+                condition=(
+                    (
+                        Q(outbound_type="SUPPLIER_RETURN")
+                        & Q(supplier__isnull=False)
+                        & Q(customer__isnull=True)
+                    )
+                    | (
+                        ~Q(outbound_type="SUPPLIER_RETURN")
+                        & Q(customer__isnull=False)
+                        & Q(supplier__isnull=True)
+                    )
                 ),
             ),
             models.UniqueConstraint(
@@ -240,10 +278,7 @@ class OutboundOrder(BaseModel):
                 name="ux_out_owner_src_bill",
             ),
             models.CheckConstraint(
-                condition=(
-                    ~Q(approval_status="OWNER_REJECTED")
-                    | ~Q(owner_reject_reason="")
-                ),
+                condition=(~Q(approval_status="OWNER_REJECTED") | ~Q(owner_reject_reason="")),
                 name="ox_owner_reject_reason",
             ),
         ]
@@ -282,6 +317,7 @@ class OutboundOrder(BaseModel):
         #     errs["etd"] = "预计发货时间不能早于单据日期"
         if errs:
             from django.core.exceptions import ValidationError
+
             raise ValidationError(errs)
 
     STATUS_OWNER_APPROVED = "OWNER_APPROVED"
@@ -400,13 +436,15 @@ class OutboundOrder(BaseModel):
         self.pricing_status = PricingStatus.CONFIRMED
         self.priced_at = timezone.now()
         self.priced_by = by_user
-        self.save(update_fields=[
-            "final_order_amount",
-            "pricing_status",
-            "priced_at",
-            "priced_by",
-            "updated_at",
-        ])
+        self.save(
+            update_fields=[
+                "final_order_amount",
+                "pricing_status",
+                "priced_at",
+                "priced_by",
+                "updated_at",
+            ]
+        )
 
     def requires_order_amount_billing(self):
         """
@@ -414,22 +452,25 @@ class OutboundOrder(BaseModel):
         DISPATCH + PERCENT_OF_ORDER_AMOUNT 规则。
         """
         from django.db.models import Q
+
+        from allapp.billing.enums import CalcMethod, ChargeType
         from allapp.billing.models import BillingRule
-        from allapp.billing.enums import ChargeType, CalcMethod
 
         biz_date = self.biz_date
-        return BillingRule.objects.filter(
-            active=True,
-            charge_type=ChargeType.DISPATCH,
-            calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
-        ).filter(
-            Q(owner_id=self.owner_id) | Q(owner__isnull=True)
-        ).filter(
-            Q(warehouse_id=self.warehouse_id) | Q(warehouse__isnull=True)
-        ).filter(
-            Q(effective_from__isnull=True) | Q(effective_from__lte=biz_date),
-            Q(effective_to__isnull=True) | Q(effective_to__gte=biz_date),
-        ).exists()
+        return (
+            BillingRule.objects.filter(
+                active=True,
+                charge_type=ChargeType.DISPATCH,
+                calc_method=CalcMethod.PERCENT_OF_ORDER_AMOUNT,
+            )
+            .filter(Q(owner_id=self.owner_id) | Q(owner__isnull=True))
+            .filter(Q(warehouse_id=self.warehouse_id) | Q(warehouse__isnull=True))
+            .filter(
+                Q(effective_from__isnull=True) | Q(effective_from__lte=biz_date),
+                Q(effective_to__isnull=True) | Q(effective_to__gte=biz_date),
+            )
+            .exists()
+        )
 
     def auto_confirm_pricing_if_required(self, by_user=None):
         """
@@ -443,13 +484,16 @@ class OutboundOrder(BaseModel):
         self.pricing_status = PricingStatus.CONFIRMED
         self.priced_at = timezone.now()
         self.priced_by = by_user
-        self.save(update_fields=[
-            "final_order_amount",
-            "pricing_status",
-            "priced_at",
-            "priced_by",
-            "updated_at",
-        ])
+        self.save(
+            update_fields=[
+                "final_order_amount",
+                "pricing_status",
+                "priced_at",
+                "priced_by",
+                "updated_at",
+            ]
+        )
+
 
 class OutboundOrderLine(BaseModel):
     PACK_REQ_CHOICES = [
@@ -460,24 +504,45 @@ class OutboundOrderLine(BaseModel):
         ("PALLET", "打托/缠膜"),
     ]
 
-    order = models.ForeignKey("OutboundOrder", verbose_name="订单",
-                              on_delete=models.PROTECT, related_name="lines")
+    order = models.ForeignKey(
+        "OutboundOrder", verbose_name="订单", on_delete=models.PROTECT, related_name="lines"
+    )
     product = models.ForeignKey("products.Product", verbose_name="商品", on_delete=models.PROTECT)
 
     base_qty = models.DecimalField("基本数量", max_digits=14, decimal_places=3, default=0)
     base_price = models.DecimalField("基本价格", max_digits=14, decimal_places=4, default=0)
-    base_uom = models.ForeignKey("products.ProductUom", verbose_name="基本单位",on_delete=models.PROTECT, null=True, blank=True)
+    base_uom = models.ForeignKey(
+        "products.ProductUom",
+        verbose_name="基本单位",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
 
-    aux_qty = models.DecimalField("包装数量", max_digits=14, decimal_places=3, blank=True, null=True)
-    aux_uom = models.ForeignKey("products.ProductPackage", verbose_name="包装单位", on_delete=models.PROTECT, blank=True, null=True)
-    aux_price = models.DecimalField("包装价格", max_digits=14, decimal_places=4, blank=True, null=True)
-    ratio = models.DecimalField("换算率(快照)", max_digits=14, decimal_places=4, blank=True, null=True)  # ←如保留，当快照用
+    aux_qty = models.DecimalField(
+        "包装数量", max_digits=14, decimal_places=3, blank=True, null=True
+    )
+    aux_uom = models.ForeignKey(
+        "products.ProductPackage",
+        verbose_name="包装单位",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+    )
+    aux_price = models.DecimalField(
+        "包装价格", max_digits=14, decimal_places=4, blank=True, null=True
+    )
+    ratio = models.DecimalField(
+        "换算率(快照)", max_digits=14, decimal_places=4, blank=True, null=True
+    )  # ←如保留，当快照用
 
     line_no = models.PositiveIntegerField("行号")
 
     lot_no = models.CharField("批号", max_length=50, blank=True, null=True)
     min_remaining_days = models.PositiveIntegerField("最短剩余效期(天)", blank=True, null=True)
-    pack_requirement = models.CharField("打包要求", max_length=20, choices=PACK_REQ_CHOICES, default="NONE")
+    pack_requirement = models.CharField(
+        "打包要求", max_length=20, choices=PACK_REQ_CHOICES, default="NONE"
+    )
     pack_note = models.CharField("打包备注", max_length=120, blank=True, default="")
     note = models.CharField("明细备注", max_length=200, blank=True, null=True)
 
@@ -494,16 +559,22 @@ class OutboundOrderLine(BaseModel):
         ordering = ["order_id", "line_no"]
         constraints = [
             models.UniqueConstraint(fields=["order", "line_no"], name="ux_out_line_no"),
-            models.CheckConstraint(check=(Q(base_qty__gt=0) | Q(aux_qty__gt=0)), name="chk_out_qty_pos"),
-            models.CheckConstraint(check=Q(base_qty__gte=0) & (Q(aux_qty__gte=0) | Q(aux_qty__isnull=True)),
-                                   name="chk_out_qty_nonneg"),
-            models.CheckConstraint(check=Q(base_price__gte=0) & (Q(aux_price__gte=0) | Q(aux_price__isnull=True)),
-                                   name="chk_out_price_nonneg"),
+            models.CheckConstraint(
+                condition=(Q(base_qty__gt=0) | Q(aux_qty__gt=0)), name="chk_out_qty_pos"
+            ),
+            models.CheckConstraint(
+                condition=Q(base_qty__gte=0) & (Q(aux_qty__gte=0) | Q(aux_qty__isnull=True)),
+                name="chk_out_qty_nonneg",
+            ),
+            models.CheckConstraint(
+                condition=Q(base_price__gte=0) & (Q(aux_price__gte=0) | Q(aux_price__isnull=True)),
+                name="chk_out_price_nonneg",
+            ),
         ]
         indexes = [
             models.Index(fields=["order", "product"], name="idx_out_order_prod"),
             models.Index(fields=["product", "lot_no"], name="idx_out_prod_lot"),
-            models.Index(fields=["order", "lot_no"],   name="idx_out_order_lot"),
+            models.Index(fields=["order", "lot_no"], name="idx_out_order_lot"),
         ]
 
     def __str__(self):
@@ -550,10 +621,16 @@ class OutboundOrderLine(BaseModel):
             ratio = self._pkg_ratio()
             expect_base = (self.aux_qty * ratio).quantize(Decimal("0.001"))
             if (expect_base - self.base_qty).copy_abs() > Decimal("0.001"):
-                errors["base_qty"] = f"基本数量与包装数量不一致，应为 {expect_base}（当前 {self.base_qty}）。"
+                errors["base_qty"] = (
+                    f"基本数量与包装数量不一致，应为 {expect_base}（当前 {self.base_qty}）。"
+                )
 
         # 可选：商品未启用批次时不允许填批号
-        # if self.lot_no and hasattr(self.product, "batch_control") and not self.product.batch_control:
+        # if (
+        #     self.lot_no
+        #     and hasattr(self.product, "batch_control")
+        #     and not self.product.batch_control
+        # ):
         #     errors["lot_no"] = "该商品未启用批次管理，批号必须留空"
 
         if errors:
@@ -566,7 +643,10 @@ class OutboundOrderLine(BaseModel):
         with transaction.atomic():
             order = Order.objects.select_for_update().get(pk=self.order_id)
             if not order.next_line_no:
-                last = type(self).objects.filter(order_id=order.id).aggregate(m=Max("line_no"))["m"] or 0
+                last = (
+                    type(self).objects.filter(order_id=order.id).aggregate(m=Max("line_no"))["m"]
+                    or 0
+                )
                 order.next_line_no = (last // 10 + 1) * 10 or 10
             self.line_no = order.next_line_no
             order.next_line_no += 10
@@ -599,31 +679,57 @@ class OutboundOrderLine(BaseModel):
         self._ensure_line_no()
         return super().save(*args, **kwargs)
 
-#===订单级扩展
+
+# ===订单级扩展
 class OutboundOrderExtra(BaseModel):
-    order = models.OneToOneField("outbound.OutboundOrder", on_delete=models.PROTECT,
-                                 related_name="extra", verbose_name="对应出库单")
-    inbound_order = models.ForeignKey("inbound.InboundOrder", on_delete=models.PROTECT,
-                                      null=True, blank=True, related_name="generated_outbound_rtv",
-                                      verbose_name="来源入库单")
+    order = models.OneToOneField(
+        "outbound.OutboundOrder",
+        on_delete=models.PROTECT,
+        related_name="extra",
+        verbose_name="对应出库单",
+    )
+    inbound_order = models.ForeignKey(
+        "inbound.InboundOrder",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="generated_outbound_rtv",
+        verbose_name="来源入库单",
+    )
 
     vendor_rma_no = models.CharField("供应商RMA/授权号", max_length=40, blank=True, default="")
-    reason_code   = models.CharField("退回原因代码", max_length=20, blank=True, default="")
-    reason_desc   = models.CharField("退回原因描述", max_length=200, blank=True, default="")
+    reason_code = models.CharField("退回原因代码", max_length=20, blank=True, default="")
+    reason_desc = models.CharField("退回原因描述", max_length=200, blank=True, default="")
 
-    chargeback_flag        = models.BooleanField("是否扣款/索赔", default=False)
-    expected_credit_amount = models.DecimalField("预计供应商贷项", max_digits=14, decimal_places=2,
-                                                 null=True, blank=True, validators=[MinValueValidator(0)])
+    chargeback_flag = models.BooleanField("是否扣款/索赔", default=False)
+    expected_credit_amount = models.DecimalField(
+        "预计供应商贷项",
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+    )
     currency = models.CharField("币种", max_length=3, blank=True, default="")
 
-    carrier     = models.ForeignKey("baseinfo.CarrierCompany", on_delete=models.PROTECT,
-                                    null=True, blank=True, verbose_name="承运商")
-    vehicle_no  = models.CharField("车牌号", max_length=32, blank=True, default="")
+    carrier = models.ForeignKey(
+        "baseinfo.CarrierCompany",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        verbose_name="承运商",
+    )
+    vehicle_no = models.CharField("车牌号", max_length=32, blank=True, default="")
     tracking_no = models.CharField("运单号/追踪号", max_length=64, blank=True, default="")
-    seal_no     = models.CharField("封签号", max_length=40, blank=True, default="")
+    seal_no = models.CharField("封签号", max_length=40, blank=True, default="")
 
-    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
-                                    null=True, blank=True, related_name="rtv_approved")
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="rtv_approved",
+    )
     approved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -632,12 +738,14 @@ class OutboundOrderExtra(BaseModel):
         constraints = [
             models.CheckConstraint(
                 name="chk_oextra_approved_pair",
-                check=(Q(approved_by__isnull=True, approved_at__isnull=True) |
-                       Q(approved_by__isnull=False, approved_at__isnull=False)),
+                condition=(
+                    Q(approved_by__isnull=True, approved_at__isnull=True)
+                    | Q(approved_by__isnull=False, approved_at__isnull=False)
+                ),
             ),
             models.CheckConstraint(
                 name="chk_oextra_credit_nonneg",
-                check=Q(expected_credit_amount__gte=0) | Q(expected_credit_amount__isnull=True),
+                condition=Q(expected_credit_amount__gte=0) | Q(expected_credit_amount__isnull=True),
             ),
         ]
         indexes = [
@@ -661,12 +769,14 @@ class OutboundOrderExtra(BaseModel):
     def __str__(self):
         return f"OOEX@{getattr(self.order, 'order_no', self.pk)}"
 
-#===订单侧通用来源映射
+
+# ===订单侧通用来源映射
 class OrderLineSourceLink(models.Model):
     """
     通用：出库订单行 ← 多来源（入库回执/检验/其他单据）
     适用于 RTV/换货/借退等
     """
+
     order_line = models.ForeignKey(
         "outbound.OutboundOrderLine",
         on_delete=models.PROTECT,
@@ -681,15 +791,26 @@ class OrderLineSourceLink(models.Model):
     src_obj = GenericForeignKey(ct_field="src_ct", fk_field="src_id")
 
     # 数量（基本单位）
-    plan_qty_base   = models.DecimalField("计划数量(基本)", max_digits=14, decimal_places=3,
-                                          null=True, blank=True, validators=[MinValueValidator(0)])
-    posted_qty_base = models.DecimalField("已过账数量(基本)", max_digits=14, decimal_places=3,
-                                          default=0, validators=[MinValueValidator(0)])
+    plan_qty_base = models.DecimalField(
+        "计划数量(基本)",
+        max_digits=14,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+    )
+    posted_qty_base = models.DecimalField(
+        "已过账数量(基本)",
+        max_digits=14,
+        decimal_places=3,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
 
     # 快照/追溯
     product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
-    lot_no  = models.CharField("批号", max_length=60, blank=True, null=True)
-    note    = models.CharField("备注", max_length=200, blank=True, null=True)
+    lot_no = models.CharField("批号", max_length=60, blank=True, null=True)
+    note = models.CharField("备注", max_length=200, blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -698,15 +819,19 @@ class OrderLineSourceLink(models.Model):
         verbose_name_plural = "订单行来源映射"
         constraints = [
             # 同一订单行+同一来源唯一
-            models.UniqueConstraint(fields=["order_line", "src_ct", "src_id"], name="ux_olsrc_unique"),
+            models.UniqueConstraint(
+                fields=["order_line", "src_ct", "src_id"], name="ux_olsrc_unique"
+            ),
             # 数量非负 & 已过账 ≤ 计划（当计划存在时）
             models.CheckConstraint(
                 name="ck_olsrc_qty_nonneg",
-                check=Q(posted_qty_base__gte=0) & (Q(plan_qty_base__isnull=True) | Q(plan_qty_base__gte=0)),
+                condition=Q(posted_qty_base__gte=0)
+                & (Q(plan_qty_base__isnull=True) | Q(plan_qty_base__gte=0)),
             ),
             models.CheckConstraint(
                 name="ck_olsrc_post_le_plan",
-                check=Q(plan_qty_base__isnull=True) | Q(posted_qty_base__lte=F("plan_qty_base")),
+                condition=Q(plan_qty_base__isnull=True)
+                | Q(posted_qty_base__lte=F("plan_qty_base")),
             ),
         ]
         indexes = [
@@ -730,7 +855,8 @@ class OrderLineSourceLink(models.Model):
 
 
 # --- 子菜单锚点（Proxy，无需迁移/建表） ---
-from allapp.tasking.models import WmsTask  # 继承用，无表变更
+from allapp.tasking.models import WmsTask  # noqa: E402 -- avoids the model import cycle.
+
 
 class FuncWaveGenerate(WmsTask):
     class Meta:
@@ -738,11 +864,13 @@ class FuncWaveGenerate(WmsTask):
         verbose_name = "波次生成"
         verbose_name_plural = verbose_name
 
+
 class FuncLabelBatch(WmsTask):
     class Meta:
         proxy = True
         verbose_name = "面单批量打印"
         verbose_name_plural = verbose_name
+
 
 class FuncShippingBoard(WmsTask):
     class Meta:

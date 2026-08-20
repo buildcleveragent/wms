@@ -29,9 +29,7 @@ class IdentifierConcurrencyError(RuntimeError):
 
 
 def _raise_concurrency_error(exc, message):
-    if isinstance(exc, OperationalError) and (
-        not exc.args or exc.args[0] not in (1205, 1213)
-    ):
+    if isinstance(exc, OperationalError) and (not exc.args or exc.args[0] not in (1205, 1213)):
         raise exc
     raise IdentifierConcurrencyError(message) from exc
 
@@ -100,9 +98,7 @@ def _validate_reservation(
         semantics = _semantic_keys(product, normalized_value)
         if semantics and semantic_key not in semantics:
             raise ValidationError(
-                {
-                    error_field: f"标识“{normalized_value}”在同一商品中具有不同包装或换算语义。"
-                }
+                {error_field: f"标识“{normalized_value}”在同一商品中具有不同包装或换算语义。"}
             )
     return existing
 
@@ -227,9 +223,7 @@ def validate_product_barcode_candidate(
         barcode_type=barcode_type,
         package=package,
     ).exists():
-        raise ValidationError(
-            {"barcode": "相同商品、类型和包装层级的该条码记录已存在。"}
-        )
+        raise ValidationError({"barcode": "相同商品、类型和包装层级的该条码记录已存在。"})
     return record
 
 
@@ -313,9 +307,7 @@ def add_external_identifier(
     source = normalize_product_identifier(source_system)
     normalized = normalize_product_identifier(external_code)
     if not normalized:
-        raise ValidationError(
-            {"external_code": "外部编码不能为空；退役请使用 RETIRE 操作。"}
-        )
+        raise ValidationError({"external_code": "外部编码不能为空；退役请使用 RETIRE 操作。"})
     _reserve(product, normalized, (None, 1), "external_code")
     if ProductExternalIdentifier.all_objects.filter(
         product=product, source_system=source, normalized_value=normalized

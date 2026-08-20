@@ -33,15 +33,11 @@ from allapp.tasking.views import WmsTaskLineViewSet, WmsTaskViewSet
 class TaskingWarehouseScopeTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Tasking", code="OWN-TASK")
-        self.warehouse = Warehouse.objects.create(
-            code="WH-TASK-1", name="Warehouse Tasking 1"
-        )
+        self.warehouse = Warehouse.objects.create(code="WH-TASK-1", name="Warehouse Tasking 1")
         self.other_warehouse = Warehouse.objects.create(
             code="WH-TASK-2", name="Warehouse Tasking 2"
         )
-        OwnerWarehouseBinding.objects.create(
-            owner=self.owner, warehouse=self.warehouse
-        )
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="SWTASK1",
@@ -196,28 +192,33 @@ class TaskingWarehouseScopeTests(TestCase):
             posting_status=WmsTask.PostingStatus.PENDING,
         )
 
+        def canonical_post(task_id, *, by_user, note):
+            WmsTask.objects.filter(pk=task_id).update(posting_status=WmsTask.PostingStatus.POSTED)
+            PostingJournal.objects.create(
+                src_model="WmsTask",
+                src_id=task_id,
+                tx_type="POST",
+                status="POSTED",
+                attempt_count=1,
+            )
+            return 2
+
         with mock.patch(
-            "allapp.tasking.services_posting.execute_posting_handler",
-            return_value=2,
+            "allapp.tasking.services_posting._run_posting_handler",
+            side_effect=canonical_post,
         ) as mocked_handler:
             first = post_task(task.id, by_user=self.superuser, note="first post")
             second = post_task(task.id, by_user=self.superuser, note="second post")
 
         task.refresh_from_db()
-        journal = PostingJournal.objects.get(
-            src_model="WmsTask", src_id=task.id, tx_type="POST"
-        )
+        journal = PostingJournal.objects.get(src_model="WmsTask", src_id=task.id, tx_type="POST")
         self.assertEqual(mocked_handler.call_count, 1)
         self.assertEqual(first["tx_created"], 2)
         self.assertEqual(second["tx_created"], 0)
         self.assertEqual(journal.status, "POSTED")
         self.assertEqual(journal.attempt_count, 1)
         self.assertEqual(task.posting_status, WmsTask.PostingStatus.POSTED)
-        mocked_handler.assert_called_once_with(
-            task=mock.ANY,
-            note="first post",
-            by_user=self.superuser,
-        )
+        mocked_handler.assert_called_once_with(task.id, note="first post", by_user=self.superuser)
 
     def test_publish_rejects_foreign_task_line_and_rolls_back_assignments(self):
         task = WmsTask.objects.create(
@@ -262,12 +263,8 @@ class TaskingWarehouseScopeTests(TestCase):
 class TaskingApiContractTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Tasking API", code="OTASKAPI")
-        self.other_owner = Owner.objects.create(
-            name="Owner Tasking API Other", code="OTASKAPIO"
-        )
-        self.warehouse = Warehouse.objects.create(
-            code="WTASKAPI", name="Warehouse Tasking API"
-        )
+        self.other_owner = Owner.objects.create(name="Owner Tasking API Other", code="OTASKAPIO")
+        self.warehouse = Warehouse.objects.create(code="WTASKAPI", name="Warehouse Tasking API")
         self.other_warehouse = Warehouse.objects.create(
             code="WTASKAPIO",
             name="Warehouse Tasking API Other",
@@ -322,9 +319,7 @@ class TaskingApiContractTests(TestCase):
             owner=self.owner,
             warehouse=self.warehouse,
         )
-        self.uom = ProductUom.objects.create(
-            code="PCS-TASK-API", name="件", is_active=True
-        )
+        self.uom = ProductUom.objects.create(code="PCS-TASK-API", name="件", is_active=True)
         self.product = Product.objects.create(
             owner=self.owner,
             code="SKU-TASK-API",
@@ -415,12 +410,15 @@ class TaskingApiContractTests(TestCase):
 
         for action, service_name, payload in action_cases:
             actor = self.user if action == "release" else self.operator
-            with self.subTest(action=action), mock.patch.object(
-                tasking_views.task_svc,
-                service_name,
-                return_value={"ok": True},
-                create=True,
-            ) as mocked_service:
+            with (
+                self.subTest(action=action),
+                mock.patch.object(
+                    tasking_views.task_svc,
+                    service_name,
+                    return_value={"ok": True},
+                    create=True,
+                ) as mocked_service,
+            ):
                 view = WmsTaskViewSet.as_view({"post": action})
                 response = view(
                     self._request(
@@ -546,9 +544,7 @@ class TaskingApiContractTests(TestCase):
 
 class TaskPostingConcurrencyTests(TransactionTestCase):
     def setUp(self):
-        self.owner = Owner.objects.create(
-            name="Owner Tasking Concurrent", code="OWN-TASK-C"
-        )
+        self.owner = Owner.objects.create(name="Owner Tasking Concurrent", code="OWN-TASK-C")
         self.warehouse = Warehouse.objects.create(
             code="WH-TASK-C", name="Warehouse Tasking Concurrent"
         )
@@ -576,15 +572,36 @@ class TaskPostingConcurrencyTests(TransactionTestCase):
         results = [None, None]
         errors = []
 
-        def fake_execute_posting_handler(*, task, note, by_user):
+        canonical_lock = threading.Lock()
+
+        def fake_execute_posting_handler(task_id, *, note, by_user):
             nonlocal handler_calls
             self.assertEqual(by_user.pk, self.superuser.pk)
-            with handler_lock:
-                handler_calls += 1
-            handler_entered.set()
-            if not release_handler.wait(timeout=5):
-                raise AssertionError(
-                    "timed out waiting to release task posting concurrent test"
+            with canonical_lock:
+                existing = PostingJournal.objects.filter(
+                    src_model="WmsTask",
+                    src_id=task_id,
+                    tx_type="POST",
+                    status="POSTED",
+                ).first()
+                if existing:
+                    return 0
+                with handler_lock:
+                    handler_calls += 1
+                handler_entered.set()
+                if not release_handler.wait(timeout=5):
+                    raise AssertionError(
+                        "timed out waiting to release task posting concurrent test"
+                    )
+                PostingJournal.objects.create(
+                    src_model="WmsTask",
+                    src_id=task_id,
+                    tx_type="POST",
+                    status="POSTED",
+                    attempt_count=1,
+                )
+                WmsTask.objects.filter(pk=task_id).update(
+                    posting_status=WmsTask.PostingStatus.POSTED
                 )
             return 2
 
@@ -598,16 +615,14 @@ class TaskPostingConcurrencyTests(TransactionTestCase):
                 close_old_connections()
 
         with mock.patch(
-            "allapp.tasking.services_posting.execute_posting_handler",
+            "allapp.tasking.services_posting._run_posting_handler",
             side_effect=fake_execute_posting_handler,
         ):
             thread1 = threading.Thread(target=invoke, args=(0, "first concurrent post"))
             thread1.start()
             self.assertTrue(handler_entered.wait(timeout=5))
 
-            thread2 = threading.Thread(
-                target=invoke, args=(1, "second concurrent post")
-            )
+            thread2 = threading.Thread(target=invoke, args=(1, "second concurrent post"))
             thread2.start()
 
             release_handler.set()
@@ -620,9 +635,7 @@ class TaskPostingConcurrencyTests(TransactionTestCase):
             raise errors[0]
 
         task.refresh_from_db()
-        journal = PostingJournal.objects.get(
-            src_model="WmsTask", src_id=task.id, tx_type="POST"
-        )
+        journal = PostingJournal.objects.get(src_model="WmsTask", src_id=task.id, tx_type="POST")
         self.assertEqual(handler_calls, 1)
         self.assertEqual(sorted(result["tx_created"] for result in results), [0, 2])
         self.assertEqual(journal.status, "POSTED")

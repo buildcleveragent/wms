@@ -54,14 +54,10 @@ def canonical_no_order_items(items):
                 "qty": format(Decimal(str(item["qty"])), "f"),
                 "lot_no": (item.get("lot_no") or "").strip().upper(),
                 "mfg_date": (
-                    mfg_date.isoformat()
-                    if hasattr(mfg_date, "isoformat")
-                    else (mfg_date or None)
+                    mfg_date.isoformat() if hasattr(mfg_date, "isoformat") else (mfg_date or None)
                 ),
                 "exp_date": (
-                    exp_date.isoformat()
-                    if hasattr(exp_date, "isoformat")
-                    else (exp_date or None)
+                    exp_date.isoformat() if hasattr(exp_date, "isoformat") else (exp_date or None)
                 ),
             }
         )
@@ -115,9 +111,7 @@ def finalize_receive_line_with_variance(line_id, *, by_user, variance_reason="")
     a variance reason, preserving plan-vs-actual for reconciliation.
     """
 
-    line = (
-        WmsTaskLine.objects.select_for_update().select_related("task").get(pk=line_id)
-    )
+    line = WmsTaskLine.objects.select_for_update().select_related("task").get(pk=line_id)
     task = line.task
     if task.task_type != WmsTask.TaskType.RECEIVE:
         raise ValidationError("仅收货任务行支持收货差异结束。")
@@ -148,9 +142,7 @@ def finalize_receive_line_with_variance(line_id, *, by_user, variance_reason="")
     except ReceiveLineExtra.DoesNotExist as exc:
         raise ValidationError("缺少收货扩展，无法结束收货行。") from exc
     total = (
-        Decimal(extra.qty_ok or 0)
-        + Decimal(extra.qty_damage or 0)
-        + Decimal(extra.qty_reject or 0)
+        Decimal(extra.qty_ok or 0) + Decimal(extra.qty_damage or 0) + Decimal(extra.qty_reject or 0)
     )
     plan = Decimal(line.qty_plan or 0)
     reason = (variance_reason or "").strip()
@@ -185,9 +177,7 @@ def finalize_receive_line_with_variance(line_id, *, by_user, variance_reason="")
             finished_at=now,
         )
     elif task.status == WmsTask.Status.RELEASED:
-        task_updates.update(
-            status=WmsTask.Status.IN_PROGRESS, started_at=task.started_at or now
-        )
+        task_updates.update(status=WmsTask.Status.IN_PROGRESS, started_at=task.started_at or now)
     WmsTask.objects.filter(pk=task.pk).update(**task_updates)
     task.refresh_from_db()
     if task.status != old_status:
@@ -385,9 +375,7 @@ def receive_goods_without_order(
     }
     missing_product_ids = sorted(product_ids - set(product_map))
     if missing_product_ids:
-        raise ValidationError(
-            {"items": f"product_id 不存在或已停用：{missing_product_ids}"}
-        )
+        raise ValidationError({"items": f"product_id 不存在或已停用：{missing_product_ids}"})
     foreign_product_ids = sorted(
         product_id
         for product_id, product in product_map.items()
@@ -591,9 +579,7 @@ def receive_goods_without_order(
             "source": source,
         },
     )
-    logger.info(
-        "inbound.receive_without_order.posting.completed %s", ctx_text, extra=ctx
-    )
+    logger.info("inbound.receive_without_order.posting.completed %s", ctx_text, extra=ctx)
     return {
         "task_id": task.id,
         "task_no": task.task_no,

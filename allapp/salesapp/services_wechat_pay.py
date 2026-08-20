@@ -10,6 +10,8 @@ from urllib import request as url_request
 
 from django.conf import settings
 
+from allapp.core.url_security import require_https_endpoint
+
 
 class WechatPayConfigError(Exception):
     pass
@@ -116,9 +118,7 @@ def _json_body(payload) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
-def _authorization_header(
-    method: str, path: str, body: str, timestamp: str, nonce: str
-):
+def _authorization_header(method: str, path: str, body: str, timestamp: str, nonce: str):
     message = "\n".join([method.upper(), path, timestamp, nonce, body]) + "\n"
     signature = _sign(message)
     return (
@@ -184,25 +184,31 @@ def _decoded_json(raw: bytes):
 
 def _wechat_request(method: str, path: str, payload=None):
     _ensure_base_config()
+    endpoint = require_https_endpoint(
+        settings.WECHAT_PAY_API_BASE_URL,
+        setting_name="WECHAT_PAY_API_BASE_URL",
+        allowed_hosts=("api.mch.weixin.qq.com",),
+    )
+    if not path.startswith("/") or path.startswith("//"):
+        raise WechatPayConfigError("微信支付 API 路径必须是站内绝对路径。")
     body = _json_body(payload)
     timestamp = str(int(time.time()))
     nonce = secrets.token_hex(16)
     data = body.encode("utf-8") if method.upper() != "GET" else None
     request = url_request.Request(
-        f"{settings.WECHAT_PAY_API_BASE_URL}{path}",
+        f"{endpoint}{path}",
         data=data,
         method=method.upper(),
         headers={
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "Authorization": _authorization_header(
-                method, path, body, timestamp, nonce
-            ),
+            "Authorization": _authorization_header(method, path, body, timestamp, nonce),
             "User-Agent": "wms-sale-mini/1.0",
         },
     )
     try:
-        with url_request.urlopen(request, timeout=10) as response:
+        # The endpoint is restricted to the official HTTPS WeChat Pay host.
+        with url_request.urlopen(request, timeout=10) as response:  # nosec B310
             raw = response.read()
             verify_wechat_response(response.headers, raw)
             return _decoded_json(raw)
@@ -336,16 +342,10 @@ def decrypt_resource(resource):
 def verify_callback_signature(headers, raw_body: bytes):
     if not settings.WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE:
         return True
-    timestamp = headers.get("Wechatpay-Timestamp") or headers.get(
-        "HTTP_WECHATPAY_TIMESTAMP"
-    )
+    timestamp = headers.get("Wechatpay-Timestamp") or headers.get("HTTP_WECHATPAY_TIMESTAMP")
     nonce = headers.get("Wechatpay-Nonce") or headers.get("HTTP_WECHATPAY_NONCE")
-    signature = headers.get("Wechatpay-Signature") or headers.get(
-        "HTTP_WECHATPAY_SIGNATURE"
-    )
-    serial = headers.get("Wechatpay-Serial") or headers.get(
-        "HTTP_WECHATPAY_SERIAL"
-    )
+    signature = headers.get("Wechatpay-Signature") or headers.get("HTTP_WECHATPAY_SIGNATURE")
+    serial = headers.get("Wechatpay-Serial") or headers.get("HTTP_WECHATPAY_SERIAL")
     if not timestamp or not nonce or not signature:
         raise WechatPayRequestError("微信支付回调缺少验签头。")
     try:

@@ -3,7 +3,16 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from rest_framework import serializers, status
 from rest_framework.exceptions import APIException
+
 from allapp.accounts.access import AccessScope
+
+from .identifier_services import (
+    IdentifierConcurrencyError,
+    add_external_identifier,
+    add_product_barcode,
+    set_barcode_primary,
+    set_external_primary,
+)
 from .models import (
     PRODUCT_IDENTIFIER_FIELDS,
     Product,
@@ -13,14 +22,8 @@ from .models import (
     ProductPackage,
     normalize_product_identifier,
 )
-from .identifier_services import (
-    IdentifierConcurrencyError,
-    add_external_identifier,
-    add_product_barcode,
-    set_barcode_primary,
-    set_external_primary,
-)
 from .permissions import can_manage_all_owner_products
+
 
 class ProductPackageBriefSerializer(serializers.ModelSerializer):
     uom_code = serializers.CharField(source="uom.code", read_only=True)
@@ -30,13 +33,22 @@ class ProductPackageBriefSerializer(serializers.ModelSerializer):
         model = ProductPackage
         fields = [
             "id",
-            "uom", "uom_code", "uom_name",
+            "uom",
+            "uom_code",
+            "uom_name",
             "qty_in_base",
             "barcode",
-            "length_cm", "width_cm", "height_cm",
-            "gross_weight_kg", "volume_m3", "volume_auto",
-            "is_pickable", "is_stock_uom",
-            "is_inventory_default", "is_purchase_default", "is_sales_default",
+            "length_cm",
+            "width_cm",
+            "height_cm",
+            "gross_weight_kg",
+            "volume_m3",
+            "volume_auto",
+            "is_pickable",
+            "is_stock_uom",
+            "is_inventory_default",
+            "is_purchase_default",
+            "is_sales_default",
             "is_active",
             "sort_order",
         ]
@@ -54,9 +66,7 @@ class ProductSerializer(serializers.ModelSerializer):
     owner_code = serializers.CharField(source="owner.code", read_only=True)
     base_uom_code = serializers.CharField(source="base_uom.code", read_only=True)
     packages = ProductPackageBriefSerializer(many=True, read_only=True)
-    carton_package_detail = ProductPackageBriefSerializer(
-        source="carton_package", read_only=True
-    )
+    carton_package_detail = ProductPackageBriefSerializer(source="carton_package", read_only=True)
     product_image = serializers.SerializerMethodField()
 
     def get_product_image(self, obj):
@@ -95,22 +105,16 @@ class ProductSerializer(serializers.ModelSerializer):
             self.instance.category if self.instance is not None else None,
         )
         if self.instance is None and category is None:
-            raise serializers.ValidationError(
-                {"category": "新建商品时至少需要选择一个大类。"}
-            )
+            raise serializers.ValidationError({"category": "新建商品时至少需要选择一个大类。"})
         if (
             self.instance is not None
             and self.instance.category_id
             and "category" in attrs
             and category is None
         ):
-            raise serializers.ValidationError(
-                {"category": "已分类商品不能清空分类。"}
-            )
+            raise serializers.ValidationError({"category": "已分类商品不能清空分类。"})
         if category is not None and not category.has_active_path():
-            raise serializers.ValidationError(
-                {"category": "商品只能选择分类链全部启用的分类。"}
-            )
+            raise serializers.ValidationError({"category": "商品只能选择分类链全部启用的分类。"})
 
         carton_barcode = attrs.get(
             "carton_barcode",
@@ -150,20 +154,18 @@ class ProductSerializer(serializers.ModelSerializer):
                     )
             if "owner" in attrs and attrs["owner"].pk != self.instance.owner_id:
                 raise serializers.ValidationError({"owner": "商品货主创建后不可修改。"})
-            if "code" in attrs and normalize_product_identifier(attrs["code"]) != normalize_product_identifier(self.instance.code):
+            if "code" in attrs and normalize_product_identifier(
+                attrs["code"]
+            ) != normalize_product_identifier(self.instance.code):
                 raise serializers.ValidationError({"code": "货主商品编码创建后不可修改。"})
 
-        owner = attrs.get(
-            "owner", self.instance.owner if self.instance is not None else None
-        )
+        owner = attrs.get("owner", self.instance.owner if self.instance is not None else None)
         if owner is not None:
             errors = {}
             for field in PRODUCT_IDENTIFIER_FIELDS:
                 value = attrs.get(
                     field,
-                    getattr(self.instance, field, None)
-                    if self.instance is not None
-                    else None,
+                    getattr(self.instance, field, None) if self.instance is not None else None,
                 )
                 normalized = normalize_product_identifier(value)
                 if not normalized:
@@ -179,9 +181,7 @@ class ProductSerializer(serializers.ModelSerializer):
                     product = conflict.product
                     deleted = "（已软删除）" if product.is_deleted else ""
                     source = f"商品 {product.code}-{product.name}{deleted}"
-                    errors[field] = (
-                        f"该货主下标识“{normalized}”已被{source}占用。"
-                    )
+                    errors[field] = f"该货主下标识“{normalized}”已被{source}占用。"
             if errors:
                 raise serializers.ValidationError(errors)
         return attrs
@@ -209,19 +209,26 @@ class ProductSerializer(serializers.ModelSerializer):
         try:
             instance = super().update(instance, validated_data)
             for field, value in legacy.items():
-                if normalize_product_identifier(value) == normalize_product_identifier(getattr(instance, field)) and not (field == "carton_barcode" and carton_package.pk != instance.carton_package_id):
+                if normalize_product_identifier(value) == normalize_product_identifier(
+                    getattr(instance, field)
+                ) and not (
+                    field == "carton_barcode" and carton_package.pk != instance.carton_package_id
+                ):
                     continue
                 if field == "external_code":
                     existing = ProductExternalIdentifier.all_objects.filter(
-                        product=instance, source_system="LEGACY",
+                        product=instance,
+                        source_system="LEGACY",
                         normalized_value=normalize_product_identifier(value),
                     ).first()
                     if existing:
                         set_external_primary(existing)
                     else:
                         add_external_identifier(
-                            product=instance, source_system="LEGACY",
-                            external_code=value, is_primary=True,
+                            product=instance,
+                            source_system="LEGACY",
+                            external_code=value,
+                            is_primary=True,
                         )
                     continue
                 barcode_type = {
@@ -231,15 +238,20 @@ class ProductSerializer(serializers.ModelSerializer):
                 }[field]
                 package = carton_package if field == "carton_barcode" else None
                 existing = ProductBarcode.all_objects.filter(
-                    product=instance, barcode_type=barcode_type, package=package,
+                    product=instance,
+                    barcode_type=barcode_type,
+                    package=package,
                     normalized_value=normalize_product_identifier(value),
                 ).first()
                 if existing:
                     set_barcode_primary(existing)
                 else:
                     add_product_barcode(
-                        product=instance, barcode=value, barcode_type=barcode_type,
-                        package=package, is_primary=True,
+                        product=instance,
+                        barcode=value,
+                        barcode_type=barcode_type,
+                        package=package,
+                        is_primary=True,
                     )
             return Product.objects.get(pk=instance.pk)
         except DjangoValidationError as exc:
@@ -255,23 +267,51 @@ class ProductSerializer(serializers.ModelSerializer):
         model = Product
         fields = [
             "id",
-            "owner", "owner_code",
-            "code", "sku", "external_code", "name", "spec", "description",
-            "category", "brand",
-            "gtin", "unit_barcode", "carton_barcode",
-            "carton_package", "carton_package_detail",
-            "base_uom", "base_uom_code",
-            "pick_policy", "break_box_allowed", "min_pick_multiple",
-            "replenish_min", "replenish_uom",
-            "volume", "weight",
-            "min_stock", "max_stock", "product_image",
-            "serial_control", "batch_control", "expiry_control",
-            "expiry_basis", "shelf_life_days", "inbound_valid_days", "expiry_warning_days",
-            "fefo_required", "mix_lot_allowed", "mix_expiry_allowed",
+            "owner",
+            "owner_code",
+            "code",
+            "sku",
+            "external_code",
+            "name",
+            "spec",
+            "description",
+            "category",
+            "brand",
+            "gtin",
+            "unit_barcode",
+            "carton_barcode",
+            "carton_package",
+            "carton_package_detail",
+            "base_uom",
+            "base_uom_code",
+            "pick_policy",
+            "break_box_allowed",
+            "min_pick_multiple",
+            "replenish_min",
+            "replenish_uom",
+            "volume",
+            "weight",
+            "min_stock",
+            "max_stock",
+            "product_image",
+            "serial_control",
+            "batch_control",
+            "expiry_control",
+            "expiry_basis",
+            "shelf_life_days",
+            "inbound_valid_days",
+            "expiry_warning_days",
+            "fefo_required",
+            "mix_lot_allowed",
+            "mix_expiry_allowed",
             "origin_country",
             "is_active",
             "extra",
-            "packages", "price", "purchase_price", "min_price", "max_discount",
+            "packages",
+            "price",
+            "purchase_price",
+            "min_price",
+            "max_discount",
         ]
         read_only_fields = ("id", "sku", "created_at", "updated_at")
         extra_kwargs = {
@@ -286,18 +326,39 @@ class ProductBarcodeSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductBarcode
         fields = (
-            "id", "owner", "product", "product_code", "barcode",
-            "normalized_value", "barcode_type", "package", "package_uom_code",
-            "qty_in_base", "is_primary", "valid_from", "valid_to", "is_active",
-            "created_at", "updated_at",
+            "id",
+            "owner",
+            "product",
+            "product_code",
+            "barcode",
+            "normalized_value",
+            "barcode_type",
+            "package",
+            "package_uom_code",
+            "qty_in_base",
+            "is_primary",
+            "valid_from",
+            "valid_to",
+            "is_active",
+            "created_at",
+            "updated_at",
         )
-        read_only_fields = ("id", "owner", "normalized_value", "qty_in_base", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "owner",
+            "normalized_value",
+            "qty_in_base",
+            "created_at",
+            "updated_at",
+        )
 
     def create(self, validated_data):
         try:
             return add_product_barcode(**validated_data)
         except DjangoValidationError as exc:
-            raise serializers.ValidationError(getattr(exc, "message_dict", None) or exc.messages) from exc
+            raise serializers.ValidationError(
+                getattr(exc, "message_dict", None) or exc.messages
+            ) from exc
         except IdentifierConcurrencyError as exc:
             raise ProductIdentifierConflict(str(exc)) from exc
 
@@ -322,9 +383,19 @@ class ProductExternalIdentifierSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProductExternalIdentifier
         fields = (
-            "id", "owner", "product", "product_code", "source_system",
-            "external_code", "normalized_value", "is_primary", "valid_from",
-            "valid_to", "is_active", "created_at", "updated_at",
+            "id",
+            "owner",
+            "product",
+            "product_code",
+            "source_system",
+            "external_code",
+            "normalized_value",
+            "is_primary",
+            "valid_from",
+            "valid_to",
+            "is_active",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = ("id", "owner", "normalized_value", "created_at", "updated_at")
 
@@ -332,7 +403,9 @@ class ProductExternalIdentifierSerializer(serializers.ModelSerializer):
         try:
             return add_external_identifier(**validated_data)
         except DjangoValidationError as exc:
-            raise serializers.ValidationError(getattr(exc, "message_dict", None) or exc.messages) from exc
+            raise serializers.ValidationError(
+                getattr(exc, "message_dict", None) or exc.messages
+            ) from exc
         except IdentifierConcurrencyError as exc:
             raise ProductIdentifierConflict(str(exc)) from exc
 

@@ -1,39 +1,104 @@
-# allapp/outbound/management/commands/release_to_pick.py
+"""Audited command-line entrypoint for releasing outbound orders."""
+
 from __future__ import annotations
 
+from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management.base import BaseCommand, CommandError
 
-from allapp.outbound.models import OutboundOrder  # 对齐路径
-from allapp.outbound import services as ob_services
+from allapp.accounts.access import AccessScope
+from allapp.accounts.audit import record_audit_event
+from allapp.outbound import services as outbound_services
+from allapp.outbound.models import OutboundOrder
 
 
 class Command(BaseCommand):
-    help = "将指定出库单释放为拣货任务（分配 FEFO 并冻结可用量）"
+    help = "以明确操作者执行出库单仓库确认，并生成或发布拣货任务"
 
     def add_arguments(self, parser):
-        parser.add_argument("--order", type=int, help="出库单 ID")
-        parser.add_argument("--order-no", type=str, help="出库单号（如存在 order_no 字段）")
-        parser.add_argument("--no-backorder", action="store_true", help="库存不足即报错，不允许回欠")
+        selector = parser.add_mutually_exclusive_group(required=True)
+        selector.add_argument("--order", type=int, help="出库单 ID")
+        selector.add_argument("--order-no", type=str, help="出库单号")
+        parser.add_argument(
+            "--operator",
+            required=True,
+            help="执行人的用户名；必须为有效用户且具备该仓库确认权限",
+        )
+        parser.add_argument(
+            "--no-backorder",
+            action="store_true",
+            help="仅代办出库有效：库存不足即失败",
+        )
 
-    def handle(self, *args, **opts):
-        order_id = opts.get("order")
-        order_no = opts.get("order_no")
-        allow_backorder = not opts.get("no_backorder")
+    def _get_order(self, options):
+        queryset = OutboundOrder.objects.select_related("owner", "warehouse")
+        try:
+            if options.get("order") is not None:
+                return queryset.get(pk=options["order"])
+            return queryset.get(order_no=options["order_no"])
+        except OutboundOrder.DoesNotExist as exc:
+            value = options.get("order") or options.get("order_no")
+            raise CommandError(f"未找到出库单：{value}") from exc
 
-        if not order_id and not order_no:
-            raise CommandError("必须提供 --order 或 --order-no 其中之一。")
+    def _get_operator(self, username):
+        try:
+            user = get_user_model().objects.get(username=username, is_active=True)
+        except get_user_model().DoesNotExist as exc:
+            raise CommandError("--operator 必须是有效用户的用户名。") from exc
+        if not (
+            user.is_superuser
+            or user.has_perm("outbound.approve_outbound_as_wh_manager")
+            or user.has_perm("tasking.taskconfirm_as_wh_manager")
+        ):
+            raise CommandError("操作者没有仓库确认权限。")
+        return user
 
-        if order_id:
-            try:
-                order = OutboundOrder.objects.select_related("owner", "warehouse").get(pk=order_id)
-            except OutboundOrder.DoesNotExist:
-                raise CommandError(f"未找到出库单 ID={order_id}")
-        else:
-            # 如你的编号字段不是 order_no，请替换为真实字段名
-            try:
-                order = OutboundOrder.objects.select_related("owner", "warehouse").get(order_no=order_no)
-            except OutboundOrder.DoesNotExist:
-                raise CommandError(f"未找到出库单号={order_no}")
+    def _validate_scope(self, order, operator):
+        if operator.is_superuser:
+            return
+        scope = AccessScope.for_user(operator)
+        if not scope.is_valid or order.warehouse_id not in scope.warehouse_ids:
+            raise CommandError("操作者不在该出库单仓库范围内。")
 
-        task = ob_services.release_to_pick(order, by_user=None, allow_backorder=allow_backorder)
-        self.stdout.write(self.style.SUCCESS(f"OK: 生成拣货任务 Task ID={task.id}"))
+    def handle(self, *args, **options):
+        order = self._get_order(options)
+        operator = self._get_operator(options["operator"])
+        self._validate_scope(order, operator)
+        assisted = order.processing_mode == OutboundOrder.ProcessingMode.WAREHOUSE_ASSISTED
+        if options["no_backorder"] and not assisted:
+            raise CommandError("--no-backorder 仅适用于仓库代办出库。")
+
+        try:
+            if assisted:
+                outbound_services.require_assisted_owner_warehouse(order.owner, order.warehouse_id)
+                task = outbound_services.approve_and_release_order(
+                    order,
+                    by_user=operator,
+                    allow_backorder=not options["no_backorder"],
+                )
+            else:
+                _, task = outbound_services.confirm_warehouse_order(order, by_user=operator)
+        except (PermissionDenied, ValidationError) as exc:
+            record_audit_event(
+                action="outbound.release_to_pick.cli",
+                module="outbound",
+                user=operator,
+                obj=order,
+                succeeded=False,
+                metadata={"error": str(exc)[:200]},
+            )
+            raise CommandError(str(exc)) from exc
+
+        record_audit_event(
+            action="outbound.release_to_pick.cli",
+            module="outbound",
+            user=operator,
+            obj=order,
+            succeeded=True,
+            metadata={
+                "task_id": getattr(task, "pk", None),
+                "processing_mode": order.processing_mode,
+            },
+        )
+        task_label = getattr(task, "pk", None) or "等待补货"
+        self.stdout.write(self.style.SUCCESS(f"OK: 拣货任务={task_label}"))

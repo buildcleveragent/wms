@@ -16,10 +16,10 @@ import black
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASELINE = ROOT / ".ci" / "lint-baseline.json"
+BLACK_CONFIG = black.parse_pyproject_toml(str(ROOT / "pyproject.toml"))
 LINT_CONFIG_PATHS = ("pyproject.toml", ".flake8", "setup.cfg", "tox.ini")
 FLAKE8_PATTERN = re.compile(
-    r"^(?P<path>.*?):(?P<line>\d+):(?P<column>\d+): "
-    r"(?P<code>[A-Z]\d+) (?P<message>.*)$"
+    r"^(?P<path>.*?):(?P<line>\d+):(?P<column>\d+): " r"(?P<code>[A-Z]\d+) (?P<message>.*)$"
 )
 ISORT_PATTERN = re.compile(
     r"ERROR: (?P<path>.+?) Imports are incorrectly sorted and/or formatted\."
@@ -38,9 +38,7 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def tracked_python_files() -> list[str]:
-    result = _run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "*.py"]
-    )
+    result = _run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "*.py"])
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "git ls-files failed")
     return sorted(line for line in result.stdout.splitlines() if line)
@@ -53,12 +51,9 @@ def sha256(path: str) -> str:
 def toolchain_fingerprint() -> dict[str, object]:
     """Identify lint engines and checked-in configuration that define the rules."""
 
-    configs = {
-        path: sha256(path) for path in LINT_CONFIG_PATHS if (ROOT / path).is_file()
-    }
+    configs = {path: sha256(path) for path in LINT_CONFIG_PATHS if (ROOT / path).is_file()}
     return {
-        tool: importlib.metadata.version(tool)
-        for tool in ("black", "isort", "ruff", "flake8")
+        tool: importlib.metadata.version(tool) for tool in ("black", "isort", "ruff", "flake8")
     } | {
         "configs": configs,
     }
@@ -73,20 +68,25 @@ def _normalize_path(value: str) -> str:
 
 
 def collect_findings(files: list[str]) -> dict[str, dict[str, list[str]]]:
-    findings = {
-        path: {"black": [], "isort": [], "ruff": [], "flake8": []} for path in files
-    }
+    findings = {path: {"black": [], "isort": [], "ruff": [], "flake8": []} for path in files}
 
     # Black's CLI always creates a process pool for multiple files, even with
     # ``--workers 1``.  That pool can hang in constrained CI/container
     # environments, so run the same formatter one file at a time in-process.
     for file_path in files:
         path = ROOT / file_path
+        target_versions = {
+            black.TargetVersion[value.upper()] for value in BLACK_CONFIG.get("target_version", [])
+        }
         try:
             would_reformat = black.format_file_in_place(
                 path,
                 fast=False,
-                mode=black.Mode(is_pyi=path.suffix == ".pyi"),
+                mode=black.Mode(
+                    line_length=int(BLACK_CONFIG.get("line_length", 88)),
+                    target_versions=target_versions,
+                    is_pyi=path.suffix == ".pyi",
+                ),
                 write_back=black.WriteBack.CHECK,
             )
         except Exception as exc:
@@ -179,6 +179,55 @@ def write_baseline(path: Path, hash_manifest: Path | None) -> int:
     return 0
 
 
+def refresh_baseline(path: Path) -> int:
+    """Advance hashes only for files that are clean under the current toolchain.
+
+    Findings for unchanged files remain pinned, so a toolchain upgrade cannot
+    silently grant new lint debt to legacy code.
+    """
+
+    baseline = json.loads(path.read_text(encoding="utf-8"))
+    baseline_files = baseline.get("files", {})
+    files = tracked_python_files()
+    hashes = {file_path: sha256(file_path) for file_path in files}
+    changed = [
+        file_path
+        for file_path in files
+        if baseline_files.get(file_path, {}).get("sha256") != hashes[file_path]
+    ]
+    findings = collect_findings(changed) if changed else {}
+    failures = [
+        f"{file_path}: {tool} still has {len(values)} finding(s)"
+        for file_path in changed
+        for tool, values in findings[file_path].items()
+        if values
+    ]
+    if failures:
+        print("Refusing to refresh lint baseline with dirty changed files:", file=sys.stderr)
+        for failure in failures:
+            print(f"- {failure}", file=sys.stderr)
+        return 1
+
+    baseline["toolchain"] = toolchain_fingerprint()
+    baseline["files"] = {
+        file_path: (
+            {"sha256": hashes[file_path], "findings": findings[file_path]}
+            if file_path in findings
+            else baseline_files[file_path]
+        )
+        for file_path in files
+    }
+    path.write_text(
+        json.dumps(baseline, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(
+        f"Refreshed lint baseline for {len(changed)} clean changed/new file(s); "
+        "unchanged debt remained pinned."
+    )
+    return 0
+
+
 def check_baseline(path: Path) -> int:
     baseline = json.loads(path.read_text(encoding="utf-8"))
     baseline_files = baseline.get("files", {})
@@ -228,9 +277,7 @@ def check_baseline_did_not_grow(path: Path, previous_ref: str) -> int:
     relative_path = path.resolve().relative_to(ROOT).as_posix()
     previous = _run(["git", "show", f"{previous_ref}:{relative_path}"])
     if previous.returncode:
-        print(
-            f"No lint baseline exists at {previous_ref}; baseline growth check skipped."
-        )
+        print(f"No lint baseline exists at {previous_ref}; baseline growth check skipped.")
         return 0
 
     current_payload = json.loads(path.read_text(encoding="utf-8"))
@@ -243,9 +290,7 @@ def check_baseline_did_not_grow(path: Path, previous_ref: str) -> int:
         for tool, values in current.get("findings", {}).items():
             added = set(values) - set(previous_findings.get(tool, []))
             if added:
-                additions.append(
-                    f"{file_path}: baseline adds {len(added)} {tool} finding(s)"
-                )
+                additions.append(f"{file_path}: baseline adds {len(added)} {tool} finding(s)")
 
     if additions:
         print("Lint baseline debt increased:", file=sys.stderr)
@@ -260,11 +305,14 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
     parser.add_argument("--write-baseline", action="store_true")
+    parser.add_argument("--refresh-baseline", action="store_true")
     parser.add_argument("--hash-manifest", type=Path)
     parser.add_argument("--previous-baseline-ref")
     args = parser.parse_args()
     if args.write_baseline:
         return write_baseline(args.baseline, args.hash_manifest)
+    if args.refresh_baseline:
+        return refresh_baseline(args.baseline)
     result = check_baseline(args.baseline)
     if result or not args.previous_baseline_ref:
         return result

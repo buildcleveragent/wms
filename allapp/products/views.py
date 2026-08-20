@@ -17,6 +17,7 @@ from rest_framework.response import Response
 
 from allapp.accounts.access import AccessScope
 
+from .access import allowed_product_owner_ids, scoped_product_queryset
 from .excel_import import ProductImportConflictError, ProductImportFileError
 from .identifier_lookup import filter_by_product_search
 from .identifier_services import (
@@ -76,39 +77,42 @@ class OwnerScopedMixin:
 
     def get_queryset(self):
         qs = super().get_queryset()  # type: ignore[attr-defined]
-        user = (
-            getattr(self, "request", None).user
-            if getattr(self, "request", None)
-            else None
-        )
+        user = getattr(self, "request", None).user if getattr(self, "request", None) else None
         if not user or not user.is_authenticated:
             return qs.none()
-        if self.has_all_owner_scope():
-            return qs
-        owner_id = AccessScope.for_user(user).single_owner_id
-        return (
-            qs.filter(**{f"{self.owner_path}_id": owner_id}) if owner_id else qs.none()
+        return scoped_product_queryset(
+            user,
+            qs,
+            for_write=self.request.method not in SAFE_METHODS,
         )
 
     def perform_create(self, serializer):
         user = self.request.user
-        if self.has_all_owner_scope():
+        owner_ids = allowed_product_owner_ids(user, for_write=True)
+        if owner_ids is None:
             serializer.save()
             return
-        owner_id = AccessScope.for_user(user).single_owner_id
-        if not owner_id:
-            raise PermissionDenied("当前账号没有单一有效货主范围。")
-        serializer.save(owner_id=owner_id)
+        requested_owner = serializer.validated_data.get("owner")
+        requested_owner_id = getattr(requested_owner, "pk", None)
+        if len(owner_ids) == 1:
+            serializer.save(owner_id=next(iter(owner_ids)))
+            return
+        if requested_owner_id not in owner_ids:
+            raise PermissionDenied("当前账号不能为该货主创建商品。")
+        serializer.save()
 
     def perform_update(self, serializer):
         user = self.request.user
-        if self.has_all_owner_scope():
+        owner_ids = allowed_product_owner_ids(user, for_write=True)
+        if owner_ids is None:
             serializer.save()
             return
-        owner_id = AccessScope.for_user(user).single_owner_id
-        if not owner_id:
-            raise PermissionDenied("当前账号没有单一有效货主范围。")
-        serializer.save(owner_id=owner_id)
+        current_owner_id = serializer.instance.owner_id
+        requested_owner = serializer.validated_data.get("owner")
+        target_owner_id = getattr(requested_owner, "pk", current_owner_id)
+        if current_owner_id not in owner_ids or target_owner_id not in owner_ids:
+            raise PermissionDenied("当前账号不能修改该货主商品。")
+        serializer.save()
 
 
 class ProductActiveIdentifierSearchFilter(filters.SearchFilter):
@@ -202,9 +206,7 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
         ]
         content = ",".join(headers) + "\r\n"
         resp = HttpResponse(content, content_type="text/csv; charset=utf-8")
-        resp["Content-Disposition"] = (
-            'attachment; filename="product_import_template.csv"'
-        )
+        resp["Content-Disposition"] = 'attachment; filename="product_import_template.csv"'
         # Backward-compatible for old tests still reading HttpResponse._headers.
         resp._headers = {  # type: ignore[attr-defined]
             "content-type": ("Content-Type", resp["Content-Type"]),
@@ -222,9 +224,7 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
     def import_file(self, request):
         f = request.FILES.get("file")
         if not f:
-            return Response(
-                {"detail": "缺少文件 file"}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"detail": "缺少文件 file"}, status=status.HTTP_400_BAD_REQUEST)
         try:
             result = import_product_file(
                 uploaded_file=f,
@@ -238,11 +238,7 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
             result,
-            status=(
-                status.HTTP_400_BAD_REQUEST
-                if result["error_count"]
-                else status.HTTP_200_OK
-            ),
+            status=(status.HTTP_400_BAD_REQUEST if result["error_count"] else status.HTTP_200_OK),
         )
 
     # 导出（支持 csv/xls/xlsx）
@@ -284,9 +280,7 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
     def barcode(self, request, pk=None):
         product = self.get_object()
         # 与产品模型对齐：用 base_uom.code；单位比例可按需从 package 推导，这里先省略
-        base_unit_code = (
-            getattr(getattr(product, "base_uom", None), "code", "") or "PCS"
-        )
+        base_unit_code = getattr(getattr(product, "base_uom", None), "code", "") or "PCS"
         data_code = product.unit_barcode or product.carton_barcode or product.code
         zpl = f"""
 ^XA
@@ -364,9 +358,7 @@ class ProductBarcodeViewSet(IdentifierViewSetBase):
         except IdentifierConcurrencyError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         except DjangoValidationError as exc:
-            return Response(
-                {"detail": exc.messages}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"detail": exc.messages}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self.get_serializer(record).data)
 
 
@@ -393,39 +385,47 @@ class ProductExternalIdentifierViewSet(IdentifierViewSetBase):
         except IdentifierConcurrencyError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         except DjangoValidationError as exc:
-            return Response(
-                {"detail": exc.messages}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"detail": exc.messages}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self.get_serializer(record).data)
 
 
 def get_product_details(request, product_id):
-    try:
-        # 获取商品
-        product = Product.objects.get(id=product_id)
+    user = getattr(request, "user", None)
+    if (
+        not user
+        or not getattr(user, "is_authenticated", False)
+        or not user.has_perm("products.view_product")
+    ):
+        return JsonResponse({"error": "Forbidden"}, status=403)
 
-        # 获取商品的基本单位
-        base_uom = product.base_uom.name  # 获取商品的基本单位
-
-        # 获取商品所有的包装单位及其换算数量
-        product_packages = ProductPackage.objects.filter(
-            product=product
-        )  # 获取与商品关联的所有包装单位
-
-        # 打包单位列表
-        pack_uoms = [
-            {
-                "uom": package.uom.name,  # 包装单位名称
-                "pack_qty": package.qty_in_base,  # 换算数量，使用 qty_in_base 字段
-                "unit": package.uom.name,  # 计量单位
-            }
-            for package in product_packages
-        ]
-        logger.debug(
-            "products.product_details.loaded product_id=%s package_count=%s",
-            product.id,
-            len(pack_uoms),
+    product = (
+        scoped_product_queryset(
+            user,
+            Product.objects.select_related("base_uom"),
         )
-        return JsonResponse({"base_uom": base_uom, "pack_uoms": pack_uoms})
-    except Product.DoesNotExist:
+        .filter(pk=product_id, is_active=True, is_deleted=False)
+        .first()
+    )
+    if product is None:
         return JsonResponse({"error": "Product not found"}, status=404)
+
+    product_packages = ProductPackage.objects.filter(
+        product=product,
+        is_active=True,
+        is_deleted=False,
+        uom__is_active=True,
+    ).select_related("uom")
+    pack_uoms = [
+        {
+            "uom": package.uom.name,
+            "pack_qty": package.qty_in_base,
+            "unit": package.uom.name,
+        }
+        for package in product_packages
+    ]
+    logger.debug(
+        "products.product_details.loaded product_id=%s package_count=%s",
+        product.id,
+        len(pack_uoms),
+    )
+    return JsonResponse({"base_uom": product.base_uom.name, "pack_uoms": pack_uoms})

@@ -5,20 +5,20 @@ import hashlib
 import json
 import secrets
 
-from openpyxl import Workbook
-
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from openpyxl import Workbook
 from rest_framework import permissions, serializers, viewsets
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from allapp.accounts.access import AccessScope
+from allapp.accounts.audit import record_audit_event
 from allapp.billing.models import Bill
 from allapp.inventory.models import InventoryLayerPosition
 from allapp.locations.models import Warehouse
@@ -66,23 +66,15 @@ class BossP1Mixin(BossScopedApiMixin):
         owner_id = integer("owner")
         warehouse_id = integer("warehouse")
         current = timezone.now()
-        today = (
-            timezone.localtime(current).date()
-            if timezone.is_aware(current)
-            else current.date()
-        )
+        today = timezone.localtime(current).date() if timezone.is_aware(current) else current.date()
         date_to = parse_date(str(raw("date_to"))) if raw("date_to") else today
         date_from = (
-            parse_date(str(raw("date_from")))
-            if raw("date_from")
-            else date_to.replace(day=1)
+            parse_date(str(raw("date_from"))) if raw("date_from") else date_to.replace(day=1)
         )
         if date_from is None or date_to is None:
             raise ValueError("date_from and date_to must be YYYY-MM-DD.")
         if date_from > date_to or date_to > today or (date_to - date_from).days > 366:
-            raise ValueError(
-                "Invalid date range; maximum 367 days and date_to cannot be future."
-            )
+            raise ValueError("Invalid date range; maximum 367 days and date_to cannot be future.")
         self._validate_scope(request, owner_id=owner_id, warehouse_id=warehouse_id)
         scope = self._scope_payload(
             owner_id=owner_id,
@@ -94,9 +86,7 @@ class BossP1Mixin(BossScopedApiMixin):
 
     def get_payload(self, request, builder):
         try:
-            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(
-                request
-            )
+            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(request)
         except ValueError as exc:
             return None, Response({"detail": str(exc)}, status=400)
         return (
@@ -114,9 +104,7 @@ class BossP1Mixin(BossScopedApiMixin):
 
 def _cycle_stats(queryset, field):
     total = queryset.count()
-    values = sorted(
-        queryset.exclude(**{f"{field}__isnull": True}).values_list(field, flat=True)
-    )
+    values = sorted(queryset.exclude(**{f"{field}__isnull": True}).values_list(field, flat=True))
     count = len(values)
     if not values:
         return {
@@ -218,9 +206,7 @@ class OperatingTargetViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         self._require_write()
-        warehouse = serializer.validated_data.get(
-            "warehouse", serializer.instance.warehouse
-        )
+        warehouse = serializer.validated_data.get("warehouse", serializer.instance.warehouse)
         owner = serializer.validated_data.get("owner", serializer.instance.owner)
         if not AccessScope.for_user(self.request.user).allows(
             warehouse_id=warehouse.pk, owner_id=getattr(owner, "pk", None)
@@ -280,22 +266,16 @@ def _cockpit_workbook(*, report_type, scope, meta, payload):
         ("数据状态", meta.get("data_status")),
         (
             "Warnings",
-            json.dumps(
-                meta.get("warnings", []), ensure_ascii=False, cls=DjangoJSONEncoder
-            ),
+            json.dumps(meta.get("warnings", []), ensure_ascii=False, cls=DjangoJSONEncoder),
         ),
     ]
     for row in rows:
         info.append([safe(row[0]), safe(row[1])])
-    data = workbook.create_sheet(
-        "冻结数据" if report_type == "REVIEW_SNAPSHOT" else "报表数据"
-    )
+    data = workbook.create_sheet("冻结数据" if report_type == "REVIEW_SNAPSHOT" else "报表数据")
     data.append(["数据块", "分片", "JSON（金额均携带原币种）"])
     for key, value in payload.items():
         encoded = json.dumps(value, ensure_ascii=False, cls=DjangoJSONEncoder)
-        chunks = [
-            encoded[index : index + 30000] for index in range(0, len(encoded), 30000)
-        ] or [""]
+        chunks = [encoded[index : index + 30000] for index in range(0, len(encoded), 30000)] or [""]
         for index, chunk in enumerate(chunks, start=1):
             data.append([safe(key), index, safe(chunk)])
     return workbook
@@ -313,9 +293,7 @@ def _workbook_response(workbook, filename):
 class BossCockpitExportApi(BossP1Mixin, APIView):
     def post(self, request):
         try:
-            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(
-                request
-            )
+            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(request)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         report_type = str(request.data.get("report_type") or "").lower()
@@ -341,11 +319,7 @@ class BossCockpitExportApi(BossP1Mixin, APIView):
             report_type=report_type,
             scope=scope,
             meta=payload.get("meta", {}),
-            payload={
-                key: value
-                for key, value in payload.items()
-                if key not in {"scope", "meta"}
-            },
+            payload={key: value for key, value in payload.items() if key not in {"scope", "meta"}},
         )
         stamp = timezone.now().strftime("%Y%m%d-%H%M%S")
         return _workbook_response(
@@ -396,9 +370,7 @@ class BossReceivableBillsApi(BossP1Mixin, APIView):
 class BossCollectionHistoryApi(BossP1Mixin, APIView):
     def get(self, request, pk):
         try:
-            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(
-                request
-            )
+            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(request)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         bills = AccessScope.for_user(request.user).filter_queryset(
@@ -483,9 +455,7 @@ class BossInventoryRiskApi(BossP1Mixin, APIView):
 class BossInventoryRiskDetailsApi(BossP1Mixin, APIView):
     def get(self, request):
         try:
-            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(
-                request
-            )
+            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(request)
             page = max(1, int(request.query_params.get("page", 1)))
             page_size = min(100, max(1, int(request.query_params.get("page_size", 20))))
         except (ValueError, TypeError) as exc:
@@ -534,9 +504,7 @@ class BossInventoryRiskDetailsApi(BossP1Mixin, APIView):
         if age_band in age_ranges:
             qs = qs.filter(layer__received_date__range=age_ranges[age_band])
         elif age_band == "90_PLUS":
-            qs = qs.filter(
-                layer__received_date__lt=date_to - datetime.timedelta(days=90)
-            )
+            qs = qs.filter(layer__received_date__lt=date_to - datetime.timedelta(days=90))
         elif age_band == "UNKNOWN":
             qs = qs.filter(layer__received_date__isnull=True)
         qs = qs.order_by("layer__received_date", "layer_id", "location_id", "id")
@@ -545,12 +513,8 @@ class BossInventoryRiskDetailsApi(BossP1Mixin, APIView):
         rows = []
         for position in qs[start : start + page_size]:
             layer = position.layer
-            age_days = (
-                (date_to - layer.received_date).days if layer.received_date else None
-            )
-            expiry_days = (
-                (layer.expiry_date - date_to).days if layer.expiry_date else None
-            )
+            age_days = (date_to - layer.received_date).days if layer.received_date else None
+            expiry_days = (layer.expiry_date - date_to).days if layer.expiry_date else None
             rows.append(
                 {
                     "id": position.id,
@@ -593,9 +557,7 @@ class BossInventoryRiskDetailsApi(BossP1Mixin, APIView):
 class BossOperationsApi(BossP1Mixin, APIView):
     def get(self, request):
         try:
-            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(
-                request
-            )
+            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(request)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         operation_filters = OperationFilters(
@@ -617,9 +579,7 @@ class BossOperationsApi(BossP1Mixin, APIView):
         operation_filters.validate()
         payload = build_operations_summary(user=request.user, filters=operation_filters)
         sla_qs = AccessScope.for_user(request.user).filter_queryset(
-            FactOutboundOrderSLA.objects.filter(
-                order_date__date__range=(date_from, date_to)
-            ),
+            FactOutboundOrderSLA.objects.filter(order_date__date__range=(date_from, date_to)),
             owner_field="owner__owner_id",
             warehouse_field="warehouse__warehouse_id",
         )
@@ -638,29 +598,19 @@ class BossOperationsApi(BossP1Mixin, APIView):
         denominator = sla["eligible_orders"] or 0
         sla.update(
             {
-                "on_time_rate": (
-                    sla["on_time_orders"] / denominator if denominator else None
-                ),
-                "in_full_rate": (
-                    sla["in_full_orders"] / denominator if denominator else None
-                ),
+                "on_time_rate": (sla["on_time_orders"] / denominator if denominator else None),
+                "in_full_rate": (sla["in_full_orders"] / denominator if denominator else None),
                 "otif_rate": sla["otif_orders"] / denominator if denominator else None,
-                "coverage": (
-                    denominator / sla["total_orders"] if sla["total_orders"] else None
-                ),
+                "coverage": (denominator / sla["total_orders"] if sla["total_orders"] else None),
             }
         )
         inbound_cycles = AccessScope.for_user(request.user).filter_queryset(
-            FactInboundLine.objects.filter(
-                order_date__date__range=(date_from, date_to)
-            ),
+            FactInboundLine.objects.filter(order_date__date__range=(date_from, date_to)),
             owner_field="owner__owner_id",
             warehouse_field="warehouse__warehouse_id",
         )
         outbound_cycles = AccessScope.for_user(request.user).filter_queryset(
-            FactOutboundLine.objects.filter(
-                order_date__date__range=(date_from, date_to)
-            ),
+            FactOutboundLine.objects.filter(order_date__date__range=(date_from, date_to)),
             owner_field="owner__owner_id",
             warehouse_field="warehouse__warehouse_id",
         )
@@ -669,9 +619,7 @@ class BossOperationsApi(BossP1Mixin, APIView):
             outbound_cycles = outbound_cycles.filter(owner__owner_id=owner_id)
         if warehouse_id:
             inbound_cycles = inbound_cycles.filter(warehouse__warehouse_id=warehouse_id)
-            outbound_cycles = outbound_cycles.filter(
-                warehouse__warehouse_id=warehouse_id
-            )
+            outbound_cycles = outbound_cycles.filter(warehouse__warehouse_id=warehouse_id)
         cycles = {
             "order_to_receive": _cycle_stats(inbound_cycles, "sec_to_receive"),
             "receive_to_putaway": _cycle_stats(inbound_cycles, "sec_to_putaway"),
@@ -681,11 +629,7 @@ class BossOperationsApi(BossP1Mixin, APIView):
             "pack_to_ship": _cycle_stats(outbound_cycles, "sec_ship"),
         }
         current = timezone.now()
-        today = (
-            timezone.localtime(current).date()
-            if timezone.is_aware(current)
-            else current.date()
-        )
+        today = timezone.localtime(current).date() if timezone.is_aware(current) else current.date()
         backlog_warnings = []
         backlog_rows = []
         if date_to != today:
@@ -715,11 +659,7 @@ class BossOperationsApi(BossP1Mixin, APIView):
                 tasks = tasks.filter(warehouse_id=warehouse_id)
             for task in tasks:
                 anchor = task.started_at or task.released_at or task.created_at
-                age_minutes = (
-                    max(0, int((current - anchor).total_seconds() // 60))
-                    if anchor
-                    else 0
-                )
+                age_minutes = max(0, int((current - anchor).total_seconds() // 60)) if anchor else 0
                 backlog_rows.append(
                     {
                         "task_id": task.id,
@@ -733,18 +673,12 @@ class BossOperationsApi(BossP1Mixin, APIView):
             key = (
                 "0_4H"
                 if minutes < 240
-                else (
-                    "4_24H"
-                    if minutes < 1440
-                    else "1_3D" if minutes < 4320 else "3D_PLUS"
-                )
+                else ("4_24H" if minutes < 1440 else "1_3D" if minutes < 4320 else "3D_PLUS")
             )
             age_bands[key] += 1
         backlog = {
             "count": len(backlog_rows),
-            "oldest_age_minutes": max(
-                (row["age_minutes"] for row in backlog_rows), default=0
-            ),
+            "oldest_age_minutes": max((row["age_minutes"] for row in backlog_rows), default=0),
             "age_bands": age_bands,
             "date_semantics": (
                 "HISTORICAL_SNAPSHOT"
@@ -767,9 +701,7 @@ class BossOperationsApi(BossP1Mixin, APIView):
 class BossOperationsDetailsApi(BossOperationsApi):
     def get(self, request):
         try:
-            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(
-                request
-            )
+            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(request)
             page = max(1, int(request.query_params.get("page", 1)))
             page_size = min(100, max(1, int(request.query_params.get("page_size", 20))))
         except (ValueError, TypeError) as exc:
@@ -828,9 +760,7 @@ def _alert_payload(case):
 class BossAlertCasesApi(BossP1Mixin, APIView):
     def get(self, request):
         try:
-            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(
-                request
-            )
+            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(request)
             page = max(1, int(request.query_params.get("page", 1)))
             page_size = min(100, max(1, int(request.query_params.get("page_size", 20))))
         except (ValueError, TypeError) as exc:
@@ -856,9 +786,7 @@ class BossAlertCasesApi(BossP1Mixin, APIView):
                 "count": count,
                 "page": page,
                 "page_size": page_size,
-                "results": [
-                    _alert_payload(row) for row in qs[start : start + page_size]
-                ],
+                "results": [_alert_payload(row) for row in qs[start : start + page_size]],
             }
         )
 
@@ -866,9 +794,7 @@ class BossAlertCasesApi(BossP1Mixin, APIView):
 class BossAlertCaseDetailApi(BossAlertCasesApi):
     def get(self, request, pk):
         try:
-            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(
-                request
-            )
+            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(request)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         qs = AccessScope.for_user(request.user).filter_queryset(
@@ -917,9 +843,7 @@ class AlertCaseActionApi(APIView):
             assignee = get_user_model().objects.filter(pk=assignee_id).first()
             if not assignee:
                 return Response({"detail": "责任人不存在。"}, status=400)
-            if not AccessScope.for_user(assignee).allows(
-                warehouse_id=case.warehouse_id
-            ):
+            if not AccessScope.for_user(assignee).allows(warehouse_id=case.warehouse_id):
                 return Response({"detail": "责任人没有对应仓库范围。"}, status=409)
             case.assignee = assignee
             due_at = request.data.get("due_at")
@@ -962,10 +886,10 @@ class AlertCaseActionApi(APIView):
 class BossReviewSnapshotCreateApi(BossP1Mixin, APIView):
     @transaction.atomic
     def post(self, request):
+        if not request.user.has_perm("reports.create_business_review_snapshot"):
+            raise PermissionDenied("当前账号没有创建经营例会快照的权限。")
         try:
-            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(
-                request
-            )
+            owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(request)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         access = AccessScope.for_user(request.user)
@@ -997,9 +921,7 @@ class BossReviewSnapshotCreateApi(BossP1Mixin, APIView):
         payload = {}
         for key in sections:
             if key not in builders:
-                return Response(
-                    {"detail": f"Unknown snapshot section: {key}"}, status=400
-                )
+                return Response({"detail": f"Unknown snapshot section: {key}"}, status=400)
             payload[key] = builders[key](
                 user=request.user,
                 owner_id=owner_id,
@@ -1009,9 +931,7 @@ class BossReviewSnapshotCreateApi(BossP1Mixin, APIView):
                 scope=scope,
             )
         frozen = json.loads(json.dumps(payload, cls=DjangoJSONEncoder))
-        canonical = json.dumps(
-            frozen, ensure_ascii=True, sort_keys=True, separators=(",", ":")
-        )
+        canonical = json.dumps(frozen, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
         snapshot = BusinessReviewSnapshot.objects.create(
             share_code=secrets.token_urlsafe(24),
             created_by=request.user,
@@ -1028,6 +948,14 @@ class BossReviewSnapshotCreateApi(BossP1Mixin, APIView):
                 for item in value.get("meta", {}).get("warnings", [])
             ],
             checksum=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        )
+        record_audit_event(
+            action="reports.business_review_snapshot.create",
+            module="reports",
+            request=request,
+            obj=snapshot,
+            warehouse_id=warehouse_ids[0] if len(warehouse_ids) == 1 else None,
+            metadata={"warehouse_ids": warehouse_ids, "checksum": snapshot.checksum},
         )
         return Response(
             {
@@ -1103,9 +1031,7 @@ class BossReviewSnapshotExportApi(BossReviewSnapshotDetailApi):
 class BossReviewSnapshotRevokeApi(BossScopedApiMixin, APIView):
     @transaction.atomic
     def post(self, request, pk):
-        snapshot = (
-            BusinessReviewSnapshot.objects.select_for_update().filter(pk=pk).first()
-        )
+        snapshot = BusinessReviewSnapshot.objects.select_for_update().filter(pk=pk).first()
         if not snapshot:
             return Response(status=404)
         if snapshot.created_by_id != request.user.id and not request.user.is_superuser:
@@ -1113,4 +1039,12 @@ class BossReviewSnapshotRevokeApi(BossScopedApiMixin, APIView):
         snapshot.revoked_at = timezone.now()
         snapshot.revoked_by = request.user
         snapshot.save(update_fields=["revoked_at", "revoked_by"])
+        record_audit_event(
+            action="reports.business_review_snapshot.revoke",
+            module="reports",
+            request=request,
+            obj=snapshot,
+            warehouse_id=(snapshot.warehouse_ids[0] if len(snapshot.warehouse_ids) == 1 else None),
+            metadata={"warehouse_ids": snapshot.warehouse_ids},
+        )
         return Response({"id": snapshot.id, "revoked_at": snapshot.revoked_at})

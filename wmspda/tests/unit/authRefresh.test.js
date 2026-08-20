@@ -123,8 +123,8 @@ describe('PDA token refresh', () => {
     finishRefresh()
 
     await expect(Promise.all([first, second])).resolves.toEqual([
-      { url: 'http://192.168.1.6:8001/api/one/' },
-      { url: 'http://192.168.1.6:8001/api/two/' },
+      { url: '/api/one/' },
+      { url: '/api/two/' },
     ])
   })
 

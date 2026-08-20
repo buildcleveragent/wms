@@ -77,11 +77,7 @@ class HideAuditFieldsMixin:
     """在表单页隐藏审计字段"""
 
     def get_exclude(self, request, obj=None):
-        base = (
-            super().get_exclude(request, obj)
-            if hasattr(super(), "get_exclude")
-            else None
-        )
+        base = super().get_exclude(request, obj) if hasattr(super(), "get_exclude") else None
         base = list(base) if base else []
         return list(dict.fromkeys(base + existing_audit_fields(self.model)))
 

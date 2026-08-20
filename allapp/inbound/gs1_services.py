@@ -27,8 +27,7 @@ def require_quick_create_owner(user, owner_id: int) -> Owner:
     if not (
         getattr(user, "is_authenticated", False)
         and (
-            getattr(user, "is_superuser", False)
-            or user.has_perm("accounts.receive_without_order")
+            getattr(user, "is_superuser", False) or user.has_perm("accounts.receive_without_order")
         )
     ):
         raise PermissionDenied("没有无订单收货权限。")
@@ -101,9 +100,7 @@ def receive_product_card(product: Product) -> dict:
 def _exact_brand(name: str):
     if not name:
         return None
-    matches = list(
-        Brand.objects.filter(name__iexact=name, is_active=True, is_deleted=False)[:2]
-    )
+    matches = list(Brand.objects.filter(name__iexact=name, is_active=True, is_deleted=False)[:2])
     return matches[0] if len(matches) == 1 else None
 
 
@@ -162,13 +159,8 @@ def quick_create_product(*, owner: Owner, lookup_id, values: dict, user, request
     gtin = str(data.get("barcode") or cache.query_code).strip()
     if not (gtin.isdigit() and len(gtin) in (8, 12, 13, 14)):
         gtin = cache.canonical_gtin
-    name = str(
-        data.get("name") or data.get("general_name") or f"GS1商品 {gtin}"
-    ).strip()[:200]
-    spec = (
-        str(data.get("specification") or data.get("net_content") or "").strip()[:200]
-        or None
-    )
+    name = str(data.get("name") or data.get("general_name") or f"GS1商品 {gtin}").strip()[:200]
+    spec = str(data.get("specification") or data.get("net_content") or "").strip()[:200] or None
     manufacturer = str(data.get("manufacturer") or "").strip()[:200] or None
     batch_control = bool(values["batch_control"])
     expiry_control = bool(values["expiry_control"])
@@ -197,9 +189,7 @@ def quick_create_product(*, owner: Owner, lookup_id, values: dict, user, request
         expiry_basis=values.get("expiry_basis") if expiry_control else None,
         shelf_life_days=values.get("shelf_life_days") if expiry_control else None,
         inbound_valid_days=values.get("inbound_valid_days") if expiry_control else None,
-        expiry_warning_days=(
-            values.get("expiry_warning_days") if expiry_control else None
-        ),
+        expiry_warning_days=(values.get("expiry_warning_days") if expiry_control else None),
         fefo_required=expiry_control,
         extra=extra,
         created_by=user,

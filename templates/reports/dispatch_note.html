@@ -28,6 +28,7 @@
 
     .print-actions { margin: 6px 0 12px; text-align:right; }
     .print-actions button { padding:6px 10px; }
+    .preview-warning { border:2px solid #b42318; color:#b42318; font-weight:700; padding:6px; text-align:center; margin-bottom:8px; }
 
     @media print { .sheet { width: auto; margin:0; border:none; padding: 0; } .print-actions { display:none; } }
   </style>
@@ -37,6 +38,7 @@
   <button onclick="window.print()">打印</button>
 </div>
 <div class="sheet">
+  {% if note.is_preview %}<div class="preview-warning">预览件：任务尚未完成，不得作为最终发运或结算凭证</div>{% endif %}
   <h1>{{ note.header.owner_name }} {{ note.header.title }}</h1>
 
   <div class="row">

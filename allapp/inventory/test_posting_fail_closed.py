@@ -314,6 +314,7 @@ class InventoryPostingFailClosedTests(TestCase):
         self.detail.refresh_from_db()
         self.assertEqual(task.posting_status, WmsTask.PostingStatus.FAILED)
         self.assertEqual(journal.status, "FAILED")
+        self.assertEqual(journal.attempt_count, 1)
         self.assertIsNone(scan.posted_at)
         self.assertIsNone(scan.posting_batch)
         self.assertIsNone(scan.posting_journal_id)

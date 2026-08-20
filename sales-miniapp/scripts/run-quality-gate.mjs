@@ -15,6 +15,10 @@ const runDataAccuracy = args.has('--data-accuracy') || runDb
 const fastDb = args.has('--fast-db') || args.has('--no-migrations')
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 
+if (runDb && skipBuild) {
+  throw new Error('release mode forbids --skip-build')
+}
+
 function commandExists(command) {
   if (path.isAbsolute(command) || command.includes(path.sep)) {
     return fs.existsSync(command)
@@ -36,7 +40,9 @@ const pythonCommand = process.env.PYTHON || firstExisting([
 const backendEnv = {
   ...process.env,
   APP_ENV: 'test',
-  SECRET_KEY: process.env.SECRET_KEY || 'test-secret-key',
+  SECRET_KEY:
+    process.env.SECRET_KEY ||
+    'sale-mini-test-key-0123456789abcdef0123456789abcdef0123456789abcdef',
   DB_TEST_NAME: process.env.DB_TEST_NAME || 'test_wms_db',
   ...(runDb
     ? { DB_NAME: process.env.DB_TEST_NAME || 'test_wms_db' }
@@ -159,7 +165,7 @@ if (fs.existsSync(path.join(repoRoot, 'manage.py'))) {
 
 addStep('wechat miniapp build', npmCommand, ['run', 'build:mp-weixin'], {
   cwd: appRoot,
-  skip: skipBuild,
+  skip: skipBuild || !runDb,
 })
 addStep('h5 build', npmCommand, ['run', 'build:h5'], {
   cwd: appRoot,

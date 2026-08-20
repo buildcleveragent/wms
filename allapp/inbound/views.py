@@ -101,9 +101,7 @@ class ReceiveGoodsWithoutOrder(APIView):
             raise _drf_validation_error(exc) from exc
         except NoOrderReceiveConflict as exc:
             raise IdempotencyConflict from exc
-        response_status = (
-            status.HTTP_200_OK if result["idempotent"] else status.HTTP_201_CREATED
-        )
+        response_status = status.HTTP_200_OK if result["idempotent"] else status.HTTP_201_CREATED
         return Response(result, status=response_status)
 
 
@@ -189,9 +187,7 @@ class InboundOrderViewSet(
                 | Q(supplier__name__icontains=query)
                 | product_search_q(query, product_field="lines__product_id")
             ).distinct()
-        approval_status = (
-            self.request.query_params.get("approval_status") or ""
-        ).strip()
+        approval_status = (self.request.query_params.get("approval_status") or "").strip()
         if approval_status:
             queryset = queryset.filter(approval_status=approval_status)
         submit_status = (self.request.query_params.get("submit_status") or "").strip()
@@ -233,10 +229,7 @@ class InboundOrderViewSet(
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
-        if not (
-            request.user.is_superuser
-            or request.user.has_perm("inbound.add_inboundorder")
-        ):
+        if not (request.user.is_superuser or request.user.has_perm("inbound.add_inboundorder")):
             raise PermissionDenied("没有创建入库单的权限。")
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -261,9 +254,7 @@ class InboundOrderViewSet(
 
     def _action_response(self, request, order):
         order.refresh_from_db()
-        return Response(
-            InboundOrderReadSerializer(order, context={"request": request}).data
-        )
+        return Response(InboundOrderReadSerializer(order, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="submit")
     @transaction.atomic
@@ -297,12 +288,8 @@ class InboundOrderViewSet(
         )
         return self._action_response(request, order)
 
-    def _review_action(
-        self, request, pk, *, permission, role, method_name, audit_action
-    ):
-        if not (
-            request.user.has_perm(permission) and self._has_role(request.user, role)
-        ):
+    def _review_action(self, request, pk, *, permission, role, method_name, audit_action):
+        if not (request.user.has_perm(permission) and self._has_role(request.user, role)):
             raise PermissionDenied("没有执行该审核动作的权限。")
         order = self._locked_scoped_order(pk)
         before = {
@@ -524,9 +511,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             is_frozen=False,
         )
         if query:
-            queryset = queryset.filter(
-                Q(code__icontains=query) | Q(name__icontains=query)
-            )
+            queryset = queryset.filter(Q(code__icontains=query) | Q(name__icontains=query))
         data = [
             {"id": row.pk, "code": row.code, "name": row.name or "", "label": row.code}
             for row in queryset.order_by("code")[:100]
@@ -534,9 +519,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(data)
 
     @staticmethod
-    def _idempotency_marker(
-        *, task, user, request_id, payload_hash, product=None, location=None
-    ):
+    def _idempotency_marker(*, task, user, request_id, payload_hash, product=None, location=None):
         marker_fp = hashlib.sha256(
             f"inbound-receipt:{task.pk}:{user.pk}:{request_id}".encode("utf-8")
         ).hexdigest()
@@ -593,9 +576,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             ),
             pk=payload["location_id"],
         )
-        processed_total = (
-            payload["qty_ok"] + payload["qty_damage"] + payload["qty_reject"]
-        )
+        processed_total = payload["qty_ok"] + payload["qty_damage"] + payload["qty_reject"]
         planned_total = Decimal(line.qty_plan or 0)
         variance_reason = (payload.get("variance_reason") or "").strip()
         payload_hash = _canonical_hash(payload)
@@ -608,9 +589,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             location=location,
         ):
             task.refresh_from_db()
-            return Response(
-                {"idempotent": True, "task": self.get_serializer(task).data}
-            )
+            return Response({"idempotent": True, "task": self.get_serializer(task).data})
 
         if processed_total > planned_total and not variance_reason:
             raise ValidationError("超收必须填写差异原因。")
@@ -656,9 +635,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
             new_qty_ok = Decimal(extra.qty_ok or 0) + Decimal("1")
             cumulative_total = (
-                new_qty_ok
-                + Decimal(extra.qty_damage or 0)
-                + Decimal(extra.qty_reject or 0)
+                new_qty_ok + Decimal(extra.qty_damage or 0) + Decimal(extra.qty_reject or 0)
             )
             if cumulative_total > planned_total and not variance_reason:
                 raise ValidationError("超收必须填写差异原因。")
@@ -686,9 +663,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 serial_no=serial_no,
                 status=TaskScanLog.ScanStatus.OK,
                 fp=hashlib.sha256(
-                    f"inbound-receipt-serial:{task.pk}:{line.pk}:{serial_no}".encode(
-                        "utf-8"
-                    )
+                    f"inbound-receipt-serial:{task.pk}:{line.pk}:{serial_no}".encode("utf-8")
                 ).hexdigest(),
                 scan_snapshot_rev=line.scan_snapshot_rev,
             )
@@ -716,11 +691,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             extra.qty_damage = payload["qty_damage"]
             extra.qty_reject = payload["qty_reject"]
             effective_total = processed_total
-        if (
-            payload.get("finalize")
-            and effective_total != planned_total
-            and not variance_reason
-        ):
+        if payload.get("finalize") and effective_total != planned_total and not variance_reason:
             raise ValidationError("结束差异收货行时必须填写差异原因。")
         extra.lot_no = payload.get("lot_no") or None
         extra.mfg_date = payload.get("mfg_date")
@@ -780,9 +751,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
         if task.task_type != WmsTask.TaskType.PUTAWAY:
             raise ValidationError("该任务不是上架任务。")
         line = get_object_or_404(
-            WmsTaskLine.objects.select_for_update().select_related(
-                "product", "from_location"
-            ),
+            WmsTaskLine.objects.select_for_update().select_related("product", "from_location"),
             pk=payload["line_id"],
             task=task,
         )
@@ -798,9 +767,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             raise ValidationError("目标库位不能与来源库位相同。")
         payload_hash = _canonical_hash(payload)
         scan_fp = hashlib.sha256(
-            f"inbound-putaway:{task.pk}:{request.user.pk}:{payload['request_id']}".encode(
-                "utf-8"
-            )
+            f"inbound-putaway:{task.pk}:{request.user.pk}:{payload['request_id']}".encode("utf-8")
         ).hexdigest()
         expected_remark = f"IDEMPOTENCY:{payload_hash}"
         existing = TaskScanLog.objects.filter(fp=scan_fp).first()
@@ -808,9 +775,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             if existing.remark != expected_remark:
                 raise IdempotencyConflict()
             task.refresh_from_db()
-            return Response(
-                {"idempotent": True, "task": self.get_serializer(task).data}
-            )
+            return Response({"idempotent": True, "task": self.get_serializer(task).data})
 
         self._require_owned(task, line=line)
         if task.status not in {WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS}:
@@ -856,9 +821,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
             if existing.remark != expected_remark:
                 raise IdempotencyConflict()
             task.refresh_from_db()
-            return Response(
-                {"idempotent": True, "task": self.get_serializer(task).data}
-            )
+            return Response({"idempotent": True, "task": self.get_serializer(task).data})
 
         extra, _ = PutawayLineExtra.objects.select_for_update().get_or_create(line=line)
         if extra.to_location_id and extra.to_location_id != location.pk:

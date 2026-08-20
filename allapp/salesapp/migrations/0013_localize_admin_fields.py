@@ -227,9 +227,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminiaftersalerequest",
                     name="request_no",
-                    field=models.CharField(
-                        max_length=64, unique=True, verbose_name="售后申请单号"
-                    ),
+                    field=models.CharField(max_length=64, unique=True, verbose_name="售后申请单号"),
                 ),
                 migrations.AlterField(
                     model_name="saleminiaftersalerequest",
@@ -248,9 +246,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminiaftersalerequest",
                     name="requested_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="申请时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="申请时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminiaftersalerequest",
@@ -262,9 +258,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminiaftersalerequest",
                     name="reviewed_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="审核时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="审核时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminiaftersalerequest",
@@ -381,9 +375,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminicartitem",
                     name="qty",
-                    field=models.DecimalField(
-                        decimal_places=3, max_digits=12, verbose_name="数量"
-                    ),
+                    field=models.DecimalField(decimal_places=3, max_digits=12, verbose_name="数量"),
                 ),
                 migrations.AlterField(
                     model_name="saleminicoupon",
@@ -400,9 +392,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminicoupon",
                     name="coupon_no",
-                    field=models.CharField(
-                        max_length=64, unique=True, verbose_name="优惠券编号"
-                    ),
+                    field=models.CharField(max_length=64, unique=True, verbose_name="优惠券编号"),
                 ),
                 migrations.AlterField(
                     model_name="saleminicoupon",
@@ -417,16 +407,12 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminicoupon",
                     name="expires_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="过期时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="过期时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminicoupon",
                     name="locked_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="锁定时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="锁定时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminicoupon",
@@ -480,9 +466,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminicoupon",
                     name="used_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="使用时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="使用时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminicoupon",
@@ -526,16 +510,12 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminicoupontemplate",
                     name="effective_to",
-                    field=models.DateField(
-                        blank=True, null=True, verbose_name="失效日期"
-                    ),
+                    field=models.DateField(blank=True, null=True, verbose_name="失效日期"),
                 ),
                 migrations.AlterField(
                     model_name="saleminicoupontemplate",
                     name="is_stackable",
-                    field=models.BooleanField(
-                        default=True, verbose_name="允许叠加使用"
-                    ),
+                    field=models.BooleanField(default=True, verbose_name="允许叠加使用"),
                 ),
                 migrations.AlterField(
                     model_name="saleminicoupontemplate",
@@ -623,9 +603,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminidistributionrecord",
                     name="confirmed_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="确认时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="确认时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminidistributionrecord",
@@ -670,16 +648,12 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminidistributionrecord",
                     name="reversed_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="冲销时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="冲销时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminidistributionrecord",
                     name="settled_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="结算时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="结算时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminidistributionrecord",
@@ -698,9 +672,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminiorderadjustment",
                     name="adjustment_no",
-                    field=models.CharField(
-                        max_length=64, unique=True, verbose_name="调整单号"
-                    ),
+                    field=models.CharField(max_length=64, unique=True, verbose_name="调整单号"),
                 ),
                 migrations.AlterField(
                     model_name="saleminiorderadjustment",
@@ -741,9 +713,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminiorderadjustment",
                     name="confirmed_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="确认时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="确认时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminiorderadjustment",
@@ -758,9 +728,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminiorderadjustment",
                     name="locked_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="锁定时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="锁定时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminiorderadjustment",
@@ -787,9 +755,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminiorderadjustment",
                     name="released_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="释放时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="释放时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminiorderadjustment",
@@ -902,16 +868,12 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminiordermapping",
                     name="paid_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="支付时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="支付时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminiordermapping",
                     name="pay_deadline_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="支付截止时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="支付截止时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminiordermapping",
@@ -974,9 +936,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="callback_payload",
-                    field=models.JSONField(
-                        blank=True, default=dict, verbose_name="支付回调报文"
-                    ),
+                    field=models.JSONField(blank=True, default=dict, verbose_name="支付回调报文"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
@@ -994,23 +954,17 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="client_pay_params",
-                    field=models.JSONField(
-                        blank=True, default=dict, verbose_name="小程序支付参数"
-                    ),
+                    field=models.JSONField(blank=True, default=dict, verbose_name="小程序支付参数"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="closed_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="关闭时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="关闭时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="currency",
-                    field=models.CharField(
-                        default="CNY", max_length=8, verbose_name="币种"
-                    ),
+                    field=models.CharField(default="CNY", max_length=8, verbose_name="币种"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
@@ -1025,9 +979,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="expires_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="支付过期时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="支付过期时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
@@ -1049,16 +1001,12 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="next_reconcile_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="下次对账时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="下次对账时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="out_trade_no",
-                    field=models.CharField(
-                        max_length=64, unique=True, verbose_name="商户支付单号"
-                    ),
+                    field=models.CharField(max_length=64, unique=True, verbose_name="商户支付单号"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
@@ -1073,16 +1021,12 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="paid_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="支付时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="支付时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="payment_no",
-                    field=models.CharField(
-                        max_length=64, unique=True, verbose_name="支付流水号"
-                    ),
+                    field=models.CharField(max_length=64, unique=True, verbose_name="支付流水号"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
@@ -1097,30 +1041,22 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="prepay_response",
-                    field=models.JSONField(
-                        blank=True, default=dict, verbose_name="预支付响应报文"
-                    ),
+                    field=models.JSONField(blank=True, default=dict, verbose_name="预支付响应报文"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="request_payload",
-                    field=models.JSONField(
-                        blank=True, default=dict, verbose_name="预支付请求报文"
-                    ),
+                    field=models.JSONField(blank=True, default=dict, verbose_name="预支付请求报文"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="requires_manual_action",
-                    field=models.BooleanField(
-                        default=False, verbose_name="需要人工处理"
-                    ),
+                    field=models.BooleanField(default=False, verbose_name="需要人工处理"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
                     name="retry_count",
-                    field=models.PositiveSmallIntegerField(
-                        default=0, verbose_name="重试次数"
-                    ),
+                    field=models.PositiveSmallIntegerField(default=0, verbose_name="重试次数"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipayment",
@@ -1175,9 +1111,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminipaymentevent",
                     name="decrypted_payload",
-                    field=models.JSONField(
-                        blank=True, default=dict, verbose_name="解密后报文"
-                    ),
+                    field=models.JSONField(blank=True, default=dict, verbose_name="解密后报文"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipaymentevent",
@@ -1189,9 +1123,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminipaymentevent",
                     name="event_id",
-                    field=models.CharField(
-                        max_length=128, unique=True, verbose_name="事件编号"
-                    ),
+                    field=models.CharField(max_length=128, unique=True, verbose_name="事件编号"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipaymentevent",
@@ -1221,9 +1153,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminipaymentevent",
                     name="payload",
-                    field=models.JSONField(
-                        blank=True, default=dict, verbose_name="原始回调报文"
-                    ),
+                    field=models.JSONField(blank=True, default=dict, verbose_name="原始回调报文"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipaymentevent",
@@ -1254,9 +1184,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminipaymentevent",
                     name="processed_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="处理时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="处理时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipaymentevent",
@@ -1351,9 +1279,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminipointledger",
                     name="tx_no",
-                    field=models.CharField(
-                        max_length=64, unique=True, verbose_name="流水号"
-                    ),
+                    field=models.CharField(max_length=64, unique=True, verbose_name="流水号"),
                 ),
                 migrations.AlterField(
                     model_name="saleminipointledger",
@@ -1478,16 +1404,12 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminirefund",
                     name="callback_payload",
-                    field=models.JSONField(
-                        blank=True, default=dict, verbose_name="退款回调报文"
-                    ),
+                    field=models.JSONField(blank=True, default=dict, verbose_name="退款回调报文"),
                 ),
                 migrations.AlterField(
                     model_name="saleminirefund",
                     name="currency",
-                    field=models.CharField(
-                        default="CNY", max_length=8, verbose_name="币种"
-                    ),
+                    field=models.CharField(default="CNY", max_length=8, verbose_name="币种"),
                 ),
                 migrations.AlterField(
                     model_name="saleminirefund",
@@ -1520,16 +1442,12 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminirefund",
                     name="next_retry_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="下次重试时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="下次重试时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminirefund",
                     name="out_refund_no",
-                    field=models.CharField(
-                        max_length=64, unique=True, verbose_name="商户退款单号"
-                    ),
+                    field=models.CharField(max_length=64, unique=True, verbose_name="商户退款单号"),
                 ),
                 migrations.AlterField(
                     model_name="saleminirefund",
@@ -1571,44 +1489,32 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminirefund",
                     name="refund_no",
-                    field=models.CharField(
-                        max_length=64, unique=True, verbose_name="退款流水号"
-                    ),
+                    field=models.CharField(max_length=64, unique=True, verbose_name="退款流水号"),
                 ),
                 migrations.AlterField(
                     model_name="saleminirefund",
                     name="request_payload",
-                    field=models.JSONField(
-                        blank=True, default=dict, verbose_name="退款请求报文"
-                    ),
+                    field=models.JSONField(blank=True, default=dict, verbose_name="退款请求报文"),
                 ),
                 migrations.AlterField(
                     model_name="saleminirefund",
                     name="requested_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="申请退款时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="申请退款时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminirefund",
                     name="requires_manual_action",
-                    field=models.BooleanField(
-                        default=False, verbose_name="需要人工处理"
-                    ),
+                    field=models.BooleanField(default=False, verbose_name="需要人工处理"),
                 ),
                 migrations.AlterField(
                     model_name="saleminirefund",
                     name="response_payload",
-                    field=models.JSONField(
-                        blank=True, default=dict, verbose_name="退款响应报文"
-                    ),
+                    field=models.JSONField(blank=True, default=dict, verbose_name="退款响应报文"),
                 ),
                 migrations.AlterField(
                     model_name="saleminirefund",
                     name="retry_count",
-                    field=models.PositiveSmallIntegerField(
-                        default=0, verbose_name="重试次数"
-                    ),
+                    field=models.PositiveSmallIntegerField(default=0, verbose_name="重试次数"),
                 ),
                 migrations.AlterField(
                     model_name="saleminirefund",
@@ -1643,9 +1549,7 @@ class Migration(migrations.Migration):
                 migrations.AlterField(
                     model_name="saleminirefund",
                     name="success_at",
-                    field=models.DateTimeField(
-                        blank=True, null=True, verbose_name="退款成功时间"
-                    ),
+                    field=models.DateTimeField(blank=True, null=True, verbose_name="退款成功时间"),
                 ),
                 migrations.AlterField(
                     model_name="saleminirefund",

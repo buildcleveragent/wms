@@ -285,12 +285,8 @@ PRODUCT_MASTER_MODEL_LABELS = frozenset(
     }
 )
 
-NEW_PURGE_PRESERVED_MODEL_LABELS = frozenset(
-    PRESERVED_MODEL_LABELS - PRODUCT_MASTER_MODEL_LABELS
-)
-NEW_PURGE_PURGED_MODEL_LABELS = frozenset(
-    PURGED_MODEL_LABELS | PRODUCT_MASTER_MODEL_LABELS
-)
+NEW_PURGE_PRESERVED_MODEL_LABELS = frozenset(PRESERVED_MODEL_LABELS - PRODUCT_MASTER_MODEL_LABELS)
+NEW_PURGE_PURGED_MODEL_LABELS = frozenset(PURGED_MODEL_LABELS | PRODUCT_MASTER_MODEL_LABELS)
 
 
 EXTRA_PRESERVED_TABLES = frozenset({"django_migrations"})
@@ -344,10 +340,7 @@ class PurgePreflightReport:
     def blocking_messages(self) -> tuple[str, ...]:
         messages = [f"未分类数据库表: {table}" for table in sorted(self.unknown_tables)]
         messages.extend(
-            (
-                f"外键阻塞: {item.child_table} -> {item.parent_table} "
-                f"({item.constraint_name})"
-            )
+            (f"外键阻塞: {item.child_table} -> {item.parent_table} " f"({item.constraint_name})")
             for item in self.foreign_key_blockers
         )
         return tuple(messages)
@@ -372,9 +365,7 @@ def resolve_manifest(
     """Resolve model labels to tables and fail when classification drifts."""
 
     preserved_model_labels = frozenset(
-        PRESERVED_MODEL_LABELS
-        if preserved_model_labels is None
-        else preserved_model_labels
+        PRESERVED_MODEL_LABELS if preserved_model_labels is None else preserved_model_labels
     )
     purged_model_labels = frozenset(
         PURGED_MODEL_LABELS if purged_model_labels is None else purged_model_labels
@@ -382,9 +373,7 @@ def resolve_manifest(
 
     overlap = preserved_model_labels & purged_model_labels
     if overlap:
-        raise PurgeConfigurationError(
-            "模型同时出现在保留和清理清单: " + "、".join(sorted(overlap))
-        )
+        raise PurgeConfigurationError("模型同时出现在保留和清理清单: " + "、".join(sorted(overlap)))
 
     models_by_label = {
         model._meta.label_lower: model
@@ -403,12 +392,9 @@ def resolve_manifest(
     if errors:
         raise PurgeConfigurationError("；".join(errors))
 
-    label_to_table = {
-        label: models_by_label[label]._meta.db_table for label in sorted(registered)
-    }
+    label_to_table = {label: models_by_label[label]._meta.db_table for label in sorted(registered)}
     preserved_tables = frozenset(
-        {label_to_table[label] for label in preserved_model_labels}
-        | set(EXTRA_PRESERVED_TABLES)
+        {label_to_table[label] for label in preserved_model_labels} | set(EXTRA_PRESERVED_TABLES)
     )
     purged_tables = frozenset(label_to_table[label] for label in purged_model_labels)
     table_overlap = preserved_tables & purged_tables
@@ -480,9 +466,7 @@ def _estimated_rows(connection) -> dict[str, int | None]:
         }
 
 
-def _prepare_purge(
-    database_alias: str, manifest: ResolvedManifest
-) -> PurgePreflightReport:
+def _prepare_purge(database_alias: str, manifest: ResolvedManifest) -> PurgePreflightReport:
     connection = connections[database_alias]
     if connection.vendor != "mysql":
         raise PurgeConfigurationError("purge_business_data 仅支持 MySQL。")
@@ -563,18 +547,15 @@ def acquire_purge_lock(database_alias: str, target: str):
 
 
 def _delete_table(cursor, quoted_table: str) -> int:
-    cursor.execute(f"DELETE FROM {quoted_table}")
+    # quoted_table is derived only from the closed model manifest and quote_name().
+    cursor.execute(f"DELETE FROM {quoted_table}")  # nosec B608
     return max(cursor.rowcount, 0)
 
 
 def _reset_owner_sku_sequences(database_alias: str) -> int:
     owner_model = django_apps.get_model("baseinfo", "Owner")
     manager = getattr(owner_model, "all_objects", owner_model._base_manager)
-    return (
-        manager.using(database_alias)
-        .exclude(next_sku_sequence=1)
-        .update(next_sku_sequence=1)
-    )
+    return manager.using(database_alias).exclude(next_sku_sequence=1).update(next_sku_sequence=1)
 
 
 def execute_purge(
@@ -608,13 +589,12 @@ def execute_purge(
                 nonempty_tables = []
                 for table in sorted(report.present_purged_tables):
                     quoted_table = connection.ops.quote_name(table)
-                    cursor.execute(f"SELECT COUNT(*) FROM {quoted_table}")
+                    # Same closed, quoted manifest identifier used by _delete_table.
+                    cursor.execute(f"SELECT COUNT(*) FROM {quoted_table}")  # nosec B608
                     if int(cursor.fetchone()[0]):
                         nonempty_tables.append(table)
                 if nonempty_tables:
-                    raise PurgeBlockedError(
-                        "清理后仍有数据: " + "、".join(nonempty_tables)
-                    )
+                    raise PurgeBlockedError("清理后仍有数据: " + "、".join(nonempty_tables))
             finally:
                 cursor.execute(f"SET SESSION FOREIGN_KEY_CHECKS = {original_fk_checks}")
 

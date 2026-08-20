@@ -149,9 +149,7 @@ class PosApiTests(TestCase):
             address="POS Customer Address",
         )
         self.uom = ProductUom.objects.create(code="PCS-POS", name="件", is_active=True)
-        self.carton_uom = ProductUom.objects.create(
-            code="CTN-POS", name="箱", is_active=True
-        )
+        self.carton_uom = ProductUom.objects.create(code="CTN-POS", name="箱", is_active=True)
         self.product = Product.objects.create(
             owner=self.owner,
             code="POS-SKU",
@@ -322,9 +320,7 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-RECEIPT-NO-PERM").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-RECEIPT-NO-PERM").exists())
 
     def test_checkout_maps_exhausted_inventory_retry_to_http_409(self):
         payload = {
@@ -353,9 +349,7 @@ class PosApiTests(TestCase):
         self.assertEqual(response.data["code"], "inventory_busy")
         self.assertTrue(response.data["retryable"])
         self.assertEqual(response["Retry-After"], "1")
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-INVENTORY-BUSY").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-INVENTORY-BUSY").exists())
 
     def test_checkout_requires_open_shift(self):
         cashier = get_user_model().objects.create_user(
@@ -383,9 +377,7 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-RECEIPT-NO-SHIFT").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-RECEIPT-NO-SHIFT").exists())
 
     def test_shift_open_api_records_opening_cash_and_blocks_duplicate_open(self):
         cashier = get_user_model().objects.create_user(
@@ -416,15 +408,11 @@ class PosApiTests(TestCase):
         self.assertEqual(shift.actual_cash_amount, Decimal("123.45"))
         self.assertEqual(shift.remark, "morning drawer")
         self.assertEqual(
-            PosAuditLog.objects.filter(
-                action=PosAuditLog.Action.SHIFT_OPEN, shift=shift
-            ).count(),
+            PosAuditLog.objects.filter(action=PosAuditLog.Action.SHIFT_OPEN, shift=shift).count(),
             1,
         )
         self.assertEqual(
-            PosShift.objects.filter(
-                cashier=cashier, status=PosShift.Status.OPEN
-            ).count(),
+            PosShift.objects.filter(cashier=cashier, status=PosShift.Status.OPEN).count(),
             1,
         )
 
@@ -433,9 +421,7 @@ class PosApiTests(TestCase):
             username="pos-no-warehouse",
             password="x",
         )
-        no_warehouse_user.user_permissions.add(
-            Permission.objects.get(codename="add_possale")
-        )
+        no_warehouse_user.user_permissions.add(Permission.objects.get(codename="add_possale"))
         self.client.force_authenticate(no_warehouse_user)
 
         response = self.client.post(
@@ -455,13 +441,9 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-RECEIPT-NO-WAREHOUSE").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-RECEIPT-NO-WAREHOUSE").exists())
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("10.0000"),
         )
 
@@ -512,9 +494,7 @@ class PosApiTests(TestCase):
         self.assertEqual(Decimal(str(row["available_qty"])), Decimal("10.0000"))
 
     def test_product_lookup_returns_other_owner_available_qty(self):
-        response = self.client.get(
-            "/api/pos/products/", {"barcode": "POS-OTH-UNIT-BAR"}
-        )
+        response = self.client.get("/api/pos/products/", {"barcode": "POS-OTH-UNIT-BAR"})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 1)
@@ -553,21 +533,13 @@ class PosApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["sale"]["src_bill_no"], "POS-RECEIPT-001")
-        self.assertEqual(
-            response.data["receipt"]["customer"]["id"], self.pos_customer.id
-        )
+        self.assertEqual(response.data["receipt"]["customer"]["id"], self.pos_customer.id)
         self.assertEqual(response.data["receipt"]["customer"]["name"], "POS Customer")
         self.assertEqual(response.data["receipt"]["customer"]["phone"], "021-10000001")
-        self.assertEqual(
-            response.data["receipt"]["customer"]["address"], "POS Customer Address"
-        )
+        self.assertEqual(response.data["receipt"]["customer"]["address"], "POS Customer Address")
         self.assertEqual(response.data["payment"]["method"], "CASH")
-        self.assertEqual(
-            Decimal(str(response.data["payment"]["amount_due"])), Decimal("18.00")
-        )
-        self.assertEqual(
-            Decimal(str(response.data["payment"]["change_amount"])), Decimal("2.00")
-        )
+        self.assertEqual(Decimal(str(response.data["payment"]["amount_due"])), Decimal("18.00"))
+        self.assertEqual(Decimal(str(response.data["payment"]["change_amount"])), Decimal("2.00"))
         order = OutboundOrder.objects.get(src_bill_no="POS-RECEIPT-001")
         self.assertEqual(order.owner_id, self.owner.id)
         self.assertEqual(order.warehouse_id, self.warehouse.id)
@@ -593,15 +565,9 @@ class PosApiTests(TestCase):
         self.assertEqual(sale.payment.amount_received, Decimal("20.00"))
         detail_response = self.client.get(f"/api/pos/sales/{sale.id}/")
         self.assertEqual(detail_response.status_code, 200)
-        self.assertEqual(
-            detail_response.data["receipt"]["customer"]["name"], "POS Customer"
-        )
-        self.assertEqual(
-            PosSaleOrder.objects.get(sale=sale).outbound_order_id, order.id
-        )
-        self.assertEqual(
-            PosSaleLine.objects.get(sale=sale).outbound_order_line_id, line.id
-        )
+        self.assertEqual(detail_response.data["receipt"]["customer"]["name"], "POS Customer")
+        self.assertEqual(PosSaleOrder.objects.get(sale=sale).outbound_order_id, order.id)
+        self.assertEqual(PosSaleLine.objects.get(sale=sale).outbound_order_line_id, line.id)
         task = WmsTask.objects.get(
             source_app="pos",
             source_model="outboundorder",
@@ -623,9 +589,7 @@ class PosApiTests(TestCase):
             src_line_id=task_line.id,
             tx_type=InvTxType.ISSUE,
         )
-        journal = PostingJournal.objects.get(
-            src_model="WmsTask", src_id=task.id, tx_type="POST"
-        )
+        journal = PostingJournal.objects.get(src_model="WmsTask", src_id=task.id, tx_type="POST")
         self.assertEqual(scan.posting_journal_id, journal.id)
         self.assertIsNotNone(scan.posted_at)
         self.assertEqual(scan.posting_batch, issue_tx.posting_batch)
@@ -760,15 +724,11 @@ class PosApiTests(TestCase):
         self.assertTrue(PosPayment.objects.filter(sale=sale).exists())
         task = WmsTask.objects.get(source_app="pos", ref_no=sale.sale_no)
         self.assertEqual(task.posting_status, WmsTask.PostingStatus.POSTED)
-        journal = PostingJournal.objects.get(
-            src_model="WmsTask", src_id=task.id, tx_type="POST"
-        )
+        journal = PostingJournal.objects.get(src_model="WmsTask", src_id=task.id, tx_type="POST")
         self.assertIn("BILLING_FAILED", journal.message)
         self.assertEqual(BillingEvent.objects.filter(task=task).count(), 0)
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
 
@@ -808,9 +768,7 @@ class PosApiTests(TestCase):
         sale = PosSale.objects.get(src_bill_no="POS-BILLING-ACCRUAL")
         task = WmsTask.objects.get(source_app="pos", ref_no=sale.sale_no)
 
-        pick_events = BillingEvent.objects.filter(
-            task=task, charge_type=ChargeType.PICK
-        )
+        pick_events = BillingEvent.objects.filter(task=task, charge_type=ChargeType.PICK)
         self.assertEqual(pick_events.count(), 1)
         self.assertEqual(pick_events.get().quantity, Decimal("2.0000"))
         pick_accruals = BillingAccrual.objects.filter(
@@ -832,9 +790,7 @@ class PosApiTests(TestCase):
         self.assertEqual(order_accruals.count(), 1)
         self.assertEqual(order_accruals.get().amount, Decimal("5.00"))
 
-        journal = PostingJournal.objects.get(
-            src_model="WmsTask", src_id=task.id, tx_type="POST"
-        )
+        journal = PostingJournal.objects.get(src_model="WmsTask", src_id=task.id, tx_type="POST")
         self.assertNotIn("BILLING_FAILED", journal.message or "")
         self.assertIsNotNone(order.id)
 
@@ -908,18 +864,14 @@ class PosApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201, response.data)
         sale = PosSale.objects.get(src_bill_no="POS-SERIAL-SALE")
-        task_line = WmsTaskLine.objects.get(
-            task__source_app="pos", task__ref_no=sale.sale_no
-        )
+        task_line = WmsTaskLine.objects.get(task__source_app="pos", task__ref_no=sale.sale_no)
         scan = TaskScanLog.objects.get(task_line=task_line)
         issue = InventoryTransaction.objects.get(
             src_model="WmsTask",
             src_line_id=task_line.id,
             tx_type=InvTxType.ISSUE,
         )
-        self.assertEqual(
-            task_line.plan_meta["source_inventory_detail_id"], source_detail.id
-        )
+        self.assertEqual(task_line.plan_meta["source_inventory_detail_id"], source_detail.id)
         self.assertEqual(scan.barcode, "POS-SN-0001")
         self.assertIsNone(scan.label_key)
         self.assertEqual(issue.serial_no, "POS-SN-0001")
@@ -976,12 +928,8 @@ class PosApiTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 400, response.data)
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-POSTING-ROLLBACK").exists()
-        )
-        self.assertFalse(
-            OutboundOrder.objects.filter(src_bill_no="POS-POSTING-ROLLBACK").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-POSTING-ROLLBACK").exists())
+        self.assertFalse(OutboundOrder.objects.filter(src_bill_no="POS-POSTING-ROLLBACK").exists())
         self.assertFalse(WmsTask.objects.filter(source_app="pos").exists())
         self.assertFalse(TaskScanLog.objects.exists())
         self.assertFalse(InventoryTransaction.objects.exists())
@@ -1021,9 +969,7 @@ class PosApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400, response.data)
         self.assertIn("来源必须为 OutboundOrder", str(response.data))
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-INVALID-TASK-SOURCE").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-INVALID-TASK-SOURCE").exists())
         self.assertFalse(WmsTask.objects.filter(source_app="pos").exists())
         self.assertFalse(InventoryTransaction.objects.exists())
         detail = InventoryDetail.objects.get(owner=self.owner, product=self.product)
@@ -1053,12 +999,8 @@ class PosApiTests(TestCase):
                     format="json",
                 )
 
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-PAYMENT-ROLLBACK").exists()
-        )
-        self.assertFalse(
-            OutboundOrder.objects.filter(src_bill_no="POS-PAYMENT-ROLLBACK").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-PAYMENT-ROLLBACK").exists())
+        self.assertFalse(OutboundOrder.objects.filter(src_bill_no="POS-PAYMENT-ROLLBACK").exists())
         self.assertFalse(WmsTask.objects.filter(source_app="pos").exists())
         self.assertFalse(TaskScanLog.objects.exists())
         self.assertFalse(PostingJournal.objects.exists())
@@ -1094,9 +1036,7 @@ class PosApiTests(TestCase):
             format="json",
         )
         self.assertEqual(checkout.status_code, 201, checkout.data)
-        PosSale.objects.filter(src_bill_no="POS-ACCURACY-BAD").update(
-            total_amount=Decimal("11.00")
-        )
+        PosSale.objects.filter(src_bill_no="POS-ACCURACY-BAD").update(total_amount=Decimal("11.00"))
 
         today = _parse_params({})[0].isoformat()
         response = self.client.get(
@@ -1107,26 +1047,18 @@ class PosApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["status"], "failed")
         self.assertGreater(response.data["summary"]["issue_count"], 0)
-        self.assertTrue(
-            any(issue["code"] == "sale_amount" for issue in response.data["issues"])
-        )
+        self.assertTrue(any(issue["code"] == "sale_amount" for issue in response.data["issues"]))
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
         self.assertEqual(
-            InventorySummary.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventorySummary.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
 
     def test_payment_line_backfill_migration_copies_legacy_payment_once(self):
-        migration = importlib.import_module(
-            "allapp.pos.migrations.0006_backfill_pos_payment_lines"
-        )
+        migration = importlib.import_module("allapp.pos.migrations.0006_backfill_pos_payment_lines")
         legacy_sale = PosSale.objects.create(
             sale_no="POS-LEGACY-PAYMENT",
             src_bill_no="POS-LEGACY-PAYMENT",
@@ -1216,9 +1148,7 @@ class PosApiTests(TestCase):
             password="x",
             warehouse=self.warehouse,
         )
-        no_owner_user.user_permissions.add(
-            Permission.objects.get(codename="add_possale")
-        )
+        no_owner_user.user_permissions.add(Permission.objects.get(codename="add_possale"))
         self.client.force_authenticate(no_owner_user)
         self.open_shift(no_owner_user)
 
@@ -1268,50 +1198,31 @@ class PosApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["order_count"], 2)
-        self.assertEqual(
-            Decimal(str(response.data["payment"]["amount_due"])), Decimal("45.00")
-        )
-        self.assertEqual(
-            Decimal(str(response.data["payment"]["change_amount"])), Decimal("5.00")
-        )
+        self.assertEqual(Decimal(str(response.data["payment"]["amount_due"])), Decimal("45.00"))
+        self.assertEqual(Decimal(str(response.data["payment"]["change_amount"])), Decimal("5.00"))
         sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-MULTI")
         self.assertEqual(sale.total_amount, Decimal("45.00"))
-        self.assertEqual(
-            PosPayment.objects.get(sale=sale).amount_received, Decimal("50.00")
-        )
-        orders = OutboundOrder.objects.filter(src_bill_no="POS-RECEIPT-MULTI").order_by(
-            "owner_id"
-        )
+        self.assertEqual(PosPayment.objects.get(sale=sale).amount_received, Decimal("50.00"))
+        orders = OutboundOrder.objects.filter(src_bill_no="POS-RECEIPT-MULTI").order_by("owner_id")
         self.assertEqual(orders.count(), 2)
         order_by_owner = {order.owner_id: order for order in orders}
         cash_customer = Customer.objects.get(owner=self.owner, code="CASH")
         self.assertEqual(order_by_owner[self.owner.id].customer_id, cash_customer.id)
         cash_customer = Customer.objects.get(owner=self.other_owner, code="CASH")
+        self.assertEqual(order_by_owner[self.other_owner.id].customer_id, cash_customer.id)
         self.assertEqual(
-            order_by_owner[self.other_owner.id].customer_id, cash_customer.id
-        )
-        self.assertEqual(
-            OutboundOrderLine.objects.get(
-                order=order_by_owner[self.owner.id]
-            ).product_id,
+            OutboundOrderLine.objects.get(order=order_by_owner[self.owner.id]).product_id,
             self.product.id,
         )
         self.assertEqual(
-            OutboundOrderLine.objects.get(
-                order=order_by_owner[self.other_owner.id]
-            ).product_id,
+            OutboundOrderLine.objects.get(order=order_by_owner[self.other_owner.id]).product_id,
             self.other_product.id,
         )
-        self.assertEqual(
-            order_by_owner[self.owner.id].final_order_amount, Decimal("9.00")
-        )
-        self.assertEqual(
-            order_by_owner[self.other_owner.id].final_order_amount, Decimal("36.00")
-        )
+        self.assertEqual(order_by_owner[self.owner.id].final_order_amount, Decimal("9.00"))
+        self.assertEqual(order_by_owner[self.other_owner.id].final_order_amount, Decimal("36.00"))
         self.assertEqual(PosSaleOrder.objects.filter(sale=sale).count(), 2)
         sale_order_amounts = {
-            link.owner_id: link.amount
-            for link in PosSaleOrder.objects.filter(sale=sale)
+            link.owner_id: link.amount for link in PosSaleOrder.objects.filter(sale=sale)
         }
         self.assertEqual(sale_order_amounts[self.owner.id], Decimal("9.00"))
         self.assertEqual(sale_order_amounts[self.other_owner.id], Decimal("36.00"))
@@ -1327,9 +1238,7 @@ class PosApiTests(TestCase):
             {WmsTask.PostingStatus.POSTED},
         )
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
         self.assertEqual(
@@ -1339,9 +1248,7 @@ class PosApiTests(TestCase):
             Decimal("6.0000"),
         )
         self.assertEqual(
-            InventorySummary.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventorySummary.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
         self.assertEqual(
@@ -1384,13 +1291,9 @@ class PosApiTests(TestCase):
         sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-SPLIT-PAY")
         self.assertEqual(sale.payment.method, PosPayment.Method.OTHER)
         self.assertEqual(sale.payment.reference_no, "MULTI")
-        payment_lines = {
-            line.method: line for line in PosPaymentLine.objects.filter(sale=sale)
-        }
+        payment_lines = {line.method: line for line in PosPaymentLine.objects.filter(sale=sale)}
         self.assertEqual(payment_lines[PosPayment.Method.CASH].amount, Decimal("10.00"))
-        self.assertEqual(
-            payment_lines[PosPayment.Method.WECHAT].amount, Decimal("8.00")
-        )
+        self.assertEqual(payment_lines[PosPayment.Method.WECHAT].amount, Decimal("8.00"))
         self.assertEqual(
             Decimal(str(response.data["receipt"]["payment_lines"][0]["amount"])),
             Decimal("10.00"),
@@ -1410,15 +1313,10 @@ class PosApiTests(TestCase):
         self.assertEqual(summary["net_amount"], "18.00")
         self.assertEqual(summary["expected_cash_amount"], "110.00")
         payments = {
-            row.method: row
-            for row in PosShiftPaymentSummary.objects.filter(shift=self.shift)
+            row.method: row for row in PosShiftPaymentSummary.objects.filter(shift=self.shift)
         }
-        self.assertEqual(
-            payments[PosPayment.Method.CASH].expected_amount, Decimal("10.00")
-        )
-        self.assertEqual(
-            payments[PosPayment.Method.WECHAT].expected_amount, Decimal("8.00")
-        )
+        self.assertEqual(payments[PosPayment.Method.CASH].expected_amount, Decimal("10.00"))
+        self.assertEqual(payments[PosPayment.Method.WECHAT].expected_amount, Decimal("8.00"))
 
     def test_checkout_allows_customer_credit_and_reports_debt(self):
         response = self.client.post(
@@ -1443,18 +1341,14 @@ class PosApiTests(TestCase):
         self.assertEqual(sale.payment.method, PosPayment.Method.CREDIT)
         self.assertEqual(sale.payment.amount_received, Decimal("0.00"))
         self.assertEqual(
-            PosPaymentLine.objects.get(
-                sale=sale, method=PosPayment.Method.CREDIT
-            ).amount,
+            PosPaymentLine.objects.get(sale=sale, method=PosPayment.Method.CREDIT).amount,
             Decimal("10.00"),
         )
         self.assertEqual(response.data["receipt"]["credit_amount"], "10.00")
         self.assertEqual(response.data["receipt"]["cumulative_debt"], "10.00")
 
         today = timezone.now().date().isoformat()
-        stats = self.client.get(
-            "/api/pos/stats/", {"start_date": today, "end_date": today}
-        )
+        stats = self.client.get("/api/pos/stats/", {"start_date": today, "end_date": today})
         self.assertEqual(stats.status_code, 200, stats.data)
         self.assertEqual(stats.data["summary"]["credit_amount"], "10.00")
         self.assertEqual(stats.data["summary"]["received_amount"], "0.00")
@@ -1479,13 +1373,9 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-CREDIT-NO-CUSTOMER").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-CREDIT-NO-CUSTOMER").exists())
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("10.0000"),
         )
 
@@ -1542,17 +1432,13 @@ class PosApiTests(TestCase):
         self.assertEqual(PosCustomerRepayment.objects.count(), 1)
 
         today = timezone.now().date().isoformat()
-        stats = self.client.get(
-            "/api/pos/stats/", {"start_date": today, "end_date": today}
-        )
+        stats = self.client.get("/api/pos/stats/", {"start_date": today, "end_date": today})
         self.assertEqual(stats.status_code, 200, stats.data)
         self.assertEqual(stats.data["summary"]["credit_amount"], "6.00")
         self.assertEqual(stats.data["summary"]["repayment_amount"], "2.50")
         self.assertEqual(stats.data["summary"]["received_amount"], "6.50")
         payment_rows = {row["method"]: row for row in stats.data["payments"]}
-        self.assertEqual(
-            payment_rows[PosPayment.Method.CASH]["repayment_amount"], "2.50"
-        )
+        self.assertEqual(payment_rows[PosPayment.Method.CASH]["repayment_amount"], "2.50")
         self.assertEqual(payment_rows[PosPayment.Method.WECHAT]["sale_amount"], "4.00")
         self.assertEqual(payment_rows[PosPayment.Method.CREDIT]["sale_amount"], "6.00")
 
@@ -1570,8 +1456,7 @@ class PosApiTests(TestCase):
         self.assertEqual(summary["credit_amount"], "6.00")
         self.assertEqual(summary["repayment_amount"], "2.50")
         shift_payments = {
-            row.method: row
-            for row in PosShiftPaymentSummary.objects.filter(shift=self.shift)
+            row.method: row for row in PosShiftPaymentSummary.objects.filter(shift=self.shift)
         }
         self.assertEqual(
             shift_payments[PosPayment.Method.CASH].repayment_amount,
@@ -1611,20 +1496,12 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-RECEIPT-BAD-SPLIT").exists()
-        )
-        self.assertFalse(
-            OutboundOrder.objects.filter(src_bill_no="POS-RECEIPT-BAD-SPLIT").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-RECEIPT-BAD-SPLIT").exists())
+        self.assertFalse(OutboundOrder.objects.filter(src_bill_no="POS-RECEIPT-BAD-SPLIT").exists())
         self.assertEqual(PosPaymentLine.objects.count(), 0)
+        self.assertEqual(InventoryTransaction.objects.filter(src_model="PosSaleLine").count(), 0)
         self.assertEqual(
-            InventoryTransaction.objects.filter(src_model="PosSaleLine").count(), 0
-        )
-        self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("10.0000"),
         )
 
@@ -1675,25 +1552,14 @@ class PosApiTests(TestCase):
         shift = PosShift.objects.get(pk=self.shift.id)
         self.assertEqual(shift.cash_difference, Decimal("-1.00"))
         summaries = {
-            row.method: row
-            for row in PosShiftPaymentSummary.objects.filter(shift=self.shift)
+            row.method: row for row in PosShiftPaymentSummary.objects.filter(shift=self.shift)
         }
-        self.assertEqual(
-            summaries[PosPayment.Method.CASH].expected_amount, Decimal("10.00")
-        )
-        self.assertEqual(
-            summaries[PosPayment.Method.CASH].actual_amount, Decimal("9.00")
-        )
+        self.assertEqual(summaries[PosPayment.Method.CASH].expected_amount, Decimal("10.00"))
+        self.assertEqual(summaries[PosPayment.Method.CASH].actual_amount, Decimal("9.00"))
         self.assertEqual(summaries[PosPayment.Method.CASH].difference, Decimal("-1.00"))
-        self.assertEqual(
-            summaries[PosPayment.Method.WECHAT].expected_amount, Decimal("8.00")
-        )
-        self.assertEqual(
-            summaries[PosPayment.Method.WECHAT].actual_amount, Decimal("7.50")
-        )
-        self.assertEqual(
-            summaries[PosPayment.Method.WECHAT].difference, Decimal("-0.50")
-        )
+        self.assertEqual(summaries[PosPayment.Method.WECHAT].expected_amount, Decimal("8.00"))
+        self.assertEqual(summaries[PosPayment.Method.WECHAT].actual_amount, Decimal("7.50"))
+        self.assertEqual(summaries[PosPayment.Method.WECHAT].difference, Decimal("-0.50"))
         self.assertTrue(
             PosAuditLog.objects.filter(
                 action=PosAuditLog.Action.SHIFT_CLOSE,
@@ -1732,9 +1598,7 @@ class PosApiTests(TestCase):
 
         self.assertEqual(first.status_code, 201, first.data)
         self.assertEqual(second.status_code, 400)
-        self.assertEqual(
-            PosSale.objects.filter(src_bill_no="POS-RECEIPT-IDEM-CONFLICT").count(), 1
-        )
+        self.assertEqual(PosSale.objects.filter(src_bill_no="POS-RECEIPT-IDEM-CONFLICT").count(), 1)
         self.assertEqual(
             InventoryTransaction.objects.filter(
                 src_model="WmsTask", tx_type=InvTxType.ISSUE
@@ -1742,9 +1606,7 @@ class PosApiTests(TestCase):
             1,
         )
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
 
@@ -1784,9 +1646,7 @@ class PosApiTests(TestCase):
             1,
         )
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
 
@@ -1810,9 +1670,7 @@ class PosApiTests(TestCase):
         self.assertEqual(first.status_code, 201, first.data)
         self.assertEqual(second.status_code, 201, second.data)
         self.assertEqual(first.data["sale"]["id"], second.data["sale"]["id"])
-        self.assertEqual(
-            PosSale.objects.filter(src_bill_no="POS-RECEIPT-IDEM").count(), 1
-        )
+        self.assertEqual(PosSale.objects.filter(src_bill_no="POS-RECEIPT-IDEM").count(), 1)
         self.assertEqual(
             InventoryTransaction.objects.filter(
                 src_model="WmsTask", tx_type=InvTxType.ISSUE
@@ -1820,9 +1678,7 @@ class PosApiTests(TestCase):
             1,
         )
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
 
@@ -1860,12 +1716,8 @@ class PosApiTests(TestCase):
 
         self.assertEqual(first.status_code, 201, first.data)
         self.assertEqual(second.status_code, 400)
-        self.assertEqual(
-            PosSale.objects.filter(src_bill_no="POS-RECEIPT-DUP").count(), 1
-        )
-        self.assertEqual(
-            OutboundOrder.objects.filter(src_bill_no="POS-RECEIPT-DUP").count(), 1
-        )
+        self.assertEqual(PosSale.objects.filter(src_bill_no="POS-RECEIPT-DUP").count(), 1)
+        self.assertEqual(OutboundOrder.objects.filter(src_bill_no="POS-RECEIPT-DUP").count(), 1)
         self.assertEqual(
             InventoryTransaction.objects.filter(
                 src_model="WmsTask", tx_type=InvTxType.ISSUE
@@ -1873,9 +1725,7 @@ class PosApiTests(TestCase):
             1,
         )
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
 
@@ -2048,9 +1898,7 @@ class PosApiTests(TestCase):
         sale = PosSale.objects.get(src_bill_no="POS-LARGE-NEGOTIATED-AMOUNT")
         self.assertEqual(sale.total_amount, Decimal("95.00"))
         self.assertEqual(sale.lines.get().amount, Decimal("95.00"))
-        self.assertEqual(
-            sale.lines.get().qty * sale.lines.get().price, Decimal("94.9905")
-        )
+        self.assertEqual(sale.lines.get().qty * sale.lines.get().price, Decimal("94.9905"))
 
     def test_checkout_rejects_explicit_amount_price_mismatch(self):
         response = self.client.post(
@@ -2071,9 +1919,7 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-NEGOTIATED-MISMATCH").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-NEGOTIATED-MISMATCH").exists())
         self.assertFalse(
             OutboundOrder.objects.filter(src_bill_no="POS-NEGOTIATED-MISMATCH").exists()
         )
@@ -2109,9 +1955,7 @@ class PosApiTests(TestCase):
         order = OutboundOrder.objects.get(src_bill_no="POS-RECEIPT-VOID")
         self.assertEqual(order.approval_status, "CANCELLED")
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("10.0000"),
         )
         self.assertEqual(
@@ -2145,9 +1989,7 @@ class PosApiTests(TestCase):
         )
         self.assertEqual(checkout.status_code, 201, checkout.data)
         sale = PosSale.objects.get(src_bill_no="POS-INACTIVE-LAYER")
-        task_line = WmsTaskLine.objects.get(
-            task__source_app="pos", task__ref_no=sale.sale_no
-        )
+        task_line = WmsTaskLine.objects.get(task__source_app="pos", task__ref_no=sale.sale_no)
         detail_id = task_line.plan_meta["source_inventory_detail_id"]
         InventoryDetail.objects.filter(pk=detail_id).update(is_active=False)
 
@@ -2163,9 +2005,7 @@ class PosApiTests(TestCase):
         self.assertEqual(detail.onhand_qty, Decimal("10.0000"))
         self.assertEqual(detail.available_qty, Decimal("10.0000"))
         self.assertEqual(
-            InventorySummary.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventorySummary.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("0.0000"),
         )
 
@@ -2179,8 +2019,7 @@ class PosApiTests(TestCase):
         self.assertEqual(accuracy.data["summary"]["warning_count"], 1)
         self.assertTrue(
             any(
-                issue["code"] == "inactive_restore_layer"
-                and issue["severity"] == "warning"
+                issue["code"] == "inactive_restore_layer" and issue["severity"] == "warning"
                 for issue in accuracy.data["issues"]
             )
         )
@@ -2283,10 +2122,7 @@ class PosApiTests(TestCase):
         self.assertEqual(accuracy.status_code, 200, accuracy.data)
         self.assertEqual(accuracy.data["status"], "failed")
         self.assertTrue(
-            any(
-                "同时存在新旧出库流水" in issue["message"]
-                for issue in accuracy.data["issues"]
-            )
+            any("同时存在新旧出库流水" in issue["message"] for issue in accuracy.data["issues"])
         )
 
     def test_soft_deleted_source_layer_rejects_return_and_void_without_residue(self):
@@ -2308,9 +2144,7 @@ class PosApiTests(TestCase):
         self.assertEqual(checkout.status_code, 201, checkout.data)
         sale = PosSale.objects.get(src_bill_no="POS-SOFT-DELETED-LAYER")
         sale_line = PosSaleLine.objects.get(sale=sale)
-        task_line = WmsTaskLine.objects.get(
-            task__source_app="pos", task__ref_no=sale.sale_no
-        )
+        task_line = WmsTaskLine.objects.get(task__source_app="pos", task__ref_no=sale.sale_no)
         detail_id = task_line.plan_meta["source_inventory_detail_id"]
         InventoryDetail.all_objects.filter(pk=detail_id).update(
             is_deleted=True,
@@ -2367,8 +2201,7 @@ class PosApiTests(TestCase):
         self.assertEqual(accuracy.data["status"], "failed")
         self.assertTrue(
             any(
-                str(detail_id) == str(issue["object_id"])
-                and "不存在或已软删除" in issue["message"]
+                str(detail_id) == str(issue["object_id"]) and "不存在或已软删除" in issue["message"]
                 for issue in accuracy.data["issues"]
             )
         )
@@ -2395,9 +2228,7 @@ class PosApiTests(TestCase):
             password="x",
             warehouse=self.warehouse,
         )
-        no_void_user.user_permissions.add(
-            Permission.objects.get(codename="add_possale")
-        )
+        no_void_user.user_permissions.add(Permission.objects.get(codename="add_possale"))
         self.client.force_authenticate(no_void_user)
 
         response = self.client.post(
@@ -2507,9 +2338,7 @@ class PosApiTests(TestCase):
         self.assertEqual(summary["net_amount"], "0.00")
         self.assertEqual(summary["voided_amount"], "18.00")
         self.assertEqual(summary["expected_cash_amount"], "100.00")
-        self.assertEqual(
-            PosShiftPaymentSummary.objects.filter(shift=self.shift).count(), 0
-        )
+        self.assertEqual(PosShiftPaymentSummary.objects.filter(shift=self.shift).count(), 0)
 
     def test_pos_return_restores_stock_and_updates_shift_stats_and_payments(self):
         checkout = self.client.post(
@@ -2546,22 +2375,14 @@ class PosApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         return_order = PosReturn.objects.get(sale=sale)
         self.assertEqual(return_order.total_amount, Decimal("9.00"))
+        self.assertEqual(PosReturnLine.objects.get(return_order=return_order).qty, Decimal("1.000"))
+        self.assertEqual(PosRefund.objects.get(return_order=return_order).amount, Decimal("9.00"))
         self.assertEqual(
-            PosReturnLine.objects.get(return_order=return_order).qty, Decimal("1.000")
-        )
-        self.assertEqual(
-            PosRefund.objects.get(return_order=return_order).amount, Decimal("9.00")
-        )
-        self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
         self.assertEqual(
-            InventorySummary.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventorySummary.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
         self.assertEqual(
@@ -2590,9 +2411,7 @@ class PosApiTests(TestCase):
         self.assertEqual(over_return.status_code, 400)
         self.assertEqual(PosReturn.objects.filter(sale=sale).count(), 1)
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
 
@@ -2624,9 +2443,7 @@ class PosApiTests(TestCase):
         self.assertEqual(owners[self.owner.id]["amount"], "9.00")
         self.assertEqual(owners[self.owner.id]["qty"], "1.000")
 
-        sales_export = self.client.get(
-            "/api/pos/sales/export/", {"search": "POS-RECEIPT-RETURN"}
-        )
+        sales_export = self.client.get("/api/pos/sales/export/", {"search": "POS-RECEIPT-RETURN"})
         self.assertEqual(sales_export.status_code, 200)
         workbook = load_workbook(io.BytesIO(sales_export.content))
         self.assertIn("PaymentLines", workbook.sheetnames)
@@ -2634,9 +2451,7 @@ class PosApiTests(TestCase):
         self.assertIn("ReturnLines", workbook.sheetnames)
         self.assertIn("Refunds", workbook.sheetnames)
         self.assertEqual(Decimal(str(workbook["Returns"]["G2"].value)), Decimal("9"))
-        self.assertEqual(
-            Decimal(str(workbook["ReturnLines"]["K2"].value)), Decimal("9")
-        )
+        self.assertEqual(Decimal(str(workbook["ReturnLines"]["K2"].value)), Decimal("9"))
         self.assertEqual(Decimal(str(workbook["Refunds"]["E2"].value)), Decimal("9"))
 
         close_response = self.client.post(
@@ -2740,9 +2555,7 @@ class PosApiTests(TestCase):
         self.assertEqual(detail_response.status_code, 200, detail_response.data)
         line_payload = detail_response.data["lines"][0]
         self.assertEqual(Decimal(str(line_payload["returned_amount"])), Decimal("1.00"))
-        self.assertEqual(
-            Decimal(str(line_payload["returnable_amount"])), Decimal("0.00")
-        )
+        self.assertEqual(Decimal(str(line_payload["returnable_amount"])), Decimal("0.00"))
 
     def test_pos_return_idempotency_does_not_double_restore_stock(self):
         checkout = self.client.post(
@@ -2783,9 +2596,7 @@ class PosApiTests(TestCase):
             1,
         )
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
 
@@ -2830,9 +2641,7 @@ class PosApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(PosReturn.objects.filter(sale=sale).exists())
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
 
@@ -2879,13 +2688,9 @@ class PosApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertFalse(PosReturn.objects.filter(sale=sale).exists())
+        self.assertEqual(InventoryTransaction.objects.filter(src_model="PosReturnLine").count(), 0)
         self.assertEqual(
-            InventoryTransaction.objects.filter(src_model="PosReturnLine").count(), 0
-        )
-        self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
         )
 
@@ -2924,13 +2729,9 @@ class PosApiTests(TestCase):
         self.assertFalse(PosReturn.objects.filter(sale=sale).exists())
         self.assertEqual(PosReturnLine.objects.count(), 0)
         self.assertEqual(PosRefund.objects.count(), 0)
+        self.assertEqual(InventoryTransaction.objects.filter(src_model="PosReturnLine").count(), 0)
         self.assertEqual(
-            InventoryTransaction.objects.filter(src_model="PosReturnLine").count(), 0
-        )
-        self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("8.0000"),
         )
 
@@ -3081,9 +2882,7 @@ class PosApiTests(TestCase):
             src_line_id=detail.id,
         )
         self.assertEqual(restored.count(), 2)
-        self.assertEqual(
-            sum((tx.qty_delta for tx in restored), Decimal("0")), Decimal("2.0000")
-        )
+        self.assertEqual(sum((tx.qty_delta for tx in restored), Decimal("0")), Decimal("2.0000"))
 
         third = self.client.post(
             "/api/pos/returns/",
@@ -3140,9 +2939,7 @@ class PosApiTests(TestCase):
         self.assertEqual(checkout.status_code, 201, checkout.data)
         sale = PosSale.objects.get(src_bill_no="POS-ID-COLLISION")
         sale_line = PosSaleLine.objects.get(sale=sale)
-        task_line = WmsTaskLine.objects.get(
-            task__source_app="pos", task__ref_no=sale.sale_no
-        )
+        task_line = WmsTaskLine.objects.get(task__source_app="pos", task__ref_no=sale.sale_no)
         self.assertNotEqual(task_line.id, source_detail.id)
 
         decoy = InventoryDetail.all_objects.filter(pk=task_line.id).first()
@@ -3331,16 +3128,12 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-RECEIPT-LOW-AMOUNT").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-RECEIPT-LOW-AMOUNT").exists())
         self.assertFalse(
             OutboundOrder.objects.filter(src_bill_no="POS-RECEIPT-LOW-AMOUNT").exists()
         )
         self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("10.0000"),
         )
 
@@ -3388,9 +3181,7 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-RECEIPT-DISCOUNT").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-RECEIPT-DISCOUNT").exists())
         self.assertEqual(
             InventoryTransaction.objects.filter(
                 product=discount_product, src_model="PosSaleLine"
@@ -3428,16 +3219,10 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-RECEIPT-AGG-STOCK").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-RECEIPT-AGG-STOCK").exists())
+        self.assertEqual(InventoryTransaction.objects.filter(src_model="PosSaleLine").count(), 0)
         self.assertEqual(
-            InventoryTransaction.objects.filter(src_model="PosSaleLine").count(), 0
-        )
-        self.assertEqual(
-            InventoryDetail.objects.get(
-                owner=self.owner, product=self.product
-            ).available_qty,
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("10.0000"),
         )
 
@@ -3487,13 +3272,9 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400, response.data)
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-SUB-MILLITH-TAILS").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-SUB-MILLITH-TAILS").exists())
         self.assertFalse(WmsTask.objects.filter(source_app="pos").exists())
-        self.assertFalse(
-            InventoryTransaction.objects.filter(product=tail_product).exists()
-        )
+        self.assertFalse(InventoryTransaction.objects.filter(product=tail_product).exists())
         self.assertEqual(
             list(
                 InventoryDetail.objects.filter(product=tail_product)
@@ -3564,9 +3345,7 @@ class PosApiTests(TestCase):
             {"barcode": "POS-ZONE-BAR", "zone_type": ZoneType.STORAGE},
         )
         self.assertEqual(lookup.status_code, 200)
-        self.assertEqual(
-            Decimal(str(lookup.data["results"][0]["available_qty"])), Decimal("0")
-        )
+        self.assertEqual(Decimal(str(lookup.data["results"][0]["available_qty"])), Decimal("0"))
 
         response = self.client.post(
             "/api/pos/checkout/",
@@ -3586,9 +3365,7 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(
-            PosSale.objects.filter(src_bill_no="POS-RECEIPT-ZONE").exists()
-        )
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-RECEIPT-ZONE").exists())
 
         matching_zone = self.client.post(
             "/api/pos/checkout/",
@@ -3610,12 +3387,8 @@ class PosApiTests(TestCase):
         sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-ZONE-OK")
         task = WmsTask.objects.get(source_app="pos", ref_no=sale.sale_no)
         task_line = WmsTaskLine.objects.get(task=task)
-        zone_detail = InventoryDetail.objects.get(
-            owner=self.owner, product=zone_product
-        )
-        self.assertEqual(
-            task_line.plan_meta["source_inventory_detail_id"], zone_detail.id
-        )
+        zone_detail = InventoryDetail.objects.get(owner=self.owner, product=zone_product)
+        self.assertEqual(task_line.plan_meta["source_inventory_detail_id"], zone_detail.id)
         self.assertEqual(task_line.plan_meta["zone_type"], ZoneType.PICK)
         issue_tx = InventoryTransaction.objects.get(
             src_model="WmsTask",
@@ -3686,9 +3459,7 @@ class PosApiTests(TestCase):
         sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-FEFO")
         task = WmsTask.objects.get(source_app="pos", ref_no=sale.sale_no)
         task_line = WmsTaskLine.objects.get(task=task)
-        self.assertEqual(
-            task_line.plan_meta["source_inventory_detail_id"], expiring_detail.id
-        )
+        self.assertEqual(task_line.plan_meta["source_inventory_detail_id"], expiring_detail.id)
         self.assertEqual(task_line.from_location_id, expiring_detail.location_id)
         issue_tx = InventoryTransaction.objects.get(
             src_model="WmsTask",
@@ -3715,9 +3486,7 @@ class PosApiTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)
-        other_warehouse = Warehouse.objects.create(
-            code="WHPOS2", name="Other POS Warehouse"
-        )
+        other_warehouse = Warehouse.objects.create(code="WHPOS2", name="Other POS Warehouse")
         PosSale.objects.create(
             sale_no="POS-OTHER-WAREHOUSE",
             src_bill_no="POS-RECEIPT-OTHER-WAREHOUSE",
@@ -3733,9 +3502,7 @@ class PosApiTests(TestCase):
         self.assertEqual(row["src_bill_no"], "POS-RECEIPT-LIST")
         self.assertEqual(row["warehouse_id"], self.warehouse.id)
 
-        other_response = self.client.get(
-            "/api/pos/sales/", {"search": "OTHER-WAREHOUSE"}
-        )
+        other_response = self.client.get("/api/pos/sales/", {"search": "OTHER-WAREHOUSE"})
         self.assertEqual(other_response.status_code, 200)
         self.assertEqual(other_response.data["count"], 0)
 
@@ -3989,12 +3756,8 @@ class PosApiTests(TestCase):
         self.assertEqual(owner_payments["WECHAT"]["sale_amount"], "7.00")
         self.assertEqual(owner_payments["WECHAT"]["refund_amount"], "0.00")
 
-        self.assertEqual(
-            other_owner_response.status_code, 200, other_owner_response.data
-        )
-        other_payments = {
-            row["method"]: row for row in other_owner_response.data["payments"]
-        }
+        self.assertEqual(other_owner_response.status_code, 200, other_owner_response.data)
+        other_payments = {row["method"]: row for row in other_owner_response.data["payments"]}
         self.assertEqual(other_owner_response.data["summary"]["sales_amount"], "36.00")
         self.assertEqual(other_owner_response.data["summary"]["return_amount"], "18.00")
         self.assertEqual(other_owner_response.data["summary"]["net_amount"], "18.00")
@@ -4099,18 +3862,11 @@ class PosApiTests(TestCase):
         self.assertEqual(shift.total_sales_amount, Decimal("63.00"))
         self.assertEqual(shift.total_voided_amount, Decimal("9.00"))
         payments = {
-            row.method: row
-            for row in PosShiftPaymentSummary.objects.filter(shift=self.shift)
+            row.method: row for row in PosShiftPaymentSummary.objects.filter(shift=self.shift)
         }
-        self.assertEqual(
-            payments[PosPayment.Method.CASH].expected_amount, Decimal("18.00")
-        )
-        self.assertEqual(
-            payments[PosPayment.Method.CASH].actual_amount, Decimal("18.00")
-        )
-        self.assertEqual(
-            payments[PosPayment.Method.WECHAT].expected_amount, Decimal("45.00")
-        )
+        self.assertEqual(payments[PosPayment.Method.CASH].expected_amount, Decimal("18.00"))
+        self.assertEqual(payments[PosPayment.Method.CASH].actual_amount, Decimal("18.00"))
+        self.assertEqual(payments[PosPayment.Method.WECHAT].expected_amount, Decimal("45.00"))
         self.assertEqual(payments[PosPayment.Method.WECHAT].difference, Decimal("0.00"))
 
         late_void = self.client.post(
@@ -4154,9 +3910,7 @@ class PosApiTests(TestCase):
         ).order_by("copy_no")
         self.assertEqual(list(logs.values_list("copy_no", flat=True)), [1, 2])
 
-        sales_export = self.client.get(
-            "/api/pos/sales/export/", {"search": "POS-EXPORT-PRINT"}
-        )
+        sales_export = self.client.get("/api/pos/sales/export/", {"search": "POS-EXPORT-PRINT"})
         self.assertEqual(sales_export.status_code, 200)
         workbook = load_workbook(io.BytesIO(sales_export.content))
         self.assertIn("Sales", workbook.sheetnames)
@@ -4244,9 +3998,7 @@ class PosApiTests(TestCase):
         anonymous = APIClient()
 
         sale_print = anonymous.get(f"/api/pos/sales/{sale_id}/print/?token={token}")
-        shift_print = anonymous.get(
-            f"/api/pos/shifts/{self.shift.id}/print/?token={token}"
-        )
+        shift_print = anonymous.get(f"/api/pos/shifts/{self.shift.id}/print/?token={token}")
 
         self.assertEqual(sale_print.status_code, 200)
         self.assertContains(sale_print, "POS-TOKEN-PRINT")
@@ -4312,9 +4064,7 @@ class PosApiTests(TestCase):
             password="x",
             warehouse=self.warehouse,
         )
-        no_supervisor.user_permissions.add(
-            Permission.objects.get(codename="view_possale")
-        )
+        no_supervisor.user_permissions.add(Permission.objects.get(codename="view_possale"))
         no_supervisor_client = APIClient()
         no_supervisor_client.force_authenticate(no_supervisor)
         denied = no_supervisor_client.post(

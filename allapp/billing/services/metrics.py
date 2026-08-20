@@ -20,6 +20,7 @@
     - admin.py: BillingPeriodAdmin.accrue_storage_view
     - management commands: billing_generate_metrics, billing_run_scheduler
 """
+
 import datetime
 from typing import Iterable, Optional
 
@@ -84,10 +85,7 @@ def generate_metrics_for_date(
 
     # 库存类指标（PALLET/CBM/AREA）共享同一份库存数据，避免重复查询
     inventory_rows = None
-    if any(
-        mt in {MetricType.PALLET, MetricType.CBM, MetricType.AREA_M2}
-        for mt in selected_types
-    ):
+    if any(mt in {MetricType.PALLET, MetricType.CBM, MetricType.AREA_M2} for mt in selected_types):
         inventory_rows = _inventory_metric_rows(owner_id, warehouse_id, service_date)
 
     results = []
@@ -303,10 +301,7 @@ def _claim_scheduled_metric_job(
         return job_run, "claimed"
 
     # 已成功 → 跳过（除非 force）
-    if (
-        job_run.status in {BillingJobRun.Status.SUCCESS, BillingJobRun.Status.WARNING}
-        and not force
-    ):
+    if job_run.status in {BillingJobRun.Status.SUCCESS, BillingJobRun.Status.WARNING} and not force:
         return job_run, "skipped_success"
 
     # 运行中且未超时 → 跳过（除非 force）
@@ -347,9 +342,7 @@ def _finish_scheduled_metric_job(
     job_run.finished_at = timezone.now()
     job_run.message = message[:200]
     job_run.summary = summary or {}
-    job_run.save(
-        update_fields=["status", "finished_at", "message", "summary", "updated_at"]
-    )
+    job_run.save(update_fields=["status", "finished_at", "message", "summary", "updated_at"])
 
 
 def _run_scheduled_metric_generation_for_scope(
@@ -403,8 +396,7 @@ def _run_scheduled_metric_generation_for_scope(
         # 历史日期 → 先确保有库存快照
         snapshot_summary = None
         if service_date < timezone.now().date() and any(
-            mt in {MetricType.PALLET, MetricType.CBM, MetricType.AREA_M2}
-            for mt in selected_types
+            mt in {MetricType.PALLET, MetricType.CBM, MetricType.AREA_M2} for mt in selected_types
         ):
             snapshot_summary = {
                 "days": [
@@ -479,9 +471,7 @@ def _run_scheduled_metric_generation_for_scope(
         "warehouse_id": warehouse_id,
         "service_date": service_date,
         "job_run_id": job_run.id,
-        "status": (
-            "warning" if final_status == BillingJobRun.Status.WARNING else "success"
-        ),
+        "status": ("warning" if final_status == BillingJobRun.Status.WARNING else "success"),
         "summary": payload,
         "message": _metric_job_run_message(metric_summary),
     }

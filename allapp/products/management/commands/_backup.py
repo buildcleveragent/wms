@@ -9,12 +9,10 @@ from typing import Any, Dict, Optional, Tuple
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import IntegrityError, transaction
-
 from openpyxl import load_workbook
 
 from allapp.baseinfo.models import Owner
 from allapp.products.models import Product, ProductUom
-
 
 # 常见中文单位 -> ProductUom
 # ProductUom.code 不能用中文，只能字母、数字、下划线、连字符、星号
@@ -65,7 +63,7 @@ def _pick_first(row: Dict[str, Any], keys: Tuple[str, ...]) -> Any:
 
 
 def _safe_uom_code_from_name(name: str) -> str:
-    h = hashlib.md5(name.encode("utf-8")).hexdigest()[:8].upper()
+    h = hashlib.md5(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:8].upper()
     return f"UOM_{h}"
 
 
@@ -195,9 +193,7 @@ class Command(BaseCommand):
         if real_name:
             return wb[real_name]
 
-        raise CommandError(
-            f"Excel 中找不到工作表：{sheet_name}，实际工作表：{wb.sheetnames}"
-        )
+        raise CommandError(f"Excel 中找不到工作表：{sheet_name}，实际工作表：{wb.sheetnames}")
 
     def get_owner(self, value: Any) -> Owner:
         key = _norm_str(value)
@@ -224,7 +220,9 @@ class Command(BaseCommand):
             owner = Owner.all_objects.filter(name__icontains=key).first()
 
         if owner is None:
-            raise ValueError(f"找不到 owner：{key}。请先在后台创建 Owner，或确认 owner 填的是 id/code/name。")
+            raise ValueError(
+                f"找不到 owner：{key}。请先在后台创建 Owner，或确认 owner 填的是 id/code/name。"
+            )
 
         if getattr(owner, "is_deleted", False):
             owner.restore()
@@ -341,9 +339,7 @@ class Command(BaseCommand):
                 missing.append(label)
 
         if missing:
-            raise CommandError(
-                f"缺少必要列：{missing}。当前识别到的表头：{list(headers.keys())}"
-            )
+            raise CommandError(f"缺少必要列：{missing}。当前识别到的表头：{list(headers.keys())}")
 
         created = 0
         updated = 0
@@ -471,7 +467,7 @@ class Command(BaseCommand):
                                 continue
 
                             # 重要：
-                            # 你当前 Product.clean() 禁止在已有记录上修改 code/sku/gtin/unit_barcode/carton_barcode/external_code。
+                            # Product.clean() 禁止修改已有记录的商品标识字段。
                             # 所以已有商品只允许更新非标识字段。
                             if existing.sku and existing.sku != sku_val:
                                 raise ValueError(

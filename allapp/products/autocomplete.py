@@ -8,7 +8,10 @@ from .category_backfill import scoped_products
 from .models import Product, ProductPackage, ProductUom
 
 
-class ProductUomAutocomplete(autocomplete.Select2QuerySetView):
+class ProductUomAutocomplete(PermissionRequiredMixin, autocomplete.Select2QuerySetView):
+    permission_required = "products.view_productuom"
+    raise_exception = True
+
     def get_queryset(self):
         qs = ProductUom.objects.filter(is_active=True).only("id", "code", "name")
         if self.forwarded.get("only_count") in ("1", 1, True):
@@ -45,9 +48,7 @@ class ProductBarcodeOwnerAutocomplete(
         owner_ids = self.scoped_product_queryset().values("owner_id")
         queryset = Owner.objects.filter(pk__in=owner_ids)
         if self.q:
-            queryset = queryset.filter(
-                Q(code__icontains=self.q) | Q(name__icontains=self.q)
-            )
+            queryset = queryset.filter(Q(code__icontains=self.q) | Q(name__icontains=self.q))
         return queryset.order_by("code")
 
     def get_result_label(self, result):
@@ -68,9 +69,7 @@ class ProductBarcodeProductAutocomplete(
         queryset = self.scoped_product_queryset().filter(owner_id=owner_id)
         if self.q:
             queryset = queryset.filter(
-                Q(code__icontains=self.q)
-                | Q(name__icontains=self.q)
-                | Q(sku__icontains=self.q)
+                Q(code__icontains=self.q) | Q(name__icontains=self.q) | Q(sku__icontains=self.q)
             )
         return queryset.order_by("code")
 

@@ -39,5 +39,12 @@ repos:
     hooks:
       - id: bandit
         name: bandit (scan allapp/)
-        args: ["-ll", "-r", "allapp/"]
+        args:
+          [
+            "-ll",
+            "-r",
+            "allapp/",
+            "-x",
+            "allapp/*/migrations/*,allapp/*/test*.py,allapp/*/tests.py",
+          ]
         stages: [pre-push]

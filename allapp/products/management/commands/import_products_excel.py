@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import re
 import hashlib
-from decimal import Decimal, ROUND_HALF_UP
+import re
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, Optional, Tuple
 
-from django.core.management.base import BaseCommand, CommandError
 from django.core.exceptions import ValidationError
+from django.core.management.base import BaseCommand, CommandError
 from django.db import IntegrityError, transaction
-
 from openpyxl import load_workbook
 
 from allapp.baseinfo.models import Owner
@@ -91,7 +90,7 @@ UOM_CODE_MAP = {
 
 
 def _safe_uom_code_from_name(name: str) -> str:
-    h = hashlib.md5(name.encode("utf-8")).hexdigest()[:6].upper()
+    h = hashlib.md5(name.encode("utf-8"), usedforsecurity=False).hexdigest()[:6].upper()
     return f"UOM_{h}"
 
 
@@ -118,9 +117,13 @@ class Command(BaseCommand):
     help = "从 Excel 批量导入商品到 Product 表（支持软删恢复、可选更新已存在记录）"
 
     def add_arguments(self, parser):
-        parser.add_argument("--file", required=True, help="Excel 文件路径，例如 goods2.xlsx 或 /mnt/data/xxx.xlsx")
+        parser.add_argument(
+            "--file", required=True, help="Excel 文件路径，例如 goods2.xlsx 或 /mnt/data/xxx.xlsx"
+        )
         parser.add_argument("--sheet", default="Sheet1", help="工作表名称，默认 Sheet1")
-        parser.add_argument("--default-price", default="0", help="当表里没有价格列时的默认价格，默认 0")
+        parser.add_argument(
+            "--default-price", default="0", help="当表里没有价格列时的默认价格，默认 0"
+        )
         parser.add_argument(
             "--update",
             action="store_true",
@@ -259,9 +262,7 @@ class Command(BaseCommand):
             if not key:
                 return None
             if key not in category_cache:
-                category = ProductCategory.objects.filter(
-                    code__iexact=key, is_active=True
-                ).first()
+                category = ProductCategory.objects.filter(code__iexact=key, is_active=True).first()
                 if category and category.has_active_path():
                     category_cache[key] = category
                 else:
@@ -287,17 +288,19 @@ class Command(BaseCommand):
                 price_val = _as_decimal(price_raw, default_price)
 
                 if not owner_val or not name_val or not uom_val or not code_val or not category_val:
-                    raise ValueError(
-                        "必填缺失：货主/商品名称/单位/code/分类编码必须有值"
-                    )
+                    raise ValueError("必填缺失：货主/商品名称/单位/code/分类编码必须有值")
 
                 owner = get_owner(owner_val)
                 if not owner:
-                    raise ValueError(f"找不到货主：{owner_val}（请先在后台创建 Owner，或确认 code/name）")
+                    raise ValueError(
+                        f"找不到货主：{owner_val}（请先在后台创建 Owner，或确认 code/name）"
+                    )
 
                 base_uom = get_uom(uom_val)
                 if not base_uom:
-                    raise ValueError(f"找不到单位：{uom_val}（dry-run 不创建单位；或请先建 ProductUom）")
+                    raise ValueError(
+                        f"找不到单位：{uom_val}（dry-run 不创建单位；或请先建 ProductUom）"
+                    )
                 category = get_category(category_val)
                 if not category:
                     raise ValueError(f"找不到分类链全部启用的分类：{category_val}")
@@ -316,9 +319,9 @@ class Command(BaseCommand):
                     expiry_control = expiry_control_in
                 else:
                     expiry_control = bool(
-                        (shelf_life_days_in and shelf_life_days_in > 0) or
-                        (inbound_valid_days_in and inbound_valid_days_in > 0) or
-                        (expiry_basis_in is not None)
+                        (shelf_life_days_in and shelf_life_days_in > 0)
+                        or (inbound_valid_days_in and inbound_valid_days_in > 0)
+                        or (expiry_basis_in is not None)
                     )
 
                 if not expiry_control:
@@ -364,11 +367,11 @@ class Command(BaseCommand):
 
                             # ✅ 如果 Excel 没提供效期信息，则不覆盖现有；如果提供了（或明确给了保质期管理），才更新
                             provided_expiry = (
-                                (_pick_first(row, EXPIRY_CONTROL_KEYS) is not None) or
-                                (_pick_first(row, EXPIRY_BASIS_KEYS) is not None) or
-                                (_pick_first(row, SHELF_LIFE_KEYS) is not None) or
-                                (_pick_first(row, INBOUND_VALID_KEYS) is not None) or
-                                (_pick_first(row, EXPIRY_WARNING_KEYS) is not None)
+                                (_pick_first(row, EXPIRY_CONTROL_KEYS) is not None)
+                                or (_pick_first(row, EXPIRY_BASIS_KEYS) is not None)
+                                or (_pick_first(row, SHELF_LIFE_KEYS) is not None)
+                                or (_pick_first(row, INBOUND_VALID_KEYS) is not None)
+                                or (_pick_first(row, EXPIRY_WARNING_KEYS) is not None)
                             )
                             if provided_expiry:
                                 existing.expiry_control = expiry_control
@@ -395,7 +398,6 @@ class Command(BaseCommand):
                             base_uom=base_uom,
                             category=category,
                             price=price_val,
-
                             # ✅ 关键：无保质期商品自动关闭
                             expiry_control=expiry_control,
                             expiry_basis=expiry_basis,
@@ -405,7 +407,7 @@ class Command(BaseCommand):
                             fefo_required=fefo_required,
                         )
 
-                        p.full_clean()   # ✅ dry-run 也校验
+                        p.full_clean()  # ✅ dry-run 也校验
                         if not dry_run:
                             p.save()
                         created += 1
@@ -425,4 +427,6 @@ class Command(BaseCommand):
         self.stdout.write(f"skipped : {skipped}")
         self.stdout.write(f"errors  : {errors}")
         if dry_run:
-            self.stdout.write(self.style.WARNING("这是 dry-run：未写入数据库（但已 full_clean 校验）。"))
+            self.stdout.write(
+                self.style.WARNING("这是 dry-run：未写入数据库（但已 full_clean 校验）。")
+            )

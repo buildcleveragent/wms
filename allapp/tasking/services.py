@@ -257,9 +257,7 @@ def _run_posting_handler(task_id: int, by_user=None, note: str = "过账"):
         "TASKING_POSTING_HANDLER",
         "allapp.tasking.plugins.handlers.DefaultPostingHandler",
     )
-    handler = (
-        import_string(handler_cfg)() if isinstance(handler_cfg, str) else handler_cfg()
-    )
+    handler = import_string(handler_cfg)() if isinstance(handler_cfg, str) else handler_cfg()
     created = handler.handle(
         task=task,
         scans=None,
@@ -294,9 +292,7 @@ def _run_posting_handler(task_id: int, by_user=None, note: str = "过账"):
             # Inventory posting has already committed.  Do not mislabel a
             # successful movement as failed because an order-resume follow-up
             # needs an operational retry.
-            logger.exception(
-                "tasking.replenishment.order_resume_failed %s", ctx_text, extra=ctx
-            )
+            logger.exception("tasking.replenishment.order_resume_failed %s", ctx_text, extra=ctx)
     return {"ok": True, "tx_created": created}
 
 
@@ -329,7 +325,7 @@ def _compute_fp(
             str(client_seq or ""),
         ]
     )
-    return hashlib.sha1(s.encode("utf-8")).hexdigest()
+    return hashlib.sha1(s.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def _allow_overdone(task_type: str) -> bool:
@@ -404,16 +400,12 @@ def scan_task(
 
     # —— 新增：把解析结果归一为 dict（兼容 SimpleNamespace / 对象 / pydantic）
     if not isinstance(r, dict):
-        if hasattr(r, "dict") and callable(
-            getattr(r, "dict", None)
-        ):  # pydantic/BaseModel 等
+        if hasattr(r, "dict") and callable(getattr(r, "dict", None)):  # pydantic/BaseModel 等
             r = r.dict()
         elif hasattr(r, "__dict__"):  # SimpleNamespace/普通对象
             r = vars(r)
         else:
-            raise ValidationError(
-                f"条码解析器返回不受支持的类型：{type(r).__name__}，期望 dict。"
-            )
+            raise ValidationError(f"条码解析器返回不受支持的类型：{type(r).__name__}，期望 dict。")
 
     product_id = r.get("product_id")
     if not product_id:
@@ -431,9 +423,7 @@ def scan_task(
     lot_no = r.get("lot_no")
     mfg_date = r.get("mfg_date")
     exp_date = r.get("exp_date")
-    serial_no = r.get("serial_no") or (
-        raw_label_key if code_type in {"SN", "SERIAL"} else None
-    )
+    serial_no = r.get("serial_no") or (raw_label_key if code_type in {"SN", "SERIAL"} else None)
 
     # —— 规则：只对“一箱一码 / 一件一码”的码使用 label_key —— #
     #   普通商品码（SKU/GTIN/ITEM/RAW）不占用 label_key，这样同一任务内可以多次扫码
@@ -485,9 +475,7 @@ def scan_task(
                 user_id,
                 client_seq,
             )
-            for from_location_id in retry_lines.values_list(
-                "from_location_id", flat=True
-            )
+            for from_location_id in retry_lines.values_list("from_location_id", flat=True)
         ]
         prior_scan = (
             TaskScanLog.objects.filter(
@@ -499,9 +487,7 @@ def scan_task(
             .first()
         )
         if prior_scan and prior_scan.task_line_id:
-            prior_line = WmsTaskLine.objects.select_for_update().get(
-                pk=prior_scan.task_line_id
-            )
+            prior_line = WmsTaskLine.objects.select_for_update().get(pk=prior_scan.task_line_id)
             return {
                 "idempotent": True,
                 "line_id": prior_line.id,
@@ -572,9 +558,7 @@ def scan_task(
         raise ValidationError("无法确定本次扫描的 location_id")
 
     # fp = _compute_fp(task.id, barcode, inc_qty, loc_for_fp, user_id, client_seq)
-    fp = _compute_fp(
-        task.id, barcode, inc_qty, effective_location_id, user_id, client_seq
-    )
+    fp = _compute_fp(task.id, barcode, inc_qty, effective_location_id, user_id, client_seq)
 
     # # FP 幂等
     # if TaskScanLog.objects.filter(task_id=task.id, fp=fp).exists():
@@ -641,12 +625,7 @@ def scan_task(
             }
 
         # label_key 冲突：同任务内重复的箱标/序列键
-        if (
-            label_key
-            and TaskScanLog.objects.filter(
-                task_id=task.id, label_key=label_key
-            ).exists()
-        ):
+        if label_key and TaskScanLog.objects.filter(task_id=task.id, label_key=label_key).exists():
             raise ValidationError("同一任务内 label_key 已存在。")
         raise
 
@@ -662,9 +641,7 @@ def scan_task(
     if not _allow_overdone(task.task_type):
         plan = getattr(line, "qty_plan", Decimal("0"))
         if line.qty_done > plan:
-            raise ValidationError(
-                f"{task.task_type} 不允许超量：{line.qty_done} > 计划 {plan}"
-            )
+            raise ValidationError(f"{task.task_type} 不允许超量：{line.qty_done} > 计划 {plan}")
 
     # RECEIVE/PICK/移库类扫码是追加式事实，不得调用覆盖式收货快照。
     if task.task_type != WmsTask.TaskType.COUNT:
@@ -680,14 +657,12 @@ def scan_task(
     TaskScanLog.objects.filter(
         task_line_id=line.id,
         posting_journal__isnull=True,
-    ).exclude(pk=scan.pk).update(status="IGNORED", remark="SNAPSHOT_REPLACED")
-    WmsTaskLine.objects.filter(pk=line.pk).update(
-        scan_snapshot_rev=F("scan_snapshot_rev") + 1
-    )
+    ).exclude(
+        pk=scan.pk
+    ).update(status="IGNORED", remark="SNAPSHOT_REPLACED")
+    WmsTaskLine.objects.filter(pk=line.pk).update(scan_snapshot_rev=F("scan_snapshot_rev") + 1)
     line.refresh_from_db(fields=["scan_snapshot_rev"])
-    TaskScanLog.objects.filter(pk=scan.pk).update(
-        scan_snapshot_rev=line.scan_snapshot_rev
-    )
+    TaskScanLog.objects.filter(pk=scan.pk).update(scan_snapshot_rev=line.scan_snapshot_rev)
     scan.scan_snapshot_rev = line.scan_snapshot_rev
 
     return {
@@ -715,9 +690,7 @@ def post_scan(*, request, task):
     )
 
 
-def claim_task(
-    task, *, by_user, allowed_wh_ids: set[int], to_status: str | None = None
-):
+def claim_task(task, *, by_user, allowed_wh_ids: set[int], to_status: str | None = None):
     """
     抢单：为 task 创建/激活一条未完成的 TaskAssignment（同一个任务同一时刻仅允许一个“未完成”指派）。
     - 仅允许在用户所属仓库范围内
@@ -769,9 +742,7 @@ def claim_task(
     return ta
 
 
-def unclaim_task(
-    task, *, by_user, allowed_wh_ids: set[int], back_to_status: str | None = None
-):
+def unclaim_task(task, *, by_user, allowed_wh_ids: set[int], back_to_status: str | None = None):
     """
     放回池子：把当前用户的“未完成”指派标记为完成（finished_at），可将任务状态回滚到 RELEASED。
     """
@@ -813,15 +784,9 @@ def _assert_can_release(t: WmsTask) -> None:
         raise ValidationError(f"当前状态为 {t.status}，仅 DRAFT/READY 可发布。")
     if not t.lines.exists():
         raise ValidationError("任务无明细，不能发布。")
-    if (
-        t.task_type != WmsTask.TaskType.COUNT
-        and not t.lines.filter(qty_plan__gt=0).exists()
-    ):
+    if t.task_type != WmsTask.TaskType.COUNT and not t.lines.filter(qty_plan__gt=0).exists():
         raise ValidationError("所有任务行计划数量为 0，不能发布。")
-    if (
-        t.task_type == WmsTask.TaskType.PICK
-        and (t.source_model or "").lower() == "outboundorder"
-    ):
+    if t.task_type == WmsTask.TaskType.PICK and (t.source_model or "").lower() == "outboundorder":
         from allapp.outbound.models import OutboundOrder
         from allapp.outbound.services import (
             allocation_shortfalls,
@@ -1030,9 +995,7 @@ def task_cancel(*, request, task, reason=None):
         part for part in ((locked.remark or "").strip(), (reason or "").strip()) if part
     )[:200]
     locked.updated_by = actor
-    locked.save(
-        update_fields=["status", "finished_at", "remark", "updated_by", "updated_at"]
-    )
+    locked.save(update_fields=["status", "finished_at", "remark", "updated_by", "updated_at"])
     TaskStatusLog.objects.create(
         task=locked,
         old_status=old_status,
@@ -1055,9 +1018,7 @@ def _finish_other_head_assignments(task: WmsTask, keep_assignee) -> int:
 
 def _finish_active_line_assignment(line: WmsTaskLine, exclude_assignee=None) -> int:
     """结束该行的活动指派；可保留 exclude_assignee"""
-    qs = TaskAssignment.objects.select_for_update().filter(
-        line=line, finished_at__isnull=True
-    )
+    qs = TaskAssignment.objects.select_for_update().filter(line=line, finished_at__isnull=True)
     if exclude_assignee is not None:
         qs = qs.exclude(assignee=exclude_assignee)
     return qs.update(finished_at=timezone.now())
@@ -1066,9 +1027,7 @@ def _finish_active_line_assignment(line: WmsTaskLine, exclude_assignee=None) -> 
 def _activate_head_assignment(task: WmsTask, assignee) -> TaskAssignment:
     """创建/激活 1 条头级活动指派（唯一）"""
     now = timezone.now()
-    ta, _ = TaskAssignment.objects.get_or_create(
-        task=task, line=None, assignee=assignee
-    )
+    ta, _ = TaskAssignment.objects.get_or_create(task=task, line=None, assignee=assignee)
     fields = []
     if ta.accepted_at is None:
         ta.accepted_at = now
@@ -1084,9 +1043,7 @@ def _activate_head_assignment(task: WmsTask, assignee) -> TaskAssignment:
 def _activate_line_assignment(line: WmsTaskLine, assignee) -> TaskAssignment:
     """创建/激活 1 条行级活动指派（每行唯一）"""
     now = timezone.now()
-    ta, _ = TaskAssignment.objects.get_or_create(
-        task=line.task, line=line, assignee=assignee
-    )
+    ta, _ = TaskAssignment.objects.get_or_create(task=line.task, line=line, assignee=assignee)
     fields = []
     if ta.accepted_at is None:
         ta.accepted_at = now
@@ -1123,9 +1080,7 @@ def publish_task(
     返回字典包含统计信息，便于 Admin 提示。
     """
     pool_status = pool_status or getattr(WmsTask.Status, "RELEASED", "RELEASED")
-    assigned_status = assigned_status or getattr(
-        WmsTask.Status, "ASSIGNED", pool_status
-    )
+    assigned_status = assigned_status or getattr(WmsTask.Status, "ASSIGNED", pool_status)
 
     now = timezone.now()
     stats = {
@@ -1167,8 +1122,7 @@ def publish_task(
             if hasattr(t, "released_at") and not t.released_at:
                 t.released_at = now
             t.save(
-                update_fields=["status"]
-                + (["released_at"] if hasattr(t, "released_at") else [])
+                update_fields=["status"] + (["released_at"] if hasattr(t, "released_at") else [])
             )
 
             # 统计：进入抢单池的行（= 全部未被指派行）
@@ -1179,9 +1133,7 @@ def publish_task(
         # —— 以下是“存在某种指派”的分支 —— #
         # 处理头级指派
         if head_assignee is not None:
-            stats["ended_head"] += _finish_other_head_assignments(
-                t, keep_assignee=head_assignee
-            )
+            stats["ended_head"] += _finish_other_head_assignments(t, keep_assignee=head_assignee)
             _activate_head_assignment(t, head_assignee)
             stats["created_head"] = 1
 
@@ -1208,9 +1160,7 @@ def publish_task(
             # 有人传入了非本任务的行ID
             not_found = set(line_ids) - found
             if not_found:
-                raise ValidationError(
-                    f"发现非本任务的行ID：{sorted(not_found)[:5]} ..."
-                )
+                raise ValidationError(f"发现非本任务的行ID：{sorted(not_found)[:5]} ...")
 
         # seed：把未被任何人行级指派的行，复制给头级负责人
         if head_assignee is not None and seed_lines:
@@ -1234,17 +1184,12 @@ def publish_task(
                 stats["seeded_lines"] += 1
 
         # 任务状态：存在任意（头/行）活动指派 → 视为 ASSIGNED；否则 → RELEASED
-        has_any_active = TaskAssignment.objects.filter(
-            task=t, finished_at__isnull=True
-        ).exists()
+        has_any_active = TaskAssignment.objects.filter(task=t, finished_at__isnull=True).exists()
         t._allow_status_write = True
         t.status = assigned_status if has_any_active else pool_status
         if hasattr(t, "released_at") and not t.released_at:
             t.released_at = now
-        t.save(
-            update_fields=["status"]
-            + (["released_at"] if hasattr(t, "released_at") else [])
-        )
+        t.save(update_fields=["status"] + (["released_at"] if hasattr(t, "released_at") else []))
 
         # 统计“进入抢单池”的行数（仅当最终无头级，且存在未被行级指派行）
         if t.status == pool_status:
@@ -1281,9 +1226,7 @@ def publish_using_inline(
         # 头级（line is NULL）
         head = [a for a in active if a.line_id is None]
         if len(head) > 1:
-            raise ValidationError(
-                "存在多条'头级活动指派'，请在发布前保留一条或清理冲突。"
-            )
+            raise ValidationError("存在多条'头级活动指派'，请在发布前保留一条或清理冲突。")
         head_assignee = head[0].assignee if head else None
 
         # 行级（line 不为空）
@@ -1316,9 +1259,7 @@ def _is_line_mine(user, line: WmsTaskLine) -> bool:
     has_head_me = TaskAssignment.objects.filter(
         task=line.task, line__isnull=True, finished_at__isnull=True, assignee=user
     ).exists()
-    any_line = TaskAssignment.objects.filter(
-        line=line, finished_at__isnull=True
-    ).exists()
+    any_line = TaskAssignment.objects.filter(line=line, finished_at__isnull=True).exists()
     return bool(has_head_me and not any_line)
 
 
@@ -1355,16 +1296,12 @@ def finalize_receive_line(line_id: int, *, by_user=None, trigger: str = "MANUAL"
 
     # 4) 读取扩展并核对数量
     try:
-        extra = (
-            line.receivelineextra
-        )  # 如果你的 related_name 是 receive_extra，请对应改名
+        extra = line.receivelineextra  # 如果你的 related_name 是 receive_extra，请对应改名
     except ReceiveLineExtra.DoesNotExist:
         raise ValidationError("缺少收货扩展，无法完成。")
 
     total = (
-        Decimal(extra.qty_ok or 0)
-        + Decimal(extra.qty_damage or 0)
-        + Decimal(extra.qty_reject or 0)
+        Decimal(extra.qty_ok or 0) + Decimal(extra.qty_damage or 0) + Decimal(extra.qty_reject or 0)
     )
     if total < 0:
         raise ValidationError("数量合计不能为负。")
@@ -1384,9 +1321,7 @@ def finalize_receive_line(line_id: int, *, by_user=None, trigger: str = "MANUAL"
     line.save(update_fields=["qty_done", *updates.keys()])
 
     # 6) 关闭该行活动指派
-    TaskAssignment.objects.filter(line=line, finished_at__isnull=True).update(
-        finished_at=now
-    )
+    TaskAssignment.objects.filter(line=line, finished_at__isnull=True).update(finished_at=now)
 
     # # 7) 过账（库存/流水）——可幂等（用幂等指纹防重复）
     # post_receive_for_line(line=line, extra=extra, by_user=by_user, reason=trigger)
@@ -1398,9 +1333,7 @@ def finalize_receive_line(line_id: int, *, by_user=None, trigger: str = "MANUAL"
         task.save(update_fields=["status"])
 
     # 所有行都完成？
-    all_done = not WmsTaskLine.objects.filter(
-        task=task, finished_at__isnull=True
-    ).exists()
+    all_done = not WmsTaskLine.objects.filter(task=task, finished_at__isnull=True).exists()
     if all_done:
         task._allow_status_write = True
         task.status = getattr(WmsTask.Status, "COMPLETED", "COMPLETED")
@@ -1428,7 +1361,6 @@ def _mk_fp(line, extra) -> str:
     return "|".join(map(str, parts))
 
 
-@transaction.atomic
 # def post_receive_for_line(*, line: WmsTaskLine, extra, by_user=None, reason="AUTO"):
 #     """
 #     生成收货过账：InvPosting + InvPostingLine（GOOD/DMG/REJ）
@@ -1536,7 +1468,6 @@ def reject_task(task_id, *, by_user, note=""):
     return t
 
 
-@transaction.atomic
 # def post_task(task_id, *, by_user, note=""):
 #     if not _as_wh_mgr(by_user):
 #         raise PermissionDenied("无过账权限。")
@@ -1605,7 +1536,11 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
 
         # 3) 软删除当前未过账事实（READY & 未关联过账）
         # (TaskScanLog.objects
-        #     .filter(task_line_id=tl.id, status__in=["READY", "RESERVED"], posting_journal__isnull=True)
+        #     .filter(
+        #         task_line_id=tl.id,
+        #         status__in=["READY", "RESERVED"],
+        #         posting_journal__isnull=True,
+        #     )
         #     .update(status="IGNORED", remark="SNAPSHOT_REPLACED"))
 
         (
@@ -1627,11 +1562,7 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
         # /test
 
         # 4) 原子自增版本号，并取新值
-        (
-            WmsTaskLine.objects.filter(pk=tl.pk).update(
-                scan_snapshot_rev=F("scan_snapshot_rev") + 1
-            )
-        )
+        (WmsTaskLine.objects.filter(pk=tl.pk).update(scan_snapshot_rev=F("scan_snapshot_rev") + 1))
         tl.refresh_from_db(fields=["scan_snapshot_rev"])
         new_rev = tl.scan_snapshot_rev
 
@@ -1662,7 +1593,8 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
             serial = it.get("serial_no") or ""
 
             logger.info(
-                "tasking.snapshot.item %s line_id=%s product_id=%s location_id=%s qty=%s lot_no=%s mfg_date=%s exp_date=%s",
+                "tasking.snapshot.item %s line_id=%s product_id=%s location_id=%s "
+                "qty=%s lot_no=%s mfg_date=%s exp_date=%s",
                 ctx_text,
                 tl.id,
                 product_id,
@@ -1811,9 +1743,7 @@ def _finish_line(line: WmsTaskLine, *, qty_total: Decimal, by_user=None) -> None
     for f, v in updates.items():
         setattr(line, f, v)
     # 关闭该行的活动指派
-    TaskAssignment.objects.filter(line=line, finished_at__isnull=True).update(
-        finished_at=now
-    )
+    TaskAssignment.objects.filter(line=line, finished_at__isnull=True).update(finished_at=now)
 
 
 # ---- 通用：推进任务头（首条完工→IN_PROGRESS；全部完工→COMPLETED, review=PENDING）----
@@ -1824,9 +1754,7 @@ def _advance_task(task: WmsTask) -> None:
         task.status = getattr(WmsTask.Status, "IN_PROGRESS", "IN_PROGRESS")
         task.save(update_fields=["status"])
     # 若全部行 finished_at 有值 → 完成任务并进入待审核
-    all_done = not WmsTaskLine.objects.filter(
-        task=task, finished_at__isnull=True
-    ).exists()
+    all_done = not WmsTaskLine.objects.filter(task=task, finished_at__isnull=True).exists()
     if all_done:
         task._allow_status_write = True
         task.status = getattr(WmsTask.Status, "COMPLETED", "COMPLETED")
@@ -1865,10 +1793,8 @@ def make_fetch(
 
     def _fetch(line):
         try:
-            # OneToOne 默认 related_name=模型小写，例如 receivelineextra / putawaylineextra / picklineextra...
-            rel_name = (
-                extra_model.__name__.replace("LineExtra", "").lower() + "lineextra"
-            )
+            # OneToOne 默认 related_name 为模型小写，如 receivelineextra。
+            rel_name = extra_model.__name__.replace("LineExtra", "").lower() + "lineextra"
             extra = getattr(line, rel_name)
         except Exception:
             try:
@@ -1888,9 +1814,7 @@ def make_fetch(
         if require_from and line.from_location.warehouse_id != task_wh:
             raise ValidationError("来源库位不在任务仓库。")
 
-        to_id = getattr(line, "to_location_id", None) or getattr(
-            extra, "to_location_id", None
-        )
+        to_id = getattr(line, "to_location_id", None) or getattr(extra, "to_location_id", None)
         if require_to and not to_id:
             raise ValidationError("缺少目标库位。")
         if ensure_same_warehouse and require_to and to_id:
@@ -1911,9 +1835,7 @@ def make_fetch(
 # 这里我们为每种任务类型定制自己的数量计算和校验逻辑
 FINALIZE_STRATEGIES = {
     "RECEIVE": {
-        "fetch": make_fetch(
-            extra_model=ReceiveLineExtra, qty_attr="qty_ok", must_positive=False
-        ),
+        "fetch": make_fetch(extra_model=ReceiveLineExtra, qty_attr="qty_ok", must_positive=False),
         "after": lambda line, extra: None,  # 收货无额外处理
         "post": lambda line, extra, *, by_user=None, reason="AUTO": None,  # 收货不做即时过账
     },
@@ -2038,9 +1960,7 @@ def generate_count_lines(
     scope = (
         "SKU"
         if product
-        else (
-            "LOC" if location or location_prefix else ("ZONE" if zone_type else "ALL")
-        )
+        else ("LOC" if location or location_prefix else ("ZONE" if zone_type else "ALL"))
     )
     params = CountScopeParams(
         warehouse_id=task.warehouse_id,
@@ -2087,9 +2007,7 @@ def finalize_count_task_after_logs(task: WmsTask, *, by_user=None) -> str:
         return "NOOP_LOCKED"
     if (
         not task.lines.exists()
-        or CountLineExtra.objects.filter(line__task=task)
-        .exclude(count_status="COUNTED")
-        .exists()
+        or CountLineExtra.objects.filter(line__task=task).exclude(count_status="COUNTED").exists()
     ):
         return "NOOP_PENDING_LINES"
     from allapp.tasking.counting import submit_count_task
@@ -2128,11 +2046,7 @@ def get_line_extra_generic(tl: WmsTaskLine):
     if model_name:
         try:
             Model = apps.get_model("allapp.tasking", model_name)
-            obj = (
-                Model.objects.select_related("line", "line__task")
-                .filter(line_id=tl.id)
-                .first()
-            )
+            obj = Model.objects.select_related("line", "line__task").filter(line_id=tl.id).first()
             if obj:
                 return obj
         except LookupError:
@@ -2174,12 +2088,8 @@ def build_scanlog_items(tl: WmsTaskLine, extra) -> list | None:
         getattr(tl, "to_location", None),
         getattr(tl, "from_location", None),
     )
-    lot_no = _first_not_none(
-        getattr(extra, "lot_no", None), getattr(extra, "batch_no", None)
-    )
-    expiry = _first_not_none(
-        getattr(extra, "exp_date", None), getattr(extra, "expiry_date", None)
-    )
+    lot_no = _first_not_none(getattr(extra, "lot_no", None), getattr(extra, "batch_no", None))
+    expiry = _first_not_none(getattr(extra, "exp_date", None), getattr(extra, "expiry_date", None))
     serial = getattr(extra, "serial_no", None)
 
     # 兼容不同扩展的“实绩量”字段名（注意用 is not None，避免 0 被当作 False 跳过）

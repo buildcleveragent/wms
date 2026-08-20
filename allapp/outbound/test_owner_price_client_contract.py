@@ -24,27 +24,19 @@ class OwnerPriceClientContractTests(SimpleTestCase):
     def test_cart_preserves_original_price_and_nullable_discount(self):
         source = (CLIENT_ROOT / "store" / "cart.js").read_text(encoding="utf-8")
 
-        self.assertIn(
-            "orig_price: Number(product.orig_price ?? product.price ?? 0)", source
-        )
+        self.assertIn("orig_price: Number(product.orig_price ?? product.price ?? 0)", source)
         self.assertIn("minimum_sale_price: product.minimum_sale_price == null", source)
         self.assertIn("max_discount: product.max_discount == null ? null", source)
         self.assertIn("product_min_price: product.product_min_price == null", source)
 
     def test_search_initializes_guard_before_price_can_be_edited(self):
-        source = (CLIENT_ROOT / "pages" / "products" / "search.vue").read_text(
-            encoding="utf-8"
-        )
+        source = (CLIENT_ROOT / "pages" / "products" / "search.vue").read_text(encoding="utf-8")
 
         self.assertIn("normalized.results.forEach(initializePriceGuard)", source)
-        self.assertIn(
-            "orig_price: Number(product.orig_price ?? product.price ?? 0)", source
-        )
+        self.assertIn("orig_price: Number(product.orig_price ?? product.price ?? 0)", source)
 
     def test_cart_rechecks_every_item_before_submit(self):
-        source = (CLIENT_ROOT / "pages" / "orders" / "cart.vue").read_text(
-            encoding="utf-8"
-        )
+        source = (CLIENT_ROOT / "pages" / "orders" / "cart.vue").read_text(encoding="utf-8")
 
         self.assertIn("cart.items.some(item => !isPriceAllowed(item))", source)
 

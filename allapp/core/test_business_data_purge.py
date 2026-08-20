@@ -9,6 +9,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
 from django.test import SimpleTestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework_simplejwt.token_blacklist.models import (
@@ -104,9 +105,7 @@ class BusinessDataPurgeManifestTests(SimpleTestCase):
             def get_models(self, include_auto_created=False):
                 from django.apps import apps
 
-                models = list(
-                    apps.get_models(include_auto_created=include_auto_created)
-                )
+                models = list(apps.get_models(include_auto_created=include_auto_created))
                 models.append(
                     SimpleNamespace(
                         _meta=SimpleNamespace(
@@ -125,9 +124,7 @@ class BusinessDataPurgeManifestTests(SimpleTestCase):
     def test_new_purge_moves_product_master_to_purge_scope(self):
         manifest = resolve_new_purge_manifest()
 
-        self.assertFalse(
-            NEW_PURGE_PRESERVED_MODEL_LABELS & NEW_PURGE_PURGED_MODEL_LABELS
-        )
+        self.assertFalse(NEW_PURGE_PRESERVED_MODEL_LABELS & NEW_PURGE_PURGED_MODEL_LABELS)
         self.assertTrue(PRODUCT_MASTER_MODEL_LABELS <= NEW_PURGE_PURGED_MODEL_LABELS)
         self.assertIn("products_product", manifest.purged_tables)
         self.assertIn("products_productpackage", manifest.purged_tables)
@@ -171,9 +168,7 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
             code="PSW1-01-01-01",
             name="Purge Location",
         )
-        self.category = ProductCategory.objects.create(
-            code="PURGE-CAT", name="Category"
-        )
+        self.category = ProductCategory.objects.create(code="PURGE-CAT", name="Category")
         self.location.product_categories.add(self.category)
         self.uom = ProductUom.objects.create(code="PURGE-EA", name="Each")
         self.product = Product.objects.create(
@@ -339,19 +334,28 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
 
     def test_new_dry_run_reports_sku_reset_without_changing_owner(self):
         output = StringIO()
+        sequence_before = Owner.all_objects.get(pk=self.owner.pk).next_sku_sequence
 
-        call_command("purge_business_data_new", "--dry-run", stdout=output)
+        with CaptureQueriesContext(connection) as captured:
+            call_command("purge_business_data_new", "--dry-run", stdout=output)
 
         self.assertEqual(
             Owner.all_objects.get(pk=self.owner.pk).next_sku_sequence,
-            50,
+            sequence_before,
         )
+        write_statements = [
+            query["sql"]
+            for query in captured.captured_queries
+            if query["sql"]
+            .lstrip()
+            .upper()
+            .startswith(("INSERT ", "UPDATE ", "DELETE ", "REPLACE "))
+        ]
+        self.assertEqual(write_statements, [])
         self.assertIn("RESET  baseinfo_owner.next_sku_sequence = 1", output.getvalue())
 
     def test_execute_purges_business_rows_and_preserves_configuration(self):
-        owner_sequence_before = Owner.all_objects.get(
-            pk=self.owner.pk
-        ).next_sku_sequence
+        owner_sequence_before = Owner.all_objects.get(pk=self.owner.pk).next_sku_sequence
 
         self.execute_command()
 
@@ -371,19 +375,13 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
         self.assertTrue(get_user_model().objects.filter(pk=self.operator.pk).exists())
         self.assertTrue(Owner.all_objects.filter(pk=self.owner.pk).exists())
         self.assertTrue(
-            OwnerWarehouseBinding.all_objects.filter(
-                pk=self.owner_warehouse_binding.pk
-            ).exists()
+            OwnerWarehouseBinding.all_objects.filter(pk=self.owner_warehouse_binding.pk).exists()
         )
         self.assertTrue(Customer.all_objects.filter(pk=self.customer.pk).exists())
-        self.assertTrue(
-            ProductCategory.all_objects.filter(pk=self.category.pk).exists()
-        )
+        self.assertTrue(ProductCategory.all_objects.filter(pk=self.category.pk).exists())
         self.assertTrue(ProductUom.all_objects.filter(pk=self.uom.pk).exists())
         self.assertTrue(BillingRule.objects.filter(pk=self.rule.pk).exists())
-        self.assertTrue(
-            BillingServiceContract.objects.filter(pk=self.service_contract.pk).exists()
-        )
+        self.assertTrue(BillingServiceContract.objects.filter(pk=self.service_contract.pk).exists())
         self.assertTrue(PosCustomer.objects.filter(pk=self.pos_customer.pk).exists())
         self.assertTrue(PriceGroup.all_objects.filter(pk=self.price_group.pk).exists())
         self.assertTrue(Strategy.objects.filter(pk=self.strategy.pk).exists())
@@ -396,9 +394,7 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
             owner_sequence_before,
         )
         self.assertTrue(AuditEvent.objects.filter(pk=self.previous_audit.pk).exists())
-        self.assertTrue(
-            OperatingTarget.objects.filter(pk=self.operating_target.pk).exists()
-        )
+        self.assertTrue(OperatingTarget.objects.filter(pk=self.operating_target.pk).exists())
         success = AuditEvent.objects.get(
             action="BUSINESS_DATA_PURGE",
             succeeded=True,
@@ -408,9 +404,7 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
             "backup-test-20260722",
         )
         self.assertNotIn("products_product", success.after["deleted_rows"])
-        self.assertGreater(
-            success.after["deleted_rows"]["inventory_inventorydetail"], 0
-        )
+        self.assertGreater(success.after["deleted_rows"]["inventory_inventorydetail"], 0)
 
     def test_new_command_also_purges_product_master(self):
         self.execute_new_command()
@@ -421,9 +415,7 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
             1,
         )
         self.assertTrue(get_user_model().objects.filter(pk=self.operator.pk).exists())
-        self.assertTrue(
-            ProductCategory.all_objects.filter(pk=self.category.pk).exists()
-        )
+        self.assertTrue(ProductCategory.all_objects.filter(pk=self.category.pk).exists())
         self.assertTrue(ProductUom.all_objects.filter(pk=self.uom.pk).exists())
         success = AuditEvent.objects.get(
             action="BUSINESS_DATA_PURGE_NEW",
@@ -459,9 +451,7 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
             self.assertTrue(Product.objects.filter(pk=self.product.pk).exists())
         finally:
             with connection.cursor() as cursor:
-                cursor.execute(
-                    f"DROP TABLE IF EXISTS {connection.ops.quote_name(table)}"
-                )
+                cursor.execute(f"DROP TABLE IF EXISTS {connection.ops.quote_name(table)}")
 
     def test_sql_failure_rolls_back_and_restores_foreign_key_setting(self):
         from allapp.core import business_data_purge

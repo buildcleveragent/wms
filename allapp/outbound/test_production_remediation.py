@@ -92,9 +92,7 @@ class OutboundProductionRemediationTests(TestCase):
             owner=self.owner,
             warehouse=self.warehouse,
         )
-        submit_permission = permission(
-            "outbound", "submit_outbound_as_owner_buyers"
-        )
+        submit_permission = permission("outbound", "submit_outbound_as_owner_buyers")
         self.salesperson.user_permissions.add(submit_permission)
         self.other_salesperson.user_permissions.add(submit_permission)
         UserRoleScope.objects.create(
@@ -259,9 +257,7 @@ class OutboundProductionRemediationTests(TestCase):
             password="x",
             owner=self.owner,
         )
-        manager.user_permissions.add(
-            permission("outbound", "approve_outbound_as_owner_manager")
-        )
+        manager.user_permissions.add(permission("outbound", "approve_outbound_as_owner_manager"))
         UserRoleScope.objects.create(
             user=manager,
             role=UserRoleScope.Role.OWNER_MANAGER,
@@ -287,9 +283,7 @@ class OutboundProductionRemediationTests(TestCase):
             password="x",
             owner=self.owner,
         )
-        manager.user_permissions.add(
-            permission("outbound", "approve_outbound_as_owner_manager")
-        )
+        manager.user_permissions.add(permission("outbound", "approve_outbound_as_owner_manager"))
         UserRoleScope.objects.create(
             user=manager,
             role=UserRoleScope.Role.OWNER_MANAGER,
@@ -329,9 +323,7 @@ class OutboundProductionRemediationTests(TestCase):
             password="x",
             warehouse=self.warehouse,
         )
-        operator.user_permissions.add(
-            permission("tasking", "claim_task_as_wh_operator")
-        )
+        operator.user_permissions.add(permission("tasking", "claim_task_as_wh_operator"))
         UserRoleScope.objects.create(
             user=operator,
             role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
@@ -344,9 +336,7 @@ class OutboundProductionRemediationTests(TestCase):
         owner_response = owner_view(owner_request)
 
         product_view = ProductViewSet.as_view({"get": "list"})
-        product_request = factory.get(
-            "/api/outbound/products/", {"owner": other_owner.id}
-        )
+        product_request = factory.get("/api/outbound/products/", {"owner": other_owner.id})
         force_authenticate(product_request, user=operator)
         product_response = product_view(product_request)
 
@@ -408,9 +398,7 @@ class OutboundProductionRemediationTests(TestCase):
             password="x",
             warehouse=self.warehouse,
         )
-        operator.user_permissions.add(
-            permission("tasking", "claim_task_as_wh_operator")
-        )
+        operator.user_permissions.add(permission("tasking", "claim_task_as_wh_operator"))
         UserRoleScope.objects.create(
             user=operator,
             role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
@@ -500,9 +488,7 @@ class OutboundProductionRemediationTests(TestCase):
         self.assertEqual(inventory.available_qty, Decimal("10.0000"))
         self.assertEqual(task.status, WmsTask.Status.CANCELLED)
         self.assertTrue(task.lines.exists())
-        self.assertFalse(
-            task.lines.exclude(status=WmsTaskLine.Status.CANCELLED).exists()
-        )
+        self.assertFalse(task.lines.exclude(status=WmsTaskLine.Status.CANCELLED).exists())
 
     def test_started_pick_blocks_cancel_and_preserves_allocation(self):
         order, _ = self._order()
@@ -672,12 +658,8 @@ class OutboundAdminHardeningTests(TestCase):
 
     def setUp(self):
         self.owner = Owner.objects.create(name="Admin Owner", code="OA-OWN")
-        self.other_owner = Owner.objects.create(
-            name="Other Admin Owner", code="OA-OWN-2"
-        )
-        self.warehouse = Warehouse.objects.create(
-            code="OA-WH", name="Admin Warehouse"
-        )
+        self.other_owner = Owner.objects.create(name="Other Admin Owner", code="OA-OWN-2")
+        self.warehouse = Warehouse.objects.create(code="OA-WH", name="Admin Warehouse")
         self.other_warehouse = Warehouse.objects.create(
             code="OA-WH-2", name="Other Admin Warehouse"
         )
@@ -894,9 +876,7 @@ class OutboundAdminHardeningTests(TestCase):
         )
         force_authenticate(request, user=self.warehouse_manager)
 
-        response = OutboundOrderViewSet.as_view(
-            {"post": "warehouse_confirm"}
-        )(request, pk=order.pk)
+        response = OutboundOrderViewSet.as_view({"post": "warehouse_confirm"})(request, pk=order.pk)
 
         self.assertEqual(response.status_code, 200, response.data)
         order.refresh_from_db()
@@ -926,9 +906,7 @@ class OutboundAdminHardeningTests(TestCase):
         for order in (draft, closed, other):
             order.refresh_from_db()
             self.assertEqual(order.approval_status, "OWNER_PENDING")
-            self.assertFalse(
-                WmsTask.objects.filter(source_pk=str(order.pk)).exists()
-            )
+            self.assertFalse(WmsTask.objects.filter(source_pk=str(order.pk)).exists())
 
     def test_owner_approval_succeeds_only_for_submitted_open_in_scope_order(self):
         order = self._order()

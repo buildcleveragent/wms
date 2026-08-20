@@ -1,16 +1,17 @@
 # allapp/inventory/models.py
-from django.conf import settings
-from django.utils.translation import gettext_lazy as _
-from django.db.models import Q, F, CheckConstraint, Value, BooleanField
 import datetime
-from django.db.models.functions import Upper, Coalesce, NullIf
 from decimal import Decimal
-from django.db import models
-from django.core.validators import MinValueValidator
+
+from django.conf import settings
 from django.core.exceptions import ValidationError
-from allapp.core.choices import ZoneType
+from django.core.validators import MinValueValidator
+from django.db import models
+from django.db.models import BooleanField, CheckConstraint, F, Q, Value
+from django.db.models.functions import Coalesce, NullIf, Upper
+from django.utils.translation import gettext_lazy as _
+
+from allapp.core.choices import InvTxType, ZoneType
 from allapp.core.models import BaseModel
-from allapp.core.choices import InvTxType
 
 
 # =========================A. 现存量 =========================
@@ -22,12 +23,8 @@ class InventoryDetail(BaseModel):
     """
 
     # —— 维度外键 —— #
-    owner = models.ForeignKey(
-        "baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主"
-    )
-    product = models.ForeignKey(
-        "products.Product", on_delete=models.PROTECT, verbose_name="商品"
-    )
+    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
+    product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
     warehouse = models.ForeignKey(
         "locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库"
     )
@@ -132,9 +129,7 @@ class InventoryDetail(BaseModel):
                 F("product"),
                 F("warehouse"),
                 F("location"),
-                Coalesce(
-                    F("container"), Value(0), output_field=models.BigIntegerField()
-                ),
+                Coalesce(F("container"), Value(0), output_field=models.BigIntegerField()),
                 Upper(Coalesce(F("batch_no"), Value(""))),
                 Coalesce(F("production_date"), Value(datetime.date(1000, 1, 1))),
                 Coalesce(F("expiry_date"), Value(datetime.date(1000, 1, 1))),
@@ -145,7 +140,7 @@ class InventoryDetail(BaseModel):
             # 2) 数量非负
             models.CheckConstraint(
                 name="chk_inv_non_negative",
-                check=Q(
+                condition=Q(
                     onhand_qty__gte=0,
                     allocated_qty__gte=0,
                     locked_qty__gte=0,
@@ -156,7 +151,7 @@ class InventoryDetail(BaseModel):
             # 3) 序列化商品数量限制（更严格可改为 in {0,1}）
             models.CheckConstraint(
                 name="chk_inv_serial_qty_le_one",
-                check=Q(product_serial_control=False)
+                condition=Q(product_serial_control=False)
                 | Q(
                     onhand_qty__lte=1,
                     allocated_qty__lte=1,
@@ -168,7 +163,7 @@ class InventoryDetail(BaseModel):
             # 4) 可用量恒等式：available = onhand - allocated - locked - damaged
             models.CheckConstraint(
                 name="chk_inv_available_identity",
-                check=Q(
+                condition=Q(
                     available_qty=F("onhand_qty")
                     - F("allocated_qty")
                     - F("locked_qty")
@@ -244,13 +239,8 @@ class InventoryDetail(BaseModel):
         if self.location_id:
             if self.warehouse_id and self.warehouse_id != self.location.warehouse_id:
                 errors["warehouse"] = "warehouse 必须与 location.warehouse 一致。"
-            if (
-                self.subwarehouse_id
-                and self.subwarehouse_id != self.location.subwarehouse_id
-            ):
-                errors["subwarehouse"] = (
-                    "subwarehouse 必须与 location.subwarehouse 一致。"
-                )
+            if self.subwarehouse_id and self.subwarehouse_id != self.location.subwarehouse_id:
+                errors["subwarehouse"] = "subwarehouse 必须与 location.subwarehouse 一致。"
 
         if self.container_id:
             container = self.container
@@ -258,15 +248,14 @@ class InventoryDetail(BaseModel):
                 errors["container"] = "容器必须与库存属于同一仓库。"
             if container.location_id != self.location_id:
                 errors["container"] = "容器当前位置必须与库存库位一致。"
-            if (
-                container.scope == container.Scope.PRIVATE
-                and container.owner_id != self.owner_id
-            ):
+            if container.scope == container.Scope.PRIVATE and container.owner_id != self.owner_id:
                 errors["container"] = "私有容器必须与库存属于同一货主。"
 
         # 产品驱动的控制口径
         if self.product_id:
             p = self.product
+            if self.owner_id and p.owner_id != self.owner_id:
+                errors["product"] = "商品货主必须与库存货主一致。"
 
             # 基本单位快照
             if getattr(p, "base_uom_id", None):
@@ -321,9 +310,7 @@ class InventoryDetail(BaseModel):
         # —— 回填快照 —— #
         if self.product_id and getattr(self.product, "base_uom_id", None):
             self.base_unit = self.product.base_uom.code
-            self.product_serial_control = bool(
-                getattr(self.product, "serial_control", False)
-            )
+            self.product_serial_control = bool(getattr(self.product, "serial_control", False))
 
         # —— 可用量恒等式 —— #
         self.available_qty = (
@@ -361,7 +348,9 @@ class InventoryDetail(BaseModel):
     #
     #     for c in self._meta.constraints:
     #         # 跳过表达式版 UniqueConstraint（contains_expressions=True）
-    #         if isinstance(c, models.UniqueConstraint) and getattr(c, "contains_expressions", False):
+    #         if isinstance(c, models.UniqueConstraint) and getattr(
+    #             c, "contains_expressions", False
+    #         ):
     #             continue
     #         try:
     #             c.validate(model=self.__class__, instance=self, exclude=exclude, using=using)
@@ -386,39 +375,25 @@ class InventorySnapshotDaily(models.Model):
         UNKNOWN = "UNKNOWN", "无法确认"
 
     snapshot_date = models.DateField("快照日期", db_index=True)
-    owner = models.ForeignKey(
-        "baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主"
-    )
+    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
     warehouse = models.ForeignKey(
         "locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库"
     )
     location = models.ForeignKey(
         "locations.Location", on_delete=models.PROTECT, verbose_name="库位"
     )
-    product = models.ForeignKey(
-        "products.Product", on_delete=models.PROTECT, verbose_name="商品"
-    )
+    product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
 
     batch_no = models.CharField("批次号", max_length=64, blank=True, default="")
     production_date = models.DateField("生产日期", null=True, blank=True)
     expiry_date = models.DateField("有效期至", null=True, blank=True)
     serial_no = models.CharField("序列号", max_length=64, blank=True, default="")
 
-    onhand_qty = models.DecimalField(
-        "账面库存快照", max_digits=18, decimal_places=4, default=0
-    )
-    available_qty = models.DecimalField(
-        "可用库存快照", max_digits=18, decimal_places=4, default=0
-    )
-    allocated_qty = models.DecimalField(
-        "已分配快照", max_digits=18, decimal_places=4, default=0
-    )
-    locked_qty = models.DecimalField(
-        "锁定快照", max_digits=18, decimal_places=4, default=0
-    )
-    damaged_qty = models.DecimalField(
-        "损坏快照", max_digits=18, decimal_places=4, default=0
-    )
+    onhand_qty = models.DecimalField("账面库存快照", max_digits=18, decimal_places=4, default=0)
+    available_qty = models.DecimalField("可用库存快照", max_digits=18, decimal_places=4, default=0)
+    allocated_qty = models.DecimalField("已分配快照", max_digits=18, decimal_places=4, default=0)
+    locked_qty = models.DecimalField("锁定快照", max_digits=18, decimal_places=4, default=0)
+    damaged_qty = models.DecimalField("损坏快照", max_digits=18, decimal_places=4, default=0)
     base_unit_code = models.CharField(
         "基本单位快照",
         max_length=30,
@@ -483,7 +458,10 @@ class InventorySnapshotDaily(models.Model):
         ]
 
     def __str__(self):
-        return f"SNAP[{self.snapshot_date}][{self.owner_id}/{self.warehouse_id}/{self.location_id}/{self.product_id}]"
+        return (
+            f"SNAP[{self.snapshot_date}]"
+            f"[{self.owner_id}/{self.warehouse_id}/{self.location_id}/{self.product_id}]"
+        )
 
 
 # =========================B. 汇总（Owner+SKU）=========================
@@ -495,12 +473,8 @@ class InventorySummary(BaseModel):
     - base_unit 为 Product 基本单位快照（系统维护，只读）。
     """
 
-    owner = models.ForeignKey(
-        "baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主"
-    )
-    product = models.ForeignKey(
-        "products.Product", on_delete=models.PROTECT, verbose_name="商品"
-    )
+    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
+    product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
 
     base_unit = models.CharField(
         "基本单位",
@@ -558,7 +532,7 @@ class InventorySummary(BaseModel):
             ),
             # 数量非负
             models.CheckConstraint(
-                check=Q(onhand_qty__gte=0)
+                condition=Q(onhand_qty__gte=0)
                 & Q(available_qty__gte=0)
                 & Q(allocated_qty__gte=0)
                 & Q(locked_qty__gte=0)
@@ -567,7 +541,7 @@ class InventorySummary(BaseModel):
             ),
             # 恒等式：available = onhand - allocated - locked - damaged
             models.CheckConstraint(
-                check=Q(
+                condition=Q(
                     available_qty=F("onhand_qty")
                     - F("allocated_qty")
                     - F("locked_qty")
@@ -596,9 +570,7 @@ class InventorySummary(BaseModel):
         )
         if calc_available < 0:
             raise ValidationError(
-                {
-                    "available_qty": "可用数量不可为负，请检查分配/锁定/损坏是否超出账面。"
-                }
+                {"available_qty": "可用数量不可为负，请检查分配/锁定/损坏是否超出账面。"}
             )
 
     def save(self, *args, **kwargs):
@@ -631,12 +603,8 @@ class InventoryTransaction(BaseModel):
 
     tx_type = models.CharField("事务类型", max_length=16, choices=InvTxType.choices)
 
-    owner = models.ForeignKey(
-        "baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主"
-    )
-    product = models.ForeignKey(
-        "products.Product", on_delete=models.PROTECT, verbose_name="商品"
-    )
+    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
+    product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
     warehouse = models.ForeignKey(
         "locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库"
     )
@@ -668,9 +636,7 @@ class InventoryTransaction(BaseModel):
     container_no = models.CharField("容器号快照", max_length=60, blank=True, default="")
 
     base_unit = models.CharField("基本单位", max_length=30, editable=False)
-    qty_delta = models.DecimalField(
-        "数量变化(+入/-出)", max_digits=18, decimal_places=4
-    )
+    qty_delta = models.DecimalField("数量变化(+入/-出)", max_digits=18, decimal_places=4)
 
     # 同一次库存移动的成对标识（ISSUE/RECEIVE 或 MOVE_OUT/MOVE_IN；可为空）
     pair_id = models.UUIDField("配对号", null=True, blank=True, db_index=True)
@@ -701,17 +667,11 @@ class InventoryTransaction(BaseModel):
                 fields=["tx_type", "warehouse", "posted_at", "id"],
                 name="ix_tx_type_wh_time",
             ),
-            models.Index(
-                fields=["tx_type", "owner", "product"], name="idx_tx_type_owner_product"
-            ),
+            models.Index(fields=["tx_type", "owner", "product"], name="idx_tx_type_owner_product"),
             models.Index(fields=["warehouse", "location"], name="idx_tx_wh_loc"),
             models.Index(fields=["owner", "product", "batch_no"], name="idx_tx_batch"),
-            models.Index(
-                fields=["owner", "product", "expiry_date"], name="idx_tx_expiry"
-            ),
-            models.Index(
-                fields=["owner", "product", "serial_no"], name="idx_tx_serial"
-            ),
+            models.Index(fields=["owner", "product", "expiry_date"], name="idx_tx_expiry"),
+            models.Index(fields=["owner", "product", "serial_no"], name="idx_tx_serial"),
             models.Index(fields=["warehouse", "container"], name="idx_tx_wh_container"),
             models.Index(fields=["src_model", "src_id"], name="idx_tx_src"),
             models.Index(fields=["pair_id"], name="idx_tx_pair"),
@@ -721,26 +681,16 @@ class InventoryTransaction(BaseModel):
         ]
         constraints = [
             # location 必填
-            CheckConstraint(
-                name="ck_tx_location_required", check=Q(location__isnull=False)
-            ),
+            CheckConstraint(name="ck_tx_location_required", condition=Q(location__isnull=False)),
             # qty_delta 非 0
-            CheckConstraint(name="ck_tx_qty_non_zero", check=~Q(qty_delta=0)),
+            CheckConstraint(name="ck_tx_qty_non_zero", condition=~Q(qty_delta=0)),
             # RECEIVE/MOVE_IN >0，ISSUE/MOVE_OUT <0
             CheckConstraint(
                 name="ck_tx_sign_by_type",
-                check=(
-                    (
-                        Q(tx_type__in=[InvTxType.RECEIVE, InvTxType.MOVE_IN])
-                        & Q(qty_delta__gt=0)
-                    )
-                    | (
-                        Q(tx_type__in=[InvTxType.ISSUE, InvTxType.MOVE_OUT])
-                        & Q(qty_delta__lt=0)
-                    )
-                    | Q(
-                        tx_type__in=[InvTxType.ADJ_GAIN, InvTxType.ADJ_LOSS]
-                    )  # 调整由业务控制正负
+                condition=(
+                    (Q(tx_type__in=[InvTxType.RECEIVE, InvTxType.MOVE_IN]) & Q(qty_delta__gt=0))
+                    | (Q(tx_type__in=[InvTxType.ISSUE, InvTxType.MOVE_OUT]) & Q(qty_delta__lt=0))
+                    | Q(tx_type__in=[InvTxType.ADJ_GAIN, InvTxType.ADJ_LOSS])  # 调整由业务控制正负
                 ),
             ),
             # 幂等（如需允许同一来源行多分录，请改为指纹 fp 唯一）
@@ -772,6 +722,8 @@ class InventoryTransaction(BaseModel):
         # 3) 商品维度一致性
         p = getattr(self, "product", None)
         if p:
+            if self.owner_id and p.owner_id != self.owner_id:
+                raise ValidationError({"product": "商品货主必须与流水货主一致。"})
             if getattr(p, "serial_control", False):
                 if not self.serial_no:
                     raise ValidationError({"serial_no": "序列号管理商品必须填写序列号"})
@@ -782,7 +734,9 @@ class InventoryTransaction(BaseModel):
 
             # if not getattr(p, "batch_control", False) and self.batch_no:
             #     raise ValidationError({"batch_no": "未启用批次管理，批次号必须留空"})
-            # if not getattr(p, "expiry_control", False) and (self.production_date or self.expiry_date):
+            # if not getattr(p, "expiry_control", False) and (
+            #     self.production_date or self.expiry_date
+            # ):
             #     raise ValidationError({"expiry_date": "未启用效期管1理，生产/到期日必须留空"})
 
         # 4) 仓库一致性
@@ -840,9 +794,7 @@ class PostingJournal(models.Model):
         "动作类型", max_length=16, db_index=True
     )  # 'POST' / 'REVERSE' / 'CANCEL'
 
-    status = models.CharField(
-        "状态", max_length=16, default="PENDING"
-    )  # PENDING/POSTED/FAILED
+    status = models.CharField("状态", max_length=16, default="PENDING")  # PENDING/POSTED/FAILED
     message = models.CharField("说明", max_length=255, blank=True, default="")
     attempt_count = models.IntegerField("尝试次数", default=0)
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
@@ -965,24 +917,16 @@ class ReviewDifferenceLine(models.Model):
         related_name="lines",
         verbose_name="复核单",
     )
-    product = models.ForeignKey(
-        "products.Product", on_delete=models.PROTECT, verbose_name="商品"
-    )
+    product = models.ForeignKey("products.Product", on_delete=models.PROTECT, verbose_name="商品")
     location = models.ForeignKey(
         "locations.Location", on_delete=models.PROTECT, verbose_name="库位"
     )
-    batch_no = models.CharField(
-        max_length=50, null=True, blank=True, verbose_name="批次号"
-    )
-    serial_no = models.CharField(
-        max_length=50, null=True, blank=True, verbose_name="序列号"
-    )
+    batch_no = models.CharField(max_length=50, null=True, blank=True, verbose_name="批次号")
+    serial_no = models.CharField(max_length=50, null=True, blank=True, verbose_name="序列号")
     quantity_before = models.DecimalField(
         max_digits=10, decimal_places=2, verbose_name="复核前数量"
     )
-    quantity_after = models.DecimalField(
-        max_digits=10, decimal_places=2, verbose_name="复核后数量"
-    )
+    quantity_after = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="复核后数量")
     quantity_difference = models.DecimalField(
         max_digits=10, decimal_places=2, verbose_name="差异数量"
     )
@@ -1019,17 +963,13 @@ class InventoryCostLayer(models.Model):
         on_delete=models.PROTECT,
         related_name="inventory_cost_layers",
     )
-    lot = models.ForeignKey(
-        "inbound.Lot", null=True, blank=True, on_delete=models.PROTECT
-    )
+    lot = models.ForeignKey("inbound.Lot", null=True, blank=True, on_delete=models.PROTECT)
     batch_no = models.CharField(max_length=64, blank=True, default="")
     serial_no = models.CharField(max_length=64, blank=True, default="")
     expiry_date = models.DateField(null=True, blank=True)
     received_date = models.DateField(null=True, blank=True, db_index=True)
     original_qty = models.DecimalField(max_digits=18, decimal_places=4)
-    unit_cost = models.DecimalField(
-        max_digits=18, decimal_places=6, null=True, blank=True
-    )
+    unit_cost = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     cost_currency = models.CharField(max_length=8, blank=True, default="")
     cost_quality = models.CharField(
         max_length=20, choices=CostQuality.choices, default=CostQuality.COST_MISSING
@@ -1041,9 +981,7 @@ class InventoryCostLayer(models.Model):
 
     class Meta:
         constraints = [
-            CheckConstraint(
-                condition=Q(original_qty__gt=0), name="chk_cost_layer_qty_pos"
-            ),
+            CheckConstraint(condition=Q(original_qty__gt=0), name="chk_cost_layer_qty_pos"),
             models.UniqueConstraint(
                 fields=[
                     "source_type",
@@ -1090,24 +1028,18 @@ class InventoryLayerPosition(models.Model):
 
     class Meta:
         constraints = [
-            CheckConstraint(
-                condition=Q(remaining_qty__gte=0), name="chk_layer_pos_qty_nonneg"
-            ),
+            CheckConstraint(condition=Q(remaining_qty__gte=0), name="chk_layer_pos_qty_nonneg"),
             models.UniqueConstraint(
                 fields=["layer", "location", "container_scope_id"],
                 name="ux_layer_position",
             ),
         ]
-        indexes = [
-            models.Index(fields=["location", "layer"], name="ix_layer_pos_location")
-        ]
+        indexes = [models.Index(fields=["location", "layer"], name="ix_layer_pos_location")]
 
     def save(self, *args, **kwargs):
         self.container_scope_id = self.container_id or 0
         if kwargs.get("update_fields") is not None:
-            kwargs["update_fields"] = set(kwargs["update_fields"]) | {
-                "container_scope_id"
-            }
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {"container_scope_id"}
         return super().save(*args, **kwargs)
 
 
@@ -1152,21 +1084,15 @@ class InventoryLayerMovement(models.Model):
     )
 
     class Meta:
-        constraints = [
-            CheckConstraint(condition=Q(quantity__gt=0), name="chk_layer_move_qty_pos")
-        ]
-        indexes = [
-            models.Index(fields=["layer", "occurred_at"], name="ix_layer_move_time")
-        ]
+        constraints = [CheckConstraint(condition=Q(quantity__gt=0), name="chk_layer_move_qty_pos")]
+        indexes = [models.Index(fields=["layer", "occurred_at"], name="ix_layer_move_time")]
 
 
 class InventoryCostAdjustment(models.Model):
     layer = models.ForeignKey(
         InventoryCostLayer, on_delete=models.PROTECT, related_name="cost_adjustments"
     )
-    old_unit_cost = models.DecimalField(
-        max_digits=18, decimal_places=6, null=True, blank=True
-    )
+    old_unit_cost = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     new_unit_cost = models.DecimalField(max_digits=18, decimal_places=6)
     old_currency = models.CharField(max_length=8, blank=True, default="")
     new_currency = models.CharField(max_length=8)

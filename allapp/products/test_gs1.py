@@ -9,9 +9,7 @@ from allapp.products.models import Gs1LookupCache
 
 class Gs1HelpersTests(SimpleTestCase):
     def test_normalizes_supported_gtin_forms(self):
-        self.assertEqual(
-            normalize_gtin("6921168509256"), ("6921168509256", "06921168509256")
-        )
+        self.assertEqual(normalize_gtin("6921168509256"), ("6921168509256", "06921168509256"))
         self.assertEqual(
             normalize_gtin("0106921168509256"),
             ("06921168509256", "06921168509256"),
@@ -42,7 +40,5 @@ class Gs1HelpersTests(SimpleTestCase):
 
         candidate = public_candidate(cache)
 
-        self.assertEqual(
-            candidate["images"], ["https://www.gds.org.cn/product/test.jpg"]
-        )
+        self.assertEqual(candidate["images"], ["https://www.gds.org.cn/product/test.jpg"])
         self.assertFalse(candidate["registered"])

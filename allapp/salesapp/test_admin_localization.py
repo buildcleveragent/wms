@@ -64,16 +64,12 @@ class SaleMiniAdminLocalizationTests(SimpleTestCase):
             _model_admin,
         ) in self._registered_sales_admins().items():
             with self.subTest(model=model_name, field="verbose_name"):
-                self.assertRegex(
-                    str(model._meta.verbose_name), re.compile(r"[\u4e00-\u9fff]")
-                )
+                self.assertRegex(str(model._meta.verbose_name), re.compile(r"[\u4e00-\u9fff]"))
             for field in model._meta.fields:
                 if field.name == "id" or field.name in audit_fields:
                     continue
                 with self.subTest(model=model_name, field=field.name):
-                    self.assertRegex(
-                        str(field.verbose_name), re.compile(r"[\u4e00-\u9fff]")
-                    )
+                    self.assertRegex(str(field.verbose_name), re.compile(r"[\u4e00-\u9fff]"))
 
     def test_all_admin_forms_hide_base_audit_fields(self):
         audit_fields = set(AUDIT_FIELDS)
@@ -149,14 +145,8 @@ class SaleMiniAdminPageSmokeTests(TestCase):
         permission_request.user = self.user
 
         for model, model_admin in registered_admins:
-            action = (
-                "add"
-                if model_admin.has_add_permission(permission_request)
-                else "changelist"
-            )
-            url = reverse(
-                f"admin:{model._meta.app_label}_{model._meta.model_name}_{action}"
-            )
+            action = "add" if model_admin.has_add_permission(permission_request) else "changelist"
+            url = reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_{action}")
             response = self.client.get(url)
             with self.subTest(model=model.__name__):
                 self.assertEqual(response.status_code, 200)
@@ -184,6 +174,4 @@ class SaleMiniAdminPageSmokeTests(TestCase):
                     ]
                     self.assertEqual(trailing_positions, sorted(trailing_positions))
                     if trailing_positions and business_positions:
-                        self.assertLess(
-                            max(business_positions), min(trailing_positions)
-                        )
+                        self.assertLess(max(business_positions), min(trailing_positions))

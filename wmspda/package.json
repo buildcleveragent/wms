@@ -23,5 +23,17 @@
     "sass": "1.77.8",
     "vite": "8.1.0",
     "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "@intlify/core-base": "9.14.5",
+    "@intlify/message-compiler": "9.14.5",
+    "@intlify/message-resolver": "9.14.5",
+    "@intlify/runtime": "9.14.5",
+    "@intlify/vue-devtools": "9.14.5",
+    "adm-zip": "0.6.0",
+    "jpeg-js": "0.4.4",
+    "nanoid": "3.3.18",
+    "postcss": "8.5.23",
+    "ws": "8.21.0"
   }
 }

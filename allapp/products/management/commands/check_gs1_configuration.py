@@ -16,9 +16,7 @@ class Command(BaseCommand):
             app="products",
             name="0012_gs1_lookup_cache_and_sku_format",
         ).exists()
-        self.stdout.write(
-            f"products.0012 migration={'ok' if migration_applied else 'missing'}"
-        )
+        self.stdout.write(f"products.0012 migration={'ok' if migration_applied else 'missing'}")
         if not migration_applied:
             errors.append("products.0012 数据库迁移未应用")
 

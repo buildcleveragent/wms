@@ -48,9 +48,9 @@ class SystemSettingsApi(APIView):
             grouped[SystemSetting.POS_NAMESPACE][
                 SystemSetting.POS_SALE_PRINT_METHOD_KEY
             ] = print_method
-            flat[
-                f"{SystemSetting.POS_NAMESPACE}.{SystemSetting.POS_SALE_PRINT_METHOD_KEY}"
-            ] = print_method
+            flat[f"{SystemSetting.POS_NAMESPACE}.{SystemSetting.POS_SALE_PRINT_METHOD_KEY}"] = (
+                print_method
+            )
 
         return Response({"settings": grouped, "flat": flat})
 
@@ -67,11 +67,7 @@ class PrintConfigListApi(APIView):
         return Response(
             {
                 "results": PrintConfigSerializer(queryset, many=True).data,
-                "default": (
-                    PrintConfigSerializer(default_config).data
-                    if default_config
-                    else None
-                ),
+                "default": (PrintConfigSerializer(default_config).data if default_config else None),
             }
         )
 

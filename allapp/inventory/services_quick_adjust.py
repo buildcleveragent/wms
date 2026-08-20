@@ -52,9 +52,7 @@ def quick_adjust_via_post_task(data: QuickAdjustInput) -> dict:
     location_warehouse = getattr(location, "warehouse", None)
     warehouse = data.warehouse or location_warehouse
     if warehouse is None:
-        raise ValueError(
-            "无法确定调整任务所属仓库，请显式传 warehouse 或传入带仓库的 location。"
-        )
+        raise ValueError("无法确定调整任务所属仓库，请显式传 warehouse 或传入带仓库的 location。")
     if (
         data.warehouse
         and getattr(location, "warehouse_id", None)

@@ -32,7 +32,6 @@ from allapp.tasking.models import (
 from allapp.tasking.plugins.handlers import DefaultPostingHandler
 from allapp.tasking.services import approve_task, publish_task, reject_task
 
-
 pytestmark = pytest.mark.integration
 
 
@@ -42,15 +41,9 @@ class PutawayFixtureMixin:
     def build_fixture(self):
         self.user_model = get_user_model()
         self.owner = Owner.objects.create(code="PUT-OWN-A", name="Putaway owner A")
-        self.other_owner = Owner.objects.create(
-            code="PUT-OWN-B", name="Putaway owner B"
-        )
-        self.warehouse = Warehouse.objects.create(
-            code="PUT-WH-A", name="Putaway warehouse A"
-        )
-        self.other_warehouse = Warehouse.objects.create(
-            code="PUT-WH-B", name="Putaway warehouse B"
-        )
+        self.other_owner = Owner.objects.create(code="PUT-OWN-B", name="Putaway owner B")
+        self.warehouse = Warehouse.objects.create(code="PUT-WH-A", name="Putaway warehouse A")
+        self.other_warehouse = Warehouse.objects.create(code="PUT-WH-B", name="Putaway warehouse B")
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse, code="PUTSWA", name="Putaway SW A"
         )
@@ -112,6 +105,17 @@ class PutawayFixtureMixin:
             code="PUT-SKU-B",
             sku="PUT-SKU-B",
             name="Putaway product B",
+            base_uom=self.uom,
+            batch_control=False,
+            expiry_control=False,
+            volume=Decimal("0.100000"),
+            price=Decimal("10.00"),
+        )
+        self.foreign_product = Product.objects.create(
+            owner=self.other_owner,
+            code="PUT-SKU-FOREIGN",
+            sku="PUT-SKU-FOREIGN",
+            name="Putaway foreign product",
             base_uom=self.uom,
             batch_control=False,
             expiry_control=False,
@@ -219,9 +223,7 @@ class PutawayPdaApiComprehensiveTests(PutawayFixtureMixin, TestCase):
     def test_auth_scope_search_pagination_and_assignment_visibility(self):
         operator = self.operator("putaway-api-operator")
         other_operator = self.operator("putaway-api-other")
-        foreign_operator = self.operator(
-            "putaway-api-foreign", warehouse=self.other_warehouse
-        )
+        foreign_operator = self.operator("putaway-api-foreign", warehouse=self.other_warehouse)
         visible, _ = self.make_task("PUT-SEARCH-VISIBLE")
         assigned, _ = self.make_task("PUT-SEARCH-ASSIGNED")
         TaskAssignment.objects.create(task=assigned, assignee=other_operator)
@@ -234,7 +236,7 @@ class PutawayPdaApiComprehensiveTests(PutawayFixtureMixin, TestCase):
             "PUT-SEARCH-FOREIGN",
             warehouse=self.other_warehouse,
             owner=self.other_owner,
-            product=self.other_product,
+            product=self.foreign_product,
             source=foreign_source,
         )
 
@@ -242,9 +244,7 @@ class PutawayPdaApiComprehensiveTests(PutawayFixtureMixin, TestCase):
         self.assertIn(anonymous.status_code, (401, 403))
 
         client = self.client_for(operator)
-        listed = client.get(
-            "/api/inbound/pda/tasks/?task_type=PUTAWAY&search=VISIBLE&page_size=1"
-        )
+        listed = client.get("/api/inbound/pda/tasks/?task_type=PUTAWAY&search=VISIBLE&page_size=1")
         self.assertEqual(listed.status_code, 200, listed.data)
         self.assertEqual([row["id"] for row in listed.data["results"]], [visible.pk])
         self.assertEqual(listed.data["count"], 1)
@@ -252,9 +252,7 @@ class PutawayPdaApiComprehensiveTests(PutawayFixtureMixin, TestCase):
             client.get(f"/api/inbound/pda/tasks/{assigned.pk}/").status_code,
             404,
         )
-        self.assertEqual(
-            client.get(f"/api/inbound/pda/tasks/{foreign.pk}/").status_code, 404
-        )
+        self.assertEqual(client.get(f"/api/inbound/pda/tasks/{foreign.pk}/").status_code, 404)
         self.assertEqual(
             self.client_for(foreign_operator)
             .get(f"/api/inbound/pda/tasks/{visible.pk}/")
@@ -323,16 +321,12 @@ class PutawayPdaApiComprehensiveTests(PutawayFixtureMixin, TestCase):
         )
         self.assertEqual(second.status_code, 200, second.data)
         self.assertEqual(second.data["task"]["status"], WmsTask.Status.COMPLETED)
-        self.assertEqual(
-            second.data["task"]["review_status"], WmsTask.ReviewStatus.PENDING
-        )
+        self.assertEqual(second.data["task"]["review_status"], WmsTask.ReviewStatus.PENDING)
         line.refresh_from_db()
         self.assertEqual(line.qty_done, Decimal("2.345"))
         self.assertEqual(line.to_location_id, self.destination.pk)
         self.assertEqual(
-            TaskScanLog.objects.filter(
-                task=task, status=TaskScanLog.ScanStatus.OK
-            ).count(),
+            TaskScanLog.objects.filter(task=task, status=TaskScanLog.ScanStatus.OK).count(),
             2,
         )
         self.assertTrue(
@@ -542,12 +536,8 @@ class PutawayTaskGenerationAndReviewTests(PutawayFixtureMixin, TestCase):
             "allapp.tasking.plugins.handlers.DocSequence.next_code",
             return_value="PUT-GENERATED-1",
         ):
-            first = handler._create_putaway_task(
-                receive_task, None, datetime.datetime.now()
-            )
-            second = handler._create_putaway_task(
-                receive_task, None, datetime.datetime.now()
-            )
+            first = handler._create_putaway_task(receive_task, None, datetime.datetime.now())
+            second = handler._create_putaway_task(receive_task, None, datetime.datetime.now())
 
         self.assertEqual(first.pk, second.pk)
         self.assertEqual(first.status, WmsTask.Status.READY)
@@ -562,11 +552,7 @@ class PutawayTaskGenerationAndReviewTests(PutawayFixtureMixin, TestCase):
             },
         )
         self.assertCountEqual(
-            list(
-                first.lines.values_list(
-                    "product_id", "from_location_id", "qty_plan", "src_id"
-                )
-            ),
+            list(first.lines.values_list("product_id", "from_location_id", "qty_plan", "src_id")),
             [
                 (self.product.pk, self.source.pk, Decimal("1.250"), transactions[0].pk),
                 (
@@ -706,9 +692,7 @@ class PutawayTaskGenerationAndReviewTests(PutawayFixtureMixin, TestCase):
         self.assertIsNone(close_inbound_order_after_putaway(first, by_user=manager))
         order.refresh_from_db()
         self.assertFalse(order.is_closed)
-        WmsTask.objects.filter(pk=second.pk).update(
-            posting_status=WmsTask.PostingStatus.POSTED
-        )
+        WmsTask.objects.filter(pk=second.pk).update(posting_status=WmsTask.PostingStatus.POSTED)
         second.refresh_from_db()
         closed = close_inbound_order_after_putaway(second, by_user=manager)
         self.assertEqual(closed.pk, order.pk)

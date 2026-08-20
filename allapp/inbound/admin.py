@@ -5,8 +5,8 @@ from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
 from django.db import models as dj_models
+from django.db import transaction
 from django.http import JsonResponse
 from django.urls import path, reverse
 from django.utils import timezone
@@ -18,11 +18,11 @@ from allapp.accounts.audit import record_audit_event
 from allapp.baseinfo.models import Supplier
 from allapp.core.admin_base import AdvancedAdminBase, BaseReadonlyAdmin
 from allapp.core.formatters import format_product_qty
-from allapp.products.models import Product
 from allapp.products.identifier_lookup import (
     UnifiedProductAdminSearchMixin,
     filter_by_product_search,
 )
+from allapp.products.models import Product
 from allapp.tasking.models import WmsTaskLine
 
 from .models import (
@@ -66,17 +66,27 @@ class InboundOrderAdminForm(forms.ModelForm):
         # 一个脚本同时处理“供应商下拉”和“订单行产品下拉”的联动
         js = ("admin/inbound_owner_linkage.js",)
 
+
 class InboundOrderLineInline(admin.TabularInline):
     model = InboundOrderLine
 
     extra = 1
-    readonly_fields = ("get_base_uom","line_no",)
+    readonly_fields = (
+        "get_base_uom",
+        "line_no",
+    )
     fields = [
         "line_no",
         "product",
-        "base_qty", "get_base_uom", "base_price",
-        "aux_qty", "aux_uom", "aux_price",
-        "lot_no", "min_remaining_days", "expiry_not_earlier_than",
+        "base_qty",
+        "get_base_uom",
+        "base_price",
+        "aux_qty",
+        "aux_uom",
+        "aux_price",
+        "lot_no",
+        "min_remaining_days",
+        "expiry_not_earlier_than",
         "note",
     ]
 
@@ -102,7 +112,8 @@ class InboundOrderLineInline(admin.TabularInline):
                         # 根据货主ID过滤商品
                         self.fields["product"].queryset = Product.objects.filter(owner_id=owner_id)
                         logger.debug(
-                            "inbound.admin.inline_formset.products_filtered owner_id=%s queryset_count=%s",
+                            "inbound.admin.inline_formset.products_filtered "
+                            "owner_id=%s queryset_count=%s",
                             owner_id,
                             self.fields["product"].queryset.count(),
                         )
@@ -135,9 +146,7 @@ class InboundOrderLineInline(admin.TabularInline):
             try:
                 url = reverse("admin:inbound_inboundorder_product_options")
                 widget.attrs["data-source-url"] = url
-                widget.attrs["class"] = (
-                    widget.attrs.get("class", "") + " vProductByOwner"
-                ).strip()
+                widget.attrs["class"] = (widget.attrs.get("class", "") + " vProductByOwner").strip()
                 kwargs["widget"] = widget
             except Exception:
                 pass
@@ -151,9 +160,7 @@ class InboundOrderLineAdmin(admin.ModelAdmin):
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "product":
             # 获取当前的 InboundOrder 对象
-            inbound_order_id = request.GET.get(
-                "inbound_order"
-            )  # 获取 URL 中的 inbound_order_id
+            inbound_order_id = request.GET.get("inbound_order")  # 获取 URL 中的 inbound_order_id
             if inbound_order_id:
                 inbound_order = (
                     AccessScope.for_user(request.user)
@@ -173,20 +180,33 @@ USE_SKIP_LOCKED = True
 
 
 @admin.register(InboundOrder)
-class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
+class InboundOrderAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
     inlines = [InboundOrderLineInline]
     # 显示的字段
     list_display = (
-        "order_no", "owner", "warehouse", "supplier", "biz_date",
-        "submit_status", "approval_status", "is_closed", "approved_by_ownermanager", "approved_at_ownermanager"
+        "order_no",
+        "owner",
+        "warehouse",
+        "supplier",
+        "biz_date",
+        "submit_status",
+        "approval_status",
+        "is_closed",
+        "approved_by_ownermanager",
+        "approved_at_ownermanager",
     )
     # 显示在搜索框中的字段
     search_fields = ("order_no", "owner__name", "supplier__name", "order_no")
 
     # 筛选功能
     list_filter = (
-        "submit_status", "approval_status", "is_closed",
-        "owner", "warehouse", "supplier", "biz_date"
+        "submit_status",
+        "approval_status",
+        "is_closed",
+        "owner",
+        "warehouse",
+        "supplier",
+        "biz_date",
     )
 
     # 可编辑的字段
@@ -194,16 +214,32 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
 
     # 表单中字段的显示顺序
     fields = (
-        "order_no", "inbound_type", "owner", "warehouse", "supplier", "biz_date",)
+        "order_no",
+        "inbound_type",
+        "owner",
+        "warehouse",
+        "supplier",
+        "biz_date",
+    )
 
     # fields = (
     #     "order_no",  "inbound_type", "owner", "supplier", "biz_date","approval_status",
     #     "address", "memo", "eta", "delivery_method",
-    #     "approved_by_ownermanager", "approved_at_ownermanager", "approved_by_warehouse", "approved_at_warehouse",
+    #     "approved_by_ownermanager", "approved_at_ownermanager",
+    #     "approved_by_warehouse", "approved_at_warehouse",
     #     "is_closed", "close_reason"
     # )
-    readonly_fields = ['order_no',"submit_status","approval_status","approved_by_ownermanager", "approved_at_ownermanager", "approved_by_warehouse", "approved_at_warehouse",
-        "is_closed", "close_reason"]
+    readonly_fields = [
+        "order_no",
+        "submit_status",
+        "approval_status",
+        "approved_by_ownermanager",
+        "approved_at_ownermanager",
+        "approved_by_warehouse",
+        "approved_at_warehouse",
+        "is_closed",
+        "close_reason",
+    ]
     # 使用 `ordering` 进行默认排序
     ordering = ("-biz_date", "-id")
 
@@ -259,18 +295,25 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         )
 
     def _as_owner_mgr(self, request):
-        return request.user.is_superuser or request.user.has_perm("inbound.approve_as_owner_manager")
+        return request.user.is_superuser or request.user.has_perm(
+            "inbound.approve_as_owner_manager"
+        )
 
     # —— 权限判断：货主业务员（或超管）才允许“提交” —— #
     def _as_owner_buyers(self, request):
         return request.user.is_superuser or request.user.has_perm("inbound.submit_as_owner_buyers")
 
-
     def _as_wh_mgr(self, request):
         return request.user.is_superuser or request.user.has_perm("inbound.approve_as_wh_manager")
 
     # ——动作：仅权限用户看得到——
-    actions = ["action_owner_approve", "action_owner_reject", "action_wh_confirm", "action_wh_reject","action_owner_buyers_submit"]
+    actions = [
+        "action_owner_approve",
+        "action_owner_reject",
+        "action_wh_confirm",
+        "action_wh_reject",
+        "action_owner_buyers_submit",
+    ]
 
     def get_actions(self, request):
         actions = super().get_actions(request)
@@ -306,9 +349,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
                         "approval_status": obj.approval_status,
                     }
                     obj.owner_approve(request.user)
-                    self._audit_order_action(
-                        request, obj, "inbound.order.owner_approve", before
-                    )
+                    self._audit_order_action(request, obj, "inbound.order.owner_approve", before)
                     ok += 1
                 except ValidationError:
                     fail += 1
@@ -340,9 +381,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
                         "approval_status": obj.approval_status,
                     }
                     obj.owner_reject(request.user)
-                    self._audit_order_action(
-                        request, obj, "inbound.order.owner_reject", before
-                    )
+                    self._audit_order_action(request, obj, "inbound.order.owner_reject", before)
                     ok += 1
                 except ValidationError:
                     fail += 1
@@ -351,9 +390,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         if ok:
             self.message_user(request, _(f"已驳回 {ok} 条。"), level=messages.SUCCESS)
         if fail:
-            self.message_user(
-                request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING
-            )
+            self.message_user(request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING)
         if skipped > 0:
             self.message_user(
                 request,
@@ -393,9 +430,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
 
         skipped = allowed_count - locked_count
         if ok:
-            self.message_user(
-                request, _(f"已确认通过 {ok} 条。"), level=messages.SUCCESS
-            )
+            self.message_user(request, _(f"已确认通过 {ok} 条。"), level=messages.SUCCESS)
         # if fail:
         #     self.message_user(request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING)
 
@@ -437,9 +472,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
                         "approval_status": obj.approval_status,
                     }
                     obj.wh_reject(request.user)
-                    self._audit_order_action(
-                        request, obj, "inbound.order.warehouse_reject", before
-                    )
+                    self._audit_order_action(request, obj, "inbound.order.warehouse_reject", before)
                     ok += 1
                 except ValidationError:
                     fail += 1
@@ -448,9 +481,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         if ok:
             self.message_user(request, _(f"已驳回 {ok} 条。"), level=messages.SUCCESS)
         if fail:
-            self.message_user(
-                request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING
-            )
+            self.message_user(request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING)
         if skipped > 0:
             self.message_user(
                 request,
@@ -478,9 +509,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
                         "approval_status": obj.approval_status,
                     }
                     obj.submit_by_owner_buyers(request.user)
-                    self._audit_order_action(
-                        request, obj, "inbound.order.submit", before
-                    )
+                    self._audit_order_action(request, obj, "inbound.order.submit", before)
                     ok += 1
                 except ValidationError:
                     fail += 1
@@ -489,9 +518,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         if ok:
             self.message_user(request, _(f"已提交 {ok} 条。"), level=messages.SUCCESS)
         if fail:
-            self.message_user(
-                request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING
-            )
+            self.message_user(request, _(f"{fail} 条状态不满足，已跳过。"), level=messages.WARNING)
         if skipped > 0:
             self.message_user(
                 request,
@@ -513,8 +540,8 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
             obj.save()
 
         touched = set(form.changed_data)
-        owner_fields = {"approved_by_ownermanager","approved_at_ownermanager"}
-        wh_fields    = {"approved_by_warehouse","approved_at_warehouse"}
+        owner_fields = {"approved_by_ownermanager", "approved_at_ownermanager"}
+        wh_fields = {"approved_by_warehouse", "approved_at_warehouse"}
         status_field = {"approval_status"}
 
         # 1) 禁止任何人手改 approval_status（系统动作专属）
@@ -687,9 +714,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
         """
         scope = AccessScope.for_user(request.user)
         if db_field.name == "owner":
-            queryset = (
-                kwargs.get("queryset") or db_field.remote_field.model.objects.all()
-            )
+            queryset = kwargs.get("queryset") or db_field.remote_field.model.objects.all()
             if not scope.is_valid:
                 queryset = queryset.none()
             elif scope.owner_ids:
@@ -697,9 +722,7 @@ class InboundOrderAdmin(AdvancedAdminBase,BaseReadonlyAdmin):
             kwargs["queryset"] = queryset
 
         if db_field.name == "warehouse":
-            queryset = (
-                kwargs.get("queryset") or db_field.remote_field.model.objects.all()
-            )
+            queryset = kwargs.get("queryset") or db_field.remote_field.model.objects.all()
             if not scope.is_valid:
                 queryset = queryset.none()
             elif scope.warehouse_ids:
@@ -742,7 +765,10 @@ class MyTaskFilter(SimpleListFilter):
     parameter_name = "mine"
 
     def lookups(self, request, model_admin):
-        return (("1", "我的任务"), ("0", "全部"),)
+        return (
+            ("1", "我的任务"),
+            ("0", "全部"),
+        )
 
     def queryset(self, request, queryset):
         # 默认对“收货员”只显示自己的任务；管理员/有特权者可看全部
@@ -808,9 +834,7 @@ class PdaNoOrderReceiveLineInline(admin.TabularInline):
         parts = []
         for scan in scans[:5]:
             location = (
-                getattr(scan.location, "code", "")
-                or getattr(scan.location, "name", "")
-                or "-"
+                getattr(scan.location, "code", "") or getattr(scan.location, "name", "") or "-"
             )
             lot_no = scan.lot_no or "-"
             exp_date = scan.exp_date.isoformat() if scan.exp_date else "-"
@@ -950,6 +974,7 @@ class InboundReceiptLineInline(admin.TabularInline):
     model = InboundReceiptLine
     extra = 0
 
+
 @admin.register(InboundReceipt)
 class InboundReceiptAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
     admin_priority = 3
@@ -1011,6 +1036,7 @@ class LotAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
 
 # ========= InboundOrderReturnInfo =========
 
+
 @admin.register(InboundOrderReturnInfo)
 class InboundOrderReturnInfoAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
     admin_priority = 5
@@ -1063,6 +1089,7 @@ class InboundOrderReturnInfoAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
 
 # ========= ReturnInspection =========
 
+
 @admin.action(description="批量审核（OPEN → APPROVED）")
 def action_approve(modeladmin, request, queryset):
     qs = queryset.filter(status="OPEN")
@@ -1070,52 +1097,77 @@ def action_approve(modeladmin, request, queryset):
     updated = qs.update(status="APPROVED", approved_by=request.user, approved_at=now)
     modeladmin.message_user(request, f"已审核 {updated} 条（其余非 OPEN 已跳过）。")
 
+
 @admin.action(description="批量下发执行（APPROVED → POSTED）")
 def action_post(modeladmin, request, queryset):
     qs = queryset.filter(status="APPROVED")
     updated = qs.update(status="POSTED")
     modeladmin.message_user(request, f"已下发 {updated} 条（其余非 APPROVED 已跳过）。")
 
+
 class ReturnInspectionInline(admin.StackedInline):  # 也可以使用 admin.TabularInline
     model = ReturnInspection
     list_display = (
-        "order_line", "owner",
-        "disposition", "condition", "qty",
-        "lot_no", "serial_no", "exp_date",
-        "status", "inspected_by", "inspected_at",
-        "approved_by", "approved_at",
+        "order_line",
+        "owner",
+        "disposition",
+        "condition",
+        "qty",
+        "lot_no",
+        "serial_no",
+        "exp_date",
+        "status",
+        "inspected_by",
+        "inspected_at",
+        "approved_by",
+        "approved_at",
     )
     list_select_related = ("order_line", "owner", "inspected_by", "approved_by")
     list_filter = (
-        "status", "disposition", "condition",
-         "owner",
+        "status",
+        "disposition",
+        "condition",
+        "owner",
         ("exp_date", admin.DateFieldListFilter),
     )
     search_fields = (
-        "serial_no", "lot_no",
+        "serial_no",
+        "lot_no",
         "order_line__order__order_no",
-        "order_line__product__code", "order_line__product__name", "order_line__product__sku",
+        "order_line__product__code",
+        "order_line__product__name",
+        "order_line__product__sku",
     )
     ordering = ("-created_at", "-id")
     list_per_page = 50
     date_hierarchy = "inspected_at"
 
     # 体量大时可改用 raw_id_fields（两者选其一）
-    autocomplete_fields = ("order_line", "inspected_by", "approved_by", "owner", )
+    autocomplete_fields = (
+        "order_line",
+        "inspected_by",
+        "approved_by",
+        "owner",
+    )
     # raw_id_fields = ("order_line", "inspected_by", "approved_by", "owner", )
 
     # owner/warehouse 在模型上 editable=False，这里放到只读里可显示
     readonly_fields = ("owner", "created_at", "updated_at")
 
     fieldsets = (
-        ("关联", {"fields": ("order_line", ("owner", ))}),
+        ("关联", {"fields": ("order_line", ("owner",))}),
         ("实物标识", {"fields": (("lot_no", "serial_no"), "exp_date")}),
         ("检验与处置", {"fields": (("condition", "disposition"), "qty", "note")}),
-        ("流程", {"fields": (
-            ("status",),
-            ("inspected_by", "inspected_at"),
-            ("approved_by", "approved_at"),
-        )}),
+        (
+            "流程",
+            {
+                "fields": (
+                    ("status",),
+                    ("inspected_by", "inspected_at"),
+                    ("approved_by", "approved_at"),
+                )
+            },
+        ),
         ("系统", {"fields": (("created_at", "updated_at"),)}),
     )
 
@@ -1123,15 +1175,27 @@ class ReturnInspectionInline(admin.StackedInline):  # 也可以使用 admin.Tabu
 
     # 根据状态动态只读：审核后不允许再改关键字段
     def get_readonly_fields(self, request, obj=None):
-        base_ro = list(super().get_readonly_fields(request, obj)) + ["owner", "created_at", "updated_at"]
+        base_ro = list(super().get_readonly_fields(request, obj)) + [
+            "owner",
+            "created_at",
+            "updated_at",
+        ]
         if not obj:
             return base_ro
         if obj.status in {"APPROVED", "POSTED"}:
             # 审核后锁关键业务字段，仅允许改备注/状态（如需）
             return base_ro + [
-                "order_line", "lot_no", "serial_no", "exp_date",
-                "condition", "disposition", "qty", "inspected_by", "inspected_at",
-                "approved_by", "approved_at",
+                "order_line",
+                "lot_no",
+                "serial_no",
+                "exp_date",
+                "condition",
+                "disposition",
+                "qty",
+                "inspected_by",
+                "inspected_at",
+                "approved_by",
+                "approved_at",
             ]
         return base_ro
 

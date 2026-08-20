@@ -78,9 +78,7 @@ class LocationsWarehouseScopeTests(TestCase):
         local_location.save(update_fields=["is_frozen"])
         with self.assertRaises(ValidationError) as unavailable_exc:
             self.warehouse.full_clean()
-        self.assertIn(
-            "default_receive_location", unavailable_exc.exception.message_dict
-        )
+        self.assertIn("default_receive_location", unavailable_exc.exception.message_dict)
 
         other_warehouse = Warehouse.objects.create(
             code="WH-LOC-2",
@@ -100,9 +98,7 @@ class LocationsWarehouseScopeTests(TestCase):
         self.warehouse.default_receive_location = other_location
         with self.assertRaises(ValidationError) as cross_warehouse_exc:
             self.warehouse.full_clean()
-        self.assertIn(
-            "default_receive_location", cross_warehouse_exc.exception.message_dict
-        )
+        self.assertIn("default_receive_location", cross_warehouse_exc.exception.message_dict)
 
     def test_container_rejects_location_from_another_warehouse(self):
         location = Location.objects.create(

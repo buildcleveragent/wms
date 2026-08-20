@@ -13,9 +13,7 @@ from allapp.inventory.locking import (
 class InventoryWriteRetryTests(SimpleTestCase):
     def test_mysql_deadlock_and_lock_wait_timeout_are_retryable(self):
         self.assertTrue(is_retryable_inventory_error(OperationalError(1205, "wait")))
-        self.assertTrue(
-            is_retryable_inventory_error(OperationalError(1213, "deadlock"))
-        )
+        self.assertTrue(is_retryable_inventory_error(OperationalError(1213, "deadlock")))
         self.assertFalse(is_retryable_inventory_error(OperationalError(2006, "gone")))
 
     @patch("allapp.inventory.locking.time.sleep")

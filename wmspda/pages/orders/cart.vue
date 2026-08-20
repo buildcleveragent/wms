@@ -99,7 +99,7 @@ onMounted(()=>{
 
 // function printReceiveTask(taskId){
 // 	console.log("92 printReceiveTask printReceiveTask ")
-//   // 后端打印页 URL，如 http://192.168.1.10:8000/console/receive_task/58/print/
+//   // 后端打印页 URL，如 https://wms.example.com/console/receive_task/58/print/
 //   const base = BASE_URL.replace(/\/$/, '')
 //   // const url = `${base}/inbound/receive_task/${taskId}/print/`
 //   const url = `${BASE_URL}/api/inbound/receive_task/${taskId}/print/`

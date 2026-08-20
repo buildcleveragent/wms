@@ -21,9 +21,9 @@ class Command(BaseCommand):
                 *ProductBarcode.all_objects.filter(product=product).values_list(
                     "normalized_value", flat=True
                 ),
-                *ProductExternalIdentifier.all_objects.filter(
-                    product=product
-                ).values_list("normalized_value", flat=True),
+                *ProductExternalIdentifier.all_objects.filter(product=product).values_list(
+                    "normalized_value", flat=True
+                ),
             } - {""}
             registered = set(
                 ProductIdentifierRegistry.objects.filter(product=product).values_list(
@@ -34,8 +34,7 @@ class Command(BaseCommand):
                 missing = sorted(expected - registered)
                 extra = sorted(registered - expected)
                 errors.append(
-                    f"商品 {product.pk}/{product.code}: "
-                    f"注册表缺少={missing} 多余={extra}"
+                    f"商品 {product.pk}/{product.code}: " f"注册表缺少={missing} 多余={extra}"
                 )
             projections = {
                 "gtin": ("GTIN", product.gtin, None),
@@ -65,9 +64,7 @@ class Command(BaseCommand):
                 and not ProductExternalIdentifier.all_objects.filter(
                     product=product,
                     source_system="LEGACY",
-                    normalized_value=normalize_product_identifier(
-                        product.external_code
-                    ),
+                    normalized_value=normalize_product_identifier(product.external_code),
                     is_primary=True,
                 ).exists()
             ):

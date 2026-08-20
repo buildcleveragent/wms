@@ -84,9 +84,7 @@ def record_audit_event(
         "after": _json_safe(after or {}),
         "metadata": event_metadata,
     }
-    raw = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), default=_json_default
-    ).encode()
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=_json_default).encode()
     key = settings.SECRET_KEY.encode()
     event_hash = hmac.new(key, raw, hashlib.sha256).hexdigest()
     manager = AuditEvent.objects.using(using) if using else AuditEvent.objects

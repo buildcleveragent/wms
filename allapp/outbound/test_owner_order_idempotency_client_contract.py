@@ -20,9 +20,7 @@ class OwnerOrderIdempotencyClientContractTests(SimpleTestCase):
         self.assertIn(':disabled="!canSubmit"', source)
         self.assertRegex(
             source,
-            re.compile(
-                r"const canSubmit = computed\(\(\) => \{.*?submitting\.value", re.DOTALL
-            ),
+            re.compile(r"const canSubmit = computed\(\(\) => \{.*?submitting\.value", re.DOTALL),
         )
         self.assertIn("finally", source)
         self.assertIn("submitting.value = false", source)

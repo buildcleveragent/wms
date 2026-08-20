@@ -64,4 +64,5 @@ npm run build:mp-weixin
 - 开发预览：`/wms/sales-miniapp/dist/dev/mp-weixin`
 - 发布构建：`/wms/sales-miniapp/dist/build/mp-weixin`
 
-默认后端地址是 `http://192.168.1.6:8001`，由 `utils/request.js` 统一配置，登录页不会向用户显示服务器地址。
+H5 默认使用同源 `/api`；App/微信构建必须通过 `VITE_API_BASE_URL` 提供公网 HTTPS
+地址。`utils/request.js` 统一读取经校验的地址，登录页不会向用户显示或持久化服务器地址。

@@ -39,9 +39,7 @@ class NoOrderReceiveImportTemplateApi(APIView):
     permission_classes = [permissions.IsAuthenticated, CanReceiveWithoutOrder]
 
     def get(self, request):
-        owner, _warehouse_id = _resolve_scope(
-            request, request.query_params.get("owner_id")
-        )
+        owner, _warehouse_id = _resolve_scope(request, request.query_params.get("owner_id"))
         content = build_no_order_receive_template(owner)
         filename = f"{owner.code}-无订单批量入库模板.xlsx"
         response = HttpResponse(content, content_type=XLSX_CONTENT_TYPE)
@@ -103,9 +101,7 @@ class NoOrderReceiveImportConfirmApi(APIView):
 
     def post(self, request):
         try:
-            credentials = load_preview_credentials(
-                request.data.get("preview_token") or ""
-            )
+            credentials = load_preview_credentials(request.data.get("preview_token") or "")
         except InboundExcelFileError as exc:
             raise ValidationError({"preview_token": str(exc)}) from exc
         if int(credentials.get("user_id") or 0) != request.user.id:
@@ -154,7 +150,5 @@ class NoOrderReceiveImportConfirmApi(APIView):
             raise ValidationError(detail) from exc
         except NoOrderReceiveConflict as exc:
             raise IdempotencyConflict from exc
-        response_status = (
-            status.HTTP_200_OK if result["idempotent"] else status.HTTP_201_CREATED
-        )
+        response_status = status.HTTP_200_OK if result["idempotent"] else status.HTTP_201_CREATED
         return Response(result, status=response_status)

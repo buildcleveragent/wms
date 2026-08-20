@@ -643,7 +643,8 @@ class SaleMiniProductReviewImageInline(SaleMiniInline):
         if not obj.pk or not obj.image:
             return "-"
         return format_html(
-            '<a href="{}" target="_blank"><img src="{}" style="max-width:120px;max-height:120px"></a>',
+            '<a href="{}" target="_blank"><img src="{}" '
+            'style="max-width:120px;max-height:120px"></a>',
             obj.image.url,
             obj.image.url,
         )

@@ -72,9 +72,7 @@ def _local_cancel_locked(mapping, by_user=None):
     release_adjustments(
         mapping,
         by_user=by_user,
-        reverse_confirmed=(
-            mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.OFFLINE
-        ),
+        reverse_confirmed=(mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.OFFLINE),
     )
     reverse_distribution(mapping)
     mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.CANCELLED
@@ -155,9 +153,7 @@ def validate_payment_result(payment, payload):
 
 
 def validate_refund_result(refund, payload, *, require_merchant=False):
-    if require_merchant and str(payload.get("mchid") or "") != str(
-        settings.WECHAT_PAY_MCH_ID
-    ):
+    if require_merchant and str(payload.get("mchid") or "") != str(settings.WECHAT_PAY_MCH_ID):
         raise ValidationError({"mchid": "微信退款商户号与本地配置不一致。"})
     if str(payload.get("out_refund_no") or "") != refund.out_refund_no:
         raise ValidationError({"out_refund_no": "微信退款单号与本地退款单不一致。"})
@@ -182,9 +178,7 @@ def get_or_create_full_refund(
     by_user=None,
 ):
     payment = (
-        SaleMiniPayment.objects.select_for_update()
-        .select_related("mapping")
-        .get(pk=payment.pk)
+        SaleMiniPayment.objects.select_for_update().select_related("mapping").get(pk=payment.pk)
     )
     idempotency_key = f"FULL_PAYMENT:{payment.pk}"
     refund = SaleMiniRefund.objects.filter(idempotency_key=idempotency_key).first()
@@ -297,15 +291,11 @@ def apply_refund_result(refund, payload, *, from_callback=False, by_user=None):
     lock_warehouses_for_inventory_write(warehouse_id)
     refund = (
         SaleMiniRefund.objects.select_for_update()
-        .select_related(
-            "payment", "payment__mapping", "payment__mapping__outbound_order"
-        )
+        .select_related("payment", "payment__mapping", "payment__mapping__outbound_order")
         .get(pk=refund.pk)
     )
     payment = SaleMiniPayment.objects.select_for_update().get(pk=refund.payment_id)
-    mapping = SaleMiniOrderMapping.objects.select_for_update().get(
-        pk=payment.mapping_id
-    )
+    mapping = SaleMiniOrderMapping.objects.select_for_update().get(pk=payment.mapping_id)
     if mapping.outbound_order.warehouse_id != warehouse_id:
         raise ValidationError("商城订单仓库在退款期间发生变化，请重试。")
     refund.payment = payment
@@ -343,9 +333,7 @@ def apply_refund_result(refund, payload, *, from_callback=False, by_user=None):
     if status_value in TERMINAL_REFUND_STATUSES:
         refund.status = status_value
         refund.next_retry_at = None
-        refund.last_error = (
-            payload.get("user_received_account") or "微信退款异常，需人工处理。"
-        )
+        refund.last_error = payload.get("user_received_account") or "微信退款异常，需人工处理。"
         refund.requires_manual_action = True
     else:
         refund.status = SaleMiniRefund.Status.PROCESSING
@@ -397,9 +385,7 @@ def _schedule_refund_failure(refund_id, exc, *, keep_processing=False):
         .get(pk=refund_id)
     )
     refund.status = (
-        SaleMiniRefund.Status.PROCESSING
-        if keep_processing
-        else SaleMiniRefund.Status.FAILED
+        SaleMiniRefund.Status.PROCESSING if keep_processing else SaleMiniRefund.Status.FAILED
     )
     refund.last_error = str(exc)[:300]
     refund.response_payload = getattr(exc, "response", None) or {"error": str(exc)}
@@ -518,10 +504,7 @@ def _prepare_refund_query(refund_id):
 
 def reconcile_refund(refund):
     current = SaleMiniRefund.objects.select_related("payment").get(pk=refund.pk)
-    if (
-        current.status == SaleMiniRefund.Status.SUCCESS
-        or current.requires_manual_action
-    ):
+    if current.status == SaleMiniRefund.Status.SUCCESS or current.requires_manual_action:
         return current
     if current.status != SaleMiniRefund.Status.PROCESSING:
         return submit_refund(current)
@@ -645,9 +628,7 @@ def apply_payment_success(payment, payload, by_user=None):
     mapping.paid_at = mapping.paid_at or payment.paid_at
     mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.PAID
     mapping.updated_by = by_user
-    mapping.save(
-        update_fields=["payment_status", "paid_at", "updated_by", "updated_at"]
-    )
+    mapping.save(update_fields=["payment_status", "paid_at", "updated_by", "updated_at"])
     confirm_adjustments(mapping, by_user=by_user)
     confirm_distribution(mapping)
     return {"result": "paid", "refund": None}
@@ -696,9 +677,7 @@ def settle_internal_zero(mapping, by_user=None):
     mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.PAID
     mapping.paid_at = mapping.paid_at or payment.paid_at or now
     mapping.updated_by = by_user
-    mapping.save(
-        update_fields=["payment_status", "paid_at", "updated_by", "updated_at"]
-    )
+    mapping.save(update_fields=["payment_status", "paid_at", "updated_by", "updated_at"])
     confirm_adjustments(mapping, by_user=by_user)
     confirm_distribution(mapping)
     return payment
@@ -719,9 +698,7 @@ def refund_internal_zero_payment(payment, by_user=None, reason="用户申请退�
     )
     if payment.channel != SaleMiniPayment.Channel.INTERNAL_ZERO:
         raise ValidationError({"payment": "该支付流水不是内部零元结算。"})
-    mapping = SaleMiniOrderMapping.objects.select_for_update().get(
-        pk=payment.mapping_id
-    )
+    mapping = SaleMiniOrderMapping.objects.select_for_update().get(pk=payment.mapping_id)
     if mapping.outbound_order.warehouse_id != warehouse_id:
         raise ValidationError("商城订单仓库在零元退款期间发生变化，请重试。")
     payment.mapping = mapping
@@ -792,9 +769,7 @@ def query_and_apply_payment(payment, by_user=None):
     if current.channel == SaleMiniPayment.Channel.INTERNAL_ZERO:
         return {
             "trade_state": current.trade_state or "SUCCESS",
-            "result": (
-                "paid" if current.status == SaleMiniPayment.Status.PAID else "pending"
-            ),
+            "result": ("paid" if current.status == SaleMiniPayment.Status.PAID else "pending"),
             "refund": current.refunds.order_by("-id").first(),
         }
     try:
@@ -827,9 +802,7 @@ def _latest_active_payment(mapping):
 
 
 def safely_cancel_unpaid_mapping(mapping, by_user=None):
-    current = SaleMiniOrderMapping.objects.select_related("outbound_order").get(
-        pk=mapping.pk
-    )
+    current = SaleMiniOrderMapping.objects.select_related("outbound_order").get(pk=mapping.pk)
     if current.payment_status == SaleMiniOrderMapping.PaymentStatus.PAID:
         return {"result": "paid", "mapping": current}
     if current.payment_status in {
@@ -892,9 +865,7 @@ def safely_cancel_unpaid_mapping(mapping, by_user=None):
             _record_payment_query_error(payment.pk, exc)
             return {"result": "unknown", "mapping": current, "error": str(exc)}
         with transaction.atomic():
-            locked_payment = SaleMiniPayment.objects.select_for_update().get(
-                pk=payment.pk
-            )
+            locked_payment = SaleMiniPayment.objects.select_for_update().get(pk=payment.pk)
             locked_payment.status = SaleMiniPayment.Status.CLOSED
             locked_payment.closed_at = timezone.now()
             locked_payment.next_reconcile_at = None

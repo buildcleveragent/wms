@@ -75,9 +75,7 @@ class OperationsEtlTests(TestCase):
             shelf_life_days=365,
         )
         cls.actor = get_user_model().objects.create_user(username="etl-actor")
-        cls.supplier = Supplier.objects.create(
-            owner=cls.owner, code="ETL-SUP", name="ETL Supplier"
-        )
+        cls.supplier = Supplier.objects.create(owner=cls.owner, code="ETL-SUP", name="ETL Supplier")
         cls.customer = Customer.objects.create(
             owner=cls.owner,
             salesperson=cls.actor,
@@ -197,9 +195,7 @@ class OperationsEtlTests(TestCase):
             line_no=10,
             lot_no="ETL-LOT",
         )
-        OutboundOrder.objects.filter(pk=cls.outbound.pk).update(
-            created_at=order_created
-        )
+        OutboundOrder.objects.filter(pk=cls.outbound.pk).update(created_at=order_created)
         cls.outbound.created_at = order_created
 
         cls.pick_task = cls._completed_task(
@@ -401,9 +397,7 @@ class OperationsEtlTests(TestCase):
         self.assertEqual(FactInboundLine.objects.count(), 1)
         self.assertEqual(FactOutboundLine.objects.count(), 1)
         self.assertEqual(FactInventoryTxn.objects.count(), 2)
-        self.assertEqual(
-            EtlJobRun.objects.filter(job_name="etl_full_reports", ok=True).count(), 2
-        )
+        self.assertEqual(EtlJobRun.objects.filter(job_name="etl_full_reports", ok=True).count(), 2)
 
     def test_late_short_shipment_is_neither_on_time_nor_in_full(self):
         type(self.dispatch_task).objects.filter(pk=self.dispatch_task.pk).update(
@@ -621,10 +615,7 @@ class OperationsEtlTests(TestCase):
 
         self.assertEqual(FactBilling.objects.count(), 2)
         self.assertEqual(
-            {
-                row.dedup_key: row.amount
-                for row in FactBilling.objects.order_by("dedup_key")
-            },
+            {row.dedup_key: row.amount for row in FactBilling.objects.order_by("dedup_key")},
             {
                 original.acc_fingerprint: Decimal("100.00"),
                 reversal.acc_fingerprint: Decimal("-100.00"),
@@ -643,12 +634,8 @@ class OperationsEtlTests(TestCase):
         self.assertTrue(reconciliation["ok"])
         self.assertEqual(reconciliation["source"]["billing_rows"], "2")
         self.assertEqual(reconciliation["facts"]["billing_rows"], "2")
-        self.assertEqual(
-            Decimal(reconciliation["source"]["billing_amount"]), Decimal("0.00")
-        )
-        self.assertEqual(
-            Decimal(reconciliation["facts"]["billing_amount"]), Decimal("0.00")
-        )
+        self.assertEqual(Decimal(reconciliation["source"]["billing_amount"]), Decimal("0.00"))
+        self.assertEqual(Decimal(reconciliation["facts"]["billing_amount"]), Decimal("0.00"))
 
         self._full()
         self._full()
@@ -753,9 +740,7 @@ class OperationsEtlTests(TestCase):
         self._full()
 
         self.assertTrue(
-            ProductDim.objects.filter(
-                product_id=archived_product.pk, is_current=True
-            ).exists()
+            ProductDim.objects.filter(product_id=archived_product.pk, is_current=True).exists()
         )
         fact = FactInventoryTxn.objects.get(txn_id=transaction_row.pk)
         self.assertEqual(fact.product.product_id, archived_product.pk)
@@ -948,9 +933,7 @@ class OperationsEtlTests(TestCase):
         self._incremental(since=first_watermark)
         self.assertEqual(FactOutboundLine.objects.count(), 1)
         self.assertEqual(FactInventoryTxn.objects.count(), 2)
-        self.assertTrue(
-            EtlJobRun.objects.filter(job_name="etl_incremental_reports").last().ok
-        )
+        self.assertTrue(EtlJobRun.objects.filter(job_name="etl_incremental_reports").last().ok)
 
     def test_failed_incremental_reconciliation_does_not_advance_watermark(self):
         self._full()

@@ -46,9 +46,7 @@ def q3(value) -> Decimal:
 
 
 def _package_multiple(policy: ReplenishmentPolicy) -> Decimal:
-    package = policy.product.packages.filter(
-        uom_id=policy.replenish_uom_id, is_active=True
-    ).first()
+    package = policy.product.packages.filter(uom_id=policy.replenish_uom_id, is_active=True).first()
     if package is None:
         raise ValidationError("补货策略的补货单位不在商品包装层级中。")
     return q3(package.qty_in_base)
@@ -117,9 +115,7 @@ def _source_details(policy: ReplenishmentPolicy, *, lock: bool = False):
     ).select_related("location", "product")
     if lock:
         qs = qs.select_for_update()
-    return qs.order_by(
-        F("expiry_date").asc(nulls_last=True), "batch_no", "location__code", "id"
-    )
+    return qs.order_by(F("expiry_date").asc(nulls_last=True), "batch_no", "location__code", "id")
 
 
 def _source_candidates(policy: ReplenishmentPolicy, *, lock: bool = False):
@@ -211,9 +207,7 @@ def _create_task(
     if shortage > 0:
         task_remark += f"；来源库存缺口 {shortage}"
 
-    task_no = DocSequence.next_code(
-        doc_type="RPL", warehouse=policy.warehouse, owner=policy.owner
-    )
+    task_no = DocSequence.next_code(doc_type="RPL", warehouse=policy.warehouse, owner=policy.owner)
     task = WmsTask.objects.create(
         task_no=task_no,
         task_type=WmsTask.TaskType.REPLEN,
@@ -238,9 +232,7 @@ def _create_task(
         request=request,
         demand_order_ids=(
             [int(source_pk)]
-            if trigger == "DEMAND"
-            and source_model == "OutboundOrder"
-            and source_pk is not None
+            if trigger == "DEMAND" and source_model == "OutboundOrder" and source_pk is not None
             else []
         ),
         src_zone=ZoneType(policy.source_zone_type).label,
@@ -272,13 +264,9 @@ def _create_task(
                 "inventory_detail_id": detail.pk,
                 "lot_no": detail.batch_no or "",
                 "mfg_date": (
-                    detail.production_date.isoformat()
-                    if detail.production_date
-                    else None
+                    detail.production_date.isoformat() if detail.production_date else None
                 ),
-                "exp_date": (
-                    detail.expiry_date.isoformat() if detail.expiry_date else None
-                ),
+                "exp_date": (detail.expiry_date.isoformat() if detail.expiry_date else None),
                 "serial_no": detail.serial_no or "",
                 "package_multiple": str(multiple),
             },
@@ -320,9 +308,7 @@ def evaluate_policy(policy_id: int, *, by_user=None, force: bool = False):
     lock_warehouses_for_inventory_write(warehouse_id)
     policy = (
         ReplenishmentPolicy.objects.select_for_update()
-        .select_related(
-            "owner", "warehouse", "product", "target_location", "replenish_uom"
-        )
+        .select_related("owner", "warehouse", "product", "target_location", "replenish_uom")
         .get(pk=policy_id, is_active=True)
     )
     if policy.warehouse_id != warehouse_id:
@@ -354,9 +340,7 @@ def evaluate_policy(policy_id: int, *, by_user=None, force: bool = False):
 def evaluate_policies(
     *, policy_ids=None, owner_id=None, warehouse_id=None, product_id=None, by_user=None
 ):
-    qs = ReplenishmentPolicy.objects.filter(is_active=True).order_by(
-        "warehouse_id", "id"
-    )
+    qs = ReplenishmentPolicy.objects.filter(is_active=True).order_by("warehouse_id", "id")
     if policy_ids is not None:
         qs = qs.filter(pk__in=policy_ids)
     if owner_id:
@@ -389,9 +373,7 @@ def create_demand_tasks(order, shortages: list[dict], *, by_user=None) -> list[W
     for shortage in shortages:
         policy = (
             ReplenishmentPolicy.objects.select_for_update()
-            .select_related(
-                "owner", "warehouse", "product", "target_location", "replenish_uom"
-            )
+            .select_related("owner", "warehouse", "product", "target_location", "replenish_uom")
             .filter(
                 owner_id=order.owner_id,
                 warehouse_id=order.warehouse_id,
@@ -417,15 +399,11 @@ def create_demand_tasks(order, shortages: list[dict], *, by_user=None) -> list[W
             .order_by("id")
         )
         for task in active:
-            extra = (
-                ReplenishTaskExtra.objects.select_for_update().filter(task=task).first()
-            )
+            extra = ReplenishTaskExtra.objects.select_for_update().filter(task=task).first()
             if extra and order.pk not in (extra.demand_order_ids or []):
                 extra.demand_order_ids = [*(extra.demand_order_ids or []), order.pk]
                 extra.updated_by = by_user
-                extra.save(
-                    update_fields=["demand_order_ids", "updated_by", "updated_at"]
-                )
+                extra.save(update_fields=["demand_order_ids", "updated_by", "updated_at"])
             if task.status in {WmsTask.Status.DRAFT, WmsTask.Status.READY}:
                 _release_task(task, by_user=by_user)
             tasks.append(task)
@@ -474,18 +452,13 @@ def approve_request(request_id: int, *, by_user, note: str = ""):
         .select_related("owner", "warehouse", "product", "target_location")
         .get(pk=request_id)
     )
-    if (
-        request.status == ReplenishmentRequest.Status.APPROVED
-        and request.generated_task_id
-    ):
+    if request.status == ReplenishmentRequest.Status.APPROVED and request.generated_task_id:
         return request.generated_task
     if request.status != ReplenishmentRequest.Status.PENDING:
         raise ValidationError("只有待审核的补货申请可以批准。")
     policy = (
         ReplenishmentPolicy.objects.select_for_update()
-        .select_related(
-            "owner", "warehouse", "product", "target_location", "replenish_uom"
-        )
+        .select_related("owner", "warehouse", "product", "target_location", "replenish_uom")
         .filter(
             owner_id=request.owner_id,
             warehouse_id=request.warehouse_id,
@@ -561,17 +534,13 @@ def reject_request(request_id: int, *, by_user, note: str):
 
 
 def _canonical_payload(payload: dict) -> str:
-    return json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    )
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def _valid_scan_codes(line: WmsTaskLine) -> tuple[set[str], set[str]]:
     product = line.product
     values = {product.code, product.sku}
-    values.update(
-        product.packages.exclude(barcode__isnull=True).values_list("barcode", flat=True)
-    )
+    values.update(product.packages.exclude(barcode__isnull=True).values_list("barcode", flat=True))
     product_codes = {str(value).strip().upper() for value in values if value}
     try:
         extra = line.replenishlineextra
@@ -601,9 +570,7 @@ def record_replenishment(
     by_user,
     serial_no: str = "",
 ):
-    task = WmsTask.objects.select_for_update().get(
-        pk=task_id, task_type=WmsTask.TaskType.REPLEN
-    )
+    task = WmsTask.objects.select_for_update().get(pk=task_id, task_type=WmsTask.TaskType.REPLEN)
     try:
         line = (
             WmsTaskLine.objects.select_for_update()
@@ -646,19 +613,13 @@ def record_replenishment(
         "qty": str(move_qty),
         "serial_no": serial,
     }
-    payload_hash = hashlib.sha256(
-        _canonical_payload(payload).encode("utf-8")
-    ).hexdigest()
-    fp = hashlib.sha256(
-        f"replen:{task.pk}:{by_user.pk}:{request_id}".encode("utf-8")
-    ).hexdigest()
+    payload_hash = hashlib.sha256(_canonical_payload(payload).encode("utf-8")).hexdigest()
+    fp = hashlib.sha256(f"replen:{task.pk}:{by_user.pk}:{request_id}".encode("utf-8")).hexdigest()
     expected_remark = f"IDEMPOTENCY:{payload_hash}"
     existing = TaskScanLog.objects.filter(fp=fp).first()
     if existing:
         if existing.remark != expected_remark:
-            raise ReplenishmentIdempotencyConflict(
-                "同一请求编号不能用于不同的补货内容。"
-            )
+            raise ReplenishmentIdempotencyConflict("同一请求编号不能用于不同的补货内容。")
         return {"idempotent": True, "task": task, "posting_required": False}
 
     if task.status != WmsTask.Status.IN_PROGRESS:
@@ -684,9 +645,7 @@ def record_replenishment(
         barcode=scanned_product,
         label_key=serial or None,
         code_type=(
-            "SERIAL"
-            if serial
-            else ("CONTAINER" if scanned_product in container_codes else "ITEM")
+            "SERIAL" if serial else ("CONTAINER" if scanned_product in container_codes else "ITEM")
         ),
         by_user=by_user,
         method=TaskScanLog.Method.SCAN,

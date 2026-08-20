@@ -192,9 +192,7 @@ class PosProductListApi(generics.ListAPIView):
         if zone_type:
             inventory = inventory.filter(zone_type=int(zone_type))
         inventory_total = (
-            inventory.values("product_id")
-            .annotate(total=Sum("available_qty"))
-            .values("total")[:1]
+            inventory.values("product_id").annotate(total=Sum("available_qty")).values("total")[:1]
         )
         active_packages = (
             ProductPackage.objects.filter(is_active=True)
@@ -238,14 +236,12 @@ class PosReceiptWarehouseInfoListApi(generics.ListAPIView):
     pagination_class = None
 
     def get_queryset(self):
-        queryset = PosReceiptWarehouseInfo.objects.filter(
-            is_active=True
-        ).select_related("warehouse")
+        queryset = PosReceiptWarehouseInfo.objects.filter(is_active=True).select_related(
+            "warehouse"
+        )
         warehouse_id = getattr(self.request.user, "warehouse_id", None)
         if warehouse_id:
-            queryset = queryset.filter(
-                Q(warehouse_id=warehouse_id) | Q(warehouse__isnull=True)
-            )
+            queryset = queryset.filter(Q(warehouse_id=warehouse_id) | Q(warehouse__isnull=True))
         else:
             queryset = queryset.filter(warehouse__isnull=True)
         return queryset.order_by("warehouse_id", "-is_default", "sort_order", "id")
@@ -261,9 +257,7 @@ class PosCustomerListCreateApi(generics.ListCreateAPIView):
         if not warehouse_id:
             return PosCustomer.objects.none()
         queryset = PosCustomer.objects.filter(warehouse_id=warehouse_id)
-        include_inactive = (
-            self.request.query_params.get("include_inactive") or ""
-        ).strip()
+        include_inactive = (self.request.query_params.get("include_inactive") or "").strip()
         if include_inactive not in {"1", "true", "TRUE", "yes", "YES"}:
             queryset = queryset.filter(is_active=True)
         search = (self.request.query_params.get("search") or "").strip()
@@ -306,21 +300,15 @@ class PosCheckoutApi(APIView):
     permission_classes = [permissions.IsAuthenticated, HasPosCheckoutPermission]
 
     def post(self, request):
-        serializer = PosCheckoutSerializer(
-            data=request.data, context={"request": request}
-        )
+        serializer = PosCheckoutSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         try:
             result = serializer.save()
         except InventoryConcurrencyError as exc:
             return _inventory_busy_response(exc)
         except DjangoValidationError as exc:
-            return Response(
-                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
-            )
-        return Response(
-            serialize_checkout_result(result, request), status=status.HTTP_201_CREATED
-        )
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
+        return Response(serialize_checkout_result(result, request), status=status.HTTP_201_CREATED)
 
 
 def _validation_error_data(exc):
@@ -385,9 +373,7 @@ def _repayment_queryset_for_user(user):
 
 def _date_bounds(start_date, end_date):
     start_at = datetime.datetime.combine(start_date, datetime.time.min)
-    end_at = datetime.datetime.combine(
-        end_date + datetime.timedelta(days=1), datetime.time.min
-    )
+    end_at = datetime.datetime.combine(end_date + datetime.timedelta(days=1), datetime.time.min)
     if timezone.is_naive(start_at) and timezone.is_aware(timezone.now()):
         tz = timezone.get_current_timezone()
         start_at = timezone.make_aware(start_at, tz)
@@ -409,9 +395,7 @@ def _filter_sale_queryset(queryset, params):
     start_raw = (params.get("start_date") or "").strip()
     end_raw = (params.get("end_date") or "").strip()
     if search:
-        queryset = queryset.filter(
-            Q(sale_no__icontains=search) | Q(src_bill_no__icontains=search)
-        )
+        queryset = queryset.filter(Q(sale_no__icontains=search) | Q(src_bill_no__icontains=search))
     if status_value:
         queryset = queryset.filter(status=status_value)
     if shift_id:
@@ -420,9 +404,7 @@ def _filter_sale_queryset(queryset, params):
         queryset = queryset.filter(shift_id=int(shift_id))
     if start_raw or end_raw:
         start_date = (
-            _parse_date(start_raw, "start_date")
-            if start_raw
-            else _parse_date(end_raw, "end_date")
+            _parse_date(start_raw, "start_date") if start_raw else _parse_date(end_raw, "end_date")
         )
         end_date = _parse_date(end_raw, "end_date") if end_raw else start_date
         if end_date < start_date:
@@ -436,9 +418,7 @@ def _shift_queryset_for_user(user):
     warehouse_id = getattr(user, "warehouse_id", None)
     if not warehouse_id:
         return PosShift.objects.none()
-    return PosShift.objects.select_related("warehouse", "cashier").filter(
-        warehouse_id=warehouse_id
-    )
+    return PosShift.objects.select_related("warehouse", "cashier").filter(warehouse_id=warehouse_id)
 
 
 def _xlsx_response(workbook, filename):
@@ -470,13 +450,9 @@ class PosStatsApi(APIView):
 
     def get(self, request):
         try:
-            payload = build_pos_stats_payload(
-                user=request.user, params=request.query_params
-            )
+            payload = build_pos_stats_payload(user=request.user, params=request.query_params)
         except (DjangoValidationError, ValueError) as exc:
-            return Response(
-                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
         return Response(payload, status=status.HTTP_200_OK)
 
 
@@ -485,13 +461,9 @@ class PosStatsExportApi(APIView):
 
     def get(self, request):
         try:
-            payload = build_pos_stats_payload(
-                user=request.user, params=request.query_params
-            )
+            payload = build_pos_stats_payload(user=request.user, params=request.query_params)
         except (DjangoValidationError, ValueError) as exc:
-            return Response(
-                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
         workbook = build_pos_stats_export_workbook(payload)
         start = payload.get("period", {}).get("start_date", "start")
         end = payload.get("period", {}).get("end_date", "end")
@@ -503,13 +475,9 @@ class PosAccuracyApi(APIView):
 
     def get(self, request):
         try:
-            payload = reconcile_pos_accuracy(
-                user=request.user, params=request.query_params
-            )
+            payload = reconcile_pos_accuracy(user=request.user, params=request.query_params)
         except (DjangoValidationError, ValueError) as exc:
-            return Response(
-                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
         return Response(payload, status=status.HTTP_200_OK)
 
 
@@ -597,12 +565,8 @@ class PosSaleVoidApi(APIView):
         except InventoryConcurrencyError as exc:
             return _inventory_busy_response(exc)
         except DjangoValidationError as exc:
-            return Response(
-                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
-            )
-        return Response(
-            serialize_checkout_result(result, request), status=status.HTTP_200_OK
-        )
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
+        return Response(serialize_checkout_result(result, request), status=status.HTTP_200_OK)
 
 
 class PosReturnListCreateApi(APIView):
@@ -614,9 +578,7 @@ class PosReturnListCreateApi(APIView):
         return super().get_permissions()
 
     def get(self, request):
-        queryset = _return_queryset_for_user(request.user).order_by(
-            "-created_at", "-id"
-        )
+        queryset = _return_queryset_for_user(request.user).order_by("-created_at", "-id")
         sale_id = (request.query_params.get("sale_id") or "").strip()
         if sale_id:
             if not sale_id.isdigit():
@@ -632,18 +594,14 @@ class PosReturnListCreateApi(APIView):
         return paginator.get_paginated_response(rows)
 
     def post(self, request):
-        serializer = PosReturnCreateSerializer(
-            data=request.data, context={"request": request}
-        )
+        serializer = PosReturnCreateSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         try:
             result = serializer.save()
         except InventoryConcurrencyError as exc:
             return _inventory_busy_response(exc)
         except DjangoValidationError as exc:
-            return Response(
-                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
         return Response(serialize_return_result(result), status=status.HTTP_201_CREATED)
 
 
@@ -651,9 +609,7 @@ class PosReturnDetailApi(APIView):
     permission_classes = [permissions.IsAuthenticated, HasPosSaleViewPermission]
 
     def get(self, request, return_id):
-        return_order = get_object_or_404(
-            _return_queryset_for_user(request.user), pk=return_id
-        )
+        return_order = get_object_or_404(_return_queryset_for_user(request.user), pk=return_id)
         return Response(
             {"return": PosReturnReadSerializer(return_order).data},
             status=status.HTTP_200_OK,
@@ -674,9 +630,7 @@ class PosCustomerDebtApi(APIView):
             PosCustomer.objects.filter(warehouse_id=warehouse_id, is_active=True),
             pk=customer_id,
         )
-        debt = customer_pos_debt_balance(
-            customer_id=customer.id, warehouse_id=warehouse_id
-        )
+        debt = customer_pos_debt_balance(customer_id=customer.id, warehouse_id=warehouse_id)
         repayments = (
             _repayment_queryset_for_user(request.user)
             .filter(pos_customer_id=customer.id)
@@ -691,9 +645,7 @@ class PosCustomerDebtApi(APIView):
                 },
                 "warehouse_id": warehouse_id,
                 "debt_balance": str(debt),
-                "repayments": PosCustomerRepaymentReadSerializer(
-                    repayments, many=True
-                ).data,
+                "repayments": PosCustomerRepaymentReadSerializer(repayments, many=True).data,
             },
             status=status.HTTP_200_OK,
         )
@@ -708,9 +660,7 @@ class PosCustomerRepaymentListCreateApi(APIView):
         return super().get_permissions()
 
     def get(self, request):
-        queryset = _repayment_queryset_for_user(request.user).order_by(
-            "-created_at", "-id"
-        )
+        queryset = _repayment_queryset_for_user(request.user).order_by("-created_at", "-id")
         customer_id = (request.query_params.get("customer_id") or "").strip()
         if customer_id:
             if not customer_id.isdigit():
@@ -733,12 +683,8 @@ class PosCustomerRepaymentListCreateApi(APIView):
         try:
             result = serializer.save()
         except DjangoValidationError as exc:
-            return Response(
-                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
-            )
-        return Response(
-            serialize_repayment_result(result), status=status.HTTP_201_CREATED
-        )
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
+        return Response(serialize_repayment_result(result), status=status.HTTP_201_CREATED)
 
 
 class PosShiftCurrentApi(APIView):
@@ -748,9 +694,7 @@ class PosShiftCurrentApi(APIView):
         try:
             shift = current_shift_for_user(request.user)
         except DjangoValidationError as exc:
-            return Response(
-                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
         return Response(
             {"shift": serialize_shift(shift) if shift else None},
             status=status.HTTP_200_OK,
@@ -766,18 +710,12 @@ class PosShiftOpenApi(APIView):
         try:
             shift = open_pos_shift(
                 user=request.user,
-                opening_cash_amount=serializer.validated_data.get(
-                    "opening_cash_amount"
-                ),
+                opening_cash_amount=serializer.validated_data.get("opening_cash_amount"),
                 remark=serializer.validated_data.get("remark", ""),
             )
         except DjangoValidationError as exc:
-            return Response(
-                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
-            )
-        return Response(
-            {"shift": serialize_shift(shift)}, status=status.HTTP_201_CREATED
-        )
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
+        return Response({"shift": serialize_shift(shift)}, status=status.HTTP_201_CREATED)
 
 
 class PosShiftListApi(APIView):
@@ -815,9 +753,7 @@ class PosShiftCloseApi(APIView):
                 remark=serializer.validated_data.get("remark", ""),
             )
         except DjangoValidationError as exc:
-            return Response(
-                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
         return Response({"shift": serialize_shift(shift)}, status=status.HTTP_200_OK)
 
 
@@ -837,9 +773,7 @@ class PosShiftReopenApi(APIView):
                 reason=serializer.validated_data["reason"],
             )
         except DjangoValidationError as exc:
-            return Response(
-                _validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
         return Response({"shift": serialize_shift(shift)}, status=status.HTTP_200_OK)
 
 

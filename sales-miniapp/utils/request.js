@@ -1,11 +1,18 @@
-const DEFAULT_BASE_URL = 'http://192.168.1.6:8001'
+import { BASE_URL } from './api-base'
+
+try {
+  uni.removeStorageSync('sales_base_url')
+} catch (error) {}
 
 export function getBaseUrl() {
-  return uni.getStorageSync('sales_base_url') || DEFAULT_BASE_URL
+  return BASE_URL
 }
 
 export function setBaseUrl(url) {
-  uni.setStorageSync('sales_base_url', String(url || '').replace(/\/$/, ''))
+  const requested = String(url || '').trim().replace(/\/$/, '')
+  if (requested && requested !== BASE_URL) {
+    throw new Error('服务地址由发布构建配置，运行时不可覆盖。')
+  }
 }
 
 export function getToken() {

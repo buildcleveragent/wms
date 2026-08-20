@@ -41,12 +41,8 @@ class UnifiedProductIdentifierLookupTests(TestCase):
         return set(matching_product_ids(term).values_list("pk", flat=True))
 
     def test_searches_full_product_and_all_effective_identifier_sources(self):
-        product = self.make_product(
-            "OWNER-CODE-ABC", name="青柠气泡水", spec="330ml 罐装"
-        )
-        package = ProductPackage.objects.create(
-            product=product, uom=self.carton, qty_in_base=24
-        )
+        product = self.make_product("OWNER-CODE-ABC", name="青柠气泡水", spec="330ml 罐装")
+        package = ProductPackage.objects.create(product=product, uom=self.carton, qty_in_base=24)
         values = [
             add_product_barcode(
                 product=product,
@@ -132,12 +128,8 @@ class UnifiedProductIdentifierLookupTests(TestCase):
     def test_related_filter_keeps_outer_owner_scope_and_does_not_duplicate(self):
         own = self.make_product("SCOPED-OWN")
         other = self.make_product("SCOPED-OTHER", owner=self.other_owner)
-        add_product_barcode(
-            product=own, barcode="SHARED-PART-OWN", barcode_type="OTHER"
-        )
-        add_product_barcode(
-            product=other, barcode="SHARED-PART-OTHER", barcode_type="OTHER"
-        )
+        add_product_barcode(product=own, barcode="SHARED-PART-OWN", barcode_type="OTHER")
+        add_product_barcode(product=other, barcode="SHARED-PART-OTHER", barcode_type="OTHER")
 
         scoped = filter_by_product_search(
             Product.objects.filter(owner=self.owner),
@@ -152,12 +144,8 @@ class UnifiedProductIdentifierLookupTests(TestCase):
         first = self.make_product("EXACT-FIRST")
         second = self.make_product("EXACT-SECOND", owner=self.other_owner)
         for product in (first, second):
-            add_product_barcode(
-                product=product, barcode="CROSS-OWNER-EXACT", barcode_type="OTHER"
-            )
-        retired = add_product_barcode(
-            product=first, barcode="EXACT-RETIRED", barcode_type="OTHER"
-        )
+            add_product_barcode(product=product, barcode="CROSS-OWNER-EXACT", barcode_type="OTHER")
+        retired = add_product_barcode(product=first, barcode="EXACT-RETIRED", barcode_type="OTHER")
         set_identifier_active(retired, False)
 
         self.assertEqual(
@@ -172,9 +160,7 @@ class UnifiedProductIdentifierLookupTests(TestCase):
 
     def test_inactive_or_deleted_package_disables_package_semantic_barcode(self):
         product = self.make_product("PACKAGE-LIFECYCLE")
-        package = ProductPackage.objects.create(
-            product=product, uom=self.carton, qty_in_base=12
-        )
+        package = ProductPackage.objects.create(product=product, uom=self.carton, qty_in_base=12)
         record = add_product_barcode(
             product=product,
             barcode="PACKAGE-LIFECYCLE-CODE",

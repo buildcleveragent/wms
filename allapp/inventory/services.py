@@ -49,6 +49,7 @@ B) 扫描打点：仅处理 status=OK & posted_at IS NULL 的扫描；写完统�
 - 如需“按行结算/回滚”，可在未来把 task_line_id 纳入聚合键或另建 TransactionAttribution 归属表，不影响当前实现。
 
 """
+
 from __future__ import annotations
 
 import logging
@@ -227,9 +228,7 @@ def _scan_product_id(s: TaskScanLog, line: Optional[WmsTaskLine]) -> Optional[in
     """
     扫描商品优先从 scan.product 读；兜底到行.product。
     """
-    pid = getattr(s, "product_id", None) or getattr(
-        getattr(s, "product", None), "id", None
-    )
+    pid = getattr(s, "product_id", None) or getattr(getattr(s, "product", None), "id", None)
     if pid:
         return pid
     if line:
@@ -336,9 +335,7 @@ def _upsert_detail(
     if det.onhand_qty < 0:
         raise ValidationError("库存不足：出库数量超出当前账面库存。")
 
-    det.available_qty = (
-        det.onhand_qty - det.allocated_qty - det.locked_qty - det.damaged_qty
-    )
+    det.available_qty = det.onhand_qty - det.allocated_qty - det.locked_qty - det.damaged_qty
     det.save()
     ctx, ctx_text = build_log_payload(
         owner_id=owner_id,
@@ -488,9 +485,7 @@ def lock_active_inventory_details_for_update(
 ) -> List[InventoryDetail]:
     """Lock every active detail in each owner/product scope in a stable pair order."""
     locked: List[InventoryDetail] = []
-    normalized_pairs = sorted(
-        {(int(owner_id), int(product_id)) for owner_id, product_id in pairs}
-    )
+    normalized_pairs = sorted({(int(owner_id), int(product_id)) for owner_id, product_id in pairs})
     for owner_id, product_id in normalized_pairs:
         locked.extend(
             InventoryDetail.objects.select_for_update()
@@ -506,9 +501,7 @@ def lock_active_inventory_details_for_update(
 
 def _lock_inventory_dimensions(
     dimensions: Iterable[Dict[str, Any]],
-) -> Tuple[
-    Dict[Tuple[Any, ...], InventoryDetail], Dict[Tuple[int, int], InventorySummary]
-]:
+) -> Tuple[Dict[Tuple[Any, ...], InventoryDetail], Dict[Tuple[int, int], InventorySummary]]:
     """
     Lock all inventory rows touched by one posting in a stable order.
 
@@ -531,9 +524,7 @@ def _lock_inventory_dimensions(
     summaries: Dict[Tuple[int, int], InventorySummary] = {}
     for owner_id, product_id in pairs:
         if (owner_id, product_id) not in existing_pairs:
-            summaries[(owner_id, product_id)] = _lock_or_create_summary(
-                owner_id, product_id
-            )
+            summaries[(owner_id, product_id)] = _lock_or_create_summary(owner_id, product_id)
 
     for key in sorted(dimensions_by_key, key=_dimension_sort_key):
         if key in details_by_key:
@@ -542,16 +533,12 @@ def _lock_inventory_dimensions(
             **dimensions_by_key[key],
             defaults=_empty_detail_quantities(),
         )
-        details_by_key[key] = InventoryDetail.objects.select_for_update().get(
-            pk=detail.pk
-        )
+        details_by_key[key] = InventoryDetail.objects.select_for_update().get(pk=detail.pk)
 
     # Match the established detail -> summary lock order used by other inventory writers.
     for owner_id, product_id in pairs:
         if (owner_id, product_id) not in summaries:
-            summaries[(owner_id, product_id)] = _lock_or_create_summary(
-                owner_id, product_id
-            )
+            summaries[(owner_id, product_id)] = _lock_or_create_summary(owner_id, product_id)
 
     return details_by_key, summaries
 
@@ -654,16 +641,12 @@ def _refresh_summaries(
             for detail in current_details
             if detail.owner_id == owner_id and detail.product_id == product_id
         ]
-        onhand = sum(
-            (detail.onhand_qty or Decimal("0") for detail in pair_details), Decimal("0")
-        )
+        onhand = sum((detail.onhand_qty or Decimal("0") for detail in pair_details), Decimal("0"))
         allocated = sum(
             (detail.allocated_qty or Decimal("0") for detail in pair_details),
             Decimal("0"),
         )
-        locked = sum(
-            (detail.locked_qty or Decimal("0") for detail in pair_details), Decimal("0")
-        )
+        locked = sum((detail.locked_qty or Decimal("0") for detail in pair_details), Decimal("0"))
         damaged = sum(
             (detail.damaged_qty or Decimal("0") for detail in pair_details),
             Decimal("0"),
@@ -874,9 +857,7 @@ def _required_pos_meta_int(line: WmsTaskLine, key: str) -> int:
     return value
 
 
-def _pos_scan_source_details(
-    task: WmsTask, scans: List[TaskScanLog]
-) -> Dict[int, InventoryDetail]:
+def _pos_scan_source_details(task: WmsTask, scans: List[TaskScanLog]) -> Dict[int, InventoryDetail]:
     """Resolve each POS scan to its explicit source layer without guessing by primary key."""
     if _normalized_model_name(task.source_model) != "outboundorder":
         raise ValidationError(f"POS PICK 任务 {task.id} 来源必须为 OutboundOrder")
@@ -889,9 +870,7 @@ def _pos_scan_source_details(
         if line.status != WmsTaskLine.Status.COMPLETED:
             raise ValidationError(f"POS PICK 任务行 {line.id} 尚未完成")
         if _normalized_model_name(line.src_model) != "outboundorderline":
-            raise ValidationError(
-                f"POS PICK 任务行 {line.id} 来源必须为 OutboundOrderLine"
-            )
+            raise ValidationError(f"POS PICK 任务行 {line.id} 来源必须为 OutboundOrderLine")
 
         detail_id = _required_pos_meta_int(line, "source_inventory_detail_id")
         _required_pos_meta_int(line, "pos_sale_id")
@@ -903,9 +882,7 @@ def _pos_scan_source_details(
         try:
             task_order_id = int(task.source_pk)
         except (TypeError, ValueError) as exc:
-            raise ValidationError(
-                f"POS PICK 任务 {task.id} 缺少有效的出库单来源"
-            ) from exc
+            raise ValidationError(f"POS PICK 任务 {task.id} 缺少有效的出库单来源") from exc
         if task_order_id != order_id:
             raise ValidationError(f"POS PICK 任务行 {line.id} 的出库单来源不一致")
         if (line.plan_meta or {}).get("sale_no") != task.ref_no:
@@ -916,9 +893,7 @@ def _pos_scan_source_details(
     missing = sorted(set(detail_ids_by_scan.values()) - set(details))
     if missing:
         raise ValidationError(f"POS PICK 原库存层不存在或已软删除: {missing}")
-    return {
-        scan_id: details[detail_id] for scan_id, detail_id in detail_ids_by_scan.items()
-    }
+    return {scan_id: details[detail_id] for scan_id, detail_id in detail_ids_by_scan.items()}
 
 
 def _group_receive_like(
@@ -994,29 +969,22 @@ def _group_receive_like(
                 or source_detail.expiry_date != s.exp_date
                 or (source_detail.serial_no or "").upper() != (s.barcode or "").upper()
             ):
-                raise ValidationError(
-                    f"POS PICK 任务行 {line.id} 的跟踪属性与原库存层不一致"
-                )
+                raise ValidationError(f"POS PICK 任务行 {line.id} 的跟踪属性与原库存层不一致")
 
             meta_subwarehouse_id = meta.get("subwarehouse_id")
             if meta_subwarehouse_id is not None:
                 try:
                     meta_subwarehouse_id = int(meta_subwarehouse_id)
                 except (TypeError, ValueError) as exc:
-                    raise ValidationError(
-                        f"POS PICK 任务行 {line.id} 的子仓快照无效"
-                    ) from exc
+                    raise ValidationError(f"POS PICK 任务行 {line.id} 的子仓快照无效") from exc
             try:
                 meta_zone_type = int(meta.get("zone_type"))
             except (TypeError, ValueError) as exc:
-                raise ValidationError(
-                    f"POS PICK 任务行 {line.id} 的区域快照无效"
-                ) from exc
+                raise ValidationError(f"POS PICK 任务行 {line.id} 的区域快照无效") from exc
             if (
                 source_detail.subwarehouse_id != meta_subwarehouse_id
                 or source_detail.zone_type != meta_zone_type
-                or (source_detail.serial_no or "").upper()
-                != (meta.get("serial_no") or "").upper()
+                or (source_detail.serial_no or "").upper() != (meta.get("serial_no") or "").upper()
             ):
                 raise ValidationError(f"POS PICK 任务行 {line.id} 的库存层快照不一致")
 
@@ -1024,17 +992,13 @@ def _group_receive_like(
             try:
                 reserved_qty = _q4(meta["reserved_qty"])
             except (KeyError, TypeError, ValueError) as exc:
-                raise ValidationError(
-                    f"POS PICK 任务行 {line.id} 的预占数量无效"
-                ) from exc
+                raise ValidationError(f"POS PICK 任务行 {line.id} 的预占数量无效") from exc
             if (
                 reserved_qty != qty_abs
                 or _q4(line.qty_plan) != qty_abs
                 or _q4(line.qty_done) != qty_abs
             ):
-                raise ValidationError(
-                    f"POS PICK 任务行 {line.id} 的扫描、完成和预占数量不一致"
-                )
+                raise ValidationError(f"POS PICK 任务行 {line.id} 的扫描、完成和预占数量不一致")
 
             loc_id = source_detail.location_id
             batch_value = source_detail.batch_no
@@ -1153,8 +1117,7 @@ def _group_putaway(
             source_detail_id=(
                 getattr(line, "src_id", None)
                 if is_replenishment
-                and _normalized_model_name(getattr(line, "src_model", ""))
-                == "inventorydetail"
+                and _normalized_model_name(getattr(line, "src_model", "")) == "inventorydetail"
                 else None
             ),
         )
@@ -1256,20 +1219,14 @@ def _apply_receive_like(
             if key.task_line_id is None or key.source_detail_id is None:
                 raise ValidationError("POS PICK 聚合缺少任务行或原库存层")
             if locked_detail.id != key.source_detail_id:
-                raise ValidationError(
-                    f"POS PICK 原库存层 {key.source_detail_id} 已变化或不再可用"
-                )
+                raise ValidationError(f"POS PICK 原库存层 {key.source_detail_id} 已变化或不再可用")
             if not locked_detail.is_active:
                 raise ValidationError(f"POS PICK 原库存层 {locked_detail.id} 已停用")
             qty_abs = abs(qty)
             if locked_detail.onhand_qty < qty_abs:
-                raise ValidationError(
-                    f"POS PICK 原库存层 {locked_detail.id} 账面库存不足"
-                )
+                raise ValidationError(f"POS PICK 原库存层 {locked_detail.id} 账面库存不足")
             if locked_detail.allocated_qty < qty_abs:
-                raise ValidationError(
-                    f"POS PICK 原库存层 {locked_detail.id} 预占数量不足"
-                )
+                raise ValidationError(f"POS PICK 原库存层 {locked_detail.id} 预占数量不足")
 
         # 明细增量（出库为负数，进库为正数；COUNT 的 ADJ_* 同理）
         posted_detail = _upsert_detail(
@@ -1314,9 +1271,7 @@ def _apply_receive_like(
 
             if key.tx_type in {InvTxType.RECEIVE, InvTxType.ADJ_GAIN}:
                 received_date = (
-                    timezone.localtime(now).date()
-                    if timezone.is_aware(now)
-                    else now.date()
+                    timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
                 )
                 create_receipt_layer(
                     owner_id=key.owner_id,
@@ -1331,9 +1286,7 @@ def _apply_receive_like(
                     serial_no=key.serial_no or "",
                     expiry_date=key.expiry_date,
                     inventory_transaction_id=inventory_tx.id,
-                    movement_type=(
-                        "ADJUST" if key.tx_type == InvTxType.ADJ_GAIN else "RECEIVE"
-                    ),
+                    movement_type=("ADJUST" if key.tx_type == InvTxType.ADJ_GAIN else "RECEIVE"),
                 )
             elif key.tx_type in {InvTxType.ISSUE, InvTxType.ADJ_LOSS}:
                 consume_fifo(
@@ -1346,9 +1299,7 @@ def _apply_receive_like(
                     serial_no=key.serial_no or "",
                     inventory_transaction_id=inventory_tx.id,
                     occurred_at=now,
-                    movement_type=(
-                        "ADJUST" if key.tx_type == InvTxType.ADJ_LOSS else "ISSUE"
-                    ),
+                    movement_type=("ADJUST" if key.tx_type == InvTxType.ADJ_LOSS else "ISSUE"),
                 )
         ctx, ctx_text = build_log_payload(task=task, posting_batch=batch_no)
         logger.info(
@@ -1386,11 +1337,7 @@ def _apply_putaway(
     ]
 
     location_ids = sorted(
-        {
-            key.location_id
-            for (key_out, key_in), _qty in pending_groups
-            for key in (key_out, key_in)
-        }
+        {key.location_id for (key_out, key_in), _qty in pending_groups for key in (key_out, key_in)}
     )
     locations = {
         location.id: location
@@ -1439,8 +1386,7 @@ def _apply_putaway(
             )
     details_by_key, locked_summaries = _lock_inventory_dimensions(dimensions)
     touched_pairs: Set[Tuple[int, int]] = {
-        (key_out.owner_id, key_out.product_id)
-        for (key_out, _key_in), _qty in pending_groups
+        (key_out.owner_id, key_out.product_id) for (key_out, _key_in), _qty in pending_groups
     }
 
     def move_sort(item):
@@ -1509,15 +1455,12 @@ def _apply_putaway(
             )
             source_detail = details_by_key[source_key]
             if task_type == WmsTask.TaskType.REPLEN and (
-                not key_out.source_detail_id
-                or source_detail.id != key_out.source_detail_id
+                not key_out.source_detail_id or source_detail.id != key_out.source_detail_id
             ):
                 raise ValidationError("补货来源库存层已发生变化，请重新规划任务。")
             if not source_detail.product_serial_control:
                 raise ValidationError("带序列号的上架记录必须对应序列号管理商品。")
-            if (source_detail.serial_no or "").upper() != (
-                key_out.serial_no or ""
-            ).upper():
+            if (source_detail.serial_no or "").upper() != (key_out.serial_no or "").upper():
                 raise ValidationError("来源库存序列号与上架记录不一致。")
             if source_detail.location_id != key_out.location_id:
                 raise ValidationError("序列号来源库存位置已发生变化，请重新执行任务。")
@@ -1620,10 +1563,7 @@ def _apply_putaway(
         )
         source_detail = details_by_key[_detail_dimension_key(source_values)]
         if task_type == WmsTask.TaskType.REPLEN:
-            if (
-                not key_out.source_detail_id
-                or source_detail.id != key_out.source_detail_id
-            ):
+            if not key_out.source_detail_id or source_detail.id != key_out.source_detail_id:
                 raise ValidationError("补货来源库存层已发生变化，请重新规划任务。")
             if any(
                 _q4(value) != 0
@@ -1633,9 +1573,7 @@ def _apply_putaway(
                     source_detail.damaged_qty,
                 )
             ):
-                raise ValidationError(
-                    "补货来源库存已分配、锁定或损坏，请重新规划任务。"
-                )
+                raise ValidationError("补货来源库存已分配、锁定或损坏，请重新规划任务。")
             if _q4(source_detail.available_qty) < qty_pos:
                 raise ValidationError("补货来源可用库存已发生变化，请重新规划任务。")
 
@@ -1783,9 +1721,7 @@ def post_task(
     """
     # 1) 仓库 -> 任务 -> PJ：统一锁序并在锁内判定幂等/状态一致性。
     task_id = task.id
-    warehouse_id = (
-        WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
-    )
+    warehouse_id = WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
     lock_warehouses_for_inventory_write(warehouse_id)
     task = _lock_task(task_id)
     if task.warehouse_id != warehouse_id:
@@ -1841,9 +1777,7 @@ def post_task(
     # 3) 重取并锁定调用方明确提供的扫描
     now_ts = now or timezone.now()
     batch = batch_no or now_ts.strftime("%Y%m%d-%H%M%S")
-    pj_ctx, pj_text = build_log_payload(
-        task=task, user=user, journal=pj, posting_batch=batch
-    )
+    pj_ctx, pj_text = build_log_payload(task=task, user=user, journal=pj, posting_batch=batch)
     try:
         scans = _lock_and_validate_scans(task=task, scans=scans)
     except ValidationError:
@@ -1921,9 +1855,7 @@ def post_task(
                 tx_type=InvTxType.ADJ_GAIN,
                 qty_task_type=task_type,
             )
-            affected += _apply_receive_like(
-                task, groups_pos, now=now_ts, batch_no=batch
-            )
+            affected += _apply_receive_like(task, groups_pos, now=now_ts, batch_no=batch)
         if neg_scans:
             groups_neg = _group_receive_like(
                 task,
@@ -1933,9 +1865,7 @@ def post_task(
                 tx_type=InvTxType.ADJ_LOSS,
                 qty_task_type=task_type,
             )
-            affected += _apply_receive_like(
-                task, groups_neg, now=now_ts, batch_no=batch
-            )
+            affected += _apply_receive_like(task, groups_neg, now=now_ts, batch_no=batch)
 
     if affected <= 0 and posting_family != "COUNT":
         raise ValidationError("库存过账未生成任何交易，拒绝提交成功状态。")
@@ -1968,9 +1898,7 @@ def post_task(
         task.posting_status = posted_status
         task.save(update_fields=["posting_status"])
     except Exception:
-        logger.exception(
-            "inventory.post_task.task_status_update_failed %s", pj_text, extra=pj_ctx
-        )
+        logger.exception("inventory.post_task.task_status_update_failed %s", pj_text, extra=pj_ctx)
         raise  # 重新抛出异常，让事务回滚
 
     pj.status = "POSTED"
@@ -1993,9 +1921,7 @@ def post_task(
 
 
 # allapp/inventory/services.py （在处理 ISSUE 成功写分录并更新 onhand 后，追加 ↓）
-def _release_allocated_after_issue(
-    owner_id, warehouse_id, product_id, location_id, qty_abs
-):
+def _release_allocated_after_issue(owner_id, warehouse_id, product_id, location_id, qty_abs):
     """
     ISSUE 后释放 allocated：allocated = max(allocated - qty_abs, 0)
     """

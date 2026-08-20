@@ -96,9 +96,7 @@ class ProductBarcodeAdminInlineTests(TestCase):
     def test_change_page_renders_editable_add_row_and_readonly_history(self):
         self.client.force_login(self.superuser)
 
-        response = self.client.get(
-            reverse("admin:products_product_change", args=[self.product.pk])
-        )
+        response = self.client.get(reverse("admin:products_product_change", args=[self.product.pk]))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "新增商品条码")
@@ -236,9 +234,7 @@ class ProductBarcodeAdminInlineTests(TestCase):
         self.assertIn("barcode", formset.forms[1].errors)
         self.assertIn("barcode", formset.forms[2].errors)
         self.assertFalse(
-            ProductBarcode.all_objects.filter(
-                normalized_value="ADMIN-SHOULD-NOT-SAVE"
-            ).exists()
+            ProductBarcode.all_objects.filter(normalized_value="ADMIN-SHOULD-NOT-SAVE").exists()
         )
 
     def test_package_choices_are_scoped_to_active_current_product_packages(self):
@@ -266,9 +262,7 @@ class ProductBarcodeAdminInlineTests(TestCase):
     def test_add_permissions_require_saved_product_and_barcode_permission(self):
         self.assertTrue(self.inline.has_add_permission(self.request, self.product))
         self.assertFalse(self.inline.has_add_permission(self.request, None))
-        self.assertFalse(
-            self.history_inline.has_add_permission(self.request, self.product)
-        )
+        self.assertFalse(self.history_inline.has_add_permission(self.request, self.product))
 
         request = self.factory.get("/")
         request.user = self.staff_without_permission
@@ -445,9 +439,7 @@ class ProductBarcodeStandaloneAdminTests(TestCase):
             response,
             reverse("admin:products_productbarcode_changelist"),
         )
-        record = ProductBarcode.all_objects.get(
-            normalized_value="ADMIN-STANDALONE-CARTON"
-        )
+        record = ProductBarcode.all_objects.get(normalized_value="ADMIN-STANDALONE-CARTON")
         self.assertEqual(record.owner_id, self.owner.pk)
         self.assertEqual(record.package_id, self.package.pk)
         self.assertEqual(record.qty_in_base, 24)
@@ -486,7 +478,5 @@ class ProductBarcodeStandaloneAdminTests(TestCase):
         self.assertEqual(wrong_owner.status_code, 200)
         self.assertContains(wrong_owner, "选择一个有效的选项")
         self.assertFalse(
-            ProductBarcode.all_objects.filter(
-                normalized_value="ADMIN-TAMPERED"
-            ).exists()
+            ProductBarcode.all_objects.filter(normalized_value="ADMIN-TAMPERED").exists()
         )

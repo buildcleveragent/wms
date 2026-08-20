@@ -30,9 +30,7 @@ class BizOrg(BaseModel):
         FRANCHISE = "franchise", "加盟公司"
         PARTNER = "partner", "合作方"
 
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="biz_orgs"
-    )  # 强隔离
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="biz_orgs")  # 强隔离
     name = models.CharField(max_length=200)
     code = models.CharField(max_length=64)
     org_type = models.CharField(max_length=20, choices=OrgType.choices)
@@ -47,12 +45,8 @@ class BizOrg(BaseModel):
 
 # 业务员（可直接复用 User；这里加业务档案）
 class Salesperson(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="salespersons"
-    )
-    user = models.OneToOneField(
-        User, on_delete=models.PROTECT, related_name="sales_profile"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="salespersons")
+    user = models.OneToOneField(User, on_delete=models.PROTECT, related_name="sales_profile")
     org = models.ForeignKey(
         BizOrg,
         on_delete=models.PROTECT,
@@ -80,15 +74,9 @@ class Channel(BaseModel):
 
 # 客户-渠道归属
 class CustomerChannel(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="customer_channels"
-    )
-    customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="channels"
-    )
-    channel = models.ForeignKey(
-        Channel, on_delete=models.PROTECT, related_name="customers"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="customer_channels")
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="channels")
+    channel = models.ForeignKey(Channel, on_delete=models.PROTECT, related_name="customers")
 
     class Meta:
         unique_together = (("owner", "customer", "channel"),)
@@ -130,17 +118,11 @@ class MiniProgramUser(BaseModel):
             models.Index(fields=["openid"]),
         ]
         constraints = [
-            models.UniqueConstraint(
-                fields=["owner", "user"], name="ux_mini_owner_user"
-            ),
+            models.UniqueConstraint(fields=["owner", "user"], name="ux_mini_owner_user"),
         ]
 
     def __str__(self):
-        return (
-            self.nickname
-            or getattr(self.user, "username", "")
-            or f"mini-user-{self.pk}"
-        )
+        return self.nickname or getattr(self.user, "username", "") or f"mini-user-{self.pk}"
 
 
 class MiniCustomerAddress(BaseModel):
@@ -246,15 +228,11 @@ class SaleProductConfig(BaseModel):
         default=StockDisplay.STATUS,
     )
     enable_qty_rules = models.BooleanField("启用起购及递增限制", default=False)
-    min_order_qty = models.DecimalField(
-        "起购数量", max_digits=12, decimal_places=3, default=1
-    )
+    min_order_qty = models.DecimalField("起购数量", max_digits=12, decimal_places=3, default=1)
     max_order_qty = models.DecimalField(
         "最大购买量", max_digits=12, decimal_places=3, null=True, blank=True
     )
-    multiple_qty = models.DecimalField(
-        "购买递增量", max_digits=12, decimal_places=3, default=1
-    )
+    multiple_qty = models.DecimalField("购买递增量", max_digits=12, decimal_places=3, default=1)
     sort_order = models.PositiveIntegerField("排序", default=0)
 
     class Meta:
@@ -267,15 +245,13 @@ class SaleProductConfig(BaseModel):
             models.Index(fields=["owner", "is_hot", "sort_order"]),
         ]
         constraints = [
-            models.UniqueConstraint(
-                fields=["owner", "product"], name="ux_sale_cfg_owner_product"
-            ),
+            models.UniqueConstraint(fields=["owner", "product"], name="ux_sale_cfg_owner_product"),
             models.CheckConstraint(
-                check=models.Q(min_order_qty__gt=0),
+                condition=models.Q(min_order_qty__gt=0),
                 name="ck_sale_cfg_min_qty_gt_0",
             ),
             models.CheckConstraint(
-                check=models.Q(multiple_qty__gt=0),
+                condition=models.Q(multiple_qty__gt=0),
                 name="ck_sale_cfg_multiple_gt_0",
             ),
         ]
@@ -368,7 +344,7 @@ class SaleMiniCartItem(BaseModel):
                 name="ux_sale_mini_cart_item",
             ),
             models.CheckConstraint(
-                check=models.Q(qty__gt=0),
+                condition=models.Q(qty__gt=0),
                 name="ck_sale_mini_cart_qty_gt_0",
             ),
         ]
@@ -419,9 +395,7 @@ class SaleMiniOrderMapping(BaseModel):
         default=PaymentStatus.OFFLINE,
     )
     source = models.CharField("订单来源", max_length=30, default="sale-mini")
-    goods_amount = models.DecimalField(
-        "商品金额", max_digits=18, decimal_places=2, default=0
-    )
+    goods_amount = models.DecimalField("商品金额", max_digits=18, decimal_places=2, default=0)
     adjustment_amount = models.DecimalField(
         "调整金额",
         max_digits=18,
@@ -429,9 +403,7 @@ class SaleMiniOrderMapping(BaseModel):
         default=0,
         help_text="订单级调整金额，负数表示优惠，正数表示加价。",
     )
-    payable_amount = models.DecimalField(
-        "应付金额", max_digits=18, decimal_places=2, default=0
-    )
+    payable_amount = models.DecimalField("应付金额", max_digits=18, decimal_places=2, default=0)
     pay_deadline_at = models.DateTimeField("支付截止时间", null=True, blank=True)
     paid_at = models.DateTimeField("支付时间", null=True, blank=True)
 
@@ -473,15 +445,11 @@ class SaleMiniCouponTemplate(BaseModel):
         choices=CouponType.choices,
         default=CouponType.AMOUNT,
     )
-    threshold_amount = models.DecimalField(
-        "使用门槛", max_digits=18, decimal_places=2, default=0
-    )
+    threshold_amount = models.DecimalField("使用门槛", max_digits=18, decimal_places=2, default=0)
     discount_amount = models.DecimalField("优惠金额", max_digits=18, decimal_places=2)
     effective_from = models.DateField("生效日期")
     effective_to = models.DateField("失效日期", null=True, blank=True)
-    total_limit = models.PositiveIntegerField(
-        "发放总量", default=0, help_text="0 表示不限量"
-    )
+    total_limit = models.PositiveIntegerField("发放总量", default=0, help_text="0 表示不限量")
     per_customer_limit = models.PositiveIntegerField(
         "每客户限领数量", default=0, help_text="0 表示不限量"
     )
@@ -495,15 +463,13 @@ class SaleMiniCouponTemplate(BaseModel):
             models.Index(fields=["owner", "effective_from", "effective_to"]),
         ]
         constraints = [
-            models.UniqueConstraint(
-                fields=["owner", "code"], name="ux_sale_mini_coupon_tpl_code"
-            ),
+            models.UniqueConstraint(fields=["owner", "code"], name="ux_sale_mini_coupon_tpl_code"),
             models.CheckConstraint(
-                check=models.Q(threshold_amount__gte=0),
+                condition=models.Q(threshold_amount__gte=0),
                 name="ck_sale_mini_coupon_tpl_threshold_gte_0",
             ),
             models.CheckConstraint(
-                check=models.Q(discount_amount__gt=0),
+                condition=models.Q(discount_amount__gt=0),
                 name="ck_sale_mini_coupon_tpl_discount_gt_0",
             ),
         ]
@@ -628,12 +594,8 @@ class SaleMiniOrderAdjustment(BaseModel):
         blank=True,
     )
     adjustment_no = models.CharField("调整单号", max_length=64, unique=True)
-    adjustment_type = models.CharField(
-        "调整类型", max_length=20, choices=AdjustmentType.choices
-    )
-    status = models.CharField(
-        "状态", max_length=20, choices=Status.choices, default=Status.PREVIEW
-    )
+    adjustment_type = models.CharField("调整类型", max_length=20, choices=AdjustmentType.choices)
+    status = models.CharField("状态", max_length=20, choices=Status.choices, default=Status.PREVIEW)
     title = models.CharField("调整说明", max_length=120)
     amount = models.DecimalField(
         "调整金额",
@@ -756,18 +718,10 @@ class SaleMiniDistributionRecord(BaseModel):
         on_delete=models.PROTECT,
         related_name="distribution_record",
     )
-    status = models.CharField(
-        "状态", max_length=20, choices=Status.choices, default=Status.PENDING
-    )
-    commission_rate = models.DecimalField(
-        "佣金比例", max_digits=7, decimal_places=4, default=0
-    )
-    base_amount = models.DecimalField(
-        "计佣金额", max_digits=18, decimal_places=2, default=0
-    )
-    commission_amount = models.DecimalField(
-        "佣金金额", max_digits=18, decimal_places=2, default=0
-    )
+    status = models.CharField("状态", max_length=20, choices=Status.choices, default=Status.PENDING)
+    commission_rate = models.DecimalField("佣金比例", max_digits=7, decimal_places=4, default=0)
+    base_amount = models.DecimalField("计佣金额", max_digits=18, decimal_places=2, default=0)
+    commission_amount = models.DecimalField("佣金金额", max_digits=18, decimal_places=2, default=0)
     confirmed_at = models.DateTimeField("确认时间", null=True, blank=True)
     settled_at = models.DateTimeField("结算时间", null=True, blank=True)
     reversed_at = models.DateTimeField("冲销时间", null=True, blank=True)
@@ -835,9 +789,7 @@ class SaleMiniPayment(BaseModel):
     amount = models.DecimalField("支付金额", max_digits=18, decimal_places=2)
     amount_cents = models.PositiveIntegerField("支付金额（分）")
     currency = models.CharField("币种", max_length=8, default="CNY")
-    prepay_id = models.CharField(
-        "微信预支付 ID", max_length=128, blank=True, default=""
-    )
+    prepay_id = models.CharField("微信预支付 ID", max_length=128, blank=True, default="")
     transaction_id = models.CharField(
         "微信支付单号",
         max_length=128,
@@ -846,12 +798,8 @@ class SaleMiniPayment(BaseModel):
         unique=True,
         default=None,
     )
-    trade_state = models.CharField(
-        "微信交易状态", max_length=40, blank=True, default=""
-    )
-    trade_state_desc = models.CharField(
-        "微信交易状态说明", max_length=200, blank=True, default=""
-    )
+    trade_state = models.CharField("微信交易状态", max_length=40, blank=True, default="")
+    trade_state_desc = models.CharField("微信交易状态说明", max_length=200, blank=True, default="")
     request_payload = models.JSONField("预支付请求报文", default=dict, blank=True)
     client_pay_params = models.JSONField("小程序支付参数", default=dict, blank=True)
     prepay_response = models.JSONField("预支付响应报文", default=dict, blank=True)
@@ -1118,9 +1066,7 @@ class SaleMiniProductReview(BaseModel):
     status = models.CharField(
         "审核状态", max_length=16, choices=Status.choices, default=Status.DRAFT
     )
-    rejection_reason = models.CharField(
-        "驳回原因", max_length=300, blank=True, default=""
-    )
+    rejection_reason = models.CharField("驳回原因", max_length=300, blank=True, default="")
     submitted_at = models.DateTimeField("提交时间", null=True, blank=True)
     reviewed_at = models.DateTimeField("审核时间", null=True, blank=True)
     reviewed_by = models.ForeignKey(
@@ -1145,15 +1091,15 @@ class SaleMiniProductReview(BaseModel):
         ]
         constraints = [
             models.CheckConstraint(
-                check=models.Q(quality_score__range=(1, 5)),
+                condition=models.Q(quality_score__range=(1, 5)),
                 name="ck_sale_review_quality_1_5",
             ),
             models.CheckConstraint(
-                check=models.Q(delivery_score__range=(1, 5)),
+                condition=models.Q(delivery_score__range=(1, 5)),
                 name="ck_sale_review_delivery_1_5",
             ),
             models.CheckConstraint(
-                check=models.Q(overall_score__range=(1, 5)),
+                condition=models.Q(overall_score__range=(1, 5)),
                 name="ck_sale_review_overall_1_5",
             ),
         ]
@@ -1185,7 +1131,7 @@ class SaleMiniProductReviewImage(BaseModel):
                 name="ux_sale_review_image_order",
             ),
             models.CheckConstraint(
-                check=models.Q(sort_order__lt=6),
+                condition=models.Q(sort_order__lt=6),
                 name="ck_sale_review_image_order_lt_6",
             ),
         ]
@@ -1219,12 +1165,8 @@ class SaleMiniPaymentEvent(BaseModel):
         null=True,
         blank=True,
     )
-    out_trade_no = models.CharField(
-        "商户支付单号", max_length=64, blank=True, default=""
-    )
-    out_refund_no = models.CharField(
-        "商户退款单号", max_length=64, blank=True, default=""
-    )
+    out_trade_no = models.CharField("商户支付单号", max_length=64, blank=True, default="")
+    out_refund_no = models.CharField("商户退款单号", max_length=64, blank=True, default="")
     payload = models.JSONField("原始回调报文", default=dict, blank=True)
     decrypted_payload = models.JSONField("解密后报文", default=dict, blank=True)
     process_status = models.CharField(
@@ -1252,18 +1194,12 @@ class SaleMiniPaymentEvent(BaseModel):
 
 # —— 订货单位 / 起订量 / 客户商品策略 ——
 class CustomerProductPolicy(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="cust_prod_policies"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="cust_prod_policies")
     customer = models.ForeignKey(
         Customer, on_delete=models.PROTECT, related_name="product_policies"
     )
-    product = models.ForeignKey(
-        Product, on_delete=models.PROTECT, related_name="customer_policies"
-    )
-    order_uom = models.CharField(
-        max_length=32, help_text="订货单位（与商品计量单位体系对齐）"
-    )
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="customer_policies")
+    order_uom = models.CharField(max_length=32, help_text="订货单位（与商品计量单位体系对齐）")
     min_order_qty = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     multiple_qty = models.DecimalField(
         max_digits=12,
@@ -1279,15 +1215,9 @@ class CustomerProductPolicy(BaseModel):
 
 # 渠道商品策略（渠道价、起订量、订货单位控制）
 class ChannelProductPolicy(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="channel_prod_policies"
-    )
-    channel = models.ForeignKey(
-        Channel, on_delete=models.PROTECT, related_name="product_policies"
-    )
-    product = models.ForeignKey(
-        Product, on_delete=models.PROTECT, related_name="channel_policies"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="channel_prod_policies")
+    channel = models.ForeignKey(Channel, on_delete=models.PROTECT, related_name="product_policies")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="channel_policies")
     order_uom = models.CharField(max_length=32)
     min_order_qty = models.DecimalField(max_digits=12, decimal_places=3, default=0)
 
@@ -1297,9 +1227,7 @@ class ChannelProductPolicy(BaseModel):
 
 # —— 价格体系：价目表 + 一店一价 + 价格记忆 ——
 class PriceGroup(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="price_groups"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="price_groups")
     name = models.CharField(max_length=100)
     code = models.CharField(max_length=64)
 
@@ -1308,9 +1236,7 @@ class PriceGroup(BaseModel):
 
 
 class PriceList(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="price_lists"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="price_lists")
     name = models.CharField(max_length=100)
     code = models.CharField(max_length=64)
     channel = models.ForeignKey(
@@ -1337,15 +1263,9 @@ class PriceList(BaseModel):
 
 
 class PriceItem(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="price_items"
-    )
-    price_list = models.ForeignKey(
-        PriceList, on_delete=models.PROTECT, related_name="items"
-    )
-    product = models.ForeignKey(
-        Product, on_delete=models.PROTECT, related_name="price_items"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="price_items")
+    price_list = models.ForeignKey(PriceList, on_delete=models.PROTECT, related_name="items")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="price_items")
     price = models.DecimalField(max_digits=12, decimal_places=4)
     currency = models.CharField(max_length=10, default="CNY")
 
@@ -1358,9 +1278,7 @@ class CustomerSpecialPrice(BaseModel):
     owner = models.ForeignKey(
         Owner, on_delete=models.PROTECT, related_name="customer_special_prices"
     )
-    customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="special_prices"
-    )
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="special_prices")
     product = models.ForeignKey(
         Product, on_delete=models.PROTECT, related_name="customer_special_prices"
     )
@@ -1374,15 +1292,9 @@ class CustomerSpecialPrice(BaseModel):
 
 # 价格记忆（最近成交价）
 class PriceMemory(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="price_memories"
-    )
-    customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="price_memories"
-    )
-    product = models.ForeignKey(
-        Product, on_delete=models.PROTECT, related_name="price_memories"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="price_memories")
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="price_memories")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="price_memories")
     last_price = models.DecimalField(max_digits=12, decimal_places=4)
     last_order_date = models.DateField()
 
@@ -1397,18 +1309,12 @@ class Promotion(BaseModel):
         GIFT = "gift", "满赠"
         SPECIAL_PRICE = "special_price", "特价"
 
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="promotions"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="promotions")
     name = models.CharField(max_length=200)
     code = models.CharField(max_length=64)
     promo_type = models.CharField(max_length=32, choices=PromoType.choices)
-    channel = models.ForeignKey(
-        Channel, on_delete=models.PROTECT, null=True, blank=True
-    )
-    customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, null=True, blank=True
-    )
+    channel = models.ForeignKey(Channel, on_delete=models.PROTECT, null=True, blank=True)
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, null=True, blank=True)
     effective_from = models.DateField()
     effective_to = models.DateField(null=True, blank=True)
     must_select = models.BooleanField(default=False, help_text="是否必选促销")
@@ -1420,12 +1326,8 @@ class Promotion(BaseModel):
 
 
 class PromotionGiftItem(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="promotion_gift_items"
-    )
-    promotion = models.ForeignKey(
-        Promotion, on_delete=models.PROTECT, related_name="gift_items"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="promotion_gift_items")
+    promotion = models.ForeignKey(Promotion, on_delete=models.PROTECT, related_name="gift_items")
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     gift_qty = models.DecimalField(max_digits=12, decimal_places=3)
 
@@ -1460,19 +1362,13 @@ class VisitPlan(BaseModel):
         COMPLETED = "completed", "已完成"
         CANCELED = "canceled", "已取消"
 
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="visit_plans"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="visit_plans")
     salesperson = models.ForeignKey(
         Salesperson, on_delete=models.PROTECT, related_name="visit_plans"
     )
-    customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="visit_plans"
-    )
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="visit_plans")
     planned_date = models.DateField()
-    status = models.CharField(
-        max_length=20, choices=PlanStatus.choices, default=PlanStatus.DRAFT
-    )
+    status = models.CharField(max_length=20, choices=PlanStatus.choices, default=PlanStatus.DRAFT)
     route_name = models.CharField(max_length=200, blank=True, default="")
 
     class Meta:
@@ -1484,9 +1380,7 @@ class AttendanceRecord(BaseModel):
         CHECKIN = "checkin", "签到"
         CHECKOUT = "checkout", "签退"
 
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="attendance_records"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="attendance_records")
     salesperson = models.ForeignKey(
         Salesperson, on_delete=models.PROTECT, related_name="attendance_records"
     )
@@ -1498,9 +1392,7 @@ class AttendanceRecord(BaseModel):
 
 
 class VisitRecord(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="visit_records"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="visit_records")
     visit_plan = models.ForeignKey(
         VisitPlan,
         on_delete=models.PROTECT,
@@ -1511,29 +1403,19 @@ class VisitRecord(BaseModel):
     salesperson = models.ForeignKey(
         Salesperson, on_delete=models.PROTECT, related_name="visit_records"
     )
-    customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="visit_records"
-    )
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="visit_records")
     start_time = models.DateTimeField()
     end_time = models.DateTimeField(null=True, blank=True)
-    start_lat = models.DecimalField(
-        max_digits=9, decimal_places=6, null=True, blank=True
-    )
-    start_lng = models.DecimalField(
-        max_digits=9, decimal_places=6, null=True, blank=True
-    )
+    start_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    start_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     end_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     end_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     notes = models.TextField(blank=True, default="")
 
 
 class GPSTrackPoint(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="gps_points"
-    )
-    visit = models.ForeignKey(
-        VisitRecord, on_delete=models.PROTECT, related_name="gps_points"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="gps_points")
+    visit = models.ForeignKey(VisitRecord, on_delete=models.PROTECT, related_name="gps_points")
     timestamp = models.DateTimeField()
     lat = models.DecimalField(max_digits=9, decimal_places=6)
     lng = models.DecimalField(max_digits=9, decimal_places=6)
@@ -1541,22 +1423,14 @@ class GPSTrackPoint(BaseModel):
 
 
 class PhotoType(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="photo_types"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="photo_types")
     name = models.CharField(max_length=50)
 
 
 class VisitPhoto(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="visit_photos"
-    )
-    visit = models.ForeignKey(
-        VisitRecord, on_delete=models.PROTECT, related_name="photos"
-    )
-    photo_type = models.ForeignKey(
-        PhotoType, on_delete=models.PROTECT, null=True, blank=True
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="visit_photos")
+    visit = models.ForeignKey(VisitRecord, on_delete=models.PROTECT, related_name="photos")
+    photo_type = models.ForeignKey(PhotoType, on_delete=models.PROTECT, null=True, blank=True)
     image = models.ImageField(upload_to="visit_photos/")
     remark = models.CharField(max_length=200, blank=True, default="")
 
@@ -1575,22 +1449,12 @@ class SalesOrder(BaseModel):
         FULFILLED = "fulfilled", "已完成"
         CANCELED = "canceled", "已取消"
 
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sales_orders"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="sales_orders")
     org = models.ForeignKey(BizOrg, on_delete=models.PROTECT, null=True, blank=True)
-    salesperson = models.ForeignKey(
-        Salesperson, on_delete=models.PROTECT, null=True, blank=True
-    )
-    customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="sales_orders"
-    )
-    order_type = models.CharField(
-        max_length=10, choices=OrderType.choices, default=OrderType.SALE
-    )
-    status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.DRAFT
-    )
+    salesperson = models.ForeignKey(Salesperson, on_delete=models.PROTECT, null=True, blank=True)
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="sales_orders")
+    order_type = models.CharField(max_length=10, choices=OrderType.choices, default=OrderType.SALE)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
     order_date = models.DateField()
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     currency = models.CharField(max_length=10, default="CNY")
@@ -1603,12 +1467,8 @@ class SalesOrder(BaseModel):
 
 
 class SalesOrderLine(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="sales_order_lines"
-    )
-    order = models.ForeignKey(
-        SalesOrder, on_delete=models.PROTECT, related_name="lines"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="sales_order_lines")
+    order = models.ForeignKey(SalesOrder, on_delete=models.PROTECT, related_name="lines")
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     order_uom = models.CharField(max_length=32)
     qty = models.DecimalField(max_digits=12, decimal_places=3)
@@ -1619,12 +1479,8 @@ class SalesOrderLine(BaseModel):
 
 # 信用策略（业务员+客户双控额度）
 class CreditPolicy(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="credit_policies"
-    )
-    customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="credit_policies"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="credit_policies")
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="credit_policies")
     salesperson = models.ForeignKey(
         Salesperson,
         on_delete=models.PROTECT,
@@ -1641,15 +1497,9 @@ class CreditPolicy(BaseModel):
 
 # 应收台账（可与财务模块对接）
 class ARLedger(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="ar_ledgers"
-    )
-    customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="ar_ledgers"
-    )
-    ref_order = models.ForeignKey(
-        SalesOrder, on_delete=models.PROTECT, null=True, blank=True
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="ar_ledgers")
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="ar_ledgers")
+    ref_order = models.ForeignKey(SalesOrder, on_delete=models.PROTECT, null=True, blank=True)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     balance = models.DecimalField(max_digits=14, decimal_places=2)
     due_date = models.DateField(null=True, blank=True)
@@ -1658,39 +1508,27 @@ class ARLedger(BaseModel):
 
 # 费用：厂家垫付/费用申请/核销
 class ExpenseAdvance(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="expense_advances"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="expense_advances")
     customer = models.ForeignKey(
         Customer, on_delete=models.PROTECT, related_name="expense_advances"
     )
     title = models.CharField(max_length=200)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
-    status = models.CharField(
-        max_length=20, default="draft"
-    )  # draft/approved/written_off
+    status = models.CharField(max_length=20, default="draft")  # draft/approved/written_off
     remark = models.CharField(max_length=200, blank=True, default="")
 
 
 class ExpenseWriteOff(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="expense_writeoffs"
-    )
-    advance = models.ForeignKey(
-        ExpenseAdvance, on_delete=models.PROTECT, related_name="writeoffs"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="expense_writeoffs")
+    advance = models.ForeignKey(ExpenseAdvance, on_delete=models.PROTECT, related_name="writeoffs")
     writeoff_amount = models.DecimalField(max_digits=14, decimal_places=2)
     writeoff_date = models.DateField()
 
 
 # 陈列管理（计划/电子协议/拍照/稽核/兑付）
 class MerchandisingPlan(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="merch_plans"
-    )
-    customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="merch_plans"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="merch_plans")
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="merch_plans")
     title = models.CharField(max_length=200)
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True)
@@ -1698,39 +1536,23 @@ class MerchandisingPlan(BaseModel):
 
 
 class MerchandisingAgreement(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="merch_agreements"
-    )
-    plan = models.ForeignKey(
-        MerchandisingPlan, on_delete=models.PROTECT, related_name="agreements"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="merch_agreements")
+    plan = models.ForeignKey(MerchandisingPlan, on_delete=models.PROTECT, related_name="agreements")
     file = models.FileField(upload_to="agreements/")
     signed_at = models.DateField(null=True, blank=True)
 
 
 class MerchandisingAudit(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="merch_audits"
-    )
-    plan = models.ForeignKey(
-        MerchandisingPlan, on_delete=models.PROTECT, related_name="audits"
-    )
-    visit = models.ForeignKey(
-        VisitRecord, on_delete=models.PROTECT, null=True, blank=True
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="merch_audits")
+    plan = models.ForeignKey(MerchandisingPlan, on_delete=models.PROTECT, related_name="audits")
+    visit = models.ForeignKey(VisitRecord, on_delete=models.PROTECT, null=True, blank=True)
     result = models.CharField(max_length=50, default="pending")  # pending/pass/fail
     remarks = models.CharField(max_length=200, blank=True, default="")
 
 
 class RebatePayout(BaseModel):
-    owner = models.ForeignKey(
-        Owner, on_delete=models.PROTECT, related_name="rebate_payouts"
-    )
-    plan = models.ForeignKey(
-        MerchandisingPlan, on_delete=models.PROTECT, null=True, blank=True
-    )
-    customer = models.ForeignKey(
-        Customer, on_delete=models.PROTECT, related_name="rebate_payouts"
-    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="rebate_payouts")
+    plan = models.ForeignKey(MerchandisingPlan, on_delete=models.PROTECT, null=True, blank=True)
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="rebate_payouts")
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     status = models.CharField(max_length=20, default="draft")  # draft/approved/paid

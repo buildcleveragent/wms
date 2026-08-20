@@ -1,10 +1,12 @@
-from django.db import models
-from django.core.exceptions import ValidationError
 from decimal import Decimal
 
-from allapp.core.models import BaseModel
+from django.core.exceptions import ValidationError
+from django.db import models
 from django.utils.translation import gettext_lazy as _
+
 from allapp.core.choices import ZoneType
+from allapp.core.models import BaseModel
+
 
 class Warehouse(BaseModel):
     code = models.CharField("仓库编号", max_length=10, unique=True)
@@ -18,11 +20,14 @@ class Warehouse(BaseModel):
         null=True,
         help_text="商品批量导入自动收货使用的库位，必须属于本仓库且处于可用状态。",
     )
+
     class Meta:
         verbose_name = "仓库"
         verbose_name_plural = "仓库"
         ordering = ["code"]
-    def __str__(self): return f"{self.name}"
+
+    def __str__(self):
+        return f"{self.name}"
 
     def clean(self):
         super().clean()
@@ -42,17 +47,22 @@ class Warehouse(BaseModel):
         if errors:
             raise ValidationError({"default_receive_location": errors})
 
+
 class Subwarehouse(BaseModel):
-    warehouse = models.ForeignKey("Warehouse", verbose_name="所属仓库", on_delete=models.PROTECT,
-                                  related_name="subwarehouse")
+    warehouse = models.ForeignKey(
+        "Warehouse", verbose_name="所属仓库", on_delete=models.PROTECT, related_name="subwarehouse"
+    )
     code = models.CharField("子仓编号", max_length=10, unique=True)
     name = models.CharField("子仓名称", max_length=30)
     floor_no = models.PositiveSmallIntegerField(_("楼层"), default=1, db_index=True)
+
     class Meta:
         verbose_name = "子仓"
         verbose_name_plural = "子仓"
         ordering = ["code"]
-    def __str__(self): return f"{self.name}"
+
+    def __str__(self):
+        return f"{self.name}"
 
     def clean(self):
         super().clean()
@@ -66,22 +76,38 @@ class Subwarehouse(BaseModel):
         self.full_clean()
         return super().save(*args, **kwargs)
 
+
 class Location(BaseModel):
 
-    warehouse = models.ForeignKey("Warehouse", verbose_name="所属仓库", on_delete=models.PROTECT, related_name="locations")
-    subwarehouse = models.ForeignKey("Subwarehouse", verbose_name="所属子仓", on_delete=models.PROTECT,
-                                  related_name="locations", blank=True, null=True)
+    warehouse = models.ForeignKey(
+        "Warehouse", verbose_name="所属仓库", on_delete=models.PROTECT, related_name="locations"
+    )
+    subwarehouse = models.ForeignKey(
+        "Subwarehouse",
+        verbose_name="所属子仓",
+        on_delete=models.PROTECT,
+        related_name="locations",
+        blank=True,
+        null=True,
+    )
     zone_type = models.PositiveSmallIntegerField(
         _("区域类型"), choices=ZoneType.choices, default=ZoneType.STORAGE, db_index=True
     )
-    # zone = models.ForeignKey("Zone", verbose_name="所属分区", on_delete=models.PROTECT, related_name="locations")
+    # zone = models.ForeignKey(
+    #     "Zone", verbose_name="所属分区", on_delete=models.PROTECT,
+    #     related_name="locations"
+    # )
 
     # 位置编码：合并了原有的货架、货架层、列号等信息
     code = models.CharField("储位编码", max_length=60)
     name = models.CharField("储位名称", max_length=100, blank=True, null=True)
     barcode = models.CharField("储位条码", max_length=64, blank=True, null=True)
-    max_volume_m3 = models.DecimalField("最大体积(m³)", max_digits=12, decimal_places=3, blank=True, null=True)
-    max_weight_kg = models.DecimalField("最大承重(kg)", max_digits=12, decimal_places=2, blank=True, null=True)
+    max_volume_m3 = models.DecimalField(
+        "最大体积(m³)", max_digits=12, decimal_places=3, blank=True, null=True
+    )
+    max_weight_kg = models.DecimalField(
+        "最大承重(kg)", max_digits=12, decimal_places=2, blank=True, null=True
+    )
     is_disabled = models.BooleanField("禁用", default=False)
     is_frozen = models.BooleanField("冻结", default=False)
 
@@ -91,7 +117,12 @@ class Location(BaseModel):
     level_code = models.CharField("层号", max_length=10, blank=True, null=True)
     col_no = models.CharField("列号", max_length=10, blank=True, null=True)
     slot_no = models.CharField("位号", max_length=10, blank=True, null=True)
-    product_categories = models.ManyToManyField("products.ProductCategory", verbose_name="存放商品类别", blank=True, related_name="locations")
+    product_categories = models.ManyToManyField(
+        "products.ProductCategory",
+        verbose_name="存放商品类别",
+        blank=True,
+        related_name="locations",
+    )
     batch_guide = models.CharField("批量设置指引", max_length=200, blank=True, null=True)
 
     class Meta:
@@ -103,14 +134,14 @@ class Location(BaseModel):
         indexes = [
             # 常见过滤：按子仓 + 区类型（拣选/存储…）
             models.Index(fields=["subwarehouse", "zone_type"], name="ix_loc_sw_zt"),
-
             # 常见过滤：按子仓 + 启用状态 / 冻结状态（布尔放在末位）
             models.Index(fields=["subwarehouse", "is_disabled"], name="ix_loc_sw_dis"),
             models.Index(fields=["subwarehouse", "is_frozen"], name="ix_loc_sw_fro"),
-
             # 若经常用条码/编码直接定位（扫描、精确或前缀查询）
             models.Index(fields=["code"], name="ix_loc_code"),  # 仅当经常按 code alone 查
-            models.Index(fields=["barcode"], name="ix_loc_barcode"),  # 扫码用；若全局唯一可用 UniqueConstraint
+            models.Index(
+                fields=["barcode"], name="ix_loc_barcode"
+            ),  # 扫码用；若全局唯一可用 UniqueConstraint
         ]
 
     def __str__(self):
@@ -122,22 +153,26 @@ class Location(BaseModel):
 
         # 校验并解析编码（例：SW01-01-01-01，第一段为子仓编号）
         if self.code:
-            parts = self.code.split('-')
+            parts = self.code.split("-")
             if len(parts) != 4:
                 raise ValidationError("储位编码格式不正确，应为[子仓号]-[层号]-[列号]-[位号]")
 
             # 解析编码并填充对应字段
-            subwarehouse_code=parts[0]
-            sw = Subwarehouse.objects.filter(code=subwarehouse_code).select_related("warehouse").first()
+            subwarehouse_code = parts[0]
+            sw = (
+                Subwarehouse.objects.filter(code=subwarehouse_code)
+                .select_related("warehouse")
+                .first()
+            )
             if not sw:
-               raise ValidationError({"subwarehouse": "该子仓不存在，请先建立子仓"})
+                raise ValidationError({"subwarehouse": "该子仓不存在，请先建立子仓"})
             self.subwarehouse = sw
             if not self.warehouse_id:
                 self.warehouse = sw.warehouse
             self.level_code = parts[1]  # 货架层编码
             self.col_no = parts[2]  # 列号
             self.slot_no = parts[3]  # 位号
-            self.barcode=self.code
+            self.barcode = self.code
 
         if self.subwarehouse_id:
             if not self.warehouse_id:
@@ -158,37 +193,65 @@ class Location(BaseModel):
         self.full_clean()
         return super().save(*args, **kwargs)
 
+
 class Container(BaseModel):
     TYPES = [("TOTE", "料箱"), ("CARTON", "纸箱"), ("PALLET", "托盘")]
 
     # 内联的枚举（不单独定义类/常量）
     class Scope(models.TextChoices):
         PRIVATE = "PRIVATE", "私有（按货主）"
-        PUBLIC  = "PUBLIC",  "公共（仓库）"
+        PUBLIC = "PUBLIC", "公共（仓库）"
 
-    warehouse = models.ForeignKey("locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库")
-    owner     = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, null=True, blank=True, verbose_name="货主")
+    warehouse = models.ForeignKey(
+        "locations.Warehouse", on_delete=models.PROTECT, verbose_name="仓库"
+    )
+    owner = models.ForeignKey(
+        "baseinfo.Owner", on_delete=models.PROTECT, null=True, blank=True, verbose_name="货主"
+    )
 
-    scope     = models.CharField("范围", max_length=16, choices=Scope.choices, default=Scope.PRIVATE)
+    scope = models.CharField("范围", max_length=16, choices=Scope.choices, default=Scope.PRIVATE)
 
-    container_no   = models.CharField("容器号", max_length=60)
+    container_no = models.CharField("容器号", max_length=60)
     container_type = models.CharField("容器类型", max_length=10, choices=TYPES, default="CARTON")
 
-    location = models.ForeignKey("locations.Location", on_delete=models.PROTECT, null=True, blank=True, verbose_name="当前位置")
-    parent   = models.ForeignKey("self", on_delete=models.PROTECT, null=True, blank=True, related_name="children", verbose_name="上级容器")
+    location = models.ForeignKey(
+        "locations.Location",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        verbose_name="当前位置",
+    )
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="children",
+        verbose_name="上级容器",
+    )
 
-    length_cm = models.DecimalField("长(cm)", max_digits=10, decimal_places=2, null=True, blank=True)
-    width_cm  = models.DecimalField("宽(cm)", max_digits=10, decimal_places=2, null=True, blank=True)
-    height_cm = models.DecimalField("高(cm)", max_digits=10, decimal_places=2, null=True, blank=True)
-    tare_kg   = models.DecimalField("皮重(kg)", max_digits=10, decimal_places=3, null=True, blank=True)
-    max_gross_kg = models.DecimalField("最大毛重(kg)", max_digits=12, decimal_places=3, null=True, blank=True)
+    length_cm = models.DecimalField(
+        "长(cm)", max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    width_cm = models.DecimalField("宽(cm)", max_digits=10, decimal_places=2, null=True, blank=True)
+    height_cm = models.DecimalField(
+        "高(cm)", max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    tare_kg = models.DecimalField(
+        "皮重(kg)", max_digits=10, decimal_places=3, null=True, blank=True
+    )
+    max_gross_kg = models.DecimalField(
+        "最大毛重(kg)", max_digits=12, decimal_places=3, null=True, blank=True
+    )
 
     class Meta:
         verbose_name = "容器"
         verbose_name_plural = "容器"
         constraints = [
             # 同仓+容器号唯一（公共/私有都适用）
-            models.UniqueConstraint(fields=["warehouse", "container_no"], name="ux_container_wh_no"),
+            models.UniqueConstraint(
+                fields=["warehouse", "container_no"], name="ux_container_wh_no"
+            ),
         ]
         indexes = [
             models.Index(fields=["owner", "warehouse"], name="ix_cont_own_wh"),

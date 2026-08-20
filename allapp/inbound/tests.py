@@ -45,7 +45,9 @@ class InboundWarehouseScopeTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Inbound", code="OWN-INB")
         self.warehouse = Warehouse.objects.create(code="WH-INB-1", name="Warehouse Inbound 1")
-        self.supplier = Supplier.objects.create(owner=self.owner, code="SUP-INB", name="Supplier Inbound")
+        self.supplier = Supplier.objects.create(
+            owner=self.owner, code="SUP-INB", name="Supplier Inbound"
+        )
         self.user = get_user_model().objects.create_user(username="inbound-user", password="x")
         self.base_uom = ProductUom.objects.create(code="PCS-INB", name="件", is_active=True)
         self.product = Product.objects.create(
@@ -178,15 +180,9 @@ class InboundWarehouseScopeTests(TestCase):
 class InboundAuthorizationAndWorkflowTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Inbound Scope Owner", code="INBSCO1")
-        self.other_owner = Owner.objects.create(
-            name="Inbound Other Owner", code="INBSCO2"
-        )
-        self.warehouse = Warehouse.objects.create(
-            code="INBWH1", name="Inbound Warehouse 1"
-        )
-        self.other_warehouse = Warehouse.objects.create(
-            code="INBWH2", name="Inbound Warehouse 2"
-        )
+        self.other_owner = Owner.objects.create(name="Inbound Other Owner", code="INBSCO2")
+        self.warehouse = Warehouse.objects.create(code="INBWH1", name="Inbound Warehouse 1")
+        self.other_warehouse = Warehouse.objects.create(code="INBWH2", name="Inbound Warehouse 2")
         OwnerWarehouseBinding.objects.create(
             owner=self.owner,
             warehouse=self.warehouse,
@@ -257,9 +253,7 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         )
 
     def test_rejected_order_can_be_resubmitted_through_both_review_stages(self):
-        user = self.user_model.objects.create_user(
-            username="inbound-workflow", password="x"
-        )
+        user = self.user_model.objects.create_user(username="inbound-workflow", password="x")
         order = self._order("INB-WORKFLOW-1")
 
         order.owner_reject(user)
@@ -292,9 +286,7 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
             role=UserRoleScope.Role.OWNER_MANAGER,
             owner=self.owner,
         )
-        user.user_permissions.add(
-            self._permission("inbound", "approve_as_owner_manager")
-        )
+        user.user_permissions.add(self._permission("inbound", "approve_as_owner_manager"))
         own_order = self._order("INB-ADMIN-OWN")
         foreign_order = self._order("INB-ADMIN-FOREIGN", other=True)
         request = RequestFactory().post("/admin/inbound/inboundorder/")
@@ -302,9 +294,7 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         model_admin = InboundOrderAdmin(InboundOrder, admin.site)
         model_admin.message_user = mock.Mock()
 
-        visible_ids = set(
-            model_admin.get_queryset(request).values_list("pk", flat=True)
-        )
+        visible_ids = set(model_admin.get_queryset(request).values_list("pk", flat=True))
         self.assertEqual(visible_ids, {own_order.pk})
 
         model_admin.action_owner_approve(
@@ -338,9 +328,7 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
             role=UserRoleScope.Role.OWNER_SALESPERSON,
             owner=self.owner,
         )
-        salesperson.user_permissions.add(
-            self._permission("inbound", "submit_as_owner_buyers")
-        )
+        salesperson.user_permissions.add(self._permission("inbound", "submit_as_owner_buyers"))
         own_order = InboundOrder.objects.create(
             order_no="INB-SALES-OWN",
             owner=self.owner,
@@ -360,16 +348,12 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         model_admin = InboundOrderAdmin(InboundOrder, admin.site)
         model_admin.message_user = mock.Mock()
 
-        visible_ids = set(
-            model_admin.get_queryset(request).values_list("pk", flat=True)
-        )
+        visible_ids = set(model_admin.get_queryset(request).values_list("pk", flat=True))
         self.assertEqual(visible_ids, {own_order.pk})
 
         model_admin.action_owner_buyers_submit(
             request,
-            InboundOrder.objects.filter(
-                pk__in=[own_order.pk, colleague_order.pk]
-            ),
+            InboundOrder.objects.filter(pk__in=[own_order.pk, colleague_order.pk]),
         )
         own_order.refresh_from_db()
         colleague_order.refresh_from_db()
@@ -400,9 +384,7 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
-        self.assertFalse(
-            WmsTask.objects.filter(task_type=WmsTask.TaskType.RECEIVE).exists()
-        )
+        self.assertFalse(WmsTask.objects.filter(task_type=WmsTask.TaskType.RECEIVE).exists())
 
     def test_receive_without_order_replays_same_request_and_rejects_changed_payload(
         self,
@@ -428,9 +410,12 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
             "items": [{"product_id": self.product.pk, "qty": "2.0000"}],
         }
 
-        with mock.patch("allapp.inbound.services.save_receiving_snapshot"), mock.patch(
-            "allapp.inbound.services._run_posting_handler",
-            return_value={"affected_tx_count": 1},
+        with (
+            mock.patch("allapp.inbound.services.save_receiving_snapshot"),
+            mock.patch(
+                "allapp.inbound.services._run_posting_handler",
+                return_value={"affected_tx_count": 1},
+            ),
         ):
             created = client.post(
                 "/api/inbound/receive_without_order/",
@@ -459,9 +444,7 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         self.assertEqual(conflict.status_code, 409, conflict.data)
         self.assertEqual(NoOrderReceiveRequest.objects.count(), 1)
         self.assertEqual(
-            AuditEvent.objects.filter(
-                action="inbound.receive_without_order.post"
-            ).count(),
+            AuditEvent.objects.filter(action="inbound.receive_without_order.post").count(),
             1,
         )
         self.assertEqual(
@@ -578,9 +561,12 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
             "by_user": user,
         }
 
-        with mock.patch("allapp.inbound.services.save_receiving_snapshot"), mock.patch(
-            "allapp.inbound.services._run_posting_handler",
-            side_effect=[RuntimeError("posting unavailable"), {"affected_tx_count": 1}],
+        with (
+            mock.patch("allapp.inbound.services.save_receiving_snapshot"),
+            mock.patch(
+                "allapp.inbound.services._run_posting_handler",
+                side_effect=[RuntimeError("posting unavailable"), {"affected_tx_count": 1}],
+            ),
         ):
             with self.assertRaisesMessage(RuntimeError, "posting unavailable"):
                 receive_goods_without_order(**kwargs)
@@ -655,15 +641,9 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
 
         api_client = APIClient()
         api_client.force_authenticate(user)
-        exported = api_client.get(
-            f"/api/inbound/receive_task/{own_task.pk}/export_excel/"
-        )
-        denied_export = api_client.get(
-            f"/api/inbound/receive_task/{other_task.pk}/export_excel/"
-        )
-        anonymous_export = APIClient().get(
-            f"/api/inbound/receive_task/{own_task.pk}/export_excel/"
-        )
+        exported = api_client.get(f"/api/inbound/receive_task/{own_task.pk}/export_excel/")
+        denied_export = api_client.get(f"/api/inbound/receive_task/{other_task.pk}/export_excel/")
+        anonymous_export = APIClient().get(f"/api/inbound/receive_task/{own_task.pk}/export_excel/")
 
         self.assertEqual(exported.status_code, 200)
         workbook = load_workbook(io.BytesIO(exported.content), data_only=True)
@@ -677,18 +657,14 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         web_client = Client()
         web_client.force_login(user)
         printed = web_client.get(f"/api/inbound/receive_task/{own_task.pk}/print/")
-        denied_print = web_client.get(
-            f"/api/inbound/receive_task/{other_task.pk}/print/"
-        )
+        denied_print = web_client.get(f"/api/inbound/receive_task/{other_task.pk}/print/")
         self.assertEqual(printed.status_code, 200)
         self.assertContains(printed, "实际收货数量")
         self.assertContains(printed, "3.000")
         self.assertEqual(denied_print.status_code, 404)
 
     def test_receive_transactions_create_one_traceable_ready_putaway_task(self):
-        user = self.user_model.objects.create_user(
-            username="inbound-putaway", password="x"
-        )
+        user = self.user_model.objects.create_user(username="inbound-putaway", password="x")
         receive_task = WmsTask.objects.create(
             task_no="INB-RECEIVE-FOR-PUTAWAY",
             task_type=WmsTask.TaskType.RECEIVE,
@@ -751,9 +727,15 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
 class InboundConcurrencyTests(TransactionTestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Owner Inbound Concurrent", code="OWN-INB-C")
-        self.warehouse = Warehouse.objects.create(code="WH-INB-C", name="Warehouse Inbound Concurrent")
-        self.supplier = Supplier.objects.create(owner=self.owner, code="SUP-INB-C", name="Supplier Inbound Concurrent")
-        self.user = get_user_model().objects.create_user(username="inbound-concurrent-user", password="x")
+        self.warehouse = Warehouse.objects.create(
+            code="WH-INB-C", name="Warehouse Inbound Concurrent"
+        )
+        self.supplier = Supplier.objects.create(
+            owner=self.owner, code="SUP-INB-C", name="Supplier Inbound Concurrent"
+        )
+        self.user = get_user_model().objects.create_user(
+            username="inbound-concurrent-user", password="x"
+        )
         self.base_uom = ProductUom.objects.create(code="PCS-INB-C", name="件", is_active=True)
         self.product = Product.objects.create(
             owner=self.owner,
@@ -808,7 +790,9 @@ class InboundConcurrencyTests(TransactionTestCase):
             finally:
                 close_old_connections()
 
-        with mock.patch("allapp.inbound.services.DocSequence.next_code", side_effect=fake_next_code):
+        with mock.patch(
+            "allapp.inbound.services.DocSequence.next_code", side_effect=fake_next_code
+        ):
             thread1 = threading.Thread(target=invoke, args=(0,))
             thread1.start()
             self.assertTrue(sequence_entered.wait(timeout=5))

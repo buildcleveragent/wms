@@ -46,7 +46,9 @@ export const useAuth = defineStore('auth', {
       let profileUser = null
       try {
         const profile = await api.authProfile()
-        profileUser = profile?.user || null
+        profileUser = profile?.user
+          ? { ...profile.user, capabilities: profile.capabilities || {} }
+          : null
       } catch (error) {
         profileUser = fallbackUser(username)
       }

@@ -30,7 +30,14 @@ from allapp.core.preserved_data_transfer import (
     validate_dump_sql,
 )
 from allapp.locations.models import Warehouse
-from allapp.products.models import ProductCategory
+from allapp.products.identifier_services import add_product_barcode
+from allapp.products.models import (
+    Product,
+    ProductBarcode,
+    ProductCategory,
+    ProductPackage,
+    ProductUom,
+)
 from allapp.reports.models import OperatingTarget
 
 
@@ -47,7 +54,9 @@ class PreservedDataTransferUnitTests(SimpleTestCase):
         self.assertIn("products_productcategory", scope.selected_tables)
         self.assertNotIn("accounts_auditevent", scope.selected_tables)
         self.assertNotIn("django_admin_log", scope.selected_tables)
-        self.assertNotIn("products_product", scope.selected_tables)
+        self.assertIn("products_product", scope.selected_tables)
+        self.assertIn("products_productpackage", scope.selected_tables)
+        self.assertIn("products_productbarcode", scope.selected_tables)
 
     def test_sql_validator_accepts_only_selected_insert_statements(self):
         with tempfile.TemporaryDirectory() as raw_temp:
@@ -169,6 +178,29 @@ class PreservedDataTransferMySQLTests(TransactionTestCase):
             name="Preserved Category",
             image="product_categories/example.png",
         )
+        uom = ProductUom.objects.create(code="PRES-EA", name="Each")
+        carton_uom = ProductUom.objects.create(code="PRES-CTN", name="Carton")
+        product = Product.objects.create(
+            owner=owner,
+            code="PRESERVED-PRODUCT",
+            name="Preserved Product",
+            category=category,
+            base_uom=uom,
+            expiry_control=False,
+        )
+        package = ProductPackage.objects.create(
+            product=product,
+            uom=carton_uom,
+            qty_in_base=12,
+        )
+        barcode = add_product_barcode(
+            product=product,
+            barcode="PRESERVED-UNIT-001",
+            barcode_type=ProductBarcode.BarcodeType.UNIT,
+            is_primary=True,
+            actor=operator,
+        )
+        next_sku_sequence = Owner.all_objects.get(pk=owner.pk).next_sku_sequence
         historical_audit = AuditEvent.objects.create(
             username=operator.username,
             action="HISTORICAL_EVENT",
@@ -223,6 +255,26 @@ class PreservedDataTransferMySQLTests(TransactionTestCase):
         self.assertTrue(OperatingTarget.objects.filter(pk=target.pk).exists())
         restored_category = ProductCategory.objects.get(pk=category.pk)
         self.assertEqual(restored_category.image.name, "product_categories/example.png")
+        restored_product = Product.objects.get(pk=product.pk)
+        self.assertEqual(restored_product.sku, product.sku)
+        self.assertTrue(
+            ProductPackage.objects.filter(
+                pk=package.pk,
+                product=restored_product,
+                qty_in_base=12,
+            ).exists()
+        )
+        self.assertTrue(
+            ProductBarcode.objects.filter(
+                pk=barcode.pk,
+                product=restored_product,
+                normalized_value="PRESERVED-UNIT-001",
+            ).exists()
+        )
+        self.assertEqual(
+            Owner.all_objects.get(pk=owner.pk).next_sku_sequence,
+            next_sku_sequence,
+        )
         self.assertFalse(AuditEvent.objects.filter(pk=historical_audit.pk).exists())
         self.assertTrue(
             AuditEvent.objects.filter(

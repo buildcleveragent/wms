@@ -113,15 +113,15 @@ class PosCheckoutConcurrencyTests(TransactionTestCase):
             finally:
                 close_old_connections()
 
-        with mock.patch.object(
-            DocSequence, "next_code", side_effect=next_code
-        ), mock.patch(
-            "allapp.pos.services._make_sale_no",
-            side_effect=lambda *args, **kwargs: next_value("PSALE"),
+        with (
+            mock.patch.object(DocSequence, "next_code", side_effect=next_code),
+            mock.patch(
+                "allapp.pos.services._make_sale_no",
+                side_effect=lambda *args, **kwargs: next_value("PSALE"),
+            ),
         ):
             threads = [
-                threading.Thread(target=invoke, args=(index,))
-                for index in range(len(actions))
+                threading.Thread(target=invoke, args=(index,)) for index in range(len(actions))
             ]
             for thread in threads:
                 thread.start()
@@ -366,9 +366,7 @@ class PosCheckoutConcurrencyTests(TransactionTestCase):
         self.assertEqual(errors, [None, None])
         sale.refresh_from_db()
         self.assertEqual(sale.status, PosSale.Status.VOIDED)
-        self.assertTrue(
-            PosSale.objects.filter(src_bill_no="POS-CONC-AFTER-VOID").exists()
-        )
+        self.assertTrue(PosSale.objects.filter(src_bill_no="POS-CONC-AFTER-VOID").exists())
         detail = InventoryDetail.objects.get(product=self.products[0])
         self.assertEqual(detail.onhand_qty, Decimal("4.0000"))
         self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
@@ -393,9 +391,7 @@ class PosCheckoutConcurrencyTests(TransactionTestCase):
 
         self.assertEqual(errors, [None, None])
         self.assertTrue(PosReturn.objects.filter(sale=sale).exists())
-        self.assertTrue(
-            PosSale.objects.filter(src_bill_no="POS-CONC-AFTER-RETURN").exists()
-        )
+        self.assertTrue(PosSale.objects.filter(src_bill_no="POS-CONC-AFTER-RETURN").exists())
         detail = InventoryDetail.objects.get(product=self.products[0])
         self.assertEqual(detail.onhand_qty, Decimal("4.0000"))
         self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
@@ -433,9 +429,7 @@ class PosCheckoutConcurrencyTests(TransactionTestCase):
             )
             failures = [error for error in oversell_errors if error is not None]
             self.assertEqual(len(failures), 1, msg=f"oversell round {round_index}")
-            self.assertIsInstance(
-                failures[0], ValidationError, msg=f"oversell round {round_index}"
-            )
+            self.assertIsInstance(failures[0], ValidationError, msg=f"oversell round {round_index}")
             oversell_detail = InventoryDetail.objects.get(product=oversell_product)
             self.assertEqual(oversell_detail.onhand_qty, Decimal("4.0000"))
 

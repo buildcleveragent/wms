@@ -133,8 +133,10 @@ class SystemSettingAdmin(admin.ModelAdmin):
 
     @admin.display(description="配置值")
     def display_value(self, obj):
-        return "••••••••（已配置）" if obj.is_secret and obj.value else (
-            "（未配置）" if obj.is_secret else obj.value
+        return (
+            "••••••••（已配置）"
+            if obj.is_secret and obj.value
+            else ("（未配置）" if obj.is_secret else obj.value)
         )
 
 

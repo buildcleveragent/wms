@@ -1,14 +1,20 @@
 # allapp/locations/admin.py
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
+
 from django.contrib import admin
 from django.db.models import Count
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
-from .models import Warehouse, Subwarehouse,Location,Container
+
+from allapp.core.admin_tenant import TenantScopedAdminMixin
+
+from .models import Container, Location, Subwarehouse, Warehouse
+
 
 class FloorNoListFilter(admin.SimpleListFilter):
     """按楼层筛选子仓。"""
+
     title = _("楼层")
     parameter_name = "floor"
 
@@ -26,21 +32,40 @@ class FloorNoListFilter(admin.SimpleListFilter):
             return queryset.filter(floor_no=floor)
         return queryset
 
-##---------- Admins ----------
+
+# ---------- Admins ----------
 @admin.register(Warehouse)
-class WarehouseAdmin(admin.ModelAdmin):
+class WarehouseAdmin(TenantScopedAdminMixin, admin.ModelAdmin):
     fields = ("code", "name", "default_receive_location")
     list_display = ("code", "name", "default_receive_location")
     search_fields = ("code", "name")
     ordering = ("code",)
     autocomplete_fields = ("default_receive_location",)
 
+
 @admin.register(Subwarehouse)
-class SubwarehouseAdmin(admin.ModelAdmin):
-    fields = ("warehouse", "code", "name",  "floor_no",)
-    list_display = ("warehouse", "code", "name",  "floor_no", "loc_cnt", "locations_link","is_active",)
+class SubwarehouseAdmin(TenantScopedAdminMixin, admin.ModelAdmin):
+    fields = (
+        "warehouse",
+        "code",
+        "name",
+        "floor_no",
+    )
+    list_display = (
+        "warehouse",
+        "code",
+        "name",
+        "floor_no",
+        "loc_cnt",
+        "locations_link",
+        "is_active",
+    )
     list_filter = ("warehouse", "is_active", FloorNoListFilter)
-    search_fields = ("code", "name","floor_no",)
+    search_fields = (
+        "code",
+        "name",
+        "floor_no",
+    )
     ordering = ("code",)
     list_per_page = 50
 
@@ -55,60 +80,87 @@ class SubwarehouseAdmin(admin.ModelAdmin):
 
     @admin.display(description=_("库位列表"))
     def locations_link(self, obj: Subwarehouse):
-        url = (
-            reverse("admin:locations_location_changelist")
-            + f"?subwarehouse__id__exact={obj.pk}"
-        )
+        url = reverse("admin:locations_location_changelist") + f"?subwarehouse__id__exact={obj.pk}"
         return format_html('<a href="{}">{}</a>', url, _("查看该子仓的库位"))
-
 
 
 @admin.action(description="批量设为禁用")
 def mark_disabled(modeladmin, request, queryset):
     queryset.update(is_disabled=True)
 
+
 @admin.action(description="批量取消禁用")
 def unmark_disabled(modeladmin, request, queryset):
     queryset.update(is_disabled=False)
+
 
 @admin.action(description="批量冻结")
 def mark_frozen(modeladmin, request, queryset):
     queryset.update(is_frozen=True)
 
+
 @admin.action(description="批量解冻")
 def unmark_frozen(modeladmin, request, queryset):
     queryset.update(is_frozen=False)
 
+
 @admin.register(Location)
-class LocationAdmin(admin.ModelAdmin):
+class LocationAdmin(TenantScopedAdminMixin, admin.ModelAdmin):
     list_display = (
-        "warehouse", "code", "name", "zone_type", "subwarehouse","level_code","col_no", "slot_no", "barcode","is_disabled", "is_frozen")
-    list_filter = (
-        "warehouse", "subwarehouse", "zone_type", "is_disabled", "is_frozen",
+        "warehouse",
+        "code",
+        "name",
+        "zone_type",
+        "subwarehouse",
+        "level_code",
+        "col_no",
+        "slot_no",
+        "barcode",
+        "is_disabled",
+        "is_frozen",
     )
-    search_fields = ("code", "name", "barcode", )
+    list_filter = (
+        "warehouse",
+        "subwarehouse",
+        "zone_type",
+        "is_disabled",
+        "is_frozen",
+    )
+    search_fields = (
+        "code",
+        "name",
+        "barcode",
+    )
     ordering = ("subwarehouse", "zone_type", "code")
-    readonly_fields = ("warehouse", "subwarehouse","level_code","col_no","slot_no", "barcode", )
+    readonly_fields = (
+        "warehouse",
+        "subwarehouse",
+        "level_code",
+        "col_no",
+        "slot_no",
+        "barcode",
+    )
 
     fieldsets = (
-        (None, {
-            'fields': (
-                "code", "name", "zone_type", ("warehouse", "subwarehouse"),"level_code","col_no", "slot_no", "barcode", )
-        }),
-        ("存储能力", {
-            'fields': (("max_volume_m3", "max_weight_kg"))
-        }),
-        ("状态", {
-            'fields': (
-                "is_disabled", "is_frozen"
-            )
-        }),
-        ("限制放置商品类别", {
-            'fields': ("product_categories",)
-        }),
-        ("指引", {
-            'fields': ("batch_guide",)
-        }),
+        (
+            None,
+            {
+                "fields": (
+                    "code",
+                    "name",
+                    "zone_type",
+                    ("warehouse", "subwarehouse"),
+                    "level_code",
+                    "col_no",
+                    "slot_no",
+                    "barcode",
+                )
+            },
+        ),
+        ("存储能力", {"fields": (("max_volume_m3", "max_weight_kg"))}),
+        ("状态", {"fields": ("is_disabled", "is_frozen")}),
+        ("限制放置商品类别", {"fields": ("product_categories",)}),
+        ("指引", {"fields": ("batch_guide",)}),
     )
 
     def save_model(self, request, obj, form, change):
@@ -122,12 +174,18 @@ class LocationAdmin(admin.ModelAdmin):
 
 
 @admin.register(Container)
-class ContainerAdmin(admin.ModelAdmin):
+class ContainerAdmin(TenantScopedAdminMixin, admin.ModelAdmin):
     # —— 列表展示 —— #
     list_display = (
-        "id", "container_no", "container_type", "owner", "warehouse",
-        "location", "parent",
-        "volume_l", "gross_limit_kg_disp",
+        "id",
+        "container_no",
+        "container_type",
+        "owner",
+        "warehouse",
+        "location",
+        "parent",
+        "volume_l",
+        "gross_limit_kg_disp",
     )
     list_display_links = ("container_no",)
     ordering = ("-id",)
@@ -151,18 +209,29 @@ class ContainerAdmin(admin.ModelAdmin):
 
     # —— 表单分组 —— #
     fieldsets = (
-        ("基础信息", {
-            "fields": (("container_no", "container_type"),
-                       ("owner", "warehouse"),
-                       ("location", "parent")),
-        }),
-        ("尺寸/载重", {
-            "classes": ("collapse",),
-            "fields": (
-                ("length_cm", "width_cm", "height_cm"),
-                ("tare_kg", "max_gross_kg", ),
-            ),
-        }),
+        (
+            "基础信息",
+            {
+                "fields": (
+                    ("container_no", "container_type"),
+                    ("owner", "warehouse"),
+                    ("location", "parent"),
+                ),
+            },
+        ),
+        (
+            "尺寸/载重",
+            {
+                "classes": ("collapse",),
+                "fields": (
+                    ("length_cm", "width_cm", "height_cm"),
+                    (
+                        "tare_kg",
+                        "max_gross_kg",
+                    ),
+                ),
+            },
+        ),
     )
 
     # —— 只读控制：创建后不允许跨租户/跨仓变更 —— #
@@ -177,9 +246,9 @@ class ContainerAdmin(admin.ModelAdmin):
         try:
             if obj.length_cm and obj.width_cm and obj.height_cm:
                 # cm^3 → L：/1000；统一四舍五入两位
-                vol = (Decimal(obj.length_cm) *
-                       Decimal(obj.width_cm) *
-                       Decimal(obj.height_cm)) / Decimal("1000")
+                vol = (
+                    Decimal(obj.length_cm) * Decimal(obj.width_cm) * Decimal(obj.height_cm)
+                ) / Decimal("1000")
                 return vol.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         except Exception:
             pass

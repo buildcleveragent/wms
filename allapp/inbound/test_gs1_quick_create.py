@@ -21,7 +21,6 @@ from allapp.products.models import (
     ProductUom,
 )
 
-
 TEST_SYSTEM_SETTING_KEY = Fernet.generate_key().decode("ascii")
 
 
@@ -34,17 +33,13 @@ class Gs1QuickCreateApiTests(TestCase):
         OwnerWarehouseBinding.objects.create(owner=cls.owner, warehouse=cls.warehouse)
         cls.category = ProductCategory.objects.create(code="GQ-CAT", name="饮品")
         cls.uom = ProductUom.objects.create(code="GQ-EA", name="瓶")
-        cls.user = get_user_model().objects.create_user(
-            username="gs1-operator", password="x"
-        )
+        cls.user = get_user_model().objects.create_user(username="gs1-operator", password="x")
         UserRoleScope.objects.create(
             user=cls.user,
             role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
             warehouse=cls.warehouse,
         )
-        cls.user.user_permissions.add(
-            Permission.objects.get(codename="receive_without_order")
-        )
+        cls.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
         api_key, _ = SystemSetting.objects.update_or_create(
             namespace=SystemSetting.INTEGRATION_NAMESPACE,
             key=SystemSetting.APIZERO_GS1_API_KEY,
@@ -268,12 +263,15 @@ class Gs1QuickCreateApiTests(TestCase):
             ("provider_network_error", "GS1_NETWORK_ERROR", 503),
         )
         for index, (provider_code, api_code, http_status) in enumerate(scenarios):
-            with self.subTest(provider_code=provider_code), mock.patch(
-                "allapp.inbound.gs1_views.get_or_fetch_lookup",
-                side_effect=Gs1LookupError(
-                    f"specific {provider_code}",
-                    code=provider_code,
-                    retry_after=1 if http_status == 429 else None,
+            with (
+                self.subTest(provider_code=provider_code),
+                mock.patch(
+                    "allapp.inbound.gs1_views.get_or_fetch_lookup",
+                    side_effect=Gs1LookupError(
+                        f"specific {provider_code}",
+                        code=provider_code,
+                        retry_after=1 if http_status == 429 else None,
+                    ),
                 ),
             ):
                 response = self.client.post(
@@ -290,10 +288,13 @@ class Gs1QuickCreateApiTests(TestCase):
                 self.assertTrue(response.data["request_id"])
 
     def test_lookup_unexpected_error_is_logged_but_not_leaked(self):
-        with mock.patch(
-            "allapp.inbound.gs1_views.get_or_fetch_lookup",
-            side_effect=RuntimeError("database-secret-detail"),
-        ), self.assertLogs("allapp.inbound.gs1_views", level="ERROR") as logs:
+        with (
+            mock.patch(
+                "allapp.inbound.gs1_views.get_or_fetch_lookup",
+                side_effect=RuntimeError("database-secret-detail"),
+            ),
+            self.assertLogs("allapp.inbound.gs1_views", level="ERROR") as logs,
+        ):
             response = self.client.post(
                 "/api/inbound/gs1-products/lookup/",
                 {"owner_id": self.owner.pk, "barcode": "6901234567892"},

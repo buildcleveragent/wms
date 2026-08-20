@@ -24,6 +24,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from allapp.baseinfo.models import Customer
+from allapp.core.url_security import require_https_endpoint
 from allapp.inventory.models import InventoryDetail
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import Brand, ProductCategory
@@ -160,9 +161,7 @@ def _payment_payload(payment):
         "paid_at": payment.paid_at.isoformat() if payment.paid_at else "",
         "retry_count": payment.retry_count,
         "next_reconcile_at": (
-            payment.next_reconcile_at.isoformat()
-            if payment.next_reconcile_at
-            else ""
+            payment.next_reconcile_at.isoformat() if payment.next_reconcile_at else ""
         ),
         "last_error": payment.last_error,
         "requires_manual_action": payment.requires_manual_action,
@@ -213,9 +212,7 @@ def _refund_payload(refund):
             and not refund.requires_manual_action
         ),
         "retry_count": refund.retry_count,
-        "next_retry_at": (
-            refund.next_retry_at.isoformat() if refund.next_retry_at else ""
-        ),
+        "next_retry_at": (refund.next_retry_at.isoformat() if refund.next_retry_at else ""),
         "last_error": refund.last_error,
         "requires_manual_action": refund.requires_manual_action,
     }
@@ -295,16 +292,12 @@ class SaleMiniPreviewSerializer(serializers.Serializer):
             raise serializers.ValidationError("至少需要一条商品明细。")
         product_keys = []
         for line in lines:
-            product_keys.append(
-                (line["product_id"], (line.get("order_uom") or "").strip())
-            )
+            product_keys.append((line["product_id"], (line.get("order_uom") or "").strip()))
         if len(product_keys) != len(set(product_keys)):
             raise serializers.ValidationError("相同商品和订货单位请合并后再提交。")
         product_ids = [line["product_id"] for line in lines]
         if len(product_ids) != len(set(product_ids)):
-            raise serializers.ValidationError(
-                "同一商品请合并为一条，避免重复占用库存。"
-            )
+            raise serializers.ValidationError("同一商品请合并为一条，避免重复占用库存。")
         return lines
 
 
@@ -391,15 +384,9 @@ class MiniAddressInputSerializer(serializers.Serializer):
     customer_id = serializers.IntegerField(required=False)
     contact = serializers.CharField(max_length=80)
     phone = serializers.CharField(max_length=40)
-    province = serializers.CharField(
-        max_length=30, required=False, allow_blank=True, default=""
-    )
-    city = serializers.CharField(
-        max_length=30, required=False, allow_blank=True, default=""
-    )
-    district = serializers.CharField(
-        max_length=30, required=False, allow_blank=True, default=""
-    )
+    province = serializers.CharField(max_length=30, required=False, allow_blank=True, default="")
+    city = serializers.CharField(max_length=30, required=False, allow_blank=True, default="")
+    district = serializers.CharField(max_length=30, required=False, allow_blank=True, default="")
     detail = serializers.CharField(max_length=200)
     is_default = serializers.BooleanField(required=False, default=False)
 
@@ -531,9 +518,7 @@ def _customer_for_context(owner, user, data=None, *, required=True, auto_create=
         return _ensure_buyer_for_owner(owner, user)
 
     if required:
-        raise PermissionDenied(
-            "当前商品暂未对你的账号开通购买权限，可先浏览或联系客服。"
-        )
+        raise PermissionDenied("当前商品暂未对你的账号开通购买权限，可先浏览或联系客服。")
     return None, buyer
 
 
@@ -557,9 +542,15 @@ def _wechat_code_to_session(code):
             "grant_type": "authorization_code",
         }
     )
-    url = f"{settings.WECHAT_JSCODE2SESSION_URL}?{query}"
+    endpoint = require_https_endpoint(
+        settings.WECHAT_JSCODE2SESSION_URL,
+        setting_name="WECHAT_JSCODE2SESSION_URL",
+        allowed_hosts=("api.weixin.qq.com",),
+    )
+    url = f"{endpoint}?{query}"
     try:
-        with url_request.urlopen(url, timeout=5) as response:
+        # The endpoint is restricted to the official HTTPS WeChat host.
+        with url_request.urlopen(url, timeout=5) as response:  # nosec B310
             payload = json.loads(response.read().decode("utf-8"))
     except (OSError, ValueError, url_error.URLError) as exc:
         raise WechatLoginUnavailable("微信登录服务请求失败，请稍后重试。") from exc
@@ -567,11 +558,7 @@ def _wechat_code_to_session(code):
     errcode = payload.get("errcode")
     if errcode:
         raise ValidationError(
-            {
-                "code": (
-                    f"微信登录 code 无效或已过期：{payload.get('errmsg') or errcode}"
-                )
-            }
+            {"code": (f"微信登录 code 无效或已过期：{payload.get('errmsg') or errcode}")}
         )
     if not payload.get("openid"):
         raise WechatLoginUnavailable("微信登录未返回 openid。")
@@ -651,9 +638,7 @@ def _bound_wechat_buyer(data, session_data):
         raise PermissionDenied("当前微信账号暂未开通购买权限，请联系客服。")
     user_ids = {buyer.user_id for buyer in buyers if buyer.user_id}
     if len(user_ids) > 1:
-        raise ValidationError(
-            {"openid": "当前微信账号存在多个购买权限记录，请联系客服处理。"}
-        )
+        raise ValidationError({"openid": "当前微信账号存在多个购买权限记录，请联系客服处理。"})
 
     buyer = buyers[0]
     for candidate in buyers:
@@ -663,9 +648,7 @@ def _bound_wechat_buyer(data, session_data):
         is_active=True,
     ).exclude(user_id=buyer.user_id)
     if conflict_qs.exists():
-        raise ValidationError(
-            {"openid": "当前 openid 已绑定到其他小程序用户，请联系管理员。"}
-        )
+        raise ValidationError({"openid": "当前 openid 已绑定到其他小程序用户，请联系管理员。"})
 
     update_fields = []
     if not buyer.openid:
@@ -748,9 +731,7 @@ def _config_qs(owner):
             product__is_active=True,
         )
         .filter(_active_category_path_q())
-        .select_related(
-            "product", "product__base_uom", "product__category", "product__brand"
-        )
+        .select_related("product", "product__base_uom", "product__category", "product__brand")
         .prefetch_related("product__packages", "product__packages__uom")
     )
 
@@ -794,8 +775,7 @@ def _available_map_for_configs(configs):
         .annotate(available_qty=Sum("available_qty"))
     )
     return {
-        (row["owner_id"], row["product_id"]): Decimal(row["available_qty"] or 0)
-        for row in rows
+        (row["owner_id"], row["product_id"]): Decimal(row["available_qty"] or 0) for row in rows
     }
 
 
@@ -879,9 +859,7 @@ def _effective_rules(product, config, policy, qty_in_base):
     )
     base_multiple = Decimal(product.min_pick_multiple or 1)
     if base_multiple > 1 and qty_in_base > 0:
-        converted = (base_multiple / qty_in_base).quantize(
-            QTY_QUANT, rounding=ROUND_HALF_UP
-        )
+        converted = (base_multiple / qty_in_base).quantize(QTY_QUANT, rounding=ROUND_HALF_UP)
         if converted > multiple_qty:
             multiple_qty = converted
     return min_qty, multiple_qty
@@ -894,9 +872,7 @@ def _is_multiple(qty, multiple, origin=Decimal("0")):
     return quotient == quotient.to_integral_value()
 
 
-def _product_payload(
-    request, owner, customer, config, available_qty, order_date, *, detail=False
-):
+def _product_payload(request, owner, customer, config, available_qty, order_date, *, detail=False):
     product = config.product
     channel = _channel_for_customer(owner, customer) if customer else None
     policy = {
@@ -921,14 +897,10 @@ def _product_payload(
         "spec": product.spec or "",
         "brand": getattr(product.brand, "name", "") if product.brand_id else "",
         "category_id": product.category_id,
-        "category_name": (
-            getattr(product.category, "name", "") if product.category_id else ""
-        ),
+        "category_name": (getattr(product.category, "name", "") if product.category_id else ""),
         "image_url": _image_url(request, product),
         "price": _str(unit_price, PRICE_QUANT),
-        "market_price": (
-            _str(config.market_price, PRICE_QUANT) if config.market_price else ""
-        ),
+        "market_price": (_str(config.market_price, PRICE_QUANT) if config.market_price else ""),
         "order_uom": order_uom,
         "order_uom_name": _uom_name(product, order_uom),
         "uom_options": uom_options,
@@ -968,18 +940,14 @@ def _product_payload(
                 "pack_note": product.pack_note or "",
                 "review_summary": review_summary(config),
                 "review_preview": (
-                    public_review_payload(request, preview_review)
-                    if preview_review
-                    else None
+                    public_review_payload(request, preview_review) if preview_review else None
                 ),
             }
         )
     return payload
 
 
-def _line_quote_payload(
-    product, config, qty, order_uom, base_price, unit_price, available_qty
-):
+def _line_quote_payload(product, config, qty, order_uom, base_price, unit_price, available_qty):
     qty_in_base = _qty_in_base_for_uom(product, order_uom) or Decimal("1")
     base_qty = _qty(qty * qty_in_base)
     owner = config.owner
@@ -1035,10 +1003,7 @@ def _build_order_preview(
     order_date = _business_date()
     channel = _channel_for_customer(owner, customer)
     product_ids = [line["product_id"] for line in lines_data]
-    configs = {
-        cfg.product_id: cfg
-        for cfg in _config_qs(owner).filter(product_id__in=product_ids)
-    }
+    configs = {cfg.product_id: cfg for cfg in _config_qs(owner).filter(product_id__in=product_ids)}
     missing = [pid for pid in product_ids if pid not in configs]
     if missing:
         raise ValidationError({"products": f"商品未上架或无权购买：{missing}"})
@@ -1059,9 +1024,7 @@ def _build_order_preview(
             "multiple_qty": Decimal("0"),
         }
         policy = _policy_for(owner, customer, product, channel)
-        order_uom = (
-            line_data.get("order_uom") or _default_order_uom(product, policy)
-        ).strip()
+        order_uom = (line_data.get("order_uom") or _default_order_uom(product, policy)).strip()
         qty = _qty(line_data["qty"])
         line_ok = True
         message = ""
@@ -1085,15 +1048,17 @@ def _build_order_preview(
         product_name = _buyer_product_name(product)
         if config.enable_qty_rules and qty < min_qty:
             line_ok = False
-            message = (
-                f"{product_name} 起订量为 {_str(min_qty, QTY_QUANT)} {order_uom}。"
-            )
+            message = f"{product_name} 起订量为 {_str(min_qty, QTY_QUANT)} {order_uom}。"
         if config.max_order_qty and qty > config.max_order_qty:
             line_ok = False
-            message = f"{product_name} 超过限购数量 {_str(config.max_order_qty, QTY_QUANT)} {order_uom}。"
+            message = (
+                f"{product_name} 超过限购数量 {_str(config.max_order_qty, QTY_QUANT)} {order_uom}。"
+            )
         if config.enable_qty_rules and not _is_multiple(qty, multiple_qty, min_qty):
             line_ok = False
-            message = f"{product_name} 购买数量需按 {_str(multiple_qty, QTY_QUANT)} {order_uom} 递增。"
+            message = (
+                f"{product_name} 购买数量需按 {_str(multiple_qty, QTY_QUANT)} {order_uom} 递增。"
+            )
         if (
             not product.break_box_allowed
             and qty_in_base == Decimal("1")
@@ -1152,9 +1117,7 @@ def _build_order_preview(
 
     if strict and not ok:
         failed = next((line for line in preview_lines if not line["ok"]), None)
-        raise ValidationError(
-            {"detail": failed["message"] if failed else "订单校验未通过。"}
-        )
+        raise ValidationError({"detail": failed["message"] if failed else "订单校验未通过。"})
 
     adjustment_preview = build_adjustment_preview(
         owner=owner,
@@ -1184,9 +1147,7 @@ def _build_order_preview(
             "adjustment_amount": _str(adjustment_amount, MONEY_QUANT),
             "payable_amount": _str(payable_amount, MONEY_QUANT),
             "total_amount": _str(payable_amount, MONEY_QUANT),
-            "adjustments": [
-                _adjustment_spec_payload(spec) for spec in adjustment_specs
-            ],
+            "adjustments": [_adjustment_spec_payload(spec) for spec in adjustment_specs],
             "line_count": len(preview_lines),
             "lines": preview_lines,
         },
@@ -1470,9 +1431,7 @@ def _combined_order_payload(request, mappings):
     first = orders[0]
     display_status, display_status_name = _combined_display_status(orders)
     payment_statuses = {order["payment_status"] for order in orders}
-    deadline_values = [
-        order["pay_deadline_at"] for order in orders if order.get("pay_deadline_at")
-    ]
+    deadline_values = [order["pay_deadline_at"] for order in orders if order.get("pay_deadline_at")]
     source = mappings[0].source if mappings else ""
     return {
         "id": first["id"],
@@ -1487,9 +1446,7 @@ def _combined_order_payload(request, mappings):
         "status_name": display_status_name,
         "submit_status": first.get("submit_status", ""),
         "approval_status": first.get("approval_status", ""),
-        "payment_status": (
-            first["payment_status"] if len(payment_statuses) == 1 else "MIXED"
-        ),
+        "payment_status": (first["payment_status"] if len(payment_statuses) == 1 else "MIXED"),
         "payment_status_name": (
             first["payment_status_name"] if len(payment_statuses) == 1 else "混合"
         ),
@@ -1511,9 +1468,7 @@ def _combined_order_payload(request, mappings):
         "payable_amount": _str(payable_amount, MONEY_QUANT),
         "total_amount": _str(payable_amount, MONEY_QUANT),
         "adjustments": [
-            adjustment
-            for order in orders
-            for adjustment in order.get("adjustments", [])
+            adjustment for order in orders for adjustment in order.get("adjustments", [])
         ],
         "line_count": sum(order["line_count"] for order in orders),
         "lines": [line for order in orders for line in order.get("lines", [])],
@@ -1525,9 +1480,7 @@ def _order_mapping_groups(mappings):
     index = {}
     for mapping in mappings:
         key = (
-            mapping.source
-            if _is_sale_mini_batch_source(mapping.source)
-            else f"single:{mapping.id}"
+            mapping.source if _is_sale_mini_batch_source(mapping.source) else f"single:{mapping.id}"
         )
         if key not in index:
             index[key] = []
@@ -1638,10 +1591,7 @@ def _cart_payload(request, cart, owner, customer):
         }
 
     product_ids = [item.product_id for item in items]
-    configs = {
-        cfg.product_id: cfg
-        for cfg in _config_qs(owner).filter(product_id__in=product_ids)
-    }
+    configs = {cfg.product_id: cfg for cfg in _config_qs(owner).filter(product_id__in=product_ids)}
     valid_inputs = [
         {
             "product_id": item.product_id,
@@ -1672,9 +1622,7 @@ def _cart_payload(request, cart, owner, customer):
         adjustment_amount = Decimal(preview["adjustment_amount"])
         payable_amount = Decimal(preview["payable_amount"])
         adjustments = preview["adjustments"]
-        valid_by_key = {
-            (line["product_id"], line["order_uom"]): line for line in preview["lines"]
-        }
+        valid_by_key = {(line["product_id"], line["order_uom"]): line for line in preview["lines"]}
 
     lines = []
     for item in items:
@@ -1899,8 +1847,7 @@ def _display_status(order, mapping=None):
         if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.REFUNDED:
             return "REFUNDED", "已退款"
     if fulfillment_status == "CANCELLED" or (
-        mapping
-        and mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.CANCELLED
+        mapping and mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.CANCELLED
     ):
         return "CANCELLED", "已取消"
     if fulfillment_status == "REJECTED":
@@ -2002,9 +1949,7 @@ def _display_status_q(status_code):
     return Q()
 
 
-def _order_line_payload(
-    request, line, config_id=None, *, review=None, review_eligible=False
-):
+def _order_line_payload(request, line, config_id=None, *, review=None, review_eligible=False):
     product = line.product
     if line.aux_uom_id:
         order_uom = getattr(line.aux_uom.uom, "code", "")
@@ -2064,13 +2009,9 @@ def _order_payload(request, mapping):
     display_status, display_status_name = _display_status(order, mapping)
     latest_payment = _latest_payment(mapping)
     latest_refund = (
-        latest_payment.refunds.order_by("-created_at", "-id").first()
-        if latest_payment
-        else None
+        latest_payment.refunds.order_by("-created_at", "-id").first() if latest_payment else None
     )
-    latest_after_sale = mapping.after_sale_requests.order_by(
-        "-created_at", "-id"
-    ).first()
+    latest_after_sale = mapping.after_sale_requests.order_by("-created_at", "-id").first()
     lines = list(
         order.lines.filter(is_deleted=False)
         .select_related("product", "product__base_uom", "aux_uom", "aux_uom__uom")
@@ -2090,14 +2031,10 @@ def _order_payload(request, mapping):
             buyer_user=mapping.buyer_user,
         )
     }
-    review_order_eligible = (
-        display_status == "COMPLETED"
-        and mapping.payment_status
-        in {
-            SaleMiniOrderMapping.PaymentStatus.PAID,
-            SaleMiniOrderMapping.PaymentStatus.OFFLINE,
-        }
-    )
+    review_order_eligible = display_status == "COMPLETED" and mapping.payment_status in {
+        SaleMiniOrderMapping.PaymentStatus.PAID,
+        SaleMiniOrderMapping.PaymentStatus.OFFLINE,
+    }
     return {
         "id": order.id,
         "mapping_id": mapping.id,
@@ -2111,9 +2048,7 @@ def _order_payload(request, mapping):
         "approval_status": order.approval_status,
         "payment_status": mapping.payment_status,
         "payment_status_name": mapping.get_payment_status_display(),
-        "pay_deadline_at": (
-            mapping.pay_deadline_at.isoformat() if mapping.pay_deadline_at else ""
-        ),
+        "pay_deadline_at": (mapping.pay_deadline_at.isoformat() if mapping.pay_deadline_at else ""),
         "paid_at": mapping.paid_at.isoformat() if mapping.paid_at else "",
         "payment": _payment_payload(latest_payment),
         "refund": _refund_payload(latest_refund),
@@ -2211,9 +2146,7 @@ class SaleMiniHomeApi(APIView):
                 "link_type": banner.link_type,
                 "link_value": banner.link_value,
             }
-            for banner in SaleMiniBanner.objects.filter(
-                owner__is_active=True, is_active=True
-            )
+            for banner in SaleMiniBanner.objects.filter(owner__is_active=True, is_active=True)
             .select_related("owner")
             .order_by("sort_order", "id")[:8]
         ]
@@ -2290,9 +2223,7 @@ def _category_rows(request=None, owner=None, owner_id=None, *, roots_only=False)
             subtree_counts[node.id] += count
             node = by_id.get(node.parent_id)
 
-    parent_ids = {
-        category.parent_id for category in categories if category.parent_id in by_id
-    }
+    parent_ids = {category.parent_id for category in categories if category.parent_id in by_id}
     rows = []
     for category in categories:
         product_count = subtree_counts[category.id]
@@ -2370,9 +2301,7 @@ def _sale_mini_coupon_payload(coupon, order_amount=None):
         "status": coupon.status,
         "expires_at": coupon.expires_at.isoformat() if coupon.expires_at else "",
         "effective_from": template.effective_from.isoformat(),
-        "effective_to": (
-            template.effective_to.isoformat() if template.effective_to else ""
-        ),
+        "effective_to": (template.effective_to.isoformat() if template.effective_to else ""),
         "usable": usable,
     }
 
@@ -2413,9 +2342,7 @@ class SaleMiniCouponListApi(APIView):
             ]
             if not contexts:
                 owner = _default_owner_for_user(request.user)
-                customer, buyer = _customer_for_context(
-                    owner, request.user, request.query_params
-                )
+                customer, buyer = _customer_for_context(owner, request.user, request.query_params)
                 contexts = [(owner, customer, buyer)]
         today = _business_date()
         now = timezone.now()
@@ -2433,19 +2360,15 @@ class SaleMiniCouponListApi(APIView):
                     template__effective_from__lte=today,
                 )
                 .filter(
-                    Q(template__effective_to__isnull=True)
-                    | Q(template__effective_to__gte=today)
+                    Q(template__effective_to__isnull=True) | Q(template__effective_to__gte=today)
                 )
                 .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
-                .order_by(
-                    "template__threshold_amount", "-template__discount_amount", "id"
-                )
+                .order_by("template__threshold_amount", "-template__discount_amount", "id")
             )
             if buyer:
                 qs = qs.filter(Q(buyer_user=buyer) | Q(buyer_user__isnull=True))
             rows.extend(
-                _sale_mini_coupon_payload(coupon, order_amount=order_amount)
-                for coupon in qs
+                _sale_mini_coupon_payload(coupon, order_amount=order_amount) for coupon in qs
             )
         rows.sort(
             key=lambda row: (
@@ -2475,9 +2398,7 @@ class SaleMiniPointBalanceApi(APIView):
             ]
             if not contexts:
                 owner = _default_owner_for_user(request.user)
-                customer, buyer = _customer_for_context(
-                    owner, request.user, request.query_params
-                )
+                customer, buyer = _customer_for_context(owner, request.user, request.query_params)
                 contexts = [(owner, customer, buyer)]
         points = 0
         frozen = 0
@@ -2486,9 +2407,7 @@ class SaleMiniPointBalanceApi(APIView):
             points += context_points
             frozen += context_frozen
         try:
-            rate = Decimal(
-                str(getattr(settings, "SALE_MINI_POINT_EXCHANGE_RATE", "100"))
-            )
+            rate = Decimal(str(getattr(settings, "SALE_MINI_POINT_EXCHANGE_RATE", "100")))
         except (InvalidOperation, TypeError, ValueError) as exc:
             raise ValidationError({"points": "积分兑换比例配置无效。"}) from exc
         if rate <= 0:
@@ -2555,9 +2474,7 @@ class SaleMiniProductListApi(APIView):
                     Value(Decimal("0.00")),
                     output_field=DecimalField(max_digits=12, decimal_places=4),
                 )
-            ).order_by(
-                "-display_price" if ordering == "price_desc" else "display_price"
-            )
+            ).order_by("-display_price" if ordering == "price_desc" else "display_price")
         elif ordering == "hot":
             qs = qs.order_by("-is_hot", "sort_order", "product__code")
         else:
@@ -2627,16 +2544,12 @@ class SaleMiniAddressListCreateApi(APIView):
             ]
             if not contexts:
                 owner = _default_owner_for_user(request.user)
-                customer, buyer = _customer_for_context(
-                    owner, request.user, request.query_params
-                )
+                customer, buyer = _customer_for_context(owner, request.user, request.query_params)
                 contexts = [(owner, customer, buyer)]
         rows = []
         seen = set()
         for owner, customer, buyer in contexts:
-            qs = MiniCustomerAddress.objects.filter(
-                owner=owner, customer=customer, is_active=True
-            )
+            qs = MiniCustomerAddress.objects.filter(owner=owner, customer=customer, is_active=True)
             if buyer:
                 qs = qs.filter(Q(buyer_user=buyer) | Q(buyer_user__isnull=True))
             for address in qs.order_by("-is_default", "-id"):
@@ -2651,9 +2564,7 @@ class SaleMiniAddressListCreateApi(APIView):
         serializer = MiniAddressInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        owner_id = (
-            request.data.get("owner_id") if hasattr(request.data, "get") else None
-        )
+        owner_id = request.data.get("owner_id") if hasattr(request.data, "get") else None
         if owner_id:
             binding = get_object_or_404(
                 _buyer_bindings_for_user(request.user),
@@ -2688,9 +2599,7 @@ class SaleMiniAddressDetailApi(APIView):
     permission_classes = [IsAuthenticated]
 
     def _get_address(self, request, pk):
-        context = (
-            request.data if request.method in {"PUT", "PATCH"} else request.query_params
-        )
+        context = request.data if request.method in {"PUT", "PATCH"} else request.query_params
         owner_id = context.get("owner_id") if hasattr(context, "get") else None
         if owner_id:
             binding = get_object_or_404(
@@ -2701,9 +2610,7 @@ class SaleMiniAddressDetailApi(APIView):
         else:
             owner = _default_owner_for_user(request.user)
         customer, buyer = _customer_for_context(owner, request.user, context)
-        qs = MiniCustomerAddress.objects.filter(
-            owner=owner, customer=customer, is_active=True
-        )
+        qs = MiniCustomerAddress.objects.filter(owner=owner, customer=customer, is_active=True)
         if buyer:
             qs = qs.filter(Q(buyer_user=buyer) | Q(buyer_user__isnull=True))
         return get_object_or_404(qs, pk=pk)
@@ -2716,9 +2623,9 @@ class SaleMiniAddressDetailApi(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         if data.get("is_default"):
-            MiniCustomerAddress.objects.filter(
-                owner=owner, customer=address.customer
-            ).exclude(pk=address.pk).update(is_default=False)
+            MiniCustomerAddress.objects.filter(owner=owner, customer=address.customer).exclude(
+                pk=address.pk
+            ).update(is_default=False)
         for field in [
             "contact",
             "phone",
@@ -2739,9 +2646,7 @@ class SaleMiniAddressDetailApi(APIView):
         address.is_active = False
         address.is_deleted = True
         address.deleted_by = request.user
-        address.save(
-            update_fields=["is_active", "is_deleted", "deleted_by", "updated_at"]
-        )
+        address.save(update_fields=["is_active", "is_deleted", "deleted_by", "updated_at"])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -2752,9 +2657,7 @@ class SaleMiniCartApi(APIView):
         cart_id = request.query_params.get("cart_id")
         if cart_id:
             cart = get_object_or_404(
-                SaleMiniCart.objects.select_related(
-                    "owner", "customer", "buyer_user"
-                ).filter(
+                SaleMiniCart.objects.select_related("owner", "customer", "buyer_user").filter(
                     id=cart_id,
                     buyer_user__user=request.user,
                     is_active=True,
@@ -2801,9 +2704,7 @@ class SaleMiniCartAddApi(APIView):
 
         channel = _channel_for_customer(owner, customer)
         policy = _policy_for(owner, customer, product, channel)
-        order_uom = (
-            data.get("order_uom") or _default_order_uom(product, policy)
-        ).strip()
+        order_uom = (data.get("order_uom") or _default_order_uom(product, policy)).strip()
         _validate_order_uom(product, order_uom)
 
         other_uom_item = (
@@ -2886,9 +2787,7 @@ class SaleMiniCartClearApi(APIView):
 
     @transaction.atomic
     def post(self, request):
-        owner_id = (
-            request.data.get("owner_id") if isinstance(request.data, dict) else None
-        )
+        owner_id = request.data.get("owner_id") if isinstance(request.data, dict) else None
         if not owner_id:
             carts = SaleMiniCart.objects.select_for_update().filter(
                 buyer_user__user=request.user,
@@ -2925,11 +2824,7 @@ class SaleMiniOrderPreviewApi(APIView):
         order_contexts = _order_contexts_for_payload(request, data, auto_create=True)
         if len(order_contexts) > 1 and _order_has_owner_scoped_adjustments(data):
             raise ValidationError(
-                {
-                    "adjustments": (
-                        "多包裹订单暂不支持优惠券或积分抵扣，请先不使用优惠后再提交。"
-                    )
-                }
+                {"adjustments": ("多包裹订单暂不支持优惠券或积分抵扣，请先不使用优惠后再提交。")}
             )
 
         group_previews = []
@@ -2959,9 +2854,7 @@ def _address_from_payload(owner, customer, data):
     if not address_id:
         return None
     return get_object_or_404(
-        MiniCustomerAddress.objects.filter(
-            owner=owner, customer=customer, is_active=True
-        ),
+        MiniCustomerAddress.objects.filter(owner=owner, customer=customer, is_active=True),
         pk=address_id,
     )
 
@@ -3014,9 +2907,7 @@ def _fulfillment_for_order_payload(owner, customer, data):
         return contact, contact_phone, _pickup_ship_to(owner, data), address
 
     contact = address.contact if address else (data.get("contact") or "").strip()
-    contact_phone = (
-        address.phone if address else (data.get("contact_phone") or "").strip()
-    )
+    contact_phone = address.phone if address else (data.get("contact_phone") or "").strip()
     ship_to = address.full_address if address else (data.get("ship_to") or "").strip()
     if not contact or not contact_phone or not ship_to:
         raise ValidationError({"address": "请填写完整收货联系人、电话和地址。"})
@@ -3087,16 +2978,10 @@ class SaleMiniOrderListCreateApi(APIView):
         order_contexts = _order_contexts_for_payload(request, data, auto_create=True)
         if len(order_contexts) > 1 and _order_has_owner_scoped_adjustments(data):
             raise ValidationError(
-                {
-                    "adjustments": (
-                        "多包裹订单暂不支持优惠券或积分抵扣，请先不使用优惠后再提交。"
-                    )
-                }
+                {"adjustments": ("多包裹订单暂不支持优惠券或积分抵扣，请先不使用优惠后再提交。")}
             )
 
-        batch_source = (
-            _new_sale_mini_batch_source() if len(order_contexts) > 1 else "sale-mini"
-        )
+        batch_source = _new_sale_mini_batch_source() if len(order_contexts) > 1 else "sale-mini"
         mappings = []
         for context in order_contexts:
             mappings.append(
@@ -3170,11 +3055,7 @@ def _prepare_wechat_prepay(mapping_id, buyer, by_user):
         .first()
     )
     if payment:
-        if (
-            payment.prepay_id
-            and payment.expires_at
-            and payment.expires_at > now
-        ):
+        if payment.prepay_id and payment.expires_at and payment.expires_at > now:
             return {"state": "reuse", "mapping": mapping, "payment": payment}
         return {"state": "resolve", "mapping": mapping, "payment": payment}
 
@@ -3275,14 +3156,10 @@ def _close_payment_for_replacement(payment_id, *, failed=False):
         SaleMiniPayment.Status.REFUNDED,
     }:
         return payment
-    payment.status = (
-        SaleMiniPayment.Status.FAILED if failed else SaleMiniPayment.Status.CLOSED
-    )
+    payment.status = SaleMiniPayment.Status.FAILED if failed else SaleMiniPayment.Status.CLOSED
     payment.closed_at = None if failed else timezone.now()
     payment.next_reconcile_at = None
-    payment.save(
-        update_fields=["status", "closed_at", "next_reconcile_at", "updated_at"]
-    )
+    payment.save(update_fields=["status", "closed_at", "next_reconcile_at", "updated_at"])
     return payment
 
 
@@ -3329,9 +3206,7 @@ class SaleMiniWechatPrepayApi(APIView):
         amount = payable_amount(mapping)
         buyer = mapping.buyer_user or _buyer_for_user(mapping.owner, request.user)
         if amount > 0 and (not buyer or not buyer.openid):
-            raise ValidationError(
-                {"openid": "当前小程序用户未绑定 openid，不能微信支付。"}
-            )
+            raise ValidationError({"openid": "当前小程序用户未绑定 openid，不能微信支付。"})
         prepared = _prepare_wechat_prepay(mapping.pk, buyer, request.user)
         mapping = prepared["mapping"]
         payment = prepared["payment"]
@@ -3379,9 +3254,7 @@ class SaleMiniWechatPrepayApi(APIView):
                         "上一笔微信预支付状态正在确认，请稍后重试。"
                     ) from exc
             except (WechatPayConfigError, ValidationError) as exc:
-                raise WechatPayUnavailable(
-                    "上一笔微信预支付状态正在确认，请稍后重试。"
-                ) from exc
+                raise WechatPayUnavailable("上一笔微信预支付状态正在确认，请稍后重试。") from exc
             else:
                 if query_result["trade_state"] == "SUCCESS":
                     mapping.refresh_from_db()
@@ -3420,9 +3293,7 @@ class SaleMiniWechatPrepayApi(APIView):
                         failed=query_result["trade_state"] == "PAYERROR",
                     )
                 else:
-                    raise WechatPayUnavailable(
-                        "上一笔微信预支付状态正在确认，请稍后重试。"
-                    )
+                    raise WechatPayUnavailable("上一笔微信预支付状态正在确认，请稍后重试。")
                 prepared = _prepare_wechat_prepay(mapping.pk, buyer, request.user)
                 payment = prepared["payment"]
 
@@ -3517,8 +3388,7 @@ class SaleMiniWechatPaymentQueryApi(APIView):
                 "confirmed": confirmed,
                 "payment_status": mapping.payment_status,
                 "trade_state": result["trade_state"],
-                "retryable": not confirmed
-                and result["trade_state"] in {"NOTPAY", "PAYERROR", ""},
+                "retryable": not confirmed and result["trade_state"] in {"NOTPAY", "PAYERROR", ""},
                 "payment": _payment_payload(payment),
                 "order": _order_payload(request, mapping),
             }
@@ -3588,21 +3458,13 @@ class SaleMiniWechatPaymentCallbackApi(APIView):
             return _wechat_callback_fail(str(exc))
 
         event, created = _callback_event(payload, raw_body, decrypted)
-        if (
-            not created
-            and event.process_status == SaleMiniPaymentEvent.ProcessStatus.PROCESSED
-        ):
+        if not created and event.process_status == SaleMiniPaymentEvent.ProcessStatus.PROCESSED:
             return _wechat_callback_ok()
 
         try:
             with transaction.atomic():
-                event = SaleMiniPaymentEvent.objects.select_for_update().get(
-                    pk=event.pk
-                )
-                if (
-                    event.process_status
-                    == SaleMiniPaymentEvent.ProcessStatus.PROCESSED
-                ):
+                event = SaleMiniPaymentEvent.objects.select_for_update().get(pk=event.pk)
+                if event.process_status == SaleMiniPaymentEvent.ProcessStatus.PROCESSED:
                     return _wechat_callback_ok()
                 payment = (
                     SaleMiniPayment.objects.select_for_update()
@@ -3646,9 +3508,7 @@ class SaleMiniWechatRefundApi(APIView):
         if fulfillment_status in {"WAIT_PICK", "COMPLETED"}:
             raise ValidationError({"status": "订单已进入备货阶段，请申请售后。"})
         if mapping.payment_status == SaleMiniOrderMapping.PaymentStatus.UNPAID:
-            cancel_result = _cancel_unpaid_mapping(
-                mapping, request.user, close_wechat=True
-            )
+            cancel_result = _cancel_unpaid_mapping(mapping, request.user, close_wechat=True)
             mapping = cancel_result["mapping"]
             if cancel_result["result"] in {"pending", "unknown"}:
                 raise WechatPayUnavailable(
@@ -3697,8 +3557,7 @@ class SaleMiniWechatRefundApi(APIView):
                 reason=refund.reason,
             )
         elif (
-            refund.status != SaleMiniRefund.Status.PROCESSING
-            and not refund.requires_manual_action
+            refund.status != SaleMiniRefund.Status.PROCESSING and not refund.requires_manual_action
         ):
             refund = submit_refund(refund)
         mapping.refresh_from_db()
@@ -3728,21 +3587,13 @@ class SaleMiniWechatRefundCallbackApi(APIView):
             return _wechat_callback_fail(str(exc))
 
         event, created = _callback_event(payload, raw_body, decrypted)
-        if (
-            not created
-            and event.process_status == SaleMiniPaymentEvent.ProcessStatus.PROCESSED
-        ):
+        if not created and event.process_status == SaleMiniPaymentEvent.ProcessStatus.PROCESSED:
             return _wechat_callback_ok()
 
         try:
             with transaction.atomic():
-                event = SaleMiniPaymentEvent.objects.select_for_update().get(
-                    pk=event.pk
-                )
-                if (
-                    event.process_status
-                    == SaleMiniPaymentEvent.ProcessStatus.PROCESSED
-                ):
+                event = SaleMiniPaymentEvent.objects.select_for_update().get(pk=event.pk)
+                if event.process_status == SaleMiniPaymentEvent.ProcessStatus.PROCESSED:
                     return _wechat_callback_ok()
                 refund = (
                     SaleMiniRefund.objects.select_for_update()
@@ -3802,9 +3653,7 @@ class SaleMiniAfterSaleListCreateApi(APIView):
         buyer = mapping.buyer_user
         fulfillment_status, _name = _fulfillment_status(mapping.outbound_order)
         if fulfillment_status not in {"WAIT_PICK", "PROCESSING", "COMPLETED"}:
-            raise ValidationError(
-                {"status": "当前订单仍可取消或退款，请优先使用原订单流程。"}
-            )
+            raise ValidationError({"status": "当前订单仍可取消或退款，请优先使用原订单流程。"})
         if mapping.payment_status not in {
             SaleMiniOrderMapping.PaymentStatus.PAID,
             SaleMiniOrderMapping.PaymentStatus.OFFLINE,
@@ -3860,9 +3709,7 @@ class SaleMiniOrderCancelApi(APIView):
                 raise ValidationError({"status": "订单已进入备货阶段，暂不能取消。"})
         for mapping in mappings:
             if mapping.outbound_order.approval_status != "CANCELLED":
-                cancel_result = _cancel_unpaid_mapping(
-                    mapping, request.user, close_wechat=True
-                )
+                cancel_result = _cancel_unpaid_mapping(mapping, request.user, close_wechat=True)
                 if cancel_result["result"] in {
                     "paid",
                     "late_payment_refund_queued",
