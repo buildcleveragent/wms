@@ -1,0 +1,97 @@
+{
+  "date": "2026-08-25",
+  "commit": "e8662074901eaf7652a06b86ce8111b0708afbf0",
+  "verdict": "FAIL",
+  "release_decision": "NO-GO",
+  "source_code_modified": false,
+  "backend": {
+    "collected": 1046,
+    "passed": 1046,
+    "failed": 0,
+    "serial_subtests_passed": 943,
+    "xdist_subtests_passed": 943,
+    "coverage_percent": 71.70,
+    "coverage_hard_gate_percent": 70,
+    "coverage_target_percent": 72
+  },
+  "migrations": {
+    "fresh_runs": 2,
+    "passed": 2,
+    "elapsed_seconds": [2012.57, 1979.32],
+    "slowest_migration": "salesapp.0013_localize_admin_fields"
+  },
+  "targeted_release_risks": {
+    "passed": 209,
+    "subtests_passed": 9,
+    "failed": 0
+  },
+  "frontend": {
+    "pda": {
+      "unit_passed": 37,
+      "h5_build": "PASS",
+      "playwright": "8/8 PASS",
+      "stability": "20x37/37 PASS"
+    },
+    "owner": {
+      "contracts": "20/20 PASS",
+      "unit": "81/81 PASS",
+      "h5_build": "PASS",
+      "isolated_stability": "20x81/81 PASS",
+      "concurrent_load_observation": "1 round 80/81 due 5s timeout",
+      "wechat_build": "BLOCKED_MISSING_APPROVED_APPID"
+    },
+    "boss": {
+      "unit": "9/9 PASS",
+      "h5_build": "PASS",
+      "playwright": "1/1 PASS",
+      "stability": "5/5 PASS",
+      "wechat_build": "BLOCKED_MISSING_APPROVED_APPID"
+    },
+    "mall": {
+      "pure_unit": "25/25 PASS",
+      "db_api_payment": "64/64 PASS",
+      "console": "16/16 PASS",
+      "admin": "10/10 PASS",
+      "data_accuracy_issues": 0,
+      "h5_build": "PASS",
+      "wechat_build": "BLOCKED_MISSING_APPROVED_APPID"
+    }
+  },
+  "quality": {
+    "black_files_requiring_format": 299,
+    "isort_failed_files": 144,
+    "ruff_issues": 173,
+    "flake8_issue_lines": 1213,
+    "bandit_high": 0,
+    "bandit_medium": 0
+  },
+  "supply_chain": {
+    "python_known_vulnerabilities": 0,
+    "python_ignored_advisories": 1,
+    "root_npm_high": 2,
+    "root_npm_moderate": 1,
+    "gitleaks_matches": 8,
+    "gitleaks_valid_live_secrets": 0,
+    "trivy_fs_high_cve_mappings": 12,
+    "trivy_image_high_or_critical": 47,
+    "trivy_image_critical": 7,
+    "sbom": "PASS"
+  },
+  "external_hard_gates": {
+    "manual_cases_196": "BLOCKED",
+    "performance": "BLOCKED",
+    "real_devices": "BLOCKED",
+    "wechat_payment": "BLOCKED",
+    "fault_injection": "BLOCKED",
+    "full_database_and_media_restore": "BLOCKED"
+  },
+  "blocking_reasons": [
+    "full static quality gates failed",
+    "root Node production dependencies contain high vulnerabilities",
+    "candidate image contains 47 high/critical OS findings",
+    "CI pins EOL Node 20",
+    "Gitleaks gate exits non-zero on unconfigured test vectors",
+    "approved WeChat AppID is unavailable",
+    "mandatory external pre-release gates were not executed"
+  ]
+}
