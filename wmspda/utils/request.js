@@ -1,5 +1,16 @@
-export { BASE_URL } from './api-base'
-import { BASE_URL } from './api-base'
+const ENV =
+  (uni.getAccountInfoSync && uni.getAccountInfoSync().miniProgram?.envVersion) ||
+  'develop'
+
+const BASE_MAP = {
+  develop: 'http://192.168.1.6:8001',
+  develop2: 'http://192.168.1.9:8001',
+  pda: 'http://8.148.198.200:8080',
+  onsite: 'http://192.168.2.6:8001',
+}
+
+// export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
+export const BASE_URL = BASE_MAP.develop
 
 const PRODUCT_IMPORT_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000
 const ACCESS_TOKEN_STORAGE_KEY = 'access'
@@ -492,6 +503,85 @@ export function downloadProductArchive(ownerId, ownerCode = '', alreadyRetried =
   })
 }
 
+export function downloadMissingGtinProducts(alreadyRetried = false) {
+  const token = getToken()
+  const url = `${BASE_URL}/api/products/export-missing-gtin/`
+
+  // #ifdef H5
+  if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+    return window.fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }).then(async (response) => {
+      if (response.status === 401) {
+        return retryAfterUnauthorized(
+          token,
+          () => downloadMissingGtinProducts(true),
+          alreadyRetried,
+        )
+      }
+      if (!response.ok) {
+        let data = null
+        try {
+          data = await response.json()
+        } catch (e) {}
+        throw {
+          statusCode: response.status,
+          data,
+          message:
+            response.status === 403
+              ? '无商品档案导出权限'
+              : getFriendlyMessage(data, '无标准条码商品导出失败'),
+        }
+      }
+      const blob = await response.blob()
+      const disposition = response.headers.get('content-disposition') || ''
+      const matched = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+      const filename = matched
+        ? decodeURIComponent(matched[1])
+        : '无标准条码商品.xlsx'
+      const objectUrl = window.URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      window.URL.revokeObjectURL(objectUrl)
+      return { opened: true, tempFilePath: '', filename }
+    })
+  }
+  // #endif
+
+  return new Promise((resolve, reject) => {
+    uni.downloadFile({
+      url,
+      header: token ? { Authorization: `Bearer ${token}` } : {},
+      success: (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve({ tempFilePath: res.tempFilePath || '', opened: false })
+          return
+        }
+        if (res.statusCode === 401) {
+          retryAfterUnauthorized(
+            token,
+            () => downloadMissingGtinProducts(true),
+            alreadyRetried,
+          ).then(resolve, reject)
+          return
+        }
+        reject({
+          statusCode: res.statusCode,
+          data: res.data,
+          message:
+            res.statusCode === 403 ? '无商品档案导出权限' : '无标准条码商品导出失败',
+        })
+      },
+      fail: (error) =>
+        reject({ statusCode: 0, data: error, message: '无标准条码商品下载失败' }),
+    })
+  })
+}
+
 export function uploadProductImportExcel(
   filePath,
   warehouseId = null,
@@ -713,6 +803,7 @@ export const api = {
       url: `/api/products/export-owners/?search=${encodeURIComponent(q)}&page=${page}`,
     }),
   downloadProductArchive,
+  downloadMissingGtinProducts,
   downloadNoOrderReceiveImportTemplate,
   previewNoOrderReceiveImport: uploadNoOrderReceiveImportPreview,
   confirmNoOrderReceiveImport: (payload) =>

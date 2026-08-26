@@ -24,6 +24,9 @@ from .excel_import import (
 from .models import Brand, Product, ProductCategory, ProductUom
 from .permissions import can_view_all_owner_products
 
+MISSING_GTIN_SHEET_NAME = "无标准条码商品"
+MISSING_GTIN_HEADERS = ("商品名称", "商品编码", "货主名称")
+
 
 @dataclass(frozen=True)
 class ProductExportAccess:
@@ -83,6 +86,59 @@ def resolve_export_owner(user, owner_id) -> Owner:
     if owner is None:
         raise PermissionDenied("当前账号无权导出该货主的商品。")
     return owner
+
+
+def missing_gtin_product_queryset(user):
+    """Return visible, non-deleted products whose standard trade barcode is blank."""
+
+    access = resolve_product_export_access(user)
+    queryset = (
+        Product.objects.filter(owner__is_active=True, owner__is_deleted=False)
+        .filter(Q(gtin__isnull=True) | Q(gtin=""))
+        .select_related("owner")
+        .order_by("owner__name", "code", "id")
+    )
+    if access.allowed_owner_ids is not None:
+        queryset = queryset.filter(owner_id__in=access.allowed_owner_ids)
+    return queryset
+
+
+def build_missing_gtin_export_workbook(user) -> tuple[bytes, int]:
+    """Build the scoped three-column workbook used by the PDA home-page export."""
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = MISSING_GTIN_SHEET_NAME
+    sheet.freeze_panes = "A2"
+
+    for column, header in enumerate(MISSING_GTIN_HEADERS, start=1):
+        cell = sheet.cell(row=1, column=column, value=header)
+        cell.data_type = "s"
+        cell.number_format = "@"
+        cell.font = Font(bold=True)
+
+    product_count = 0
+    queryset = missing_gtin_product_queryset(user)
+    for row_number, product in enumerate(queryset.iterator(chunk_size=2000), start=2):
+        values = (product.name, product.code, product.owner.name)
+        for column, value in enumerate(values, start=1):
+            cell = sheet.cell(row=row_number, column=column, value=str(value or ""))
+            # Force strings so leading zeroes survive and formula-looking values stay inert.
+            cell.data_type = "s"
+            cell.number_format = "@"
+        product_count += 1
+
+    sheet.auto_filter.ref = f"A1:C{product_count + 1}"
+    sheet.column_dimensions["A"].width = 40
+    sheet.column_dimensions["B"].width = 24
+    sheet.column_dimensions["C"].width = 24
+
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue(), product_count
 
 
 def build_product_export_workbook(owner: Owner) -> tuple[bytes, int, int]:

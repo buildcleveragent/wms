@@ -12,6 +12,7 @@ from allapp.accounts.audit import record_audit_event
 from allapp.baseinfo.models import Owner
 
 from .excel_export import (
+    build_missing_gtin_export_workbook,
     build_product_export_workbook,
     export_owner_queryset,
     resolve_export_owner,
@@ -197,6 +198,29 @@ class ProductExportExcelApi(APIView):
         response = HttpResponse(content, content_type=XLSX_CONTENT_TYPE)
         response["Content-Disposition"] = (
             "attachment; filename=product_archive.xlsx; "
+            f"filename*=UTF-8''{quote(filename, safe='')}"
+        )
+        response["Cache-Control"] = "private, no-store"
+        return response
+
+
+class ProductMissingGtinExportApi(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        content, product_count = build_missing_gtin_export_workbook(request.user)
+        record_audit_event(
+            action="products.export_missing_gtin_excel",
+            module="products",
+            request=request,
+            succeeded=True,
+            metadata={"product_count": product_count},
+        )
+        timestamp = timezone.now().strftime("%Y%m%d-%H%M%S")
+        filename = f"无标准条码商品-{timestamp}.xlsx"
+        response = HttpResponse(content, content_type=XLSX_CONTENT_TYPE)
+        response["Content-Disposition"] = (
+            "attachment; filename=products_missing_gtin.xlsx; "
             f"filename*=UTF-8''{quote(filename, safe='')}"
         )
         response["Cache-Control"] = "private, no-store"

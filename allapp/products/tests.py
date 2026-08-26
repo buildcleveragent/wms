@@ -27,6 +27,7 @@ from .category_backfill import (
     build_category_backfill_workbook,
     import_category_backfill,
 )
+from .excel_export import MISSING_GTIN_HEADERS, MISSING_GTIN_SHEET_NAME
 from .excel_import import (
     HEADERS,
     IMPORT_SHEET_NAME,
@@ -1959,6 +1960,140 @@ class ProductExcelImportApiTests(TestCase):
 
         self.assertEqual(missing.status_code, 400)
         self.assertEqual(forbidden.status_code, 403)
+
+    def test_missing_gtin_export_is_scoped_sorted_and_excel_safe(self):
+        Product.objects.create(
+            owner=self.owner,
+            code="0002",
+            name="=公式商品",
+            category=self.category,
+            base_uom=self.uom,
+            gtin=None,
+        )
+        Product.objects.create(
+            owner=self.owner,
+            code="0001",
+            name="停用商品",
+            category=self.category,
+            base_uom=self.uom,
+            gtin="",
+            is_active=False,
+        )
+        Product.objects.create(
+            owner=self.owner,
+            code="WITH-GTIN",
+            name="已有标准条码",
+            category=self.category,
+            base_uom=self.uom,
+            gtin="12345678",
+        )
+        Product.objects.create(
+            owner=self.other_owner,
+            code="0000",
+            name="其他货主商品",
+            category=self.category,
+            base_uom=self.uom,
+            gtin=None,
+        )
+        inactive_owner = Owner.objects.create(
+            code="PXIC",
+            name="Product Excel Owner 0",
+            is_active=False,
+        )
+        Product.objects.create(
+            owner=inactive_owner,
+            code="INACTIVE-OWNER",
+            name="无效货主商品",
+            category=self.category,
+            base_uom=self.uom,
+            gtin=None,
+        )
+        Product.objects.create(
+            owner=self.owner,
+            code="SOFT-DELETED",
+            name="软删除商品",
+            category=self.category,
+            base_uom=self.uom,
+            gtin=None,
+            is_deleted=True,
+        )
+
+        scoped = self.client.get("/api/products/export-missing-gtin/")
+        self.assertEqual(scoped.status_code, 200)
+        scoped_book = load_workbook(io.BytesIO(scoped.content), data_only=False)
+        scoped_rows = list(
+            scoped_book[MISSING_GTIN_SHEET_NAME].iter_rows(min_row=2, values_only=True)
+        )
+        self.assertEqual(
+            scoped_rows,
+            [
+                ("停用商品", "0001", self.owner.name),
+                ("=公式商品", "0002", self.owner.name),
+            ],
+        )
+
+        global_client = APIClient()
+        global_client.force_authenticate(self.cross_owner_user)
+        exported = global_client.get("/api/products/export-missing-gtin/")
+
+        self.assertEqual(exported.status_code, 200)
+        self.assertEqual(exported["Cache-Control"], "private, no-store")
+        self.assertIn("filename*=UTF-8", exported["Content-Disposition"])
+        self.assertIn(
+            "%E6%97%A0%E6%A0%87%E5%87%86%E6%9D%A1%E7%A0%81", exported["Content-Disposition"]
+        )
+        workbook = load_workbook(io.BytesIO(exported.content), data_only=False)
+        self.assertEqual(workbook.sheetnames, [MISSING_GTIN_SHEET_NAME])
+        sheet = workbook[MISSING_GTIN_SHEET_NAME]
+        self.assertEqual(tuple(cell.value for cell in sheet[1]), MISSING_GTIN_HEADERS)
+        self.assertEqual(sheet.freeze_panes, "A2")
+        self.assertEqual(sheet.auto_filter.ref, "A1:C4")
+        self.assertEqual(
+            list(sheet.iter_rows(min_row=2, values_only=True)),
+            [
+                ("停用商品", "0001", self.owner.name),
+                ("=公式商品", "0002", self.owner.name),
+                ("其他货主商品", "0000", self.other_owner.name),
+            ],
+        )
+        self.assertEqual(sheet["A3"].data_type, "s")
+        self.assertEqual(sheet["B2"].data_type, "s")
+        audit = AuditEvent.objects.filter(
+            action="products.export_missing_gtin_excel",
+            actor=self.cross_owner_user,
+        ).latest("id")
+        self.assertEqual(audit.metadata["product_count"], 3)
+
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
+        warehouse_client = APIClient()
+        warehouse_client.force_authenticate(self.warehouse_denied_user)
+        warehouse_export = warehouse_client.get("/api/products/export-missing-gtin/")
+        warehouse_book = load_workbook(io.BytesIO(warehouse_export.content), data_only=False)
+        self.assertEqual(
+            list(warehouse_book[MISSING_GTIN_SHEET_NAME].iter_rows(min_row=2, values_only=True)),
+            scoped_rows,
+        )
+
+    def test_missing_gtin_export_permissions_and_empty_workbook(self):
+        anonymous = APIClient().get("/api/products/export-missing-gtin/")
+        denied_client = APIClient()
+        denied_client.force_authenticate(self.no_permission_user)
+        denied = denied_client.get("/api/products/export-missing-gtin/")
+        empty = self.client.get("/api/products/export-missing-gtin/")
+
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(empty.status_code, 200)
+        workbook = load_workbook(io.BytesIO(empty.content), data_only=False)
+        sheet = workbook[MISSING_GTIN_SHEET_NAME]
+        self.assertEqual(tuple(cell.value for cell in sheet[1]), MISSING_GTIN_HEADERS)
+        self.assertEqual(sheet.max_row, 1)
+        self.assertEqual(sheet.auto_filter.ref, "A1:C1")
+        audit = AuditEvent.objects.filter(
+            action="products.export_missing_gtin_excel",
+            actor=self.user,
+        ).latest("id")
+        self.assertEqual(audit.metadata["product_count"], 0)
 
     def test_export_v8_round_trip_preserves_prices_and_multiple_packages(self):
         product = Product.objects.create(

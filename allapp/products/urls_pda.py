@@ -9,6 +9,7 @@ from .views_excel import (
     ProductImportExcelApi,
     ProductImportTemplateApi,
     ProductImportWarehousesApi,
+    ProductMissingGtinExportApi,
 )
 
 app_name = "products_pda"
@@ -31,6 +32,11 @@ urlpatterns = [
     ),
     path("export-owners/", ProductExportOwnersApi.as_view(), name="export-owners"),
     path("export-excel/", ProductExportExcelApi.as_view(), name="export-excel"),
+    path(
+        "export-missing-gtin/",
+        ProductMissingGtinExportApi.as_view(),
+        name="export-missing-gtin",
+    ),
     path(
         "import-template/",
         ProductImportTemplateApi.as_view(),

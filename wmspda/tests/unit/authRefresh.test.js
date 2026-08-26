@@ -110,7 +110,7 @@ describe('PDA token refresh', () => {
       respond(options, 200, { url: options.url })
     })
 
-    const { request } = await import('@/utils/request')
+    const { BASE_URL, request } = await import('@/utils/request')
     const first = request({ url: '/api/one/' })
     const second = request({ url: '/api/two/' })
 
@@ -123,8 +123,8 @@ describe('PDA token refresh', () => {
     finishRefresh()
 
     await expect(Promise.all([first, second])).resolves.toEqual([
-      { url: '/api/one/' },
-      { url: '/api/two/' },
+      { url: `${BASE_URL}/api/one/` },
+      { url: `${BASE_URL}/api/two/` },
     ])
   })
 

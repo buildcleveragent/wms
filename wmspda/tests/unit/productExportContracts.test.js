@@ -30,4 +30,18 @@ describe('product archive export contracts', () => {
     expect(request).toContain('window.fetch(url')
     expect(request).toContain('uni.downloadFile({')
   })
+
+  it('exports missing GTIN products directly from the permission-gated home card', () => {
+    const home = read('pages/index/index.vue')
+    const request = read('utils/request.js')
+
+    expect(home).toContain('key: "missing-gtin-export"')
+    expect(home).toContain('requiresProductExport: true')
+    expect(home).toContain('if (missingGtinExporting.value) return')
+    expect(home).toContain('api.downloadMissingGtinProducts()')
+    expect(home).toContain("title: '正在导出…'")
+    expect(request).toContain('export function downloadMissingGtinProducts')
+    expect(request).toContain('/api/products/export-missing-gtin/')
+    expect(request).toContain('() => downloadMissingGtinProducts(true)')
+  })
 })

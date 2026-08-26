@@ -26,14 +26,16 @@
 </template>
 
 <script>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useAuth } from '@/store/auth'
+import { api } from '@/utils/request'
 
 export default {
   name: "WarehouseAdminHome",
   setup() {
     const auth = useAuth()
+    const missingGtinExporting = ref(false)
     // 响应式数据
     const allActions = [
       { key: "assisted-outbound", title: "代货主出库", emoji: "🚛", desc: "仓库代货主创建并完成出库", path: "/pages/outbound/assisted", requiresAssistedOutbound: true },
@@ -47,6 +49,7 @@ export default {
       { key: "pos-accuracy", title: "POS数据对账", emoji: "✓", desc: "销售数据核查", op: "pos_accuracy", path: "/pages/pos/accuracy" },
       { key: "product-import", title: "商品导入", emoji: "📊", desc: "Excel批量创建商品档案", path: "/pages/products/import", requiresProductImport: true },
       { key: "product-export", title: "商品导出", emoji: "📤", desc: "按货主导出商品档案", path: "/pages/products/export", requiresProductExport: true },
+      { key: "missing-gtin-export", title: "无标准条码导出", emoji: "📥", desc: "导出未维护标准条码的商品", requiresProductExport: true },
       { key: "pack",      title: "打包", emoji: "🎁", desc: "装箱/封箱/打印",     op: "pack" },
       { key: "shipping",  title: "发运", emoji: "🚚", desc: "复核装车/出库发运",  op: "ship" },
       { key: "replenish", title: "补货", emoji: "🔀", desc: "从存储区到拣货区",   op: "replenish",path: "/pages/inventory/replenish/index" },
@@ -54,15 +57,63 @@ export default {
       { key: "stocktake", title: "盘点", emoji: "🧮", desc: "周期盘点/抽盘/全盘", op: "stocktake",path: "/pages/inventory/stocktake/index" },
 	  { key: "query", title: "查询", emoji: "🔍", desc: "查询", op: "chaxun",path: "/pages/inventory/company" },
     ]
-    const actions = computed(() => allActions.filter(
-      (item) =>
-        (!item.requiresAssistedOutbound || auth.canProcessAssistedOutbound) &&
-        (!item.requiresProductImport || auth.canImportProducts) &&
-        (!item.requiresProductExport || auth.canExportProducts),
-    ))
+    const actions = computed(() =>
+      allActions
+        .filter(
+          (item) =>
+            (!item.requiresAssistedOutbound || auth.canProcessAssistedOutbound) &&
+            (!item.requiresProductImport || auth.canImportProducts) &&
+            (!item.requiresProductExport || auth.canExportProducts),
+        )
+        .map((item) =>
+          item.key === 'missing-gtin-export' && missingGtinExporting.value
+            ? { ...item, title: '正在导出…' }
+            : item,
+        ),
+    )
+
+    const exportMissingGtinProducts = async () => {
+      if (missingGtinExporting.value) return
+      missingGtinExporting.value = true
+      uni.showLoading({ title: '正在生成 Excel' })
+      try {
+        const result = await api.downloadMissingGtinProducts()
+        if (result?.tempFilePath) {
+          // #ifndef H5
+          const filePath = await new Promise((resolve) => {
+            uni.saveFile({
+              tempFilePath: result.tempFilePath,
+              success: (saved) => resolve(saved.savedFilePath || result.tempFilePath),
+              fail: () => resolve(result.tempFilePath),
+            })
+          })
+          uni.openDocument({
+            filePath,
+            fileType: 'xlsx',
+            showMenu: true,
+            fail: () =>
+              uni.showToast({ title: '文件已下载，请在文件管理中查看', icon: 'none' }),
+          })
+          // #endif
+        }
+        uni.showToast({ title: '无标准条码商品已导出', icon: 'success' })
+      } catch (error) {
+        if (Number(error?.statusCode) === 403) {
+          await auth.loadProfile({ force: true }).catch(() => {})
+        }
+        uni.showToast({ title: error?.message || '无标准条码商品导出失败', icon: 'none' })
+      } finally {
+        uni.hideLoading()
+        missingGtinExporting.value = false
+      }
+    }
     
     // 方法
     const go = (item) => {
+      if (item.key === 'missing-gtin-export') {
+        exportMissingGtinProducts()
+        return
+      }
       console.log("👉 go() 被调用，准备跳转：", item.path)
       uni.showToast({ title: "跳转中...", icon: "none" })
       uni.navigateTo({ url: item.path })
@@ -79,6 +130,7 @@ export default {
     return {
       actions,
       go,
+      missingGtinExporting,
     }
   }
 }
