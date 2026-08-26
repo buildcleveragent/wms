@@ -1,8 +1,18 @@
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import include, path
 from django.views.generic import RedirectView
 from rest_framework_simplejwt.views import TokenVerifyView
+
+from allapp.console.views_dashboard import DashboardHomeView
+
+from . import settings
+from .auth_views import (
+    LoginView,
+    PDALoginView,
+    PDATokenRefreshView,
+    TokenRefreshView,
+)
 from .views import (
     change_password_view,
     health_live_view,
@@ -10,9 +20,6 @@ from .views import (
     logout_view,
     profile_view,
 )
-from . import settings
-from .auth_views import LoginView, TokenRefreshView
-from allapp.console.views_dashboard import DashboardHomeView
 
 urlpatterns = [
     path("healthz/live", health_live_view, name="health-live"),
@@ -34,6 +41,12 @@ urlpatterns = [
     path("api/auth/profile/", profile_view, name="auth_profile"),
     path("api/auth/password/change/", change_password_view, name="auth_password_change"),
     path("api/auth/logout/", logout_view, name="auth_logout"),
+    path("api/pda/token/", PDALoginView.as_view(), name="pda_token_obtain_pair"),
+    path(
+        "api/pda/token/refresh/",
+        PDATokenRefreshView.as_view(),
+        name="pda_token_refresh",
+    ),
     # 业务 API
     # 统一 API 版本入口（把所有业务路由聚合到 allapp.api.urls）
     path("api/v1/", include("allapp.api.urls")),

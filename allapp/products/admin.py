@@ -438,6 +438,7 @@ class ProductExternalIdentifierHistoryInline(TenantScopedInlineMixin, admin.Tabu
 @admin.register(Product)
 class ProductAdmin(TenantScopedAdminMixin, AdvancedAdminBase, BaseReadonlyAdmin):
     admin_priority = 1
+    list_per_page = 500
     change_list_template = "admin/products/product/change_list.html"
     inlines = [
         ProductPackageInline,

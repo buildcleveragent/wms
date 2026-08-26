@@ -279,14 +279,45 @@ class JwtSessionLifecycleTests(TestCase):
         )
         self.client = APIClient()
 
-    def login(self):
+    def login(self, url="/api/auth/login/"):
         response = self.client.post(
-            "/api/auth/login/",
+            url,
             {"username": self.user.username, "password": self.password},
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)
         return response.data
+
+    @staticmethod
+    def access_lifetime_seconds(encoded_token):
+        token = AccessToken(encoded_token)
+        return token["exp"] - token["iat"]
+
+    def test_pda_access_lasts_24_hours_without_changing_shared_tokens(self):
+        shared_tokens = self.login()
+        pda_tokens = self.login("/api/pda/token/")
+
+        self.assertEqual(self.access_lifetime_seconds(shared_tokens["access"]), 15 * 60)
+        self.assertEqual(self.access_lifetime_seconds(pda_tokens["access"]), 24 * 60 * 60)
+
+    def test_pda_refresh_accepts_legacy_refresh_and_rotates_to_24_hour_access(self):
+        legacy_tokens = self.login()
+
+        rotated = self.client.post(
+            "/api/pda/token/refresh/",
+            {"refresh": legacy_tokens["refresh"]},
+            format="json",
+        )
+
+        self.assertEqual(rotated.status_code, 200, rotated.data)
+        self.assertIn("refresh", rotated.data)
+        self.assertEqual(self.access_lifetime_seconds(rotated.data["access"]), 24 * 60 * 60)
+        replay = self.client.post(
+            "/api/pda/token/refresh/",
+            {"refresh": legacy_tokens["refresh"]},
+            format="json",
+        )
+        self.assertEqual(replay.status_code, 401)
 
     def test_refresh_rotates_and_blacklists_the_old_refresh(self):
         tokens = self.login()
@@ -313,6 +344,35 @@ class JwtSessionLifecycleTests(TestCase):
         )
         self.assertEqual(replay.status_code, 401)
 
+    def test_logout_blacklists_pda_refresh(self):
+        tokens = self.login("/api/pda/token/")
+        response = self.client.post(
+            "/api/auth/logout/", {"refresh": tokens["refresh"]}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 204)
+        replay = self.client.post(
+            "/api/pda/token/refresh/",
+            {"refresh": tokens["refresh"]},
+            format="json",
+        )
+        self.assertEqual(replay.status_code, 401)
+
+    def test_inactive_user_cannot_use_pda_access_or_refresh(self):
+        tokens = self.login("/api/pda/token/")
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {tokens["access"]}')
+        self.assertEqual(self.client.get("/api/auth/profile/").status_code, 401)
+        self.client.credentials()
+        refreshed = self.client.post(
+            "/api/pda/token/refresh/",
+            {"refresh": tokens["refresh"]},
+            format="json",
+        )
+        self.assertEqual(refreshed.status_code, 401)
+
     def test_password_change_revokes_existing_access_and_refresh(self):
         tokens = self.login()
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {tokens["access"]}')
@@ -337,6 +397,29 @@ class JwtSessionLifecycleTests(TestCase):
         self.client.credentials()
         refreshed = self.client.post(
             "/api/auth/refresh/", {"refresh": tokens["refresh"]}, format="json"
+        )
+        self.assertEqual(refreshed.status_code, 401)
+
+    def test_password_change_revokes_pda_access_and_refresh(self):
+        tokens = self.login("/api/pda/token/")
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {tokens["access"]}')
+        changed = self.client.post(
+            "/api/auth/password/change/",
+            {
+                "old_password": self.password,
+                "new_password1": "NewStrongPass123!",
+                "new_password2": "NewStrongPass123!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(changed.status_code, 200, changed.data)
+        self.assertEqual(self.client.get("/api/auth/profile/").status_code, 401)
+        self.client.credentials()
+        refreshed = self.client.post(
+            "/api/pda/token/refresh/",
+            {"refresh": tokens["refresh"]},
+            format="json",
         )
         self.assertEqual(refreshed.status_code, 401)
 

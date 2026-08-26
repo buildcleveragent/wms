@@ -1,24 +1,36 @@
 import logging
 import math
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from rest_framework.exceptions import AuthenticationFailed
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, AuthenticationFailed
 from rest_framework_simplejwt.serializers import (
     TokenObtainPairSerializer,
     TokenRefreshSerializer,
 )
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from rest_framework_simplejwt.utils import get_md5_hash_password
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
-    TokenRefreshView as BaseTokenRefreshView,
 )
+from rest_framework_simplejwt.views import TokenRefreshView as BaseTokenRefreshView
 
 from allapp.accounts.audit import record_audit_event
 from allapp.accounts.throttling import LoginIPThrottle, LoginUsernameIPThrottle
 
 logger = logging.getLogger(__name__)
+
+
+class PDAAccessToken(AccessToken):
+    """Access token used only by WMSpda clients."""
+
+    lifetime = timedelta(days=1)
+
+
+class PDARefreshToken(RefreshToken):
+    """Refresh token that issues 24-hour PDA access tokens."""
+
+    access_token_class = PDAAccessToken
 
 
 class LoginThrottled(APIException):
@@ -63,6 +75,10 @@ class LoginSerializer(TokenObtainPairSerializer):
         return data
 
 
+class PDALoginSerializer(LoginSerializer):
+    token_class = PDARefreshToken
+
+
 class LoginView(TokenObtainPairView):
     serializer_class = LoginSerializer
     throttle_classes = (LoginUsernameIPThrottle, LoginIPThrottle)
@@ -86,11 +102,15 @@ class LoginView(TokenObtainPairView):
         raise LoginThrottled(retry_after)
 
 
+class PDALoginView(LoginView):
+    serializer_class = PDALoginSerializer
+
+
 class PasswordRevokingTokenRefreshSerializer(TokenRefreshSerializer):
     """Reject refresh tokens issued before the user's latest password hash."""
 
     def validate(self, attrs):
-        token = RefreshToken(attrs["refresh"])
+        token = self.token_class(attrs["refresh"])
         user_id = token.get("user_id")
         user = (
             get_user_model()
@@ -109,3 +129,11 @@ class PasswordRevokingTokenRefreshSerializer(TokenRefreshSerializer):
 
 class TokenRefreshView(BaseTokenRefreshView):
     serializer_class = PasswordRevokingTokenRefreshSerializer
+
+
+class PDATokenRefreshSerializer(PasswordRevokingTokenRefreshSerializer):
+    token_class = PDARefreshToken
+
+
+class PDATokenRefreshView(TokenRefreshView):
+    serializer_class = PDATokenRefreshSerializer

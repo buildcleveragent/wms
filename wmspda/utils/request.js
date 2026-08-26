@@ -65,6 +65,8 @@ let refreshPromise = null
 
 function isAuthenticationRequest(url = '') {
   return (
+    url === '/api/pda/token/' ||
+    url.includes('/api/pda/token/') ||
     url === '/api/token/' ||
     url.includes('/api/token/') ||
     url === '/api/auth/login/' ||
@@ -161,7 +163,7 @@ export function refreshAccessToken() {
 
   const pending = new Promise((resolve, reject) => {
     uni.request({
-      url: `${BASE_URL}/api/token/refresh/`,
+      url: `${BASE_URL}/api/pda/token/refresh/`,
       method: 'POST',
       data: { refresh },
       header: { 'Content-Type': 'application/json' },
@@ -759,7 +761,7 @@ export const api = {
   // Auth
   login: (username, password) =>
     request({
-      url: '/api/token/',
+      url: '/api/pda/token/',
       method: 'POST',
       data: { username, password },
       auth: false,
@@ -1425,7 +1427,7 @@ export const api = {
       owner_id: params.owner_id || '',
       search: params.search || '',
       page: params.page || 1,
-      page_size: params.page_size || 10,
+      page_size: params.page_size || 100,
     })
     return request({
       url: `/api/inventory/company-summary/?${qs}`,

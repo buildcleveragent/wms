@@ -26,6 +26,11 @@ class DefaultPagination(PageNumberPagination):
     max_page_size = 100
 
 
+class CompanyInventoryPagination(DefaultPagination):
+    page_size = 100
+    max_page_size = 1000
+
+
 class OwnerInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     """
     货主端实时库存（MVP 第一层）
@@ -87,7 +92,7 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
     - mode=all: 所有仓库合并，只分货主 + 分商品
     """
     permission_classes = [IsAuthenticated]
-    pagination_class = DefaultPagination
+    pagination_class = CompanyInventoryPagination
 
     def _check_company_level_permission(self, user):
         if user.is_superuser:

@@ -11,8 +11,10 @@ describe('PDA API base URL', () => {
       getAccountInfoSync: vi.fn(() => ({ miniProgram: { envVersion: 'onsite' } })),
     })
 
-    const { BASE_URL } = await import('@/utils/request')
+    const { BASE_URL, api, downloadMissingGtinProducts } = await import('@/utils/request')
 
     expect(BASE_URL).toBe('http://192.168.1.6:8001')
+    expect(downloadMissingGtinProducts).toBeTypeOf('function')
+    expect(api.downloadMissingGtinProducts).toBe(downloadMissingGtinProducts)
   })
 })

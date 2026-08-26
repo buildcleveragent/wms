@@ -167,12 +167,12 @@ const ownerId = ref('')
 
 const rows = ref([])
 const page = ref(1)
-const pageSize = ref(10)
+const pageSize = ref(100)
 const total = ref(0)
-const pageSizeOptions = [10, 20, 50, 100]
+const pageSizeOptions = [10, 20, 50, 100, 500, 1000]
 
 const totalPages = computed(() => {
-  const size = Number(pageSize.value || 10)
+  const size = Number(pageSize.value || 100)
   const count = Number(total.value || 0)
   return Math.max(1, Math.ceil(count / size))
 })
@@ -344,7 +344,7 @@ function nextPage() {
 
 function onPageSizeChange(e) {
   const idx = Number(e.detail.value)
-  pageSize.value = pageSizeOptions[idx] || 10
+  pageSize.value = pageSizeOptions[idx] || 100
   page.value = 1
   load()
 }

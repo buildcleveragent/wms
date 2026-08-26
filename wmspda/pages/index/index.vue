@@ -29,7 +29,7 @@
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useAuth } from '@/store/auth'
-import { api } from '@/utils/request'
+import { downloadMissingGtinProducts } from '@/utils/request'
 
 export default {
   name: "WarehouseAdminHome",
@@ -77,7 +77,7 @@ export default {
       missingGtinExporting.value = true
       uni.showLoading({ title: '正在生成 Excel' })
       try {
-        const result = await api.downloadMissingGtinProducts()
+        const result = await downloadMissingGtinProducts()
         if (result?.tempFilePath) {
           // #ifndef H5
           const filePath = await new Promise((resolve) => {

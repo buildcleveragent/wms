@@ -33,7 +33,7 @@ afterEach(() => {
 describe('PDA token refresh', () => {
   it('stores both tokens returned by login', async () => {
     uniMock.request.mockImplementation((options) => {
-      if (options.url.endsWith('/api/token/')) {
+      if (options.url.endsWith('/api/pda/token/')) {
         respond(options, 200, {
           access: 'login-access',
           refresh: 'login-refresh',
@@ -70,7 +70,7 @@ describe('PDA token refresh', () => {
     storage.set('access', 'expired-access')
     storage.set('refresh', 'refresh-one')
     uniMock.request.mockImplementation((options) => {
-      if (options.url.endsWith('/api/token/refresh/')) {
+      if (options.url.endsWith('/api/pda/token/refresh/')) {
         expect(options.data).toEqual({ refresh: 'refresh-one' })
         respond(options, 200, { access: 'fresh-access', refresh: 'refresh-two' })
         return
@@ -95,7 +95,7 @@ describe('PDA token refresh', () => {
     storage.set('refresh', 'refresh-one')
     let finishRefresh
     uniMock.request.mockImplementation((options) => {
-      if (options.url.endsWith('/api/token/refresh/')) {
+      if (options.url.endsWith('/api/pda/token/refresh/')) {
         finishRefresh = () =>
           options.success({
             statusCode: 200,
@@ -117,7 +117,7 @@ describe('PDA token refresh', () => {
     await vi.waitFor(() => expect(finishRefresh).toBeTypeOf('function'))
     expect(
       uniMock.request.mock.calls.filter(([options]) =>
-        options.url.endsWith('/api/token/refresh/'),
+        options.url.endsWith('/api/pda/token/refresh/'),
       ),
     ).toHaveLength(1)
     finishRefresh()
@@ -159,7 +159,7 @@ describe('PDA token refresh', () => {
     storage.set('access', 'expired-access')
     storage.set('refresh', 'expired-refresh')
     uniMock.request.mockImplementation((options) => {
-      if (options.url.endsWith('/api/token/refresh/')) {
+      if (options.url.endsWith('/api/pda/token/refresh/')) {
         respond(options, 401, { code: 'token_not_valid' })
         return
       }
@@ -181,5 +181,26 @@ describe('PDA token refresh', () => {
       expect.objectContaining({ title: '登录已超时，需要重新登录' }),
     )
     expect(uniMock.reLaunch).toHaveBeenCalledWith({ url: '/pages/login' })
+  })
+
+  it('restores persisted tokens after an app restart without logging in again', async () => {
+    storage.set('access', 'persisted-access')
+    storage.set('refresh', 'persisted-refresh')
+    uniMock.request.mockImplementation((options) => {
+      respond(options, 200, {
+        user: { id: 4, username: 'operator' },
+        perms: [],
+        capabilities: {},
+      })
+    })
+
+    const { useAuth } = await import('@/store/auth')
+    const auth = useAuth()
+
+    expect(auth.access).toBe('persisted-access')
+    await auth.ensureProfile()
+    expect(auth.profileLoaded).toBe(true)
+    expect(uniMock.request).toHaveBeenCalledTimes(1)
+    expect(uniMock.request.mock.calls[0][0].url).toContain('/api/auth/profile/')
   })
 })
