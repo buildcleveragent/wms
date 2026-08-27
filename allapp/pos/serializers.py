@@ -107,6 +107,7 @@ class PosProductSerializer(serializers.ModelSerializer):
             "code",
             "sku",
             "name",
+            "spec",
             "gtin",
             "unit_barcode",
             "carton_barcode",

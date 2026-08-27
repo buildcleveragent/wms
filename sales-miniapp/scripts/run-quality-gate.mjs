@@ -18,6 +18,19 @@ const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 if (runDb && skipBuild) {
   throw new Error('release mode forbids --skip-build')
 }
+if (runDb && fastDb) {
+  throw new Error('release mode forbids --fast-db and --no-migrations')
+}
+
+function safeTestDatabaseName(value) {
+  const name = String(value || '').trim()
+  const reserved = new Set(['wms_db', 'mysql', 'information_schema', 'performance_schema', 'sys'])
+  const hasTestMarker = /(^|[_-])(test|ci|gate)([_-]|$)/i.test(name)
+  if (!name || reserved.has(name.toLowerCase()) || !hasTestMarker) {
+    throw new Error(`unsafe DB_TEST_NAME: ${name || '<empty>'}`)
+  }
+  return name
+}
 
 function commandExists(command) {
   if (path.isAbsolute(command) || command.includes(path.sep)) {
@@ -37,18 +50,23 @@ const pythonCommand = process.env.PYTHON || firstExisting([
   'python',
 ])
 
+const testDatabaseName = safeTestDatabaseName(process.env.DB_TEST_NAME || 'wms_db_test')
 const backendEnv = {
   ...process.env,
   APP_ENV: 'test',
   SECRET_KEY:
     process.env.SECRET_KEY ||
     'sale-mini-test-key-0123456789abcdef0123456789abcdef0123456789abcdef',
-  DB_TEST_NAME: process.env.DB_TEST_NAME || 'test_wms_db',
+  DB_TEST_NAME: testDatabaseName,
   ...(runDb
-    ? { DB_NAME: process.env.DB_TEST_NAME || 'test_wms_db' }
+    ? { DB_NAME: testDatabaseName }
     : {}),
   CORS_ALLOWED_ORIGINS:
     process.env.CORS_ALLOWED_ORIGINS || 'http://localhost,http://127.0.0.1',
+}
+
+if (runDb) {
+  console.log(`- TEST DATABASE ${testDatabaseName}`)
 }
 
 const steps = []
@@ -65,6 +83,9 @@ function addStep(name, command, commandArgs, options = {}) {
 }
 
 addStep('frontend mall structure', 'node', ['scripts/verify-mall-structure.mjs'], {
+  cwd: appRoot,
+})
+addStep('frontend payment behavior', 'node', ['--test', 'tests/payment-service.test.mjs'], {
   cwd: appRoot,
 })
 
@@ -96,7 +117,7 @@ if (fs.existsSync(path.join(repoRoot, 'manage.py'))) {
       'pytest',
       '-q',
       '--reuse-db',
-      ...(fastDb ? ['--no-migrations'] : []),
+      '--create-db',
       '--disable-warnings',
       'allapp/salesapp/tests.py::SaleMiniApiTests',
       'allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests',
@@ -115,7 +136,6 @@ if (fs.existsSync(path.join(repoRoot, 'manage.py'))) {
       'pytest',
       '-q',
       '--reuse-db',
-      ...(fastDb ? ['--no-migrations'] : []),
       '--disable-warnings',
       'allapp/console/tests.py',
     ],
@@ -133,7 +153,6 @@ if (fs.existsSync(path.join(repoRoot, 'manage.py'))) {
       'pytest',
       '-q',
       '--reuse-db',
-      ...(fastDb ? ['--no-migrations'] : []),
       '--disable-warnings',
       'allapp/salesapp/test_admin_bulk_listing.py',
     ],

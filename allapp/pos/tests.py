@@ -154,6 +154,7 @@ class PosApiTests(TestCase):
             owner=self.owner,
             code="POS-SKU",
             name="POS Product",
+            spec="12 pieces per carton",
             sku="POS-SKU",
             gtin="6901234567892",
             unit_barcode="POS-UNIT-BAR",
@@ -455,9 +456,17 @@ class PosApiTests(TestCase):
         row = response.data["results"][0]
         self.assertEqual(row["id"], self.product.id)
         self.assertEqual(row["code"], self.product.code)
+        self.assertEqual(row["spec"], self.product.spec)
         self.assertEqual(Decimal(str(row["available_qty"])), Decimal("10.0000"))
         self.assertEqual(row["unit_options"][0]["kind"], "base")
         self.assertEqual(row["unit_options"][1]["kind"], "package")
+
+    def test_product_search_returns_product_spec(self):
+        response = self.client.get("/api/pos/products/", {"search": "POS Product"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["spec"], self.product.spec)
 
     def test_product_lookup_ignores_inactive_and_soft_deleted_package_barcode(self):
         package = self.product.packages.get(barcode="POS-CTN-BAR")

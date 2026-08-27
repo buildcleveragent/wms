@@ -38,6 +38,7 @@ from allapp.salesapp.salemini_review_api import (
 from allapp.salesapp.services_salemini_payments import (
     payable_amount,
     validate_payment_result,
+    validate_refund_result,
 )
 from allapp.salesapp.services_wechat_pay import (
     WechatPayRequestError,
@@ -45,6 +46,7 @@ from allapp.salesapp.services_wechat_pay import (
     decrypt_resource,
     money_to_cents,
     verify_callback_signature,
+    verify_wechat_response,
 )
 
 
@@ -307,6 +309,91 @@ def test_payment_result_rejects_identity_currency_and_amount_mismatch():
         raise AssertionError("mismatched merchant must be rejected")
 
 
+@override_settings(WECHAT_MINI_APPID="wx-app", WECHAT_PAY_MCH_ID="mch-1")
+def test_payment_result_rejects_every_authoritative_field_mismatch():
+    payment = SimpleNamespace(
+        out_trade_no="trade-1",
+        amount_cents=100,
+        currency="CNY",
+    )
+    valid = {
+        "out_trade_no": "trade-1",
+        "appid": "wx-app",
+        "mchid": "mch-1",
+        "amount": {"total": 100, "currency": "CNY"},
+    }
+    invalid_payloads = [
+        ({**valid, "out_trade_no": "trade-other"}, "商户订单号"),
+        ({**valid, "appid": "wx-other"}, "AppID"),
+        ({**valid, "mchid": "mch-other"}, "商户号"),
+        (
+            {**valid, "amount": {"total": 100, "currency": "USD"}},
+            "币种",
+        ),
+        (
+            {**valid, "amount": {"total": 99, "currency": "CNY"}},
+            "金额",
+        ),
+    ]
+
+    for payload, expected_message in invalid_payloads:
+        try:
+            validate_payment_result(payment, payload)
+        except DjangoValidationError as exc:
+            assert expected_message in str(exc)
+        else:
+            raise AssertionError(f"mismatch must be rejected: {payload}")
+
+
+@override_settings(WECHAT_PAY_MCH_ID="mch-1")
+def test_refund_result_rejects_identity_currency_and_amount_mismatch():
+    refund = SimpleNamespace(
+        out_refund_no="refund-1",
+        amount_cents=80,
+        total_amount_cents=100,
+        currency="CNY",
+    )
+    valid = {
+        "mchid": "mch-1",
+        "out_refund_no": "refund-1",
+        "amount": {"refund": 80, "total": 100, "currency": "CNY"},
+    }
+    validate_refund_result(refund, valid, require_merchant=True)
+    invalid_payloads = [
+        ({**valid, "mchid": "mch-other"}, "商户号"),
+        ({**valid, "out_refund_no": "refund-other"}, "退款单号"),
+        (
+            {
+                **valid,
+                "amount": {"refund": 80, "total": 100, "currency": "USD"},
+            },
+            "币种",
+        ),
+        (
+            {
+                **valid,
+                "amount": {"refund": 79, "total": 100, "currency": "CNY"},
+            },
+            "金额",
+        ),
+        (
+            {
+                **valid,
+                "amount": {"refund": 80, "total": 99, "currency": "CNY"},
+            },
+            "金额",
+        ),
+    ]
+
+    for payload, expected_message in invalid_payloads:
+        try:
+            validate_refund_result(refund, payload, require_merchant=True)
+        except DjangoValidationError as exc:
+            assert expected_message in str(exc)
+        else:
+            raise AssertionError(f"refund mismatch must be rejected: {payload}")
+
+
 def test_wechat_request_error_preserves_structured_context():
     error = WechatPayRequestError(
         "failed",
@@ -413,6 +500,72 @@ def test_callback_verifies_real_rsa_signature_for_selected_serial(mock_time):
             raise AssertionError("invalid RSA callback signature must be rejected")
 
 
+@override_settings(WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=True)
+def test_wechat_api_response_verifies_real_rsa_signature_and_body_integrity():
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    timestamp = "2000"
+    nonce = "response-nonce"
+    raw_body = b'{"trade_state":"SUCCESS"}'
+    message = (
+        timestamp.encode("utf-8")
+        + b"\n"
+        + nonce.encode("utf-8")
+        + b"\n"
+        + raw_body
+        + b"\n"
+    )
+    signature = base64.b64encode(
+        private_key.sign(message, padding.PKCS1v15(), hashes.SHA256())
+    ).decode("ascii")
+    headers = {
+        "Wechatpay-Timestamp": timestamp,
+        "Wechatpay-Nonce": nonce,
+        "Wechatpay-Signature": signature,
+        "Wechatpay-Serial": "platform-response-key",
+    }
+
+    with override_settings(
+        WECHAT_PAY_PLATFORM_KEYS={"platform-response-key": public_key_pem.decode()}
+    ):
+        assert verify_wechat_response(headers, raw_body)
+        try:
+            verify_wechat_response(headers, b'{"trade_state":"NOTPAY"}')
+        except WechatPayRequestError as exc:
+            assert "验签失败" in str(exc)
+        else:
+            raise AssertionError("tampered WeChat API response must be rejected")
+
+
+@override_settings(
+    WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=True,
+    WECHAT_PAY_PLATFORM_KEYS={"known-response-key": "unused"},
+)
+def test_wechat_api_response_rejects_missing_headers_and_unknown_serial():
+    try:
+        verify_wechat_response({}, b"{}")
+    except WechatPayRequestError as exc:
+        assert "缺少验签头" in str(exc)
+    else:
+        raise AssertionError("unsigned WeChat API response must be rejected")
+
+    headers = {
+        "Wechatpay-Timestamp": "2000",
+        "Wechatpay-Nonce": "nonce",
+        "Wechatpay-Signature": "WECHATPAY/SIGNTEST/invalid",
+        "Wechatpay-Serial": "unknown-response-key",
+    }
+    try:
+        verify_wechat_response(headers, b"{}")
+    except WechatPayRequestError as exc:
+        assert "未知" in str(exc)
+    else:
+        raise AssertionError("unknown WeChat response key serial must be rejected")
+
+
 @override_settings(
     WECHAT_MINI_APPID="wx-test-app",
     WECHAT_PAY_MCH_ID="test-merchant",
@@ -445,6 +598,14 @@ def test_callback_resource_uses_real_aes_gcm_decryption():
     assert result["appid"] == "wx-test-app"
     assert result["mchid"] == "test-merchant"
     assert result["out_trade_no"] == "PAY-TEST-1"
+
+    resource["ciphertext"] = base64.b64encode(ciphertext[:-1] + b"0").decode("ascii")
+    try:
+        decrypt_resource(resource)
+    except WechatPayRequestError as exc:
+        assert "解密失败" in str(exc)
+    else:
+        raise AssertionError("tampered callback ciphertext must be rejected")
 
 
 @override_settings(

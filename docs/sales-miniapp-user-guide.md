@@ -773,6 +773,15 @@ cd /wms/sales-miniapp
 npm run test:quality
 ```
 
+仅运行前端支付确认行为测试：
+
+```bash
+npm run test:payment
+```
+
+该测试使用可注入的 `uni.requestPayment`、主动查单和等待函数，覆盖零元结算、
+客户端支付成功后的后端确认轮询、用户取消后的补查、查单异常和缺失预支付参数。
+
 快速门禁，不跑 H5/微信构建：
 
 ```bash
@@ -785,21 +794,25 @@ npm run test:quality -- --skip-build
 npm run test:quality -- --skip-build --data-accuracy
 ```
 
-带数据库 API 端到端测试的完整 DB 门禁：
+带数据库 API 端到端测试和微信小程序发布构建的完整发布门禁：
 
 ```bash
-npm run test:quality -- --db
+npm run test:release
 ```
 
-本地快速 DB 门禁，跳过迁移回放但保留 API 业务断言：
+本地开发期间可以复用已经完成迁移的测试库：
 
 ```bash
-npm run test:quality -- --skip-build --db --fast-db
+cd /wms
+.venv/bin/pytest -q --reuse-db \
+  allapp/salesapp/tests.py::SaleMiniApiTests \
+  allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests
 ```
 
-`--db` 门禁强制使用 `DB_TEST_NAME`（默认 `test_wms_db`），不会把普通管理命令指向
-正式 `wms_db`。标准模式会回放完整迁移；`--fast-db` 使用 pytest-django
-`--no-migrations` 快速建表，但不能替代正式迁移回放。
+`--db` 门禁强制使用 `DB_TEST_NAME`（默认 `wms_db_test`），并拒绝正式库名、
+空名称及不含测试标记的数据库名。发布门禁的第一组数据库测试固定使用
+`--create-db` 回放完整迁移，禁止搭配 `--fast-db` 或 `--no-migrations`；后续测试
+才会复用这次创建的干净测试库。本地复用测试库不能替代发布迁移门禁。
 
 ## 10. 超时订单处理
 
@@ -938,10 +951,10 @@ SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/pytho
 SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --disable-warnings allapp/salesapp/tests.py::SaleMiniApiTests
 ```
 
-销售小程序快速 DB 集成测试：
+销售小程序支付并发测试：
 
 ```bash
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --no-migrations --disable-warnings allapp/salesapp/tests.py::SaleMiniApiTests
+SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --disable-warnings allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests
 ```
 
 销售小程序无数据库单元测试：
@@ -967,16 +980,22 @@ npm run build:h5
 已验证结果：
 
 ```text
-manage.py check: passed
-sale-mini pure unit tests: 15 passed
-validate_sale_mini_data_accuracy: ok, issue_count=0
-npm run test:structure: passed
-npm run test:quality -- --skip-build: passed
-npm run test:quality -- --skip-build --data-accuracy: passed
-npm run test:quality -- --skip-build --db --fast-db: passed, including 43 SaleMiniApiTests, console catalog tests, Admin owner bulk-listing tests, and live data validation
-npm run test:quality: passed, including build:mp-weixin and build:h5
-SaleMiniApiTests fast DB mode: 43 passed
+2026-08-27:
+- manage.py check: passed
+- sale-mini pure unit tests: 29 passed
+- frontend payment behavior: 8 passed
+- clean wms_db_test SaleMiniApiTests + payment concurrency: 75 passed
+- console catalog database tests: 16 passed
+- Admin owner bulk-listing database tests: 10 passed
+- test and business database accuracy checks: ok, issue_count=0
+- H5 production build: passed
+- WeChat mini-program production build: blocked until VITE_API_BASE_URL and the approved
+  mp-weixin AppID are configured
 ```
+
+上述自动化结果不代表真实微信交易验收。真实支付还必须配置商户参数、公网 HTTPS
+回调地址和测试小程序，并使用 0.01～0.10 元专用订单完成真机支付、查单、关单、
+退款、重复回调和微信商户平台逐笔对账。
 
 ## 14. 常见问题
 

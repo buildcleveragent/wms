@@ -162,7 +162,13 @@ const submitText = computed(() => (effectivePaymentMethod.value === 'WECHAT' ? '
 const adjustmentRows = computed(() => (preview.value && preview.value.adjustments) || [])
 const payableAmount = computed(() => {
   const data = preview.value || {}
-  return data.payable_amount || data.total_amount || cart.selectedTotalAmount
+  if (data.payable_amount !== undefined && data.payable_amount !== null) {
+    return data.payable_amount
+  }
+  if (data.total_amount !== undefined && data.total_amount !== null) {
+    return data.total_amount
+  }
+  return cart.selectedTotalAmount
 })
 const previewGoodsAmount = computed(() => {
   const data = preview.value || {}

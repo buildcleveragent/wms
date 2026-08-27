@@ -91,9 +91,9 @@
       </view>
 
       <view class="product-list" v-if="products.length">
-        <view class="product-row" v-for="product in products" :key="product.id">
+        <view class="product-row" v-for="product in products" :key="product.id" data-testid="pos-product-row">
           <view class="product-main">
-            <text class="product-name">{{ product.name || product.sku || product.code }}</text>
+            <text class="product-name" data-testid="pos-product-name">{{ product.name || product.sku || product.code }}<text v-if="product.spec" class="product-spec">　{{ product.spec }}</text></text>
             <text class="product-meta">{{ product.code }} {{ product.sku || '' }}</text>
             <text class="product-meta">
               售价 {{ money(product.price) }} / 可售 {{ qtyText(stockAvailableQty(product), product) }}
@@ -134,8 +134,8 @@
           style="display: flex; flex-direction: row; align-items: center; flex-wrap: nowrap; width: 100%;"
         >
           <view class="cart-info cart-goods-col" style="flex: 1 1 auto; min-width: 0; padding-right: 12rpx; text-align: right; box-sizing: border-box;">
-            <text class="cart-goods-line">
-              {{ item.name }}　{{ item.code }} / 可售 {{ qtyText(item.available_qty, item) }} {{ item.base_unit_name }} / 基本数量 {{ qtyText(lineBaseQty(item), item) }} {{ item.base_unit_name }}
+            <text class="cart-goods-line" data-testid="pos-cart-product">
+              {{ item.name }}<text v-if="item.spec" class="cart-product-spec">　{{ item.spec }}</text>　{{ item.code }} / 可售 {{ qtyText(item.available_qty, item) }} {{ item.base_unit_name }} / 基本数量 {{ qtyText(lineBaseQty(item), item) }} {{ item.base_unit_name }}
             </text>
           </view>
 

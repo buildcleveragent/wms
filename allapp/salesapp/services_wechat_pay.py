@@ -327,6 +327,8 @@ def query_refund(refund):
 
 def decrypt_resource(resource):
     _x509, _invalid, _hashes, _serialization, _padding, AESGCM = _require_crypto()
+    from cryptography.exceptions import InvalidTag
+
     _ensure_base_config()
     try:
         ciphertext = base64.b64decode(resource["ciphertext"])
@@ -335,7 +337,7 @@ def decrypt_resource(resource):
         aesgcm = AESGCM(settings.WECHAT_PAY_APIV3_KEY.encode("utf-8"))
         plaintext = aesgcm.decrypt(nonce, ciphertext, associated_data)
         return json.loads(plaintext.decode("utf-8"))
-    except (KeyError, ValueError, TypeError) as exc:
+    except (InvalidTag, KeyError, ValueError, TypeError) as exc:
         raise WechatPayRequestError("微信支付回调资源解密失败。") from exc
 
 
