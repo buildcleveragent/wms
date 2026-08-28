@@ -16,6 +16,71 @@ from .models import (
     PosSaleLine,
 )
 
+SHEET_TITLES = {
+    "shift": "班次汇总",
+    "summary": "统计汇总",
+    "payments": "支付汇总",
+    "owners": "货主汇总",
+    "products": "商品汇总",
+    "cashiers": "收银员汇总",
+    "sales": "销售单",
+    "payment_lines": "支付明细",
+    "sale_lines": "销售明细",
+    "returns": "退货单",
+    "return_lines": "退货明细",
+    "refunds": "退款明细",
+    "repayments": "客户还款",
+}
+
+STATS_SUMMARY_FIELDS = (
+    ("sale_count", "销售单数"),
+    ("completed_count", "完成单数"),
+    ("voided_count", "作废单数"),
+    ("return_count", "退货单数"),
+    ("line_count", "销售明细行数"),
+    ("return_line_count", "退货明细行数"),
+    ("total_qty", "销售总数量"),
+    ("completed_qty", "完成销售数量"),
+    ("voided_qty", "作废数量"),
+    ("return_qty", "退货数量"),
+    ("net_qty", "净销售数量"),
+    ("gross_amount", "销售总金额"),
+    ("sales_amount", "销售金额"),
+    ("voided_amount", "作废金额"),
+    ("return_amount", "退货金额"),
+    ("net_amount", "净销售额"),
+    ("received_amount", "实收金额"),
+    ("credit_amount", "赊账金额"),
+    ("repayment_amount", "还款金额"),
+)
+
+SHIFT_SUMMARY_FIELDS = (
+    ("sale_count", "销售单数"),
+    ("completed_count", "完成单数"),
+    ("voided_count", "作废单数"),
+    ("return_count", "退货单数"),
+    ("gross_sales_amount", "销售总额"),
+    ("net_amount", "净销售额"),
+    ("voided_amount", "作废金额"),
+    ("return_amount", "退货金额"),
+    ("opening_cash_amount", "备用金"),
+    ("expected_cash_amount", "现金应点金额"),
+    ("actual_cash_amount", "现金实点金额"),
+    ("cash_difference", "现金差异"),
+    ("credit_amount", "赊账金额"),
+    ("repayment_amount", "还款金额"),
+    ("received_amount", "实收金额"),
+    ("line_count", "销售明细行数"),
+    ("completed_line_count", "完成明细行数"),
+    ("completed_qty", "完成销售数量"),
+    ("completed_line_amount", "完成销售金额"),
+    ("voided_qty", "作废数量"),
+    ("voided_line_amount", "作废明细金额"),
+    ("cash_sales_amount", "现金销售金额"),
+)
+
+PAYMENT_METHOD_LABELS = dict(PosPayment.Method.choices)
+
 
 def _text(value):
     if value is None:
@@ -32,16 +97,12 @@ def _money(value):
 
 
 def _sale_customer_name(sale):
-    customer = getattr(sale, "pos_customer", None) or getattr(
-        sale, "selected_customer", None
-    )
+    customer = getattr(sale, "pos_customer", None) or getattr(sale, "selected_customer", None)
     return getattr(customer, "name", "") if customer else ""
 
 
 def _repayment_customer_name(repayment):
-    customer = getattr(repayment, "pos_customer", None) or getattr(
-        repayment, "customer", None
-    )
+    customer = getattr(repayment, "pos_customer", None) or getattr(repayment, "customer", None)
     return getattr(customer, "name", "") if customer else ""
 
 
@@ -51,6 +112,16 @@ def _append_stats_sheet(workbook, title, headers, rows):
     for row in rows:
         sheet.append(row)
     return sheet
+
+
+def _append_summary_rows(sheet, data, fields):
+    for key, label in fields:
+        if key in data:
+            sheet.append([label, data[key]])
+
+
+def _payment_method_label(row):
+    return row.get("method_label") or PAYMENT_METHOD_LABELS.get(row.get("method"), "其他")
 
 
 def build_sales_export_workbook(sales):
@@ -87,7 +158,7 @@ def build_sales_export_workbook(sales):
 
     workbook = Workbook()
     sheet = workbook.active
-    sheet.title = "Sales"
+    sheet.title = SHEET_TITLES["sales"]
     sheet.append(
         [
             "销售单号",
@@ -123,7 +194,7 @@ def build_sales_export_workbook(sales):
             [
                 sale.sale_no,
                 sale.src_bill_no,
-                sale.status,
+                sale.get_status_display(),
                 getattr(sale.warehouse, "name", ""),
                 getattr(sale.shift, "shift_no", "") if sale.shift_id else "",
                 getattr(sale.cashier, "username", "") if sale.cashier_id else "",
@@ -132,7 +203,7 @@ def build_sales_export_workbook(sales):
                 _money(sale.total_amount),
                 return_amount,
                 net_amount,
-                payment.method if payment else "",
+                payment.get_method_display() if payment else "",
                 _money(payment.amount_received) if payment else Decimal("0.00"),
                 _money(credit_amounts.get(sale.id, Decimal("0.00"))),
                 _money(payment.change_amount) if payment else Decimal("0.00"),
@@ -143,7 +214,7 @@ def build_sales_export_workbook(sales):
             ]
         )
 
-    payment_sheet = workbook.create_sheet("PaymentLines")
+    payment_sheet = workbook.create_sheet(SHEET_TITLES["payment_lines"])
     payment_sheet.append(
         [
             "销售单号",
@@ -167,17 +238,17 @@ def build_sales_export_workbook(sales):
             [
                 line.sale.sale_no,
                 line.sale.src_bill_no,
-                line.method,
+                line.get_method_display(),
                 Decimal(line.amount),
                 Decimal(line.amount_received),
                 Decimal(line.change_amount),
                 line.reference_no,
-                line.status,
+                line.get_status_display(),
                 _dt(line.created_at),
             ]
         )
 
-    line_sheet = workbook.create_sheet("Lines")
+    line_sheet = workbook.create_sheet(SHEET_TITLES["sale_lines"])
     line_sheet.append(
         [
             "销售单号",
@@ -215,7 +286,7 @@ def build_sales_export_workbook(sales):
             [
                 line.sale.sale_no,
                 line.sale.src_bill_no,
-                line.sale.status,
+                line.sale.get_status_display(),
                 getattr(line.sale.shift, "shift_no", "") if line.sale.shift_id else "",
                 getattr(line.owner, "name", ""),
                 getattr(line.product, "code", ""),
@@ -237,7 +308,7 @@ def build_sales_export_workbook(sales):
     )
     return_ids = [return_order.id for return_order in returns]
 
-    return_sheet = workbook.create_sheet("Returns")
+    return_sheet = workbook.create_sheet(SHEET_TITLES["returns"])
     return_sheet.append(
         [
             "退货单号",
@@ -257,24 +328,16 @@ def build_sales_export_workbook(sales):
                 return_order.return_no,
                 return_order.sale.sale_no,
                 return_order.sale.src_bill_no,
-                return_order.status,
-                (
-                    getattr(return_order.shift, "shift_no", "")
-                    if return_order.shift_id
-                    else ""
-                ),
-                (
-                    getattr(return_order.cashier, "username", "")
-                    if return_order.cashier_id
-                    else ""
-                ),
+                return_order.get_status_display(),
+                (getattr(return_order.shift, "shift_no", "") if return_order.shift_id else ""),
+                (getattr(return_order.cashier, "username", "") if return_order.cashier_id else ""),
                 Decimal(return_order.total_amount),
                 return_order.reason,
                 _dt(return_order.created_at),
             ]
         )
 
-    return_line_sheet = workbook.create_sheet("ReturnLines")
+    return_line_sheet = workbook.create_sheet(SHEET_TITLES["return_lines"])
     return_line_sheet.append(
         [
             "退货单号",
@@ -309,7 +372,7 @@ def build_sales_export_workbook(sales):
                 line.return_order.return_no,
                 line.return_order.sale.sale_no,
                 line.return_order.sale.src_bill_no,
-                line.return_order.status,
+                line.return_order.get_status_display(),
                 getattr(line.owner, "name", ""),
                 getattr(line.product, "code", ""),
                 getattr(line.product, "sku", ""),
@@ -322,7 +385,7 @@ def build_sales_export_workbook(sales):
             ]
         )
 
-    refund_sheet = workbook.create_sheet("Refunds")
+    refund_sheet = workbook.create_sheet(SHEET_TITLES["refunds"])
     refund_sheet.append(
         [
             "退货单号",
@@ -346,10 +409,10 @@ def build_sales_export_workbook(sales):
                 refund.return_order.return_no,
                 refund.sale.sale_no,
                 refund.sale.src_bill_no,
-                refund.method,
+                refund.get_method_display(),
                 Decimal(refund.amount),
                 refund.reference_no,
-                refund.status,
+                refund.get_status_display(),
                 _dt(refund.processed_at or refund.created_at),
             ]
         )
@@ -360,19 +423,17 @@ def build_sales_export_workbook(sales):
 def build_pos_stats_export_workbook(payload):
     workbook = Workbook()
     summary = workbook.active
-    summary.title = "Summary"
+    summary.title = SHEET_TITLES["summary"]
     summary.append(["字段", "值"])
-    for key, value in payload.get("summary", {}).items():
-        summary.append([key, value])
-    summary.append(["start_date", payload.get("period", {}).get("start_date", "")])
-    summary.append(["end_date", payload.get("period", {}).get("end_date", "")])
+    _append_summary_rows(summary, payload.get("summary", {}), STATS_SUMMARY_FIELDS)
+    summary.append(["开始日期", payload.get("period", {}).get("start_date", "")])
+    summary.append(["结束日期", payload.get("period", {}).get("end_date", "")])
 
     _append_stats_sheet(
         workbook,
-        "Payments",
+        SHEET_TITLES["payments"],
         [
             "支付方式",
-            "支付方式名称",
             "销售单数",
             "退款单数",
             "还款单数",
@@ -383,8 +444,7 @@ def build_pos_stats_export_workbook(payload):
         ],
         [
             [
-                row.get("method", ""),
-                row.get("method_label", ""),
+                _payment_method_label(row),
                 row.get("sale_count", 0),
                 row.get("refund_count", 0),
                 row.get("repayment_count", 0),
@@ -398,7 +458,7 @@ def build_pos_stats_export_workbook(payload):
     )
     _append_stats_sheet(
         workbook,
-        "Owners",
+        SHEET_TITLES["owners"],
         [
             "货主ID",
             "货主编码",
@@ -433,7 +493,7 @@ def build_pos_stats_export_workbook(payload):
     )
     _append_stats_sheet(
         workbook,
-        "Products",
+        SHEET_TITLES["products"],
         [
             "商品ID",
             "货主商品编码",
@@ -472,7 +532,7 @@ def build_pos_stats_export_workbook(payload):
     )
     _append_stats_sheet(
         workbook,
-        "Cashiers",
+        SHEET_TITLES["cashiers"],
         [
             "收银员ID",
             "收银员",
@@ -507,25 +567,21 @@ def build_pos_stats_export_workbook(payload):
 def build_shift_export_workbook(shift, payload):
     workbook = Workbook()
     summary = workbook.active
-    summary.title = "Shift"
+    summary.title = SHEET_TITLES["shift"]
     summary.append(["字段", "值"])
     summary.append(["班次号", payload.get("shift_no", "")])
-    summary.append(["状态", payload.get("status", "")])
+    summary.append(["状态", shift.get_status_display()])
     summary.append(["收银员", payload.get("cashier_username", "")])
     summary.append(["开班时间", payload.get("opened_at", "")])
     summary.append(["交班时间", payload.get("closed_at", "")])
     summary.append(["备注", payload.get("remark", "")])
-    for key, value in payload.get("summary", {}).items():
-        if key == "payments":
-            continue
-        summary.append([key, value])
+    _append_summary_rows(summary, payload.get("summary", {}), SHIFT_SUMMARY_FIELDS)
 
     _append_stats_sheet(
         workbook,
-        "Payments",
+        SHEET_TITLES["payments"],
         [
             "支付方式",
-            "支付方式名称",
             "销售单数",
             "退款单数",
             "还款单数",
@@ -537,8 +593,7 @@ def build_shift_export_workbook(shift, payload):
         ],
         [
             [
-                row.get("method", ""),
-                row.get("method_label", ""),
+                _payment_method_label(row),
                 row.get("sale_count", 0),
                 row.get("refund_count", 0),
                 row.get("repayment_count", 0),
@@ -562,7 +617,7 @@ def build_shift_export_workbook(shift, payload):
         .select_related("pos_customer", "customer", "cashier")
         .order_by("-created_at", "-id")
     )
-    repayment_sheet = workbook.create_sheet("Repayments")
+    repayment_sheet = workbook.create_sheet(SHEET_TITLES["repayments"])
     repayment_sheet.append(
         [
             "还款单号",
@@ -581,15 +636,11 @@ def build_shift_export_workbook(shift, payload):
             [
                 repayment.repayment_no,
                 _repayment_customer_name(repayment),
-                (
-                    getattr(repayment.cashier, "username", "")
-                    if repayment.cashier_id
-                    else ""
-                ),
-                repayment.method,
+                (getattr(repayment.cashier, "username", "") if repayment.cashier_id else ""),
+                repayment.get_method_display(),
                 Decimal(repayment.amount),
                 repayment.reference_no,
-                repayment.status,
+                repayment.get_status_display(),
                 repayment.remark,
                 _dt(repayment.created_at),
             ]

@@ -2455,13 +2455,16 @@ class PosApiTests(TestCase):
         sales_export = self.client.get("/api/pos/sales/export/", {"search": "POS-RECEIPT-RETURN"})
         self.assertEqual(sales_export.status_code, 200)
         workbook = load_workbook(io.BytesIO(sales_export.content))
-        self.assertIn("PaymentLines", workbook.sheetnames)
-        self.assertIn("Returns", workbook.sheetnames)
-        self.assertIn("ReturnLines", workbook.sheetnames)
-        self.assertIn("Refunds", workbook.sheetnames)
-        self.assertEqual(Decimal(str(workbook["Returns"]["G2"].value)), Decimal("9"))
-        self.assertEqual(Decimal(str(workbook["ReturnLines"]["K2"].value)), Decimal("9"))
-        self.assertEqual(Decimal(str(workbook["Refunds"]["E2"].value)), Decimal("9"))
+        self.assertIn("支付明细", workbook.sheetnames)
+        self.assertIn("退货单", workbook.sheetnames)
+        self.assertIn("退货明细", workbook.sheetnames)
+        self.assertIn("退款明细", workbook.sheetnames)
+        self.assertEqual(workbook["退货单"]["D2"].value, "已完成")
+        self.assertEqual(workbook["退款明细"]["D2"].value, "现金")
+        self.assertEqual(workbook["退款明细"]["G2"].value, "已退款")
+        self.assertEqual(Decimal(str(workbook["退货单"]["G2"].value)), Decimal("9"))
+        self.assertEqual(Decimal(str(workbook["退货明细"]["K2"].value)), Decimal("9"))
+        self.assertEqual(Decimal(str(workbook["退款明细"]["E2"].value)), Decimal("9"))
 
         close_response = self.client.post(
             f"/api/pos/shifts/{self.shift.id}/close/",
@@ -4060,24 +4063,135 @@ class PosApiTests(TestCase):
         sales_export = self.client.get("/api/pos/sales/export/", {"search": "POS-EXPORT-PRINT"})
         self.assertEqual(sales_export.status_code, 200)
         workbook = load_workbook(io.BytesIO(sales_export.content))
-        self.assertIn("Sales", workbook.sheetnames)
-        self.assertIn("Lines", workbook.sheetnames)
-        sales_sheet = workbook["Sales"]
-        lines_sheet = workbook["Lines"]
+        self.assertEqual(
+            workbook.sheetnames,
+            ["销售单", "支付明细", "销售明细", "退货单", "退货明细", "退款明细"],
+        )
+        sales_sheet = workbook["销售单"]
+        payment_sheet = workbook["支付明细"]
+        lines_sheet = workbook["销售明细"]
         self.assertEqual(sales_sheet["B2"].value, "POS-EXPORT-PRINT")
+        self.assertEqual(sales_sheet["C2"].value, "已完成")
+        self.assertEqual(sales_sheet["L2"].value, "现金")
         self.assertEqual(Decimal(str(sales_sheet["I2"].value)), Decimal("9"))
+        self.assertEqual(payment_sheet["C2"].value, "现金")
+        self.assertEqual(payment_sheet["H2"].value, "已收款")
         self.assertEqual(lines_sheet["B2"].value, "POS-EXPORT-PRINT")
+        self.assertEqual(lines_sheet["C2"].value, "已完成")
         self.assertEqual(Decimal(str(lines_sheet["K2"].value)), Decimal("9"))
 
         stats_export = self.client.get("/api/pos/stats/export/")
         self.assertEqual(stats_export.status_code, 200)
         stats_workbook = load_workbook(io.BytesIO(stats_export.content))
-        self.assertIn("Summary", stats_workbook.sheetnames)
+        self.assertEqual(
+            stats_workbook.sheetnames,
+            ["统计汇总", "支付汇总", "货主汇总", "商品汇总", "收银员汇总"],
+        )
         summary_rows = {
             row[0].value: row[1].value
-            for row in stats_workbook["Summary"].iter_rows(min_row=2, max_col=2)
+            for row in stats_workbook["统计汇总"].iter_rows(min_row=2, max_col=2)
         }
-        self.assertEqual(summary_rows["net_amount"], "9.00")
+        self.assertEqual(summary_rows["净销售额"], "9.00")
+        self.assertIn("开始日期", summary_rows)
+        self.assertIn("结束日期", summary_rows)
+        payment_headers = next(
+            stats_workbook["支付汇总"].iter_rows(min_row=1, max_row=1, values_only=True)
+        )
+        self.assertEqual(
+            payment_headers,
+            (
+                "支付方式",
+                "销售单数",
+                "退款单数",
+                "还款单数",
+                "销售金额",
+                "退款金额",
+                "还款金额",
+                "净金额",
+            ),
+        )
+        self.assertEqual(stats_workbook["支付汇总"]["A2"].value, "现金")
+
+    def test_closed_shift_excel_export_uses_only_chinese_labels(self):
+        checkout = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-EXPORT-CHINESE-SHIFT",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(checkout.status_code, 201, checkout.data)
+        close_response = self.client.post(
+            f"/api/pos/shifts/{self.shift.id}/close/",
+            {"actual_cash_amount": "109.00"},
+            format="json",
+        )
+        self.assertEqual(close_response.status_code, 200, close_response.data)
+
+        exported = self.client.get(f"/api/pos/shifts/{self.shift.id}/export/")
+
+        self.assertEqual(exported.status_code, 200)
+        workbook = load_workbook(io.BytesIO(exported.content))
+        self.assertEqual(
+            workbook.sheetnames,
+            [
+                "班次汇总",
+                "支付汇总",
+                "销售单",
+                "支付明细",
+                "销售明细",
+                "退货单",
+                "退货明细",
+                "退款明细",
+                "客户还款",
+            ],
+        )
+        summary_rows = {
+            row[0].value: row[1].value
+            for row in workbook["班次汇总"].iter_rows(min_row=2, max_col=2)
+        }
+        self.assertEqual(summary_rows["状态"], "已交班")
+        self.assertEqual(summary_rows["销售单数"], 1)
+        self.assertEqual(summary_rows["净销售额"], "9.00")
+        self.assertEqual(summary_rows["备用金"], "100.00")
+        self.assertEqual(workbook["支付汇总"]["A2"].value, "现金")
+        self.assertEqual(workbook["销售单"]["C2"].value, "已完成")
+        self.assertEqual(workbook["支付明细"]["H2"].value, "已收款")
+
+        exported_text = {
+            cell.value
+            for sheet in workbook.worksheets
+            for row in sheet.iter_rows()
+            for cell in row
+            if isinstance(cell.value, str)
+        }
+        forbidden_english_labels = {
+            "Shift",
+            "Payments",
+            "Sales",
+            "PaymentLines",
+            "Lines",
+            "Returns",
+            "ReturnLines",
+            "Refunds",
+            "Repayments",
+            "CLOSED",
+            "CASH",
+            "COMPLETED",
+            "PAID",
+            "sale_count",
+            "net_amount",
+            "opening_cash_amount",
+        }
+        self.assertTrue(forbidden_english_labels.isdisjoint(exported_text))
 
     def test_frontend_print_log_records_source_and_copy_number(self):
         checkout = self.client.post(
