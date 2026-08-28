@@ -291,7 +291,7 @@ class PosCheckoutLineSerializer(serializers.Serializer):
     amount = serializers.DecimalField(
         max_digits=18,
         decimal_places=2,
-        min_value=Decimal("0.01"),
+        min_value=Decimal("0.00"),
         required=False,
     )
 

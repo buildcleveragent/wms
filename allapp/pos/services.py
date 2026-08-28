@@ -300,23 +300,28 @@ def _validate_prices_and_shape(items, products):
         else:
             amount = _money(qty * price)
 
-        try:
-            lowest = minimum_sale_price(
-                base_price=getattr(product, "price", None),
-                min_price=getattr(product, "min_price", None),
-                max_discount=getattr(product, "max_discount", None),
-            )
-        except InvalidSalePriceRule as exc:
-            _error("price", f"{product.code} 价格配置错误：{exc}")
-        if lowest is not None and price < lowest:
-            _error("price", f"{product.code} 成交价不能低于 {lowest}。")
-        if lowest is not None and explicit_amount is not None:
-            minimum_amount = _money(qty * lowest)
-            if amount < minimum_amount:
-                _error(
-                    "amount",
-                    f"{product.code} 成交金额不能低于 {minimum_amount}。",
+        if amount < ZERO:
+            _error("amount", f"{product.code} 成交金额不能小于 0。")
+        is_gift = amount == ZERO
+
+        if not is_gift:
+            try:
+                lowest = minimum_sale_price(
+                    base_price=getattr(product, "price", None),
+                    min_price=getattr(product, "min_price", None),
+                    max_discount=getattr(product, "max_discount", None),
                 )
+            except InvalidSalePriceRule as exc:
+                _error("price", f"{product.code} 价格配置错误：{exc}")
+            if lowest is not None and price < lowest:
+                _error("price", f"{product.code} 成交价不能低于 {lowest}。")
+            if lowest is not None and explicit_amount is not None:
+                minimum_amount = _money(qty * lowest)
+                if amount < minimum_amount:
+                    _error(
+                        "amount",
+                        f"{product.code} 成交金额不能低于 {minimum_amount}。",
+                    )
 
         qty_by_product[product.id] += qty
         normalized.append(
@@ -409,10 +414,11 @@ def _normalize_payment_lines(payment, payments, total_amount, *, allow_credit=Fa
         if method not in valid_methods:
             _error("payments", "请选择有效的支付方式。")
         amount = _money(raw.get("amount", raw.get("amount_received")))
-        if amount <= 0:
+        zero_total_payment = total_amount == ZERO and len(raw_lines) == 1 and amount == ZERO
+        if amount < 0 or (amount == ZERO and not zero_total_payment):
             _error("payments", "支付金额必须大于 0。")
         if method == PosPayment.Method.CREDIT:
-            if not allow_credit:
+            if not allow_credit and not zero_total_payment:
                 _error("customer_id", "赊账必须先选择客户。")
             received = _money(raw.get("amount_received", ZERO))
             if received != ZERO:

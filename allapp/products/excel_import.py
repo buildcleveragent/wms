@@ -381,7 +381,8 @@ def _write_instruction_sheet(sheet) -> None:
             "货主商品编码规则",
             _joined_text(
                 "优先使用填写的货主商品编码；留空时使用标准贸易条码（GTIN）；",
-                "两者均留空时，使用系统自动生成的仓库SKU编码。仅含空格视为留空。",
+                "两者均留空时，按“货主ID至少4位+序号至少5位”自动生成。",
+                "位数不足时左侧补零，超过位数时不截断；仅含空格视为留空。",
             ),
         ]
     )
@@ -891,7 +892,7 @@ class ProductExcelImporter:
         generated_code_owners = {
             row.product.owner.code.upper()
             for row in product_rows
-            if getattr(row.product, "_derive_code_from_sku_on_create", False)
+            if getattr(row.product, "_derive_code_from_owner_id_on_create", False)
         }
         parsed: list[ParsedPackageRow] = []
         seen_uoms: dict[tuple[str, str, str], int] = {}
@@ -1097,7 +1098,7 @@ class ProductExcelImporter:
             row_number, "标准贸易条码", values.get("标准贸易条码"), max_length=20
         )
         code = supplied_code or gtin or ""
-        derive_code_from_sku = not supplied_code and not _text(values.get("标准贸易条码"))
+        derive_code_from_owner_id = not supplied_code and not _text(values.get("标准贸易条码"))
         if owner is None:
             return None
 
@@ -1228,8 +1229,8 @@ class ProductExcelImporter:
             created_by=self.user,
             updated_by=self.user,
         )
-        if derive_code_from_sku:
-            product._derive_code_from_sku_on_create = True
+        if derive_code_from_owner_id:
+            product._derive_code_from_owner_id_on_create = True
         expiry_control = self._boolean(
             row_number,
             "保质期管理",
@@ -1323,7 +1324,7 @@ class ProductExcelImporter:
 
         if len(self.errors) == before_error_count:
             try:
-                product.full_clean(exclude={"code", "sku"} if derive_code_from_sku else None)
+                product.full_clean(exclude={"code", "sku"} if derive_code_from_owner_id else None)
             except DjangoValidationError as exc:
                 self._add_validation_errors(row_number, exc)
         if len(self.errors) == before_error_count and package_data:
@@ -1765,7 +1766,7 @@ class ProductExcelImporter:
                 product.full_clean(
                     exclude=(
                         {"code", "sku"}
-                        if getattr(product, "_derive_code_from_sku_on_create", False)
+                        if getattr(product, "_derive_code_from_owner_id_on_create", False)
                         else None
                     )
                 )

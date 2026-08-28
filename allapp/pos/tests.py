@@ -3146,6 +3146,144 @@ class PosApiTests(TestCase):
             Decimal("10.0000"),
         )
 
+    def test_checkout_accepts_mixed_paid_and_zero_amount_gift_lines(self):
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-RECEIPT-MIXED-GIFT",
+                "payment": self.payment("20.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "0.0000",
+                        "amount": "0.00",
+                    },
+                    {
+                        "product_id": self.other_product.id,
+                        "qty": "1.000",
+                        "price": "20.0000",
+                        "amount": "20.00",
+                    },
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-MIXED-GIFT")
+        self.assertEqual(sale.total_amount, Decimal("20.00"))
+        gift_line = sale.lines.get(product=self.product)
+        self.assertEqual(gift_line.price, Decimal("0.0000"))
+        self.assertEqual(gift_line.amount, Decimal("0.00"))
+        self.assertEqual(sale.lines.get(product=self.other_product).amount, Decimal("20.00"))
+        self.assertEqual(
+            OutboundOrder.objects.get(
+                owner=self.owner,
+                src_bill_no="POS-RECEIPT-MIXED-GIFT",
+            ).final_order_amount,
+            Decimal("0.00"),
+        )
+        self.assertEqual(
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
+            Decimal("9.0000"),
+        )
+        self.assertEqual(
+            InventoryDetail.objects.get(
+                owner=self.other_owner,
+                product=self.other_product,
+            ).available_qty,
+            Decimal("7.0000"),
+        )
+
+    def test_checkout_accepts_zero_total_gift_sale_and_posts_stock(self):
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-RECEIPT-ZERO-GIFT",
+                "payment": self.payment("0.00", method="WECHAT"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "0.0000",
+                        "amount": "0.00",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-ZERO-GIFT")
+        self.assertEqual(sale.total_amount, Decimal("0.00"))
+        self.assertEqual(sale.lines.get().price, Decimal("0.0000"))
+        self.assertEqual(sale.lines.get().amount, Decimal("0.00"))
+        self.assertEqual(sale.payment.amount_due, Decimal("0.00"))
+        self.assertEqual(sale.payment.amount_received, Decimal("0.00"))
+        payment_line = PosPaymentLine.objects.get(sale=sale)
+        self.assertEqual(payment_line.amount, Decimal("0.00"))
+        self.assertEqual(payment_line.amount_received, Decimal("0.00"))
+        order = OutboundOrder.objects.get(src_bill_no="POS-RECEIPT-ZERO-GIFT")
+        self.assertEqual(order.final_order_amount, Decimal("0.00"))
+        self.assertEqual(order.lines.get().base_price, Decimal("0.0000"))
+        self.assertEqual(order.lines.get().final_line_amount, Decimal("0.00"))
+        self.assertEqual(
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
+            Decimal("9.0000"),
+        )
+
+    def test_checkout_rejects_negative_explicit_amount(self):
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-RECEIPT-NEGATIVE-AMOUNT",
+                "payment": self.payment("0.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "-0.0100",
+                        "amount": "-0.01",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(PosSale.objects.filter(src_bill_no="POS-RECEIPT-NEGATIVE-AMOUNT").exists())
+        self.assertFalse(
+            OutboundOrder.objects.filter(src_bill_no="POS-RECEIPT-NEGATIVE-AMOUNT").exists()
+        )
+        self.assertEqual(
+            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
+            Decimal("10.0000"),
+        )
+
+    def test_checkout_rejects_zero_qty_and_negative_price(self):
+        invalid_lines = (
+            ("ZERO-QTY", {"qty": "0.000", "price": "0.0000", "amount": "0.00"}),
+            ("NEGATIVE-PRICE", {"qty": "1.000", "price": "-0.0001", "amount": "0.00"}),
+        )
+
+        for suffix, values in invalid_lines:
+            receipt_no = f"POS-RECEIPT-{suffix}"
+            with self.subTest(suffix=suffix):
+                response = self.client.post(
+                    "/api/pos/checkout/",
+                    {
+                        "src_bill_no": receipt_no,
+                        "payment": self.payment("0.00"),
+                        "items": [{"product_id": self.product.id, **values}],
+                    },
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertFalse(PosSale.objects.filter(src_bill_no=receipt_no).exists())
+                self.assertFalse(OutboundOrder.objects.filter(src_bill_no=receipt_no).exists())
+
     def test_checkout_rejects_max_discount_breach_without_stock_post(self):
         discount_product = Product.objects.create(
             owner=self.owner,

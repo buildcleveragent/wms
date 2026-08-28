@@ -90,7 +90,11 @@
         <text v-if="scanFeedbackMessage" class="scan-message">{{ scanFeedbackMessage }}</text>
       </view>
 
-      <view class="product-list" v-if="products.length">
+      <view
+        class="product-list"
+        data-testid="pos-product-list"
+        v-if="products.length"
+      >
         <view class="product-row" v-for="product in products" :key="product.id" data-testid="pos-product-row">
           <view class="product-main">
             <text class="product-name" data-testid="pos-product-name">{{ product.name || product.sku || product.code }}<text v-if="product.spec" class="product-spec">　{{ product.spec }}</text></text>
@@ -723,6 +727,7 @@ const shiftPaymentActuals = ref({})
 const shiftHistory = ref([])
 const shiftHistoryLoading = ref(false)
 const POS_DRAFT_KEY = 'pos_sale_draft_v1'
+const POS_PRODUCT_PAGE_SIZE = 100
 const POS_AUTO_PRINT_KEY = 'pos_auto_print_sale_v1'
 const POS_SALE_PRINT_MODE_KEY = 'pos_sale_print_mode_v2'
 const POS_SALE_PRINT_CONFIG_KEY = 'pos_sale_print_config_v1'
@@ -936,7 +941,7 @@ const cartPricingReady = computed(() =>
   cartItems.value.every((item) => {
     const amount = numberFromValue(item.amount, 0)
     const price = numberFromValue(item.price, -1)
-    return !item.price_error && amount > 0 && price >= 0
+    return !item.price_error && amount >= 0 && price >= 0
   })
 )
 const ownerCount = computed(() => {
@@ -1052,7 +1057,10 @@ const changeAmount = computed(() =>
       : 0
 )
 const paymentReady = computed(() => {
-  if (totalAmount.value <= 0) return false
+  if (totalAmount.value < 0) return false
+  if (moneyEqual(totalAmount.value, 0)) {
+    return !splitPaymentEnabled.value && moneyEqual(receivedAmount.value, 0)
+  }
   if (splitPaymentEnabled.value) {
     if (!paymentLines.value.length || !moneyEqual(splitPaymentAmount.value, totalAmount.value)) return false
     return paymentLines.value.every((line) => {
@@ -3232,8 +3240,32 @@ async function drainProductLookupQueue() {
 }
 
 async function fetchProductsByBarcode(barcode) {
-  const res = await api.posProducts({ ...POS_STOCK_QUERY, barcode, page: 1, page_size: 20 })
-  return normalizePage(res)
+  return fetchAllPosProducts({ ...POS_STOCK_QUERY, barcode })
+}
+
+async function fetchAllPosProducts(params) {
+  const rows = []
+  const seenProductIds = new Set()
+  let page = 1
+
+  while (true) {
+    const res = await api.posProducts({
+      ...params,
+      page,
+      page_size: POS_PRODUCT_PAGE_SIZE,
+    })
+    normalizePage(res).forEach((product) => {
+      const productId = product?.id
+      const dedupeKey = productId === undefined || productId === null ? null : String(productId)
+      if (dedupeKey !== null && seenProductIds.has(dedupeKey)) return
+      if (dedupeKey !== null) seenProductIds.add(dedupeKey)
+      rows.push(product)
+    })
+    if (Array.isArray(res) || !res?.next) break
+    page += 1
+  }
+
+  return rows
 }
 
 async function lookupByBarcode(barcode, options = {}) {
@@ -3272,14 +3304,12 @@ async function lookupProductKeyword(keyword) {
   const exactRows = await lookupByBarcode(value, { showNotFound: false })
   if (exactRows.length) return exactRows
 
-  const res = await api.posProducts({
+  const rows = await fetchAllPosProducts({
     ...POS_STOCK_QUERY,
     search: value,
-    page: 1,
-    page_size: 20
   })
 
-  products.value = normalizePage(res)
+  products.value = rows
 
   if (!products.value.length) {
     setScanFeedback(`未找到商品：${value}`, 'error')
@@ -3530,11 +3560,13 @@ function validateLinePricing(item) {
 
   if (baseQty <= 0) {
     error = '数量必须大于0'
-  } else if (amount <= 0) {
-    error = '金额必须大于0'
+  } else if (amount < 0) {
+    error = '金额不能小于0'
   } else if (price < 0) {
     error = '单价不能小于0'
-  } else {
+  } else if (amount === 0 && price > 0) {
+    error = '赠品单价必须为0'
+  } else if (amount > 0) {
     const lowest = minimumLinePrice(item)
     if (lowest !== null) {
       const minimumAmount = roundDecimal(baseQty * lowest, 2)
@@ -4172,6 +4204,13 @@ function focusProductInput(delay = 80) {
 .pos-toolbar .customer-list,
 .pos-toolbar .product-list {
   margin-top: 6rpx;
+}
+
+.pos-toolbar .product-list {
+  max-height: min(42vh, 560rpx);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .pos-toolbar .empty-tip {

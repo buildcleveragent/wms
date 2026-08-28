@@ -37,7 +37,7 @@ from .excel_import import (
     PRODUCT_HEADERS,
 )
 from .identifier_services import add_product_barcode
-from .models import ProductBarcode
+from .models import ProductBarcode, format_owner_product_code_identifier
 from .views import ProductViewSet
 
 # 业务模型
@@ -795,7 +795,8 @@ class ProductExcelImportApiTests(TestCase):
         self.assertIn("货主编码", instructions["必填字段"])
         self.assertNotIn("货主商品编码", instructions["必填字段"])
         self.assertIn("标准贸易条码", instructions["货主商品编码规则"])
-        self.assertIn("仓库SKU编码", instructions["货主商品编码规则"])
+        self.assertIn("货主ID至少4位+序号至少5位", instructions["货主商品编码规则"])
+        self.assertIn("左侧补零", instructions["货主商品编码规则"])
         self.assertIn("系统按", instructions["仓库SKU编码规则"])
         self.assertIn("默认价格和进价均可留空", instructions["价格规则"])
         self.assertIn("批次、序列号和保质期管理默认否", instructions["布尔值"])
@@ -1258,10 +1259,19 @@ class ProductExcelImportApiTests(TestCase):
         products = list(
             Product.objects.filter(owner=self.owner).order_by("sku").values_list("code", "sku")
         )
-        self.assertEqual(products, [("PXIA1", "PXIA1"), ("PXIA2", "PXIA2")])
+        self.assertEqual(
+            products,
+            [
+                (format_owner_product_code_identifier(self.owner.pk, 1), "PXIA1"),
+                (format_owner_product_code_identifier(self.owner.pk, 2), "PXIA2"),
+            ],
+        )
         self.assertEqual(
             [item["code"] for item in response.data["created"]],
-            ["PXIA1", "PXIA2"],
+            [
+                format_owner_product_code_identifier(self.owner.pk, 1),
+                format_owner_product_code_identifier(self.owner.pk, 2),
+            ],
         )
 
     def test_generated_code_skips_owner_identifier_collision(self):
@@ -1285,7 +1295,36 @@ class ProductExcelImportApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         product = Product.objects.get(name="跳号无码商品")
-        self.assertEqual((product.code, product.sku), ("PXIA3", "PXIA3"))
+        self.assertEqual(
+            (product.code, product.sku),
+            (format_owner_product_code_identifier(self.owner.pk, 3), "PXIA3"),
+        )
+
+    def test_generated_code_skips_owner_id_sequence_identifier_collision(self):
+        existing = Product.objects.create(
+            owner=self.owner,
+            code="EXISTING-CODE",
+            name="已有商品",
+            category=self.category,
+            base_uom=self.uom,
+            expiry_control=False,
+            expiry_basis=None,
+        )
+        add_product_barcode(
+            product=existing,
+            barcode=format_owner_product_code_identifier(self.owner.pk, 2),
+            barcode_type=ProductBarcode.BarcodeType.OTHER,
+            is_primary=False,
+        )
+
+        response = self._post_rows([self._valid_row("", **{"商品名称": "货主编号跳号商品"})])
+
+        self.assertEqual(response.status_code, 200, response.data)
+        product = Product.objects.get(name="货主编号跳号商品")
+        self.assertEqual(
+            (product.code, product.sku),
+            (format_owner_product_code_identifier(self.owner.pk, 3), "PXIA3"),
+        )
 
     def test_gtin_fallback_can_be_referenced_by_package_sheet(self):
         workbook = Workbook()
@@ -1336,7 +1375,11 @@ class ProductExcelImportApiTests(TestCase):
 
         self.assertEqual(inline_response.status_code, 200, inline_response.data)
         product = Product.objects.get(name="无码同行包装")
-        self.assertEqual(product.code, product.sku)
+        self.assertEqual(
+            product.code,
+            format_owner_product_code_identifier(self.owner.pk, 1),
+        )
+        self.assertEqual(product.sku, "PXIA1")
         self.assertTrue(product.packages.filter(barcode="INLINE-AUTO-PACKAGE").exists())
 
         workbook = Workbook()

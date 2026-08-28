@@ -41,6 +41,11 @@ def format_owner_sequence_identifier(owner_code: str, sequence: int) -> str:
     return f"{str(owner_code).strip().upper()}{int(sequence)}"
 
 
+def format_owner_product_code_identifier(owner_id: int, sequence: int) -> str:
+    """Build an owner product code from minimum-width owner and sequence numbers."""
+    return f"{int(owner_id):04d}{int(sequence):05d}"
+
+
 def normalize_product_identifier(value) -> str:
     """Return the canonical comparison form used by the identifier registry."""
     return str(value).strip().upper() if value not in (None, "") else ""
@@ -916,6 +921,9 @@ class Product(BaseModel):
             owner = None
             validate_carton_binding = adding
             if adding:
+                derive_code_from_owner_id = getattr(
+                    self, "_derive_code_from_owner_id_on_create", False
+                )
                 owner = (
                     Owner.all_objects.select_for_update()
                     .only("id", "code", "next_sku_sequence")
@@ -923,23 +931,36 @@ class Product(BaseModel):
                 )
                 sequence = owner.next_sku_sequence
                 while True:
-                    candidate = format_owner_sequence_identifier(owner.code, sequence)
+                    sku_candidate = format_owner_sequence_identifier(owner.code, sequence)
+                    code_candidate = (
+                        format_owner_product_code_identifier(owner.pk, sequence)
+                        if derive_code_from_owner_id
+                        else None
+                    )
+                    candidates = {
+                        normalize_product_identifier(candidate)
+                        for candidate in (sku_candidate, code_candidate)
+                        if candidate
+                    }
+                    product_conflict = Q()
+                    for candidate in candidates:
+                        product_conflict |= Q(code__iexact=candidate) | Q(sku__iexact=candidate)
                     occupied = (
                         ProductIdentifierRegistry.objects.filter(
                             owner_id=owner.pk,
-                            normalized_value=normalize_product_identifier(candidate),
+                            normalized_value__in=candidates,
                         ).exists()
                         or type(self)
                         .all_objects.filter(owner_id=owner.pk)
-                        .filter(Q(code__iexact=candidate) | Q(sku__iexact=candidate))
+                        .filter(product_conflict)
                         .exists()
                     )
                     if not occupied:
                         break
                     sequence += 1
-                self.sku = format_owner_sequence_identifier(owner.code, sequence)
-                if getattr(self, "_derive_code_from_sku_on_create", False):
-                    self.code = self.sku
+                self.sku = sku_candidate
+                if derive_code_from_owner_id:
+                    self.code = code_candidate
             else:
                 original = (
                     type(self)
@@ -1033,10 +1054,10 @@ class Product(BaseModel):
         if self.code:
             self.code = self.code.strip().upper()
 
-        derive_code_from_sku = self._state.adding and getattr(
-            self, "_derive_code_from_sku_on_create", False
+        derive_code_from_owner_id = self._state.adding and getattr(
+            self, "_derive_code_from_owner_id_on_create", False
         )
-        if not self.code and not derive_code_from_sku:
+        if not self.code and not derive_code_from_owner_id:
             errors["code"] = "货主商品编码不能为空"
 
         if self._state.adding and not self.category_id:

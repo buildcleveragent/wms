@@ -6,7 +6,7 @@ from django.test import TestCase
 
 from allapp.baseinfo.models import Owner
 
-from .models import Product, ProductUom
+from .models import Product, ProductUom, format_owner_product_code_identifier
 
 
 class ProductSkuSequenceTests(TestCase):
@@ -23,6 +23,13 @@ class ProductSkuSequenceTests(TestCase):
             expiry_control=False,
             expiry_basis=None,
             **kwargs,
+        )
+
+    def test_owner_product_code_uses_minimum_width_numeric_parts(self):
+        self.assertEqual(format_owner_product_code_identifier(2, 1), "000200001")
+        self.assertEqual(
+            format_owner_product_code_identifier(12345, 100000),
+            "12345100000",
         )
 
     def test_new_product_uses_current_sequence_and_increments_owner(self):
