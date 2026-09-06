@@ -3,6 +3,7 @@ import importlib
 import io
 from decimal import Decimal
 from unittest.mock import patch
+from urllib.parse import quote
 
 from django.apps import apps
 from django.contrib import admin
@@ -51,6 +52,41 @@ from allapp.products.models import Product, ProductPackage, ProductUom
 from allapp.tasking.models import TaskScanLog, TaskStatusLog, WmsTask, WmsTaskLine
 
 
+def _worksheet_values(sheet):
+    return [tuple(row) for row in sheet.iter_rows(values_only=True)]
+
+
+def _assert_all_information_sheet(test_case, workbook, source_names):
+    test_case.assertEqual(workbook.sheetnames, ["全部信息", *source_names])
+    combined = workbook["全部信息"]
+    cursor = 1
+    for source_name in source_names:
+        source = workbook[source_name]
+        test_case.assertEqual(combined.cell(row=cursor, column=1).value, source_name)
+        test_case.assertTrue(combined.cell(row=cursor, column=1).font.bold)
+        copied_rows = [
+            tuple(row)
+            for row in combined.iter_rows(
+                min_row=cursor + 1,
+                max_row=cursor + source.max_row,
+                min_col=1,
+                max_col=source.max_column,
+                values_only=True,
+            )
+        ]
+        test_case.assertEqual(copied_rows, _worksheet_values(source))
+        cursor += source.max_row + 2
+
+
+def _assert_original_sheets_unchanged(test_case, original, combined):
+    test_case.assertEqual(combined.sheetnames[1:], original.sheetnames)
+    for sheet_name in original.sheetnames:
+        test_case.assertEqual(
+            _worksheet_values(combined[sheet_name]),
+            _worksheet_values(original[sheet_name]),
+        )
+
+
 class PosAccuracyUtilityTests(SimpleTestCase):
     def test_parse_params_uses_safe_default_date(self):
         start_date, end_date = _parse_params({})
@@ -63,6 +99,12 @@ class PosAccuracyUtilityTests(SimpleTestCase):
         value = field.to_representation(datetime.datetime(2026, 1, 10, 10, 30))
 
         self.assertIn("2026-01-10T10:30", value)
+
+    def test_pos_export_filename_part_replaces_invalid_characters(self):
+        from allapp.pos.views import _safe_filename_part
+
+        self.assertEqual(_safe_filename_part("SHIFT/IN:VA*LID", "未编号"), "SHIFT_IN_VA_LID")
+        self.assertEqual(_safe_filename_part(" . ", "未编号"), "未编号")
 
 
 class PosAdminRegistrationTests(SimpleTestCase):
@@ -4080,6 +4122,35 @@ class PosApiTests(TestCase):
         self.assertEqual(lines_sheet["C2"].value, "已完成")
         self.assertEqual(Decimal(str(lines_sheet["K2"].value)), Decimal("9"))
 
+        non_opt_in_export = self.client.get(
+            "/api/pos/sales/export/",
+            {"search": "POS-EXPORT-PRINT", "include_all_sheet": "true"},
+        )
+        non_opt_in_workbook = load_workbook(io.BytesIO(non_opt_in_export.content))
+        self.assertEqual(non_opt_in_workbook.sheetnames, workbook.sheetnames)
+        self.assertEqual(
+            non_opt_in_export["Content-Disposition"],
+            'attachment; filename="pos-sales.xlsx"',
+        )
+
+        with patch(
+            "allapp.pos.views.timezone.now",
+            return_value=datetime.datetime(2026, 8, 31, 12, 0),
+        ):
+            combined_sales_export = self.client.get(
+                "/api/pos/sales/export/",
+                {"search": "POS-EXPORT-PRINT", "include_all_sheet": "1"},
+            )
+        self.assertEqual(combined_sales_export.status_code, 200)
+        combined_sales_workbook = load_workbook(io.BytesIO(combined_sales_export.content))
+        _assert_all_information_sheet(self, combined_sales_workbook, workbook.sheetnames)
+        _assert_original_sheets_unchanged(self, workbook, combined_sales_workbook)
+        sales_filename = "POS销售历史_2026-08-31.xlsx"
+        self.assertEqual(
+            combined_sales_export["Content-Disposition"],
+            f"attachment; filename*=utf-8''{quote(sales_filename)}",
+        )
+
         stats_export = self.client.get("/api/pos/stats/export/")
         self.assertEqual(stats_export.status_code, 200)
         stats_workbook = load_workbook(io.BytesIO(stats_export.content))
@@ -4111,6 +4182,28 @@ class PosApiTests(TestCase):
             ),
         )
         self.assertEqual(stats_workbook["支付汇总"]["A2"].value, "现金")
+
+        with patch(
+            "allapp.pos.views.timezone.now",
+            return_value=datetime.datetime(2026, 8, 31, 12, 0),
+        ):
+            combined_stats_export = self.client.get(
+                "/api/pos/stats/export/",
+                {
+                    "start_date": summary_rows["开始日期"],
+                    "end_date": summary_rows["结束日期"],
+                    "include_all_sheet": "1",
+                },
+            )
+        self.assertEqual(combined_stats_export.status_code, 200)
+        combined_stats_workbook = load_workbook(io.BytesIO(combined_stats_export.content))
+        _assert_all_information_sheet(self, combined_stats_workbook, stats_workbook.sheetnames)
+        _assert_original_sheets_unchanged(self, stats_workbook, combined_stats_workbook)
+        stats_filename = "POS今日统计_2026-08-31.xlsx"
+        self.assertEqual(
+            combined_stats_export["Content-Disposition"],
+            f"attachment; filename*=utf-8''{quote(stats_filename)}",
+        )
 
     def test_closed_shift_excel_export_uses_only_chinese_labels(self):
         checkout = self.client.post(
@@ -4192,6 +4285,24 @@ class PosApiTests(TestCase):
             "opening_cash_amount",
         }
         self.assertTrue(forbidden_english_labels.isdisjoint(exported_text))
+
+        with patch(
+            "allapp.pos.views.timezone.now",
+            return_value=datetime.datetime(2026, 8, 31, 12, 0),
+        ):
+            combined_export = self.client.get(
+                f"/api/pos/shifts/{self.shift.id}/export/",
+                {"include_all_sheet": "1"},
+            )
+        self.assertEqual(combined_export.status_code, 200)
+        combined_workbook = load_workbook(io.BytesIO(combined_export.content))
+        _assert_all_information_sheet(self, combined_workbook, workbook.sheetnames)
+        _assert_original_sheets_unchanged(self, workbook, combined_workbook)
+        shift_filename = f"POS班次_{self.shift.shift_no}_2026-08-31.xlsx"
+        self.assertEqual(
+            combined_export["Content-Disposition"],
+            f"attachment; filename*=utf-8''{quote(shift_filename)}",
+        )
 
     def test_frontend_print_log_records_source_and_copy_number(self):
         checkout = self.client.post(

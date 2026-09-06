@@ -2578,7 +2578,88 @@ function openAuthenticatedUrl(url) {
   uni.showToast({ title: '当前环境不支持打开打印页', icon: 'none' })
 }
 
-function downloadExcel(url, filename = 'pos.xlsx') {
+function safeExportFilenamePart(value, fallback = 'POS导出') {
+  const cleaned = String(value || '')
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+    .replace(/^[ .]+|[ .]+$/g, '')
+  return cleaned || fallback
+}
+
+function posExportFilename(label) {
+  return `${safeExportFilenamePart(label)}_${dateOnly(new Date())}.xlsx`
+}
+
+function showExcelDownloadFailure() {
+  uni.showToast({ title: '导出失败', icon: 'none' })
+}
+
+function openDownloadedExcel(filePath, filename) {
+  if (typeof uni.openDocument === 'function') {
+    uni.openDocument({
+      filePath,
+      fileType: 'xlsx',
+      showMenu: true,
+      fail: () => {
+        uni.showToast({ title: `${filename} 已下载`, icon: 'none' })
+      },
+    })
+    return
+  }
+  uni.showToast({ title: `${filename} 已下载`, icon: 'none' })
+}
+
+function downloadExcel(url, filename = 'POS导出.xlsx') {
+  // #ifdef APP-PLUS
+  if (typeof plus !== 'undefined' && plus.downloader?.createDownload) {
+    const task = plus.downloader.createDownload(
+      url,
+      { filename: `_downloads/${filename}` },
+      (download, status) => {
+        if (Number(status) !== 200 || !download?.filename) {
+          showExcelDownloadFailure()
+          return
+        }
+        if (plus.runtime?.openFile) {
+          plus.runtime.openFile(download.filename, {}, () => {
+            uni.showToast({ title: `${filename} 已下载`, icon: 'none' })
+          })
+          return
+        }
+        openDownloadedExcel(download.filename, filename)
+      }
+    )
+    Object.entries(authHeader()).forEach(([name, value]) => {
+      task.setRequestHeader(name, value)
+    })
+    task.start()
+    return
+  }
+  // #endif
+
+  // #ifdef H5
+  if (
+    typeof window !== 'undefined' &&
+    typeof window.fetch === 'function' &&
+    typeof document !== 'undefined'
+  ) {
+    window.fetch(url, { headers: authHeader() })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const blob = await response.blob()
+        const objectUrl = window.URL.createObjectURL(blob)
+        const anchor = document.createElement('a')
+        anchor.href = objectUrl
+        anchor.download = filename
+        document.body.appendChild(anchor)
+        anchor.click()
+        anchor.remove()
+        window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 0)
+      })
+      .catch(showExcelDownloadFailure)
+    return
+  }
+  // #endif
+
   if (typeof uni.downloadFile !== 'function') {
     if (typeof window !== 'undefined' && window.open) {
       window.open(api.authUrl(url), '_blank')
@@ -2590,44 +2671,45 @@ function downloadExcel(url, filename = 'pos.xlsx') {
     header: authHeader(),
     success: (res) => {
       if (res.statusCode && res.statusCode !== 200) {
-        uni.showToast({ title: '导出失败', icon: 'none' })
+        showExcelDownloadFailure()
         return
       }
-      const filePath = res.tempFilePath
-      if (typeof uni.openDocument === 'function') {
-        uni.openDocument({
-          filePath,
-          fileType: 'xlsx',
-          showMenu: true,
-          fail: () => {
-            uni.showToast({ title: `${filename} 已下载`, icon: 'none' })
-          },
-        })
-      } else {
-        uni.showToast({ title: `${filename} 已下载`, icon: 'none' })
-      }
+      openDownloadedExcel(res.tempFilePath, filename)
     },
-    fail: () => {
-      uni.showToast({ title: '导出失败', icon: 'none' })
-    },
+    fail: showExcelDownloadFailure,
   })
 }
 
 function exportTodayStats() {
   const today = dateOnly(new Date())
-  downloadExcel(api.posStatsExport({ start_date: today, end_date: today, top_n: 50 }), 'pos-stats.xlsx')
+  downloadExcel(
+    api.posStatsExport({
+      start_date: today,
+      end_date: today,
+      top_n: 50,
+      include_all_sheet: 1,
+    }),
+    posExportFilename('POS今日统计')
+  )
 }
 
 function exportSalesHistory() {
   downloadExcel(
-    api.posSalesExport({ search: historyKeyword.value || '', page_size: 500 }),
-    'pos-sales.xlsx'
+    api.posSalesExport({
+      search: historyKeyword.value || '',
+      include_all_sheet: 1,
+    }),
+    posExportFilename('POS销售历史')
   )
 }
 
 function exportCurrentShift() {
   if (!currentShift.value?.id) return
-  downloadExcel(api.posShiftExportUrl(currentShift.value.id), `${currentShift.value.shift_no || 'pos-shift'}.xlsx`)
+  const shiftNo = safeExportFilenamePart(currentShift.value.shift_no, '未编号')
+  downloadExcel(
+    api.posShiftExportUrl(currentShift.value.id, { include_all_sheet: 1 }),
+    posExportFilename(`POS班次_${shiftNo}`)
+  )
 }
 
 function printCurrentShift() {
@@ -2642,7 +2724,11 @@ function printShift(shift) {
 
 function exportShift(shift) {
   if (!shift?.id) return
-  downloadExcel(api.posShiftExportUrl(shift.id), `${shift.shift_no || 'pos-shift'}.xlsx`)
+  const shiftNo = safeExportFilenamePart(shift.shift_no, '未编号')
+  downloadExcel(
+    api.posShiftExportUrl(shift.id, { include_all_sheet: 1 }),
+    posExportFilename(`POS班次_${shiftNo}`)
+  )
 }
 
 async function loadCurrentShift() {

@@ -1,0 +1,322 @@
+{
+  "findings": [
+    {
+      "title": "POS 商品接口允许商城买家读取跨货主商品、最低售价和库存",
+      "cwe": "CWE-862",
+      "severity": "high",
+      "confidence": "high",
+      "attacker": "拥有正常商城账号或其他绑定了 legacy warehouse_id 的普通认证账号，无需 POS 权限或有效 WMS UserRoleScope。",
+      "violated_security_invariant": "商城购买身份不能获得仓库内部商品和价格权限；商品可见范围应受到货主及仓库授权约束。",
+      "source_to_sink": "商城微信登录向 buyer.user 签发通用 JWT，且要求该用户绑定 warehouse_id。该 JWT 可直接请求 /api/pos/products/。PosProductListApi 只检查 IsAuthenticated 和 warehouse_id，其商品查询仅过滤 is_active=True，没有 POS 权限、货主或 AccessScope 过滤。库存子查询限制仓库，但没有限制返回的商品集合。序列化器返回各货主商品的 min_price、max_discount 和该仓库 available_qty。",
+      "impact": "普通商城买家可分页枚举包括未在商城上架商品在内的跨货主商品档案、内部最低售价、折扣底线及库存数量。",
+      "locations": [
+        {"file": "allapp/pos/views.py", "start_line": 144, "end_line": 177},
+        {"file": "allapp/pos/views.py", "start_line": 186, "end_line": 221},
+        {"file": "allapp/pos/serializers.py", "start_line": 94, "end_line": 148},
+        {"file": "allapp/pos/urls.py", "start_line": 35, "end_line": 35},
+        {"file": "allapp/salesapp/salemini_api.py", "start_line": 568, "end_line": 573},
+        {"file": "allapp/salesapp/salemini_api.py", "start_line": 596, "end_line": 612},
+        {"file": "allapp/salesapp/salemini_api.py", "start_line": 2120, "end_line": 2133}
+      ],
+      "supporting_source_evidence": [
+        "PosProductListApi.permission_classes = [permissions.IsAuthenticated]。",
+        "商品集合是 Product.objects.filter(is_active=True)，库存使用 Subquery 注解，而非用于排除未授权商品。",
+        "PosProductSerializer.fields 包含 owner_id、min_price、max_discount、available_qty。",
+        "_token_payload_for_user 使用 RefreshToken.for_user(user)，并未签发仅适用于商城的独立身份。"
+      ],
+      "counterevidence": [
+        "接口拒绝没有 warehouse_id 的账号，库存数量限定在该 warehouse_id；但商城绑定用户正好具备这个字段。",
+        "分页上限为 100，只限制每次返回量，不阻止完整枚举。",
+        "其他 POS 销售及结算接口有独立权限检查；本发现针对商品查询接口。"
+      ],
+      "recommended_remediation": "在 POS 商品接口检查明确的 POS 查询或收银权限，并使用统一 AccessScope 与授权货主集合过滤商品和库存；添加商城买家、无范围用户、跨货主及跨仓库拒绝测试。"
+    },
+    {
+      "title": "任务行及任务指派后台绕过仓库范围过滤",
+      "cwe": "CWE-863",
+      "severity": "high",
+      "confidence": "high",
+      "attacker": "具有 tasking.taskconfirm_as_wh_manager，并另获相应任务行或任务指派 view/change 模型权限的非超级管理员 staff 用户。",
+      "violated_security_invariant": "授予业务功能权限不能扩大 UserRoleScope 指定的仓库数据范围。",
+      "source_to_sink": "Django Admin 的任务行详情、修改及列表通过 WmsTaskLineAdmin.get_queryset 获取对象。该方法对 is_wh_manager 用户直接返回未按仓库过滤的完整 queryset；TaskAssignmentAdmin 同样如此。任务行非盘点表单可修改商品、库位和数量，save_related 在检查任务锁定前已调用父类保存。",
+      "impact": "满足上述权限前提的单仓管理员可查看及修改其他仓库的任务明细或指派，破坏跨仓库隔离和作业数据完整性。",
+      "locations": [
+        {"file": "allapp/tasking/admin.py", "start_line": 1537, "end_line": 1549},
+        {"file": "allapp/tasking/admin.py", "start_line": 1568, "end_line": 1578},
+        {"file": "allapp/tasking/admin.py", "start_line": 1611, "end_line": 1627},
+        {"file": "allapp/tasking/admin.py", "start_line": 1859, "end_line": 1873},
+        {"file": "allapp/tasking/admin.py", "start_line": 2034, "end_line": 2055},
+        {"file": "allapp/accounts/access.py", "start_line": 17, "end_line": 20}
+      ],
+      "supporting_source_evidence": [
+        "WmsTaskLineAdmin 在 is_wh_manager(request.user) 为真时执行 return qs.order_by('-id')，此前没有 AccessScope 过滤。",
+        "TaskAssignmentAdmin 在相同条件下直接 return qs。",
+        "同一文件 WmsTaskAdmin 的 845–849 行已经对任务头使用 AccessScope，任务行和指派未继承这个查询过滤。",
+        "任务行 fields 包括 product、from_location、to_location、qty_plan、qty_done；非盘点行没有对应 readonly 限制。"
+      ],
+      "counterevidence": [
+        "默认仓库管理员角色模板没有授予 view/change_wmstaskline 或 view/change_taskassignment；需要额外分配对应模型权限。",
+        "任务头、移库申请及移库预留后台已有范围过滤，但 Django Admin 不会自动把这些过滤传播到独立注册的任务行和指派后台。",
+        "本结论未声称默认角色可以直接操作所有这些后台。"
+      ],
+      "recommended_remediation": "对任务行使用 task__owner_id/task__warehouse_id 范围过滤，对指派使用关联任务范围过滤；在保存及关联字段选择时执行同样的检查，并在任何写入前检查任务锁定状态。"
+    },
+    {
+      "title": "受限用户管理员可以通过继承的密码重置页面接管超级管理员",
+      "cwe": "CWE-269",
+      "severity": "high",
+      "confidence": "high",
+      "attacker": "获授 accounts.change_user 的非超级管理员 staff 用户。",
+      "violated_security_invariant": "禁止普通用户管理员修改 is_superuser、角色及权限的限制，也必须防止其通过重置高权限账号密码获得相同权限。",
+      "source_to_sink": "自定义 UserAdmin 继承 DjangoUserAdmin，仅将 is_superuser、groups 和 user_permissions 设为只读，get_queryset 仍返回所有用户。它没有覆盖 has_change_permission 或 user_change_password。已安装 Django 的继承实现通过 get_object 找到目标用户，仅以 change_user 模型权限检查后调用密码表单 save，因此可直接访问 /admin/accounts/user/<超级管理员ID>/password/。",
+      "impact": "受限用户管理员可设置超级管理员的新密码，并以超级管理员身份登录，获得全系统权限。",
+      "locations": [
+        {"file": "allapp/accounts/admin.py", "start_line": 372, "end_line": 376},
+        {"file": "allapp/accounts/admin.py", "start_line": 400, "end_line": 413},
+        {"file": "allapp/accounts/admin.py", "start_line": 466, "end_line": 474},
+        {"file": "wmsmaster/urls.py", "start_line": 35, "end_line": 35}
+      ],
+      "supporting_source_evidence": [
+        "get_readonly_fields 对非超级管理员仅追加 is_superuser、groups、user_permissions。",
+        "get_queryset 仅 prefetch_related，没有排除超级管理员或按管理层级限制目标用户。",
+        "静态核对本地 Django 依赖：django/contrib/auth/admin.py:155–184 的 user_change_password 只检查 self.has_change_permission(request, user)，然后 form.save()。",
+        "本地 django/contrib/admin/options.py:578–591 的默认 has_change_permission 仅检查 accounts.change_user，不检查目标用户身份。"
+      ],
+      "counterevidence": [
+        "需要 staff 和 accounts.change_user；规范业务角色模板默认未授予此权限。",
+        "角色组和 UserRoleScope 编辑另有限制为超级管理员，但不会约束独立密码重置入口。",
+        "没有执行密码修改或实际接管测试。"
+      ],
+      "recommended_remediation": "将用户管理限制为超级管理员，或统一实现明确的可管理用户集合和权限等级检查，并使用户详情、保存、删除、密码重置入口全部使用该检查。"
+    },
+    {
+      "title": "收货和出库打印接口继续接受密码变更前的访问令牌",
+      "cwe": "CWE-613",
+      "severity": "medium",
+      "confidence": "high",
+      "attacker": "持有某个有效账号在密码修改前签发且尚未自然过期的访问令牌的人。",
+      "violated_security_invariant": "密码变更后，已撤销的访问令牌不能继续访问受保护的业务数据。",
+      "source_to_sink": "打印接口从 token/access 查询参数读取令牌，直接执行 AccessToken(token) 并按 user_id 查询用户，没有使用 JWTAuthentication.get_user，也没有比较 hash_password。AccessToken 验证签名及有效期，但密码撤销检查属于 JWTAuthentication 的用户验证流程。系统明确启用 CHECK_REVOKE_TOKEN，普通接口和自定义 refresh 流程均实施密码撤销检查，因此打印入口构成旁路。",
+      "impact": "即使用户通过改密处理令牌泄露，攻击者仍可读取其范围内的收货单及包含价格、联系人、电话、地址的出库打印单，最长延续到 PDA 访问令牌的 24 小时有效期结束。",
+      "locations": [
+        {"file": "allapp/inbound/export_print.py", "start_line": 28, "end_line": 45},
+        {"file": "allapp/outbound/export_print.py", "start_line": 109, "end_line": 127},
+        {"file": "wmsmaster/settings.py", "start_line": 195, "end_line": 200},
+        {"file": "wmsmaster/auth_views.py", "start_line": 24, "end_line": 33},
+        {"file": "wmsmaster/auth_views.py", "start_line": 109, "end_line": 127},
+        {"file": "wmsmaster/views.py", "start_line": 172, "end_line": 175}
+      ],
+      "supporting_source_evidence": [
+        "两个打印实现均用 AccessToken(token) 后直接读取 get_user_model().objects.get(id=user_id)。",
+        "SIMPLE_JWT['CHECK_REVOKE_TOKEN'] = True。",
+        "PDAAccessToken.lifetime = timedelta(days=1)。",
+        "作为有效对照，allapp/pos/views.py:129–135 的 QueryTokenAuthentication 调用 get_validated_token 和 get_user。"
+      ],
+      "counterevidence": [
+        "令牌签名、有效期和当前对象范围仍受校验；这不是任意用户冒充或跨范围读取。",
+        "出库打印显式拒绝停用用户；收货打印的 AccessScope 最终也拒绝停用用户。",
+        "本发现针对密码变更撤销旁路，不把普通 JWT 登出后等待访问令牌到期的设计本身判为漏洞。"
+      ],
+      "recommended_remediation": "复用统一 JWTAuthentication 的 get_validated_token/get_user 流程，或统一的短期打印凭证验证器，并测试改密前令牌在全部打印端点均被拒绝。"
+    },
+    {
+      "title": "打印链接把可重放的访问令牌写入 URL 和默认访问日志",
+      "cwe": "CWE-598",
+      "severity": "medium",
+      "confidence": "high",
+      "attacker": "能够读取应用访问日志、已保存打印 URL 或浏览器历史，但没有对应业务账号权限的人。",
+      "violated_security_invariant": "具有完整 API 权限的 bearer 访问令牌不能暴露给 URL 历史及普通访问日志处理链。",
+      "source_to_sink": "PDA 打印助手从本地存储读取完整 access token，拼入 ?token=，然后通过浏览器或系统浏览器打开。收货、出库和 POS 打印后端接受这个参数。部署启动脚本开启 Gunicorn 默认访问日志且没有配置脱敏格式，因此请求行中的查询字符串会进入日志输出。",
+      "impact": "日志或历史记录读取者可在令牌有效期内将其作为 Bearer 凭据重放到用户其他业务 API；PDA access token 有效期为一天。",
+      "locations": [
+        {"file": "wmspda/utils/outboundPrint.js", "start_line": 26, "end_line": 29},
+        {"file": "wmspda/utils/outboundPrint.js", "start_line": 40, "end_line": 55},
+        {"file": "wmspda/utils/receiveTaskDocument.js", "start_line": 9, "end_line": 12},
+        {"file": "wmspda/utils/request.js", "start_line": 273, "end_line": 277},
+        {"file": "wmsandroid/utils/request.js", "start_line": 274, "end_line": 278},
+        {"file": "allapp/pos/views.py", "start_line": 129, "end_line": 135},
+        {"file": "docker/start-web.sh", "start_line": 4, "end_line": 9}
+      ],
+      "supporting_source_evidence": [
+        "outboundPrintUrl 将 getToken() 的结果直接写入 token 查询参数。",
+        "withAuthToken 同样附加完整 access token，没有将权限约束到单个文档。",
+        "docker/start-web.sh 使用 --access-logfile -，没有 --access-logformat 或查询参数脱敏配置。"
+      ],
+      "counterevidence": [
+        "需要访问日志或打印链接这一额外前提；没有声称任意远程访客可以直接读取日志。",
+        "HTTPS 能保护传输，但不能阻止服务端访问日志及浏览器历史存储 URL。",
+        "没有检查任何真实日志或输出任何真实令牌。"
+      ],
+      "recommended_remediation": "使用 Authorization 头获取文档后打开本地 Blob，或签发仅绑定单份文档、短期且可一次性消费的打印凭证；同时让应用及代理日志排除敏感查询参数。"
+    },
+    {
+      "title": "标识维护和无订单收货导入未限制 XLSX 解压资源消耗",
+      "cwe": "CWE-409",
+      "severity": "medium",
+      "confidence": "high",
+      "attacker": "有商品导入权限及有效货主范围的用户，或有无订单收货权限及有效范围的仓库操作员。",
+      "violated_security_invariant": "处理不可信上传文档前必须限制解压后的大小及解析资源，不能让单个上传耗尽共享服务。",
+      "source_to_sink": "标识维护接口将 request.FILES['file'] 直接交给 import_identifier_workbook，后者首先调用普通模式 load_workbook。无订单收货预览只限制压缩文件为 5 MB，同样直接普通模式 load_workbook；货主模板和行数检查都发生在解析之后。两条路径均未设置 ZIP 总解压大小、条目数或解析预算。",
+      "impact": "小型高压缩率 XLSX 可在模板被拒绝前消耗大量内存和 CPU，造成工作进程终止或并发请求阻塞；标识导入还缺少明确行数上限。",
+      "locations": [
+        {"file": "allapp/products/views_excel.py", "start_line": 254, "end_line": 274},
+        {"file": "allapp/products/identifier_excel.py", "start_line": 141, "end_line": 162},
+        {"file": "allapp/inbound/excel_views.py", "start_line": 54, "end_line": 69},
+        {"file": "allapp/inbound/excel_import.py", "start_line": 245, "end_line": 256},
+        {"file": "allapp/inbound/excel_import.py", "start_line": 321, "end_line": 334},
+        {"file": "allapp/inbound/excel_import.py", "start_line": 374, "end_line": 375}
+      ],
+      "supporting_source_evidence": [
+        "identifier_excel.py:154 为 load_workbook(uploaded_file, data_only=True)，此前没有资源预算。",
+        "inbound/excel_import.py:256 为 load_workbook(io.BytesIO(data), data_only=False, read_only=False)。",
+        "相邻的商品批量导入及一件代发导入已有 MAX_XLSX_UNCOMPRESSED_SIZE、MAX_XLSX_ENTRIES 检查，证明这些控制没有通过共同上传层覆盖上述两条路径。"
+      ],
+      "counterevidence": [
+        "两个接口均有认证及业务权限/范围控制，不是匿名上传攻击面。",
+        "无订单收货有压缩文件大小和 1000 行限制，但不能约束在这些检查前完成的 ZIP 解压及 XML 解析。",
+        "没有构造或执行资源耗尽样本。"
+      ],
+      "recommended_remediation": "复用已有 XLSX 安全读取逻辑，在 load_workbook 前限制压缩大小、总解压大小、条目数，并限制行列及共享字符串资源；适用时使用只读解析，补充恶意压缩文件拒绝测试。"
+    },
+    {
+      "title": "商品标识 Excel 导出把攻击者控制的标识值作为公式写入",
+      "cwe": "CWE-1236",
+      "severity": "medium",
+      "confidence": "high",
+      "attacker": "可以在授权货主范围创建商品外部标识或导入标识的用户。",
+      "violated_security_invariant": "商品标识是数据，导出时不得变为在使用者表格软件中执行的公式。",
+      "source_to_sink": "外部标识 API/导入服务接收 external_code，模型和服务仅进行非空、长度、归一化及归属校验，没有禁止等号开头的文本。build_identifier_export 将 record.external_code、source_system 等字符串直接交给 worksheet.append。已安装 openpyxl 的 Cell._bind_value 会把以 '=' 开头且长度大于 1 的字符串标记为公式，导出器没有像其他商品导出器一样强制 data_type='s'。",
+      "impact": "管理员或业务人员打开标识导出文件时，攻击者控制的文本可成为公式，造成单元格结果伪造、恶意超链接，或在支持且允许相关外部数据函数的表格软件中向外部地址传出同一工作簿的数据。",
+      "locations": [
+        {"file": "allapp/products/identifier_excel.py", "start_line": 95, "end_line": 138},
+        {"file": "allapp/products/identifier_services.py", "start_line": 295, "end_line": 327},
+        {"file": "allapp/products/models.py", "start_line": 1568, "end_line": 1585},
+        {"file": "allapp/products/serializers.py", "start_line": 380, "end_line": 408},
+        {"file": "allapp/products/views_excel.py", "start_line": 244, "end_line": 251}
+      ],
+      "supporting_source_evidence": [
+        "identifier_excel.py:123–129 直接 append record.source_system 和 record.external_code。",
+        "identifier_services.py:320 保存 str(external_code).strip()，没有把内容转换成安全的 Excel 文本。",
+        "静态核对本地 openpyxl/cell/cell.py:196–199：value.startswith('=') 会设置 self.data_type = 'f'。",
+        "allapp/products/excel_export.py:119、130、222 有强制字符串 data_type='s' 的对照实现。"
+      ],
+      "counterevidence": [
+        "必须由受害者打开导出文件；外部数据读取或传输是否执行受 Excel/LibreOffice 版本和安全设置影响。",
+        "并非服务端 Python 代码执行。",
+        "导出按货主检查访问范围，攻击者不能仅靠此漏洞取得其他货主的导出权限。"
+      ],
+      "recommended_remediation": "在所有标识导出列将不可信文本显式写为字符串单元格，复用已有商品导出的安全文本写入辅助函数，并验证导出文件中等号开头标识不是公式单元格。"
+    },
+    {
+      "title": "会话登录入口绕过仅应用于 JWT 登录的失败尝试限流",
+      "cwe": "CWE-307",
+      "severity": "medium",
+      "confidence": "high",
+      "attacker": "可访问系统登录页面的未认证远程用户。",
+      "violated_security_invariant": "同一账号密码的全部验证入口应执行一致的登录尝试限制。",
+      "source_to_sink": "LoginView 和 PDALoginView 配置了数据库支持的用户名/IP 及 IP 限流，但 root URL 同时注册 Django 原生 accounts 登录、DRF api-auth 登录和 Django admin 登录。这些会话入口没有复用 LoginView；配置没有全局认证限流中间件或定制认证 backend。失败信号仅记录审计，不阻断后续尝试。",
+      "impact": "攻击者可绕过 API 登录的 5/min 和 30/min 限制，在会话登录入口持续猜测同一套账号密码；取得密码后可再调用业务登录接口。",
+      "locations": [
+        {"file": "wmsmaster/urls.py", "start_line": 35, "end_line": 35},
+        {"file": "wmsmaster/urls.py", "start_line": 53, "end_line": 60},
+        {"file": "wmsmaster/auth_views.py", "start_line": 82, "end_line": 106},
+        {"file": "allapp/accounts/throttling.py", "start_line": 19, "end_line": 50},
+        {"file": "allapp/accounts/signals.py", "start_line": 74, "end_line": 84},
+        {"file": "wmsmaster/settings.py", "start_line": 263, "end_line": 273}
+      ],
+      "supporting_source_evidence": [
+        "urlpatterns 注册 include('rest_framework.urls') 和 include('django.contrib.auth.urls')，以及 admin.site.urls。",
+        "后面的 accounts/login RedirectView 不会覆盖前面 include 已匹配的 Django 登录路由。",
+        "throttle_classes 仅挂在 JWT LoginView 上；user_login_failed 信号只调用 _safe_auth_audit。"
+      ],
+      "counterevidence": [
+        "JWT 登录本身具有限流；本发现是其他密码验证入口未覆盖。",
+        "CSRF 保护仍然启用，但攻击者可以正常获取登录页及 CSRF cookie 后提交自己的请求。",
+        "未检查部署现场是否还有仓库外的 WAF 或代理限流；本地所审源代码没有证明存在统一补偿控制。",
+        "没有执行密码猜测。"
+      ],
+      "recommended_remediation": "在共享认证层或所有会话登录视图中接入同一限流机制，确保 accounts、api-auth、admin、JWT 和旧别名登录入口均覆盖，并测试跨入口累积失败次数。"
+    }
+  ],
+  "resolved_questions": [
+    {
+      "question": "分析方式与覆盖边界",
+      "resolution": "仅静态读取当前工作树及少量已安装依赖源码。没有执行应用、数据库操作、网络访问或破坏性验证。全仓库执行了攻击面搜索，并深入检查认证、租户范围、打印、上传、商品和 POS 接口；没有逐行读完仓库所有文件，因此不能将该结果描述为穷尽全部漏洞。fully_reviewed_files 仅列全文实际审阅的文件。"
+    },
+    {
+      "question": "安全政策",
+      "resolution": "使用给定策略解析器检查 allapp、accounts、core、products、inbound、outbound、tasking、inventory、salesapp、console、reports、api、wmsmaster、wmspda、wmsandroid、docker，均未解析到适用 SECURITY.md。没有外部知识库或用户提供的额外威胁模型。"
+    },
+    {
+      "question": "是否存在已证实的 SQL 注入、命令执行、路径遍历或通用 SSRF",
+      "resolution": "本轮未建立可报告的攻击路径。搜索命中的数据库维护 SQL 属于离线管理流程；APK 下载使用固定服务器文件路径；微信登录及支付地址经过官方 HTTPS 主机限制；PDF 报表 fetcher 拒绝非 data: 资源。此结论仅代表本轮核查，不能当作全部相关路径无漏洞的证明。"
+    },
+    {
+      "question": "旧 console/views.py 中无认证 PickTaskListView/PickScanView 和拼接 body_html 是否可报告",
+      "resolution": "已全文检查该文件及当前 console URL 注册。当前 URL 指向 views_dashboard、views_billing、views_salemini、views_op 和 tasking.views_console，没有发现这些旧 Pick* 类或 tx_detail 的可达路由，故未报告其潜在未授权访问/XSS。"
+    },
+    {
+      "question": "Android 客户端允许 http URL 是否意味着明文泄露",
+      "resolution": "wmsandroid 的 URL 归一化函数接受 http，但 manifest 引用的 network_security_config 默认禁止明文，例外仅 localhost/127.0.0.1。未将该配置单独报告为仓库网络明文漏洞。实际安装包是否正确包含配置未动态验证。"
+    },
+    {
+      "question": "系统设置接口是否直接返回密钥",
+      "resolution": "SystemSettingsApi 同时过滤 is_active=True、client_visible=True、is_secret=False，没有发现直接返回秘密配置值的路径。没有读取或输出真实凭据。"
+    },
+    {
+      "question": "商品标识导入是否绕过修改权限",
+      "resolution": "ProductIdentifierImportApi 复用只要求 products.add_product 的访问检查，却支持 RETIRE、REACTIVATE、SET_PRIMARY。这是源码支持的权限语义不一致，但本轮未进一步确认“商品导入权限”是否被明确设计为包含这些维护操作，故保留为待确认项，不单独列为已确认漏洞。"
+    },
+    {
+      "question": "商城后台及其他未统一接入 TenantScopedAdminMixin 的模型",
+      "resolution": "SaleMiniAdmin 没有统一 tenant queryset 过滤，部分 tasking 子模型后台也只使用默认 ModelAdmin。已对任务行和任务指派建立具体范围绕过路径并报告；商城后台的预期授权方式、实际角色分配及其他模型写入链未完成独立验证，不以此推断更多已确认漏洞。"
+    },
+    {
+      "question": "支付回调匿名权限是否允许伪造付款",
+      "resolution": "回调虽使用 AllowAny，但服务实现提供签名验证、时间窗口、平台公钥选择和 AES-GCM 资源解密，生产配置检查要求启用验签。未建立无密钥伪造付款的有效路径。没有开展支付运行时或外部环境测试。"
+    },
+    {
+      "question": "报告中的严重程度与验证状态",
+      "resolution": "所有发现均为静态源代码证据支持，没有执行利用验证。任务后台与用户后台发现明确依赖额外模型权限；它们不能被描述为默认普通仓库角色即可利用。公式导出的外部传输影响依赖表格软件安全设置。"
+    }
+  ],
+  "fully_reviewed_files": [
+    "allapp/accounts/access.py",
+    "allapp/accounts/client_ip.py",
+    "allapp/accounts/permissions.py",
+    "allapp/accounts/throttling.py",
+    "allapp/accounts/signals.py",
+    "allapp/accounts/roles.py",
+    "allapp/accounts/urls.py",
+    "allapp/api/urls.py",
+    "allapp/api/views.py",
+    "allapp/baseinfo/views.py",
+    "allapp/locations/views.py",
+    "allapp/core/api/mixins.py",
+    "allapp/core/admin_tenant.py",
+    "allapp/core/printing.py",
+    "allapp/core/url_security.py",
+    "allapp/core/views.py",
+    "allapp/inventory/views.py",
+    "allapp/products/access.py",
+    "allapp/products/permissions.py",
+    "allapp/products/views_excel.py",
+    "allapp/products/identifier_excel.py",
+    "allapp/products/urls_identifiers.py",
+    "allapp/inbound/excel_views.py",
+    "allapp/inbound/export_print.py",
+    "allapp/inbound/permissions.py",
+    "allapp/console/mixins.py",
+    "allapp/console/urls.py",
+    "allapp/console/urls_op.py",
+    "allapp/console/views.py",
+    "allapp/reports/views.py",
+    "wmsmaster/auth_views.py",
+    "wmsmaster/urls.py",
+    "wmsmaster/views.py",
+    "wmspda/utils/outboundPrint.js",
+    "wmsandroid/manifest.json",
+    "wmsandroid/nativeResources/android/res/xml/network_security_config.xml",
+    "docker/start-web.sh"
+  ]
+}

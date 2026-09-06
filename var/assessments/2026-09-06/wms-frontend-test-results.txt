@@ -1,0 +1,49 @@
+2026-09-06 /wms frontend assessment
+This is a faithful summary/excerpt of observed tool outputs, not a complete raw log.
+Node: v22.22.0
+
+/wms/wmspda $ npm run test:unit
+Test Files 14 passed (14); Tests 51 passed (51); exit 0
+
+/wms/wmsandroid $ npm run test:unit
+Test Files 9 passed (9); Tests 35 passed (35); exit 0
+
+/wms/wmsownersale $ npm run test:unit
+Test Files 18 passed (18); Tests 81 passed (81); exit 0
+
+/wms/wmsbossbilling $ npm run test:unit
+Test Files 2 passed (2); Tests 9 passed (9); exit 0
+
+/wms/sales-miniapp $ npm run test:payment
+TAP version 13
+ok 1 - tests/payment-service.test.mjs
+# tests 1; # pass 1; # fail 0; # skipped 0; exit 0
+File source contains 8 test() definitions; runner emitted file-level result only.
+
+/wms/wmsownersale $ npm run test:contracts
+owner client contract OK: 20 registered pages
+exit 0
+
+/wms/sales-miniapp $ npm run test:structure
+sales-miniapp mall structure ok
+exit 0
+
+Each of /wms/wmspda, /wms/wmsandroid, /wms/wmsownersale,
+/wms/wmsbossbilling, /wms/sales-miniapp:
+$ npm run build:h5
+Compiler version: 5.11（vue3）
+Compiling...
+[PLUGIN_TIMINGS] Your build spent significant time in plugins.
+DONE Build complete.
+exit 0
+
+Each of /wms/wmsownersale, /wms/wmsbossbilling, /wms/sales-miniapp:
+$ npm run build:mp-weixin
+Compiler version: 5.11（vue3）
+Compiling...
+failed to load config from <project>/vite.config.js
+VITE_API_BASE_URL is required for App and mini-program builds.
+Build failed with errors.
+exit 1
+
+No browser/Playwright, device, APK, real API or database tests executed by this assessment worker.

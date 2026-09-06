@@ -1093,6 +1093,7 @@ export const api = {
       start_date: params.start_date || '',
       end_date: params.end_date || '',
       shift: params.shift || '',
+      include_all_sheet: params.include_all_sheet || '',
     })
     return `${BASE_URL}/api/pos/sales/export/?${qs}`
   },
@@ -1117,6 +1118,7 @@ export const api = {
       owner_id: params.owner_id || '',
       cashier_id: params.cashier_id || '',
       top_n: params.top_n || 10,
+      include_all_sheet: params.include_all_sheet || '',
     })
     return `${BASE_URL}/api/pos/stats/export/?${qs}`
   },
@@ -1260,7 +1262,10 @@ export const api = {
 
   posShiftPrintUrl: (id) => `${BASE_URL}/api/pos/shifts/${id}/print/`,
 
-  posShiftExportUrl: (id) => `${BASE_URL}/api/pos/shifts/${id}/export/`,
+  posShiftExportUrl: (id, params = {}) => {
+    const qs = buildQuery({ include_all_sheet: params.include_all_sheet || '' })
+    return `${BASE_URL}/api/pos/shifts/${id}/export/${qs ? `?${qs}` : ''}`
+  },
 
   authUrl: (url) => withAuthToken(url),
 

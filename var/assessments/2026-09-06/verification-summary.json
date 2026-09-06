@@ -1,0 +1,51 @@
+{
+  "junit": {
+    "wms-assessment-unit.xml": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "24",
+        "time": "1.676",
+        "timestamp": "2026-09-06T08:56:22.532256+08:00",
+        "hostname": "wms"
+      }
+    ],
+    "wms-assessment-integration.xml": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "85",
+        "time": "217.309",
+        "timestamp": "2026-09-06T09:00:35.224752+08:00",
+        "hostname": "wms"
+      }
+    ],
+    "wms-assessment-repro.xml": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "6",
+        "skipped": "0",
+        "tests": "6",
+        "time": "78.953",
+        "timestamp": "2026-09-06T08:57:15.143251+08:00",
+        "hostname": "wms"
+      }
+    ]
+  },
+  "mysql": "8.0.46",
+  "database": "wms_db_test",
+  "databaseReused": true,
+  "databaseRecreated": false,
+  "securityFindings": {
+    "high": 1,
+    "medium": 5,
+    "low": 3
+  },
+  "securityCoverage": "partial",
+  "brokenReportLinks": []
+}

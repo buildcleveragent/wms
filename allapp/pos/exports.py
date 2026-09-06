@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.db.models import Sum
 from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
 
 from .models import (
     PosCustomerRepayment,
@@ -80,6 +81,9 @@ SHIFT_SUMMARY_FIELDS = (
 )
 
 PAYMENT_METHOD_LABELS = dict(PosPayment.Method.choices)
+ALL_INFORMATION_SHEET_TITLE = "全部信息"
+ALL_INFORMATION_SECTION_FILL = PatternFill(fill_type="solid", fgColor="1F4E78")
+ALL_INFORMATION_HEADER_FILL = PatternFill(fill_type="solid", fgColor="D9EAF7")
 
 
 def _text(value):
@@ -124,7 +128,33 @@ def _payment_method_label(row):
     return row.get("method_label") or PAYMENT_METHOD_LABELS.get(row.get("method"), "其他")
 
 
-def build_sales_export_workbook(sales):
+def _prepend_all_information_sheet(workbook):
+    """Copy every existing worksheet into one value-only sheet at index zero."""
+
+    source_sheets = list(workbook.worksheets)
+    combined = workbook.create_sheet(ALL_INFORMATION_SHEET_TITLE, 0)
+    for index, source in enumerate(source_sheets):
+        combined.append([source.title])
+        section_row = combined.max_row
+        for column in range(1, max(source.max_column, 1) + 1):
+            cell = combined.cell(row=section_row, column=column)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = ALL_INFORMATION_SECTION_FILL
+
+        header_row = combined.max_row + 1
+        for values in source.iter_rows(values_only=True):
+            combined.append(list(values))
+        if combined.max_row >= header_row:
+            for cell in combined[header_row]:
+                cell.font = Font(bold=True)
+                cell.fill = ALL_INFORMATION_HEADER_FILL
+
+        if index < len(source_sheets) - 1:
+            combined.append([])
+    return combined
+
+
+def build_sales_export_workbook(sales, *, include_all_sheet=False):
     sales = list(
         sales.select_related(
             "warehouse",
@@ -417,10 +447,12 @@ def build_sales_export_workbook(sales):
             ]
         )
 
+    if include_all_sheet:
+        _prepend_all_information_sheet(workbook)
     return workbook
 
 
-def build_pos_stats_export_workbook(payload):
+def build_pos_stats_export_workbook(payload, *, include_all_sheet=False):
     workbook = Workbook()
     summary = workbook.active
     summary.title = SHEET_TITLES["summary"]
@@ -561,10 +593,12 @@ def build_pos_stats_export_workbook(payload):
             for row in payload.get("cashiers", [])
         ],
     )
+    if include_all_sheet:
+        _prepend_all_information_sheet(workbook)
     return workbook
 
 
-def build_shift_export_workbook(shift, payload):
+def build_shift_export_workbook(shift, payload, *, include_all_sheet=False):
     workbook = Workbook()
     summary = workbook.active
     summary.title = SHEET_TITLES["shift"]
@@ -645,4 +679,6 @@ def build_shift_export_workbook(shift, payload):
                 _dt(repayment.created_at),
             ]
         )
+    if include_all_sheet:
+        _prepend_all_information_sheet(workbook)
     return workbook

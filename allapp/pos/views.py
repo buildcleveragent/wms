@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import io
+import re
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -11,6 +12,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.utils import timezone
+from django.utils.http import content_disposition_header
 from rest_framework import generics, permissions, status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.pagination import PageNumberPagination
@@ -429,8 +431,21 @@ def _xlsx_response(workbook, filename):
         buffer.getvalue(),
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response["Content-Disposition"] = content_disposition_header(True, filename)
     return response
+
+
+def _include_all_sheet(request):
+    return request.query_params.get("include_all_sheet") == "1"
+
+
+def _export_date_text():
+    return timezone.now().date().isoformat()
+
+
+def _safe_filename_part(value, fallback):
+    value = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", str(value or "")).strip(" .")
+    return value or fallback
 
 
 class PosSaleListApi(generics.ListAPIView):
@@ -464,10 +479,19 @@ class PosStatsExportApi(APIView):
             payload = build_pos_stats_payload(user=request.user, params=request.query_params)
         except (DjangoValidationError, ValueError) as exc:
             return Response(_validation_error_data(exc), status=status.HTTP_400_BAD_REQUEST)
-        workbook = build_pos_stats_export_workbook(payload)
+        include_all_sheet = _include_all_sheet(request)
+        workbook = build_pos_stats_export_workbook(
+            payload,
+            include_all_sheet=include_all_sheet,
+        )
         start = payload.get("period", {}).get("start_date", "start")
         end = payload.get("period", {}).get("end_date", "end")
-        return _xlsx_response(workbook, f"pos-stats-{start}-{end}.xlsx")
+        filename = (
+            f"POS今日统计_{_export_date_text()}.xlsx"
+            if include_all_sheet
+            else f"pos-stats-{start}-{end}.xlsx"
+        )
+        return _xlsx_response(workbook, filename)
 
 
 class PosAccuracyApi(APIView):
@@ -491,8 +515,15 @@ class PosSaleExportApi(APIView):
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        workbook = build_sales_export_workbook(queryset)
-        return _xlsx_response(workbook, "pos-sales.xlsx")
+        include_all_sheet = _include_all_sheet(request)
+        workbook = build_sales_export_workbook(
+            queryset,
+            include_all_sheet=include_all_sheet,
+        )
+        filename = (
+            f"POS销售历史_{_export_date_text()}.xlsx" if include_all_sheet else "pos-sales.xlsx"
+        )
+        return _xlsx_response(workbook, filename)
 
 
 class PosSaleDetailApi(APIView):
@@ -803,8 +834,18 @@ class PosShiftExportApi(APIView):
     def get(self, request, shift_id):
         shift = get_object_or_404(_shift_queryset_for_user(request.user), pk=shift_id)
         payload = serialize_shift(shift)
-        workbook = build_shift_export_workbook(shift, payload)
-        return _xlsx_response(workbook, f"{shift.shift_no}.xlsx")
+        include_all_sheet = _include_all_sheet(request)
+        workbook = build_shift_export_workbook(
+            shift,
+            payload,
+            include_all_sheet=include_all_sheet,
+        )
+        filename = (
+            f"POS班次_{_safe_filename_part(shift.shift_no, '未编号')}_{_export_date_text()}.xlsx"
+            if include_all_sheet
+            else f"{shift.shift_no}.xlsx"
+        )
+        return _xlsx_response(workbook, filename)
 
 
 class PosShiftListExportApi(APIView):

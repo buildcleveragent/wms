@@ -1,0 +1,314 @@
+{
+  "threatModel": {
+    "summary": "WMS is a Django/DRF monolith covering accounts, master data, inbound/outbound work, inventory, warehouse tasks, POS, billing, reporting and a consumer sales miniapp. Browser sessions serve Admin/console; JWT APIs serve PDA, Android, owner-sales, boss and consumer clients. Production Compose defines Gunicorn web and a separate billing scheduler, with the same environment, UID 10001, database authority and media/static volumes; optional expiry/reconciliation commands run separately. Main entry points are explicit URL registrations, not merely installed applications. Evidence: wmsmaster/settings.py:134-168; wmsmaster/urls.py:24-82; compose.production.yml:3-46; docker/start-web.sh:4-9; docker/start-scheduler.sh:4. This is architecture mapping, not completed vulnerability coverage.",
+    "assets": [
+      "Owner/warehouse records, orders, stock balances and movements, task state, POS transactions, invoices and reports; authorization combines capability permissions with explicit tenant scopes. Evidence: allapp/accounts/models.py:60-83; allapp/accounts/access.py:15-20,44-127,198-231.",
+      "User credentials, Django sessions, access/refresh tokens, role memberships and audit records. Standard JWT access lifetime is 15 minutes with seven-day rotating refresh tokens; the PDA issuance path instead produces 24-hour access tokens. Evidence: wmsmaster/settings.py:173-201; wmsmaster/auth_views.py:24-33,78-106,109-139.",
+      "WeChat customer bindings, addresses, payment/refund state and merchant signing/decryption authority. Private-key path takes precedence over inline key material; production platform verification keys are selected by serial number. Evidence: allapp/salesapp/salemini_api.py:532-574,596-610; allapp/salesapp/services_wechat_pay.py:51-101,142-173,328-364.",
+      "ApiZero integration credentials are encrypted in SystemSetting.value. The encryption key comes from SYSTEM_SETTING_ENCRYPTION_KEY or a deterministic derivation from SECRET_KEY, so these are not necessarily independent key authorities. Evidence: allapp/core/models.py:19-30,126-155,176-216.",
+      "Uploaded review images resolve to MEDIA_ROOT/sale-mini/reviews/<review_id>/<uuid>.<validated suffix>; public APK distribution reads BASE_DIR/media/bv2.apk. In Compose both are in /app/media backed by the wms-media volume. Evidence: allapp/salesapp/models.py:19-23,1111-1118; allapp/api/views.py:22-35; wmsmaster/settings.py:515-521; compose.production.yml:9-11.",
+      "Logical preserved-data backup bundles contain database data, including privileged identity/configuration tables selected by the transfer manifest. Bundle files are <operator-selected absolute output>/preserved-data.sql.gz and manifest.json; directory mode is 0700 and files 0600. Temporary MySQL option files contain connection credentials and are mode 0600. Evidence: allapp/core/preserved_data_transfer.py:34-36,295-328,403-440,457-493; allapp/core/management/commands/backup_preserved_data.py:26-57.",
+      "Published container images, build provenance, deployment SSH authority, backup executables, application environment and host-managed TLS/media serving. These are operator/CI privileges rather than capabilities granted to ordinary WMS users. Evidence: Dockerfile:23-28; .github/workflows/ci.yml:590-655,666-705; docker/production_release.sh:13-16,37-65."
+    ],
+    "trustBoundaries": [
+      "Unauthenticated callers cross login boundaries into accounts.User identity. Credential login uses database-backed username/IP and IP throttles; refresh rejects inactive users and password-hash mismatches. Browser requests additionally encounter Django session, CSRF and clickjacking middleware; API defaults are JWTAuthentication plus IsAuthenticated, with explicit public endpoint exceptions. Evidence: wmsmaster/settings.py:175-201,263-273,359-369; allapp/accounts/throttling.py:19-50; wmsmaster/auth_views.py:82-139; allapp/salesapp/salemini_api.py:2121,2137,3444,3573.",
+      "Authenticated business capability and row scope are separate controls. Groups/permissions grant operations; AccessScope resolves owner/warehouse reach from active UserRoleScope rows, rejects missing/conflicting bindings and grants global scope only to superusers. Admin has explicit model-to-tenant policies and separate cross-owner product capabilities. Coverage of every caller still requires audit. Evidence: allapp/accounts/models.py:60-66; allapp/accounts/access.py:44-127,198-231; allapp/core/admin_tenant.py:19-48,55-100.",
+      "Miniapp customer identity is bound through the official WeChat code exchange, existing customer/owner relationships and active accounts. Public catalog/review browsing is intentionally separate from authenticated purchase/review actions; review mutations resolve purchases belonging to the caller. Evidence: allapp/salesapp/salemini_api.py:532-574,596-610; allapp/salesapp/salemini_review_api.py:64-111,159-172,203-210.",
+      "External ApiZero and WeChat requests transmit different authorities to distinct recipients. ApiZero receives a GS1 code and decrypted API key in an HTTPS query; WeChat login receives app secret and authorization code; WeChat Pay receives signed requests. Each initial destination is validated by require_https_endpoint, which enforces HTTPS, allowlisted host, port 443 and no URL credentials/query/fragment. Redirect behavior is delegated to urllib and was not resolved here. Evidence: allapp/products/gs1.py:113-149; allapp/salesapp/salemini_api.py:532-554; allapp/salesapp/services_wechat_pay.py:185-214; allapp/core/url_security.py:10-33.",
+      "Public payment callbacks transfer provider-authenticated event authority into payment processing. Cryptographic controls include serial-specific RSA verification, default 300-second callback timestamp tolerance and AES-GCM resource decryption. Production system checks reject disabled verification or missing payment settings, whereas the direct Gunicorn startup script contains no explicit system-check invocation. Exact deployment path therefore matters. Evidence: allapp/salesapp/services_wechat_pay.py:73-85,142-156,328-364; allapp/salesapp/checks.py:56-104; docker/start-web.sh:4-9; docker/production_release.sh:39.",
+      "Untrusted review image uploads cross into filesystem storage through authenticated buyer ownership, a five-MiB limit, JPEG/PNG/WebP validation and generated filenames. Publication lists use published_reviews; actual production media access is delegated to a web server absent from the inspected deployment definitions. Evidence: allapp/salesapp/salemini_review_api.py:28-30,104-111,135-156,159-172; allapp/salesapp/models.py:19-23; sales-miniapp/README.md:28-32; wmsmaster/urls.py:90-91.",
+      "Mobile/browser bearer-token transport has materially different controls: wmspda hard-selects an HTTP LAN endpoint; Android permits a configured HTTP endpoint and generates a host-specific cleartext exception; boss/owner/consumer clients use a stricter configured endpoint policy, with same-origin H5 support. Device storage and deployed build artifacts remain external trust assumptions. Evidence: wmspda/utils/request.js:5-17,19-48; wmspda/vite.config.js:1-8; wmsandroid/utils/request.js:1-18; wmsandroid/vite.config.js:31-49; wmsandroid/config/androidNetworkSecurity.mjs:1-22; frontend/api-base-policy.mjs:21-48; wmsbossbilling/utils/api-base.js:20-47; sales-miniapp/utils/api-base.js:41-47.",
+      "Web, scheduler and optional maintenance containers share the same application environment and writable media/static volumes. No independent database or secret isolation is established merely by separate Compose service names. Systemd expiry/reconciliation units invoke those Compose services and share a host flock path. Evidence: compose.production.yml:3-46; deploy/systemd/wms-sale-mini-expire.service:8-12; deploy/systemd/wms-sale-mini-reconcile.service:8-12.",
+      "Privileged offline backup/restore crosses from operator-provided bundle paths into MySQL tools. Commands default to dry-run; execution requires exact target confirmation, maintenance assertions and eligible operator identity. Restore checks a freshly migrated target and acquires a database maintenance lock. These checks supplement existing shell/database authority rather than authenticate a remote user. Evidence: allapp/core/management/commands/backup_preserved_data.py:26-57,87-99; allapp/core/management/commands/restore_preserved_data.py:25-41,44-77,103-119; allapp/core/preserved_data_transfer.py:295-328,587-657,696-746.",
+      "CI publishing requires the aggregate release gate and a main-branch push; the build job receives registry authority, scans and publishes a SHA candidate, resolves its digest and attests provenance. Staging deployment uses SSH with a supplied known-hosts file. Production release separately invokes operator-supplied backup scripts, migrations, static collection, readiness checks and reconciliation. Evidence: .github/workflows/ci.yml:554-588,590-655,666-705; docker/production_release.sh:8-16,37-87."
+    ],
+    "attackerCapabilities": [
+      "An unauthenticated network caller can reach explicitly public health, credential/WeChat login, product/review browsing, payment callback and APK download interfaces if the deployment exposes them. It does not initially possess an account, merchant key, database credential, filesystem write access or CI authority. Evidence: wmsmaster/urls.py:24-79; allapp/api/views.py:15-39; allapp/salesapp/salemini_urls.py:40-130.",
+      "An authenticated warehouse/owner user can submit API identifiers, quantities and business actions and inspect data within assigned capability and owner/warehouse scope. A meaningful boundary failure would add operations or cross-scope access; merely exercising an authorized operation is not a security failure. Evidence: allapp/accounts/access.py:44-127,198-231; allapp/accounts/models.py:158-169.",
+      "A bound miniapp customer can manipulate their cart/order/review requests and upload review images; they do not automatically acquire another customer's binding or staff workflow authority. Evidence: allapp/salesapp/salemini_api.py:501-522,596-610; allapp/salesapp/salemini_review_api.py:64-111,135-156.",
+      "A network intermediary matters where a deployed client actually uses plaintext HTTP. Repository wmspda and configurable Android transport establish conditional surfaces, but interception capability, deployed artifacts and warehouse network trust were not established. Evidence: wmspda/utils/request.js:5-13; wmsandroid/config/androidNetworkSecurity.mjs:14-22.",
+      "Repository contributors, CI maintainers, host operators and holders of database/secret files have different existing privileges from application users. They must not be modeled as low-privilege attackers for actions already enabled by their source, host or database authority. Evidence: Dockerfile:24; .github/workflows/ci.yml:595-609,679-705; allapp/core/management/commands/restore_preserved_data.py:25-41."
+    ],
+    "securityObjectives": [
+      "Preserve separate operation permissions and owner/warehouse row boundaries across APIs, Admin, exports and all business mutation callers; fail closed for unbound/conflicting accounts. Evidence: allapp/accounts/access.py:44-127,198-231; allapp/core/admin_tenant.py:64-100.",
+      "Preserve stock/order/payment integrity and actor attribution across concurrent business operations; architecture inspection alone does not establish correctness of every transaction or failure path.",
+      "Keep session, JWT, database, integration and merchant credentials restricted to their intended consumers; model fallback-derived system-setting encryption keys and shared container environments accurately. Evidence: wmsmaster/settings.py:182-201,346-369; allapp/core/models.py:19-30; compose.production.yml:3-11.",
+      "Accept payment state transitions only from authorized customer/operator workflows or validated provider events, with merchant/order/amount/idempotency invariants requiring downstream audit beyond the cryptographic boundary inspected here. Evidence: allapp/salesapp/services_wechat_pay.py:142-173,328-364.",
+      "Use explicit production configuration, validated hosts/origins, secure cookies, HTTPS and a correctly trusted reverse proxy. The production profile is selected by APP_ENV; it is not inferred from running Gunicorn or Compose. Evidence: wmsmaster/settings.py:41-48,92-98,123-126,282-286,444-473,512-514.",
+      "User-supplied operational constraint: automated database work must use MySQL 8 and may write destructively only to the exactly validated wms_db_test, never wms_db. This architecture review performed no database connection, application execution or source modification.",
+      "Maintain reviewable, target-bound deployment and maintenance workflows, protect sensitive backup artifacts and preserve useful audit evidence without credential material. Evidence: docker/production_release.sh:8-16,37-87; allapp/core/management/commands/restore_preserved_data.py:103-119; allapp/core/preserved_data_transfer.py:295-328,403-493."
+    ],
+    "assumptions": [
+      "Scope supplied by the parent is the entire current /wms worktree, including dirty/untracked source. No user-supplied threat model or root SECURITY.md was supplied. This review used offline source only; live configuration, infrastructure controls, runtime behavior and test results were not verified.",
+      "Production Compose imports /etc/wms/wms.env unless WMS_ENV_FILE overrides it; the file contents and actual deployment environment were not inspected. APP_ENV defaults to development when absent, while documentation requires production/preproduction DEBUG=False. Strict production behavior is conditional on the effective APP_ENV. Evidence: compose.production.yml:5-6; wmsmaster/settings.py:41-48,92-98,123-126; docs/release-test-plan.md:54-56.",
+      "Local environment precedence is existing process variables, then .env.test.local for test commands or explicit APP_ENV=test, then .env. Contrary to the settings comment's shorthand about ordinary commands, an explicit APP_ENV=test also loads the test file for a non-test command. Evidence: wmsmaster/settings.py:33-38; wmsmaster/environment.py:22-35.",
+      "The documented release surface mentions Redis, but actual configured application caches are per-process LocMemCache and the MySQL table wms_login_throttle_cache. Do not assume Redis provides shared-cache isolation, locking or throttling. Evidence: docs/release-test-plan.md:40; wmsmaster/settings.py:359-369.",
+      "The settings comment says USE_TZ ensures timezone support, while the consumed value is False with TIME_ZONE=Asia/Shanghai. Scheduler and payment timestamp behavior should be interpreted from actual code and deployment timezone, not that comment. Evidence: wmsmaster/settings.py:394-397.",
+      "API endpoint policies are not uniform across clients. wmspda's chosen destination is http://192.168.1.6:8001 regardless of its computed miniapp environment; Android intentionally permits a configured host-specific HTTP exception; boss-client documentation promises HTTPS outside loopback development and its runtime validator enforces that policy. Evidence: wmspda/utils/request.js:1-13; wmsandroid/config/androidNetworkSecurity.mjs:10-22; wmsbossbilling/README.md:23-27; wmsbossbilling/utils/api-base.js:20-47.",
+      "Public-media serving and TLS termination are documented host obligations; the Compose file publishes web only on host loopback and defines no reverse proxy. Debug-only Django media routing does not establish production confidentiality or publication controls. Evidence: sales-miniapp/README.md:28; compose.production.yml:18-19; wmsmaster/urls.py:90-91.",
+      "Payment verification defaults differ by environment. Production checks reject disabled verification, but the direct Gunicorn startup script does not explicitly run checks; the production-release and staging paths do. Deployment-specific effective enforcement must be distinguished from checker availability. Evidence: wmsmaster/settings.py:240-247; allapp/salesapp/checks.py:56-71; docker/start-web.sh:4-9; docker/production_release.sh:39; .github/workflows/ci.yml:695.",
+      "Docker copies the entire allowed build context. .dockerignore includes *.env but does not explicitly list .env.test.local or **/.env.local; filename-only inspection found such local files. Actual build inclusion and presence of sensitive values were not tested, and a clean CI checkout can differ from a dirty local build. Evidence: Dockerfile:24; .dockerignore:15-29.",
+      "Caller-selected payment key paths and backup output paths cannot be resolved to actual host locations without deployment/operator values. Compose provides only media/static mounts, so a configured key path is not evidence that the key is mounted or readable. Evidence: compose.production.yml:9-11; allapp/salesapp/services_wechat_pay.py:51-84; allapp/core/preserved_data_transfer.py:410-419.",
+      "Native Android/PDA SDK archives and released mobile binaries are separate opaque implementation artifacts; this pass did not inspect their internal controls. No remote driver API exposure is inferred merely from the installed driverapp.",
+      "Repository citations were read at the stated locations and batch-checked for file existence and line bounds."
+    ]
+  },
+  "effectiveResources": [
+    {
+      "consumer": "Django database connection",
+      "deployment": "Local development / direct management or WSGI",
+      "configurationChain": "Process environment > conditional .env.test.local > /wms/.env > settings defaults; DB_SOCKET optionally adds unix_socket",
+      "effectiveValue": "Default TCP target 127.0.0.1:3306, database wms_db, MySQL utf8mb4; actual env overrides not inspected",
+      "recipients": "MySQL server; Django process",
+      "enforcingControl": "Database credentials and server grants; scope controls are in application code, not separate databases",
+      "evidence": ["wmsmaster/environment.py:22-35", "wmsmaster/settings.py:323-356"],
+      "missingImpactPrerequisite": "Actual endpoint, privileges and transport security unknown"
+    },
+    {
+      "consumer": "Django database connection",
+      "deployment": "Compose web, scheduler and optional one-shot jobs",
+      "configurationChain": "WMS_ENV_FILE or /etc/wms/wms.env becomes common service environment; same settings consumer",
+      "effectiveValue": "One shared configured database authority; absent overrides the default is container-local 127.0.0.1:3306/wms_db, with no MySQL service defined here",
+      "recipients": "All four defined service types and configured MySQL server",
+      "enforcingControl": "Common UID 10001 and external database credentials; services are not separately authorized at the database boundary",
+      "evidence": ["compose.production.yml:3-46", "wmsmaster/settings.py:323-356"]
+    },
+    {
+      "consumer": "Automated test database selection",
+      "deployment": "Local pytest/Django test",
+      "configurationChain": "Exported variables > .env.test.local > .env; DB_TEST_NAME populates DATABASES.default.TEST.NAME",
+      "effectiveValue": "Required by supplied user policy: exactly wms_db_test; actual resolved configuration not executed",
+      "recipients": "Test runner and MySQL server",
+      "enforcingControl": "User-required preflight validation; settings merely copy nonempty DB_TEST_NAME and do not themselves establish exact-name safety",
+      "evidence": ["wmsmaster/environment.py:30-35", "wmsmaster/settings.py:337-355"]
+    },
+    {
+      "consumer": "Login throttling",
+      "deployment": "All Django workers",
+      "configurationChain": "LOGIN_THROTTLE_CACHE_ALIAS=login_throttle -> DatabaseCache -> wms_login_throttle_cache",
+      "effectiveValue": "Table wms_login_throttle_cache in the configured application database; defaults 5/min per username/IP and 30/min per IP",
+      "recipients": "Login endpoints and database",
+      "enforcingControl": "LoginUsernameIPThrottle and LoginIPThrottle",
+      "evidence": ["wmsmaster/settings.py:175-180,364-369", "allapp/accounts/throttling.py:19-50", "wmsmaster/auth_views.py:82-84"],
+      "documentedClaim": "Release plan includes Redis as an operational surface",
+      "discrepancy": "This consumer uses MySQL DatabaseCache, not Redis"
+    },
+    {
+      "consumer": "GS1 secret decryption",
+      "deployment": "Django processes using SystemSetting",
+      "configurationChain": "SYSTEM_SETTING_ENCRYPTION_KEY; if absent, SHA-256 derivation from SECRET_KEY; Fernet decrypts SystemSetting.value",
+      "effectiveValue": "Encrypted database record integration.apizero_gs1_api_key; key material remains in process environment/memory",
+      "recipients": "Application process and subsequently ApiZero request consumer",
+      "enforcingControl": "Fernet; secret-setting write/read guards and frontend suppression",
+      "evidence": ["allapp/core/models.py:19-30,141-155,176-220", "allapp/products/gs1.py:113-125"]
+    },
+    {
+      "consumer": "GS1 provider request",
+      "deployment": "Django outbound HTTP",
+      "configurationChain": "APIZERO_GS1_URL and APIZERO_GS1_ALLOWED_HOSTS -> require_https_endpoint -> query code and decrypted key",
+      "effectiveValue": "Default https://v1.apizero.cn/api/barcode-gs1?code=<barcode>&key=<secret reference>",
+      "recipients": "Configured allowlisted ApiZero HTTPS endpoint",
+      "enforcingControl": "HTTPS/host/port validation; database provider scheduling gate; five-second default timeout",
+      "evidence": ["wmsmaster/settings.py:109-115", "allapp/products/gs1.py:88-110,113-149", "allapp/core/url_security.py:10-33"],
+      "missingImpactPrerequisite": "Redirect destination enforcement not resolved"
+    },
+    {
+      "consumer": "WeChat login exchange",
+      "deployment": "Django outbound HTTP",
+      "configurationChain": "WECHAT_JSCODE2SESSION_URL -> official-host validation -> appid/secret/code query",
+      "effectiveValue": "Default https://api.weixin.qq.com/sns/jscode2session with app identifier, secret reference, user authorization code and grant_type query parameters",
+      "recipients": "api.weixin.qq.com",
+      "enforcingControl": "HTTPS official-host validation and five-second timeout",
+      "evidence": ["wmsmaster/settings.py:203-208", "allapp/salesapp/salemini_api.py:532-554"],
+      "missingImpactPrerequisite": "Redirect destination enforcement not resolved"
+    },
+    {
+      "consumer": "WeChat merchant signing key",
+      "deployment": "Direct local process",
+      "configurationChain": "WECHAT_PAY_PRIVATE_KEY_PATH first; otherwise WECHAT_PAY_PRIVATE_KEY",
+      "effectiveValue": "Absolute configured path, or relative path against process working directory; otherwise inline PEM reference",
+      "recipients": "Python signing process",
+      "enforcingControl": "Host file permissions/environment access; private key used for RSA signatures",
+      "evidence": ["wmsmaster/settings.py:219-220", "allapp/salesapp/services_wechat_pay.py:51-57,104-111"],
+      "missingImpactPrerequisite": "Actual path and file permissions unknown"
+    },
+    {
+      "consumer": "WeChat merchant signing key",
+      "deployment": "Compose",
+      "configurationChain": "Common env file -> key path first or inline key; container WORKDIR=/app",
+      "effectiveValue": "Relative key path resolves beneath /app; absolute path remains container-absolute; no dedicated key mount is declared",
+      "recipients": "All processes receiving common environment; payment signing consumer",
+      "enforcingControl": "Container/host access controls and key file readability",
+      "evidence": ["Dockerfile:23-26", "compose.production.yml:3-11", "allapp/salesapp/services_wechat_pay.py:51-57"],
+      "missingImpactPrerequisite": "Actual key provision method unknown"
+    },
+    {
+      "consumer": "WeChat payment API",
+      "deployment": "Django payment/reconciliation requests",
+      "configurationChain": "WECHAT_PAY_API_BASE_URL -> official-host validation -> constrained absolute API path",
+      "effectiveValue": "Default https://api.mch.weixin.qq.com plus payment/refund operation path; Authorization carries generated merchant signature",
+      "recipients": "api.mch.weixin.qq.com",
+      "enforcingControl": "HTTPS official-host validation, signed requests, configurable response verification and ten-second timeout",
+      "evidence": ["wmsmaster/settings.py:209-216", "allapp/salesapp/services_wechat_pay.py:121-130,163-214,315-325"]
+    },
+    {
+      "consumer": "Payment callback verification",
+      "deployment": "Production release / direct startup distinction",
+      "configurationChain": "APP_ENV -> verification default; platform serial -> configured key map; APIv3 key decrypts resource",
+      "effectiveValue": "Production default signature verification enabled, callback age limit 300 seconds; explicit environment can override verification",
+      "recipients": "Payment callback handlers",
+      "enforcingControl": "RSA verification, AES-GCM, timestamp check; deployment check rejects disabled production verification",
+      "evidence": ["wmsmaster/settings.py:232-247", "allapp/salesapp/services_wechat_pay.py:73-85,328-364", "allapp/salesapp/checks.py:56-71", "docker/production_release.sh:39", "docker/start-web.sh:4-9"],
+      "discrepancy": "Availability of a production system check is not equivalent to running it on every direct Gunicorn startup"
+    },
+    {
+      "consumer": "Review image storage",
+      "deployment": "Local Django",
+      "configurationChain": "BASE_DIR=/wms -> MEDIA_ROOT=/wms/media -> upload_to callback",
+      "effectiveValue": "/wms/media/sale-mini/reviews/<review_id>/<uuid>.<validated jpg/png/webp suffix>",
+      "recipients": "Django process; media-serving host; published review viewers",
+      "enforcingControl": "Buyer ownership, image validation, five-MiB per-image limit and generated filenames",
+      "evidence": ["wmsmaster/settings.py:24,515-521", "allapp/salesapp/models.py:19-23", "allapp/salesapp/salemini_review_api.py:104-111,135-156"]
+    },
+    {
+      "consumer": "Review image storage",
+      "deployment": "Compose",
+      "configurationChain": "BASE_DIR=/app -> MEDIA_ROOT=/app/media -> wms-media volume -> upload_to callback",
+      "effectiveValue": "/app/media/sale-mini/reviews/<review_id>/<uuid>.<suffix>; underlying Docker volume host location is not specified",
+      "recipients": "Web and other services sharing wms-media; external media server if configured",
+      "enforcingControl": "Application upload controls; production file-serving controls external",
+      "evidence": ["Dockerfile:23", "compose.production.yml:9-11", "wmsmaster/settings.py:515-517", "allapp/salesapp/models.py:19-23"],
+      "documentedClaim": "Production web server must serve MEDIA_URL and treat uploads only as static media",
+      "missingImpactPrerequisite": "No proxy/media-server configuration was supplied"
+    },
+    {
+      "consumer": "Public APK download",
+      "deployment": "Local / Compose",
+      "configurationChain": "BASE_DIR / media / bv2.apk, independently of supplied download filename",
+      "effectiveValue": "Local /wms/media/bv2.apk; Compose /app/media/bv2.apk in wms-media",
+      "recipients": "Any caller of /api/v1/bv2/<filename>.apk",
+      "enforcingControl": "Fixed source path; requested filename controls attachment naming",
+      "evidence": ["allapp/api/urls.py:8-11", "allapp/api/views.py:22-38", "compose.production.yml:9-11"]
+    },
+    {
+      "consumer": "PDA bearer-token requests",
+      "deployment": "Current wmspda source",
+      "configurationChain": "BASE_MAP.develop selected unconditionally",
+      "effectiveValue": "http://192.168.1.6:8001; access/refresh tokens held in uni storage",
+      "recipients": "Selected LAN HTTP server",
+      "enforcingControl": "Backend authentication; no HTTPS policy in this client request base selection",
+      "evidence": ["wmspda/utils/request.js:1-17,19-48", "wmspda/vite.config.js:1-8"],
+      "missingImpactPrerequisite": "Actual deployed binary and network threat model unknown"
+    },
+    {
+      "consumer": "Android bearer-token requests",
+      "deployment": "wmsandroid app build",
+      "configurationChain": "Process VITE_API_BASE_URL > Vite loaded env; runtime URL normalization; generated network_security_config.xml",
+      "effectiveValue": "Configured HTTP/HTTPS base; cleartext allowed only for loopback and the configured host when that base is HTTP",
+      "recipients": "Configured application backend",
+      "enforcingControl": "Generated Android network policy, valid host syntax and required app-build endpoint",
+      "evidence": ["wmsandroid/vite.config.js:31-49", "wmsandroid/utils/request.js:1-18", "wmsandroid/config/androidNetworkSecurity.mjs:1-22"],
+      "missingImpactPrerequisite": "Actual effective Vite environment and packaged network policy unknown"
+    },
+    {
+      "consumer": "Boss/consumer configured API requests",
+      "deployment": "H5 / native or miniapp",
+      "configurationChain": "Build VITE_API_BASE_URL -> runtime validation; blank permitted only for H5",
+      "effectiveValue": "H5 defaults to same-origin API paths; native/miniapp requires explicit base; HTTPS except loopback development",
+      "recipients": "Same-origin server or configured HTTPS backend",
+      "enforcingControl": "URL component validation and private-host opt-in",
+      "evidence": ["frontend/api-base-policy.mjs:21-48", "wmsbossbilling/utils/api-base.js:20-47", "sales-miniapp/utils/api-base.js:41-47"],
+      "documentedClaim": "Boss README describes same-origin H5 and HTTPS native/miniapp policy",
+      "discrepancy": "No discrepancy established for the inspected boss consumer"
+    },
+    {
+      "consumer": "Preserved-data backup output",
+      "deployment": "Authorized operator command",
+      "configurationChain": "--output -> expanduser().resolve() -> same-parent temporary directory -> atomic rename",
+      "effectiveValue": "<resolved output>/preserved-data.sql.gz and <resolved output>/manifest.json",
+      "recipients": "Operator and parties granted filesystem access",
+      "enforcingControl": "Reject overwrite; 0700 directory; 0600 files; exact-target/maintenance/operator gates",
+      "evidence": ["allapp/core/management/commands/backup_preserved_data.py:26-57,87-99", "allapp/core/preserved_data_transfer.py:34-36,403-440,488-493"]
+    },
+    {
+      "consumer": "MySQL dump/restore credentials",
+      "deployment": "Operator backup / restore",
+      "configurationChain": "Django connection settings -> temporary MySQL defaults file",
+      "effectiveValue": "Backup: temporary bundle directory/.mysql-client-<random>; restore: platform temporary directory/wms-preserved-restore-<random>/.mysql-client-<random>",
+      "recipients": "mysqldump/mysql subprocess and process owner",
+      "enforcingControl": "Mode 0600, option-file escaping and scoped temporary directory",
+      "evidence": ["allapp/core/preserved_data_transfer.py:295-328,417-430,717-725"]
+    },
+    {
+      "consumer": "Container build context",
+      "deployment": "Dirty local build / clean CI build",
+      "configurationChain": "Docker context -> .dockerignore -> COPY . /app",
+      "effectiveValue": "All nonexcluded source/context files become /app/<relative path>; exact resulting image not inspected",
+      "recipients": "Build process, registry image recipients and runtime user",
+      "enforcingControl": ".dockerignore filtering and controlled build source",
+      "evidence": ["Dockerfile:23-26", ".dockerignore:15-29", ".github/workflows/ci.yml:602-618"],
+      "missingImpactPrerequisite": "Whether local env suffix files contain sensitive values and are included in a real built image remains unverified"
+    }
+  ],
+  "resolved_questions": [
+    {
+      "question": "Are tenant scope and operational capabilities the same authorization mechanism?",
+      "resolution": "No. Explicit UserRoleScope controls row reach; Django permissions independently grant operations. Superuser global scope is explicit.",
+      "evidence": ["allapp/accounts/models.py:60-66", "allapp/accounts/access.py:44-127"]
+    },
+    {
+      "question": "Does OUTBOUND_LEGACY_AUTHZ_MODE=shadow bypass rejected writes?",
+      "resolution": "The inspected require_legacy_action implementation logs shadow telemetry and still raises PermissionDenied.",
+      "evidence": ["allapp/outbound/authz.py:193-205"]
+    },
+    {
+      "question": "Does documented Redis infrastructure own login throttling?",
+      "resolution": "Documentation lists Redis, while effective settings select MySQL DatabaseCache for login throttling and LocMemCache otherwise. Both facts must remain in the model.",
+      "evidence": ["docs/release-test-plan.md:40", "wmsmaster/settings.py:359-369"]
+    },
+    {
+      "question": "Does Compose or Gunicorn automatically select production security settings?",
+      "resolution": "No automatic inference is present. APP_ENV defaults to development; Compose supplies an external common env file. Production documentation requires DEBUG=False, but actual deployment values are unknown.",
+      "evidence": ["wmsmaster/settings.py:41-48,92-98,123-126", "compose.production.yml:5-6", "docs/release-test-plan.md:54-56"]
+    },
+    {
+      "question": "Do all mobile clients share the same HTTPS-only destination control?",
+      "resolution": "No. Current PDA source hard-selects a LAN HTTP base; Android generates a configured-host HTTP exception; boss and consumer validators implement the stricter HTTPS policy. Deployment evidence is required before claiming live transport exposure.",
+      "evidence": ["wmspda/utils/request.js:5-13", "wmsandroid/config/androidNetworkSecurity.mjs:14-22", "wmsbossbilling/utils/api-base.js:20-47"]
+    },
+    {
+      "question": "Are PDA access tokens governed by the regular 15-minute setting?",
+      "resolution": "The distinct PDA token class sets a one-day lifetime; ordinary tokens use the settings value.",
+      "evidence": ["wmsmaster/settings.py:195-201", "wmsmaster/auth_views.py:24-33,78-106"]
+    },
+    {
+      "question": "Is the public APK request filename a filesystem selector?",
+      "resolution": "No. The file read is fixed at BASE_DIR/media/bv2.apk; the path variable affects the attachment filename.",
+      "evidence": ["allapp/api/views.py:22-38"]
+    },
+    {
+      "question": "Are review-upload paths opaque or resolved?",
+      "resolution": "The full derived path is MEDIA_ROOT/sale-mini/reviews/<review_id>/<uuid>.<suffix>, mapping to /wms/media locally and /app/media in Compose. Production server behavior remains external.",
+      "evidence": ["allapp/salesapp/models.py:19-23", "wmsmaster/settings.py:515-517", "compose.production.yml:9-11", "sales-miniapp/README.md:28"]
+    },
+    {
+      "question": "Does the production payment check always run on web startup?",
+      "resolution": "Release and staging scripts explicitly run check --deploy. The direct start-web.sh invokes Gunicorn only. The checks reject disabled verification, while the runtime verification functions honor the setting.",
+      "evidence": ["allapp/salesapp/checks.py:56-71", "allapp/salesapp/services_wechat_pay.py:163-165,344-346", "docker/start-web.sh:4-9", "docker/production_release.sh:39", ".github/workflows/ci.yml:695"]
+    },
+    {
+      "question": "Are web, scheduler and payment one-shot jobs isolated from each other's secrets or media?",
+      "resolution": "No separate such control is established: all inherit the same environment, UID and volume configuration. Different commands do not prove reduced authority.",
+      "evidence": ["compose.production.yml:3-46"]
+    },
+    {
+      "question": "Are timezone support and the settings comment consistent?",
+      "resolution": "No. The comment says to ensure timezone support, but USE_TZ is False and TIME_ZONE is Asia/Shanghai.",
+      "evidence": ["wmsmaster/settings.py:394-397"]
+    },
+    {
+      "question": "What remains unresolved for subsequent audit?",
+      "resolution": "Actual env values and proxy trust; media confidentiality/publication policy; deployed mobile artifacts and native SDK behavior; final redirect recipients; complete endpoint/caller permission coverage; payment business/idempotency invariants; database grants; backup/restore operational proof; build-context secret inclusion. No hypotheses are promoted to findings by this architecture pass."
+    }
+  ]
+}

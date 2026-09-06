@@ -1,0 +1,14 @@
+node_modules/
+dist/
+unpackage/
+.hbuilderx/
+playwright-report/
+test-results/
+*.apk
+*.aab
+*.keystore
+*.jks
+*.p12
+.env
+.env.*.local
+!.env.example

@@ -1,0 +1,35 @@
+{
+  "name": "金桥融通仓库手机版",
+  "appid": "__UNI__E10A49B",
+  "description": "金桥融通仓库现场作业与手机收银",
+  "versionName": "1.0.1",
+  "versionCode": "101",
+  "transformPx": false,
+  "networkTimeout": { "request": 30000, "uploadFile": 600000 },
+  "app-plus": {
+    "usingComponents": true,
+    "nvueStyleCompiler": "uni-app",
+    "compilerVersion": 3,
+    "orientation": ["portrait-primary"],
+    "splashscreen": { "alwaysShowBeforeRender": true, "waiting": true, "autoclose": true, "delay": 0 },
+    "modules": { "Barcode": {} },
+    "distribute": {
+      "android": {
+        "packagename": "com.jinqiaorongtong.wmsandroid",
+        "networkSecurityConfig": "xml/network_security_config.xml",
+        "permissions": [
+          "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+          "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+          "<uses-permission android:name=\"android.permission.VIBRATE\"/>"
+        ]
+      },
+      "ios": { "dSYMs": false },
+      "sdkConfigs": {}
+    },
+    "nativePlugins": {}
+  },
+  "quickapp": {},
+  "mp-weixin": { "appid": "", "setting": { "urlCheck": true }, "usingComponents": true },
+  "uniStatistics": { "enable": false },
+  "vueVersion": "3"
+}

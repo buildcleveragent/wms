@@ -1,0 +1,11 @@
+Lint ratchet failed:
+- allapp/accounts/tests.py: changed/new file has 1 black finding(s)
+- allapp/inventory/views.py: changed/new file has 1 black finding(s)
+- allapp/inventory/views.py: changed/new file has 1 isort finding(s)
+- allapp/inventory/views.py: changed/new file has 2 flake8 finding(s)
+- allapp/pos/serializers.py: changed/new file has 1 black finding(s)
+- allapp/salesapp/test_salemini_unit.py: changed/new file has 1 black finding(s)
+- allapp/salesapp/test_salemini_unit.py: changed/new file has 1 isort finding(s)
+- allapp/salesapp/tests.py: changed/new file has 1 black finding(s)
+- allapp/salesapp/tests.py: changed/new file has 1 isort finding(s)
+- wmsmaster/auth_views.py: changed/new file has 1 black finding(s)

@@ -1,0 +1,156 @@
+{
+  "findings": [
+    {
+      "id": "deploy-01",
+      "title": "Local Docker builds can embed Git-ignored credential files in the runtime image",
+      "CWE": "CWE-538",
+      "severity": "medium",
+      "confidence": "high for packaging defect; actual credential exposure not established",
+      "attacker": "A party able to read a locally built image, its exported layers, or its runtime filesystem, but not otherwise authorized to read the developer's environment files.",
+      "preconditions": [
+        "Build uses the developer workspace as its context, such as the documented docker build -t wms:latest . command.",
+        "That context contains a sensitive .env.* file.",
+        "The resulting image or runtime filesystem becomes accessible to the recipient."
+      ],
+      "impact": "The recipient obtains credentials or other sensitive configuration present in the copied file. Further access depends on credential validity and service reachability; production credentials and production compromise were not established.",
+      "likelihood": "Conditional. The repository documents both creating a local credential-bearing .env.test.local and building an image from the repository directory. That file exists in this workspace. There is no evidence that an affected image was built, published, or accessed.",
+      "analysis": "The sole Docker ignore file excludes *.env but not .env.*. The final runtime stage copies the entire remaining context into /app with ownership assigned to the runtime user. Git ignore rules do not filter a filesystem Docker build context. Thus .env.test.local, .env.production, and similarly named files survive this exclusion policy and enter the final image. The current .env.test.local has mode 600, but COPY --chown=wms:wms makes the copied file readable by the runtime user.",
+      "locations": [
+        {
+          "path": "/wms/.dockerignore",
+          "start_line": 15,
+          "end_line": 15,
+          "excerpt": "*.env"
+        },
+        {
+          "path": "/wms/Dockerfile",
+          "start_line": 23,
+          "end_line": 26,
+          "excerpt": "WORKDIR /app\nCOPY --chown=wms:wms . /app\nRUN chmod +x /app/docker/start-web.sh /app/docker/start-scheduler.sh /app/docker/release.sh\nUSER wms"
+        },
+        {
+          "path": "/wms/CLAUDE.md",
+          "start_line": 34,
+          "end_line": 36,
+          "excerpt": "# Docker\ndocker build -t wms:latest .\ndocker run -p 8000:8000 wms:latest"
+        },
+        {
+          "path": "/wms/docs/system-testing-manual.md",
+          "start_line": 312,
+          "end_line": 313,
+          "excerpt": "cp .env.test.example .env.test.local\n# 只修改本地测试密码；该文件已被 Git 忽略。"
+        }
+      ],
+      "counterevidence": [
+        "The CI build job uses its own ubuntu-latest runner and actions/checkout, then builds context '.', without creating .env.* files or downloading test-workspace artifacts before the build (.github/workflows/ci.yml:590–618). The developer's ignored local file therefore does not ordinarily enter that build.",
+        "The CI job scans the candidate image before pushing it (.github/workflows/ci.yml:619–639). Its effectiveness against every possible credential format was not tested.",
+        "Production Compose consumes a prebuilt image and injects configuration from /etc/wms/wms.env by default; it contains no local build directive (compose.production.yml:3–6).",
+        "The local test environment loader activates only for test commands or APP_ENV=test, so this finding does not establish that normal production commands consume the embedded test configuration (wmsmaster/environment.py:30–35).",
+        "Only local test configuration is known to exist. Its values were not read, and no production secret exposure is asserted."
+      ],
+      "remediation": [
+        "Exclude .env and .env.* at the root and corresponding nested paths in .dockerignore, retaining only explicitly approved example files if needed.",
+        "Prefer explicit runtime COPY paths or another allowlist of necessary application files.",
+        "Verify the packaging rule using harmless sentinel files; do not inspect real credentials to demonstrate the issue.",
+        "If workspace-built images were previously distributed, inspect their provenance and contents under authorized access and rotate only credentials confirmed exposed."
+      ],
+      "validation": "Read-only source analysis and file metadata inspection. No image build, image extraction, application execution, network request, database access, or credential-content inspection."
+    }
+  ],
+  "resolved_questions": [
+    {
+      "id": "deploy-01-build-path",
+      "answer": "Affected path is a filesystem-context build from a populated local workspace. The documented CI clean-checkout path does not establish an actual leak.",
+      "additional_controls_checked": [
+        "The repository search found only /wms/Dockerfile and /wms/.dockerignore; no Dockerfile-specific ignore override was found.",
+        "No build-context allowlist or git-archive packaging route was found in repository build scripts or documentation.",
+        ".gitignore:23–29 excludes local .env.* files from ordinary Git checkout while allowing example files."
+      ]
+    },
+    {
+      "id": "ops-02",
+      "classification": "Confirmed operational orchestration gap; not a demonstrated security vulnerability",
+      "title": "Production release rejects the supplied payment timers and does not restore payment scheduling",
+      "priority": "High operational priority for deployments using the supplied systemd timers",
+      "answer": "production_release.sh does not itself disable payment timers. It exits if either named timer is active. Those same names belong to the current supplied systemd templates, whose services invoke the current Compose payment one-shot services. If an operator stops the timers to satisfy the release check, the script starts only the billing scheduler and never restarts the payment timers.",
+      "impact": "The supplied release flow can leave unattended overdue-order cancellation, missed-payment reconciliation, and refund retries unscheduled. This can retain overdue orders and delay convergence of payment/refund state until another invocation or manual action. A running billing scheduler does not demonstrate payment scheduling health.",
+      "locations": [
+        {
+          "path": "/wms/docker/production_release.sh",
+          "start_line": 28,
+          "end_line": 35,
+          "excerpt": "if command -v systemctl >/dev/null 2>&1; then\n  for legacy_timer in wms-sale-mini-expire.timer wms-sale-mini-reconcile.timer; do\n    if systemctl is-active --quiet \"$legacy_timer\"; then\n      echo \"refusing release while legacy timer is active: $legacy_timer\" >&2\n      exit 2\n    fi\n  done\nfi"
+        },
+        {
+          "path": "/wms/docker/production_release.sh",
+          "start_line": 65,
+          "end_line": 68,
+          "excerpt": "compose up -d scheduler\n\nscheduler_count=\"$(compose ps -q scheduler | wc -l | tr -d ' ')\"\nif [ \"$scheduler_count\" -ne 1 ]; then"
+        },
+        {
+          "path": "/wms/docker/start-scheduler.sh",
+          "start_line": 4,
+          "end_line": 4,
+          "excerpt": "exec python manage.py billing_run_scheduler"
+        },
+        {
+          "path": "/wms/compose.production.yml",
+          "start_line": 36,
+          "end_line": 46,
+          "excerpt": "sale-mini-expire:\n    <<: *wms-service\n    command: python manage.py expire_sale_mini_orders --limit 200\n    restart: \"no\"\n    profiles: [oneshot]\n\n  sale-mini-reconcile:\n    <<: *wms-service\n    command: python manage.py reconcile_sale_mini_payments --limit 200\n    restart: \"no\"\n    profiles: [oneshot]"
+        },
+        {
+          "path": "/wms/deploy/systemd/wms-sale-mini-expire.service",
+          "start_line": 12,
+          "end_line": 12,
+          "excerpt": "ExecStart=/usr/bin/flock -n /run/lock/wms-sale-mini-payments.lock /usr/bin/docker compose -f /wms/compose.production.yml --profile oneshot run --rm sale-mini-expire"
+        },
+        {
+          "path": "/wms/deploy/systemd/wms-sale-mini-reconcile.service",
+          "start_line": 12,
+          "end_line": 12,
+          "excerpt": "ExecStart=/usr/bin/flock -n /run/lock/wms-sale-mini-payments.lock /usr/bin/docker compose -f /wms/compose.production.yml --profile oneshot run --rm sale-mini-reconcile"
+        }
+      ],
+      "supporting_evidence": [
+        "docs/sales-miniapp-user-guide.md:355–368 instructs enabling those timers and describes one-minute expiration and five-minute reconciliation.",
+        "allapp/billing/management/commands/billing_run_scheduler.py:85–106 calls billing metric generation only; its background loop repeats that action at :130–136.",
+        "allapp/billing/services/metrics.py:485–578 iterates service dates, owners, and warehouses to generate billing metrics.",
+        "allapp/salesapp/management/commands/expire_sale_mini_orders.py:24–40 selects overdue unpaid mappings and invokes safe cancellation.",
+        "allapp/salesapp/management/commands/reconcile_sale_mini_payments.py:25–105 processes overdue mappings, due payment queries, and due refund retries."
+      ],
+      "counterevidence": [
+        "The timers can be enabled or restarted separately by an operator; their actual deployment state was not inspected.",
+        "An external scheduler might exist outside this repository.",
+        "Payment/refund callbacks still apply state changes, and API/admin paths can query or reconcile individual records. This finding does not mean all payment processing stops.",
+        "The script rejects active timers rather than stopping them automatically. The stopped-timer outcome depends on operator actions or an initially unscheduled deployment."
+      ],
+      "remediation": [
+        "Choose and document one supported payment scheduling mechanism.",
+        "If retaining the supplied systemd timers, explicitly quiesce and restore them during deployment, including failure handling, and distinguish obsolete units from current Compose-backed units.",
+        "Verify payment-job execution timestamps or due-work lag after release instead of checking only the billing container count."
+      ],
+      "validation": "Static control-flow and configuration review only; no deployment or timer execution."
+    }
+  ],
+  "fully_reviewed_files": [
+    "/wms/Dockerfile",
+    "/wms/.dockerignore",
+    "/wms/.gitignore",
+    "/wms/compose.production.yml",
+    "/wms/docker/start-web.sh",
+    "/wms/docker/start-scheduler.sh",
+    "/wms/docker/production_release.sh",
+    "/wms/docker/release.sh",
+    "/wms/deploy/systemd/wms-sale-mini-expire.service",
+    "/wms/deploy/systemd/wms-sale-mini-expire.timer",
+    "/wms/deploy/systemd/wms-sale-mini-reconcile.service",
+    "/wms/deploy/systemd/wms-sale-mini-reconcile.timer",
+    "/wms/wmsmaster/environment.py",
+    "/wms/allapp/billing/management/commands/billing_run_scheduler.py",
+    "/wms/allapp/salesapp/management/commands/expire_sale_mini_orders.py",
+    "/wms/allapp/salesapp/management/commands/reconcile_sale_mini_payments.py",
+    "/wms/CLAUDE.md"
+  ],
+  "scope_note": "Only assigned deployment and scheduling questions were investigated. Relevant portions of CI, settings, documentation, billing services, sales services, API, and admin code were inspected; those larger files were not reviewed in full. SECURITY.md resolution returned no applicable policy for docker, deploy, .github, docs, wmsmaster, allapp/billing, or allapp/salesapp. No repository-wide security coverage is claimed."
+}

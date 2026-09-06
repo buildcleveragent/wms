@@ -1,0 +1,50 @@
+[
+  {
+    "client": "wmsbossbilling",
+    "failure": "network",
+    "returnedStatus": 0,
+    "requests": 2,
+    "removed": [
+      "access",
+      "refresh",
+      "user"
+    ],
+    "cart": [],
+    "notifications": [
+      "登录已失效，请重新登录"
+    ]
+  },
+  {
+    "client": "wmsbossbilling",
+    "failure": "business",
+    "returnedStatus": 400,
+    "requests": 3,
+    "removed": [
+      "access",
+      "refresh",
+      "user"
+    ],
+    "cart": [],
+    "notifications": [
+      "登录已失效，请重新登录"
+    ]
+  },
+  {
+    "client": "wmsownersale",
+    "failure": "business",
+    "returnedStatus": 400,
+    "requests": 3,
+    "removed": [
+      "access",
+      "refresh",
+      "user"
+    ],
+    "cart": [
+      "reset"
+    ],
+    "notifications": [
+      "business validation failed",
+      "登录已超时，需要重新登录"
+    ]
+  }
+]
