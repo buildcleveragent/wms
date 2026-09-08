@@ -1,7 +1,8 @@
 *.pyc
 __pycache__
+**/*.pyc
+**/__pycache__
 .git
-.gitignore
 .venv
 .venv.*
 venv
@@ -10,9 +11,17 @@ venv
 **/.ruff_cache
 **/dist
 **/coverage
+**/test-results
+**/playwright-report
+.coverage*
 *.idea
 *.vscode
 *.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.test.example
 auth.json
 *.key
 *.pem
@@ -27,3 +36,6 @@ auth.json
 media/
 staticfiles/
 backups/
+
+var/
+docs/remediation-execution-2026-09-06.md

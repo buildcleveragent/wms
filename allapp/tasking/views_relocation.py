@@ -386,8 +386,13 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
         )
         qs = _scoped(qs, self.request.user)
         if _is_operator(self.request.user) and not _is_manager(self.request.user):
+            assignment_scope = Q(assignments__assignee=self.request.user)
+            # Posting finishes the assignment. Its operator must still be able
+            # to retrieve the result and replay a lost successful response.
+            if self.action not in {"retrieve", "record"}:
+                assignment_scope &= Q(assignments__finished_at__isnull=True)
             qs = qs.filter(
-                Q(assignments__assignee=self.request.user, assignments__finished_at__isnull=True)
+                assignment_scope
                 | Q(status=WmsTask.Status.RELEASED, has_active_assignment=False)
                 | Q(created_by=self.request.user)
             ).distinct()

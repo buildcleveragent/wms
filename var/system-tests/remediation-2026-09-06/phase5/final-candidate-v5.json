@@ -1,0 +1,27 @@
+{
+  "source_digest": "a640217bf9b45da7311328d43c1e6c740c331fbafed8fae9c33d082d677bd5c0",
+  "revision": "c9175bfcb837fe740471710c5267ac8d5147911d",
+  "runtime_image_id": "sha256:c5620e3feea83e3617036d85d8c3f28b5849bdebffcae4233e1299c80bba5747",
+  "test_image_id": "sha256:d7c1f4d2918818add1b4fb060e924ce22950f7972288714c396af360df1621a2",
+  "acceptance_driver_sha256": "314c0816a5c058d24465365ec12f4177bc7f656ede1b64984838bbded6531259",
+  "frontend_artifacts_sha256": "c776c5b75367a128f66855fb9b2dbcb1c694ddb70f1c0a8653e60b4ed6e0241b",
+  "runtime_configuration": {
+    "python": "3.12.14",
+    "node": "22.23.2",
+    "npm": "10.9.8",
+    "mysql": "8.0.46",
+    "database": "wms_db_test",
+    "APP_ENV": "test",
+    "coordination": "/tmp/wms-test-coordination shared single-host; unique runner hostname; default per-container PID namespace",
+    "password_hashing": "configured default; no fast-password-hashers",
+    "functional_database": "clean real migration once",
+    "migration_group": "independent disposable MySQL instances"
+  },
+  "build_args": {
+    "DEBIAN_MIRROR": "https://mirrors.tuna.tsinghua.edu.cn",
+    "PIP_INDEX_URL": "https://pypi.tuna.tsinghua.edu.cn/simple"
+  },
+  "docker_cli_sha256": "4fd41ecac3ec0f8a6067f8da79cbce516ed0572d1081e4767db764c84d32257b",
+  "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+  "frozen_at": "2026-09-06T09:07:18.959685+00:00"
+}

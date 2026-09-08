@@ -1,0 +1,18 @@
+{
+  "machine": "x86_64",
+  "uid": 10001,
+  "python": "3.12.14",
+  "weasyprint": "69.0",
+  "mysql_identity": [
+    "wms_db_test",
+    "8.0.46",
+    "utf8mb4"
+  ],
+  "mysql_client": "3.4.9",
+  "systemd_homed_present": false,
+  "mariadbd": null,
+  "mbstream": null,
+  "perl_word_size": "ivsize='8';\nptrsize='8';\n",
+  "pdf_bytes": 119903,
+  "status": "PASS"
+}

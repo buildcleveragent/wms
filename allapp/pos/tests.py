@@ -534,6 +534,9 @@ class PosApiTests(TestCase):
             password="x",
             warehouse=self.warehouse,
         )
+        no_owner_user.user_permissions.add(
+            Permission.objects.get(content_type__app_label="pos", codename="add_possale")
+        )
         self.client.force_authenticate(no_owner_user)
 
         response = self.client.get("/api/pos/products/", {"barcode": "POS-CTN-BAR"})
@@ -4348,7 +4351,7 @@ class PosApiTests(TestCase):
         )
         self.assertTrue(all(log.payload_hash for log in logs))
 
-    def test_print_pages_accept_query_token_and_record_backend_source(self):
+    def test_print_pages_accept_document_ticket_and_record_backend_source(self):
         checkout = self.client.post(
             "/api/pos/checkout/",
             {
@@ -4369,8 +4372,15 @@ class PosApiTests(TestCase):
         token = str(RefreshToken.for_user(self.user).access_token)
         anonymous = APIClient()
 
-        sale_print = anonymous.get(f"/api/pos/sales/{sale_id}/print/?token={token}")
-        shift_print = anonymous.get(f"/api/pos/shifts/{self.shift.id}/print/?token={token}")
+        from allapp.core.print_tickets import issue_print_ticket
+
+        sale_path = f"/api/pos/sales/{sale_id}/print/"
+        shift_path = f"/api/pos/shifts/{self.shift.id}/print/"
+        self.assertEqual(anonymous.get(sale_path, {"token": token}).status_code, 401)
+        sale_print = anonymous.get(sale_path, {"ticket": issue_print_ticket(self.user, sale_path)})
+        shift_print = anonymous.get(
+            shift_path, {"ticket": issue_print_ticket(self.user, shift_path)}
+        )
 
         self.assertEqual(sale_print.status_code, 200)
         self.assertContains(sale_print, "POS-TOKEN-PRINT")

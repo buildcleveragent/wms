@@ -1,0 +1,11 @@
+{
+  "reason": "A pytest fixture repr included a disposable test database credential; redact diagnostics and preserve integrity receipt. The disposable database container has been removed.",
+  "files": [
+    {
+      "file": "testlayer-coordination-probe.log",
+      "before_sha256": "dae7a3a02c358b9ccb6168cb1c27fef780febc9265955f4d57126091c25d83e2",
+      "redactions": 1,
+      "after_sha256": "f8620fd839f2dcd04f2a6df8a3dd005fd231632cf0f77573e2bb627a9e5042c5"
+    }
+  ]
+}

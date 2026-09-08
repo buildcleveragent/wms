@@ -1,0 +1,1 @@
+{"machine": "x86_64", "uid": 10001, "mysql_client": "3.4.9", "systemd_homed_present": false, "mariadbd": null, "mbstream": null, "perl_word_size": "ivsize='8';\nptrsize='8';\n", "libxml2_present": true}

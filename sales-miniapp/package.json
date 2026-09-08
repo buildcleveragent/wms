@@ -10,7 +10,9 @@
     "dev:h5": "CI=1 UNI_INPUT_DIR=$PWD uni -p h5",
     "dev:mp-weixin": "CI=1 UNI_INPUT_DIR=$PWD uni -p mp-weixin",
     "build:h5": "CI=1 UNI_INPUT_DIR=$PWD uni build -p h5",
-    "build:mp-weixin": "CI=1 UNI_INPUT_DIR=$PWD uni build -p mp-weixin"
+    "build:mp-weixin": "CI=1 UNI_INPUT_DIR=$PWD uni build -p mp-weixin",
+    "test:auth": "node --test tests/request-auth.test.mjs",
+    "test:cart": "node --test tests/cart-recovery.test.mjs"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-alpha-1000920260626810",
@@ -33,6 +35,9 @@
     "jpeg-js": "0.4.4",
     "nanoid": "3.3.18",
     "postcss": "8.5.23",
-    "ws": "8.21.0"
+    "ws": "8.21.0",
+    "express": "4.22.2",
+    "path-to-regexp": "0.1.13",
+    "qs": "6.16.0"
   }
 }

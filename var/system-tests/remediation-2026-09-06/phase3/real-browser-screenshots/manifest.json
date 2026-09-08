@@ -1,0 +1,40 @@
+{
+  "scope": "Unmodified screenshots from the completed real browser run with synthetic test fixtures.",
+  "screenshots": [
+    {
+      "original": "/tmp/wms-remediation-browser-final-v2/admin.png",
+      "path": "admin.png",
+      "sha256": "16792f9aa393718edd192efed38ef01c77befdeabd80b8abc3a0ec69643e6204"
+    },
+    {
+      "original": "/tmp/wms-remediation-browser-final-v2/movement/wmsandroid-move.png",
+      "path": "movement/wmsandroid-move.png",
+      "sha256": "84120375d50cb936516816a5e6f78b4c98acce8d50366a11103834b724360600"
+    },
+    {
+      "original": "/tmp/wms-remediation-browser-final-v2/movement/wmsandroid-replenish.png",
+      "path": "movement/wmsandroid-replenish.png",
+      "sha256": "cf983df545c17e7ca9a9a878cfdba24ffa4cd4f80e94e2412b598a96f2bfcabd"
+    },
+    {
+      "original": "/tmp/wms-remediation-browser-final-v2/movement/wmspda-move.png",
+      "path": "movement/wmspda-move.png",
+      "sha256": "ba8739d5b89011390faea9b73bd9845830862eb6df51dd1f0701aeb703a7c7be"
+    },
+    {
+      "original": "/tmp/wms-remediation-browser-final-v2/movement/wmspda-replenish.png",
+      "path": "movement/wmspda-replenish.png",
+      "sha256": "98e314155960e61af3dfb14efc81bc94d6390360ad2e80e30ad65c6a9f055b3d"
+    },
+    {
+      "original": "/tmp/wms-remediation-browser-final-v2/sales-miniapp.png",
+      "path": "sales-miniapp.png",
+      "sha256": "d32507e95e671cf4f2409530fc020c5d79cc3865ea30078eeb90ee22da17925a"
+    },
+    {
+      "original": "/tmp/wms-remediation-browser-final-v2/wmsownersale.png",
+      "path": "wmsownersale.png",
+      "sha256": "6901f60c477ffb164359851cf8b385e54adc73d9e95e49772ef641a206a8dd7a"
+    }
+  ]
+}

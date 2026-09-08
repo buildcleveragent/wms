@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "compared_files": 727,
+  "mismatches": [],
+  "checks": [
+    "non-root",
+    "local env files absent",
+    "DRF 3.17.2"
+  ],
+  "scope": "configuration and source match; not full container business suite"
+}

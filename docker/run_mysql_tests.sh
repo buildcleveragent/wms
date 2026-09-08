@@ -4,17 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/.env.test.local"
 COMPOSE_FILE="${ROOT_DIR}/compose.test.yml"
-FRESH_DATABASE=false
-REUSE_DATABASE=true
 MIGRATE_ONLY=false
 
 while [[ "${1:-}" == --* ]]; do
   case "${1}" in
     --fresh)
-      FRESH_DATABASE=true
+      echo "拒绝删除测试卷；确需重建 schema 请使用 --create-db。" >&2
+      exit 2
       ;;
     --clean)
-      REUSE_DATABASE=false
+      echo "请使用默认 --reuse-db；发布验证使用 --create-db。" >&2
+      exit 2
       ;;
     --migrate-only)
       MIGRATE_ONLY=true
@@ -24,6 +24,15 @@ while [[ "${1:-}" == --* ]]; do
       ;;
   esac
   shift
+done
+
+for test_arg in "$@"; do
+  case "$test_arg" in
+    -n|--numprocesses|--numprocesses=*|-n[0-9]*|--no-migrations|--nomigrations|--fast-db)
+      echo "拒绝非规范测试数据库或绕过迁移的参数。" >&2
+      exit 2
+      ;;
+  esac
 done
 
 if [[ ! -f "${ENV_FILE}" ]]; then
@@ -65,24 +74,20 @@ if [[ "${REDIS_PORT:-}" != "${WMS_TEST_REDIS_PORT:-36379}" || "${REDIS_PORT:-}" 
   exit 2
 fi
 
-if [[ "${FRESH_DATABASE}" == "true" ]]; then
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" down --volumes
-fi
-
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d --wait \
   --wait-timeout 300 mysql-test redis-test
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" \
   exec -T redis-test redis-cli ping >/dev/null
-# Pytest-xdist creates one disposable database per worker. Use the isolated
-# container's root account for the test process so create/drop privileges are
-# explicit and never fall back to a development database credential.
+# Use the isolated container's root account for explicit test schema privileges.
 export DB_USER=root
 export DB_PASSWORD="${MYSQL_ROOT_PASSWORD}"
+"${ROOT_DIR}/.venv/bin/python" -c 'import os; os.environ.setdefault("DJANGO_SETTINGS_MODULE", "wmsmaster.settings"); import django; django.setup(); from django.conf import settings; from wmsmaster.test_database import verify_test_database; verify_test_database(settings.DATABASES["default"])'
 if [[ "${MIGRATE_ONLY}" == "true" ]]; then
   started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   started_seconds="${SECONDS}"
   echo "Starting isolated MySQL migrations at ${started_at}."
-  "${ROOT_DIR}/.venv/bin/python" manage.py migrate --noinput --verbosity 2
+  "${ROOT_DIR}/.venv/bin/python" scripts/test_migrate.py \
+    --artifacts "${ROOT_DIR}/var/system-tests/manual-migration-$(date -u +%Y%m%dT%H%M%S)-$$"
   echo "Completed isolated MySQL migrations in $((SECONDS - started_seconds)) seconds."
   exit 0
 fi
@@ -91,8 +96,4 @@ if [[ ! -x "${PYTEST_BIN}" ]]; then
   echo "拒绝执行：pytest 可执行文件不存在或不可执行：${PYTEST_BIN}" >&2
   exit 2
 fi
-pytest_args=()
-if [[ "${REUSE_DATABASE}" == "true" ]]; then
-  pytest_args+=(--reuse-db)
-fi
-exec "${PYTEST_BIN}" "${pytest_args[@]}" "$@"
+exec "${PYTEST_BIN}" --reuse-db "$@"

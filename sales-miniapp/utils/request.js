@@ -1,5 +1,10 @@
 import { BASE_URL } from './api-base'
 
+let sessionEpoch = 0
+function checkSession(epoch) {
+  if (epoch !== sessionEpoch) throw { statusCode: 409, message: '登录账号已变化，请重新操作' }
+}
+
 try {
   uni.removeStorageSync('sales_base_url')
 } catch (error) {}
@@ -20,11 +25,17 @@ export function getToken() {
 }
 
 export function setToken(access, refresh) {
+  sessionEpoch++
+  persistTokens(access, refresh)
+}
+
+function persistTokens(access, refresh) {
   uni.setStorageSync('sales_access', access || '')
   uni.setStorageSync('sales_refresh', refresh || '')
 }
 
 export function clearToken() {
+  sessionEpoch++
   uni.removeStorageSync('sales_access')
   uni.removeStorageSync('sales_refresh')
 }
@@ -82,7 +93,76 @@ function mallMessage(message) {
   return text
 }
 
-export function request({ url, method = 'GET', data, header = {}, authRedirect = true }) {
+let refreshFlight = null
+let refreshEpoch = -1
+
+function expireSession(authRedirect) {
+  clearToken()
+  if (authRedirect) uni.reLaunch({ url: '/pages/login/login' })
+}
+
+function refreshSession() {
+  const epoch = sessionEpoch
+  if (refreshFlight && refreshEpoch === epoch) return refreshFlight
+  const refresh = uni.getStorageSync('sales_refresh') || ''
+  if (!refresh) return Promise.reject({ statusCode: 401, message: '请重新登录' })
+  refreshEpoch = epoch
+  const flight = rawRequest({ url: '/api/auth/refresh/', method: 'POST', data: { refresh }, silent: true })
+    .then((data) => {
+      checkSession(epoch)
+      if (!data?.access) throw { statusCode: 401, message: '登录已失效' }
+      if (uni.getStorageSync('sales_refresh') !== refresh) {
+        throw { statusCode: 409, message: '登录状态已变化，请重试' }
+      }
+      persistTokens(data.access, data.refresh || refresh)
+    }).catch(error => {
+      checkSession(epoch)
+      throw error
+    }).finally(() => { if (refreshFlight === flight) refreshFlight = null })
+  refreshFlight = flight
+  return flight
+}
+
+async function withAuthRecovery(send, { authRedirect = true, credential = false } = {}) {
+  const epoch = sessionEpoch
+  const originalAccess = getToken()
+  try {
+    const result = await send()
+    checkSession(epoch)
+    return result
+  } catch (error) {
+    checkSession(epoch)
+    if (error?.statusCode !== 401 || credential) throw error
+  }
+  try {
+    if (getToken() === originalAccess) await refreshSession()
+    checkSession(epoch)
+  } catch (error) {
+    checkSession(epoch)
+    if ([401, 403].includes(error?.statusCode)) expireSession(authRedirect)
+    throw error
+  }
+  try {
+    const result = await send()
+    checkSession(epoch)
+    return result
+  } catch (error) {
+    checkSession(epoch)
+    if (error?.statusCode === 401) expireSession(authRedirect)
+    throw error
+  }
+}
+
+export function request(options = {}) {
+  const credential = ['/api/auth/login/', '/api/auth/refresh/', '/api/sale-mini/auth/wechat-login/'].includes(options.url)
+  return withAuthRecovery(() => rawRequest(options), { authRedirect: options.authRedirect !== false, credential })
+}
+
+export function uploadFile(options) {
+  return withAuthRecovery(() => rawUploadFile(options))
+}
+
+function rawRequest({ url, method = 'GET', data, header = {}, silent = false }) {
   const token = getToken()
   return new Promise((resolve, reject) => {
     uni.request({
@@ -100,24 +180,18 @@ export function request({ url, method = 'GET', data, header = {}, authRedirect =
           return
         }
         const msg = messageFrom(res.data, '请求失败', res.statusCode)
-        if (res.statusCode === 401) {
-          clearToken()
-          if (authRedirect) {
-            uni.reLaunch({ url: '/pages/login/login' })
-          }
-        }
-        uni.showToast({ title: msg, icon: 'none' })
+        if (!silent && res.statusCode !== 401) uni.showToast({ title: msg, icon: 'none' })
         reject({ statusCode: res.statusCode, message: msg, data: res.data, notified: true })
       },
       fail(err) {
-        uni.showToast({ title: '网络异常，请检查服务地址', icon: 'none' })
+        if (!silent) uni.showToast({ title: '网络异常，请检查服务地址', icon: 'none' })
         reject({ statusCode: 0, message: '网络异常', data: err, notified: true })
       },
     })
   })
 }
 
-export function uploadFile({ url, filePath, name = 'image', formData = {} }) {
+function rawUploadFile({ url, filePath, name = 'image', formData = {} }) {
   const token = getToken()
   return new Promise((resolve, reject) => {
     uni.uploadFile({
@@ -140,11 +214,7 @@ export function uploadFile({ url, filePath, name = 'image', formData = {} }) {
           return
         }
         const msg = messageFrom(data, '图片上传失败', res.statusCode)
-        if (res.statusCode === 401) {
-          clearToken()
-          uni.reLaunch({ url: '/pages/login/login' })
-        }
-        uni.showToast({ title: msg, icon: 'none' })
+        if (res.statusCode !== 401) uni.showToast({ title: msg, icon: 'none' })
         reject({ statusCode: res.statusCode, message: msg, data, notified: true })
       },
       fail(err) {

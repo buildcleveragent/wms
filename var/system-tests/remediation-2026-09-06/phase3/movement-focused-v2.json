@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "run_id": "04180a532e774785b96c06d2626deba6",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 4,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase3/movement-focused-v2.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 4
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/tasking/test_movement_api_acceptance.py::test_scans_4_4_2_post_once_and_replay_is_stable[relocation]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_scans_4_4_2_post_once_and_replay_is_stable[replenishment]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_posting_failure_keeps_scan_and_manager_can_retry[relocation]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_posting_failure_keeps_scan_and_manager_can_retry[replenishment]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

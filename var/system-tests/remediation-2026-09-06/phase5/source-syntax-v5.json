@@ -1,0 +1,6 @@
+{
+  "status": "PASS",
+  "python_files": 622,
+  "source_digest": "a640217bf9b45da7311328d43c1e6c740c331fbafed8fae9c33d082d677bd5c0",
+  "reader": "tokenize.open honors Python encoding declarations and BOM"
+}

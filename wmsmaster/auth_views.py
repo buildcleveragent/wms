@@ -112,18 +112,9 @@ class PasswordRevokingTokenRefreshSerializer(TokenRefreshSerializer):
     def validate(self, attrs):
         token = self.token_class(attrs["refresh"])
         user_id = token.get("user_id")
-        user = (
-            get_user_model()
-            .objects.filter(pk=user_id, is_active=True)
-            .only("password")
-            .first()
-        )
-        if not user or token.get("hash_password") != get_md5_hash_password(
-            user.password
-        ):
-            raise AuthenticationFailed(
-                "令牌已因密码变更而失效。", code="password_changed"
-            )
+        user = get_user_model().objects.filter(pk=user_id, is_active=True).only("password").first()
+        if not user or token.get("hash_password") != get_md5_hash_password(user.password):
+            raise AuthenticationFailed("令牌已因密码变更而失效。", code="password_changed")
         return super().validate(attrs)
 
 

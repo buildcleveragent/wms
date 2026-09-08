@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "run_id": "a8ace1da15194f5999fe5c0847b4a732",
+  "status": "FAIL",
+  "owner": {
+    "pid": 87,
+    "pid_namespace": "pid:[4026532620]",
+    "boot_id": "0a436ce8-0fe0-4427-8c39-e6cacfa16d29",
+    "start_time": "3092270",
+    "state": "R"
+  },
+  "command": [
+    "/wms/.venv/bin/python",
+    "/wms/var/system-tests/remediation-2026-09-06/phase6-v6/run_candidate_gate.py",
+    "functional",
+    "child"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 89,
+    "pid_namespace": "pid:[4026532620]",
+    "boot_id": "0a436ce8-0fe0-4427-8c39-e6cacfa16d29",
+    "start_time": "3092330",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 89,
+  "exit_code": 1,
+  "cleaned_containers": [],
+  "duration_seconds": 3710.974
+}

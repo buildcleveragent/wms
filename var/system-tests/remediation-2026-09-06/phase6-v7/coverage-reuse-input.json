@@ -1,0 +1,7 @@
+{
+  "source": "phase6-v6/.coverage.functional",
+  "copy": "phase6-v7/.coverage.functional-v6",
+  "sha256": "accc65c91d4ab5394d1202f7a2cbf6484dd45c112896edb62a189d380182883d",
+  "source_run_status": "FAIL: exactly two missing-client tests; closed only by later successful module rerun",
+  "measured_python_sources": "unchanged"
+}

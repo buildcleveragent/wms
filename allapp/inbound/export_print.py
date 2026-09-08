@@ -1,8 +1,7 @@
 from django.http import HttpResponse
 from django.views.generic import DetailView
-from django.contrib.auth import get_user_model
-from rest_framework_simplejwt.tokens import AccessToken
 
+from allapp.core.print_tickets import user_from_print_ticket
 from allapp.inbound.permissions import can_view_receive_tasks, scoped_receive_tasks
 from allapp.tasking.models import WmsTask
 
@@ -11,7 +10,7 @@ class ReceiveTaskPrintView(DetailView):
     """
     收货任务打印页面（PC + PDA）
     - PC：已登录 session 直接打印
-    - PDA：用 ?token=<access> 认证（window.open/openURL 不带 Authorization 头）
+    - PDA：用 ?ticket=<document-ticket> 认证（window.open/openURL 不带 Authorization 头）
     """
 
     model = WmsTask
@@ -26,16 +25,12 @@ class ReceiveTaskPrintView(DetailView):
             return super().dispatch(request, *args, **kwargs)
 
         # 2) PDA: query token
-        token = request.GET.get("token") or request.GET.get("access")
+        token = request.GET.get("ticket")
         if not token:
             return HttpResponse("Unauthorized: missing token", status=401)
 
         try:
-            at = AccessToken(token)
-            user_id = at.get("user_id")
-            if not user_id:
-                return HttpResponse("Unauthorized: invalid token", status=401)
-            user = get_user_model().objects.get(id=user_id)
+            user = user_from_print_ticket(token, request.path)
             request.user = user
         except Exception:
             return HttpResponse("Unauthorized: invalid token", status=401)

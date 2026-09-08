@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "run_id": "0b9c21c96d8d41b88c005b21c8b167fa",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 2,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase1/pid-namespace.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 2
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/core/test_test_coordination.py::test_pid_alone_cannot_prove_process_identity": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_process.py::test_sigkill_is_recovered_as_aborted_not_passed": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

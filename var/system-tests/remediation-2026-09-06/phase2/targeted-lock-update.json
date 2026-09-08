@@ -1,0 +1,53 @@
+{
+  "method": "targeted official PyPI release hashes; all unrelated pins preserved",
+  "reason": "pip-compile attempted downloading unchanged Django wheel and exceeded 120-second bound",
+  "checks": [
+    {
+      "package": "pydyf",
+      "pinned": "0.12.1",
+      "satisfies": ">=0.11.0"
+    },
+    {
+      "package": "cffi",
+      "pinned": "2.1.1",
+      "satisfies": ">=0.6"
+    },
+    {
+      "package": "tinyhtml5",
+      "pinned": "2.1.0",
+      "satisfies": ">=2.0.0b1"
+    },
+    {
+      "package": "tinycss2",
+      "pinned": "1.5.1",
+      "satisfies": ">=1.5.0"
+    },
+    {
+      "package": "cssselect2",
+      "pinned": "0.9.0",
+      "satisfies": ">=0.8.0"
+    },
+    {
+      "package": "Pyphen",
+      "pinned": "0.17.2",
+      "satisfies": ">=0.9.1"
+    },
+    {
+      "package": "Pillow",
+      "pinned": "12.3.0",
+      "satisfies": ">=9.1.0"
+    },
+    {
+      "package": "fonttools",
+      "pinned": "4.63.0",
+      "satisfies": ">=4.59.2"
+    }
+  ],
+  "files": [
+    "requirements/requirements.txt",
+    "requirements/prod.txt",
+    "requirements/dev.txt",
+    "requirements/test.txt"
+  ],
+  "wheel_sha256": "475951cfd917014de6d4d005caff48c6aa867e7e42b80cd5b16a0484a1609ee6"
+}

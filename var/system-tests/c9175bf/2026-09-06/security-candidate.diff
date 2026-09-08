@@ -1,0 +1,3217 @@
+diff --git a/allapp/accounts/admin.py b/allapp/accounts/admin.py
+index 059f182..76dadce 100755
+--- a/allapp/accounts/admin.py
++++ b/allapp/accounts/admin.py
+@@ -89,8 +89,7 @@ class PermissionMatrixWidget(forms.SelectMultiple):
+             {
+                 "groups": groups,
+                 "action_order": [
+-                    {"key": key, "label": self.action_labels[key]}
+-                    for key in self.action_order
++                    {"key": key, "label": self.action_labels[key]} for key in self.action_order
+                 ],
+                 "selected_count": sum(group["selected_count"] for group in groups),
+                 "total_count": sum(group["total_count"] for group in groups),
+@@ -187,9 +186,7 @@ class PermissionMatrixWidget(forms.SelectMultiple):
+                     search_parts.append(permission["label"])
+                 for permission in model_group["extras"]:
+                     search_parts.append(permission["label"])
+-                model_group["search_text"] = " ".join(
+-                    str(part) for part in search_parts
+-                ).lower()
++                model_group["search_text"] = " ".join(str(part) for part in search_parts).lower()
+                 models.append(model_group)
+             app_group["models"] = models
+             groups.append(app_group)
+@@ -242,13 +239,10 @@ class AuxiliaryGroupsMixin:
+         field = self.fields.get("groups")
+         if not field:
+             return
+-        field.queryset = Group.objects.exclude(name__in=ROLE_GROUP_NAMES).order_by(
+-            "name"
+-        )
++        field.queryset = Group.objects.exclude(name__in=ROLE_GROUP_NAMES).order_by("name")
+         field.label = "辅助权限组"
+         field.help_text = (
+-            "这里只配置自定义辅助权限组；"
+-            "WMS 规范角色组由下方用户角色范围自动同步。"
++            "这里只配置自定义辅助权限组；" "WMS 规范角色组由下方用户角色范围自动同步。"
+         )
+ 
+ 
+@@ -301,9 +295,7 @@ class UserRoleScopeInlineFormSet(BaseInlineFormSet):
+             active_rows.append(cleaned)
+ 
+         if self.instance.is_superuser and active_rows:
+-            raise forms.ValidationError(
+-                "超级管理员使用全局权限，不需要设置用户角色范围。"
+-            )
++            raise forms.ValidationError("超级管理员使用全局权限，不需要设置用户角色范围。")
+ 
+         roles = {row.get("role") for row in active_rows}
+         roles.discard(None)
+@@ -312,14 +304,11 @@ class UserRoleScopeInlineFormSet(BaseInlineFormSet):
+         if roles:
+             role = next(iter(roles))
+             if role != UserRoleScope.Role.WAREHOUSE_BOSS and len(active_rows) > 1:
+-                raise forms.ValidationError(
+-                    "除仓库老板外，每个用户只能有一个活动范围。"
+-                )
++                raise forms.ValidationError("除仓库老板外，每个用户只能有一个活动范围。")
+             group_name = role_group_name(role)
+             if not Group.objects.filter(name=group_name).exists():
+                 raise forms.ValidationError(
+-                    f"缺少规范角色组“{group_name}”，"
+-                    "请先执行 sync_wms_role_groups。"
++                    f"缺少规范角色组“{group_name}”，" "请先执行 sync_wms_role_groups。"
+                 )
+ 
+ 
+@@ -463,6 +452,11 @@ class UserAdmin(DjangoUserAdmin):
+ 
+     filter_horizontal = ("groups",)
+ 
++    def has_change_permission(self, request, obj=None):
++        if obj is not None and obj.is_superuser and not request.user.is_superuser:
++            return False
++        return super().has_change_permission(request, obj)
++
+     def get_readonly_fields(self, request, obj=None):
+         readonly = list(super().get_readonly_fields(request, obj))
+         readonly.append("canonical_role_group_display")
+@@ -475,11 +469,7 @@ class UserAdmin(DjangoUserAdmin):
+ 
+     @admin.display(description="业务角色")
+     def business_role_display(self, obj):
+-        roles = {
+-            scope.get_role_display()
+-            for scope in obj.role_scopes.all()
+-            if scope.is_active
+-        }
++        roles = {scope.get_role_display() for scope in obj.role_scopes.all() if scope.is_active}
+         return "、".join(sorted(roles)) or "—"
+ 
+     @admin.display(description="WMS 数据范围")
+@@ -497,9 +487,7 @@ class UserAdmin(DjangoUserAdmin):
+         if not obj or not obj.pk:
+             return "保存角色范围后自动同步"
+         names = sorted(
+-            obj.groups.filter(name__in=CANONICAL_ROLE_GROUP_NAMES).values_list(
+-                "name", flat=True
+-            )
++            obj.groups.filter(name__in=CANONICAL_ROLE_GROUP_NAMES).values_list("name", flat=True)
+         )
+         return "、".join(names) or "未分配（保存角色范围后自动同步）"
+ 
+@@ -583,9 +571,7 @@ class GroupAdmin(DjangoGroupAdmin):
+ 
+     def save_model(self, request, obj, form, change):
+         request._wms_group_auth_before = (
+-            _group_authorization_snapshot(Group.objects.get(pk=obj.pk))
+-            if change and obj.pk
+-            else {}
++            _group_authorization_snapshot(Group.objects.get(pk=obj.pk)) if change and obj.pk else {}
+         )
+         super().save_model(request, obj, form, change)
+ 
+@@ -718,9 +704,7 @@ class SystemLogAdmin(admin.ModelAdmin):
+     # 展示操作内容的简短摘要（简化展示）
+     def get_queryset(self, request):
+         queryset = super().get_queryset(request)
+-        return queryset.annotate(
+-            short_content=models.functions.Substr("content", 1, 50)
+-        )
++        return queryset.annotate(short_content=models.functions.Substr("content", 1, 50))
+ 
+ 
+ @admin.register(AuditEvent)
+diff --git a/allapp/inbound/excel_import.py b/allapp/inbound/excel_import.py
+index 0f51f43..a43916c 100644
+--- a/allapp/inbound/excel_import.py
++++ b/allapp/inbound/excel_import.py
+@@ -12,6 +12,7 @@ from openpyxl.utils import get_column_letter
+ from openpyxl.workbook.defined_name import DefinedName
+ from openpyxl.worksheet.datavalidation import DataValidation
+ 
++from allapp.core.xlsx_safety import validate_xlsx_archive
+ from allapp.products.models import Product, ProductPackage
+ 
+ from .services import no_order_items_hash
+@@ -123,9 +124,7 @@ def _write_data_sheet(sheet):
+             fgColor="DC2626" if header in REQUIRED_VALUE_HEADERS else "1D4ED8",
+         )
+         cell.alignment = Alignment(horizontal="center", vertical="center")
+-        sheet.column_dimensions[get_column_letter(index)].width = (
+-            30 if header == "商品名称" else 18
+-        )
++        sheet.column_dimensions[get_column_letter(index)].width = 30 if header == "商品名称" else 18
+     for row_number in range(2, MAX_IMPORT_ROWS + 2):
+         for header in ("货主商品编码", "商品名称", "收货单位代码", "批次号"):
+             column = HEADERS.index(header) + 1
+@@ -160,8 +159,7 @@ def _write_reference_sheet(sheet, products):
+         product_codes.append(product.code)
+         unit_rows = [(product.base_uom, Decimal("1"))]
+         unit_rows.extend(
+-            (package.uom, Decimal(package.qty_in_base))
+-            for package in product.packages.all()
++            (package.uom, Decimal(package.qty_in_base)) for package in product.packages.all()
+         )
+         seen_units = set()
+         for uom, multiplier in unit_rows:
+@@ -194,9 +192,7 @@ def _write_reference_sheet(sheet, products):
+         cell.fill = PatternFill("solid", fgColor="475569")
+         sheet.column_dimensions[get_column_letter(column)].width = 20
+     sheet.freeze_panes = "A2"
+-    sheet.auto_filter.ref = (
+-        f"A1:{get_column_letter(len(headers))}{max(1, row_number - 1)}"
+-    )
++    sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{max(1, row_number - 1)}"
+     return product_codes, sorted(uom_codes)
+ 
+ 
+@@ -253,20 +249,18 @@ def _read_upload(uploaded_file):
+     if len(data) > MAX_IMPORT_FILE_SIZE:
+         raise InboundExcelFileError("Excel 文件不能超过 5 MB。")
+     try:
+-        return data, load_workbook(io.BytesIO(data), data_only=False, read_only=False)
++        return data, load_workbook(
++            io.BytesIO(validate_xlsx_archive(data)), data_only=False, read_only=False
++        )
+     except Exception as exc:
+-        raise InboundExcelFileError(
+-            "Excel 文件无法解析，请重新下载标准模板填写。"
+-        ) from exc
++        raise InboundExcelFileError("Excel 文件无法解析，请重新下载标准模板填写。") from exc
+ 
+ 
+ def _metadata(workbook):
+     if "_meta" not in workbook.sheetnames:
+         raise InboundExcelFileError("文件不是系统生成的无订单收货模板。")
+     values = {}
+-    for key, value in workbook["_meta"].iter_rows(
+-        min_col=1, max_col=2, values_only=True
+-    ):
++    for key, value in workbook["_meta"].iter_rows(min_col=1, max_col=2, values_only=True):
+         if key:
+             values[str(key)] = value
+     if (
+@@ -347,9 +341,7 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
+     unknown_headers = [header for header in nonempty_headers if header not in HEADERS]
+     if unknown_headers:
+         raise InboundExcelFileError(f"模板存在未知列：{unknown_headers}")
+-    header_columns = {
+-        header: raw_headers.index(header) + 1 for header in nonempty_headers
+-    }
++    header_columns = {header: raw_headers.index(header) + 1 for header in nonempty_headers}
+ 
+     products = _active_products(owner.id)
+     product_map = {product.code.strip().upper(): product for product in products}
+@@ -359,14 +351,9 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
+     nonempty_count = 0
+ 
+     for excel_row in range(2, sheet.max_row + 1):
+-        cells = {
+-            header: sheet.cell(excel_row, column)
+-            for header, column in header_columns.items()
+-        }
++        cells = {header: sheet.cell(excel_row, column) for header, column in header_columns.items()}
+         import_cells = {
+-            header: cell
+-            for header, cell in cells.items()
+-            if header not in IGNORED_VALUE_HEADERS
++            header: cell for header, cell in cells.items() if header not in IGNORED_VALUE_HEADERS
+         }
+         if all(_text(cell.value) == "" for cell in import_cells.values()):
+             continue
+@@ -431,9 +418,7 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
+             unit_map = {product.base_uom.code.strip().upper(): Decimal("1")}
+             for package in product.packages.all():
+                 if package.is_active and package.uom.is_active:
+-                    unit_map[package.uom.code.strip().upper()] = Decimal(
+-                        package.qty_in_base
+-                    )
++                    unit_map[package.uom.code.strip().upper()] = Decimal(package.qty_in_base)
+             multiplier = unit_map.get(uom_code)
+             if uom_code and multiplier is None:
+                 _row_error(
+@@ -453,9 +438,7 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
+                     )
+ 
+             if product.batch_control and not lot_no:
+-                _row_error(
+-                    errors, excel_row, "批次号", "该商品启用批次管理，批次号不能为空"
+-                )
++                _row_error(errors, excel_row, "批次号", "该商品启用批次管理，批次号不能为空")
+             if not product.batch_control and lot_no:
+                 _row_error(errors, excel_row, "批次号", "该商品未启用批次管理，请留空")
+             if product.expiry_control:
+@@ -548,10 +531,6 @@ def load_preview_credentials(token):
+             max_age=PREVIEW_TOKEN_MAX_AGE,
+         )
+     except signing.SignatureExpired as exc:
+-        raise InboundExcelFileError(
+-            "预览已超过 30 分钟，请重新上传 Excel 校验。"
+-        ) from exc
++        raise InboundExcelFileError("预览已超过 30 分钟，请重新上传 Excel 校验。") from exc
+     except signing.BadSignature as exc:
+-        raise InboundExcelFileError(
+-            "预览凭证无效或已被篡改，请重新上传 Excel 校验。"
+-        ) from exc
++        raise InboundExcelFileError("预览凭证无效或已被篡改，请重新上传 Excel 校验。") from exc
+diff --git a/allapp/inbound/export_print.py b/allapp/inbound/export_print.py
+index 4fa5ddd..fbb5c1a 100644
+--- a/allapp/inbound/export_print.py
++++ b/allapp/inbound/export_print.py
+@@ -1,8 +1,7 @@
+ from django.http import HttpResponse
+ from django.views.generic import DetailView
+-from django.contrib.auth import get_user_model
+-from rest_framework_simplejwt.tokens import AccessToken
+ 
++from allapp.core.print_tickets import user_from_print_ticket
+ from allapp.inbound.permissions import can_view_receive_tasks, scoped_receive_tasks
+ from allapp.tasking.models import WmsTask
+ 
+@@ -11,7 +10,7 @@ class ReceiveTaskPrintView(DetailView):
+     """
+     收货任务打印页面（PC + PDA）
+     - PC：已登录 session 直接打印
+-    - PDA：用 ?token=<access> 认证（window.open/openURL 不带 Authorization 头）
++    - PDA：用 ?ticket=<document-ticket> 认证（window.open/openURL 不带 Authorization 头）
+     """
+ 
+     model = WmsTask
+@@ -26,16 +25,12 @@ class ReceiveTaskPrintView(DetailView):
+             return super().dispatch(request, *args, **kwargs)
+ 
+         # 2) PDA: query token
+-        token = request.GET.get("token") or request.GET.get("access")
++        token = request.GET.get("ticket")
+         if not token:
+             return HttpResponse("Unauthorized: missing token", status=401)
+ 
+         try:
+-            at = AccessToken(token)
+-            user_id = at.get("user_id")
+-            if not user_id:
+-                return HttpResponse("Unauthorized: invalid token", status=401)
+-            user = get_user_model().objects.get(id=user_id)
++            user = user_from_print_ticket(token, request.path)
+             request.user = user
+         except Exception:
+             return HttpResponse("Unauthorized: invalid token", status=401)
+diff --git a/allapp/outbound/export_print.py b/allapp/outbound/export_print.py
+index f2db473..b094910 100644
+--- a/allapp/outbound/export_print.py
++++ b/allapp/outbound/export_print.py
+@@ -2,15 +2,14 @@ from __future__ import annotations
+ 
+ from decimal import Decimal
+ 
+-from django.contrib.auth import get_user_model
+ from django.db.models import DecimalField, ExpressionWrapper, F, Sum
+ from django.http import HttpResponse
+ from django.shortcuts import render
+ from django.utils import timezone
+-from rest_framework_simplejwt.tokens import AccessToken
+ 
+ from allapp.accounts.audit import record_audit_event
+ from allapp.core.models import PrintConfig
++from allapp.core.print_tickets import user_from_print_ticket
+ from allapp.core.printing import normalize_print_css
+ from allapp.outbound.authz import (
+     strict_pick_queryset,
+@@ -104,9 +103,9 @@ def _money_to_rmb_upper(amount: Decimal) -> str:
+ 
+ def pick_task_print(request, task_id: int):
+     """拣货任务打印页（给 PDA 打开用，打印“出库单格式”）。
+-    MVP：用 ?token=<access> 认证（因为 window.open/openURL 不带 Authorization 头）。
++    MVP：用 ?ticket=<document-ticket> 认证（因为 window.open/openURL 不带 Authorization 头）。
+     """
+-    token = request.GET.get("token") or request.GET.get("access")
++    token = request.GET.get("ticket")
+ 
+     # 允许两种方式：
+     # 1) 已有 session 登录（后台/PC）
+@@ -115,13 +114,7 @@ def pick_task_print(request, task_id: int):
+         if not token:
+             return HttpResponse("Unauthorized: missing token", status=401)
+         try:
+-            at = AccessToken(token)
+-            user_id = at.get("user_id")
+-            if not user_id:
+-                return HttpResponse("Unauthorized: invalid token", status=401)
+-            user = get_user_model().objects.get(id=user_id)
+-            if not user.is_active:
+-                return HttpResponse("Unauthorized: inactive user", status=401)
++            user = user_from_print_ticket(token, request.path)
+             request.user = user
+         except Exception:
+             return HttpResponse("Unauthorized: invalid token", status=401)
+@@ -153,9 +146,7 @@ def pick_task_print(request, task_id: int):
+         .first()
+     )
+     if not tl:
+-        return HttpResponse(
+-            "Bad Request: pick task has no OutboundOrderLine binding", status=400
+-        )
++        return HttpResponse("Bad Request: pick task has no OutboundOrderLine binding", status=400)
+ 
+     try:
+         ol = OutboundOrderLine.objects.select_related(
+@@ -252,9 +243,8 @@ def pick_task_print(request, task_id: int):
+ # from decimal import Decimal
+ # from django.http import HttpResponse
+ # from django.shortcuts import render
+-# from django.contrib.auth import get_user_model
+-# from django.utils import timezone
+-# from rest_framework_simplejwt.tokens import AccessToken
++# # from django.utils import timezone
++# from allapp.core.print_tickets import user_from_print_ticket
+ #
+ # from allapp.tasking.models import WmsTask, WmsTaskLine
+ # from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+@@ -263,9 +253,9 @@ def pick_task_print(request, task_id: int):
+ # def pick_task_print(request, task_id: int):
+ #     """
+ #     拣货任务打印页（给 PDA 打开用）
+-#     MVP：用 ?token=<access> 认证（因为 window.open/openURL 不带 Authorization 头）
++#     MVP：用 ?ticket=<document-ticket> 认证（因为 window.open/openURL 不带 Authorization 头）
+ #     """
+-#     token = request.GET.get("token") or request.GET.get("access")
++#     token = request.GET.get("ticket")
+ #
+ #     # 允许两种方式：
+ #     # 1) 已有 session 登录（后台/PC）
+@@ -300,7 +290,8 @@ def pick_task_print(request, task_id: int):
+ #     # --- 关键：找到对应 OutboundOrder ---
+ #     order = None
+ #
+-#     # 1) 优先用 task.source_pk（你 outbound/services.py 已经 canonical 写了 source_model=outboundorder, source_pk=str(order.pk)）
++# # 1) 优先用 task.source_pk（你 outbound/services.py 已经 canonical 写了 source_model=outboundorder,
++# source_pk=str(order.pk)）
+ #     if task.source_pk:
+ #         try:
+ #             order = (
+@@ -323,7 +314,8 @@ def pick_task_print(request, task_id: int):
+ #             try:
+ #                 ol = (
+ #                     OutboundOrderLine.objects
+-#                     .select_related("order", "order__owner", "order__warehouse", "order__created_by", "order__approved_by_warehouse")
++# .select_related("order", "order__owner", "order__warehouse", "order__created_by",
++# "order__approved_by_warehouse")
+ #                     .get(pk=tl.src_id)
+ #                 )
+ #                 order = ol.order
+@@ -331,7 +323,7 @@ def pick_task_print(request, task_id: int):
+ #                 order = None
+ #
+ #     if order is None:
+-#         return HttpResponse("Bad Request: cannot resolve outbound order for this pick task", status=400)
++# return HttpResponse("Bad Request: cannot resolve outbound order for this pick task", status=400)
+ #
+ #     # --- 要打印的“头部字段” ---
+ #     receiver_name = order.contact or ""
+@@ -371,9 +363,9 @@ def pick_task_print(request, task_id: int):
+ # def pick_task_print(request, task_id: int):
+ #     """
+ #     拣货任务打印页（给 PDA 打开用）
+-#     MVP：用 ?token=<access> 认证（因为 window.open/openURL 不带 Authorization 头）
++#     MVP：用 ?ticket=<document-ticket> 认证（因为 window.open/openURL 不带 Authorization 头）
+ #     """
+-#     token = request.GET.get("token") or request.GET.get("access")
++#     token = request.GET.get("ticket")
+ #
+ #     # 允许两种方式：
+ #     # 1) 已有 session 登录（后台/PC）
+diff --git a/allapp/pos/services.py b/allapp/pos/services.py
+index fb87a1f..84a1a8d 100644
+--- a/allapp/pos/services.py
++++ b/allapp/pos/services.py
+@@ -263,13 +263,17 @@ def _cash_customer(owner_id, user):
+     return Customer.objects.create(owner_id=owner_id, code="CASH", name="散客", salesperson=user)
+ 
+ 
+-def _load_products(items):
++def _load_products(items, warehouse_id):
+     product_ids = [item["product_id"] for item in items]
+     products = {
+         product.id: product
+-        for product in Product.objects.filter(id__in=product_ids, is_active=True).select_related(
+-            "owner", "base_uom"
+-        )
++        for product in Product.objects.filter(
++            id__in=product_ids,
++            is_active=True,
++            pk__in=InventoryDetail.objects.filter(warehouse_id=warehouse_id, is_active=True).values(
++                "product_id"
++            ),
++        ).select_related("owner", "base_uom")
+     }
+     missing = [product_id for product_id in product_ids if product_id not in products]
+     if missing:
+@@ -468,6 +472,8 @@ def _payment_summary_from_lines(payment_lines, total_amount):
+ 
+ def _normalize_refunds(refunds, total_amount):
+     refunds = refunds or []
++    if not refunds and total_amount == ZERO:
++        return []
+     if not refunds:
+         _error("refunds", "退货必须填写退款方式和退款金额。")
+     valid_methods = {choice.value for choice in PosPayment.Method}
+@@ -1269,17 +1275,66 @@ def result_for_return(return_order):
+ 
+ 
+ @transaction.atomic
+-def create_customer_repayment(*, user, customer_id, amount, method, reference_no="", remark=""):
++def create_customer_repayment(
++    *, user, customer_id, amount, method, reference_no="", remark="", idempotency_key=""
++):
+     warehouse_id = getattr(user, "warehouse_id", None)
+     if not warehouse_id:
+         raise ValidationError("当前用户未绑定仓库(warehouse)，无法记录客户还款。")
+ 
+-    customer = PosCustomer.objects.filter(
+-        id=customer_id, warehouse_id=warehouse_id, is_active=True
+-    ).first()
++    lock_warehouses_for_inventory_write(warehouse_id)
++    customer = (
++        PosCustomer.objects.select_for_update()
++        .filter(id=customer_id, warehouse_id=warehouse_id, is_active=True)
++        .first()
++    )
+     if not customer:
+         _error("customer_id", "客户不存在。")
+ 
++    request_key = (idempotency_key or "").strip()
++    reference_no = (reference_no or "").strip()
++    if request_key:
++        if len(request_key) > 100:
++            _error("idempotency_key", "还款请求标识过长。")
++        request_key = "key:" + request_key
++    elif reference_no:
++        request_key = "reference:" + reference_no
++    else:
++        _error("idempotency_key", "请更新客户端并提供稳定的还款请求标识。")
++    fingerprint = hashlib.sha256(
++        json.dumps(
++            {
++                "customer_id": customer.id,
++                "cashier_id": user.pk,
++                "amount": str(_money(amount)),
++                "method": (method or "").strip().upper(),
++                "reference_no": reference_no,
++                "remark": (remark or "").strip(),
++            },
++            sort_keys=True,
++        ).encode()
++    ).hexdigest()
++    existing = PosCustomerRepayment.objects.filter(
++        warehouse_id=warehouse_id,
++        pos_customer=customer,
++        idempotency_key=request_key,
++    ).first()
++    if existing:
++        if existing.idempotency_fingerprint != fingerprint:
++            _error("idempotency_key", "同一还款请求标识对应的内容不一致。")
++        if existing.status != PosCustomerRepayment.Status.COMPLETED:
++            _error("idempotency_key", "原还款已经撤销，不能重复提交。")
++        audit = PosAuditLog.objects.get(
++            action=PosAuditLog.Action.REPAYMENT,
++            metadata__repayment_id=existing.pk,
++        )
++        return {
++            "repayment": existing,
++            "customer": customer,
++            "debt_before": _money(audit.metadata["debt_before"]),
++            "debt_after": _money(audit.metadata["debt_after"]),
++        }
++
+     shift = current_shift_for_user(user, for_update=True)
+     if not shift:
+         raise ValidationError("当前收银员没有进行中的 POS 班次，请先开班。")
+@@ -1299,6 +1354,8 @@ def create_customer_repayment(*, user, customer_id, amount, method, reference_no
+ 
+     repayment = PosCustomerRepayment.objects.create(
+         repayment_no=_make_repayment_no(),
++        idempotency_key=request_key,
++        idempotency_fingerprint=fingerprint,
+         warehouse_id=warehouse_id,
+         pos_customer=customer,
+         shift=shift,
+@@ -1407,7 +1464,7 @@ def _create_pos_sale_once(
+     if not shift:
+         raise ValidationError("当前收银员没有进行中的 POS 班次，请先开班。")
+ 
+-    products = _load_products(items)
++    products = _load_products(items, warehouse_id)
+     normalized_items, qty_by_product = _validate_prices_and_shape(items, products)
+     _validate_stock(qty_by_product, products, warehouse_id, zone_type=stock_zone_type)
+ 
+@@ -1665,6 +1722,17 @@ def _create_pos_return_once(
+ 
+     total_amount = _money(sum((line["amount"] for line in normalized_lines), ZERO))
+     refund_lines = _normalize_refunds(refunds, total_amount)
++    credit_refund = sum(
++        (line["amount"] for line in refund_lines if line["method"] == PosPayment.Method.CREDIT),
++        ZERO,
++    )
++    if credit_refund and sale.pos_customer_id:
++        PosCustomer.objects.select_for_update().get(pk=sale.pos_customer_id)
++        if credit_refund > customer_pos_debt_balance(
++            customer_id=sale.pos_customer_id,
++            warehouse_id=warehouse_id,
++        ):
++            _error("refunds", "赊销退款不能超过未还欠款，已还部分请使用实际退款方式。")
+     now = timezone.now()
+     return_order = PosReturn.objects.create(
+         return_no=_make_return_no(now),
+@@ -1768,6 +1836,17 @@ def _void_pos_sale_once(*, sale_id, warehouse_id, user, reason=""):
+     if not (reason or "").strip():
+         _error("reason", "POS 作废必须填写原因。")
+ 
++    if sale.pos_customer_id and _sale_credit_amount(sale) > ZERO:
++        # Repayments are customer-level: there is no sale-level allocation yet.
++        # Fail closed rather than guessing which sale the received cash settled.
++        PosCustomer.objects.select_for_update().get(pk=sale.pos_customer_id)
++        if PosCustomerRepayment.objects.filter(
++            pos_customer_id=sale.pos_customer_id,
++            warehouse_id=warehouse_id,
++            status=PosCustomerRepayment.Status.COMPLETED,
++        ).exists():
++            raise ValidationError("该客户已有赊销还款，不能直接作废；请先完成关联退款或冲销。")
++
+     _restore_stock_from_sale(sale, user, reason)
+     payment = PosPayment.objects.select_for_update().get(sale=sale)
+     payment.status = PosPayment.Status.VOIDED
+diff --git a/allapp/pos/views.py b/allapp/pos/views.py
+index 8425592..292e40c 100644
+--- a/allapp/pos/views.py
++++ b/allapp/pos/views.py
+@@ -128,10 +128,11 @@ class HasPosShiftSupervisorPermission(BasePermission):
+ 
+ class QueryTokenAuthentication(JWTAuthentication):
+     def authenticate(self, request):
+-        token = request.query_params.get("token") or request.query_params.get("access")
+-        if token:
+-            validated_token = self.get_validated_token(token)
+-            return self.get_user(validated_token), validated_token
++        from allapp.core.print_tickets import user_from_print_ticket
++
++        ticket = request.query_params.get("ticket")
++        if ticket:
++            return user_from_print_ticket(ticket, request.path), None
+         return super().authenticate(request)
+ 
+ 
+@@ -142,7 +143,7 @@ class PosProductPagination(PageNumberPagination):
+ 
+ 
+ class PosProductListApi(generics.ListAPIView):
+-    permission_classes = [permissions.IsAuthenticated]
++    permission_classes = [permissions.IsAuthenticated, HasPosCheckoutPermission]
+     serializer_class = PosProductSerializer
+     pagination_class = PosProductPagination
+ 
+@@ -174,6 +175,9 @@ class PosProductListApi(generics.ListAPIView):
+ 
+         queryset = Product.objects.filter(
+             is_active=True,
++            pk__in=InventoryDetail.objects.filter(warehouse_id=warehouse_id, is_active=True).values(
++                "product_id"
++            ),
+         ).select_related("base_uom")
+         search = (self.request.query_params.get("search") or "").strip()
+         barcode = (self.request.query_params.get("barcode") or "").strip()
+diff --git a/allapp/products/identifier_excel.py b/allapp/products/identifier_excel.py
+index b631961..353ad61 100644
+--- a/allapp/products/identifier_excel.py
++++ b/allapp/products/identifier_excel.py
+@@ -9,6 +9,8 @@ from django.db import transaction
+ from django.utils import timezone
+ from openpyxl import Workbook, load_workbook
+ 
++from allapp.core.xlsx_safety import MAX_COMPRESSED_BYTES, validate_xlsx_archive
++
+ from .identifier_services import (
+     IdentifierConcurrencyError,
+     add_external_identifier,
+@@ -87,6 +89,11 @@ def build_identifier_template():
+     for sheet in (barcode, external):
+         sheet.freeze_panes = "A2"
+         sheet.auto_filter.ref = sheet.dimensions
++    for sheet in workbook.worksheets:
++        for row in sheet.iter_rows():
++            for cell in row:
++                if isinstance(cell.value, str):
++                    cell.data_type = "s"
+     stream = io.BytesIO()
+     workbook.save(stream)
+     return stream.getvalue()
+@@ -133,6 +140,11 @@ def build_identifier_export(owner):
+                 record.is_active,
+             ]
+         )
++    for sheet in workbook.worksheets:
++        for row in sheet.iter_rows():
++            for cell in row:
++                if isinstance(cell.value, str):
++                    cell.data_type = "s"
+     stream = io.BytesIO()
+     workbook.save(stream)
+     return stream.getvalue()
+@@ -151,7 +163,8 @@ def _rows(sheet, headers):
+ @transaction.atomic
+ def import_identifier_workbook(uploaded_file, *, owner):
+     try:
+-        workbook = load_workbook(uploaded_file, data_only=True)
++        data = validate_xlsx_archive(uploaded_file.read(MAX_COMPRESSED_BYTES + 1))
++        workbook = load_workbook(io.BytesIO(data), data_only=True)
+     except Exception as exc:
+         raise IdentifierExcelError("无法读取标识维护 Excel 文件。") from exc
+     missing = {BARCODE_SHEET, EXTERNAL_SHEET} - set(workbook.sheetnames)
+diff --git a/allapp/tasking/admin.py b/allapp/tasking/admin.py
+index d14e760..64b518a 100755
+--- a/allapp/tasking/admin.py
++++ b/allapp/tasking/admin.py
+@@ -1,62 +1,85 @@
+ # allapp/tasking/admin.py
+ from __future__ import annotations
+-import logging
+-
+-logger = logging.getLogger(__name__)
+ 
+-from django.apps import apps
+-from django.db.models import OneToOneRel
+-from .counting import create_count_task
+-from django.shortcuts import redirect, render, get_object_or_404
+-from django.db import models
+-from allapp.core.admin_widgets import TrimDecimalWidget
+-from allapp.core.choices import ZoneType
+-from allapp.core.admin_mixins import DecimalPrettyInitialMixin
+-from allapp.outbound import services as ob_services
++import logging
+ from collections import OrderedDict
+ from dataclasses import dataclass
+-from typing import Optional, List, Dict, Type
+-from typing_extensions import OrderedDict
++from typing import Dict, List, Optional, Type
++from urllib.parse import urlencode
+ 
++from django import forms
++from django.apps import apps
++from django.contrib import admin, messages
+ from django.contrib.admin.widgets import AdminDateWidget
+ from django.contrib.auth import get_user_model
+ from django.contrib.contenttypes.models import ContentType
+-from django.core.exceptions import ValidationError, PermissionDenied, ObjectDoesNotExist
+-from django.db.models import Count, Q, Sum, Exists, OuterRef
++from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
++from django.db import models, transaction
++from django.db.models import Count, Exists, OneToOneRel, OuterRef, Q, Sum
+ from django.forms import modelform_factory
+ from django.forms.models import BaseInlineFormSet
+-from django.shortcuts import redirect, get_object_or_404
++from django.shortcuts import get_object_or_404, redirect, render
++from django.urls import path, reverse
++from django.utils import timezone
+ from django.utils.html import format_html
++from django.utils.translation import gettext_lazy as _
+ 
++from allapp.accounts.access import AccessScope
++from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
++from allapp.core.admin_mixins import DecimalPrettyInitialMixin
++from allapp.core.admin_widgets import TrimDecimalWidget
++from allapp.core.choices import ZoneType
++from allapp.core.utils.log_context import build_log_payload
++from allapp.inventory.services import post_task
++from allapp.locations.models import Location, Subwarehouse, Warehouse
++from allapp.outbound import services as ob_services
+ from allapp.products.identifier_lookup import UnifiedProductAdminSearchMixin
+-from allapp.tasking.plugins.handlers import get_posting_handler
+-from . import services  # 放着 save_receiving_snapshot
++from allapp.products.models import Product
+ from allapp.tasking import services as svc  # 内含 publish_using_inline / publish_task
+-from allapp.inventory.services import post_task
+-from .models import (ReviewTaskExtra,ReviewLineExtra, AdjustLineExtra,  AdjustTaskExtra, CountLineExtra, CountTaskExtra,  DispatchLineExtra, DispatchTaskExtra,
+-    LoadLineExtra, LoadTaskExtra,PackLineExtra, PackTaskExtra, PickLineExtra, PickTaskExtra, PutawayLineExtra,
+-    PutawayTaskExtra,QCLineExtra,QCTaskExtra,ReceiveLineExtra,ReceiveTaskExtra,RelocLineExtra,RelocTaskExtra,
+-    ReplenishLineExtra, ReplenishTaskExtra, ReplenishmentPolicy, ReplenishmentRequest,
+-    RelocationRequest, RelocationRequestLine, RelocationReservation,
+-    TaskAssignment, TaskScanLog, TaskStatusLog, WmsTask, WmsTaskLine,)
+-
+-from django.db import transaction
+-from urllib.parse import urlencode
+-from .models import WmsTask, WmsTaskLine
++from allapp.tasking.plugins.handlers import get_posting_handler
+ 
+-from django.contrib import admin, messages
++from . import services  # 放着 save_receiving_snapshot
++from .admin_scope import TaskChildAdminScopeMixin
++from .counting import create_count_task
++from .models import (
++    AdjustLineExtra,
++    AdjustTaskExtra,
++    CountLineExtra,
++    CountTaskExtra,
++    DispatchLineExtra,
++    DispatchTaskExtra,
++    LoadLineExtra,
++    LoadTaskExtra,
++    PackLineExtra,
++    PackTaskExtra,
++    PickLineExtra,
++    PickTaskExtra,
++    PutawayLineExtra,
++    PutawayTaskExtra,
++    QCLineExtra,
++    QCTaskExtra,
++    ReceiveLineExtra,
++    ReceiveTaskExtra,
++    RelocationRequest,
++    RelocationRequestLine,
++    RelocationReservation,
++    RelocLineExtra,
++    RelocTaskExtra,
++    ReplenishLineExtra,
++    ReplenishmentPolicy,
++    ReplenishmentRequest,
++    ReplenishTaskExtra,
++    ReviewLineExtra,
++    ReviewTaskExtra,
++    TaskAssignment,
++    TaskScanLog,
++    TaskStatusLog,
++    WmsTask,
++    WmsTaskLine,
++)
+ 
+-from django.urls import path, reverse
+-from django.utils.translation import gettext_lazy as _
+-from allapp.locations.models import Warehouse, Location, Subwarehouse
+-from allapp.products.models import Product
+-from django import forms
+-from django.utils import timezone
++logger = logging.getLogger(__name__)
+ 
+-from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
+-from allapp.tasking.models import WmsTask  # 确保导入你的模型
+-from allapp.core.utils.log_context import build_log_payload
+-from allapp.accounts.access import AccessScope
+ 
+ def get_line_extra_generic(tl):
+     """
+@@ -72,25 +95,22 @@ def get_line_extra_generic(tl):
+     # ① 按 task_type → 模型名（只写你项目里真实存在的名字）
+     MAP = {
+         # 收货 / 上架 / 拣货 / 复核 / 打包 / 装车 / 发运 / 补货 / 盘点 / 调整
+-        getattr(task.__class__.TaskType, "RECEIPT", None):     "ReceiveLineExtra",
+-        getattr(task.__class__.TaskType, "PUTAWAY", None):     "PutawayLineExtra",
+-        getattr(task.__class__.TaskType, "PICK", None):        "PickLineExtra",
+-        getattr(task.__class__.TaskType, "REVIEW", None):      "ReviewLineExtra",
+-        getattr(task.__class__.TaskType, "PACK", None):        "PackLineExtra",
+-        getattr(task.__class__.TaskType, "LOAD", None):        "LoadLineExtra",
+-        getattr(task.__class__.TaskType, "DISPATCH", None):    "DispatchLineExtra",
+-        getattr(task.__class__.TaskType, "REPLEN", None):      "ReplenishLineExtra",
+-        getattr(task.__class__.TaskType, "COUNT", None):       "CountLineExtra",
+-        getattr(task.__class__.TaskType, "ADJUST", None):      "AdjustLineExtra",
++        getattr(task.__class__.TaskType, "RECEIPT", None): "ReceiveLineExtra",
++        getattr(task.__class__.TaskType, "PUTAWAY", None): "PutawayLineExtra",
++        getattr(task.__class__.TaskType, "PICK", None): "PickLineExtra",
++        getattr(task.__class__.TaskType, "REVIEW", None): "ReviewLineExtra",
++        getattr(task.__class__.TaskType, "PACK", None): "PackLineExtra",
++        getattr(task.__class__.TaskType, "LOAD", None): "LoadLineExtra",
++        getattr(task.__class__.TaskType, "DISPATCH", None): "DispatchLineExtra",
++        getattr(task.__class__.TaskType, "REPLEN", None): "ReplenishLineExtra",
++        getattr(task.__class__.TaskType, "COUNT", None): "CountLineExtra",
++        getattr(task.__class__.TaskType, "ADJUST", None): "AdjustLineExtra",
+     }
+     model_name = MAP.get(ttype)
+     if model_name:
+         try:
+             Model = apps.get_model("allapp.tasking", model_name)
+-            extra = (Model.objects
+-                     .select_related("line", "line__task")
+-                     .filter(line_id=tl.id)
+-                     .first())
++            extra = Model.objects.select_related("line", "line__task").filter(line_id=tl.id).first()
+             if extra:
+                 return extra
+         except LookupError:
+@@ -111,9 +131,12 @@ def get_line_extra_generic(tl):
+ 
+     return None
+ 
++
+ class CountWizardForm(forms.Form):
+     # —— 必填
+-    warehouse = forms.ModelChoiceField(label="仓库", queryset=Warehouse.objects.all(), required=True)
++    warehouse = forms.ModelChoiceField(
++        label="仓库", queryset=Warehouse.objects.all(), required=True
++    )
+     owner = forms.ModelChoiceField(label="货主", queryset=Owner.objects.all(), required=True)
+     scope = forms.ChoiceField(
+         label="盘点范围",
+@@ -126,16 +149,24 @@ class CountWizardForm(forms.Form):
+ 
+     # —— 细化筛选（全可选，按需要组合）
+     zone_type = forms.ChoiceField(
+-        label="库区",
+-        choices=ZoneType.choices,  # 直接从 IntegerChoices 获取 choices
+-        required=False
++        label="库区", choices=ZoneType.choices, required=False  # 直接从 IntegerChoices 获取 choices
++    )
++    location = forms.ModelChoiceField(
++        label="指定库位", queryset=Location.objects.all(), required=False
++    )
++    location_prefix = forms.CharField(
++        label="库位前缀", required=False, help_text="例如 A-01-；匹配 Location.code/name 前缀"
++    )
++    product = forms.ModelChoiceField(
++        label="商品（SKU）", queryset=Product.objects.all(), required=False
+     )
+-    location = forms.ModelChoiceField(label="指定库位", queryset=Location.objects.all(), required=False)
+-    location_prefix = forms.CharField(label="库位前缀", required=False, help_text="例如 A-01-；匹配 Location.code/name 前缀")
+-    product = forms.ModelChoiceField(label="商品（SKU）", queryset=Product.objects.all(), required=False)
+     batch_no = forms.CharField(label="批次号", required=False)
+-    exclude_zero_onhand = forms.BooleanField(label="忽略在库为 0 的明细", required=False, initial=True)
+-    max_lines = forms.IntegerField(label="最多生成行数", min_value=1, max_value=10000, initial=1000, required=True)
++    exclude_zero_onhand = forms.BooleanField(
++        label="忽略在库为 0 的明细", required=False, initial=True
++    )
++    max_lines = forms.IntegerField(
++        label="最多生成行数", min_value=1, max_value=10000, initial=1000, required=True
++    )
+     blind = forms.BooleanField(label="盲盘", required=False, initial=True)
+     recount_threshold = forms.DecimalField(
+         label="复盘阈值", min_value=0, decimal_places=4, max_digits=14, initial=0
+@@ -161,9 +192,7 @@ class CountWizardForm(forms.Form):
+         self.fields["subwarehouse"].queryset = Subwarehouse.objects.filter(
+             warehouse_id__in=warehouse_ids
+         )
+-        self.fields["location"].queryset = Location.objects.filter(
+-            warehouse_id__in=warehouse_ids
+-        )
++        self.fields["location"].queryset = Location.objects.filter(warehouse_id__in=warehouse_ids)
+         self.fields["product"].queryset = Product.objects.filter(owner_id__in=owner_ids)
+ 
+     def clean(self):
+@@ -177,9 +206,13 @@ class CountWizardForm(forms.Form):
+             self.add_error("zone_type", "按库区盘点必须指定库区。")
+         warehouse = cd.get("warehouse")
+         owner = cd.get("owner")
+-        if warehouse and owner and not OwnerWarehouseBinding.objects.filter(
+-            warehouse=warehouse, owner=owner, is_active=True
+-        ).exists():
++        if (
++            warehouse
++            and owner
++            and not OwnerWarehouseBinding.objects.filter(
++                warehouse=warehouse, owner=owner, is_active=True
++            ).exists()
++        ):
+             self.add_error("owner", "该货主未授权使用所选仓库。")
+         subwarehouse = cd.get("subwarehouse")
+         if subwarehouse and warehouse and subwarehouse.warehouse_id != warehouse.id:
+@@ -192,11 +225,11 @@ class CountScope(forms.TextInput):
+ 
+ 
+ class CountWizardScope:
+-    WAREHOUSE = "WAREHOUSE"                 # 整个仓库
+-    OWNER = "OWNER"                         # 仓库 + 货主全部
+-    OWNER_PRODUCT = "OWNER_PRODUCT"         # 仓库 + 货主 + SKU
++    WAREHOUSE = "WAREHOUSE"  # 整个仓库
++    OWNER = "OWNER"  # 仓库 + 货主全部
++    OWNER_PRODUCT = "OWNER_PRODUCT"  # 仓库 + 货主 + SKU
+     OWNER_PRODUCT_BATCH = "OWNER_PRODUCT_BATCH"  # 再加批次
+-    LOCATION = "LOCATION"                   # 指定库位（可选再加货主）
++    LOCATION = "LOCATION"  # 指定库位（可选再加货主）
+ 
+ 
+ SCOPE_CHOICES = (
+@@ -222,44 +255,62 @@ LINE_EXTRA_MODEL_MAP = {
+     "COUNT": CountLineExtra,
+ }
+ 
++
+ # ====== 1) 映射：TaskType -> 行级 Extra（rel_attr 按你冻结包里的小写反向名） ======
+ @dataclass
+ class LineExtraEntry:
+     extra_model: Type
+-    rel_attr: str                      # 反向访问器（如 'receivelineextra'）
++    rel_attr: str  # 反向访问器（如 'receivelineextra'）
+     include: Optional[List[str]] = None
+     readonly: Optional[List[str]] = None
+ 
++
+ LINE_EXTRA_REGISTRY: Dict[str, LineExtraEntry] = {
+-    "RECEIVE":  LineExtraEntry(ReceiveLineExtra,  "receivelineextra"),
+-    "PUTAWAY":  LineExtraEntry(PutawayLineExtra,  "putawaylineextra"),
+-    "PICK":     LineExtraEntry(PickLineExtra,     "picklineextra"),
+-    "REVIEW":   LineExtraEntry(ReviewLineExtra,   "reviewlineextra"),
+-    "PACK":     LineExtraEntry(PackLineExtra,     "packlineextra"),
+-    "LOAD":     LineExtraEntry(LoadLineExtra,     "loadlineextra"),
++    "RECEIVE": LineExtraEntry(ReceiveLineExtra, "receivelineextra"),
++    "PUTAWAY": LineExtraEntry(PutawayLineExtra, "putawaylineextra"),
++    "PICK": LineExtraEntry(PickLineExtra, "picklineextra"),
++    "REVIEW": LineExtraEntry(ReviewLineExtra, "reviewlineextra"),
++    "PACK": LineExtraEntry(PackLineExtra, "packlineextra"),
++    "LOAD": LineExtraEntry(LoadLineExtra, "loadlineextra"),
+     "DISPATCH": LineExtraEntry(DispatchLineExtra, "dispatchlineextra"),
+-    "REPLEN":   LineExtraEntry(ReplenishLineExtra,"replenishlineextra"),
+-    "RELOC":    LineExtraEntry(RelocLineExtra,    "reloclineextra"),
++    "REPLEN": LineExtraEntry(ReplenishLineExtra, "replenishlineextra"),
++    "RELOC": LineExtraEntry(RelocLineExtra, "reloclineextra"),
+     "COUNT": LineExtraEntry(
+         CountLineExtra,
+         "countlineextra",
+         include=[
+-            "lot_no", "exp_date", "lpn_no", "qty_counted", "qty_book",
+-            "qty_diff", "count_status", "method", "countorder",
++            "lot_no",
++            "exp_date",
++            "lpn_no",
++            "qty_counted",
++            "qty_book",
++            "qty_diff",
++            "count_status",
++            "method",
++            "countorder",
+         ],
+         readonly=[
+-            "lot_no", "exp_date", "lpn_no", "qty_book", "qty_diff",
+-            "count_status", "method", "countorder",
++            "lot_no",
++            "exp_date",
++            "lpn_no",
++            "qty_book",
++            "qty_diff",
++            "count_status",
++            "method",
++            "countorder",
+         ],
+     ),
+ }
++
++
+ # ====== 2) 工具：自动探测 Extra 模型上指向 WmsTaskLine 的 FK / O2O 字段名 ======
+ def _detect_fk_to_taskline(model):
+     from allapp.tasking.models import WmsTaskLine
++
+     candidates = []
+     for f in model._meta.get_fields():
+         is_o2o = f.get_internal_type() == "OneToOneField"
+-        is_fk  = f.get_internal_type() == "ForeignKey"
++        is_fk = f.get_internal_type() == "ForeignKey"
+         if not (is_o2o or is_fk):
+             continue
+         try:
+@@ -273,14 +324,17 @@ def _detect_fk_to_taskline(model):
+         return candidates[0]
+     raise AssertionError(f"{model.__name__} 未找到指向 WmsTaskLine 的外键/一对一字段")
+ 
++
+ # ====== 3) 统一 select_related（覆盖所有可能的 rel_attr） ======
+ def _select_related_all_extras(qs):
+     for e in LINE_EXTRA_REGISTRY.values():
+         qs = qs.select_related(e.rel_attr)
+     return qs
+ 
++
+ def make_extra_inline(entry):
+     from django.contrib import admin
++
+     BaseInline = admin.StackedInline  # or TabularInline
+     extra_model = entry.extra_model
+ 
+@@ -288,26 +342,35 @@ def make_extra_inline(entry):
+     fk = getattr(entry, "fk_name", None)
+     if not fk:
+         fk = next(
+-            (f.name for f in extra_model._meta.fields
+-             if getattr(getattr(f, "remote_field", None), "model", None) is WmsTaskLine),
++            (
++                f.name
++                for f in extra_model._meta.fields
++                if getattr(getattr(f, "remote_field", None), "model", None) is WmsTaskLine
++            ),
+             "line",
+         )
+ 
+     # —— 计算 include / exclude / readonly —— #
+     default_exclude = (
+-        "line", "id", "pk",
+-        "created_at", "updated_at", "deleted_at",
+-        "created_by", "updated_by", "deleted_by",
++        "line",
++        "id",
++        "pk",
++        "created_at",
++        "updated_at",
++        "deleted_at",
++        "created_by",
++        "updated_by",
++        "deleted_by",
+         "is_deleted",
+     )
+-    fields_cfg   = tuple(entry.include) if entry.include else None
+-    exclude_cfg  = None if fields_cfg else default_exclude
++    fields_cfg = tuple(entry.include) if entry.include else None
++    exclude_cfg = None if fields_cfg else default_exclude
+     readonly_cfg = tuple(entry.readonly) if entry.readonly else ()
+ 
+     class _ExtraInline(BaseInline):
+-        extra       = 0
+-        max_num     = 1
+-        can_delete  = False
++        extra = 0
++        max_num = 1
++        can_delete = False
+ 
+         # —— 没记录时给 1 个空表单 —— #
+         def get_extra(self, request, obj=None, **kwargs):
+@@ -318,9 +381,9 @@ def make_extra_inline(entry):
+                 return 0
+             try:
+                 val = getattr(obj, rel_attr)
+-                if hasattr(val, "exists"):      # 反向 manager（FK）
++                if hasattr(val, "exists"):  # 反向 manager（FK）
+                     return 1 if not val.exists() else 0
+-                return 0 if val else 1          # OneToOne 对象或 None
++                return 0 if val else 1  # OneToOne 对象或 None
+             except Exception:
+                 return 1
+ 
+@@ -332,13 +395,15 @@ def make_extra_inline(entry):
+                 return FormSet
+ 
+             fk_name_local = self.fk_name
+-            model_local   = self.model
++            model_local = self.model
+ 
+             class BoundFormSet(FormSet):
+                 def __init__(self, *args, **kws):
+                     super().__init__(*args, **kws)
+                     try:
+-                        self.queryset = model_local._default_manager.filter(**{fk_name_local: parent_pk})
++                        self.queryset = model_local._default_manager.filter(
++                            **{fk_name_local: parent_pk}
++                        )
+                     except Exception:
+                         # 即使 fk_name 配错，也不要让页面崩；退回默认行为
+                         pass
+@@ -373,9 +438,9 @@ def make_extra_inline(entry):
+             return formfield
+ 
+     # —— 类体外设置依赖外部变量的类属性（避免 NameError） —— #
+-    _ExtraInline.__name__  = f"{extra_model.__name__}Inline"
+-    _ExtraInline.model     = extra_model
+-    _ExtraInline.fk_name   = fk
++    _ExtraInline.__name__ = f"{extra_model.__name__}Inline"
++    _ExtraInline.model = extra_model
++    _ExtraInline.fk_name = fk
+     _ExtraInline.rel_attr_name = entry.rel_attr  # 例如 'reviewlineextra'
+ 
+     if fields_cfg is not None:
+@@ -389,29 +454,37 @@ def make_extra_inline(entry):
+ 
+     return _ExtraInline
+ 
++
+ def is_wh_operator(user):
+     return user.is_superuser or user.has_perm("tasking.claim_task_as_wh_operator")
+ 
++
+ def is_wh_manager(user):
+     return user.is_superuser or user.has_perm("tasking.taskconfirm_as_wh_manager")
+ 
++
+ class ReceiveLineExtraForm(forms.ModelForm):
+     # 明确允许的输入格式；根据你现场习惯可再加 2025/09/14、2025.09.14 等
+     mfg_date = forms.DateField(
+-        label="生产日期", required=False,
+-        input_formats=['%Y-%m-%d', '%Y/%m/%d', '%Y.%m.%d'],
+-        widget=AdminDateWidget
++        label="生产日期",
++        required=False,
++        input_formats=["%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d"],
++        widget=AdminDateWidget,
+     )
+     exp_date = forms.DateField(
+-        label="有效期至", required=False,
+-        input_formats=['%Y-%m-%d', '%Y/%m/%d', '%Y.%m.%d'],
+-        widget=AdminDateWidget
++        label="有效期至",
++        required=False,
++        input_formats=["%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d"],
++        widget=AdminDateWidget,
+     )
+ 
+     class Meta:
+         from allapp.tasking.models import ReceiveLineExtra  # 按你项目路径调整
++
+         model = ReceiveLineExtra
+         exclude = ("line",)
++
++
+ # ========= 共用 Inline =========
+ class TaskAssignmentInlineFormSet(BaseInlineFormSet):
+     def clean(self):
+@@ -448,17 +521,13 @@ class TaskAssignmentInlineFormSet(BaseInlineFormSet):
+                 if qs.exists():
+                     raise ValidationError(f"任务行 #{line.pk} 已被其他记录活动指派。")
+ 
+-        # 头级活动指派唯一性的数据库级兜底（防止只改时间戳绕过）
+-        if active_head_count == 1:
+-            # 找到本任务其他“头级活动指派”
+-            task_id = self.instance.pk if hasattr(self, "instance") else None
+ 
+ class TaskAssignmentInline(admin.TabularInline):
+     model = TaskAssignment
+     extra = 0
+     # autocomplete_fields = ["assignee"]
+     readonly_fields = ["accepted_at", "finished_at"]
+-    fields = ("assignee", "line","accepted_at", "finished_at")
++    fields = ("assignee", "line", "accepted_at", "finished_at")
+     show_change_link = True
+ 
+     formset = TaskAssignmentInlineFormSet
+@@ -479,11 +548,14 @@ class TaskAssignmentInline(admin.TabularInline):
+             kwargs["queryset"] = (
+                 User.objects.filter(is_active=True, is_staff=True)
+                 .filter(
+-                    Q(user_permissions__content_type__app_label=app_label,
+-                      user_permissions__codename=codename)
+-                    |
+-                    Q(groups__permissions__content_type__app_label=app_label,
+-                      groups__permissions__codename=codename)
++                    Q(
++                        user_permissions__content_type__app_label=app_label,
++                        user_permissions__codename=codename,
++                    )
++                    | Q(
++                        groups__permissions__content_type__app_label=app_label,
++                        groups__permissions__codename=codename,
++                    )
+                 )
+                 .distinct()
+             )
+@@ -511,6 +583,7 @@ class TaskAssignmentInline(admin.TabularInline):
+         # 操作员仅能结束自己那条（例如通过动作/服务），不在 inline 里改人
+         return is_wh_manager(request.user)
+ 
++
+ class TaskStatusLogInline(admin.TabularInline):
+     model = TaskStatusLog
+     extra = 0
+@@ -519,6 +592,7 @@ class TaskStatusLogInline(admin.TabularInline):
+     fields = ("old_status", "new_status", "changed_by", "changed_at", "note")
+     ordering = ("-changed_at",)
+ 
++
+ class WmsTaskLineInline(admin.TabularInline):
+     model = WmsTaskLine
+     extra = 0
+@@ -537,7 +611,11 @@ class WmsTaskLineInline(admin.TabularInline):
+ 
+     def get_formset(self, request, obj=None, **kwargs):
+         """给每个行表单挂 extra_form（用整页 POST 绑定），并在保存时把 line 赋回去。"""
+-        task_type = getattr(obj, "task_type", None) or request.POST.get("task_type") or request.GET.get("task_type")
++        task_type = (
++            getattr(obj, "task_type", None)
++            or request.POST.get("task_type")
++            or request.GET.get("task_type")
++        )
+         extra_model = LINE_EXTRA_MODEL_MAP.get(task_type)
+ 
+         BaseFormSet = super().get_formset(request, obj, **kwargs)
+@@ -648,40 +726,51 @@ class WmsTaskLineInline(admin.TabularInline):
+ 
+         return LineWithExtraFormSet
+ 
++
+ class _BaseHeadExtraInline(admin.StackedInline):
+     extra = 0
+     max_num = 1
+     can_delete = True
+ 
++
+ class ReceiveTaskExtraInline(_BaseHeadExtraInline):
+     model = ReceiveTaskExtra
+ 
++
+ class PutawayTaskExtraInline(_BaseHeadExtraInline):
+     model = PutawayTaskExtra
+ 
++
+ class PickTaskExtraInline(_BaseHeadExtraInline):
+     model = PickTaskExtra
+ 
++
+ class ReviewTaskExtraInline(_BaseHeadExtraInline):
+     model = ReviewTaskExtra
+-    fields = ['from_location', 'qty_reviewed', 'qty_picked', 'discrepancy_reason']
++    fields = ["from_location", "qty_reviewed", "qty_picked", "discrepancy_reason"]
+     extra = 1  # 至少显示一个空行
+ 
++
+ class PackTaskExtraInline(_BaseHeadExtraInline):
+     model = PackTaskExtra
+ 
++
+ class LoadTaskExtraInline(_BaseHeadExtraInline):
+     model = LoadTaskExtra
+ 
++
+ class DispatchTaskExtraInline(_BaseHeadExtraInline):
+     model = DispatchTaskExtra
+ 
++
+ class ReplenishTaskExtraInline(_BaseHeadExtraInline):
+     model = ReplenishTaskExtra
+ 
++
+ class RelocTaskExtraInline(_BaseHeadExtraInline):
+     model = RelocTaskExtra
+ 
++
+ class CountTaskExtraInline(_BaseHeadExtraInline):
+     model = CountTaskExtra
+     can_delete = False
+@@ -698,12 +787,15 @@ class CountTaskExtraInline(_BaseHeadExtraInline):
+     )
+     readonly_fields = fields
+ 
++
+ class QCTaskExtraInline(_BaseHeadExtraInline):
+     model = QCTaskExtra
+ 
++
+ class AdjustTaskExtraInline(_BaseHeadExtraInline):
+     model = AdjustTaskExtra
+ 
++
+ _TASK_HEAD_INLINE_MAP = {
+     "RECEIVE": ReceiveTaskExtraInline,
+     "PUTAWAY": PutawayTaskExtraInline,
+@@ -719,11 +811,13 @@ _TASK_HEAD_INLINE_MAP = {
+     "ADJUST": AdjustTaskExtraInline,  # 你模型里若未提供该类型，可忽略
+ }
+ 
++
+ def _err_to_text(e: ValidationError) -> str:
+     if getattr(e, "message_dict", None):
+         return "；".join(f"{k}: {', '.join(map(str, v))}" for k, v in e.message_dict.items())
+     return "；".join(getattr(e, "messages", [str(e)]))
+ 
++
+ # ========= 任务头 Admin =========
+ def _bool_from_post(request, key, default=False):
+     """
+@@ -734,6 +828,7 @@ def _bool_from_post(request, key, default=False):
+         return default
+     return str(val).lower() in {"1", "true", "on", "yes"}
+ 
++
+ def _stats_brief(stats: dict) -> str:
+     """
+     把 publish_* 返回的统计信息做个简短摘要，便于 message_user 呈现
+@@ -755,47 +850,75 @@ def _stats_brief(stats: dict) -> str:
+         return ""
+     return "（" + "，".join(parts) + "）"
+ 
++
+ @admin.register(WmsTask)
+ class WmsTaskAdmin(admin.ModelAdmin):
+     # —— 批量动作：状态流转 + 记录日志 —— #
+     actions_selection_counter = True
+-    actions = ["action_wave_release_pick","action_approve", "action_reject","action_post","action_release", "action_cancel"]
++    actions = [
++        "action_wave_release_pick",
++        "action_approve",
++        "action_reject",
++        "action_post",
++        "action_release",
++        "action_cancel",
++    ]
+     list_display = (
+-        "task_no_clip","task_type", "status", "review_status","posting_status","priority",
+-        "owner", "released_at", "started_at", "finished_at","picked_by",
+-        "lines_count", "qty_plan_total", "qty_done_total","approved_at","posted_at",
++        "task_no_clip",
++        "task_type",
++        "status",
++        "review_status",
++        "posting_status",
++        "priority",
++        "owner",
++        "released_at",
++        "started_at",
++        "finished_at",
++        "picked_by",
++        "lines_count",
++        "qty_plan_total",
++        "qty_done_total",
++        "approved_at",
++        "posted_at",
+     )
+     list_filter = (
+-        "owner", "task_type", "status", "priority",
+-
++        "owner",
++        "task_type",
++        "status",
++        "priority",
+     )
+     search_fields = (
+-        "task_no", "ref_no", "task_type", "source_app", "source_model", "source_pk", "remark",
++        "task_no",
++        "ref_no",
++        "task_type",
++        "source_app",
++        "source_model",
++        "source_pk",
++        "remark",
+     )
+     date_hierarchy = "created_at"
+     ordering = ("-created_at", "-id")
+     list_select_related = ("owner", "warehouse")
+-    autocomplete_fields = ["owner", ]
++    autocomplete_fields = [
++        "owner",
++    ]
+     # inlines = (TaskAssignmentInline, TaskStatusLogInline, WmsTaskLineInline)
+     inlines = []  # 动态决定
+ 
+     formfield_overrides = {
+-        models.CharField: {'widget': forms.TextInput(attrs={'style': 'white-space: nowrap; width: auto;'})},
+-        models.TextField: {'widget': forms.Textarea(attrs={'style': 'white-space: nowrap; width: auto;'})},
++        models.CharField: {
++            "widget": forms.TextInput(attrs={"style": "white-space: nowrap; width: auto;"})
++        },
++        models.TextField: {
++            "widget": forms.Textarea(attrs={"style": "white-space: nowrap; width: auto;"})
++        },
+     }
+ 
+-    class Media:
+-        css = {
+-            'all': ('css/admin_custom.css',)
+-        }
+-
+-
+     @admin.display(description="任务号", ordering="task_no")
+     def task_no_clip(self, obj):
+         # 用 span 包起来，悬停显示完整任务号
+         return format_html(
+-            '<span class="nowrap-ellipsis" title="{}">{}</span>',
+-            obj.task_no, obj.task_no
++            '<span class="nowrap-ellipsis" title="{}">{}</span>', obj.task_no, obj.task_no
+         )
+ 
+     class Media:
+@@ -807,12 +930,37 @@ class WmsTaskAdmin(admin.ModelAdmin):
+             return [TaskAssignmentInline, TaskStatusLogInline, WmsTaskLineInline]  # 你的原有 inline
+         # 操作员：不显示行 Inline（避免看见别人的）
+         return []  # 或直接 []
++
+     readonly_fields = ()
+ 
+     fieldsets = (
+-        ("基本信息", {"fields": ("task_no", "task_type", "status", "priority","owner", "task_group_no", "released_at","remark")}),
+-        ("计划与实际", { "fields": (("planned_start", "planned_end"),("started_at", "finished_at"))}),
+-        ("来源快照", {"classes": ("collapse",),"fields": (("ref_no", "source_app"), ("source_model", "source_pk"))}),)
++        (
++            "基本信息",
++            {
++                "fields": (
++                    "task_no",
++                    "task_type",
++                    "status",
++                    "priority",
++                    "owner",
++                    "task_group_no",
++                    "released_at",
++                    "remark",
++                )
++            },
++        ),
++        (
++            "计划与实际",
++            {"fields": (("planned_start", "planned_end"), ("started_at", "finished_at"))},
++        ),
++        (
++            "来源快照",
++            {
++                "classes": ("collapse",),
++                "fields": (("ref_no", "source_app"), ("source_model", "source_pk")),
++            },
++        ),
++    )
+     # 任务头 Admin：按任务类型追加“头部 Extra” Inline
+     change_form_template = "admin/tasking/wmstask/change_form.html"  # 若已自定义，保持一致
+ 
+@@ -835,13 +983,16 @@ class WmsTaskAdmin(admin.ModelAdmin):
+ 
+     def get_queryset(self, request):
+         # ① 基础 + 你原来的聚合
+-        qs = (super().get_queryset(request)
+-        .select_related("owner", "warehouse")
+-        .annotate(
+-            _lines=Count("lines", distinct=True),
+-            _qty_plan=Sum("lines__qty_plan"),
+-            _qty_done=Sum("lines__qty_done"),
+-        ))
++        qs = (
++            super()
++            .get_queryset(request)
++            .select_related("owner", "warehouse")
++            .annotate(
++                _lines=Count("lines", distinct=True),
++                _qty_plan=Sum("lines__qty_plan"),
++                _qty_done=Sum("lines__qty_done"),
++            )
++        )
+         qs = AccessScope.for_user(request.user).filter_queryset(
+             qs,
+             owner_field="owner_id",
+@@ -858,25 +1009,31 @@ class WmsTaskAdmin(admin.ModelAdmin):
+         # ③ 操作员：仅看到“与我相关”或“含抢单行”的任务
+         # 我在头级/行级的活动指派
+         mine_head = TaskAssignment.objects.filter(
+-            task_id=OuterRef("pk"), line__isnull=True,
+-            assignee=request.user, finished_at__isnull=True
++            task_id=OuterRef("pk"),
++            line__isnull=True,
++            assignee=request.user,
++            finished_at__isnull=True,
+         )
+         mine_line = TaskAssignment.objects.filter(
+-            task_id=OuterRef("pk"), line__isnull=False,
+-            assignee=request.user, finished_at__isnull=True
++            task_id=OuterRef("pk"),
++            line__isnull=False,
++            assignee=request.user,
++            finished_at__isnull=True,
+         )
+         # 该任务是否存在“抢单行”：行上无活动行级指派；且任务头也无活动头级指派
+         active_head_any = TaskAssignment.objects.filter(
+             task_id=OuterRef("pk"), line__isnull=True, finished_at__isnull=True
+         )
+         # 子查询：有“无人认领”的行
+-        pool_line = (WmsTaskLine.objects
+-                     .filter(task_id=OuterRef("pk"))
+-                     .annotate(_has_line=Exists(
+-            TaskAssignment.objects.filter(line_id=OuterRef("pk"),
+-                                          finished_at__isnull=True)
+-        ))
+-                     .filter(_has_line=False))
++        pool_line = (
++            WmsTaskLine.objects.filter(task_id=OuterRef("pk"))
++            .annotate(
++                _has_line=Exists(
++                    TaskAssignment.objects.filter(line_id=OuterRef("pk"), finished_at__isnull=True)
++                )
++            )
++            .filter(_has_line=False)
++        )
+ 
+         qs = qs.annotate(
+             _mine_head=Exists(mine_head),
+@@ -887,9 +1044,9 @@ class WmsTaskAdmin(admin.ModelAdmin):
+ 
+         # 可见任务：我负责（头或行） 或 含有抢单行（任务状态需为 RELEASED 且无头级活动指派）
+         return qs.filter(
+-            Q(_mine_head=True) |
+-            Q(_mine_line=True) |
+-            (Q(status=WmsTask.Status.RELEASED) & Q(_has_head=False) & Q(_has_pool_line=True))
++            Q(_mine_head=True)
++            | Q(_mine_line=True)
++            | (Q(status=WmsTask.Status.RELEASED) & Q(_has_head=False) & Q(_has_pool_line=True))
+         )
+ 
+     @admin.display(description="行数", ordering="_lines")
+@@ -920,21 +1077,35 @@ class WmsTaskAdmin(admin.ModelAdmin):
+                 task.finished_at = now
+             task.save(update_fields=["status", ts_field] if ts_field else ["status"])
+             TaskStatusLog.objects.create(
+-                task=task, old_status=old, new_status=to_status,
+-                changed_by=request.user, note="admin bulk action"
++                task=task,
++                old_status=old,
++                new_status=to_status,
++                changed_by=request.user,
++                note="admin bulk action",
+             )
+             updated += 1
+         self.message_user(request, f"已更新 {updated} 条任务状态为 {to_status}。")
+ 
+     def _as_wh_mgr(self, request):
+-        return request.user.is_superuser or request.user.has_perm("tasking.taskconfirm_as_wh_manager")
++        return request.user.is_superuser or request.user.has_perm(
++            "tasking.taskconfirm_as_wh_manager"
++        )
+ 
+     def get_actions(self, request):
+         actions = super().get_actions(request)
+         if not self._as_wh_mgr(request):
+             actions.pop("action_release", None)
+ 
+-        order = ["action_release","action_approve", "action_reject", "action_post",  "action_start", "action_complete", "action_cancel","delete_selected"]
++        order = [
++            "action_release",
++            "action_approve",
++            "action_reject",
++            "action_post",
++            "action_start",
++            "action_complete",
++            "action_cancel",
++            "delete_selected",
++        ]
+ 
+         ordered = OrderedDict()
+         for name in order:
+@@ -965,9 +1136,7 @@ class WmsTaskAdmin(admin.ModelAdmin):
+ 
+         with transaction.atomic():
+             # 在事务里加行锁，防并发修改
+-            qs = (WmsTask.objects
+-                  .select_for_update(skip_locked=USE_SKIP_LOCKED)
+-                  .filter(pk__in=pks))
++            qs = WmsTask.objects.select_for_update(skip_locked=USE_SKIP_LOCKED).filter(pk__in=pks)
+ 
+             locked_ids = set(qs.values_list("pk", flat=True))
+             skipped = len(pks) - len(locked_ids)
+@@ -990,7 +1159,7 @@ class WmsTaskAdmin(admin.ModelAdmin):
+                     stats = svc.publish_using_inline(
+                         obj,
+                         seed_lines=seed_lines,  # True=把头级兜底落地到行；False=只保留兜底语义
+-                        overwrite=overwrite  # True=覆盖全部行；False=仅补“无人”的行
++                        overwrite=overwrite,  # True=覆盖全部行；False=仅补“无人”的行
+                     )
+                     ok += 1
+                     brief = _stats_brief(stats)
+@@ -1010,9 +1179,15 @@ class WmsTaskAdmin(admin.ModelAdmin):
+             for msg in fail_details[:20]:
+                 self.message_user(request, msg, level=messages.ERROR)
+             if len(fail_details) > 20:
+-                self.message_user(request, f"还有 {len(fail_details) - 20} 条失败原因已省略。", level=messages.WARNING)
++                self.message_user(
++                    request,
++                    f"还有 {len(fail_details) - 20} 条失败原因已省略。",
++                    level=messages.WARNING,
++                )
+         if skipped:
+-            self.message_user(request, f"{skipped} 条记录被其他事务锁定，已跳过。", level=messages.INFO)
++            self.message_user(
++                request, f"{skipped} 条记录被其他事务锁定，已跳过。", level=messages.INFO
++            )
+ 
+     @admin.action(description="取消所选的任务")
+     def action_cancel(self, request, queryset):
+@@ -1041,12 +1216,36 @@ class WmsTaskAdmin(admin.ModelAdmin):
+     def get_urls(self):
+         urls = super().get_urls()
+         custom = [
+-            path("<int:task_id>/print-dispatch/", self.admin_site.admin_view(self.goto_print),name="task_print_dispatch"),
+-            path("<int:task_id>/print-dispatch-save/", self.admin_site.admin_view(self.goto_print_save), name="task_print_dispatch_save"),
+-            path("<int:task_id>/dispatch-pdf/", self.admin_site.admin_view(self.goto_pdf), name="task_print_dispatch_pdf"),
+-            path("<int:object_id>/approve/", self.admin_site.admin_view(self.approve_view),name="tasking_wmstask_approve"),
+-            path("<int:object_id>/post/", self.admin_site.admin_view(self.post_view),name="tasking_wmstask_post"),
+-            path("count_wizard/", self.admin_site.admin_view(self.count_wizard),name="tasking_wmstask_count_wizard",),
++            path(
++                "<int:task_id>/print-dispatch/",
++                self.admin_site.admin_view(self.goto_print),
++                name="task_print_dispatch",
++            ),
++            path(
++                "<int:task_id>/print-dispatch-save/",
++                self.admin_site.admin_view(self.goto_print_save),
++                name="task_print_dispatch_save",
++            ),
++            path(
++                "<int:task_id>/dispatch-pdf/",
++                self.admin_site.admin_view(self.goto_pdf),
++                name="task_print_dispatch_pdf",
++            ),
++            path(
++                "<int:object_id>/approve/",
++                self.admin_site.admin_view(self.approve_view),
++                name="tasking_wmstask_approve",
++            ),
++            path(
++                "<int:object_id>/post/",
++                self.admin_site.admin_view(self.post_view),
++                name="tasking_wmstask_post",
++            ),
++            path(
++                "count_wizard/",
++                self.admin_site.admin_view(self.count_wizard),
++                name="tasking_wmstask_count_wizard",
++            ),
+         ]
+         return custom + urls
+ 
+@@ -1065,8 +1264,10 @@ class WmsTaskAdmin(admin.ModelAdmin):
+         return format_html(
+             '<a class="button" href="{}" style="margin-right:6px;">审核</a>'
+             '<a class="button" href="{}">过账</a>',
+-            approve_url, post_url
++            approve_url,
++            post_url,
+         )
++
+     ops_buttons.short_description = "操作"
+ 
+     # ===== 批量动作 =====
+@@ -1083,9 +1284,9 @@ class WmsTaskAdmin(admin.ModelAdmin):
+         PS_PENDING = getattr(PostingStatus, "PENDING", "PENDING") if PostingStatus else "PENDING"
+ 
+         count_ids = list(
+-            queryset.filter(
+-                task_type=WmsTask.TaskType.COUNT, review_status=RS_PENDING
+-            ).values_list("id", flat=True)
++            queryset.filter(task_type=WmsTask.TaskType.COUNT, review_status=RS_PENDING).values_list(
++                "id", flat=True
++            )
+         )
+         updated = 0
+         if count_ids:
+@@ -1095,17 +1296,18 @@ class WmsTaskAdmin(admin.ModelAdmin):
+                 approve_count_task(task_id, by_user=request.user, note="Admin 审核通过")
+                 updated += 1
+         with transaction.atomic():
+-            qs = queryset.select_for_update().exclude(
+-                task_type__in=[WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC]
+-            ).filter(review_status=RS_PENDING)
++            qs = (
++                queryset.select_for_update()
++                .exclude(task_type__in=[WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC])
++                .filter(review_status=RS_PENDING)
++            )
+             updated += qs.update(review_status=RS_APPROVED, posting_status=PS_PENDING)
+ 
+-
+         skipped = queryset.count() - updated
+         self.message_user(
+             request,
+             f"已将任务头 审核状态 由 待审核 改为 通过审核通过：{updated} 条；跳过（非 待审核）：{skipped} 条。",
+-            level=messages.SUCCESS
++            level=messages.SUCCESS,
+         )
+ 
+     @admin.action(description="驳回所选的任务")
+@@ -1119,11 +1321,10 @@ class WmsTaskAdmin(admin.ModelAdmin):
+         RS_PENDING = getattr(ReviewStatus, "PENDING", "PENDING") if ReviewStatus else "PENDING"
+         RS_REJECTED = getattr(ReviewStatus, "REJECTED", "REJECTED") if ReviewStatus else "REJECTED"
+ 
+-
+         count_ids = list(
+-            queryset.filter(
+-                task_type=WmsTask.TaskType.COUNT, review_status=RS_PENDING
+-            ).values_list("id", flat=True)
++            queryset.filter(task_type=WmsTask.TaskType.COUNT, review_status=RS_PENDING).values_list(
++                "id", flat=True
++            )
+         )
+         updated = 0
+         if count_ids:
+@@ -1133,17 +1334,18 @@ class WmsTaskAdmin(admin.ModelAdmin):
+                 reject_count_task(task_id, by_user=request.user, note="Admin 批量驳回")
+                 updated += 1
+         with transaction.atomic():
+-            qs = queryset.select_for_update().exclude(
+-                task_type__in=[WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC]
+-            ).filter(review_status=RS_PENDING)
++            qs = (
++                queryset.select_for_update()
++                .exclude(task_type__in=[WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC])
++                .filter(review_status=RS_PENDING)
++            )
+             updated += qs.update(review_status=RS_REJECTED)
+ 
+-
+         skipped = queryset.count() - updated
+         self.message_user(
+             request,
+             f"已将任务头 审核状态 由 待审核 改为 通过驳回：{updated} 条；跳过（非 待审核）：{skipped} 条。",
+-            level=messages.SUCCESS
++            level=messages.SUCCESS,
+         )
+ 
+     def approve_view(self, request, object_id: int):
+@@ -1187,7 +1389,9 @@ class WmsTaskAdmin(admin.ModelAdmin):
+             if res.get("ok"):
+                 self.message_user(request, "过账成功。", level=messages.SUCCESS)
+             else:
+-                self.message_user(request, f"过账失败：{res.get('warnings') or res}", level=messages.ERROR)
++                self.message_user(
++                    request, f"过账失败：{res.get('warnings') or res}", level=messages.ERROR
++                )
+         except Exception as e:
+             self.message_user(request, f"过账异常：{e}", level=messages.ERROR)
+         return redirect(self._change_url(task))
+@@ -1208,7 +1412,9 @@ class WmsTaskAdmin(admin.ModelAdmin):
+ 
+         for task in queryset:
+             # 前置校验：必须“审核通过”方可过账
+-            if getattr(task, "review_status", None) != getattr(WmsTask.ReviewStatus, "APPROVED", "APPROVED"):
++            if getattr(task, "review_status", None) != getattr(
++                WmsTask.ReviewStatus, "APPROVED", "APPROVED"
++            ):
+                 fail += 1
+                 self.message_user(
+                     request,
+@@ -1247,7 +1453,9 @@ class WmsTaskAdmin(admin.ModelAdmin):
+ 
+     def action_wave_release_pick(self, request, queryset):
+         pick_type = getattr(WmsTask.TaskType, "PICK", "PICK")
+-        ids = list(queryset.filter(task_type=pick_type, status="DRAFT").values_list("id", flat=True))
++        ids = list(
++            queryset.filter(task_type=pick_type, status="DRAFT").values_list("id", flat=True)
++        )
+         if not ids:
+             self.message_user(request, "没有可放行的拣货草稿。", level=messages.WARNING)
+             return
+@@ -1275,7 +1483,9 @@ class WmsTaskAdmin(admin.ModelAdmin):
+         extra_context["has_add_permission"] = self.has_add_permission(request)
+         add_url = reverse("admin:tasking_wmstask_add")
+         # 预选 task_type=COUNT
+-        extra_context["add_count_url"] = f"{add_url}?{urlencode({'task_type': WmsTask.TaskType.COUNT})}"
++        extra_context["add_count_url"] = (
++            f"{add_url}?{urlencode({'task_type': WmsTask.TaskType.COUNT})}"
++        )
+         extra_context["count_wizard_url"] = reverse("admin:tasking_wmstask_count_wizard")
+         return super().changelist_view(request, extra_context=extra_context)
+ 
+@@ -1284,38 +1494,40 @@ class WmsTaskAdmin(admin.ModelAdmin):
+         extra_context["count_wizard_url"] = reverse("admin:tasking_wmstask_count_wizard")
+         return super().changeform_view(request, object_id, form_url, extra_context=extra_context)
+ 
+-    def count_wizard(self, request,*args, **kwargs):
+-            form = CountWizardForm(request.POST or None, user=request.user)
+-            if form.is_valid():
+-                task, created, truncated = create_count_task(
+-                    created_by=request.user,
+-                    owner_id=form.cleaned_data["owner"].id,
+-                    warehouse_id=form.cleaned_data["warehouse"].id,
+-                    scope=form.cleaned_data["scope"],
+-                    subwarehouse_id=getattr(form.cleaned_data.get("subwarehouse"), "id", None),
+-                    zone_type=form.cleaned_data.get("zone_type"),
+-                    location_id=getattr(form.cleaned_data.get("location"), "id", None),
+-                    location_prefix=form.cleaned_data.get("location_prefix"),
+-                    product_id=getattr(form.cleaned_data.get("product"), "id", None),
+-                    batch_no=form.cleaned_data.get("batch_no"),
+-                    exclude_zero_onhand=form.cleaned_data.get("exclude_zero_onhand", True),
+-                    max_lines=form.cleaned_data.get("max_lines") or 1000,
+-                    blind=form.cleaned_data.get("blind", True),
+-                    recount_threshold=form.cleaned_data.get("recount_threshold") or 0,
+-                    task_remark=form.cleaned_data.get("task_remark") or "",
+-                )
++    def count_wizard(self, request, *args, **kwargs):
++        form = CountWizardForm(request.POST or None, user=request.user)
++        if form.is_valid():
++            task, created, truncated = create_count_task(
++                created_by=request.user,
++                owner_id=form.cleaned_data["owner"].id,
++                warehouse_id=form.cleaned_data["warehouse"].id,
++                scope=form.cleaned_data["scope"],
++                subwarehouse_id=getattr(form.cleaned_data.get("subwarehouse"), "id", None),
++                zone_type=form.cleaned_data.get("zone_type"),
++                location_id=getattr(form.cleaned_data.get("location"), "id", None),
++                location_prefix=form.cleaned_data.get("location_prefix"),
++                product_id=getattr(form.cleaned_data.get("product"), "id", None),
++                batch_no=form.cleaned_data.get("batch_no"),
++                exclude_zero_onhand=form.cleaned_data.get("exclude_zero_onhand", True),
++                max_lines=form.cleaned_data.get("max_lines") or 1000,
++                blind=form.cleaned_data.get("blind", True),
++                recount_threshold=form.cleaned_data.get("recount_threshold") or 0,
++                task_remark=form.cleaned_data.get("task_remark") or "",
++            )
+ 
+-                suffix = "（已按最大行数截断）" if truncated else ""
+-                messages.success(request, f"已创建盘点任务 {task.task_no}，生成行数：{created}{suffix}")
+-                return redirect("admin:tasking_wmstask_change", object_id=task.pk)
++            suffix = "（已按最大行数截断）" if truncated else ""
++            messages.success(request, f"已创建盘点任务 {task.task_no}，生成行数：{created}{suffix}")
++            return redirect("admin:tasking_wmstask_change", object_id=task.pk)
+ 
+-            # GET：展示表单
+-            return render(request, "admin/tasking/count_wizard.html", {"form": form})
++        # GET：展示表单
++        return render(request, "admin/tasking/count_wizard.html", {"form": form})
+ 
+     def _render_wizard(self, request, context):
+         from django.template.response import TemplateResponse
++
+         return TemplateResponse(request, "admin/tasking/wmstask/count_wizard.html", context)
+ 
++
+ # ========= 行级 Extra Inlines（OneToOne） =========
+ class _BaseLineExtraInline(admin.StackedInline):
+     extra = 0
+@@ -1338,18 +1550,23 @@ class _BaseLineExtraInline(admin.StackedInline):
+                     f.initial = 0
+         return FormSet
+ 
++
+ class ReceiveLineExtraInline(_BaseLineExtraInline):
+     model = ReceiveLineExtra
+ 
++
+ class PutawayLineExtraInline(_BaseLineExtraInline):
+     model = PutawayLineExtra
+ 
++
+ class PickLineExtraInline(_BaseLineExtraInline):
+     model = PickLineExtra
+ 
++
+ class ReviewLineExtraInline(_BaseLineExtraInline):
+     model = ReviewLineExtra
+ 
++
+ # class ReviewLineExtraInline(admin.StackedInline):
+ #     model = ReviewLineExtra
+ #     fields = ['from_location', 'qty_reviewed', 'qty_picked', 'discrepancy_reason']
+@@ -1370,23 +1587,26 @@ class ReviewLineExtraInline(_BaseLineExtraInline):
+ #                 logger.debug("Form initial data: %s", form.initial)  # 调试输出，检查初始化数据
+ #         return form
+ 
++
+ class PackLineExtraInline(_BaseLineExtraInline):
+     model = PackLineExtra
+ 
++
+ class LoadLineExtraInline(_BaseLineExtraInline):
+     model = LoadLineExtra
+ 
++
+ class DispatchLineExtraInline(_BaseLineExtraInline):
+     model = DispatchLineExtra
+ 
++
+ class ReplenishLineExtraInline(_BaseLineExtraInline):
+     model = ReplenishLineExtra
+ 
++
+ class RelocLineExtraInline(_BaseLineExtraInline):
+     model = RelocLineExtra
+ 
+-from django.contrib import admin
+-from allapp.tasking.models import WmsTaskLine, CountLineExtra
+ 
+ def _is_blind_count(obj: WmsTaskLine) -> bool:
+     """Return the task-level blind-count flag for every count round."""
+@@ -1412,19 +1632,32 @@ class CountLineExtraForm(forms.ModelForm):
+             cleaned["count_status"] = "COUNTED"
+         return cleaned
+ 
++
+ class CountLineExtraInline(admin.StackedInline):
+     model = CountLineExtra
+     form = CountLineExtraForm
+     extra = 0
+     # 给出一个完整顺序，等会儿按需剔除
+     fields = (
+-        "lot_no", "exp_date", "lpn_no",
+-        "qty_counted", "qty_book", "qty_diff",
+-        "count_status", "method", "countorder",
++        "lot_no",
++        "exp_date",
++        "lpn_no",
++        "qty_counted",
++        "qty_book",
++        "qty_diff",
++        "count_status",
++        "method",
++        "countorder",
+     )
+     readonly_fields = (
+-        "lot_no", "exp_date", "lpn_no", "qty_book", "qty_diff",
+-        "count_status", "method", "countorder",
++        "lot_no",
++        "exp_date",
++        "lpn_no",
++        "qty_book",
++        "qty_diff",
++        "count_status",
++        "method",
++        "countorder",
+     )
+ 
+     # 1) 从“渲染用字段集”里剔除（模板层一定会调用 get_fieldsets）
+@@ -1432,7 +1665,9 @@ class CountLineExtraInline(admin.StackedInline):
+         fs = super().get_fieldsets(request, obj)
+         if not _is_blind_count(obj):
+             return fs
+-        logger.debug("tasking.admin.count_inline.get_fieldsets line_id=%s", getattr(obj, "id", None))
++        logger.debug(
++            "tasking.admin.count_inline.get_fieldsets line_id=%s", getattr(obj, "id", None)
++        )
+         new = []
+         for name, opts in fs:
+             fields = list(opts.get("fields", ()))
+@@ -1460,6 +1695,7 @@ class CountLineExtraInline(admin.StackedInline):
+         FormSet.form = BlindForm
+         return FormSet
+ 
++
+ # —— 首盘用：完整字段 —— #
+ class CountLineExtraInlineFull(admin.StackedInline):
+     model = CountLineExtra
+@@ -1467,15 +1703,28 @@ class CountLineExtraInlineFull(admin.StackedInline):
+     extra = 0
+     can_delete = False
+     fields = (
+-        "lot_no", "exp_date", "lpn_no",
+-        "qty_counted", "qty_book", "qty_diff",
+-        "count_status", "method", "countorder",
++        "lot_no",
++        "exp_date",
++        "lpn_no",
++        "qty_counted",
++        "qty_book",
++        "qty_diff",
++        "count_status",
++        "method",
++        "countorder",
+     )
+     readonly_fields = (
+-        "lot_no", "exp_date", "lpn_no", "qty_book", "qty_diff",
+-        "count_status", "method", "countorder",
++        "lot_no",
++        "exp_date",
++        "lpn_no",
++        "qty_book",
++        "qty_diff",
++        "count_status",
++        "method",
++        "countorder",
+     )
+ 
++
+ # —— 复盘/三盘用：不渲染账面数与差异 —— #
+ class CountLineExtraInlineBlind(admin.StackedInline):
+     model = CountLineExtra
+@@ -1483,20 +1732,32 @@ class CountLineExtraInlineBlind(admin.StackedInline):
+     extra = 0
+     can_delete = False
+     fields = (
+-        "lot_no", "exp_date", "lpn_no",
++        "lot_no",
++        "exp_date",
++        "lpn_no",
+         "qty_counted",
+-        "count_status", "method", "countorder",
++        "count_status",
++        "method",
++        "countorder",
+     )
+     readonly_fields = (
+-        "lot_no", "exp_date", "lpn_no", "count_status", "method", "countorder",
++        "lot_no",
++        "exp_date",
++        "lpn_no",
++        "count_status",
++        "method",
++        "countorder",
+     )
+ 
++
+ class QCLineExtraInline(_BaseLineExtraInline):
+     model = QCLineExtra
+ 
++
+ class AdjustLineExtraInline(_BaseLineExtraInline):
+     model = AdjustLineExtra
+ 
++
+ _LINE_EXTRA_MODEL_MAP = {
+     "RECEIVE": ReceiveLineExtra,
+     "PUTAWAY": PutawayLineExtra,
+@@ -1513,13 +1774,15 @@ _LINE_EXTRA_MODEL_MAP = {
+     "ADJUST": AdjustLineExtra,
+ }
+ 
++
+ # ========= 其余模型 Admin =========
+-#人工处理一行多桶
++# 人工处理一行多桶
+ class TaskScanLogInline(admin.TabularInline):
+     model = TaskScanLog
+     extra = 2
+-    fields = ("qty_base", "lot_no", "exp_date", "location",  "remark")
++    fields = ("qty_base", "lot_no", "exp_date", "location", "remark")
+     readonly_fields = ()
++
+     # 只显示本行，默认手工录入
+     def get_queryset(self, request):
+         qs = super().get_queryset(request)
+@@ -1532,30 +1795,43 @@ class TaskScanLogInline(admin.TabularInline):
+         # formset.form.base_fields["source"].initial = "WEB"
+         return formset
+ 
+-#任务行admin
++
++# 任务行admin
+ # ====== 你的 WmsTaskLineAdmin（在此基础上融合行级 Extra Inline） ======
+ @admin.register(WmsTaskLine)
+-class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
++class WmsTaskLineAdmin(TaskChildAdminScopeMixin, DecimalPrettyInitialMixin, admin.ModelAdmin):
+     # inlines = [TaskScanLogInline]
+     # inlines = [ReviewLineExtraInline, TaskScanLogInline]
+     actions = ["act_claim_lines"]
+-    list_display = ("id", "task", "status","product", "from_location", "to_location", "qty_plan", "qty_done", "src_model", "src_id")
++    list_display = (
++        "id",
++        "task",
++        "status",
++        "product",
++        "from_location",
++        "to_location",
++        "qty_plan",
++        "qty_done",
++        "src_model",
++        "src_id",
++    )
+     list_filter = ("task__task_type", "task__status", "product", "from_location", "to_location")
+     search_fields = ("task__task_no", "src_model", "src_id", "rule_key")
+     list_select_related = ("task", "product", "from_location", "to_location")
+     autocomplete_fields = ["task", "product", "from_location", "to_location", "bound_content_type"]
+     readonly_fields = ()
+     ordering = ("-id",)
+-    fields = ("task", "product","from_location", "to_location", "qty_plan", "qty_done", "remark")
++    fields = ("task", "product", "from_location", "to_location", "qty_plan", "qty_done", "remark")
+ 
+     class Media:
+-        js  = ("tasking/count_blind.js",)   # ← 改个版本号
++        js = ("tasking/count_blind.js",)  # ← 改个版本号
++
+     # 任务行 Admin：按所属任务类型追加“行 Extra” Inline（仅 1 个）
+     def get_fields(self, request, obj=None):
+         f = list(super().get_fields(request, obj))
+         if _is_blind_count(obj):
+             # 复盘/三盘：不渲染账面数和差异
+-            for name in ("qty_book", "qty_diff","qty_plan"):
++            for name in ("qty_book", "qty_diff", "qty_plan"):
+                 if name in f:
+                     f.remove(name)
+             logger.debug(
+@@ -1617,8 +1893,11 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+         经理：全量；非仓库操作：空
+         """
+         # 1) 外键预取
+-        qs = (super().get_queryset(request)
+-              .select_related("task", "product", "from_location", "to_location"))
++        qs = (
++            super()
++            .get_queryset(request)
++            .select_related("task", "product", "from_location", "to_location")
++        )
+         qs = _select_related_all_extras(qs)
+ 
+         # 2) 角色分流
+@@ -1652,12 +1931,15 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+         cond_mine = Q(_mine_line=True) | (Q(_mine_head=True) & Q(_has_line=False))
+ 
+         # “可抢单”条件：任务 RELEASED + 无头级 + 该行无人
+-        # cond_pool = Q(task__status=WmsTask.Status.RELEASED) & Q(_has_head=False) & Q(_has_line=False)
++        # cond_pool = Q(task__status=WmsTask.Status.RELEASED) & Q(_has_head=False) &
++        # Q(_has_line=False)
+         cond_pool = (
+-                Q(task__status__in=[WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS])  # 任务是 RELEASED 或 IN_PROCESS
+-                & Q(_has_head=False)  # 无头级指派
+-                & Q(_has_line=False)  # 该行无人
+-                & Q(assignments__finished_at__isnull=True)  # 任务指派未完成（finished_at 为空）
++            Q(
++                task__status__in=[WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS]
++            )  # 任务是 RELEASED 或 IN_PROCESS
++            & Q(_has_head=False)  # 无头级指派
++            & Q(_has_line=False)  # 该行无人
++            & Q(assignments__finished_at__isnull=True)  # 任务指派未完成（finished_at 为空）
+         )
+         # 5) 合并筛选：我的 ∪ 可抢
+         qs = qs.filter(cond_mine | cond_pool)
+@@ -1669,14 +1951,14 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+         )
+         # task=qs.filter() or None
+         # if task:
+-        #     logger.debug("task review/posting status %s %s", task.review_status, task.posting_statu)
++        # logger.debug("task review/posting status %s %s", task.review_status, task.posting_statu)
+ 
+         # 6) 排序：我的在前（行级>头级兜底），再可抢；组内按 id 逆序
+         # 说明：Django 对布尔注解可直接排序；True>False，因此用降序把 True 放前面
+         return qs.order_by(
+-            '-_mine_line',  # 我=行级指派优先（True 在前）
+-            '-_mine_head',  # 我=头级兜底其次
+-            '-id',  # 组内按 id 倒序
++            "-_mine_line",  # 我=行级指派优先（True 在前）
++            "-_mine_head",  # 我=头级兜底其次
++            "-id",  # 组内按 id 倒序
+         )
+ 
+     @admin.action(description="认领所选任务行")
+@@ -1690,10 +1972,11 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+ 
+         with transaction.atomic():
+             # 锁住选中的行，避免并发重复认领
+-            qs = (WmsTaskLine.objects
+-                  .select_for_update(skip_locked=USE_SKIP_LOCKED)
+-                  .select_related("task")
+-                  .filter(pk__in=line_ids))
++            qs = (
++                WmsTaskLine.objects.select_for_update(skip_locked=USE_SKIP_LOCKED)
++                .select_related("task")
++                .filter(pk__in=line_ids)
++            )
+             locked_ids = set(qs.values_list("pk", flat=True))
+             skipped = len(line_ids) - len(locked_ids)
+ 
+@@ -1724,7 +2007,9 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+                     continue
+                 if line._has_head:
+                     fail += 1
+-                    details.append(f"{getattr(t, 'task_no', t.pk)}-行{line.pk}：存在头级指派，不能抢单。")
++                    details.append(
++                        f"{getattr(t, 'task_no', t.pk)}-行{line.pk}：存在头级指派，不能抢单。"
++                    )
+                     continue
+                 if line._has_line:
+                     fail += 1
+@@ -1733,8 +2018,7 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+ 
+                 # 创建/激活行级指派（幂等）
+                 ta, _created = TaskAssignment.objects.get_or_create(
+-                    task=t, line=line, assignee=request.user,
+-                    defaults={"accepted_at": now}
++                    task=t, line=line, assignee=request.user, defaults={"accepted_at": now}
+                 )
+                 if ta.finished_at is not None:
+                     ta.finished_at = None
+@@ -1755,9 +2039,13 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+             for m in details[:20]:
+                 self.message_user(request, m, level=messages.WARNING)
+             if len(details) > 20:
+-                self.message_user(request, f"还有 {len(details) - 20} 条失败原因已省略。", level=messages.INFO)
++                self.message_user(
++                    request, f"还有 {len(details) - 20} 条失败原因已省略。", level=messages.INFO
++                )
+         if skipped:
+-            self.message_user(request, f"{skipped} 条记录被其他事务锁定，已跳过。", level=messages.INFO)
++            self.message_user(
++                request, f"{skipped} 条记录被其他事务锁定，已跳过。", level=messages.INFO
++            )
+ 
+     # @transaction.atomic
+     # def save_related(self, request, form, formsets, change):
+@@ -1766,7 +2054,7 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+     #     """
+     #     logger.debug("Saving related data...")
+     #     if form.is_valid():
+-    #         logger.debug("cleaned_data=%s", form.cleaned_data)  # 检查 qty_reviewed 和 qty_picked 是否传递
++    # logger.debug("cleaned_data=%s", form.cleaned_data)  # 检查 qty_reviewed 和 qty_picked 是否传递
+     #
+     #     logger.debug("taskline save_related begin")
+     #     super().save_related(request, form, formsets, change)
+@@ -1783,14 +2071,16 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+     #         return
+     #     logger.debug("已进入审核/过账阶段，不覆盖，直接返回")
+     #
+-    #     # models_to_check = ["ReceiveLineExtra", "PutawayLineExtra","PickLineExtra","ReviewLineExtra","PackLineExtra","LoadLineExtra","DispatchLineExtra","ReplenishLineExtra","CountLineExtra","AdjustLineExtra"]
++    # # models_to_check = ["ReceiveLineExtra",
++    # "PutawayLineExtra","PickLineExtra","ReviewLineExtra","PackLineExtra","LoadLineExtra","DispatchLineExtra","ReplenishLineExtra","CountLineExtra","AdjustLineExtra"]
+     #     # extra_obj = None
+     #     # for fs in formsets:
+     #     #     logger.debug("Extra save_related fs=%s", fs)
+     #     #     # 找到那个 inline（模型类名按你实际导入修改）
+     #     #     # if getattr(getattr(fs, "model", None), "__name__", "") == "ReceiveLineExtra":
+     #     #     if getattr(getattr(fs, "model", None), "__name__", "") in models_to_check:
+-    #     #         logger.debug("Extra save_related model=%s", getattr(getattr(fs, "model", None), "__name__", ""))
++    # #         logger.debug("Extra save_related model=%s", getattr(getattr(fs, "model", None),
++    # "__name__", ""))
+     #     #         # fs.save() 已由 super().save_related 调过，这里拿实例更稳
+     #     #         # cleaned_data 里可能包含删除/空表单，过滤一下
+     #     #         for f in fs.forms:
+@@ -1811,7 +2101,8 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+     #     logger.debug("Extra save_related step5")
+     #     # 3) 用“最新实例”取字段，避免 relation 缓存
+     #     product  = getattr(tl, "product", None)
+-    #     location = getattr(extra_obj, "to_location", None) or getattr(extra_obj, "location", None) or getattr(tl, "to_location", None)
++    # location = getattr(extra_obj, "to_location", None) or getattr(extra_obj, "location", None)
++    # or getattr(tl, "to_location", None)
+     #     lot_no   = getattr(extra_obj, "lot_no", None)
+     #     expiry   = getattr(extra_obj, "exp_date", None) or getattr(extra_obj, "expiry_date", None)
+     #     serial   = getattr(extra_obj, "serial_no", None)
+@@ -1857,7 +2148,8 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+ 
+     @transaction.atomic
+     def save_related(self, request, form, formsets, change):
+-        from allapp.tasking.services import is_task_locked,build_scanlog_items,FINALIZERS
++        from allapp.tasking.services import FINALIZERS, build_scanlog_items, is_task_locked
++
+         # 先让 Django 把父表单 & inline 都落库
+         super().save_related(request, form, formsets, change)
+ 
+@@ -1869,7 +2161,9 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+         # 头部锁定就跳过（更友好：消息提示而非 500）
+ 
+         if is_task_locked(task):
+-            self.message_user(request, "任务已进入审核/过账阶段，跳过生成日志。", level=messages.INFO)
++            self.message_user(
++                request, "任务已进入审核/过账阶段，跳过生成日志。", level=messages.INFO
++            )
+             return
+ 
+         # 通用：取对应的 LineExtra（不依赖 formsets 顺序/是否为空）
+@@ -1892,9 +2186,11 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+                     by_user=request.user,
+                     source="WEB",
+                 )
+-                if not CountLineExtra.objects.filter(
+-                    line__task=task
+-                ).exclude(count_status="COUNTED").exists():
++                if (
++                    not CountLineExtra.objects.filter(line__task=task)
++                    .exclude(count_status="COUNTED")
++                    .exists()
++                ):
+                     submit_count_task(task.id, by_user=request.user)
+             except Exception as exc:
+                 logger.exception("admin count recording failed (line=%s)", tl.id)
+@@ -1931,6 +2227,7 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+                 logger.exception("finalizer failed (task=%s)", task.id)
+                 self.message_user(request, "任务收尾失败，请联系管理员。", level=messages.WARNING)
+ 
++
+ def get_inline_instances(self, request, obj=None):
+     # 显式两参 super，规避 __class__ cell 问题
+     instances = super(WmsTaskLineAdmin, self).get_inline_instances(request, obj)
+@@ -2010,13 +2307,16 @@ def get_inline_instances(self, request, obj=None):
+                 inline_inst._initial_for_fields = initial
+     if not _is_blind_count(obj):
+         return instances
+-    logger.debug("tasking.admin.taskline.inline_replace_blind_count line_id=%s", getattr(obj, "id", None))
++    logger.debug(
++        "tasking.admin.taskline.inline_replace_blind_count line_id=%s", getattr(obj, "id", None)
++    )
+ 
+     # 盲盘：把“模型=CountLineExtra”的 inline 全部替换成 Blind
+     new_instances = []
+     for inline in instances:
+         # 调试：看看到底拿到的是什么类
+-        # logger.debug("inline class=%s model=%s", inline.__class__.__name__, getattr(inline, "model", None))
++        # logger.debug("inline class=%s model=%s", inline.__class__.__name__, getattr(inline,
++        # "model", None))
+ 
+         if getattr(inline, "model", None) is CountLineExtra:
+             new_instances.append(CountLineExtraInlineBlind(self.model, self.admin_site))
+@@ -2028,20 +2328,31 @@ def get_inline_instances(self, request, obj=None):
+ 
+     return instances
+ 
++
+ WmsTaskLineAdmin.get_inline_instances = get_inline_instances
+ 
++
+ @admin.register(TaskAssignment)
+-class TaskAssignmentAdmin(admin.ModelAdmin):
+-    list_display = ("task", "line","assignee", "accepted_at", "finished_at")
++class TaskAssignmentAdmin(TaskChildAdminScopeMixin, admin.ModelAdmin):
++    list_display = ("task", "line", "assignee", "accepted_at", "finished_at")
+     list_filter = ("assignee", "accepted_at", "finished_at")
+-    search_fields = ("task__task_no", "assignee__username", "assignee__first_name", "assignee__last_name")
++    search_fields = (
++        "task__task_no",
++        "assignee__username",
++        "assignee__first_name",
++        "assignee__last_name",
++    )
+     autocomplete_fields = ["task", "assignee"]
+     date_hierarchy = "created_at"
+     ordering = ("-created_at",)
+ 
+     def get_model_perms(self, request):
+         # 操作员看到这个模型=0 权限（彻底从菜单消失）
+-        if is_wh_operator(request.user) and not is_wh_manager(request.user) and not request.user.is_superuser:
++        if (
++            is_wh_operator(request.user)
++            and not is_wh_manager(request.user)
++            and not request.user.is_superuser
++        ):
+             return {}
+         return super().get_model_perms(request)
+ 
+@@ -2054,6 +2365,7 @@ class TaskAssignmentAdmin(admin.ModelAdmin):
+         # 保险：即使知道 URL 也只能看到“自己的活动指派”
+         return qs.filter(assignee=request.user)
+ 
++
+ @admin.register(TaskStatusLog)
+ class TaskStatusLogAdmin(admin.ModelAdmin):
+     list_display = ("task", "old_status", "new_status", "changed_by", "changed_at", "note")
+@@ -2063,13 +2375,24 @@ class TaskStatusLogAdmin(admin.ModelAdmin):
+     date_hierarchy = "changed_at"
+     ordering = ("-changed_at",)
+ 
++
+ @admin.register(TaskScanLog)
+ class TaskScanLogAdmin(admin.ModelAdmin):
+     list_display = (
+-        "id", "task", "task_line", "product", "location",
+-        "barcode", "label_key", "qty_base_delta",
+-        "method", "source", "by_user",
+-        "review_status", "reviewed_at", "created_at",
++        "id",
++        "task",
++        "task_line",
++        "product",
++        "location",
++        "barcode",
++        "label_key",
++        "qty_base_delta",
++        "method",
++        "source",
++        "by_user",
++        "review_status",
++        "reviewed_at",
++        "created_at",
+     )
+     list_filter = ("method", "source", "review_status", "by_user", "product", "location")
+     search_fields = ("task__task_no", "barcode", "label_key", "reason_code", "remark")
+@@ -2081,7 +2404,9 @@ class TaskScanLogAdmin(admin.ModelAdmin):
+ 
+     @admin.action(description="标记为已通过复核")
+     def mark_reviewed(self, request, queryset):
+-        n = queryset.update(review_status="APPROVED", reviewed_by=request.user, reviewed_at=timezone.now())
++        n = queryset.update(
++            review_status="APPROVED", reviewed_by=request.user, reviewed_at=timezone.now()
++        )
+         self.message_user(request, f"已标记 {n} 条为 APPROVED。")
+ 
+     @admin.action(description="标记为待复核")
+@@ -2093,8 +2418,16 @@ class TaskScanLogAdmin(admin.ModelAdmin):
+ @admin.register(ReplenishmentPolicy)
+ class ReplenishmentPolicyAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmin):
+     list_display = (
+-        "owner", "warehouse", "product", "target_location", "min_qty", "target_qty",
+-        "replenish_uom", "auto_release", "demand_enabled", "is_active",
++        "owner",
++        "warehouse",
++        "product",
++        "target_location",
++        "min_qty",
++        "target_qty",
++        "replenish_uom",
++        "auto_release",
++        "demand_enabled",
++        "is_active",
+     )
+     list_filter = ("warehouse", "owner", "auto_release", "demand_enabled", "is_active")
+     search_fields = ("product__code", "product__sku", "product__name", "target_location__code")
+@@ -2105,13 +2438,27 @@ class ReplenishmentPolicyAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmin)
+ @admin.register(ReplenishmentRequest)
+ class ReplenishmentRequestAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmin):
+     list_display = (
+-        "id", "status", "owner", "warehouse", "product", "target_location",
+-        "requested_qty", "created_by", "reviewed_by", "generated_task", "created_at",
++        "id",
++        "status",
++        "owner",
++        "warehouse",
++        "product",
++        "target_location",
++        "requested_qty",
++        "created_by",
++        "reviewed_by",
++        "generated_task",
++        "created_at",
+     )
+     list_filter = ("status", "warehouse", "owner")
+     search_fields = ("product__code", "product__sku", "product__name", "reason")
+     autocomplete_fields = (
+-        "owner", "warehouse", "product", "target_location", "created_by", "reviewed_by",
++        "owner",
++        "warehouse",
++        "product",
++        "target_location",
++        "created_by",
++        "reviewed_by",
+         "generated_task",
+     )
+     readonly_fields = ("status", "reviewed_by", "reviewed_at", "generated_task")
+@@ -2121,7 +2468,11 @@ class RelocationRequestLineInline(admin.TabularInline):
+     model = RelocationRequestLine
+     extra = 0
+     readonly_fields = (
+-        "inventory_detail", "requested_qty", "to_location", "to_container", "source_snapshot"
++        "inventory_detail",
++        "requested_qty",
++        "to_location",
++        "to_container",
++        "source_snapshot",
+     )
+     can_delete = False
+ 
+@@ -2129,18 +2480,32 @@ class RelocationRequestLineInline(admin.TabularInline):
+ @admin.register(RelocationRequest)
+ class RelocationRequestAdmin(admin.ModelAdmin):
+     list_display = (
+-        "id", "status", "mode", "trigger", "owner", "warehouse", "source_container",
+-        "to_location", "created_by", "reviewed_by", "generated_task", "created_at",
++        "id",
++        "status",
++        "mode",
++        "trigger",
++        "owner",
++        "warehouse",
++        "source_container",
++        "to_location",
++        "created_by",
++        "reviewed_by",
++        "generated_task",
++        "created_at",
+     )
+     list_filter = ("status", "mode", "trigger", "warehouse", "owner")
+     search_fields = ("reason", "source_container__container_no", "generated_task__task_no")
+     autocomplete_fields = (
+-        "owner", "warehouse", "source_container", "to_location", "target_parent_container",
+-        "created_by", "reviewed_by", "generated_task",
+-    )
+-    readonly_fields = (
+-        "status", "reviewed_by", "reviewed_at", "review_note", "generated_task"
++        "owner",
++        "warehouse",
++        "source_container",
++        "to_location",
++        "target_parent_container",
++        "created_by",
++        "reviewed_by",
++        "generated_task",
+     )
++    readonly_fields = ("status", "reviewed_by", "reviewed_at", "review_note", "generated_task")
+     inlines = (RelocationRequestLineInline,)
+ 
+     def get_queryset(self, request):
+@@ -2163,7 +2528,12 @@ class RelocationReservationAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmi
+     list_filter = ("status",)
+     search_fields = ("task_line__task__task_no", "inventory_detail__product__code")
+     readonly_fields = (
+-        "task_line", "inventory_detail", "qty", "status", "consumed_at", "released_at"
++        "task_line",
++        "inventory_detail",
++        "qty",
++        "status",
++        "consumed_at",
++        "released_at",
+     )
+ 
+     def has_add_permission(self, request):
+@@ -2173,15 +2543,14 @@ class RelocationReservationAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmi
+         return False
+ 
+     def get_queryset(self, request):
+-        qs = super().get_queryset(request).select_related(
+-            "task_line__task", "inventory_detail"
+-        )
++        qs = super().get_queryset(request).select_related("task_line__task", "inventory_detail")
+         return AccessScope.for_user(request.user).filter_queryset(
+             qs,
+             owner_field="task_line__task__owner_id",
+             warehouse_field="task_line__task__warehouse_id",
+         )
+ 
++
+ @admin.register(ContentType)
+ class _HiddenContentTypeAdmin(admin.ModelAdmin):
+     # autocomplete 必须有 search_fields
+diff --git a/wmsandroid/utils/request.js b/wmsandroid/utils/request.js
+index 78dbc8e..aa2c12d 100755
+--- a/wmsandroid/utils/request.js
++++ b/wmsandroid/utils/request.js
+@@ -271,11 +271,14 @@ export function createIdempotencyUuid() {
+   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+ }
+ 
+-export function withAuthToken(url) {
+-  const token = getToken()
+-  if (!token) return url
++export async function withAuthToken(url) {
++  if (!url.startsWith(`${BASE_URL}/`)) throw new Error('打印地址不属于当前服务。')
++  const relative = url.slice(BASE_URL.length)
++  const path = relative.split('?')[0]
++  const result = await request({ url: '/api/print-tickets/', method: 'POST', data: { path } })
++  if (!result?.ticket) throw new Error('未取得打印票据，请重试。')
+   const separator = url.includes('?') ? '&' : '?'
+-  return `${url}${separator}token=${encodeURIComponent(token)}`
++  return `${url}${separator}ticket=${encodeURIComponent(result.ticket)}`
+ }
+ 
+ export function request(opts = {}, alreadyRetried = false) {
+@@ -785,8 +788,8 @@ export const api = {
+ 
+   postCountTask: (id, payload = {}) =>
+     request({ url: `/api/pda/count-tasks/${id}/post/`, method: 'POST', data: payload }),
+-	
+-	
++
++
+   companyInventorySummary: (params = {}) => {
+     const qs = buildQuery({
+       ...params,
+@@ -796,8 +799,8 @@ export const api = {
+       search: params.search || '',
+       page: params.page || 1,
+       page_size: params.page_size || 100,
+-    })
+-    return request({
++    })
++    return request({
+       url: `/api/inventory/company-summary/?${qs}`,
+     })
+   },
+diff --git a/wmsmaster/settings.py b/wmsmaster/settings.py
+index 89f649e..b192629 100755
+--- a/wmsmaster/settings.py
++++ b/wmsmaster/settings.py
+@@ -267,6 +267,7 @@ MIDDLEWARE = [
+     "django.middleware.common.CommonMiddleware",
+     "django.middleware.csrf.CsrfViewMiddleware",
+     "django.contrib.auth.middleware.AuthenticationMiddleware",
++    "allapp.accounts.login_middleware.SessionLoginThrottleMiddleware",
+     "django.contrib.messages.middleware.MessageMiddleware",
+     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+     "django_htmx.middleware.HtmxMiddleware",
+diff --git a/wmsmaster/urls.py b/wmsmaster/urls.py
+index f0b83c1..ae6d1ba 100755
+--- a/wmsmaster/urls.py
++++ b/wmsmaster/urls.py
+@@ -5,6 +5,7 @@ from django.views.generic import RedirectView
+ from rest_framework_simplejwt.views import TokenVerifyView
+ 
+ from allapp.console.views_dashboard import DashboardHomeView
++from allapp.core.print_tickets import PrintTicketApi
+ 
+ from . import settings
+ from .auth_views import (
+@@ -22,6 +23,7 @@ from .views import (
+ )
+ 
+ urlpatterns = [
++    path("api/print-tickets/", PrintTicketApi.as_view(), name="print-ticket"),
+     path("healthz/live", health_live_view, name="health-live"),
+     path("healthz/ready", health_ready_view, name="health-ready"),
+     path("api/inbound/", include("allapp.inbound.urls")),  # 放在可能覆盖它的 router 之前
+diff --git a/wmspda/utils/outboundPrint.js b/wmspda/utils/outboundPrint.js
+index 0cdf32e..3a4b0f4 100644
+--- a/wmspda/utils/outboundPrint.js
++++ b/wmspda/utils/outboundPrint.js
+@@ -1,4 +1,4 @@
+-import { BASE_URL, getToken } from '@/utils/request'
++import { BASE_URL, getToken, withAuthToken } from '@/utils/request'
+ 
+ export function prepareOutboundPrintWindow() {
+   let preparedWindow = null
+@@ -23,14 +23,20 @@ export function closePreparedOutboundPrintWindow(preparedWindow) {
+   }
+ }
+ 
+-export function outboundPrintUrl(taskId) {
++export async function outboundPrintUrl(taskId) {
+   const token = getToken()
+   if (!token || !Number(taskId)) return ''
+-  return `${BASE_URL}/api/pda/pick-tasks/${Number(taskId)}/print/?token=${encodeURIComponent(token)}`
++  return withAuthToken(`${BASE_URL}/api/pda/pick-tasks/${Number(taskId)}/print/`)
+ }
+ 
+-export function openOutboundPrintPage(taskId, preparedWindow = null) {
+-  const url = outboundPrintUrl(taskId)
++export async function openOutboundPrintPage(taskId, preparedWindow = null) {
++  preparedWindow = preparedWindow || prepareOutboundPrintWindow()
++  let url
++  try { url = await outboundPrintUrl(taskId) } catch (error) {
++    closePreparedOutboundPrintWindow(preparedWindow)
++    uni.showToast({ title: '无法取得打印票据，请稍后重试', icon: 'none' })
++    return false
++  }
+   if (!url) {
+     closePreparedOutboundPrintWindow(preparedWindow)
+     uni.showToast({ title: '登录已失效，暂时无法打印出库单', icon: 'none' })
+diff --git a/wmspda/utils/receiveTaskDocument.js b/wmspda/utils/receiveTaskDocument.js
+index a13b731..6b0eb77 100644
+--- a/wmspda/utils/receiveTaskDocument.js
++++ b/wmspda/utils/receiveTaskDocument.js
+@@ -1,15 +1,23 @@
+-import { BASE_URL, getToken } from '@/utils/request'
++import { BASE_URL, getToken, withAuthToken } from '@/utils/request'
+ 
+-export function openReceiveTaskPrint(taskId) {
++export async function openReceiveTaskPrint(taskId) {
+   const token = getToken()
+   if (!token) {
+     uni.showToast({ title: '登录已失效，请重新登录', icon: 'none' })
+     return
+   }
+-  const url = `${BASE_URL}/api/inbound/receive_task/${taskId}/print/?token=${encodeURIComponent(token)}`
+-
++  let prepared = null
++  // #ifdef H5
++  if (typeof window !== 'undefined') prepared = window.open('', '_blank')
++  // #endif
++  let url
++  try { url = await withAuthToken(`${BASE_URL}/api/inbound/receive_task/${taskId}/print/`) } catch (error) {
++    if (prepared) prepared.close()
++    uni.showToast({ title: '无法取得打印票据，请稍后重试', icon: 'none' })
++    return
++  }
+   // #ifdef H5
+-  window.open(url, '_blank')
++  if (prepared) prepared.location.href = url
+   // #endif
+ 
+   // #ifdef APP-PLUS
+diff --git a/wmspda/utils/request.js b/wmspda/utils/request.js
+index e01dac0..3193636 100755
+--- a/wmspda/utils/request.js
++++ b/wmspda/utils/request.js
+@@ -10,7 +10,10 @@ const BASE_MAP = {
+ }
+ 
+ // export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
+-export const BASE_URL = BASE_MAP.develop
++export const BASE_URL = String(import.meta.env.VITE_API_BASE_URL || BASE_MAP.develop).trim().replace(/\/$/, '')
++if (!/^https?:\/\/[^/?#@]+(?::\d+)?(?:\/[^?#]*)?$/.test(BASE_URL)) {
++  throw new Error('VITE_API_BASE_URL 必须是无凭据、查询参数和片段的 HTTP(S) 地址。')
++}
+ 
+ const PRODUCT_IMPORT_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000
+ const ACCESS_TOKEN_STORAGE_KEY = 'access'
+@@ -270,11 +273,14 @@ export function createIdempotencyUuid() {
+   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+ }
+ 
+-export function withAuthToken(url) {
+-  const token = getToken()
+-  if (!token) return url
++export async function withAuthToken(url) {
++  if (!url.startsWith(`${BASE_URL}/`)) throw new Error('打印地址不属于当前服务。')
++  const relative = url.slice(BASE_URL.length)
++  const path = relative.split('?')[0]
++  const result = await request({ url: '/api/print-tickets/', method: 'POST', data: { path } })
++  if (!result?.ticket) throw new Error('未取得打印票据，请重试。')
+   const separator = url.includes('?') ? '&' : '?'
+-  return `${url}${separator}token=${encodeURIComponent(token)}`
++  return `${url}${separator}ticket=${encodeURIComponent(result.ticket)}`
+ }
+ 
+ export function request(opts = {}, alreadyRetried = false) {
+@@ -1422,8 +1428,8 @@ export const api = {
+ 
+   postCountTask: (id, payload = {}) =>
+     request({ url: `/api/pda/count-tasks/${id}/post/`, method: 'POST', data: payload }),
+-	
+-	
++
++
+   companyInventorySummary: (params = {}) => {
+     const qs = buildQuery({
+       ...params,
+@@ -1433,8 +1439,8 @@ export const api = {
+       search: params.search || '',
+       page: params.page || 1,
+       page_size: params.page_size || 100,
+-    })
+-    return request({
++    })
++    return request({
+       url: `/api/inventory/company-summary/?${qs}`,
+     })
+   },
+@@ -1467,6 +1473,6 @@ export const api = {
+       url: `/api/reports/pda/throughput/details/?${qs}`,
+     })
+   },
+-	  
+-	  
++
++
+ }
+diff --git a/allapp/accounts/login_middleware.py b/allapp/accounts/login_middleware.py
+new file mode 100644
+index 0000000..ade3aaf
+--- /dev/null
++++ b/allapp/accounts/login_middleware.py
+@@ -0,0 +1,28 @@
++"""Apply the credential throttle to Django's session-login entry points too."""
++
++import math
++from types import SimpleNamespace
++
++from django.http import HttpResponse
++
++from .throttling import LoginIPThrottle, LoginUsernameIPThrottle
++
++
++class SessionLoginThrottleMiddleware:
++    login_paths = frozenset({"/admin/login", "/accounts/login", "/api-auth/login"})
++
++    def __init__(self, get_response):
++        self.get_response = get_response
++
++    def __call__(self, request):
++        if request.method == "POST" and request.path.rstrip("/") in self.login_paths:
++            wrapped = SimpleNamespace(data=request.POST, META=request.META)
++            waits = []
++            for throttle in (LoginUsernameIPThrottle(), LoginIPThrottle()):
++                if not throttle.allow_request(wrapped, None):
++                    waits.append(throttle.wait() or 1)
++            if waits:
++                response = HttpResponse("登录尝试过于频繁，请稍后重试。", status=429)
++                response["Retry-After"] = str(max(1, math.ceil(max(waits))))
++                return response
++        return self.get_response(request)
+diff --git a/allapp/core/print_tickets.py b/allapp/core/print_tickets.py
+new file mode 100644
+index 0000000..9b50919
+--- /dev/null
++++ b/allapp/core/print_tickets.py
+@@ -0,0 +1,68 @@
++"""Short-lived document credentials that cannot authenticate normal API calls."""
++
++from django.contrib.auth import get_user_model
++from django.core import signing
++from django.urls import Resolver404, resolve
++from django.utils.crypto import constant_time_compare, salted_hmac
++from rest_framework import permissions
++from rest_framework.exceptions import AuthenticationFailed, ValidationError
++from rest_framework.response import Response
++from rest_framework.views import APIView
++
++SALT = "wms.document-print.v1"
++MAX_AGE = 120
++ALLOWED_VIEWS = {
++    ("allapp.inbound.export_print", "ReceiveTaskPrintView"),
++    ("allapp.outbound.export_print", "pick_task_print"),
++    ("allapp.pos.views", "PosSalePrintApi"),
++    ("allapp.pos.views", "PosShiftPrintApi"),
++}
++
++
++def _password_version(user):
++    return salted_hmac(SALT, user.password).hexdigest()
++
++
++def issue_print_ticket(user, path):
++    """Sign a single print path; object authorization is still checked at consumption."""
++    if not isinstance(path, str) or not path.startswith("/") or any(c in path for c in "?#"):
++        raise ValidationError("打印路径无效。")
++    try:
++        view = resolve(path).func
++    except Resolver404 as exc:
++        raise ValidationError("打印路径不存在。") from exc
++    view = getattr(view, "view_class", view)
++    if (view.__module__, view.__name__) not in ALLOWED_VIEWS:
++        raise ValidationError("该路径不支持打印票据。")
++    return signing.dumps(
++        {"user": user.pk, "path": path, "version": _password_version(user)}, salt=SALT
++    )
++
++
++def user_from_print_ticket(ticket, path):
++    """Validate expiry, exact document, current account state and password version."""
++    try:
++        payload = signing.loads(ticket, salt=SALT, max_age=MAX_AGE)
++        if payload["path"] != path:
++            raise ValueError("wrong document")
++        user = get_user_model().objects.get(pk=payload["user"], is_active=True)
++        if not constant_time_compare(payload["version"], _password_version(user)):
++            raise ValueError("revoked password")
++        return user
++    except (
++        signing.BadSignature,
++        KeyError,
++        TypeError,
++        ValueError,
++        get_user_model().DoesNotExist,
++    ) as exc:
++        raise AuthenticationFailed("打印票据无效或已过期，请重新打开打印。") from exc
++
++
++class PrintTicketApi(APIView):
++    permission_classes = [permissions.IsAuthenticated]
++
++    def post(self, request):
++        path = request.data.get("path")
++        ticket = issue_print_ticket(request.user, path)
++        return Response({"ticket": ticket, "expires_in": MAX_AGE})
+diff --git a/allapp/core/xlsx_safety.py b/allapp/core/xlsx_safety.py
+new file mode 100644
+index 0000000..69f1050
+--- /dev/null
++++ b/allapp/core/xlsx_safety.py
+@@ -0,0 +1,28 @@
++"""Bound XLSX input before openpyxl expands and parses the archive."""
++
++import io
++import zipfile
++
++MAX_COMPRESSED_BYTES = 5 * 1024 * 1024
++MAX_EXPANDED_BYTES = 50 * 1024 * 1024
++MAX_ENTRIES = 300
++
++
++def validate_xlsx_archive(data):
++    """Return validated bytes or raise ValueError before workbook parsing."""
++    if not data or len(data) > MAX_COMPRESSED_BYTES:
++        raise ValueError("Excel 文件为空或超过 5 MB。")
++    try:
++        with zipfile.ZipFile(io.BytesIO(data)) as archive:
++            entries = archive.infolist()
++            if len(entries) > MAX_ENTRIES:
++                raise ValueError("Excel 文件条目过多。")
++            if sum(item.file_size for item in entries) > MAX_EXPANDED_BYTES:
++                raise ValueError("Excel 解压后内容超过 50 MB。")
++            if any(item.flag_bits & 1 for item in entries):
++                raise ValueError("不支持加密 Excel 文件。")
++            if archive.testzip() is not None:
++                raise ValueError("Excel 文件已损坏。")
++    except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
++        raise ValueError("Excel 文件无法解析。") from exc
++    return data
+diff --git a/allapp/core/test_security_acceptance.py b/allapp/core/test_security_acceptance.py
+new file mode 100644
+index 0000000..148f91e
+--- /dev/null
++++ b/allapp/core/test_security_acceptance.py
+@@ -0,0 +1,244 @@
++import io
++import zipfile
++from unittest.mock import patch
++
++from django.contrib import admin
++from django.contrib.auth import get_user_model
++from django.contrib.auth.models import Permission
++from django.core.exceptions import ValidationError
++from django.test import Client, RequestFactory, SimpleTestCase, TestCase
++from openpyxl import load_workbook
++from rest_framework_simplejwt.tokens import AccessToken
++
++from allapp.accounts.models import UserRoleScope
++from allapp.baseinfo.models import Customer
++from allapp.inbound import tests as inbound_fixtures
++from allapp.outbound.models import OutboundOrder, OutboundOrderLine
++from allapp.pos import tests as pos_fixtures
++from allapp.products.identifier_excel import build_identifier_export
++from allapp.products.identifier_services import add_external_identifier
++from allapp.tasking.models import TaskAssignment, WmsTask, WmsTaskLine
++
++from .print_tickets import issue_print_ticket
++from .xlsx_safety import validate_xlsx_archive
++
++
++class XlsxBudgetTests(SimpleTestCase):
++    def test_rejects_excessive_expansion_before_decompressing(self):
++        stream = io.BytesIO()
++        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
++            archive.writestr("sheet.xml", "a" * 100)
++        with patch("allapp.core.xlsx_safety.MAX_EXPANDED_BYTES", 99):
++            with patch.object(zipfile.ZipFile, "testzip") as decompress:
++                with self.assertRaises(ValueError):
++                    validate_xlsx_archive(stream.getvalue())
++                decompress.assert_not_called()
++
++    def test_rejects_too_many_entries_and_corrupt_archives(self):
++        stream = io.BytesIO()
++        with zipfile.ZipFile(stream, "w") as archive:
++            archive.writestr("one", "ok")
++            archive.writestr("two", "ok")
++        with patch("allapp.core.xlsx_safety.MAX_ENTRIES", 1):
++            with self.assertRaises(ValueError):
++                validate_xlsx_archive(stream.getvalue())
++        with self.assertRaises(ValueError):
++            validate_xlsx_archive(b"not an xlsx")
++
++
++class PosCatalogPermissionTests(TestCase):
++    setUp = pos_fixtures.PosApiTests.setUp
++    open_shift = pos_fixtures.PosApiTests.open_shift
++
++    def test_authenticated_buyer_without_pos_permission_cannot_read_catalog(self):
++        buyer = get_user_model().objects.create_user(
++            username="scope-buyer", warehouse=self.warehouse, owner=self.owner
++        )
++        self.client.force_authenticate(buyer)
++        for params in ({}, {"search": self.product.code}, {"barcode": "POS-CTN-BAR"}):
++            response = self.client.get("/api/pos/products/", params)
++            self.assertEqual(response.status_code, 403)
++
++    def test_authorized_cashier_keeps_cross_owner_stock_visibility(self):
++        response = self.client.get("/api/pos/products/", {"barcode": "POS-OTH-UNIT-BAR"})
++        self.assertEqual(response.status_code, 200)
++        self.assertEqual(response.data["results"][0]["id"], self.other_product.id)
++
++
++class SuperuserPasswordBoundaryTests(TestCase):
++    def setUp(self):
++        self.editor = get_user_model().objects.create_user(
++            username="password-editor", is_staff=True
++        )
++        self.editor.user_permissions.add(
++            Permission.objects.get(content_type__app_label="accounts", codename="change_user")
++        )
++        self.target = get_user_model().objects.create_superuser(
++            username="password-target", email="target@example.test", password="test-original"
++        )
++        self.client.force_login(self.editor)
++
++    def test_delegated_editor_cannot_open_or_submit_superuser_password_form(self):
++        original = self.target.password
++        url = f"/admin/accounts/user/{self.target.pk}/password/"
++        self.assertEqual(self.client.get(url).status_code, 403)
++        self.assertEqual(
++            self.client.post(
++                url,
++                {
++                    "password1": "Changed-test-password-345!",
++                    "password2": "Changed-test-password-345!",
++                },
++            ).status_code,
++            403,
++        )
++        self.target.refresh_from_db()
++        self.assertEqual(self.target.password, original)
++
++    def test_delegated_editor_can_still_reset_an_ordinary_user(self):
++        ordinary = get_user_model().objects.create_user(username="ordinary-target")
++        response = self.client.post(
++            f"/admin/accounts/user/{ordinary.pk}/password/",
++            {"password1": "Changed-test-password-345!", "password2": "Changed-test-password-345!"},
++        )
++        self.assertEqual(response.status_code, 302)
++        ordinary.refresh_from_db()
++        self.assertTrue(ordinary.check_password("Changed-test-password-345!"))
++
++
++class TaskAndPrintBoundaryTests(TestCase):
++    setUp = inbound_fixtures.InboundAuthorizationAndWorkflowTests.setUp
++
++    def _manager(self):
++        user = get_user_model().objects.create_user(username="scoped-manager", is_staff=True)
++        UserRoleScope.objects.create(
++            user=user, role=UserRoleScope.Role.WAREHOUSE_MANAGER, warehouse=self.warehouse
++        )
++        user.user_permissions.add(
++            *Permission.objects.filter(
++                content_type__app_label="tasking",
++                codename__in=[
++                    "view_wmstask",
++                    "view_wmstaskline",
++                    "change_wmstaskline",
++                    "view_taskassignment",
++                    "change_taskassignment",
++                    "taskconfirm_as_wh_manager",
++                ],
++            )
++        )
++        return user
++
++    def _task(self, code, other=False, kind="RECEIVE"):
++        return WmsTask.objects.create(
++            task_no=code,
++            task_type=kind,
++            owner=self.other_owner if other else self.owner,
++            warehouse=self.other_warehouse if other else self.warehouse,
++        )
++
++    def test_task_children_and_foreign_keys_respect_manager_scope(self):
++        user = self._manager()
++        own, other = self._task("OWN"), self._task("OTHER", other=True)
++        own_line = WmsTaskLine.objects.create(task=own, product=self.product, qty_plan=1)
++        other_product = type(self.product).objects.create(
++            owner=self.other_owner,
++            code="OTHER-ADMIN",
++            sku="OTHER-ADMIN",
++            name="Other product",
++            base_uom=self.base_uom,
++        )
++        other_line = WmsTaskLine.objects.create(task=other, product=other_product, qty_plan=1)
++        own_assignment = TaskAssignment.objects.create(task=own, assignee=user)
++        TaskAssignment.objects.create(task=other, assignee=user)
++        request = RequestFactory().get("/admin/")
++        request.user = user
++        for model, expected in ((WmsTaskLine, own_line), (TaskAssignment, own_assignment)):
++            model_admin = admin.site._registry[model]
++            self.assertEqual(list(model_admin.get_queryset(request)), [expected])
++            field = model_admin.formfield_for_foreignkey(model._meta.get_field("task"), request)
++            self.assertEqual(list(field.queryset), [own])
++            with self.assertRaises(ValidationError):
++                model_admin._validate_values(request, {"task": other})
++        self.assertFalse(
++            admin.site._registry[WmsTaskLine].has_change_permission(request, other_line)
++        )
++        with self.assertRaises(ValidationError):
++            admin.site._registry[TaskAssignment]._validate_values(
++                request, {"task": own, "line": other_line}
++            )
++
++    def test_print_tokens_are_revoked_by_password_change(self):
++        user = self._manager()
++        token = str(AccessToken.for_user(user))
++        tasks = [self._task("PRINT-RECEIVE"), self._task("PRINT-PICK", kind="PICK")]
++        order = OutboundOrder.objects.create(
++            owner=self.owner,
++            warehouse=self.warehouse,
++            order_no="PRINT-ORDER",
++            customer=Customer.objects.create(
++                owner=self.owner, code="PRINT", name="Print", salesperson=user
++            ),
++            outbound_type="SALES",
++        )
++        line = OutboundOrderLine.objects.create(
++            order=order,
++            product=self.product,
++            base_qty=1,
++            base_price=0,
++            base_uom=self.base_uom,
++            line_no=1,
++        )
++        WmsTaskLine.objects.create(
++            task=tasks[1],
++            product=self.product,
++            qty_plan=1,
++            src_model="OutboundOrderLine",
++            src_id=line.pk,
++        )
++        urls = [
++            f"/api/inbound/receive_task/{tasks[0].pk}/print/",
++            f"/api/pda/pick-tasks/{tasks[1].pk}/print/",
++        ]
++        client = Client()
++        tickets = {url: issue_print_ticket(user, url) for url in urls}
++        for url in urls:
++            self.assertEqual(client.get(url, {"ticket": tickets[url]}).status_code, 200)
++            self.assertEqual(client.get(url, {"token": token}).status_code, 401)
++        user.set_password("Changed-print-test-password!")
++        user.save(update_fields=["password"])
++        for url in urls:
++            self.assertEqual(client.get(url, {"ticket": tickets[url]}).status_code, 401)
++            self.assertEqual(client.get(url, {"token": token}).status_code, 401)
++            self.assertEqual(client.get(url, {"access": token}).status_code, 401)
++
++    def test_print_ticket_is_bound_to_document_and_cannot_authenticate_api(self):
++        user = self._manager()
++        own = self._task("TICKET-OWN")
++        other = self._task("TICKET-OTHER", other=True)
++        path = f"/api/inbound/receive_task/{own.pk}/print/"
++        ticket = issue_print_ticket(user, path)
++        client = Client()
++        self.assertEqual(
++            client.get(
++                f"/api/inbound/receive_task/{other.pk}/print/", {"ticket": ticket}
++            ).status_code,
++            401,
++        )
++        self.assertEqual(client.get(path, {"ticket": ticket + "x"}).status_code, 401)
++        with patch("django.core.signing.time.time", return_value=__import__("time").time() + 121):
++            self.assertEqual(client.get(path, {"ticket": ticket}).status_code, 401)
++        self.assertEqual(
++            client.get("/api/auth/profile/", HTTP_AUTHORIZATION=f"Bearer {ticket}").status_code, 401
++        )
++        user.is_active = False
++        user.save(update_fields=["is_active"])
++        self.assertEqual(client.get(path, {"ticket": ticket}).status_code, 401)
++
++    def test_external_identifiers_export_as_literal_text(self):
++        value = '=HYPERLINK("https://example.invalid","identifier")'
++        add_external_identifier(product=self.product, source_system="TEST", external_code=value)
++        workbook = load_workbook(io.BytesIO(build_identifier_export(self.owner)), data_only=False)
++        cell = workbook["外部标识维护"]["E2"]
++        self.assertEqual(cell.value, value)
++        self.assertEqual(cell.data_type, "s")
+diff --git a/allapp/tasking/admin_scope.py b/allapp/tasking/admin_scope.py
+new file mode 100644
+index 0000000..afc6df1
+--- /dev/null
++++ b/allapp/tasking/admin_scope.py
+@@ -0,0 +1,81 @@
++"""Task-derived boundaries shared by child-model admin entry points."""
++
++from django.core.exceptions import PermissionDenied, ValidationError
++
++from allapp.accounts.access import AccessScope
++
++from .models import WmsTask, WmsTaskLine
++
++
++class TaskChildAdminScopeMixin:
++    def _tasks(self, request):
++        return AccessScope.for_user(request.user).filter_queryset(
++            WmsTask.objects.all(), owner_field="owner_id", warehouse_field="warehouse_id"
++        )
++
++    def get_queryset(self, request):
++        return super().get_queryset(request).filter(task_id__in=self._tasks(request).values("pk"))
++
++    def has_add_permission(self, request):
++        return AccessScope.for_user(request.user).is_valid and super().has_add_permission(request)
++
++    def _in_scope(self, request, obj):
++        return obj is None or self._tasks(request).filter(pk=obj.task_id).exists()
++
++    def has_view_permission(self, request, obj=None):
++        return self._in_scope(request, obj) and super().has_view_permission(request, obj)
++
++    def has_change_permission(self, request, obj=None):
++        return self._in_scope(request, obj) and super().has_change_permission(request, obj)
++
++    def has_delete_permission(self, request, obj=None):
++        return self._in_scope(request, obj) and super().has_delete_permission(request, obj)
++
++    def formfield_for_foreignkey(self, db_field, request, **kwargs):
++        if db_field.name == "task":
++            kwargs["queryset"] = self._tasks(request)
++        elif db_field.name == "line":
++            kwargs["queryset"] = WmsTaskLine.objects.filter(task__in=self._tasks(request))
++        return super().formfield_for_foreignkey(db_field, request, **kwargs)
++
++    def _validate_values(self, request, values):
++        task = values.get("task")
++        if not task or not self._tasks(request).filter(pk=task.pk).exists():
++            raise ValidationError("任务不在当前用户授权范围内。")
++        line = values.get("line")
++        if line and line.task_id != task.pk:
++            raise ValidationError("任务行不属于所选任务。")
++        product = values.get("product")
++        if product and product.owner_id != task.owner_id:
++            raise ValidationError("商品不属于任务货主。")
++        for field in ("from_location", "to_location"):
++            location = values.get(field)
++            if location and location.warehouse_id != task.warehouse_id:
++                raise ValidationError("库位不属于任务仓库。")
++
++    def get_form(self, request, obj=None, **kwargs):
++        base_form = super().get_form(request, obj, **kwargs)
++        model_admin = self
++
++        class ScopedForm(base_form):
++            def clean(self):
++                values = super().clean()
++                # Readonly task fields are absent from cleaned_data on count tasks.
++                effective = {"task": getattr(self.instance, "task", None), **values}
++                model_admin._validate_values(request, effective)
++                return values
++
++        return ScopedForm
++
++    def save_model(self, request, obj, form, change):
++        try:
++            self._validate_values(
++                request,
++                {
++                    name: getattr(obj, name, None)
++                    for name in ("task", "line", "product", "from_location", "to_location")
++                },
++            )
++        except ValidationError as exc:
++            raise PermissionDenied("任务关联对象不在授权范围内。") from exc
++        return super().save_model(request, obj, form, change)

@@ -2,6 +2,11 @@ import { useCart } from '@/store/cart'
 export { BASE_URL } from './api-base'
 import { BASE_URL } from './api-base'
 
+let sessionEpoch = 0
+function checkSession(epoch) {
+  if (epoch !== sessionEpoch) throw { statusCode: 409, message: '登录账号已变化，请重新操作' }
+}
+
 export function getAccessToken() {
   try {
     return uni.getStorageSync('access') || ''
@@ -19,6 +24,11 @@ export function getRefreshToken() {
 }
 
 export function setTokens(access, refresh) {
+  sessionEpoch++
+  persistTokens(access, refresh)
+}
+
+function persistTokens(access, refresh) {
   uni.setStorageSync('access', access || '')
   if (refresh !== undefined) uni.setStorageSync('refresh', refresh || '')
 }
@@ -29,6 +39,7 @@ export function setToken(access) {
 }
 
 export function clearSessionStorage() {
+  sessionEpoch++
   try {
     uni.removeStorageSync('access')
     uni.removeStorageSync('refresh')
@@ -75,6 +86,7 @@ export function expireLocalSession({ notify = true } = {}) {
   redirectingToLogin = true
 
   clearSessionStorage()
+  const expiredEpoch = sessionEpoch
 
   try { useCart().resetOrder() } catch (e) {}
 
@@ -88,7 +100,7 @@ export function expireLocalSession({ notify = true } = {}) {
 
   setTimeout(() => {
     try {
-      uni.reLaunch({ url: '/pages/login' })
+      if (expiredEpoch === sessionEpoch) uni.reLaunch({ url: '/pages/login' })
     } finally {
       setTimeout(() => {
         redirectingToLogin = false
@@ -157,43 +169,71 @@ function rawRequest(opts = {}, access = '') {
 }
 
 let refreshPromise = null
+let refreshEpoch = -1
 
 export function refreshSession() {
-  if (refreshPromise) return refreshPromise
+  const epoch = sessionEpoch
+  if (refreshPromise && refreshEpoch === epoch) return refreshPromise
   const refresh = getRefreshToken()
   if (!refresh) {
     return Promise.reject({ statusCode: 401, message: '缺少刷新令牌' })
   }
-  refreshPromise = rawRequest({
+  refreshEpoch = epoch
+  const flight = rawRequest({
     url: '/api/auth/refresh/',
     method: 'POST',
     data: { refresh },
     silent: true,
   }).then((data) => {
+    checkSession(epoch)
     if (!data?.access) throw { statusCode: 401, message: '刷新令牌无效' }
-    setTokens(data.access, data.refresh || refresh)
+    persistTokens(data.access, data.refresh || refresh)
     return data.access
+  }).catch(error => {
+    checkSession(epoch)
+    throw error
   }).finally(() => {
-    refreshPromise = null
+    if (refreshPromise === flight) refreshPromise = null
   })
-  return refreshPromise
+  refreshPromise = flight
+  return flight
 }
 
-export async function request(opts = {}) {
+async function recoverRequest(send, credential = false) {
+  const epoch = sessionEpoch
+  const originalAccess = getAccessToken()
   try {
-    return await rawRequest(opts, getAccessToken())
+    const result = await send(originalAccess)
+    checkSession(epoch)
+    return result
   } catch (error) {
-    if (error?.statusCode !== 401 || isLoginRequest(opts.url) || opts._retried) throw error
+    checkSession(epoch)
+    if (error?.statusCode !== 401 || credential) throw error
+    let access
     try {
-      const access = await refreshSession()
-      return await rawRequest({ ...opts, _retried: true }, access)
+      access = getAccessToken() !== originalAccess ? getAccessToken() : await refreshSession()
+      checkSession(epoch)
     } catch (refreshError) {
+      checkSession(epoch)
       // Offline refresh failures keep the session so the startup page can
       // offer an explicit retry instead of destroying a valid login.
-      if (refreshError?.statusCode !== 0) expireLocalSession()
+      if ([401, 403].includes(refreshError?.statusCode)) expireLocalSession()
       throw refreshError
     }
+    try {
+      const result = await send(access)
+      checkSession(epoch)
+      return result
+    } catch (retryError) {
+      checkSession(epoch)
+      if (retryError?.statusCode === 401) expireLocalSession()
+      throw retryError
+    }
   }
+}
+
+export function request(opts = {}) {
+  return recoverRequest(access => rawRequest(opts, access), isLoginRequest(opts.url) || opts._retried)
 }
 
 export async function fetchAllPages(fetchPage, params = {}) {
@@ -236,17 +276,7 @@ export async function downloadAuthenticatedFile(url, filename) {
   // #endif
 
   // #ifndef H5
-  let path
-  try {
-    path = await rawDownload(url, getAccessToken())
-  } catch (error) {
-    if (error?.statusCode !== 401) throw error
-    const access = await refreshSession().catch((refreshError) => {
-      if (refreshError?.statusCode !== 0) expireLocalSession()
-      throw refreshError
-    })
-    path = await rawDownload(url, access)
-  }
+  const path = await recoverRequest(access => rawDownload(url, access))
   return new Promise((resolve, reject) => {
     uni.openDocument({ filePath: path, showMenu: true, success: resolve, fail: reject })
   })
@@ -294,27 +324,8 @@ function rawUpload(opts, access = '') {
   })
 }
 
-export async function uploadAuthenticatedFile(opts) {
-  try {
-    return await rawUpload(opts, getAccessToken())
-  } catch (error) {
-    if (error?.statusCode !== 401) throw error
-  }
-
-  let access
-  try {
-    access = await refreshSession()
-  } catch (refreshError) {
-    if (refreshError?.statusCode !== 0) expireLocalSession()
-    throw refreshError
-  }
-
-  try {
-    return await rawUpload(opts, access)
-  } catch (retryError) {
-    if (retryError?.statusCode === 401) expireLocalSession()
-    throw retryError
-  }
+export function uploadAuthenticatedFile(opts) {
+  return recoverRequest(access => rawUpload(opts, access))
 }
 
 export const api = {
@@ -524,7 +535,7 @@ export const api = {
       url: `/api/outbound/orders/${id}/owner-approve/`,
       method: 'POST',
     }),
-	
+
   // 这两个接口如果你后端还没实现，会返回后端错误
   ownerReject: (id, reason) =>
     request({
@@ -538,7 +549,7 @@ export const api = {
       url: `/api/outbound/orders/${id}/cancel/`,
       method: 'POST',
     }),
-	
+
   // 上传一件代发 Excel
   importDropShipExcel(filePath, warehouseId) {
     return uploadAuthenticatedFile({

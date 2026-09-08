@@ -5,6 +5,7 @@ from django.views.generic import RedirectView
 from rest_framework_simplejwt.views import TokenVerifyView
 
 from allapp.console.views_dashboard import DashboardHomeView
+from allapp.core.print_tickets import PrintTicketApi
 
 from . import settings
 from .auth_views import (
@@ -22,6 +23,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path("api/print-tickets/", PrintTicketApi.as_view(), name="print-ticket"),
     path("healthz/live", health_live_view, name="health-live"),
     path("healthz/ready", health_ready_view, name="health-ready"),
     path("api/inbound/", include("allapp.inbound.urls")),  # 放在可能覆盖它的 router 之前
@@ -67,7 +69,10 @@ urlpatterns = [
     path("api/products/", include("allapp.products.urls_pda")),
     path("api/", include("allapp.products.urls_identifiers")),
     path("reports/", include("allapp.reports.urls")),
-    path("tasking/console/", include("allapp.tasking.urls_console", namespace="tasking_console")),
+    path(
+        "tasking/console/",
+        include("allapp.tasking.urls_console", namespace="tasking_console"),
+    ),
     path("console/", include("allapp.console.urls", namespace="console")),
     path(
         "console/op/",

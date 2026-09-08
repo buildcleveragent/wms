@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "run_id": "8c62a0bf0d754761b9e4e1c0dcd82c3e",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 7,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "/evidence/focused-tests.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 7
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferMySQLTests::test_backup_and_restore_round_trip_into_fresh_database": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferMySQLTests::test_restore_row_count_failure_rolls_back_seed_replacement": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferUnitTests::test_execute_modes_require_all_confirmation_arguments": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferUnitTests::test_mysql_credentials_use_mode_0600_file_and_not_command_arguments": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferUnitTests::test_restore_sql_has_delete_transaction_and_count_assertions_only": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferUnitTests::test_scope_reuses_preserved_manifest_and_excludes_history": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferUnitTests::test_sql_validator_accepts_only_selected_insert_statements": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

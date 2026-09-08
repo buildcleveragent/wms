@@ -17,7 +17,37 @@ const auth=useAuth(),taskId=ref(null),task=ref(null),forms=ref({}),loading=ref(f
 function hydrate(v){task.value=v;const n={};for(const l of v?.lines||[])n[l.id]=forms.value[l.id]||{from:'',to:'',fromContainer:'',toContainer:'',product:'',serial:'',qty:l.serial_control?'1':l.qty_pending,requestId:createIdempotencyUuid()};forms.value=n}
 async function load(){loading.value=true;try{hydrate(await api.relocationTask(taskId.value))}catch(_){task.value=null}finally{loading.value=false}}
 async function claim(){hydrate(await api.claimRelocationTask(taskId.value))}async function start(){hydrate(await api.startRelocationTask(taskId.value))}async function resume(){hydrate(await api.resumeRelocation(taskId.value))}async function retry(){hydrate(await api.retryRelocationPosting(taskId.value))}
-async function record(line){const f=forms.value[line.id];if(!f.from||!f.to||!f.product||(line.from_container_no&&!f.fromContainer)||(line.to_container_no&&!f.toContainer)||Number(f.qty)<=0){uni.showToast({title:'请完整扫描库位、容器、商品并填写数量',icon:'none'});return}saving.value=line.id;try{const r=await api.recordRelocation(taskId.value,{request_id:f.requestId,line_id:line.id,from_location_code:f.from,to_location_code:f.to,from_container_code:f.fromContainer,to_container_code:f.toContainer,product_code:f.product,serial_no:f.serial,qty:Number(f.qty)});hydrate(r.task)}finally{saving.value=null}}
+async function record(line) {
+  if (saving.value !== null) return
+  const form = forms.value[line.id]
+  if (!form.from || !form.to || !form.product || !Number.isFinite(Number(form.qty)) || Number(form.qty) <= 0
+      || (line.serial_control && !form.serial) || (line.from_container_no && !form.fromContainer) || (line.to_container_no && !form.toContainer)) {
+    uni.showToast({ title: '请完整扫描并填写有效数量', icon: 'none' }); return
+  }
+  saving.value = line.id
+  try {
+    const payload = {
+      request_id: form.requestId, line_id: line.id,
+      from_location_code: form.from, to_location_code: form.to,
+      product_code: form.product, serial_no: form.serial, qty: Number(form.qty),
+      from_container_code: form.fromContainer, to_container_code: form.toContainer,
+    }
+    // An uncertain write must retain both its identifier and original payload.
+    if (form.pendingPayload && JSON.stringify(form.pendingPayload) !== JSON.stringify(payload)) {
+      throw new Error('上次扫描结果尚未确认，请恢复原扫描内容后重试')
+    }
+    form.pendingPayload = payload
+    const response = await api.recordRelocation(taskId.value, payload)
+    if (!response?.task) throw new Error('扫描结果尚未确认，请保持原内容重试')
+    form.pendingPayload = null
+    form.requestId = createIdempotencyUuid()
+    hydrate(response.task)
+    uni.showToast({ title: response.idempotent ? '已确认此前扫描记录' : '移库已记录', icon: 'success' })
+  } catch (error) {
+    uni.showToast({ title: error?.message || '移库失败，请保持原内容重试', icon: 'none' })
+  } finally { saving.value = null }
+}
+
 function reportException(){uni.showModal({title:'报告移库异常',editable:true,placeholderText:'请输入异常说明',success:async r=>{if(r.confirm&&r.content)hydrate(await api.reportRelocationException(taskId.value,{note:r.content}))}})}
 function voidTask(){uni.showModal({title:'整单作废',editable:true,placeholderText:'请输入作废原因',success:async r=>{if(r.confirm&&r.content)hydrate(await api.voidRelocation(taskId.value,{note:r.content}))}})}
 onLoad(async q=>{taskId.value=Number(q.task_id);await auth.loadProfile({force:true});await load()})

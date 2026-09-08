@@ -1,0 +1,107 @@
+{
+  "revision": "c9175bfcb837fe740471710c5267ac8d5147911d",
+  "candidate": "uncommitted working tree",
+  "overall": "LOCAL_EXECUTION_FINISHED_RELEASE_ACCEPTANCE_INCOMPLETE",
+  "backend": {
+    "status": "PASS",
+    "tests": 1122,
+    "subtests": 945,
+    "failed": 0,
+    "skipped": 0,
+    "not_run": 0,
+    "coverage_percent": 72.38,
+    "duration_seconds": 2330.08,
+    "evidence": "backend-complete/backend-manifest.json",
+    "reconciliation": "backend-complete/reconciliation.json",
+    "password_hasher": "test-only MD5; browser uses configured PBKDF2",
+    "main_database_mode": "reuse",
+    "isolated_identifier_migration": "2 tests PASS; fresh independent instance cleaned",
+    "junit_records_including_subtests": 2067
+  },
+  "frontend": {
+    "status": "PASS_WITH_SCOPE_LIMITS",
+    "unit_logic_tests": 236,
+    "existing_playwright_tests": 26,
+    "h5_builds": 5,
+    "android_app_resource_build": "PASS",
+    "signed_apk": "BLOCKED",
+    "wechat_builds": "BLOCKED",
+    "evidence": [
+      "pda-client-verified-unit.log",
+      "pda-client-verified-e2e.log",
+      "android-client-verified-unit.log",
+      "android-client-verified-e2e.log",
+      "android-client-verified-app.log",
+      "owner-client-final.log",
+      "boss-client-final.log",
+      "mall-client-final.log"
+    ]
+  },
+  "real_api_browser": {
+    "status": "PASS",
+    "cases": 1,
+    "duration_seconds": 31.38,
+    "flows": [
+      "owner login and authenticated home",
+      "mall login, search, cart and offline order submission",
+      "admin session login"
+    ],
+    "database_assertions": "synthetic order qty=1 and unit price=9.50",
+    "evidence": "browser-render-complete/real-browser.xml",
+    "password_hasher": "configured PBKDF2",
+    "scope": "real Django API and built H5 in Chromium; synthetic accounts; no real payment",
+    "ui_result_visibility": "PASS: order submitted and ¥9.50 visible; final screenshot inspected"
+  },
+  "migration": {
+    "main_database": "wms_db_test",
+    "main_rebuild_count": 1,
+    "reason": "new POS migration",
+    "real_chain": "PASS",
+    "subsequent_policy": "reuse",
+    "identifier_scenario": "PASS on separate disposable MySQL instance; not DR proof",
+    "final_model_drift_check": "PASS: No changes detected"
+  },
+  "lint": {
+    "status": "PASS",
+    "changed_python_files": 54,
+    "baseline_growth": false,
+    "evidence": "lint-verified-retry.log"
+  },
+  "security": {
+    "image_gate": "FAIL",
+    "trivy_evidence": "trivy-image-summary.json",
+    "gitleaks_confirmed_real_secrets": 0,
+    "gitleaks_fixture_matches": 9,
+    "pip_audit": "one existing time-limited WeasyPrint exception; DRF upgraded",
+    "npm_audit": "zero high/critical after mall update; moderate/low remain",
+    "bandit_allapp_medium_high": 0,
+    "bandit_extended_medium_high": 2,
+    "bandit_extended_evidence": "bandit-extended-triage.json",
+    "gitleaks_evidence": "gitleaks-verified-triage.json",
+    "bandit_extended_status": "FAIL scan / operator-script hardening review required"
+  },
+  "external_gates": "external-gates.json",
+  "manual_cases": {
+    "NOT RUN": 196
+  },
+  "production_actions": {
+    "deployment": false,
+    "production_database_writes": false,
+    "real_payments": false
+  },
+  "container": {
+    "status": "BUILD_AND_SMOKE_PASS",
+    "identity": "sha256:9c1b6d42b50188dd3dc4127fd089f6b5ce60343ba967cc650a627d12b13434a3",
+    "source_files_compared": 727,
+    "source_mismatches": 0,
+    "vulnerability_gate": "FAIL",
+    "full_container_business_suite": "NOT RUN",
+    "smoke_evidence": "container-render-complete-smoke.json"
+  },
+  "final_checks": {
+    "migration_model_drift": "PASS",
+    "git_diff_check": "PASS",
+    "source_hash_match": "PASS",
+    "isolated_migration_container_cleanup": "PASS"
+  }
+}

@@ -40,7 +40,36 @@ function activeStep(line){const steps=stepsFor(line);return activeTargets.value[
 function advance(line,key){const steps=stepsFor(line),index=steps.findIndex((step)=>step.key===key);activeTargets.value[line.id]=steps[index+1]?.key||key}
 async function load(){loading.value=true;try{hydrate(await api.replenishmentTask(taskId.value))}catch(error){task.value=null}finally{loading.value=false}}
 async function claim(){hydrate(await api.claimReplenishmentTask(taskId.value))}async function start(){hydrate(await api.startReplenishmentTask(taskId.value))}async function retryPosting(){hydrate(await api.retryReplenishmentPosting(taskId.value))}
-async function record(line){const form=forms.value[line.id];if(!form.from||!form.to||!form.product||(line.serial_control&&!form.serial)||Number(form.qty)<=0){uni.showToast({title:'请按步骤完整扫描并填写数量',icon:'none'});return}saving.value=line.id;try{const response=await api.recordReplenishment(taskId.value,{request_id:form.requestId,line_id:line.id,from_location_code:form.from,to_location_code:form.to,product_code:form.product,serial_no:form.serial,qty:Number(form.qty)});hydrate(response.task);uni.showToast({title:'补货已记录',icon:'success'})}catch(error){uni.showToast({title:error?.message||'补货失败',icon:'none'})}finally{saving.value=null}}
+async function record(line) {
+  if (saving.value !== null) return
+  const form = forms.value[line.id]
+  if (!form.from || !form.to || !form.product || !Number.isFinite(Number(form.qty)) || Number(form.qty) <= 0
+      || (line.serial_control && !form.serial)) {
+    uni.showToast({ title: '请完整扫描并填写有效数量', icon: 'none' }); return
+  }
+  saving.value = line.id
+  try {
+    const payload = {
+      request_id: form.requestId, line_id: line.id,
+      from_location_code: form.from, to_location_code: form.to,
+      product_code: form.product, serial_no: form.serial, qty: Number(form.qty),
+    }
+    // An uncertain write must retain both its identifier and original payload.
+    if (form.pendingPayload && JSON.stringify(form.pendingPayload) !== JSON.stringify(payload)) {
+      throw new Error('上次扫描结果尚未确认，请恢复原扫描内容后重试')
+    }
+    form.pendingPayload = payload
+    const response = await api.recordReplenishment(taskId.value, payload)
+    if (!response?.task) throw new Error('扫描结果尚未确认，请保持原内容重试')
+    form.pendingPayload = null
+    form.requestId = createIdempotencyUuid()
+    hydrate(response.task)
+    uni.showToast({ title: response.idempotent ? '已确认此前扫描记录' : '补货已记录', icon: 'success' })
+  } catch (error) {
+    uni.showToast({ title: error?.message || '补货失败，请保持原内容重试', icon: 'none' })
+  } finally { saving.value = null }
+}
+
 onLoad(async query=>{taskId.value=Number(query.task_id);await auth.loadProfile({force:true});await load()})
 </script>
 

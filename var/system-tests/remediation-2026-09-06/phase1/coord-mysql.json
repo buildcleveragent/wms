@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "39724f6b0af14b5b8aadb9d4407aaa89",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 1,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase1/coord-mysql.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 1
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/core/test_test_coordination.py::test_lock_loss_never_allows_new_run_to_overtake_live_worker": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

@@ -3,12 +3,10 @@
 
 import json
 import os
-import re
 import time
 
 import MySQLdb
 
-SCHEMA_PATTERN = re.compile(r"^wms_identifier_migration_[a-f0-9_]+$")
 MIGRATE_FROM = ("products", "0008_product_carton_package")
 MIGRATE_TO = ("products", "0011_identifier_normalized_value_indexes")
 MIGRATE_FROM_TARGETS = [
@@ -24,27 +22,21 @@ def _admin_connection():
         user=os.environ["DB_USER"],
         passwd=os.environ["DB_PASSWORD"],
         charset="utf8mb4",
+        connect_timeout=5,
     )
 
 
-def _create_schema(schema):
+def _assert_empty_schema():
     connection = _admin_connection()
     try:
-        connection.autocommit(True)
+        connection.select_db("wms_db_test")
         with connection.cursor() as cursor:
-            cursor.execute(  # nosec B608
-                f"CREATE DATABASE `{schema}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-            )
-    finally:
-        connection.close()
-
-
-def _drop_schema(schema):
-    connection = _admin_connection()
-    try:
-        connection.autocommit(True)
-        with connection.cursor() as cursor:
-            cursor.execute(f"DROP DATABASE IF EXISTS `{schema}`")  # nosec B608
+            cursor.execute("SELECT DATABASE()")
+            if cursor.fetchone()[0] != "wms_db_test":
+                raise RuntimeError("Unexpected connected migration database.")
+            cursor.execute("SHOW TABLES")
+            if cursor.fetchall():
+                raise RuntimeError("Migration scenario requires a NEW empty test instance.")
     finally:
         connection.close()
 
@@ -185,33 +177,32 @@ def _run_scenario():
 
 
 def main():
-    schema = os.environ.get("WMS_IDENTIFIER_MIGRATION_SCHEMA", "")
     if os.environ.get("APP_ENV") != "test":
         raise SystemExit("APP_ENV must be test.")
-    if os.environ.get("DB_NAME") != "wms_db_test":
-        raise SystemExit("DB_NAME must be the isolated wms_db_test database.")
-    if not SCHEMA_PATTERN.fullmatch(schema):
-        raise SystemExit("Invalid disposable migration schema name.")
+    if any(os.environ.get(key) != "wms_db_test" for key in ("DB_NAME", "DB_TEST_NAME")):
+        raise SystemExit("Both database names must be wms_db_test.")
+    if os.environ.get("WMS_ISOLATED_MIGRATION_TEST") != "1":
+        raise SystemExit("Run through the isolated migration test container.")
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "wmsmaster.settings")
+    import django
 
-    _create_schema(schema)
-    django_ready = False
-    try:
-        os.environ["DB_NAME"] = schema
-        os.environ["DB_TEST_NAME"] = schema
-        os.environ.setdefault("DJANGO_SETTINGS_MODULE", "wmsmaster.settings")
-        import django
+    django.setup()
+    from django.conf import settings
+    from django.db import connection, connections
+    from django.db.migrations.executor import MigrationExecutor
 
-        django.setup()
-        django_ready = True
-        print(json.dumps(_run_scenario(), ensure_ascii=False, sort_keys=True))
-    finally:
+    from wmsmaster.test_coordination import DatabaseLease
+
+    with DatabaseLease(settings.DATABASES["default"]):
         try:
-            if django_ready:
-                from django.db import connections
-
-                connections.close_all()
+            _assert_empty_schema()
+            result = _run_scenario()
+            executor = MigrationExecutor(connection)
+            executor.migrate(executor.loader.graph.leaf_nodes())
+            result["restored_to_head"] = True
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         finally:
-            _drop_schema(schema)
+            connections.close_all()
 
 
 if __name__ == "__main__":

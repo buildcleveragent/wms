@@ -1,0 +1,1215 @@
+{
+  "status": "BLOCKED",
+  "not_production_readiness": true,
+  "manual_cases": [
+    {
+      "id": "AUTH-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AUTH-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AUTH-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AUTH-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AUTH-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AUTH-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AUTH-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AUTH-008",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MD-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MD-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MD-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MD-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MD-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MD-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRD-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRD-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRD-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRD-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRD-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRD-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRD-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRD-008",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INB-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INB-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INB-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INB-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INB-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INB-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INB-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INB-008",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "NRI-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "NRI-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "NRI-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "NRI-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "NRI-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "NRI-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "NRI-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "TRK-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "TRK-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "TRK-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "TRK-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "TRK-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "TRK-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OUT-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OUT-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OUT-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OUT-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OUT-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OUT-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OUT-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OUT-008",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AST-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AST-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AST-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AST-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AST-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "FEFO-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "FEFO-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "FEFO-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "FEFO-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "FEFO-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PICK-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PICK-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PICK-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PICK-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PICK-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PICK-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PICK-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PICK-008",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REV-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REV-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REV-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REV-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REV-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REV-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REP-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REP-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REP-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REP-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REP-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REL-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REL-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REL-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REL-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REL-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "REL-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "CNT-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "CNT-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "CNT-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "CNT-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "CNT-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "CNT-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INV-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INV-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INV-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INV-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INV-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "INV-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RPT-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RPT-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RPT-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RPT-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RPT-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RPT-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BIL-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BIL-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BIL-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BIL-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BIL-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BIL-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BIL-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BIL-008",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AR-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AR-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AR-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AR-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "AR-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OWN-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OWN-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OWN-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OWN-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OWN-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OWN-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OWN-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BOSS-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BOSS-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BOSS-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BOSS-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BOSS-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "BOSS-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POS-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POS-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POS-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POS-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POS-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POS-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POS-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POS-008",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POSR-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POSR-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POSR-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POSR-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POSR-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POSR-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "POSR-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MALL-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MALL-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MALL-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MALL-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MALL-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MALL-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MALL-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "MALL-008",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PAY-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PAY-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PAY-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PAY-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PAY-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PAY-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PAY-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PAY-008",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PAY-009",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRN-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRN-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRN-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRN-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRN-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "PRN-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "SEC-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "SEC-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "SEC-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "SEC-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "SEC-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "SEC-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "SEC-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "SEC-008",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RES-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RES-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RES-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RES-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RES-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RES-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RES-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "RES-008",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "UI-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "UI-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "UI-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "UI-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OPS-001",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OPS-002",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OPS-003",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OPS-004",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OPS-005",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OPS-006",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OPS-007",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    },
+    {
+      "id": "OPS-008",
+      "status": "NOT_RUN",
+      "reviewer": null,
+      "evidence": null
+    }
+  ],
+  "manual_count": 196,
+  "external_gates": [
+    {
+      "gate_id": "capacity",
+      "status": "BLOCKED",
+      "missing": "Dedicated staging target, approved synthetic dataset and role actors, resource/DB telemetry"
+    },
+    {
+      "gate_id": "disaster-recovery",
+      "status": "BLOCKED",
+      "missing": "Independent restore target, consistent full MySQL/media backup and measured recovery"
+    },
+    {
+      "gate_id": "wechat-payment",
+      "status": "BLOCKED",
+      "missing": "WeChat AppID, approved test merchant, callback route and limited transaction authorization"
+    },
+    {
+      "gate_id": "signed-apk-devices",
+      "status": "BLOCKED",
+      "missing": "Signing environment and real scanning/printing devices"
+    },
+    {
+      "gate_id": "staging-rehearsal-60m",
+      "status": "BLOCKED",
+      "missing": "Staging release target and scheduler/business observations"
+    },
+    {
+      "gate_id": "production-observation-60m",
+      "status": "BLOCKED",
+      "missing": "Approved production deployment and actual 60-minute observations"
+    }
+  ]
+}

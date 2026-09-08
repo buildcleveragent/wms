@@ -175,9 +175,7 @@ class LoginThrottleTests(TestCase):
         self.assertEqual(throttled.status_code, 429)
         self.assertEqual(throttled.data["code"], "login_throttled")
         self.assertGreaterEqual(throttled.data["retry_after"], 1)
-        self.assertEqual(
-            throttled.headers["Retry-After"], str(throttled.data["retry_after"])
-        )
+        self.assertEqual(throttled.headers["Retry-After"], str(throttled.data["retry_after"]))
         event = AuditEvent.objects.get(action="LOGIN_THROTTLED")
         self.assertEqual(event.ip_address, "198.51.100.10")
         self.assertEqual(event.metadata["attempted_identity"], self.user.username)
@@ -498,9 +496,7 @@ class GroupAdminPermissionMatrixTests(TestCase):
 
     def test_canonical_group_name_is_read_only_and_delete_is_denied(self):
         call_command("sync_wms_role_groups", stdout=StringIO())
-        group = Group.objects.get(
-            name=role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR)
-        )
+        group = Group.objects.get(name=role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR))
 
         form = self.model_admin.get_form(self.request, group)(instance=group)
 
@@ -510,9 +506,7 @@ class GroupAdminPermissionMatrixTests(TestCase):
 
     def test_canonical_group_cannot_be_renamed_through_orm(self):
         call_command("sync_wms_role_groups", stdout=StringIO())
-        group = Group.objects.get(
-            name=role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR)
-        )
+        group = Group.objects.get(name=role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR))
         group.name = "被篡改的规范组"
 
         with self.assertRaisesMessage(ValidationError, "规范角色组名称固定"):
@@ -520,16 +514,12 @@ class GroupAdminPermissionMatrixTests(TestCase):
 
     def test_group_permission_change_and_custom_delete_are_audited(self):
         call_command("sync_wms_role_groups", stdout=StringIO())
-        group = Group.objects.get(
-            name=role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR)
-        )
+        group = Group.objects.get(name=role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR))
         extra = Permission.objects.get(
             content_type__app_label="auth",
             codename="view_group",
         )
-        permission_ids = list(group.permissions.values_list("pk", flat=True)) + [
-            extra.pk
-        ]
+        permission_ids = list(group.permissions.values_list("pk", flat=True)) + [extra.pk]
         request = RequestFactory().post(f"/admin/auth/group/{group.pk}/change/")
         request.user = self.request.user
         form = self.model_admin.get_form(request, group)(
@@ -542,9 +532,7 @@ class GroupAdminPermissionMatrixTests(TestCase):
         self.model_admin.save_model(request, changed_group, form, change=True)
         self.model_admin.save_related(request, form, [], change=True)
 
-        event = AuditEvent.objects.get(
-            action="ROLE_GROUP_UPDATE", object_id=str(group.pk)
-        )
+        event = AuditEvent.objects.get(action="ROLE_GROUP_UPDATE", object_id=str(group.pk))
         self.assertTrue(event.metadata["canonical"])
         self.assertIn("auth.view_group", event.metadata["permissions"]["added"])
 
@@ -612,9 +600,7 @@ class GroupAdminPermissionMatrixTests(TestCase):
         self.assertIn(group.name, event.metadata["groups"]["added"])
         self.assertIn("auth.view_group", event.metadata["user_permissions"]["added"])
 
-        staff_request = RequestFactory().get(
-            f"/admin/accounts/user/{target.pk}/change/"
-        )
+        staff_request = RequestFactory().get(f"/admin/accounts/user/{target.pk}/change/")
         staff_request.user = get_user_model().objects.create_user(
             username="user-editor",
             is_staff=True,
@@ -659,9 +645,7 @@ class GroupAdminPermissionMatrixTests(TestCase):
             ).exists()
         )
         self.assertTrue(target.groups.filter(pk=auxiliary.pk).exists())
-        event = AuditEvent.objects.get(
-            action="USER_AUTHORIZATION_UPDATE", object_id=str(target.pk)
-        )
+        event = AuditEvent.objects.get(action="USER_AUTHORIZATION_UPDATE", object_id=str(target.pk))
         self.assertEqual(
             event.metadata["canonical_group_sync"]["desired_group"],
             role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR),
@@ -671,9 +655,7 @@ class GroupAdminPermissionMatrixTests(TestCase):
 class UserRoleScopeModelTests(TestCase):
     def setUp(self):
         self.owner = Owner.objects.create(name="Role Owner", code="ROLEOWN")
-        self.warehouse = Warehouse.objects.create(
-            code="ROLEWH1", name="Role Warehouse 1"
-        )
+        self.warehouse = Warehouse.objects.create(code="ROLEWH1", name="Role Warehouse 1")
         self.other_warehouse = Warehouse.objects.create(
             code="ROLEWH2",
             name="Role Warehouse 2",
@@ -754,18 +736,14 @@ class RoleMembershipSyncTests(TestCase):
         call_command("sync_wms_role_groups", stdout=StringIO())
         self.owner = Owner.objects.create(name="Membership Owner", code="MEMOWNER")
         self.warehouse = Warehouse.objects.create(code="MEMWH1", name="Membership WH 1")
-        self.other_warehouse = Warehouse.objects.create(
-            code="MEMWH2", name="Membership WH 2"
-        )
+        self.other_warehouse = Warehouse.objects.create(code="MEMWH2", name="Membership WH 2")
         self.user = get_user_model().objects.create_user(username="membership-user")
         self.auxiliary_group = Group.objects.create(name="Membership Auxiliary")
         self.user.groups.add(self.auxiliary_group)
 
     def role_group_names(self):
         return set(
-            self.user.groups.filter(name__in=ROLE_GROUP_NAMES).values_list(
-                "name", flat=True
-            )
+            self.user.groups.filter(name__in=ROLE_GROUP_NAMES).values_list("name", flat=True)
         )
 
     def test_scope_syncs_canonical_group_and_preserves_auxiliary_configuration(self):
@@ -848,9 +826,7 @@ class RoleMembershipSyncTests(TestCase):
         self.assertFalse(self.role_group_names())
 
     def test_sync_does_not_change_owner_customized_group_permissions(self):
-        group = Group.objects.get(
-            name=role_group_name(UserRoleScope.Role.OWNER_SALESPERSON)
-        )
+        group = Group.objects.get(name=role_group_name(UserRoleScope.Role.OWNER_SALESPERSON))
         extra_permission = Permission.objects.get(
             content_type__app_label="auth", codename="view_group"
         )
@@ -874,9 +850,7 @@ class AccessScopeTests(TestCase):
             name="Scope Other Owner",
             code="SCOPEOTH",
         )
-        self.warehouse = Warehouse.objects.create(
-            code="SCOPEW1", name="Scope Warehouse 1"
-        )
+        self.warehouse = Warehouse.objects.create(code="SCOPEW1", name="Scope Warehouse 1")
         self.other_warehouse = Warehouse.objects.create(
             code="SCOPEW2",
             name="Scope Warehouse 2",
@@ -951,9 +925,7 @@ class AccessScopeTests(TestCase):
 
         scope = AccessScope.for_user(user)
         usernames = set(
-            scope.filter_queryset(self.target_queryset()).values_list(
-                "username", flat=True
-            )
+            scope.filter_queryset(self.target_queryset()).values_list("username", flat=True)
         )
 
         self.assertEqual(scope.roles, {UserRoleScope.Role.WAREHOUSE_OPERATOR})
@@ -1056,9 +1028,7 @@ class AccessScopeTests(TestCase):
 
         scope = AccessScope.for_user(user)
         usernames = set(
-            scope.filter_queryset(self.target_queryset()).values_list(
-                "username", flat=True
-            )
+            scope.filter_queryset(self.target_queryset()).values_list("username", flat=True)
         )
 
         self.assertEqual(scope.owner_ids, {self.owner.id})
@@ -1104,9 +1074,7 @@ class AccessScopeTests(TestCase):
 
         scope = AccessScope.for_user(user)
         usernames = set(
-            scope.filter_queryset(self.target_queryset()).values_list(
-                "username", flat=True
-            )
+            scope.filter_queryset(self.target_queryset()).values_list("username", flat=True)
         )
 
         self.assertTrue(scope.is_valid)
@@ -1148,9 +1116,7 @@ class AccessScopeTests(TestCase):
     def test_conflicting_explicit_rows_fail_closed_even_if_validation_was_bypassed(
         self,
     ):
-        user = get_user_model().objects.create_user(
-            username="scope-conflicting-explicit"
-        )
+        user = get_user_model().objects.create_user(username="scope-conflicting-explicit")
         UserRoleScope.objects.bulk_create(
             [
                 UserRoleScope(
@@ -1180,9 +1146,7 @@ class SyncWmsRoleGroupsCommandTests(TestCase):
 
         self.assertFalse(
             Group.objects.filter(
-                name__in=[
-                    template.group_name for template in ROLE_GROUP_TEMPLATES.values()
-                ]
+                name__in=[template.group_name for template in ROLE_GROUP_TEMPLATES.values()]
             ).exists()
         )
         self.assertIn("[dry-run]", output.getvalue())
@@ -1195,9 +1159,7 @@ class SyncWmsRoleGroupsCommandTests(TestCase):
 
         self.assertEqual(
             Group.objects.filter(
-                name__in=[
-                    template.group_name for template in ROLE_GROUP_TEMPLATES.values()
-                ]
+                name__in=[template.group_name for template in ROLE_GROUP_TEMPLATES.values()]
             ).count(),
             5,
         )
@@ -1273,17 +1235,13 @@ class SyncWmsUserRoleMembershipsCommandTests(TestCase):
         )
         output = StringIO()
 
-        call_command(
-            "sync_wms_user_role_memberships", dry_run=True, stdout=output
-        )
+        call_command("sync_wms_user_role_memberships", dry_run=True, stdout=output)
         self.assertFalse(user.groups.filter(name__in=ROLE_GROUP_NAMES).exists())
         self.assertIn("未写入", output.getvalue())
 
         call_command("sync_wms_user_role_memberships", stdout=StringIO())
         self.assertTrue(
-            user.groups.filter(
-                name=role_group_name(UserRoleScope.Role.OWNER_MANAGER)
-            ).exists()
+            user.groups.filter(name=role_group_name(UserRoleScope.Role.OWNER_MANAGER)).exists()
         )
         self.assertTrue(
             AuditEvent.objects.filter(
@@ -1300,9 +1258,7 @@ class SyncWmsUserRoleMembershipsCommandTests(TestCase):
 
     def test_unscoped_user_loses_only_recognized_role_group(self):
         user = get_user_model().objects.create_user(username="command-unscoped")
-        role_group = Group.objects.get(
-            name=role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR)
-        )
+        role_group = Group.objects.get(name=role_group_name(UserRoleScope.Role.WAREHOUSE_OPERATOR))
         auxiliary = Group.objects.create(name="Command Auxiliary")
         user.groups.add(role_group, auxiliary)
 
@@ -1349,9 +1305,7 @@ class AuditWmsRoleScopesCommandTests(TestCase):
             owner=owner,
             warehouse=warehouse,
         )
-        conflict_user = get_user_model().objects.create_user(
-            username="audit-conflict-user"
-        )
+        conflict_user = get_user_model().objects.create_user(username="audit-conflict-user")
         UserRoleScope.objects.create(
             user=conflict_user,
             role=UserRoleScope.Role.OWNER_MANAGER,

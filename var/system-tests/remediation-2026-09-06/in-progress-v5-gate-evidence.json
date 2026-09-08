@@ -1,0 +1,279 @@
+[
+  {
+    "gate_id": "historical-evidence-review",
+    "status": "PASS",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [
+      {
+        "path": "phase1/historical-review.json",
+        "sha256": "21eff44b52eeecda1960551d7fcd7626e017726aed394bb472aa08b7add6e9a8"
+      }
+    ]
+  },
+  {
+    "gate_id": "runtime-smoke",
+    "status": "PASS",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [
+      {
+        "path": "phase5/runtime-smoke-v5/runtime-smoke.json",
+        "sha256": "8a52a5b9a43fa5c56ac0948320b9a356c0ab0e87c879b3cedb2520a3946df808"
+      },
+      {
+        "path": "phase5/runtime-django-check-v5.log",
+        "sha256": "1e3e63f221bde88816c4a4ef7367691607b20cc1d194028a02ec9ae0586cf9b1"
+      },
+      {
+        "path": "phase5/runtime-migration-drift-v5.log",
+        "sha256": "a2bfa7b376c38062f77ce2b1e703876aaa04662f96355cdf5dc9d0d075302b05"
+      },
+      {
+        "path": "phase5/source-verification-v5.log",
+        "sha256": "7f264a6415e2b21e0d8a309896cc1af637280e497a133bb2e248e02fcb064780"
+      }
+    ],
+    "runtime_image_id": "sha256:c5620e3feea83e3617036d85d8c3f28b5849bdebffcae4233e1299c80bba5747"
+  },
+  {
+    "gate_id": "dependency-audit",
+    "status": "BLOCKED",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [
+      {
+        "path": "phase2/pip-audit-69.json",
+        "sha256": "7203882fab66e3eea4b8b9fb165aea758fd58358cd10c8ca0c8798efe7899a61"
+      },
+      {
+        "path": "phase2/npm-audit-final-summary.json",
+        "sha256": "183508f7c88ebb18d2f5504d4d06ba5ce9b66d397f06ad58cfee299a14c0513d"
+      },
+      {
+        "path": "phase5/secret-scan-review-v5.json",
+        "sha256": "01d4723ac5644cd639d561bf08d2ffca69e696b0ec26027de493b3c85f7c9130"
+      }
+    ],
+    "note": "Production pip audit zero; npm high/critical zero, low/moderate findings remain registered; exact locks unchanged."
+  },
+  {
+    "gate_id": "image-security",
+    "status": "BLOCKED",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [
+      {
+        "path": "phase5/image-security-dispositions-v5.json",
+        "sha256": "97b2e7ed479324c5259b7c4f66cdfe1f8538861480a52b9daf5cf9cb76e139c7"
+      }
+    ],
+    "runtime_image_id": "sha256:c5620e3feea83e3617036d85d8c3f28b5849bdebffcae4233e1299c80bba5747"
+  },
+  {
+    "gate_id": "frontend",
+    "status": "PASS",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [
+      {
+        "path": "phase5/frontend-summary-v5.json",
+        "sha256": "3d8c3726362f1e0ef8ab46a70b1203f1db37b928029a26635dcba29242b6b5c2"
+      },
+      {
+        "path": "phase3/frontend-final-v1/frontend-manifest.json",
+        "sha256": "9efc274076de765d7fd9eb59e9b78778604b9af4a80d8fffb5a19ec9625111aa"
+      },
+      {
+        "path": "phase5/frontend-artifacts-v3.json",
+        "sha256": "c776c5b75367a128f66855fb9b2dbcb1c694ddb70f1c0a8653e60b4ed6e0241b"
+      }
+    ]
+  },
+  {
+    "gate_id": "real-browser",
+    "status": "PASS",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [
+      {
+        "path": "phase3/real-browser-final-v2.json",
+        "sha256": "6e5078070751c764df568af25485b3ca6f965422845379673de4c2f524f3057f"
+      },
+      {
+        "path": "phase3/real-browser-final-v2.xml",
+        "sha256": "0176d1ef44a10debe41e417a02f8d6d02033e99f5d0a48a2edb7fab3aef99b7d"
+      }
+    ],
+    "note": "Host browser environment recorded; frontend inputs unchanged in candidate v5."
+  },
+  {
+    "gate_id": "pdf-resource-register",
+    "status": "PASS",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [
+      {
+        "path": "phase2/pdf-measurements/measurement.json",
+        "sha256": "1fe44a7e970cbc570ef86271d3f4db3cbac94596cc1cf3bf9f16cba9d3fc5f4f"
+      }
+    ],
+    "note": "Risk remains open; measurement timeout is not a production control."
+  },
+  {
+    "gate_id": "external-gates-register",
+    "status": "PASS",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [
+      {
+        "path": "phase4/external-open-items.json",
+        "sha256": "f9a59f4c7aafe2050c7c8e9978930f412e92da4543e2feebbc3a5ab4229eb3c0"
+      }
+    ]
+  },
+  {
+    "gate_id": "test-coordination",
+    "status": "NOT_RUN",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Final candidate gate not yet complete at this snapshot."
+  },
+  {
+    "gate_id": "business-matrix",
+    "status": "NOT_RUN",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Final candidate gate not yet complete at this snapshot."
+  },
+  {
+    "gate_id": "migration-clean",
+    "status": "NOT_RUN",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Final candidate gate not yet complete at this snapshot."
+  },
+  {
+    "gate_id": "migration-nonempty-pos",
+    "status": "NOT_RUN",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Final candidate gate not yet complete at this snapshot."
+  },
+  {
+    "gate_id": "backend-functional",
+    "status": "NOT_RUN",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Final candidate gate not yet complete at this snapshot."
+  },
+  {
+    "gate_id": "coverage",
+    "status": "NOT_RUN",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Final candidate gate not yet complete at this snapshot."
+  },
+  {
+    "gate_id": "pdf-acceptance",
+    "status": "NOT_RUN",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Final candidate gate not yet complete at this snapshot."
+  },
+  {
+    "gate_id": "readiness-tool",
+    "status": "NOT_RUN",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Final candidate gate not yet complete at this snapshot."
+  },
+  {
+    "gate_id": "pdf-resource-release-decision",
+    "status": "BLOCKED",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Actual environment, human decision or actual deployment evidence required; no local validator result substitutes for it."
+  },
+  {
+    "gate_id": "staging-rehearsal-60m",
+    "status": "BLOCKED",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Actual environment, human decision or actual deployment evidence required; no local validator result substitutes for it."
+  },
+  {
+    "gate_id": "capacity",
+    "status": "BLOCKED",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Actual environment, human decision or actual deployment evidence required; no local validator result substitutes for it."
+  },
+  {
+    "gate_id": "disaster-recovery",
+    "status": "BLOCKED",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Actual environment, human decision or actual deployment evidence required; no local validator result substitutes for it."
+  },
+  {
+    "gate_id": "wechat-payment",
+    "status": "BLOCKED",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Actual environment, human decision or actual deployment evidence required; no local validator result substitutes for it."
+  },
+  {
+    "gate_id": "signed-apk-devices",
+    "status": "BLOCKED",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Actual environment, human decision or actual deployment evidence required; no local validator result substitutes for it."
+  },
+  {
+    "gate_id": "manual-196",
+    "status": "BLOCKED",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Actual environment, human decision or actual deployment evidence required; no local validator result substitutes for it."
+  },
+  {
+    "gate_id": "release-approval",
+    "status": "BLOCKED",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Actual environment, human decision or actual deployment evidence required; no local validator result substitutes for it."
+  },
+  {
+    "gate_id": "deployed-artifact-identity",
+    "status": "NOT_RUN",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Actual environment, human decision or actual deployment evidence required; no local validator result substitutes for it."
+  },
+  {
+    "gate_id": "production-observation-60m",
+    "status": "NOT_RUN",
+    "candidate_id": "7313235eea7faea2db5b27539f7e052192a8a63d76ab3c1beea20f15b8a2c6c1",
+    "finished_at": "2026-09-06T09:09:03.163568+00:00",
+    "artifacts": [],
+    "note": "Actual environment, human decision or actual deployment evidence required; no local validator result substitutes for it."
+  }
+]

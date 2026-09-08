@@ -520,7 +520,7 @@ async function executeSubmit() {
       title: result?.replayed ? '已恢复原代办订单' : '代办订单已创建',
       icon: 'none',
     })
-    if (shouldPrint) printStarted = openOutboundPrintPage(taskId, preparedPrintWindow)
+    if (shouldPrint) printStarted = await openOutboundPrintPage(taskId, preparedPrintWindow)
     await redirectToTask(taskId)
     draft.resetAll()
   } catch (error) {

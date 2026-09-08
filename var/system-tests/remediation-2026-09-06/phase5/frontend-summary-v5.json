@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "logic_tests": 251,
+  "browser_tests_mocked_or_intercepted": 26,
+  "real_browser_flows": 7,
+  "python_live_server_cases": 2,
+  "builds": {
+    "H5": 5,
+    "Android_App_build": 1,
+    "signed_APK": "NOT_RUN"
+  },
+  "phase3_frontend_manifest": "phase3/frontend-final-v1/frontend-manifest.json",
+  "real_browser_manifest": "phase3/real-browser-final-v2.json",
+  "build_config_correction": {
+    "variable": "VITE_API_BASE_URL",
+    "PDA_Android": "http://127.0.0.1:18081",
+    "owner_boss_mall": "same origin (empty base)"
+  },
+  "limitations": [
+    "Android App build is not a signed APK/device acceptance.",
+    "Mocked/intercepted browser tests do not independently prove backend behavior.",
+    "Real browser backend ran in host Python 3.12.3; authoritative backend allapp gate runs in the candidate-derived Python 3.12.14 image."
+  ]
+}

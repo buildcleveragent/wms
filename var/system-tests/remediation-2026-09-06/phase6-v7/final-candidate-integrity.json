@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+  "source_digest": "0bf6043f017406193d84dbe5ebc7dd67b1de7d49143201474274e44b5adc44ab",
+  "runtime_image_id": "sha256:1b943a89e9bf0983b8753634c3185fba552be07a5e50a265a102fe5e63b91346",
+  "test_image_id": "sha256:2dfd66b593ceec4d5ae01b3c4344e6fcf10e656cacc1df27fa49e5e62c49b560",
+  "file_count": 1296,
+  "acceptance_driver_unchanged": true,
+  "reuse_policy_unchanged": true,
+  "at": "2026-09-06T10:59:48.210352+00:00"
+}

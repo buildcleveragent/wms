@@ -5,10 +5,14 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO, StringIO
+from tempfile import TemporaryDirectory
 from threading import Barrier
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -18,9 +22,6 @@ from django.core.management.base import CommandError
 from django.db import close_old_connections, connection
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from PIL import Image
 from rest_framework.test import APIClient
 
@@ -36,8 +37,8 @@ from allapp.products.models import (
     ProductPackage,
     ProductUom,
 )
-from allapp.tasking.models import WmsTask, WmsTaskLine
 from allapp.tasking import services as tasking_services
+from allapp.tasking.models import WmsTask, WmsTaskLine
 
 from .models import (
     MiniCustomerAddress,
@@ -61,6 +62,7 @@ from .models import (
     SaleMiniRefund,
     SaleProductConfig,
 )
+from .salemini_api import _prepare_wechat_prepay
 from .services_salemini_adjustments import (
     confirm_adjustments,
     confirm_distribution,
@@ -75,7 +77,6 @@ from .services_salemini_payments import (
     submit_refund,
 )
 from .services_wechat_pay import WechatPayRequestError
-from .salemini_api import _prepare_wechat_prepay
 
 User = get_user_model()
 
@@ -105,17 +106,13 @@ class SaleMiniCatalogBootstrapCommandTests(TestCase):
         call_command("bootstrap_sale_mini_catalog", stdout=out)
 
         self.assertIn("missing_configs=1", out.getvalue())
-        self.assertFalse(
-            SaleProductConfig.objects.filter(product=self.product).exists()
-        )
+        self.assertFalse(SaleProductConfig.objects.filter(product=self.product).exists())
 
     def test_bootstrap_catalog_requires_owner_code_when_listing_and_creates_config(
         self,
     ):
         with self.assertRaises(CommandError):
-            call_command(
-                "bootstrap_sale_mini_catalog", "--apply", "--listed", stdout=StringIO()
-            )
+            call_command("bootstrap_sale_mini_catalog", "--apply", "--listed", stdout=StringIO())
 
         out = StringIO()
         call_command(
@@ -153,9 +150,7 @@ class SaleMiniApiTests(TestCase):
 
     def setUp(self):
         self.owner = Owner.objects.create(code="SMINI", name="Sale Mini Owner")
-        self.warehouse = Warehouse.objects.create(
-            code="WHSMI", name="Sale Mini Warehouse"
-        )
+        self.warehouse = Warehouse.objects.create(code="WHSMI", name="Sale Mini Warehouse")
         self.subwarehouse = Subwarehouse.objects.create(
             warehouse=self.warehouse,
             code="SWSMI",
@@ -185,9 +180,7 @@ class SaleMiniApiTests(TestCase):
             nickname="采购员",
         )
         self.uom = ProductUom.objects.create(code="EA-MINI", name="件")
-        self.category = ProductCategory.objects.create(
-            code="MINI-DEFAULT-CAT", name="默认大类"
-        )
+        self.category = ProductCategory.objects.create(code="MINI-DEFAULT-CAT", name="默认大类")
         self.product = Product.objects.create(
             owner=self.owner,
             code="MP001",
@@ -279,9 +272,7 @@ class SaleMiniApiTests(TestCase):
             "is_anonymous": True,
         }
         payload.update(overrides)
-        return self.client.post(
-            "/api/sale-mini/reviews/drafts/", payload, format="json"
-        )
+        return self.client.post("/api/sale-mini/reviews/drafts/", payload, format="json")
 
     def _review_image(self, name="review.png"):
         content = BytesIO()
@@ -435,9 +426,7 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(first.status_code, 201)
         self.assertEqual(second.status_code, 200)
         self.assertEqual(first.data["id"], second.data["id"])
-        self.assertEqual(
-            SaleMiniProductReview.objects.filter(order_line=line).count(), 1
-        )
+        self.assertEqual(SaleMiniProductReview.objects.filter(order_line=line).count(), 1)
         detail = self.client.get(f"/api/sale-mini/orders/{mapping.outbound_order_id}/")
         self.assertEqual(detail.status_code, 200)
         self.assertFalse(detail.data["lines"][0]["review"]["eligible"])
@@ -523,8 +512,9 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(anonymous["display_name"], "匿名用户")
         self.assertEqual(anonymous["avatar_url"], "")
 
-    @override_settings(MEDIA_ROOT="/tmp/wms-sale-mini-review-tests")
     def test_review_image_upload_validates_content_limit_and_owner(self):
+        media = self.enterContext(TemporaryDirectory(prefix="wms-review-tests-"))
+        self.enterContext(override_settings(MEDIA_ROOT=media))
         _mapping, line = self._completed_order_line()
         draft = self._review_draft(line)
         review_id = draft.data["id"]
@@ -543,9 +533,7 @@ class SaleMiniApiTests(TestCase):
                 format="multipart",
             )
             self.assertEqual(upload.status_code, 201)
-        self.assertEqual(
-            SaleMiniProductReviewImage.objects.filter(review_id=review_id).count(), 6
-        )
+        self.assertEqual(SaleMiniProductReviewImage.objects.filter(review_id=review_id).count(), 6)
         seventh = self.client.post(
             f"/api/sale-mini/reviews/{review_id}/images/",
             {"image": self._review_image("seventh.png")},
@@ -553,16 +541,10 @@ class SaleMiniApiTests(TestCase):
         )
         self.assertEqual(seventh.status_code, 400)
 
-        image_id = (
-            SaleMiniProductReviewImage.objects.filter(review_id=review_id).first().id
-        )
-        removed = self.client.delete(
-            f"/api/sale-mini/reviews/{review_id}/images/{image_id}/"
-        )
+        image_id = SaleMiniProductReviewImage.objects.filter(review_id=review_id).first().id
+        removed = self.client.delete(f"/api/sale-mini/reviews/{review_id}/images/{image_id}/")
         self.assertEqual(removed.status_code, 204)
-        self.assertEqual(
-            SaleMiniProductReviewImage.objects.filter(review_id=review_id).count(), 5
-        )
+        self.assertEqual(SaleMiniProductReviewImage.objects.filter(review_id=review_id).count(), 5)
 
     def test_products_only_return_listed_goods_with_server_stock_and_price(self):
         response = self.client.get(
@@ -777,7 +759,7 @@ class SaleMiniApiTests(TestCase):
             code="SWSMI-01-01-02",
             name="Sale Mini Complete Tracking Location",
         )
-        InventoryDetail.objects.create(
+        complete_detail = InventoryDetail.objects.create(
             owner=self.owner,
             product=tracked_product,
             warehouse=self.warehouse,
@@ -820,9 +802,7 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(rows[0]["stock"]["available_qty"], "8.000")
         self.assertEqual(rows[0]["stock"]["status"], "IN")
 
-        detail_response = public_client.get(
-            f"/api/sale-mini/products/{tracked_product.id}/"
-        )
+        detail_response = public_client.get(f"/api/sale-mini/products/{tracked_product.id}/")
         self.assertEqual(detail_response.status_code, 200)
         self.assertEqual(detail_response.data["stock"]["available_qty"], "8.000")
 
@@ -875,10 +855,14 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(order_response.status_code, 201)
         incomplete_detail.refresh_from_db()
         self.assertEqual(incomplete_detail.onhand_qty, Decimal("10.0000"))
-        self.assertEqual(incomplete_detail.allocated_qty, Decimal("6.0000"))
+        self.assertEqual(incomplete_detail.allocated_qty, Decimal("4.0000"))
         self.assertEqual(incomplete_detail.locked_qty, Decimal("1.0000"))
         self.assertEqual(incomplete_detail.damaged_qty, Decimal("1.0000"))
-        self.assertEqual(incomplete_detail.available_qty, Decimal("2.0000"))
+        self.assertEqual(incomplete_detail.available_qty, Decimal("4.0000"))
+        complete_detail.refresh_from_db()
+        self.assertEqual(complete_detail.onhand_qty, Decimal("2.0000"))
+        self.assertEqual(complete_detail.allocated_qty, Decimal("2.0000"))
+        self.assertEqual(complete_detail.available_qty, Decimal("0.0000"))
         self.assertEqual(
             incomplete_detail.onhand_qty,
             incomplete_detail.allocated_qty
@@ -886,13 +870,14 @@ class SaleMiniApiTests(TestCase):
             + incomplete_detail.damaged_qty
             + incomplete_detail.available_qty,
         )
-        pick_line = WmsTaskLine.objects.get(
+        pick_lines = WmsTaskLine.objects.filter(
             task__task_type=WmsTask.TaskType.PICK,
             product=tracked_product,
         )
-        self.assertEqual(pick_line.qty_plan, Decimal("4.0000"))
+        self.assertEqual(pick_lines.count(), 2)
         self.assertEqual(
-            pick_line.plan_meta["inventory_detail_id"], incomplete_detail.id
+            {line.plan_meta["inventory_detail_id"]: line.qty_plan for line in pick_lines},
+            {complete_detail.id: Decimal("2.0000"), incomplete_detail.id: Decimal("2.0000")},
         )
 
     def test_saleable_stock_counts_serial_controlled_inventory_without_serial(self):
@@ -1010,9 +995,7 @@ class SaleMiniApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         rows = response.data["results"]
-        self.assertEqual(
-            {row["id"] for row in rows}, {self.product.id, other_product.id}
-        )
+        self.assertEqual({row["id"] for row in rows}, {self.product.id, other_product.id})
         by_id = {row["id"]: row for row in rows}
         self.assertPublicProductPayloadHidesInternalFields(by_id[self.product.id])
         self.assertPublicProductPayloadHidesInternalFields(by_id[other_product.id])
@@ -1266,16 +1249,10 @@ class SaleMiniApiTests(TestCase):
         recommended_product = create_tagged_product("MP-REC-1", is_recommended=True)
         public_client = APIClient()
 
-        hot = public_client.get(
-            "/api/sale-mini/products/", {"tag": "hot", "page_size": 1}
-        )
+        hot = public_client.get("/api/sale-mini/products/", {"tag": "hot", "page_size": 1})
         new = public_client.get("/api/sale-mini/products/", {"tag": "new"})
-        recommended = public_client.get(
-            "/api/sale-mini/products/", {"tag": "recommended"}
-        )
-        invalid = public_client.get(
-            "/api/sale-mini/products/", {"tag": "not-supported"}
-        )
+        recommended = public_client.get("/api/sale-mini/products/", {"tag": "recommended"})
+        invalid = public_client.get("/api/sale-mini/products/", {"tag": "not-supported"})
 
         self.assertEqual(hot.status_code, 200)
         self.assertEqual(hot.data["count"], 2)
@@ -1325,18 +1302,12 @@ class SaleMiniApiTests(TestCase):
         response = APIClient().get("/api/sale-mini/home/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            {row["id"] for row in response.data["categories"]}, expected_ids
-        )
+        self.assertEqual({row["id"] for row in response.data["categories"]}, expected_ids)
 
     def test_public_brands_only_return_listed_goods_and_respect_filters(self):
-        category = ProductCategory.objects.create(
-            code="MINI-BRAND-CAT", name="品牌分类"
-        )
+        category = ProductCategory.objects.create(code="MINI-BRAND-CAT", name="品牌分类")
         listed_brand = Brand.objects.create(code="BR-LISTED", name="上架品牌")
-        other_listed_brand = Brand.objects.create(
-            code="BR-LISTED-2", name="跨货主上架品牌"
-        )
+        other_listed_brand = Brand.objects.create(code="BR-LISTED-2", name="跨货主上架品牌")
         hidden_brand = Brand.objects.create(code="BR-HIDDEN", name="未上架品牌")
         self.product.category = category
         self.product.brand = listed_brand
@@ -1394,9 +1365,7 @@ class SaleMiniApiTests(TestCase):
         )
         self.product.category = small
         self.product.save(update_fields=["category", "updated_at"])
-        _owner, _customer, _buyer, other_product = (
-            self._create_other_owner_sale_binding()
-        )
+        _owner, _customer, _buyer, other_product = self._create_other_owner_sale_binding()
         other_product.category = middle
         other_product.save(update_fields=["category", "updated_at"])
         public_client = APIClient()
@@ -1405,9 +1374,7 @@ class SaleMiniApiTests(TestCase):
         root_products = public_client.get(
             "/api/sale-mini/products/", {"category_id": self.category.id}
         )
-        small_products = public_client.get(
-            "/api/sale-mini/products/", {"category_id": small.id}
-        )
+        small_products = public_client.get("/api/sale-mini/products/", {"category_id": small.id})
 
         self.assertEqual(categories.status_code, 200)
         by_id = {row["id"]: row for row in categories.data}
@@ -1690,9 +1657,7 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(response.data["payable_amount"], "14.00")
         self.assertEqual(coupon.status, SaleMiniCoupon.Status.LOCKED)
         self.assertEqual(coupon.locked_mapping, mapping)
-        self.assertEqual(
-            point_balance(self.owner, self.customer, self.buyer), (400, 100)
-        )
+        self.assertEqual(point_balance(self.owner, self.customer, self.buyer), (400, 100))
         self.assertEqual(
             set(mapping.adjustments.values_list("status", flat=True)),
             {SaleMiniOrderAdjustment.Status.LOCKED},
@@ -1708,9 +1673,7 @@ class SaleMiniApiTests(TestCase):
         mapping.refresh_from_db()
         coupon.refresh_from_db()
         detail = InventoryDetail.objects.get(product=self.product)
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.CANCELLED
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.CANCELLED)
         self.assertEqual(mapping.outbound_order.approval_status, "CANCELLED")
         self.assertEqual(coupon.status, SaleMiniCoupon.Status.AVAILABLE)
         self.assertIsNone(coupon.locked_mapping)
@@ -1894,9 +1857,7 @@ class SaleMiniApiTests(TestCase):
             ).exists()
         )
 
-        SaleProductConfig.objects.filter(product=self.product).update(
-            sale_price=Decimal("8.0000")
-        )
+        SaleProductConfig.objects.filter(product=self.product).update(sale_price=Decimal("8.0000"))
         response = self.client.get("/api/sale-mini/cart/")
 
         self.assertEqual(response.status_code, 200)
@@ -1933,9 +1894,7 @@ class SaleMiniApiTests(TestCase):
         self.assertFalse(SaleMiniCartItem.objects.filter(cart_id=cart_id).exists())
 
     def test_cart_groups_items_by_owner_for_multi_owner_buyer(self):
-        other_owner, _customer, _buyer, other_product = (
-            self._create_other_owner_sale_binding()
-        )
+        other_owner, _customer, _buyer, other_product = self._create_other_owner_sale_binding()
 
         first = self.client.post(
             "/api/sale-mini/cart/add/",
@@ -1965,14 +1924,10 @@ class SaleMiniApiTests(TestCase):
             {group["owner_id"] for group in cart.data["groups"]},
             {self.owner.id, other_owner.id},
         )
-        self.assertEqual(
-            SaleMiniCart.objects.filter(buyer_user__user=self.user).count(), 2
-        )
+        self.assertEqual(SaleMiniCart.objects.filter(buyer_user__user=self.user).count(), 2)
 
     def test_multi_owner_preview_returns_combined_packages(self):
-        other_owner, _customer, _buyer, other_product = (
-            self._create_other_owner_sale_binding()
-        )
+        other_owner, _customer, _buyer, other_product = self._create_other_owner_sale_binding()
 
         response = self.client.post(
             "/api/sale-mini/orders/preview/",
@@ -2066,10 +2021,7 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(response.data["payment_status"], "OFFLINE")
 
         order_ids = [row["id"] for row in response.data["orders"]]
-        orders = {
-            order.owner_id: order
-            for order in OutboundOrder.objects.filter(id__in=order_ids)
-        }
+        orders = {order.owner_id: order for order in OutboundOrder.objects.filter(id__in=order_ids)}
         self.assertEqual(set(orders), {self.owner.id, other_owner.id})
         self.assertEqual(orders[self.owner.id].customer, self.customer)
         self.assertEqual(orders[other_owner.id].customer, other_customer)
@@ -2084,9 +2036,7 @@ class SaleMiniApiTests(TestCase):
 
         mappings = {
             mapping.owner_id: mapping
-            for mapping in SaleMiniOrderMapping.objects.filter(
-                outbound_order_id__in=order_ids
-            )
+            for mapping in SaleMiniOrderMapping.objects.filter(outbound_order_id__in=order_ids)
         }
         self.assertEqual(mappings[self.owner.id].buyer_user, self.buyer)
         self.assertEqual(mappings[other_owner.id].buyer_user, other_buyer)
@@ -2141,9 +2091,7 @@ class SaleMiniApiTests(TestCase):
             {self.product.id, other_product.id},
         )
 
-        cancel = self.client.post(
-            f"/api/sale-mini/orders/{response.data['id']}/cancel/"
-        )
+        cancel = self.client.post(f"/api/sale-mini/orders/{response.data['id']}/cancel/")
         self.assertEqual(cancel.status_code, 200)
         self.assertTrue(cancel.data["is_combined"])
         self.assertEqual(cancel.data["status"], "CANCELLED")
@@ -2276,9 +2224,7 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(mapping.buyer_user, other_buyer)
         self.assertEqual(response.data["owner_id"], other_owner.id)
         self.assertFalse(
-            SaleMiniCartItem.objects.filter(
-                cart_id=cart_response.data["cart_id"]
-            ).exists()
+            SaleMiniCartItem.objects.filter(cart_id=cart_response.data["cart_id"]).exists()
         )
 
     def test_order_and_after_sale_lists_ignore_owner_filter_for_unified_mall(self):
@@ -2316,12 +2262,8 @@ class SaleMiniApiTests(TestCase):
             format="json",
         )
         self.assertEqual(second_order.status_code, 201)
-        first_mapping = SaleMiniOrderMapping.objects.get(
-            id=first_order.data["mapping_id"]
-        )
-        second_mapping = SaleMiniOrderMapping.objects.get(
-            id=second_order.data["mapping_id"]
-        )
+        first_mapping = SaleMiniOrderMapping.objects.get(id=first_order.data["mapping_id"])
+        second_mapping = SaleMiniOrderMapping.objects.get(id=second_order.data["mapping_id"])
         SaleMiniAfterSaleRequest.objects.create(
             owner=self.owner,
             customer=self.customer,
@@ -2374,9 +2316,7 @@ class SaleMiniApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 404)
-        self.assertFalse(
-            SaleMiniCartItem.objects.filter(product=self.hidden_product).exists()
-        )
+        self.assertFalse(SaleMiniCartItem.objects.filter(product=self.hidden_product).exists())
 
         carton = ProductUom.objects.create(code="CTN-MINI", name="箱")
         ProductPackage.objects.create(
@@ -2668,12 +2608,8 @@ class SaleMiniApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.data["paid"])
-        self.assertEqual(
-            response.data["pay_params"]["package"], "prepay_id=prepay-test"
-        )
-        payment = SaleMiniPayment.objects.get(
-            mapping_id=order_response.data["mapping_id"]
-        )
+        self.assertEqual(response.data["pay_params"]["package"], "prepay_id=prepay-test")
+        payment = SaleMiniPayment.objects.get(mapping_id=order_response.data["mapping_id"])
         self.assertEqual(payment.status, SaleMiniPayment.Status.PREPAY)
         self.assertEqual(payment.amount, Decimal("19.00"))
         self.assertEqual(payment.amount_cents, 1900)
@@ -2706,9 +2642,7 @@ class SaleMiniApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        payment = SaleMiniPayment.objects.get(
-            mapping_id=order_response.data["mapping_id"]
-        )
+        payment = SaleMiniPayment.objects.get(mapping_id=order_response.data["mapping_id"])
         self.assertEqual(payment.amount, Decimal("16.00"))
         self.assertEqual(payment.amount_cents, 1600)
 
@@ -2803,9 +2737,7 @@ class SaleMiniApiTests(TestCase):
         payment = SaleMiniPayment.objects.get(mapping=mapping)
 
         self.assertEqual(order_response.data["payable_amount"], "0.00")
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.PAID
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.PAID)
         self.assertEqual(payment.channel, SaleMiniPayment.Channel.INTERNAL_ZERO)
         self.assertEqual(payment.amount, Decimal("0.00"))
         self.assertEqual(payment.amount_cents, 0)
@@ -2832,9 +2764,7 @@ class SaleMiniApiTests(TestCase):
         coupon.refresh_from_db()
         refund = SaleMiniRefund.objects.get(payment=payment)
         detail = InventoryDetail.objects.get(product=self.product)
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDED
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDED)
         self.assertEqual(payment.status, SaleMiniPayment.Status.REFUNDED)
         self.assertEqual(refund.status, SaleMiniRefund.Status.SUCCESS)
         self.assertEqual(refund.amount_cents, 0)
@@ -2944,9 +2874,7 @@ class SaleMiniApiTests(TestCase):
         self.assertTrue(response.data["confirmed"])
         self.assertEqual(response.data["payment_status"], "PAID")
         mapping.refresh_from_db()
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.PAID
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.PAID)
 
     def test_signed_encrypted_payment_callback_runs_full_crypto_and_business_flow(self):
         order_response = self._create_sale_mini_order(payment_method="WECHAT")
@@ -3005,12 +2933,7 @@ class SaleMiniApiTests(TestCase):
         timestamp = str(int(time.time()))
         nonce = "full-crypto-http-nonce"
         message = (
-            timestamp.encode("utf-8")
-            + b"\n"
-            + nonce.encode("utf-8")
-            + b"\n"
-            + raw_body
-            + b"\n"
+            timestamp.encode("utf-8") + b"\n" + nonce.encode("utf-8") + b"\n" + raw_body + b"\n"
         )
         signature = base64.b64encode(
             platform_private_key.sign(
@@ -3024,9 +2947,7 @@ class SaleMiniApiTests(TestCase):
             WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=True,
             WECHAT_PAY_APIV3_KEY=api_v3_key,
             WECHAT_PAY_MCH_SERIAL_NO="merchant-test-serial",
-            WECHAT_PAY_PLATFORM_KEYS={
-                "platform-test-serial": platform_public_key.decode("utf-8")
-            },
+            WECHAT_PAY_PLATFORM_KEYS={"platform-test-serial": platform_public_key.decode("utf-8")},
         ):
             response = APIClient().post(
                 "/api/sale-mini/payments/wechat/callback/",
@@ -3050,9 +2971,7 @@ class SaleMiniApiTests(TestCase):
 
     @patch("allapp.salesapp.salemini_api.decrypt_resource")
     @patch("allapp.salesapp.salemini_api.verify_callback_signature")
-    def test_wechat_payment_callback_marks_paid_idempotently(
-        self, mock_verify, mock_decrypt
-    ):
+    def test_wechat_payment_callback_marks_paid_idempotently(self, mock_verify, mock_decrypt):
         order_response = self._create_sale_mini_order(payment_method="WECHAT")
         mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
         payment = SaleMiniPayment.objects.create(
@@ -3101,12 +3020,8 @@ class SaleMiniApiTests(TestCase):
         mapping.refresh_from_db()
         self.assertEqual(payment.status, SaleMiniPayment.Status.PAID)
         self.assertEqual(payment.transaction_id, "wx-transaction-1")
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.PAID
-        )
-        self.assertEqual(
-            SaleMiniPaymentEvent.objects.filter(event_id="evt-pay-1").count(), 1
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.PAID)
+        self.assertEqual(SaleMiniPaymentEvent.objects.filter(event_id="evt-pay-1").count(), 1)
 
     @patch(
         "allapp.salesapp.services_salemini_payments.confirm_adjustments",
@@ -3159,12 +3074,8 @@ class SaleMiniApiTests(TestCase):
         event = SaleMiniPaymentEvent.objects.get(event_id="evt-pay-rollback")
         self.assertEqual(payment.status, SaleMiniPayment.Status.PREPAY)
         self.assertIsNone(payment.transaction_id)
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.UNPAID
-        )
-        self.assertEqual(
-            event.process_status, SaleMiniPaymentEvent.ProcessStatus.FAILED
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.UNPAID)
+        self.assertEqual(event.process_status, SaleMiniPaymentEvent.ProcessStatus.FAILED)
 
     @override_settings(SALE_MINI_DISTRIBUTION_COMMISSION_RATE="0.10")
     @patch("allapp.salesapp.salemini_api.decrypt_resource")
@@ -3219,9 +3130,7 @@ class SaleMiniApiTests(TestCase):
         mapping.refresh_from_db()
         coupon.refresh_from_db()
         distribution = SaleMiniDistributionRecord.objects.get(mapping=mapping)
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.PAID
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.PAID)
         self.assertEqual(coupon.status, SaleMiniCoupon.Status.USED)
         self.assertEqual(coupon.used_mapping, mapping)
         self.assertIsNotNone(coupon.used_at)
@@ -3236,9 +3145,7 @@ class SaleMiniApiTests(TestCase):
 
     @patch("allapp.salesapp.salemini_api.decrypt_resource")
     @patch("allapp.salesapp.salemini_api.verify_callback_signature")
-    def test_wechat_payment_callback_rejects_amount_mismatch(
-        self, mock_verify, mock_decrypt
-    ):
+    def test_wechat_payment_callback_rejects_amount_mismatch(self, mock_verify, mock_decrypt):
         order_response = self._create_sale_mini_order(payment_method="WECHAT")
         mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
         payment = SaleMiniPayment.objects.create(
@@ -3276,13 +3183,9 @@ class SaleMiniApiTests(TestCase):
         payment.refresh_from_db()
         mapping.refresh_from_db()
         self.assertEqual(payment.status, SaleMiniPayment.Status.PREPAY)
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.UNPAID
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.UNPAID)
         event = SaleMiniPaymentEvent.objects.get(event_id="evt-pay-bad")
-        self.assertEqual(
-            event.process_status, SaleMiniPaymentEvent.ProcessStatus.FAILED
-        )
+        self.assertEqual(event.process_status, SaleMiniPaymentEvent.ProcessStatus.FAILED)
 
     @patch("allapp.salesapp.salemini_api.decrypt_resource")
     @patch("allapp.salesapp.salemini_api.verify_callback_signature")
@@ -3291,9 +3194,7 @@ class SaleMiniApiTests(TestCase):
     ):
         order_response = self._create_sale_mini_order(payment_method="WECHAT")
         mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
-        cancelled = self.client.post(
-            f"/api/sale-mini/orders/{order_response.data['id']}/cancel/"
-        )
+        cancelled = self.client.post(f"/api/sale-mini/orders/{order_response.data['id']}/cancel/")
         self.assertEqual(cancelled.status_code, 200)
         payment = SaleMiniPayment.objects.create(
             owner=self.owner,
@@ -3332,9 +3233,7 @@ class SaleMiniApiTests(TestCase):
         payment.refresh_from_db()
         detail = InventoryDetail.objects.get(product=self.product)
         refund = SaleMiniRefund.objects.get(payment=payment)
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDING
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDING)
         self.assertEqual(payment.status, SaleMiniPayment.Status.REFUNDING)
         self.assertEqual(refund.source, SaleMiniRefund.Source.LATE_PAYMENT)
         self.assertEqual(SaleMiniRefund.objects.filter(payment=payment).count(), 1)
@@ -3343,9 +3242,7 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(detail.available_qty, Decimal("10.0000"))
 
     @patch("allapp.salesapp.services_salemini_payments.request_refund")
-    def test_wechat_refund_request_cancels_order_and_releases_inventory(
-        self, mock_refund
-    ):
+    def test_wechat_refund_request_cancels_order_and_releases_inventory(self, mock_refund):
         order_response = self._create_sale_mini_order(payment_method="WECHAT")
         mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
         mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.PAID
@@ -3385,9 +3282,7 @@ class SaleMiniApiTests(TestCase):
         payment.refresh_from_db()
         refund = SaleMiniRefund.objects.get(payment=payment)
         detail = InventoryDetail.objects.get(product=self.product)
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDING
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDING)
         self.assertEqual(payment.status, SaleMiniPayment.Status.REFUNDING)
         self.assertEqual(refund.status, SaleMiniRefund.Status.PROCESSING)
         self.assertEqual(mapping.outbound_order.approval_status, "CANCELLED")
@@ -3432,9 +3327,7 @@ class SaleMiniApiTests(TestCase):
 
     @override_settings(SALE_MINI_DISTRIBUTION_COMMISSION_RATE="0.10")
     @patch("allapp.salesapp.services_salemini_payments.request_refund")
-    def test_successful_refund_reverses_confirmed_adjustments_and_distribution(
-        self, mock_refund
-    ):
+    def test_successful_refund_reverses_confirmed_adjustments_and_distribution(self, mock_refund):
         coupon = self._create_coupon(discount="4.00")
         self._earn_points(500)
         referrer = self._create_referrer()
@@ -3488,18 +3381,14 @@ class SaleMiniApiTests(TestCase):
         distribution = SaleMiniDistributionRecord.objects.get(mapping=mapping)
         refund = SaleMiniRefund.objects.get(payment=payment)
         detail = InventoryDetail.objects.get(product=self.product)
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDED
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDED)
         self.assertEqual(payment.status, SaleMiniPayment.Status.REFUNDED)
         self.assertEqual(refund.status, SaleMiniRefund.Status.SUCCESS)
         self.assertIsNotNone(refund.success_at)
         self.assertEqual(coupon.status, SaleMiniCoupon.Status.AVAILABLE)
         self.assertIsNone(coupon.used_mapping)
         self.assertEqual(point_balance(self.owner, self.customer, self.buyer), (500, 0))
-        self.assertEqual(
-            distribution.status, SaleMiniDistributionRecord.Status.REVERSED
-        )
+        self.assertEqual(distribution.status, SaleMiniDistributionRecord.Status.REVERSED)
         self.assertEqual(
             set(mapping.adjustments.values_list("status", flat=True)),
             {SaleMiniOrderAdjustment.Status.REVERSED},
@@ -3575,14 +3464,10 @@ class SaleMiniApiTests(TestCase):
         mapping.refresh_from_db()
         payment.refresh_from_db()
         refund.refresh_from_db()
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDED
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDED)
         self.assertEqual(payment.status, SaleMiniPayment.Status.REFUNDED)
         self.assertEqual(refund.status, SaleMiniRefund.Status.SUCCESS)
-        self.assertEqual(
-            SaleMiniPaymentEvent.objects.filter(event_id="evt-refund-1").count(), 1
-        )
+        self.assertEqual(SaleMiniPaymentEvent.objects.filter(event_id="evt-refund-1").count(), 1)
 
     @patch("allapp.salesapp.salemini_api.decrypt_resource")
     @patch("allapp.salesapp.salemini_api.verify_callback_signature")
@@ -3642,9 +3527,7 @@ class SaleMiniApiTests(TestCase):
         mapping.refresh_from_db()
         payment.refresh_from_db()
         refund.refresh_from_db()
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDING
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDING)
         self.assertEqual(payment.status, SaleMiniPayment.Status.REFUNDING)
         self.assertEqual(mapping.outbound_order.approval_status, "CANCELLED")
         self.assertTrue(refund.requires_manual_action)
@@ -3697,17 +3580,13 @@ class SaleMiniApiTests(TestCase):
         mapping.refresh_from_db()
         detail = InventoryDetail.objects.get(product=self.product)
         self.assertEqual(payment.status, SaleMiniPayment.Status.REFUNDING)
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDING
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.REFUNDING)
         self.assertEqual(mapping.outbound_order.approval_status, "CANCELLED")
         self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
         self.assertEqual(detail.available_qty, Decimal("10.0000"))
 
     @patch("allapp.salesapp.services_salemini_payments.query_refund")
-    def test_processing_refund_recovers_by_query_with_stable_refund_number(
-        self, mock_query_refund
-    ):
+    def test_processing_refund_recovers_by_query_with_stable_refund_number(self, mock_query_refund):
         order_response = self._create_sale_mini_order(payment_method="WECHAT")
         mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
         mapping.payment_status = SaleMiniOrderMapping.PaymentStatus.REFUNDING
@@ -3766,9 +3645,7 @@ class SaleMiniApiTests(TestCase):
         coupon.refresh_from_db()
         detail = InventoryDetail.objects.get(product=self.product)
         self.assertIn("expired=1", out.getvalue())
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.CANCELLED
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.CANCELLED)
         self.assertEqual(mapping.outbound_order.approval_status, "CANCELLED")
         self.assertEqual(coupon.status, SaleMiniCoupon.Status.AVAILABLE)
         self.assertEqual(point_balance(self.owner, self.customer, self.buyer), (500, 0))
@@ -3804,9 +3681,7 @@ class SaleMiniApiTests(TestCase):
 
         mapping.refresh_from_db()
         detail = InventoryDetail.objects.get(product=self.product)
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.UNPAID
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.UNPAID)
         self.assertNotEqual(mapping.outbound_order.approval_status, "CANCELLED")
         self.assertEqual(detail.allocated_qty, Decimal("2.0000"))
         self.assertEqual(detail.available_qty, Decimal("8.0000"))
@@ -3846,9 +3721,7 @@ class SaleMiniApiTests(TestCase):
         payment.refresh_from_db()
         detail = InventoryDetail.objects.get(product=self.product)
         mock_close.assert_called_once()
-        self.assertEqual(
-            mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.CANCELLED
-        )
+        self.assertEqual(mapping.payment_status, SaleMiniOrderMapping.PaymentStatus.CANCELLED)
         self.assertEqual(payment.status, SaleMiniPayment.Status.CLOSED)
         self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
         self.assertEqual(detail.available_qty, Decimal("10.0000"))
@@ -3864,9 +3737,7 @@ class SaleMiniApiTests(TestCase):
         responses = []
         for index, (trade_state, _payment_status) in enumerate(scenarios, start=1):
             order_response = self._create_sale_mini_order(payment_method="WECHAT")
-            mapping = SaleMiniOrderMapping.objects.get(
-                id=order_response.data["mapping_id"]
-            )
+            mapping = SaleMiniOrderMapping.objects.get(id=order_response.data["mapping_id"])
             mapping.pay_deadline_at = timezone.now() - timedelta(minutes=1)
             mapping.save(update_fields=["pay_deadline_at", "updated_at"])
             payment = SaleMiniPayment.objects.create(
@@ -3908,9 +3779,7 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(detail.available_qty, Decimal("10.0000"))
 
     @patch("allapp.salesapp.services_salemini_payments.query_jsapi_payment")
-    def test_expire_network_error_keeps_one_order_reserved_and_continues_batch(
-        self, mock_query
-    ):
+    def test_expire_network_error_keeps_one_order_reserved_and_continues_batch(self, mock_query):
         first_response = self._create_sale_mini_order(payment_method="WECHAT")
         first = SaleMiniOrderMapping.objects.get(id=first_response.data["mapping_id"])
         first.pay_deadline_at = timezone.now() - timedelta(minutes=2)
@@ -3945,9 +3814,7 @@ class SaleMiniApiTests(TestCase):
         second.refresh_from_db()
         self.assertEqual(first.payment_status, SaleMiniOrderMapping.PaymentStatus.UNPAID)
         self.assertNotEqual(first.outbound_order.approval_status, "CANCELLED")
-        self.assertEqual(
-            second.payment_status, SaleMiniOrderMapping.PaymentStatus.CANCELLED
-        )
+        self.assertEqual(second.payment_status, SaleMiniOrderMapping.PaymentStatus.CANCELLED)
         self.assertIn("expired=1", stdout.getvalue())
         self.assertIn("pending=1", stdout.getvalue())
         self.assertIn("network unavailable", stderr.getvalue())

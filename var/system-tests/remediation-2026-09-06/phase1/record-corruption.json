@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "run_id": "cbb2bf295fd44ca5a1dec471f22a2db0",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 5,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase1/record-corruption.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 5
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/core/test_test_coordination.py::test_unsafe_lock_objects_rejected_without_modifying_target[dangling]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_coordination.py::test_corrupt_record_is_not_interpreted_as_clean[{]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_coordination.py::test_corrupt_record_is_not_interpreted_as_clean[{}]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_coordination.py::test_corrupt_record_is_not_interpreted_as_clean[{\"state\":\"CLEAN\"}]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_coordination.py::test_dangling_run_record_is_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

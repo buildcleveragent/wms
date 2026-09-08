@@ -25,14 +25,28 @@ compose() {
   docker compose -f compose.production.yml "$@"
 }
 
-if command -v systemctl >/dev/null 2>&1; then
-  for legacy_timer in wms-sale-mini-expire.timer wms-sale-mini-reconcile.timer; do
-    if systemctl is-active --quiet "$legacy_timer"; then
-      echo "refusing release while legacy timer is active: $legacy_timer" >&2
-      exit 2
-    fi
-  done
-fi
+payment_timers="wms-sale-mini-expire.timer wms-sale-mini-reconcile.timer"
+payment_services="wms-sale-mini-expire.service wms-sale-mini-reconcile.service"
+command -v systemctl >/dev/null 2>&1 || {
+  echo "payment scheduling requires the repository systemd units" >&2
+  exit 2
+}
+for timer in $payment_timers; do
+  systemctl cat "$timer" >/dev/null
+ done
+
+deploy_started=false
+release_exit() {
+  result=$?
+  trap - EXIT
+  if [ "$result" -ne 0 ] && [ "$deploy_started" = true ]; then
+    systemctl stop $payment_timers || true
+    compose stop scheduler web || true
+    echo "release failed: writers and payment timers remain stopped; restore the verified database/media backup and previous image before restarting all schedulers" >&2
+  fi
+  exit "$result"
+}
+trap release_exit EXIT
 
 compose config --quiet
 compose pull
@@ -41,6 +55,18 @@ compose run --rm web python manage.py migrate --plan
 "$WMS_DB_BACKUP_SCRIPT"
 "$WMS_MEDIA_BACKUP_SCRIPT"
 
+systemctl stop $payment_timers
+waited=0
+while systemctl is-active --quiet wms-sale-mini-expire.service || systemctl is-active --quiet wms-sale-mini-reconcile.service; do
+  if [ "$waited" -ge 300 ]; then
+    systemctl start $payment_timers
+    echo "payment jobs did not quiesce; release aborted before stopping web or migrating" >&2
+    exit 1
+  fi
+  sleep 5
+  waited=$((waited + 5))
+done
+deploy_started=true
 compose stop scheduler web
 compose run --rm web python manage.py migrate --noinput
 compose run --rm web python manage.py sync_wms_role_groups
@@ -71,8 +97,20 @@ if [ "$scheduler_count" -ne 1 ]; then
   exit 1
 fi
 
+systemctl start $payment_timers
+for timer in $payment_timers; do
+  systemctl is-active --quiet "$timer"
+done
+# Exercise the actual commands once; a running timer alone is not proof of work.
+for service in $payment_services; do
+  systemctl start "$service"
+done
+
 elapsed=0
 while [ "$elapsed" -lt "$observe_seconds" ]; do
+  for timer in $payment_timers; do
+    systemctl is-active --quiet "$timer"
+  done
   if ! compose exec -T web python -c \
     "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz/ready', timeout=5)"; then
     echo "readiness failed during release observation; traffic must remain stopped" >&2

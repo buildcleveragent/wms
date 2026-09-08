@@ -1,0 +1,38 @@
+{
+  "risk": "R-PDF-RESOURCE",
+  "risk_status": "REVIEW_REQUIRED",
+  "production_limits_implemented": false,
+  "scope": "synthetic local measurement; not a production capacity or DoS guarantee",
+  "samples": [
+    {
+      "rows": 1,
+      "input_html_bytes": 3438,
+      "pdf_bytes": 299066,
+      "elapsed_seconds": 1.663,
+      "peak_rss_kib": 267216,
+      "weasyprint": "69.0",
+      "python": "3.12.3",
+      "status": "MEASURED"
+    },
+    {
+      "rows": 100,
+      "input_html_bytes": 36310,
+      "pdf_bytes": 325582,
+      "elapsed_seconds": 7.826,
+      "peak_rss_kib": 288912,
+      "weasyprint": "69.0",
+      "python": "3.12.3",
+      "status": "MEASURED"
+    },
+    {
+      "rows": 1000,
+      "input_html_bytes": 335112,
+      "pdf_bytes": 565096,
+      "elapsed_seconds": 86.418,
+      "peak_rss_kib": 506436,
+      "weasyprint": "69.0",
+      "python": "3.12.3",
+      "status": "MEASURED"
+    }
+  ]
+}

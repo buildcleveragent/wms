@@ -1,0 +1,6 @@
+{
+  "status": "PASS",
+  "compared_files": 727,
+  "mismatches": [],
+  "scope": "backend, settings, templates, static and requirement files; not full image runtime tests"
+}

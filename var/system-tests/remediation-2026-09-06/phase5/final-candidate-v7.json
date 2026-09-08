@@ -1,0 +1,39 @@
+{
+  "source_digest": "0bf6043f017406193d84dbe5ebc7dd67b1de7d49143201474274e44b5adc44ab",
+  "revision": "c9175bfcb837fe740471710c5267ac8d5147911d",
+  "runtime_image_id": "sha256:1b943a89e9bf0983b8753634c3185fba552be07a5e50a265a102fe5e63b91346",
+  "test_image_id": "sha256:2dfd66b593ceec4d5ae01b3c4344e6fcf10e656cacc1df27fa49e5e62c49b560",
+  "acceptance_driver_sha256": "8c505988a04dd82a879b409901d9d4037dcb5e4bd57262558aa12281824c1235",
+  "frontend_artifacts_sha256": "c776c5b75367a128f66855fb9b2dbcb1c694ddb70f1c0a8653e60b4ed6e0241b",
+  "runtime_configuration": {
+    "python": "3.12.14",
+    "node": "22.23.2",
+    "npm": "10.9.8",
+    "mysql": "8.0.46",
+    "database": "wms_db_test",
+    "APP_ENV": "test",
+    "coordination": "/tmp/wms-test-coordination shared single-host; unique runner hostname; default per-container PID namespace",
+    "password_hashing": "configured default; no fast-password-hashers",
+    "functional_database": "Reuse v6 clean real migration: exact runtime and model/migration files unchanged",
+    "migration_group": "independent disposable MySQL instances",
+    "functional_verification": "v6 full-run passed nodes plus v7 full preserved-data module rerun; original two tool failures retained"
+  },
+  "build_args": {
+    "DEBIAN_MIRROR": "https://mirrors.tuna.tsinghua.edu.cn",
+    "PIP_INDEX_URL": "https://pypi.tuna.tsinghua.edu.cn/simple"
+  },
+  "docker_cli_sha256": "4fd41ecac3ec0f8a6067f8da79cbce516ed0572d1081e4767db764c84d32257b",
+  "runtime_source_digest": "03c698a030504068df8e01a1c63ce352ab41441f910e450fba3df7b978b4e719",
+  "runtime_source_manifest": "phase5/candidate-source-v6.json",
+  "acceptance_source_manifest": "phase5/candidate-source-v7.json",
+  "reuse_policy_sha256": "d73e240101cccd10f59d601afe3dd0297b14e0b935b9b117bab27a15cda89388",
+  "test_build_inputs": {
+    "Dockerfile": "443adfb41d313469f0e426faad5e6313a8755fa5c73fcff2a48f0a9380822ee8",
+    "test.txt": "09df60f938f1e97eb41cee2e077610988126393847db1cbda09896398e6d27a5",
+    "docker-cli": "4fd41ecac3ec0f8a6067f8da79cbce516ed0572d1081e4767db764c84d32257b",
+    "verify_runtime_dependencies.py": "4f6e2be98ae0af5e508b5f844e9466505b62d489bb91e340dc4dd36eb5eddfa3"
+  },
+  "mysql_client_source": "mysql:8.0.46@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b",
+  "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+  "frozen_at": "2026-09-06T10:20:33.042391+00:00"
+}

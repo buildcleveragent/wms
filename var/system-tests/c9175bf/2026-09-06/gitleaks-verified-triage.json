@@ -1,0 +1,65 @@
+[
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 258,
+    "rule": "generic-api-key",
+    "disposition": "TEST_FIXTURE",
+    "reason": "CI synthetic Django test key"
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 275,
+    "rule": "generic-api-key",
+    "disposition": "TEST_FIXTURE",
+    "reason": "CI synthetic Django test key"
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 291,
+    "rule": "generic-api-key",
+    "disposition": "TEST_FIXTURE",
+    "reason": "CI synthetic Django test key"
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 384,
+    "rule": "generic-api-key",
+    "disposition": "TEST_FIXTURE",
+    "reason": "CI synthetic Django test key"
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 438,
+    "rule": "generic-api-key",
+    "disposition": "TEST_FIXTURE",
+    "reason": "CI synthetic Django test key"
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 499,
+    "rule": "generic-api-key",
+    "disposition": "TEST_FIXTURE",
+    "reason": "CI synthetic Django test key"
+  },
+  {
+    "file": "allapp/outbound/test_standard_order_idempotency.py",
+    "line": 136,
+    "rule": "generic-api-key",
+    "disposition": "TEST_FIXTURE",
+    "reason": "Synthetic idempotency or AES-GCM test input; no live account credential"
+  },
+  {
+    "file": "allapp/salesapp/test_salemini_unit.py",
+    "line": 553,
+    "rule": "generic-api-key",
+    "disposition": "TEST_FIXTURE",
+    "reason": "Synthetic idempotency or AES-GCM test input; no live account credential"
+  },
+  {
+    "file": "allapp/salesapp/tests.py",
+    "line": 2893,
+    "rule": "generic-api-key",
+    "disposition": "TEST_FIXTURE",
+    "reason": "Synthetic idempotency or AES-GCM test input; no live account credential"
+  }
+]

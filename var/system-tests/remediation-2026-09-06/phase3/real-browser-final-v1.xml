@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="2" time="73.452" timestamp="2026-09-06T16:47:35.919948+08:00" hostname="wms"><testcase classname="scripts.test_real_browser_acceptance.RealBrowserAcceptanceTests" name="test_owner_mall_and_admin_login_against_real_api" time="30.418" /><testcase classname="scripts.test_real_browser_acceptance.MovementBrowserAcceptanceTests" name="test_pda_and_android_scan_sequence_with_real_lost_response" time="42.450"><failure message="AssertionError: 1 != 0 : node:internal/modules/run_main:123&#10;    triggerUncaughtException(&#10;    ^&#10;&#10;ExpectError: expect(page).toHaveURL(expected) failed&#10;&#10;Expected pattern: /pages\/index\/index/&#10;Received string:  &quot;http://127.0.0.1:18081/#/pages/login&quot;&#10;Timeout: 30000ms&#10;&#10;Call log:&#10;  - Expect &quot;to.have.url&quot; with timeout 30000ms&#10;    63 × unexpected value &quot;http://127.0.0.1:18081/#/pages/login&quot;&#10;&#10;    at captureRawStack (/wms/wmspda/node_modules/playwright-core/lib/coreBundle.js:3172:17)&#10;    at callMatcherAsStep (/wms/wmspda/node_modules/playwright/lib/matchers/expect.js:12877:57)&#10;    at Object.toHaveURL (/wms/wmspda/node_modules/playwright/lib/matchers/expect.js:12867:23)&#10;    at /wms/scripts/movement-browser-acceptance.mjs:70:24 {&#10;  matcherResult: {&#10;    name: 'toHaveURL',&#10;    expected: /pages\/index\/index/,&#10;    message: 'expect(page).toHaveURL(expected) failed\n' +&#10;      '\n' +&#10;      'Expected pattern: /pages\\/index\\/index/\n' +&#10;      'Received string:  &quot;http://127.0.0.1:18081/#/pages/login&quot;\n' +&#10;      'Timeout: 30000ms\n' +&#10;      '\n' +&#10;      'Call log:\n' +&#10;      '  - Expect &quot;to.have.url&quot; with timeout 30000ms\n' +&#10;      '    63 × unexpected value &quot;http://127.0.0.1:18081/#/pages/login&quot;\n',&#10;    pass: false,&#10;    actual: 'http://127.0.0.1:18081/#/pages/login',&#10;    log: [&#10;      '  - Expect &quot;to.have.url&quot; with timeout 30000ms',&#10;      '    63 × unexpected value &quot;http://127.0.0.1:18081/#/pages/login&quot;'&#10;    ],&#10;    timeout: 30000,&#10;    ariaSnapshot: '- text: 登录 登录\n- textbox: reloc-user\n- textbox: x\n- text: 👁️ 登录'&#10;  }&#10;}&#10;&#10;Node.js v22.23.2">self = &lt;test_real_browser_acceptance.MovementBrowserAcceptanceTests testMethod=test_pda_and_android_scan_sequence_with_real_lost_response&gt;
+
+    def test_pda_and_android_scan_sequence_with_real_lost_response(self):
+        from allapp.inventory.models import InventoryDetail, InventoryTransaction
+        from allapp.tasking import relocation, replenishment, test_relocation, test_replenishment
+        from allapp.tasking.models import ReplenishmentRequest, WmsTask
+    
+        cases, tasks = [], []
+        for kind in ("move", "replenish"):
+            fixture = SimpleNamespace()
+            if kind == "move":
+                test_relocation.RelocationFlowTests.setUp(fixture)
+            else:
+                test_replenishment.ReplenishmentFlowTests.setUp(fixture)
+                test_replenishment.ReplenishmentFlowTests._detail(
+                    fixture, qty="30", batch="SOURCE", expiry=datetime.date(2030, 1, 1)
+                )
+                test_replenishment.ReplenishmentFlowTests._detail(
+                    fixture,
+                    qty="5",
+                    batch="PICK",
+                    expiry=datetime.date(2030, 1, 1),
+                    location=fixture.pick,
+                )
+                test_replenishment.ReplenishmentFlowTests._policy(fixture)
+                fixture.source, fixture.target = fixture.storage, fixture.pick
+            fixture.user.warehouse = fixture.warehouse
+            fixture.user.save(update_fields=["warehouse"])
+            UserRoleScope.objects.create(
+                user=fixture.user,
+                role=UserRoleScope.Role.WAREHOUSE_OPERATOR,
+                warehouse=fixture.warehouse,
+            )
+            fixture.user.user_permissions.set(
+                Permission.objects.filter(content_type__app_label="tasking")
+            )
+            for app in ("wmspda", "wmsandroid"):
+                if kind == "move":
+                    detail = InventoryDetail.objects.create(
+                        owner=fixture.owner,
+                        product=fixture.product,
+                        location=fixture.source,
+                        warehouse=fixture.warehouse,
+                        zone_type=fixture.source.zone_type,
+                        batch_no=app,
+                        onhand_qty=10,
+                        allocated_qty=0,
+                        locked_qty=0,
+                        damaged_qty=0,
+                    )
+                    request = relocation.create_layer_request(
+                        owner=fixture.owner,
+                        warehouse=fixture.warehouse,
+                        lines=[
+                            {
+                                "inventory_detail_id": detail.pk,
+                                "qty": "10",
+                                "to_location_id": fixture.target.pk,
+                            }
+                        ],
+                        reason="browser acceptance",
+                        by_user=fixture.user,
+                    )
+                    task = relocation.approve_request(request.pk, by_user=fixture.user)
+                else:
+                    request = ReplenishmentRequest.objects.create(
+                        owner=fixture.owner,
+                        warehouse=fixture.warehouse,
+                        product=fixture.product,
+                        target_location=fixture.pick,
+                        requested_qty=10,
+                        reason="browser acceptance",
+                        created_by=fixture.user,
+                    )
+                    task = replenishment.approve_request(request.pk, by_user=fixture.user)
+                tasks.append(task.pk)
+                cases.append(
+                    {
+                        "app": app,
+                        "kind": kind,
+                        "task_id": task.pk,
+                        "task_no": task.task_no,
+                        "source": fixture.source.code,
+                        "target": fixture.target.code,
+                        "product": fixture.product.code,
+                        "username": fixture.user.username,
+                    }
+                )
+        artifacts = Path(os.environ["WMS_BROWSER_ARTIFACTS"]).resolve() / "movement"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            ["node", str(ROOT / "scripts/movement-browser-acceptance.mjs")],
+            input=json.dumps(
+                {"backend": self.live_server_url, "artifacts": str(artifacts), "cases": cases}
+            ),
+            text=True,
+            capture_output=True,
+            timeout=300,
+        )
+        (artifacts / "browser.log").write_text(result.stdout + result.stderr)
+&gt;       self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+E       AssertionError: 1 != 0 : node:internal/modules/run_main:123
+E           triggerUncaughtException(
+E           ^
+E       
+E       ExpectError: expect(page).toHaveURL(expected) failed
+E       
+E       Expected pattern: /pages\/index\/index/
+E       Received string:  "http://127.0.0.1:18081/#/pages/login"
+E       Timeout: 30000ms
+E       
+E       Call log:
+E         - Expect "to.have.url" with timeout 30000ms
+E           63 × unexpected value "http://127.0.0.1:18081/#/pages/login"
+E       
+E           at captureRawStack (/wms/wmspda/node_modules/playwright-core/lib/coreBundle.js:3172:17)
+E           at callMatcherAsStep (/wms/wmspda/node_modules/playwright/lib/matchers/expect.js:12877:57)
+E           at Object.toHaveURL (/wms/wmspda/node_modules/playwright/lib/matchers/expect.js:12867:23)
+E           at /wms/scripts/movement-browser-acceptance.mjs:70:24 {
+E         matcherResult: {
+E           name: 'toHaveURL',
+E           expected: /pages\/index\/index/,
+E           message: 'expect(page).toHaveURL(expected) failed\n' +
+E             '\n' +
+E             'Expected pattern: /pages\\/index\\/index/\n' +
+E             'Received string:  "http://127.0.0.1:18081/#/pages/login"\n' +
+E             'Timeout: 30000ms\n' +
+E             '\n' +
+E             'Call log:\n' +
+E             '  - Expect "to.have.url" with timeout 30000ms\n' +
+E             '    63 × unexpected value "http://127.0.0.1:18081/#/pages/login"\n',
+E           pass: false,
+E           actual: 'http://127.0.0.1:18081/#/pages/login',
+E           log: [
+E             '  - Expect "to.have.url" with timeout 30000ms',
+E             '    63 × unexpected value "http://127.0.0.1:18081/#/pages/login"'
+E           ],
+E           timeout: 30000,
+E           ariaSnapshot: '- text: 登录 登录\n- textbox: reloc-user\n- textbox: x\n- text: 👁️ 登录'
+E         }
+E       }
+E       
+E       Node.js v22.23.2
+
+scripts/test_real_browser_acceptance.py:160: AssertionError</failure></testcase></testsuite></testsuites>

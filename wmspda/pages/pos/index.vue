@@ -673,6 +673,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onHide, onShow } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
+import { getPendingRepayment, recordRepayment } from '@/utils/repaymentRecovery'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
 import { CHECKOUT_STATUS, executeCheckoutFlow, executePrintAttempt } from '@/utils/posCheckoutFlow'
 
@@ -2565,10 +2566,17 @@ function authHeader() {
   }
 }
 
-function openAuthenticatedUrl(url) {
-  const target = api.authUrl(url)
+async function openAuthenticatedUrl(url) {
+  const prepared = typeof window !== 'undefined' && typeof window.open === 'function' ? window.open('', '_blank') : null
+  let target
+  try { target = await api.authUrl(url) } catch (error) {
+    if (prepared) prepared.close()
+    showPosError(error, '打印暂时不可用，请稍后重试')
+    return
+  }
   if (typeof window !== 'undefined' && typeof window.open === 'function') {
-    window.open(target, '_blank')
+    if (prepared) prepared.location.href = target
+    else uni.showToast({ title: '浏览器阻止了打印窗口', icon: 'none' })
     return
   }
   if (typeof plus !== 'undefined' && plus.runtime?.openURL) {
@@ -2662,7 +2670,7 @@ function downloadExcel(url, filename = 'POS导出.xlsx') {
 
   if (typeof uni.downloadFile !== 'function') {
     if (typeof window !== 'undefined' && window.open) {
-      window.open(api.authUrl(url), '_blank')
+      throw new Error('当前浏览器不支持文件下载，请使用新版浏览器')
     }
     return
   }
@@ -3204,12 +3212,18 @@ async function submitCustomerRepayment() {
     uni.showToast({ title: '请先开班后再收款', icon: 'none' })
     return
   }
-  const amount = numberFromValue(repaymentAmount.value, 0)
+  const scope = `${currentShift.value.warehouse_id}:${currentShift.value.cashier_id}`
+  const pending = getPendingRepayment(scope)
+  if (pending && pending.payload.customer_id !== selectedCustomer.value.id) {
+    uni.showToast({ title: '请先选择原还款客户，确认上一笔还款结果', icon: 'none' })
+    return
+  }
+  const amount = numberFromValue(pending?.payload.amount ?? repaymentAmount.value, 0)
   if (amount <= 0) {
     uni.showToast({ title: '请输入还款金额', icon: 'none' })
     return
   }
-  if (amount > customerDebtBalance.value + 0.005) {
+  if (!pending && amount > customerDebtBalance.value + 0.005) {
     uni.showToast({ title: '还款金额不能大于累计欠款', icon: 'none' })
     return
   }
@@ -3222,13 +3236,14 @@ async function submitCustomerRepayment() {
 
   repaymentSubmitting.value = true
   try {
-    const res = await api.posRepaymentCreate({
+    const payload = pending?.payload || {
       customer_id: selectedCustomer.value.id,
       method: repaymentMethod.value,
       amount: plainMoney(amount),
       reference_no: repaymentReferenceNo.value || '',
       remark: repaymentRemark.value || '',
-    })
+    }
+    const res = await recordRepayment({ scope, payload, send: api.posRepaymentCreate, makeKey: makeIdempotencyKey })
     customerDebtBalance.value = numberFromValue(res?.debt_after, 0)
     repaymentAmount.value = ''
     repaymentReferenceNo.value = ''

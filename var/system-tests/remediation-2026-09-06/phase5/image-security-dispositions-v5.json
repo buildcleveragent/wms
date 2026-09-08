@@ -1,0 +1,1604 @@
+{
+  "status": "BLOCKED",
+  "old_image_id": "sha256:9c1b6d42b50188dd3dc4127fd089f6b5ce60343ba967cc650a627d12b13434a3",
+  "candidate_image_id": "sha256:c5620e3feea83e3617036d85d8c3f28b5849bdebffcae4233e1299c80bba5747",
+  "sources": {
+    "trivy-final-v5.json": "02db47dafabab9c46c7f4a754669127b615c261f7c46326b0a01aec631c73165",
+    "runtime-smoke-v5/runtime-smoke.json": "8a52a5b9a43fa5c56ac0948320b9a356c0ab0e87c879b3cedb2520a3946df808"
+  },
+  "rows": [
+    {
+      "id": "CVE-2023-25193",
+      "previous": [
+        {
+          "package": "libharfbuzz0b",
+          "installed": "6.0.0+dfsg-3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [],
+      "disposition": "NOT_DETECTED_IN_NEW_SCAN",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2023-25193",
+      "reason": "Absent in new image scan; do not describe all other PDF/OS risks as closed."
+    },
+    {
+      "id": "CVE-2023-45853",
+      "previous": [
+        {
+          "package": "zlib1g",
+          "installed": "1:1.2.13.dfsg-1",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [],
+      "disposition": "NOT_DETECTED_IN_NEW_SCAN",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2023-45853",
+      "reason": "Absent in new image scan; do not describe all other PDF/OS risks as closed."
+    },
+    {
+      "id": "CVE-2025-59375",
+      "previous": [
+        {
+          "package": "libexpat1",
+          "installed": "2.5.0-1+deb12u2",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [],
+      "disposition": "NOT_DETECTED_IN_NEW_SCAN",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2025-59375",
+      "reason": "Absent in new image scan; do not describe all other PDF/OS risks as closed."
+    },
+    {
+      "id": "CVE-2025-69720",
+      "previous": [
+        {
+          "package": "libncursesw6",
+          "installed": "6.4-4",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libtinfo6",
+          "installed": "6.4-4",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "ncurses-base",
+          "installed": "6.4-4",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "ncurses-bin",
+          "installed": "6.4-4",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libncursesw6",
+          "installed": "6.5+20250216-2",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libtinfo6",
+          "installed": "6.5+20250216-2",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "ncurses-base",
+          "installed": "6.5+20250216-2",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "ncurses-bin",
+          "installed": "6.5+20250216-2",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2025-69720",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2025-7458",
+      "previous": [
+        {
+          "package": "libsqlite3-0",
+          "installed": "3.40.1-2+deb12u2",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [],
+      "disposition": "NOT_DETECTED_IN_NEW_SCAN",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2025-7458",
+      "reason": "Absent in new image scan; do not describe all other PDF/OS risks as closed."
+    },
+    {
+      "id": "CVE-2026-11822",
+      "previous": [
+        {
+          "package": "libsqlite3-0",
+          "installed": "3.40.1-2+deb12u2",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libsqlite3-0",
+          "installed": "3.46.1-7+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-11822",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-11824",
+      "previous": [
+        {
+          "package": "libsqlite3-0",
+          "installed": "3.40.1-2+deb12u2",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libsqlite3-0",
+          "installed": "3.46.1-7+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-11824",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-13221",
+      "previous": [
+        {
+          "package": "perl-base",
+          "installed": "5.36.0-7+deb12u3",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "perl-base",
+          "installed": "5.40.1-6",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-13221",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-16742",
+      "previous": [
+        {
+          "package": "libsystemd0",
+          "installed": "252.39-1~deb12u2",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libudev1",
+          "installed": "252.39-1~deb12u2",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libsystemd0",
+          "installed": "257.13-1~deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libudev1",
+          "installed": "257.13-1~deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "NOT_APPLICABLE_COMPONENT",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-16742",
+      "reason": "Vulnerable systemd-homed executable is absent in the runtime image; source-package scanner mappings alone do not establish this component is shipped.",
+      "evidence": "runtime-smoke-v5/runtime-smoke.json"
+    },
+    {
+      "id": "CVE-2026-19487",
+      "previous": [
+        {
+          "package": "perl-base",
+          "installed": "5.36.0-7+deb12u3",
+          "fixed": null,
+          "severity": "UNKNOWN",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "perl-base",
+          "installed": "5.40.1-6",
+          "fixed": null,
+          "severity": "UNKNOWN",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-19487",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-25210",
+      "previous": [
+        {
+          "package": "libexpat1",
+          "installed": "2.5.0-1+deb12u2",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [],
+      "disposition": "NOT_DETECTED_IN_NEW_SCAN",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-25210",
+      "reason": "Absent in new image scan; do not describe all other PDF/OS risks as closed."
+    },
+    {
+      "id": "CVE-2026-41992",
+      "previous": [
+        {
+          "package": "gzip",
+          "installed": "1.12-1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "gzip",
+          "installed": "1.13-1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-41992",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-42496",
+      "previous": [
+        {
+          "package": "perl-base",
+          "installed": "5.36.0-7+deb12u3",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "perl-base",
+          "installed": "5.40.1-6",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-42496",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-42497",
+      "previous": [
+        {
+          "package": "perl-base",
+          "installed": "5.36.0-7+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "perl-base",
+          "installed": "5.40.1-6",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-42497",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-44168",
+      "previous": [],
+      "candidate": [
+        {
+          "package": "libmariadb3",
+          "installed": "1:11.8.6-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "mariadb-common",
+          "installed": "1:11.8.6-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-44168",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-44171",
+      "previous": [],
+      "candidate": [
+        {
+          "package": "libmariadb3",
+          "installed": "1:11.8.6-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "mariadb-common",
+          "installed": "1:11.8.6-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-44171",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-44172",
+      "previous": [],
+      "candidate": [
+        {
+          "package": "libmariadb3",
+          "installed": "1:11.8.6-0+deb13u1",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "mariadb-common",
+          "installed": "1:11.8.6-0+deb13u1",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "FIXED_CLIENT_VERSION",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-44172",
+      "reason": "Runtime mysqlclient reports Connector/C 3.4.9, matching the fixed version in the advisory. This does not close other mariadb source-package advisories.",
+      "evidence": "runtime-smoke-v5/runtime-smoke.json"
+    },
+    {
+      "id": "CVE-2026-45186",
+      "previous": [
+        {
+          "package": "libexpat1",
+          "installed": "2.5.0-1+deb12u2",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [],
+      "disposition": "NOT_DETECTED_IN_NEW_SCAN",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-45186",
+      "reason": "Absent in new image scan; do not describe all other PDF/OS risks as closed."
+    },
+    {
+      "id": "CVE-2026-48163",
+      "previous": [],
+      "candidate": [
+        {
+          "package": "libmariadb3",
+          "installed": "1:11.8.6-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "mariadb-common",
+          "installed": "1:11.8.6-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-48163",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-48165",
+      "previous": [],
+      "candidate": [
+        {
+          "package": "libmariadb3",
+          "installed": "1:11.8.6-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "mariadb-common",
+          "installed": "1:11.8.6-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-48165",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-48962",
+      "previous": [
+        {
+          "package": "perl-base",
+          "installed": "5.36.0-7+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "perl-base",
+          "installed": "5.40.1-6",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-48962",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-49261",
+      "previous": [],
+      "candidate": [
+        {
+          "package": "libmariadb3",
+          "installed": "1:11.8.6-0+deb13u1",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "mariadb-common",
+          "installed": "1:11.8.6-0+deb13u1",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-49261",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-53613",
+      "previous": [
+        {
+          "package": "bsdutils",
+          "installed": "1:2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libblkid1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libmount1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libsmartcols1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libuuid1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "mount",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "util-linux",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "util-linux-extra",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [],
+      "disposition": "NOT_DETECTED_IN_NEW_SCAN",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-53613",
+      "reason": "Absent in new image scan; do not describe all other PDF/OS risks as closed."
+    },
+    {
+      "id": "CVE-2026-54369",
+      "previous": [
+        {
+          "package": "libacl1",
+          "installed": "2.3.1-3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libacl1",
+          "installed": "2.3.2-2+b1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-54369",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-57432",
+      "previous": [
+        {
+          "package": "perl-base",
+          "installed": "5.36.0-7+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "perl-base",
+          "installed": "5.40.1-6",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-57432",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-57433",
+      "previous": [
+        {
+          "package": "perl-base",
+          "installed": "5.36.0-7+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "perl-base",
+          "installed": "5.40.1-6",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-57433",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-58010",
+      "previous": [
+        {
+          "package": "libglib2.0-0",
+          "installed": "2.74.6-2+deb12u9",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libglib2.0-0t64",
+          "installed": "2.84.4-3~deb13u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-58010",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-58011",
+      "previous": [
+        {
+          "package": "libglib2.0-0",
+          "installed": "2.74.6-2+deb12u9",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libglib2.0-0t64",
+          "installed": "2.84.4-3~deb13u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-58011",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-58012",
+      "previous": [
+        {
+          "package": "libglib2.0-0",
+          "installed": "2.74.6-2+deb12u9",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libglib2.0-0t64",
+          "installed": "2.84.4-3~deb13u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-58012",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-58013",
+      "previous": [
+        {
+          "package": "libglib2.0-0",
+          "installed": "2.74.6-2+deb12u9",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libglib2.0-0t64",
+          "installed": "2.84.4-3~deb13u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-58013",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-58014",
+      "previous": [
+        {
+          "package": "libglib2.0-0",
+          "installed": "2.74.6-2+deb12u9",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libglib2.0-0t64",
+          "installed": "2.84.4-3~deb13u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-58014",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-58015",
+      "previous": [
+        {
+          "package": "libglib2.0-0",
+          "installed": "2.74.6-2+deb12u9",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libglib2.0-0t64",
+          "installed": "2.84.4-3~deb13u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-58015",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-58016",
+      "previous": [
+        {
+          "package": "libglib2.0-0",
+          "installed": "2.74.6-2+deb12u9",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libglib2.0-0t64",
+          "installed": "2.84.4-3~deb13u3",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-58016",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-6653",
+      "previous": [
+        {
+          "package": "libxml2",
+          "installed": "2.9.14+dfsg-1.3~deb12u6",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [],
+      "disposition": "NOT_DETECTED_IN_NEW_SCAN",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-6653",
+      "reason": "Absent in new image scan; do not describe all other PDF/OS risks as closed."
+    },
+    {
+      "id": "CVE-2026-76642",
+      "previous": [
+        {
+          "package": "bsdutils",
+          "installed": "1:2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libblkid1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libmount1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libsmartcols1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libuuid1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "mount",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "util-linux",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "util-linux-extra",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "bsdutils",
+          "installed": "1:2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libblkid1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "liblastlog2-2",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libmount1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libsmartcols1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libuuid1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "login",
+          "installed": "1:4.16.0-2+really2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "mount",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "util-linux",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-76642",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-78408",
+      "previous": [
+        {
+          "package": "bsdutils",
+          "installed": "1:2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libblkid1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libmount1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libsmartcols1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libuuid1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "mount",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "util-linux",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "util-linux-extra",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "bsdutils",
+          "installed": "1:2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libblkid1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "liblastlog2-2",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libmount1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libsmartcols1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libuuid1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "login",
+          "installed": "1:4.16.0-2+really2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "mount",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "util-linux",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-78408",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-78409",
+      "previous": [
+        {
+          "package": "bsdutils",
+          "installed": "1:2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libblkid1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libmount1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libsmartcols1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libuuid1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "mount",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "util-linux",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "util-linux-extra",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "bsdutils",
+          "installed": "1:2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libblkid1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "liblastlog2-2",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libmount1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libsmartcols1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libuuid1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "login",
+          "installed": "1:4.16.0-2+really2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "mount",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "util-linux",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-78409",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-78410",
+      "previous": [
+        {
+          "package": "bsdutils",
+          "installed": "1:2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libblkid1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libmount1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libsmartcols1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "libuuid1",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "mount",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "util-linux",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        },
+        {
+          "package": "util-linux-extra",
+          "installed": "2.38.1-5+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "bsdutils",
+          "installed": "1:2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libblkid1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "liblastlog2-2",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libmount1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libsmartcols1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "libuuid1",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "login",
+          "installed": "1:4.16.0-2+really2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "mount",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        },
+        {
+          "package": "util-linux",
+          "installed": "2.41.5-0+deb13u1",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-78410",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-8376",
+      "previous": [
+        {
+          "package": "perl-base",
+          "installed": "5.36.0-7+deb12u3",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "perl-base",
+          "installed": "5.40.1-6",
+          "fixed": null,
+          "severity": "CRITICAL",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "NOT_APPLICABLE_ARCHITECTURE",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-8376",
+      "reason": "Official advisory requires 32-bit Perl; actual image is x86_64, Perl ivsize and ptrsize are both 8 bytes.",
+      "evidence": "runtime-smoke-v5/runtime-smoke.json"
+    },
+    {
+      "id": "CVE-2026-86145",
+      "previous": [
+        {
+          "package": "libpcre2-8-0",
+          "installed": "10.42-1",
+          "fixed": "10.42-1+deb12u1",
+          "severity": "UNKNOWN",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libpcre2-8-0",
+          "installed": "10.46-1~deb13u1",
+          "fixed": null,
+          "severity": "UNKNOWN",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-86145",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "CVE-2026-9538",
+      "previous": [
+        {
+          "package": "perl-base",
+          "installed": "5.36.0-7+deb12u3",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "perl-base",
+          "installed": "5.40.1-6",
+          "fixed": null,
+          "severity": "HIGH",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/CVE-2026-9538",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "TEMP-0000000-21C4F8",
+      "previous": [
+        {
+          "package": "libpcre2-8-0",
+          "installed": "10.42-1",
+          "fixed": "10.42-1+deb12u1",
+          "severity": "UNKNOWN",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libpcre2-8-0",
+          "installed": "10.46-1~deb13u1",
+          "fixed": null,
+          "severity": "UNKNOWN",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/TEMP-0000000-21C4F8",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "TEMP-0000000-8188AC",
+      "previous": [
+        {
+          "package": "libpcre2-8-0",
+          "installed": "10.42-1",
+          "fixed": "10.42-1+deb12u1",
+          "severity": "UNKNOWN",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libpcre2-8-0",
+          "installed": "10.46-1~deb13u1",
+          "fixed": null,
+          "severity": "UNKNOWN",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/TEMP-0000000-8188AC",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "TEMP-0000000-A5518C",
+      "previous": [
+        {
+          "package": "libpcre2-8-0",
+          "installed": "10.42-1",
+          "fixed": "10.42-1+deb12u1",
+          "severity": "UNKNOWN",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libpcre2-8-0",
+          "installed": "10.46-1~deb13u1",
+          "fixed": null,
+          "severity": "UNKNOWN",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/TEMP-0000000-A5518C",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    },
+    {
+      "id": "TEMP-0000000-B05303",
+      "previous": [
+        {
+          "package": "libpcre2-8-0",
+          "installed": "10.42-1",
+          "fixed": "10.42-1+deb12u1",
+          "severity": "UNKNOWN",
+          "target": "wms-system-test:c9175bf-20260906 (debian 12.15)"
+        }
+      ],
+      "candidate": [
+        {
+          "package": "libpcre2-8-0",
+          "installed": "10.46-1~deb13u1",
+          "fixed": null,
+          "severity": "UNKNOWN",
+          "target": "wms-system-test:remediation-candidate-v5 (debian 13.6)"
+        }
+      ],
+      "disposition": "REVIEW_REQUIRED",
+      "owner": "release-security",
+      "source": "https://security-tracker.debian.org/tracker/TEMP-0000000-B05303",
+      "reason": "No blanket exception; package-level severity is not proof of an exploitable WMS path. Requires individual applicability or vendor fix assessment."
+    }
+  ],
+  "unresolved": 37,
+  "remaining_review_required": 34,
+  "scope": "Final candidate v5; exact runtime image scanned; original non-root component facts rechecked",
+  "severity_counts": {
+    "LOW": 75,
+    "HIGH": 65,
+    "MEDIUM": 88,
+    "CRITICAL": 8,
+    "UNKNOWN": 6
+  }
+}

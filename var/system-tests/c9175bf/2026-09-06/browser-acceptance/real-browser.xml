@@ -1,0 +1,352 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="42.997" timestamp="2026-09-06T11:17:47.834559+08:00" hostname="wms"><testcase classname="scripts.test_real_browser_acceptance.RealBrowserAcceptanceTests" name="test_owner_mall_and_admin_login_against_real_api" time="41.863"><failure message="AssertionError: 1 != 0 : node:internal/modules/run_main:123&#10;    triggerUncaughtException(&#10;    ^&#10;&#10;ExpectError: expect(page).toHaveURL(expected) failed&#10;&#10;Expected: &quot;http://localhost:51017/admin/&quot;&#10;Received: &quot;http://localhost:51017/admin/tasking/wmstask/&quot;&#10;Timeout:  5000ms&#10;&#10;Call log:&#10;  - Expect &quot;to.have.url&quot; with timeout 5000ms&#10;    - waiting for&quot; http://localhost:51017/admin/tasking/wmstask/&quot; navigation to finish...&#10;    - navigated to &quot;http://localhost:51017/admin/tasking/wmstask/&quot;&#10;    10 × unexpected value &quot;http://localhost:51017/admin/tasking/wmstask/&quot;&#10;&#10;    at captureRawStack (/wms/wmspda/node_modules/playwright-core/lib/coreBundle.js:3172:17)&#10;    at callMatcherAsStep (/wms/wmspda/node_modules/playwright/lib/matchers/expect.js:12877:57)&#10;    at Object.toHaveURL (/wms/wmspda/node_modules/playwright/lib/matchers/expect.js:12867:23)&#10;    at /wms/scripts/real-browser-acceptance.mjs:83:22 {&#10;  matcherResult: {&#10;    name: 'toHaveURL',&#10;    expected: 'http://localhost:51017/admin/',&#10;    message: 'expect(page).toHaveURL(expected) failed\n' +&#10;      '\n' +&#10;      'Expected: &quot;http://localhost:51017/admin/&quot;\n' +&#10;      'Received: &quot;http://localhost:51017/admin/tasking/wmstask/&quot;\n' +&#10;      'Timeout:  5000ms\n' +&#10;      '\n' +&#10;      'Call log:\n' +&#10;      '  - Expect &quot;to.have.url&quot; with timeout 5000ms\n' +&#10;      '    - waiting for&quot; http://localhost:51017/admin/tasking/wmstask/&quot; navigation to finish...\n' +&#10;      '    - navigated to &quot;http://localhost:51017/admin/tasking/wmstask/&quot;\n' +&#10;      '    10 × unexpected value &quot;http://localhost:51017/admin/tasking/wmstask/&quot;\n',&#10;    pass: false,&#10;    actual: 'http://localhost:51017/admin/tasking/wmstask/',&#10;    log: [&#10;      '  - Expect &quot;to.have.url&quot; with timeout 5000ms',&#10;      '    - waiting for&quot; http://localhost:51017/admin/tasking/wmstask/&quot; navigation to finish...',&#10;      '    - navigated to &quot;http://localhost:51017/admin/tasking/wmstask/&quot;',&#10;      '    10 × unexpected value &quot;http://localhost:51017/admin/tasking/wmstask/&quot;'&#10;    ],&#10;    timeout: 5000,&#10;    ariaSnapshot: '- link &quot;跳到主要内容&quot;:\n' +&#10;      '  - /url: &quot;#content-start&quot;\n' +&#10;      '- banner:\n' +&#10;      '  - text: 欢迎，\n' +&#10;      '  - strong: browser-admin\n' +&#10;      '  - text: .\n' +&#10;      '  - button &quot;browser-admin&quot;\n' +&#10;      '- navigation &quot;条形导航&quot;:\n' +&#10;      '  - link &quot;首页&quot;:\n' +&#10;      '    - /url: /admin/\n' +&#10;      '  - text: ›\n' +&#10;      '  - link &quot;任务管理&quot;:\n' +&#10;      '    - /url: /admin/tasking/\n' +&#10;      '  - text: › 任务\n' +&#10;      '- button &quot;切换导航&quot;: «\n' +&#10;      '- navigation &quot;侧边栏&quot;:\n' +&#10;      '  - searchbox &quot;筛选导航项目&quot;\n' +&#10;      '  - table &quot;任务管理 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;任务管理&quot;:\n' +&#10;      '        - /url: /admin/tasking/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;入库管理 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;入库管理&quot;:\n' +&#10;      '        - /url: /admin/inbound/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;出库管理 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;出库管理&quot;:\n' +&#10;      '        - /url: /admin/outbound/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;POS收银 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;POS收银&quot;:\n' +&#10;      '        - /url: /admin/pos/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;库存管理 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;库存管理&quot;:\n' +&#10;      '        - /url: /admin/inventory/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;商品管理 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;商品管理&quot;:\n' +&#10;      '        - /url: /admin/products/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;基础信息 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;基础信息&quot;:\n' +&#10;      '        - /url: /admin/baseinfo/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;仓位管理 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;仓位管理&quot;:\n' +&#10;      '        - /url: /admin/locations/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;计费管理 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;计费管理&quot;:\n' +&#10;      '        - /url: /admin/billing/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;报表管理 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;报表管理&quot;:\n' +&#10;      '        - /url: /admin/reports/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;认证和授权 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;认证和授权&quot;:\n' +&#10;      '        - /url: /admin/auth/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;账号管理 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;账号管理&quot;:\n' +&#10;      '        - /url: /admin/accounts/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;令牌黑名单 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;令牌黑名单&quot;:\n' +&#10;      '        - /url: /admin/token_blacklist/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;商城销售管理 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;商城销售管理&quot;:\n' +&#10;      '        - /url: /admin/salesapp/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;核心 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;核心&quot;:\n' +&#10;      '        - /url: /admin/core/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '  - table &quot;认证令牌 ▸&quot;:\n' +&#10;      '    - caption:\n' +&#10;      '      - link &quot;认证令牌&quot;:\n' +&#10;      '        - /url: /admin/authtoken/\n' +&#10;      '      - text: ▸\n' +&#10;      '    - rowgroup:\n' +&#10;      '      - row &quot;Model name Add link Change or view list link&quot;:\n' +&#10;      '        - columnheader &quot;Model name&quot;\n' +&#10;      '        - columnheader &quot;Add link&quot;\n' +&#10;      '        - columnheader &quot;Change or view list link&quot;\n' +&#10;      '- main:\n' +&#10;      '  - heading &quot;选择 任务 来修改&quot; [level=1]\n' +&#10;      '  - list:\n' +&#10;      '    - listitem:\n' +&#10;      '      - link &quot;增加 任务&quot;:\n' +&#10;      '        - /url: /admin/tasking/wmstask/add/\n' +&#10;      '  - search:\n' +&#10;      '    - img &quot;Search&quot;\n' +&#10;      '    - textbox &quot;Search&quot;\n' +&#10;      '    - button &quot;搜索&quot;\n' +&#10;      '  - navigation\n' +&#10;      '  - paragraph: 0 任务\n' +&#10;      '  - navigation &quot;过滤器&quot;:\n' +&#10;      '    - heading &quot;过滤器&quot; [level=2]\n' +&#10;      '    - heading &quot;显示计数&quot; [level=3]:\n' +&#10;      '      - link &quot;显示计数&quot;:\n' +&#10;      '        - /url: &quot;?_facets=True&quot;\n' +&#10;      '    - group:\n' +&#10;      '      - text: ↓ 以 任务类型\n' +&#10;      '      - list:\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;全部&quot;:\n' +&#10;      '            - /url: &quot;?&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;收货&quot;:\n' +&#10;      '            - /url: &quot;?task_type__exact=RECEIVE&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;上架&quot;:\n' +&#10;      '            - /url: &quot;?task_type__exact=PUTAWAY&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;拣货&quot;:\n' +&#10;      '            - /url: &quot;?task_type__exact=PICK&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;复核&quot;:\n' +&#10;      '            - /url: &quot;?task_type__exact=REVIEW&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;打包&quot;:\n' +&#10;      '            - /url: &quot;?task_type__exact=PACK&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;装车&quot;:\n' +&#10;      '            - /url: &quot;?task_type__exact=LOAD&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;发运&quot;:\n' +&#10;      '            - /url: &quot;?task_type__exact=DISPATCH&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;补货&quot;:\n' +&#10;      '            - /url: &quot;?task_type__exact=REPLEN&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;移位&quot;:\n' +&#10;      '            - /url: &quot;?task_type__exact=RELOC&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;盘点&quot;:\n' +&#10;      '            - /url: &quot;?task_type__exact=COUNT&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;其他&quot;:\n' +&#10;      '            - /url: &quot;?task_type__exact=OTHER&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;调整&quot;:\n' +&#10;      '            - /url: &quot;?task_type__exact=ADJUST&quot;\n' +&#10;      '    - group:\n' +&#10;      '      - text: ↓ 以 任务状态\n' +&#10;      '      - list:\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;全部&quot;:\n' +&#10;      '            - /url: &quot;?&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;冻结预订&quot;:\n' +&#10;      '            - /url: &quot;?status__exact=RESERVED&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;草稿&quot;:\n' +&#10;      '            - /url: &quot;?status__exact=DRAFT&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;待发布&quot;:\n' +&#10;      '            - /url: &quot;?status__exact=READY&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;已发布&quot;:\n' +&#10;      '            - /url: &quot;?status__exact=RELEASED&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;执行中&quot;:\n' +&#10;      '            - /url: &quot;?status__exact=IN_PROGRESS&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;已完成&quot;:\n' +&#10;      '            - /url: &quot;?status__exact=COMPLETED&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;已取消&quot;:\n' +&#10;      '            - /url: &quot;?status__exact=CANCELLED&quot;\n' +&#10;      '    - group:\n' +&#10;      '      - text: ↓ 以 优先级\n' +&#10;      '      - list:\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;全部&quot;:\n' +&#10;      '            - /url: &quot;?&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;低&quot;:\n' +&#10;      '            - /url: &quot;?priority__exact=1&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;中&quot;:\n' +&#10;      '            - /url: &quot;?priority__exact=2&quot;\n' +&#10;      '        - listitem:\n' +&#10;      '          - link &quot;高&quot;:\n' +&#10;      '            - /url: &quot;?priority__exact=3&quot;\n' +&#10;      '- contentinfo'&#10;  }&#10;}&#10;&#10;Node.js v22.22.0">self = &lt;test_real_browser_acceptance.RealBrowserAcceptanceTests testMethod=test_owner_mall_and_admin_login_against_real_api&gt;
+
+    def test_owner_mall_and_admin_login_against_real_api(self):
+        sales_fixtures.SaleMiniApiTests.setUp(self)
+        owner_user = get_user_model().objects.create_user(
+            username="browser-owner", password="browser-test-password", owner=self.owner
+        )
+        UserRoleScope.objects.create(
+            user=owner_user, owner=self.owner, role=UserRoleScope.Role.OWNER_MANAGER
+        )
+        get_user_model().objects.create_superuser(
+            username="browser-admin", password="browser-test-password"
+        )
+        artifacts = Path(os.environ["WMS_BROWSER_ARTIFACTS"]).resolve()
+        artifacts.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            ["node", str(ROOT / "scripts/real-browser-acceptance.mjs")],
+            input=json.dumps({"backend": self.live_server_url, "artifacts": str(artifacts)}),
+            text=True,
+            capture_output=True,
+            timeout=180,
+        )
+        (artifacts / "browser.log").write_text(result.stdout + result.stderr)
+&gt;       self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+E       AssertionError: 1 != 0 : node:internal/modules/run_main:123
+E           triggerUncaughtException(
+E           ^
+E       
+E       ExpectError: expect(page).toHaveURL(expected) failed
+E       
+E       Expected: "http://localhost:51017/admin/"
+E       Received: "http://localhost:51017/admin/tasking/wmstask/"
+E       Timeout:  5000ms
+E       
+E       Call log:
+E         - Expect "to.have.url" with timeout 5000ms
+E           - waiting for" http://localhost:51017/admin/tasking/wmstask/" navigation to finish...
+E           - navigated to "http://localhost:51017/admin/tasking/wmstask/"
+E           10 × unexpected value "http://localhost:51017/admin/tasking/wmstask/"
+E       
+E           at captureRawStack (/wms/wmspda/node_modules/playwright-core/lib/coreBundle.js:3172:17)
+E           at callMatcherAsStep (/wms/wmspda/node_modules/playwright/lib/matchers/expect.js:12877:57)
+E           at Object.toHaveURL (/wms/wmspda/node_modules/playwright/lib/matchers/expect.js:12867:23)
+E           at /wms/scripts/real-browser-acceptance.mjs:83:22 {
+E         matcherResult: {
+E           name: 'toHaveURL',
+E           expected: 'http://localhost:51017/admin/',
+E           message: 'expect(page).toHaveURL(expected) failed\n' +
+E             '\n' +
+E             'Expected: "http://localhost:51017/admin/"\n' +
+E             'Received: "http://localhost:51017/admin/tasking/wmstask/"\n' +
+E             'Timeout:  5000ms\n' +
+E             '\n' +
+E             'Call log:\n' +
+E             '  - Expect "to.have.url" with timeout 5000ms\n' +
+E             '    - waiting for" http://localhost:51017/admin/tasking/wmstask/" navigation to finish...\n' +
+E             '    - navigated to "http://localhost:51017/admin/tasking/wmstask/"\n' +
+E             '    10 × unexpected value "http://localhost:51017/admin/tasking/wmstask/"\n',
+E           pass: false,
+E           actual: 'http://localhost:51017/admin/tasking/wmstask/',
+E           log: [
+E             '  - Expect "to.have.url" with timeout 5000ms',
+E             '    - waiting for" http://localhost:51017/admin/tasking/wmstask/" navigation to finish...',
+E             '    - navigated to "http://localhost:51017/admin/tasking/wmstask/"',
+E             '    10 × unexpected value "http://localhost:51017/admin/tasking/wmstask/"'
+E           ],
+E           timeout: 5000,
+E           ariaSnapshot: '- link "跳到主要内容":\n' +
+E             '  - /url: "#content-start"\n' +
+E             '- banner:\n' +
+E             '  - text: 欢迎，\n' +
+E             '  - strong: browser-admin\n' +
+E             '  - text: .\n' +
+E             '  - button "browser-admin"\n' +
+E             '- navigation "条形导航":\n' +
+E             '  - link "首页":\n' +
+E             '    - /url: /admin/\n' +
+E             '  - text: ›\n' +
+E             '  - link "任务管理":\n' +
+E             '    - /url: /admin/tasking/\n' +
+E             '  - text: › 任务\n' +
+E             '- button "切换导航": «\n' +
+E             '- navigation "侧边栏":\n' +
+E             '  - searchbox "筛选导航项目"\n' +
+E             '  - table "任务管理 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "任务管理":\n' +
+E             '        - /url: /admin/tasking/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "入库管理 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "入库管理":\n' +
+E             '        - /url: /admin/inbound/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "出库管理 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "出库管理":\n' +
+E             '        - /url: /admin/outbound/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "POS收银 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "POS收银":\n' +
+E             '        - /url: /admin/pos/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "库存管理 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "库存管理":\n' +
+E             '        - /url: /admin/inventory/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "商品管理 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "商品管理":\n' +
+E             '        - /url: /admin/products/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "基础信息 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "基础信息":\n' +
+E             '        - /url: /admin/baseinfo/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "仓位管理 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "仓位管理":\n' +
+E             '        - /url: /admin/locations/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "计费管理 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "计费管理":\n' +
+E             '        - /url: /admin/billing/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "报表管理 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "报表管理":\n' +
+E             '        - /url: /admin/reports/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "认证和授权 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "认证和授权":\n' +
+E             '        - /url: /admin/auth/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "账号管理 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "账号管理":\n' +
+E             '        - /url: /admin/accounts/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "令牌黑名单 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "令牌黑名单":\n' +
+E             '        - /url: /admin/token_blacklist/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "商城销售管理 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "商城销售管理":\n' +
+E             '        - /url: /admin/salesapp/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "核心 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "核心":\n' +
+E             '        - /url: /admin/core/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '  - table "认证令牌 ▸":\n' +
+E             '    - caption:\n' +
+E             '      - link "认证令牌":\n' +
+E             '        - /url: /admin/authtoken/\n' +
+E             '      - text: ▸\n' +
+E             '    - rowgroup:\n' +
+E             '      - row "Model name Add link Change or view list link":\n' +
+E             '        - columnheader "Model name"\n' +
+E             '        - columnheader "Add link"\n' +
+E             '        - columnheader "Change or view list link"\n' +
+E             '- main:\n' +
+E             '  - heading "选择 任务 来修改" [level=1]\n' +
+E             '  - list:\n' +
+E             '    - listitem:\n' +
+E             '      - link "增加 任务":\n' +
+E             '        - /url: /admin/tasking/wmstask/add/\n' +
+E             '  - search:\n' +
+E             '    - img "Search"\n' +
+E             '    - textbox "Search"\n' +
+E             '    - button "搜索"\n' +
+E             '  - navigation\n' +
+E             '  - paragraph: 0 任务\n' +
+E             '  - navigation "过滤器":\n' +
+E             '    - heading "过滤器" [level=2]\n' +
+E             '    - heading "显示计数" [level=3]:\n' +
+E             '      - link "显示计数":\n' +
+E             '        - /url: "?_facets=True"\n' +
+E             '    - group:\n' +
+E             '      - text: ↓ 以 任务类型\n' +
+E             '      - list:\n' +
+E             '        - listitem:\n' +
+E             '          - link "全部":\n' +
+E             '            - /url: "?"\n' +
+E             '        - listitem:\n' +
+E             '          - link "收货":\n' +
+E             '            - /url: "?task_type__exact=RECEIVE"\n' +
+E             '        - listitem:\n' +
+E             '          - link "上架":\n' +
+E             '            - /url: "?task_type__exact=PUTAWAY"\n' +
+E             '        - listitem:\n' +
+E             '          - link "拣货":\n' +
+E             '            - /url: "?task_type__exact=PICK"\n' +
+E             '        - listitem:\n' +
+E             '          - link "复核":\n' +
+E             '            - /url: "?task_type__exact=REVIEW"\n' +
+E             '        - listitem:\n' +
+E             '          - link "打包":\n' +
+E             '            - /url: "?task_type__exact=PACK"\n' +
+E             '        - listitem:\n' +
+E             '          - link "装车":\n' +
+E             '            - /url: "?task_type__exact=LOAD"\n' +
+E             '        - listitem:\n' +
+E             '          - link "发运":\n' +
+E             '            - /url: "?task_type__exact=DISPATCH"\n' +
+E             '        - listitem:\n' +
+E             '          - link "补货":\n' +
+E             '            - /url: "?task_type__exact=REPLEN"\n' +
+E             '        - listitem:\n' +
+E             '          - link "移位":\n' +
+E             '            - /url: "?task_type__exact=RELOC"\n' +
+E             '        - listitem:\n' +
+E             '          - link "盘点":\n' +
+E             '            - /url: "?task_type__exact=COUNT"\n' +
+E             '        - listitem:\n' +
+E             '          - link "其他":\n' +
+E             '            - /url: "?task_type__exact=OTHER"\n' +
+E             '        - listitem:\n' +
+E             '          - link "调整":\n' +
+E             '            - /url: "?task_type__exact=ADJUST"\n' +
+E             '    - group:\n' +
+E             '      - text: ↓ 以 任务状态\n' +
+E             '      - list:\n' +
+E             '        - listitem:\n' +
+E             '          - link "全部":\n' +
+E             '            - /url: "?"\n' +
+E             '        - listitem:\n' +
+E             '          - link "冻结预订":\n' +
+E             '            - /url: "?status__exact=RESERVED"\n' +
+E             '        - listitem:\n' +
+E             '          - link "草稿":\n' +
+E             '            - /url: "?status__exact=DRAFT"\n' +
+E             '        - listitem:\n' +
+E             '          - link "待发布":\n' +
+E             '            - /url: "?status__exact=READY"\n' +
+E             '        - listitem:\n' +
+E             '          - link "已发布":\n' +
+E             '            - /url: "?status__exact=RELEASED"\n' +
+E             '        - listitem:\n' +
+E             '          - link "执行中":\n' +
+E             '            - /url: "?status__exact=IN_PROGRESS"\n' +
+E             '        - listitem:\n' +
+E             '          - link "已完成":\n' +
+E             '            - /url: "?status__exact=COMPLETED"\n' +
+E             '        - listitem:\n' +
+E             '          - link "已取消":\n' +
+E             '            - /url: "?status__exact=CANCELLED"\n' +
+E             '    - group:\n' +
+E             '      - text: ↓ 以 优先级\n' +
+E             '      - list:\n' +
+E             '        - listitem:\n' +
+E             '          - link "全部":\n' +
+E             '            - /url: "?"\n' +
+E             '        - listitem:\n' +
+E             '          - link "低":\n' +
+E             '            - /url: "?priority__exact=1"\n' +
+E             '        - listitem:\n' +
+E             '          - link "中":\n' +
+E             '            - /url: "?priority__exact=2"\n' +
+E             '        - listitem:\n' +
+E             '          - link "高":\n' +
+E             '            - /url: "?priority__exact=3"\n' +
+E             '- contentinfo'
+E         }
+E       }
+E       
+E       Node.js v22.22.0
+
+scripts/test_real_browser_acceptance.py:41: AssertionError</failure></testcase></testsuite></testsuites>

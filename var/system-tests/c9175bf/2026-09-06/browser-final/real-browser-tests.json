@@ -1,0 +1,15 @@
+{
+  "exit_code": 1,
+  "collected": 1,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "tests": {
+    "scripts/test_real_browser_acceptance.py::RealBrowserAcceptanceTests::test_owner_mall_and_admin_login_against_real_api": {
+      "status": "FAIL",
+      "phases": {
+        "setup": "passed",
+        "call": "failed",
+        "teardown": "passed"
+      }
+    }
+  }
+}

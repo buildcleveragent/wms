@@ -1,0 +1,11 @@
+EVENT_NAME	COUNT_STAR	total_seconds
+statement/sql/alter_table	828	97.33
+statement/sql/create_index	383	13.02
+statement/sql/create_table	136	5.26
+statement/sql/select	694	1.09
+statement/sql/show_keys	3	0.19
+statement/sql/drop_index	1	0.19
+statement/sql/insert	128	0.12
+statement/sql/set_option	56	0.01
+statement/sql/show_tables	1	0.01
+statement/sql/update	16	0.01

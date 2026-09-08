@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>WMS 离线手册兼容验收</title>
+  <style>
+@page {
+  size: A4;
+  margin: 18mm 16mm 19mm 16mm;
+  @top-left { content: string(document-title); color: #667085; font-size: 8.2pt; }
+  @top-right { content: "V2.0 · 2026-08"; color: #667085; font-size: 8.2pt; }
+  @bottom-center { content: "第 " counter(page) " 页 / 共 " counter(pages) " 页"; color: #7a8493; font-size: 8.2pt; }
+}
+@page cover {
+  margin: 0;
+  @top-left { content: none; }
+  @top-right { content: none; }
+  @bottom-center { content: none; }
+}
+* { box-sizing: border-box; }
+html { font-family: "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; color: #172033; }
+body { margin: 0; font-size: 10pt; line-height: 1.7; }
+.cover {
+  page: cover;
+  page-break-after: always;
+  height: 297mm;
+  padding: 43mm 26mm 25mm;
+  color: white;
+  background: linear-gradient(150deg, #0f2f68 0%, #155eef 58%, #65a5ff 100%);
+  position: relative;
+}
+.cover::after {
+  content: "";
+  position: absolute;
+  right: -44mm;
+  bottom: -42mm;
+  width: 150mm;
+  height: 150mm;
+  border-radius: 50%;
+  background: rgba(255,255,255,.10);
+}
+.cover-logo { width: 23mm; height: 23mm; object-fit: contain; margin-bottom: 25mm; }
+.cover h1 { string-set: document-title content(); font-size: 27pt; line-height: 1.28; margin: 0 0 12mm; color: white; }
+.cover .lead { font-size: 14pt; color: #e8f1ff; margin-bottom: 28mm; }
+.cover-meta { border-top: 1px solid rgba(255,255,255,.45); padding-top: 9mm; width: 125mm; }
+.cover-meta div { margin: 2.2mm 0; font-size: 10.5pt; }
+.cover-foot { position: absolute; left: 26mm; right: 26mm; bottom: 25mm; color: #eaf2ff; font-size: 9pt; }
+.toc { page-break-after: always; }
+.toc h1 { color: #0f2f68; font-size: 23pt; border-bottom: 3px solid #155eef; padding-bottom: 4mm; }
+.toc ul { margin: 0; padding-left: 0; list-style: none; }
+.toc li { margin: 1.6mm 0; }
+.toc li.level-3 { margin-left: 7mm; color: #4d5c73; font-size: 9.2pt; }
+.toc a { color: inherit; text-decoration: none; }
+h2 { page-break-before: always; font-size: 19pt; color: #0f2f68; margin: 0 0 7mm; border-bottom: 2px solid #bfd2f6; padding-bottom: 3mm; }
+h2.first-section { page-break-before: auto; }
+h3 { font-size: 13.5pt; color: #174a98; margin: 8mm 0 3mm; page-break-after: avoid; }
+h4 { font-size: 11.5pt; color: #243b63; margin: 5mm 0 2mm; page-break-after: avoid; }
+p { margin: 2.4mm 0; orphans: 3; widows: 3; }
+ul, ol { margin: 2.2mm 0 3mm; padding-left: 7mm; }
+li { margin: 1.2mm 0; }
+strong { color: #122c57; }
+code { font-family: "Noto Sans Mono CJK SC", monospace; background: #eef3fb; padding: .2mm 1mm; border-radius: 1mm; }
+blockquote { margin: 4mm 0; padding: 3.5mm 5mm; border-left: 4px solid #3274dd; background: #f2f6fd; color: #35445d; }
+blockquote p { margin: 0; }
+hr { border: 0; border-top: 1px solid #d7dee9; margin: 7mm 0; }
+table { width: 100%; border-collapse: collapse; margin: 4mm 0 6mm; font-size: 8.5pt; page-break-inside: auto; }
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; }
+th { background: #eaf1fd; color: #143a75; font-weight: 700; }
+th, td { border: 1px solid #bdc9da; padding: 2.2mm 2.4mm; vertical-align: top; }
+img { display: block; max-width: 100%; height: auto; margin: 5mm auto 7mm; page-break-inside: avoid; }
+img.role-map { width: 96%; }
+img.mobile-shot { width: 62mm; border: 1px solid #ccd5e2; border-radius: 3mm; box-shadow: 0 2mm 7mm rgba(20,40,80,.10); }
+img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rgba(20,40,80,.10); }
+.caption { text-align: center; color: #68758a; font-size: 8.5pt; margin-top: -5mm; margin-bottom: 6mm; }
+.document-note { margin: 0 0 7mm; padding: 3mm 4mm; color: #34445d; background: #f6f8fb; border: 1px solid #d8e0eb; }
+.checkbox { font-family: "Noto Sans Symbols 2", "Noto Sans CJK SC", sans-serif; }
+</style>
+</head>
+<body>
+
+    <section class="cover">
+      <img class="cover-logo" src="../static/img/aaa.png" alt="金桥融通" />
+      <h1>WMS 离线手册兼容验收</h1>
+      <div class="lead">岗位操作 · 权限边界 · 异常处理</div>
+      <div class="cover-meta">
+        <div>文档版本：acceptance</div>
+        <div>适用基线：2026-09-06 当前工作区</div>
+        <div>文档状态：交付版</div>
+        <div>主要读者：合成测试</div>
+      </div>
+      <div class="cover-foot">实际菜单和数据范围以账号角色、权限及显式货主/仓库范围为准</div>
+    </section>
+    
+<section class='toc'><h1>目录</h1><ul><li class='level-2'><a href='#section-1-测试章节'>测试章节</a></li></ul></section>
+<div class="document-note">本手册仅描述当前代码中具有有效权限、页面和业务闭环的功能。</div>
+
+<h2 class="first-section" id="section-1-测试章节">测试章节</h2>
+<p>中文说明与 <strong>强调内容</strong>。</p>
+<table>
+<thead>
+<tr>
+<th>项目</th>
+<th>数量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>验收商品</td>
+<td>4</td>
+</tr>
+</tbody>
+</table>
+
+</body>
+</html>

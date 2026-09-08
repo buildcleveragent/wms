@@ -1,0 +1,352 @@
+{
+  "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+  "evaluated_at": "2026-09-06T11:01:06.947439+00:00",
+  "local": {
+    "status": "BLOCKED",
+    "gates": [
+      {
+        "gate_id": "test-coordination",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "historical-evidence-review",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "runtime-smoke",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "dependency-audit",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "image-security",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "business-matrix",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "migration-clean",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "migration-nonempty-pos",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "backend-functional",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "coverage",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "frontend",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "real-browser",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "pdf-acceptance",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "pdf-resource-register",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "readiness-tool",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "external-gates-register",
+        "status": "PASS",
+        "reason": null
+      }
+    ]
+  },
+  "pre_release": {
+    "status": "BLOCKED",
+    "gates": [
+      {
+        "gate_id": "test-coordination",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "historical-evidence-review",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "runtime-smoke",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "dependency-audit",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "image-security",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "business-matrix",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "migration-clean",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "migration-nonempty-pos",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "backend-functional",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "coverage",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "frontend",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "real-browser",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "pdf-acceptance",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "pdf-resource-register",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "readiness-tool",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "external-gates-register",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "pdf-resource-release-decision",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "staging-rehearsal-60m",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "capacity",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "disaster-recovery",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "wechat-payment",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "signed-apk-devices",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "manual-196",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "release-approval",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      }
+    ]
+  },
+  "post_release": {
+    "status": "BLOCKED",
+    "gates": [
+      {
+        "gate_id": "test-coordination",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "historical-evidence-review",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "runtime-smoke",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "dependency-audit",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "image-security",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "business-matrix",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "migration-clean",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "migration-nonempty-pos",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "backend-functional",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "coverage",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "frontend",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "real-browser",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "pdf-acceptance",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "pdf-resource-register",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "readiness-tool",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "external-gates-register",
+        "status": "PASS",
+        "reason": null
+      },
+      {
+        "gate_id": "pdf-resource-release-decision",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "staging-rehearsal-60m",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "capacity",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "disaster-recovery",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "wechat-payment",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "signed-apk-devices",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "manual-196",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "release-approval",
+        "status": "BLOCKED",
+        "reason": "BLOCKED"
+      },
+      {
+        "gate_id": "deployed-artifact-identity",
+        "status": "BLOCKED",
+        "reason": "NOT_RUN"
+      },
+      {
+        "gate_id": "production-observation-60m",
+        "status": "BLOCKED",
+        "reason": "NOT_RUN"
+      }
+    ]
+  },
+  "local_complete": false,
+  "release_permitted": false,
+  "release_accepted": false
+}

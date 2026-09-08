@@ -86,9 +86,11 @@ def _offline_url_fetcher(url, *args, **kwargs):
 
     if not url.startswith("data:"):
         raise ValueError("External resources are disabled for PDF reports.")
-    from weasyprint import default_url_fetcher
+    from weasyprint import URLFetcher
 
-    return default_url_fetcher(url, *args, **kwargs)
+    kwargs["allowed_protocols"] = {"data"}
+    kwargs["allow_redirects"] = False
+    return URLFetcher(*args, **kwargs).fetch(url)
 
 
 @login_required
@@ -107,7 +109,9 @@ def dispatch_note_pdf(request, task_id: int):
     if error_response:
         return error_response
     html = render_to_string("reports/dispatch_note.html", {"note": note})
-    pdf_bytes = HTML(string=html, url_fetcher=_offline_url_fetcher).write_pdf()
+    pdf_bytes = HTML(string=html, url_fetcher=_offline_url_fetcher).write_pdf(
+        presentational_hints=False
+    )
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
     response["Content-Disposition"] = f"inline; filename=dispatch_{task_id}.pdf"
     return response

@@ -133,6 +133,9 @@ class PreservedDataTransferMySQLTests(TransactionTestCase):
     reset_sequences = False
 
     def _empty_application_tables(self):
+        from wmsmaster.test_database import verify_test_database
+
+        verify_test_database(connection.settings_dict)
         with connection.cursor() as cursor:
             tables = [
                 item.name
@@ -142,7 +145,8 @@ class PreservedDataTransferMySQLTests(TransactionTestCase):
             cursor.execute("SET SESSION FOREIGN_KEY_CHECKS = 0")
             try:
                 for table in tables:
-                    cursor.execute(f"DELETE FROM {connection.ops.quote_name(table)}")
+                    # Identifiers come from server introspection and are backend-quoted.
+                    cursor.execute(f"DELETE FROM {connection.ops.quote_name(table)}")  # nosec B608
             finally:
                 cursor.execute("SET SESSION FOREIGN_KEY_CHECKS = 1")
 

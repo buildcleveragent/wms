@@ -1,0 +1,12 @@
+[
+  {
+    "app": "wmsownersale",
+    "status": "PASS",
+    "scope": "real API login and authenticated landing page"
+  },
+  {
+    "app": "sales-miniapp",
+    "status": "PASS",
+    "scope": "real API login and authenticated landing page"
+  }
+]

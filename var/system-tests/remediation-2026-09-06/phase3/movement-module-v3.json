@@ -1,0 +1,618 @@
+{
+  "schema_version": 1,
+  "run_id": "cfdefb7d707e4c12a341cb146db73744",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 43,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase3/movement-module-v3.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 43
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/tasking/test_movement_api_acceptance.py::test_scans_4_4_2_post_once_and_replay_is_stable[relocation]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_scans_4_4_2_post_once_and_replay_is_stable[replenishment]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[relocation-qty-0]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[relocation-qty-11]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[relocation-from_location_code-WRONG]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[relocation-to_location_code-WRONG]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[relocation-product_code-WRONG]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[relocation-serial_no-UNEXPECTED]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[replenishment-qty-0]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[replenishment-qty-11]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[replenishment-from_location_code-WRONG]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[replenishment-to_location_code-WRONG]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[replenishment-product_code-WRONG]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[replenishment-serial_no-UNEXPECTED]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_changed_payload_same_key_conflicts[relocation]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_changed_payload_same_key_conflicts[replenishment]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_claim_start_scope_and_role_boundaries[relocation]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_claim_start_scope_and_role_boundaries[replenishment]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_request_review_list_detail_and_scope[relocation-approve]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_request_review_list_detail_and_scope[relocation-reject]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_request_review_list_detail_and_scope[replenishment-approve]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_request_review_list_detail_and_scope[replenishment-reject]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_feature_disabled_and_unscoped_account_rejected[relocation]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_feature_disabled_and_unscoped_account_rejected[replenishment]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_task_list_filters[relocation]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_task_list_filters[replenishment]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_posting_failure_keeps_scan_and_manager_can_retry[relocation]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_posting_failure_keeps_scan_and_manager_can_retry[replenishment]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_four_piece_direct_release_changes_10_to_6_and_0_to_4[relocation]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_exception_resume_and_void_preserve_stock_and_release_locks[relocation]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_request_cancel_and_options_are_scoped[relocation]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_policy_management_and_scoped_evaluation[replenishment]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_policy_create_has_scope_and_model_validation[replenishment]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_relocation.py::RelocationFlowTests::test_idempotency_key_reuse_with_different_payload_conflicts": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_relocation.py::RelocationFlowTests::test_layer_request_approval_locks_and_posting_moves_exact_layer": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_relocation.py::RelocationFlowTests::test_target_capacity_blocks_request": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_relocation.py::RelocationFlowTests::test_void_releases_reservation_and_preserves_ignored_scan": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_relocation.py::RelocationFlowTests::test_whole_container_moves_descendants_inventory_and_hierarchy": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_replenishment.py::ReplenishmentFlowTests::test_manual_request_stays_pending_when_full_quantity_is_unavailable": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_replenishment.py::ReplenishmentFlowTests::test_minmax_rounds_to_package_splits_fefo_and_counts_in_transit": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_replenishment.py::ReplenishmentFlowTests::test_policy_rejects_non_pick_target": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_replenishment.py::ReplenishmentFlowTests::test_record_is_idempotent_and_posts_paired_replenishment_move": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_movement_api_acceptance.py::test_two_concurrent_evaluators_create_only_twenty_units[replenishment]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

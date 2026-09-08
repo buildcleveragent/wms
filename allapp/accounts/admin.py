@@ -89,8 +89,7 @@ class PermissionMatrixWidget(forms.SelectMultiple):
             {
                 "groups": groups,
                 "action_order": [
-                    {"key": key, "label": self.action_labels[key]}
-                    for key in self.action_order
+                    {"key": key, "label": self.action_labels[key]} for key in self.action_order
                 ],
                 "selected_count": sum(group["selected_count"] for group in groups),
                 "total_count": sum(group["total_count"] for group in groups),
@@ -187,9 +186,7 @@ class PermissionMatrixWidget(forms.SelectMultiple):
                     search_parts.append(permission["label"])
                 for permission in model_group["extras"]:
                     search_parts.append(permission["label"])
-                model_group["search_text"] = " ".join(
-                    str(part) for part in search_parts
-                ).lower()
+                model_group["search_text"] = " ".join(str(part) for part in search_parts).lower()
                 models.append(model_group)
             app_group["models"] = models
             groups.append(app_group)
@@ -242,13 +239,10 @@ class AuxiliaryGroupsMixin:
         field = self.fields.get("groups")
         if not field:
             return
-        field.queryset = Group.objects.exclude(name__in=ROLE_GROUP_NAMES).order_by(
-            "name"
-        )
+        field.queryset = Group.objects.exclude(name__in=ROLE_GROUP_NAMES).order_by("name")
         field.label = "辅助权限组"
         field.help_text = (
-            "这里只配置自定义辅助权限组；"
-            "WMS 规范角色组由下方用户角色范围自动同步。"
+            "这里只配置自定义辅助权限组；" "WMS 规范角色组由下方用户角色范围自动同步。"
         )
 
 
@@ -301,9 +295,7 @@ class UserRoleScopeInlineFormSet(BaseInlineFormSet):
             active_rows.append(cleaned)
 
         if self.instance.is_superuser and active_rows:
-            raise forms.ValidationError(
-                "超级管理员使用全局权限，不需要设置用户角色范围。"
-            )
+            raise forms.ValidationError("超级管理员使用全局权限，不需要设置用户角色范围。")
 
         roles = {row.get("role") for row in active_rows}
         roles.discard(None)
@@ -312,14 +304,11 @@ class UserRoleScopeInlineFormSet(BaseInlineFormSet):
         if roles:
             role = next(iter(roles))
             if role != UserRoleScope.Role.WAREHOUSE_BOSS and len(active_rows) > 1:
-                raise forms.ValidationError(
-                    "除仓库老板外，每个用户只能有一个活动范围。"
-                )
+                raise forms.ValidationError("除仓库老板外，每个用户只能有一个活动范围。")
             group_name = role_group_name(role)
             if not Group.objects.filter(name=group_name).exists():
                 raise forms.ValidationError(
-                    f"缺少规范角色组“{group_name}”，"
-                    "请先执行 sync_wms_role_groups。"
+                    f"缺少规范角色组“{group_name}”，" "请先执行 sync_wms_role_groups。"
                 )
 
 
@@ -463,6 +452,11 @@ class UserAdmin(DjangoUserAdmin):
 
     filter_horizontal = ("groups",)
 
+    def has_change_permission(self, request, obj=None):
+        if obj is not None and obj.is_superuser and not request.user.is_superuser:
+            return False
+        return super().has_change_permission(request, obj)
+
     def get_readonly_fields(self, request, obj=None):
         readonly = list(super().get_readonly_fields(request, obj))
         readonly.append("canonical_role_group_display")
@@ -475,11 +469,7 @@ class UserAdmin(DjangoUserAdmin):
 
     @admin.display(description="业务角色")
     def business_role_display(self, obj):
-        roles = {
-            scope.get_role_display()
-            for scope in obj.role_scopes.all()
-            if scope.is_active
-        }
+        roles = {scope.get_role_display() for scope in obj.role_scopes.all() if scope.is_active}
         return "、".join(sorted(roles)) or "—"
 
     @admin.display(description="WMS 数据范围")
@@ -497,9 +487,7 @@ class UserAdmin(DjangoUserAdmin):
         if not obj or not obj.pk:
             return "保存角色范围后自动同步"
         names = sorted(
-            obj.groups.filter(name__in=CANONICAL_ROLE_GROUP_NAMES).values_list(
-                "name", flat=True
-            )
+            obj.groups.filter(name__in=CANONICAL_ROLE_GROUP_NAMES).values_list("name", flat=True)
         )
         return "、".join(names) or "未分配（保存角色范围后自动同步）"
 
@@ -583,9 +571,7 @@ class GroupAdmin(DjangoGroupAdmin):
 
     def save_model(self, request, obj, form, change):
         request._wms_group_auth_before = (
-            _group_authorization_snapshot(Group.objects.get(pk=obj.pk))
-            if change and obj.pk
-            else {}
+            _group_authorization_snapshot(Group.objects.get(pk=obj.pk)) if change and obj.pk else {}
         )
         super().save_model(request, obj, form, change)
 
@@ -718,9 +704,7 @@ class SystemLogAdmin(admin.ModelAdmin):
     # 展示操作内容的简短摘要（简化展示）
     def get_queryset(self, request):
         queryset = super().get_queryset(request)
-        return queryset.annotate(
-            short_content=models.functions.Substr("content", 1, 50)
-        )
+        return queryset.annotate(short_content=models.functions.Substr("content", 1, 50))
 
 
 @admin.register(AuditEvent)

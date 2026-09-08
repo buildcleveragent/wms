@@ -1,0 +1,9 @@
+app	name	applied
+salesapp	0012_payment_reliability	2026-09-06 12:16:28.459750
+salesapp	0011_saleminirefund_idempotency_key_and_more	2026-09-06 12:16:09.156628
+salesapp	0010_saleminiproductreview_saleminiproductreviewimage_and_more	2026-09-06 12:15:58.582996
+salesapp	0009_saleproductconfig_enable_qty_rules	2026-09-06 12:15:43.713777
+salesapp	0008_alter_minicustomeraddress_options_and_more	2026-09-06 12:15:42.628086
+COMMAND	TIME	STATE
+Query	0	executing
+Sleep	66	

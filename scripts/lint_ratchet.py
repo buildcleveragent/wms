@@ -122,6 +122,7 @@ def collect_findings(files: list[str]) -> dict[str, dict[str, list[str]]]:
             sys.executable,
             "-m",
             "flake8",
+            "--jobs=1",
             "--max-line-length=100",
             "--extend-ignore=E203,W503",
             *files,

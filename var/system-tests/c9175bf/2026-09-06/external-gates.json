@@ -1,0 +1,50 @@
+[
+  {
+    "id": "EXT-01",
+    "gate": "微信小程序构建与联调",
+    "status": "BLOCKED",
+    "reason": "三端构建缺少真实 API 基址、AppID 和平台配置；命令失败，不计通过"
+  },
+  {
+    "id": "EXT-02",
+    "gate": "签名 APK、自定义基座与真机扫码打印",
+    "status": "BLOCKED",
+    "reason": "App 资源构建通过；缺少签名交付与现场设备验证"
+  },
+  {
+    "id": "EXT-03",
+    "gate": "真实支付与回调",
+    "status": "BLOCKED",
+    "reason": "未提供专用测试商户及受控交易条件；本地支付测试使用合成数据"
+  },
+  {
+    "id": "EXT-04",
+    "gate": "50/100 并发容量与热点测试",
+    "status": "NOT RUN",
+    "reason": "未准备计划规定的规模数据和固定资源环境"
+  },
+  {
+    "id": "EXT-05",
+    "gate": "生产等效耐久配置灾备及 RPO/RTO",
+    "status": "NOT RUN",
+    "reason": "本地功能库采用低耐久参数，不能作为灾备通过证据"
+  },
+  {
+    "id": "EXT-06",
+    "gate": "发布、回退与 60 分钟观察",
+    "status": "NOT RUN",
+    "reason": "没有部署候选版本；仅编排模拟测试"
+  },
+  {
+    "id": "EXT-07",
+    "gate": "196 条人工验收",
+    "status": "NOT RUN",
+    "reason": "独立 CSV 保留逐条执行栏，未填充推定结果"
+  },
+  {
+    "id": "SEC-IMG",
+    "gate": "候选镜像高危/严重漏洞门禁",
+    "status": "FAIL",
+    "reason": "Trivy 检出 72 条高危/严重包记录（33 个唯一 CVE），当前扫描库无修复版本；尚未完成逐项可达性处置。"
+  }
+]

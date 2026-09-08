@@ -1,1099 +1,335 @@
 # 商城小程序使用教程
 
-本文档说明 `sales-miniapp` 买家商城小程序做了什么、包含哪些文件、如何配置和使用。这个小程序是一个独立的 uni-app 工程，不修改 `wmspda`，它作为 WMS 的线上商城入口，把客户订单接入现有出库、库存、支付和售后链路。
+- 文档版本：V2.1
+- 适用系统版本：2026-09-07 当前工作区业务基线
+- 适用读者：金桥融通商城买家；运营和技术人员另见文末附录
+- 核对依据：当前页面、服务端实现及现有测试；本文不作为实际支付、真机或发布验收报告。
 
-## 1. 项目定位
+## 1. 使用范围与基本流程
 
-`sales-miniapp` 是面向普通客户、门店、采购方的统一销售商城小程序。
+金桥融通商城用于浏览商品、加入购物车、提交采购订单、付款、查询配送进度和申请售后。客户在统一商城中选购；页面出现多个“配送包裹”时，表示本次购买需要分包履约。
 
-对外它只有一个销售主体：`金桥融通商城`。客户不选择货主、不进商家店铺，也不会看到
-“多商家”“货主”“商家筛选”等平台招商概念。
-
-对内它仍然保留 `owner_id / config_id`：不同货主的商品可以在后台做代销、履约、
-结算和库存隔离，但这些都是后台数据准确性上下文，不是前台客户交互。
-
-它负责：
-
-- 展示可售商品、分类、首页横幅和推荐商品。
-- 浏览所有已上架可售商品，商品可来自不同后台代销货主。
-- 管理客户收货地址。
-- 使用服务端购物车。
-- 预览订单金额、库存和购买规则。
-- 使用优惠券、积分抵扣。
-- 提交商城订单。
-- 创建 WMS 出库单 `OutboundOrder / OutboundOrderLine`。
-- 发起微信支付、处理支付回调。
-- 申请退款、接收退款回调。
-- 取消未支付订单、释放库存和优惠资源。
-- 发起售后申请。
-- 查询订单状态。
-
-它不负责直接扣减库存。库存事实仍由 WMS 出库、分配、拣货、复核和过账链路负责。
-
-核心链路：
+日常操作顺序：
 
 ```text
-客户浏览商品
-  -> 加入购物车
-  -> 服务端校验价格、库存、单位、起订量
-  -> 预览优惠券/积分后的应付金额
-  -> 提交订单
-  -> 创建 OutboundOrder
-  -> 分配库存
-  -> 微信支付或线下付款
-  -> 仓库履约
-  -> 退款/售后按状态进入后端流程
+浏览商品 → 登录 → 加入购物车 → 勾选商品
+  → 核对地址、配送、优惠和金额 → 提交订单
+  → 按所选方式付款 → 查看配送进度 → 按订单状态申请退款或售后
 ```
 
-## 2. 我完成的主要工作
+商品页的价格、库存和优惠会在购物车及结算时重新校验。加入购物车不等于下单成功，关闭支付窗口也不等于取消订单。
 
-前端部分：
+## 2. 登录与重新登录
 
-- 新建独立 uni-app 工程 `sales-miniapp/`。
-- 实现商城首页、分类、商品列表、商品详情、购物车、确认订单、订单列表、订单详情、地址、我的、登录页面。
-- 实现优惠/积分、售后、收藏、浏览足迹等商城常用页面。
-- 移除前台商家列表和商家店铺入口，客户只看到统一商城。
-- 地址簿、订单列表、售后列表不再给客户提供商家切换。
-- 购物车仍按后台 `owner_id` 做配送包裹分组，前台文案展示为“配送包裹”，不是商家。
-- 实现服务端请求封装、JWT token 存储、服务地址配置。
-- 实现账号登录和微信登录入口。
-- 微信登录资料只保存 `buyer / customer / bindings`；前台不保存顶层 `owner / warehouse`，`bindings` 仅用于后台代销权限、地址、优惠和下单校验。
-- 实现服务端购物车同步，本地响应式状态只负责页面展示。
-- 实现搜索历史、热门搜索、分类筛选、品牌筛选、价格筛选、只看有货和价格排序。
-- 实现收藏、浏览足迹、订单详情“再来一单”。公开浏览侧保留 `config_id` 定位上架配置，订单和购物车侧由服务端保留内部履约上下文。
-- 订单详情展示买家可读的配送进度，不直接暴露 WMS 审核、分配、拣货等内部状态。
-- 实现优惠券列表、积分余额、订单预览时优惠抵扣。
-- 实现微信支付发起、继续支付、退款申请、售后申请。
-- 清理旧销售员移动开单页面，当前前端只保留普通客户商城入口。
+1. 打开商城，可从首页、分类和搜索入口浏览商品。
+2. 使用购物车、地址、会员权益和订单功能时，按页面提示登录。
+3. 在微信小程序内点击“微信登录”；使用平台分配的账号时，填写账号、密码后点击“账号登录”。
+4. 登录成功进入首页，再打开“我的”核对当前账号信息。
+5. 如果提示账号未开通或某商品暂未开放购买，联系商城运营人员开通；不要反复更换数量尝试绕过提示。
 
-后端部分：
+登录状态到期时，系统会先尝试自动续期；如果明确提示登录已失效，再重新登录。网络暂时不可用时先恢复网络并重开原页面，不要把网络错误当作账号被停用。
 
-- 新增 `/api/sale-mini/` 接口分组。
-- 新增小程序用户、地址、首页 Banner、商品上架配置、购物车、订单映射、支付、退款、支付事件、优惠券、积分流水、分销记录、售后申请等模型。
-- 下单时创建现有 WMS `OutboundOrder / OutboundOrderLine`，不让小程序直接扣库存。
-- 支付前使用 `SaleMiniOrderMapping.payable_amount`，避免优惠影响 WMS 出库行单价。
-- 优惠券、积分、分销记录支持锁定、确认、释放、退款反冲。
-- 未支付超时订单支持管理命令自动取消并释放资源。
-- 微信支付、支付回调、退款、退款回调有幂等事件记录。
-- 修复旧销售移动接口在 `USE_TZ=False` 下 `timezone.localdate()` 报错的问题。
+当前登录页只提供微信登录和账号登录，没有“服务地址”输入框。服务器配置由技术人员在发布前完成，买家无需填写服务器地址。
 
-数据准确性保障：
+## 3. 浏览、搜索与选择商品
 
-- 服务端每次预览和下单都重新计算价格、金额、单位换算和库存。
-- 下单后走库存分配，不依赖前端库存展示。
-- 优惠不污染 WMS 出库行价格，订单映射单独保存 `goods_amount / adjustment_amount / payable_amount`。
-- 支付成功、取消、过期、退款回调都会处理优惠券、积分、分销、库存占用的状态一致性。
-- 当前已通过商城结构测试、前端 H5/微信构建、后端基础检查、纯单元测试、真实库只读数据准确性校验，以及数据库级 `SaleMiniApiTests` 快速 DB 模式业务验收。
+1. 在首页查看分类、推荐、热卖、新品等已配置栏目，或点击搜索入口输入商品名称、规格等信息。
+2. 在分类或商品列表按品牌、价格范围、是否有货和排序条件缩小范围。
+3. 打开商品详情，核对名称、规格、购买单位、售价、库存提示和购买数量要求。
+4. 如需稍后购买，可使用收藏；已浏览商品可从“我的”中的浏览足迹再次打开。
+5. 需要了解购买体验时，查看商品评价或“全部评价”。
 
-## 3. 文件结构
+搜索使用买家可理解的商品信息；找不到商品时，可尝试更短的名称或清空筛选。下架商品、未开放购买的商品、库存不足或数量不符合规则的商品，可能无法加购或结算。
 
-### 3.1 小程序前端
+启用起购及递增限制的商品，按页面显示的规则选择数量。例如起购 2、递增 3 时，可购买 2、5、8。未启用该限制时，不依据历史提示自行推断数量要求。
 
-核心目录：
+## 4. 加购、勾选与购物车恢复
 
-```text
-sales-miniapp/
-  package.json
-  vite.config.js
-  index.html
-  App.vue
-  main.js
-  manifest.json
-  pages.json
-  uni.scss
-  pages/
-  components/
-  services/
-  stores/
-  utils/
-```
+### 4.1 正常加购
 
-页面文件：
+1. 在首页、商品列表或商品详情选择数量，点击加入购物车。
+2. 等待当前操作返回，再打开“购物车”核对商品、单位、数量和金额。
+3. 使用数量控件修改数量；如出现库存、包装或起购提示，按提示调整。
+4. 点击商品左侧勾选框选择本次购买项，也可使用“全选”；不勾选的商品不参与本次结算。
+5. 核对已选件数、配送包裹数和合计，点击“结算”。需要移除商品时点击对应行的“删”。
 
-```text
-sales-miniapp/pages/login/login.vue
-sales-miniapp/pages/index/index.vue
-sales-miniapp/pages/category/category.vue
-sales-miniapp/pages/product-list/product-list.vue
-sales-miniapp/pages/product-detail/product-detail.vue
-sales-miniapp/pages/cart/cart.vue
-sales-miniapp/pages/order-confirm/order-confirm.vue
-sales-miniapp/pages/order-result/order-result.vue
-sales-miniapp/pages/order-list/order-list.vue
-sales-miniapp/pages/order-detail/order-detail.vue
-sales-miniapp/pages/benefits/benefits.vue
-sales-miniapp/pages/after-sales/after-sales.vue
-sales-miniapp/pages/favorites/favorites.vue
-sales-miniapp/pages/history/history.vue
-sales-miniapp/pages/address/address.vue
-sales-miniapp/pages/address-edit/address-edit.vue
-sales-miniapp/pages/user/user.vue
-```
+购物车按配送包裹展示，但客户统一选择、统一提交。页面显示“部分商品需处理”时，先处理具体商品的错误信息再结算。
 
-组件：
+### 4.2 加购后网络异常
 
-```text
-sales-miniapp/components/ProductCard.vue
-sales-miniapp/components/PriceText.vue
-sales-miniapp/components/QuantityStepper.vue
-sales-miniapp/components/EmptyState.vue
-sales-miniapp/components/AddressCard.vue
-sales-miniapp/components/OrderStatusTag.vue
-sales-miniapp/components/CartBar.vue
-```
+加购是累加数量的操作。结果不明时先查购物车，不要立即再点一次加购。
 
-服务层：
+| 页面提示 | 操作步骤 |
+| --- | --- |
+| “加购结果尚未确认，已刷新购物车，请核对后再操作” | 打开购物车，比较目标商品当前数量；核对后再决定是否调整 |
+| “加购结果尚未确认，请稍后打开购物车核对，不要重复加购” | 恢复网络后重新进入购物车，等最新数量加载成功 |
+| “已加购，购物车刷新失败，请打开购物车核对，不要重复加购” | 本次写入已成功；重新进入购物车刷新，不要重复添加 |
+| 明确的库存、包装数量或购买权限错误 | 按原错误处理；反复提交同一数量不会解决业务校验问题 |
 
-```text
-sales-miniapp/services/auth.js
-sales-miniapp/services/product.js
-sales-miniapp/services/cart.js
-sales-miniapp/services/order.js
-sales-miniapp/services/address.js
-sales-miniapp/services/benefit.js
-sales-miniapp/services/payment.js
-```
+系统在加购结果不确定时会尝试读取最新购物车，不会自动重发累加加购。若仍无法确认，保留商品、数量、操作时间和提示，联系平台核对。
 
-状态和工具：
+## 5. 管理地址、优惠券与积分
 
-```text
-sales-miniapp/stores/session.js
-sales-miniapp/stores/cart.js
-sales-miniapp/stores/browse.js
-sales-miniapp/utils/request.js
-sales-miniapp/utils/money.js
-sales-miniapp/utils/qty.js
-```
+### 5.1 收货地址
 
-测试脚本：
+1. 从“我的 → 收货地址”进入地址簿，新增或编辑地址。
+2. 填写联系人、联系电话、省、市、区及详细地址，需要时勾选“设为默认地址”，点击“保存”。
+3. 回到确认订单页，通过“管理地址”或“更换地址”选定本次地址。
+4. 提交前再次核对收件人、电话和完整地址；地址簿保存成功不代表此前已提交订单的地址已同步修改。
 
-```text
-sales-miniapp/scripts/verify-mall-structure.mjs
-sales-miniapp/scripts/run-quality-gate.mjs
-```
+确认订单页未选择地址时，也可按页面填写联系人、电话和收货地址。选择“客户自提”后填写自提联系人及电话，并与平台确认约定的自提地点。
 
-### 3.2 后端文件
+### 5.2 优惠与积分
 
-销售小程序接口：
+1. 打开“优惠与积分”，查看可用积分、冻结积分、可用优惠券、使用门槛和有效期。
+2. 可用券的“去使用”入口会跳转商品列表。
+3. 在单包裹确认订单页选择优惠券和积分数量。
+4. 查看金额区的商品金额、各项抵扣及最终应付金额；以结算重新校验后的结果为准。
 
-```text
-allapp/salesapp/salemini_api.py
-allapp/salesapp/salemini_urls.py
-```
+冻结积分表示相关订单正在占用权益，不等于可再次使用的积分。取消或退款后的权益变化需结合订单处理状态核对，发现差异时提供原订单号。
 
-小程序支付和优惠服务：
+## 6. 确认与提交订单
 
-```text
-allapp/salesapp/services_wechat_pay.py
-allapp/salesapp/services_salemini_adjustments.py
-```
+1. 在购物车勾选本次商品，点击“结算”。
+2. 核对收货信息；选择“配送”“客户自提”或“快递/小包”。
+3. 核对支付方式、可用优惠、每个商品的单位及数量，填写必要备注。
+4. 查看“已校验 / 待校验”提示及应付金额。商品数量、配送方式或优惠发生变化后，等待重新校验。
+5. 单包裹选择微信支付时点击“提交并支付”；选择线下付款时点击“提交订单”。
+6. 成功后保存订单号，并在下单结果页选择“查看订单”确认结果。
 
-模型和管理：
+| 本次结算 | 当前可用方式 |
+| --- | --- |
+| 单配送包裹 | 微信支付或线下付款；符合规则时可使用优惠券、积分 |
+| 多配送包裹统一订单 | 自动采用线下付款 / 平台确认；暂不使用微信支付、优惠券和积分 |
 
-```text
-allapp/salesapp/models.py
-allapp/salesapp/admin.py
-```
+多包裹订单会在客户订单中合并展示商品、总额和包裹数。不要按包裹数重复提交相同采购。
 
-超时取消命令：
+若点击提交后超时或结果不明，先进入“我的订单”查看是否已生成订单，核对商品、金额及时间，再决定后续处理；不能只因没有跳转成功就认定没有下单。
 
-```text
-allapp/salesapp/management/commands/bootstrap_sale_mini_catalog.py
-allapp/salesapp/management/commands/expire_sale_mini_orders.py
-allapp/salesapp/management/commands/validate_sale_mini_data_accuracy.py
-```
+## 7. 付款与结果确认
 
-迁移：
+### 7.1 微信支付
 
-```text
-allapp/salesapp/migrations/0002_miniprogramuser_minicustomeraddress_saleminibanner_and_more.py
-allapp/salesapp/migrations/0003_saleminicart_saleminicartitem_and_more.py
-allapp/salesapp/migrations/0004_saleminipayment_saleminipaymentevent_saleminirefund_and_more.py
-allapp/salesapp/migrations/0005_saleminicoupon_saleminicoupontemplate_and_more.py
-allapp/salesapp/migrations/0006_saleminiaftersalerequest.py
-allapp/salesapp/migrations/0007_allow_multi_owner_mini_program_user.py
-```
+1. 对支持微信支付的订单点击“提交并支付”，或在原订单结果页、详情页点击“继续支付”。
+2. 在微信支付窗口完成付款。
+3. 返回商城后等待系统确认；只有服务端确认后，商城才显示“支付成功”。
+4. 打开订单详情，核对支付状态、应付金额和配送进度。
 
-测试：
+| 结果 | 后续操作 |
+| --- | --- |
+| 支付成功 | 保留订单号，等待平台备货和配送 |
+| 支付结果确认中 | 稍后重新查看原订单；已扣款但未更新时联系平台核对，避免重复付款 |
+| 支付未完成 | 回到原订单核对状态；仍为待付款且需购买时使用“继续支付” |
+| 支付窗口取消或中断 | 原订单可能仍在，先查看订单状态，再选择继续支付或取消订单 |
 
-```text
-allapp/salesapp/tests.py
-allapp/salesapp/test_salemini_unit.py
-allapp/salesapp/test_mobile_api_unit.py
-allapp/salesapp/test_services_pricing_unit.py
-```
+应付金额为零的订单由系统完成零元结算，不会拉起微信付款窗口；仍应检查订单结果。
 
-配置：
+### 7.2 线下付款与支付期限
 
-```text
-.env.example
-wmsmaster/settings.py
-wmsmaster/urls.py
-```
+选择线下付款后，系统不调用微信支付，结果页提示按约定完成线下付款。付款时间、方式和凭证按平台约定处理；“线下付款”是订单采用的方式，不代表微信收款成功。
 
-## 4. 后端接口
+待付款订单有付款截止时间时，按订单显示时间处理。超时订单由后台定时核对支付状态后处理，页面刚过截止时间不代表已立即取消。若支付结果尚未确认，联系平台核对，不要自行认定库存已经释放。
 
-小程序主接口都挂在：
+## 8. 查询订单、配送进度与再次购买
 
-```text
-/api/sale-mini/
-```
+1. 从底部“订单”或“我的”相关入口进入“我的订单”。
+2. 使用“全部”“待付款”“待发货”“已完成”“已取消”标签筛选；可下拉刷新、上拉加载更多。
+3. 打开订单，核对订单号、配送方式、支付状态、商品、优惠、应付金额、地址及配送进度。
+4. 遇到退款订单，查看退款单号、处理状态和平台提示。
 
-核心接口：
+买家状态主要包括待付款、待发货、已完成、退款中、已退款和已取消。配送进度以页面实际展示为准，付款成功不等于商品已发货。
 
-```text
-POST /api/sale-mini/auth/wechat-login/
-GET  /api/sale-mini/me/
-GET  /api/sale-mini/home/
-GET  /api/sale-mini/categories/
-GET  /api/sale-mini/brands/
-GET  /api/sale-mini/products/
-GET  /api/sale-mini/products/{id}/
-GET  /api/sale-mini/cart/
-POST /api/sale-mini/cart/add/
-POST /api/sale-mini/cart/update/
-POST /api/sale-mini/cart/remove/
-POST /api/sale-mini/cart/clear/
-GET  /api/sale-mini/addresses/
-POST /api/sale-mini/addresses/
-PUT  /api/sale-mini/addresses/{id}/
-DELETE /api/sale-mini/addresses/{id}/
-GET  /api/sale-mini/coupons/
-GET  /api/sale-mini/points/
-POST /api/sale-mini/orders/preview/
-GET  /api/sale-mini/orders/
-POST /api/sale-mini/orders/
-GET  /api/sale-mini/orders/{id}/
-POST /api/sale-mini/orders/{id}/cancel/
-POST /api/sale-mini/payments/wechat/prepay/
-POST /api/sale-mini/payments/wechat/callback/
-POST /api/sale-mini/payments/wechat/refund/
-POST /api/sale-mini/payments/wechat/refund-callback/
-POST /api/sale-mini/after-sales/
-```
+“再来一单”会将原订单商品按原数量重新尝试加入购物车。商品下架、库存不足或规则变化时可能只加入部分商品；打开购物车逐项核对，再按当前价格、库存和优惠重新结算。发生加购异常时，按第 4 节先核对数量。
 
-`GET /api/sale-mini/home/` 返回首页首屏数据，包括 `banners`、`categories`、
-`recommend_products`、`hot_products` 和 `new_products`。公开接口不提供商家列表，
-普通客户只看到统一商城品牌；后台代销关系通过 `owner_id / config_id` 在服务端履约链路中保留。
+## 9. 取消、退款与售后
 
-登录页也支持后台账号登录，使用：
+以原订单详情当前提供的操作为准。按钮是否显示受订单、付款和备货状态限制，点击后服务端仍会再次检查。
 
-```text
-POST /api/auth/login/
-```
+### 9.1 取消订单
 
-## 5. 运行前准备
+1. 对尚未进入备货阶段、且未付款或采用线下付款的可取消订单，点击“取消订单”。
+2. 等待返回，再核对订单确已显示取消。
+3. 已经在微信扣款、正在退款或已进入备货阶段时，不再按普通未付款取消处理。
+4. 取消结果不明时重新查看原订单；没有明确成功前，不把库存和优惠视为已释放。
 
-### 5.1 后端环境变量
+### 9.2 申请退款
 
-参考 `.env.example`，至少需要配置：
+1. 单包裹订单已付款且尚未进入备货阶段，详情出现“申请退款”时，可点击提交。
+2. 提交后查看“退款申请已提交”及订单退款进度。
+3. “退款处理中”表示仍需等待支付渠道确认；出现“退款成功 / 已退款”后再核对到账。
+4. 若显示“退款异常，请等待处理”，记录订单号、退款单号和提示，联系平台处理，不重复下单抵消差异。
 
-```text
-SECRET_KEY=
-DB_NAME=
-DB_USER=
-DB_PASSWORD=
-DB_HOST=
-DB_PORT=
-```
+当前详情页通过按钮直接提交退款申请，没有自定义退款金额表单；现有退款入口按整笔成功支付处理。进入备货后应按售后流程处理。
 
-微信登录和支付相关配置：
+### 9.3 申请售后
 
-```text
-WECHAT_MINI_APPID=
-WECHAT_MINI_SECRET=
-WECHAT_JSCODE2SESSION_URL=https://api.weixin.qq.com/sns/jscode2session
+1. 单包裹订单进入备货、处理中或已完成，且已付款或采用线下付款时，可在提供按钮的详情页点击“申请售后”。
+2. 当前按钮直接提交申请；补充商品问题、照片等证据时按平台后续沟通要求提供，页面没有独立的售后证据上传表单。
+3. 到“售后服务”查看申请单号、原订单、类型、金额、申请时间、状态及处理意见；点击“刷新”获取最新进度。
+4. 同一订单已有待处理售后时，不重复提交。
 
-WECHAT_PAY_API_BASE_URL=https://api.mch.weixin.qq.com
-WECHAT_PAY_MCH_ID=
-WECHAT_PAY_MCH_SERIAL_NO=
-WECHAT_PAY_PRIVATE_KEY=
-WECHAT_PAY_PRIVATE_KEY_PATH=
-WECHAT_PAY_APIV3_KEY=
-WECHAT_PAY_NOTIFY_URL=
-WECHAT_PAY_REFUND_NOTIFY_URL=
-WECHAT_PAY_PLATFORM_PUBLIC_KEY=
-WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH=
-WECHAT_PAY_PLATFORM_KEYS={}
-WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=False
-WECHAT_PAY_CALLBACK_MAX_AGE_SECONDS=300
+售后申请提交成功仅表示已建立申请记录，不代表已退款、已收退货或库存已恢复。多包裹统一订单当前不提供详情页的直接退款、售后按钮，需联系平台按包裹核对处理。
 
-SALE_MINI_PAY_TIMEOUT_MINUTES=30
-SALE_MINI_REFUND_MAX_RETRIES=6
-SALE_MINI_REFUND_QUERY_INTERVAL_MINUTES=5
-SALE_MINI_POINT_EXCHANGE_RATE=100
-SALE_MINI_DISTRIBUTION_COMMISSION_RATE=0
-```
+## 10. 商品评价
 
-说明：
+1. 已完成且付款状态符合要求的订单，进入详情点击商品行的“评价”。
+2. 为商品质量、配送或自提服务、综合满意度分别选择 1 至 5 星。
+3. 填写最多 1000 字的体验，可上传最多 6 张 JPEG、PNG 或 WebP 图片，单图最大 5 MB。
+4. 核对“匿名评价”开关，默认开启；点击“提交审核”。
+5. 待审核评价不会立即展示在商品页；从原订单查看审核状态。草稿可继续填写，驳回后可按原因修改。
 
-- 开发阶段可以先用账号登录和线下付款。
-- 真正使用微信登录必须配置 `WECHAT_MINI_APPID / WECHAT_MINI_SECRET`。
-- 真正使用微信支付必须配置商户号、证书序列号、私钥、APIv3 key、回调地址。
-- 生产环境必须用 `WECHAT_PAY_PLATFORM_KEYS` 配置
-  `Wechatpay-Serial -> 公钥 PEM/文件路径` 的 JSON 映射，以支持平台公钥轮换。
-- `WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=False` 只适合开发和测试环境，生产环境应开启签名校验。
-- 生产环境若关闭验签、缺少序列号公钥映射、密钥不可解析或回调不是 HTTPS，
-  `manage.py check` 会直接报错。
+每条订单明细对应一条评价记录；再次购买形成新的订单明细后可再次评价。商品页的评价数量和评分只统计已发布内容。
 
-### 5.2 应用数据库迁移
+## 11. 常见问题与上报信息
 
-先备份 `wms_db`，再执行迁移。支付可靠性修复需要连续应用 `salesapp 0011` 和
-`0012`；未完成迁移前不要开放微信预支付和退款接口。
+| 问题 | 建议处理 |
+| --- | --- |
+| 登录失败 | 核对账号、网络和平台是否已开通；保留实际错误提示 |
+| 搜索不到商品 | 清空筛选，尝试名称或规格，必要时询问平台是否仍上架 |
+| 商品暂未开放购买 | 联系平台开通，不反复提交 |
+| 加购结果不明 / 刷新失败 | 按第 4 节先核对最新购物车数量 |
+| 购物车与结算金额不同 | 核对单位、数量、最新价格、优惠门槛及包裹数 |
+| 无法使用优惠券或积分 | 检查期限、门槛、余额和是否为多包裹订单 |
+| 已扣款但仍显示待确认 | 保留原订单，稍后重新查询，并提供付款时间让平台核对 |
+| 找不到取消或退款按钮 | 核对是否已进入备货、退款状态或为多包裹订单，联系平台处理 |
+| 售后提交后未退款 | 查看售后审批和退款进度，两者不是同一状态 |
+
+上报时提供订单号或商品名、操作时间、期望结果、页面实际状态及错误提示。付款、地址等信息按平台需要提供必要部分，不在公开群聊发送密码或完整支付凭据。
+
+## 附录 A. 运营维护与业务边界
+
+本附录供运营、技术支持和部署人员使用，不属于买家页面操作。
+
+### A.1 上架与基础绑定
+
+“商城上架管理”入口为 `/console/sale-mini/products/`。运营可按授权范围筛选商品、创建商城配置、上架或下架、设置商城售价或同步主数据价格、设置划线价、库存展示方式、推荐标签、最大购买量和排序。
+
+“启用起购及递增限制”默认关闭。只有启用后，起购和递增量才参与展示、加购、预览和下单校验。上架管理维护货架配置，不直接调整库存。
+
+Django Admin 的 `/admin/salesapp/saleproductconfig/` 还提供“按货主批量上架”。默认保留已有售价和购买规则；选择覆盖前应核对表单范围及提示，查看被跳过商品的原因。
+
+后台需要有效货主、商品上架配置、客户、买家绑定、可用出库仓库和库存。微信登录需要已绑定的买家身份；相关配置由运营维护。对外只有统一商城，不将这些后台关系转为买家需要选择的商家或货主入口。
+
+### A.2 数据准确性与权限
+
+- `SaleProductConfig` 控制可售范围；公开商品浏览保留必要的 `config_id`，不暴露仓库内部商品编码、条码和内部计价字段。
+- 登录及个人资料以买家、客户和绑定关系支持权限；前台不展示顶层货主、仓库身份。
+- 购物车由服务端保存。预览、下单重新校验价格、数量、单位和库存；前端存储不作为金额或库存事实来源。
+- 多包裹提交在后台按履约范围建立出库单，再聚合为买家可见订单。各包裹的权限和数据隔离仍由服务端校验。
+- 下单对接现有出库与库存分配，库存扣减由正式仓库履约流程产生；买家端不能直接改库存。
+- 商品原金额、优惠金额、应付金额分别保存在订单映射，支付按 `payable_amount` 执行，不用优惠改写出库行原价。
+- 未付款微信订单可以占用库存，但进入仓库执行前仍须通过支付状态检查；线下付款按相应业务流程处理。
+- 退款申请进入正式退款流程后可先取消履约并释放库存，退款到账仍以渠道确认结果为准；售后建单本身不改库存或支付状态。
+
+### A.3 支付、退款和评价维护
+
+支付确认由主动查单和异步回调完成；客户端支付窗口的返回值不能替代服务端确认。零元订单采用本地 `INTERNAL_ZERO` 结算，不调用微信扣款。
+
+超时取消先核对微信状态并安全关单；支付中或结果未知时不能直接释放资源。退款网络失败按同一商户退款单号重试，异常或重试耗尽转人工处理，不能重新分配已取消订单的库存作为“恢复”。
+
+后台命令包括：
+
+- [expire_sale_mini_orders](../allapp/salesapp/management/commands/expire_sale_mini_orders.py)：核对并处理超时待付款订单。
+- [reconcile_sale_mini_payments](../allapp/salesapp/management/commands/reconcile_sale_mini_payments.py)：支付及退款对账恢复。
+- [validate_sale_mini_data_accuracy](../allapp/salesapp/management/commands/validate_sale_mini_data_accuracy.py)：商城数据准确性检查。
+
+这些命令各有明确用途；前两项会推进业务状态，不作为仅查看操作运行。[systemd 模板](../deploy/systemd/)包含每分钟的超时核对和每 5 分钟的支付退款核对；部署时应确认运行目录、用户、配置和锁文件与实际环境一致。
+
+评价审核在后台“商城商品评价”处理，可审核通过、驳回或隐藏；买家可见统计只包含已发布评价。上传图片依赖正确的媒体存储及访问配置。
+
+## 附录 B. 技术配置、代码入口与接口
+
+### B.1 运行与构建配置
+
+前端为独立 [sales-miniapp 工程](../sales-miniapp/)，源码入口就在工程根目录，没有额外的 `src` 根目录。HBuilderX 应打开包含 `App.vue`、`main.js`、`pages.json` 的项目目录。
+
+服务地址以 [前端环境示例](../sales-miniapp/.env.example)和 [api-base.js](../sales-miniapp/utils/api-base.js) 为准：
+
+- `VITE_API_BASE_URL` 为构建时 API 基地址；微信小程序和 App 构建需要显式配置。
+- H5 未设置基地址时使用同源路径。
+- 除本机回环开发地址外要求 HTTPS；私网非回环地址还需显式 `VITE_ALLOW_PRIVATE_API=true`。
+- 页面不再提供运行时地址编辑，不使用旧的固定局域网 HTTP 地址或登录页缓存作为配置来源。
+- 微信小程序构建同时校验 manifest 配置；正式发布前应配置真实应用标识和对应合法域名。
+
+使用项目锁文件安装并按目标构建，在 `sales-miniapp` 目录运行：
 
 ```bash
-cd /wms
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py migrate
-```
-
-只检查迁移是否已应用：
-
-```bash
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py migrate --check
-```
-
-### 5.3 支付与退款对账调度
-
-仓库提供了 systemd 模板：
-
-```bash
-sudo cp deploy/systemd/wms-sale-mini-* /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now \
-  wms-sale-mini-expire.timer \
-  wms-sale-mini-reconcile.timer
-```
-
-部署目录或运行用户不是 `/wms`、`wms:wms` 时，先修改 service 文件。两个任务共用
-同一把 `flock` 锁：超时订单每分钟检查，支付和退款每 5 分钟对账，不会重叠运行。
-
-退款网络失败会使用同一个商户退款单号重试；退款异常或重试耗尽后转人工处理，
-订单继续保持取消，库存不会重新分配。
-
-查看销售小程序迁移：
-
-```bash
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py showmigrations salesapp
-```
-
-### 5.3 基础业务数据
-
-小程序要能下单，至少要有这些数据：
-
-1. 货主 `Owner`。
-2. 仓库 `Warehouse`。
-3. 客户 `Customer`。
-4. 系统用户 `User`，并绑定同一货主和出库仓库。
-5. 商品 `Product`，包含单位、价格、规格等基础信息。
-6. 库存明细或库存汇总中有可用库存。
-7. 小程序买家 `MiniProgramUser`，绑定 `Owner + User + Customer`。
-8. 商品上架配置 `SaleProductConfig`，且 `is_listed=True`。
-
-重要规则：
-
-- 不是所有 `Product` 都会展示，只有 `SaleProductConfig` 已上架商品才会出现在小程序。
-- 小程序用户必须绑定客户，否则不能下单。
-- 绑定的系统用户必须有出库仓库，否则不能从小程序下单。
-- 微信登录时，`MiniProgramUser` 需要预先绑定 `openid`，或通过 `unionid` 绑定后首次登录写入 `openid`。
-
-### 5.4 可选运营数据
-
-如果要使用优惠和运营功能，可以配置：
-
-- `SaleMiniBanner`：首页横幅。
-- `SaleMiniCouponTemplate`：优惠券模板。
-- `SaleMiniCoupon`：发给客户或买家的优惠券。
-- `SaleMiniPointLedger`：客户积分流水。
-- `SALE_MINI_DISTRIBUTION_COMMISSION_RATE`：分销佣金比例。
-
-## 6. 启动后端
-
-```bash
-cd /wms
-SECRET_KEY=test-secret-key ALLOWED_HOSTS=192.168.1.6,localhost,127.0.0.1 CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://192.168.1.33:5173 .venv/bin/python manage.py runserver 0.0.0.0:8001
-```
-
-小程序默认请求地址：
-
-```text
-http://192.168.1.6:8001
-```
-
-后端运行在 VMware Ubuntu 虚拟机时，需要确保：
-
-- Django 监听 `0.0.0.0:8001`，不要只监听 `127.0.0.1`。
-- 虚拟机 IP 是 `192.168.1.6`，Windows 主机和真机手机能访问这个 IP。
-- Ubuntu 防火墙放行 `8001` 端口。
-- Django 的 `ALLOWED_HOSTS` 包含 `192.168.1.6`。
-- Django 的 `CORS_ALLOWED_ORIGINS` 包含 HBuilderX H5 地址，例如 `http://192.168.1.33:5173`。
-
-也可以在小程序登录页的“服务地址”输入框里改成实际后端地址。该地址会保存到本地缓存 `sales_base_url`。
-
-## 7. 启动和构建小程序
-
-进入前端工程：
-
-```bash
-cd /wms/sales-miniapp
-```
-
-HBuilderX 编译方式：
-
-- 打开 `/wms/sales-miniapp` 项目根目录。
-- 不要打开 `/wms/sales-miniapp/src`，当前项目没有 `src` 源码根。
-- 项目根目录应直接看到 `App.vue`、`main.js`、`manifest.json`、`pages.json`、`pages/`。
-- 运行到微信小程序即可，或使用下方命令行构建后导入微信开发者工具。
-
-安装依赖：
-
-```bash
-npm install
-```
-
-H5 开发预览：
-
-```bash
+npm ci
 npm run dev:h5
 ```
 
-微信小程序开发预览：
+其他入口为 `npm run dev:mp-weixin`、`npm run build:h5` 和 `npm run build:mp-weixin`。微信开发者工具导入当前对应的 `dist/dev/mp-weixin` 或 `dist/build/mp-weixin` 输出目录。
+
+后端配置参考 [根环境示例](../.env.example)和 [settings.py](../wmsmaster/settings.py)，通过实际部署环境加载数据库、Django、微信登录和支付配置。微信支付涉及商户号、证书序列号、私钥、APIv3 密钥、回调地址及平台公钥映射；不要把密钥写入手册或前端变量。生产配置由 [checks.py](../allapp/salesapp/checks.py) 校验，不能沿用开发关闭验签的配置。
+
+部署应先按实际环境完成备份及迁移评估，再应用完整迁移链；不要仅按旧文档列出的某几个迁移编号判断已升级。文档更新本身不执行迁移或支付操作。
+
+### B.2 实现入口
+
+| 文件 / 目录 | 用途 |
+| --- | --- |
+| [pages.json](../sales-miniapp/pages.json) | 页面注册、标题和底部导航 |
+| [stores/cart.js](../sales-miniapp/stores/cart.js) | 服务端购物车、勾选结算、加购异常恢复 |
+| [stores/session.js](../sales-miniapp/stores/session.js)及[utils/request.js](../sales-miniapp/utils/request.js) | 登录、续期和账号切换隔离 |
+| [services/payment-core.mjs](../sales-miniapp/services/payment-core.mjs) | 支付发起、服务端确认和异常结果 |
+| [salemini_api.py](../allapp/salesapp/salemini_api.py) | 商城商品、购物车、订单、地址及支付业务接口 |
+| [services_salemini_payments.py](../allapp/salesapp/services_salemini_payments.py) | 支付、退款及对账状态处理 |
+| [services_wechat_pay.py](../allapp/salesapp/services_wechat_pay.py) | 微信支付通信和校验 |
+| [services_salemini_adjustments.py](../allapp/salesapp/services_salemini_adjustments.py) | 优惠券、积分及订单调整 |
+| [salemini_review_api.py](../allapp/salesapp/salemini_review_api.py) | 评价草稿、图片、提交及公开展示接口 |
+
+### B.3 API 参考
+
+账号登录使用 `POST /api/auth/login/`。其余商城接口以下列 `/api/sale-mini/` 前缀为准，完整定义见 [salemini_urls.py](../allapp/salesapp/salemini_urls.py)：
+
+| 方法 | 相对接口 | 用途 |
+| --- | --- | --- |
+| POST | `auth/wechat-login/` | 微信登录 |
+| GET | `me/` | 当前买家资料 |
+| GET | `home/`、`categories/`、`brands/` | 首页与分类品牌 |
+| GET | `products/`、`products/{id}/` | 商品列表与详情 |
+| GET | `cart/` | 最新购物车 |
+| POST | `cart/add/`、`cart/update/`、`cart/remove/`、`cart/clear/` | 加购、改量、移除、清空 |
+| GET / POST | `addresses/` | 地址列表、新增 |
+| PUT / DELETE | `addresses/{id}/` | 地址编辑、删除 |
+| GET | `coupons/`、`points/` | 优惠券与积分 |
+| POST | `orders/preview/` | 价格、库存、优惠和应付预览 |
+| GET / POST | `orders/` | 查询、创建订单 |
+| GET | `orders/{id}/` | 订单详情 |
+| POST | `orders/{id}/cancel/` | 取消订单 |
+| POST | `payments/wechat/prepay/`、`payments/wechat/query/` | 预支付、查单 |
+| POST | `payments/wechat/refund/` | 申请退款 |
+| POST | `payments/wechat/callback/`、`payments/wechat/refund-callback/` | 微信支付、退款回调 |
+| GET / POST | `after-sales/` | 售后列表、申请 |
+| GET | `products/{id}/reviews/` | 已发布商品评价 |
+| POST | `reviews/drafts/`、`reviews/{id}/submit/` | 建立评价草稿、提交审核 |
+
+回调接口由支付平台调用；不是买家手动请求的确认付款入口。接口对具体订单、购物车和地址另行执行权限及范围检查，前端不以传入任意内部标识获取其他客户数据。
+
+## 附录 C. 验证依据与维护检查
+
+本文核对了当前源码及以下测试定义，没有据此宣称测试已执行或正式环境已验收：
+
+| 测试 | 核对的行为 |
+| --- | --- |
+| [cart-recovery.test.mjs](../sales-miniapp/tests/cart-recovery.test.mjs) | 加购结果不明只读恢复、成功后刷新失败、业务错误不重发 |
+| [request-auth.test.mjs](../sales-miniapp/tests/request-auth.test.mjs) | 并发续期、离线保留登录、失效重登、账号切换后的旧响应隔离 |
+| [payment-service.test.mjs](../sales-miniapp/tests/payment-service.test.mjs) | 零元结算、付款确认、取消后补查、查询异常 |
+| [verify-mall-structure.mjs](../sales-miniapp/scripts/verify-mall-structure.mjs) | 统一商城结构和页面入口 |
+| [salesapp/tests.py](../allapp/salesapp/tests.py) | 多包裹、库存分配、支付与取消并发、退款和评价 |
+| [test_salemini_unit.py](../allapp/salesapp/test_salemini_unit.py) | 购买规则、支付结果字段校验及配置检查 |
+
+前端针对性命令，在 `sales-miniapp` 目录运行：
 
 ```bash
-npm run dev:mp-weixin
-```
-
-微信小程序发布构建：
-
-```bash
-npm run build:mp-weixin
-```
-
-H5 构建：
-
-```bash
-npm run build:h5
-```
-
-微信开发者工具导入路径：
-
-```text
-sales-miniapp/dist/dev/mp-weixin
-sales-miniapp/dist/build/mp-weixin
-```
-
-注意：
-
-- 这是 uni-app CLI 工程，不使用 DCloud 云服务。
-- 构建输出里可能出现 uni-app 自带的 DCloud/uniCloud 提示，那只是工具链提示，不代表项目接入了 DCloud 云。
-
-## 8. 客户采购使用流程
-
-### 8.1 登录
-
-打开小程序后，如果没有 token，会进入：
-
-```text
-pages/login/login
-```
-
-可选登录方式：
-
-- 微信登录：调用 `uni.login` 获取 code，再请求 `/api/sale-mini/auth/wechat-login/`。
-- 账号登录：请求 `/api/auth/login/`，适合开发测试或内部用户。
-
-登录成功后进入：
-
-```text
-pages/index/index
-```
-
-### 8.2 浏览商品
-
-首页展示：
-
-- 商城名称或当前登录客户名称。
-- 统一商城标题和配送入口，登录后可显示默认收货信息。
-- 搜索入口。
-- Banner，可按后台配置跳转到商品、分类、搜索结果、商品列表或内部页面。
-- 分类。
-- 热卖商品、品质优选、有货商品、领券中心、会员积分、订单和售后入口。
-- 品牌筛选、价格筛选、只看有货和排序。
-- 热卖商品。
-- 推荐商品。
-- 底部购物车栏。
-
-商品来源：
-
-- 后端只返回所有 active 代销货主下已上架的 `SaleProductConfig` 商品。
-- 商品列表和分类页对客户不展示货主筛选；`owner_id` 只作为服务端内部履约上下文保留。
-- 商品列表可以按品牌筛选，筛选参数是 `brand_id`，品牌也只来自已上架可售商品。
-- 库存、价格和购买规则由服务端计算；前端只展示结果，不信任本地价格。
-- 购物车可以加入不同后台代销货主的商品，前台统一提交订单；后端会按后台履约上下文拆成多个 WMS 出库单。
-- 多个“配送包裹”对客户只表示不同履约包裹，不表示商家或货主。
-- 如果当前账号还未开通某个后台代销货主的购买权限，仍然可以浏览商品；加购/购买由后端拦截，前台提示“当前商品暂未对你的账号开通购买权限”。
-
-前台页面 URL 不再传递 `owner_id`。商品跳转使用 `config_id` 定位上架配置，单包裹确认订单使用
-`cart_id` 定位服务端购物车；地址选择和地址编辑通过本地临时上下文保存后台履约范围。
-公开首页、商品列表、商品详情、分类和品牌接口也不返回 `owner_id`、`code`、`sku`、
-`barcodes`、`base_unit_price` 等仓库主数据或内部计价字段，避免普通客户通过抓包看到后台代销结构和内部编码体系。
-登录和个人资料接口也不返回顶层 `owner / warehouse`，避免把后台货主和仓库概念变成前台身份信息。
-商品搜索只匹配商品名称、规格、分类名、品牌名等客户可理解的信息，不按货主商品编码、仓库SKU编码、条码或品牌/分类编码检索。
-
-### 8.3 加入购物车
-
-在首页、商品列表、商品详情点击加入购物车。
-
-购物车特点：
-
-- 商品写入后端 `SaleMiniCart / SaleMiniCartItem`。
-- 前端本地状态只做页面展示，不是库存和金额事实来源。
-- 修改数量时会请求服务端重新校验。
-- 起订量、倍数、库存不足等错误由服务端返回。
-
-### 8.4 确认订单
-
-进入：
-
-```text
-pages/order-confirm/order-confirm
-```
-
-确认内容：
-
-- 收货地址。
-- 配送方式：配送、自提、快递/小包。
-- 支付方式：微信支付、线下付款。
-- 优惠券。
-- 积分抵扣。
-- 商品明细。
-- 商品金额、优惠金额、应付金额。
-- 备注。
-
-多包裹订单规则：
-
-- 前台仍然是一次统一提交。
-- 服务端按每个后台履约包裹重新校验价格、库存、单位和金额。
-- 后端会为每个履约包裹创建独立 WMS 出库单，并用同一个小程序批次号聚合成一个客户可见订单。
-- 当前多包裹订单暂不使用微信支付、优惠券和积分，确认页会自动按线下付款/平台确认处理。
-- 单包裹订单仍可使用微信支付、优惠券和积分。
-
-地址规则：
-
-- 从“我的 - 收货地址”进入时，客户看到统一地址簿；后台默认代销绑定用于保存地址上下文。
-- 从确认订单进入地址选择时，地址页锁定当前配送包裹的后台 `owner_id`，只返回当前履约上下文的客户地址。
-- 新增和编辑地址都会带上当前 `owner_id`，后端仍按 `Owner + Customer` 保存。
-
-点击提交时，前端会先用：
-
-```text
-POST /api/sale-mini/orders/preview/
-```
-
-服务端重新计算：
-
-- 商品价格。
-- 商品金额。
-- 优惠券。
-- 积分抵扣。
-- 应付金额。
-- 库存是否足够。
-- 单位换算和购买规则。
-
-然后用：
-
-```text
-POST /api/sale-mini/orders/
-```
-
-创建订单。
-
-### 8.5 微信支付
-
-如果单包裹订单选择微信支付：
-
-1. 创建小程序订单。
-2. 后端创建 WMS 出库单和小程序订单映射。
-3. 后端锁定优惠券和积分。
-4. 前端请求 `/api/sale-mini/payments/wechat/prepay/`。
-5. 前端调用 `uni.requestPayment`。
-6. 前端立即调用 `/api/sale-mini/payments/wechat/query/`，按 1、2、3、5 秒确认。
-7. 微信异步回调 `/api/sale-mini/payments/wechat/callback/`。
-8. 后端在单一事务内确认支付、优惠券、积分和分销记录。
-
-只有后端查单或回调确认 `PAID` 后，前端才显示“支付成功”。客户端返回成功但后端
-暂未确认时显示“支付结果确认中”，不能据此发布仓库任务。
-
-应付金额为 `0.00` 时使用 `INTERNAL_ZERO` 内部结算，生成零元支付流水并确认优惠
-权益，不调用微信；零元退款同样只走本地原子退款。
-
-支付完成、支付中断或选择线下付款后，前端会进入：
-
-```text
-pages/order-result/order-result
-```
-
-结果页展示订单摘要、支付状态、待付款提醒，并提供“继续支付”“查看订单”“继续逛逛”。
-如果前端支付中断，可以在结果页或订单详情点击“继续支付”。
-
-多包裹统一订单当前不会拉起一次聚合微信支付，避免一个支付流水同时对应多个内部 WMS 出库单造成对账和退款歧义。
-
-### 8.6 线下付款
-
-如果选择线下付款：
-
-- 订单会以线下付款状态创建。
-- 不调用微信支付。
-- 前端进入下单结果页，提示按约定完成线下付款。
-- 适合货到付款、月结、人工确认付款等场景。
-
-微信待付款订单可以冻结库存，但仓库确认、任务发布、认领和开始拣货都会再次校验
-支付状态。只有 `PAID` 或 `OFFLINE` 可以进入仓库执行。
-
-### 8.7 查看订单
-
-订单列表：
-
-```text
-pages/order-list/order-list
-```
-
-订单详情：
-
-```text
-pages/order-detail/order-detail
-```
-
-订单详情展示：
-
-- 订单号。
-- 买家状态。
-- 支付状态。
-- 收货信息。
-- 商品明细。
-- 商品金额。
-- 优惠明细。
-- 应付金额。
-- 备注。
-- 售后申请状态。
-- 再来一单入口。
-
-买家状态使用普通商城文案：
-
-- `WAIT_PAY`：待付款。
-- `WAIT_SHIP`：待发货。
-- `COMPLETED`：已完成。
-- `REFUNDING`：退款中。
-- `REFUNDED`：已退款。
-- `CANCELLED`：已取消。
-
-WMS 内部的货主审核、仓库确认、拣货等状态不会直接展示给普通买家。
-
-订单列表对客户展示为统一商城订单，不提供商家筛选。后台仍按当前登录客户的绑定关系过滤订单权限。
-
-“再来一单”会把原订单商品重新加入当前服务端购物车，但下单前仍然重新预览当前价格、库存、优惠和购买规则，不复用旧订单金额。
-
-### 8.8 取消订单
-
-未支付、未进入仓库深度作业的订单可以取消。
-
-取消会处理：
-
-- 关闭或取消微信支付单。
-- 释放库存分配。
-- 释放优惠券。
-- 释放冻结积分。
-- 反冲分销记录。
-- 标记订单取消。
-
-### 8.9 退款和售后
-
-订单已支付且还未进入拣货深度流程时，可以在订单详情申请退款。
-
-退款成功后会处理：
-
-- WMS 订单取消。
-- 库存释放。
-- 优惠券/积分/分销反冲。
-- 小程序支付状态变为已退款。
-
-订单进入拣货、处理中或完成后，可以申请售后。售后申请只创建 `SaleMiniAfterSaleRequest`，不直接改库存和支付，需要后续人工或业务流程处理。
-
-售后列表同样展示为统一商城售后记录，不提供商家筛选。
-
-### 8.10 商品评价
-
-只有已完成且付款状态为已付款或线下付款的订单商品可以评价。每条订单明细只能评价一次，重复购买产生新的订单明细后可以再次评价。
-
-在订单详情点击“评价”后可以：
-
-- 为商品质量、配送/自提服务、综合满意度分别打 1 至 5 星。
-- 填写最多 1000 字评价。
-- 上传最多 6 张 JPEG、PNG 或 WebP 图片，单图最大 5MB。
-- 选择匿名评价，默认开启。
-
-提交后状态为“待审核”，不会立即出现在商品页。运营人员在 Django Admin 的“商城商品评价”中执行审核通过、驳回或隐藏；只有“已发布”评价计入评价数量、平均分和星级统计。
-
-评价图片保存在 `MEDIA_ROOT/sale-mini/reviews/`，生产环境必须正确提供 `MEDIA_URL`。部署本功能需要应用 `salesapp` 的 `0010` 迁移。
-
-## 9. 商城结构测试
-
-项目提供一个不依赖数据库和浏览器的结构测试，用来防止旧销售工作台页面重新混入商城小程序：
-
-```bash
-cd /wms/sales-miniapp
 npm run test:structure
-```
-
-它会检查：
-
-- `pages.json` 的首页和底部 Tab 是否是商城结构。
-- 旧销售工作台页面文件是否不存在。
-- 请求封装是否只暴露 `/api/sale-mini/` 商城接口。
-- 首页 Banner 是否保留可点击跳转逻辑。
-- 首页是否没有精选商家/全部商家/商家店铺入口，并展示统一商城栏目。
-- 分类页是否保留“全部”分类，且不出现商家筛选。
-- 商品列表是否支持品牌、搜索历史、热门搜索、只看有货和价格排序，且不出现商家筛选。
-- 商品详情是否支持收藏、浏览足迹和相关推荐，且不出现进店/同店/商家名称。
-- 微信登录是否只保存 `buyer / customer / bindings`，不暴露顶层 `owner / warehouse` 或多商家概念。
-- 商品详情是否有未开通商品的购买权限提示，文案不出现商家/货主。
-- “我的”页和权益页是否是统一会员资产口径，不出现商家切换。
-- 地址页是否没有商家切换，订单选择地址时仍锁定当前后台履约 `owner_id`。
-- 订单列表和售后列表是否不出现商家筛选。
-- 订单详情是否有配送进度，且页面不出现 WMS、PDA、销售员等后台术语。
-- 下单结果页是否能区分支付成功、待付款、线下付款，并支持继续支付、查看订单、继续逛逛。
-- 后端权限错误是否翻译为普通客户能理解的商城文案。
-- 购物车和确认订单是否按 `owner_id` 做后台分组，前台展示为“配送包裹”并统一提交。
-- 多包裹订单是否自动使用线下付款/平台确认，且不暴露不可用的合单微信支付入口。
-- 订单详情是否保留必要的 `config_id` 和内部履约上下文，用于再来一单重新加购。
-
-完整质量门禁：
-
-```bash
-cd /wms/sales-miniapp
-npm run test:quality
-```
-
-仅运行前端支付确认行为测试：
-
-```bash
+npm run test:auth
+npm run test:cart
 npm run test:payment
 ```
 
-该测试使用可注入的 `uni.requestPayment`、主动查单和等待函数，覆盖零元结算、
-客户端支付成功后的后端确认轮询、用户取消后的补查、查单异常和缺失预支付参数。
+这些检查不能替代 H5、微信小程序构建、真机交互或实际微信支付联调。具体执行情况应在每次发布记录中分别列明通过、失败、未执行或受阻项目。
 
-快速门禁，不跑 H5/微信构建：
+后端测试遵循仓库 [AGENTS.md](../AGENTS.md)：使用 MySQL 8，加载 `.env.test.local`，先进行有界连通性检查，确认测试目标恰为 `wms_db_test`。正常开发使用 `pytest --reuse-db` 运行相关用例；只有迁移变化、测试库异常或最终发布验证等规定情形才重建。自动测试不得写入业务库 `wms_db`，最终发布数据库验证应执行完整真实迁移链。
 
-```bash
-npm run test:quality -- --skip-build
-```
-
-带真实库只读数据准确性校验的快速门禁：
-
-```bash
-npm run test:quality -- --skip-build --data-accuracy
-```
-
-带数据库 API 端到端测试和微信小程序发布构建的完整发布门禁：
-
-```bash
-npm run test:release
-```
-
-本地开发期间可以复用已经完成迁移的测试库：
-
-```bash
-cd /wms
-.venv/bin/pytest -q --reuse-db \
-  allapp/salesapp/tests.py::SaleMiniApiTests \
-  allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests
-```
-
-`--db` 门禁强制使用 `DB_TEST_NAME`（默认 `wms_db_test`），并拒绝正式库名、
-空名称及不含测试标记的数据库名。发布门禁的第一组数据库测试固定使用
-`--create-db` 回放完整迁移，禁止搭配 `--fast-db` 或 `--no-migrations`；后续测试
-才会复用这次创建的干净测试库。本地复用测试库不能替代发布迁移门禁。
-
-## 10. 超时订单处理
-
-未支付微信订单超时后，需要定时执行：
-
-```bash
-cd /wms
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py expire_sale_mini_orders
-```
-
-命令始终先查询微信状态，只在微信确认未支付并关单成功后释放库存。
-`--close-wechat` 仅为旧脚本兼容参数，不能跳过安全查单。
-
-## 11. 管理后台常用维护项
-
-建议优先使用专门运营页面维护小程序货架：
-
-```text
-/console/sale-mini/products/
-```
-
-页面名称是“商城上架管理”。它支持按货主、分类、品牌、关键词、上架状态、库存状态、价格状态和商品状态筛选 WMS 商品，然后批量勾选处理：
-
-- 创建商城配置 `SaleProductConfig`。
-- 上架或下架商品。
-- 设置商城售价、按 `Product.price` 同步售价、设置或清空划线价。
-- 设置库存展示方式：库存状态、准确库存、不展示库存。
-- 设置推荐、热卖、新品标签。
-- 设置最大购买量和排序。
-- “启用起购及递增限制”默认关闭；只有主动开启后，起购数量和购买递增量才会在商城显示并参与购物车、预览和下单校验。
-
-如果运营需要先把某个货主的合格商品整批铺到商城，也可以进入 Django Admin：
-
-```text
-/admin/salesapp/saleproductconfig/
-```
-
-在列表页点击“按货主批量上架”，选择货主后可执行：
-
-- 创建缺失配置并上架该货主全部合格商品。
-- 仅创建缺失配置，不立即上架。
-- 下架该货主全部已配置商品。
-
-这个入口会保留原有单个商品的编辑、上架和下架能力。默认不会覆盖已有商品的商城售价、库存展示和购买规则；只有勾选“覆盖已有配置的价格、库存展示和购买规则”时，才会按表单值改写已有配置。批量上架时，缺价格、无有效分类、停用商品等不满足规则的商品会被跳过，并在执行结果里显示原因。
-
-单品配置和按货主批量配置都提供“启用起购及递增限制”开关。默认关闭时，即使数据库中保留了历史起购量或递增量，商城也不展示、不执行这两项限制；开启后才按“起购量 + N × 递增量”接受数量，例如起购 2、递增 3 时允许 2、5、8。
-
-这个页面只维护商城货架配置，不修改库存数量，不直接修改 `Product` 主数据。执行“上架”时会校验：
-
-- `SaleProductConfig.owner_id == Product.owner_id`。
-- 货主和商品都处于启用状态。
-- 上架配置启用。
-- 商品有 `sale_price` 或 `Product.price`，缺价格商品不会被上架。
-
-仍可在 Django admin 或后端管理页面维护这些对象：
-
-- 小程序买家：`MiniProgramUser`
-- 客户地址：`MiniCustomerAddress`
-- 首页横幅：`SaleMiniBanner`
-- 商品上架配置：`SaleProductConfig`
-- 服务端购物车：`SaleMiniCart / SaleMiniCartItem`
-- 小程序订单映射：`SaleMiniOrderMapping`
-- 支付单：`SaleMiniPayment`
-- 退款单：`SaleMiniRefund`
-- 支付事件：`SaleMiniPaymentEvent`
-- 优惠券模板：`SaleMiniCouponTemplate`
-- 优惠券：`SaleMiniCoupon`
-- 订单调整：`SaleMiniOrderAdjustment`
-- 积分流水：`SaleMiniPointLedger`
-- 分销记录：`SaleMiniDistributionRecord`
-- 售后申请：`SaleMiniAfterSaleRequest`
-- 商品评价：`SaleMiniProductReview`
-- 评价图片：`SaleMiniProductReviewImage`
-
-## 12. 数据准确性说明
-
-这个项目最重要的原则是：前端只展示和提交意图，后端负责事实。
-
-具体规则：
-
-- 商品是否可卖由 `SaleProductConfig.is_listed` 控制。
-- 商品价格由后端服务端计算。
-- 库存由后端在预览和下单时重新校验。
-- 下单会创建 WMS 出库单，并通过 WMS 分配库存。
-- 微信支付金额使用 `SaleMiniOrderMapping.payable_amount`。
-- WMS 出库行仍保存商品原始成交行金额，不被优惠券和积分污染。
-- 优惠、积分、分销、退款都有独立流水和状态。
-- 支付回调、退款回调有事件表用于幂等处理。
-
-关键金额字段：
-
-```text
-goods_amount       商品金额
-adjustment_amount 订单级优惠或加价金额，优惠为负数
-payable_amount     最终应付金额
-```
-
-不要直接把前端传来的价格、金额、库存作为最终事实。
-
-只读数据准确性校验命令：
-
-```bash
-cd /wms
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py validate_sale_mini_data_accuracy --fail-on-issues --limit 20
-```
-
-它会检查：
-
-- 上架配置的货主和商品货主是否一致。
-- 已上架商品是否指向启用的货主和启用的商品。
-- 服务端购物车是否存在跨货主商品、下架商品或非正数数量。
-- 小程序订单映射和 WMS 出库单的货主、客户、商品金额、应付金额是否一致。
-- 支付/退款金额和分值金额是否一致。
-- 优惠券、积分调整和订单映射的归属是否一致。
-- 库存明细和库存汇总的可用库存是否为负数。
-
-## 13. 验证命令
-
-后端检查：
-
-```bash
-cd /wms
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py check
-```
-
-迁移检查：
-
-```bash
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py makemigrations --check --dry-run
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py migrate --check
-```
-
-销售小程序集成测试：
-
-```bash
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --disable-warnings allapp/salesapp/tests.py::SaleMiniApiTests
-```
-
-销售小程序支付并发测试：
-
-```bash
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q --reuse-db --disable-warnings allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests
-```
-
-销售小程序无数据库单元测试：
-
-```bash
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python -m pytest -q allapp/salesapp/test_salemini_unit.py allapp/salesapp/test_mobile_api_unit.py allapp/salesapp/test_services_pricing_unit.py
-```
-
-数据准确性校验：
-
-```bash
-SECRET_KEY=test-secret-key CORS_ALLOWED_ORIGINS=http://localhost .venv/bin/python manage.py validate_sale_mini_data_accuracy --fail-on-issues --limit 20
-```
-
-前端构建：
-
-```bash
-cd /wms/sales-miniapp
-npm run build:mp-weixin
-npm run build:h5
-```
-
-已验证结果：
-
-```text
-2026-08-27:
-- manage.py check: passed
-- sale-mini pure unit tests: 29 passed
-- frontend payment behavior: 8 passed
-- clean wms_db_test SaleMiniApiTests + payment concurrency: 75 passed
-- console catalog database tests: 16 passed
-- Admin owner bulk-listing database tests: 10 passed
-- test and business database accuracy checks: ok, issue_count=0
-- H5 production build: passed
-- WeChat mini-program production build: blocked until VITE_API_BASE_URL and the approved
-  mp-weixin AppID are configured
-```
-
-上述自动化结果不代表真实微信交易验收。真实支付还必须配置商户参数、公网 HTTPS
-回调地址和测试小程序，并使用 0.01～0.10 元专用订单完成真机支付、查单、关单、
-退款、重复回调和微信商户平台逐笔对账。
-
-## 14. 常见问题
-
-### 登录后提示未绑定客户
-
-检查：
-
-- 是否存在 `MiniProgramUser`。
-- `MiniProgramUser.owner` 是否正确。
-- `MiniProgramUser.customer` 是否正确且启用。
-- 账号登录时，`MiniProgramUser.user` 是否绑定当前登录用户。
-
-### 微信登录提示未绑定客户
-
-检查：
-
-- `.env` 是否配置 `WECHAT_MINI_APPID / WECHAT_MINI_SECRET`。
-- 微信 code 是否来自正确小程序。
-- `MiniProgramUser.openid` 是否已预绑定。
-- 如果用 unionid 绑定，微信接口是否返回 unionid。
-- 同一 openid 是否绑定了多个小程序用户。
-
-### 下单提示未绑定仓库
-
-检查：
-
-- `MiniProgramUser.user` 绑定的系统用户是否设置了 `warehouse`。
-- 该仓库是否属于当前货主业务范围。
-
-### 商品不显示
-
-检查：
-
-- 后台 `/console/sale-mini/products/` 中该商品是否显示为“前台可见”。
-- 是否已经创建 `SaleProductConfig`。WMS 里有 `Product` 不等于商城已上架。
-- `SaleProductConfig.is_listed=True`。
-- `SaleProductConfig.is_active=True`。
-- `Product.is_active=True`。
-- `SaleProductConfig.owner_id` 是否等于 `Product.owner_id`。
-- 货主 `Owner.is_active=True`。
-- 如果列表使用了“只看有货”，检查是否有可售 `InventoryDetail.available_qty > 0`；普通商品列表不要求有库存才展示。
-- 商城可售库存以启用库存明细的 `available_qty` 为准。商品即使启用了批次、效期或序列号管理，缺少批次号、生产日期、有效期或序列号的库存仍会展示并允许下单。
-- `available_qty` 仍等于账面库存减去已分配、锁定和损坏数量；追踪字段缺失不会增加数量，只是不再阻塞商城销售。
-- 核心数据准确性检查仍会报告缺批次、缺日期或缺序列号，供仓库后续补录，但这些告警不影响商城可售判断。
-
-图形界面上架入口：
-
-- 精细运营：打开 `/console/sale-mini/products/`，按货主、分类、库存、价格等条件筛选后勾选商品，再执行创建配置、上架或下架。
-- 整货主批量：打开 `/admin/salesapp/saleproductconfig/`，点击“按货主批量上架”，选择货主后执行批量创建并上架。
-
-可先运行 dry-run 诊断，不会写库：
-
-```bash
-.venv/bin/python manage.py bootstrap_sale_mini_catalog
-```
-
-确认某个货主商品确实应该对外销售后，再按货主创建并上架：
-
-```bash
-.venv/bin/python manage.py bootstrap_sale_mini_catalog --owner-code byny --apply --listed
-```
-
-不要直接把所有 WMS 商品自动上架，包装材料、内部物料和非销售品也可能存在于 `Product` 表。
-
-### 购物车或下单提示库存不足
-
-这是正常保护。小程序库存展示不是最终事实，服务端会按当前仓库库存重新校验。需要检查库存明细、库存分配和是否已有其他订单占用库存。
-
-### 微信支付预下单失败
-
-检查：
-
-- 商户号、证书序列号、私钥、APIv3 key 是否配置。
-- 私钥路径是否可读。
-- 回调地址是否是微信可访问的 HTTPS 地址。
-- 订单是否仍是未支付状态。
-- `payable_amount` 是否大于 0。
-
-### 退款申请失败
-
-检查：
-
-- 订单是否已支付。
-- 订单状态是否允许退款。
-- 微信支付原交易号是否存在。
-- 微信支付配置是否完整。
-
-## 15. 上线前检查清单
-
-上线前至少确认：
-
-- 数据库迁移全部应用。
-- `.env` 中生产环境微信配置完整。
-- `WECHAT_PAY_VERIFY_CALLBACK_SIGNATURE=True`。
-- 微信支付和退款回调地址可公网访问。
-- 已配置订单超时取消定时任务。
-- 已配置每 5 分钟一次的支付退款对账任务。
-- 已配置至少一个测试客户、测试买家、测试仓库、测试商品、测试库存。
-- 上架商品只包含允许对外销售的商品。
-- 已用测试账号跑通：登录、浏览、加购、预览、下单、支付、取消、退款、售后。
-- WMS PDA 端可以看到对应出库任务并完成履约。
+本次仅更新文档；没有运行数据库测试、创建或取消真实订单、发起支付退款、构建发布或执行生产数据验收。

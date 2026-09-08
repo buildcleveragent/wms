@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "run_id": "a6689e0f77ba46219595797ddca8c21c",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 3,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "/evidence/migrations-tests.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 3
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/pos/test_repayment_migrations.py::test_nonempty_0009_to_0010_preserves_history_and_enforces_new_request_keys": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/products/test_identifier_migrations.py::ProductIdentifierMigrationTests::test_0008_to_0011_backfills_soft_deleted_identifier_history": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/products/test_identifier_migrations.py::ProductIdentifierMigrationTests::test_preflight_conflict_fails_before_schema_changes": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

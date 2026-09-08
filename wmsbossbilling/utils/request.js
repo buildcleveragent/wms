@@ -4,6 +4,10 @@ import { BASE_URL } from './api-base'
 const ACCESS_KEY = 'access'
 const REFRESH_KEY = 'refresh'
 const USER_KEY = 'user'
+let sessionEpoch = 0
+function checkSession(epoch) {
+  if (epoch !== sessionEpoch) throw classifyError(409, { detail: '登录账号已变化，请重新操作' })
+}
 
 function storageGet(key) {
   try {
@@ -22,6 +26,11 @@ export function getStoredRefreshToken() {
 }
 
 export function setTokens(access, refresh) {
+  sessionEpoch++
+  persistTokens(access, refresh)
+}
+
+function persistTokens(access, refresh) {
   try {
     if (access) uni.setStorageSync(ACCESS_KEY, access)
     else uni.removeStorageSync(ACCESS_KEY)
@@ -51,6 +60,7 @@ export function setStoredUser(user) {
 }
 
 export function clearToken() {
+  sessionEpoch++
   try {
     uni.removeStorageSync(ACCESS_KEY)
     uni.removeStorageSync(REFRESH_KEY)
@@ -112,36 +122,45 @@ function rawRequest(options, token = '') {
 }
 
 let refreshFlight = null
+let refreshEpoch = -1
 let redirectingToLogin = false
 
 function redirectToLogin() {
   if (redirectingToLogin) return
   redirectingToLogin = true
   clearToken()
+  const expiredEpoch = sessionEpoch
   uni.showToast({ title: '登录已失效，请重新登录', icon: 'none', duration: 1500 })
   setTimeout(() => {
-    uni.reLaunch({ url: '/pages/login' })
+    if (expiredEpoch === sessionEpoch) uni.reLaunch({ url: '/pages/login' })
     setTimeout(() => { redirectingToLogin = false }, 300)
   }, 300)
 }
 
 async function refreshAccessToken() {
-  if (refreshFlight) return refreshFlight
+  const epoch = sessionEpoch
+  if (refreshFlight && refreshEpoch === epoch) return refreshFlight
   const refresh = getStoredRefreshToken()
   if (!refresh) throw classifyError(401, { detail: 'Refresh token is missing.' })
 
-  refreshFlight = rawRequest({
+  refreshEpoch = epoch
+  const flight = rawRequest({
     url: '/api/auth/refresh/',
     method: 'POST',
     data: { refresh },
   }).then((data) => {
+    checkSession(epoch)
     if (!data?.access) throw classifyError(401, { detail: 'Refresh response is invalid.' })
-    setTokens(data.access, data.refresh || refresh)
+    persistTokens(data.access, data.refresh || refresh)
     return data.access
+  }).catch(error => {
+    checkSession(epoch)
+    throw error
   }).finally(() => {
-    refreshFlight = null
+    if (refreshFlight === flight) refreshFlight = null
   })
-  return refreshFlight
+  refreshFlight = flight
+  return flight
 }
 
 export function buildQuery(params = {}) {
@@ -152,16 +171,32 @@ export function buildQuery(params = {}) {
 }
 
 export async function request(options = {}) {
+  const epoch = sessionEpoch
+  const originalAccess = getStoredToken()
   try {
-    return await rawRequest(options, getStoredToken())
+    const result = await rawRequest(options, originalAccess)
+    checkSession(epoch)
+    return result
   } catch (error) {
+    checkSession(epoch)
     if (error.statusCode !== 401 || credentialEndpoint(options.url) || options._retried) throw error
+    let access
     try {
-      const access = await refreshAccessToken()
-      return await rawRequest({ ...options, _retried: true }, access)
+      access = getStoredToken() !== originalAccess ? getStoredToken() : await refreshAccessToken()
+      checkSession(epoch)
     } catch (refreshError) {
-      redirectToLogin()
+      checkSession(epoch)
+      if ([401, 403].includes(refreshError?.statusCode)) redirectToLogin()
       throw refreshError
+    }
+    try {
+      const result = await rawRequest({ ...options, _retried: true }, access)
+      checkSession(epoch)
+      return result
+    } catch (retryError) {
+      checkSession(epoch)
+      if (retryError?.statusCode === 401) redirectToLogin()
+      throw retryError
     }
   }
 }

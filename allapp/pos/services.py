@@ -33,6 +33,7 @@ from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
 from allapp.tasking.models import TaskScanLog, TaskStatusLog, WmsTask, WmsTaskLine
 from allapp.tasking.posting_exec import execute_posting_handler
 
+from .access import pos_warehouse_allowed
 from .inventory_trace import resolve_sale_issue_layers
 from .models import (
     PosAuditLog,
@@ -263,13 +264,17 @@ def _cash_customer(owner_id, user):
     return Customer.objects.create(owner_id=owner_id, code="CASH", name="散客", salesperson=user)
 
 
-def _load_products(items):
+def _load_products(items, warehouse_id):
     product_ids = [item["product_id"] for item in items]
     products = {
         product.id: product
-        for product in Product.objects.filter(id__in=product_ids, is_active=True).select_related(
-            "owner", "base_uom"
-        )
+        for product in Product.objects.filter(
+            id__in=product_ids,
+            is_active=True,
+            pk__in=InventoryDetail.objects.filter(warehouse_id=warehouse_id, is_active=True).values(
+                "product_id"
+            ),
+        ).select_related("owner", "base_uom")
     }
     missing = [product_id for product_id in product_ids if product_id not in products]
     if missing:
@@ -468,6 +473,8 @@ def _payment_summary_from_lines(payment_lines, total_amount):
 
 def _normalize_refunds(refunds, total_amount):
     refunds = refunds or []
+    if not refunds and total_amount == ZERO:
+        return []
     if not refunds:
         _error("refunds", "退货必须填写退款方式和退款金额。")
     valid_methods = {choice.value for choice in PosPayment.Method}
@@ -1269,16 +1276,72 @@ def result_for_return(return_order):
 
 
 @transaction.atomic
-def create_customer_repayment(*, user, customer_id, amount, method, reference_no="", remark=""):
+def create_customer_repayment(
+    *, user, customer_id, amount, method, reference_no="", remark="", idempotency_key=""
+):
     warehouse_id = getattr(user, "warehouse_id", None)
     if not warehouse_id:
         raise ValidationError("当前用户未绑定仓库(warehouse)，无法记录客户还款。")
 
-    customer = PosCustomer.objects.filter(
-        id=customer_id, warehouse_id=warehouse_id, is_active=True
-    ).first()
+    lock_warehouses_for_inventory_write(warehouse_id)
+    customer = (
+        PosCustomer.objects.select_for_update()
+        .filter(id=customer_id, warehouse_id=warehouse_id, is_active=True)
+        .first()
+    )
     if not customer:
         _error("customer_id", "客户不存在。")
+
+    request_key = (idempotency_key or "").strip()
+    reference_no = (reference_no or "").strip()
+    if request_key:
+        if len(request_key) > 100:
+            _error("idempotency_key", "还款请求标识过长。")
+        request_key = "key:" + request_key
+    elif reference_no:
+        if PosCustomerRepayment.objects.filter(
+            warehouse_id=warehouse_id,
+            pos_customer=customer,
+            reference_no=reference_no,
+            idempotency_key__isnull=True,
+        ).exists():
+            _error("reference_no", "该凭证号已有历史还款，请先核对原记录，不能作为新还款重试。")
+        request_key = "reference:" + reference_no
+    else:
+        _error("idempotency_key", "请更新客户端并提供稳定的还款请求标识。")
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "customer_id": customer.id,
+                "cashier_id": user.pk,
+                "amount": str(_money(amount)),
+                "method": (method or "").strip().upper(),
+                "reference_no": reference_no,
+                "remark": (remark or "").strip(),
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    existing = PosCustomerRepayment.objects.filter(
+        warehouse_id=warehouse_id,
+        pos_customer=customer,
+        idempotency_key=request_key,
+    ).first()
+    if existing:
+        if existing.idempotency_fingerprint != fingerprint:
+            _error("idempotency_key", "同一还款请求标识对应的内容不一致。")
+        if existing.status != PosCustomerRepayment.Status.COMPLETED:
+            _error("idempotency_key", "原还款已经撤销，不能重复提交。")
+        audit = PosAuditLog.objects.get(
+            action=PosAuditLog.Action.REPAYMENT,
+            metadata__repayment_id=existing.pk,
+        )
+        return {
+            "repayment": existing,
+            "customer": customer,
+            "debt_before": _money(audit.metadata["debt_before"]),
+            "debt_after": _money(audit.metadata["debt_after"]),
+        }
 
     shift = current_shift_for_user(user, for_update=True)
     if not shift:
@@ -1299,6 +1362,8 @@ def create_customer_repayment(*, user, customer_id, amount, method, reference_no
 
     repayment = PosCustomerRepayment.objects.create(
         repayment_no=_make_repayment_no(),
+        idempotency_key=request_key,
+        idempotency_fingerprint=fingerprint,
         warehouse_id=warehouse_id,
         pos_customer=customer,
         shift=shift,
@@ -1377,6 +1442,8 @@ def _create_pos_sale_once(
     warehouse_id = getattr(user, "warehouse_id", None)
     if not warehouse_id:
         raise ValidationError("当前用户未绑定仓库(warehouse)，无法收银。")
+    if not pos_warehouse_allowed(user):
+        raise ValidationError("当前用户的 POS 仓库与授权范围不一致。")
     lock_warehouses_for_inventory_write(warehouse_id)
     items = items or []
     if not items:
@@ -1407,7 +1474,7 @@ def _create_pos_sale_once(
     if not shift:
         raise ValidationError("当前收银员没有进行中的 POS 班次，请先开班。")
 
-    products = _load_products(items)
+    products = _load_products(items, warehouse_id)
     normalized_items, qty_by_product = _validate_prices_and_shape(items, products)
     _validate_stock(qty_by_product, products, warehouse_id, zone_type=stock_zone_type)
 
@@ -1665,6 +1732,17 @@ def _create_pos_return_once(
 
     total_amount = _money(sum((line["amount"] for line in normalized_lines), ZERO))
     refund_lines = _normalize_refunds(refunds, total_amount)
+    credit_refund = sum(
+        (line["amount"] for line in refund_lines if line["method"] == PosPayment.Method.CREDIT),
+        ZERO,
+    )
+    if credit_refund and sale.pos_customer_id:
+        PosCustomer.objects.select_for_update().get(pk=sale.pos_customer_id)
+        if credit_refund > customer_pos_debt_balance(
+            customer_id=sale.pos_customer_id,
+            warehouse_id=warehouse_id,
+        ):
+            _error("refunds", "赊销退款不能超过未还欠款，已还部分请使用实际退款方式。")
     now = timezone.now()
     return_order = PosReturn.objects.create(
         return_no=_make_return_no(now),
@@ -1767,6 +1845,17 @@ def _void_pos_sale_once(*, sale_id, warehouse_id, user, reason=""):
         raise ValidationError("该 POS 销售单已有退货记录，不能作废。")
     if not (reason or "").strip():
         _error("reason", "POS 作废必须填写原因。")
+
+    if sale.pos_customer_id and _sale_credit_amount(sale) > ZERO:
+        # Repayments are customer-level: there is no sale-level allocation yet.
+        # Fail closed rather than guessing which sale the received cash settled.
+        PosCustomer.objects.select_for_update().get(pk=sale.pos_customer_id)
+        if PosCustomerRepayment.objects.filter(
+            pos_customer_id=sale.pos_customer_id,
+            warehouse_id=warehouse_id,
+            status=PosCustomerRepayment.Status.COMPLETED,
+        ).exists():
+            raise ValidationError("该客户已有赊销还款，不能直接作废；请先完成关联退款或冲销。")
 
     _restore_stock_from_sale(sale, user, reason)
     payment = PosPayment.objects.select_for_update().get(sale=sale)

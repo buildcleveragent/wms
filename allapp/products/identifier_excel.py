@@ -9,6 +9,8 @@ from django.db import transaction
 from django.utils import timezone
 from openpyxl import Workbook, load_workbook
 
+from allapp.core.xlsx_safety import MAX_COMPRESSED_BYTES, validate_xlsx_archive
+
 from .identifier_services import (
     IdentifierConcurrencyError,
     add_external_identifier,
@@ -87,6 +89,11 @@ def build_identifier_template():
     for sheet in (barcode, external):
         sheet.freeze_panes = "A2"
         sheet.auto_filter.ref = sheet.dimensions
+    for sheet in workbook.worksheets:
+        for row in sheet.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
     stream = io.BytesIO()
     workbook.save(stream)
     return stream.getvalue()
@@ -133,6 +140,11 @@ def build_identifier_export(owner):
                 record.is_active,
             ]
         )
+    for sheet in workbook.worksheets:
+        for row in sheet.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
     stream = io.BytesIO()
     workbook.save(stream)
     return stream.getvalue()
@@ -151,7 +163,8 @@ def _rows(sheet, headers):
 @transaction.atomic
 def import_identifier_workbook(uploaded_file, *, owner):
     try:
-        workbook = load_workbook(uploaded_file, data_only=True)
+        data = validate_xlsx_archive(uploaded_file.read(MAX_COMPRESSED_BYTES + 1))
+        workbook = load_workbook(io.BytesIO(data), data_only=True)
     except Exception as exc:
         raise IdentifierExcelError("无法读取标识维护 Excel 文件。") from exc
     missing = {BARCODE_SHEET, EXTERNAL_SHEET} - set(workbook.sheetnames)

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "run_id": "0788293ecde140df9862d3c85543ed96",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 2,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "/evidence/focused-tests.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 2
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferMySQLTests::test_backup_and_restore_round_trip_into_fresh_database": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferMySQLTests::test_restore_row_count_failure_rolls_back_seed_replacement": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

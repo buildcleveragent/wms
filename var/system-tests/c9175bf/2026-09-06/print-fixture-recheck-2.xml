@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="4.818" timestamp="2026-09-06T10:35:49.109232+08:00" hostname="wms"><testcase classname="allapp.core.test_security_acceptance.TaskAndPrintBoundaryTests" name="test_print_tokens_are_revoked_by_password_change" time="3.579"><failure message="django.db.utils.IntegrityError: (1048, &quot;Column 'salesperson_id' cannot be null&quot;)">self = &lt;django.db.backends.utils.CursorWrapper object at 0x70da658c65d0&gt;
+sql = 'INSERT INTO `baseinfo_customer` (`is_deleted`, `deleted_at`, `deleted_by_id`, `created_at`, `updated_at`, `created_by...s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'
+params = [False, None, None, '2026-09-06 10:35:53.019231', '2026-09-06 10:35:53.019260', None, ...]
+ignored_wrapper_args = (False, {'connection': &lt;DatabaseWrapper vendor='mysql' alias='default'&gt;, 'cursor': &lt;django.db.backends.utils.CursorWrapper object at 0x70da658c65d0&gt;})
+
+    def _execute(self, sql, params, *ignored_wrapper_args):
+        # Raise a warning during app initialization (stored_app_configs is only
+        # ever set during testing).
+        if not apps.ready and not apps.stored_app_configs:
+            warnings.warn(self.APPS_NOT_READY_WARNING_MSG, category=RuntimeWarning)
+        self.db.validate_no_broken_transaction()
+        with self.db.wrap_database_errors:
+            if params is None:
+                # params default might be backend specific.
+                return self.cursor.execute(sql)
+            else:
+&gt;               return self.cursor.execute(sql, params)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/django/db/backends/utils.py:105: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/django/db/backends/mysql/base.py:76: in execute
+    return self.cursor.execute(query, args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/MySQLdb/cursors.py:179: in execute
+    res = self._query(mogrified_query)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/MySQLdb/cursors.py:330: in _query
+    db.query(q)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;_mysql.connection open to '127.0.0.1' at 0x169275c0&gt;
+query = b"INSERT INTO `baseinfo_customer` (`is_deleted`, `deleted_at`, `deleted_by_id`, `created_at`, `updated_at`, `created_b... NULL, 'PRINT', 'Print', 39, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)"
+
+    def query(self, query):
+        # Since _mysql releases GIL while querying, we need immutable buffer.
+        if isinstance(query, bytearray):
+            query = bytes(query)
+&gt;       _mysql.connection.query(self, query)
+E       MySQLdb.IntegrityError: (1048, "Column 'salesperson_id' cannot be null")
+
+.venv/lib/python3.12/site-packages/MySQLdb/connections.py:280: IntegrityError
+
+The above exception was the direct cause of the following exception:
+
+self = &lt;allapp.core.test_security_acceptance.TaskAndPrintBoundaryTests testMethod=test_print_tokens_are_revoked_by_password_change&gt;
+
+    def test_print_tokens_are_revoked_by_password_change(self):
+        user = self._manager()
+        token = str(AccessToken.for_user(user))
+        tasks = [self._task("PRINT-RECEIVE"), self._task("PRINT-PICK", kind="PICK")]
+        order = OutboundOrder.objects.create(
+            owner=self.owner, warehouse=self.warehouse, order_no="PRINT-ORDER",
+&gt;           customer=Customer.objects.create(owner=self.owner, code="PRINT", name="Print"),
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            outbound_type="SALES",
+        )
+
+allapp/core/test_security_acceptance.py:177: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/django/db/models/manager.py:87: in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/django/db/models/query.py:665: in create
+    obj.save(force_insert=True, using=self.db)
+allapp/baseinfo/models.py:250: in save
+    super().save(*args, **kwargs)
+.venv/lib/python3.12/site-packages/django/db/models/base.py:902: in save
+    self.save_base(
+.venv/lib/python3.12/site-packages/django/db/models/base.py:1008: in save_base
+    updated = self._save_table(
+.venv/lib/python3.12/site-packages/django/db/models/base.py:1169: in _save_table
+    results = self._do_insert(
+.venv/lib/python3.12/site-packages/django/db/models/base.py:1210: in _do_insert
+    return manager._insert(
+.venv/lib/python3.12/site-packages/django/db/models/manager.py:87: in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/django/db/models/query.py:1873: in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/django/db/models/sql/compiler.py:1882: in execute_sql
+    cursor.execute(sql, params)
+.venv/lib/python3.12/site-packages/django/db/backends/utils.py:79: in execute
+    return self._execute_with_wrappers(
+.venv/lib/python3.12/site-packages/django/db/backends/utils.py:92: in _execute_with_wrappers
+    return executor(sql, params, many, context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/django/db/backends/utils.py:100: in _execute
+    with self.db.wrap_database_errors:
+.venv/lib/python3.12/site-packages/django/db/utils.py:91: in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+.venv/lib/python3.12/site-packages/django/db/backends/utils.py:105: in _execute
+    return self.cursor.execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/django/db/backends/mysql/base.py:76: in execute
+    return self.cursor.execute(query, args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/MySQLdb/cursors.py:179: in execute
+    res = self._query(mogrified_query)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/MySQLdb/cursors.py:330: in _query
+    db.query(q)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;_mysql.connection open to '127.0.0.1' at 0x169275c0&gt;
+query = b"INSERT INTO `baseinfo_customer` (`is_deleted`, `deleted_at`, `deleted_by_id`, `created_at`, `updated_at`, `created_b... NULL, 'PRINT', 'Print', 39, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)"
+
+    def query(self, query):
+        # Since _mysql releases GIL while querying, we need immutable buffer.
+        if isinstance(query, bytearray):
+            query = bytes(query)
+&gt;       _mysql.connection.query(self, query)
+E       django.db.utils.IntegrityError: (1048, "Column 'salesperson_id' cannot be null")
+
+.venv/lib/python3.12/site-packages/MySQLdb/connections.py:280: IntegrityError</failure></testcase></testsuite></testsuites>

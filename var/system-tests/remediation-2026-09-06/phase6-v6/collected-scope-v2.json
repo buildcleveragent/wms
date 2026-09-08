@@ -1,0 +1,27 @@
+{
+  "status": "COLLECTED_NOT_EXECUTION_RESULT",
+  "collected": 1253,
+  "by_app": {
+    "accounts": 63,
+    "api": 3,
+    "baseinfo": 4,
+    "billing": 101,
+    "console": 16,
+    "core": 170,
+    "cross_app_business_flows": 12,
+    "driverapp": 3,
+    "inbound": 50,
+    "inventory": 59,
+    "labeling": 1,
+    "locations": 7,
+    "outbound": 186,
+    "pos": 113,
+    "products": 157,
+    "reports": 83,
+    "salesapp": 135,
+    "strategies": 3,
+    "tasking": 87
+  },
+  "collection_evidence_sha256": "4949252cba59e886a6015c5a8a7cf854a10e601e911bd79fed0068cdffcc7f45",
+  "boundary": "Main pytest node IDs only; subtests counted separately from execution events."
+}

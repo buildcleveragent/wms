@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "run_id": "ddcef561bbfe46abac86ebf3c5636beb",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 8,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase1/coord-unit.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 8
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/core/test_test_coordination.py::test_stable_lock_is_exclusive_and_not_deleted": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_coordination.py::test_unsafe_lock_objects_rejected_without_modifying_target[symlink]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_coordination.py::test_unsafe_lock_objects_rejected_without_modifying_target[dangling]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_coordination.py::test_unsafe_lock_objects_rejected_without_modifying_target[fifo]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_coordination.py::test_unsafe_lock_objects_rejected_without_modifying_target[hardlink]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_coordination.py::test_unsafe_lock_objects_rejected_without_modifying_target[public]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_coordination.py::test_coordination_directory_cannot_be_aliased_or_public": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_coordination.py::test_pid_alone_cannot_prove_process_identity": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

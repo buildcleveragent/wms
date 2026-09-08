@@ -145,13 +145,30 @@ const cartStore = reactive({
   async addProduct(product, qty = 1) {
     const amount = Math.max(toNumber(qty), 0)
     if (!amount) return this.lastPreview
-    const data = await cartService.add({
-      config_id: product.config_id,
-      product_id: product.id,
-      qty: String(amount),
-      order_uom: product.order_uom,
-    })
-    await this.load()
+    let data
+    try {
+      data = await cartService.add({
+        config_id: product.config_id,
+        product_id: product.id,
+        qty: String(amount),
+        order_uom: product.order_uom,
+      })
+    } catch (error) {
+      const status = Number(error?.statusCode || error?.code || 0)
+      if (status >= 400 && status < 500) throw error
+      // Add is cumulative: a lost response must never cause an automatic resend.
+      // Reading the cart restores current state, not request-level attribution.
+      const refreshed = await this.load().then(() => true).catch(() => false)
+      if (!refreshed) this.synced = false
+      throw new Error(refreshed
+        ? '加购结果尚未确认，已刷新购物车，请核对后再操作'
+        : '加购结果尚未确认，请稍后打开购物车核对，不要重复加购')
+    }
+    try { await this.load() }
+    catch (_) {
+      this.synced = false
+      throw new Error('已加购，购物车刷新失败，请打开购物车核对，不要重复加购')
+    }
     const addedItem = this.items.find((item) => {
       if (product.config_id && item.config_id) {
         return Number(item.config_id) === Number(product.config_id)

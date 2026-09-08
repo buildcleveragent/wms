@@ -1,0 +1,2415 @@
+<!DOCTYPE html><html lang="zh-hans" dir="ltr" data-theme="auto"><head>
+<title></title>
+<link rel="stylesheet" href="/static/admin/css/base.css">
+
+  <link rel="stylesheet" href="/static/admin/css/dark_mode.css">
+  <script src="/static/admin/js/theme.js"></script>
+
+
+  <link rel="stylesheet" href="/static/admin/css/nav_sidebar.css">
+  <script src="/static/admin/js/nav_sidebar.js" defer=""></script>
+
+
+  
+  
+   <link rel="stylesheet" href="/static/admin/custom/collapse-apps.css">
+<link rel="stylesheet" href="/static/admin/custom/topbar-theme.css">
+    <link rel="stylesheet" href="/static/admin/custom/admin_nowrap_rows.css">
+
+  <link rel="stylesheet" href="/static/admin/css/changelists.css">
+  
+  
+    <script src="/admin/jsi18n/"></script>
+  
+  <link href="/static/admin/custom/changelist.css" media="all" rel="stylesheet">
+  
+
+  <style>
+    /* 顶部：添加按钮 + 搜索框同一行、垂直对齐 */
+    .cl-toolbar{
+      display:flex;
+      align-items:center;         /* ✅ 垂直居中对齐 */
+      gap:10px;
+      margin: 0 0 10px 0;
+      flex-wrap: wrap;
+    }
+
+    /* 让 object-tools 参与 flex，不再 float */
+    .cl-toolbar .object-tools{
+      float:none !important;
+      margin:0 !important;
+      padding:0 !important;
+      list-style:none !important;
+
+      display:flex !important;
+      align-items:center !important;   /* ✅ 垂直居中 */
+      gap:10px !important;
+    }
+    .cl-toolbar .object-tools li{
+      margin:0 !important;
+      padding:0 !important;
+      list-style:none !important;
+      display:flex !important;
+      align-items:center !important;   /* ✅ 垂直居中 */
+    }
+
+    /* 搜索表单参与 flex，保证同一基线 */
+    .cl-toolbar #changelist-search{
+      display:flex !important;
+      align-items:center !important;   /* ✅ 垂直居中 */
+      gap:10px !important;
+      margin:0 !important;
+    }
+
+    /* 统一输入框高度 */
+    .cl-toolbar #changelist-search input[type="text"],
+    .cl-toolbar #changelist-search input[type="search"]{
+      height:36px !important;
+      line-height:36px !important;
+      padding:0 10px !important;
+      box-sizing:border-box;
+      margin:0 !important;
+    }
+
+    /* 搜索按钮统一高度 */
+    .cl-toolbar #changelist-search input[type="submit"]{
+      height:36px !important;
+      line-height:36px !important;
+      padding:0 14px !important;
+      border-radius:8px !important;
+      box-sizing:border-box;
+      margin:0 !important;
+    }
+
+    /* ✅ 添加按钮：同高 + 绿色底色 */
+    .cl-toolbar .object-tools a.addlink{
+      display:inline-flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+
+      height:36px !important;
+      line-height:36px !important;
+      padding:0 14px !important;
+      border-radius:8px !important;
+      box-sizing:border-box;
+
+      white-space:nowrap !important;
+      margin:0 !important;
+      vertical-align: middle !important;
+
+      background:#2e7d32 !important;      /* ✅ 绿色 */
+      border:1px solid #2e7d32 !important;
+      color:#fff !important;              /* 白字 */
+      text-decoration:none !important;
+      background-image:none !important;
+    }
+    .cl-toolbar .object-tools a.addlink:visited{
+      color:#fff !important;
+    }
+    .cl-toolbar .object-tools a.addlink:hover{
+      filter: brightness(0.95);
+      color:#fff !important;
+    }
+
+    /* 如果你的主题给 addlink 额外加了伪元素图标，避免干扰对齐（可留着，没副作用） */
+    .cl-toolbar .object-tools a.addlink::before,
+    .cl-toolbar .object-tools a.addlink::after{
+      content: none !important;
+      display: none !important;
+    }
+  </style>
+
+
+
+
+
+  <script src="/static/admin/custom/collapse-apps.js"></script>
+  <script src="/static/admin/custom/sidebar-scroll-state.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+
+<script src="/static/admin/js/vendor/jquery/jquery.min.js"></script>
+<script src="/static/admin/js/jquery.init.js"></script>
+<script src="/static/admin/js/core.js"></script>
+<script src="/static/admin/js/admin/RelatedObjectLookups.js"></script>
+<script src="/static/admin/js/actions.js"></script>
+<script src="/static/admin/js/urlify.js"></script>
+<script src="/static/admin/js/prepopulate.js"></script>
+<script src="/static/admin/js/vendor/xregexp/xregexp.min.js"></script>
+<script src="/static/admin/js/filters.js" defer=""></script>
+
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/admin/css/responsive.css">
+    
+
+<meta name="robots" content="NONE,NOARCHIVE">
+<style>                      .htmx-indicator{opacity:0}                      .htmx-request .htmx-indicator{opacity:1; transition: opacity 200ms ease-in;}                      .htmx-request.htmx-indicator{opacity:1; transition: opacity 200ms ease-in;}                    </style></head>
+
+<body class=" app-tasking model-wmstask change-list" data-admin-utc-offset="28800">
+<a href="#content-start" class="skip-to-content-link">跳到主要内容</a>
+<!-- Container -->
+<div id="container">
+
+    
+    <!-- Header -->
+    
+      <header id="header">
+        <div id="branding">
+        
+        </div>
+        
+        
+        <div id="user-tools">
+            
+                欢迎，
+                <strong>browser-admin</strong>.
+            
+            
+  
+
+  
+  <span id="ud-root" class="ud-root">
+    <button id="ud-btn" class="ud-btn" aria-haspopup="menu" aria-expanded="false" title="browser-admin">
+      <span class="ud-avatar" aria-hidden="true">B</span>
+      <svg class="ud-caret" viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="M5 7l5 6 5-6" fill="currentColor"></path></svg>
+    </button>
+    <div id="ud-menu" class="ud-menu" role="menu" aria-labelledby="ud-btn" hidden="">
+
+      <a role="menuitem" tabindex="-1" class="ud-item" href="/console/op/lines/">操作台</a>
+      <a role="menuitem" tabindex="-1" class="ud-item" href="/admin/">管理首页</a>
+      <a role="menuitem" tabindex="-1" class="ud-item" href="/accounts/password_change/">修改密码</a>
+      <form method="post" action="/admin/logout/" style="margin:0;">
+        <input type="hidden" name="csrfmiddlewaretoken" value="2ygDzkq3ZBW21pnRbtNWaeIhEhjmcznIS4GvmaSv1gQPKfTdbeTBN2lqGxK17RbE" style="">
+        <input type="hidden" name="next" value="/admin/login/" style="">
+        <button type="submit" role="menuitem" tabindex="-1" class="ud-item danger ud-as-link">退出登录</button>
+      </form>
+    </div>
+  </span>
+  
+
+
+<style>
+/* 融入 Admin 顶栏（非悬浮） */
+
+
+/* 触发按钮（头像+箭头） */
+.ud-root { position:relative; display:inline-block; }
+.ud-btn{ display:inline-flex; align-items:center; gap:6px; cursor:pointer; background:transparent; border:0; padding:0; color:inherit; }
+.ud-avatar{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:28px; height:28px; border-radius:9999px; font-weight:700;
+  background:#6b7280;   /* 灰色头像 */
+  color:#fff; user-select:none;
+}
+.ud-avatar.lg{ width:40px; height:40px; font-size:16px; background:#6b7280; }
+.ud-caret{ opacity:.6; }
+
+/* 菜单（更窄、更紧凑） */
+.ud-menu{
+  position:absolute; right:0; top:calc(100% + 8px);
+  width:80px;  /* 固定宽度 180px */
+  background:var(--body-bg, #fff); color:var(--body-fg, #111);
+  border:1px solid rgba(0,0,0,.08); border-radius:12px;
+  box-shadow:0 10px 30px rgba(0,0,0,.15); overflow:hidden; z-index:1000;
+}
+@media (prefers-color-scheme: dark){
+  .ud-avatar{ background:#9ca3af; color:#111; } /* 深色模式用更浅的灰 */
+  .ud-menu{ background:#1f2937; color:#f9fafb; border-color:rgba(255,255,255,.08); }
+}
+
+.ud-hd{ display:flex; gap:10px; align-items:center; padding:8px 10px; border-bottom:1px solid rgba(0,0,0,.06); }
+.ud-meta .ud-name{ font-weight:600; font-size:13px; }
+.ud-meta .ud-role{ font-size:12px; opacity:.75; }
+
+.ud-item{
+  display:block; padding:8px 10px; text-decoration:none; color:inherit;
+  border-top:1px solid rgba(0,0,0,.04);
+  font-size:13px; line-height:1.15;
+}
+.ud-item:hover{ background:rgba(0,0,0,.04); }
+.ud-item.danger{ color:#b91c1c; font-weight:600; }
+
+/* 让 POST 按钮看起来像链接 */
+.ud-as-link{
+  appearance:none; -webkit-appearance:none; background:none; border:0;
+  width:100%; text-align:left; font:inherit; color:inherit; padding:8px 10px; cursor:pointer;
+}
+.ud-as-link:hover{ background:rgba(0,0,0,.04); }
+
+/* 未登录时的按钮 */
+.ud-login{
+  display:inline-block; padding:4px 10px; border-radius:9999px;
+  background:#111; color:#fff; text-decoration:none;
+}
+#header #user-tools .ud-menu { text-align: left !important; }
+#header #user-tools .ud-menu .ud-item,
+#header #user-tools .ud-menu .ud-as-link {
+  text-align: left !important;
+  display: flex;               /* 让内容天然靠左 */
+  align-items: center;
+  justify-content: flex-start;
+}
+/* 避免主题把链接颜色改得和背景一样，强制菜单项可读颜色 */
+#ud-root .ud-menu .ud-item:link,
+#ud-root .ud-menu .ud-item:visited,
+#ud-root .ud-menu .ud-as-link{
+  color:#374151 !important;   /* 深灰，亮色背景可读 */
+}
+@media (prefers-color-scheme: dark){
+  #ud-root .ud-menu .ud-item:link,
+  #ud-root .ud-menu .ud-item:visited,
+  #ud-root .ud-menu .ud-as-link{
+    color:#e5e7eb !important; /* 浅灰，深色背景可读 */
+  }
+}
+#ud-root .ud-menu .ud-item:hover,
+#ud-root .ud-menu .ud-as-link:hover{
+  background:rgba(0,0,0,.05);
+}
+/* 头像：商业浅灰底，深灰字；加轻微内描边更利落 */
+#ud-root .ud-avatar,
+#ud-root .ud-avatar.lg{
+  background: #d1d5db !important;   /* Gray 300：商务浅灰 */
+  color: #111827 !important;         /* Gray 900：深灰字母 */
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
+}
+
+/* 若系统是深色模式，也保持偏浅的灰，仍用深色字母保证可读 */
+@media (prefers-color-scheme: dark){
+  #ud-root .ud-avatar,
+  #ud-root .ud-avatar.lg{
+    background: #9ca3af !important; /* Gray 400（深色环境下略深一点） */
+    color: #111827 !important;
+  }
+}
+</style>
+
+
+
+<script>
+(function(){
+  const root = document.getElementById('ud-root');
+  const btn  = document.getElementById('ud-btn');
+  const menu = document.getElementById('ud-menu');
+  if (!btn || !menu) return;
+  function open(){ menu.hidden = false; btn.setAttribute('aria-expanded','true'); }
+  function close(){ menu.hidden = true; btn.setAttribute('aria-expanded','false'); }
+  function toggle(e){ e.preventDefault(); e.stopPropagation(); menu.hidden ? open() : close(); }
+  btn.addEventListener('click', toggle);
+  document.addEventListener('click', (e)=>{ if (!menu.hidden && !root.contains(e.target)) close(); });
+  document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') close(); });
+})();
+</script>
+
+
+        </div>
+        
+        
+        
+      </header>
+    
+    <!-- END Header -->
+    
+      <nav aria-label="条形导航">
+        
+<div class="breadcrumbs">
+<a href="/admin/">首页</a>
+› <a href="/admin/tasking/">任务管理</a>
+› 任务
+</div>
+
+      </nav>
+    
+    
+
+    <div class="main shifted" id="main">
+      
+        
+          
+<button class="sticky toggle-nav-sidebar" id="toggle-nav-sidebar" aria-label="切换导航"></button>
+<nav class="sticky" id="nav-sidebar" aria-label="侧边栏" aria-expanded="true">
+  <input type="search" id="nav-filter" placeholder="开始输入以筛选..." aria-label="筛选导航项目" style="">
+  
+
+
+  
+    <div class="app-tasking module current-app collapsed">
+      <table>
+        <caption>
+          <a href="/admin/tasking/" class="section" title="在应用程序 任务管理 中的模型">任务管理</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-wmstask current-model">
+              <th scope="row" id="tasking-wmstask">
+                
+                  <a href="/admin/tasking/wmstask/" aria-current="page">任务</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/tasking/wmstask/add/" class="addlink" aria-describedby="tasking-wmstask">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-wmstaskline">
+              <th scope="row" id="tasking-wmstaskline">
+                
+                  <a href="/admin/tasking/wmstaskline/">任务行</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/tasking/wmstaskline/add/" class="addlink" aria-describedby="tasking-wmstaskline">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-taskassignment">
+              <th scope="row" id="tasking-taskassignment">
+                
+                  <a href="/admin/tasking/taskassignment/">任务指派</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/tasking/taskassignment/add/" class="addlink" aria-describedby="tasking-taskassignment">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-taskscanlog">
+              <th scope="row" id="tasking-taskscanlog">
+                
+                  <a href="/admin/tasking/taskscanlog/">任务扫描记录</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/tasking/taskscanlog/add/" class="addlink" aria-describedby="tasking-taskscanlog">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-taskstatuslog">
+              <th scope="row" id="tasking-taskstatuslog">
+                
+                  <a href="/admin/tasking/taskstatuslog/">任务状态日志</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/tasking/taskstatuslog/add/" class="addlink" aria-describedby="tasking-taskstatuslog">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-relocationrequest">
+              <th scope="row" id="tasking-relocationrequest">
+                
+                  <a href="/admin/tasking/relocationrequest/">移库申请</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-relocationreservation">
+              <th scope="row" id="tasking-relocationreservation">
+                
+                  <a href="/admin/tasking/relocationreservation/">移库预留</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-replenishmentrequest">
+              <th scope="row" id="tasking-replenishmentrequest">
+                
+                  <a href="/admin/tasking/replenishmentrequest/">补货申请</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/tasking/replenishmentrequest/add/" class="addlink" aria-describedby="tasking-replenishmentrequest">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-replenishmentpolicy">
+              <th scope="row" id="tasking-replenishmentpolicy">
+                
+                  <a href="/admin/tasking/replenishmentpolicy/">补货策略</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/tasking/replenishmentpolicy/add/" class="addlink" aria-describedby="tasking-replenishmentpolicy">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-inbound module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/inbound/" class="section" title="在应用程序 入库管理 中的模型">入库管理</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-inboundorder">
+              <th scope="row" id="inbound-inboundorder">
+                
+                  <a href="/admin/inbound/inboundorder/">入库订单</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/inbound/inboundorder/add/" class="addlink" aria-describedby="inbound-inboundorder">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-inboundreceipt">
+              <th scope="row" id="inbound-inboundreceipt">
+                
+                  <a href="/admin/inbound/inboundreceipt/">入库收货单</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/inbound/inboundreceipt/add/" class="addlink" aria-describedby="inbound-inboundreceipt">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-pdanoorderreceive">
+              <th scope="row" id="inbound-pdanoorderreceive">
+                
+                  <a href="/admin/inbound/pdanoorderreceive/">PDA无订单收货</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-lot">
+              <th scope="row" id="inbound-lot">
+                
+                  <a href="/admin/inbound/lot/">批次</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/inbound/lot/add/" class="addlink" aria-describedby="inbound-lot">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-inboundorderreturninfo">
+              <th scope="row" id="inbound-inboundorderreturninfo">
+                
+                  <a href="/admin/inbound/inboundorderreturninfo/">销售退货入库</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/inbound/inboundorderreturninfo/add/" class="addlink" aria-describedby="inbound-inboundorderreturninfo">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-outbound module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/outbound/" class="section" title="在应用程序 出库管理 中的模型">出库管理</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-outboundorder">
+              <th scope="row" id="outbound-outboundorder">
+                
+                  <a href="/admin/outbound/outboundorder/">出库订单</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/outbound/outboundorder/add/" class="addlink" aria-describedby="outbound-outboundorder">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-pos module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/pos/" class="section" title="在应用程序 POS收银 中的模型">POS收银</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-poscustomer">
+              <th scope="row" id="pos-poscustomer">
+                
+                  <a href="/admin/pos/poscustomer/">POS客户管理</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/pos/poscustomer/add/" class="addlink" aria-describedby="pos-poscustomer">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-poscustomerrepayment">
+              <th scope="row" id="pos-poscustomerrepayment">
+                
+                  <a href="/admin/pos/poscustomerrepayment/">POS客户还款</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-posprintlog">
+              <th scope="row" id="pos-posprintlog">
+                
+                  <a href="/admin/pos/posprintlog/">POS打印日志</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-posauditlog">
+              <th scope="row" id="pos-posauditlog">
+                
+                  <a href="/admin/pos/posauditlog/">POS操作审计</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-pospayment">
+              <th scope="row" id="pos-pospayment">
+                
+                  <a href="/admin/pos/pospayment/">POS收款</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-pospaymentline">
+              <th scope="row" id="pos-pospaymentline">
+                
+                  <a href="/admin/pos/pospaymentline/">POS收款明细</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-posshift">
+              <th scope="row" id="pos-posshift">
+                
+                  <a href="/admin/pos/posshift/">POS班次</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-posshiftpaymentsummary">
+              <th scope="row" id="pos-posshiftpaymentsummary">
+                
+                  <a href="/admin/pos/posshiftpaymentsummary/">POS班次支付汇总</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-posrefund">
+              <th scope="row" id="pos-posrefund">
+                
+                  <a href="/admin/pos/posrefund/">POS退款流水</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-posreturn">
+              <th scope="row" id="pos-posreturn">
+                
+                  <a href="/admin/pos/posreturn/">POS退货单</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-posreturnline">
+              <th scope="row" id="pos-posreturnline">
+                
+                  <a href="/admin/pos/posreturnline/">POS退货明细</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-possaleorder">
+              <th scope="row" id="pos-possaleorder">
+                
+                  <a href="/admin/pos/possaleorder/">POS销售出库关联</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-possale">
+              <th scope="row" id="pos-possale">
+                
+                  <a href="/admin/pos/possale/">POS销售单</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-posreceiptwarehouseinfo">
+              <th scope="row" id="pos-posreceiptwarehouseinfo">
+                
+                  <a href="/admin/pos/posreceiptwarehouseinfo/">POS销售单仓库信息</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/pos/posreceiptwarehouseinfo/add/" class="addlink" aria-describedby="pos-posreceiptwarehouseinfo">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-possaleline">
+              <th scope="row" id="pos-possaleline">
+                
+                  <a href="/admin/pos/possaleline/">POS销售明细</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-inventory module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/inventory/" class="section" title="在应用程序 库存管理 中的模型">库存管理</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-inventorydetail">
+              <th scope="row" id="inventory-inventorydetail">
+                
+                  <a href="/admin/inventory/inventorydetail/">库存现存量</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-inventorytransaction">
+              <th scope="row" id="inventory-inventorytransaction">
+                
+                  <a href="/admin/inventory/inventorytransaction/">库存事务流水</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-inventorysummary">
+              <th scope="row" id="inventory-inventorysummary">
+                
+                  <a href="/admin/inventory/inventorysummary/">库存汇总</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-inventoryquickinboundadjust">
+              <th scope="row" id="inventory-inventoryquickinboundadjust">
+                
+                  <a href="/admin/inventory/inventoryquickinboundadjust/">入库快调</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/inventory/inventoryquickinboundadjust/add/" class="addlink" aria-describedby="inventory-inventoryquickinboundadjust">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-inventoryquickoutboundadjust">
+              <th scope="row" id="inventory-inventoryquickoutboundadjust">
+                
+                  <a href="/admin/inventory/inventoryquickoutboundadjust/">出库快调</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/inventory/inventoryquickoutboundadjust/add/" class="addlink" aria-describedby="inventory-inventoryquickoutboundadjust">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-inventorysnapshotdaily">
+              <th scope="row" id="inventory-inventorysnapshotdaily">
+                
+                  <a href="/admin/inventory/inventorysnapshotdaily/">库存日快照</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-products module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/products/" class="section" title="在应用程序 商品管理 中的模型">商品管理</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-brand">
+              <th scope="row" id="products-brand">
+                
+                  <a href="/admin/products/brand/">品牌</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/products/brand/add/" class="addlink" aria-describedby="products-brand">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-productcategory">
+              <th scope="row" id="products-productcategory">
+                
+                  <a href="/admin/products/productcategory/">商品分类</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/products/productcategory/add/" class="addlink" aria-describedby="products-productcategory">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-productpackage">
+              <th scope="row" id="products-productpackage">
+                
+                  <a href="/admin/products/productpackage/">商品包装层级</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/products/productpackage/add/" class="addlink" aria-describedby="products-productpackage">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-productexternalidentifier">
+              <th scope="row" id="products-productexternalidentifier">
+                
+                  <a href="/admin/products/productexternalidentifier/">商品外部标识</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/products/productexternalidentifier/add/" class="addlink" aria-describedby="products-productexternalidentifier">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-productbarcode">
+              <th scope="row" id="products-productbarcode">
+                
+                  <a href="/admin/products/productbarcode/">商品条码</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/products/productbarcode/add/" class="addlink" aria-describedby="products-productbarcode">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-product">
+              <th scope="row" id="products-product">
+                
+                  <a href="/admin/products/product/">商品档案</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/products/product/add/" class="addlink" aria-describedby="products-product">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-productuom">
+              <th scope="row" id="products-productuom">
+                
+                  <a href="/admin/products/productuom/">计量单位</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/products/productuom/add/" class="addlink" aria-describedby="products-productuom">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-baseinfo module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/baseinfo/" class="section" title="在应用程序 基础信息 中的模型">基础信息</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-supplier">
+              <th scope="row" id="baseinfo-supplier">
+                
+                  <a href="/admin/baseinfo/supplier/">供应商管理</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/baseinfo/supplier/add/" class="addlink" aria-describedby="baseinfo-supplier">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-employee">
+              <th scope="row" id="baseinfo-employee">
+                
+                  <a href="/admin/baseinfo/employee/">公司职员管理</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/baseinfo/employee/add/" class="addlink" aria-describedby="baseinfo-employee">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-driver">
+              <th scope="row" id="baseinfo-driver">
+                
+                  <a href="/admin/baseinfo/driver/">司机档案</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/baseinfo/driver/add/" class="addlink" aria-describedby="baseinfo-driver">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-carriercompany">
+              <th scope="row" id="baseinfo-carriercompany">
+                
+                  <a href="/admin/baseinfo/carriercompany/">承运公司档案</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/baseinfo/carriercompany/add/" class="addlink" aria-describedby="baseinfo-carriercompany">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-dictcategory">
+              <th scope="row" id="baseinfo-dictcategory">
+                
+                  <a href="/admin/baseinfo/dictcategory/">数据字典分类</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/baseinfo/dictcategory/add/" class="addlink" aria-describedby="baseinfo-dictcategory">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-dictitem">
+              <th scope="row" id="baseinfo-dictitem">
+                
+                  <a href="/admin/baseinfo/dictitem/">数据字典条目</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/baseinfo/dictitem/add/" class="addlink" aria-describedby="baseinfo-dictitem">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-route">
+              <th scope="row" id="baseinfo-route">
+                
+                  <a href="/admin/baseinfo/route/">线路管理</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/baseinfo/route/add/" class="addlink" aria-describedby="baseinfo-route">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-customer">
+              <th scope="row" id="baseinfo-customer">
+                
+                  <a href="/admin/baseinfo/customer/">终端客户管理</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/baseinfo/customer/add/" class="addlink" aria-describedby="baseinfo-customer">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-owner">
+              <th scope="row" id="baseinfo-owner">
+                
+                  <a href="/admin/baseinfo/owner/">货主管理</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/baseinfo/owner/add/" class="addlink" aria-describedby="baseinfo-owner">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-vehicle">
+              <th scope="row" id="baseinfo-vehicle">
+                
+                  <a href="/admin/baseinfo/vehicle/">车辆档案</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/baseinfo/vehicle/add/" class="addlink" aria-describedby="baseinfo-vehicle">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-locations module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/locations/" class="section" title="在应用程序 仓位管理 中的模型">仓位管理</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-subwarehouse">
+              <th scope="row" id="locations-subwarehouse">
+                
+                  <a href="/admin/locations/subwarehouse/">子仓</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/locations/subwarehouse/add/" class="addlink" aria-describedby="locations-subwarehouse">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-location">
+              <th scope="row" id="locations-location">
+                
+                  <a href="/admin/locations/location/">储位管理</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/locations/location/add/" class="addlink" aria-describedby="locations-location">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-container">
+              <th scope="row" id="locations-container">
+                
+                  <a href="/admin/locations/container/">容器</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/locations/container/add/" class="addlink" aria-describedby="locations-container">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-warehouse">
+              <th scope="row" id="locations-warehouse">
+                
+                  <a href="/admin/locations/warehouse/">仓库</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/locations/warehouse/add/" class="addlink" aria-describedby="locations-warehouse">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-billing module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/billing/" class="section" title="在应用程序 计费管理 中的模型">计费管理</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-collectionactivity">
+              <th scope="row" id="billing-collectionactivity">
+                
+                  <a href="/admin/billing/collectionactivity/">Collection activitys</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-receivablecollectioncase">
+              <th scope="row" id="billing-receivablecollectioncase">
+                
+                  <a href="/admin/billing/receivablecollectioncase/">Receivable collection cases</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/billing/receivablecollectioncase/add/" class="addlink" aria-describedby="billing-receivablecollectioncase">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-bill">
+              <th scope="row" id="billing-bill">
+                
+                  <a href="/admin/billing/bill/">发票/结算单</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/billing/bill/add/" class="addlink" aria-describedby="billing-bill">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-billingaccrual">
+              <th scope="row" id="billing-billingaccrual">
+                
+                  <a href="/admin/billing/billingaccrual/">应计费用</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/billing/billingaccrual/add/" class="addlink" aria-describedby="billing-billingaccrual">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-paymentreceipt">
+              <th scope="row" id="billing-paymentreceipt">
+                
+                  <a href="/admin/billing/paymentreceipt/">收款单</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/billing/paymentreceipt/add/" class="addlink" aria-describedby="billing-paymentreceipt">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-billingevent">
+              <th scope="row" id="billing-billingevent">
+                
+                  <a href="/admin/billing/billingevent/">计费事件</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/billing/billingevent/add/" class="addlink" aria-describedby="billing-billingevent">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-billingjobrun">
+              <th scope="row" id="billing-billingjobrun">
+                
+                  <a href="/admin/billing/billingjobrun/">计费作业执行记录</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/billing/billingjobrun/add/" class="addlink" aria-describedby="billing-billingjobrun">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-billingmetricdaily">
+              <th scope="row" id="billing-billingmetricdaily">
+                
+                  <a href="/admin/billing/billingmetricdaily/">计费日指标</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/billing/billingmetricdaily/add/" class="addlink" aria-describedby="billing-billingmetricdaily">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-billingservicecontract">
+              <th scope="row" id="billing-billingservicecontract">
+                
+                  <a href="/admin/billing/billingservicecontract/">计费服务合同</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/billing/billingservicecontract/add/" class="addlink" aria-describedby="billing-billingservicecontract">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-billingrule">
+              <th scope="row" id="billing-billingrule">
+                
+                  <a href="/admin/billing/billingrule/">计费规则</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/billing/billingrule/add/" class="addlink" aria-describedby="billing-billingrule">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-billingperiod">
+              <th scope="row" id="billing-billingperiod">
+                
+                  <a href="/admin/billing/billingperiod/">账期</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/billing/billingperiod/add/" class="addlink" aria-describedby="billing-billingperiod">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-reports module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/reports/" class="section" title="在应用程序 报表管理 中的模型">报表管理</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-aggthroughputdaily">
+              <th scope="row" id="reports-aggthroughputdaily">
+                
+                  <a href="/admin/reports/aggthroughputdaily/">吞吐日汇总</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/reports/aggthroughputdaily/add/" class="addlink" aria-describedby="reports-aggthroughputdaily">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-factinventorysnapshotdaily">
+              <th scope="row" id="reports-factinventorysnapshotdaily">
+                
+                  <a href="/admin/reports/factinventorysnapshotdaily/">库存日快照</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/reports/factinventorysnapshotdaily/add/" class="addlink" aria-describedby="reports-factinventorysnapshotdaily">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-agginventoryaging">
+              <th scope="row" id="reports-agginventoryaging">
+                
+                  <a href="/admin/reports/agginventoryaging/">库龄汇总</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/reports/agginventoryaging/add/" class="addlink" aria-describedby="reports-agginventoryaging">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-reportsnapshot">
+              <th scope="row" id="reports-reportsnapshot">
+                
+                  <a href="/admin/reports/reportsnapshot/">报表快照</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/reports/reportsnapshot/add/" class="addlink" aria-describedby="reports-reportsnapshot">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-aggbillingdaily">
+              <th scope="row" id="reports-aggbillingdaily">
+                
+                  <a href="/admin/reports/aggbillingdaily/">计费日汇总</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/reports/aggbillingdaily/add/" class="addlink" aria-describedby="reports-aggbillingdaily">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-auth module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/auth/" class="section" title="在应用程序 认证和授权 中的模型">认证和授权</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-group">
+              <th scope="row" id="auth-group">
+                
+                  <a href="/admin/auth/group/">组</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/auth/group/add/" class="addlink" aria-describedby="auth-group">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-accounts module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/accounts/" class="section" title="在应用程序 账号管理 中的模型">账号管理</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-systemlog">
+              <th scope="row" id="accounts-systemlog">
+                
+                  <a href="/admin/accounts/systemlog/">上机日志</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-auditevent">
+              <th scope="row" id="accounts-auditevent">
+                
+                  <a href="/admin/accounts/auditevent/">不可变审计事件</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-user">
+              <th scope="row" id="accounts-user">
+                
+                  <a href="/admin/accounts/user/">用户管理</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/accounts/user/add/" class="addlink" aria-describedby="accounts-user">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-userrolescope">
+              <th scope="row" id="accounts-userrolescope">
+                
+                  <a href="/admin/accounts/userrolescope/">用户角色范围</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-token_blacklist module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/token_blacklist/" class="section" title="在应用程序 令牌黑名单 中的模型">令牌黑名单</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-blacklistedtoken">
+              <th scope="row" id="token_blacklist-blacklistedtoken">
+                
+                  <a href="/admin/token_blacklist/blacklistedtoken/">Blacklisted Tokens</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/token_blacklist/blacklistedtoken/add/" class="addlink" aria-describedby="token_blacklist-blacklistedtoken">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-outstandingtoken">
+              <th scope="row" id="token_blacklist-outstandingtoken">
+                
+                  <a href="/admin/token_blacklist/outstandingtoken/">Outstanding Tokens</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-salesapp module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/salesapp/" class="section" title="在应用程序 商城销售管理 中的模型">商城销售管理</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-saleminicoupon">
+              <th scope="row" id="salesapp-saleminicoupon">
+                
+                  <a href="/admin/salesapp/saleminicoupon/">商城优惠券</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminicoupon/add/" class="addlink" aria-describedby="salesapp-saleminicoupon">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminicoupontemplate">
+              <th scope="row" id="salesapp-saleminicoupontemplate">
+                
+                  <a href="/admin/salesapp/saleminicoupontemplate/">商城优惠券模板</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminicoupontemplate/add/" class="addlink" aria-describedby="salesapp-saleminicoupontemplate">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminidistributionrecord">
+              <th scope="row" id="salesapp-saleminidistributionrecord">
+                
+                  <a href="/admin/salesapp/saleminidistributionrecord/">商城分销记录</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminidistributionrecord/add/" class="addlink" aria-describedby="salesapp-saleminidistributionrecord">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminiaftersalerequest">
+              <th scope="row" id="salesapp-saleminiaftersalerequest">
+                
+                  <a href="/admin/salesapp/saleminiaftersalerequest/">商城售后申请</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminiaftersalerequest/add/" class="addlink" aria-describedby="salesapp-saleminiaftersalerequest">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminiproductreview">
+              <th scope="row" id="salesapp-saleminiproductreview">
+                
+                  <a href="/admin/salesapp/saleminiproductreview/">商城商品评价</a>
+                
+              </th>
+
+              
+                <td></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleproductconfig">
+              <th scope="row" id="salesapp-saleproductconfig">
+                
+                  <a href="/admin/salesapp/saleproductconfig/">商城商品配置</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleproductconfig/add/" class="addlink" aria-describedby="salesapp-saleproductconfig">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminipayment">
+              <th scope="row" id="salesapp-saleminipayment">
+                
+                  <a href="/admin/salesapp/saleminipayment/">商城支付单</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminipayment/add/" class="addlink" aria-describedby="salesapp-saleminipayment">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminipaymentevent">
+              <th scope="row" id="salesapp-saleminipaymentevent">
+                
+                  <a href="/admin/salesapp/saleminipaymentevent/">商城支付回调事件</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminipaymentevent/add/" class="addlink" aria-describedby="salesapp-saleminipaymentevent">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminipointledger">
+              <th scope="row" id="salesapp-saleminipointledger">
+                
+                  <a href="/admin/salesapp/saleminipointledger/">商城积分流水</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminipointledger/add/" class="addlink" aria-describedby="salesapp-saleminipointledger">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminiordermapping">
+              <th scope="row" id="salesapp-saleminiordermapping">
+                
+                  <a href="/admin/salesapp/saleminiordermapping/">商城订单映射</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminiordermapping/add/" class="addlink" aria-describedby="salesapp-saleminiordermapping">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminiorderadjustment">
+              <th scope="row" id="salesapp-saleminiorderadjustment">
+                
+                  <a href="/admin/salesapp/saleminiorderadjustment/">商城订单调整</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminiorderadjustment/add/" class="addlink" aria-describedby="salesapp-saleminiorderadjustment">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminicart">
+              <th scope="row" id="salesapp-saleminicart">
+                
+                  <a href="/admin/salesapp/saleminicart/">商城购物车</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminicart/add/" class="addlink" aria-describedby="salesapp-saleminicart">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminicartitem">
+              <th scope="row" id="salesapp-saleminicartitem">
+                
+                  <a href="/admin/salesapp/saleminicartitem/">商城购物车商品</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminicartitem/add/" class="addlink" aria-describedby="salesapp-saleminicartitem">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminibanner">
+              <th scope="row" id="salesapp-saleminibanner">
+                
+                  <a href="/admin/salesapp/saleminibanner/">商城轮播图</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminibanner/add/" class="addlink" aria-describedby="salesapp-saleminibanner">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-saleminirefund">
+              <th scope="row" id="salesapp-saleminirefund">
+                
+                  <a href="/admin/salesapp/saleminirefund/">商城退款单</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/saleminirefund/add/" class="addlink" aria-describedby="salesapp-saleminirefund">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-minicustomeraddress">
+              <th scope="row" id="salesapp-minicustomeraddress">
+                
+                  <a href="/admin/salesapp/minicustomeraddress/">小程序收货地址</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/minicustomeraddress/add/" class="addlink" aria-describedby="salesapp-minicustomeraddress">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-miniprogramuser">
+              <th scope="row" id="salesapp-miniprogramuser">
+                
+                  <a href="/admin/salesapp/miniprogramuser/">小程序用户</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/salesapp/miniprogramuser/add/" class="addlink" aria-describedby="salesapp-miniprogramuser">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-core module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/core/" class="section" title="在应用程序 核心 中的模型">核心</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-printconfig">
+              <th scope="row" id="core-printconfig">
+                
+                  <a href="/admin/core/printconfig/">打印配置</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/core/printconfig/add/" class="addlink" aria-describedby="core-printconfig">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+          
+            <tr class="model-systemsetting">
+              <th scope="row" id="core-systemsetting">
+                
+                  <a href="/admin/core/systemsetting/">系统设置</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/core/systemsetting/add/" class="addlink" aria-describedby="core-systemsetting">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+    <div class="app-authtoken module collapsed">
+      <table>
+        <caption>
+          <a href="/admin/authtoken/" class="section" title="在应用程序 认证令牌 中的模型">认证令牌</a>
+        </caption>
+        <thead class="visually-hidden">
+          <tr>
+            <th scope="col">Model name</th>
+            <th scope="col">Add link</th>
+            <th scope="col">Change or view list link</th>
+          </tr>
+        </thead>
+        
+          
+            <tbody><tr class="model-tokenproxy">
+              <th scope="row" id="authtoken-tokenproxy">
+                
+                  <a href="/admin/authtoken/tokenproxy/">令牌</a>
+                
+              </th>
+
+              
+                <td><a href="/admin/authtoken/tokenproxy/add/" class="addlink" aria-describedby="authtoken-tokenproxy">增加</a></td>
+              
+
+              
+            </tr>
+          
+        
+      </tbody></table>
+    </div>
+  
+
+
+</nav>
+
+        
+      
+      <main id="content-start" class="content" tabindex="-1">
+        
+          
+        
+        <!-- Content -->
+        <div id="content" class="">
+          
+          <h1>选择 任务 来修改</h1>
+          
+          
+  <div id="content-main">
+    
+    
+    <div class="module filtered" id="changelist">
+      <div class="changelist-form-container">
+        
+  <div class="cl-toolbar">
+    
+      <ul class="object-tools">
+        <li>
+          <a class="addlink" href="/admin/tasking/wmstask/add/">
+            增加 任务
+          </a>
+        </li>
+      </ul>
+    
+    
+
+<div id="toolbar"><form id="changelist-search" method="get" role="search">
+<div><!-- DIV needed for valid HTML -->
+<label for="searchbar"><img src="/static/admin/img/search.svg" alt="Search"></label>
+<input type="text" size="40" name="q" value="" id="searchbar" style="">
+<input type="submit" value="搜索" style="">
+
+
+</div>
+
+</form></div>
+
+
+  </div>
+
+        
+<nav class="toplinks">
+
+
+
+
+
+
+
+
+</nav>
+
+
+
+        <form id="changelist-form" method="post" novalidate=""><input type="hidden" name="csrfmiddlewaretoken" value="2ygDzkq3ZBW21pnRbtNWaeIhEhjmcznIS4GvmaSv1gQPKfTdbeTBN2lqGxK17RbE" style="">
+        
+
+        
+          
+          
+
+
+
+          
+        
+        
+
+<p class="paginator">
+
+0 任务
+
+
+</p>
+
+        </form>
+      </div>
+      
+        
+          <nav id="changelist-filter" aria-labelledby="changelist-filter-header">
+            <h2 id="changelist-filter-header">过滤器</h2>
+            <div id="changelist-filter-extra-actions">
+              <h3>
+                <a href="?_facets=True" class="viewlink">显示计数</a>
+              </h3>
+              
+            </div>
+            
+<details data-filter-title="任务类型" open="">
+  <summary>
+     以 任务类型
+  </summary>
+  <ul>
+  
+    <li class="selected">
+    <a href="?">全部</a></li>
+  
+    <li>
+    <a href="?task_type__exact=RECEIVE">收货</a></li>
+  
+    <li>
+    <a href="?task_type__exact=PUTAWAY">上架</a></li>
+  
+    <li>
+    <a href="?task_type__exact=PICK">拣货</a></li>
+  
+    <li>
+    <a href="?task_type__exact=REVIEW">复核</a></li>
+  
+    <li>
+    <a href="?task_type__exact=PACK">打包</a></li>
+  
+    <li>
+    <a href="?task_type__exact=LOAD">装车</a></li>
+  
+    <li>
+    <a href="?task_type__exact=DISPATCH">发运</a></li>
+  
+    <li>
+    <a href="?task_type__exact=REPLEN">补货</a></li>
+  
+    <li>
+    <a href="?task_type__exact=RELOC">移位</a></li>
+  
+    <li>
+    <a href="?task_type__exact=COUNT">盘点</a></li>
+  
+    <li>
+    <a href="?task_type__exact=OTHER">其他</a></li>
+  
+    <li>
+    <a href="?task_type__exact=ADJUST">调整</a></li>
+  
+  </ul>
+</details>
+
+<details data-filter-title="任务状态" open="">
+  <summary>
+     以 任务状态
+  </summary>
+  <ul>
+  
+    <li class="selected">
+    <a href="?">全部</a></li>
+  
+    <li>
+    <a href="?status__exact=RESERVED">冻结预订</a></li>
+  
+    <li>
+    <a href="?status__exact=DRAFT">草稿</a></li>
+  
+    <li>
+    <a href="?status__exact=READY">待发布</a></li>
+  
+    <li>
+    <a href="?status__exact=RELEASED">已发布</a></li>
+  
+    <li>
+    <a href="?status__exact=IN_PROGRESS">执行中</a></li>
+  
+    <li>
+    <a href="?status__exact=COMPLETED">已完成</a></li>
+  
+    <li>
+    <a href="?status__exact=CANCELLED">已取消</a></li>
+  
+  </ul>
+</details>
+
+<details data-filter-title="优先级" open="">
+  <summary>
+     以 优先级
+  </summary>
+  <ul>
+  
+    <li class="selected">
+    <a href="?">全部</a></li>
+  
+    <li>
+    <a href="?priority__exact=1">低</a></li>
+  
+    <li>
+    <a href="?priority__exact=2">中</a></li>
+  
+    <li>
+    <a href="?priority__exact=3">高</a></li>
+  
+  </ul>
+</details>
+
+          </nav>
+        
+      
+    </div>
+  </div>
+
+          
+          <br class="clear">
+        </div>
+        <!-- END Content -->
+      </main>
+    </div>
+    <footer id="footer"></footer>
+</div>
+<!-- END Container -->
+
+<!-- SVGs -->
+<svg xmlns="http://www.w3.org/2000/svg" class="base-svgs">
+  <symbol viewBox="0 0 24 24" width="1.5rem" height="1.5rem" id="icon-auto"><path d="M0 0h24v24H0z" fill="currentColor"></path><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm0-2V4a8 8 0 1 0 0 16z"></path></symbol>
+  <symbol viewBox="0 0 24 24" width="1.5rem" height="1.5rem" id="icon-moon"><path d="M0 0h24v24H0z" fill="currentColor"></path><path d="M10 7a7 7 0 0 0 12 4.9v.1c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2h.1A6.979 6.979 0 0 0 10 7zm-6 5a8 8 0 0 0 15.062 3.762A9 9 0 0 1 8.238 4.938 7.999 7.999 0 0 0 4 12z"></path></symbol>
+  <symbol viewBox="0 0 24 24" width="1.5rem" height="1.5rem" id="icon-sun"><path d="M0 0h24v24H0z" fill="currentColor"></path><path d="M12 18a6 6 0 1 1 0-12 6 6 0 0 1 0 12zm0-2a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM11 1h2v3h-2V1zm0 19h2v3h-2v-3zM3.515 4.929l1.414-1.414L7.05 5.636 5.636 7.05 3.515 4.93zM16.95 18.364l1.414-1.414 2.121 2.121-1.414 1.414-2.121-2.121zm2.121-14.85l1.414 1.415-2.121 2.121-1.414-1.414 2.121-2.121zM5.636 16.95l1.414 1.414-2.121 2.121-1.414-1.414 2.121-2.121zM23 11v2h-3v-2h3zM4 11v2H1v-2h3z"></path></symbol>
+</svg>
+<!-- END SVGs -->
+
+
+
+</body></html>

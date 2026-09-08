@@ -1,0 +1,44 @@
+{
+  "candidate_id": "f0318285cde720a5ad0a947ec3da03186c74d6365dff1dea820ab51b5ae58769",
+  "from_source_digest": "a640217bf9b45da7311328d43c1e6c740c331fbafed8fae9c33d082d677bd5c0",
+  "to_source_digest": "03c698a030504068df8e01a1c63ce352ab41441f910e450fba3df7b978b4e719",
+  "changed_inputs": [
+    "allapp/core/test_test_evidence.py",
+    "wmsmaster/test_evidence.py"
+  ],
+  "reuse_decisions": {
+    "frontend": "Frontend source, locks, build configuration and previously hashed H5 output unchanged; reuse actual 251 logic/26 intercepted-browser/7 real-flow results.",
+    "historical-evidence-review": "Historical raw artifacts are immutable; no retroactive restoration of missing subtest identities.",
+    "python-dependency-audit": "Production lock and image installed dependency set unchanged; retain the actual earlier scan timestamp.",
+    "pdf-resource-measurement": "PDF implementation/dependencies unchanged; host measurement is budget input only, not a production limit or candidate-runtime benchmark.",
+    "secret-scan": "Prior candidate source scan reused; only evidence recorder and its tests changed, reviewed diff contains no credential addition. This is not a fresh full secret scan."
+  },
+  "created_at": "2026-09-06T09:24:38.346558+00:00",
+  "limitations": [
+    "Backend functional/migration authority must come from v6 derived image.",
+    "Real browser server used host Python 3.12.3.",
+    "Evidence helper outputs do not mutate frozen acceptance inputs."
+  ],
+  "artifacts": [
+    {
+      "path": "candidate-source-v5.json",
+      "sha256": "0a453e26f319102d450d5bcb03fbacda916f13bcd398fa9c1849b484507d48ec"
+    },
+    {
+      "path": "candidate-source-v6.json",
+      "sha256": "52ff9bb912425fe99314a5aee2b299cd34155d9945b9bd4be7df3bde8685a766"
+    },
+    {
+      "path": "frontend-summary-v5.json",
+      "sha256": "3d8c3726362f1e0ef8ab46a70b1203f1db37b928029a26635dcba29242b6b5c2"
+    },
+    {
+      "path": "secret-scan-review-v5.json",
+      "sha256": "01d4723ac5644cd639d561bf08d2ffca69e696b0ec26027de493b3c85f7c9130"
+    },
+    {
+      "path": "frontend-artifacts-v3.json",
+      "sha256": "c776c5b75367a128f66855fb9b2dbcb1c694ddb70f1c0a8653e60b4ed6e0241b"
+    }
+  ]
+}

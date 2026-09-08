@@ -1,0 +1,900 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "@babel/core": {
+      "name": "@babel/core",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@babel/helper-module-transforms",
+        {
+          "source": 1123528,
+          "name": "@babel/core",
+          "dependency": "@babel/core",
+          "title": "@babel/core: Arbitrary File Read via sourceMappingURL Comment",
+          "url": "https://github.com/advisories/GHSA-4x5r-pxfx-6jf8",
+          "severity": "low",
+          "cwe": [
+            "CWE-22",
+            "CWE-200"
+          ],
+          "cvss": {
+            "score": 3.2,
+            "vectorString": "CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:C/C:L/I:N/A:N"
+          },
+          "range": "<=7.29.0"
+        }
+      ],
+      "effects": [
+        "@babel/helper-module-transforms",
+        "@dcloudio/uni-cli-shared"
+      ],
+      "range": "",
+      "nodes": [
+        "node_modules/@babel/core"
+      ],
+      "fixAvailable": false
+    },
+    "@babel/helper-module-transforms": {
+      "name": "@babel/helper-module-transforms",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@babel/core"
+      ],
+      "effects": [
+        "@babel/core"
+      ],
+      "range": "",
+      "nodes": [
+        "node_modules/@babel/helper-module-transforms"
+      ],
+      "fixAvailable": false
+    },
+    "@dcloudio/uni-app": {
+      "name": "@dcloudio/uni-app",
+      "severity": "low",
+      "isDirect": true,
+      "via": [
+        "@dcloudio/uni-cloud",
+        "@dcloudio/uni-components",
+        "@dcloudio/uni-console",
+        "@dcloudio/uni-push",
+        "@dcloudio/uni-stat"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@dcloudio/uni-app"
+      ],
+      "fixAvailable": false
+    },
+    "@dcloudio/uni-cli-shared": {
+      "name": "@dcloudio/uni-cli-shared",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@babel/core",
+        "esbuild",
+        "postcss-selector-parser"
+      ],
+      "effects": [
+        "@dcloudio/uni-cloud",
+        "@dcloudio/uni-console",
+        "@dcloudio/uni-h5-vite",
+        "@dcloudio/uni-mp-compiler",
+        "@dcloudio/uni-mp-vite",
+        "@dcloudio/uni-mp-weixin",
+        "@dcloudio/uni-push",
+        "@dcloudio/uni-stat"
+      ],
+      "range": "",
+      "nodes": [
+        "node_modules/@dcloudio/uni-cli-shared"
+      ],
+      "fixAvailable": false
+    },
+    "@dcloudio/uni-cloud": {
+      "name": "@dcloudio/uni-cloud",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@dcloudio/uni-cli-shared"
+      ],
+      "effects": [
+        "@dcloudio/uni-app"
+      ],
+      "range": "",
+      "nodes": [
+        "node_modules/@dcloudio/uni-cloud"
+      ],
+      "fixAvailable": false
+    },
+    "@dcloudio/uni-components": {
+      "name": "@dcloudio/uni-components",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@dcloudio/uni-cloud",
+        "@dcloudio/uni-h5"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@dcloudio/uni-components"
+      ],
+      "fixAvailable": true
+    },
+    "@dcloudio/uni-console": {
+      "name": "@dcloudio/uni-console",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@dcloudio/uni-cli-shared"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@dcloudio/uni-console"
+      ],
+      "fixAvailable": true
+    },
+    "@dcloudio/uni-h5": {
+      "name": "@dcloudio/uni-h5",
+      "severity": "low",
+      "isDirect": true,
+      "via": [
+        "@dcloudio/uni-h5-vite",
+        "postcss-selector-parser"
+      ],
+      "effects": [
+        "@dcloudio/uni-components"
+      ],
+      "range": "",
+      "nodes": [
+        "node_modules/@dcloudio/uni-h5"
+      ],
+      "fixAvailable": false
+    },
+    "@dcloudio/uni-h5-vite": {
+      "name": "@dcloudio/uni-h5-vite",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@dcloudio/uni-cli-shared",
+        "@vitejs/plugin-basic-ssl"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@dcloudio/uni-h5-vite"
+      ],
+      "fixAvailable": true
+    },
+    "@dcloudio/uni-mp-compiler": {
+      "name": "@dcloudio/uni-mp-compiler",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@dcloudio/uni-cli-shared"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@dcloudio/uni-mp-compiler"
+      ],
+      "fixAvailable": true
+    },
+    "@dcloudio/uni-mp-vite": {
+      "name": "@dcloudio/uni-mp-vite",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@dcloudio/uni-cli-shared",
+        "@dcloudio/uni-mp-compiler"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@dcloudio/uni-mp-vite"
+      ],
+      "fixAvailable": true
+    },
+    "@dcloudio/uni-mp-weixin": {
+      "name": "@dcloudio/uni-mp-weixin",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": [
+        "@dcloudio/uni-cli-shared",
+        "@dcloudio/uni-mp-compiler",
+        "@dcloudio/uni-mp-vite",
+        "jimp"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@dcloudio/uni-mp-weixin"
+      ],
+      "fixAvailable": false
+    },
+    "@dcloudio/uni-push": {
+      "name": "@dcloudio/uni-push",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@dcloudio/uni-cli-shared"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@dcloudio/uni-push"
+      ],
+      "fixAvailable": true
+    },
+    "@dcloudio/uni-stat": {
+      "name": "@dcloudio/uni-stat",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@dcloudio/uni-cli-shared"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@dcloudio/uni-stat"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/bmp": {
+      "name": "@jimp/bmp",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/bmp"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/core": {
+      "name": "@jimp/core",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "phin"
+      ],
+      "effects": [
+        "@jimp/custom"
+      ],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/core"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/custom": {
+      "name": "@jimp/custom",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/core"
+      ],
+      "effects": [
+        "@jimp/bmp",
+        "@jimp/gif",
+        "@jimp/jpeg",
+        "@jimp/plugin-blit",
+        "@jimp/plugin-blur",
+        "@jimp/plugin-circle",
+        "@jimp/plugin-color",
+        "@jimp/plugin-contain",
+        "@jimp/plugin-cover",
+        "@jimp/plugin-crop",
+        "@jimp/plugin-displace",
+        "@jimp/plugin-dither",
+        "@jimp/plugin-fisheye",
+        "@jimp/plugin-flip",
+        "@jimp/plugin-gaussian",
+        "@jimp/plugin-invert",
+        "@jimp/plugin-mask",
+        "@jimp/plugin-normalize",
+        "@jimp/plugin-print",
+        "@jimp/plugin-resize",
+        "@jimp/plugin-rotate",
+        "@jimp/plugin-scale",
+        "@jimp/plugin-shadow",
+        "@jimp/plugin-threshold",
+        "@jimp/plugins",
+        "@jimp/png",
+        "@jimp/tiff",
+        "@jimp/types",
+        "jimp"
+      ],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/custom"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/gif": {
+      "name": "@jimp/gif",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/gif"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/jpeg": {
+      "name": "@jimp/jpeg",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/jpeg"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-blit": {
+      "name": "@jimp/plugin-blit",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-blit"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-blur": {
+      "name": "@jimp/plugin-blur",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-blur"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-circle": {
+      "name": "@jimp/plugin-circle",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-circle"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-color": {
+      "name": "@jimp/plugin-color",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-color"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-contain": {
+      "name": "@jimp/plugin-contain",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom",
+        "@jimp/plugin-blit",
+        "@jimp/plugin-resize",
+        "@jimp/plugin-scale"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-contain"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-cover": {
+      "name": "@jimp/plugin-cover",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom",
+        "@jimp/plugin-crop",
+        "@jimp/plugin-resize",
+        "@jimp/plugin-scale"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-cover"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-crop": {
+      "name": "@jimp/plugin-crop",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-crop"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-displace": {
+      "name": "@jimp/plugin-displace",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-displace"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-dither": {
+      "name": "@jimp/plugin-dither",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-dither"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-fisheye": {
+      "name": "@jimp/plugin-fisheye",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-fisheye"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-flip": {
+      "name": "@jimp/plugin-flip",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom",
+        "@jimp/plugin-rotate"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-flip"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-gaussian": {
+      "name": "@jimp/plugin-gaussian",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-gaussian"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-invert": {
+      "name": "@jimp/plugin-invert",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-invert"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-mask": {
+      "name": "@jimp/plugin-mask",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-mask"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-normalize": {
+      "name": "@jimp/plugin-normalize",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-normalize"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-print": {
+      "name": "@jimp/plugin-print",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom",
+        "@jimp/plugin-blit"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-print"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-resize": {
+      "name": "@jimp/plugin-resize",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-resize"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-rotate": {
+      "name": "@jimp/plugin-rotate",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom",
+        "@jimp/plugin-blit",
+        "@jimp/plugin-crop",
+        "@jimp/plugin-resize"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-rotate"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-scale": {
+      "name": "@jimp/plugin-scale",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom",
+        "@jimp/plugin-resize"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-scale"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-shadow": {
+      "name": "@jimp/plugin-shadow",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom",
+        "@jimp/plugin-blur",
+        "@jimp/plugin-resize"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-shadow"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugin-threshold": {
+      "name": "@jimp/plugin-threshold",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom",
+        "@jimp/plugin-color",
+        "@jimp/plugin-resize"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugin-threshold"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/plugins": {
+      "name": "@jimp/plugins",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom",
+        "@jimp/plugin-blit",
+        "@jimp/plugin-blur",
+        "@jimp/plugin-circle",
+        "@jimp/plugin-color",
+        "@jimp/plugin-contain",
+        "@jimp/plugin-cover",
+        "@jimp/plugin-crop",
+        "@jimp/plugin-displace",
+        "@jimp/plugin-dither",
+        "@jimp/plugin-fisheye",
+        "@jimp/plugin-flip",
+        "@jimp/plugin-gaussian",
+        "@jimp/plugin-invert",
+        "@jimp/plugin-mask",
+        "@jimp/plugin-normalize",
+        "@jimp/plugin-print",
+        "@jimp/plugin-resize",
+        "@jimp/plugin-rotate",
+        "@jimp/plugin-scale",
+        "@jimp/plugin-shadow",
+        "@jimp/plugin-threshold"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/plugins"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/png": {
+      "name": "@jimp/png",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/png"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/tiff": {
+      "name": "@jimp/tiff",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/tiff"
+      ],
+      "fixAvailable": true
+    },
+    "@jimp/types": {
+      "name": "@jimp/types",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/bmp",
+        "@jimp/custom",
+        "@jimp/gif",
+        "@jimp/jpeg",
+        "@jimp/png",
+        "@jimp/tiff"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@jimp/types"
+      ],
+      "fixAvailable": true
+    },
+    "@vitejs/plugin-basic-ssl": {
+      "name": "@vitejs/plugin-basic-ssl",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "vite"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/@vitejs/plugin-basic-ssl"
+      ],
+      "fixAvailable": true
+    },
+    "esbuild": {
+      "name": "esbuild",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1120680,
+          "name": "esbuild",
+          "dependency": "esbuild",
+          "title": "esbuild allows arbitrary file read when running the development server on Windows",
+          "url": "https://github.com/advisories/GHSA-g7r4-m6w7-qqqr",
+          "severity": "low",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 2.5,
+            "vectorString": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:L/A:N"
+          },
+          "range": ">=0.27.3 <0.28.1"
+        }
+      ],
+      "effects": [
+        "vite"
+      ],
+      "range": "",
+      "nodes": [
+        "node_modules/esbuild"
+      ],
+      "fixAvailable": false
+    },
+    "jimp": {
+      "name": "jimp",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@jimp/custom",
+        "@jimp/plugins",
+        "@jimp/types"
+      ],
+      "effects": [],
+      "range": "",
+      "nodes": [
+        "node_modules/jimp"
+      ],
+      "fixAvailable": true
+    },
+    "phin": {
+      "name": "phin",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1096967,
+          "name": "phin",
+          "dependency": "phin",
+          "title": "phin may include sensitive headers in subsequent requests after redirect",
+          "url": "https://github.com/advisories/GHSA-x565-32qp-m3vf",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-200"
+          ],
+          "cvss": {
+            "score": 4.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:N/A:N"
+          },
+          "range": "<3.7.1"
+        }
+      ],
+      "effects": [
+        "@jimp/core"
+      ],
+      "range": "",
+      "nodes": [
+        "node_modules/phin"
+      ],
+      "fixAvailable": true
+    },
+    "postcss-selector-parser": {
+      "name": "postcss-selector-parser",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1153170,
+          "name": "postcss-selector-parser",
+          "dependency": "postcss-selector-parser",
+          "title": "postcss-selector-parser allows denial of service through uncontrolled AST recursion",
+          "url": "https://github.com/advisories/GHSA-w9m9-85wc-3x92",
+          "severity": "low",
+          "cwe": [
+            "CWE-404"
+          ],
+          "cvss": {
+            "score": 4.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:L"
+          },
+          "range": ">=6.1.0 <6.1.3"
+        }
+      ],
+      "effects": [
+        "@dcloudio/uni-h5"
+      ],
+      "range": "",
+      "nodes": [
+        "node_modules/postcss-selector-parser"
+      ],
+      "fixAvailable": false
+    },
+    "vite": {
+      "name": "vite",
+      "severity": "low",
+      "isDirect": true,
+      "via": [
+        "esbuild"
+      ],
+      "effects": [
+        "@vitejs/plugin-basic-ssl"
+      ],
+      "range": "",
+      "nodes": [
+        "node_modules/vite"
+      ],
+      "fixAvailable": false
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 17,
+      "moderate": 33,
+      "high": 0,
+      "critical": 0,
+      "total": 50
+    },
+    "dependencies": {
+      "prod": 351,
+      "dev": 369,
+      "optional": 87,
+      "peer": 18,
+      "peerOptional": 0,
+      "total": 796
+    }
+  }
+}

@@ -1,15 +1,23 @@
-import { BASE_URL, getToken } from '@/utils/request'
+import { BASE_URL, getToken, withAuthToken } from '@/utils/request'
 
-export function openReceiveTaskPrint(taskId) {
+export async function openReceiveTaskPrint(taskId) {
   const token = getToken()
   if (!token) {
     uni.showToast({ title: '登录已失效，请重新登录', icon: 'none' })
     return
   }
-  const url = `${BASE_URL}/api/inbound/receive_task/${taskId}/print/?token=${encodeURIComponent(token)}`
-
+  let prepared = null
   // #ifdef H5
-  window.open(url, '_blank')
+  if (typeof window !== 'undefined') prepared = window.open('', '_blank')
+  // #endif
+  let url
+  try { url = await withAuthToken(`${BASE_URL}/api/inbound/receive_task/${taskId}/print/`) } catch (error) {
+    if (prepared) prepared.close()
+    uni.showToast({ title: '无法取得打印票据，请稍后重试', icon: 'none' })
+    return
+  }
+  // #ifdef H5
+  if (prepared) prepared.location.href = url
   // #endif
 
   // #ifdef APP-PLUS

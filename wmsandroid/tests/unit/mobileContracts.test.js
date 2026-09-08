@@ -28,7 +28,16 @@ describe('mobile app contracts', () => {
     expect(manifest).not.toMatch(/READ_PHONE_STATE|GET_ACCOUNTS|WRITE_SETTINGS|BLUETOOTH|NFC/)
     const networkConfig = read('nativeResources/android/res/xml/network_security_config.xml')
     expect(networkConfig).toContain('cleartextTrafficPermitted="false"')
-    expect(networkConfig).not.toContain('192.168.')
+    // App builds generate a host-specific LAN exception from the local build
+    // configuration; the checked-in template contains only loopback hosts.
+    const domains = [...networkConfig.matchAll(/<domain includeSubdomains="false">([^<]+)<\/domain>/g)]
+      .map(match => match[1])
+    expect(domains).toEqual(expect.arrayContaining(['127.0.0.1', 'localhost']))
+    expect(domains.length).toBeLessThanOrEqual(3)
+    expect(networkConfig.match(/<domain(?:\s|>)/g)).toHaveLength(domains.length)
+    // androidNetworkSecurity.test.js independently verifies that the optional
+    // third host equals the build's HTTP API host, and is absent for HTTPS.
+    expect(networkConfig).not.toContain('includeSubdomains="true"')
     expect(read('vite.config.js')).toContain('wmsandroid-network-security-config')
   })
 

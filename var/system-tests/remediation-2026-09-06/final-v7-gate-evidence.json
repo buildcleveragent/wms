@@ -1,0 +1,470 @@
+[
+  {
+    "gate_id": "test-coordination",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.612821+00:00",
+    "artifacts": [
+      {
+        "path": "phase6-v7/final-results-review.json",
+        "sha256": "eb325f4562acc4873e98de5f31ea06e704b4c816b2306dd221ae7acd02ec2453"
+      },
+      {
+        "path": "phase6-v6/focused-tests.json",
+        "sha256": "1ae1b2b20b1f70a04d1b3d40fe27b43fdb9f08b64e07c3695958dc728a4e8d04"
+      }
+    ]
+  },
+  {
+    "gate_id": "historical-evidence-review",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.613323+00:00",
+    "artifacts": [
+      {
+        "path": "phase1/historical-review.json",
+        "sha256": "21eff44b52eeecda1960551d7fcd7626e017726aed394bb472aa08b7add6e9a8"
+      },
+      {
+        "path": "phase5/evidence-reuse-v6.json",
+        "sha256": "e49935f24d4ae49b010a249a111a780c1fd009b96a4bcc64459a40c6217c74f3"
+      },
+      {
+        "path": "phase6-v7/reuse-policy.json",
+        "sha256": "d73e240101cccd10f59d601afe3dd0297b14e0b935b9b117bab27a15cda89388"
+      }
+    ]
+  },
+  {
+    "gate_id": "runtime-smoke",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.615380+00:00",
+    "artifacts": [
+      {
+        "path": "phase5/runtime-smoke-v6/runtime-smoke.json",
+        "sha256": "0dcf6f27ef0866b13a374fd82a04b52a39fa20da4a395f2445f99dca4f822f0f"
+      },
+      {
+        "path": "phase5/runtime-django-check-v6.log",
+        "sha256": "1e3e63f221bde88816c4a4ef7367691607b20cc1d194028a02ec9ae0586cf9b1"
+      },
+      {
+        "path": "phase5/source-verification-v6.log",
+        "sha256": "ef2c78376c96d513b91419061890c468a2e3da85cc4d24b3e06eb37aa0aa1d97"
+      }
+    ],
+    "runtime_image_id": "sha256:1b943a89e9bf0983b8753634c3185fba552be07a5e50a265a102fe5e63b91346"
+  },
+  {
+    "gate_id": "dependency-audit",
+    "status": "BLOCKED",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T08:00:46.520691+00:00",
+    "artifacts": [
+      {
+        "path": "phase2/pip-audit-69.json",
+        "sha256": "7203882fab66e3eea4b8b9fb165aea758fd58358cd10c8ca0c8798efe7899a61"
+      },
+      {
+        "path": "phase2/npm-audit-final-summary.json",
+        "sha256": "183508f7c88ebb18d2f5504d4d06ba5ce9b66d397f06ad58cfee299a14c0513d"
+      },
+      {
+        "path": "phase5/secret-scan-review-v6.json",
+        "sha256": "58948007fdf8bc70711b64dd8b96eb223dd329dd889f6144339242e78bedbae5"
+      },
+      {
+        "path": "phase5/evidence-reuse-v6.json",
+        "sha256": "e49935f24d4ae49b010a249a111a780c1fd009b96a4bcc64459a40c6217c74f3"
+      },
+      {
+        "path": "phase6-v7/reuse-policy.json",
+        "sha256": "d73e240101cccd10f59d601afe3dd0297b14e0b935b9b117bab27a15cda89388"
+      }
+    ],
+    "note": "Production pip audit zero; npm high/critical zero, low/moderate findings remain registered. Older scan timestamps retained."
+  },
+  {
+    "gate_id": "image-security",
+    "status": "BLOCKED",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T09:13:24.110851+00:00",
+    "artifacts": [
+      {
+        "path": "phase5/trivy-final-v6.json",
+        "sha256": "aac34a3cef88c36e0ce0c9fabb667e2f44345aabbc89582de635e2742c79a915"
+      },
+      {
+        "path": "phase5/image-security-dispositions-v6-reviewed.json",
+        "sha256": "33b4f6ae89c870e1df6474ad2859f3c262180cec2de3f53eab56262395f22f18"
+      }
+    ],
+    "runtime_image_id": "sha256:1b943a89e9bf0983b8753634c3185fba552be07a5e50a265a102fe5e63b91346"
+  },
+  {
+    "gate_id": "business-matrix",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.630890+00:00",
+    "artifacts": [
+      {
+        "path": "phase6-v7/final-results-review.json",
+        "sha256": "eb325f4562acc4873e98de5f31ea06e704b4c816b2306dd221ae7acd02ec2453"
+      },
+      {
+        "path": "phase6-v6/functional-tests.json",
+        "sha256": "0a9f8785a41acd3f473ba231754a1697b65f1807360e43276ed57d1270c253f9"
+      }
+    ]
+  },
+  {
+    "gate_id": "migration-clean",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.631756+00:00",
+    "artifacts": [
+      {
+        "path": "phase6-v7/final-schema-verification.json",
+        "sha256": "21964f75281f18512dffce6882b6d09e34775e47974e1bf62ba9a39c3f8395d8"
+      },
+      {
+        "path": "phase6-v7/final-schema-process.json",
+        "sha256": "f96a94b67905212a2695eb30c69538bf3e28272dfa3ed73916f50b87af3ebd69"
+      },
+      {
+        "path": "phase6-v6/functional-process.json",
+        "sha256": "b2ebaef5cb8166d4a145d90fb82304eb4228af4764dc941294b8dee73d5eeedb"
+      },
+      {
+        "path": "phase5/runtime-migration-drift-v7.log",
+        "sha256": "a2bfa7b376c38062f77ce2b1e703876aaa04662f96355cdf5dc9d0d075302b05"
+      }
+    ]
+  },
+  {
+    "gate_id": "migration-nonempty-pos",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.632052+00:00",
+    "artifacts": [
+      {
+        "path": "phase6-v7/final-results-review.json",
+        "sha256": "eb325f4562acc4873e98de5f31ea06e704b4c816b2306dd221ae7acd02ec2453"
+      },
+      {
+        "path": "phase6-v7/migrations-tests.json",
+        "sha256": "8a3a951cee3c1c468feacb230040c055641269d8eb96561ec5c81f732ac68fae"
+      },
+      {
+        "path": "phase6-v7/migrations-process.json",
+        "sha256": "d109ad1427a8e453d0ea6c1603fb89ad938cda5c6fb09d35e02a0056f34809d2"
+      }
+    ]
+  },
+  {
+    "gate_id": "backend-functional",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.639691+00:00",
+    "artifacts": [
+      {
+        "path": "phase6-v7/final-results-review.json",
+        "sha256": "eb325f4562acc4873e98de5f31ea06e704b4c816b2306dd221ae7acd02ec2453"
+      },
+      {
+        "path": "phase6-v7/functional-reverification-review.json",
+        "sha256": "205247851bb33ea1848e5048a54a844b56e6321d5aa99df446908246fcbb2875"
+      },
+      {
+        "path": "phase6-v6/functional-tests.json",
+        "sha256": "0a9f8785a41acd3f473ba231754a1697b65f1807360e43276ed57d1270c253f9"
+      },
+      {
+        "path": "phase6-v6/functional-process.json",
+        "sha256": "b2ebaef5cb8166d4a145d90fb82304eb4228af4764dc941294b8dee73d5eeedb"
+      },
+      {
+        "path": "phase6-v6/functional.xml",
+        "sha256": "94afbcad31cb038981a8a4bf37552bb7a6402efc734b96602b010910ac498230"
+      },
+      {
+        "path": "phase6-v7/focused-tests.json",
+        "sha256": "57e278715cab4a88c17758f4d5d26edd235fa1456370a26e672f270d4da5fb21"
+      },
+      {
+        "path": "phase6-v7/reuse-policy.json",
+        "sha256": "d73e240101cccd10f59d601afe3dd0297b14e0b935b9b117bab27a15cda89388"
+      },
+      {
+        "path": "phase5/test-environment-v7-vs-v6.json",
+        "sha256": "c79d6532e3ca1a467bc7667745f6e5d747ffd7ef1f1ed9a232b0403cb060d40e"
+      }
+    ],
+    "note": "Functional acceptance uses the original full run and a separate complete affected-module rerun; this is not a new full pytest run."
+  },
+  {
+    "gate_id": "coverage",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.656169+00:00",
+    "artifacts": [
+      {
+        "path": "phase6-v7/coverage-gate.json",
+        "sha256": "782bc856b4a1a2735343997f920f2a27e23ddccc710787559007fd5924a8d832"
+      },
+      {
+        "path": "phase6-v7/coverage.json",
+        "sha256": "5ba1fea1caef003d5c47ab7e963d17efa8be6e885c613875eeb669bf3aa57f98"
+      }
+    ]
+  },
+  {
+    "gate_id": "frontend",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.658086+00:00",
+    "artifacts": [
+      {
+        "path": "phase5/frontend-summary-v6.json",
+        "sha256": "a8ccf1089b90fead8103eaf981f71c3beb602aea56bf09989d8d2a3f33a91fa8"
+      },
+      {
+        "path": "phase3/frontend-final-v1/frontend-manifest.json",
+        "sha256": "9efc274076de765d7fd9eb59e9b78778604b9af4a80d8fffb5a19ec9625111aa"
+      },
+      {
+        "path": "phase5/frontend-artifacts-v3.json",
+        "sha256": "c776c5b75367a128f66855fb9b2dbcb1c694ddb70f1c0a8653e60b4ed6e0241b"
+      },
+      {
+        "path": "phase5/evidence-reuse-v6.json",
+        "sha256": "e49935f24d4ae49b010a249a111a780c1fd009b96a4bcc64459a40c6217c74f3"
+      },
+      {
+        "path": "phase6-v7/reuse-policy.json",
+        "sha256": "d73e240101cccd10f59d601afe3dd0297b14e0b935b9b117bab27a15cda89388"
+      }
+    ]
+  },
+  {
+    "gate_id": "real-browser",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.659936+00:00",
+    "artifacts": [
+      {
+        "path": "phase3/real-browser-final-v2.json",
+        "sha256": "6e5078070751c764df568af25485b3ca6f965422845379673de4c2f524f3057f"
+      },
+      {
+        "path": "phase3/real-browser-final-v2.xml",
+        "sha256": "0176d1ef44a10debe41e417a02f8d6d02033e99f5d0a48a2edb7fab3aef99b7d"
+      },
+      {
+        "path": "phase3/real-browser-screenshots/manifest.json",
+        "sha256": "0f9053fcf67138a15d7e80c3f77a100691d92f03b4f6f65326e7f7ae47f472f0"
+      },
+      {
+        "path": "phase5/evidence-reuse-v6.json",
+        "sha256": "e49935f24d4ae49b010a249a111a780c1fd009b96a4bcc64459a40c6217c74f3"
+      },
+      {
+        "path": "phase6-v7/reuse-policy.json",
+        "sha256": "d73e240101cccd10f59d601afe3dd0297b14e0b935b9b117bab27a15cda89388"
+      }
+    ],
+    "note": "Real browser backend used host Python 3.12.3. Final backend authority is candidate-derived Python 3.12.14."
+  },
+  {
+    "gate_id": "pdf-acceptance",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.662859+00:00",
+    "artifacts": [
+      {
+        "path": "phase6-v7/final-results-review.json",
+        "sha256": "eb325f4562acc4873e98de5f31ea06e704b4c816b2306dd221ae7acd02ec2453"
+      },
+      {
+        "path": "phase6-v6/functional-tests.json",
+        "sha256": "0a9f8785a41acd3f473ba231754a1697b65f1807360e43276ed57d1270c253f9"
+      }
+    ]
+  },
+  {
+    "gate_id": "pdf-resource-register",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.663084+00:00",
+    "artifacts": [
+      {
+        "path": "phase2/pdf-measurements/measurement.json",
+        "sha256": "1fe44a7e970cbc570ef86271d3f4db3cbac94596cc1cf3bf9f16cba9d3fc5f4f"
+      },
+      {
+        "path": "phase6-v6/pdf-risk-register.json",
+        "sha256": "7f9f8fd21b55f7e4e0fc054e4832960c3112fcf1cd0a9362ecc4cb5a065e8eed"
+      }
+    ],
+    "note": "Risk is registered and still open; test timeout is not a production control."
+  },
+  {
+    "gate_id": "readiness-tool",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.663644+00:00",
+    "artifacts": [
+      {
+        "path": "phase6-v7/final-results-review.json",
+        "sha256": "eb325f4562acc4873e98de5f31ea06e704b4c816b2306dd221ae7acd02ec2453"
+      },
+      {
+        "path": "phase6-v6/focused-tests.json",
+        "sha256": "1ae1b2b20b1f70a04d1b3d40fe27b43fdb9f08b64e07c3695958dc728a4e8d04"
+      }
+    ]
+  },
+  {
+    "gate_id": "external-gates-register",
+    "status": "PASS",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.663854+00:00",
+    "artifacts": [
+      {
+        "path": "phase4/external-open-items.json",
+        "sha256": "f9a59f4c7aafe2050c7c8e9978930f412e92da4543e2feebbc3a5ab4229eb3c0"
+      }
+    ]
+  },
+  {
+    "gate_id": "pdf-resource-release-decision",
+    "status": "BLOCKED",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.664045+00:00",
+    "artifacts": [
+      {
+        "path": "phase4/external-open-items.json",
+        "sha256": "f9a59f4c7aafe2050c7c8e9978930f412e92da4543e2feebbc3a5ab4229eb3c0"
+      }
+    ],
+    "note": "Actual independent environment, named human decision or deployment evidence is missing; local validators do not substitute for execution."
+  },
+  {
+    "gate_id": "staging-rehearsal-60m",
+    "status": "BLOCKED",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.664392+00:00",
+    "artifacts": [
+      {
+        "path": "phase4/external-open-items.json",
+        "sha256": "f9a59f4c7aafe2050c7c8e9978930f412e92da4543e2feebbc3a5ab4229eb3c0"
+      }
+    ],
+    "note": "Actual independent environment, named human decision or deployment evidence is missing; local validators do not substitute for execution."
+  },
+  {
+    "gate_id": "capacity",
+    "status": "BLOCKED",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.664616+00:00",
+    "artifacts": [
+      {
+        "path": "phase4/external-open-items.json",
+        "sha256": "f9a59f4c7aafe2050c7c8e9978930f412e92da4543e2feebbc3a5ab4229eb3c0"
+      }
+    ],
+    "note": "Actual independent environment, named human decision or deployment evidence is missing; local validators do not substitute for execution."
+  },
+  {
+    "gate_id": "disaster-recovery",
+    "status": "BLOCKED",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.664803+00:00",
+    "artifacts": [
+      {
+        "path": "phase4/external-open-items.json",
+        "sha256": "f9a59f4c7aafe2050c7c8e9978930f412e92da4543e2feebbc3a5ab4229eb3c0"
+      }
+    ],
+    "note": "Actual independent environment, named human decision or deployment evidence is missing; local validators do not substitute for execution."
+  },
+  {
+    "gate_id": "wechat-payment",
+    "status": "BLOCKED",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.665010+00:00",
+    "artifacts": [
+      {
+        "path": "phase4/external-open-items.json",
+        "sha256": "f9a59f4c7aafe2050c7c8e9978930f412e92da4543e2feebbc3a5ab4229eb3c0"
+      }
+    ],
+    "note": "Actual independent environment, named human decision or deployment evidence is missing; local validators do not substitute for execution."
+  },
+  {
+    "gate_id": "signed-apk-devices",
+    "status": "BLOCKED",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.665478+00:00",
+    "artifacts": [
+      {
+        "path": "phase4/external-open-items.json",
+        "sha256": "f9a59f4c7aafe2050c7c8e9978930f412e92da4543e2feebbc3a5ab4229eb3c0"
+      }
+    ],
+    "note": "Actual independent environment, named human decision or deployment evidence is missing; local validators do not substitute for execution."
+  },
+  {
+    "gate_id": "manual-196",
+    "status": "BLOCKED",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.665803+00:00",
+    "artifacts": [
+      {
+        "path": "phase4/external-open-items.json",
+        "sha256": "f9a59f4c7aafe2050c7c8e9978930f412e92da4543e2feebbc3a5ab4229eb3c0"
+      }
+    ],
+    "note": "Actual independent environment, named human decision or deployment evidence is missing; local validators do not substitute for execution."
+  },
+  {
+    "gate_id": "release-approval",
+    "status": "BLOCKED",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.666203+00:00",
+    "artifacts": [
+      {
+        "path": "phase4/external-open-items.json",
+        "sha256": "f9a59f4c7aafe2050c7c8e9978930f412e92da4543e2feebbc3a5ab4229eb3c0"
+      }
+    ],
+    "note": "Actual independent environment, named human decision or deployment evidence is missing; local validators do not substitute for execution."
+  },
+  {
+    "gate_id": "deployed-artifact-identity",
+    "status": "NOT_RUN",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.666639+00:00",
+    "artifacts": [
+      {
+        "path": "phase4/external-open-items.json",
+        "sha256": "f9a59f4c7aafe2050c7c8e9978930f412e92da4543e2feebbc3a5ab4229eb3c0"
+      }
+    ],
+    "note": "Actual independent environment, named human decision or deployment evidence is missing; local validators do not substitute for execution."
+  },
+  {
+    "gate_id": "production-observation-60m",
+    "status": "NOT_RUN",
+    "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+    "finished_at": "2026-09-06T11:01:06.666847+00:00",
+    "artifacts": [
+      {
+        "path": "phase4/external-open-items.json",
+        "sha256": "f9a59f4c7aafe2050c7c8e9978930f412e92da4543e2feebbc3a5ab4229eb3c0"
+      }
+    ],
+    "note": "Actual independent environment, named human decision or deployment evidence is missing; local validators do not substitute for execution."
+  }
+]

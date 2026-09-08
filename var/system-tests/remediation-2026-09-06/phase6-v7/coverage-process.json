@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "run_id": "93f250f6fad7414c8c71962fc7d72cdf",
+  "status": "PASS",
+  "owner": {
+    "pid": 102,
+    "pid_namespace": "pid:[4026532612]",
+    "boot_id": "0a436ce8-0fe0-4427-8c39-e6cacfa16d29",
+    "start_time": "3718913",
+    "state": "R"
+  },
+  "command": [
+    "/wms/.venv/bin/python",
+    "/wms/var/system-tests/remediation-2026-09-06/phase6-v7/run_candidate_gate.py",
+    "coverage",
+    "child"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 104,
+    "pid_namespace": "pid:[4026532612]",
+    "boot_id": "0a436ce8-0fe0-4427-8c39-e6cacfa16d29",
+    "start_time": "3718979",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 104,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 16.045
+}

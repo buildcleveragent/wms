@@ -1,0 +1,11 @@
+{
+  "package_findings": 72,
+  "unique_cves": 33,
+  "severity": {
+    "HIGH": 65,
+    "CRITICAL": 7
+  },
+  "fixable": [],
+  "source": "trivy-image-render-complete.json",
+  "image_identity": "sha256:9c1b6d42b50188dd3dc4127fd089f6b5ce60343ba967cc650a627d12b13434a3"
+}

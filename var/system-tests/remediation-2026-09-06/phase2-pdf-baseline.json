@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "run_id": "656d96c0515d41e5bb0a9f4dd4a235d1",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 8,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase2-pdf-baseline.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 8
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/reports/test_pdf_acceptance.py::test_report_fetcher_rejects_every_non_inline_resource[https://invalid.example/a]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_pdf_acceptance.py::test_report_fetcher_rejects_every_non_inline_resource[http://127.0.0.1/a]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_pdf_acceptance.py::test_report_fetcher_rejects_every_non_inline_resource[file:///etc/passwd]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_pdf_acceptance.py::test_report_fetcher_rejects_every_non_inline_resource[/static/a.png]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_pdf_acceptance.py::test_report_fetcher_rejects_every_non_inline_resource[/media/a.png]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_pdf_acceptance.py::test_report_fetcher_rejects_every_non_inline_resource[ftp://invalid.example/a]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_pdf_acceptance.py::test_real_pdf_keeps_all_rows_amounts_and_escaped_content": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_pdf_acceptance.py::test_nested_css_and_svg_resources_never_reach_default_fetcher": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

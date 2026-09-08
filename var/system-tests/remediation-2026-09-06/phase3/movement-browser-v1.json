@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "5ef33b2aac434f9b99214dedcf1d529f",
+  "status": "FAIL",
+  "exit_code": 1,
+  "collected": 1,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase3/movement-browser-v1.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "FAIL": 1
+  },
+  "subtest_counts": {},
+  "tests": {
+    "scripts/test_real_browser_acceptance.py::MovementBrowserAcceptanceTests::test_pda_and_android_scan_sequence_with_real_lost_response": {
+      "status": "FAIL",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "failed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

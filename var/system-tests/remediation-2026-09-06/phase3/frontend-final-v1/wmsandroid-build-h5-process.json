@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "cf5f61138eac49958fbdf059a6051565",
+  "status": "PASS",
+  "owner": {
+    "pid": 3,
+    "pid_namespace": "pid:[4026532615]",
+    "boot_id": "0a436ce8-0fe0-4427-8c39-e6cacfa16d29",
+    "start_time": "2877251",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "run",
+    "build:h5"
+  ],
+  "cwd": "/wms/wmsandroid",
+  "child": {
+    "pid": 1357,
+    "pid_namespace": "pid:[4026532615]",
+    "boot_id": "0a436ce8-0fe0-4427-8c39-e6cacfa16d29",
+    "start_time": "2893340",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 1357,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 28.754
+}

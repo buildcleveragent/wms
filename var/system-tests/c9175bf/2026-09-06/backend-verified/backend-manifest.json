@@ -1,0 +1,123 @@
+{
+  "stage": "backend",
+  "revision": "c9175bfcb837fe740471710c5267ac8d5147911d",
+  "started_at": "2026-09-06T03:24:03Z",
+  "steps": [
+    {
+      "name": "backend",
+      "command": [
+        "/wms/.venv/bin/python",
+        "-m",
+        "pytest",
+        "--reuse-db",
+        "-q",
+        "--durations=20",
+        "--fast-password-hashers",
+        "allapp",
+        "--cov=allapp",
+        "--cov-report=xml:/wms/var/system-tests/c9175bf/2026-09-06/backend-verified/coverage.xml",
+        "--cov-report=term-missing",
+        "--cov-fail-under=70",
+        "--junitxml=/wms/var/system-tests/c9175bf/2026-09-06/backend-verified/backend.xml"
+      ],
+      "cwd": "/wms",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/backend-verified/backend.log",
+      "status": "RUNNING"
+    }
+  ],
+  "status": "INTERRUPTED",
+  "password_hashing": "fast test-only",
+  "database_mode": "reuse",
+  "database": {
+    "database": "wms_db_test",
+    "mysql_version": "8.0.46",
+    "migration_heads": [
+      [
+        "accounts",
+        "0005_loginthrottlecacheentry"
+      ],
+      [
+        "admin",
+        "0003_logentry_add_action_flag_choices"
+      ],
+      [
+        "auth",
+        "0012_alter_user_first_name_max_length"
+      ],
+      [
+        "authtoken",
+        "0004_alter_tokenproxy_options"
+      ],
+      [
+        "baseinfo",
+        "0005_ownerwarehousebinding"
+      ],
+      [
+        "billing",
+        "0007_paymentreceipt_date_quality"
+      ],
+      [
+        "contenttypes",
+        "0002_remove_content_type_name"
+      ],
+      [
+        "core",
+        "0007_remove_obsolete_gs1_enabled_setting"
+      ],
+      [
+        "driverapp",
+        "0001_initial"
+      ],
+      [
+        "inbound",
+        "0005_alter_inboundreceiptline_product_code_and_more"
+      ],
+      [
+        "inventory",
+        "0010_inventorycostlayer_inventorycostadjustment_and_more"
+      ],
+      [
+        "locations",
+        "0005_warehouse_default_receive_location"
+      ],
+      [
+        "outbound",
+        "0007_operations_report_indexes"
+      ],
+      [
+        "pos",
+        "0010_poscustomerrepayment_idempotency_fingerprint_and_more"
+      ],
+      [
+        "products",
+        "0014_product_purchase_price"
+      ],
+      [
+        "reports",
+        "0008_business_review_snapshot_permission"
+      ],
+      [
+        "salesapp",
+        "0013_localize_admin_fields"
+      ],
+      [
+        "sessions",
+        "0001_initial"
+      ],
+      [
+        "strategies",
+        "0001_initial"
+      ],
+      [
+        "tasking",
+        "0009_taskscanlog_barcode_resolution_snapshot"
+      ],
+      [
+        "token_blacklist",
+        "0013_alter_blacklistedtoken_options_and_more"
+      ]
+    ]
+  },
+  "reason": "Stopped after a SaleMini regression failure for targeted diagnosis; no full-suite pass.",
+  "exit_code": 130
+}

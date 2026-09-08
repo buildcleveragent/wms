@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="2" time="5.136" timestamp="2026-09-06T11:39:42.333886+08:00" hostname="wms"><testcase classname="allapp.salesapp.tests.SaleMiniApiTests" name="test_saleable_stock_counts_incomplete_tracking_fields_and_allocates" time="4.092"><failure message="AssertionError: Decimal('4.0000') != Decimal('6.0000')">self = &lt;allapp.salesapp.tests.SaleMiniApiTests testMethod=test_saleable_stock_counts_incomplete_tracking_fields_and_allocates&gt;
+
+    def test_saleable_stock_counts_incomplete_tracking_fields_and_allocates(self):
+        tracked_product = Product.objects.create(
+            owner=self.owner,
+            code="MP-TRACK",
+            sku="MP-TRACK",
+            name="批次效期商品",
+            category=self.category,
+            base_uom=self.uom,
+            price=Decimal("18.00"),
+            batch_control=True,
+            expiry_control=True,
+            expiry_basis=Product.ExpiryBasis.MFG,
+            shelf_life_days=365,
+            is_active=True,
+        )
+        SaleProductConfig.objects.create(
+            owner=self.owner,
+            product=tracked_product,
+            is_listed=True,
+            sale_price=Decimal("18.0000"),
+            min_order_qty=Decimal("1.000"),
+            multiple_qty=Decimal("1.000"),
+            stock_display=SaleProductConfig.StockDisplay.EXACT,
+        )
+        incomplete_detail = InventoryDetail.objects.create(
+            owner=self.owner,
+            product=tracked_product,
+            warehouse=self.warehouse,
+            location=self.location,
+            onhand_qty=Decimal("10.0000"),
+            allocated_qty=Decimal("2.0000"),
+            locked_qty=Decimal("1.0000"),
+            damaged_qty=Decimal("1.0000"),
+            base_unit=self.uom.code,
+        )
+        complete_location = Location.objects.create(
+            warehouse=self.warehouse,
+            code="SWSMI-01-01-02",
+            name="Sale Mini Complete Tracking Location",
+        )
+        InventoryDetail.objects.create(
+            owner=self.owner,
+            product=tracked_product,
+            warehouse=self.warehouse,
+            location=complete_location,
+            batch_no="LOT-202606",
+            production_date=date(2026, 6, 1),
+            expiry_date=date(2027, 6, 1),
+            onhand_qty=Decimal("2.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+        )
+        inactive_location = Location.objects.create(
+            warehouse=self.warehouse,
+            code="SWSMI-01-01-03",
+            name="Sale Mini Inactive Inventory Location",
+        )
+        InventoryDetail.objects.create(
+            owner=self.owner,
+            product=tracked_product,
+            warehouse=self.warehouse,
+            location=inactive_location,
+            onhand_qty=Decimal("9.0000"),
+            allocated_qty=Decimal("0.0000"),
+            locked_qty=Decimal("0.0000"),
+            damaged_qty=Decimal("0.0000"),
+            base_unit=self.uom.code,
+            is_active=False,
+        )
+        public_client = APIClient()
+    
+        response = public_client.get(
+            "/api/sale-mini/products/",
+            {"search": "批次效期"},
+        )
+        self.assertEqual(response.status_code, 200)
+        rows = response.data["results"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["stock"]["available_qty"], "8.000")
+        self.assertEqual(rows[0]["stock"]["status"], "IN")
+    
+        detail_response = public_client.get(f"/api/sale-mini/products/{tracked_product.id}/")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.data["stock"]["available_qty"], "8.000")
+    
+        stocked_response = public_client.get(
+            "/api/sale-mini/products/",
+            {"search": "批次效期", "only_stock": "1"},
+        )
+        self.assertEqual(stocked_response.status_code, 200)
+        self.assertEqual(len(stocked_response.data["results"]), 1)
+        self.assertEqual(
+            stocked_response.data["results"][0]["stock"]["available_qty"],
+            "8.000",
+        )
+    
+        preview = self.client.post(
+            "/api/sale-mini/orders/preview/",
+            {
+                "lines": [
+                    {
+                        "product_id": tracked_product.id,
+                        "qty": "4.000",
+                        "order_uom": "EA-MINI",
+                    }
+                ]
+            },
+            format="json",
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertTrue(preview.data["ok"])
+        self.assertEqual(preview.data["lines"][0]["available_qty"], "8.000")
+    
+        order_response = self.client.post(
+            "/api/sale-mini/orders/",
+            {
+                "payment_method": "OFFLINE",
+                "contact": "张三",
+                "contact_phone": "13800000000",
+                "ship_to": "上海市测试路 1 号",
+                "delivery_method": "OWN_TRUCK",
+                "lines": [
+                    {
+                        "product_id": tracked_product.id,
+                        "qty": "4.000",
+                        "order_uom": "EA-MINI",
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(order_response.status_code, 201)
+        incomplete_detail.refresh_from_db()
+        self.assertEqual(incomplete_detail.onhand_qty, Decimal("10.0000"))
+&gt;       self.assertEqual(incomplete_detail.allocated_qty, Decimal("6.0000"))
+E       AssertionError: Decimal('4.0000') != Decimal('6.0000')
+
+allapp/salesapp/tests.py:858: AssertionError</failure></testcase><testcase classname="allapp.salesapp.tests.SaleMiniApiTests" name="test_saleable_stock_counts_serial_controlled_inventory_without_serial" time="0.293" /></testsuite></testsuites>

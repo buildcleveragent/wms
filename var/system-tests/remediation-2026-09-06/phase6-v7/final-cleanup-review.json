@@ -1,0 +1,48 @@
+{
+  "status": "PASS",
+  "at": "2026-09-06T11:01:30.484798+00:00",
+  "checks": [
+    {
+      "process": "phase6-v6/functional-process.json",
+      "run_id": "a8ace1da15194f5999fe5c0847b4a732",
+      "reported_status": "FAIL",
+      "cleanup_complete": true,
+      "residual_containers": []
+    },
+    {
+      "process": "phase6-v7/focused-process.json",
+      "run_id": "50680b4677ee4da9a3245f75dd50b67b",
+      "reported_status": "PASS",
+      "cleanup_complete": true,
+      "residual_containers": []
+    },
+    {
+      "process": "phase6-v7/collect-process.json",
+      "run_id": "a8a07932b3374417bf0c4e734d1bb1a8",
+      "reported_status": "PASS",
+      "cleanup_complete": true,
+      "residual_containers": []
+    },
+    {
+      "process": "phase6-v7/migrations-process.json",
+      "run_id": "b8201205b1954f38b2e064d5b4155664",
+      "reported_status": "PASS",
+      "cleanup_complete": true,
+      "residual_containers": []
+    },
+    {
+      "process": "phase6-v7/coverage-process.json",
+      "run_id": "93f250f6fad7414c8c71962fc7d72cdf",
+      "reported_status": "PASS",
+      "cleanup_complete": true,
+      "residual_containers": []
+    },
+    {
+      "process": "phase6-v7/final-schema-process.json",
+      "run_id": "dc0a82d5bb074bf5b93f336de0c116ce",
+      "reported_status": "PASS",
+      "cleanup_complete": true,
+      "residual_containers": []
+    }
+  ]
+}

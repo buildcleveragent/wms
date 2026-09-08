@@ -1,14 +1,5 @@
-exceptions:
-  - id: PYSEC-2026-3412
-    package: weasyprint
-    owner: release-security
-    expires: 2026-09-19
-    rationale: >-
-      No fixed release exists. WMS renders only a server-owned Django template;
-      dispatch data is auto-escaped and the PDF url_fetcher rejects every URL
-      except inline data: resources. User-supplied HTML/CSS and remote URL fetches
-      are not reachable. Remove the exception immediately when a fixed compatible
-      release is available.
-    compensating_controls:
-      - allapp.reports.views._offline_url_fetcher
-      - dispatch note source mapping fails closed with HTTP 409
+# PYSEC-2026-3412: removed after upgrading to WeasyPrint 69.0 and auditing
+# requirements/prod.txt without ignores (2026-09-06). Historical evidence is
+# retained under var/system-tests/. R-PDF-RESOURCE remains independently open
+# in docs/release-risk-policy.json; this removal does not accept that risk.
+exceptions: []

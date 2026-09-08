@@ -1,0 +1,48 @@
+{
+  "buildx.build.provenance": {
+    "builder": {
+      "id": ""
+    },
+    "buildType": "https://mobyproject.org/buildkit@v1",
+    "materials": [
+      {
+        "uri": "pkg:docker/wms-system-test@remediation-candidate-v2?platform=linux%2Famd64",
+        "digest": {
+          "sha256": "4c1c2b243ecd7deec37b47b0eaf6991a973cc49498dd062afe50ff633145c832"
+        }
+      }
+    ],
+    "invocation": {
+      "configSource": {
+        "entryPoint": "Dockerfile"
+      },
+      "parameters": {
+        "frontend": "dockerfile.v0",
+        "args": {
+          "build-arg:PIP_INDEX_URL": "https://pypi.tuna.tsinghua.edu.cn/simple",
+          "build-arg:RUNTIME_IMAGE": "wms-system-test:remediation-candidate-v2",
+          "force-network-mode": "host"
+        },
+        "locals": [
+          {
+            "name": "context"
+          },
+          {
+            "name": "dockerfile"
+          }
+        ]
+      },
+      "environment": {
+        "platform": "linux/amd64"
+      }
+    }
+  },
+  "buildx.build.ref": "default/default/47gpj7ji1a1y71sk1tuqwnc56",
+  "containerimage.descriptor": {
+    "mediaType": "application/vnd.oci.image.index.v1+json",
+    "digest": "sha256:4effd13a58a62f5506b809d6d18e0fc246d9677d2657bc2f80b68c1e6e25eb87",
+    "size": 856
+  },
+  "containerimage.digest": "sha256:4effd13a58a62f5506b809d6d18e0fc246d9677d2657bc2f80b68c1e6e25eb87",
+  "image.name": "docker.io/library/wms-system-test:remediation-test-v2"
+}

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="22.244" timestamp="2026-09-06T10:49:17.321730+08:00" hostname="wms"><testcase classname="scripts.test_real_browser_acceptance.RealBrowserAcceptanceTests" name="test_owner_mall_and_admin_login_against_real_api" time="21.685"><failure message="AssertionError: 1 != 0 : node:internal/fs/promises:603&#10;  return await PromisePrototypeThen(&#10;         ^&#10;&#10;Error: ENOENT: no such file or directory, access '/wms/sales-miniapp/dist/build/h5/index.html'&#10;    at async Object.access (node:internal/fs/promises:603:10)&#10;    at async serve (file:///wms/scripts/real-browser-acceptance.mjs:23:3)&#10;    at async file:///wms/scripts/real-browser-acceptance.mjs:52:20 {&#10;  errno: -2,&#10;  code: 'ENOENT',&#10;  syscall: 'access',&#10;  path: '/wms/sales-miniapp/dist/build/h5/index.html'&#10;}&#10;&#10;Node.js v22.22.0">self = &lt;test_real_browser_acceptance.RealBrowserAcceptanceTests testMethod=test_owner_mall_and_admin_login_against_real_api&gt;
+
+    def test_owner_mall_and_admin_login_against_real_api(self):
+        sales_fixtures.SaleMiniApiTests.setUp(self)
+        owner_user = get_user_model().objects.create_user(
+            username="browser-owner", password="browser-test-password", owner=self.owner
+        )
+        UserRoleScope.objects.create(
+            user=owner_user, owner=self.owner, role=UserRoleScope.Role.OWNER_MANAGER
+        )
+        get_user_model().objects.create_superuser(
+            username="browser-admin", password="browser-test-password"
+        )
+        artifacts = Path(os.environ["WMS_BROWSER_ARTIFACTS"]).resolve()
+        artifacts.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            ["node", str(ROOT / "scripts/real-browser-acceptance.mjs")],
+            input=json.dumps({"backend": self.live_server_url, "artifacts": str(artifacts)}),
+            text=True,
+            capture_output=True,
+            timeout=180,
+        )
+        (artifacts / "browser.log").write_text(result.stdout + result.stderr)
+&gt;       self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+E       AssertionError: 1 != 0 : node:internal/fs/promises:603
+E         return await PromisePrototypeThen(
+E                ^
+E       
+E       Error: ENOENT: no such file or directory, access '/wms/sales-miniapp/dist/build/h5/index.html'
+E           at async Object.access (node:internal/fs/promises:603:10)
+E           at async serve (file:///wms/scripts/real-browser-acceptance.mjs:23:3)
+E           at async file:///wms/scripts/real-browser-acceptance.mjs:52:20 {
+E         errno: -2,
+E         code: 'ENOENT',
+E         syscall: 'access',
+E         path: '/wms/sales-miniapp/dist/build/h5/index.html'
+E       }
+E       
+E       Node.js v22.22.0
+
+scripts/test_real_browser_acceptance.py:40: AssertionError</failure></testcase></testsuite></testsuites>

@@ -1,0 +1,228 @@
+{
+  "status": "PASS",
+  "files": {
+    "allapp/core/test_coverage_gate.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/core/test_external_acceptance.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/core/test_junit_reader.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/core/test_load_client_safety.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/core/test_release_readiness.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/core/test_test_candidate.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/core/test_test_coordination.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/core/test_test_evidence.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/core/test_test_process.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/pos/test_repayment_migrations.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/products/test_identifier_migrations.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/reports/test_pdf_acceptance.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/reports/views.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/tasking/test_movement_api_acceptance.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "allapp/tasking/views_relocation.py": {
+      "black": [
+        "would-reformat"
+      ],
+      "isort": [],
+      "ruff": [],
+      "flake8": [
+        "150:101:E501:line too long (104 > 100 characters)",
+        "248:101:E501:line too long (122 > 100 characters)",
+        "356:101:E501:line too long (109 > 100 characters)",
+        "377:101:E501:line too long (107 > 100 characters)",
+        "382:101:E501:line too long (104 > 100 characters)",
+        "431:101:E501:line too long (114 > 100 characters)",
+        "454:101:E501:line too long (106 > 100 characters)",
+        "498:101:E501:line too long (101 > 100 characters)"
+      ]
+    },
+    "allapp/tasking/views_replenishment.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "conftest.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/check_coverage_gate.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/identifier_migration_scenario.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/isolated_test_mysql.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/measure_pdf_resource.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/pos_repayment_migration_scenario.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/putaway_load_test.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/recover_test_process.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/release_readiness.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/review_historical_test_evidence.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/run_system_tests.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/test_candidate.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/test_migrate.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/test_process.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/test_real_browser_acceptance.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/validate_external_acceptance.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "scripts/verify_runtime_dependencies.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "wmsmaster/test_coordination.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    },
+    "wmsmaster/test_evidence.py": {
+      "black": [],
+      "isort": [],
+      "ruff": [],
+      "flake8": []
+    }
+  },
+  "new_debt": [],
+  "scope": "changed Python acceptance inputs; repository linter settings; existing debt retained"
+}

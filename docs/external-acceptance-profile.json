@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "dataset": {"warehouses": 2, "owners": 10, "products": 10000, "inventory_details": 100000, "inventory_transactions": 1000000, "orders": 100000, "accounting_months": 12},
+  "capacity": {
+    "warmup_seconds": 300,
+    "scenarios": ["same-warehouse-hotspot", "cross-warehouse"],
+    "phases": [{"users": 50, "seconds": 1800}, {"users": 100, "seconds": 300}],
+    "roles_per_50": {"pda": 25, "owner": 10, "pos": 5, "mall": 5, "reports": 5},
+    "read_p95_ms": 800,
+    "write_p95_ms": 1500,
+    "unexpected_error_rate_less_than": 0.01,
+    "required_metrics": ["p50_ms", "p95_ms", "p99_ms", "throughput_per_second", "queue_wait_p95_ms", "cpu_percent", "rss_bytes", "database_connections", "lock_waits", "slow_queries", "backlog", "payment_external_ms"],
+    "inventory_errors": 0,
+    "financial_errors": 0
+  },
+  "disaster_recovery": {"rpo_seconds": 86400, "rto_seconds": 3600, "consistent_database_and_media": true},
+  "manual_case_source": "docs/manual-test-cases.csv",
+  "manual_count": 196,
+  "notice": "This file defines acceptance requirements. It is not evidence that the workload, recovery or manual checks ran."
+}

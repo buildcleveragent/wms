@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="53.233" timestamp="2026-09-06T10:47:54.216599+08:00" hostname="wms"><testcase classname="scripts.test_real_browser_acceptance.RealBrowserAcceptanceTests" name="test_owner_mall_and_admin_login_against_real_api" time="52.700"><failure message="AssertionError: 1 != 0 : node:internal/modules/run_main:123&#10;    triggerUncaughtException(&#10;    ^&#10;&#10;ExpectError: expect(page).toHaveURL(expected) failed&#10;&#10;Expected pattern: /pages\/index\/index/&#10;Received string:  &quot;http://127.0.0.1:45073/#/&quot;&#10;Timeout: 30000ms&#10;&#10;Call log:&#10;  - Expect &quot;to.have.url&quot; with timeout 30000ms&#10;    5 × unexpected value &quot;http://127.0.0.1:45073/#/pages/login/login&quot;&#10;    57 × unexpected value &quot;http://127.0.0.1:45073/#/&quot;&#10;&#10;    at captureRawStack (/wms/wmspda/node_modules/playwright-core/lib/coreBundle.js:3172:17)&#10;    at callMatcherAsStep (/wms/wmspda/node_modules/playwright/lib/matchers/expect.js:12877:57)&#10;    at Object.toHaveURL (/wms/wmspda/node_modules/playwright/lib/matchers/expect.js:12867:23)&#10;    at /wms/scripts/real-browser-acceptance.mjs:66:24 {&#10;  matcherResult: {&#10;    name: 'toHaveURL',&#10;    expected: /pages\/index\/index/,&#10;    message: 'expect(page).toHaveURL(expected) failed\n' +&#10;      '\n' +&#10;      'Expected pattern: /pages\\/index\\/index/\n' +&#10;      'Received string:  &quot;http://127.0.0.1:45073/#/&quot;\n' +&#10;      'Timeout: 30000ms\n' +&#10;      '\n' +&#10;      'Call log:\n' +&#10;      '  - Expect &quot;to.have.url&quot; with timeout 30000ms\n' +&#10;      '    5 × unexpected value &quot;http://127.0.0.1:45073/#/pages/login/login&quot;\n' +&#10;      '    57 × unexpected value &quot;http://127.0.0.1:45073/#/&quot;\n',&#10;    pass: false,&#10;    actual: 'http://127.0.0.1:45073/#/',&#10;    log: [&#10;      '  - Expect &quot;to.have.url&quot; with timeout 30000ms',&#10;      '    5 × unexpected value &quot;http://127.0.0.1:45073/#/pages/login/login&quot;',&#10;      '    57 × unexpected value &quot;http://127.0.0.1:45073/#/&quot;'&#10;    ],&#10;    timeout: 30000,&#10;    ariaSnapshot: '- text: 金桥融通商城 搜索商品、品牌、关键词\n' +&#10;      '- searchbox\n' +&#10;      '- text: 搜索 默 默认大类 每日精选 品质好货，安心选购 热卖 新品 推荐 空 暂无热卖商品\n' +&#10;      '- img\n' +&#10;      '- text: 首页\n' +&#10;      '- img\n' +&#10;      '- text: 分类\n' +&#10;      '- img\n' +&#10;      '- text: 购物车\n' +&#10;      '- img\n' +&#10;      '- text: 订单\n' +&#10;      '- img\n' +&#10;      '- text: 我的'&#10;  }&#10;}&#10;&#10;Node.js v22.22.0">self = &lt;test_real_browser_acceptance.RealBrowserAcceptanceTests testMethod=test_owner_mall_and_admin_login_against_real_api&gt;
+
+    def test_owner_mall_and_admin_login_against_real_api(self):
+        sales_fixtures.SaleMiniApiTests.setUp(self)
+        owner_user = get_user_model().objects.create_user(
+            username="browser-owner", password="browser-test-password", owner=self.owner
+        )
+        UserRoleScope.objects.create(
+            user=owner_user, owner=self.owner, role=UserRoleScope.Role.OWNER_MANAGER
+        )
+        get_user_model().objects.create_superuser(
+            username="browser-admin", password="browser-test-password"
+        )
+        artifacts = Path(os.environ["WMS_BROWSER_ARTIFACTS"]).resolve()
+        artifacts.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            ["node", str(ROOT / "scripts/real-browser-acceptance.mjs")],
+            input=json.dumps({"backend": self.live_server_url, "artifacts": str(artifacts)}),
+            text=True,
+            capture_output=True,
+            timeout=180,
+        )
+        (artifacts / "browser.log").write_text(result.stdout + result.stderr)
+&gt;       self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+E       AssertionError: 1 != 0 : node:internal/modules/run_main:123
+E           triggerUncaughtException(
+E           ^
+E       
+E       ExpectError: expect(page).toHaveURL(expected) failed
+E       
+E       Expected pattern: /pages\/index\/index/
+E       Received string:  "http://127.0.0.1:45073/#/"
+E       Timeout: 30000ms
+E       
+E       Call log:
+E         - Expect "to.have.url" with timeout 30000ms
+E           5 × unexpected value "http://127.0.0.1:45073/#/pages/login/login"
+E           57 × unexpected value "http://127.0.0.1:45073/#/"
+E       
+E           at captureRawStack (/wms/wmspda/node_modules/playwright-core/lib/coreBundle.js:3172:17)
+E           at callMatcherAsStep (/wms/wmspda/node_modules/playwright/lib/matchers/expect.js:12877:57)
+E           at Object.toHaveURL (/wms/wmspda/node_modules/playwright/lib/matchers/expect.js:12867:23)
+E           at /wms/scripts/real-browser-acceptance.mjs:66:24 {
+E         matcherResult: {
+E           name: 'toHaveURL',
+E           expected: /pages\/index\/index/,
+E           message: 'expect(page).toHaveURL(expected) failed\n' +
+E             '\n' +
+E             'Expected pattern: /pages\\/index\\/index/\n' +
+E             'Received string:  "http://127.0.0.1:45073/#/"\n' +
+E             'Timeout: 30000ms\n' +
+E             '\n' +
+E             'Call log:\n' +
+E             '  - Expect "to.have.url" with timeout 30000ms\n' +
+E             '    5 × unexpected value "http://127.0.0.1:45073/#/pages/login/login"\n' +
+E             '    57 × unexpected value "http://127.0.0.1:45073/#/"\n',
+E           pass: false,
+E           actual: 'http://127.0.0.1:45073/#/',
+E           log: [
+E             '  - Expect "to.have.url" with timeout 30000ms',
+E             '    5 × unexpected value "http://127.0.0.1:45073/#/pages/login/login"',
+E             '    57 × unexpected value "http://127.0.0.1:45073/#/"'
+E           ],
+E           timeout: 30000,
+E           ariaSnapshot: '- text: 金桥融通商城 搜索商品、品牌、关键词\n' +
+E             '- searchbox\n' +
+E             '- text: 搜索 默 默认大类 每日精选 品质好货，安心选购 热卖 新品 推荐 空 暂无热卖商品\n' +
+E             '- img\n' +
+E             '- text: 首页\n' +
+E             '- img\n' +
+E             '- text: 分类\n' +
+E             '- img\n' +
+E             '- text: 购物车\n' +
+E             '- img\n' +
+E             '- text: 订单\n' +
+E             '- img\n' +
+E             '- text: 我的'
+E         }
+E       }
+E       
+E       Node.js v22.22.0
+
+scripts/test_real_browser_acceptance.py:40: AssertionError</failure></testcase></testsuite></testsuites>

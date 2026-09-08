@@ -11,6 +11,7 @@ from django.db.models import Count, DecimalField, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
+from .access import pos_warehouse_allowed
 from .models import (
     PosAuditLog,
     PosCustomerRepayment,
@@ -71,6 +72,8 @@ def _warehouse_id_or_error(user):
     warehouse_id = getattr(user, "warehouse_id", None)
     if not warehouse_id:
         raise ValidationError("当前用户未绑定仓库(warehouse)，无法操作 POS 班次。")
+    if not pos_warehouse_allowed(user):
+        raise ValidationError("当前用户的 POS 仓库与授权范围不一致。")
     return warehouse_id
 
 
@@ -187,9 +190,7 @@ def _payment_summary_rows_for_shift(shift):
         )
         current["refund_count"] = row["refund_count"] or 0
         current["refund_amount"] = row["refund_amount"] or ZERO_MONEY
-        current["expected_amount"] = _money(
-            current["sale_amount"] - current["refund_amount"]
-        )
+        current["expected_amount"] = _money(current["sale_amount"] - current["refund_amount"])
     repayment_rows = (
         PosCustomerRepayment.objects.filter(
             shift=shift,
@@ -223,9 +224,7 @@ def _payment_summary_rows_for_shift(shift):
         current["repayment_count"] = row["repayment_count"] or 0
         current["repayment_amount"] = row["repayment_amount"] or ZERO_MONEY
         current["expected_amount"] = _money(
-            current["sale_amount"]
-            - current["refund_amount"]
-            + current["repayment_amount"]
+            current["sale_amount"] - current["refund_amount"] + current["repayment_amount"]
         )
         current["amount_received"] = _money(
             current["amount_received"] + current["repayment_amount"]
@@ -239,38 +238,23 @@ def build_shift_summary(shift):
         sale_count=Count("id"),
         completed_count=Count("id", filter=Q(status=PosSale.Status.COMPLETED)),
         voided_count=Count("id", filter=Q(status=PosSale.Status.VOIDED)),
-        net_amount=_sum_money(
-            "total_amount", filter_expr=Q(status=PosSale.Status.COMPLETED)
-        ),
-        voided_amount=_sum_money(
-            "total_amount", filter_expr=Q(status=PosSale.Status.VOIDED)
-        ),
+        net_amount=_sum_money("total_amount", filter_expr=Q(status=PosSale.Status.COMPLETED)),
+        voided_amount=_sum_money("total_amount", filter_expr=Q(status=PosSale.Status.VOIDED)),
     )
     return_totals = PosReturn.objects.filter(shift=shift).aggregate(
         return_count=Count("id", filter=Q(status=PosReturn.Status.COMPLETED)),
-        return_amount=_sum_money(
-            "total_amount", filter_expr=Q(status=PosReturn.Status.COMPLETED)
-        ),
+        return_amount=_sum_money("total_amount", filter_expr=Q(status=PosReturn.Status.COMPLETED)),
     )
     line_totals = PosSaleLine.objects.filter(sale__shift=shift).aggregate(
         line_count=Count("id"),
-        completed_line_count=Count(
-            "id", filter=Q(sale__status=PosSale.Status.COMPLETED)
-        ),
-        completed_qty=_sum_qty(
-            "qty", filter_expr=Q(sale__status=PosSale.Status.COMPLETED)
-        ),
-        completed_amount=_sum_money(
-            "amount", filter_expr=Q(sale__status=PosSale.Status.COMPLETED)
-        ),
+        completed_line_count=Count("id", filter=Q(sale__status=PosSale.Status.COMPLETED)),
+        completed_qty=_sum_qty("qty", filter_expr=Q(sale__status=PosSale.Status.COMPLETED)),
+        completed_amount=_sum_money("amount", filter_expr=Q(sale__status=PosSale.Status.COMPLETED)),
         voided_qty=_sum_qty("qty", filter_expr=Q(sale__status=PosSale.Status.VOIDED)),
-        voided_amount=_sum_money(
-            "amount", filter_expr=Q(sale__status=PosSale.Status.VOIDED)
-        ),
+        voided_amount=_sum_money("amount", filter_expr=Q(sale__status=PosSale.Status.VOIDED)),
     )
     net_amount = _money(
-        (sale_counts["net_amount"] or ZERO_MONEY)
-        - (return_totals["return_amount"] or ZERO_MONEY)
+        (sale_counts["net_amount"] or ZERO_MONEY) - (return_totals["return_amount"] or ZERO_MONEY)
     )
 
     payment_rows = _payment_summary_rows_for_shift(shift)
@@ -356,14 +340,10 @@ def _actual_payment_amounts(actual_payments):
 
 
 @transaction.atomic
-def close_pos_shift(
-    *, shift_id, user, actual_cash_amount=None, actual_payments=None, remark=""
-):
+def close_pos_shift(*, shift_id, user, actual_cash_amount=None, actual_payments=None, remark=""):
     warehouse_id = _warehouse_id_or_error(user)
     shift = (
-        PosShift.objects.select_for_update()
-        .filter(pk=shift_id, warehouse_id=warehouse_id)
-        .first()
+        PosShift.objects.select_for_update().filter(pk=shift_id, warehouse_id=warehouse_id).first()
     )
     if not shift:
         raise ValidationError("POS 班次不存在或无权操作。")
@@ -376,9 +356,7 @@ def close_pos_shift(
     actual_map = _actual_payment_amounts(actual_payments)
     expected_cash_total = _money(summary["expected_cash_amount"])
     actual_cash_total = (
-        _money(actual_cash_amount)
-        if actual_cash_amount not in (None, "")
-        else expected_cash_total
+        _money(actual_cash_amount) if actual_cash_amount not in (None, "") else expected_cash_total
     )
     actual_cash_sales = _money(actual_cash_total - shift.opening_cash_amount)
 
@@ -459,9 +437,7 @@ def reopen_pos_shift(*, shift_id, user, reason=""):
         raise ValidationError({"reason": "重开 POS 班次必须填写原因。"})
 
     shift = (
-        PosShift.objects.select_for_update()
-        .filter(pk=shift_id, warehouse_id=warehouse_id)
-        .first()
+        PosShift.objects.select_for_update().filter(pk=shift_id, warehouse_id=warehouse_id).first()
     )
     if not shift:
         raise ValidationError("POS 班次不存在或无权操作。")
@@ -537,9 +513,7 @@ def serialize_shift(shift, *, include_dynamic_summary=True):
             "completed_count": shift.completed_count,
             "voided_count": shift.voided_count,
             "return_count": shift.return_count,
-            "gross_sales_amount": _money_text(
-                shift.total_sales_amount + shift.total_return_amount
-            ),
+            "gross_sales_amount": _money_text(shift.total_sales_amount + shift.total_return_amount),
             "net_amount": _money_text(shift.total_sales_amount),
             "voided_amount": _money_text(shift.total_voided_amount),
             "return_amount": _money_text(shift.total_return_amount),

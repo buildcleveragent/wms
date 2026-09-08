@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "measured": {
+    "allapp": 73.56528142114225,
+    "relocation_api": 87.46177370030581,
+    "replenishment_api": 93.27354260089686
+  },
+  "minimum": {
+    "allapp": 72.38,
+    "relocation_api": 80,
+    "replenishment_api": 80
+  },
+  "scope": "INTERIM: migration group excluded; does not replace final combined gate"
+}

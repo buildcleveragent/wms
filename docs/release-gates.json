@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "local": [
+    "test-coordination", "historical-evidence-review", "runtime-smoke", "dependency-audit",
+    "image-security", "business-matrix", "migration-clean", "migration-nonempty-pos",
+    "backend-functional", "coverage", "frontend", "real-browser", "pdf-acceptance",
+    "pdf-resource-register", "readiness-tool", "external-gates-register"
+  ],
+  "pre_release_additional": [
+    "pdf-resource-release-decision", "staging-rehearsal-60m", "capacity",
+    "disaster-recovery", "wechat-payment", "signed-apk-devices", "manual-196",
+    "release-approval"
+  ],
+  "post_release_additional": ["deployed-artifact-identity", "production-observation-60m"],
+  "minimum_coverage_percent": {"allapp": 72.38, "relocation_api": 80, "replenishment_api": 80},
+  "security_max_age_hours": 24,
+  "exception_required_fields": ["risk_id", "trigger", "mitigations", "impact", "owner", "closure", "reason", "expires_at"],
+  "notes": "Technical readiness is separate from deployment authorization. Logs and signoffs are evidence, not candidate inputs."
+}

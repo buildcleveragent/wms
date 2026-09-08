@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "run_id": "97b8031856da4d7eb6a7fa27fe767357",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 2,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "/wms/var/system-tests/remediation-2026-09-06/phase3/real-browser-final-v2.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 2
+  },
+  "subtest_counts": {},
+  "tests": {
+    "scripts/test_real_browser_acceptance.py::RealBrowserAcceptanceTests::test_owner_mall_and_admin_login_against_real_api": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "scripts/test_real_browser_acceptance.py::MovementBrowserAcceptanceTests::test_pda_and_android_scan_sequence_with_real_lost_response": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

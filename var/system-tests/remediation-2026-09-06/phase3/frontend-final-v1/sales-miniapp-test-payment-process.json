@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "3006a430b4564a0c93e3b631662696d8",
+  "status": "PASS",
+  "owner": {
+    "pid": 3,
+    "pid_namespace": "pid:[4026532615]",
+    "boot_id": "0a436ce8-0fe0-4427-8c39-e6cacfa16d29",
+    "start_time": "2877251",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "run",
+    "test:payment"
+  ],
+  "cwd": "/wms/sales-miniapp",
+  "child": {
+    "pid": 3217,
+    "pid_namespace": "pid:[4026532615]",
+    "boot_id": "0a436ce8-0fe0-4427-8c39-e6cacfa16d29",
+    "start_time": "2919716",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 3217,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 0.78
+}

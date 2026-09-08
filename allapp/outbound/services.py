@@ -19,6 +19,10 @@ from allapp.core.models import DocSequence
 from allapp.core.utils.log_context import build_log_payload
 from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.inventory.models import InventoryDetail
+from allapp.inventory.services import (
+    _refresh_summaries,
+    lock_active_inventory_details_for_update,
+)
 from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
 from allapp.tasking.models import (
     DispatchTaskExtra,
@@ -541,7 +545,7 @@ def _fefo_details_qs(owner_id: int, warehouse_id: int, product_id: int):
         )
         .select_for_update(skip_locked=True)  # 锁住行，防止并发冲突
         .order_by(
-            "expiry_date",  # FEFO：早到期的先分配
+            F("expiry_date").asc(nulls_last=True),  # FEFO：空效期最后
             "-onhand_qty",  # 若效期相同，优先使用库存多的
         )
         .only("id", "location_id", "available_qty", "allocated_qty", "onhand_qty")
@@ -588,6 +592,8 @@ def allocate_inventory(order, by_user=None, allow_backorder=True):
     demands = _compute_line_demands(order)
     if not demands:
         raise ValidationError("出库单没有有效需求行。")
+    pairs = {(order.owner_id, d["product_id"]) for d in demands}
+    lock_active_inventory_details_for_update(pairs)
     for d in demands:
         already_allocated = allocated_by_line.get(d["line_id"], Decimal("0"))
         if already_allocated > d["demand"]:
@@ -683,6 +689,7 @@ def allocate_inventory(order, by_user=None, allow_backorder=True):
             )
 
     task_ctx, task_text = build_log_payload(order=order, task=task, user=by_user)
+    _refresh_summaries(pairs)
     logger.info("outbound.allocate_inventory.completed %s", task_text, extra=task_ctx)
     return task
 
@@ -1516,6 +1523,11 @@ def unallocate_for_order(order, *, by_user=None) -> Decimal:
         .exclude(status__in=["CANCELLED", "COMPLETED"])
     )
 
+    pairs = {
+        (order.owner_id, product_id)
+        for product_id in order.lines.values_list("product_id", flat=True)
+    }
+    lock_active_inventory_details_for_update(pairs)
     for task in tasks:
         lines = (
             WmsTaskLine.objects.select_for_update()
@@ -1591,6 +1603,7 @@ def unallocate_for_order(order, *, by_user=None) -> Decimal:
         released,
         extra=ctx,
     )
+    _refresh_summaries(pairs)
     return released
 
 

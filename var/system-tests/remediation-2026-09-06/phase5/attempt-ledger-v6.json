@@ -1,0 +1,67 @@
+[
+  {
+    "attempt": "runtime-build-v1/v2",
+    "status": "PASS_SUPERSEDED",
+    "reason": "Test-layer package verification, formatting and coordination changes created later candidates."
+  },
+  {
+    "attempt": "test-build-v2",
+    "status": "FAIL",
+    "reason": "BuildKit treated a bare image digest as a repository; rerun used the local tag and verified resolved parent digest."
+  },
+  {
+    "attempt": "test-build-v2b",
+    "status": "PASS_SUPERSEDED",
+    "reason": "39 Python and 112 original system packages unchanged; later runner coordination fix required a new candidate."
+  },
+  {
+    "attempt": "test-build-v3",
+    "status": "ABORTED",
+    "reason": "Stopped an obsolete build after focused container tests identified the runner identity issue."
+  },
+  {
+    "attempt": "runtime-build-v4",
+    "status": "ABORTED",
+    "reason": "Minimal lock extraction required extras-aware parsing; corrected before the final candidate."
+  },
+  {
+    "attempt": "testlayer-coordination-probe",
+    "status": "FAIL",
+    "reason": "21 passed, 1 failed: current runner hostname was not a container ID. Cleanup completed; temporary credential repr redacted with receipt."
+  },
+  {
+    "attempt": "testlayer-coordination-probe-v4",
+    "status": "PASS",
+    "reason": "23 passed with focused source overlays; preparatory evidence only, not frozen-candidate full acceptance."
+  },
+  {
+    "attempt": "real-browser-final-v1",
+    "status": "FAIL",
+    "reason": "1 passed, 1 failed because the PDA/Android build used an incorrect environment variable; output retained."
+  },
+  {
+    "attempt": "real-browser-final-v2",
+    "status": "PASS",
+    "reason": "2 Python scenarios passed, covering 7 real browser flows after VITE_API_BASE_URL was set correctly."
+  },
+  {
+    "attempt": "v5-focused",
+    "status": "PASS_SUPERSEDED",
+    "reason": "Final entry checks passed before collection revealed the recorder defect."
+  },
+  {
+    "attempt": "v5-collect",
+    "status": "FAIL",
+    "reason": "Reading a defaultdict inserted empty report entries; collect-only was incorrectly failed. Original outputs retained under phase6."
+  },
+  {
+    "attempt": "v6-collection-fix-focused",
+    "status": "PASS",
+    "reason": "19 evidence-recorder tests and actual collect-only CLI passed after using reports.get without mutation."
+  },
+  {
+    "attempt": "v6-focused-and-collect",
+    "status": "PASS",
+    "reason": "Frozen candidate: 77 focused tests passed; 1253 main cases collected with functional/migrations union and disjointness verified."
+  }
+]

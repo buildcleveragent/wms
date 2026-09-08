@@ -1,0 +1,4 @@
+allapp/core/preserved_data_transfer.py:275:        missing_tools=_missing_tools("mysqldump", "mysql"),
+allapp/core/preserved_data_transfer.py:346:    executable = shutil.which("mysqldump") or "mysqldump"
+allapp/core/preserved_data_transfer.py:647:        missing_tools=_missing_tools("mysql"),
+allapp/core/preserved_data_transfer.py:697:    executable = shutil.which("mysql") or "mysql"

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="42.557" timestamp="2026-09-06T10:46:47.783544+08:00" hostname="wms"><testcase classname="scripts.test_real_browser_acceptance.RealBrowserAcceptanceTests" name="test_owner_mall_and_admin_login_against_real_api" time="41.836"><failure message="AssertionError: 1 != 0 : node:internal/modules/run_main:123&#10;    triggerUncaughtException(&#10;    ^&#10;&#10;locator.fill: Timeout 30000ms exceeded.&#10;Call log:&#10;#x1B[2m  - waiting for getByPlaceholder('用户名', { exact: true })#x1B[22m&#10;&#10;    at /wms/scripts/real-browser-acceptance.mjs:61:74 {&#10;  log: [ &quot;  - waiting for getByPlaceholder('用户名', { exact: true })&quot; ],&#10;  name: 'TimeoutError'&#10;}&#10;&#10;Node.js v22.22.0">self = &lt;test_real_browser_acceptance.RealBrowserAcceptanceTests testMethod=test_owner_mall_and_admin_login_against_real_api&gt;
+
+    def test_owner_mall_and_admin_login_against_real_api(self):
+        sales_fixtures.SaleMiniApiTests.setUp(self)
+        owner_user = get_user_model().objects.create_user(
+            username="browser-owner", password="browser-test-password", owner=self.owner
+        )
+        UserRoleScope.objects.create(
+            user=owner_user, owner=self.owner, role=UserRoleScope.Role.OWNER_MANAGER
+        )
+        get_user_model().objects.create_superuser(
+            username="browser-admin", password="browser-test-password"
+        )
+        artifacts = Path(os.environ["WMS_BROWSER_ARTIFACTS"]).resolve()
+        artifacts.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            ["node", str(ROOT / "scripts/real-browser-acceptance.mjs")],
+            input=json.dumps({"backend": self.live_server_url, "artifacts": str(artifacts)}),
+            text=True,
+            capture_output=True,
+            timeout=180,
+        )
+        (artifacts / "browser.log").write_text(result.stdout + result.stderr)
+&gt;       self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+E       AssertionError: 1 != 0 : node:internal/modules/run_main:123
+E           triggerUncaughtException(
+E           ^
+E       
+E       locator.fill: Timeout 30000ms exceeded.
+E       Call log:
+E       #x1B[2m  - waiting for getByPlaceholder('用户名', { exact: true })#x1B[22m
+E       
+E           at /wms/scripts/real-browser-acceptance.mjs:61:74 {
+E         log: [ "  - waiting for getByPlaceholder('用户名', { exact: true })" ],
+E         name: 'TimeoutError'
+E       }
+E       
+E       Node.js v22.22.0
+
+scripts/test_real_browser_acceptance.py:40: AssertionError</failure></testcase></testsuite></testsuites>

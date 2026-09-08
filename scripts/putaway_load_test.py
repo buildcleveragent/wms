@@ -33,6 +33,30 @@ class Sample:
     error: str = ""
 
 
+def validate_base_url(value: str) -> str:
+    """Accept an explicit HTTP(S) origin, without credentials or URL rewriting."""
+    parsed = urllib.parse.urlsplit(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or any(character.isspace() for character in value)
+        or "\\" in value
+    ):
+        raise ValueError("base URL must be an HTTP(S) origin without credentials, path or query")
+    _ = parsed.port  # Reject invalid/non-numeric ports before any request.
+    return value.rstrip("/")
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, newurl):
+        raise urllib.error.HTTPError(request.full_url, code, "Redirect refused", headers, fp)
+
+
 def percentile(values: list[float], percentile_value: float) -> float:
     if not values:
         return 0.0
@@ -43,9 +67,12 @@ def percentile(values: list[float], percentile_value: float) -> float:
 
 class JsonClient:
     def __init__(self, base_url: str, timeout: float):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = validate_base_url(base_url)
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("timeout must be positive and finite")
         self.timeout = timeout
         self.token = ""
+        self.opener = urllib.request.build_opener(NoRedirect())
 
     def request(
         self,
@@ -56,6 +83,8 @@ class JsonClient:
         operation: str,
         expected: tuple[int, ...] = (200,),
     ) -> tuple[Sample, Any]:
+        if not path.startswith("/") or path.startswith("//") or "\\" in path:
+            raise ValueError("request path must stay on the configured HTTP(S) origin")
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
         headers = {"Accept": "application/json"}
         if body is not None:
@@ -70,7 +99,7 @@ class JsonClient:
         )
         started = time.perf_counter()
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with self.opener.open(request, timeout=self.timeout) as response:
                 raw = response.read()
                 status = response.status
         except urllib.error.HTTPError as exc:
@@ -117,9 +146,7 @@ def run_actor(
     if not samples[-1].ok:
         return samples
 
-    query = urllib.parse.urlencode(
-        {"task_type": "PUTAWAY", "search": actor.get("search", "")}
-    )
+    query = urllib.parse.urlencode({"task_type": "PUTAWAY", "search": actor.get("search", "")})
     list_sample, _ = client.request(
         "GET",
         f"/api/inbound/pda/tasks/?{query}",
@@ -211,6 +238,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    args.base_url = validate_base_url(args.base_url)
+    if args.workers < 1:
+        raise ValueError("workers must be positive")
     if args.execute_writes and not args.confirm_preproduction:
         print(
             "Refusing write scenario without --confirm-preproduction.",
@@ -276,7 +306,9 @@ def main() -> int:
         for name in write_operations
         if name in report["operations"]
     )
-    return 0 if read_ok and write_ok and report["error_rate"] < 0.01 else 1
+    required = read_operations + (write_operations if args.execute_writes else ())
+    complete = all(report["operations"].get(name, {}).get("requests", 0) > 0 for name in required)
+    return 0 if complete and read_ok and write_ok and report["error_rate"] < 0.01 else 1
 
 
 if __name__ == "__main__":

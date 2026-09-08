@@ -1,0 +1,31 @@
+{
+  "stage": "collect",
+  "revision": "c9175bfcb837fe740471710c5267ac8d5147911d",
+  "started_at": "2026-09-06T02:46:57Z",
+  "steps": [
+    {
+      "name": "collection",
+      "command": [
+        "/wms/.venv/bin/python",
+        "-m",
+        "pytest",
+        "--reuse-db",
+        "-q",
+        "--collect-only",
+        "allapp"
+      ],
+      "cwd": "/wms",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/collection-final/collection.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 7.0
+    }
+  ],
+  "status": "PASS",
+  "database_mode": "reuse",
+  "database": {
+    "database": "wms_db_test",
+    "mysql_version": "8.0.46"
+  },
+  "scope_note": "This stage is not a production-readiness certificate; external device/payment/recovery gates are separate."
+}

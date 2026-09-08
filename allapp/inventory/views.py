@@ -1,22 +1,18 @@
-from django.db.models import Q
+from django.db.models import Q, Sum
 from rest_framework import mixins, viewsets
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.pagination import PageNumberPagination
-
-from .models import InventorySummary
-from .serializers import OwnerInventorySummarySerializer
-
-from django.db.models import Sum
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import IsAuthenticated
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 from allapp.products.identifier_lookup import product_search_q
 
-from .models import InventoryDetail
+from .models import InventoryDetail, InventorySummary
 from .serializers import (
-    CompanyInventoryWarehouseSummarySerializer,
     CompanyInventoryAllSummarySerializer,
+    CompanyInventoryWarehouseSummarySerializer,
+    OwnerInventorySummarySerializer,
 )
 
 
@@ -36,6 +32,7 @@ class OwnerInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericViewSe
     货主端实时库存（MVP 第一层）
     只提供 owner + product 粒度的汇总库存，不做 detail。
     """
+
     permission_classes = [IsAuthenticated]
     serializer_class = OwnerInventorySummarySerializer
     pagination_class = DefaultPagination
@@ -54,11 +51,7 @@ class OwnerInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericViewSe
                 return InventorySummary.objects.none()
             qs = qs.filter(owner_id=owner_id)
 
-        qs = (
-            qs
-            .select_related("product")
-            .order_by("product_id")
-        )
+        qs = qs.select_related("product").order_by("product_id")
 
         q = (self.request.query_params.get("search") or "").strip()
         if q:
@@ -78,7 +71,6 @@ class OwnerInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericViewSe
         return response
 
 
-
 # class DefaultPagination(PageNumberPagination):
 #     page_size = 10
 #     page_size_query_param = "page_size"
@@ -91,6 +83,7 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
     - mode=warehouse: 分仓库 + 分货主 + 分商品
     - mode=all: 所有仓库合并，只分货主 + 分商品
     """
+
     permission_classes = [IsAuthenticated]
     pagination_class = CompanyInventoryPagination
 
@@ -214,40 +207,44 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
         data = []
         if mode == "warehouse":
             for row in rows:
-                data.append({
-                    "warehouse_id": row["warehouse_id"],
-                    "warehouse_name": row.get("warehouse__name") or "",
-                    "owner_id": row["owner_id"],
-                    "owner_name": row.get("owner__name") or "",
-                    "product_id": row["product_id"],
-                    "product_code": row.get("product__code") or "",
-                    "product_name": row.get("product__name") or "",
-                    "product_spec": row.get("product__spec") or "",
-                    "product_sku": row.get("product__sku") or "",
-                    "base_unit": row.get("base_unit") or "",
-                    "onhand_qty": row["onhand_qty"],
-                    "available_qty": row["available_qty"],
-                    "allocated_qty": row["allocated_qty"],
-                    "locked_qty": row["locked_qty"],
-                    "damaged_qty": row["damaged_qty"],
-                })
+                data.append(
+                    {
+                        "warehouse_id": row["warehouse_id"],
+                        "warehouse_name": row.get("warehouse__name") or "",
+                        "owner_id": row["owner_id"],
+                        "owner_name": row.get("owner__name") or "",
+                        "product_id": row["product_id"],
+                        "product_code": row.get("product__code") or "",
+                        "product_name": row.get("product__name") or "",
+                        "product_spec": row.get("product__spec") or "",
+                        "product_sku": row.get("product__sku") or "",
+                        "base_unit": row.get("base_unit") or "",
+                        "onhand_qty": row["onhand_qty"],
+                        "available_qty": row["available_qty"],
+                        "allocated_qty": row["allocated_qty"],
+                        "locked_qty": row["locked_qty"],
+                        "damaged_qty": row["damaged_qty"],
+                    }
+                )
         else:
             for row in rows:
-                data.append({
-                    "owner_id": row["owner_id"],
-                    "owner_name": row.get("owner__name") or "",
-                    "product_id": row["product_id"],
-                    "product_code": row.get("product__code") or "",
-                    "product_name": row.get("product__name") or "",
-                    "product_spec": row.get("product__spec") or "",
-                    "product_sku": row.get("product__sku") or "",
-                    "base_unit": row.get("base_unit") or "",
-                    "onhand_qty": row["onhand_qty"],
-                    "available_qty": row["available_qty"],
-                    "allocated_qty": row["allocated_qty"],
-                    "locked_qty": row["locked_qty"],
-                    "damaged_qty": row["damaged_qty"],
-                })
+                data.append(
+                    {
+                        "owner_id": row["owner_id"],
+                        "owner_name": row.get("owner__name") or "",
+                        "product_id": row["product_id"],
+                        "product_code": row.get("product__code") or "",
+                        "product_name": row.get("product__name") or "",
+                        "product_spec": row.get("product__spec") or "",
+                        "product_sku": row.get("product__sku") or "",
+                        "base_unit": row.get("base_unit") or "",
+                        "onhand_qty": row["onhand_qty"],
+                        "available_qty": row["available_qty"],
+                        "allocated_qty": row["allocated_qty"],
+                        "locked_qty": row["locked_qty"],
+                        "damaged_qty": row["damaged_qty"],
+                    }
+                )
 
         serializer = self.get_serializer(data, many=True)
 
@@ -255,17 +252,22 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
             response = self.get_paginated_response(serializer.data)
         else:
             from rest_framework.response import Response
+
             response = Response(serializer.data)
         record_audit_event(
             action="QUERY",
             module="inventory.company_summary",
             request=request,
-            owner_id=int(request.query_params["owner_id"])
-            if (request.query_params.get("owner_id") or "").isdigit()
-            else None,
-            warehouse_id=int(request.query_params["warehouse_id"])
-            if (request.query_params.get("warehouse_id") or "").isdigit()
-            else None,
+            owner_id=(
+                int(request.query_params["owner_id"])
+                if (request.query_params.get("owner_id") or "").isdigit()
+                else None
+            ),
+            warehouse_id=(
+                int(request.query_params["warehouse_id"])
+                if (request.query_params.get("warehouse_id") or "").isdigit()
+                else None
+            ),
             metadata={"mode": mode, "search": request.query_params.get("search", "")},
         )
         return response

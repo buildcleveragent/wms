@@ -1,560 +1,337 @@
-# allapp/billing/services.py 技术讲解
+# 计费服务包技术讲解
 
-本文档对 `allapp/billing/services.py`（约 1900 行）进行逐层讲解。该文件是 WMS 计费系统的**核心业务逻辑层**，负责从仓库作业事件产生费用、进行阶梯/封顶/打包计算、生成日指标、完成关账与开票的完整流程。
+- 文档版本：V2.1
+- 适用系统版本：2026-09-07 当前工作区业务基线
+- 适用读者：后端开发、计费维护和技术支持人员
+- 核对依据：当前工作区实现与现有测试；本文不代表数据库测试或生产验收结果。
 
----
+本文说明计费事件、应计、日指标、关账、开票和收款的技术关系。日常查看账单的角色操作请参阅[货主管理员手册](manuals/金桥融通WMS货主管理员操作手册.md)和[仓库老板手册](manuals/金桥融通WMS仓库老板经营看板手册.md)。
 
-## 目录
+## 1. 服务结构与公共入口
 
-1. [整体架构与数据流](#1-整体架构与数据流)
-2. [基础工具函数（L1–60）](#2-基础工具函数)
-3. [数据对账门控（L35–162）](#3-数据对账门控)
-4. [规则选择引擎（L175–194）](#4-规则选择引擎)
-5. [指纹防重机制（L197–201）](#5-指纹防重机制)
-6. [金额调整辅助函数（L204–277）](#6-金额调整辅助函数)
-7. [阶梯计价引擎（L280–335）](#7-阶梯计价引擎)
-8. [封顶与打包——日口径（L337–372）](#8-封顶与打包日口径)
-9. [作业计费：accrue_for_posting（L375–453）](#9-作业计费)
-10. [仓储日在库计费：accrue_storage_for_date（L456–511）](#10-仓储日在库计费)
-11. [日指标体系（L514–1051）](#11-日指标体系)
-12. [指标调度器（L1193–1437）](#12-指标调度器)
-13. [指标转计费：accrue_metrics_for_date（L1440–1502）](#13-指标转计费)
-14. [订单处理费：accrue_order_processing_from_posted（L1505–1711）](#14-订单处理费)
-15. [关账与开票（L1714–1889）](#15-关账与开票)
-16. [函数调用关系图](#16-函数调用关系图)
-17. [关键设计决策](#17-关键设计决策)
+原单文件已拆分为 [services 服务包](../allapp/billing/services/)。定位实现时使用模块和函数名，避免依赖易失效的源代码行号。
 
----
+| 模块 | 主要职责 |
+| --- | --- |
+| [__init__.py](../allapp/billing/services/__init__.py) | 兼容导出应计、指标、账期、开票及完整性检查的公共入口 |
+| [_common.py](../allapp/billing/services/_common.py) | 金额精度、规则选择、指纹、阶梯、最低收费、日封顶和金额调整 |
+| [_reconciliation.py](../allapp/billing/services/_reconciliation.py) | 可配置的数据对账门控 |
+| [_metrics.py](../allapp/billing/services/_metrics.py) | 库存来源、指标构建器、自定义 resolver 和指标存储 |
+| [accrual.py](../allapp/billing/services/accrual.py) | 过账、仓储、日指标和订单处理费的应计生成 |
+| [metrics.py](../allapp/billing/services/metrics.py) | 单日、日期范围指标生成及调度作业记录 |
+| [integrity.py](../allapp/billing/services/integrity.py) | 关账就绪检查、未定价事件重计价 |
+| [period.py](../allapp/billing/services/period.py) | 关账、关账试算、撤销关账及红冲 |
+| [invoice.py](../allapp/billing/services/invoice.py) | 从已关账账期生成账单及明细 |
+| [receivables.py](../allapp/billing/services/receivables.py) | 收款过账、核销分配和收款冲销 |
+| [ledger.py](../allapp/billing/services/ledger.py) | 财务应计汇总的统一有效记录口径 |
+| [dashboard.py](../allapp/billing/services/dashboard.py) | 仓库计费总览数据组装 |
 
-## 1. 整体架构与数据流
-
-计费系统的数据流经过五个阶段：
-
-```
-仓库作业 / 库存数据
-        │
-        ▼
-  ┌─────────────┐     ┌──────────────┐
-  │ BillingEvent │ ←── │ 指纹防重(fp) │
-  └──────┬──────┘     └──────────────┘
-         │
-         ▼  规则匹配 → 阶梯计价 → 最低收费 → 封顶/打包(日)
-  ┌──────────────┐
-  │BillingAccrual│  status=OPEN
-  └──────┬───────┘
-         │  lock_period()
-         ▼
-  ┌──────────────┐
-  │BillingAccrual│  status=LOCKED，挂靠 BillingPeriod
-  └──────┬───────┘  + 封顶/打包(账期口径)
-         │  generate_invoice_for_period()
-         ▼
-  ┌──────┐  ┌──────────┐
-  │ Bill │──│ BillLine │  status=INVOICED
-  └──────┘  └──────────┘
-```
-
-**核心状态机：**
-- **BillingAccrual**: `OPEN → LOCKED → INVOICED`（或 `VOID`）
-- **BillingPeriod**: `OPEN → CLOSED → INVOICED`
-- **Bill**: `DRAFT → ISSUED → PAID`（或 `VOID`）
-
----
-
-## 2. 基础工具函数
+既有公共调用可以继续使用：
 
 ```python
-def _q(val, q="0.01"):                      # L26
-def _days_in_month(d: datetime.date) -> int: # L29
+from allapp.billing.services import (
+    accrue_for_posting,
+    build_close_readiness,
+    generate_invoice_for_period,
+    lock_period,
+    preview_lock_period,
+    unlock_period,
+)
 ```
 
-- **`_q(val, q)`**：统一的 Decimal 四舍五入函数。`q` 决定精度（`"0.01"` = 分，`"0.0001"` = 万分位）。全文件所有金额计算最终都经过 `_q` 对齐精度，防止浮点漂移。
-- **`_days_in_month(d)`**：返回某月天数，用于面积月租按日分摊。
+收款服务当前从 `allapp.billing.services.receivables` 导入；不要假定服务包内所有函数都已由包入口导出。
 
----
+## 2. 数据流与状态
 
-## 3. 数据对账门控
+```text
+仓库过账 / 仓储库存 / 日指标 / 订单处理
+  → BillingEvent：保留来源、计价状态、规则和计价明细
+  → BillingAccrual：OPEN
+  → 关账就绪检查 + lock_period
+  → BillingAccrual：LOCKED，归属 BillingPeriod：CLOSED
+  → 开票就绪检查 + generate_invoice_for_period
+  → Bill + BillLine，Accrual：INVOICED，Period：INVOICED
+  → PaymentReceipt + PaymentAllocation
+  → 收款过账 / 冲销，更新账单收款状态
+```
+
+状态定义见 [enums.py](../allapp/billing/enums.py)：
+
+| 对象 / 字段 | 状态 | 含义 |
+| --- | --- | --- |
+| `BillingEvent.pricing_status` | `PENDING / ACCRUED / NO_CHARGE / UNPRICED` | 待计价、已计费、有依据的无需收费、未定价 |
+| `BillingAccrual.status` | `OPEN / LOCKED / INVOICED / VOID` | 未锁定、已锁定、已开票、作废 |
+| `BillingPeriod.status` | `OPEN / CLOSED / INVOICED` | 开账、关账、已开票 |
+| `Bill.document_status` | `DRAFT / ISSUED / VOID` | 单据生命周期 |
+| `Bill.payment_status` | `UNPAID / PARTIAL / PAID` | 未收款、部分收款、已收清 |
+| `PaymentReceipt.status` | `DRAFT / POSTED / REVERSED` | 草稿、已过账、已冲销 |
+
+`Bill.status` 仍保留兼容状态 `DRAFT / ISSUED / PAID / VOID`。解释应收时应同时核对单据状态、收款状态和有效核销金额；“已开票”不代表收款。这里的开票指系统生成 Bill 结算单，不表示已向外部税务系统开具税务发票。
+
+## 3. 规则选择、金额精度与防重
+
+### 3.1 规则匹配
+
+`_select_rule(owner_id, warehouse_id, charge_type, calc_method, service_date)` 筛选启用规则、收费类型、计算方式和生效日期，并允许货主或仓库为空作为通配。
+
+优先级为：
+
+```text
+指定货主 + 指定仓库
+  > 指定货主 + 通配仓库
+  > 通配货主 + 指定仓库
+  > 全通配
+```
+
+同层级按 `priority` 升序，再按 `id` 升序选第一条。账期打包还通过 `_select_bundle_rule_for_period` 优先考虑本期实际产生应计的规则。
+
+匹配不到规则时，应计生成路径会保留事件并标记 `UNPRICED`，不是默认免费。已计价但最终费用为零的事件以 `NO_CHARGE` 留存规则、原因和明细，供关账就绪检查核验。
+
+### 3.2 指纹
+
+`_event_fp` 组合任务、扫描日志、收费类型、计算方式、服务日期和四位小数数量。仓储等无任务来源使用包含货主、仓库的 `scope_key`，避免不同范围的同日同量事件碰撞。
+
+`_acc_fp` 还包含货主、仓库、规则、数量、有效单价、币种和事件指纹。数据库字段分别是 `event_fp` 与 `acc_fingerprint`，不是统一的 `fp` 字段。
+
+唯一约束和 `get_or_create` 对相同指纹防重。改价可能产生不同应计指纹，因此不能把防重理解为“同一事件永远只有一条历史记录”；关账会将同一事件下重复的锁定应计作废并保留最新价格记录。
+
+### 3.3 定价顺序
+
+`_q` 使用 Decimal 四舍五入；金额通常保留两位小数，数量和有效单价通常保留四位小数。
+
+`_compute_fee_with_rule` 支持普通单价、百分比费率和两种阶梯：
+
+| 方式 | 计算示例：前 100 单位为 1.00，之后为 0.80，数量 300 |
+| --- | --- |
+| 整档 `WHOLE` | 全部 300 按所在档单价计算：240.00 |
+| 累进 `INCREMENTAL` | 100 × 1.00 + 200 × 0.80：260.00 |
+
+百分比规则将计费基数解释为金额，使用配置的费率；普通数量规则按数量计价。
+
+所有应计路径通过 `_finalize_daily_price` 统一执行：
+
+```text
+原始阶梯金额 → 每笔最低收费 → 日规则 CAP → 日打包 CAP → 有效单价
+```
+
+最低收费只在计费数量大于零时应用。日 CAP 是最终上限，不能再用最低收费把已封顶的金额抬高。日累计查询排除作废应计。最终价格及调整原因写入事件的计价明细。
+
+`_save_adjusted_accrual` 在调整金额时同步重算税额及有效单价；`_apply_fixed_bundle_total` 将一组费用调整到固定总价，多余金额从后往前扣，差额追加到最后一笔。
+
+## 4. 作业过账与订单处理费
+
+### 4.1 作业计费
+
+`accrue_for_posting(task, posting_journal, by_user=None)` 查询本任务、本次过账关联的成功扫描日志，并按以下映射生成事件：
+
+| 任务类型 | 收费类型 | 计算方式 |
+| --- | --- | --- |
+| `RECEIVE` | 收货 | `PER_QTY_ABSDEL` |
+| `PUTAWAY` | 上架 | `PER_QTY_ABSDEL` |
+| `RELOC` | 移库 | `PER_QTY_ABSDEL` |
+| `PICK` | 拣货 | `PER_QTY_ABSDEL` |
+| `REVIEW` | 复核 | `PER_LINE` |
+| `PACK` | 打包 | `PER_LINE` |
+| `LOAD` | 装车 | `PER_TASK` |
+| `DISPATCH` | 发运 | `PER_TASK` |
+| `COUNT` | 盘点 | `PER_LINE` |
+
+实际实现逐扫描日志处理；`PER_LINE`、`PER_TASK` 在每条记录中取计费数量 1，不能据名称推断已按整张任务或任务行再次聚合。数量口径取 `qty_base_delta`，为空时取 `qty_base`，再取绝对值；服务日期取过账日期。
+
+每条记录依次建立事件、匹配规则、完成定价、保存应计和计价证据。缺少规则留下未定价事件；业务过账成功不代表其计费数据已具备关账条件。已关闭账期内的迟到业务须由完整性检查和账期处理流程解决。
+
+### 4.2 订单处理费
+
+两个入口用途不同：
+
+- `accrue_order_processing_for_task(task, posting_journal, ...)`：当前任务、本次过账的即时处理。
+- `accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_date, ...)`：按日期范围处理已过账来源。
+
+通过 `BILLING_TASKLINE_ORDER_RESOLVER` 从任务行提取订单、订单行、包裹数、订单金额和打包键，支持 `PER_ORDER`、`PER_ORDER_LINE`、`PER_PARCEL`、`PERCENT_OF_ORDER_AMOUNT`，可用 `allowed_methods` 限定计算方式。
+
+两个入口检查另一种来源是否已存在相应事件，避免即时计费与批量计费叠加。金额来源还结合订单行金额及 `ORDER_AMT` 指标；排查重计或漏计时需一并核对 resolver、日期和事件来源，不能只统计扫描日志数量。
+
+## 5. 仓储计费与日指标
+
+### 5.1 按在库基本数量收费
+
+`accrue_storage_for_date(owner_id, warehouse_id, service_date, by_user=None)` 使用 `STORAGE / PER_DAY_ONHAND_BASE`：
+
+1. 当天读取活动库存明细；历史日期读取对应的 `InventorySnapshotDaily`。
+2. 汇总在库数量，数量不大于零时不生成该项费用。
+3. 建立带货主、仓库范围的事件，匹配规则并定价。
+4. 创建应计，传播历史快照的来源可信度。
+
+这个函数不能被描述为“历史补算也直接查实时库存”。历史快照缺失的检查、生成和重建应在指标或维护流程中处理。
+
+### 5.2 指标及计费映射
+
+| 日指标 | 构建口径 | 应计计算方式 |
+| --- | --- | --- |
+| `PALLET` | 有库存的去重库位数，当前实现的托盘位代理口径 | `STORAGE / PER_PALLET_DAY` |
+| `CBM` | 在库量 × 单位体积 | `STORAGE / PER_CBM_DAY` |
+| `AREA_M2` | 占用库位面积去重合计 | `STORAGE / PER_AREA_MONTH` |
+| `ORDER_AMT` | 业务日期下已提交、未删除、未取消出库订单行金额 | `DISPATCH / PERCENT_OF_ORDER_AMOUNT` |
+
+`ORDER_AMT` 优先取大于零的 `final_line_amount`，否则取 `base_qty × base_price`。它与按过账日志提取订单处理费的来源不同，不能把两个入口的结果无条件相加。
+
+面积月价先按当前面积计算月金额，再除以服务日期所在月的天数，最后进入日定价流程。每天的面积变化和按日舍入都会影响整月累计值，不能保证任意月的累计值恰好等于某一天面积的月报价。
+
+### 5.3 历史来源与近似数据
+
+`_inventory_metric_rows` 当天取实时库存，历史日期取快照；快照为空时尝试生成。正常生成依赖快照链和库存事务，链断裂等情形可能回退到 bootstrap。
+
+bootstrap 基于当前库存生成历史日期快照，不能因此声称恢复了真实历史库存。`BOOTSTRAP_DETAIL`、`TX_ROLLFORWARD_APPROX` 等来源会传播为 `APPROXIMATE` 指标或应计，并被关账就绪检查阻断。
+
+历史体积和面积使用快照保存的单位体积、库位面积，避免用现有主数据覆盖历史口径。面积缺失时仅在启用 `allow_area_fallback` 后允许库位数代理；代理数量不等同于已测量平方米，应核对指标的 source、note 和合同约定。
+
+### 5.4 扩展与存储
+
+`BILLING_{TYPE}_METRIC_RESOLVER` 可配置 `module:function`，为指标提供自定义构建器。实际配置名及 resolver 加载规则见 `_load_metric_resolver`。
+
+`_store_generated_metric` 的主要行为：
+
+- `AUTO:` 前缀标识自动指标；手动指标默认保留，显式 `overwrite=True` 才允许覆盖。
+- 零值或负值不会创建新的正费用指标；已有自动指标按零值清理流程处理。
+- 相同值、来源及备注无需重复更新；并发创建按唯一范围恢复读取已有记录。
+- 结果保留创建、更新、删除、跳过、无变化等处理信息及来源可信度。
+
+`generate_metrics_for_date` 和 `generate_metrics_for_range` 负责生成指标，`accrue_metrics_for_date` 才负责将指标转为应计。生成指标成功不等同于已经收费或关账成功。
+
+## 6. 日调度与失败恢复
+
+`billing_run_scheduler` 调用 `run_scheduled_metric_generation_for_dates`，按日期、货主和仓库范围生成指标。设置见 [settings.py](../wmsmaster/settings.py)：默认时、分为 1:05，回看此前 3 天，轮询 60 秒，运行记录过期阈值 180 分钟。触发时间依据命令使用的 `timezone.now()` 与部署时区设置，不应固定写成 UTC。
+
+`BillingJobRun` 与行锁管理每个范围的执行：
+
+| 结果 | 处理 |
+| --- | --- |
+| `claimed` | 已取得执行权 |
+| `skipped_success` | 已成功，默认跳过 |
+| `skipped_running` | 未过期的作业仍在运行，跳过 |
+| 超时作业 / `force=True` | 按认领逻辑重新执行 |
+
+执行顺序为认领、可选日对账、历史快照准备、指标生成、可选日对账、写入成功或失败记录。单个范围失败会记录结果，不等于整个批次没有其他成功项。
+
+维护人员应先核对失败日期、货主、仓库、错误原因和数据来源，再选择有范围的重试。历史可信数据修复可参考 [billing_rebuild_trusted_range](../allapp/billing/management/commands/billing_rebuild_trusted_range.py)，未定价事件可参考 [billing_reprice_unpriced](../allapp/billing/management/commands/billing_reprice_unpriced.py)。这些命令会写业务数据，不属于纯查看操作。
+
+## 7. 关账就绪与数据对账
+
+两类检查相互独立：
+
+| 检查 | 入口 | 行为 |
+| --- | --- | --- |
+| 关账就绪 | `build_close_readiness / ensure_close_readiness` | 锁账和开票必经；阻断时抛出 `BillingCloseBlocked` |
+| 数据对账 | `_reconciliation.py` 中的检查 | 根据配置启用，失败抛出 `BillingAccuracyGateError` |
+
+就绪检查覆盖待计价或未定价事件、已计费事件缺有效应计、免费事件缺计价证据、近似应计或指标、无账期的锁定应计，以及合同要求的计费来源缺失。开票时额外检查账期日期范围内仍未锁定的应计和关账后到达的计费事件。
+
+返回结果包含 `ready`、`blocker_count`、`blockers`、`by_code`，便于从阻断代码定位记录。API 在就绪检查失败时返回 `409 BILLING_CLOSE_BLOCKED` 及 readiness 明细。
+
+可选对账的开关包括 `BILLING_RECONCILIATION_GATE_ENABLED` 及 `DAILY_ENABLED`、`LOCK_ENABLED`、`INVOICE_ENABLED` 对应完整配置名。关闭可选对账不会关闭强制就绪检查；检查失败后应处理来源和计价缺口，不应直接改账单金额掩盖问题。
+
+## 8. 关账、试算与撤销
+
+### 8.1 锁账
+
+`lock_period(owner_id, warehouse_id, label, start_date, end_date, *, by_user=None)` 在事务内执行：
+
+1. 检查关账就绪；按配置执行数据对账。
+2. 获取或创建账期并加行锁；已有账期须为 OPEN，日期范围须一致。
+3. 将同货主、仓库、日期范围内 `OPEN + period=NULL` 的应计锁定到本期。
+4. 对同一事件的重复锁定应计保留最新价格，旧记录标记作废。
+5. 依次应用账期 FIXED 打包、规则 CAP、打包 CAP，确保 CAP 最终作为硬上限。
+6. 首次调整时保存 `pre_adjustment_amount`，记录调整明细；账期变为 CLOSED，写入操作人及关账时间。
+
+已关联其他账期的应计不会被本次锁账抢占。账期业务范围创建后不可通过普通编辑改写，API 只允许删除没有应计、账单关联的 OPEN 账期。
+
+### 8.2 试算
+
+`preview_lock_period` 在内存中模拟关账金额调整，返回原金额、调整金额及调整原因，不锁定应计、不修改账期。API 的 `preview-lock` 仅用于 OPEN 账期。
+
+普通 `preview` 是应计汇总预览，`preview-lock` 是关账调整试算，`close-readiness` 是完整性检查；三者用途不同，试算金额正确不代表就绪检查一定通过。
+
+### 8.3 撤销
+
+`unlock_period(period, *, by_user=None, reason="")` 根据状态处理：
+
+| 原状态 | 结果 |
+| --- | --- |
+| OPEN | 拒绝，无需撤销 |
+| CLOSED | 没有有效账单时恢复封顶前金额，LOCKED → OPEN，解除账期关联，账期回到 OPEN |
+| INVOICED | 作废有效账单，创建或复用一致的负数红冲记录，保留审计关系并重开账期 |
+
+红冲指纹发生字段冲突会中止并回滚，不能强行复用不同金额或来源的记录。撤销已开票账期不代表已经向客户退款，也不等同于撤销收款单；资金差异须另走收款冲销和财务核对流程。
+
+## 9. 开票
+
+公共入口：
 
 ```python
-class BillingAccuracyGateError(ValueError):              # L35
-def _billing_accuracy_gate_enabled(setting_name) -> bool: # L49
-def _ensure_reconciliation_for_service_date(...)          # L94
-def _ensure_reconciliation_for_date_range(...)            # L117
-def _ensure_reconciliation_for_period(...)                # L150
+generate_invoice_for_period(
+    period, invoice_no, issue_date=None, due_date=None, *, by_user=None
+)
 ```
 
-**作用**：在关键节点（日调度前/后、锁账、开票）调用 `core.data_accuracy.reconcile_data_accuracy`，验证库存/计费数据是否一致。如果发现问题，抛出 `BillingAccuracyGateError` 中断流程。
+虽然签名允许省略 `due_date`，业务校验要求到期日必填，且不得早于开票日。开票日期未提供时取当前日期；账单号必须满足模型唯一性要求。
 
-**控制开关**（在 `settings.py` 中配置）：
-- `BILLING_RECONCILIATION_GATE_ENABLED` — 全局总开关
-- `BILLING_RECONCILIATION_GATE_DAILY_ENABLED` — 日调度
-- `BILLING_RECONCILIATION_GATE_LOCK_ENABLED` — 锁账
-- `BILLING_RECONCILIATION_GATE_INVOICE_ENABLED` — 开票
+执行过程：
 
-**设计意图**：防止在数据不一致的情况下生成错误账单。这是一道安全闸门（gate），不是自动修复——发现问题就停下来，由人工排查。
+1. 重新读取并行锁定账期，防止并发重复开票。
+2. 校验 CLOSED 状态、有效账单不存在、到期日合法。
+3. 强制开票就绪检查，按配置执行数据对账。
+4. 读取本期 LOCKED 应计，无可开票应计则拒绝。
+5. 创建 Bill，用 `bulk_create` 创建一条应计对应一条 BillLine，累计不含税金额和税额。
+6. 批量将应计更新为 INVOICED，账单单据状态设为 ISSUED、收款状态设为 UNPAID。
+7. 账期更新为 INVOICED，记录开票时间和操作人。
 
----
+全过程在事务内完成。重复开票限制是“同一账期不能并存有效账单”；作废后的历史账单保留，账期经正式撤销、重新计费和关账后可以重新开票。
 
-## 4. 规则选择引擎
+## 10. 收款、红冲与财务汇总
 
-```python
-def _select_rule(owner_id, warehouse_id, charge_type, calc_method, service_date)  # L175
-```
+`post_receipt` 锁定草稿收款单、核销分配和账单，检查至少有一笔分配、分配不超过收款金额、货主/仓库/币种一致、账单有效且核销不超过未收金额，再将收款单过账并同步账单收款状态。
 
-给定 **"谁（owner）、在哪（warehouse）、什么类型的费用（charge_type）、怎么算（calc_method）、哪天（service_date）"**，返回最匹配的一条 `BillingRule`。
+`reverse_receipt` 保留原收款及核销记录，通过冲销单和反向分配抵消原收款，再计算账单剩余应收。有效收款使用带符号的核销合计，不能仅凭原收款单标记为 REVERSED 就丢弃其历史金额。
 
-**匹配逻辑**：
-1. 过滤 `active=True`、`charge_type` 和 `calc_method` 完全匹配
-2. `owner_id` 匹配或为 NULL（通配）；`warehouse_id` 同理
-3. 生效日期区间包含 `service_date`
-4. **排序优先级**：`owner_id` 非空 > NULL → `warehouse_id` 非空 > NULL → `priority` 升序 → `id` 升序
-5. 取第一条（`.first()`）
+`ledger.py` 统一财务应计口径：
 
-**为什么这样排序**：更具体的规则（指定了 owner + warehouse）优先于通配规则。这允许系统先配一个「默认价」，再为特定客户覆盖。
+- 非 VOID 且不是冲销标记的普通应计纳入汇总。
+- VOID、带原记录引用且金额为负、单价和税额不为正的真实红冲纳入带符号汇总。
+- 改价去重产生的正金额作废记录不作为真实红冲再次扣减。
 
-**相关变体**：
-```python
-def _select_bundle_rule_for_period(period, bundle_key, preferred_rule_ids=None)  # L237
-```
-关账时查找账期口径的打包规则，逻辑相同，但额外优先匹配 `preferred_rule_ids`（已产生 accrual 的那些规则）。
+经营看板、应计汇总、已出账金额和已收款金额的对象及时间口径不同。追查差异时应保留账期、服务日期、账单号、来源事件和收款核销记录。
 
----
+## 11. API、后台入口与权限边界
 
-## 5. 指纹防重机制
+路由见 [billing/urls.py](../allapp/billing/urls.py)，动作实现见 [views.py](../allapp/billing/views.py)。以下路径挂在项目 `/api/` 下：
 
-```python
-def _event_fp(task_id, scanlog_id, charge_type, calc_method, service_date, qty)  # L197
-def _acc_fp(owner_id, warehouse_id, rule_id, charge_type, service_date, ...)     # L200
-```
+| 方法及路径 | 用途 |
+| --- | --- |
+| `GET /api/billing/periods/{id}/preview/` | 应计汇总预览 |
+| `GET /api/billing/periods/{id}/close-readiness/` | 查询阻断项 |
+| `POST /api/billing/periods/{id}/preview-lock/` | OPEN 账期关账试算 |
+| `POST /api/billing/periods/{id}/lock/` | OPEN → CLOSED |
+| `POST /api/billing/periods/{id}/invoice/` | CLOSED → INVOICED |
+| `POST /api/billing/periods/{id}/unlock/` | 撤销 CLOSED / INVOICED 账期 |
+| `GET /api/billing/bills/{id}/` | 账单及明细查看 |
 
-**Event 指纹**（`event_fp`）：`task_id|scanlog_id|charge_type|calc_method|service_date|qty`
-**Accrual 指纹**（`acc_fingerprint`）：在 event 指纹基础上追加 `owner|warehouse|rule_id|unit_price|currency`
+`lock / unlock` 要求 `change_billingperiod`，`invoice` 要求 `add_bill`，同时受货主、仓库范围限制。Django Admin 的计费账期详情也提供受权限控制的动作。
 
-两者都用 `get_or_create(fp=..., defaults=...)` 实现**幂等写入**。同一笔扫描日志被重复处理时，不会产生重复费用。这是整个计费系统防重复的核心手段。
+`BillViewSet` 是只读接口；账单金额不能通过普通更新接口直接修改。仓库老板和货主管理员的前台账单入口用于查询、核对和按权限导出，不能据此推断具备关账、开票、收款或冲销权限。
 
----
+## 12. 维护核对与验证依据
 
-## 6. 金额调整辅助函数
+维护顺序建议为：核对来源和规则 → 检查事件计价状态 → 检查指标可信度 → 查询关账阻断项 → 试算 → 授权关账 → 授权开票 → 收款核销与对账。每一步保留范围、日期、操作人和结果。
 
-```python
-def _save_adjusted_accrual(accrual, new_amount)                    # L204
-def _apply_fixed_bundle_total(accs, target_total)                  # L253
-def _period_bundle_rule_queryset(period, bundle_key)               # L219
-def _select_bundle_rule_for_period(period, bundle_key, ...)        # L237
-```
+现有测试可作为阅读行为边界的依据：
 
-### `_save_adjusted_accrual`
+| 测试文件 | 主要核对场景 |
+| --- | --- |
+| [billing/tests.py](../allapp/billing/tests.py) | 阶梯及封顶、开票条件、金额汇总、事务回滚、并发开票、撤销后重开和红冲冲突 |
+| [test_integrity_unit.py](../allapp/billing/test_integrity_unit.py) | 计价及来源可信度等纯逻辑 |
+| [test_p1_receivables.py](../allapp/billing/test_p1_receivables.py) | 收款、核销、状态、应收与账龄相关行为 |
+| [test_management_commands.py](../allapp/billing/test_management_commands.py) | 维护命令及范围处理 |
 
-封顶/打包后需要修改 accrual 金额时调用。它：
-1. 将 `new_amount` 对齐到分（`"0.01"`），且不低于 0
-2. 如果金额未变则 early return（避免无意义的 DB 写入）
-3. 同步重算 `tax_amount` 和 `unit_price`
-4. 只更新必要字段（`update_fields`），不触发 `full_clean`
+数据库测试遵循仓库 [AGENTS.md](../AGENTS.md)：使用 MySQL 8 和 `.env.test.local`，先有界检查连通性并确认目标恰为 `wms_db_test`；正常迭代复用健康测试库，按需从相关用例扩展。迁移变更、测试库异常或最终发布验证才按规则重建，并执行真实迁移链。业务库 `wms_db` 不用于自动测试写入。
 
-### `_apply_fixed_bundle_total`
-
-FIXED 打包模式：将一组 accrual 的总额调整为恰好等于 `target_total`。
-- 多了 → 从最后一笔开始往回扣减
-- 少了 → 追加到最后一笔
-
----
-
-## 7. 阶梯计价引擎
-
-```python
-def _compute_fee_with_rule(rule, base_value) -> (amount, effective_price)  # L281
-```
-
-这是计价的**核心算法**，支持三种模式：
-
-### 无阶梯（最常见）
-```
-amount = base_value × rule.unit_price
-```
-
-### WHOLE 模式（整档/落档）
-所有数量按同一档定价。例如：
-
-| 阈值区间 | 单价 |
-|---------|------|
-| 0–100   | 1.00 |
-| 100–500 | 0.80 |
-| 500+    | 0.60 |
-
-数量 = 300 → 落在第二档 → `300 × 0.80 = 240.00`
-
-### INCREMENTAL 模式（累进/分段）
-不同区间分别计价再累加。同上例：
-
-数量 = 300 → `100 × 1.00 + 200 × 0.80 = 260.00`
-
-**费率阶梯**：当 tier 中填了 `percent_rate` 而非 `unit_price` 时，`base_value` 被解释为「金额」而非「数量」，`percent_rate` 作为费率。用于按订单金额百分比收费的场景。
-
----
-
-## 8. 封顶与打包——日口径
-
-```python
-def _apply_caps_bundles_day(rule, owner_id, warehouse_id, service_date, draft_amount)  # L353
-```
-
-在每笔 accrual 生成时即时应用的限额控制：
-
-1. **封顶（cap）**：如果规则设置了 `cap_mode=PER_DAY`，查询当天该规则已累计金额，新笔费用不超过剩余额度。
-2. **打包上限（bundle CAP）**：如果规则属于某个打包组（`bundle_key`），查询当天整个打包组已累计金额，新笔费用不超过打包组剩余额度。
-
-**执行顺序**（系统设计约定）：
-```
-阶梯计价 → 最低收费 → 日规则封顶 → 日打包上限
-```
-
-> 所有 CAP 都是最终硬上限。最低收费先应用，再由日规则 CAP 和日打包 CAP 裁剪，不能突破剩余额度。
-
----
-
-## 9. 作业计费
-
-```python
-@transaction.atomic
-def accrue_for_posting(task, posting_journal, by_user=None) -> (created_events, created_accruals)  # L377
-```
-
-**触发时机**：任务过账成功后调用。
-
-**流程**：
-1. 查询该 task + posting_journal 下所有已过账的 `TaskScanLog`
-2. 根据任务类型映射到费用类型和计量方式：
-
-| task_type | charge_type | calc_method |
-|-----------|-------------|-------------|
-| RECEIVE   | RECEIVE     | PER_QTY_ABSDEL（按数量绝对值）|
-| PUTAWAY   | PUTAWAY     | PER_QTY_ABSDEL |
-| PICK      | PICK        | PER_QTY_ABSDEL |
-| REVIEW    | REVIEW      | PER_LINE（按行）|
-| PACK      | PACK        | PER_LINE |
-| LOAD      | LOAD        | PER_TASK（按任务）|
-| DISPATCH  | DISPATCH    | PER_TASK |
-| COUNT     | COUNT       | PER_LINE |
-
-3. 对每条 scan log：
-   - 创建 `BillingEvent`（指纹防重）
-   - 创建计费事件 → 匹配规则 → 阶梯计价 → 最低收费 → 日封顶/打包
-   - 创建 `BillingAccrual`（指纹防重）
-
-**关键细节**：
-- `PER_TASK` / `PER_LINE` 时 `qty_bill = 1`，按件数计费；`PER_QTY_ABSDEL` 时用扫描日志的实际数量
-- 如果匹配不到规则，跳过（不报错，因为可能确实未配置该类费用）
-
----
-
-## 10. 仓储日在库计费
-
-```python
-@transaction.atomic
-def accrue_storage_for_date(owner_id, warehouse_id, service_date, by_user=None)  # L457
-```
-
-**触发时机**：由管理命令或 API 手动触发。
-
-**流程**：
-1. 匹配 `STORAGE / PER_DAY_ONHAND_BASE` 规则
-2. 查询 `InventoryDetail` 中该 owner/warehouse 的在库总量
-3. 以在库量为 `base_value` 走阶梯计价 → 最低收费 → 封顶/打包
-4. 创建 Event + Accrual
-
-**与指标计费的区别**：这是直接查实时库存；后面第 13 节的 `accrue_metrics_for_date` 则基于预先计算好的日指标（PALLET/CBM/AREA 等）。
-
----
-
-## 11. 日指标体系
-
-这是文件中最大的功能模块（L514–L1051），负责每天自动计算四类仓储运营指标：
-
-| 指标类型 | 说明 | 数据来源 |
-|---------|------|---------|
-| `PALLET` | 占用库位数 | 去重统计 `location_id` |
-| `CBM` | 在库体积(m³) | `onhand_qty × unit_volume_m3` |
-| `AREA_M2` | 占用面积(m²) | 去重统计 `location.area_m2` |
-| `ORDER_AMT` | 订单金额 | `OutboundOrderLine` 聚合 |
-
-### 数据源切换逻辑
-
-```python
-def _inventory_metric_rows(owner_id, warehouse_id, service_date)  # L606
-```
-
-- **当天**：查实时 `InventoryDetail`
-- **历史日期**：优先查 `InventorySnapshotDaily`；如果快照不存在，自动生成后再查
-- 这保证了即使补跑历史日期的指标，也能拿到当时的库存数据
-
-### 指标构建器
-
-每个指标都有独立的构建函数：
-
-- **`_build_pallet_metric`**（L636）：统计有在库量的去重 location 数
-- **`_build_cbm_metric`**（L651）：累加 `onhand_qty × unit_volume`。体积优先从 product.volume 取，fallback 到 `ProductPackage.volume_m3 / qty_in_base`
-- **`_build_area_metric`**（L700）：累加去重 location 的面积。支持 snapshot 模式和 fallback（用库位数替代面积）
-- **`_build_order_amount_metric`**（L855）：`Sum(final_line_amount)`，未冻结时 fallback 到 `base_qty × base_price`
-
-### 自定义扩展点
-
-```python
-def _load_metric_resolver(metric_type)  # L515
-```
-
-通过 `settings.BILLING_{TYPE}_METRIC_RESOLVER`（格式 `"module:function"`）可以替换任意指标的构建逻辑，无需修改 services.py。
-
-### 指标存储
-
-```python
-def _store_generated_metric(*, owner_id, warehouse_id, service_date, metric_payload, overwrite)  # L931
-```
-
-核心的指标写入函数，策略：
-1. 如果已存在**手动录入**的指标（source 不以 `"AUTO:"` 开头），默认不覆盖（除非 `overwrite=True`）
-2. 值 ≤ 0 的指标：删除已有的自动指标，不创建新的
-3. 并发创建时通过 `_recover_existing_metric_after_create_race` 处理竞态
-4. 已存在且未变化则返回 `noop`
-
-### 指标生成入口
-
-```python
-def generate_metrics_for_date(owner_id, warehouse_id, service_date, ...)   # L1054
-def generate_metrics_for_range(owner_id, warehouse_id, start_date, end_date, ...)  # L1126
-```
-
-遍历 `[PALLET, CBM, AREA_M2, ORDER_AMT]`，构建 → 归一化 → 存储。返回包含计数器的 summary dict。
-
----
-
-## 12. 指标调度器
-
-```python
-def _claim_scheduled_metric_job(owner_id, warehouse_id, service_date, *, force)              # L1197
-def _run_scheduled_metric_generation_for_scope(owner_id, warehouse_id, service_date, ...)    # L1251
-def run_scheduled_metric_generation_for_dates(service_dates, *, owner_id, warehouse_id, ...) # L1354
-```
-
-**调度模型**：由管理命令 `billing_run_scheduler` 在后台持续运行，每天 UTC 1:05（可配置）触发，回看最近 3 天。
-
-### 作业锁机制
-
-通过 `BillingJobRun` 模型 + `select_for_update` 实现分布式锁：
-- **新建**：`claimed` → 开始执行
-- **已成功**：`skipped_success`（不重复跑）
-- **运行中但未超时**：`skipped_running`（另一个进程在跑）
-- **运行中已超时**（默认 180 分钟）：重新 claim
-- **force=True**：强制重跑
-
-### 单个 scope 的执行流程
-
-```python
-_run_scheduled_metric_generation_for_scope:
-    1. claim 作业锁
-    2. [可选] 数据对账门控（日调度前）
-    3. [如果是历史日期] 生成库存快照
-    4. generate_metrics_for_date() 生成四类指标
-    5. [可选] 数据对账门控（日调度后）
-    6. 记录成功/失败到 BillingJobRun
-```
-
-### 批量调度
-
-```python
-run_scheduled_metric_generation_for_dates:
-    for service_date in sorted(dates):
-        for owner in owners:
-            for warehouse in warehouses:
-                _run_scheduled_metric_generation_for_scope(...)
-```
-
-三重循环遍历所有 owner × warehouse × date 组合。
-
----
-
-## 13. 指标转计费
-
-```python
-@transaction.atomic
-def accrue_metrics_for_date(owner_id, warehouse_id, service_date, by_user=None)  # L1440
-```
-
-将日指标转化为 accrual（费用应计）。映射关系：
-
-| 指标类型 | calc_method | charge_type | 特殊处理 |
-|---------|-------------|-------------|---------|
-| PALLET  | PER_PALLET_DAY | STORAGE | — |
-| CBM     | PER_CBM_DAY | STORAGE | — |
-| AREA_M2 | PER_AREA_MONTH | STORAGE | **月价按日分摊** |
-| ORDER_AMT | PERCENT_OF_ORDER_AMOUNT | DISPATCH | base_value 为金额 |
-
-**面积月价分摊**（L1464–1467）：
-```python
-monthly_amount, monthly_eff = _compute_fee_with_rule(rule, qty_bill)
-amount = monthly_amount / days_in_month(service_date)
-```
-先用整月面积量走阶梯求出月总价，再除以当月天数得日金额。
-
----
-
-## 14. 订单处理费
-
-```python
-@transaction.atomic
-def accrue_order_processing_from_posted(owner_id, warehouse_id, start_date, end_date, by_user=None)  # L1514
-```
-
-基于已过账的 `TaskScanLog`，通过可配置的 resolver（`BILLING_TASKLINE_ORDER_RESOLVER`）反推出订单维度的信息，然后按四种维度分别计费：
-
-### 数据收集阶段
-
-遍历 scan logs，调用 resolver 提取：
-- `order_ids` → 用于 PER_ORDER 计费
-- `order_line_ids` → 用于 PER_ORDER_LINE 计费
-- `parcels` → 用于 PER_PARCEL 计费
-- `order_amount` → 用于 PERCENT_OF_ORDER_AMOUNT 计费
-
-### 计费阶段
-
-四个独立循环，各自走：Event → 规则匹配 → 阶梯 → 最低 → CAP → Accrual。无规则事件标记为 `UNPRICED` 并阻止关账。
-
-**PERCENT_OF_ORDER_AMOUNT 的特殊处理**（L1661–1672）：
-如果 resolver 没有返回某些日期的金额，会 fallback 到 `BillingMetricDaily`（ORDER_AMT 指标）补全。
-
----
-
-## 15. 关账与开票
-
-### 关账 `lock_period`
-
-```python
-@transaction.atomic
-def lock_period(owner_id, warehouse_id, label, start_date, end_date) -> BillingPeriod  # L1738
-```
-
-**步骤**：
-
-1. **数据对账门控**（可选）
-2. **创建/获取 Period**：通过 `_get_or_create_period_locked` 安全获取（处理并发创建）
-3. **批量锁定 Accrual**：将 owner/warehouse/日期范围内、`status=OPEN` 且 `period__isnull=True` 的 accrual 批量 update 为 `LOCKED`，挂靠到 period
-4. **账期封顶**：遍历所有 `cap_mode=PER_PERIOD` 的规则，对本期 accrual 按时间顺序累加，超过 `cap_amount` 的部分截断为 0
-5. **账期打包**：遍历所有 `bundle_key`，找到对应的打包规则：
-   - `BundleType.CAP`：总额不超过 `bundle_price`（类似封顶）
-   - `BundleType.FIXED`：总额强制调整为恰好等于 `bundle_price`
-6. **Period 状态 → CLOSED**
-
-### 开票 `generate_invoice_for_period`
-
-```python
-@transaction.atomic
-def generate_invoice_for_period(period, invoice_no, issue_date=None, due_date=None) -> Bill  # L1842
-```
-
-**前置校验**：
-- Period 必须是 `CLOSED` 状态
-- 不能重复开票
-- 数据对账门控（可选）
-- 至少有一条 `LOCKED` 的 accrual
-
-**步骤**：
-1. 创建 `Bill`
-2. 遍历 LOCKED accrual，逐条创建 `BillLine`，累加 subtotal 和 tax
-3. Accrual 状态 → `INVOICED`
-4. Bill 写入总计金额，状态 → `ISSUED`
-5. Period 状态 → `INVOICED`
-
----
-
-## 16. 函数调用关系图
-
-```
-accrue_for_posting()                          ← 任务过账触发
-  ├→ _select_rule()
-  ├→ _compute_fee_with_rule()
-  ├→ _apply_caps_bundles_day()
-  └→ BillingEvent/BillingAccrual.get_or_create()
-
-accrue_storage_for_date()                     ← 手动/调度触发
-  └→ (同上流程)
-
-generate_metrics_for_date()                   ← 手动/调度触发
-  ├→ _inventory_metric_rows()
-  │     ├→ _current_inventory_metric_rows()   (当天)
-  │     └→ _snapshot_inventory_metric_rows()  (历史)
-  ├→ _build_pallet_metric()
-  ├→ _build_cbm_metric()
-  ├→ _build_area_metric()
-  ├→ _build_order_amount_metric()
-  └→ _store_generated_metric()
-
-run_scheduled_metric_generation_for_dates()   ← 调度器主入口
-  └→ _run_scheduled_metric_generation_for_scope()
-       ├→ _claim_scheduled_metric_job()
-       ├→ _ensure_reconciliation_for_service_date()
-       ├→ generate_metrics_for_date()
-       └→ _finish_scheduled_metric_job()
-
-accrue_metrics_for_date()                     ← 手动/调度触发
-  ├→ _select_rule()
-  ├→ _compute_fee_with_rule()
-  └→ _apply_caps_bundles_day()
-
-accrue_order_processing_from_posted()         ← 手动/调度触发
-  ├→ _load_taskline_order_resolver()
-  └→ 四轮计费循环 (PER_ORDER / PER_ORDER_LINE / PER_PARCEL / PERCENT_OF_ORDER_AMOUNT)
-
-lock_period()                                 ← API/Admin 触发
-  ├→ _ensure_reconciliation_for_date_range()
-  ├→ _get_or_create_period_locked()
-  ├→ Accrual 批量 OPEN → LOCKED
-  ├→ 账期封顶 (PER_PERIOD cap)
-  │     └→ _save_adjusted_accrual()
-  └→ 账期打包 (PER_PERIOD bundle)
-        ├→ _select_bundle_rule_for_period()
-        ├→ _save_adjusted_accrual() (CAP 模式)
-        └→ _apply_fixed_bundle_total() (FIXED 模式)
-
-generate_invoice_for_period()                 ← API/Admin 触发
-  ├→ _ensure_reconciliation_for_period()
-  ├→ Bill.create + BillLine.create × N
-  └→ Accrual LOCKED → INVOICED, Period → INVOICED
-```
-
----
-
-## 17. 关键设计决策
-
-### 指纹防重 vs 唯一约束
-
-系统同时使用了两层防重：
-- **指纹（fp）字段 + `get_or_create`**：应用层幂等，无论调用多少次同一笔过账，结果相同
-- **数据库 unique 约束**：作为最终保障，防止竞态条件下的重复
-
-### 封顶/打包的两阶段设计
-
-- **日口径**（`_apply_caps_bundles_day`）：在每笔 accrual 生成时即时限额，实时生效
-- **账期口径**（`lock_period` 内）：在关账时才统一调整，因为账期打包需要看到全部 accrual 才能计算
-
-这样设计的原因是：日口径提供即时限额保护；账期口径则允许跨天的费用打包优惠。
-
-### 手动指标 vs 自动指标
-
-- 自动指标以 `"AUTO:"` 为 source 前缀
-- 手动录入的指标不会被自动覆盖（除非 `overwrite=True`）
-- 这允许运营人员在系统自动计算有误时手动修正
-
-### 规则优先级层级
-
-```
-owner 指定 + warehouse 指定  >  owner 指定 + warehouse 通配  >  owner 通配 + warehouse 指定  >  全通配
-```
-
-在同一优先级层级内，`priority` 数值小的优先，最后按 `id` 确定性排序。
-
-### 面积月价按日分摊
-
-面积费按月定价但按日入账：先用整月面积走阶梯计算月价，再除以当月天数。这样 28 天的 2 月和 31 天的 1 月，每日单价不同，但月总价由阶梯决定。
-
-### 事务原子性
-
-所有涉及多表写入的函数都使用 `@transaction.atomic`，确保要么全部成功要么全部回滚。关账和开票尤其重要——不会出现 "accrual 锁了但 period 状态没更新" 的中间状态。
+本版仅依据源码及现有测试进行文档校对；没有在本次文档更新中执行计费任务、关账、开票、收款、数据库测试或发布验收。

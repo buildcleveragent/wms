@@ -1,0 +1,14 @@
+{
+  "status": "INCONCLUSIVE_HISTORICAL_CAUSE",
+  "historical_sources": [
+    {
+      "file": "var/system-tests/c9175bf/2026-09-06/browser-final/browser/diagnostics.json",
+      "sha256": "fa120e1d65545f6699618caae77556f0790b8457d241e0b59589c27499e30c99",
+      "has_response_body_evidence": false
+    }
+  ],
+  "reason": "Historical browser console recorded HTTP 400 without a request payload, endpoint and structured response body sufficient to establish its cause. Subsequent success cannot reconstruct those missing facts.",
+  "new_evidence": "phase3/real-browser-final-v2.json",
+  "current_behavior": "Real product load, cart add (assert HTTP 200), offline order and database amount/quantity assertions passed.",
+  "not_claimed": "No historical cause or defect fix inferred solely from a later pass."
+}

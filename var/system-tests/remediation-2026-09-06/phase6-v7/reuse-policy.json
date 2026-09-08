@@ -1,0 +1,14 @@
+{
+  "scope": "Only the test image recipe changes; the exact accepted production runtime image is reused.",
+  "from_candidate_id": "f0318285cde720a5ad0a947ec3da03186c74d6365dff1dea820ab51b5ae58769",
+  "allowed_source_changes": ["docker/Dockerfile.test"],
+  "allowed_test_environment_additions": ["MySQL 8.0.46 mysql and mysqldump binaries from the pinned official image", "libncurses6"],
+  "required_unchanged": ["runtime image ID", "all application and test source files", "all original runtime Python package versions and files", "all original runtime system package versions", "all previously installed test Python package versions and files", "all previously installed test system package versions", "full collection node IDs"],
+  "original_failure_nodes": [
+    "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferMySQLTests::test_backup_and_restore_round_trip_into_fresh_database",
+    "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferMySQLTests::test_restore_row_count_failure_rolls_back_seed_replacement"
+  ],
+  "rerun": ["allapp/core/test_preserved_data_transfer.py", "all three previously unexecuted isolated migration scenarios", "combined coverage gates", "read-only schema and migration drift verification"],
+  "evidence_rules": ["Retain the original failed full-run XML and manifest unchanged.", "Do not claim a new complete functional pytest run happened in v7.", "Only map failed nodes to separately identified passing reruns after the missing tools are supplied.", "Reuse the 141-step real clean migration because application schema and the runtime image are byte-identical.", "Every functional node must have a passed authoritative execution, with no unexplained skip or failed node.", "Reused coverage is valid only with identical measured Python sources and configuration."],
+  "reason": "Direct application invocation of mysql/mysqldump is confined to preserved_data_transfer.py; scoped reruns cover that entire module. Repeating unrelated business tests or rebuilding a healthy test database is not required for this isolated test-tool correction."
+}

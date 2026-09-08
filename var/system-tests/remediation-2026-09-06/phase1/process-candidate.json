@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "run_id": "1a48d3dcd0e143db8e0b6451081e5f10",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 8,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase1/process-candidate.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 8
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/core/test_test_process.py::test_process_exit_cannot_hide_failure_or_leaked_children[print('done')-5-PASS-None]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_process.py::test_process_exit_cannot_hide_failure_or_leaked_children[raise SystemExit(7)-5-FAIL-None]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_process.py::test_process_exit_cannot_hide_failure_or_leaked_children[import time; time.sleep(60)-0.2-ABORTED-TIMEOUT]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_process.py::test_process_exit_cannot_hide_failure_or_leaked_children[import subprocess,sys; subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])-5-FAIL-LEAKED_RESOURCES]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_process.py::test_process_exit_cannot_hide_failure_or_leaked_children[import os,signal,time; os.kill(os.getppid(),signal.SIGTERM); time.sleep(60)-5-ABORTED-INTERRUPTED]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_process.py::test_cleanup_failure_blocks_an_otherwise_successful_command": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_process.py::test_existing_evidence_is_not_overwritten": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_test_candidate.py::test_evidence_is_separate_but_source_and_test_changes_change_candidate": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

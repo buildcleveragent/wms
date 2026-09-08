@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "run_id": "ad21e6b0b2a5431aba5328a3d633b2e5",
+  "status": "COLLECTED",
+  "exit_code": 0,
+  "collected": 19,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase5/collection-cli-v6.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "NOT RUN": 19
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/core/test_test_evidence.py::test_failed_subtest_survives_all_later_success_events": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_failed_phase_cannot_be_overwritten_or_hidden_by_exit_zero[setup]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_failed_phase_cannot_be_overwritten_or_hidden_by_exit_zero[call]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_failed_phase_cannot_be_overwritten_or_hidden_by_exit_zero[teardown]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_successful_events_do_not_override_nonzero_exit[1]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_successful_events_do_not_override_nonzero_exit[2]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_successful_events_do_not_override_nonzero_exit[3]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_successful_events_do_not_override_nonzero_exit[4]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_successful_events_do_not_override_nonzero_exit[5]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_zero_incomplete_and_unexpected_execution_are_not_success": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_collection_only_is_distinct_from_execution[nodes0-0-COLLECTED]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_collection_only_is_distinct_from_execution[nodes1-0-FAIL]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_collection_only_is_distinct_from_execution[nodes2-2-ABORTED]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_new_run_can_pass_without_overwriting_previous_failure": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_actual_pytest_hooks_preserve_failure_and_subtest_evidence[def test_example(subtests):\\n    for value in (False, True):\\n        with subtests.test(value=value):\\n            assert value\\n-FAIL-1]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_actual_pytest_hooks_preserve_failure_and_subtest_evidence[import pytest\\n@pytest.fixture\\ndef broken():\\n    yield\\n    assert False\\ndef test_example(broken):\\n    pass\\n-FAIL-1]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_actual_pytest_hooks_preserve_failure_and_subtest_evidence[def test_example():\\n    raise KeyboardInterrupt\\n-ABORTED-2]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_actual_pytest_hooks_preserve_failure_and_subtest_evidence[def test_example():\\n    pass\\n-PASS-0]": {
+      "status": "NOT RUN",
+      "phases": {}
+    },
+    "allapp/core/test_test_evidence.py::test_actual_pytest_hooks_preserve_failure_and_subtest_evidence[# no tests\\n-FAIL-5]": {
+      "status": "NOT RUN",
+      "phases": {}
+    }
+  }
+}

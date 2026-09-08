@@ -77,9 +77,7 @@ def _scoped(qs, user):
     scope = _scope(user)
     if scope.is_global:
         return qs
-    return scope.filter_queryset(
-        qs, owner_field="owner_id", warehouse_field="warehouse_id"
-    )
+    return scope.filter_queryset(qs, owner_field="owner_id", warehouse_field="warehouse_id")
 
 
 class ReplenishmentPolicyViewSet(viewsets.ModelViewSet):
@@ -102,27 +100,21 @@ class ReplenishmentPolicyViewSet(viewsets.ModelViewSet):
 
     def _require_target_scope(self, serializer):
         instance = getattr(serializer, "instance", None)
-        owner = serializer.validated_data.get("owner") or getattr(
-            instance, "owner", None
-        )
+        owner = serializer.validated_data.get("owner") or getattr(instance, "owner", None)
         warehouse = serializer.validated_data.get("warehouse") or getattr(
             instance, "warehouse", None
         )
         if (
             not owner
             or not warehouse
-            or not _scope(self.request.user).allows(
-                owner_id=owner.pk, warehouse_id=warehouse.pk
-            )
+            or not _scope(self.request.user).allows(owner_id=owner.pk, warehouse_id=warehouse.pk)
         ):
             raise PermissionDenied("补货策略超出当前账号范围。")
 
     def perform_create(self, serializer):
         self._require_manager()
         self._require_target_scope(serializer)
-        obj = serializer.save(
-            created_by=self.request.user, updated_by=self.request.user
-        )
+        obj = serializer.save(created_by=self.request.user, updated_by=self.request.user)
         record_audit_event(
             action="replenishment.policy.create",
             module="tasking",
@@ -163,9 +155,7 @@ class ReplenishmentRequestViewSet(viewsets.GenericViewSet):
         return qs.order_by("-created_at", "-id")
 
     def list(self, request):
-        return Response(
-            ReplenishmentRequestSerializer(self.get_queryset(), many=True).data
-        )
+        return Response(ReplenishmentRequestSerializer(self.get_queryset(), many=True).data)
 
     def retrieve(self, request, pk=None):
         obj = get_object_or_404(self.get_queryset(), pk=pk)
@@ -203,25 +193,20 @@ class ReplenishmentRequestViewSet(viewsets.GenericViewSet):
             obj=obj,
             after={"status": obj.status, "requested_qty": obj.requested_qty},
         )
-        return Response(
-            ReplenishmentRequestSerializer(obj).data, status=status.HTTP_201_CREATED
-        )
+        return Response(ReplenishmentRequestSerializer(obj).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
         _require_feature("REPLENISHMENT_MANUAL_ENABLED", "手工补货申请功能尚未启用。")
         if not (
-            _is_manager(request.user)
-            and request.user.has_perm("tasking.approve_replenishment")
+            _is_manager(request.user) and request.user.has_perm("tasking.approve_replenishment")
         ):
             raise PermissionDenied("只有仓库管理员可以审核补货申请。")
         obj = get_object_or_404(self.get_queryset(), pk=pk)
         serializer = ReplenishmentReviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            approve_request(
-                obj.pk, by_user=request.user, note=serializer.validated_data["note"]
-            )
+            approve_request(obj.pk, by_user=request.user, note=serializer.validated_data["note"])
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages) from exc
         obj.refresh_from_db()
@@ -239,17 +224,14 @@ class ReplenishmentRequestViewSet(viewsets.GenericViewSet):
     def reject(self, request, pk=None):
         _require_feature("REPLENISHMENT_MANUAL_ENABLED", "手工补货申请功能尚未启用。")
         if not (
-            _is_manager(request.user)
-            and request.user.has_perm("tasking.approve_replenishment")
+            _is_manager(request.user) and request.user.has_perm("tasking.approve_replenishment")
         ):
             raise PermissionDenied("只有仓库管理员可以审核补货申请。")
         obj = get_object_or_404(self.get_queryset(), pk=pk)
         serializer = ReplenishmentReviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            reject_request(
-                obj.pk, by_user=request.user, note=serializer.validated_data["note"]
-            )
+            reject_request(obj.pk, by_user=request.user, note=serializer.validated_data["note"])
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages) from exc
         obj.refresh_from_db()
@@ -270,24 +252,19 @@ class ReplenishmentEvaluateView(APIView):
     def post(self, request):
         _require_feature("REPLENISHMENT_MINMAX_ENABLED", "阈值补货评估功能尚未启用。")
         if not (
-            _is_manager(request.user)
-            and request.user.has_perm("tasking.evaluate_replenishment")
+            _is_manager(request.user) and request.user.has_perm("tasking.evaluate_replenishment")
         ):
             raise PermissionDenied("只有仓库管理员可以触发补货策略评估。")
         serializer = ReplenishmentEvaluateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         filters = serializer.validated_data
-        scoped_policies = _scoped(
-            ReplenishmentPolicy.objects.filter(is_active=True), request.user
-        )
+        scoped_policies = _scoped(ReplenishmentPolicy.objects.filter(is_active=True), request.user)
         if filters.get("policy_id"):
             scoped_policies = scoped_policies.filter(pk=filters["policy_id"])
         if filters.get("owner_id"):
             scoped_policies = scoped_policies.filter(owner_id=filters["owner_id"])
         if filters.get("warehouse_id"):
-            scoped_policies = scoped_policies.filter(
-                warehouse_id=filters["warehouse_id"]
-            )
+            scoped_policies = scoped_policies.filter(warehouse_id=filters["warehouse_id"])
         if filters.get("product_id"):
             scoped_policies = scoped_policies.filter(product_id=filters["product_id"])
         results = evaluate_policies(
@@ -300,9 +277,7 @@ class ReplenishmentEvaluateView(APIView):
             request=request,
             metadata={
                 "policy_ids": [row["policy_id"] for row in results],
-                "created_task_ids": [
-                    row["task_id"] for row in results if row["task_id"]
-                ],
+                "created_task_ids": [row["task_id"] for row in results if row["task_id"]],
             },
         )
         return Response({"results": results})
@@ -330,11 +305,12 @@ class ReplenishmentTaskViewSet(viewsets.ReadOnlyModelViewSet):
         )
         qs = _scoped(qs, self.request.user)
         if _is_operator(self.request.user) and not _is_manager(self.request.user):
+            assignment_scope = Q(assignments__assignee=self.request.user)
+            # A completed operator retains access to confirm/replay their scan.
+            if self.action not in {"retrieve", "record"}:
+                assignment_scope &= Q(assignments__finished_at__isnull=True)
             qs = qs.filter(
-                Q(
-                    assignments__assignee=self.request.user,
-                    assignments__finished_at__isnull=True,
-                )
+                assignment_scope
                 | Q(status=WmsTask.Status.RELEASED, has_active_assignment=False)
                 | Q(created_by=self.request.user)
             ).distinct()
@@ -355,9 +331,7 @@ class ReplenishmentTaskViewSet(viewsets.ReadOnlyModelViewSet):
             raise PermissionDenied("只有仓库操作员可以领取补货任务。")
         task = self.get_object()
         try:
-            task_services.claim_task(
-                task, by_user=request.user, allowed_wh_ids={task.warehouse_id}
-            )
+            task_services.claim_task(task, by_user=request.user, allowed_wh_ids={task.warehouse_id})
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages) from exc
         task.refresh_from_db()
@@ -417,9 +391,7 @@ class ReplenishmentTaskViewSet(viewsets.ReadOnlyModelViewSet):
         }:
             raise ValidationError("当前补货任务不允许重试过账。")
         try:
-            task_services._run_posting_handler(
-                task.pk, by_user=request.user, note="补货过账重试"
-            )
+            task_services._run_posting_handler(task.pk, by_user=request.user, note="补货过账重试")
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages) from exc
         task.refresh_from_db()

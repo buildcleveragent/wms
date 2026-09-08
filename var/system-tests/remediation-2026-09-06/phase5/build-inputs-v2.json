@@ -1,0 +1,14 @@
+{
+  "runtime_image_id": "sha256:4c1c2b243ecd7deec37b47b0eaf6991a973cc49498dd062afe50ff633145c832",
+  "docker_cli_sha256": "4fd41ecac3ec0f8a6067f8da79cbce516ed0572d1081e4767db764c84d32257b",
+  "docker_cli_version": "Docker version 29.2.1, build a5c7197",
+  "build_args": {
+    "DEBIAN_MIRROR": "https://mirrors.tuna.tsinghua.edu.cn",
+    "PIP_INDEX_URL": "https://pypi.tuna.tsinghua.edu.cn/simple"
+  },
+  "frontend_runtime": {
+    "node": "22.23.2",
+    "npm": "10.9.8",
+    "VITE_API_ENDPOINT": "http://127.0.0.1:18081"
+  }
+}

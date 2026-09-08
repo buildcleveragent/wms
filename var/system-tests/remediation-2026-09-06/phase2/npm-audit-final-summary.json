@@ -1,0 +1,67 @@
+[
+  {
+    "app": "wmspda",
+    "exit_code": 1,
+    "vulnerabilities": {
+      "info": 0,
+      "low": 13,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 13
+    },
+    "error": null
+  },
+  {
+    "app": "wmsandroid",
+    "exit_code": 1,
+    "vulnerabilities": {
+      "info": 0,
+      "low": 13,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 13
+    },
+    "error": null
+  },
+  {
+    "app": "wmsownersale",
+    "exit_code": 1,
+    "vulnerabilities": {
+      "info": 0,
+      "low": 15,
+      "moderate": 5,
+      "high": 0,
+      "critical": 0,
+      "total": 20
+    },
+    "error": null
+  },
+  {
+    "app": "wmsbossbilling",
+    "exit_code": 1,
+    "vulnerabilities": {
+      "info": 0,
+      "low": 15,
+      "moderate": 5,
+      "high": 0,
+      "critical": 0,
+      "total": 20
+    },
+    "error": null
+  },
+  {
+    "app": "sales-miniapp",
+    "exit_code": 1,
+    "vulnerabilities": {
+      "info": 0,
+      "low": 15,
+      "moderate": 5,
+      "high": 0,
+      "critical": 0,
+      "total": 20
+    },
+    "error": null
+  }
+]

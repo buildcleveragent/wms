@@ -1,0 +1,16 @@
+[
+  {
+    "url": "https://mirrors.edge.kernel.org/debian/dists/trixie/main/binary-amd64/Packages.xz",
+    "bytes": 262144,
+    "seconds": 7.5
+  },
+  {
+    "url": "https://ftp.de.debian.org/debian/dists/trixie/main/binary-amd64/Packages.xz",
+    "error": "URLError"
+  },
+  {
+    "url": "https://mirrors.tuna.tsinghua.edu.cn/debian/dists/trixie/main/binary-amd64/Packages.xz",
+    "bytes": 262144,
+    "seconds": 3.8
+  }
+]

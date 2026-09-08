@@ -1,4 +1,4 @@
-import { BASE_URL, getToken } from '@/utils/request'
+import { BASE_URL, getToken, withAuthToken } from '@/utils/request'
 
 export function prepareOutboundPrintWindow() {
   let preparedWindow = null
@@ -23,14 +23,20 @@ export function closePreparedOutboundPrintWindow(preparedWindow) {
   }
 }
 
-export function outboundPrintUrl(taskId) {
+export async function outboundPrintUrl(taskId) {
   const token = getToken()
   if (!token || !Number(taskId)) return ''
-  return `${BASE_URL}/api/pda/pick-tasks/${Number(taskId)}/print/?token=${encodeURIComponent(token)}`
+  return withAuthToken(`${BASE_URL}/api/pda/pick-tasks/${Number(taskId)}/print/`)
 }
 
-export function openOutboundPrintPage(taskId, preparedWindow = null) {
-  const url = outboundPrintUrl(taskId)
+export async function openOutboundPrintPage(taskId, preparedWindow = null) {
+  preparedWindow = preparedWindow || prepareOutboundPrintWindow()
+  let url
+  try { url = await outboundPrintUrl(taskId) } catch (error) {
+    closePreparedOutboundPrintWindow(preparedWindow)
+    uni.showToast({ title: '无法取得打印票据，请稍后重试', icon: 'none' })
+    return false
+  }
   if (!url) {
     closePreparedOutboundPrintWindow(preparedWindow)
     uni.showToast({ title: '登录已失效，暂时无法打印出库单', icon: 'none' })

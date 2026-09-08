@@ -16,8 +16,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from xml.dom import minidom
 
 import mistune
 from bs4 import BeautifulSoup
@@ -32,13 +34,14 @@ MANIFEST_PATH = MANUALS_DIR / "manuals_manifest.json"
 CONSOLIDATED_STEM = "金桥融通WMS操作手册"
 
 
-STYLE = r"""
+STYLE = """
 @page {
   size: A4;
   margin: 18mm 16mm 19mm 16mm;
   @top-left { content: string(document-title); color: #667085; font-size: 8.2pt; }
-  @top-right { content: "V2.0 · 2026-08"; color: #667085; font-size: 8.2pt; }
-  @bottom-center { content: "第 " counter(page) " 页 / 共 " counter(pages) " 页"; color: #7a8493; font-size: 8.2pt; }
+  @top-right { content: __DOCUMENT_EDITION__; color: #667085; font-size: 8.2pt; }
+  @bottom-center { content: "第 " counter(page) " 页 / 共 " counter(pages) " 页"; color: #7a8493; \
+font-size: 8.2pt; }
 }
 @page cover {
   margin: 0;
@@ -69,18 +72,21 @@ body { margin: 0; font-size: 10pt; line-height: 1.7; }
   background: rgba(255,255,255,.10);
 }
 .cover-logo { width: 23mm; height: 23mm; object-fit: contain; margin-bottom: 25mm; }
-.cover h1 { string-set: document-title content(); font-size: 27pt; line-height: 1.28; margin: 0 0 12mm; color: white; }
+.cover h1 { string-set: document-title content(); font-size: 27pt; line-height: 1.28; \
+margin: 0 0 12mm; color: white; }
 .cover .lead { font-size: 14pt; color: #e8f1ff; margin-bottom: 28mm; }
 .cover-meta { border-top: 1px solid rgba(255,255,255,.45); padding-top: 9mm; width: 125mm; }
 .cover-meta div { margin: 2.2mm 0; font-size: 10.5pt; }
-.cover-foot { position: absolute; left: 26mm; right: 26mm; bottom: 25mm; color: #eaf2ff; font-size: 9pt; }
+.cover-foot { position: absolute; left: 26mm; right: 26mm; bottom: 25mm; color: #eaf2ff; \
+font-size: 9pt; }
 .toc { page-break-after: always; }
 .toc h1 { color: #0f2f68; font-size: 23pt; border-bottom: 3px solid #155eef; padding-bottom: 4mm; }
 .toc ul { margin: 0; padding-left: 0; list-style: none; }
 .toc li { margin: 1.6mm 0; }
 .toc li.level-3 { margin-left: 7mm; color: #4d5c73; font-size: 9.2pt; }
 .toc a { color: inherit; text-decoration: none; }
-h2 { page-break-before: always; font-size: 19pt; color: #0f2f68; margin: 0 0 7mm; border-bottom: 2px solid #bfd2f6; padding-bottom: 3mm; }
+h2 { page-break-before: always; font-size: 19pt; color: #0f2f68; margin: 0 0 7mm; \
+border-bottom: 2px solid #bfd2f6; padding-bottom: 3mm; }
 h2.first-section { page-break-before: auto; }
 h3 { font-size: 13.5pt; color: #174a98; margin: 8mm 0 3mm; page-break-after: avoid; }
 h4 { font-size: 11.5pt; color: #243b63; margin: 5mm 0 2mm; page-break-after: avoid; }
@@ -88,21 +94,28 @@ p { margin: 2.4mm 0; orphans: 3; widows: 3; }
 ul, ol { margin: 2.2mm 0 3mm; padding-left: 7mm; }
 li { margin: 1.2mm 0; }
 strong { color: #122c57; }
-code { font-family: "Noto Sans Mono CJK SC", monospace; background: #eef3fb; padding: .2mm 1mm; border-radius: 1mm; }
-blockquote { margin: 4mm 0; padding: 3.5mm 5mm; border-left: 4px solid #3274dd; background: #f2f6fd; color: #35445d; }
+code { font-family: "Noto Sans Mono CJK SC", monospace; background: #eef3fb; \
+padding: .2mm 1mm; border-radius: 1mm; }
+blockquote { margin: 4mm 0; padding: 3.5mm 5mm; border-left: 4px solid #3274dd; \
+background: #f2f6fd; color: #35445d; }
 blockquote p { margin: 0; }
 hr { border: 0; border-top: 1px solid #d7dee9; margin: 7mm 0; }
-table { width: 100%; border-collapse: collapse; margin: 4mm 0 6mm; font-size: 8.5pt; page-break-inside: auto; }
+table { width: 100%; border-collapse: collapse; margin: 4mm 0 6mm; font-size: 8.5pt; \
+page-break-inside: auto; }
 thead { display: table-header-group; }
 tr { page-break-inside: avoid; }
 th { background: #eaf1fd; color: #143a75; font-weight: 700; }
 th, td { border: 1px solid #bdc9da; padding: 2.2mm 2.4mm; vertical-align: top; }
-img { display: block; max-width: 100%; height: auto; margin: 5mm auto 7mm; page-break-inside: avoid; }
+img { display: block; max-width: 100%; height: auto; margin: 5mm auto 7mm; \
+page-break-inside: avoid; }
 img.role-map { width: 96%; }
-img.mobile-shot { width: 62mm; border: 1px solid #ccd5e2; border-radius: 3mm; box-shadow: 0 2mm 7mm rgba(20,40,80,.10); }
+img.mobile-shot { width: 62mm; border: 1px solid #ccd5e2; border-radius: 3mm; \
+box-shadow: 0 2mm 7mm rgba(20,40,80,.10); }
 img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rgba(20,40,80,.10); }
-.caption { text-align: center; color: #68758a; font-size: 8.5pt; margin-top: -5mm; margin-bottom: 6mm; }
-.document-note { margin: 0 0 7mm; padding: 3mm 4mm; color: #34445d; background: #f6f8fb; border: 1px solid #d8e0eb; }
+.caption { text-align: center; color: #68758a; font-size: 8.5pt; margin-top: -5mm; \
+margin-bottom: 6mm; }
+.document-note { margin: 0 0 7mm; padding: 3mm 4mm; color: #34445d; background: #f6f8fb; \
+border: 1px solid #d8e0eb; }
 .checkbox { font-family: "Noto Sans Symbols 2", "Noto Sans CJK SC", sans-serif; }
 """
 
@@ -138,24 +151,7 @@ def read_source(name: str) -> str:
 
 
 def demote_headings(markdown: str) -> str:
-    return re.sub(
-        r"^(#{2,5})(?= )", lambda match: "#" + match.group(1), markdown, flags=re.M
-    )
-
-
-def login_image(spec: ManualSpec, *, consolidated: bool = False) -> str:
-    prefix = "manual_assets" if consolidated else "../manual_assets"
-    images = {
-        "warehouse_operator": ("pda-login.png", "仓库 PDA 登录界面"),
-        "warehouse_manager": ("web-login.png", "Web 管理后台登录界面"),
-        "system_admin": ("web-login.png", "Web 管理后台登录界面"),
-        "warehouse_boss": ("boss-login.png", "仓储经营分析中心登录界面"),
-    }
-    image = images.get(spec.slug)
-    if not image:
-        return ""
-    filename, alt = image
-    return f"\n![{alt}]({prefix}/{filename})\n"
+    return re.sub(r"^(#{2,5})(?= )", lambda match: "#" + match.group(1), markdown, flags=re.M)
 
 
 def role_header(manifest: dict[str, str], spec: ManualSpec) -> str:
@@ -199,7 +195,6 @@ def compose_role_manual(
     parts = [
         role_header(manifest, spec),
         common_safety,
-        login_image(spec),
         fragment,
         common_status,
         common_exceptions,
@@ -215,8 +210,7 @@ def compose_consolidated(
     common_exceptions: str,
 ) -> str:
     role_rows = "\n".join(
-        f"| {spec.label} | `{spec.group}` | {spec.entry} | {spec.scope} |"
-        for spec in specs
+        f"| {spec.label} | `{spec.group}` | {spec.entry} | {spec.scope} |" for spec in specs
     )
     parts = [
         f"""# {manifest['system_name']}操作手册
@@ -252,9 +246,6 @@ def compose_consolidated(
 
     for spec in specs:
         parts.append(f"## {spec.label}操作指南")
-        image = login_image(spec, consolidated=True)
-        if image:
-            parts.append(image)
         parts.append(demote_headings(read_source(spec.fragment)))
 
     parts.append(common_exceptions)
@@ -277,9 +268,7 @@ def render_html(target: BuildTarget, *, version: str, baseline_date: str) -> str
     for index, heading in enumerate(soup.find_all(["h2", "h3"]), start=1):
         heading_id = slugify(heading.get_text(" ", strip=True), index)
         heading["id"] = heading_id
-        toc_items.append(
-            (int(heading.name[1]), heading_id, heading.get_text(" ", strip=True))
-        )
+        toc_items.append((int(heading.name[1]), heading_id, heading.get_text(" ", strip=True)))
 
     for image in soup.find_all("img"):
         alt = image.get("alt", "界面截图")
@@ -302,7 +291,8 @@ def render_html(target: BuildTarget, *, version: str, baseline_date: str) -> str
     toc_lines = ["<section class='toc'><h1>目录</h1><ul>"]
     for level, heading_id, title in toc_items:
         toc_lines.append(
-            f"<li class='level-{level}'><a href='#{html.escape(heading_id)}'>{html.escape(title)}</a></li>"
+            f"<li class='level-{level}'><a href='#{html.escape(heading_id)}'>"
+            f"{html.escape(title)}</a></li>"
         )
     toc_lines.append("</ul></section>")
 
@@ -326,12 +316,14 @@ def render_html(target: BuildTarget, *, version: str, baseline_date: str) -> str
     </section>
     """
     body = str(soup).replace("☐", "□")
+    edition = json.dumps(f"{version} · {baseline_date}", ensure_ascii=False)
+    style = STYLE.replace("__DOCUMENT_EDITION__", edition)
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <title>{html.escape(target.title)}</title>
-  <style>{STYLE}</style>
+  <style>{style}</style>
 </head>
 <body>
 {cover}
@@ -346,9 +338,7 @@ def build_word_images() -> None:
     assets = DOCS_DIR / "manual_assets"
     variants = (
         ("role-entry-map.png", "role-entry-map-word.png", 600),
-        ("pda-login.png", "pda-login-word.png", 280),
-        ("boss-login.png", "boss-login-word.png", 280),
-        ("web-login.png", "web-login-word.png", 600),
+        ("../../static/img/aaa.png", "logo-word.png", 88),
     )
     for source_name, target_name, max_width in variants:
         with Image.open(assets / source_name) as source:
@@ -365,6 +355,19 @@ def build_word_images() -> None:
 
 def build_word_html(document: str, *, base_dir: Path) -> str:
     soup = BeautifulSoup(document, "html.parser")
+    # Writer's HTML importer does not reliably apply percentage table widths
+    # from stylesheets. Give it a concrete width within the A4 text area.
+    for table in soup.find_all("table"):
+        table["width"] = "670"
+        table["border"] = "1"
+        table["cellspacing"] = "0"
+        table["cellpadding"] = "5"
+        table["style"] = "width:670px; border-collapse:collapse;"
+        for cell in table.find_all(["th", "td"]):
+            cell["style"] = "border:1px solid #bdc9da; padding:4pt; font-size:9pt;"
+            cell["valign"] = "top"
+            if cell.name == "th":
+                cell["bgcolor"] = "#eaf1fd"
     cover = soup.select_one(".cover")
     if cover:
         cover["style"] = (
@@ -376,17 +379,77 @@ def build_word_html(document: str, *, base_dir: Path) -> str:
         if not source or source.startswith(("data:", "http://", "https://", "file://")):
             continue
         path = (base_dir / source).resolve()
-        if path.name.endswith("-word.png"):
+        if "cover-logo" in image.get("class", []):
+            word_path = DOCS_DIR / "manual_assets" / "logo-word.png"
+        elif path.name.endswith("-word.png"):
             word_path = path
         else:
             candidate = path.with_name(f"{path.stem}-word{path.suffix}")
             word_path = candidate if candidate.exists() else path
         image["src"] = word_path.as_uri()
         classes = set(image.get("class", []))
-        width = "600" if classes.intersection({"role-map", "web-shot"}) else "280"
+        if "cover-logo" in classes:
+            width = "88"
+        else:
+            width = "600" if classes.intersection({"role-map", "web-shot"}) else "280"
         image["width"] = width
-        image["style"] = f"width:{width}px; height:auto;"
+        with Image.open(word_path) as asset:
+            height = str(round(int(width) * asset.height / asset.width))
+        image["height"] = height
+        image["style"] = f"width:{width}px; height:{height}px;"
     return str(soup)
+
+
+def normalize_docx_layout(docx_path: Path) -> None:
+    """Keep cover, contents and body separate when HTML section breaks are lost."""
+    namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    with zipfile.ZipFile(docx_path) as package:
+        files = {name: package.read(name) for name in package.namelist()}
+    document = minidom.parseString(files["word/document.xml"])
+    for paragraph in document.getElementsByTagNameNS(namespace, "p"):
+        text = "".join(
+            child.data
+            for node in paragraph.getElementsByTagNameNS(namespace, "t")
+            for child in node.childNodes
+            if child.nodeType == child.TEXT_NODE
+        )
+        if text not in {"目录", "本手册仅描述当前代码中具有有效权限、页面和业务闭环的功能。"}:
+            continue
+        properties = paragraph.getElementsByTagNameNS(namespace, "pPr")
+        if properties:
+            properties = properties[0]
+        else:
+            properties = document.createElementNS(namespace, "w:pPr")
+            paragraph.insertBefore(properties, paragraph.firstChild)
+        breaks = properties.getElementsByTagNameNS(namespace, "pageBreakBefore")
+        page_break = (
+            breaks[0] if breaks else document.createElementNS(namespace, "w:pageBreakBefore")
+        )
+        page_break.setAttributeNS(namespace, "w:val", "1")
+        if page_break.parentNode:
+            page_break.parentNode.removeChild(page_break)
+        # CT_PPr places this before bidi, spacing, alignment and run properties.
+        following = next(
+            (
+                child
+                for child in properties.childNodes
+                if child.nodeType == child.ELEMENT_NODE
+                and child.localName not in {"pStyle", "keepNext", "keepLines"}
+            ),
+            None,
+        )
+        properties.insertBefore(page_break, following)
+    files["word/document.xml"] = document.toxml(encoding="utf-8")
+    document.unlink()
+    with tempfile.NamedTemporaryFile(dir=docx_path.parent, suffix=".docx", delete=False) as handle:
+        temporary = Path(handle.name)
+    try:
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as package:
+            for name, content in files.items():
+                package.writestr(name, content)
+        temporary.replace(docx_path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def convert_docx(word_html: Path, docx_path: Path) -> None:
@@ -436,15 +499,14 @@ def convert_docx(word_html: Path, docx_path: Path) -> None:
                 + (result.stderr or result.stdout or "no output")
             )
     embed_images(docx_path)
+    normalize_docx_layout(docx_path)
 
 
 def build_target(target: BuildTarget, *, version: str, baseline_date: str) -> None:
     target.output_stem.parent.mkdir(parents=True, exist_ok=True)
     markdown_path = target.output_stem.with_suffix(".md")
     html_path = target.output_stem.with_suffix(".html")
-    word_html_path = target.output_stem.with_name(
-        target.output_stem.name + "_Word源.html"
-    )
+    word_html_path = target.output_stem.with_name(target.output_stem.name + "_Word源.html")
     pdf_path = target.output_stem.with_suffix(".pdf")
     docx_path = target.output_stem.with_suffix(".docx")
 
@@ -454,20 +516,19 @@ def build_target(target: BuildTarget, *, version: str, baseline_date: str) -> No
     word_html_path.write_text(
         build_word_html(document, base_dir=html_path.parent), encoding="utf-8"
     )
-    HTML(filename=str(html_path), base_url=str(html_path.parent)).write_pdf(
-        str(pdf_path)
-    )
+    HTML(filename=str(html_path), base_url=str(html_path.parent)).write_pdf(str(pdf_path))
     convert_docx(word_html_path, docx_path)
     print(f"Built {markdown_path}, {docx_path}, {pdf_path}")
 
 
-def write_index(manifest: dict[str, str], specs: list[ManualSpec]) -> None:
+def compose_index(manifest: dict[str, str], specs: list[ManualSpec]) -> str:
     rows = []
     for spec in specs:
         quoted_stem = spec.output.replace(" ", "%20")
         rows.append(
             f"| {spec.label} | `{spec.group}` | "
-            f"[Markdown]({quoted_stem}.md) · [Word]({quoted_stem}.docx) · [PDF]({quoted_stem}.pdf) |"
+            f"[Markdown]({quoted_stem}.md) · [Word]({quoted_stem}.docx) · "
+            f"[PDF]({quoted_stem}.pdf) |"
         )
     content = f"""# WMS 角色操作手册索引
 
@@ -491,15 +552,22 @@ def write_index(manifest: dict[str, str], specs: list[ManualSpec]) -> None:
 
 - [角色—权限—动作矩阵](ROLE_MATRIX.md)
 - [本次业务基线](BASELINE.md)
+- [内容核对记录](CONTENT_REVIEW.md)
+- [文档验收记录](VALIDATION.md)
 
 专项指南：
 
 - [POS 使用手册](../pos_user_manual.md)
 - [商城小程序使用教程](../sales-miniapp-user-guide.md)
+- [计费服务技术讲解](../billing_services_guide.md)
+
+维护方式：先编辑 `src/` 源内容，再运行 `.venv/bin/python docs/build_user_manual.py --all`，
+最后运行 `.venv/bin/python docs/validate_user_manuals.py`。命令在仓库根目录执行。
+构建需要项目 Python 文档依赖、中文字体、LibreOffice 和 Poppler 工具；不连接业务数据库。
 
 角色命名注意：企业岗位“仓库主管”如需管理仓库作业，应使用 `WMS::仓库管理员`。旧用户组“仓库主管”会按兼容逻辑识别为仓库老板。
 """
-    (MANUALS_DIR / "README.md").write_text(content, encoding="utf-8")
+    return content
 
 
 def parse_args(specs: list[ManualSpec]) -> argparse.Namespace:
@@ -518,59 +586,51 @@ def parse_args(specs: list[ManualSpec]) -> argparse.Namespace:
     return parser.parse_args()
 
 
+def compose_targets(manifest: dict[str, str], specs: list[ManualSpec]) -> list[BuildTarget]:
+    """Compose all deliverables without writing files or invoking converters."""
+    common_safety = read_source("common_safety.md")
+    common_status = read_source("common_status.md")
+    common_exceptions = read_source("common_exceptions.md")
+    targets = [
+        BuildTarget(
+            title=spec.title,
+            audience=spec.label,
+            output_stem=MANUALS_DIR / spec.output,
+            markdown=compose_role_manual(
+                manifest, spec, common_safety, common_status, common_exceptions
+            ),
+        )
+        for spec in specs
+    ]
+    targets.append(
+        BuildTarget(
+            title=f"{manifest['system_name']}操作手册",
+            audience="六类 WMS 角色",
+            output_stem=DOCS_DIR / CONSOLIDATED_STEM,
+            markdown=compose_consolidated(
+                manifest, specs, common_safety, common_status, common_exceptions
+            ),
+        )
+    )
+    return targets
+
+
 def main() -> None:
     manifest, specs = load_manifest()
     args = parse_args(specs)
     build_all = args.all or not (args.role or args.consolidated)
-    common_safety = read_source("common_safety.md")
-    common_status = read_source("common_status.md")
-    common_exceptions = read_source("common_exceptions.md")
     build_word_images()
-    write_index(manifest, specs)
-
-    targets: list[BuildTarget] = []
-    if build_all or args.role:
-        selected = (
-            specs if build_all else [spec for spec in specs if spec.slug == args.role]
-        )
-        for spec in selected:
-            targets.append(
-                BuildTarget(
-                    title=spec.title,
-                    audience=spec.label,
-                    output_stem=MANUALS_DIR / spec.output,
-                    markdown=compose_role_manual(
-                        manifest,
-                        spec,
-                        common_safety,
-                        common_status,
-                        common_exceptions,
-                    ),
-                )
-            )
-
-    if build_all or args.consolidated:
-        targets.append(
-            BuildTarget(
-                title=f"{manifest['system_name']}操作手册",
-                audience="六类 WMS 角色",
-                output_stem=DOCS_DIR / CONSOLIDATED_STEM,
-                markdown=compose_consolidated(
-                    manifest,
-                    specs,
-                    common_safety,
-                    common_status,
-                    common_exceptions,
-                ),
-            )
-        )
-
+    (MANUALS_DIR / "README.md").write_text(compose_index(manifest, specs), encoding="utf-8")
+    targets = compose_targets(manifest, specs)
+    if not build_all:
+        selected_stems = set()
+        if args.role:
+            selected_stems.add(next(spec.output for spec in specs if spec.slug == args.role))
+        if args.consolidated:
+            selected_stems.add(CONSOLIDATED_STEM)
+        targets = [target for target in targets if target.output_stem.name in selected_stems]
     for target in targets:
-        build_target(
-            target,
-            version=manifest["version"],
-            baseline_date=manifest["baseline_date"],
-        )
+        build_target(target, version=manifest["version"], baseline_date=manifest["baseline_date"])
 
 
 if __name__ == "__main__":

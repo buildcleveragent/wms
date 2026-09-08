@@ -79,7 +79,7 @@ export const useAuth = defineStore('auth', {
         persistUser(this.user)
         return { status: 'authenticated' }
       } catch (error) {
-        if (error?.statusCode === 0) return { status: 'offline', error }
+        if (![401, 403].includes(error?.statusCode)) return { status: 'offline', error }
         this.clearLocalSession()
         return { status: 'anonymous', error }
       }

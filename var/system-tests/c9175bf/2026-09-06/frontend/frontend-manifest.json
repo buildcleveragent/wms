@@ -1,0 +1,257 @@
+{
+  "stage": "frontend",
+  "revision": "c9175bfcb837fe740471710c5267ac8d5147911d",
+  "started_at": "2026-09-06T02:20:46Z",
+  "steps": [
+    {
+      "name": "wmspda-test-unit",
+      "command": [
+        "npm",
+        "run",
+        "test:unit"
+      ],
+      "cwd": "/wms/wmspda",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmspda-test-unit.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 22.93
+    },
+    {
+      "name": "wmspda-build-h5",
+      "command": [
+        "npm",
+        "run",
+        "build:h5"
+      ],
+      "cwd": "/wms/wmspda",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmspda-build-h5.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 38.82
+    },
+    {
+      "name": "wmspda-test-e2e",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e"
+      ],
+      "cwd": "/wms/wmspda",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmspda-test-e2e.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 83.38
+    },
+    {
+      "name": "wmsandroid-test-unit",
+      "command": [
+        "npm",
+        "run",
+        "test:unit"
+      ],
+      "cwd": "/wms/wmsandroid",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmsandroid-test-unit.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 12.82
+    },
+    {
+      "name": "wmsandroid-build-h5",
+      "command": [
+        "npm",
+        "run",
+        "build:h5"
+      ],
+      "cwd": "/wms/wmsandroid",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmsandroid-build-h5.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 29.82
+    },
+    {
+      "name": "wmsandroid-test-e2e",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e"
+      ],
+      "cwd": "/wms/wmsandroid",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmsandroid-test-e2e.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 102.96
+    },
+    {
+      "name": "wmsownersale-test-contracts",
+      "command": [
+        "npm",
+        "run",
+        "test:contracts"
+      ],
+      "cwd": "/wms/wmsownersale",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmsownersale-test-contracts.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 1.13
+    },
+    {
+      "name": "wmsownersale-test-unit",
+      "command": [
+        "npm",
+        "run",
+        "test:unit"
+      ],
+      "cwd": "/wms/wmsownersale",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmsownersale-test-unit.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 34.23
+    },
+    {
+      "name": "wmsownersale-build-h5",
+      "command": [
+        "npm",
+        "run",
+        "build:h5"
+      ],
+      "cwd": "/wms/wmsownersale",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmsownersale-build-h5.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 24.57
+    },
+    {
+      "name": "wmsownersale-build-mp-weixin",
+      "command": [
+        "npm",
+        "run",
+        "build:mp-weixin"
+      ],
+      "cwd": "/wms/wmsownersale",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmsownersale-build-mp-weixin.log",
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 3.73
+    },
+    {
+      "name": "wmsbossbilling-test-unit",
+      "command": [
+        "npm",
+        "run",
+        "test:unit"
+      ],
+      "cwd": "/wms/wmsbossbilling",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmsbossbilling-test-unit.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 8.07
+    },
+    {
+      "name": "wmsbossbilling-build-h5",
+      "command": [
+        "npm",
+        "run",
+        "build:h5"
+      ],
+      "cwd": "/wms/wmsbossbilling",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmsbossbilling-build-h5.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 21.89
+    },
+    {
+      "name": "wmsbossbilling-test-e2e",
+      "command": [
+        "npm",
+        "run",
+        "test:e2e"
+      ],
+      "cwd": "/wms/wmsbossbilling",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmsbossbilling-test-e2e.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 19.19
+    },
+    {
+      "name": "wmsbossbilling-build-mp-weixin",
+      "command": [
+        "npm",
+        "run",
+        "build:mp-weixin"
+      ],
+      "cwd": "/wms/wmsbossbilling",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/wmsbossbilling-build-mp-weixin.log",
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 2.93
+    },
+    {
+      "name": "sales-miniapp-test-structure",
+      "command": [
+        "npm",
+        "run",
+        "test:structure"
+      ],
+      "cwd": "/wms/sales-miniapp",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/sales-miniapp-test-structure.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 0.83
+    },
+    {
+      "name": "sales-miniapp-test-payment",
+      "command": [
+        "npm",
+        "run",
+        "test:payment"
+      ],
+      "cwd": "/wms/sales-miniapp",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/sales-miniapp-test-payment.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 0.93
+    },
+    {
+      "name": "sales-miniapp-test-auth",
+      "command": [
+        "npm",
+        "run",
+        "test:auth"
+      ],
+      "cwd": "/wms/sales-miniapp",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/sales-miniapp-test-auth.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 0.93
+    },
+    {
+      "name": "sales-miniapp-build-h5",
+      "command": [
+        "npm",
+        "run",
+        "build:h5"
+      ],
+      "cwd": "/wms/sales-miniapp",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/sales-miniapp-build-h5.log",
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 34.69
+    },
+    {
+      "name": "sales-miniapp-build-mp-weixin",
+      "command": [
+        "npm",
+        "run",
+        "build:mp-weixin"
+      ],
+      "cwd": "/wms/sales-miniapp",
+      "log": "/wms/var/system-tests/c9175bf/2026-09-06/frontend/sales-miniapp-build-mp-weixin.log",
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 3.78
+    }
+  ],
+  "status": "FAIL",
+  "database_mode": "reuse",
+  "scope_note": "This stage is not a production-readiness certificate; external device/payment/recovery gates are separate."
+}

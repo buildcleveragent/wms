@@ -1,0 +1,14 @@
+{
+  "collected": 1122,
+  "outcomes": {
+    "PASS": 1122
+  },
+  "missing_baseline_nodes": [],
+  "added_nodes": [
+    "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_legacy_reference_cannot_be_collected_again_after_upgrade"
+  ],
+  "coverage_percent": 72.38,
+  "covered_statements": 31451,
+  "total_statements": 43450,
+  "test_password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher"
+}

@@ -3,10 +3,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 afterEach(() => {
   vi.resetModules()
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
 })
 
 describe('PDA API base URL', () => {
-  it('always uses the hard-coded develop endpoint', async () => {
+  it('uses an explicit build endpoint', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://wms.example.test/')
+    vi.stubGlobal('uni', {})
+    const { BASE_URL } = await import('@/utils/request')
+    expect(BASE_URL).toBe('https://wms.example.test')
+  })
+
+  it('retains the onsite default when no build endpoint is supplied', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', '')
     vi.stubGlobal('uni', {
       getAccountInfoSync: vi.fn(() => ({ miniProgram: { envVersion: 'onsite' } })),
     })

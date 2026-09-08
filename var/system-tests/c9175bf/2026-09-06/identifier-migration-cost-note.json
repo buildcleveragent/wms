@@ -1,0 +1,9 @@
+{
+  "migration": "allapp/salesapp/migrations/0013_localize_admin_fields.py",
+  "operation_counts": {
+    "swappable_dependency": 1,
+    "SeparateDatabaseAndState": 1,
+    "AlterField": 183
+  },
+  "observation": "Last recorded migration was salesapp 0012; migration connection observed sleeping 66 seconds. Large metadata operation set is a plausible client-side migration cost; CPU profile not collected, no causal timing claim."
+}

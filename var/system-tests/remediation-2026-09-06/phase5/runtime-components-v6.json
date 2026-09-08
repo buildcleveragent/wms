@@ -1,0 +1,14 @@
+{
+  "packages": [
+    "libc6 amd64 2.41-12+deb13u3",
+    "libpcre2-8-0 amd64 10.46-1~deb13u1",
+    "perl-base amd64 5.40.1-6"
+  ],
+  "commands": {
+    "infocmp": "/usr/bin/infocmp",
+    "nsenter": "/usr/bin/nsenter",
+    "mount": "/usr/bin/mount",
+    "gzip": "/usr/bin/gzip"
+  },
+  "fstab_noncomment_lines": []
+}

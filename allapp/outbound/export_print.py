@@ -2,15 +2,14 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.contrib.auth import get_user_model
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.utils import timezone
-from rest_framework_simplejwt.tokens import AccessToken
 
 from allapp.accounts.audit import record_audit_event
 from allapp.core.models import PrintConfig
+from allapp.core.print_tickets import user_from_print_ticket
 from allapp.core.printing import normalize_print_css
 from allapp.outbound.authz import (
     strict_pick_queryset,
@@ -104,9 +103,9 @@ def _money_to_rmb_upper(amount: Decimal) -> str:
 
 def pick_task_print(request, task_id: int):
     """拣货任务打印页（给 PDA 打开用，打印“出库单格式”）。
-    MVP：用 ?token=<access> 认证（因为 window.open/openURL 不带 Authorization 头）。
+    MVP：用 ?ticket=<document-ticket> 认证（因为 window.open/openURL 不带 Authorization 头）。
     """
-    token = request.GET.get("token") or request.GET.get("access")
+    token = request.GET.get("ticket")
 
     # 允许两种方式：
     # 1) 已有 session 登录（后台/PC）
@@ -115,13 +114,7 @@ def pick_task_print(request, task_id: int):
         if not token:
             return HttpResponse("Unauthorized: missing token", status=401)
         try:
-            at = AccessToken(token)
-            user_id = at.get("user_id")
-            if not user_id:
-                return HttpResponse("Unauthorized: invalid token", status=401)
-            user = get_user_model().objects.get(id=user_id)
-            if not user.is_active:
-                return HttpResponse("Unauthorized: inactive user", status=401)
+            user = user_from_print_ticket(token, request.path)
             request.user = user
         except Exception:
             return HttpResponse("Unauthorized: invalid token", status=401)
@@ -153,9 +146,7 @@ def pick_task_print(request, task_id: int):
         .first()
     )
     if not tl:
-        return HttpResponse(
-            "Bad Request: pick task has no OutboundOrderLine binding", status=400
-        )
+        return HttpResponse("Bad Request: pick task has no OutboundOrderLine binding", status=400)
 
     try:
         ol = OutboundOrderLine.objects.select_related(
@@ -252,9 +243,8 @@ def pick_task_print(request, task_id: int):
 # from decimal import Decimal
 # from django.http import HttpResponse
 # from django.shortcuts import render
-# from django.contrib.auth import get_user_model
-# from django.utils import timezone
-# from rest_framework_simplejwt.tokens import AccessToken
+# # from django.utils import timezone
+# from allapp.core.print_tickets import user_from_print_ticket
 #
 # from allapp.tasking.models import WmsTask, WmsTaskLine
 # from allapp.outbound.models import OutboundOrder, OutboundOrderLine
@@ -263,9 +253,9 @@ def pick_task_print(request, task_id: int):
 # def pick_task_print(request, task_id: int):
 #     """
 #     拣货任务打印页（给 PDA 打开用）
-#     MVP：用 ?token=<access> 认证（因为 window.open/openURL 不带 Authorization 头）
+#     MVP：用 ?ticket=<document-ticket> 认证（因为 window.open/openURL 不带 Authorization 头）
 #     """
-#     token = request.GET.get("token") or request.GET.get("access")
+#     token = request.GET.get("ticket")
 #
 #     # 允许两种方式：
 #     # 1) 已有 session 登录（后台/PC）
@@ -300,7 +290,8 @@ def pick_task_print(request, task_id: int):
 #     # --- 关键：找到对应 OutboundOrder ---
 #     order = None
 #
-#     # 1) 优先用 task.source_pk（你 outbound/services.py 已经 canonical 写了 source_model=outboundorder, source_pk=str(order.pk)）
+# # 1) 优先用 task.source_pk（你 outbound/services.py 已经 canonical 写了 source_model=outboundorder,
+# source_pk=str(order.pk)）
 #     if task.source_pk:
 #         try:
 #             order = (
@@ -323,7 +314,8 @@ def pick_task_print(request, task_id: int):
 #             try:
 #                 ol = (
 #                     OutboundOrderLine.objects
-#                     .select_related("order", "order__owner", "order__warehouse", "order__created_by", "order__approved_by_warehouse")
+# .select_related("order", "order__owner", "order__warehouse", "order__created_by",
+# "order__approved_by_warehouse")
 #                     .get(pk=tl.src_id)
 #                 )
 #                 order = ol.order
@@ -331,7 +323,7 @@ def pick_task_print(request, task_id: int):
 #                 order = None
 #
 #     if order is None:
-#         return HttpResponse("Bad Request: cannot resolve outbound order for this pick task", status=400)
+# return HttpResponse("Bad Request: cannot resolve outbound order for this pick task", status=400)
 #
 #     # --- 要打印的“头部字段” ---
 #     receiver_name = order.contact or ""
@@ -371,9 +363,9 @@ def pick_task_print(request, task_id: int):
 # def pick_task_print(request, task_id: int):
 #     """
 #     拣货任务打印页（给 PDA 打开用）
-#     MVP：用 ?token=<access> 认证（因为 window.open/openURL 不带 Authorization 头）
+#     MVP：用 ?ticket=<document-ticket> 认证（因为 window.open/openURL 不带 Authorization 头）
 #     """
-#     token = request.GET.get("token") or request.GET.get("access")
+#     token = request.GET.get("ticket")
 #
 #     # 允许两种方式：
 #     # 1) 已有 session 登录（后台/PC）

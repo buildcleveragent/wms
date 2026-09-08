@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "functional": 1250,
+  "migrations": 3,
+  "total": 1253,
+  "overlap": 0,
+  "migration_nodes": [
+    "allapp/pos/test_repayment_migrations.py::test_nonempty_0009_to_0010_preserves_history_and_enforces_new_request_keys",
+    "allapp/products/test_identifier_migrations.py::ProductIdentifierMigrationTests::test_0008_to_0011_backfills_soft_deleted_identifier_history",
+    "allapp/products/test_identifier_migrations.py::ProductIdentifierMigrationTests::test_preflight_conflict_fails_before_schema_changes"
+  ],
+  "evidence": "collect-tests.events.jsonl"
+}

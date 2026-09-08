@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "run_id": "78e5a20448734c4fa082cb01bdd81e13",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 10,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase2/load-client.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 10
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/core/test_load_client_safety.py::test_rejects_non_origin_urls_before_network[file:///etc/passwd]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_load_client_safety.py::test_rejects_non_origin_urls_before_network[ftp://localhost]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_load_client_safety.py::test_rejects_non_origin_urls_before_network[https://user:secret@example.com]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_load_client_safety.py::test_rejects_non_origin_urls_before_network[http://localhost/api]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_load_client_safety.py::test_rejects_non_origin_urls_before_network[http://localhost?token=x]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_load_client_safety.py::test_rejects_non_origin_urls_before_network[http://localhost#x]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_load_client_safety.py::test_rejects_non_origin_urls_before_network[http://localhost:bad]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_load_client_safety.py::test_rejects_non_origin_urls_before_network[http://localhost\\\\@example.com]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_load_client_safety.py::test_rejects_non_origin_urls_before_network[ http://localhost]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_load_client_safety.py::test_http_success_and_redirects_never_forward_authorization": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "exit_code": 1,
+  "collected": 2,
+  "password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher",
+  "tests": {
+    "allapp/salesapp/tests.py::SaleMiniApiTests::test_saleable_stock_counts_incomplete_tracking_fields_and_allocates": {
+      "status": "FAIL",
+      "phases": {
+        "setup": "passed",
+        "call": "failed",
+        "teardown": "passed"
+      }
+    },
+    "allapp/salesapp/tests.py::SaleMiniApiTests::test_saleable_stock_counts_serial_controlled_inventory_without_serial": {
+      "status": "PASS",
+      "phases": {
+        "setup": "passed",
+        "call": "passed",
+        "teardown": "passed"
+      }
+    }
+  }
+}

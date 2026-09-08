@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "run_id": "ceecf2cf64df46a2bc29443f6311d6d4",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 2,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase4-candidate-coverage-final.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 2
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/core/test_test_candidate.py::test_evidence_is_separate_but_source_and_test_changes_change_candidate": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_coverage_gate.py::test_coverage_thresholds_do_not_round_up_or_accept_missing_business_entries": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

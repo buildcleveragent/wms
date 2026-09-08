@@ -15,9 +15,7 @@ class PosSale(models.Model):
     src_bill_no = models.CharField(
         "小票号/外部单号", max_length=100, blank=True, default="", db_index=True
     )
-    idempotency_key = models.CharField(
-        "幂等键", max_length=100, unique=True, null=True, blank=True
-    )
+    idempotency_key = models.CharField("幂等键", max_length=100, unique=True, null=True, blank=True)
     idempotency_fingerprint = models.CharField(
         "幂等请求指纹", max_length=64, blank=True, default=""
     )
@@ -82,14 +80,10 @@ class PosSale(models.Model):
         verbose_name = "POS销售单"
         verbose_name_plural = "POS销售单"
         indexes = [
-            models.Index(
-                fields=["warehouse", "created_at"], name="idx_pos_sale_wh_created"
-            ),
+            models.Index(fields=["warehouse", "created_at"], name="idx_pos_sale_wh_created"),
             models.Index(fields=["status", "created_at"], name="idx_pos_sale_status"),
             models.Index(fields=["shift", "created_at"], name="idx_pos_sale_shift"),
-            models.Index(
-                fields=["pos_customer", "created_at"], name="idx_pos_sale_customer"
-            ),
+            models.Index(fields=["pos_customer", "created_at"], name="idx_pos_sale_customer"),
         ]
 
     def __str__(self) -> str:
@@ -135,9 +129,7 @@ class PosCustomer(models.Model):
         verbose_name_plural = "POS客户管理"
         ordering = ["warehouse_id", "code", "id"]
         constraints = [
-            models.UniqueConstraint(
-                fields=["warehouse", "code"], name="ux_pos_customer_wh_code"
-            )
+            models.UniqueConstraint(fields=["warehouse", "code"], name="ux_pos_customer_wh_code")
         ]
         indexes = [
             models.Index(
@@ -145,9 +137,7 @@ class PosCustomer(models.Model):
                 name="idx_pos_customer_wh_active",
             ),
             models.Index(fields=["warehouse", "phone"], name="idx_pos_customer_phone"),
-            models.Index(
-                fields=["warehouse", "mobile"], name="idx_pos_customer_mobile"
-            ),
+            models.Index(fields=["warehouse", "mobile"], name="idx_pos_customer_mobile"),
         ]
 
     def __str__(self) -> str:
@@ -245,9 +235,7 @@ class PosShift(models.Model):
 
 
 class PosShiftPaymentSummary(models.Model):
-    shift = models.ForeignKey(
-        PosShift, on_delete=models.PROTECT, related_name="payment_summaries"
-    )
+    shift = models.ForeignKey(PosShift, on_delete=models.PROTECT, related_name="payment_summaries")
     method = models.CharField(
         "支付方式",
         max_length=20,
@@ -285,9 +273,7 @@ class PosShiftPaymentSummary(models.Model):
         verbose_name = "POS班次支付汇总"
         verbose_name_plural = "POS班次支付汇总"
         constraints = [
-            models.UniqueConstraint(
-                fields=["shift", "method"], name="ux_pos_shift_payment_method"
-            ),
+            models.UniqueConstraint(fields=["shift", "method"], name="ux_pos_shift_payment_method"),
         ]
 
     def __str__(self) -> str:
@@ -323,9 +309,7 @@ class PosReceiptWarehouseInfo(models.Model):
                 fields=["warehouse", "is_active", "sort_order"],
                 name="idx_pos_receipt_info_wh",
             ),
-            models.Index(
-                fields=["is_default", "sort_order"], name="idx_pos_receipt_info_def"
-            ),
+            models.Index(fields=["is_default", "sort_order"], name="idx_pos_receipt_info_def"),
         ]
 
     def __str__(self) -> str:
@@ -334,9 +318,9 @@ class PosReceiptWarehouseInfo(models.Model):
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         if self.is_default:
-            type(self).objects.filter(warehouse_id=self.warehouse_id).exclude(
-                pk=self.pk
-            ).update(is_default=False)
+            type(self).objects.filter(warehouse_id=self.warehouse_id).exclude(pk=self.pk).update(
+                is_default=False
+            )
 
 
 class PosSaleLine(models.Model):
@@ -388,18 +372,14 @@ class PosPayment(models.Model):
         PAID = "PAID", "已收款"
         VOIDED = "VOIDED", "已撤销"
 
-    sale = models.OneToOneField(
-        PosSale, on_delete=models.PROTECT, related_name="payment"
-    )
+    sale = models.OneToOneField(PosSale, on_delete=models.PROTECT, related_name="payment")
     method = models.CharField("支付方式", max_length=20, choices=Method.choices)
     amount_due = models.DecimalField("应收金额", max_digits=18, decimal_places=2)
     amount_received = models.DecimalField("实收金额", max_digits=18, decimal_places=2)
     change_amount = models.DecimalField(
         "找零", max_digits=18, decimal_places=2, default=Decimal("0.00")
     )
-    reference_no = models.CharField(
-        "支付参考号", max_length=100, blank=True, default=""
-    )
+    reference_no = models.CharField("支付参考号", max_length=100, blank=True, default="")
     status = models.CharField(
         "状态",
         max_length=20,
@@ -423,20 +403,14 @@ class PosPayment(models.Model):
 
 
 class PosPaymentLine(models.Model):
-    sale = models.ForeignKey(
-        PosSale, on_delete=models.PROTECT, related_name="payment_lines"
-    )
-    method = models.CharField(
-        "支付方式", max_length=20, choices=PosPayment.Method.choices
-    )
+    sale = models.ForeignKey(PosSale, on_delete=models.PROTECT, related_name="payment_lines")
+    method = models.CharField("支付方式", max_length=20, choices=PosPayment.Method.choices)
     amount = models.DecimalField("抵扣金额", max_digits=18, decimal_places=2)
     amount_received = models.DecimalField("实收金额", max_digits=18, decimal_places=2)
     change_amount = models.DecimalField(
         "找零", max_digits=18, decimal_places=2, default=Decimal("0.00")
     )
-    reference_no = models.CharField(
-        "支付参考号", max_length=100, blank=True, default=""
-    )
+    reference_no = models.CharField("支付参考号", max_length=100, blank=True, default="")
     status = models.CharField(
         "状态",
         max_length=20,
@@ -452,12 +426,8 @@ class PosPaymentLine(models.Model):
         verbose_name_plural = "POS收款明细"
         indexes = [
             models.Index(fields=["sale", "method"], name="idx_pos_payline_sale"),
-            models.Index(
-                fields=["method", "created_at"], name="idx_pos_payline_method"
-            ),
-            models.Index(
-                fields=["status", "created_at"], name="idx_pos_payline_status"
-            ),
+            models.Index(fields=["method", "created_at"], name="idx_pos_payline_method"),
+            models.Index(fields=["status", "created_at"], name="idx_pos_payline_status"),
         ]
 
     def __str__(self) -> str:
@@ -504,13 +474,9 @@ class PosCustomerRepayment(models.Model):
         null=True,
         blank=True,
     )
-    method = models.CharField(
-        "还款方式", max_length=20, choices=PosPayment.Method.choices
-    )
+    method = models.CharField("还款方式", max_length=20, choices=PosPayment.Method.choices)
     amount = models.DecimalField("还款金额", max_digits=18, decimal_places=2)
-    reference_no = models.CharField(
-        "还款参考号", max_length=100, blank=True, default=""
-    )
+    reference_no = models.CharField("还款参考号", max_length=100, blank=True, default="")
     status = models.CharField(
         "状态",
         max_length=20,
@@ -538,16 +504,21 @@ class PosCustomerRepayment(models.Model):
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
     updated_at = models.DateTimeField("更新时间", auto_now=True)
 
+    idempotency_key = models.CharField(max_length=180, null=True, blank=True)
+    idempotency_fingerprint = models.CharField(max_length=64, blank=True, default="")
+
     class Meta:
         verbose_name = "POS客户还款"
         verbose_name_plural = "POS客户还款"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["warehouse", "pos_customer", "idempotency_key"],
+                name="ux_pos_repay_request",
+            ),
+        ]
         indexes = [
-            models.Index(
-                fields=["warehouse", "created_at"], name="idx_pos_repay_wh_created"
-            ),
-            models.Index(
-                fields=["pos_customer", "created_at"], name="idx_pos_repay_customer"
-            ),
+            models.Index(fields=["warehouse", "created_at"], name="idx_pos_repay_wh_created"),
+            models.Index(fields=["pos_customer", "created_at"], name="idx_pos_repay_customer"),
             models.Index(fields=["shift", "created_at"], name="idx_pos_repay_shift"),
             models.Index(fields=["method", "created_at"], name="idx_pos_repay_method"),
             models.Index(fields=["status", "created_at"], name="idx_pos_repay_status"),
@@ -568,9 +539,7 @@ class PosReturn(models.Model):
     warehouse = models.ForeignKey(
         "locations.Warehouse", on_delete=models.PROTECT, related_name="pos_returns"
     )
-    shift = models.ForeignKey(
-        PosShift, on_delete=models.PROTECT, related_name="returns"
-    )
+    shift = models.ForeignKey(PosShift, on_delete=models.PROTECT, related_name="returns")
     cashier = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -589,9 +558,7 @@ class PosReturn(models.Model):
         "退货金额", max_digits=18, decimal_places=2, default=Decimal("0.00")
     )
     reason = models.CharField("退货原因", max_length=200, blank=True, default="")
-    idempotency_key = models.CharField(
-        "幂等键", max_length=100, unique=True, null=True, blank=True
-    )
+    idempotency_key = models.CharField("幂等键", max_length=100, unique=True, null=True, blank=True)
     idempotency_fingerprint = models.CharField(
         "幂等请求指纹", max_length=64, blank=True, default=""
     )
@@ -602,9 +569,7 @@ class PosReturn(models.Model):
         verbose_name = "POS退货单"
         verbose_name_plural = "POS退货单"
         indexes = [
-            models.Index(
-                fields=["warehouse", "created_at"], name="idx_pos_return_wh_created"
-            ),
+            models.Index(fields=["warehouse", "created_at"], name="idx_pos_return_wh_created"),
             models.Index(fields=["shift", "created_at"], name="idx_pos_return_shift"),
             models.Index(fields=["sale", "created_at"], name="idx_pos_return_sale"),
         ]
@@ -614,9 +579,7 @@ class PosReturn(models.Model):
 
 
 class PosReturnLine(models.Model):
-    return_order = models.ForeignKey(
-        PosReturn, on_delete=models.PROTECT, related_name="lines"
-    )
+    return_order = models.ForeignKey(PosReturn, on_delete=models.PROTECT, related_name="lines")
     sale_line = models.ForeignKey(
         PosSaleLine, on_delete=models.PROTECT, related_name="return_lines"
     )
@@ -641,9 +604,7 @@ class PosReturnLine(models.Model):
             ),
         ]
         indexes = [
-            models.Index(
-                fields=["return_order", "owner"], name="idx_pos_return_line_owner"
-            ),
+            models.Index(fields=["return_order", "owner"], name="idx_pos_return_line_owner"),
             models.Index(fields=["sale_line"], name="idx_pos_return_line_sale_line"),
             models.Index(fields=["product"], name="idx_pos_return_line_product"),
         ]
@@ -659,20 +620,12 @@ class PosRefund(models.Model):
         FAILED = "FAILED", "退款失败"
         CANCELED = "CANCELED", "已取消"
 
-    return_order = models.ForeignKey(
-        PosReturn, on_delete=models.PROTECT, related_name="refunds"
-    )
+    return_order = models.ForeignKey(PosReturn, on_delete=models.PROTECT, related_name="refunds")
     sale = models.ForeignKey(PosSale, on_delete=models.PROTECT, related_name="refunds")
-    shift = models.ForeignKey(
-        PosShift, on_delete=models.PROTECT, related_name="refunds"
-    )
-    method = models.CharField(
-        "退款方式", max_length=20, choices=PosPayment.Method.choices
-    )
+    shift = models.ForeignKey(PosShift, on_delete=models.PROTECT, related_name="refunds")
+    method = models.CharField("退款方式", max_length=20, choices=PosPayment.Method.choices)
     amount = models.DecimalField("退款金额", max_digits=18, decimal_places=2)
-    reference_no = models.CharField(
-        "退款参考号", max_length=100, blank=True, default=""
-    )
+    reference_no = models.CharField("退款参考号", max_length=100, blank=True, default="")
     status = models.CharField(
         "状态",
         max_length=20,
@@ -695,9 +648,7 @@ class PosRefund(models.Model):
         verbose_name = "POS退款流水"
         verbose_name_plural = "POS退款流水"
         indexes = [
-            models.Index(
-                fields=["return_order", "method"], name="idx_pos_refund_return"
-            ),
+            models.Index(fields=["return_order", "method"], name="idx_pos_refund_return"),
             models.Index(fields=["shift", "created_at"], name="idx_pos_refund_shift"),
             models.Index(fields=["method", "created_at"], name="idx_pos_refund_method"),
             models.Index(fields=["status", "created_at"], name="idx_pos_refund_status"),
@@ -708,9 +659,7 @@ class PosRefund(models.Model):
 
 
 class PosSaleOrder(models.Model):
-    sale = models.ForeignKey(
-        PosSale, on_delete=models.PROTECT, related_name="sale_orders"
-    )
+    sale = models.ForeignKey(PosSale, on_delete=models.PROTECT, related_name="sale_orders")
     owner = models.ForeignKey(
         "baseinfo.Owner", on_delete=models.PROTECT, related_name="pos_sale_orders"
     )
@@ -728,9 +677,7 @@ class PosSaleOrder(models.Model):
         verbose_name = "POS销售出库关联"
         verbose_name_plural = "POS销售出库关联"
         constraints = [
-            models.UniqueConstraint(
-                fields=["sale", "owner"], name="ux_pos_sale_owner_order"
-            ),
+            models.UniqueConstraint(fields=["sale", "owner"], name="ux_pos_sale_owner_order"),
         ]
         indexes = [
             models.Index(fields=["sale", "owner"], name="idx_pos_sale_order_owner"),
@@ -849,9 +796,7 @@ class PosAuditLog(models.Model):
             models.Index(fields=["action", "created_at"], name="idx_pos_audit_action"),
             models.Index(fields=["sale", "created_at"], name="idx_pos_audit_sale"),
             models.Index(fields=["shift", "created_at"], name="idx_pos_audit_shift"),
-            models.Index(
-                fields=["return_order", "created_at"], name="idx_pos_audit_return"
-            ),
+            models.Index(fields=["return_order", "created_at"], name="idx_pos_audit_return"),
         ]
 
     def __str__(self) -> str:

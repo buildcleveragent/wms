@@ -1,62 +1,85 @@
 # allapp/tasking/admin.py
 from __future__ import annotations
+
 import logging
-
-logger = logging.getLogger(__name__)
-
-from django.apps import apps
-from django.db.models import OneToOneRel
-from .counting import create_count_task
-from django.shortcuts import redirect, render, get_object_or_404
-from django.db import models
-from allapp.core.admin_widgets import TrimDecimalWidget
-from allapp.core.choices import ZoneType
-from allapp.core.admin_mixins import DecimalPrettyInitialMixin
-from allapp.outbound import services as ob_services
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Type
-from typing_extensions import OrderedDict
+from typing import Dict, List, Optional, Type
+from urllib.parse import urlencode
 
+from django import forms
+from django.apps import apps
+from django.contrib import admin, messages
 from django.contrib.admin.widgets import AdminDateWidget
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import ValidationError, PermissionDenied, ObjectDoesNotExist
-from django.db.models import Count, Q, Sum, Exists, OuterRef
+from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
+from django.db import models, transaction
+from django.db.models import Count, Exists, OneToOneRel, OuterRef, Q, Sum
 from django.forms import modelform_factory
 from django.forms.models import BaseInlineFormSet
-from django.shortcuts import redirect, get_object_or_404
-from django.utils.html import format_html
-
-from allapp.products.identifier_lookup import UnifiedProductAdminSearchMixin
-from allapp.tasking.plugins.handlers import get_posting_handler
-from . import services  # 放着 save_receiving_snapshot
-from allapp.tasking import services as svc  # 内含 publish_using_inline / publish_task
-from allapp.inventory.services import post_task
-from .models import (ReviewTaskExtra,ReviewLineExtra, AdjustLineExtra,  AdjustTaskExtra, CountLineExtra, CountTaskExtra,  DispatchLineExtra, DispatchTaskExtra,
-    LoadLineExtra, LoadTaskExtra,PackLineExtra, PackTaskExtra, PickLineExtra, PickTaskExtra, PutawayLineExtra,
-    PutawayTaskExtra,QCLineExtra,QCTaskExtra,ReceiveLineExtra,ReceiveTaskExtra,RelocLineExtra,RelocTaskExtra,
-    ReplenishLineExtra, ReplenishTaskExtra, ReplenishmentPolicy, ReplenishmentRequest,
-    RelocationRequest, RelocationRequestLine, RelocationReservation,
-    TaskAssignment, TaskScanLog, TaskStatusLog, WmsTask, WmsTaskLine,)
-
-from django.db import transaction
-from urllib.parse import urlencode
-from .models import WmsTask, WmsTaskLine
-
-from django.contrib import admin, messages
-
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
-from django.utils.translation import gettext_lazy as _
-from allapp.locations.models import Warehouse, Location, Subwarehouse
-from allapp.products.models import Product
-from django import forms
 from django.utils import timezone
+from django.utils.html import format_html
+from django.utils.translation import gettext_lazy as _
 
-from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
-from allapp.tasking.models import WmsTask  # 确保导入你的模型
-from allapp.core.utils.log_context import build_log_payload
 from allapp.accounts.access import AccessScope
+from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
+from allapp.core.admin_mixins import DecimalPrettyInitialMixin
+from allapp.core.admin_widgets import TrimDecimalWidget
+from allapp.core.choices import ZoneType
+from allapp.core.utils.log_context import build_log_payload
+from allapp.inventory.services import post_task
+from allapp.locations.models import Location, Subwarehouse, Warehouse
+from allapp.outbound import services as ob_services
+from allapp.products.identifier_lookup import UnifiedProductAdminSearchMixin
+from allapp.products.models import Product
+from allapp.tasking import services as svc  # 内含 publish_using_inline / publish_task
+from allapp.tasking.plugins.handlers import get_posting_handler
+
+from . import services  # 放着 save_receiving_snapshot
+from .admin_scope import TaskChildAdminScopeMixin
+from .counting import create_count_task
+from .models import (
+    AdjustLineExtra,
+    AdjustTaskExtra,
+    CountLineExtra,
+    CountTaskExtra,
+    DispatchLineExtra,
+    DispatchTaskExtra,
+    LoadLineExtra,
+    LoadTaskExtra,
+    PackLineExtra,
+    PackTaskExtra,
+    PickLineExtra,
+    PickTaskExtra,
+    PutawayLineExtra,
+    PutawayTaskExtra,
+    QCLineExtra,
+    QCTaskExtra,
+    ReceiveLineExtra,
+    ReceiveTaskExtra,
+    RelocationRequest,
+    RelocationRequestLine,
+    RelocationReservation,
+    RelocLineExtra,
+    RelocTaskExtra,
+    ReplenishLineExtra,
+    ReplenishmentPolicy,
+    ReplenishmentRequest,
+    ReplenishTaskExtra,
+    ReviewLineExtra,
+    ReviewTaskExtra,
+    TaskAssignment,
+    TaskScanLog,
+    TaskStatusLog,
+    WmsTask,
+    WmsTaskLine,
+)
+
+logger = logging.getLogger(__name__)
+
 
 def get_line_extra_generic(tl):
     """
@@ -72,25 +95,22 @@ def get_line_extra_generic(tl):
     # ① 按 task_type → 模型名（只写你项目里真实存在的名字）
     MAP = {
         # 收货 / 上架 / 拣货 / 复核 / 打包 / 装车 / 发运 / 补货 / 盘点 / 调整
-        getattr(task.__class__.TaskType, "RECEIPT", None):     "ReceiveLineExtra",
-        getattr(task.__class__.TaskType, "PUTAWAY", None):     "PutawayLineExtra",
-        getattr(task.__class__.TaskType, "PICK", None):        "PickLineExtra",
-        getattr(task.__class__.TaskType, "REVIEW", None):      "ReviewLineExtra",
-        getattr(task.__class__.TaskType, "PACK", None):        "PackLineExtra",
-        getattr(task.__class__.TaskType, "LOAD", None):        "LoadLineExtra",
-        getattr(task.__class__.TaskType, "DISPATCH", None):    "DispatchLineExtra",
-        getattr(task.__class__.TaskType, "REPLEN", None):      "ReplenishLineExtra",
-        getattr(task.__class__.TaskType, "COUNT", None):       "CountLineExtra",
-        getattr(task.__class__.TaskType, "ADJUST", None):      "AdjustLineExtra",
+        getattr(task.__class__.TaskType, "RECEIPT", None): "ReceiveLineExtra",
+        getattr(task.__class__.TaskType, "PUTAWAY", None): "PutawayLineExtra",
+        getattr(task.__class__.TaskType, "PICK", None): "PickLineExtra",
+        getattr(task.__class__.TaskType, "REVIEW", None): "ReviewLineExtra",
+        getattr(task.__class__.TaskType, "PACK", None): "PackLineExtra",
+        getattr(task.__class__.TaskType, "LOAD", None): "LoadLineExtra",
+        getattr(task.__class__.TaskType, "DISPATCH", None): "DispatchLineExtra",
+        getattr(task.__class__.TaskType, "REPLEN", None): "ReplenishLineExtra",
+        getattr(task.__class__.TaskType, "COUNT", None): "CountLineExtra",
+        getattr(task.__class__.TaskType, "ADJUST", None): "AdjustLineExtra",
     }
     model_name = MAP.get(ttype)
     if model_name:
         try:
             Model = apps.get_model("allapp.tasking", model_name)
-            extra = (Model.objects
-                     .select_related("line", "line__task")
-                     .filter(line_id=tl.id)
-                     .first())
+            extra = Model.objects.select_related("line", "line__task").filter(line_id=tl.id).first()
             if extra:
                 return extra
         except LookupError:
@@ -111,9 +131,12 @@ def get_line_extra_generic(tl):
 
     return None
 
+
 class CountWizardForm(forms.Form):
     # —— 必填
-    warehouse = forms.ModelChoiceField(label="仓库", queryset=Warehouse.objects.all(), required=True)
+    warehouse = forms.ModelChoiceField(
+        label="仓库", queryset=Warehouse.objects.all(), required=True
+    )
     owner = forms.ModelChoiceField(label="货主", queryset=Owner.objects.all(), required=True)
     scope = forms.ChoiceField(
         label="盘点范围",
@@ -127,15 +150,27 @@ class CountWizardForm(forms.Form):
     # —— 细化筛选（全可选，按需要组合）
     zone_type = forms.ChoiceField(
         label="库区",
-        choices=ZoneType.choices,  # 直接从 IntegerChoices 获取 choices
-        required=False
+        choices=ZoneType.choices,
+        required=False,  # 直接从 IntegerChoices 获取 choices
     )
-    location = forms.ModelChoiceField(label="指定库位", queryset=Location.objects.all(), required=False)
-    location_prefix = forms.CharField(label="库位前缀", required=False, help_text="例如 A-01-；匹配 Location.code/name 前缀")
-    product = forms.ModelChoiceField(label="商品（SKU）", queryset=Product.objects.all(), required=False)
+    location = forms.ModelChoiceField(
+        label="指定库位", queryset=Location.objects.all(), required=False
+    )
+    location_prefix = forms.CharField(
+        label="库位前缀",
+        required=False,
+        help_text="例如 A-01-；匹配 Location.code/name 前缀",
+    )
+    product = forms.ModelChoiceField(
+        label="商品（SKU）", queryset=Product.objects.all(), required=False
+    )
     batch_no = forms.CharField(label="批次号", required=False)
-    exclude_zero_onhand = forms.BooleanField(label="忽略在库为 0 的明细", required=False, initial=True)
-    max_lines = forms.IntegerField(label="最多生成行数", min_value=1, max_value=10000, initial=1000, required=True)
+    exclude_zero_onhand = forms.BooleanField(
+        label="忽略在库为 0 的明细", required=False, initial=True
+    )
+    max_lines = forms.IntegerField(
+        label="最多生成行数", min_value=1, max_value=10000, initial=1000, required=True
+    )
     blind = forms.BooleanField(label="盲盘", required=False, initial=True)
     recount_threshold = forms.DecimalField(
         label="复盘阈值", min_value=0, decimal_places=4, max_digits=14, initial=0
@@ -161,9 +196,7 @@ class CountWizardForm(forms.Form):
         self.fields["subwarehouse"].queryset = Subwarehouse.objects.filter(
             warehouse_id__in=warehouse_ids
         )
-        self.fields["location"].queryset = Location.objects.filter(
-            warehouse_id__in=warehouse_ids
-        )
+        self.fields["location"].queryset = Location.objects.filter(warehouse_id__in=warehouse_ids)
         self.fields["product"].queryset = Product.objects.filter(owner_id__in=owner_ids)
 
     def clean(self):
@@ -177,9 +210,13 @@ class CountWizardForm(forms.Form):
             self.add_error("zone_type", "按库区盘点必须指定库区。")
         warehouse = cd.get("warehouse")
         owner = cd.get("owner")
-        if warehouse and owner and not OwnerWarehouseBinding.objects.filter(
-            warehouse=warehouse, owner=owner, is_active=True
-        ).exists():
+        if (
+            warehouse
+            and owner
+            and not OwnerWarehouseBinding.objects.filter(
+                warehouse=warehouse, owner=owner, is_active=True
+            ).exists()
+        ):
             self.add_error("owner", "该货主未授权使用所选仓库。")
         subwarehouse = cd.get("subwarehouse")
         if subwarehouse and warehouse and subwarehouse.warehouse_id != warehouse.id:
@@ -192,11 +229,11 @@ class CountScope(forms.TextInput):
 
 
 class CountWizardScope:
-    WAREHOUSE = "WAREHOUSE"                 # 整个仓库
-    OWNER = "OWNER"                         # 仓库 + 货主全部
-    OWNER_PRODUCT = "OWNER_PRODUCT"         # 仓库 + 货主 + SKU
+    WAREHOUSE = "WAREHOUSE"  # 整个仓库
+    OWNER = "OWNER"  # 仓库 + 货主全部
+    OWNER_PRODUCT = "OWNER_PRODUCT"  # 仓库 + 货主 + SKU
     OWNER_PRODUCT_BATCH = "OWNER_PRODUCT_BATCH"  # 再加批次
-    LOCATION = "LOCATION"                   # 指定库位（可选再加货主）
+    LOCATION = "LOCATION"  # 指定库位（可选再加货主）
 
 
 SCOPE_CHOICES = (
@@ -222,44 +259,62 @@ LINE_EXTRA_MODEL_MAP = {
     "COUNT": CountLineExtra,
 }
 
+
 # ====== 1) 映射：TaskType -> 行级 Extra（rel_attr 按你冻结包里的小写反向名） ======
 @dataclass
 class LineExtraEntry:
     extra_model: Type
-    rel_attr: str                      # 反向访问器（如 'receivelineextra'）
+    rel_attr: str  # 反向访问器（如 'receivelineextra'）
     include: Optional[List[str]] = None
     readonly: Optional[List[str]] = None
 
+
 LINE_EXTRA_REGISTRY: Dict[str, LineExtraEntry] = {
-    "RECEIVE":  LineExtraEntry(ReceiveLineExtra,  "receivelineextra"),
-    "PUTAWAY":  LineExtraEntry(PutawayLineExtra,  "putawaylineextra"),
-    "PICK":     LineExtraEntry(PickLineExtra,     "picklineextra"),
-    "REVIEW":   LineExtraEntry(ReviewLineExtra,   "reviewlineextra"),
-    "PACK":     LineExtraEntry(PackLineExtra,     "packlineextra"),
-    "LOAD":     LineExtraEntry(LoadLineExtra,     "loadlineextra"),
+    "RECEIVE": LineExtraEntry(ReceiveLineExtra, "receivelineextra"),
+    "PUTAWAY": LineExtraEntry(PutawayLineExtra, "putawaylineextra"),
+    "PICK": LineExtraEntry(PickLineExtra, "picklineextra"),
+    "REVIEW": LineExtraEntry(ReviewLineExtra, "reviewlineextra"),
+    "PACK": LineExtraEntry(PackLineExtra, "packlineextra"),
+    "LOAD": LineExtraEntry(LoadLineExtra, "loadlineextra"),
     "DISPATCH": LineExtraEntry(DispatchLineExtra, "dispatchlineextra"),
-    "REPLEN":   LineExtraEntry(ReplenishLineExtra,"replenishlineextra"),
-    "RELOC":    LineExtraEntry(RelocLineExtra,    "reloclineextra"),
+    "REPLEN": LineExtraEntry(ReplenishLineExtra, "replenishlineextra"),
+    "RELOC": LineExtraEntry(RelocLineExtra, "reloclineextra"),
     "COUNT": LineExtraEntry(
         CountLineExtra,
         "countlineextra",
         include=[
-            "lot_no", "exp_date", "lpn_no", "qty_counted", "qty_book",
-            "qty_diff", "count_status", "method", "countorder",
+            "lot_no",
+            "exp_date",
+            "lpn_no",
+            "qty_counted",
+            "qty_book",
+            "qty_diff",
+            "count_status",
+            "method",
+            "countorder",
         ],
         readonly=[
-            "lot_no", "exp_date", "lpn_no", "qty_book", "qty_diff",
-            "count_status", "method", "countorder",
+            "lot_no",
+            "exp_date",
+            "lpn_no",
+            "qty_book",
+            "qty_diff",
+            "count_status",
+            "method",
+            "countorder",
         ],
     ),
 }
+
+
 # ====== 2) 工具：自动探测 Extra 模型上指向 WmsTaskLine 的 FK / O2O 字段名 ======
 def _detect_fk_to_taskline(model):
     from allapp.tasking.models import WmsTaskLine
+
     candidates = []
     for f in model._meta.get_fields():
         is_o2o = f.get_internal_type() == "OneToOneField"
-        is_fk  = f.get_internal_type() == "ForeignKey"
+        is_fk = f.get_internal_type() == "ForeignKey"
         if not (is_o2o or is_fk):
             continue
         try:
@@ -273,14 +328,17 @@ def _detect_fk_to_taskline(model):
         return candidates[0]
     raise AssertionError(f"{model.__name__} 未找到指向 WmsTaskLine 的外键/一对一字段")
 
+
 # ====== 3) 统一 select_related（覆盖所有可能的 rel_attr） ======
 def _select_related_all_extras(qs):
     for e in LINE_EXTRA_REGISTRY.values():
         qs = qs.select_related(e.rel_attr)
     return qs
 
+
 def make_extra_inline(entry):
     from django.contrib import admin
+
     BaseInline = admin.StackedInline  # or TabularInline
     extra_model = entry.extra_model
 
@@ -288,26 +346,35 @@ def make_extra_inline(entry):
     fk = getattr(entry, "fk_name", None)
     if not fk:
         fk = next(
-            (f.name for f in extra_model._meta.fields
-             if getattr(getattr(f, "remote_field", None), "model", None) is WmsTaskLine),
+            (
+                f.name
+                for f in extra_model._meta.fields
+                if getattr(getattr(f, "remote_field", None), "model", None) is WmsTaskLine
+            ),
             "line",
         )
 
     # —— 计算 include / exclude / readonly —— #
     default_exclude = (
-        "line", "id", "pk",
-        "created_at", "updated_at", "deleted_at",
-        "created_by", "updated_by", "deleted_by",
+        "line",
+        "id",
+        "pk",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "created_by",
+        "updated_by",
+        "deleted_by",
         "is_deleted",
     )
-    fields_cfg   = tuple(entry.include) if entry.include else None
-    exclude_cfg  = None if fields_cfg else default_exclude
+    fields_cfg = tuple(entry.include) if entry.include else None
+    exclude_cfg = None if fields_cfg else default_exclude
     readonly_cfg = tuple(entry.readonly) if entry.readonly else ()
 
     class _ExtraInline(BaseInline):
-        extra       = 0
-        max_num     = 1
-        can_delete  = False
+        extra = 0
+        max_num = 1
+        can_delete = False
 
         # —— 没记录时给 1 个空表单 —— #
         def get_extra(self, request, obj=None, **kwargs):
@@ -318,9 +385,9 @@ def make_extra_inline(entry):
                 return 0
             try:
                 val = getattr(obj, rel_attr)
-                if hasattr(val, "exists"):      # 反向 manager（FK）
+                if hasattr(val, "exists"):  # 反向 manager（FK）
                     return 1 if not val.exists() else 0
-                return 0 if val else 1          # OneToOne 对象或 None
+                return 0 if val else 1  # OneToOne 对象或 None
             except Exception:
                 return 1
 
@@ -332,13 +399,15 @@ def make_extra_inline(entry):
                 return FormSet
 
             fk_name_local = self.fk_name
-            model_local   = self.model
+            model_local = self.model
 
             class BoundFormSet(FormSet):
                 def __init__(self, *args, **kws):
                     super().__init__(*args, **kws)
                     try:
-                        self.queryset = model_local._default_manager.filter(**{fk_name_local: parent_pk})
+                        self.queryset = model_local._default_manager.filter(
+                            **{fk_name_local: parent_pk}
+                        )
                     except Exception:
                         # 即使 fk_name 配错，也不要让页面崩；退回默认行为
                         pass
@@ -373,9 +442,9 @@ def make_extra_inline(entry):
             return formfield
 
     # —— 类体外设置依赖外部变量的类属性（避免 NameError） —— #
-    _ExtraInline.__name__  = f"{extra_model.__name__}Inline"
-    _ExtraInline.model     = extra_model
-    _ExtraInline.fk_name   = fk
+    _ExtraInline.__name__ = f"{extra_model.__name__}Inline"
+    _ExtraInline.model = extra_model
+    _ExtraInline.fk_name = fk
     _ExtraInline.rel_attr_name = entry.rel_attr  # 例如 'reviewlineextra'
 
     if fields_cfg is not None:
@@ -389,29 +458,37 @@ def make_extra_inline(entry):
 
     return _ExtraInline
 
+
 def is_wh_operator(user):
     return user.is_superuser or user.has_perm("tasking.claim_task_as_wh_operator")
+
 
 def is_wh_manager(user):
     return user.is_superuser or user.has_perm("tasking.taskconfirm_as_wh_manager")
 
+
 class ReceiveLineExtraForm(forms.ModelForm):
     # 明确允许的输入格式；根据你现场习惯可再加 2025/09/14、2025.09.14 等
     mfg_date = forms.DateField(
-        label="生产日期", required=False,
-        input_formats=['%Y-%m-%d', '%Y/%m/%d', '%Y.%m.%d'],
-        widget=AdminDateWidget
+        label="生产日期",
+        required=False,
+        input_formats=["%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d"],
+        widget=AdminDateWidget,
     )
     exp_date = forms.DateField(
-        label="有效期至", required=False,
-        input_formats=['%Y-%m-%d', '%Y/%m/%d', '%Y.%m.%d'],
-        widget=AdminDateWidget
+        label="有效期至",
+        required=False,
+        input_formats=["%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d"],
+        widget=AdminDateWidget,
     )
 
     class Meta:
         from allapp.tasking.models import ReceiveLineExtra  # 按你项目路径调整
+
         model = ReceiveLineExtra
         exclude = ("line",)
+
+
 # ========= 共用 Inline =========
 class TaskAssignmentInlineFormSet(BaseInlineFormSet):
     def clean(self):
@@ -448,17 +525,13 @@ class TaskAssignmentInlineFormSet(BaseInlineFormSet):
                 if qs.exists():
                     raise ValidationError(f"任务行 #{line.pk} 已被其他记录活动指派。")
 
-        # 头级活动指派唯一性的数据库级兜底（防止只改时间戳绕过）
-        if active_head_count == 1:
-            # 找到本任务其他“头级活动指派”
-            task_id = self.instance.pk if hasattr(self, "instance") else None
 
 class TaskAssignmentInline(admin.TabularInline):
     model = TaskAssignment
     extra = 0
     # autocomplete_fields = ["assignee"]
     readonly_fields = ["accepted_at", "finished_at"]
-    fields = ("assignee", "line","accepted_at", "finished_at")
+    fields = ("assignee", "line", "accepted_at", "finished_at")
     show_change_link = True
 
     formset = TaskAssignmentInlineFormSet
@@ -479,11 +552,14 @@ class TaskAssignmentInline(admin.TabularInline):
             kwargs["queryset"] = (
                 User.objects.filter(is_active=True, is_staff=True)
                 .filter(
-                    Q(user_permissions__content_type__app_label=app_label,
-                      user_permissions__codename=codename)
-                    |
-                    Q(groups__permissions__content_type__app_label=app_label,
-                      groups__permissions__codename=codename)
+                    Q(
+                        user_permissions__content_type__app_label=app_label,
+                        user_permissions__codename=codename,
+                    )
+                    | Q(
+                        groups__permissions__content_type__app_label=app_label,
+                        groups__permissions__codename=codename,
+                    )
                 )
                 .distinct()
             )
@@ -511,6 +587,7 @@ class TaskAssignmentInline(admin.TabularInline):
         # 操作员仅能结束自己那条（例如通过动作/服务），不在 inline 里改人
         return is_wh_manager(request.user)
 
+
 class TaskStatusLogInline(admin.TabularInline):
     model = TaskStatusLog
     extra = 0
@@ -518,6 +595,7 @@ class TaskStatusLogInline(admin.TabularInline):
     readonly_fields = ("old_status", "new_status", "changed_by", "changed_at", "note")
     fields = ("old_status", "new_status", "changed_by", "changed_at", "note")
     ordering = ("-changed_at",)
+
 
 class WmsTaskLineInline(admin.TabularInline):
     model = WmsTaskLine
@@ -537,7 +615,11 @@ class WmsTaskLineInline(admin.TabularInline):
 
     def get_formset(self, request, obj=None, **kwargs):
         """给每个行表单挂 extra_form（用整页 POST 绑定），并在保存时把 line 赋回去。"""
-        task_type = getattr(obj, "task_type", None) or request.POST.get("task_type") or request.GET.get("task_type")
+        task_type = (
+            getattr(obj, "task_type", None)
+            or request.POST.get("task_type")
+            or request.GET.get("task_type")
+        )
         extra_model = LINE_EXTRA_MODEL_MAP.get(task_type)
 
         BaseFormSet = super().get_formset(request, obj, **kwargs)
@@ -648,39 +730,50 @@ class WmsTaskLineInline(admin.TabularInline):
 
         return LineWithExtraFormSet
 
+
 class _BaseHeadExtraInline(admin.StackedInline):
     extra = 0
     max_num = 1
     can_delete = True
 
+
 class ReceiveTaskExtraInline(_BaseHeadExtraInline):
     model = ReceiveTaskExtra
+
 
 class PutawayTaskExtraInline(_BaseHeadExtraInline):
     model = PutawayTaskExtra
 
+
 class PickTaskExtraInline(_BaseHeadExtraInline):
     model = PickTaskExtra
 
+
 class ReviewTaskExtraInline(_BaseHeadExtraInline):
     model = ReviewTaskExtra
-    fields = ['from_location', 'qty_reviewed', 'qty_picked', 'discrepancy_reason']
+    fields = ["from_location", "qty_reviewed", "qty_picked", "discrepancy_reason"]
     extra = 1  # 至少显示一个空行
+
 
 class PackTaskExtraInline(_BaseHeadExtraInline):
     model = PackTaskExtra
 
+
 class LoadTaskExtraInline(_BaseHeadExtraInline):
     model = LoadTaskExtra
+
 
 class DispatchTaskExtraInline(_BaseHeadExtraInline):
     model = DispatchTaskExtra
 
+
 class ReplenishTaskExtraInline(_BaseHeadExtraInline):
     model = ReplenishTaskExtra
 
+
 class RelocTaskExtraInline(_BaseHeadExtraInline):
     model = RelocTaskExtra
+
 
 class CountTaskExtraInline(_BaseHeadExtraInline):
     model = CountTaskExtra
@@ -698,11 +791,14 @@ class CountTaskExtraInline(_BaseHeadExtraInline):
     )
     readonly_fields = fields
 
+
 class QCTaskExtraInline(_BaseHeadExtraInline):
     model = QCTaskExtra
 
+
 class AdjustTaskExtraInline(_BaseHeadExtraInline):
     model = AdjustTaskExtra
+
 
 _TASK_HEAD_INLINE_MAP = {
     "RECEIVE": ReceiveTaskExtraInline,
@@ -719,10 +815,12 @@ _TASK_HEAD_INLINE_MAP = {
     "ADJUST": AdjustTaskExtraInline,  # 你模型里若未提供该类型，可忽略
 }
 
+
 def _err_to_text(e: ValidationError) -> str:
     if getattr(e, "message_dict", None):
         return "；".join(f"{k}: {', '.join(map(str, v))}" for k, v in e.message_dict.items())
     return "；".join(getattr(e, "messages", [str(e)]))
+
 
 # ========= 任务头 Admin =========
 def _bool_from_post(request, key, default=False):
@@ -733,6 +831,7 @@ def _bool_from_post(request, key, default=False):
     if val is None:
         return default
     return str(val).lower() in {"1", "true", "on", "yes"}
+
 
 def _stats_brief(stats: dict) -> str:
     """
@@ -755,47 +854,75 @@ def _stats_brief(stats: dict) -> str:
         return ""
     return "（" + "，".join(parts) + "）"
 
+
 @admin.register(WmsTask)
 class WmsTaskAdmin(admin.ModelAdmin):
     # —— 批量动作：状态流转 + 记录日志 —— #
     actions_selection_counter = True
-    actions = ["action_wave_release_pick","action_approve", "action_reject","action_post","action_release", "action_cancel"]
+    actions = [
+        "action_wave_release_pick",
+        "action_approve",
+        "action_reject",
+        "action_post",
+        "action_release",
+        "action_cancel",
+    ]
     list_display = (
-        "task_no_clip","task_type", "status", "review_status","posting_status","priority",
-        "owner", "released_at", "started_at", "finished_at","picked_by",
-        "lines_count", "qty_plan_total", "qty_done_total","approved_at","posted_at",
+        "task_no_clip",
+        "task_type",
+        "status",
+        "review_status",
+        "posting_status",
+        "priority",
+        "owner",
+        "released_at",
+        "started_at",
+        "finished_at",
+        "picked_by",
+        "lines_count",
+        "qty_plan_total",
+        "qty_done_total",
+        "approved_at",
+        "posted_at",
     )
     list_filter = (
-        "owner", "task_type", "status", "priority",
-
+        "owner",
+        "task_type",
+        "status",
+        "priority",
     )
     search_fields = (
-        "task_no", "ref_no", "task_type", "source_app", "source_model", "source_pk", "remark",
+        "task_no",
+        "ref_no",
+        "task_type",
+        "source_app",
+        "source_model",
+        "source_pk",
+        "remark",
     )
     date_hierarchy = "created_at"
     ordering = ("-created_at", "-id")
     list_select_related = ("owner", "warehouse")
-    autocomplete_fields = ["owner", ]
+    autocomplete_fields = [
+        "owner",
+    ]
     # inlines = (TaskAssignmentInline, TaskStatusLogInline, WmsTaskLineInline)
     inlines = []  # 动态决定
 
     formfield_overrides = {
-        models.CharField: {'widget': forms.TextInput(attrs={'style': 'white-space: nowrap; width: auto;'})},
-        models.TextField: {'widget': forms.Textarea(attrs={'style': 'white-space: nowrap; width: auto;'})},
+        models.CharField: {
+            "widget": forms.TextInput(attrs={"style": "white-space: nowrap; width: auto;"})
+        },
+        models.TextField: {
+            "widget": forms.Textarea(attrs={"style": "white-space: nowrap; width: auto;"})
+        },
     }
-
-    class Media:
-        css = {
-            'all': ('css/admin_custom.css',)
-        }
-
 
     @admin.display(description="任务号", ordering="task_no")
     def task_no_clip(self, obj):
         # 用 span 包起来，悬停显示完整任务号
         return format_html(
-            '<span class="nowrap-ellipsis" title="{}">{}</span>',
-            obj.task_no, obj.task_no
+            '<span class="nowrap-ellipsis" title="{}">{}</span>', obj.task_no, obj.task_no
         )
 
     class Media:
@@ -804,15 +931,44 @@ class WmsTaskAdmin(admin.ModelAdmin):
     def get_inlines(self, request, obj):
         # 主管/超管：显示完整行 Inline
         if is_wh_manager(request.user):
-            return [TaskAssignmentInline, TaskStatusLogInline, WmsTaskLineInline]  # 你的原有 inline
+            return [
+                TaskAssignmentInline,
+                TaskStatusLogInline,
+                WmsTaskLineInline,
+            ]  # 你的原有 inline
         # 操作员：不显示行 Inline（避免看见别人的）
         return []  # 或直接 []
+
     readonly_fields = ()
 
     fieldsets = (
-        ("基本信息", {"fields": ("task_no", "task_type", "status", "priority","owner", "task_group_no", "released_at","remark")}),
-        ("计划与实际", { "fields": (("planned_start", "planned_end"),("started_at", "finished_at"))}),
-        ("来源快照", {"classes": ("collapse",),"fields": (("ref_no", "source_app"), ("source_model", "source_pk"))}),)
+        (
+            "基本信息",
+            {
+                "fields": (
+                    "task_no",
+                    "task_type",
+                    "status",
+                    "priority",
+                    "owner",
+                    "task_group_no",
+                    "released_at",
+                    "remark",
+                )
+            },
+        ),
+        (
+            "计划与实际",
+            {"fields": (("planned_start", "planned_end"), ("started_at", "finished_at"))},
+        ),
+        (
+            "来源快照",
+            {
+                "classes": ("collapse",),
+                "fields": (("ref_no", "source_app"), ("source_model", "source_pk")),
+            },
+        ),
+    )
     # 任务头 Admin：按任务类型追加“头部 Extra” Inline
     change_form_template = "admin/tasking/wmstask/change_form.html"  # 若已自定义，保持一致
 
@@ -835,13 +991,16 @@ class WmsTaskAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         # ① 基础 + 你原来的聚合
-        qs = (super().get_queryset(request)
-        .select_related("owner", "warehouse")
-        .annotate(
-            _lines=Count("lines", distinct=True),
-            _qty_plan=Sum("lines__qty_plan"),
-            _qty_done=Sum("lines__qty_done"),
-        ))
+        qs = (
+            super()
+            .get_queryset(request)
+            .select_related("owner", "warehouse")
+            .annotate(
+                _lines=Count("lines", distinct=True),
+                _qty_plan=Sum("lines__qty_plan"),
+                _qty_done=Sum("lines__qty_done"),
+            )
+        )
         qs = AccessScope.for_user(request.user).filter_queryset(
             qs,
             owner_field="owner_id",
@@ -858,25 +1017,31 @@ class WmsTaskAdmin(admin.ModelAdmin):
         # ③ 操作员：仅看到“与我相关”或“含抢单行”的任务
         # 我在头级/行级的活动指派
         mine_head = TaskAssignment.objects.filter(
-            task_id=OuterRef("pk"), line__isnull=True,
-            assignee=request.user, finished_at__isnull=True
+            task_id=OuterRef("pk"),
+            line__isnull=True,
+            assignee=request.user,
+            finished_at__isnull=True,
         )
         mine_line = TaskAssignment.objects.filter(
-            task_id=OuterRef("pk"), line__isnull=False,
-            assignee=request.user, finished_at__isnull=True
+            task_id=OuterRef("pk"),
+            line__isnull=False,
+            assignee=request.user,
+            finished_at__isnull=True,
         )
         # 该任务是否存在“抢单行”：行上无活动行级指派；且任务头也无活动头级指派
         active_head_any = TaskAssignment.objects.filter(
             task_id=OuterRef("pk"), line__isnull=True, finished_at__isnull=True
         )
         # 子查询：有“无人认领”的行
-        pool_line = (WmsTaskLine.objects
-                     .filter(task_id=OuterRef("pk"))
-                     .annotate(_has_line=Exists(
-            TaskAssignment.objects.filter(line_id=OuterRef("pk"),
-                                          finished_at__isnull=True)
-        ))
-                     .filter(_has_line=False))
+        pool_line = (
+            WmsTaskLine.objects.filter(task_id=OuterRef("pk"))
+            .annotate(
+                _has_line=Exists(
+                    TaskAssignment.objects.filter(line_id=OuterRef("pk"), finished_at__isnull=True)
+                )
+            )
+            .filter(_has_line=False)
+        )
 
         qs = qs.annotate(
             _mine_head=Exists(mine_head),
@@ -887,9 +1052,9 @@ class WmsTaskAdmin(admin.ModelAdmin):
 
         # 可见任务：我负责（头或行） 或 含有抢单行（任务状态需为 RELEASED 且无头级活动指派）
         return qs.filter(
-            Q(_mine_head=True) |
-            Q(_mine_line=True) |
-            (Q(status=WmsTask.Status.RELEASED) & Q(_has_head=False) & Q(_has_pool_line=True))
+            Q(_mine_head=True)
+            | Q(_mine_line=True)
+            | (Q(status=WmsTask.Status.RELEASED) & Q(_has_head=False) & Q(_has_pool_line=True))
         )
 
     @admin.display(description="行数", ordering="_lines")
@@ -920,21 +1085,35 @@ class WmsTaskAdmin(admin.ModelAdmin):
                 task.finished_at = now
             task.save(update_fields=["status", ts_field] if ts_field else ["status"])
             TaskStatusLog.objects.create(
-                task=task, old_status=old, new_status=to_status,
-                changed_by=request.user, note="admin bulk action"
+                task=task,
+                old_status=old,
+                new_status=to_status,
+                changed_by=request.user,
+                note="admin bulk action",
             )
             updated += 1
         self.message_user(request, f"已更新 {updated} 条任务状态为 {to_status}。")
 
     def _as_wh_mgr(self, request):
-        return request.user.is_superuser or request.user.has_perm("tasking.taskconfirm_as_wh_manager")
+        return request.user.is_superuser or request.user.has_perm(
+            "tasking.taskconfirm_as_wh_manager"
+        )
 
     def get_actions(self, request):
         actions = super().get_actions(request)
         if not self._as_wh_mgr(request):
             actions.pop("action_release", None)
 
-        order = ["action_release","action_approve", "action_reject", "action_post",  "action_start", "action_complete", "action_cancel","delete_selected"]
+        order = [
+            "action_release",
+            "action_approve",
+            "action_reject",
+            "action_post",
+            "action_start",
+            "action_complete",
+            "action_cancel",
+            "delete_selected",
+        ]
 
         ordered = OrderedDict()
         for name in order:
@@ -965,9 +1144,7 @@ class WmsTaskAdmin(admin.ModelAdmin):
 
         with transaction.atomic():
             # 在事务里加行锁，防并发修改
-            qs = (WmsTask.objects
-                  .select_for_update(skip_locked=USE_SKIP_LOCKED)
-                  .filter(pk__in=pks))
+            qs = WmsTask.objects.select_for_update(skip_locked=USE_SKIP_LOCKED).filter(pk__in=pks)
 
             locked_ids = set(qs.values_list("pk", flat=True))
             skipped = len(pks) - len(locked_ids)
@@ -990,7 +1167,7 @@ class WmsTaskAdmin(admin.ModelAdmin):
                     stats = svc.publish_using_inline(
                         obj,
                         seed_lines=seed_lines,  # True=把头级兜底落地到行；False=只保留兜底语义
-                        overwrite=overwrite  # True=覆盖全部行；False=仅补“无人”的行
+                        overwrite=overwrite,  # True=覆盖全部行；False=仅补“无人”的行
                     )
                     ok += 1
                     brief = _stats_brief(stats)
@@ -1010,9 +1187,15 @@ class WmsTaskAdmin(admin.ModelAdmin):
             for msg in fail_details[:20]:
                 self.message_user(request, msg, level=messages.ERROR)
             if len(fail_details) > 20:
-                self.message_user(request, f"还有 {len(fail_details) - 20} 条失败原因已省略。", level=messages.WARNING)
+                self.message_user(
+                    request,
+                    f"还有 {len(fail_details) - 20} 条失败原因已省略。",
+                    level=messages.WARNING,
+                )
         if skipped:
-            self.message_user(request, f"{skipped} 条记录被其他事务锁定，已跳过。", level=messages.INFO)
+            self.message_user(
+                request, f"{skipped} 条记录被其他事务锁定，已跳过。", level=messages.INFO
+            )
 
     @admin.action(description="取消所选的任务")
     def action_cancel(self, request, queryset):
@@ -1041,12 +1224,36 @@ class WmsTaskAdmin(admin.ModelAdmin):
     def get_urls(self):
         urls = super().get_urls()
         custom = [
-            path("<int:task_id>/print-dispatch/", self.admin_site.admin_view(self.goto_print),name="task_print_dispatch"),
-            path("<int:task_id>/print-dispatch-save/", self.admin_site.admin_view(self.goto_print_save), name="task_print_dispatch_save"),
-            path("<int:task_id>/dispatch-pdf/", self.admin_site.admin_view(self.goto_pdf), name="task_print_dispatch_pdf"),
-            path("<int:object_id>/approve/", self.admin_site.admin_view(self.approve_view),name="tasking_wmstask_approve"),
-            path("<int:object_id>/post/", self.admin_site.admin_view(self.post_view),name="tasking_wmstask_post"),
-            path("count_wizard/", self.admin_site.admin_view(self.count_wizard),name="tasking_wmstask_count_wizard",),
+            path(
+                "<int:task_id>/print-dispatch/",
+                self.admin_site.admin_view(self.goto_print),
+                name="task_print_dispatch",
+            ),
+            path(
+                "<int:task_id>/print-dispatch-save/",
+                self.admin_site.admin_view(self.goto_print_save),
+                name="task_print_dispatch_save",
+            ),
+            path(
+                "<int:task_id>/dispatch-pdf/",
+                self.admin_site.admin_view(self.goto_pdf),
+                name="task_print_dispatch_pdf",
+            ),
+            path(
+                "<int:object_id>/approve/",
+                self.admin_site.admin_view(self.approve_view),
+                name="tasking_wmstask_approve",
+            ),
+            path(
+                "<int:object_id>/post/",
+                self.admin_site.admin_view(self.post_view),
+                name="tasking_wmstask_post",
+            ),
+            path(
+                "count_wizard/",
+                self.admin_site.admin_view(self.count_wizard),
+                name="tasking_wmstask_count_wizard",
+            ),
         ]
         return custom + urls
 
@@ -1065,8 +1272,10 @@ class WmsTaskAdmin(admin.ModelAdmin):
         return format_html(
             '<a class="button" href="{}" style="margin-right:6px;">审核</a>'
             '<a class="button" href="{}">过账</a>',
-            approve_url, post_url
+            approve_url,
+            post_url,
         )
+
     ops_buttons.short_description = "操作"
 
     # ===== 批量动作 =====
@@ -1083,9 +1292,9 @@ class WmsTaskAdmin(admin.ModelAdmin):
         PS_PENDING = getattr(PostingStatus, "PENDING", "PENDING") if PostingStatus else "PENDING"
 
         count_ids = list(
-            queryset.filter(
-                task_type=WmsTask.TaskType.COUNT, review_status=RS_PENDING
-            ).values_list("id", flat=True)
+            queryset.filter(task_type=WmsTask.TaskType.COUNT, review_status=RS_PENDING).values_list(
+                "id", flat=True
+            )
         )
         updated = 0
         if count_ids:
@@ -1095,17 +1304,18 @@ class WmsTaskAdmin(admin.ModelAdmin):
                 approve_count_task(task_id, by_user=request.user, note="Admin 审核通过")
                 updated += 1
         with transaction.atomic():
-            qs = queryset.select_for_update().exclude(
-                task_type__in=[WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC]
-            ).filter(review_status=RS_PENDING)
+            qs = (
+                queryset.select_for_update()
+                .exclude(task_type__in=[WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC])
+                .filter(review_status=RS_PENDING)
+            )
             updated += qs.update(review_status=RS_APPROVED, posting_status=PS_PENDING)
-
 
         skipped = queryset.count() - updated
         self.message_user(
             request,
             f"已将任务头 审核状态 由 待审核 改为 通过审核通过：{updated} 条；跳过（非 待审核）：{skipped} 条。",
-            level=messages.SUCCESS
+            level=messages.SUCCESS,
         )
 
     @admin.action(description="驳回所选的任务")
@@ -1119,11 +1329,10 @@ class WmsTaskAdmin(admin.ModelAdmin):
         RS_PENDING = getattr(ReviewStatus, "PENDING", "PENDING") if ReviewStatus else "PENDING"
         RS_REJECTED = getattr(ReviewStatus, "REJECTED", "REJECTED") if ReviewStatus else "REJECTED"
 
-
         count_ids = list(
-            queryset.filter(
-                task_type=WmsTask.TaskType.COUNT, review_status=RS_PENDING
-            ).values_list("id", flat=True)
+            queryset.filter(task_type=WmsTask.TaskType.COUNT, review_status=RS_PENDING).values_list(
+                "id", flat=True
+            )
         )
         updated = 0
         if count_ids:
@@ -1133,17 +1342,18 @@ class WmsTaskAdmin(admin.ModelAdmin):
                 reject_count_task(task_id, by_user=request.user, note="Admin 批量驳回")
                 updated += 1
         with transaction.atomic():
-            qs = queryset.select_for_update().exclude(
-                task_type__in=[WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC]
-            ).filter(review_status=RS_PENDING)
+            qs = (
+                queryset.select_for_update()
+                .exclude(task_type__in=[WmsTask.TaskType.COUNT, WmsTask.TaskType.RELOC])
+                .filter(review_status=RS_PENDING)
+            )
             updated += qs.update(review_status=RS_REJECTED)
-
 
         skipped = queryset.count() - updated
         self.message_user(
             request,
             f"已将任务头 审核状态 由 待审核 改为 通过驳回：{updated} 条；跳过（非 待审核）：{skipped} 条。",
-            level=messages.SUCCESS
+            level=messages.SUCCESS,
         )
 
     def approve_view(self, request, object_id: int):
@@ -1187,7 +1397,9 @@ class WmsTaskAdmin(admin.ModelAdmin):
             if res.get("ok"):
                 self.message_user(request, "过账成功。", level=messages.SUCCESS)
             else:
-                self.message_user(request, f"过账失败：{res.get('warnings') or res}", level=messages.ERROR)
+                self.message_user(
+                    request, f"过账失败：{res.get('warnings') or res}", level=messages.ERROR
+                )
         except Exception as e:
             self.message_user(request, f"过账异常：{e}", level=messages.ERROR)
         return redirect(self._change_url(task))
@@ -1208,7 +1420,9 @@ class WmsTaskAdmin(admin.ModelAdmin):
 
         for task in queryset:
             # 前置校验：必须“审核通过”方可过账
-            if getattr(task, "review_status", None) != getattr(WmsTask.ReviewStatus, "APPROVED", "APPROVED"):
+            if getattr(task, "review_status", None) != getattr(
+                WmsTask.ReviewStatus, "APPROVED", "APPROVED"
+            ):
                 fail += 1
                 self.message_user(
                     request,
@@ -1247,7 +1461,9 @@ class WmsTaskAdmin(admin.ModelAdmin):
 
     def action_wave_release_pick(self, request, queryset):
         pick_type = getattr(WmsTask.TaskType, "PICK", "PICK")
-        ids = list(queryset.filter(task_type=pick_type, status="DRAFT").values_list("id", flat=True))
+        ids = list(
+            queryset.filter(task_type=pick_type, status="DRAFT").values_list("id", flat=True)
+        )
         if not ids:
             self.message_user(request, "没有可放行的拣货草稿。", level=messages.WARNING)
             return
@@ -1275,7 +1491,9 @@ class WmsTaskAdmin(admin.ModelAdmin):
         extra_context["has_add_permission"] = self.has_add_permission(request)
         add_url = reverse("admin:tasking_wmstask_add")
         # 预选 task_type=COUNT
-        extra_context["add_count_url"] = f"{add_url}?{urlencode({'task_type': WmsTask.TaskType.COUNT})}"
+        extra_context["add_count_url"] = (
+            f"{add_url}?{urlencode({'task_type': WmsTask.TaskType.COUNT})}"
+        )
         extra_context["count_wizard_url"] = reverse("admin:tasking_wmstask_count_wizard")
         return super().changelist_view(request, extra_context=extra_context)
 
@@ -1284,37 +1502,39 @@ class WmsTaskAdmin(admin.ModelAdmin):
         extra_context["count_wizard_url"] = reverse("admin:tasking_wmstask_count_wizard")
         return super().changeform_view(request, object_id, form_url, extra_context=extra_context)
 
-    def count_wizard(self, request,*args, **kwargs):
-            form = CountWizardForm(request.POST or None, user=request.user)
-            if form.is_valid():
-                task, created, truncated = create_count_task(
-                    created_by=request.user,
-                    owner_id=form.cleaned_data["owner"].id,
-                    warehouse_id=form.cleaned_data["warehouse"].id,
-                    scope=form.cleaned_data["scope"],
-                    subwarehouse_id=getattr(form.cleaned_data.get("subwarehouse"), "id", None),
-                    zone_type=form.cleaned_data.get("zone_type"),
-                    location_id=getattr(form.cleaned_data.get("location"), "id", None),
-                    location_prefix=form.cleaned_data.get("location_prefix"),
-                    product_id=getattr(form.cleaned_data.get("product"), "id", None),
-                    batch_no=form.cleaned_data.get("batch_no"),
-                    exclude_zero_onhand=form.cleaned_data.get("exclude_zero_onhand", True),
-                    max_lines=form.cleaned_data.get("max_lines") or 1000,
-                    blind=form.cleaned_data.get("blind", True),
-                    recount_threshold=form.cleaned_data.get("recount_threshold") or 0,
-                    task_remark=form.cleaned_data.get("task_remark") or "",
-                )
+    def count_wizard(self, request, *args, **kwargs):
+        form = CountWizardForm(request.POST or None, user=request.user)
+        if form.is_valid():
+            task, created, truncated = create_count_task(
+                created_by=request.user,
+                owner_id=form.cleaned_data["owner"].id,
+                warehouse_id=form.cleaned_data["warehouse"].id,
+                scope=form.cleaned_data["scope"],
+                subwarehouse_id=getattr(form.cleaned_data.get("subwarehouse"), "id", None),
+                zone_type=form.cleaned_data.get("zone_type"),
+                location_id=getattr(form.cleaned_data.get("location"), "id", None),
+                location_prefix=form.cleaned_data.get("location_prefix"),
+                product_id=getattr(form.cleaned_data.get("product"), "id", None),
+                batch_no=form.cleaned_data.get("batch_no"),
+                exclude_zero_onhand=form.cleaned_data.get("exclude_zero_onhand", True),
+                max_lines=form.cleaned_data.get("max_lines") or 1000,
+                blind=form.cleaned_data.get("blind", True),
+                recount_threshold=form.cleaned_data.get("recount_threshold") or 0,
+                task_remark=form.cleaned_data.get("task_remark") or "",
+            )
 
-                suffix = "（已按最大行数截断）" if truncated else ""
-                messages.success(request, f"已创建盘点任务 {task.task_no}，生成行数：{created}{suffix}")
-                return redirect("admin:tasking_wmstask_change", object_id=task.pk)
+            suffix = "（已按最大行数截断）" if truncated else ""
+            messages.success(request, f"已创建盘点任务 {task.task_no}，生成行数：{created}{suffix}")
+            return redirect("admin:tasking_wmstask_change", object_id=task.pk)
 
-            # GET：展示表单
-            return render(request, "admin/tasking/count_wizard.html", {"form": form})
+        # GET：展示表单
+        return render(request, "admin/tasking/count_wizard.html", {"form": form})
 
     def _render_wizard(self, request, context):
         from django.template.response import TemplateResponse
+
         return TemplateResponse(request, "admin/tasking/wmstask/count_wizard.html", context)
+
 
 # ========= 行级 Extra Inlines（OneToOne） =========
 class _BaseLineExtraInline(admin.StackedInline):
@@ -1338,17 +1558,22 @@ class _BaseLineExtraInline(admin.StackedInline):
                     f.initial = 0
         return FormSet
 
+
 class ReceiveLineExtraInline(_BaseLineExtraInline):
     model = ReceiveLineExtra
+
 
 class PutawayLineExtraInline(_BaseLineExtraInline):
     model = PutawayLineExtra
 
+
 class PickLineExtraInline(_BaseLineExtraInline):
     model = PickLineExtra
 
+
 class ReviewLineExtraInline(_BaseLineExtraInline):
     model = ReviewLineExtra
+
 
 # class ReviewLineExtraInline(admin.StackedInline):
 #     model = ReviewLineExtra
@@ -1370,23 +1595,26 @@ class ReviewLineExtraInline(_BaseLineExtraInline):
 #                 logger.debug("Form initial data: %s", form.initial)  # 调试输出，检查初始化数据
 #         return form
 
+
 class PackLineExtraInline(_BaseLineExtraInline):
     model = PackLineExtra
+
 
 class LoadLineExtraInline(_BaseLineExtraInline):
     model = LoadLineExtra
 
+
 class DispatchLineExtraInline(_BaseLineExtraInline):
     model = DispatchLineExtra
+
 
 class ReplenishLineExtraInline(_BaseLineExtraInline):
     model = ReplenishLineExtra
 
+
 class RelocLineExtraInline(_BaseLineExtraInline):
     model = RelocLineExtra
 
-from django.contrib import admin
-from allapp.tasking.models import WmsTaskLine, CountLineExtra
 
 def _is_blind_count(obj: WmsTaskLine) -> bool:
     """Return the task-level blind-count flag for every count round."""
@@ -1412,19 +1640,32 @@ class CountLineExtraForm(forms.ModelForm):
             cleaned["count_status"] = "COUNTED"
         return cleaned
 
+
 class CountLineExtraInline(admin.StackedInline):
     model = CountLineExtra
     form = CountLineExtraForm
     extra = 0
     # 给出一个完整顺序，等会儿按需剔除
     fields = (
-        "lot_no", "exp_date", "lpn_no",
-        "qty_counted", "qty_book", "qty_diff",
-        "count_status", "method", "countorder",
+        "lot_no",
+        "exp_date",
+        "lpn_no",
+        "qty_counted",
+        "qty_book",
+        "qty_diff",
+        "count_status",
+        "method",
+        "countorder",
     )
     readonly_fields = (
-        "lot_no", "exp_date", "lpn_no", "qty_book", "qty_diff",
-        "count_status", "method", "countorder",
+        "lot_no",
+        "exp_date",
+        "lpn_no",
+        "qty_book",
+        "qty_diff",
+        "count_status",
+        "method",
+        "countorder",
     )
 
     # 1) 从“渲染用字段集”里剔除（模板层一定会调用 get_fieldsets）
@@ -1432,7 +1673,9 @@ class CountLineExtraInline(admin.StackedInline):
         fs = super().get_fieldsets(request, obj)
         if not _is_blind_count(obj):
             return fs
-        logger.debug("tasking.admin.count_inline.get_fieldsets line_id=%s", getattr(obj, "id", None))
+        logger.debug(
+            "tasking.admin.count_inline.get_fieldsets line_id=%s", getattr(obj, "id", None)
+        )
         new = []
         for name, opts in fs:
             fields = list(opts.get("fields", ()))
@@ -1460,6 +1703,7 @@ class CountLineExtraInline(admin.StackedInline):
         FormSet.form = BlindForm
         return FormSet
 
+
 # —— 首盘用：完整字段 —— #
 class CountLineExtraInlineFull(admin.StackedInline):
     model = CountLineExtra
@@ -1467,14 +1711,27 @@ class CountLineExtraInlineFull(admin.StackedInline):
     extra = 0
     can_delete = False
     fields = (
-        "lot_no", "exp_date", "lpn_no",
-        "qty_counted", "qty_book", "qty_diff",
-        "count_status", "method", "countorder",
+        "lot_no",
+        "exp_date",
+        "lpn_no",
+        "qty_counted",
+        "qty_book",
+        "qty_diff",
+        "count_status",
+        "method",
+        "countorder",
     )
     readonly_fields = (
-        "lot_no", "exp_date", "lpn_no", "qty_book", "qty_diff",
-        "count_status", "method", "countorder",
+        "lot_no",
+        "exp_date",
+        "lpn_no",
+        "qty_book",
+        "qty_diff",
+        "count_status",
+        "method",
+        "countorder",
     )
+
 
 # —— 复盘/三盘用：不渲染账面数与差异 —— #
 class CountLineExtraInlineBlind(admin.StackedInline):
@@ -1483,19 +1740,31 @@ class CountLineExtraInlineBlind(admin.StackedInline):
     extra = 0
     can_delete = False
     fields = (
-        "lot_no", "exp_date", "lpn_no",
+        "lot_no",
+        "exp_date",
+        "lpn_no",
         "qty_counted",
-        "count_status", "method", "countorder",
+        "count_status",
+        "method",
+        "countorder",
     )
     readonly_fields = (
-        "lot_no", "exp_date", "lpn_no", "count_status", "method", "countorder",
+        "lot_no",
+        "exp_date",
+        "lpn_no",
+        "count_status",
+        "method",
+        "countorder",
     )
+
 
 class QCLineExtraInline(_BaseLineExtraInline):
     model = QCLineExtra
 
+
 class AdjustLineExtraInline(_BaseLineExtraInline):
     model = AdjustLineExtra
+
 
 _LINE_EXTRA_MODEL_MAP = {
     "RECEIVE": ReceiveLineExtra,
@@ -1513,13 +1782,15 @@ _LINE_EXTRA_MODEL_MAP = {
     "ADJUST": AdjustLineExtra,
 }
 
+
 # ========= 其余模型 Admin =========
-#人工处理一行多桶
+# 人工处理一行多桶
 class TaskScanLogInline(admin.TabularInline):
     model = TaskScanLog
     extra = 2
-    fields = ("qty_base", "lot_no", "exp_date", "location",  "remark")
+    fields = ("qty_base", "lot_no", "exp_date", "location", "remark")
     readonly_fields = ()
+
     # 只显示本行，默认手工录入
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -1532,30 +1803,63 @@ class TaskScanLogInline(admin.TabularInline):
         # formset.form.base_fields["source"].initial = "WEB"
         return formset
 
-#任务行admin
+
+# 任务行admin
 # ====== 你的 WmsTaskLineAdmin（在此基础上融合行级 Extra Inline） ======
 @admin.register(WmsTaskLine)
-class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
+class WmsTaskLineAdmin(TaskChildAdminScopeMixin, DecimalPrettyInitialMixin, admin.ModelAdmin):
     # inlines = [TaskScanLogInline]
     # inlines = [ReviewLineExtraInline, TaskScanLogInline]
     actions = ["act_claim_lines"]
-    list_display = ("id", "task", "status","product", "from_location", "to_location", "qty_plan", "qty_done", "src_model", "src_id")
-    list_filter = ("task__task_type", "task__status", "product", "from_location", "to_location")
+    list_display = (
+        "id",
+        "task",
+        "status",
+        "product",
+        "from_location",
+        "to_location",
+        "qty_plan",
+        "qty_done",
+        "src_model",
+        "src_id",
+    )
+    list_filter = (
+        "task__task_type",
+        "task__status",
+        "product",
+        "from_location",
+        "to_location",
+    )
     search_fields = ("task__task_no", "src_model", "src_id", "rule_key")
     list_select_related = ("task", "product", "from_location", "to_location")
-    autocomplete_fields = ["task", "product", "from_location", "to_location", "bound_content_type"]
+    autocomplete_fields = [
+        "task",
+        "product",
+        "from_location",
+        "to_location",
+        "bound_content_type",
+    ]
     readonly_fields = ()
     ordering = ("-id",)
-    fields = ("task", "product","from_location", "to_location", "qty_plan", "qty_done", "remark")
+    fields = (
+        "task",
+        "product",
+        "from_location",
+        "to_location",
+        "qty_plan",
+        "qty_done",
+        "remark",
+    )
 
     class Media:
-        js  = ("tasking/count_blind.js",)   # ← 改个版本号
+        js = ("tasking/count_blind.js",)  # ← 改个版本号
+
     # 任务行 Admin：按所属任务类型追加“行 Extra” Inline（仅 1 个）
     def get_fields(self, request, obj=None):
         f = list(super().get_fields(request, obj))
         if _is_blind_count(obj):
             # 复盘/三盘：不渲染账面数和差异
-            for name in ("qty_book", "qty_diff","qty_plan"):
+            for name in ("qty_book", "qty_diff", "qty_plan"):
                 if name in f:
                     f.remove(name)
             logger.debug(
@@ -1617,8 +1921,11 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
         经理：全量；非仓库操作：空
         """
         # 1) 外键预取
-        qs = (super().get_queryset(request)
-              .select_related("task", "product", "from_location", "to_location"))
+        qs = (
+            super()
+            .get_queryset(request)
+            .select_related("task", "product", "from_location", "to_location")
+        )
         qs = _select_related_all_extras(qs)
 
         # 2) 角色分流
@@ -1652,12 +1959,15 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
         cond_mine = Q(_mine_line=True) | (Q(_mine_head=True) & Q(_has_line=False))
 
         # “可抢单”条件：任务 RELEASED + 无头级 + 该行无人
-        # cond_pool = Q(task__status=WmsTask.Status.RELEASED) & Q(_has_head=False) & Q(_has_line=False)
+        # cond_pool = Q(task__status=WmsTask.Status.RELEASED) & Q(_has_head=False) &
+        # Q(_has_line=False)
         cond_pool = (
-                Q(task__status__in=[WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS])  # 任务是 RELEASED 或 IN_PROCESS
-                & Q(_has_head=False)  # 无头级指派
-                & Q(_has_line=False)  # 该行无人
-                & Q(assignments__finished_at__isnull=True)  # 任务指派未完成（finished_at 为空）
+            Q(
+                task__status__in=[WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS]
+            )  # 任务是 RELEASED 或 IN_PROCESS
+            & Q(_has_head=False)  # 无头级指派
+            & Q(_has_line=False)  # 该行无人
+            & Q(assignments__finished_at__isnull=True)  # 任务指派未完成（finished_at 为空）
         )
         # 5) 合并筛选：我的 ∪ 可抢
         qs = qs.filter(cond_mine | cond_pool)
@@ -1669,14 +1979,14 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
         )
         # task=qs.filter() or None
         # if task:
-        #     logger.debug("task review/posting status %s %s", task.review_status, task.posting_statu)
+        # logger.debug("task review/posting status %s %s", task.review_status, task.posting_statu)
 
         # 6) 排序：我的在前（行级>头级兜底），再可抢；组内按 id 逆序
         # 说明：Django 对布尔注解可直接排序；True>False，因此用降序把 True 放前面
         return qs.order_by(
-            '-_mine_line',  # 我=行级指派优先（True 在前）
-            '-_mine_head',  # 我=头级兜底其次
-            '-id',  # 组内按 id 倒序
+            "-_mine_line",  # 我=行级指派优先（True 在前）
+            "-_mine_head",  # 我=头级兜底其次
+            "-id",  # 组内按 id 倒序
         )
 
     @admin.action(description="认领所选任务行")
@@ -1690,10 +2000,11 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
 
         with transaction.atomic():
             # 锁住选中的行，避免并发重复认领
-            qs = (WmsTaskLine.objects
-                  .select_for_update(skip_locked=USE_SKIP_LOCKED)
-                  .select_related("task")
-                  .filter(pk__in=line_ids))
+            qs = (
+                WmsTaskLine.objects.select_for_update(skip_locked=USE_SKIP_LOCKED)
+                .select_related("task")
+                .filter(pk__in=line_ids)
+            )
             locked_ids = set(qs.values_list("pk", flat=True))
             skipped = len(line_ids) - len(locked_ids)
 
@@ -1724,7 +2035,9 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
                     continue
                 if line._has_head:
                     fail += 1
-                    details.append(f"{getattr(t, 'task_no', t.pk)}-行{line.pk}：存在头级指派，不能抢单。")
+                    details.append(
+                        f"{getattr(t, 'task_no', t.pk)}-行{line.pk}：存在头级指派，不能抢单。"
+                    )
                     continue
                 if line._has_line:
                     fail += 1
@@ -1733,8 +2046,7 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
 
                 # 创建/激活行级指派（幂等）
                 ta, _created = TaskAssignment.objects.get_or_create(
-                    task=t, line=line, assignee=request.user,
-                    defaults={"accepted_at": now}
+                    task=t, line=line, assignee=request.user, defaults={"accepted_at": now}
                 )
                 if ta.finished_at is not None:
                     ta.finished_at = None
@@ -1755,9 +2067,15 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
             for m in details[:20]:
                 self.message_user(request, m, level=messages.WARNING)
             if len(details) > 20:
-                self.message_user(request, f"还有 {len(details) - 20} 条失败原因已省略。", level=messages.INFO)
+                self.message_user(
+                    request,
+                    f"还有 {len(details) - 20} 条失败原因已省略。",
+                    level=messages.INFO,
+                )
         if skipped:
-            self.message_user(request, f"{skipped} 条记录被其他事务锁定，已跳过。", level=messages.INFO)
+            self.message_user(
+                request, f"{skipped} 条记录被其他事务锁定，已跳过。", level=messages.INFO
+            )
 
     # @transaction.atomic
     # def save_related(self, request, form, formsets, change):
@@ -1766,7 +2084,7 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
     #     """
     #     logger.debug("Saving related data...")
     #     if form.is_valid():
-    #         logger.debug("cleaned_data=%s", form.cleaned_data)  # 检查 qty_reviewed 和 qty_picked 是否传递
+    # logger.debug("cleaned_data=%s", form.cleaned_data)  # 检查 qty_reviewed 和 qty_picked 是否传递
     #
     #     logger.debug("taskline save_related begin")
     #     super().save_related(request, form, formsets, change)
@@ -1783,14 +2101,16 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
     #         return
     #     logger.debug("已进入审核/过账阶段，不覆盖，直接返回")
     #
-    #     # models_to_check = ["ReceiveLineExtra", "PutawayLineExtra","PickLineExtra","ReviewLineExtra","PackLineExtra","LoadLineExtra","DispatchLineExtra","ReplenishLineExtra","CountLineExtra","AdjustLineExtra"]
+    # # models_to_check = ["ReceiveLineExtra",
+    # "PutawayLineExtra","PickLineExtra","ReviewLineExtra","PackLineExtra","LoadLineExtra","DispatchLineExtra","ReplenishLineExtra","CountLineExtra","AdjustLineExtra"]
     #     # extra_obj = None
     #     # for fs in formsets:
     #     #     logger.debug("Extra save_related fs=%s", fs)
     #     #     # 找到那个 inline（模型类名按你实际导入修改）
     #     #     # if getattr(getattr(fs, "model", None), "__name__", "") == "ReceiveLineExtra":
     #     #     if getattr(getattr(fs, "model", None), "__name__", "") in models_to_check:
-    #     #         logger.debug("Extra save_related model=%s", getattr(getattr(fs, "model", None), "__name__", ""))
+    # #         logger.debug("Extra save_related model=%s", getattr(getattr(fs, "model", None),
+    # "__name__", ""))
     #     #         # fs.save() 已由 super().save_related 调过，这里拿实例更稳
     #     #         # cleaned_data 里可能包含删除/空表单，过滤一下
     #     #         for f in fs.forms:
@@ -1811,7 +2131,8 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
     #     logger.debug("Extra save_related step5")
     #     # 3) 用“最新实例”取字段，避免 relation 缓存
     #     product  = getattr(tl, "product", None)
-    #     location = getattr(extra_obj, "to_location", None) or getattr(extra_obj, "location", None) or getattr(tl, "to_location", None)
+    # location = getattr(extra_obj, "to_location", None) or getattr(extra_obj, "location", None)
+    # or getattr(tl, "to_location", None)
     #     lot_no   = getattr(extra_obj, "lot_no", None)
     #     expiry   = getattr(extra_obj, "exp_date", None) or getattr(extra_obj, "expiry_date", None)
     #     serial   = getattr(extra_obj, "serial_no", None)
@@ -1857,7 +2178,8 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
 
     @transaction.atomic
     def save_related(self, request, form, formsets, change):
-        from allapp.tasking.services import is_task_locked,build_scanlog_items,FINALIZERS
+        from allapp.tasking.services import FINALIZERS, build_scanlog_items, is_task_locked
+
         # 先让 Django 把父表单 & inline 都落库
         super().save_related(request, form, formsets, change)
 
@@ -1869,7 +2191,9 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
         # 头部锁定就跳过（更友好：消息提示而非 500）
 
         if is_task_locked(task):
-            self.message_user(request, "任务已进入审核/过账阶段，跳过生成日志。", level=messages.INFO)
+            self.message_user(
+                request, "任务已进入审核/过账阶段，跳过生成日志。", level=messages.INFO
+            )
             return
 
         # 通用：取对应的 LineExtra（不依赖 formsets 顺序/是否为空）
@@ -1892,9 +2216,11 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
                     by_user=request.user,
                     source="WEB",
                 )
-                if not CountLineExtra.objects.filter(
-                    line__task=task
-                ).exclude(count_status="COUNTED").exists():
+                if (
+                    not CountLineExtra.objects.filter(line__task=task)
+                    .exclude(count_status="COUNTED")
+                    .exists()
+                ):
                     submit_count_task(task.id, by_user=request.user)
             except Exception as exc:
                 logger.exception("admin count recording failed (line=%s)", tl.id)
@@ -1930,6 +2256,7 @@ class WmsTaskLineAdmin(DecimalPrettyInitialMixin,admin.ModelAdmin):
             except Exception:
                 logger.exception("finalizer failed (task=%s)", task.id)
                 self.message_user(request, "任务收尾失败，请联系管理员。", level=messages.WARNING)
+
 
 def get_inline_instances(self, request, obj=None):
     # 显式两参 super，规避 __class__ cell 问题
@@ -2010,13 +2337,17 @@ def get_inline_instances(self, request, obj=None):
                 inline_inst._initial_for_fields = initial
     if not _is_blind_count(obj):
         return instances
-    logger.debug("tasking.admin.taskline.inline_replace_blind_count line_id=%s", getattr(obj, "id", None))
+    logger.debug(
+        "tasking.admin.taskline.inline_replace_blind_count line_id=%s",
+        getattr(obj, "id", None),
+    )
 
     # 盲盘：把“模型=CountLineExtra”的 inline 全部替换成 Blind
     new_instances = []
     for inline in instances:
         # 调试：看看到底拿到的是什么类
-        # logger.debug("inline class=%s model=%s", inline.__class__.__name__, getattr(inline, "model", None))
+        # logger.debug("inline class=%s model=%s", inline.__class__.__name__, getattr(inline,
+        # "model", None))
 
         if getattr(inline, "model", None) is CountLineExtra:
             new_instances.append(CountLineExtraInlineBlind(self.model, self.admin_site))
@@ -2028,20 +2359,31 @@ def get_inline_instances(self, request, obj=None):
 
     return instances
 
+
 WmsTaskLineAdmin.get_inline_instances = get_inline_instances
 
+
 @admin.register(TaskAssignment)
-class TaskAssignmentAdmin(admin.ModelAdmin):
-    list_display = ("task", "line","assignee", "accepted_at", "finished_at")
+class TaskAssignmentAdmin(TaskChildAdminScopeMixin, admin.ModelAdmin):
+    list_display = ("task", "line", "assignee", "accepted_at", "finished_at")
     list_filter = ("assignee", "accepted_at", "finished_at")
-    search_fields = ("task__task_no", "assignee__username", "assignee__first_name", "assignee__last_name")
+    search_fields = (
+        "task__task_no",
+        "assignee__username",
+        "assignee__first_name",
+        "assignee__last_name",
+    )
     autocomplete_fields = ["task", "assignee"]
     date_hierarchy = "created_at"
     ordering = ("-created_at",)
 
     def get_model_perms(self, request):
         # 操作员看到这个模型=0 权限（彻底从菜单消失）
-        if is_wh_operator(request.user) and not is_wh_manager(request.user) and not request.user.is_superuser:
+        if (
+            is_wh_operator(request.user)
+            and not is_wh_manager(request.user)
+            and not request.user.is_superuser
+        ):
             return {}
         return super().get_model_perms(request)
 
@@ -2054,8 +2396,9 @@ class TaskAssignmentAdmin(admin.ModelAdmin):
         # 保险：即使知道 URL 也只能看到“自己的活动指派”
         return qs.filter(assignee=request.user)
 
+
 @admin.register(TaskStatusLog)
-class TaskStatusLogAdmin(admin.ModelAdmin):
+class TaskStatusLogAdmin(TaskChildAdminScopeMixin, admin.ModelAdmin):
     list_display = ("task", "old_status", "new_status", "changed_by", "changed_at", "note")
     list_filter = ("new_status", "old_status", "changed_by")
     search_fields = ("task__task_no", "note")
@@ -2063,13 +2406,24 @@ class TaskStatusLogAdmin(admin.ModelAdmin):
     date_hierarchy = "changed_at"
     ordering = ("-changed_at",)
 
+
 @admin.register(TaskScanLog)
-class TaskScanLogAdmin(admin.ModelAdmin):
+class TaskScanLogAdmin(TaskChildAdminScopeMixin, admin.ModelAdmin):
     list_display = (
-        "id", "task", "task_line", "product", "location",
-        "barcode", "label_key", "qty_base_delta",
-        "method", "source", "by_user",
-        "review_status", "reviewed_at", "created_at",
+        "id",
+        "task",
+        "task_line",
+        "product",
+        "location",
+        "barcode",
+        "label_key",
+        "qty_base_delta",
+        "method",
+        "source",
+        "by_user",
+        "review_status",
+        "reviewed_at",
+        "created_at",
     )
     list_filter = ("method", "source", "review_status", "by_user", "product", "location")
     search_fields = ("task__task_no", "barcode", "label_key", "reason_code", "remark")
@@ -2081,7 +2435,9 @@ class TaskScanLogAdmin(admin.ModelAdmin):
 
     @admin.action(description="标记为已通过复核")
     def mark_reviewed(self, request, queryset):
-        n = queryset.update(review_status="APPROVED", reviewed_by=request.user, reviewed_at=timezone.now())
+        n = queryset.update(
+            review_status="APPROVED", reviewed_by=request.user, reviewed_at=timezone.now()
+        )
         self.message_user(request, f"已标记 {n} 条为 APPROVED。")
 
     @admin.action(description="标记为待复核")
@@ -2093,25 +2449,64 @@ class TaskScanLogAdmin(admin.ModelAdmin):
 @admin.register(ReplenishmentPolicy)
 class ReplenishmentPolicyAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmin):
     list_display = (
-        "owner", "warehouse", "product", "target_location", "min_qty", "target_qty",
-        "replenish_uom", "auto_release", "demand_enabled", "is_active",
+        "owner",
+        "warehouse",
+        "product",
+        "target_location",
+        "min_qty",
+        "target_qty",
+        "replenish_uom",
+        "auto_release",
+        "demand_enabled",
+        "is_active",
     )
     list_filter = ("warehouse", "owner", "auto_release", "demand_enabled", "is_active")
-    search_fields = ("product__code", "product__sku", "product__name", "target_location__code")
-    autocomplete_fields = ("owner", "warehouse", "product", "target_location", "replenish_uom")
-    list_select_related = ("owner", "warehouse", "product", "target_location", "replenish_uom")
+    search_fields = (
+        "product__code",
+        "product__sku",
+        "product__name",
+        "target_location__code",
+    )
+    autocomplete_fields = (
+        "owner",
+        "warehouse",
+        "product",
+        "target_location",
+        "replenish_uom",
+    )
+    list_select_related = (
+        "owner",
+        "warehouse",
+        "product",
+        "target_location",
+        "replenish_uom",
+    )
 
 
 @admin.register(ReplenishmentRequest)
 class ReplenishmentRequestAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmin):
     list_display = (
-        "id", "status", "owner", "warehouse", "product", "target_location",
-        "requested_qty", "created_by", "reviewed_by", "generated_task", "created_at",
+        "id",
+        "status",
+        "owner",
+        "warehouse",
+        "product",
+        "target_location",
+        "requested_qty",
+        "created_by",
+        "reviewed_by",
+        "generated_task",
+        "created_at",
     )
     list_filter = ("status", "warehouse", "owner")
     search_fields = ("product__code", "product__sku", "product__name", "reason")
     autocomplete_fields = (
-        "owner", "warehouse", "product", "target_location", "created_by", "reviewed_by",
+        "owner",
+        "warehouse",
+        "product",
+        "target_location",
+        "created_by",
+        "reviewed_by",
         "generated_task",
     )
     readonly_fields = ("status", "reviewed_by", "reviewed_at", "generated_task")
@@ -2121,7 +2516,11 @@ class RelocationRequestLineInline(admin.TabularInline):
     model = RelocationRequestLine
     extra = 0
     readonly_fields = (
-        "inventory_detail", "requested_qty", "to_location", "to_container", "source_snapshot"
+        "inventory_detail",
+        "requested_qty",
+        "to_location",
+        "to_container",
+        "source_snapshot",
     )
     can_delete = False
 
@@ -2129,17 +2528,37 @@ class RelocationRequestLineInline(admin.TabularInline):
 @admin.register(RelocationRequest)
 class RelocationRequestAdmin(admin.ModelAdmin):
     list_display = (
-        "id", "status", "mode", "trigger", "owner", "warehouse", "source_container",
-        "to_location", "created_by", "reviewed_by", "generated_task", "created_at",
+        "id",
+        "status",
+        "mode",
+        "trigger",
+        "owner",
+        "warehouse",
+        "source_container",
+        "to_location",
+        "created_by",
+        "reviewed_by",
+        "generated_task",
+        "created_at",
     )
     list_filter = ("status", "mode", "trigger", "warehouse", "owner")
     search_fields = ("reason", "source_container__container_no", "generated_task__task_no")
     autocomplete_fields = (
-        "owner", "warehouse", "source_container", "to_location", "target_parent_container",
-        "created_by", "reviewed_by", "generated_task",
+        "owner",
+        "warehouse",
+        "source_container",
+        "to_location",
+        "target_parent_container",
+        "created_by",
+        "reviewed_by",
+        "generated_task",
     )
     readonly_fields = (
-        "status", "reviewed_by", "reviewed_at", "review_note", "generated_task"
+        "status",
+        "reviewed_by",
+        "reviewed_at",
+        "review_note",
+        "generated_task",
     )
     inlines = (RelocationRequestLineInline,)
 
@@ -2159,11 +2578,23 @@ class RelocationRequestAdmin(admin.ModelAdmin):
 @admin.register(RelocationReservation)
 class RelocationReservationAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmin):
     product_search_paths = ("inventory_detail__product_id",)
-    list_display = ("task_line", "inventory_detail", "qty", "status", "consumed_at", "released_at")
+    list_display = (
+        "task_line",
+        "inventory_detail",
+        "qty",
+        "status",
+        "consumed_at",
+        "released_at",
+    )
     list_filter = ("status",)
     search_fields = ("task_line__task__task_no", "inventory_detail__product__code")
     readonly_fields = (
-        "task_line", "inventory_detail", "qty", "status", "consumed_at", "released_at"
+        "task_line",
+        "inventory_detail",
+        "qty",
+        "status",
+        "consumed_at",
+        "released_at",
     )
 
     def has_add_permission(self, request):
@@ -2173,14 +2604,13 @@ class RelocationReservationAdmin(UnifiedProductAdminSearchMixin, admin.ModelAdmi
         return False
 
     def get_queryset(self, request):
-        qs = super().get_queryset(request).select_related(
-            "task_line__task", "inventory_detail"
-        )
+        qs = super().get_queryset(request).select_related("task_line__task", "inventory_detail")
         return AccessScope.for_user(request.user).filter_queryset(
             qs,
             owner_field="task_line__task__owner_id",
             warehouse_field="task_line__task__warehouse_id",
         )
+
 
 @admin.register(ContentType)
 class _HiddenContentTypeAdmin(admin.ModelAdmin):

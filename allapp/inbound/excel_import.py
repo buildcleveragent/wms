@@ -12,6 +12,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.worksheet.datavalidation import DataValidation
 
+from allapp.core.xlsx_safety import validate_xlsx_archive
 from allapp.products.models import Product, ProductPackage
 
 from .services import no_order_items_hash
@@ -73,6 +74,11 @@ def build_no_order_receive_template(owner):
     lists.sheet_state = "hidden"
     metadata.sheet_state = "hidden"
     workbook.active = workbook.sheetnames.index(IMPORT_SHEET_NAME)
+    for sheet in workbook:
+        for row in sheet:
+            for cell in row:
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
     output = io.BytesIO()
     workbook.save(output)
     return output.getvalue()
@@ -83,7 +89,10 @@ def _write_instructions(sheet, owner):
         ("无订单收货 Excel 模板", f"模板版本：{TEMPLATE_VERSION}"),
         ("适用货主", f"{owner.code} - {owner.name}"),
         ("使用步骤", "填写“无订单收货”工作表，在 wmspda 上传校验，确认后一次性入库。"),
-        ("货主商品编码", "必须填写“商品单位参考”中的货主商品编码，只匹配当前货主的已有商品。"),
+        (
+            "货主商品编码",
+            "必须填写“商品单位参考”中的货主商品编码，只匹配当前货主的已有商品。",
+        ),
         (
             "商品名称",
             "仅供人工核对，可留空；系统导入时忽略此列，仅按货主商品编码识别商品。",
@@ -123,9 +132,7 @@ def _write_data_sheet(sheet):
             fgColor="DC2626" if header in REQUIRED_VALUE_HEADERS else "1D4ED8",
         )
         cell.alignment = Alignment(horizontal="center", vertical="center")
-        sheet.column_dimensions[get_column_letter(index)].width = (
-            30 if header == "商品名称" else 18
-        )
+        sheet.column_dimensions[get_column_letter(index)].width = 30 if header == "商品名称" else 18
     for row_number in range(2, MAX_IMPORT_ROWS + 2):
         for header in ("货主商品编码", "商品名称", "收货单位代码", "批次号"):
             column = HEADERS.index(header) + 1
@@ -160,8 +167,7 @@ def _write_reference_sheet(sheet, products):
         product_codes.append(product.code)
         unit_rows = [(product.base_uom, Decimal("1"))]
         unit_rows.extend(
-            (package.uom, Decimal(package.qty_in_base))
-            for package in product.packages.all()
+            (package.uom, Decimal(package.qty_in_base)) for package in product.packages.all()
         )
         seen_units = set()
         for uom, multiplier in unit_rows:
@@ -194,9 +200,7 @@ def _write_reference_sheet(sheet, products):
         cell.fill = PatternFill("solid", fgColor="475569")
         sheet.column_dimensions[get_column_letter(column)].width = 20
     sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = (
-        f"A1:{get_column_letter(len(headers))}{max(1, row_number - 1)}"
-    )
+    sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{max(1, row_number - 1)}"
     return product_codes, sorted(uom_codes)
 
 
@@ -253,20 +257,18 @@ def _read_upload(uploaded_file):
     if len(data) > MAX_IMPORT_FILE_SIZE:
         raise InboundExcelFileError("Excel 文件不能超过 5 MB。")
     try:
-        return data, load_workbook(io.BytesIO(data), data_only=False, read_only=False)
+        return data, load_workbook(
+            io.BytesIO(validate_xlsx_archive(data)), data_only=False, read_only=False
+        )
     except Exception as exc:
-        raise InboundExcelFileError(
-            "Excel 文件无法解析，请重新下载标准模板填写。"
-        ) from exc
+        raise InboundExcelFileError("Excel 文件无法解析，请重新下载标准模板填写。") from exc
 
 
 def _metadata(workbook):
     if "_meta" not in workbook.sheetnames:
         raise InboundExcelFileError("文件不是系统生成的无订单收货模板。")
     values = {}
-    for key, value in workbook["_meta"].iter_rows(
-        min_col=1, max_col=2, values_only=True
-    ):
+    for key, value in workbook["_meta"].iter_rows(min_col=1, max_col=2, values_only=True):
         if key:
             values[str(key)] = value
     if (
@@ -347,9 +349,7 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
     unknown_headers = [header for header in nonempty_headers if header not in HEADERS]
     if unknown_headers:
         raise InboundExcelFileError(f"模板存在未知列：{unknown_headers}")
-    header_columns = {
-        header: raw_headers.index(header) + 1 for header in nonempty_headers
-    }
+    header_columns = {header: raw_headers.index(header) + 1 for header in nonempty_headers}
 
     products = _active_products(owner.id)
     product_map = {product.code.strip().upper(): product for product in products}
@@ -359,14 +359,9 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
     nonempty_count = 0
 
     for excel_row in range(2, sheet.max_row + 1):
-        cells = {
-            header: sheet.cell(excel_row, column)
-            for header, column in header_columns.items()
-        }
+        cells = {header: sheet.cell(excel_row, column) for header, column in header_columns.items()}
         import_cells = {
-            header: cell
-            for header, cell in cells.items()
-            if header not in IGNORED_VALUE_HEADERS
+            header: cell for header, cell in cells.items() if header not in IGNORED_VALUE_HEADERS
         }
         if all(_text(cell.value) == "" for cell in import_cells.values()):
             continue
@@ -431,9 +426,7 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
             unit_map = {product.base_uom.code.strip().upper(): Decimal("1")}
             for package in product.packages.all():
                 if package.is_active and package.uom.is_active:
-                    unit_map[package.uom.code.strip().upper()] = Decimal(
-                        package.qty_in_base
-                    )
+                    unit_map[package.uom.code.strip().upper()] = Decimal(package.qty_in_base)
             multiplier = unit_map.get(uom_code)
             if uom_code and multiplier is None:
                 _row_error(
@@ -453,9 +446,7 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
                     )
 
             if product.batch_control and not lot_no:
-                _row_error(
-                    errors, excel_row, "批次号", "该商品启用批次管理，批次号不能为空"
-                )
+                _row_error(errors, excel_row, "批次号", "该商品启用批次管理，批次号不能为空")
             if not product.batch_control and lot_no:
                 _row_error(errors, excel_row, "批次号", "该商品未启用批次管理，请留空")
             if product.expiry_control:
@@ -548,10 +539,6 @@ def load_preview_credentials(token):
             max_age=PREVIEW_TOKEN_MAX_AGE,
         )
     except signing.SignatureExpired as exc:
-        raise InboundExcelFileError(
-            "预览已超过 30 分钟，请重新上传 Excel 校验。"
-        ) from exc
+        raise InboundExcelFileError("预览已超过 30 分钟，请重新上传 Excel 校验。") from exc
     except signing.BadSignature as exc:
-        raise InboundExcelFileError(
-            "预览凭证无效或已被篡改，请重新上传 Excel 校验。"
-        ) from exc
+        raise InboundExcelFileError("预览凭证无效或已被篡改，请重新上传 Excel 校验。") from exc

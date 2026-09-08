@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   storage: {},
   login: vi.fn(),
   authProfileWithAccess: vi.fn(),
+  authProfile: vi.fn(),
   setTokens: vi.fn(),
   clearSessionStorage: vi.fn(),
   resetOrder: vi.fn(),
@@ -14,7 +15,7 @@ vi.mock('@/utils/request', () => ({
   api: {
     login: mocks.login,
     authProfileWithAccess: mocks.authProfileWithAccess,
-    authProfile: vi.fn(),
+    authProfile: mocks.authProfile,
     logout: vi.fn(),
   },
   getAccessToken: () => mocks.storage.access || '',
@@ -33,6 +34,8 @@ describe('登录会话原子提交', () => {
     mocks.storage = {}
     mocks.login.mockReset()
     mocks.authProfileWithAccess.mockReset()
+    mocks.authProfile.mockReset()
+    mocks.clearSessionStorage.mockReset()
     mocks.setTokens.mockReset().mockImplementation((access, refresh) => {
       mocks.storage.access = access
       mocks.storage.refresh = refresh
@@ -58,6 +61,17 @@ describe('登录会话原子提交', () => {
     expect(mocks.storage).toEqual({})
     expect(auth.access).toBe('')
     expect(auth.user).toBeNull()
+  })
+
+  it.each([0, 429, 500, 503])('启动验证暂时失败 %s 时保留会话和订单草稿', async (statusCode) => {
+    mocks.storage = { access: 'saved-access', refresh: 'saved-refresh', user: { id: 7 } }
+    mocks.authProfile.mockRejectedValue({ statusCode })
+    const { useAuth } = await import('@/store/auth')
+    const auth = useAuth()
+    await expect(auth.bootstrap()).resolves.toMatchObject({ status: 'offline' })
+    expect(mocks.storage.access).toBe('saved-access')
+    expect(mocks.clearSessionStorage).not.toHaveBeenCalled()
+    expect(mocks.resetOrder).not.toHaveBeenCalled()
   })
 
   it('profile 成功后一次提交令牌、用户和能力', async () => {

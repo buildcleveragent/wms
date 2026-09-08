@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "risks": [
+    {
+      "id": "R-PDF-RESOURCE",
+      "title": "PDF 渲染资源消耗尚未完成发布评审",
+      "entrypoint": "allapp.reports.views.dispatch_note_pdf",
+      "assessment_owner": "release-security",
+      "decision_owner": "release-manager",
+      "default_state": "REVIEW_REQUIRED",
+      "blocks": ["pre-release"],
+      "trigger": "发运单行数、业务文本或内联资源导致较长渲染时间或较高内存消耗；当前尚未验证为可利用漏洞",
+      "existing_controls": [
+        "登录、对象范围及打印权限校验",
+        "服务端模板及业务字段自动转义",
+        "URL fetcher 仅允许内联 data: 资源",
+        "运行镜像非 root"
+      ],
+      "required_evidence": [
+        "适用候选及运行镜像身份",
+        "合成大单的耗时、峰值内存、输入及输出体积",
+        "实际部署的内存、时间及并发限制",
+        "具名评审、处置依据、关闭条件或限期例外"
+      ],
+      "accepted_dispositions": ["CONTROL_VERIFIED", "EXPLICIT_TIME_LIMITED_ACCEPTANCE"],
+      "historical_advisory_exception_is_not_applicable": "PYSEC-2026-3412"
+    }
+  ]
+}

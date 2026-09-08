@@ -1,0 +1,8 @@
+{
+  "perl_module_files": {
+    "Archive/Tar.pm": [],
+    "File/GlobMapper.pm": [],
+    "Storable.pm": []
+  },
+  "perl_include_paths": "/etc/perl\n/usr/local/lib/x86_64-linux-gnu/perl/5.40.1\n/usr/local/share/perl/5.40.1\n/usr/lib/x86_64-linux-gnu/perl5/5.40\n/usr/share/perl5\n/usr/lib/x86_64-linux-gnu/perl-base\n/usr/lib/x86_64-linux-gnu/perl/5.40\n/usr/share/perl/5.40\n/usr/local/lib/site_perl"
+}

@@ -488,7 +488,7 @@ function authHeader() {
 function downloadExcel(url, filename) {
   if (typeof uni.downloadFile !== 'function') {
     if (typeof window !== 'undefined' && window.open) {
-      window.open(api.authUrl(url), '_blank')
+      throw new Error('当前浏览器不支持文件下载，请使用新版浏览器')
     }
     return
   }

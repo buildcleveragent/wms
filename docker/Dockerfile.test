@@ -1,0 +1,22 @@
+# Build with an isolated context containing test-layer.txt as test.txt, the Docker CLI and
+# runtime dependency verifier. No business package may change in this layer.
+ARG RUNTIME_IMAGE
+FROM mysql:8.0.46@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b AS mysql_client
+FROM ${RUNTIME_IMAGE}
+USER root
+ARG PIP_INDEX_URL=https://pypi.org/simple
+# The preserved-data tests execute the real MySQL 8 backup and restore clients.
+COPY --from=mysql_client /usr/bin/mysql /usr/bin/mysqldump /usr/local/bin/
+COPY docker-cli /usr/local/bin/docker
+COPY test.txt /tmp/wms-test-requirements.txt
+COPY verify_runtime_dependencies.py /tmp/verify_runtime_dependencies.py
+RUN python /tmp/verify_runtime_dependencies.py snapshot /tmp/runtime-before.json \
+    && apt-get -o Acquire::Retries=2 -o Acquire::https::Timeout=30 update \
+    && apt-get install -y --no-install-recommends git poppler-utils libncurses6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --index-url "$PIP_INDEX_URL" --require-hashes -r /tmp/wms-test-requirements.txt \
+    && python /tmp/verify_runtime_dependencies.py verify /tmp/runtime-before.json \
+    && pip check \
+    && mysql --version && mysqldump --version
+WORKDIR /app
+USER wms

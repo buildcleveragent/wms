@@ -24,10 +24,8 @@ if (runDb && fastDb) {
 
 function safeTestDatabaseName(value) {
   const name = String(value || '').trim()
-  const reserved = new Set(['wms_db', 'mysql', 'information_schema', 'performance_schema', 'sys'])
-  const hasTestMarker = /(^|[_-])(test|ci|gate)([_-]|$)/i.test(name)
-  if (!name || reserved.has(name.toLowerCase()) || !hasTestMarker) {
-    throw new Error(`unsafe DB_TEST_NAME: ${name || '<empty>'}`)
+  if (name !== 'wms_db_test') {
+    throw new Error('DB_TEST_NAME must be exactly wms_db_test')
   }
   return name
 }
@@ -89,6 +87,9 @@ addStep('frontend payment behavior', 'node', ['--test', 'tests/payment-service.t
   cwd: appRoot,
 })
 
+addStep('frontend authentication recovery', 'node', ['--test', 'tests/request-auth.test.mjs'], { cwd: appRoot })
+addStep('cart uncertainty recovery', 'node', ['--test', 'tests/cart-recovery.test.mjs'], { cwd: appRoot })
+
 if (fs.existsSync(path.join(repoRoot, 'manage.py'))) {
   addStep('django system check', pythonCommand, ['manage.py', 'check'], {
     cwd: repoRoot,
@@ -117,7 +118,6 @@ if (fs.existsSync(path.join(repoRoot, 'manage.py'))) {
       'pytest',
       '-q',
       '--reuse-db',
-      '--create-db',
       '--disable-warnings',
       'allapp/salesapp/tests.py::SaleMiniApiTests',
       'allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests',

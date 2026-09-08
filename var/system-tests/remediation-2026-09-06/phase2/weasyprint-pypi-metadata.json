@@ -1,0 +1,146 @@
+{
+  "info": {
+    "author": null,
+    "author_email": "Simon Sapin <simon.sapin@exyr.org>",
+    "bugtrack_url": null,
+    "classifiers": [
+      "Development Status :: 5 - Production/Stable",
+      "Intended Audience :: Developers",
+      "License :: OSI Approved :: BSD License",
+      "Operating System :: OS Independent",
+      "Programming Language :: Python",
+      "Programming Language :: Python :: 3",
+      "Programming Language :: Python :: 3 :: Only",
+      "Programming Language :: Python :: 3.10",
+      "Programming Language :: Python :: 3.11",
+      "Programming Language :: Python :: 3.12",
+      "Programming Language :: Python :: 3.13",
+      "Programming Language :: Python :: 3.14",
+      "Programming Language :: Python :: Implementation :: CPython",
+      "Programming Language :: Python :: Implementation :: PyPy",
+      "Topic :: Internet :: WWW/HTTP",
+      "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+      "Topic :: Printing",
+      "Topic :: Text Processing :: Markup :: HTML"
+    ],
+    "description": "**The Awesome Document Factory**\n\nWeasyPrint is a smart solution helping web developers to create PDF\ndocuments. It turns simple HTML pages into gorgeous statistical reports,\ninvoices, tickets\u2026\n\nFrom a technical point of view, WeasyPrint is a visual rendering engine for\nHTML and CSS that can export to PDF. It aims to support web standards for\nprinting. WeasyPrint is free software made available under a BSD license.\n\nIt is based on various libraries but *not* on a full rendering engine like\nWebKit or Gecko. The CSS layout engine is written in Python, designed for\npagination, and meant to be easy to hack on.\n\n* Free software: BSD license\n* For Python 3.10+, tested on CPython and PyPy\n* Documentation: https://doc.courtbouillon.org/weasyprint\n* Examples: https://weasyprint.org/#samples\n* Changelog: https://github.com/Kozea/WeasyPrint/releases\n* Code, issues, tests: https://github.com/Kozea/WeasyPrint\n* Code of conduct: https://www.courtbouillon.org/code-of-conduct\n* Professional support: https://www.courtbouillon.org\n* Donation: https://opencollective.com/courtbouillon\n\nWeasyPrint has been created and developed by Kozea (https://kozea.fr/).\nProfessional support, maintenance and community management is provided by\nCourtBouillon (https://www.courtbouillon.org/).\n\nCopyrights are retained by their contributors, no copyright assignment is\nrequired to contribute to WeasyPrint. Unless explicitly stated otherwise, any\ncontribution intentionally submitted for inclusion is licensed under the BSD\n3-clause license, without any additional terms or conditions. For full\nauthorship information, see the version control history.\n\n",
+    "description_content_type": "text/x-rst",
+    "docs_url": null,
+    "download_url": null,
+    "downloads": {
+      "last_day": -1,
+      "last_month": -1,
+      "last_week": -1
+    },
+    "dynamic": null,
+    "home_page": null,
+    "keywords": "html, css, pdf, converter",
+    "license": null,
+    "license_expression": null,
+    "license_files": [
+      "LICENSE"
+    ],
+    "maintainer": null,
+    "maintainer_email": "CourtBouillon <contact@courtbouillon.org>",
+    "name": "weasyprint",
+    "package_url": "https://pypi.org/project/weasyprint/",
+    "platform": null,
+    "project_url": "https://pypi.org/project/weasyprint/",
+    "project_urls": {
+      "Changelog": "https://github.com/Kozea/WeasyPrint/releases",
+      "Code": "https://github.com/Kozea/WeasyPrint",
+      "Documentation": "https://doc.courtbouillon.org/weasyprint/",
+      "Donation": "https://opencollective.com/courtbouillon",
+      "Homepage": "https://weasyprint.org/",
+      "Issues": "https://github.com/Kozea/WeasyPrint/issues"
+    },
+    "provides_extra": [
+      "doc",
+      "test"
+    ],
+    "release_url": "https://pypi.org/project/weasyprint/69.0/",
+    "requires_dist": [
+      "pydyf>=0.11.0",
+      "cffi>=0.6",
+      "tinyhtml5>=2.0.0b1",
+      "tinycss2>=1.5.0",
+      "cssselect2>=0.8.0",
+      "Pyphen>=0.9.1",
+      "Pillow>=9.1.0",
+      "fonttools[woff]>=4.59.2",
+      "sphinx; extra == \"doc\"",
+      "furo; extra == \"doc\"",
+      "pytest; extra == \"test\"",
+      "ruff; extra == \"test\"",
+      "Pillow>=12.1.0; extra == \"test\""
+    ],
+    "requires_python": ">=3.10",
+    "summary": "The Awesome Document Factory",
+    "version": "69.0",
+    "yanked": false,
+    "yanked_reason": null
+  },
+  "last_serial": 37646720,
+  "ownership": {
+    "organization": null,
+    "roles": [
+      {
+        "role": "Owner",
+        "user": "gentooboontoo"
+      },
+      {
+        "role": "Owner",
+        "user": "liZe"
+      }
+    ]
+  },
+  "urls": [
+    {
+      "comment_text": null,
+      "core-metadata": {
+        "sha256": "518954a33ed487b36e98020d157074a7f92324572226c53d5fb52ef8608c9bd2"
+      },
+      "digests": {
+        "blake2b_256": "93cb208525c6bd5033d7b2589b55e07bec23d9c61bb00703cbaf20ef52c3811f",
+        "md5": "c6bf9d6309e79cd299071a3cfa36acda",
+        "sha256": "475951cfd917014de6d4d005caff48c6aa867e7e42b80cd5b16a0484a1609ee6"
+      },
+      "downloads": -1,
+      "filename": "weasyprint-69.0-py3-none-any.whl",
+      "has_sig": false,
+      "md5_digest": "c6bf9d6309e79cd299071a3cfa36acda",
+      "packagetype": "bdist_wheel",
+      "python_version": "py3",
+      "requires_python": ">=3.10",
+      "size": 322872,
+      "upload_time": "2026-06-02T14:42:15",
+      "upload_time_iso_8601": "2026-06-02T14:42:15.871545Z",
+      "url": "https://files.pythonhosted.org/packages/93/cb/208525c6bd5033d7b2589b55e07bec23d9c61bb00703cbaf20ef52c3811f/weasyprint-69.0-py3-none-any.whl",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "comment_text": null,
+      "core-metadata": false,
+      "digests": {
+        "blake2b_256": "5953dcc3885c2f7a47faa45f6b8b801412f5f9e055173a52801ef01c09943c5a",
+        "md5": "267e1bd34e02655399bc72b45f697be3",
+        "sha256": "a7a32f39ca16bd82ef11de99c92ea4b5f14951c9033af035e451ce4f4ee0a88c"
+      },
+      "downloads": -1,
+      "filename": "weasyprint-69.0.tar.gz",
+      "has_sig": false,
+      "md5_digest": "267e1bd34e02655399bc72b45f697be3",
+      "packagetype": "sdist",
+      "python_version": "source",
+      "requires_python": ">=3.10",
+      "size": 1549834,
+      "upload_time": "2026-06-02T14:42:17",
+      "upload_time_iso_8601": "2026-06-02T14:42:17.765299Z",
+      "url": "https://files.pythonhosted.org/packages/59/53/dcc3885c2f7a47faa45f6b8b801412f5f9e055173a52801ef01c09943c5a/weasyprint-69.0.tar.gz",
+      "yanked": false,
+      "yanked_reason": null
+    }
+  ],
+  "vulnerabilities": []
+}

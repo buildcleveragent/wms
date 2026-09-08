@@ -1,0 +1,15 @@
+{
+  "exit_code": 0,
+  "collected": 1,
+  "password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher",
+  "tests": {
+    "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_legacy_reference_cannot_be_collected_again_after_upgrade": {
+      "status": "PASS",
+      "phases": {
+        "setup": "passed",
+        "call": "passed",
+        "teardown": "passed"
+      }
+    }
+  }
+}

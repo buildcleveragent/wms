@@ -8,7 +8,7 @@
   size: A4;
   margin: 18mm 16mm 19mm 16mm;
   @top-left { content: string(document-title); color: #667085; font-size: 8.2pt; }
-  @top-right { content: "V2.0 · 2026-08"; color: #667085; font-size: 8.2pt; }
+  @top-right { content: "V2.1 · 2026-09-07"; color: #667085; font-size: 8.2pt; }
   @bottom-center { content: "第 " counter(page) " 页 / 共 " counter(pages) " 页"; color: #7a8493; font-size: 8.2pt; }
 }
 @page cover {
@@ -84,19 +84,19 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
       <h1>金桥融通WMS系统管理员操作手册</h1>
       <div class="lead">岗位操作 · 权限边界 · 异常处理</div>
       <div class="cover-meta">
-        <div>文档版本：V2.0</div>
-        <div>适用基线：2026-08-04 当前工作区</div>
+        <div>文档版本：V2.1</div>
+        <div>适用基线：2026-09-07 当前工作区</div>
         <div>文档状态：交付版</div>
         <div>主要读者：系统管理员</div>
       </div>
       <div class="cover-foot">实际菜单和数据范围以账号角色、权限及显式货主/仓库范围为准</div>
     </section>
     
-<section class='toc'><h1>目录</h1><ul><li class='level-2'><a href='#section-1-使用范围'>使用范围</a></li><li class='level-2'><a href='#section-2-登录-账号与通用安全'>登录、账号与通用安全</a></li><li class='level-3'><a href='#section-3-首次登录'>首次登录</a></li><li class='level-3'><a href='#section-4-账号和数据范围'>账号和数据范围</a></li><li class='level-3'><a href='#section-5-通用操作原则'>通用操作原则</a></li><li class='level-3'><a href='#section-6-修改密码与退出'>修改密码与退出</a></li><li class='level-2'><a href='#section-7-角色定位与权限边界'>角色定位与权限边界</a></li><li class='level-2'><a href='#section-8-用户和角色范围管理'>用户和角色范围管理</a></li><li class='level-3'><a href='#section-9-新建用户'>新建用户</a></li><li class='level-3'><a href='#section-10-范围规则'>范围规则</a></li><li class='level-2'><a href='#section-11-规范角色组与-仓库主管-说明'>规范角色组与“仓库主管”说明</a></li><li class='level-2'><a href='#section-12-额外权限管理'>额外权限管理</a></li><li class='level-2'><a href='#section-13-基础资料维护顺序'>基础资料维护顺序</a></li><li class='level-3'><a href='#section-14-商品标识历史维护'>商品标识历史维护</a></li><li class='level-2'><a href='#section-15-Excel-导入与批量配置'>Excel 导入与批量配置</a></li><li class='level-2'><a href='#section-16-商城-POS-与计费管理边界'>商城、POS 与计费管理边界</a></li><li class='level-2'><a href='#section-17-审计-账号安全与故障处理'>审计、账号安全与故障处理</a></li><li class='level-2'><a href='#section-18-用户开通验收表'>用户开通验收表</a></li><li class='level-2'><a href='#section-19-常见状态与控制点'>常见状态与控制点</a></li><li class='level-2'><a href='#section-20-异常处理与问题上报'>异常处理与问题上报</a></li><li class='level-3'><a href='#section-21-无法登录或菜单缺失'>无法登录或菜单缺失</a></li><li class='level-3'><a href='#section-22-数据为空或范围不正确'>数据为空或范围不正确</a></li><li class='level-3'><a href='#section-23-网络超时或重复提交提示'>网络超时或重复提交提示</a></li><li class='level-3'><a href='#section-24-库存-任务或账单不一致'>库存、任务或账单不一致</a></li><li class='level-3'><a href='#section-25-问题上报模板'>问题上报模板</a></li><li class='level-2'><a href='#section-26-日常自检与培训验收'>日常自检与培训验收</a></li><li class='level-2'><a href='#section-27-专项手册与边界'>专项手册与边界</a></li><li class='level-2'><a href='#section-28-文档修订记录'>文档修订记录</a></li></ul></section>
+<section class='toc'><h1>目录</h1><ul><li class='level-2'><a href='#section-1-使用范围'>使用范围</a></li><li class='level-2'><a href='#section-2-登录-账号与通用安全'>登录、账号与通用安全</a></li><li class='level-3'><a href='#section-3-首次登录'>首次登录</a></li><li class='level-3'><a href='#section-4-登录失效与切换账号'>登录失效与切换账号</a></li><li class='level-3'><a href='#section-5-账号和数据范围'>账号和数据范围</a></li><li class='level-3'><a href='#section-6-通用操作原则'>通用操作原则</a></li><li class='level-3'><a href='#section-7-修改密码与退出'>修改密码与退出</a></li><li class='level-2'><a href='#section-8-角色定位与权限边界'>角色定位与权限边界</a></li><li class='level-2'><a href='#section-9-用户和角色范围管理'>用户和角色范围管理</a></li><li class='level-3'><a href='#section-10-新建用户'>新建用户</a></li><li class='level-3'><a href='#section-11-范围规则'>范围规则</a></li><li class='level-2'><a href='#section-12-规范角色组与-仓库主管-说明'>规范角色组与“仓库主管”说明</a></li><li class='level-2'><a href='#section-13-额外权限管理'>额外权限管理</a></li><li class='level-2'><a href='#section-14-移库-补货的启用与岗位分工'>移库、补货的启用与岗位分工</a></li><li class='level-2'><a href='#section-15-基础资料维护顺序'>基础资料维护顺序</a></li><li class='level-3'><a href='#section-16-商品标识历史维护'>商品标识历史维护</a></li><li class='level-3'><a href='#section-17-GS1-辅助建档的准备与核对'>GS1 辅助建档的准备与核对</a></li><li class='level-2'><a href='#section-18-Excel-导入与批量配置'>Excel 导入与批量配置</a></li><li class='level-2'><a href='#section-19-商城-POS-与计费管理边界'>商城、POS 与计费管理边界</a></li><li class='level-2'><a href='#section-20-审计-账号安全与故障处理'>审计、账号安全与故障处理</a></li><li class='level-2'><a href='#section-21-用户开通验收表'>用户开通验收表</a></li><li class='level-2'><a href='#section-22-常见状态与控制点'>常见状态与控制点</a></li><li class='level-2'><a href='#section-23-异常处理与问题上报'>异常处理与问题上报</a></li><li class='level-3'><a href='#section-24-无法登录或菜单缺失'>无法登录或菜单缺失</a></li><li class='level-3'><a href='#section-25-数据为空或范围不正确'>数据为空或范围不正确</a></li><li class='level-3'><a href='#section-26-网络超时或重复提交提示'>网络超时或重复提交提示</a></li><li class='level-3'><a href='#section-27-打印失败或打印页过期'>打印失败或打印页过期</a></li><li class='level-3'><a href='#section-28-移库-补货过账失败'>移库、补货过账失败</a></li><li class='level-3'><a href='#section-29-库存-任务或账单不一致'>库存、任务或账单不一致</a></li><li class='level-3'><a href='#section-30-问题上报模板'>问题上报模板</a></li><li class='level-2'><a href='#section-31-日常自检与培训验收'>日常自检与培训验收</a></li><li class='level-2'><a href='#section-32-专项手册与边界'>专项手册与边界</a></li><li class='level-2'><a href='#section-33-文档修订记录'>文档修订记录</a></li></ul></section>
 <div class="document-note">本手册仅描述当前代码中具有有效权限、页面和业务闭环的功能。</div>
 
-<p><strong>文档版本：</strong> V2.0</p>
-<p><strong>适用系统版本：</strong> 2026-08-04 当前工作区业务基线</p>
+<p><strong>文档版本：</strong> V2.1</p>
+<p><strong>适用系统版本：</strong> 2026-09-07 当前工作区业务基线</p>
 <p><strong>适用对象：</strong> 系统管理员</p>
 <p><strong>正式权限组：</strong> <code>超级管理员或经过审批的后台管理权限组</code></p>
 <p><strong>主要入口：</strong> Web 控制台 / Django Admin</p>
@@ -141,7 +141,15 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>首次登录立即进入“我的 → 修改密码”或 Web 右上角密码修改入口。</li>
 <li>如果能够登录但没有菜单，不要借用其他账号，记录用户名、入口和页面截图并联系系统管理员。</li>
 </ol>
-<h3 id="section-4-账号和数据范围">账号和数据范围</h3>
+<h3 id="section-4-登录失效与切换账号">登录失效与切换账号</h3>
+<ol>
+<li>使用管理员提供的正式入口；客户端的服务地址由部署配置决定，不在登录页自行改接其他服务器。</li>
+<li>使用过程中客户端会尝试续期登录。临时断网或服务器繁忙时先检查网络，恢复后重新查询当前单据；不能把网络故障当成业务未提交。</li>
+<li>明确提示登录失效并返回登录页时，重新登录本人账号，再核对角色、仓库或货主范围。</li>
+<li>看到“登录账号已变化”或“登录状态已变化”时停止当前操作，刷新页面并重新选择业务对象。旧账号的页面结果不能作为新账号继续操作的依据。</li>
+<li>连续登录过频时按提示等待，不连续点击；仍不能登录则联系管理员检查账号。</li>
+</ol>
+<h3 id="section-5-账号和数据范围">账号和数据范围</h3>
 <ul>
 <li>一人一号，不得共用账号或把密码留在 PDA、电脑旁。</li>
 <li>角色决定能够执行什么操作；显式角色范围决定能够操作哪个货主或仓库的数据。</li>
@@ -149,7 +157,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>超级管理员使用全局权限，不设置业务角色范围；超级管理员账号不得用于日常开单、审批和现场作业。</li>
 <li>离职、调岗、合作终止或设备丢失后，应立即停用账号并保留审计记录。</li>
 </ul>
-<h3 id="section-5-通用操作原则">通用操作原则</h3>
+<h3 id="section-6-通用操作原则">通用操作原则</h3>
 <ol>
 <li>操作前核对货主、仓库、客户、商品、批次、库位和单据号。</li>
 <li>扫码后必须核对系统命中的商品名称和规格，不能只凭提示音继续。</li>
@@ -158,19 +166,19 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>禁止通过直接修改库存明细来代替正常收货、上架、拣货、复核、盘点或调整流程。</li>
 <li>页面入口可见不代表账号一定有执行权限；最终以服务器返回的角色、权限和数据范围校验为准。</li>
 </ol>
-<h3 id="section-6-修改密码与退出">修改密码与退出</h3>
+<h3 id="section-7-修改密码与退出">修改密码与退出</h3>
 <ol>
 <li>修改密码时输入原密码、新密码和确认密码；新密码必须通过系统安全校验。</li>
 <li>修改成功后退出，并用新密码重新登录验证。</li>
 <li>当班结束或共用设备交接前必须从“我的”或用户菜单执行退出，不能只关闭屏幕或浏览器。</li>
+<li>切换账号前先记录尚未确认的单号、任务号及收付款结果；下一位人员使用自己的账号重新打开业务页面，不接着提交上一账号遗留的内容。</li>
 </ol>
 <hr/>
-<p><img alt="Web 管理后台登录界面" class="web-shot" src="../manual_assets/web-login.png"/><p class="caption">图：Web 管理后台登录界面</p></p>
-<h2 id="section-7-角色定位与权限边界">角色定位与权限边界</h2>
+<h2 id="section-8-角色定位与权限边界">角色定位与权限边界</h2>
 <p>系统管理员是后台管理职责，不是 <code>UserRoleScope</code> 中的业务角色。超级管理员通过 Django <code>is_superuser</code> 获得全局访问；其他后台账号仍必须通过职员状态、显式业务角色范围、规范角色组和经过审批的辅助权限组合授权。</p>
 <p>系统管理员负责账号、角色范围、基础资料、配置和审计，不代替业务员开单、货主管理员审核、仓库管理员确认或操作员现场作业。</p>
-<h2 id="section-8-用户和角色范围管理">用户和角色范围管理</h2>
-<h3 id="section-9-新建用户">新建用户</h3>
+<h2 id="section-9-用户和角色范围管理">用户和角色范围管理</h2>
+<h3 id="section-10-新建用户">新建用户</h3>
 <ol>
 <li>进入“系统 → 用户”新增账号，设置唯一用户名、姓名、联系方式和初始密码。</li>
 <li>设置账号为有效；只有需要登录 Web 后台的账号才启用职员状态。</li>
@@ -179,7 +187,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>保存后系统自动同步对应规范角色组，检查“系统规范角色组”显示是否正确。</li>
 <li>使用该角色测试账号验证入口、菜单、允许操作和数据隔离，再安全交付初始密码。</li>
 </ol>
-<h3 id="section-10-范围规则">范围规则</h3>
+<h3 id="section-11-范围规则">范围规则</h3>
 <ul>
 <li>仓库操作员、仓库管理员只能配置一个活动仓库范围。</li>
 <li>货主业务员、货主管理员只能配置一个活动货主范围。</li>
@@ -188,7 +196,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>超级管理员使用全局范围，不得再配置业务角色范围。</li>
 <li>用户模型中的旧 <code>owner</code>、<code>warehouse</code> 字段仅供 POS、商城等兼容模块使用，不决定 WMS 角色和数据范围。</li>
 </ul>
-<h2 id="section-11-规范角色组与-仓库主管-说明">规范角色组与“仓库主管”说明</h2>
+<h2 id="section-12-规范角色组与-仓库主管-说明">规范角色组与“仓库主管”说明</h2>
 <p>系统规范角色组包括：</p>
 <ul>
 <li><code>WMS::仓库操作员</code></li>
@@ -199,7 +207,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 </ul>
 <p>规范角色组名称固定，由角色范围自动同步，不应手工改名或删除。需要调整规范权限模板时应通过代码、迁移和测试发布，不能在生产环境临时修改后不留记录。</p>
 <p>“仓库主管”是旧兼容组名，当前会识别为仓库老板角色。企业内部的作业主管若要确认单据、管理任务，应配置 <code>WMS::仓库管理员</code>，不能创建或沿用名为“仓库主管”的组。</p>
-<h2 id="section-12-额外权限管理">额外权限管理</h2>
+<h2 id="section-13-额外权限管理">额外权限管理</h2>
 <ul>
 <li>商品 Excel 导入、POS、计费、报表导出、商城运营等不一定属于规范角色默认权限，应使用经过审批的辅助权限组。</li>
 <li>优先使用权限组，不给个人账号长期追加零散权限。</li>
@@ -207,7 +215,16 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>每次权限变化后检查审计事件，并使用边界数据验证不能访问其他货主或仓库。</li>
 <li>不得用额外权限绕过显式角色范围；权限授予能力，角色范围限制能够触达的数据。</li>
 </ul>
-<h2 id="section-13-基础资料维护顺序">基础资料维护顺序</h2>
+<h2 id="section-14-移库-补货的启用与岗位分工">移库、补货的启用与岗位分工</h2>
+<ol>
+<li>先与仓库确认需要开放的能力：移库申请/管理、移库现场执行、整容器移库、手工要货、补货现场执行、阈值补货或出库需求补货。这些开关默认关闭，不能仅凭看到权限名称就宣布功能已可用。</li>
+<li>检查仓库操作员规范组的申请及任务领取权限，仓库管理员规范组的审核、移库管理和补货策略权限；岗位不得混配。既有组权限有定制时，以实际授予结果为准。</li>
+<li>由部署负责人按已批准范围启用对应功能；本手册不提供直接修改生产环境的操作命令。</li>
+<li>补货启用前，由仓库管理员核对有效策略、目标拣货位、来源库区、单位换算和库存；整容器移库另外核对容器层级及位置。</li>
+<li>使用实际岗位账号刷新首页权限资料，分别确认操作员能申请/领取/执行、管理员能审核/管理且不能代替普通操作员扫码；再验证未授权仓库和关闭的功能不可使用。</li>
+<li>明确失败交接人：操作员记录实物和扫描状态，管理员处理恢复、作废或原任务过账重试，系统管理员排查配置和故障。</li>
+</ol>
+<h2 id="section-15-基础资料维护顺序">基础资料维护顺序</h2>
 <p>建议按以下顺序建档：</p>
 <ol>
 <li>货主。</li>
@@ -219,7 +236,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>用户、显式角色范围及必要的辅助权限。</li>
 </ol>
 <p>货主商品编码和仓库SKU编码是稳定主数据，创建后不得修改。标准贸易条码是 GTIN/EAN/UPC 等贸易条码的正式显示名称；条码、包装条码和外部系统商品编码通过独立的标识维护入口追加历史记录，不直接覆盖旧值。基本单位是库存记账单位。修改包装换算、批次/效期控制或停用商品前，必须确认没有未完成单据、任务和库存影响。</p>
-<h3 id="section-14-商品标识历史维护">商品标识历史维护</h3>
+<h3 id="section-16-商品标识历史维护">商品标识历史维护</h3>
 <ul>
 <li>同一货主内，货主商品编码、仓库SKU编码、全部商品条码、包装条码和外部系统商品编码共享唯一命名空间；比较时忽略首尾空格和大小写。不同商品不得交叉复用，跨货主可以复用。</li>
 <li>新厂家码、新旧包装并存或箱规变化时使用“新增”操作创建记录。新箱码或包装条码必须选择当前商品下启用且未删除的包装层级，系统会固化当时的基础单位换算快照。</li>
@@ -229,7 +246,16 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>普通搜索只使用当前有效标识；历史审计应在商品条码或外部标识维护入口中按记录查询。</li>
 <li>批量维护使用当前“商品条码维护”和“外部标识维护”工作表，操作值为 <code>ADD</code>、<code>SET_PRIMARY</code>、<code>RETIRE</code>、<code>REACTIVATE</code>。导入为整批事务，任意行失败时不得保留注册项、主值投影或旧主码降级。</li>
 </ul>
-<h2 id="section-15-Excel-导入与批量配置">Excel 导入与批量配置</h2>
+<p>例如厂家换箱码时，新增一条箱码并选择对应包装，再按需要设为主码；不要覆盖旧条码或把旧包装换算改成新箱规。扫码抽查新旧箱码各自的基本数量，确认历史商品仍可追溯。</p>
+<h3 id="section-17-GS1-辅助建档的准备与核对">GS1 辅助建档的准备与核对</h3>
+<ol>
+<li>在系统设置维护已批准的 GS1 查询服务配置，按配置入口保存凭据，不把凭据抄入手册、工单或截图。</li>
+<li>确认操作员具有无订单收货权限，所选货主处于有效授权范围，并有可选的有效分类、基本单位。</li>
+<li>在无订单收货选品中核对“本地优先查询 → GS1 候选 → 补齐分类、单位和追溯信息 → 加入收货清单”的结果。查到资料不代表已入库，正式提交收货清单后才核对库存。</li>
+<li>服务未收录、资料不符、标识冲突或配置异常时先核对本地商品；必要时由有权限人员人工维护主数据，不能让操作员复用其他商品编码。</li>
+<li>当前 PDA 有订单收货页缺少序列号输入，不把后端序列号校验能力当作现成的 PDA 操作入口；先安排经过验证的入口及培训。</li>
+</ol>
+<h2 id="section-18-Excel-导入与批量配置">Excel 导入与批量配置</h2>
 <ul>
 <li>使用系统当前页面下载的模板，不复用历史模板。</li>
 <li>商品导入按权限和数据范围校验，整批原子处理；任意错误会阻止整批写入。</li>
@@ -239,23 +265,25 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>无订单批量入库、一件代发导入与商品主数据导入用途不同，禁止混用模板。</li>
 <li>导入后保存结果、审计记录和抽查样本，不能只依据前端提示判断成功。</li>
 </ul>
-<h2 id="section-16-商城-POS-与计费管理边界">商城、POS 与计费管理边界</h2>
+<h2 id="section-19-商城-POS-与计费管理边界">商城、POS 与计费管理边界</h2>
 <ul>
-<li>POS 权限、打印配置、撤销和退款按专项 POS 手册管理；POS 销售通过统一任务和过账链路影响库存。</li>
+<li>POS 收银、仓库内 POS 客户、赊账还款、退货、班次和打印配置按《POS 使用手册》管理；POS 销售通过统一任务和过账链路影响库存。兼容仓库字段必须与有效授权范围一致，不能通过改旧字段跨仓收银。</li>
 <li>商城上架、支付、退款、评价审核和批量配置按商城专项指南管理；商城买家不配置 WMS 业务角色。</li>
 <li>计费规则、账期锁定、开票和解锁属于高风险财务操作，应保留审批依据和审计记录。</li>
 <li>系统管理员可以维护配置和排查异常，但不能代替货主或仓库确认业务事实。</li>
+<li>打印页过期时引导用户从原单重新打印；修改密码后旧打印凭据也会失效。打印成功提示不代表纸张已输出，不能因打印失败重复收银或收货。</li>
 </ul>
-<h2 id="section-17-审计-账号安全与故障处理">审计、账号安全与故障处理</h2>
+<h2 id="section-20-审计-账号安全与故障处理">审计、账号安全与故障处理</h2>
 <ol>
 <li>在审计事件和 Admin 日志中按用户名、时间、模块和操作类型查询。</li>
 <li>发现异常新增、修改、删除、导入、导出或授权时，先停用可疑账号并保留日志。</li>
 <li>遗忘密码走重置流程；管理员不得读取、传播或在群聊中发送明文密码。</li>
 <li>角色范围冲突、缺失规范组或范围与组不一致时，账号应保持拒绝访问，修正配置后再验证。</li>
 <li>库存、订单、支付和账单异常应先保全事实记录，不直接改数据库或删除流水。</li>
+<li>登录过频时核对对应入口和时间，按限流提示等待；不通过反复尝试或更换入口绕过限制。临时网络故障与账号失效分别处理，切换账号后重新验证数据范围。</li>
 </ol>
 <p>服务器部署、数据库备份恢复、域名证书、服务启停和版本回滚属于独立运维流程，本手册不授权在生产服务器直接操作。</p>
-<h2 id="section-18-用户开通验收表">用户开通验收表</h2>
+<h2 id="section-21-用户开通验收表">用户开通验收表</h2>
 <ul>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>用户名唯一，姓名和联系方式正确。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>账号有效，职员/超级用户状态符合用途。</li>
@@ -265,9 +293,10 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>登录入口、菜单和岗位一致。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>不能查看其他货主或仓库数据。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>高风险按钮只对授权人员可见且服务端会再次校验。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>移库、补货各项开关与岗位能力一致，已说明当前 PDA 序列号收货限制。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>初始密码已安全交付并要求首次修改。</li>
 </ul>
-<h2 id="section-19-常见状态与控制点">常见状态与控制点</h2>
+<h2 id="section-22-常见状态与控制点">常见状态与控制点</h2>
 <table>
 <thead>
 <tr>
@@ -352,6 +381,11 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <td>单据或任务终止</td>
 <td>核对冻结库存是否释放、现场实物是否隔离</td>
 </tr>
+<tr>
+<td>异常 / EXCEPTION</td>
+<td>移库任务处于异常执行状态</td>
+<td>操作员说明现场情况，管理员处理原因后决定恢复或作废</td>
+</tr>
 </tbody>
 </table>
 <p>关键控制点：</p>
@@ -360,18 +394,35 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>标准出库必须先完成货主审核，再由仓库管理员确认发布；系统已停用仓库端代替货主审批的一键流程。</li>
 <li>拣货完成不等于库存已经扣减；以任务过账状态 <code>POSTED</code> 和库存流水为准。</li>
 <li>取消、撤回或驳回涉及已冻结库存时，必须核对分配量已经释放；任务已开始或已有执行数量时，系统会阻止直接取消。</li>
+<li>移库和补货需要同时看任务状态、行完成量和过账状态；分次扫描只累计执行数量，库存移动以整任务过账成功为准。</li>
+<li>移库异常执行状态与过账失败不是同一件事；“恢复”用于异常任务，“重试过账”用于过账失败，均由有权限的仓库管理员处理。</li>
+<li>POS 销售状态和班次状态按《POS 使用手册》核对；现场还款或打印完成情况不能由普通仓库任务状态推断。</li>
 </ul>
 <hr/>
-<h2 id="section-20-异常处理与问题上报">异常处理与问题上报</h2>
-<h3 id="section-21-无法登录或菜单缺失">无法登录或菜单缺失</h3>
-<p>按“网络 → 入口 → 用户名和密码 → 账号启用状态 → 职员状态 → 角色范围 → 规范角色组 → 额外权限”的顺序检查。连续失败后停止尝试，由系统管理员查看账号和审计日志。</p>
-<h3 id="section-22-数据为空或范围不正确">数据为空或范围不正确</h3>
+<h2 id="section-23-异常处理与问题上报">异常处理与问题上报</h2>
+<h3 id="section-24-无法登录或菜单缺失">无法登录或菜单缺失</h3>
+<p>按“网络 → 正式入口 → 用户名和密码 → 账号启用状态 → 职员状态（仅 Web 后台）→ 角色范围 → 规范角色组 → 功能开关及额外权限”的顺序检查。移库、补货等功能即使有角色权限，也可能尚未启用。登录过于频繁时按页面提示等待，由系统管理员检查账号和审计日志。</p>
+<h3 id="section-25-数据为空或范围不正确">数据为空或范围不正确</h3>
 <p>先清除筛选并刷新，再核对当前角色和货主/仓库范围。看到不属于本范围的数据时立即停止操作并上报，不得导出或转发。</p>
-<h3 id="section-23-网络超时或重复提交提示">网络超时或重复提交提示</h3>
+<h3 id="section-26-网络超时或重复提交提示">网络超时或重复提交提示</h3>
 <p>不要连续点击。先回到列表按单号、任务号或平台单号查询；带幂等保护的操作可以使用同一请求重试，但不能改动内容后继续使用原请求标识。</p>
-<h3 id="section-24-库存-任务或账单不一致">库存、任务或账单不一致</h3>
+<ul>
+<li>移库、补货扫描结果未确认时，保留当前页的原库位、商品、容器、序列号和数量再试；提示“已确认此前扫描记录”表示恢复了原结果，不能再次搬货。离开页面后先查原任务再决定下一步。</li>
+<li>收货与上架使用不同数量口径：普通商品有订单收货登记当前行累计数量，上架登记本次增量。重试前不要把累计数量当作新增数量再次录入。</li>
+<li>POS 还款结果未确认时，回到原收银员、原仓库和原客户核对并恢复该笔还款；不能更换客户或金额当作新收款。具体步骤见《POS 使用手册》。</li>
+</ul>
+<h3 id="section-27-打印失败或打印页过期">打印失败或打印页过期</h3>
+<ol>
+<li>先核对原单是否已成功保存或结账，保留单号。</li>
+<li>从原收货任务、出库记录、POS 销售单或班次记录重新点击打印；打印页过期时不要反复使用原链接。</li>
+<li>浏览器阻止新窗口时，按设备提示允许本系统打开打印窗口，再从原记录重试。</li>
+<li>“打印已发起”不代表纸张已输出；核对打印机、纸张和实际份数。结账成功但打印失败时仅补打，不能重新结账。</li>
+</ol>
+<h3 id="section-28-移库-补货过账失败">移库、补货过账失败</h3>
+<p>扫描数量已保存不代表库存已移动。保留原任务号、来源和目标库位、已搬数量及完整错误信息，交仓库管理员处理原任务；管理员修复原因后按权限重试过账，不能新建任务重复搬货或修改库存数。</p>
+<h3 id="section-29-库存-任务或账单不一致">库存、任务或账单不一致</h3>
 <p>保留页面截图和原始单号，按“业务单据 → 任务 → 扫描记录 → 过账状态 → 库存流水/计费来源”逐层核对。禁止通过删除记录或直接改汇总数掩盖差异。</p>
-<h3 id="section-25-问题上报模板">问题上报模板</h3>
+<h3 id="section-30-问题上报模板">问题上报模板</h3>
 <ul>
 <li>上报人、角色、用户名：</li>
 <li>发生时间和系统入口：</li>
@@ -384,23 +435,24 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>已执行的查询和重试：</li>
 <li>截图或导出文件：</li>
 </ul>
-<h2 id="section-26-日常自检与培训验收">日常自检与培训验收</h2>
+<h2 id="section-31-日常自检与培训验收">日常自检与培训验收</h2>
 <ul>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能使用本人账号登录、修改密码并正确退出。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能说明本角色的数据范围和禁止事项。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能完成本手册列出的核心业务流程。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能识别会改变库存或业务状态的高风险按钮。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>遇到网络中断时会先查询原单，不重复建单。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能区分已保存、已过账和已打印，知道登录切换后必须重新核对业务范围。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能使用问题模板提交可追踪的异常信息。</li>
 </ul>
-<h2 id="section-27-专项手册与边界">专项手册与边界</h2>
+<h2 id="section-32-专项手册与边界">专项手册与边界</h2>
 <ul>
-<li>POS 收银、退款、交班和 POS 对账参见 <code>docs/pos_user_manual.md</code>；只有取得相应 POS 权限的账号才能使用。</li>
-<li>面向终端客户的商城参见 <code>docs/sales-miniapp-user-guide.md</code>；商城买家不是本手册六类 WMS 后台角色。</li>
+<li>POS 收银、赊账、客户还款、退货、打印、交班和对账参见《POS 使用手册》；只有取得相应 POS 权限的账号才能使用。</li>
+<li>面向终端客户的商城参见《商城小程序使用教程》；商城买家不是本手册六类 WMS 后台角色。</li>
 <li>服务器部署、数据库备份恢复、域名证书、服务启停和版本回滚不属于普通用户手册。</li>
 <li>没有已注册页面、有效权限和可验证业务闭环的功能，不作为正式可用能力发布。</li>
 </ul>
-<h2 id="section-28-文档修订记录">文档修订记录</h2>
+<h2 id="section-33-文档修订记录">文档修订记录</h2>
 <table>
 <thead>
 <tr>
@@ -410,6 +462,11 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>V2.1</td>
+<td>2026-09-07</td>
+<td>按当前工作区（含未提交改动）更新收货上架、移库补货、商品建档、登录恢复、打印和财务核对；功能启用及设备使用以实际部署为准</td>
+</tr>
 <tr>
 <td>V2.0</td>
 <td>2026-08-04</td>

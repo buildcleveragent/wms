@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="8.887" timestamp="2026-09-06T11:15:25.491621+08:00" hostname="wms"><testcase classname="allapp.pos.tests.PosApiTests" name="test_checkout_requires_user_warehouse_without_side_effects" time="8.133"><failure message="AssertionError: 403 != 400">self = &lt;allapp.pos.tests.PosApiTests testMethod=test_checkout_requires_user_warehouse_without_side_effects&gt;
+
+    def test_checkout_requires_user_warehouse_without_side_effects(self):
+        no_warehouse_user = get_user_model().objects.create_user(
+            username="pos-no-warehouse",
+            password="x",
+        )
+        no_warehouse_user.user_permissions.add(Permission.objects.get(codename="add_possale"))
+        self.client.force_authenticate(no_warehouse_user)
+    
+        response = self.client.post(
+            "/api/pos/checkout/",
+            {
+                "src_bill_no": "POS-RECEIPT-NO-WAREHOUSE",
+                "payment": self.payment("9.00"),
+                "items": [
+                    {
+                        "product_id": self.product.id,
+                        "qty": "1.000",
+                        "price": "9.0000",
+                    }
+                ],
+            },
+            format="json",
+        )
+    
+&gt;       self.assertEqual(response.status_code, 400)
+E       AssertionError: 403 != 400
+
+allapp/pos/tests.py:486: AssertionError</failure></testcase></testsuite></testsuites>

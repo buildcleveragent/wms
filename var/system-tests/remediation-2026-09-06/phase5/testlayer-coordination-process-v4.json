@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "9268ac8949454f65b2a0964a7b2ad915",
+  "status": "PASS",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026532617]",
+    "boot_id": "0a436ce8-0fe0-4427-8c39-e6cacfa16d29",
+    "start_time": "2981582",
+    "state": "R"
+  },
+  "command": [
+    "/wms/.venv/bin/python",
+    "/tmp/wms-testlayer-probe-v4.py",
+    "child"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 4,
+    "pid_namespace": "pid:[4026532617]",
+    "boot_id": "0a436ce8-0fe0-4427-8c39-e6cacfa16d29",
+    "start_time": "2981600",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 4,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 35.633
+}

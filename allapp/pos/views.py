@@ -30,6 +30,7 @@ from allapp.products.identifier_lookup import (
 )
 from allapp.products.models import Product, ProductPackage
 
+from .access import pos_warehouse_allowed
 from .accuracy import reconcile_pos_accuracy
 from .exports import (
     build_pos_stats_export_workbook,
@@ -78,7 +79,11 @@ class HasPosCheckoutPermission(BasePermission):
     message = "缺少 POS 收银权限。"
 
     def has_permission(self, request, view):
-        return bool(request.user and request.user.has_perm("pos.add_possale"))
+        return bool(
+            request.user
+            and request.user.has_perm("pos.add_possale")
+            and (not request.user.warehouse_id or pos_warehouse_allowed(request.user))
+        )
 
 
 class HasPosSaleViewPermission(BasePermission):
@@ -128,10 +133,11 @@ class HasPosShiftSupervisorPermission(BasePermission):
 
 class QueryTokenAuthentication(JWTAuthentication):
     def authenticate(self, request):
-        token = request.query_params.get("token") or request.query_params.get("access")
-        if token:
-            validated_token = self.get_validated_token(token)
-            return self.get_user(validated_token), validated_token
+        from allapp.core.print_tickets import user_from_print_ticket
+
+        ticket = request.query_params.get("ticket")
+        if ticket:
+            return user_from_print_ticket(ticket, request.path), None
         return super().authenticate(request)
 
 
@@ -142,7 +148,7 @@ class PosProductPagination(PageNumberPagination):
 
 
 class PosProductListApi(generics.ListAPIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasPosCheckoutPermission]
     serializer_class = PosProductSerializer
     pagination_class = PosProductPagination
 
@@ -174,6 +180,9 @@ class PosProductListApi(generics.ListAPIView):
 
         queryset = Product.objects.filter(
             is_active=True,
+            pk__in=InventoryDetail.objects.filter(warehouse_id=warehouse_id, is_active=True).values(
+                "product_id"
+            ),
         ).select_related("base_uom")
         search = (self.request.query_params.get("search") or "").strip()
         barcode = (self.request.query_params.get("barcode") or "").strip()

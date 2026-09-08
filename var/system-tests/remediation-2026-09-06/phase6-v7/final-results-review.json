@@ -1,0 +1,272 @@
+{
+  "candidate_id": "8cbb7823bf692c81d6064eb4fe38343675e6c314520c4f60a42ac11768ec91bf",
+  "kind": "ACCEPTANCE_AGGREGATE_WITH_EXPLICIT_REVERIFICATION",
+  "not_a_new_full_pytest_run": true,
+  "main_counts": {
+    "PASS": 1253
+  },
+  "stages": {
+    "functional": {
+      "status": "PASS",
+      "kind": "FUNCTIONAL_ACCEPTANCE_BY_BASELINE_AND_SCOPED_REVERIFICATION",
+      "baseline_main_counts": {
+        "PASS": 1248,
+        "FAIL": 2
+      },
+      "rerun_main_counts": {
+        "PASS": 7
+      },
+      "subtest_counts": {
+        "passed": 945,
+        "unique_event_identities": 945,
+        "identity_scope": "run_id + parent nodeid + attempt + subtest_id",
+        "source": "phase6-v6/functional-tests.events.jsonl",
+        "historical_945_identities_restored": false
+      },
+      "raw_junit_counts": {
+        "baseline": {
+          "testcase_elements": 1250,
+          "framework_tests": 2195
+        },
+        "rerun": {
+          "testcase_elements": 7,
+          "framework_tests": 7
+        }
+      }
+    },
+    "migrations": {
+      "status": "PASS",
+      "process_status": "PASS",
+      "main_counts": {
+        "PASS": 3
+      },
+      "subtest_counts": {},
+      "cleanup_complete": true,
+      "duration_seconds": 2285.399,
+      "junit_testcase_elements": 3,
+      "junit_summary_tests": 3
+    }
+  },
+  "matrix": {
+    "movement_api": {
+      "status": "PASS",
+      "count": 34,
+      "nodes": {
+        "allapp/tasking/test_movement_api_acceptance.py::test_scans_4_4_2_post_once_and_replay_is_stable[relocation]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_scans_4_4_2_post_once_and_replay_is_stable[replenishment]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[relocation-qty-0]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[relocation-qty-11]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[relocation-from_location_code-WRONG]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[relocation-to_location_code-WRONG]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[relocation-product_code-WRONG]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[relocation-serial_no-UNEXPECTED]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[replenishment-qty-0]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[replenishment-qty-11]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[replenishment-from_location_code-WRONG]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[replenishment-to_location_code-WRONG]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[replenishment-product_code-WRONG]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_invalid_scan_does_not_change_stock_or_progress[replenishment-serial_no-UNEXPECTED]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_changed_payload_same_key_conflicts[relocation]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_changed_payload_same_key_conflicts[replenishment]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_claim_start_scope_and_role_boundaries[relocation]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_claim_start_scope_and_role_boundaries[replenishment]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_request_review_list_detail_and_scope[relocation-approve]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_request_review_list_detail_and_scope[relocation-reject]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_request_review_list_detail_and_scope[replenishment-approve]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_request_review_list_detail_and_scope[replenishment-reject]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_feature_disabled_and_unscoped_account_rejected[relocation]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_feature_disabled_and_unscoped_account_rejected[replenishment]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_task_list_filters[relocation]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_task_list_filters[replenishment]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_posting_failure_keeps_scan_and_manager_can_retry[relocation]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_posting_failure_keeps_scan_and_manager_can_retry[replenishment]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_four_piece_direct_release_changes_10_to_6_and_0_to_4[relocation]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_exception_resume_and_void_preserve_stock_and_release_locks[relocation]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_request_cancel_and_options_are_scoped[relocation]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_policy_management_and_scoped_evaluation[replenishment]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_policy_create_has_scope_and_model_validation[replenishment]": "PASS",
+        "allapp/tasking/test_movement_api_acceptance.py::test_two_concurrent_evaluators_create_only_twenty_units[replenishment]": "PASS"
+      }
+    },
+    "pdf_acceptance": {
+      "status": "PASS",
+      "count": 9,
+      "nodes": {
+        "allapp/reports/test_pdf_acceptance.py::DispatchPdfEndpointTests::test_real_endpoint_renders_zero_price_and_requires_permission": "PASS",
+        "allapp/reports/test_pdf_acceptance.py::test_report_fetcher_rejects_every_non_inline_resource[https://invalid.example/a]": "PASS",
+        "allapp/reports/test_pdf_acceptance.py::test_report_fetcher_rejects_every_non_inline_resource[http://127.0.0.1/a]": "PASS",
+        "allapp/reports/test_pdf_acceptance.py::test_report_fetcher_rejects_every_non_inline_resource[file:///etc/passwd]": "PASS",
+        "allapp/reports/test_pdf_acceptance.py::test_report_fetcher_rejects_every_non_inline_resource[/static/a.png]": "PASS",
+        "allapp/reports/test_pdf_acceptance.py::test_report_fetcher_rejects_every_non_inline_resource[/media/a.png]": "PASS",
+        "allapp/reports/test_pdf_acceptance.py::test_report_fetcher_rejects_every_non_inline_resource[ftp://invalid.example/a]": "PASS",
+        "allapp/reports/test_pdf_acceptance.py::test_real_pdf_keeps_all_rows_amounts_and_escaped_content": "PASS",
+        "allapp/reports/test_pdf_acceptance.py::test_nested_css_and_svg_resources_never_reach_default_fetcher": "PASS"
+      }
+    },
+    "coordination": {
+      "status": "PASS",
+      "count": 14,
+      "nodes": {
+        "allapp/core/test_test_coordination.py::test_clean_sql_lease_still_waits_for_previous_runner_container": "PASS",
+        "allapp/core/test_test_coordination.py::test_stable_lock_is_exclusive_and_not_deleted": "PASS",
+        "allapp/core/test_test_coordination.py::test_unsafe_lock_objects_rejected_without_modifying_target[symlink]": "PASS",
+        "allapp/core/test_test_coordination.py::test_unsafe_lock_objects_rejected_without_modifying_target[dangling]": "PASS",
+        "allapp/core/test_test_coordination.py::test_unsafe_lock_objects_rejected_without_modifying_target[fifo]": "PASS",
+        "allapp/core/test_test_coordination.py::test_unsafe_lock_objects_rejected_without_modifying_target[hardlink]": "PASS",
+        "allapp/core/test_test_coordination.py::test_unsafe_lock_objects_rejected_without_modifying_target[public]": "PASS",
+        "allapp/core/test_test_coordination.py::test_coordination_directory_cannot_be_aliased_or_public": "PASS",
+        "allapp/core/test_test_coordination.py::test_pid_alone_cannot_prove_process_identity": "PASS",
+        "allapp/core/test_test_coordination.py::test_corrupt_record_is_not_interpreted_as_clean[{]": "PASS",
+        "allapp/core/test_test_coordination.py::test_corrupt_record_is_not_interpreted_as_clean[{}]": "PASS",
+        "allapp/core/test_test_coordination.py::test_corrupt_record_is_not_interpreted_as_clean[{\"state\":\"CLEAN\"}]": "PASS",
+        "allapp/core/test_test_coordination.py::test_dangling_run_record_is_rejected": "PASS",
+        "allapp/core/test_test_coordination.py::test_lock_loss_never_allows_new_run_to_overtake_live_worker": "PASS"
+      }
+    },
+    "process_cleanup": {
+      "status": "PASS",
+      "count": 8,
+      "nodes": {
+        "allapp/core/test_test_process.py::test_process_exit_cannot_hide_failure_or_leaked_children[print('done')-5-PASS-None]": "PASS",
+        "allapp/core/test_test_process.py::test_process_exit_cannot_hide_failure_or_leaked_children[raise SystemExit(7)-5-FAIL-None]": "PASS",
+        "allapp/core/test_test_process.py::test_process_exit_cannot_hide_failure_or_leaked_children[import time; time.sleep(60)-0.2-ABORTED-TIMEOUT]": "PASS",
+        "allapp/core/test_test_process.py::test_process_exit_cannot_hide_failure_or_leaked_children[import subprocess,sys; subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])-5-FAIL-LEAKED_RESOURCES]": "PASS",
+        "allapp/core/test_test_process.py::test_process_exit_cannot_hide_failure_or_leaked_children[import os,signal,time; os.kill(os.getppid(),signal.SIGTERM); time.sleep(60)-5-ABORTED-INTERRUPTED]": "PASS",
+        "allapp/core/test_test_process.py::test_cleanup_failure_blocks_an_otherwise_successful_command": "PASS",
+        "allapp/core/test_test_process.py::test_existing_evidence_is_not_overwritten": "PASS",
+        "allapp/core/test_test_process.py::test_sigkill_is_recovered_as_aborted_not_passed": "PASS"
+      }
+    },
+    "evidence_recorder": {
+      "status": "PASS",
+      "count": 19,
+      "nodes": {
+        "allapp/core/test_test_evidence.py::test_failed_subtest_survives_all_later_success_events": "PASS",
+        "allapp/core/test_test_evidence.py::test_failed_phase_cannot_be_overwritten_or_hidden_by_exit_zero[setup]": "PASS",
+        "allapp/core/test_test_evidence.py::test_failed_phase_cannot_be_overwritten_or_hidden_by_exit_zero[call]": "PASS",
+        "allapp/core/test_test_evidence.py::test_failed_phase_cannot_be_overwritten_or_hidden_by_exit_zero[teardown]": "PASS",
+        "allapp/core/test_test_evidence.py::test_successful_events_do_not_override_nonzero_exit[1]": "PASS",
+        "allapp/core/test_test_evidence.py::test_successful_events_do_not_override_nonzero_exit[2]": "PASS",
+        "allapp/core/test_test_evidence.py::test_successful_events_do_not_override_nonzero_exit[3]": "PASS",
+        "allapp/core/test_test_evidence.py::test_successful_events_do_not_override_nonzero_exit[4]": "PASS",
+        "allapp/core/test_test_evidence.py::test_successful_events_do_not_override_nonzero_exit[5]": "PASS",
+        "allapp/core/test_test_evidence.py::test_zero_incomplete_and_unexpected_execution_are_not_success": "PASS",
+        "allapp/core/test_test_evidence.py::test_collection_only_is_distinct_from_execution[nodes0-0-COLLECTED]": "PASS",
+        "allapp/core/test_test_evidence.py::test_collection_only_is_distinct_from_execution[nodes1-0-FAIL]": "PASS",
+        "allapp/core/test_test_evidence.py::test_collection_only_is_distinct_from_execution[nodes2-2-ABORTED]": "PASS",
+        "allapp/core/test_test_evidence.py::test_new_run_can_pass_without_overwriting_previous_failure": "PASS",
+        "allapp/core/test_test_evidence.py::test_actual_pytest_hooks_preserve_failure_and_subtest_evidence[def test_example(subtests):\\n    for value in (False, True):\\n        with subtests.test(value=value):\\n            assert value\\n-FAIL-1]": "PASS",
+        "allapp/core/test_test_evidence.py::test_actual_pytest_hooks_preserve_failure_and_subtest_evidence[import pytest\\n@pytest.fixture\\ndef broken():\\n    yield\\n    assert False\\ndef test_example(broken):\\n    pass\\n-FAIL-1]": "PASS",
+        "allapp/core/test_test_evidence.py::test_actual_pytest_hooks_preserve_failure_and_subtest_evidence[def test_example():\\n    raise KeyboardInterrupt\\n-ABORTED-2]": "PASS",
+        "allapp/core/test_test_evidence.py::test_actual_pytest_hooks_preserve_failure_and_subtest_evidence[def test_example():\\n    pass\\n-PASS-0]": "PASS",
+        "allapp/core/test_test_evidence.py::test_actual_pytest_hooks_preserve_failure_and_subtest_evidence[# no tests\\n-FAIL-5]": "PASS"
+      }
+    },
+    "readiness": {
+      "status": "PASS",
+      "count": 16,
+      "nodes": {
+        "allapp/core/test_release_readiness.py::test_pre_release_can_pass_before_any_production_observation": "PASS",
+        "allapp/core/test_release_readiness.py::test_security_gate_never_passes_via_later_observation[FAIL]": "PASS",
+        "allapp/core/test_release_readiness.py::test_security_gate_never_passes_via_later_observation[RUNNING]": "PASS",
+        "allapp/core/test_release_readiness.py::test_security_gate_never_passes_via_later_observation[ABORTED]": "PASS",
+        "allapp/core/test_release_readiness.py::test_security_gate_never_passes_via_later_observation[SKIPPED]": "PASS",
+        "allapp/core/test_release_readiness.py::test_security_gate_never_passes_via_later_observation[BLOCKED]": "PASS",
+        "allapp/core/test_release_readiness.py::test_security_gate_never_passes_via_later_observation[NOT_RUN]": "PASS",
+        "allapp/core/test_release_readiness.py::test_open_pdf_resource_risk_blocks_release_but_not_completed_local_work": "PASS",
+        "allapp/core/test_release_readiness.py::test_incomplete_or_mismatched_evidence_is_not_accepted[candidate]": "PASS",
+        "allapp/core/test_release_readiness.py::test_incomplete_or_mismatched_evidence_is_not_accepted[digest]": "PASS",
+        "allapp/core/test_release_readiness.py::test_incomplete_or_mismatched_evidence_is_not_accepted[missing]": "PASS",
+        "allapp/core/test_release_readiness.py::test_incomplete_or_mismatched_evidence_is_not_accepted[stale]": "PASS",
+        "allapp/core/test_release_readiness.py::test_incomplete_or_mismatched_evidence_is_not_accepted[duplicate]": "PASS",
+        "allapp/core/test_release_readiness.py::test_incomplete_or_mismatched_evidence_is_not_accepted[short-observation]": "PASS",
+        "allapp/core/test_release_readiness.py::test_incomplete_or_mismatched_evidence_is_not_accepted[image]": "PASS",
+        "allapp/core/test_release_readiness.py::test_same_image_fresh_scan_updates_conclusion_without_rebuild": "PASS"
+      }
+    },
+    "pos_nonempty_upgrade": {
+      "status": "PASS",
+      "count": 1,
+      "nodes": {
+        "allapp/pos/test_repayment_migrations.py::test_nonempty_0009_to_0010_preserves_history_and_enforces_new_request_keys": "PASS"
+      }
+    },
+    "identifier_upgrade": {
+      "status": "PASS",
+      "count": 2,
+      "nodes": {
+        "allapp/products/test_identifier_migrations.py::ProductIdentifierMigrationTests::test_0008_to_0011_backfills_soft_deleted_identifier_history": "PASS",
+        "allapp/products/test_identifier_migrations.py::ProductIdentifierMigrationTests::test_preflight_conflict_fails_before_schema_changes": "PASS"
+      }
+    },
+    "cross_app_business_flows": {
+      "status": "PASS",
+      "count": 12,
+      "nodes": {
+        "allapp/test_business_flows.py::BusinessFlowTests::test_flow_10_formal_inbound_putaway_to_outbound_full_chain": "PASS",
+        "allapp/test_business_flows.py::BusinessFlowTests::test_flow_11_multiline_multilocation_outbound_full_chain": "PASS",
+        "allapp/test_business_flows.py::BusinessFlowTests::test_flow_12_operational_inventory_to_billing_invoice_chain": "PASS",
+        "allapp/test_business_flows.py::BusinessFlowTests::test_flow_1_receive_without_order_inventory_visible": "PASS",
+        "allapp/test_business_flows.py::BusinessFlowTests::test_flow_2_outbound_approve_scan_post": "PASS",
+        "allapp/test_business_flows.py::BusinessFlowTests::test_flow_3_unapprove_or_cancel_releases_reservation": "PASS",
+        "allapp/test_business_flows.py::BusinessFlowTests::test_flow_4_quick_adjust_updates_inventory_and_company_report": "PASS",
+        "allapp/test_business_flows.py::BusinessFlowTests::test_flow_5_snapshot_metrics_accrual_lock_invoice": "PASS",
+        "allapp/test_business_flows.py::BusinessFlowTests::test_flow_6_owner_portal_can_view_inventory_bill_and_export": "PASS",
+        "allapp/test_business_flows.py::BusinessFlowTests::test_flow_7_pda_pick_scan_and_state_transition": "PASS",
+        "allapp/test_business_flows.py::BusinessFlowTests::test_flow_8_console_billing_overview_and_detail": "PASS",
+        "allapp/test_business_flows.py::BusinessFlowTests::test_flow_9_formal_inbound_order_to_outbound_full_chain": "PASS"
+      }
+    },
+    "preserved_data_transfer": {
+      "status": "PASS",
+      "count": 7,
+      "nodes": {
+        "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferMySQLTests::test_backup_and_restore_round_trip_into_fresh_database": "PASS",
+        "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferMySQLTests::test_restore_row_count_failure_rolls_back_seed_replacement": "PASS",
+        "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferUnitTests::test_execute_modes_require_all_confirmation_arguments": "PASS",
+        "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferUnitTests::test_mysql_credentials_use_mode_0600_file_and_not_command_arguments": "PASS",
+        "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferUnitTests::test_restore_sql_has_delete_transaction_and_count_assertions_only": "PASS",
+        "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferUnitTests::test_scope_reuses_preserved_manifest_and_excludes_history": "PASS",
+        "allapp/core/test_preserved_data_transfer.py::PreservedDataTransferUnitTests::test_sql_validator_accepts_only_selected_insert_statements": "PASS"
+      }
+    }
+  },
+  "collection_union_verified": true,
+  "overlap": 0,
+  "limitations": [
+    "The failed v6 full run remains FAIL with its original XML unchanged.",
+    "v7 reruns the complete affected seven-test module and the three migration cases; other functional evidence is reused under the frozen policy.",
+    "945 historical aggregate-only subtests remain historically unidentified."
+  ],
+  "status": "PASS",
+  "artifacts": [
+    {
+      "path": "functional-reverification-review.json",
+      "sha256": "205247851bb33ea1848e5048a54a844b56e6321d5aa99df446908246fcbb2875"
+    },
+    {
+      "path": "migrations-tests.json",
+      "sha256": "8a3a951cee3c1c468feacb230040c055641269d8eb96561ec5c81f732ac68fae"
+    },
+    {
+      "path": "migrations-process.json",
+      "sha256": "d109ad1427a8e453d0ea6c1603fb89ad938cda5c6fb09d35e02a0056f34809d2"
+    },
+    {
+      "path": "migrations.xml",
+      "sha256": "b6f68e9df5c3862582d17f074c5380380f0941e46bc176bc9cd851af7d195f43"
+    },
+    {
+      "path": "collect-tests.json",
+      "sha256": "3197810873c9172cfacf4a49110d2190c0db4163c4095e84fd9b3e5b6e4deabc"
+    },
+    {
+      "path": "collection-reuse-review.json",
+      "sha256": "2e917fd055214e02e458c01cd92ca3d70f03142588777223b936f0fa938bc007"
+    },
+    {
+      "path": "reuse-policy.json",
+      "sha256": "d73e240101cccd10f59d601afe3dd0297b14e0b935b9b117bab27a15cda89388"
+    }
+  ]
+}

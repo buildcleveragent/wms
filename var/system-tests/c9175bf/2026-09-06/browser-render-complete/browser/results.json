@@ -1,0 +1,17 @@
+[
+  {
+    "app": "wmsownersale",
+    "status": "PASS",
+    "scope": "real API login and authenticated landing page"
+  },
+  {
+    "app": "sales-miniapp",
+    "status": "PASS",
+    "scope": "real API login, product search, cart and offline order submission"
+  },
+  {
+    "app": "admin",
+    "status": "PASS",
+    "scope": "real session login"
+  }
+]

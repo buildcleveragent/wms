@@ -1,0 +1,89 @@
+[
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 258,
+    "enclosing": [],
+    "field": "SECRET_KEY",
+    "fixture_marker": true,
+    "disposition": "TEST_FIXTURE",
+    "reason": "CI synthetic Django test key"
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 275,
+    "enclosing": [],
+    "field": "SECRET_KEY",
+    "fixture_marker": true,
+    "disposition": "TEST_FIXTURE",
+    "reason": "CI synthetic Django test key"
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 291,
+    "enclosing": [],
+    "field": "SECRET_KEY",
+    "fixture_marker": true,
+    "disposition": "TEST_FIXTURE",
+    "reason": "CI synthetic Django test key"
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 384,
+    "enclosing": [],
+    "field": "SECRET_KEY",
+    "fixture_marker": true,
+    "disposition": "TEST_FIXTURE",
+    "reason": "CI synthetic Django test key"
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 438,
+    "enclosing": [],
+    "field": "SECRET_KEY",
+    "fixture_marker": true,
+    "disposition": "TEST_FIXTURE",
+    "reason": "CI synthetic Django test key"
+  },
+  {
+    "file": ".github/workflows/ci.yml",
+    "line": 499,
+    "enclosing": [],
+    "field": "SECRET_KEY",
+    "fixture_marker": true,
+    "disposition": "TEST_FIXTURE",
+    "reason": "CI synthetic Django test key"
+  },
+  {
+    "file": "allapp/outbound/test_standard_order_idempotency.py",
+    "line": 136,
+    "enclosing": [
+      "StandardOrderIdempotencyTests",
+      "test_same_key_and_payload_replays_one_complete_order"
+    ],
+    "field": "key ",
+    "fixture_marker": true,
+    "disposition": "TEST_FIXTURE",
+    "reason": "Synthetic idempotency or AES-GCM test input; no live account credential"
+  },
+  {
+    "file": "allapp/salesapp/test_salemini_unit.py",
+    "line": 553,
+    "enclosing": [],
+    "field": "WECHAT_PAY_APIV3_KEY",
+    "fixture_marker": false,
+    "disposition": "TEST_FIXTURE",
+    "reason": "Synthetic idempotency or AES-GCM test input; no live account credential"
+  },
+  {
+    "file": "allapp/salesapp/tests.py",
+    "line": 2886,
+    "enclosing": [
+      "SaleMiniApiTests",
+      "test_signed_encrypted_payment_callback_runs_full_crypto_and_business_flow"
+    ],
+    "field": "api_v3_key ",
+    "fixture_marker": false,
+    "disposition": "TEST_FIXTURE",
+    "reason": "Synthetic idempotency or AES-GCM test input; no live account credential"
+  }
+]

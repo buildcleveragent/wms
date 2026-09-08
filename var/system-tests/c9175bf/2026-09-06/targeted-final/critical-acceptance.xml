@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="34" time="97.200" timestamp="2026-09-06T10:41:53.531608+08:00" hostname="wms"><testcase classname="allapp.core.test_security_acceptance.PosCatalogPermissionTests" name="test_authenticated_buyer_without_pos_permission_cannot_read_catalog" time="9.053" /><testcase classname="allapp.core.test_security_acceptance.PosCatalogPermissionTests" name="test_authorized_cashier_keeps_cross_owner_stock_visibility" time="2.859" /><testcase classname="allapp.core.test_security_acceptance.PosCatalogPermissionTests" name="test_explicit_warehouse_scope_revokes_stale_pos_binding" time="2.511"><failure message="django.db.utils.DataError: (1406, &quot;Data too long for column 'code' at row 1&quot;)">self = &lt;django.db.backends.utils.CursorWrapper object at 0x7ce1a48793d0&gt;
+sql = 'INSERT INTO `locations_warehouse` (`is_deleted`, `deleted_at`, `deleted_by_id`, `created_at`, `updated_at`, `created_...ive`, `remark`, `code`, `name`, `default_receive_location_id`) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'
+params = [False, None, None, '2026-09-06 10:42:08.743969', '2026-09-06 10:42:08.744000', None, ...]
+ignored_wrapper_args = (False, {'connection': &lt;DatabaseWrapper vendor='mysql' alias='default'&gt;, 'cursor': &lt;django.db.backends.utils.CursorWrapper object at 0x7ce1a48793d0&gt;})
+
+    def _execute(self, sql, params, *ignored_wrapper_args):
+        # Raise a warning during app initialization (stored_app_configs is only
+        # ever set during testing).
+        if not apps.ready and not apps.stored_app_configs:
+            warnings.warn(self.APPS_NOT_READY_WARNING_MSG, category=RuntimeWarning)
+        self.db.validate_no_broken_transaction()
+        with self.db.wrap_database_errors:
+            if params is None:
+                # params default might be backend specific.
+                return self.cursor.execute(sql)
+            else:
+&gt;               return self.cursor.execute(sql, params)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/django/db/backends/utils.py:105: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/django/db/backends/mysql/base.py:76: in execute
+    return self.cursor.execute(query, args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/MySQLdb/cursors.py:179: in execute
+    res = self._query(mogrified_query)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/MySQLdb/cursors.py:330: in _query
+    db.query(q)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;_mysql.connection open to '127.0.0.1' at 0x34f876f0&gt;
+query = b"INSERT INTO `locations_warehouse` (`is_deleted`, `deleted_at`, `deleted_by_id`, `created_at`, `updated_at`, `created...LL, '2026-09-06 10:42:08.743969', '2026-09-06 10:42:08.744000', NULL, NULL, 1, NULL, 'POS-OTHER-SCOPE', 'Other', NULL)"
+
+    def query(self, query):
+        # Since _mysql releases GIL while querying, we need immutable buffer.
+        if isinstance(query, bytearray):
+            query = bytes(query)
+&gt;       _mysql.connection.query(self, query)
+E       MySQLdb.DataError: (1406, "Data too long for column 'code' at row 1")
+
+.venv/lib/python3.12/site-packages/MySQLdb/connections.py:280: DataError
+
+The above exception was the direct cause of the following exception:
+
+self = &lt;allapp.core.test_security_acceptance.PosCatalogPermissionTests testMethod=test_explicit_warehouse_scope_revokes_stale_pos_binding&gt;
+
+    def test_explicit_warehouse_scope_revokes_stale_pos_binding(self):
+        from allapp.pos.services import create_pos_sale
+    
+&gt;       other_warehouse = type(self.warehouse).objects.create(code="POS-OTHER-SCOPE", name="Other")
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+allapp/core/test_security_acceptance.py:71: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/django/db/models/manager.py:87: in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/django/db/models/query.py:665: in create
+    obj.save(force_insert=True, using=self.db)
+.venv/lib/python3.12/site-packages/django/db/models/base.py:902: in save
+    self.save_base(
+.venv/lib/python3.12/site-packages/django/db/models/base.py:1008: in save_base
+    updated = self._save_table(
+.venv/lib/python3.12/site-packages/django/db/models/base.py:1169: in _save_table
+    results = self._do_insert(
+.venv/lib/python3.12/site-packages/django/db/models/base.py:1210: in _do_insert
+    return manager._insert(
+.venv/lib/python3.12/site-packages/django/db/models/manager.py:87: in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/django/db/models/query.py:1873: in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/django/db/models/sql/compiler.py:1882: in execute_sql
+    cursor.execute(sql, params)
+.venv/lib/python3.12/site-packages/django/db/backends/utils.py:79: in execute
+    return self._execute_with_wrappers(
+.venv/lib/python3.12/site-packages/django/db/backends/utils.py:92: in _execute_with_wrappers
+    return executor(sql, params, many, context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/django/db/backends/utils.py:100: in _execute
+    with self.db.wrap_database_errors:
+.venv/lib/python3.12/site-packages/django/db/utils.py:91: in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+.venv/lib/python3.12/site-packages/django/db/backends/utils.py:105: in _execute
+    return self.cursor.execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/django/db/backends/mysql/base.py:76: in execute
+    return self.cursor.execute(query, args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/MySQLdb/cursors.py:179: in execute
+    res = self._query(mogrified_query)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/MySQLdb/cursors.py:330: in _query
+    db.query(q)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;_mysql.connection open to '127.0.0.1' at 0x34f876f0&gt;
+query = b"INSERT INTO `locations_warehouse` (`is_deleted`, `deleted_at`, `deleted_by_id`, `created_at`, `updated_at`, `created...LL, '2026-09-06 10:42:08.743969', '2026-09-06 10:42:08.744000', NULL, NULL, 1, NULL, 'POS-OTHER-SCOPE', 'Other', NULL)"
+
+    def query(self, query):
+        # Since _mysql releases GIL while querying, we need immutable buffer.
+        if isinstance(query, bytearray):
+            query = bytes(query)
+&gt;       _mysql.connection.query(self, query)
+E       django.db.utils.DataError: (1406, "Data too long for column 'code' at row 1")
+
+.venv/lib/python3.12/site-packages/MySQLdb/connections.py:280: DataError</failure></testcase><testcase classname="allapp.core.test_security_acceptance.SuperuserPasswordBoundaryTests" name="test_delegated_editor_can_still_reset_an_ordinary_user" time="8.624" /><testcase classname="allapp.core.test_security_acceptance.SuperuserPasswordBoundaryTests" name="test_delegated_editor_cannot_open_or_submit_superuser_password_form" time="2.169" /><testcase classname="allapp.core.test_security_acceptance.TaskAndPrintBoundaryTests" name="test_external_identifiers_export_as_literal_text" time="0.395" /><testcase classname="allapp.core.test_security_acceptance.TaskAndPrintBoundaryTests" name="test_inbound_template_treats_product_names_as_text" time="0.752" /><testcase classname="allapp.core.test_security_acceptance.TaskAndPrintBoundaryTests" name="test_print_ticket_is_bound_to_document_and_cannot_authenticate_api" time="0.372" /><testcase classname="allapp.core.test_security_acceptance.TaskAndPrintBoundaryTests" name="test_print_tokens_are_revoked_by_password_change" time="2.396" /><testcase classname="allapp.core.test_security_acceptance.TaskAndPrintBoundaryTests" name="test_task_children_and_foreign_keys_respect_manager_scope" time="0.619" /><testcase classname="allapp.core.test_security_acceptance.TaskAndPrintBoundaryTests" name="test_task_log_admin_querysets_are_scoped" time="0.334"><failure message="django.core.exceptions.ValidationError: {'fp': ['此字段不能为空。'], 'scan_snapshot_rev': ['这个值不能为 null。'], '__all__': ['约束 “ck_tscan_ok_qty” 是无效的']}">self = &lt;allapp.core.test_security_acceptance.TaskAndPrintBoundaryTests testMethod=test_task_log_admin_querysets_are_scoped&gt;
+
+    def test_task_log_admin_querysets_are_scoped(self):
+        user = self._manager()
+        own, other = self._task("LOG-OWN"), self._task("LOG-OTHER", other=True)
+        request = RequestFactory().get("/admin/")
+        request.user = user
+        for model in (TaskStatusLog, TaskScanLog):
+            rows = []
+            for task in (own, other):
+                values = {"task": task}
+                if model is TaskStatusLog:
+                    values.update(old_status="RELEASED", new_status="IN_PROGRESS")
+                else:
+                    values.update(owner=task.owner, warehouse=task.warehouse)
+&gt;               rows.append(model.objects.create(**values))
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+allapp/core/test_security_acceptance.py:168: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/django/db/models/manager.py:87: in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/django/db/models/query.py:665: in create
+    obj.save(force_insert=True, using=self.db)
+allapp/tasking/models.py:981: in save
+    self.full_clean()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;TaskScanLog: 35-&gt;, exclude = {'fp', 'scan_snapshot_rev'}
+validate_unique = True, validate_constraints = True
+
+    def full_clean(self, exclude=None, validate_unique=True, validate_constraints=True):
+        """
+        Call clean_fields(), clean(), validate_unique(), and
+        validate_constraints() on the model. Raise a ValidationError for any
+        errors that occur.
+        """
+        errors = {}
+        if exclude is None:
+            exclude = set()
+        else:
+            exclude = set(exclude)
+    
+        try:
+            self.clean_fields(exclude=exclude)
+        except ValidationError as e:
+            errors = e.update_error_dict(errors)
+    
+        # Form.clean() is run even if other validation fails, so do the
+        # same with Model.clean() for consistency.
+        try:
+            self.clean()
+        except ValidationError as e:
+            errors = e.update_error_dict(errors)
+    
+        # Run unique checks, but only for fields that passed validation.
+        if validate_unique:
+            for name in errors:
+                if name != NON_FIELD_ERRORS and name not in exclude:
+                    exclude.add(name)
+            try:
+                self.validate_unique(exclude=exclude)
+            except ValidationError as e:
+                errors = e.update_error_dict(errors)
+    
+        # Run constraints checks, but only for fields that passed validation.
+        if validate_constraints:
+            for name in errors:
+                if name != NON_FIELD_ERRORS and name not in exclude:
+                    exclude.add(name)
+            try:
+                self.validate_constraints(exclude=exclude)
+            except ValidationError as e:
+                errors = e.update_error_dict(errors)
+    
+        if errors:
+&gt;           raise ValidationError(errors)
+E           django.core.exceptions.ValidationError: {'fp': ['此字段不能为空。'], 'scan_snapshot_rev': ['这个值不能为 null。'], '__all__': ['约束 “ck_tscan_ok_qty” 是无效的']}
+
+.venv/lib/python3.12/site-packages/django/db/models/base.py:1679: ValidationError</failure></testcase><testcase classname="allapp.pos.test_cross_flow_acceptance.ReviewInventorySummaryTests" name="test_allocation_keeps_owner_summary_consistent" time="8.704" /><testcase classname="allapp.pos.test_cross_flow_acceptance.ReviewInventorySummaryTests" name="test_release_keeps_owner_summary_consistent" time="10.978" /><testcase classname="allapp.pos.test_cross_flow_acceptance.ReviewInventorySummaryTests" name="test_standard_outbound_fefo_prioritizes_dated_stock" time="9.279" /><testcase classname="allapp.pos.test_cross_flow_acceptance.ReviewPosFinancialTests" name="test_repayment_key_rejects_changed_payload" time="6.812" /><testcase classname="allapp.pos.test_cross_flow_acceptance.ReviewPosFinancialTests" name="test_repayment_without_stable_identity_is_rejected" time="4.098" /><testcase classname="allapp.pos.test_cross_flow_acceptance.ReviewPosFinancialTests" name="test_repeated_repayment_request_is_not_double_recorded" time="3.743" /><testcase classname="allapp.pos.test_cross_flow_acceptance.ReviewPosFinancialTests" name="test_void_after_repayment_preserves_settlement" time="3.308" /><testcase classname="allapp.pos.test_cross_flow_acceptance.ReviewPosFinancialTests" name="test_zero_value_gift_can_be_returned_without_refund" time="4.104" /><testcase classname="allapp.pos.test_repayment_concurrency.RepaymentConcurrencyTests" name="test_repayment_and_void_have_one_consistent_settlement_order" time="6.746" /><testcase classname="allapp.pos.test_repayment_concurrency.RepaymentConcurrencyTests" name="test_two_cashiers_cannot_collect_more_than_outstanding_debt" time="6.994" /><testcase classname="allapp.core.test_database_safety" name="test_rejects_noncanonical_resolved_database[NAME-]" time="0.009" /><testcase classname="allapp.core.test_database_safety" name="test_rejects_noncanonical_resolved_database[NAME-wms_db]" time="0.005" /><testcase classname="allapp.core.test_database_safety" name="test_rejects_noncanonical_resolved_database[NAME-wms_ci_serial]" time="0.005" /><testcase classname="allapp.core.test_database_safety" name="test_rejects_noncanonical_resolved_database[NAME-wms_db_test_gw0]" time="0.005" /><testcase classname="allapp.core.test_database_safety" name="test_rejects_noncanonical_resolved_database[NAME-None]" time="0.005" /><testcase classname="allapp.core.test_database_safety" name="test_rejects_noncanonical_resolved_database[TEST-]" time="0.005" /><testcase classname="allapp.core.test_database_safety" name="test_rejects_noncanonical_resolved_database[TEST-wms_db]" time="0.006" /><testcase classname="allapp.core.test_database_safety" name="test_rejects_noncanonical_resolved_database[TEST-wms_ci_serial]" time="0.005" /><testcase classname="allapp.core.test_database_safety" name="test_rejects_noncanonical_resolved_database[TEST-wms_db_test_gw0]" time="0.005" /><testcase classname="allapp.core.test_database_safety" name="test_rejects_noncanonical_resolved_database[TEST-None]" time="0.006" /><testcase classname="allapp.core.test_database_safety" name="test_rejects_sqlite_even_with_a_test_name" time="0.005" /><testcase classname="allapp.core.test_security_acceptance.XlsxBudgetTests" name="test_rejects_excessive_expansion_before_decompressing" time="0.006" /><testcase classname="allapp.core.test_security_acceptance.XlsxBudgetTests" name="test_rejects_too_many_entries_and_corrupt_archives" time="0.009" /></testsuite></testsuites>

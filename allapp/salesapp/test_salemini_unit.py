@@ -15,12 +15,12 @@ from django.test import override_settings
 from PIL import Image
 from rest_framework.exceptions import ValidationError
 
+from allapp.salesapp.checks import check_wechat_pay_production_configuration
 from allapp.salesapp.management.commands.validate_sale_mini_data_accuracy import (
     IssueCollector,
     cents,
     money,
 )
-from allapp.salesapp.checks import check_wechat_pay_production_configuration
 from allapp.salesapp.salemini_api import (
     _display_status,
     _display_status_q,
@@ -210,9 +210,7 @@ def test_sale_mini_accuracy_money_and_cents_rounding():
 
 
 def test_authoritative_payable_amount_preserves_zero_and_rejects_negative():
-    assert payable_amount(SimpleNamespace(payable_amount=Decimal("0.00"))) == Decimal(
-        "0.00"
-    )
+    assert payable_amount(SimpleNamespace(payable_amount=Decimal("0.00"))) == Decimal("0.00")
     try:
         payable_amount(SimpleNamespace(payable_amount=Decimal("-0.01")))
     except DjangoValidationError as exc:
@@ -262,9 +260,7 @@ def test_review_scores_and_content_are_strictly_validated():
 def test_review_image_validation_reads_real_image_content():
     content = BytesIO()
     Image.new("RGB", (32, 24), color=(22, 119, 255)).save(content, format="PNG")
-    uploaded = SimpleUploadedFile(
-        "claimed.jpg", content.getvalue(), content_type="image/jpeg"
-    )
+    uploaded = SimpleUploadedFile("claimed.jpg", content.getvalue(), content_type="image/jpeg")
 
     width, height = _validate_uploaded_image(uploaded)
 
@@ -273,9 +269,7 @@ def test_review_image_validation_reads_real_image_content():
 
 
 def test_review_image_validation_rejects_fake_image():
-    uploaded = SimpleUploadedFile(
-        "fake.jpg", b"not-an-image", content_type="image/jpeg"
-    )
+    uploaded = SimpleUploadedFile("fake.jpg", b"not-an-image", content_type="image/jpeg")
 
     try:
         _validate_uploaded_image(uploaded)
@@ -469,14 +463,7 @@ def test_callback_verifies_real_rsa_signature_for_selected_serial(mock_time):
     timestamp = "2000"
     nonce = "callback-nonce"
     raw_body = b'{"id":"event-1"}'
-    message = (
-        timestamp.encode("utf-8")
-        + b"\n"
-        + nonce.encode("utf-8")
-        + b"\n"
-        + raw_body
-        + b"\n"
-    )
+    message = timestamp.encode("utf-8") + b"\n" + nonce.encode("utf-8") + b"\n" + raw_body + b"\n"
     signature = base64.b64encode(
         private_key.sign(message, padding.PKCS1v15(), hashes.SHA256())
     ).decode("ascii")
@@ -510,14 +497,7 @@ def test_wechat_api_response_verifies_real_rsa_signature_and_body_integrity():
     timestamp = "2000"
     nonce = "response-nonce"
     raw_body = b'{"trade_state":"SUCCESS"}'
-    message = (
-        timestamp.encode("utf-8")
-        + b"\n"
-        + nonce.encode("utf-8")
-        + b"\n"
-        + raw_body
-        + b"\n"
-    )
+    message = timestamp.encode("utf-8") + b"\n" + nonce.encode("utf-8") + b"\n" + raw_body + b"\n"
     signature = base64.b64encode(
         private_key.sign(message, padding.PKCS1v15(), hashes.SHA256())
     ).decode("ascii")

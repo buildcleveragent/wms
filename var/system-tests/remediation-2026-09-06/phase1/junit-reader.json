@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "run_id": "0e999b24aade4ac3bd176591ba9e2dfa",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 3,
+  "password_hasher": "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+  "events_file": "var/system-tests/remediation-2026-09-06/phase1/junit-reader.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 3
+  },
+  "subtest_counts": {},
+  "tests": {
+    "allapp/core/test_junit_reader.py::test_junit_reader_rejects_internal_and_external_dtd[<!DOCTYPE testsuite [<!ENTITY attack \"expanded\">]>]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_junit_reader.py::test_junit_reader_rejects_internal_and_external_dtd[<!DOCTYPE testsuite SYSTEM \"file:///private.xml\">]": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/test_junit_reader.py::test_junit_reader_preserves_ordinary_testcase_identity": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

@@ -18,7 +18,7 @@
 
         <!-- 右侧商品信息 -->
         <view class="col-info">
-			
+
           <view class="customer-name"><text class="name">{{ it.name || it.sku || it.product_id }}</text></view>
 		  <view class="product-spec" v-if="it.spec">
 		    规格：{{ it.spec }}
@@ -33,8 +33,8 @@
 
           <!-- 单价与数量 -->
           <view class="price-qty">
-  
-			  
+
+
             <!-- 数量 -->
             <view class="col-label-qty">
               <text class="label-text">基本数量</text>
@@ -51,18 +51,18 @@
 			<view class="col-label-first">
 			  <text class="label-text">基本单位</text>
 			  <text class="label-text-name">{{ it.base_unit_name }}</text>
-			</view>			
+			</view>
 
           </view>
 
 		  <view class="item-actions">
 		    <button class="btn-danger-outline" @click="removeItem(i)">删除本行</button>
 		  </view>
-		  
+
        </view>
       </view>
     </view>
-	
+
 	<view class="footer">
 	  <!-- 操作 -->
 	  <view class="button-row">
@@ -75,6 +75,7 @@
 </template>
 
 <script setup>
+import { openReceiveTaskPrint } from '@/utils/receiveTaskDocument'
 import { computed, onMounted } from 'vue'
 import { useCart } from '@/store/cart'
 import { api } from '@/utils/request'
@@ -103,7 +104,7 @@ onMounted(()=>{
 //   const base = BASE_URL.replace(/\/$/, '')
 //   // const url = `${base}/inbound/receive_task/${taskId}/print/`
 //   const url = `${BASE_URL}/api/inbound/receive_task/${taskId}/print/`
-  
+
 //   // 在 H5（PC 浏览器）里：新开一个标签页，里面会自动 window.print()
 //   // #ifdef H5
 //   console.log("1 window.open  ")
@@ -117,42 +118,17 @@ onMounted(()=>{
 //   try {
 // 	  console.log("1 plus.runtime.openURL printReceiveTask  ")
 //     plus.runtime.openURL(url)
-	
+
 // 	console.log("2 plus.runtime.openURL printReceiveTask  ")
 //   } catch (e) {
-	
+
 // 	console.log("4 printReceiveTask catch ")
 //     uni.showToast({ title: '当前环境不支持直接打印', icon: 'none' })
 //   }
 //   // #endif
 // }
 function printReceiveTask(taskId) {
-  console.log("92 printReceiveTask printReceiveTask ")
-
-  const token = uni.getStorageSync('access') || ''
-  if (!token) {
-    uni.showToast({ title: '未登录或缺少token', icon: 'none' })
-    return
-  }
-
-  const url = `${BASE_URL}/api/inbound/receive_task/${taskId}/print/?token=${encodeURIComponent(token)}`
-
-  // #ifdef H5
-  console.log("1 window.open")
-  window.open(url, '_blank')
-  console.log("2 window.open")
-  // #endif
-
-  // #ifdef APP-PLUS
-  try {
-    console.log("1 plus.runtime.openURL printReceiveTask")
-    plus.runtime.openURL(url)
-    console.log("2 plus.runtime.openURL printReceiveTask")
-  } catch (e) {
-    console.log("4 printReceiveTask catch", e)
-    uni.showToast({ title: '当前环境不支持直接打印', icon: 'none' })
-  }
-  // #endif
+  return openReceiveTaskPrint(taskId)
 }
 
 
@@ -227,16 +203,16 @@ async function submitOrder(){
       remark: '仓库操作员入库',
    //    items: cart.items.map(it=> ({
    //      product_id: it.id,
-   //      qty: it.base_quantity,		
+   //      qty: it.base_quantity,
    //    }))
-	  
+
 	  items: cart.items.map(compactReceiveItem)
-	  
+
     }
-	
+
 	console.log("aaaaaaaaaa111222 payload=",payload)
 	console.log("receive_without_order payload json=", JSON.stringify(payload))
-	
+
     const res = await api.submitReceiveWithoutOrder(payload)
     // uni.showToast({ title: '已创建：'+ (res?.order_no||res?.id), icon:'none' })
 	// const msg = res.data?.detail || res.data?.message || JSON.stringify(res.data)
@@ -270,7 +246,7 @@ async function submitOrder(){
 	  // App：下载到本地后用系统应用打开
 	  // #ifdef APP-PLUS
 	  const token = uni.getStorageSync('access') || ''
-	  
+
 	  if (!token) {
 	    uni.showToast({
 	      title: '登录已失效，请重新登录',
@@ -278,13 +254,13 @@ async function submitOrder(){
 	    })
 	    return
 	  }
-	  
+
 	  if (!exportUrl) {
 	    uni.showToast({ title: '导出地址无效', icon: 'none' })
 	    return
 	  }
 
-	  
+
 	  uni.downloadFile({
 		url: exportUrl,
 		header: {
@@ -311,13 +287,13 @@ async function submitOrder(){
 	  })
 	  // #endif
 	}
-	
+
 	console.log("1 printReceiveTask printReceiveTask ")
 
 	// printReceiveTask(taskId)
-	
+
 	console.log("2 printReceiveTask printReceiveTask ")
-	
+
     cart.clear()
     receiveRequestId = ''
     uni.switchTab({ url:'/pages/index/index' })
@@ -334,7 +310,7 @@ async function submitOrder(){
   display: flex;
   flex-direction: column;
   height: 100vh;
-  padding-top: 200rpx; 
+  padding-top: 200rpx;
   overflow: hidden;
   margin-left:2rpx;
    margin-right:2rpx;
@@ -555,13 +531,13 @@ async function submitOrder(){
   align-items: center; /* 水平居中 */
   width: 28%; /* 第一列宽度稍小 */
   text-align: center; /* 左对齐 */
-  
+
 }
 
 .col-label-qty {
   display: flex;
   flex-direction: column;
-  align-items: center; /* 水平居中 */	
+  align-items: center; /* 水平居中 */
   width: 30%; /* 第一列宽度稍小 */
   text-align: left; /* 左对齐 */
 }
@@ -572,7 +548,7 @@ async function submitOrder(){
   align-items: right; /* 水平居中 */
   width: 32%;
   text-align: right;
-  margin-right:20rpx;  
+  margin-right:20rpx;
 }
 
 .col-label-first .label-text-name {
@@ -669,7 +645,7 @@ async function submitOrder(){
   .container {
     padding-top: 0px; /* 电脑上可能需要更多顶部空间 */
   }
-  
+
   .card-first {
 	top:80rpx;
     height: 60px; /* 电脑上增加高度 */
@@ -682,8 +658,8 @@ async function submitOrder(){
   .container {
     padding-top: 0px;
   }
-  
-  .card-first {	  
+
+  .card-first {
     height: 60rpx;
     padding: 15rpx 20rpx;
   }

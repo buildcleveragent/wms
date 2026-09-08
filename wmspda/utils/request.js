@@ -10,11 +10,18 @@ const BASE_MAP = {
 }
 
 // export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
-export const BASE_URL = BASE_MAP.develop
+export const BASE_URL = String(import.meta.env.VITE_API_BASE_URL || BASE_MAP.develop).trim().replace(/\/$/, '')
+if (!/^https?:\/\/[^/?#@]+(?::\d+)?(?:\/[^?#]*)?$/.test(BASE_URL)) {
+  throw new Error('VITE_API_BASE_URL 必须是无凭据、查询参数和片段的 HTTP(S) 地址。')
+}
 
 const PRODUCT_IMPORT_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000
 const ACCESS_TOKEN_STORAGE_KEY = 'access'
 const REFRESH_TOKEN_STORAGE_KEY = 'refresh'
+let sessionEpoch = 0
+function sessionChangedError() {
+  return { code: 409, statusCode: 409, sessionChanged: true, message: '登录账号已变化，请重新操作' }
+}
 
 export function getToken() {
   try {
@@ -25,6 +32,7 @@ export function getToken() {
 }
 
 export function setToken(t) {
+  sessionEpoch++
   uni.setStorageSync(ACCESS_TOKEN_STORAGE_KEY, t || '')
 }
 
@@ -37,6 +45,11 @@ export function getRefreshToken() {
 }
 
 export function setAuthTokens(tokens = {}) {
+  sessionEpoch++
+  persistAuthTokens(tokens)
+}
+
+function persistAuthTokens(tokens = {}) {
   const access = tokens?.access || ''
   const refresh = tokens?.refresh
 
@@ -50,6 +63,7 @@ export function setAuthTokens(tokens = {}) {
 }
 
 export function clearAuthTokens() {
+  sessionEpoch++
   try {
     uni.removeStorageSync(ACCESS_TOKEN_STORAGE_KEY)
     uni.removeStorageSync(REFRESH_TOKEN_STORAGE_KEY)
@@ -62,6 +76,7 @@ export function clearToken() {
 
 let redirectingToLogin = false
 let refreshPromise = null
+let refreshEpoch = -1
 
 function isAuthenticationRequest(url = '') {
   return (
@@ -127,6 +142,7 @@ function redirectToLogin() {
   redirectingToLogin = true
 
   clearToken()
+  const expiredEpoch = sessionEpoch
 
   uni.showToast({
     title: '登录已超时，需要重新登录',
@@ -136,7 +152,7 @@ function redirectToLogin() {
 
   setTimeout(() => {
     try {
-      uni.reLaunch({ url: '/pages/login' })
+      if (expiredEpoch === sessionEpoch) uni.reLaunch({ url: '/pages/login' })
     } finally {
       setTimeout(() => {
         redirectingToLogin = false
@@ -156,7 +172,9 @@ function expiredLoginError(data = null) {
 }
 
 export function refreshAccessToken() {
-  if (refreshPromise) return refreshPromise
+  const epoch = sessionEpoch
+  if (refreshPromise && refreshEpoch === epoch) return refreshPromise
+  refreshEpoch = epoch
 
   const refresh = getRefreshToken()
   if (!refresh) return Promise.reject(expiredLoginError())
@@ -168,10 +186,11 @@ export function refreshAccessToken() {
       data: { refresh },
       header: { 'Content-Type': 'application/json' },
       success: (res) => {
+        if (epoch !== sessionEpoch) { reject(sessionChangedError()); return }
         const statusCode = Number(res.statusCode || 0)
         const data = res.data || {}
         if (statusCode >= 200 && statusCode < 300 && data.access) {
-          setAuthTokens({
+          persistAuthTokens({
             access: data.access,
             refresh: data.refresh || refresh,
           })
@@ -179,7 +198,6 @@ export function refreshAccessToken() {
           return
         }
         if (statusCode === 400 || statusCode === 401 || statusCode === 403) {
-          clearAuthTokens()
           reject(expiredLoginError(data))
           return
         }
@@ -200,20 +218,15 @@ export function refreshAccessToken() {
     })
   })
 
-  refreshPromise = pending.then(
-    (access) => {
-      refreshPromise = null
-      return access
-    },
-    (error) => {
-      refreshPromise = null
-      throw error
-    },
-  )
-  return refreshPromise
+  const flight = pending.finally(() => {
+    if (refreshPromise === flight) refreshPromise = null
+  })
+  refreshPromise = flight
+  return flight
 }
 
-function retryAfterUnauthorized(tokenUsed, retry, alreadyRetried = false) {
+function retryAfterUnauthorized(tokenUsed, retry, alreadyRetried = false, epoch) {
+  if (epoch !== sessionEpoch) return Promise.reject(sessionChangedError())
   if (alreadyRetried) {
     const error = expiredLoginError()
     clearAuthTokens()
@@ -227,8 +240,11 @@ function retryAfterUnauthorized(tokenUsed, retry, alreadyRetried = false) {
       ? Promise.resolve(currentToken)
       : refreshAccessToken()
 
-  return refreshOrReuse.then(retry).catch((error) => {
-    if (error?.authExpired) redirectToLogin()
+  return refreshOrReuse.then(() => {
+    if (epoch !== sessionEpoch) throw sessionChangedError()
+    return retry()
+  }).catch((error) => {
+    if (error?.authExpired && epoch === sessionEpoch) redirectToLogin()
     throw error
   })
 }
@@ -270,14 +286,18 @@ export function createIdempotencyUuid() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-export function withAuthToken(url) {
-  const token = getToken()
-  if (!token) return url
+export async function withAuthToken(url) {
+  if (!url.startsWith(`${BASE_URL}/`)) throw new Error('打印地址不属于当前服务。')
+  const relative = url.slice(BASE_URL.length)
+  const path = relative.split('?')[0]
+  const result = await request({ url: '/api/print-tickets/', method: 'POST', data: { path } })
+  if (!result?.ticket) throw new Error('未取得打印票据，请重试。')
   const separator = url.includes('?') ? '&' : '?'
-  return `${url}${separator}token=${encodeURIComponent(token)}`
+  return `${url}${separator}ticket=${encodeURIComponent(result.ticket)}`
 }
 
 export function request(opts = {}, alreadyRetried = false) {
+  const epoch = sessionEpoch
   const token = opts.auth === false ? '' : getToken()
 
   return new Promise((resolve, reject) => {
@@ -292,6 +312,7 @@ export function request(opts = {}, alreadyRetried = false) {
       },
 
       success: (res) => {
+        if (epoch !== sessionEpoch) { reject(sessionChangedError()); return }
         const statusCode = res.statusCode
         const data = res.data
 
@@ -310,6 +331,7 @@ export function request(opts = {}, alreadyRetried = false) {
             token,
             () => request(opts, true),
             alreadyRetried,
+            epoch,
           ).then(resolve, reject)
           return
         }
@@ -353,6 +375,7 @@ export function request(opts = {}, alreadyRetried = false) {
 }
 
 export function downloadProductImportTemplate(alreadyRetried = false) {
+  const epoch = sessionEpoch
   const token = getToken()
   const url = `${BASE_URL}/api/products/import-template/`
 
@@ -361,11 +384,13 @@ export function downloadProductImportTemplate(alreadyRetried = false) {
     return window.fetch(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }).then(async (response) => {
+      if (epoch !== sessionEpoch) throw sessionChangedError()
       if (response.status === 401) {
         return retryAfterUnauthorized(
           token,
           () => downloadProductImportTemplate(true),
           alreadyRetried,
+          epoch,
         )
       }
       if (!response.ok) {
@@ -383,6 +408,7 @@ export function downloadProductImportTemplate(alreadyRetried = false) {
         }
       }
       const blob = await response.blob()
+      if (epoch !== sessionEpoch) throw sessionChangedError()
       const objectUrl = window.URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = objectUrl
@@ -401,6 +427,7 @@ export function downloadProductImportTemplate(alreadyRetried = false) {
       url,
       header: token ? { Authorization: `Bearer ${token}` } : {},
       success: (res) => {
+        if (epoch !== sessionEpoch) { reject(sessionChangedError()); return }
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve({ tempFilePath: res.tempFilePath || '', opened: false })
           return
@@ -410,6 +437,7 @@ export function downloadProductImportTemplate(alreadyRetried = false) {
             token,
             () => downloadProductImportTemplate(true),
             alreadyRetried,
+            epoch,
           ).then(resolve, reject)
           return
         }
@@ -428,6 +456,7 @@ export function downloadProductImportTemplate(alreadyRetried = false) {
 }
 
 export function downloadProductArchive(ownerId, ownerCode = '', alreadyRetried = false) {
+  const epoch = sessionEpoch
   const token = getToken()
   const url = `${BASE_URL}/api/products/export-excel/?owner_id=${encodeURIComponent(ownerId)}`
 
@@ -436,11 +465,13 @@ export function downloadProductArchive(ownerId, ownerCode = '', alreadyRetried =
     return window.fetch(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }).then(async (response) => {
+      if (epoch !== sessionEpoch) throw sessionChangedError()
       if (response.status === 401) {
         return retryAfterUnauthorized(
           token,
           () => downloadProductArchive(ownerId, ownerCode, true),
           alreadyRetried,
+          epoch,
         )
       }
       if (!response.ok) {
@@ -458,6 +489,7 @@ export function downloadProductArchive(ownerId, ownerCode = '', alreadyRetried =
         }
       }
       const blob = await response.blob()
+      if (epoch !== sessionEpoch) throw sessionChangedError()
       const disposition = response.headers.get('content-disposition') || ''
       const matched = disposition.match(/filename\*=UTF-8''([^;]+)/i)
       const filename = matched
@@ -481,6 +513,7 @@ export function downloadProductArchive(ownerId, ownerCode = '', alreadyRetried =
       url,
       header: token ? { Authorization: `Bearer ${token}` } : {},
       success: (res) => {
+        if (epoch !== sessionEpoch) { reject(sessionChangedError()); return }
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve({ tempFilePath: res.tempFilePath || '', opened: false })
           return
@@ -490,6 +523,7 @@ export function downloadProductArchive(ownerId, ownerCode = '', alreadyRetried =
             token,
             () => downloadProductArchive(ownerId, ownerCode, true),
             alreadyRetried,
+            epoch,
           ).then(resolve, reject)
           return
         }
@@ -506,6 +540,7 @@ export function downloadProductArchive(ownerId, ownerCode = '', alreadyRetried =
 }
 
 export function downloadMissingGtinProducts(alreadyRetried = false) {
+  const epoch = sessionEpoch
   const token = getToken()
   const url = `${BASE_URL}/api/products/export-missing-gtin/`
 
@@ -514,11 +549,13 @@ export function downloadMissingGtinProducts(alreadyRetried = false) {
     return window.fetch(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }).then(async (response) => {
+      if (epoch !== sessionEpoch) throw sessionChangedError()
       if (response.status === 401) {
         return retryAfterUnauthorized(
           token,
           () => downloadMissingGtinProducts(true),
           alreadyRetried,
+          epoch,
         )
       }
       if (!response.ok) {
@@ -536,6 +573,7 @@ export function downloadMissingGtinProducts(alreadyRetried = false) {
         }
       }
       const blob = await response.blob()
+      if (epoch !== sessionEpoch) throw sessionChangedError()
       const disposition = response.headers.get('content-disposition') || ''
       const matched = disposition.match(/filename\*=UTF-8''([^;]+)/i)
       const filename = matched
@@ -559,6 +597,7 @@ export function downloadMissingGtinProducts(alreadyRetried = false) {
       url,
       header: token ? { Authorization: `Bearer ${token}` } : {},
       success: (res) => {
+        if (epoch !== sessionEpoch) { reject(sessionChangedError()); return }
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve({ tempFilePath: res.tempFilePath || '', opened: false })
           return
@@ -568,6 +607,7 @@ export function downloadMissingGtinProducts(alreadyRetried = false) {
             token,
             () => downloadMissingGtinProducts(true),
             alreadyRetried,
+            epoch,
           ).then(resolve, reject)
           return
         }
@@ -589,6 +629,7 @@ export function uploadProductImportExcel(
   warehouseId = null,
   alreadyRetried = false,
 ) {
+  const epoch = sessionEpoch
   const token = getToken()
   return new Promise((resolve, reject) => {
     uni.uploadFile({
@@ -599,6 +640,7 @@ export function uploadProductImportExcel(
       formData: warehouseId ? { warehouse_id: String(warehouseId) } : {},
       header: token ? { Authorization: `Bearer ${token}` } : {},
       success: (res) => {
+        if (epoch !== sessionEpoch) { reject(sessionChangedError()); return }
         let data = res.data
         try {
           data = typeof data === 'string' ? JSON.parse(data) : data
@@ -622,6 +664,7 @@ export function uploadProductImportExcel(
             token,
             () => uploadProductImportExcel(filePath, warehouseId, true),
             alreadyRetried,
+            epoch,
           ).then(resolve, reject)
           return
         }
@@ -645,6 +688,7 @@ export function uploadProductImportExcel(
 }
 
 export function downloadNoOrderReceiveImportTemplate(ownerId, alreadyRetried = false) {
+  const epoch = sessionEpoch
   const token = getToken()
   const url = `${BASE_URL}/api/inbound/receive_without_order/import_template/?owner_id=${encodeURIComponent(ownerId)}`
 
@@ -653,11 +697,13 @@ export function downloadNoOrderReceiveImportTemplate(ownerId, alreadyRetried = f
     return window.fetch(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }).then(async (response) => {
+      if (epoch !== sessionEpoch) throw sessionChangedError()
       if (response.status === 401) {
         return retryAfterUnauthorized(
           token,
           () => downloadNoOrderReceiveImportTemplate(ownerId, true),
           alreadyRetried,
+          epoch,
         )
       }
       if (!response.ok) {
@@ -672,6 +718,7 @@ export function downloadNoOrderReceiveImportTemplate(ownerId, alreadyRetried = f
         }
       }
       const blob = await response.blob()
+      if (epoch !== sessionEpoch) throw sessionChangedError()
       const objectUrl = window.URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = objectUrl
@@ -690,6 +737,7 @@ export function downloadNoOrderReceiveImportTemplate(ownerId, alreadyRetried = f
       url,
       header: token ? { Authorization: `Bearer ${token}` } : {},
       success: (res) => {
+        if (epoch !== sessionEpoch) { reject(sessionChangedError()); return }
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve({ tempFilePath: res.tempFilePath || '', opened: false })
           return
@@ -699,6 +747,7 @@ export function downloadNoOrderReceiveImportTemplate(ownerId, alreadyRetried = f
             token,
             () => downloadNoOrderReceiveImportTemplate(ownerId, true),
             alreadyRetried,
+            epoch,
           ).then(resolve, reject)
           return
         }
@@ -714,6 +763,7 @@ export function downloadNoOrderReceiveImportTemplate(ownerId, alreadyRetried = f
 }
 
 export function uploadNoOrderReceiveImportPreview(filePath, ownerId, alreadyRetried = false) {
+  const epoch = sessionEpoch
   const token = getToken()
   return new Promise((resolve, reject) => {
     uni.uploadFile({
@@ -723,6 +773,7 @@ export function uploadNoOrderReceiveImportPreview(filePath, ownerId, alreadyRetr
       formData: { owner_id: String(ownerId) },
       header: token ? { Authorization: `Bearer ${token}` } : {},
       success: (res) => {
+        if (epoch !== sessionEpoch) { reject(sessionChangedError()); return }
         let data = res.data
         try {
           data = typeof data === 'string' ? JSON.parse(data) : data
@@ -743,6 +794,7 @@ export function uploadNoOrderReceiveImportPreview(filePath, ownerId, alreadyRetr
             token,
             () => uploadNoOrderReceiveImportPreview(filePath, ownerId, true),
             alreadyRetried,
+            epoch,
           ).then(resolve, reject)
           return
         }
@@ -1422,8 +1474,8 @@ export const api = {
 
   postCountTask: (id, payload = {}) =>
     request({ url: `/api/pda/count-tasks/${id}/post/`, method: 'POST', data: payload }),
-	
-	
+
+
   companyInventorySummary: (params = {}) => {
     const qs = buildQuery({
       ...params,
@@ -1467,6 +1519,6 @@ export const api = {
       url: `/api/reports/pda/throughput/details/?${qs}`,
     })
   },
-	  
-	  
+
+
 }

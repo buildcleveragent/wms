@@ -1,0 +1,20 @@
+[
+  {
+    "file": "scripts/putaway_load_test.py",
+    "line": 73,
+    "rule": "B310",
+    "severity": "MEDIUM",
+    "status": "REVIEW_REQUIRED",
+    "scope": "operator-invoked load tool",
+    "evidence": "base URL is supplied by the CLI operator, not an HTTP request; no allowed-scheme check. No exploit or production invocation performed. Restricting schemes is a remaining hardening item."
+  },
+  {
+    "file": "scripts/run_system_tests.py",
+    "line": 143,
+    "rule": "B108",
+    "severity": "MEDIUM",
+    "status": "REVIEW_REQUIRED",
+    "scope": "local test orchestration lock",
+    "evidence": "predictable /tmp path opened in append mode for flock; no data is written. Local multi-user symlink interference has not been tested; no production HTTP path reaches this code."
+  }
+]

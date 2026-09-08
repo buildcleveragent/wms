@@ -1,0 +1,63 @@
+{
+  "exit_code": 0,
+  "collected": 7,
+  "password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher",
+  "tests": {
+    "allapp/salesapp/tests.py::SaleMiniApiTests::test_checkout_rejects_second_order_after_available_stock_is_allocated": {
+      "status": "PASS",
+      "phases": {
+        "setup": "passed",
+        "call": "passed",
+        "teardown": "passed"
+      }
+    },
+    "allapp/salesapp/tests.py::SaleMiniApiTests::test_create_order_generates_outbound_and_allocates_inventory": {
+      "status": "PASS",
+      "phases": {
+        "setup": "passed",
+        "call": "passed",
+        "teardown": "passed"
+      }
+    },
+    "allapp/salesapp/tests.py::SaleMiniApiTests::test_products_only_return_listed_goods_with_server_stock_and_price": {
+      "status": "PASS",
+      "phases": {
+        "setup": "passed",
+        "call": "passed",
+        "teardown": "passed"
+      }
+    },
+    "allapp/salesapp/tests.py::SaleMiniApiTests::test_saleable_stock_counts_incomplete_tracking_fields_and_allocates": {
+      "status": "PASS",
+      "phases": {
+        "setup": "passed",
+        "call": "passed",
+        "teardown": "passed"
+      }
+    },
+    "allapp/salesapp/tests.py::SaleMiniApiTests::test_saleable_stock_counts_serial_controlled_inventory_without_serial": {
+      "status": "PASS",
+      "phases": {
+        "setup": "passed",
+        "call": "passed",
+        "teardown": "passed"
+      }
+    },
+    "allapp/salesapp/tests.py::SaleMiniApiTests::test_server_cart_persists_reprices_and_reports_stock_errors": {
+      "status": "PASS",
+      "phases": {
+        "setup": "passed",
+        "call": "passed",
+        "teardown": "passed"
+      }
+    },
+    "allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests::test_concurrent_payment_success_and_cancel_preserve_order_stock_invariants": {
+      "status": "PASS",
+      "phases": {
+        "setup": "passed",
+        "call": "passed",
+        "teardown": "passed"
+      }
+    }
+  }
+}
