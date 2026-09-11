@@ -199,19 +199,35 @@
       <view v-else-if="!saleRows.length" class="empty">暂无销售记录</view>
       <view v-else class="sale-list">
         <view class="sale-row" v-for="sale in saleRows" :key="sale.id">
-          <view class="sale-main">
-            <view class="sale-title-row">
-              <text class="sale-no">{{ saleDisplayNo(sale) }}</text>
-              <text :class="['sale-status', sale.status === 'VOIDED' ? 'voided' : 'completed']">
-                {{ saleStatusText(sale.status) }}
-              </text>
+          <scroll-view scroll-x class="sale-scroll">
+            <view class="sale-content">
+              <view class="sale-summary">
+                <text class="sale-no">{{ saleDisplayNo(sale) }}</text>
+                <text class="sale-meta">{{ saleCreatedText(sale) }} / {{ salePaymentMethod(sale) }}</text>
+                <text class="sale-meta">商品 {{ saleLineCount(sale) }} 项 / 出库单 {{ saleOrderCount(sale) }} 张</text>
+                <text :class="['sale-status', sale.status === 'VOIDED' ? 'voided' : 'completed']">
+                  {{ saleStatusText(sale.status) }}
+                </text>
+                <view class="sale-amount">
+                  <text>{{ money(sale.total_amount) }}</text>
+                </view>
+              </view>
+              <view v-if="saleLineCount(sale)" class="sale-lines">
+                <view class="sale-line" v-for="line in sale.lines" :key="line.id || line.line_no">
+                  <view class="sale-line-product">
+                    <text class="sale-line-name">{{ line.product_name || line.product_code || '-' }}</text>
+                    <text class="sale-line-code">编码：{{ line.product_code || '-' }}</text>
+                  </view>
+                  <view class="sale-line-values">
+                    <text>数量：{{ qtyText(line.qty) }}</text>
+                    <text>单价：{{ priceText(line.price) }}</text>
+                    <text class="sale-line-amount">小计：{{ money(line.amount) }}</text>
+                  </view>
+                </view>
+              </view>
+              <view v-else class="empty sale-lines-empty">暂无商品明细</view>
             </view>
-            <text class="sale-meta">{{ saleCreatedText(sale) }} / {{ salePaymentMethod(sale) }}</text>
-            <text class="sale-meta">商品 {{ saleLineCount(sale) }} 项 / 出库单 {{ saleOrderCount(sale) }} 张</text>
-          </view>
-          <view class="sale-amount">
-            <text>{{ money(sale.total_amount) }}</text>
-          </view>
+          </scroll-view>
         </view>
       </view>
       <button v-if="hasMoreSales" class="ghost-btn more-btn" :disabled="salesLoading" @click="loadMoreSales">
@@ -329,6 +345,11 @@ function qtyText(value) {
   const num = Number(value || 0)
   if (!Number.isFinite(num)) return '0'
   return num.toFixed(3).replace(/\.?0+$/, '')
+}
+
+function priceText(value) {
+  const num = Number(value || 0)
+  return `¥${Number.isFinite(num) ? num.toFixed(4).replace(/\.?0+$/, '') : '0'}`
 }
 
 function formatDateTime(value) {
@@ -572,10 +593,15 @@ onShow(() => {
 }
 
 .header-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8rpx 24rpx;
   min-width: 0;
 }
 
 .title {
+  margin: 0;
   color: #111827;
   font-size: 38rpx;
   font-weight: 700;
@@ -583,7 +609,6 @@ onShow(() => {
 }
 
 .subtitle {
-  margin-top: 6rpx;
   color: #6b7280;
   font-size: 24rpx;
 }
@@ -664,20 +689,19 @@ button::after {
 }
 
 .filter-panel {
-  padding: 4rpx 20rpx;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8rpx 32rpx;
+  padding: 12rpx 20rpx;
   margin-bottom: 16rpx;
 }
 
 .filter-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  min-height: 82rpx;
-  border-bottom: 1rpx solid #f3f4f6;
-}
-
-.filter-row:last-child {
-  border-bottom: 0;
+  gap: 24rpx;
+  min-height: 58rpx;
 }
 
 .filter-label {
@@ -705,14 +729,18 @@ button::after {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440rpx), 1fr));
   gap: 14rpx;
   margin-bottom: 20rpx;
 }
 
 .summary-card {
-  min-height: 168rpx;
-  padding: 20rpx;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8rpx 16rpx;
+  min-width: 0;
+  padding: 12rpx 16rpx;
   border: 1rpx solid #e5e7eb;
   border-left: 8rpx solid #94a3b8;
   border-radius: 8rpx;
@@ -731,14 +759,12 @@ button::after {
 
 .card-value {
   display: block;
-  margin-top: 16rpx;
+  min-width: 0;
   color: #111827;
-  font-size: 40rpx;
+  font-size: 32rpx;
   font-weight: 700;
   line-height: 1.15;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .card-value.danger {
@@ -747,13 +773,13 @@ button::after {
 
 .card-meta {
   display: block;
-  margin-top: 12rpx;
   color: #4b5563;
   font-size: 23rpx;
+  overflow-wrap: anywhere;
 }
 
 .section {
-  padding: 18rpx;
+  padding: 16rpx 18rpx;
   margin-bottom: 18rpx;
   box-sizing: border-box;
 }
@@ -763,7 +789,7 @@ button::after {
   align-items: center;
   justify-content: space-between;
   gap: 12rpx;
-  margin-bottom: 12rpx;
+  margin-bottom: 8rpx;
 }
 
 .section-title {
@@ -798,9 +824,104 @@ button::after {
   border-top: 0;
 }
 
-.rank-main,
-.sale-main {
-  flex: 1;
+.sale-row {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.sale-scroll {
+  width: 100%;
+  min-width: 0;
+}
+
+.sale-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  width: max-content;
+  min-width: 100%;
+  white-space: nowrap;
+}
+
+.sale-summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 24rpx;
+  text-align: right;
+}
+
+.sale-summary > * {
+  flex-shrink: 0;
+}
+
+.sale-lines {
+  padding: 0 16rpx;
+  border-radius: 8rpx;
+  background: #f9fafb;
+}
+
+.sale-line {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 24rpx;
+  padding: 12rpx 0;
+  border-top: 1rpx solid #edf0f4;
+  text-align: right;
+}
+
+.sale-line:first-child {
+  border-top: 0;
+}
+
+.sale-line-product {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  flex: 0 0 auto;
+}
+
+.sale-line-name,
+.sale-line-code {
+  display: block;
+  white-space: nowrap;
+}
+
+.sale-line-name {
+  color: #111827;
+  font-size: 26rpx;
+}
+
+.sale-line-code {
+  color: #6b7280;
+  font-size: 23rpx;
+}
+
+.sale-line-values {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 24rpx;
+  color: #4b5563;
+  font-size: 23rpx;
+}
+
+.sale-line-amount {
+  color: #111827;
+  font-weight: 700;
+}
+
+.empty.sale-lines-empty {
+  padding: 20rpx 16rpx;
+}
+
+.rank-main {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8rpx 24rpx;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -844,14 +965,50 @@ button::after {
   white-space: nowrap;
 }
 
+.rank-row {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8rpx 24rpx;
+  padding: 12rpx 0;
+  text-align: right;
+}
+
+.rank-amount {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  flex: 0 1 auto;
+  gap: 8rpx 24rpx;
+  min-width: 0;
+}
+
+.rank-title,
+.rank-meta,
+.rank-amount text {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.rank-meta,
+.rank-sub {
+  margin-top: 0;
+}
+
+.sale-summary .sale-meta {
+  margin-top: 0;
+  overflow: visible;
+}
+
+.sale-summary .sale-amount {
+  flex: 0 0 auto;
+}
+
 .split-sections {
   display: grid;
   grid-template-columns: 1fr;
   gap: 0;
-}
-
-.compact-row {
-  min-height: 88rpx;
 }
 
 .sales-filter {
@@ -886,13 +1043,6 @@ button::after {
   justify-content: center;
 }
 
-.sale-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10rpx;
-}
-
 .sale-status {
   flex: 0 0 auto;
   font-size: 22rpx;
@@ -914,7 +1064,7 @@ button::after {
 }
 
 .empty {
-  padding: 36rpx 16rpx;
+  padding: 20rpx 16rpx;
   border-radius: 8rpx;
   background: #f9fafb;
   color: #6b7280;
@@ -923,10 +1073,6 @@ button::after {
 }
 
 @media (min-width: 900px) {
-  .summary-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-
   .split-sections {
     grid-template-columns: 1fr 1fr;
     gap: 18rpx;
