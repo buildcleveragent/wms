@@ -9,14 +9,24 @@ from allapp.core.models import BaseModel
 
 class OwnerProductMapping(BaseModel):
     source_product = models.ForeignKey(
-        "products.Product", on_delete=models.PROTECT, related_name="outgoing_owner_mappings"
+        "products.Product",
+        verbose_name="来源商品",
+        on_delete=models.PROTECT,
+        related_name="outgoing_owner_mappings",
     )
-    target_owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT)
+    target_owner = models.ForeignKey(
+        "baseinfo.Owner", verbose_name="目标货主", on_delete=models.PROTECT
+    )
     target_product = models.ForeignKey(
-        "products.Product", on_delete=models.PROTECT, related_name="incoming_owner_mappings"
+        "products.Product",
+        verbose_name="目标商品",
+        on_delete=models.PROTECT,
+        related_name="incoming_owner_mappings",
     )
 
     class Meta:
+        verbose_name = "货主商品映射"
+        verbose_name_plural = "货主商品映射"
         constraints = [
             models.UniqueConstraint(
                 fields=["source_product", "target_owner"], name="uq_owner_product_mapping"

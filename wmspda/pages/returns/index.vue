@@ -23,9 +23,9 @@
           <text v-if="ownerId" class="muted">本单货主：{{ ownerName }}。更换货主请先移除已选商品。</text>
           <view class="search-row"><input v-model="search" placeholder="商品名称、编码或条码" confirm-type="search" :disabled="busy || !!pending" @confirm="searchProducts(true)" /><button :disabled="busy || !!pending" @click="searchProducts(true)">搜索</button></view>
           <view v-for="product in products" :key="product.product_id" class="product-row" @click="chooseProduct(product)">
-            <text class="strong">{{ product.product_name }} {{ product.spec }}</text>
-            <text class="owner-label">货主：{{ product.owner_name }}</text>
-            <text class="muted">{{ product.product_code }} · 可用 {{ product.available_qty }} / 破损 {{ product.damaged_qty }} {{ product.base_unit }}</text>
+            <text class="strong product-name" :title="product.product_name + (product.spec ? ' ' + product.spec : '')">{{ product.product_name }} {{ product.spec }}</text>
+            <text class="owner-label" :title="'货主：' + product.owner_name">货主：{{ product.owner_name }}</text>
+            <text class="muted product-stock">{{ product.product_code }} · 可用 {{ product.available_qty }} / 破损 {{ product.damaged_qty }} {{ product.base_unit }}</text>
           </view>
           <text v-if="searched && !products.length" class="muted">没有匹配的可退库存</text>
           <button v-if="productNext" :disabled="busy" @click="searchProducts(false)">更多商品</button>
@@ -82,9 +82,11 @@
           <view class="actions"><button :disabled="busy" @click="loadTab">查询</button><button :disabled="busy" @click="exportRows">导出 Excel</button><button @click="clearFilters">清除筛选</button></view>
         </view>
         <template v-if="tab === 'history'">
-          <view v-for="row in history" :key="row.id" class="card clickable" @click="openOrder(row.id)">
-            <text class="section-title">{{ row.return_no }} · {{ statusText(row.status) }}</text><text>{{ row.owner_name }} → {{ row.recipient_name }}</text>
-            <text class="muted">{{ row.operator_name }} · {{ row.confirmed_at || row.created_at }}</text><text class="muted">{{ row.reason }} · {{ row.lines.length }} 条明细</text>
+          <view v-for="row in history" :key="row.id" class="card clickable history-row" @click="openOrder(row.id)">
+            <view class="section-title history-identity"><text class="history-number" :title="row.return_no">{{ row.return_no }}</text><text class="history-status"> · {{ statusText(row.status) }}</text></view>
+            <text class="history-recipient" :title="row.owner_name + ' → ' + row.recipient_name">{{ row.owner_name }} → {{ row.recipient_name }}</text>
+            <text class="muted history-meta" :title="row.operator_name + ' · ' + (row.confirmed_at || row.created_at)">{{ row.operator_name }} · {{ row.confirmed_at || row.created_at }}</text>
+            <view class="muted history-summary"><text class="history-reason" :title="row.reason">{{ row.reason }}</text><text class="history-count"> · {{ row.lines.length }} 条明细</text></view>
           </view>
           <view v-if="!history.length" class="card muted">暂无退货记录</view><button v-if="historyNext" :disabled="busy" @click="loadHistory(false)">更多记录</button>
         </template>
@@ -315,5 +317,18 @@ input, textarea, .picker-field { box-sizing: border-box; background: #f6f8fa; bo
 .quantity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12rpx; }.quantity-grid label { font-size: 23rpx; line-height: 1.8; }.quantity-grid input { width: 100%; }
 .danger { color: #ad3434; background: #fff2f0; }.text-button { align-self: flex-end; color: #ad3434; }.notice, .error { padding: 20rpx; border-radius: 10rpx; margin-bottom: 20rpx; line-height: 1.6; }.notice { background: #fff5dc; }.error { background: #fff0ef; color: #a32c24; }
 .filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16rpx; }.filters .actions { grid-column: 1 / -1; }.filters label { font-size: 25rpx; }.clickable, .stat-row { cursor: pointer; }
+@media (min-width: 1024px) {
+  .return-page { max-width: 1600px; }
+  .product-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 200px) auto; align-items: center; gap: 24px; padding: 14px 0; }
+  .product-row .product-name, .product-row .owner-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .product-row .product-stock { white-space: nowrap; }
+  .product-row:hover { background: #f6faf9; }
+  .history-row { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, .85fr) minmax(0, 1.2fr) minmax(0, 1fr); align-items: center; gap: 20px; padding: 14px 16px; }
+  .history-row .section-title { margin: 0; }
+  .history-identity, .history-row .history-summary { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .history-number, .history-recipient, .history-meta, .history-reason { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .history-status, .history-count { flex-shrink: 0; white-space: nowrap; }
+  .history-row:hover { background: #f6faf9; }
+}
 @media (max-width: 480px) { .filters { grid-template-columns: 1fr; }.quantity-grid { gap: 8rpx; }.card { padding: 20rpx; } }
 </style>
