@@ -1,6 +1,14 @@
 import { defineStore } from 'pinia'
 import { api } from '@/utils/request'
 import { formatDate } from '@/utils/billing'
+import { createLatestRequest } from '@/utils/latest-request'
+
+const contexts = new WeakMap()
+const selections = new WeakMap()
+function gate(map, store) {
+  if (!map.has(store)) map.set(store, createLatestRequest(() => store.userId))
+  return map.get(store)
+}
 
 function monthRange() {
   const now = new Date()
@@ -48,11 +56,13 @@ export const useBossScope = defineStore('bossScope', {
     restore(user) {
       const userId = String(user?.id || user?.pk || user?.username || '')
       if (this.userId === userId) return
+      gate(contexts, this).invalidate()
+      gate(selections, this).invalidate()
       this.userId = userId
       this.loaded = false
       this.warehouseOptions = []
       this.ownerOptions = []
-      Object.assign(this, monthRange(), readSaved(userId))
+      Object.assign(this, { warehouse: '', owner: '' }, monthRange(), readSaved(userId))
     },
     persist() {
       try {
@@ -64,10 +74,20 @@ export const useBossScope = defineStore('bossScope', {
         }))
       } catch (error) {}
     },
-    async loadContext(user, force = false) {
+    async loadContext(user, force = false, warehouse) {
       this.restore(user)
-      if (this.loaded && !force) return
-      const context = await api.bossContext({ warehouse: this.warehouse || undefined })
+      if (this.loaded && !force) return true
+      const current = gate(contexts, this).begin()
+      const requestedWarehouse = warehouse === undefined ? this.warehouse : warehouse
+      let context
+      try {
+        context = await api.bossContext({ warehouse: requestedWarehouse || undefined })
+      } catch (error) {
+        if (!current()) return false
+        throw error
+      }
+      if (!current()) return false
+      this.warehouse = requestedWarehouse
       this.warehouseOptions = context?.warehouse_options || []
       this.ownerOptions = context?.owner_options || []
       this.maxRangeDays = Number(context?.limits?.max_range_days || 367)
@@ -77,14 +97,26 @@ export const useBossScope = defineStore('bossScope', {
       if (this.owner && !allowedOwners.has(String(this.owner))) this.owner = ''
       this.loaded = true
       this.persist()
+      return true
     },
     async selectWarehouse(value) {
+      const current = gate(selections, this).begin()
+      const previous = {
+        warehouse: this.warehouse, owner: this.owner, loaded: this.loaded,
+        warehouseOptions: this.warehouseOptions, ownerOptions: this.ownerOptions,
+        maxRangeDays: this.maxRangeDays,
+      }
       const previousOwner = this.owner
-      this.warehouse = value ? String(value) : ''
       this.loaded = false
-      await this.loadContext({ id: this.userId }, true)
-      this.persist()
-      return !!previousOwner && !this.owner
+      try {
+        const applied = await this.loadContext({ id: this.userId }, true, value ? String(value) : '')
+        if (!current() || !applied) return null
+        return !!previousOwner && !this.owner
+      } catch (error) {
+        if (!current()) return null
+        Object.assign(this, previous)
+        throw error
+      }
     },
     selectOwner(value) {
       this.owner = value ? String(value) : ''
@@ -104,6 +136,8 @@ export const useBossScope = defineStore('bossScope', {
       return true
     },
     clear() {
+      gate(contexts, this).invalidate()
+      gate(selections, this).invalidate()
       try { uni.removeStorageSync(storageKey(this.userId)) } catch (error) {}
       this.$reset()
     },

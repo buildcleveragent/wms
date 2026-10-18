@@ -71,6 +71,13 @@
                 基本数量 {{ qtyText(row.total_base_qty) }}
               </view>
               <view class="history-meta">
+                <template v-if="row.transfer_no">
+                  转货出库：{{ row.source_owner?.name }} → {{ row.owner?.name }} → {{ row.customer?.name }}
+                  · 转货单 {{ row.transfer_no }} · {{ transferStatus(row.transfer_status) }}
+                </template>
+                <template v-else>直接出库</template>
+              </view>
+              <view class="history-meta">
                 操作员 {{ row.assisted_by?.name || '未记录' }}
                 <template v-if="row.src_bill_no"> · 源单号 {{ row.src_bill_no }}</template>
               </view>
@@ -107,6 +114,10 @@ import { onLoad } from '@dcloudio/uni-app'
 import { useAuth } from '@/store/auth'
 import { api } from '@/utils/request'
 import { openOutboundPrintPage } from '@/utils/outboundPrint'
+
+function transferStatus(status) {
+  return { RESERVED: '已预留', POSTED: '已完成', CANCELLED: '已取消' }[status] || status
+}
 
 const auth = useAuth()
 const checkingPermission = ref(true)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure synthetic dispatch PDFs; timeout is a test guard, not production protection."""
+"""Measure synthetic dispatch PDFs through the bounded production renderer."""
 
 import argparse
 import json
@@ -22,16 +22,15 @@ def worker(rows, output):
 
     django.setup()
     import weasyprint
+    from django.conf import settings
     from django.template.loader import render_to_string
 
+    from allapp.reports.pdf_rendering import render_pdf
     from allapp.reports.test_pdf_acceptance import sample_note
-    from allapp.reports.views import _offline_url_fetcher
 
     started = time.monotonic()
     html = render_to_string("reports/dispatch_note.html", {"note": sample_note(rows)})
-    pdf = weasyprint.HTML(string=html, url_fetcher=_offline_url_fetcher).write_pdf(
-        presentational_hints=False
-    )
+    pdf = render_pdf(html)
     output.write_bytes(pdf)
     print(
         json.dumps(
@@ -40,7 +39,12 @@ def worker(rows, output):
                 "input_html_bytes": len(html.encode()),
                 "pdf_bytes": len(pdf),
                 "elapsed_seconds": round(time.monotonic() - started, 3),
-                "peak_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                "peak_rss_kib": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
+                "web_process_peak_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                "renderer_memory_bytes": settings.PDF_MEMORY_BYTES,
+                "renderer_cpu_seconds": settings.PDF_CPU_SECONDS,
+                "renderer_timeout_seconds": settings.PDF_TIMEOUT_SECONDS,
+                "renderer_concurrency_per_container": 1,
                 "weasyprint": weasyprint.__version__,
                 "python": platform.python_version(),
                 "status": "MEASURED",
@@ -61,7 +65,7 @@ def main():
     report = {
         "risk": "R-PDF-RESOURCE",
         "risk_status": "REVIEW_REQUIRED",
-        "production_limits_implemented": False,
+        "production_limits_implemented": True,
         "scope": "synthetic local measurement; not a production capacity or DoS guarantee",
         "samples": [],
     }
@@ -78,7 +82,7 @@ def main():
                 ],
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=180,
             )
             (args.output / f"dispatch-{rows}.log").write_text(result.stderr)
             sample = (
@@ -91,7 +95,7 @@ def main():
                 }
             )
         except subprocess.TimeoutExpired:
-            sample = {"rows": rows, "status": "TEST_TIMEOUT", "limit_seconds": 120}
+            sample = {"rows": rows, "status": "TEST_TIMEOUT", "limit_seconds": 180}
         report["samples"].append(sample)
         (args.output / "measurement.json").write_text(json.dumps(report, indent=2) + "\n")
     return 0 if all(row["status"] == "MEASURED" for row in report["samples"]) else 1

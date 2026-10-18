@@ -1,0 +1,1 @@
+{"name": "wmsandroid-build-app", "cwd": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsandroid", "command": ["npm", "run", "build:app"], "env": {"CI": "1", "npm_config_cache": "/tmp/wms-release-20261005-aohudxd1/npm-cache"}, "timeout": 300}

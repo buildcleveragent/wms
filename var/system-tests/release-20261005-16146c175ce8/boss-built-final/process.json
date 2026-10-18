@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "run_id": "313d476b12024dff9a9d1dd59ce7e9f8",
+  "status": "PASS",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026533122]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "473560",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "run",
+    "test:e2e",
+    "--",
+    "--output=/tmp/wms-release-20261005-aohudxd1/boss-built-final-results",
+    "--reporter=line,json"
+  ],
+  "cwd": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling",
+  "child": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026533122]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "473573",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 7,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 59.923
+}

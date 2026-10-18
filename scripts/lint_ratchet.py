@@ -41,7 +41,14 @@ def tracked_python_files() -> list[str]:
     result = _run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "*.py"])
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "git ls-files failed")
-    return sorted(line for line in result.stdout.splitlines() if line)
+    # Historical execution evidence is not maintained application/tooling source.
+    return sorted(
+        {
+            line
+            for line in result.stdout.splitlines()
+            if line and not line.startswith("var/system-tests/")
+        }
+    )
 
 
 def sha256(path: str) -> str:

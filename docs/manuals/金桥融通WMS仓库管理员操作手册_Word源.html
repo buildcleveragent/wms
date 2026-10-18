@@ -9,7 +9,7 @@
   size: A4;
   margin: 18mm 16mm 19mm 16mm;
   @top-left { content: string(document-title); color: #667085; font-size: 8.2pt; }
-  @top-right { content: "V2.1 · 2026-09-07"; color: #667085; font-size: 8.2pt; }
+  @top-right { content: "V2.2 · 2026-10-17"; color: #667085; font-size: 8.2pt; }
   @bottom-center { content: "第 " counter(page) " 页 / 共 " counter(pages) " 页"; color: #7a8493; font-size: 8.2pt; }
 }
 @page cover {
@@ -84,17 +84,17 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <h1>金桥融通WMS仓库管理员操作手册</h1>
 <div class="lead">岗位操作 · 权限边界 · 异常处理</div>
 <div class="cover-meta">
-<div>文档版本：V2.1</div>
-<div>适用基线：2026-09-07 当前工作区</div>
+<div>文档版本：V2.2</div>
+<div>适用基线：2026-10-17 当前工作区</div>
 <div>文档状态：交付版</div>
 <div>主要读者：仓库管理员</div>
 </div>
 <div class="cover-foot">实际菜单和数据范围以账号角色、权限及显式货主/仓库范围为准</div>
 </section>
-<section class="toc"><h1>目录</h1><ul><li class="level-2"><a href="#section-1-使用范围">使用范围</a></li><li class="level-2"><a href="#section-2-登录-账号与通用安全">登录、账号与通用安全</a></li><li class="level-3"><a href="#section-3-首次登录">首次登录</a></li><li class="level-3"><a href="#section-4-登录失效与切换账号">登录失效与切换账号</a></li><li class="level-3"><a href="#section-5-账号和数据范围">账号和数据范围</a></li><li class="level-3"><a href="#section-6-通用操作原则">通用操作原则</a></li><li class="level-3"><a href="#section-7-修改密码与退出">修改密码与退出</a></li><li class="level-2"><a href="#section-8-角色定位与权限">角色定位与权限</a></li><li class="level-2"><a href="#section-9-每日工作顺序">每日工作顺序</a></li><li class="level-2"><a href="#section-10-入库单确认与收货监督">入库单确认与收货监督</a></li><li class="level-2"><a href="#section-11-标准出库确认与任务发布">标准出库确认与任务发布</a></li><li class="level-2"><a href="#section-12-驳回-取消和库存释放">驳回、取消和库存释放</a></li><li class="level-2"><a href="#section-13-任务发布-审核与过账">任务发布、审核与过账</a></li><li class="level-2"><a href="#section-14-库存查询-调整与盘点控制">库存查询、调整与盘点控制</a></li><li class="level-2"><a href="#section-15-移库审批-下发与异常处理">移库审批、下发与异常处理</a></li><li class="level-2"><a href="#section-16-要货审核与补货监督">要货审核与补货监督</a></li><li class="level-2"><a href="#section-17-POS-岗位与打印交接">POS 岗位与打印交接</a></li><li class="level-2"><a href="#section-18-报表-导出与额外财务权限">报表、导出与额外财务权限</a></li><li class="level-2"><a href="#section-19-日结检查表">日结检查表</a></li><li class="level-2"><a href="#section-20-常见状态与控制点">常见状态与控制点</a></li><li class="level-2"><a href="#section-21-异常处理与问题上报">异常处理与问题上报</a></li><li class="level-3"><a href="#section-22-无法登录或菜单缺失">无法登录或菜单缺失</a></li><li class="level-3"><a href="#section-23-数据为空或范围不正确">数据为空或范围不正确</a></li><li class="level-3"><a href="#section-24-网络超时或重复提交提示">网络超时或重复提交提示</a></li><li class="level-3"><a href="#section-25-打印失败或打印页过期">打印失败或打印页过期</a></li><li class="level-3"><a href="#section-26-移库-补货过账失败">移库、补货过账失败</a></li><li class="level-3"><a href="#section-27-库存-任务或账单不一致">库存、任务或账单不一致</a></li><li class="level-3"><a href="#section-28-问题上报模板">问题上报模板</a></li><li class="level-2"><a href="#section-29-日常自检与培训验收">日常自检与培训验收</a></li><li class="level-2"><a href="#section-30-专项手册与边界">专项手册与边界</a></li><li class="level-2"><a href="#section-31-文档修订记录">文档修订记录</a></li></ul></section>
+<section class="toc"><h1>目录</h1><ul><li class="level-2"><a href="#section-1-使用范围">使用范围</a></li><li class="level-2"><a href="#section-2-登录-账号与通用安全">登录、账号与通用安全</a></li><li class="level-3"><a href="#section-3-首次登录">首次登录</a></li><li class="level-3"><a href="#section-4-登录失效与切换账号">登录失效与切换账号</a></li><li class="level-3"><a href="#section-5-账号和数据范围">账号和数据范围</a></li><li class="level-3"><a href="#section-6-通用操作原则">通用操作原则</a></li><li class="level-3"><a href="#section-7-修改密码与退出">修改密码与退出</a></li><li class="level-2"><a href="#section-8-角色定位与权限">角色定位与权限</a></li><li class="level-2"><a href="#section-9-每日工作顺序">每日工作顺序</a></li><li class="level-2"><a href="#section-10-入库单确认与收货监督">入库单确认与收货监督</a></li><li class="level-2"><a href="#section-11-标准出库确认与任务发布">标准出库确认与任务发布</a></li><li class="level-2"><a href="#section-12-驳回-取消和库存释放">驳回、取消和库存释放</a></li><li class="level-2"><a href="#section-13-任务发布-审核与过账">任务发布、审核与过账</a></li><li class="level-2"><a href="#section-14-库存查询-调整与盘点控制">库存查询、调整与盘点控制</a></li><li class="level-2"><a href="#section-15-移库审批-下发与异常处理">移库审批、下发与异常处理</a></li><li class="level-2"><a href="#section-16-要货审核与补货监督">要货审核与补货监督</a></li><li class="level-2"><a href="#section-17-代办转货和退货出库监督">代办转货和退货出库监督</a></li><li class="level-2"><a href="#section-18-POS-岗位与打印交接">POS 岗位与打印交接</a></li><li class="level-2"><a href="#section-19-报表-导出与额外财务权限">报表、导出与额外财务权限</a></li><li class="level-2"><a href="#section-20-日结检查表">日结检查表</a></li><li class="level-2"><a href="#section-21-常见状态与控制点">常见状态与控制点</a></li><li class="level-2"><a href="#section-22-异常处理与问题上报">异常处理与问题上报</a></li><li class="level-3"><a href="#section-23-无法登录或菜单缺失">无法登录或菜单缺失</a></li><li class="level-3"><a href="#section-24-数据为空或范围不正确">数据为空或范围不正确</a></li><li class="level-3"><a href="#section-25-网络超时或重复提交提示">网络超时或重复提交提示</a></li><li class="level-3"><a href="#section-26-打印失败或打印页过期">打印失败或打印页过期</a></li><li class="level-3"><a href="#section-27-移库-补货过账失败">移库、补货过账失败</a></li><li class="level-3"><a href="#section-28-库存-任务或账单不一致">库存、任务或账单不一致</a></li><li class="level-3"><a href="#section-29-问题上报模板">问题上报模板</a></li><li class="level-2"><a href="#section-30-日常自检与培训验收">日常自检与培训验收</a></li><li class="level-2"><a href="#section-31-专项手册与边界">专项手册与边界</a></li><li class="level-2"><a href="#section-32-文档修订记录">文档修订记录</a></li></ul></section>
 <div class="document-note">本手册仅描述当前代码中具有有效权限、页面和业务闭环的功能。</div>
-<p><strong>文档版本：</strong> V2.1</p>
-<p><strong>适用系统版本：</strong> 2026-09-07 当前工作区业务基线</p>
+<p><strong>文档版本：</strong> V2.2</p>
+<p><strong>适用系统版本：</strong> 2026-10-17 当前工作区业务基线</p>
 <p><strong>适用对象：</strong> 仓库管理员</p>
 <p><strong>正式权限组：</strong> <code>WMS::仓库管理员</code></p>
 <p><strong>主要入口：</strong> Web 控制台 / Django Admin，必要时使用仓库 PDA</p>
@@ -251,16 +251,24 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>安排操作员领取并按任务扫描来源库位、商品和目标库位，跟踪剩余量。管理员不代替操作员扫码。</li>
 <li>任务完成后核对过账与库位库存。PDA 执行已启用且任务允许重试时，由管理员在原任务执行“重试过账”；其他异常先保存证据交接处理。</li>
 </ol>
-<h2 id="section-17-POS-岗位与打印交接">POS 岗位与打印交接</h2>
+<h2 id="section-17-代办转货和退货出库监督">代办转货和退货出库监督</h2>
+<ul>
+<li>跨货主代办按“原货主 → 新货主 → 客户”核对，原货主库存先预留，拣货与复核完成后统一过账。核对转货单、销售单、任务及原货主转出/新货主转入/销售出库流水，不能把中间转入量当成仓库新增实物收货，也不能重复下发扣库任务。</li>
+<li>取得查看权限并可登录后台时，可在“代办货权转移单”查看本仓库只读证据；商品对应由系统管理员维护，不在审核中临时改库存归属。</li>
+<li>PDA“退货出库”由有权限的仓库操作员办理，确认即扣库存，不需要仓库管理员审批。规范仓库管理员角色不因此自动获得退货办理或查询入口；由经办人提供记录、统计及退货单号，管理员按本职权限核对库存流水。</li>
+<li>监督本人草稿、本人确认与整单冲销的责任边界；冲销前核实实物，现场发现破损冲销后仍为破损。不借用经办人账号，不删除流水代替冲销。</li>
+<li>退货统计按确认/冲销各自日期、各基本单位核对；仓库退供应商不等于已经退款或完成供应商结算，财务另行处理。</li>
+</ul>
+<h2 id="section-18-POS-岗位与打印交接">POS 岗位与打印交接</h2>
 <p>管理仓库不自动取得收银、退货或客户还款权限。兼任 POS 管理时按《POS 使用手册》核对开班、销售、退款、赊账、还款和交班差异；收付款失败或结果不明必须先恢复原记录。销售已完成但打印失败时安排补打，不能要求收银员重新结账。仓库库存监督与 POS 现金实点应分别留下核对结果。</p>
-<h2 id="section-18-报表-导出与额外财务权限">报表、导出与额外财务权限</h2>
+<h2 id="section-19-报表-导出与额外财务权限">报表、导出与额外财务权限</h2>
 <ul>
 <li>默认可查看当前仓库运营报表并按授权导出，核对入库、出库、任务和库存趋势。</li>
 <li>计费总览、收入和账单不是规范仓库管理员角色的默认权限；只有额外授予仓库财务权限时才可使用。</li>
 <li>取得财务权限后，按货主、仓库和账期核对费用来源、收费类型和账单行；不得直接改总额掩盖差异。</li>
 <li>导出文件包含业务范围数据，应按公司数据安全要求保存和传递。</li>
 </ul>
-<h2 id="section-19-日结检查表">日结检查表</h2>
+<h2 id="section-20-日结检查表">日结检查表</h2>
 <ul>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>待仓库确认单据已经处理或登记原因。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>保留任务与货主已审核订单一一对应。</li>
@@ -272,7 +280,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已启用的移库、要货和补货任务已核对审批、剩余量、实物位置及过账状态。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>下一班交接事项已经记录。</li>
 </ul>
-<h2 id="section-20-常见状态与控制点">常见状态与控制点</h2>
+<h2 id="section-21-常见状态与控制点">常见状态与控制点</h2>
 <table border="1" cellpadding="5" cellspacing="0" style="width:670px; border-collapse:collapse;" width="670">
 <thead>
 <tr>
@@ -362,6 +370,11 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">移库任务处于异常执行状态</td>
 <td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">操作员说明现场情况，管理员处理原因后决定恢复或作废</td>
 </tr>
+<tr>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">退货已冲销 / REVERSED</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">PDA 退货整单已恢复原库存维度</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">原退货记录保留；现场发现破损仍恢复为破损，不再重复补库存</td>
+</tr>
 </tbody>
 </table>
 <p>关键控制点：</p>
@@ -373,32 +386,35 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>移库和补货需要同时看任务状态、行完成量和过账状态；分次扫描只累计执行数量，库存移动以整任务过账成功为准。</li>
 <li>移库异常执行状态与过账失败不是同一件事；“恢复”用于异常任务，“重试过账”用于过账失败，均由有权限的仓库管理员处理。</li>
 <li>POS 销售状态和班次状态按《POS 使用手册》核对；现场还款或打印完成情况不能由普通仓库任务状态推断。</li>
+<li>同名状态必须结合单据类型解释：PDA 退货 <code>COMPLETED</code> 已直接扣库；代办货权转移 <code>RESERVED</code> 是待转货，<code>POSTED</code> 是已转货并销售出库。不能套用普通任务的“已完成、待过账”结论。</li>
 </ul>
 <hr/>
-<h2 id="section-21-异常处理与问题上报">异常处理与问题上报</h2>
-<h3 id="section-22-无法登录或菜单缺失">无法登录或菜单缺失</h3>
+<h2 id="section-22-异常处理与问题上报">异常处理与问题上报</h2>
+<h3 id="section-23-无法登录或菜单缺失">无法登录或菜单缺失</h3>
 <p>按“网络 → 正式入口 → 用户名和密码 → 账号启用状态 → 职员状态（仅 Web 后台）→ 角色范围 → 规范角色组 → 功能开关及额外权限”的顺序检查。移库、补货等功能即使有角色权限，也可能尚未启用。登录过于频繁时按页面提示等待，由系统管理员检查账号和审计日志。</p>
-<h3 id="section-23-数据为空或范围不正确">数据为空或范围不正确</h3>
+<h3 id="section-24-数据为空或范围不正确">数据为空或范围不正确</h3>
 <p>先清除筛选并刷新，再核对当前角色和货主/仓库范围。看到不属于本范围的数据时立即停止操作并上报，不得导出或转发。</p>
-<h3 id="section-24-网络超时或重复提交提示">网络超时或重复提交提示</h3>
+<h3 id="section-25-网络超时或重复提交提示">网络超时或重复提交提示</h3>
 <p>不要连续点击。先回到列表按单号、任务号或平台单号查询；带幂等保护的操作可以使用同一请求重试，但不能改动内容后继续使用原请求标识。</p>
 <ul>
 <li>移库、补货扫描结果未确认时，保留当前页的原库位、商品、容器、序列号和数量再试；提示“已确认此前扫描记录”表示恢复了原结果，不能再次搬货。离开页面后先查原任务再决定下一步。</li>
 <li>收货与上架使用不同数量口径：普通商品有订单收货登记当前行累计数量，上架登记本次增量。重试前不要把累计数量当作新增数量再次录入。</li>
 <li>POS 还款结果未确认时，回到原收银员、原仓库和原客户核对并恢复该笔还款；不能更换客户或金额当作新收款。具体步骤见《POS 使用手册》。</li>
+<li>PDA 退货出库出现“继续确认结果”时，使用原账号、原仓库恢复原请求；冲销待确认也不能另建退货单抵消。跨货主代办同时按销售单号、转货单号和任务号查原结果。</li>
+<li>Android 拣货、收银或 POS 退货出现待确认提示时，保留原设备本地数据，使用页面提供的原请求恢复按钮。不要清应用数据、修改原请求或换账号继续办理，具体区别见《Android 移动端使用手册》和《POS 使用手册》。</li>
 </ul>
-<h3 id="section-25-打印失败或打印页过期">打印失败或打印页过期</h3>
+<h3 id="section-26-打印失败或打印页过期">打印失败或打印页过期</h3>
 <ol>
 <li>先核对原单是否已成功保存或结账，保留单号。</li>
 <li>从原收货任务、出库记录、POS 销售单或班次记录重新点击打印；打印页过期时不要反复使用原链接。</li>
 <li>浏览器阻止新窗口时，按设备提示允许本系统打开打印窗口，再从原记录重试。</li>
 <li>“打印已发起”不代表纸张已输出；核对打印机、纸张和实际份数。结账成功但打印失败时仅补打，不能重新结账。</li>
 </ol>
-<h3 id="section-26-移库-补货过账失败">移库、补货过账失败</h3>
+<h3 id="section-27-移库-补货过账失败">移库、补货过账失败</h3>
 <p>扫描数量已保存不代表库存已移动。保留原任务号、来源和目标库位、已搬数量及完整错误信息，交仓库管理员处理原任务；管理员修复原因后按权限重试过账，不能新建任务重复搬货或修改库存数。</p>
-<h3 id="section-27-库存-任务或账单不一致">库存、任务或账单不一致</h3>
+<h3 id="section-28-库存-任务或账单不一致">库存、任务或账单不一致</h3>
 <p>保留页面截图和原始单号，按“业务单据 → 任务 → 扫描记录 → 过账状态 → 库存流水/计费来源”逐层核对。禁止通过删除记录或直接改汇总数掩盖差异。</p>
-<h3 id="section-28-问题上报模板">问题上报模板</h3>
+<h3 id="section-29-问题上报模板">问题上报模板</h3>
 <ul>
 <li>上报人、角色、用户名：</li>
 <li>发生时间和系统入口：</li>
@@ -411,7 +427,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>已执行的查询和重试：</li>
 <li>截图或导出文件：</li>
 </ul>
-<h2 id="section-29-日常自检与培训验收">日常自检与培训验收</h2>
+<h2 id="section-30-日常自检与培训验收">日常自检与培训验收</h2>
 <ul>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能使用本人账号登录、修改密码并正确退出。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能说明本角色的数据范围和禁止事项。</li>
@@ -421,14 +437,15 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能区分已保存、已过账和已打印，知道登录切换后必须重新核对业务范围。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能使用问题模板提交可追踪的异常信息。</li>
 </ul>
-<h2 id="section-30-专项手册与边界">专项手册与边界</h2>
+<h2 id="section-31-专项手册与边界">专项手册与边界</h2>
 <ul>
 <li>POS 收银、赊账、客户还款、退货、打印、交班和对账参见《POS 使用手册》；只有取得相应 POS 权限的账号才能使用。</li>
+<li>仓库向货主/原供应商退货参见《PDA 退货出库使用手册》；Android 现场操作与原请求恢复参见《Android 移动端使用手册》。功能以各客户端已注册页面和实际权限为准。</li>
 <li>面向终端客户的商城参见《商城小程序使用教程》；商城买家不是本手册六类 WMS 后台角色。</li>
 <li>服务器部署、数据库备份恢复、域名证书、服务启停和版本回滚不属于普通用户手册。</li>
 <li>没有已注册页面、有效权限和可验证业务闭环的功能，不作为正式可用能力发布。</li>
 </ul>
-<h2 id="section-31-文档修订记录">文档修订记录</h2>
+<h2 id="section-32-文档修订记录">文档修订记录</h2>
 <table border="1" cellpadding="5" cellspacing="0" style="width:670px; border-collapse:collapse;" width="670">
 <thead>
 <tr>
@@ -438,6 +455,11 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 </tr>
 </thead>
 <tbody>
+<tr>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">V2.2</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">2026-10-17</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">补齐共享客户、代办转货、PDA 退货出库、商品导入自动收货与导出；区分 Android/PDA 收银库存和恢复能力，更新老板筛选及计费口径</td>
+</tr>
 <tr>
 <td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">V2.1</td>
 <td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">2026-09-07</td>

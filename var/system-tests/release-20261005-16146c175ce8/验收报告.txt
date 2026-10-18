@@ -1,0 +1,71 @@
+WMS 全量测试与发布门禁验收报告
+候选版本：7be0a23ddf1c-16146c175ce8
+验证范围包含当前工作区原有的未提交修改，具体文件哈希见 candidate.json。
+完成时间（UTC）：2026-10-05T05:36:40.411844+00:00
+本地门禁全部通过：False
+允许发布：False
+
+本次执行结果
+后端功能组：PASS；收集 1317 项，结果 {'PASS': 1317}。
+功能组子检查：{'passed': 1014}，与主用例分开计数。
+迁移专项：PASS；收集 3 项，结果 {'PASS': 3}。
+真实 API 浏览器验收：PASS，2 个测试覆盖 7 条流程。
+前端单元测试：258 项通过（PDA 70、Android 47、货主 97、老板 28、商城 16）。
+模拟接口浏览器测试：49 项通过（PDA 10、Android 15、老板 24）。
+五个 H5 构建、Android App bundle 构建及生产 Docker 镜像构建通过。App bundle 不等于签名 APK/真机验收。
+三个微信小程序发布构建均因缺 VITE_API_BASE_URL 而阻断，批准使用的 AppID 也尚待确认。
+覆盖率：{"status": "PASS", "measured": {"allapp": 74.09817220370158, "relocation_api": 87.46177370030581, "replenishment_api": 93.27354260089686}, "minimum": {"allapp": 72.38, "relocation_api": 80, "replenishment_api": 80}}
+
+已确认的发布阻断
+1. 新建生产静态/媒体卷归 root 所有（0755），UID 10001 不可写，collectstatic 实际失败；已有生产卷未检查。
+2. 生产 HTTP 健康检查与强制 HTTPS 设置冲突；中间件验证及实际候选镜像 Gunicorn HTTP 请求均返回 301。
+3. 生产镜像漏洞扫描失败：80 个 HIGH、8 个 CRITICAL 包—漏洞匹配条目，涉及 42 个不同漏洞编号；不等于已验证的可利用漏洞数。
+4. Python 依赖审计和五个前端 npm 高危阈值审计未通过；原始报告保留。
+5. lint 基线检查未通过：1 个业务代码文件及 25 个历史证据脚本文件存在新增违规。
+6. 三端微信小程序发布配置不完整。
+
+环境与证据限制
+主 wms_db_test 因本次明确要求发布门禁而重建一次，执行全部真实迁移后复用。
+历史升级专项使用独立 MySQL 容器中的 wms_db_test；不对 wms_db 执行写入或破坏性操作。
+测试期间没有修改候选业务源码、升级依赖或部署生产。
+后端完整测试使用工作区 Python 3.12.3，生产镜像 Python 3.12.14 另做源码、依赖及真实 PDF 渲染检查。
+使用测试专用快速密码哈希；这些功能测试和本地 PDF 量测不是生产性能证据。
+浏览器验收使用 Playwright Chromium；手机视口模拟不等于 Android/iOS 真机或扫码、打印硬件验收。
+生产依赖锁文件成功复现；其余三个锁文件复现因下载超时未完成，不能判定为锁文件漂移。
+Gitleaks 原始扫描命中 557 项，其中候选源码 5 项经检查为合成测试值或测试标识；其余 552 项来自非候选证据文件，未全部人工归因。没有把扫描命中数描述为生产密钥泄露数。
+Bandit 通过所配置的中高危门槛，但保留了 nosec 不匹配警告。构建及浏览器原始警告也保留在日志中。
+真实移库/补货验收包含主动丢失响应和网络隔离；控制台相应网络错误保留，业务断言通过不等于零控制台错误。
+老板端开发模式误拦截依赖资源及临时网络限制导致的早期失败均保留；生产构建预览模式最终 24 项通过。
+
+尚未执行/尚未签收的外部门禁
+- pdf-resource-release-decision: NOT_RUN — Pending identified release-security assessment and release-manager decision for R-PDF-RESOURCE; fresh local measurements do not implement production controls.
+- staging-rehearsal-60m: NOT_RUN — No designated staging candidate deployment or 60-minute observation evidence supplied.
+- capacity: NOT_RUN — No approved production-like workload, capacity targets, deployment limits or measured load-test evidence supplied.
+- disaster-recovery: NOT_RUN — No approved staging backup/restore/rollback exercise supplied; automated isolated DB tests are not an operational recovery signoff.
+- wechat-payment: NOT_RUN — No authorized real merchant/sandbox credentials and external payment/refund confirmation supplied; cryptographic and service tests are separate.
+- signed-apk-devices: NOT_RUN — App bundle compilation is separate from signed APK installation and physical scanner/printer/NFC acceptance.
+- manual-196: NOT_RUN — No current candidate-matched human acceptance records for the required 196 cases supplied.
+- release-approval: NOT_RUN — No release-manager approval supplied; user asked to run gates, not deploy.
+- deployed-artifact-identity: NOT_RUN — No deployment performed in this task.
+- production-observation-60m: NOT_RUN — No production deployment or observation performed in this task.
+
+本地门禁逐项状态
+- test-coordination: PASS
+- historical-evidence-review: PASS
+- runtime-smoke: BLOCKED (FAIL)
+- dependency-audit: BLOCKED (FAIL)
+- image-security: BLOCKED (FAIL)
+- business-matrix: PASS
+- migration-clean: PASS
+- migration-nonempty-pos: PASS
+- backend-functional: PASS
+- coverage: PASS
+- frontend: BLOCKED (BLOCKED_CONFIG)
+- real-browser: PASS
+- pdf-acceptance: PASS
+- pdf-resource-register: PASS
+- readiness-tool: PASS
+- external-gates-register: PASS
+
+证据入口：final-report.json、release-readiness.json、gate-evidence.json。
+各目录保留命令、退出状态、测试明细、覆盖率、浏览器截图、审计结果和失败尝试。

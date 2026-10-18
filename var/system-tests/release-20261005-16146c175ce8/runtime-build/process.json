@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "run_id": "1159537bcf0a46cd8f40dcabb0dcbdef",
+  "status": "FAIL",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026532621]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "352495",
+    "state": "R"
+  },
+  "command": [
+    "docker",
+    "build",
+    "--progress=plain",
+    "--tag",
+    "wms-release:20261005-16146c175ce8",
+    "."
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026532621]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "352515",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 7,
+  "exit_code": 1,
+  "cleaned_containers": [],
+  "duration_seconds": 1.013
+}

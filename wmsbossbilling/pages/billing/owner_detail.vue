@@ -133,6 +133,7 @@ import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import { api, buildQuery } from '@/utils/request'
 import { useAuth } from '@/store/auth'
+import { useLatestRequest } from '@/utils/use-latest-request'
 import {
   ACCRUAL_STATUS_LABELS,
   CHARGE_TYPE_LABELS,
@@ -251,51 +252,61 @@ function accrualParams(activeOwnerId) {
   }
 }
 
+const requests = useLatestRequest(() => JSON.stringify(overviewParams()))
+let loadedKey = ''
+
 async function refreshAll() {
-  loading.value = true
-  try {
-    const overviewPayload = await api.billingWarehouseOverview(overviewParams())
-    overview.value = overviewPayload || null
-
-    const activeOwnerId = ownerId.value || overviewPayload?.scope?.owner
-    if (activeOwnerId && !ownerId.value) {
-      ownerId.value = String(activeOwnerId)
-    }
-    if (overviewPayload?.scope?.warehouse && !warehouseId.value) {
-      warehouseId.value = String(overviewPayload.scope.warehouse)
-    }
-
-    if (!activeOwnerId) {
-      periods.value = []
-      bills.value = []
-      accruals.value = []
-      return
-    }
-
-    const [periodRes, billRes, accrualRes] = await Promise.all([
-      api.billingPeriods({
-        owner: activeOwnerId,
-        warehouse: warehouseId.value || undefined,
-      }),
-      api.billingBills({
-        owner: activeOwnerId,
-        warehouse: warehouseId.value || undefined,
-      }),
-      api.billingAccruals(accrualParams(activeOwnerId)),
-    ])
-
-    periods.value = asList(periodRes)
-    bills.value = asList(billRes)
-    accruals.value = asList(accrualRes)
-  } catch (error) {
+  const current = requests.begin()
+  const params = overviewParams()
+  const fingerprint = JSON.stringify(params)
+  const accrualQuery = accrualParams(params.owner)
+  let resolvedScope = null
+  if (loadedKey !== fingerprint) {
     overview.value = null
     periods.value = []
     bills.value = []
     accruals.value = []
-    console.error('load owner billing detail failed:', error)
+  }
+  loading.value = true
+  try {
+    const overviewPayload = await api.billingWarehouseOverview(params)
+    if (!current()) return
+    const activeOwnerId = params.owner || overviewPayload?.scope?.owner
+    const warehouse = params.warehouse || overviewPayload?.scope?.warehouse
+    let nextPeriods = [], nextBills = [], nextAccruals = []
+    if (activeOwnerId) {
+      const [periodRes, billRes, accrualRes] = await Promise.all([
+        api.billingPeriods({ owner: activeOwnerId, warehouse }),
+        api.billingBills({ owner: activeOwnerId, warehouse }),
+        api.billingAccruals({ ...accrualQuery, owner: activeOwnerId, warehouse }),
+      ])
+      if (!current()) return
+      nextPeriods = asList(periodRes)
+      nextBills = asList(billRes)
+      nextAccruals = asList(accrualRes)
+    }
+    overview.value = overviewPayload || null
+    periods.value = nextPeriods
+    bills.value = nextBills
+    accruals.value = nextAccruals
+    resolvedScope = { owner: activeOwnerId, warehouse }
+  } catch (error) {
+    if (!current()) return
+    overview.value = null
+    periods.value = []
+    bills.value = []
+    accruals.value = []
+    uni.showToast({ title: error.message || '加载失败，请重试', icon: 'none' })
   } finally {
-    loading.value = false
-    uni.stopPullDownRefresh()
+    if (current()) {
+      loading.value = false
+      uni.stopPullDownRefresh()
+      if (resolvedScope) {
+        if (!ownerId.value && resolvedScope.owner) ownerId.value = String(resolvedScope.owner)
+        if (!warehouseId.value && resolvedScope.warehouse) warehouseId.value = String(resolvedScope.warehouse)
+        loadedKey = JSON.stringify(overviewParams())
+      }
+    }
   }
 }
 
@@ -354,7 +365,7 @@ function goBackOverview() {
     date_to: draftDateTo.value,
     charge_type: draftChargeType.value,
     status: draftStatus.value,
-  })
+  }, { keepEmpty: ['warehouse', 'owner'] })
   uni.redirectTo({
     url: query ? `/pages/billing/overview?${query}` : '/pages/billing/overview',
   })

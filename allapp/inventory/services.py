@@ -1824,15 +1824,23 @@ def post_task(
         affected = _apply_putaway(task, groups, now=now_ts, batch_no=batch)
 
     elif posting_family == "ISSUE":
-        groups = _group_receive_like(
-            task,
-            scans,
-            now=now_ts,
-            batch_no=batch,
-            tx_type=InvTxType.ISSUE,
-            qty_task_type=task_type,
-        )
-        affected = _apply_receive_like(task, groups, now=now_ts, batch_no=batch)
+        from allapp.outbound.ownership import post_transfer_inventory, transfer_for_task
+
+        transfer = transfer_for_task(task)
+        if transfer:
+            affected = post_transfer_inventory(
+                task=task, transfer=transfer, scans=scans, now=now_ts, batch_no=batch, actor=user
+            )
+        else:
+            groups = _group_receive_like(
+                task,
+                scans,
+                now=now_ts,
+                batch_no=batch,
+                tx_type=InvTxType.ISSUE,
+                qty_task_type=task_type,
+            )
+            affected = _apply_receive_like(task, groups, now=now_ts, batch_no=batch)
 
     elif posting_family in ("COUNT", "ADJUST"):
         # COUNT 读取 qty_base；ADJUST 读取 qty_base_delta。两者均按符号分录。

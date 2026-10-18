@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "run_id": "abe01e02c0e0482096f3868368c95705",
+  "status": "PASS",
+  "owner": {
+    "pid": 286,
+    "pid_namespace": "pid:[4026532634]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "413755",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "run",
+    "test:e2e",
+    "--",
+    "--output=/tmp/wms-release-20261005-aohudxd1/wmsandroid-browser-results",
+    "--reporter=line,json"
+  ],
+  "cwd": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsandroid",
+  "child": {
+    "pid": 287,
+    "pid_namespace": "pid:[4026532634]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "413768",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 287,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 76.491
+}

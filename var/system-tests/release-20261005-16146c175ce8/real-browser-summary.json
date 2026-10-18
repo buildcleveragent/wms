@@ -1,0 +1,73 @@
+{
+  "scope": "Real local API browser acceptance",
+  "status": "PASS",
+  "pytest_cases": 2,
+  "user_flows": 7,
+  "movement_flows": [
+    {
+      "app": "wmspda",
+      "kind": "move",
+      "status": "PASS",
+      "url": "http://127.0.0.1:18081/#/pages/inventory/move/detail?task_id=5",
+      "title": "移库作业",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "consoleMessages": [
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_CONTENT_LENGTH_MISMATCH"
+      ],
+      "scope": "real API login/claim/start/4+4+2, lost response, edited retry blocked, same-payload replay, final posting"
+    },
+    {
+      "app": "wmsandroid",
+      "kind": "move",
+      "status": "PASS",
+      "url": "http://127.0.0.1:18081/#/pages/inventory/move/detail?task_id=6",
+      "title": "移库作业",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "consoleMessages": [
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_CONTENT_LENGTH_MISMATCH"
+      ],
+      "scope": "real API login/claim/start/4+4+2, lost response, edited retry blocked, same-payload replay, final posting"
+    },
+    {
+      "app": "wmspda",
+      "kind": "replenish",
+      "status": "PASS",
+      "url": "http://127.0.0.1:18081/#/pages/inventory/replenish/detail?task_id=7",
+      "title": "补货作业",
+      "viewport": {
+        "width": 1280,
+        "height": 900
+      },
+      "consoleMessages": [
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_CONTENT_LENGTH_MISMATCH"
+      ],
+      "scope": "real API login/claim/start/4+4+2, lost response, edited retry blocked, same-payload replay, final posting"
+    },
+    {
+      "app": "wmsandroid",
+      "kind": "replenish",
+      "status": "PASS",
+      "url": "http://127.0.0.1:18081/#/pages/inventory/replenish/detail?task_id=8",
+      "title": "补货作业",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "consoleMessages": [
+        "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+        "Failed to load resource: net::ERR_CONTENT_LENGTH_MISMATCH"
+      ],
+      "scope": "real API login/claim/start/4+4+2, lost response, edited retry blocked, same-payload replay, final posting"
+    }
+  ],
+  "warnings": "Movement cases intentionally lose a committed response; ERR_CONTENT_LENGTH_MISMATCH is retained as injected transport failure evidence. The temporary network fence also produces ERR_BLOCKED_BY_CLIENT for denied requests. These are not a claim of a zero-console-error run; original assertions require no uncaught page exceptions and correct persisted quantities/replay behavior."
+}

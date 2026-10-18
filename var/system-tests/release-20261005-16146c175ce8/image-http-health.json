@@ -1,0 +1,7 @@
+{
+  "http_status": 301,
+  "location": "https://127.0.0.1:8000/healthz/ready",
+  "runtime": "candidate Gunicorn process with production settings",
+  "network": "none; loopback probe only",
+  "scope": "Determine whether HTTP health checking reaches readiness handling or is redirected before DB access."
+}

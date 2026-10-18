@@ -1,0 +1,1 @@
+{"name": "image-dependencies", "command": ["docker", "run", "--rm", "--network", "none", "--name", "wms-release-image-dependencies-16146c175ce8", "-v", "/tmp/wms-release-20261005-aohudxd1/candidate.json:/evidence/candidate.json:ro", "wms-release:20261005-16146c175ce8", "python", "-m", "pip", "check"], "timeout": 60, "docker_cleanup": true}

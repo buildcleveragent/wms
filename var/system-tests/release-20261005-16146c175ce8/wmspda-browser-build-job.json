@@ -1,0 +1,1 @@
+{"name": "wmspda-browser-build", "cwd": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmspda", "command": ["npm", "run", "build:h5"], "env": {"CI": "1", "VITE_API_BASE_URL": "http://127.0.0.1:18081", "npm_config_cache": "/tmp/wms-release-20261005-aohudxd1/npm-cache"}, "timeout": 300}

@@ -106,6 +106,8 @@ def consume_fifo(
     occurred_at=None,
     movement_type=InventoryLayerMovement.MovementType.ISSUE,
     by_user=None,
+    layer_ids=None,
+    exact_container=False,
 ):
     remaining = Decimal(quantity)
     if remaining <= 0:
@@ -124,7 +126,9 @@ def consume_fifo(
         )
         .order_by(F("layer__received_date").asc(nulls_last=True), "layer_id", "id")
     )
-    if container_id is not None:
+    if layer_ids is not None:
+        positions = positions.filter(layer_id__in=layer_ids)
+    if container_id is not None or exact_container:
         positions = positions.filter(container_id=container_id)
     available = sum((row.remaining_qty for row in positions), Decimal("0"))
     if available < remaining:

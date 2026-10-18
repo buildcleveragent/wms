@@ -8,7 +8,7 @@ from django.db import transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
-from allapp.baseinfo.models import Customer, Owner, Supplier
+from allapp.baseinfo.models import Owner, OwnerCustomerBinding, Supplier
 from allapp.billing.models import BillingAccrual
 from allapp.billing.services.ledger import (
     financial_ledger_accruals,
@@ -36,7 +36,6 @@ from .models import (
     SupplierDim,
     WarehouseDim,
 )
-
 
 ZERO = Decimal("0")
 
@@ -103,15 +102,17 @@ def sync_dimensions() -> dict[str, int]:
         )
         counts["products"] += int(changed)
 
-    for customer in Customer.all_objects.all().iterator(chunk_size=1000):
+    for binding in (
+        OwnerCustomerBinding.all_objects.select_related("customer").all().iterator(chunk_size=1000)
+    ):
+        customer = binding.customer
         _, changed = upsert_scd2(
             CustomerDim,
-            {"customer_id": customer.pk},
+            {"customer_id": customer.pk, "owner_id": binding.owner_id},
             {
-                "owner_id": customer.owner_id,
-                "code": customer.code,
+                "code": binding.code,
                 "name": customer.name,
-                "level": str(customer.level or ""),
+                "level": str(binding.level or ""),
             },
         )
         counts["customers"] += int(changed)
@@ -471,7 +472,7 @@ def sync_outbound_facts(queryset=None) -> int:
         owner_dim = _current(OwnerDim, owner_id=order.owner_id)
         warehouse_dim = _current(WarehouseDim, warehouse_id=order.warehouse_id)
         customer_dim = (
-            _current(CustomerDim, customer_id=order.customer_id)
+            _current(CustomerDim, customer_id=order.customer_id, owner_id=order.owner_id)
             if order.customer_id
             else None
         )
@@ -595,7 +596,9 @@ def sync_inventory_transactions(queryset=None) -> int:
             )
         order_type = "OTHER"
         order_model = None
-        if task:
+        if tx.tx_type in {InvTxType.OWNER_XFER_IN, InvTxType.OWNER_XFER_OUT}:
+            order_type = "TRANSFER"
+        elif task:
             if task.task_type == WmsTask.TaskType.RECEIVE:
                 order_type, order_model = "INBOUND", InboundOrder
             elif task.task_type in {

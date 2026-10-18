@@ -16,8 +16,8 @@
         <text>已加载 {{ rows.length }} 条</text>
       </view>
     </view>
-	
-	
+
+
     <BossScopeFilter @change="onScopeChange" />
     <BossDataStatus :meta="meta" :error="dataError" />
 
@@ -130,6 +130,7 @@ import BossDataStatus from '@/components/boss-data-status.vue'
 import { useAuth } from '@/store/auth'
 import { useBossScope } from '@/store/bossScope'
 import { api } from '@/utils/request'
+import { useLatestRequest } from '@/utils/use-latest-request'
 
 const auth = useAuth()
 const bossScope = useBossScope()
@@ -173,49 +174,49 @@ function buildParams() {
 }
 
 
-async function load(reset = false) {
-  if (loading.value) return
+const requests = useLatestRequest(() => bossScope.fingerprint)
+const initialization = useLatestRequest()
 
+async function load(reset = false) {
+  // New filters supersede an in-flight page. Only duplicate append requests are blocked.
+  if (!reset && (loading.value || finished.value)) return
+  const current = requests.begin()
+  const nextPage = reset ? 1 : page.value + 1
+  const params = { ...buildParams(), page: nextPage }
   if (reset) {
     page.value = 1
     rows.value = []
+    total.value = 0
+    meta.value = null
     finished.value = false
   }
-
-  if (finished.value && !reset) return
-
   loading.value = true
   dataError.value = null
-
   try {
-    const res = await api.bossInventoryDetails(buildParams())
+    const res = await api.bossInventoryDetails(params)
+    if (!current()) return
     const list = Array.isArray(res?.results) ? res.results : []
     meta.value = res?.meta || null
-
     total.value = Number(res?.count || 0)
-
-    if (reset) {
-      rows.value = list
-    } else {
-      rows.value = [...rows.value, ...list]
-    }
-
+    rows.value = reset ? list : [...rows.value, ...list]
+    page.value = nextPage
     finished.value = !res?.next_page || rows.value.length >= total.value
   } catch (error) {
+    if (!current()) return
     dataError.value = error
-    rows.value = []
-    total.value = 0
-    finished.value = true
-    console.error('boss inventory detail failed:', error)
+    if (error.kind === 'FORBIDDEN') {
+      rows.value = []
+      total.value = 0
+      meta.value = null
+    }
+    // Keep the last committed page so retry cannot skip a failed append.
+    finished.value = false
   } finally {
-    loading.value = false
-    uni.stopPullDownRefresh()
+    if (current()) { loading.value = false; uni.stopPullDownRefresh() }
   }
 }
 
 function loadMore() {
-  if (loading.value || finished.value) return
-  page.value += 1
   load(false)
 }
 
@@ -249,10 +250,12 @@ onLoad(async (query = {}) => {
   if (query.warehouse !== undefined) bossScope.warehouse = String(query.warehouse || '')
   if (query.owner !== undefined) bossScope.owner = String(query.owner || '')
   if (query.date_from && query.date_to) bossScope.setDates(query.date_from, query.date_to)
+  const current = initialization.begin()
   try {
-    await bossScope.loadContext(auth.user, true)
-    load(true)
+    const applied = await bossScope.loadContext(auth.user, true)
+    if (current() && applied) load(true)
   } catch (error) {
+    if (!current()) return
     dataError.value = error
     rows.value = []
     total.value = 0

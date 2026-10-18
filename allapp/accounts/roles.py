@@ -21,6 +21,7 @@ ROLE_GROUP_TEMPLATES = {
         group_name="WMS::仓库操作员",
         permissions=(
             "accounts.access_warehouse_operations",
+            "outbound.process_pda_return",
             "accounts.receive_without_order",
             "reports.view_warehouse_operations",
             "tasking.view_wmstask",
@@ -43,6 +44,7 @@ ROLE_GROUP_TEMPLATES = {
             "outbound.view_outboundorder",
             "outbound.change_outboundorder",
             "outbound.approve_outbound_as_wh_manager",
+            "outbound.view_assistedownershiptransfer",
             "tasking.view_wmstask",
             "tasking.change_wmstask",
             "tasking.taskconfirm_as_wh_manager",
@@ -83,6 +85,7 @@ ROLE_GROUP_TEMPLATES = {
             "outbound.view_outboundorder",
             "outbound.change_outboundorder",
             "outbound.approve_outbound_as_owner_manager",
+            "outbound.view_assistedownershiptransfer",
         ),
     ),
     UserRoleScope.Role.OWNER_SALESPERSON: RoleGroupTemplate(

@@ -1,0 +1,6 @@
+{
+  "status": "PASS",
+  "readiness_decision_unchanged_after_copy": true,
+  "secret_environment_files_copied": false,
+  "loose_helper_python_files_copied": false
+}

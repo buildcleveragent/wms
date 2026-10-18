@@ -4,15 +4,18 @@ from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import OuterRef, Subquery
 from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 
-from allapp.baseinfo.models import Owner
+from allapp.baseinfo.customer_access import customer_binding
+from allapp.baseinfo.models import Owner, OwnerCustomerBinding
 from allapp.core.admin_base import AuditStampedAdminMixin
 from allapp.core.admin_mixins import HideAuditFieldsMixin, HideAuditInlineMixin
+from allapp.core.admin_tenant import TenantScopedAdminMixin
 from allapp.products.models import Product
 
 from .models import (
@@ -67,6 +70,21 @@ class SaleMiniAdmin(HideAuditFieldsMixin, AuditStampedAdminMixin, admin.ModelAdm
 
     def get_fields(self, request, obj=None):
         return _move_common_fields_to_end(super().get_fields(request, obj))
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if "customer__code" in self.search_fields:
+            binding = OwnerCustomerBinding.all_objects.filter(
+                owner_id=OuterRef("owner_id"), customer_id=OuterRef("customer_id")
+            )
+            qs = qs.annotate(owner_customer_code=Subquery(binding.values("code")[:1]))
+        return qs
+
+    def get_search_fields(self, request):
+        return tuple(
+            "owner_customer_code" if field == "customer__code" else field
+            for field in super().get_search_fields(request)
+        )
 
 
 class SaleMiniInline(HideAuditInlineMixin, admin.TabularInline):
@@ -283,7 +301,7 @@ def _apply_owner_bulk_to_product(form, user, product, config):
 
 
 @admin.register(MiniProgramUser)
-class MiniProgramUserAdmin(SaleMiniAdmin):
+class MiniProgramUserAdmin(TenantScopedAdminMixin, SaleMiniAdmin):
     list_display = ("id", "owner", "customer", "user", "nickname", "phone", "is_active")
     list_filter = ("owner", "is_active")
     search_fields = (
@@ -295,6 +313,19 @@ class MiniProgramUserAdmin(SaleMiniAdmin):
         "user__username",
     )
     raw_id_fields = ("owner", "customer", "user")
+
+    def get_form(self, request, obj=None, **kwargs):
+        base_form = super().get_form(request, obj, **kwargs)
+
+        class CustomerBindingForm(base_form):
+            def clean(self):
+                data = super().clean()
+                owner, customer = data.get("owner"), data.get("customer")
+                if owner and customer and not customer_binding(customer, owner.pk):
+                    self.add_error("customer", "客户必须已关联当前货主且关联有效。")
+                return data
+
+        return CustomerBindingForm
 
 
 @admin.register(MiniCustomerAddress)

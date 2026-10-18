@@ -9,7 +9,7 @@
   size: A4;
   margin: 18mm 16mm 19mm 16mm;
   @top-left { content: string(document-title); color: #667085; font-size: 8.2pt; }
-  @top-right { content: "V2.1 · 2026-09-07"; color: #667085; font-size: 8.2pt; }
+  @top-right { content: "V2.2 · 2026-10-17"; color: #667085; font-size: 8.2pt; }
   @bottom-center { content: "第 " counter(page) " 页 / 共 " counter(pages) " 页"; color: #7a8493; font-size: 8.2pt; }
 }
 @page cover {
@@ -84,8 +84,8 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <h1>金桥融通WMS货主业务员操作手册</h1>
 <div class="lead">岗位操作 · 权限边界 · 异常处理</div>
 <div class="cover-meta">
-<div>文档版本：V2.1</div>
-<div>适用基线：2026-09-07 当前工作区</div>
+<div>文档版本：V2.2</div>
+<div>适用基线：2026-10-17 当前工作区</div>
 <div>文档状态：交付版</div>
 <div>主要读者：货主业务员</div>
 </div>
@@ -93,8 +93,8 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 </section>
 <section class="toc"><h1>目录</h1><ul><li class="level-2"><a href="#section-1-使用范围">使用范围</a></li><li class="level-2"><a href="#section-2-登录-账号与通用安全">登录、账号与通用安全</a></li><li class="level-3"><a href="#section-3-首次登录">首次登录</a></li><li class="level-3"><a href="#section-4-登录失效与切换账号">登录失效与切换账号</a></li><li class="level-3"><a href="#section-5-账号和数据范围">账号和数据范围</a></li><li class="level-3"><a href="#section-6-通用操作原则">通用操作原则</a></li><li class="level-3"><a href="#section-7-修改密码与退出">修改密码与退出</a></li><li class="level-2"><a href="#section-8-角色职责与权限">角色职责与权限</a></li><li class="level-2"><a href="#section-9-首页和开单准备">首页和开单准备</a></li><li class="level-2"><a href="#section-10-创建-保存和提交订单">创建、保存和提交订单</a></li><li class="level-2"><a href="#section-11-防重复提交和冲突处理">防重复提交和冲突处理</a></li><li class="level-2"><a href="#section-12-撤回-退回修改和重新提交">撤回、退回修改和重新提交</a></li><li class="level-2"><a href="#section-13-一件代发-Excel-导入">一件代发 Excel 导入</a></li><li class="level-2"><a href="#section-14-库存-订单和报表查询">库存、订单和报表查询</a></li><li class="level-2"><a href="#section-15-业务员日结检查表">业务员日结检查表</a></li><li class="level-2"><a href="#section-16-常见状态与控制点">常见状态与控制点</a></li><li class="level-2"><a href="#section-17-异常处理与问题上报">异常处理与问题上报</a></li><li class="level-3"><a href="#section-18-无法登录或菜单缺失">无法登录或菜单缺失</a></li><li class="level-3"><a href="#section-19-数据为空或范围不正确">数据为空或范围不正确</a></li><li class="level-3"><a href="#section-20-网络超时或重复提交提示">网络超时或重复提交提示</a></li><li class="level-3"><a href="#section-21-打印失败或打印页过期">打印失败或打印页过期</a></li><li class="level-3"><a href="#section-22-移库-补货过账失败">移库、补货过账失败</a></li><li class="level-3"><a href="#section-23-库存-任务或账单不一致">库存、任务或账单不一致</a></li><li class="level-3"><a href="#section-24-问题上报模板">问题上报模板</a></li><li class="level-2"><a href="#section-25-日常自检与培训验收">日常自检与培训验收</a></li><li class="level-2"><a href="#section-26-专项手册与边界">专项手册与边界</a></li><li class="level-2"><a href="#section-27-文档修订记录">文档修订记录</a></li></ul></section>
 <div class="document-note">本手册仅描述当前代码中具有有效权限、页面和业务闭环的功能。</div>
-<p><strong>文档版本：</strong> V2.1</p>
-<p><strong>适用系统版本：</strong> 2026-09-07 当前工作区业务基线</p>
+<p><strong>文档版本：</strong> V2.2</p>
+<p><strong>适用系统版本：</strong> 2026-10-17 当前工作区业务基线</p>
 <p><strong>适用对象：</strong> 货主业务员</p>
 <p><strong>正式权限组：</strong> <code>WMS::货主业务员</code></p>
 <p><strong>主要入口：</strong> 货主业务端（wmsownersale）</p>
@@ -183,6 +183,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>选择客户后再选品；更换仓库或客户时重新检查购物车上下文。</li>
 <li>搜索商品名称、货主商品编码、仓库SKU编码或条码，核对包装单位、基本数量、价格和所选仓库可用库存。</li>
 </ol>
+<p>同一终端客户可以关联多个货主，但客户编号、负责业务员和配送资料按当前货主分别维护。只能选择与当前货主有效关联且符合本人业务范围的客户；相同客户名称或联系方式不能作为跨货主开单依据。查不到客户时交管理员检查关联和业务员配置，不新建重复档案绕过限制。<code>CASH</code> 也按当前货主的客户关联编号识别。</p>
 <h2 id="section-10-创建-保存和提交订单">创建、保存和提交订单</h2>
 <ol>
 <li>选择已授权仓库和正确客户。</li>
@@ -333,6 +334,11 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">移库任务处于异常执行状态</td>
 <td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">操作员说明现场情况，管理员处理原因后决定恢复或作废</td>
 </tr>
+<tr>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">退货已冲销 / REVERSED</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">PDA 退货整单已恢复原库存维度</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">原退货记录保留；现场发现破损仍恢复为破损，不再重复补库存</td>
+</tr>
 </tbody>
 </table>
 <p>关键控制点：</p>
@@ -344,6 +350,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>移库和补货需要同时看任务状态、行完成量和过账状态；分次扫描只累计执行数量，库存移动以整任务过账成功为准。</li>
 <li>移库异常执行状态与过账失败不是同一件事；“恢复”用于异常任务，“重试过账”用于过账失败，均由有权限的仓库管理员处理。</li>
 <li>POS 销售状态和班次状态按《POS 使用手册》核对；现场还款或打印完成情况不能由普通仓库任务状态推断。</li>
+<li>同名状态必须结合单据类型解释：PDA 退货 <code>COMPLETED</code> 已直接扣库；代办货权转移 <code>RESERVED</code> 是待转货，<code>POSTED</code> 是已转货并销售出库。不能套用普通任务的“已完成、待过账”结论。</li>
 </ul>
 <hr/>
 <h2 id="section-17-异常处理与问题上报">异常处理与问题上报</h2>
@@ -357,6 +364,8 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>移库、补货扫描结果未确认时，保留当前页的原库位、商品、容器、序列号和数量再试；提示“已确认此前扫描记录”表示恢复了原结果，不能再次搬货。离开页面后先查原任务再决定下一步。</li>
 <li>收货与上架使用不同数量口径：普通商品有订单收货登记当前行累计数量，上架登记本次增量。重试前不要把累计数量当作新增数量再次录入。</li>
 <li>POS 还款结果未确认时，回到原收银员、原仓库和原客户核对并恢复该笔还款；不能更换客户或金额当作新收款。具体步骤见《POS 使用手册》。</li>
+<li>PDA 退货出库出现“继续确认结果”时，使用原账号、原仓库恢复原请求；冲销待确认也不能另建退货单抵消。跨货主代办同时按销售单号、转货单号和任务号查原结果。</li>
+<li>Android 拣货、收银或 POS 退货出现待确认提示时，保留原设备本地数据，使用页面提供的原请求恢复按钮。不要清应用数据、修改原请求或换账号继续办理，具体区别见《Android 移动端使用手册》和《POS 使用手册》。</li>
 </ul>
 <h3 id="section-21-打印失败或打印页过期">打印失败或打印页过期</h3>
 <ol>
@@ -395,6 +404,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <h2 id="section-26-专项手册与边界">专项手册与边界</h2>
 <ul>
 <li>POS 收银、赊账、客户还款、退货、打印、交班和对账参见《POS 使用手册》；只有取得相应 POS 权限的账号才能使用。</li>
+<li>仓库向货主/原供应商退货参见《PDA 退货出库使用手册》；Android 现场操作与原请求恢复参见《Android 移动端使用手册》。功能以各客户端已注册页面和实际权限为准。</li>
 <li>面向终端客户的商城参见《商城小程序使用教程》；商城买家不是本手册六类 WMS 后台角色。</li>
 <li>服务器部署、数据库备份恢复、域名证书、服务启停和版本回滚不属于普通用户手册。</li>
 <li>没有已注册页面、有效权限和可验证业务闭环的功能，不作为正式可用能力发布。</li>
@@ -409,6 +419,11 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 </tr>
 </thead>
 <tbody>
+<tr>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">V2.2</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">2026-10-17</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">补齐共享客户、代办转货、PDA 退货出库、商品导入自动收货与导出；区分 Android/PDA 收银库存和恢复能力，更新老板筛选及计费口径</td>
+</tr>
 <tr>
 <td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">V2.1</td>
 <td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">2026-09-07</td>

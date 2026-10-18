@@ -97,6 +97,8 @@ class AssistedIdempotencyFingerprintTests(SimpleTestCase):
                 order_no="CK-1",
                 submit_status="SUBMITTED",
                 approval_status="WHS_APPROVED",
+                owner_id=11,
+                owner=SimpleNamespace(pk=11, name="Owner", code="OWN"),
             ),
             SimpleNamespace(id=2, task_no="JH-1", status="RELEASED"),
             idempotent=True,

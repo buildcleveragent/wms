@@ -1,0 +1,578 @@
+[
+  {
+    "gate_id": "test-coordination",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "PASS",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "backend/functional-tests.json",
+        "sha256": "8eecf91699ec677df11f1ee7c1d3cbbdb42926f05763a01b2ef7b5f3165098d5"
+      },
+      {
+        "path": "backend/functional.xml",
+        "sha256": "d243f8823985f6e22f61e608b5613297a820751d1e24d28cfdc19ef2e4084f30"
+      }
+    ],
+    "note": "",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "historical-evidence-review",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "PASS",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "historical-review.json",
+        "sha256": "21eff44b52eeecda1960551d7fcd7626e017726aed394bb472aa08b7add6e9a8"
+      }
+    ],
+    "note": "Historical evidence review is separate from current candidate execution.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "runtime-smoke",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "FAIL",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "image-python/output.log",
+        "sha256": "f04c92fe8f280ff5156fa251725e3336353dfa423ea36e04a724aa54b1cc9bda"
+      },
+      {
+        "path": "image-dependencies/output.log",
+        "sha256": "9261363b733079a641c2e4cc9bc46ffa1d8336945a87f807b6cf68847dbc9b09"
+      },
+      {
+        "path": "image-source/output.log",
+        "sha256": "a5421c1eb41bf04c2bdd9e8332aaf5a1c26904d947c0e6e7716d4d5972a8ef17"
+      },
+      {
+        "path": "image-pdf-native/output.log",
+        "sha256": "a69138066fb828372ec3b832cb8705e60dd7fa8537788074e340f4c4ad255967"
+      },
+      {
+        "path": "image-static-volumes/output.log",
+        "sha256": "100f7836a766e024914744429ca3fad3964db6b73f3caa493ff47b95d03ea9f0"
+      },
+      {
+        "path": "static-volume-finding.json",
+        "sha256": "f5b625fb719fef3646df02d38f2bc4e03a0ada4bd3e2ca5ae050abfdbebc02ec"
+      },
+      {
+        "path": "image-http-health.json",
+        "sha256": "a5ab2af4b2394370088cbfedbb2a0c0dd72f9c6f0159857f1bce473ed6d70be2"
+      },
+      {
+        "path": "image-http-health/output.log",
+        "sha256": "1044cfd2e0b1c5f8564615b838e6682397eaa95936aae005acb5910426df5550"
+      },
+      {
+        "path": "runtime-image.json",
+        "sha256": "ad38c4728b80820196d891cd84b2f1bb69f6b38d8e5335d34f582a299ab7c5f0"
+      }
+    ],
+    "note": "",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "dependency-audit",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "FAIL",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "python-audit.json",
+        "sha256": "57b3053e412ea0384cee2e41456499c0ce54502bcdafff967ba0887e4a6deca3"
+      },
+      {
+        "path": "lock-results-bounded.json",
+        "sha256": "2318d2ae15d072dc21cc5654f29c3a67fb944c3a9ea98838ee6fc6b38b2d638b"
+      },
+      {
+        "path": "python-audit-retry/output.log",
+        "sha256": "8f814b0df6fc922f0a061492b20c1aa8c596d596aec502b819341fac771fd2ba"
+      },
+      {
+        "path": "wmspda-audit/output.log",
+        "sha256": "ec8a5acde3207afeb29ddd0059e928174dd1b2c93578ab6a97dd4dc9be660ea7"
+      },
+      {
+        "path": "wmsandroid-audit/output.log",
+        "sha256": "ec8a5acde3207afeb29ddd0059e928174dd1b2c93578ab6a97dd4dc9be660ea7"
+      },
+      {
+        "path": "wmsownersale-audit/output.log",
+        "sha256": "86963424019c833b121d4608a8f261df36f60c23179c382e36bc68d827aa142a"
+      },
+      {
+        "path": "wmsbossbilling-audit/output.log",
+        "sha256": "0599db12ca4f09bec83e0e92c985849608b2e7e4dd8d7bb49a57b7042d77050d"
+      },
+      {
+        "path": "sales-miniapp-audit/output.log",
+        "sha256": "6e2102d0907b7ec6dda0bfb52767a8d05333b786332f82263ae95680548514b9"
+      }
+    ],
+    "note": "Advisory matches are scanner results, not confirmed exploitation paths. Lock reproduction timeouts are recorded separately.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "image-security",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "FAIL",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "trivy-image.json",
+        "sha256": "ada87c728842646fe97b49b98d2aced3fe76dcb520c1a52213473100e7f1afca"
+      },
+      {
+        "path": "image-security/output.log",
+        "sha256": "9d6733a56aba20b0f2b2629a4d5a2815a9920a52618472cc58116bd6c3564bae"
+      },
+      {
+        "path": "trivy-cache/db/metadata.json",
+        "sha256": "97b4e78feb0221b05e697a0dbcc6b4ec1e58b00d5af9b48289170bb6d332779a"
+      },
+      {
+        "path": "image-evidence-binding.json",
+        "sha256": "f372ffcf2f49de756cc4e25347cd8c21a1999eaee599015d4d47ff6df4f771e7"
+      }
+    ],
+    "note": "",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "business-matrix",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "PASS",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "business-matrix.json",
+        "sha256": "059d53878f68963372b254959650500d05b93466a846473e92825eea5977a8f6"
+      },
+      {
+        "path": "backend/functional-tests.json",
+        "sha256": "8eecf91699ec677df11f1ee7c1d3cbbdb42926f05763a01b2ef7b5f3165098d5"
+      },
+      {
+        "path": "backend/functional.xml",
+        "sha256": "d243f8823985f6e22f61e608b5613297a820751d1e24d28cfdc19ef2e4084f30"
+      },
+      {
+        "path": "backend/migrations-tests.json",
+        "sha256": "61f83fa151d4f07802c36c343ec54b8c3f48a942b8fad35cea2aede256f7c1cf"
+      },
+      {
+        "path": "backend/migrations.xml",
+        "sha256": "f5696e14e998133a89ff5494b2e632e16c96f38695a7a5cde0c537ad42f534ef"
+      },
+      {
+        "path": "backend/migrations-tests.pos-migration.log",
+        "sha256": "6a50e82b1dd90eb74de9afa3c54ee67e11002a2713050ae51f5680e7a9303f60"
+      }
+    ],
+    "note": "",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "migration-clean",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "PASS",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "database-preflight.json",
+        "sha256": "151dfb6113f2a973dd1163cd46dd94dd9a132e2a2eeccb4241b58bc6dcee5cb0"
+      },
+      {
+        "path": "schema/preflight-manifest.json",
+        "sha256": "a4ca443cf30815228389f14c89b88cee84066905a6be4616ce41124901e5b5c7"
+      },
+      {
+        "path": "migration-progress.json",
+        "sha256": "34ff654e42fb5b6ec456aa387a31a184f967fc4c2ac119184e65e1d3a50b7dde"
+      },
+      {
+        "path": "backend/backend-manifest.json",
+        "sha256": "30a3d09a9c6088cc5d6253c99de898c6ac566ed82f191121668b20b13c8704fd"
+      }
+    ],
+    "note": "Main wms_db_test recreated once for the requested release gate, with all real migrations. Later tests reuse it; dedicated historical migration scenarios use isolated MySQL instances.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "migration-nonempty-pos",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "PASS",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "backend/migrations-tests.json",
+        "sha256": "61f83fa151d4f07802c36c343ec54b8c3f48a942b8fad35cea2aede256f7c1cf"
+      },
+      {
+        "path": "backend/migrations.xml",
+        "sha256": "f5696e14e998133a89ff5494b2e632e16c96f38695a7a5cde0c537ad42f534ef"
+      },
+      {
+        "path": "backend/migrations-tests.pos-migration.log",
+        "sha256": "6a50e82b1dd90eb74de9afa3c54ee67e11002a2713050ae51f5680e7a9303f60"
+      }
+    ],
+    "note": "",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "backend-functional",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "PASS",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "backend/functional-tests.json",
+        "sha256": "8eecf91699ec677df11f1ee7c1d3cbbdb42926f05763a01b2ef7b5f3165098d5"
+      },
+      {
+        "path": "backend/functional.xml",
+        "sha256": "d243f8823985f6e22f61e608b5613297a820751d1e24d28cfdc19ef2e4084f30"
+      }
+    ],
+    "note": "",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "coverage",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "PASS",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "coverage-gate-summary.json",
+        "sha256": "6658b272f8f0f5a171383b39326975067652e4ca44a53e16647bdaf6208b5ade"
+      },
+      {
+        "path": "backend/coverage.json",
+        "sha256": "b84266b214ee2358493af1865fd5c3c9a0fc128a476302cbcd79f64e94cf00aa"
+      }
+    ],
+    "note": "",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "frontend",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "BLOCKED_CONFIG",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "wmspda-unit/process.json",
+        "sha256": "0d628d108147fe8301d951fb046a6c6f73bea492d1f433b348a7fbfae79fa639"
+      },
+      {
+        "path": "wmsandroid-unit/process.json",
+        "sha256": "208e47381f063ee2d4529316b48043c4d6ef9aa8ce8865be9349ad199df0eef8"
+      },
+      {
+        "path": "wmsownersale-unit/process.json",
+        "sha256": "0309ad4663fd27d7700c39f2b1fd5c5b7837d313de4f3ccf19a7c4041355c474"
+      },
+      {
+        "path": "wmsbossbilling-unit/process.json",
+        "sha256": "5a8795593481c25146f12e42d0a5537fc815c33669bf1311202a26c3f5f4e642"
+      },
+      {
+        "path": "mall-unit/process.json",
+        "sha256": "e3ed1adbec6b8b0ee08e0ce0f9a8f35d9509519ffe9709880cb0278ef51ee7f0"
+      },
+      {
+        "path": "wmspda-build-h5/process.json",
+        "sha256": "f8256462b8627c244d28ad6c10ef2857dd945702c37063ddbaba0328e3e8ddd6"
+      },
+      {
+        "path": "wmsandroid-build-h5/process.json",
+        "sha256": "c307b60261a9a141654af48a2bcc42eb71e62a31e94f7a1991c58d185ac7aa75"
+      },
+      {
+        "path": "wmsownersale-build-h5/process.json",
+        "sha256": "0435eadd8370d359d6220395c1bc14af6f0a48b49989d89789986ef66c6bf86e"
+      },
+      {
+        "path": "wmsbossbilling-build-h5/process.json",
+        "sha256": "a556cd01b25bcf7970c41754db0efc8da48670b4cccb254217c3d666810d8117"
+      },
+      {
+        "path": "sales-miniapp-build-h5/process.json",
+        "sha256": "42e4306074bdbef5cdcae8d2a966230b6f3ec58cc8d896f280e0ac763a001748"
+      },
+      {
+        "path": "wmsandroid-build-app/process.json",
+        "sha256": "0ccc9be7aa6f28453ae3b4a6c48d2d1a8d7cd5cb93a86cf324ac4319a19e6b13"
+      },
+      {
+        "path": "wmspda-e2e/process.json",
+        "sha256": "f66304ce91471908378a2f98649988fa55ccf542a453581b1b8f20f33313f044"
+      },
+      {
+        "path": "wmsandroid-e2e/process.json",
+        "sha256": "d29952db34e8f9ce4f19892101b49fd5b5158a58515658f975e43c56cd94c151"
+      },
+      {
+        "path": "boss-built-final/process.json",
+        "sha256": "900a4c1709c4290e54e316b324667566cb56b81501f01c7181ad24d737a047f6"
+      },
+      {
+        "path": "wmsownersale-build-mp-weixin/process.json",
+        "sha256": "2ab37b6934ad1ace0d225d309410ec86efcd5ba4e3b7ef5c3fa48a4c665623f9"
+      },
+      {
+        "path": "wmsbossbilling-build-mp-weixin/process.json",
+        "sha256": "515c9bee93dc3c1cba4569d99a5bdbdd388013db0f81dc4856b777fff0da48fd"
+      },
+      {
+        "path": "sales-miniapp-build-mp-weixin/process.json",
+        "sha256": "d1b3fbb9278c3389b5aa7c2af35ac95a600fc97008ad73dbc262e354618d22ee"
+      },
+      {
+        "path": "boss-browser-diagnosis.json",
+        "sha256": "c76201b19d28d8f7bf51406f336c89b3b5f82a53bbf3929545a9ead788322675"
+      }
+    ],
+    "note": "Mini-program release builds require approved API URL/AppIDs. Browser harness corrections and failed attempts retained separately.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "real-browser",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "PASS",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "real-browser-tests.json",
+        "sha256": "681fbe812dd451308347e21739fe2456722100d52811bd8e4233e37faf67f292"
+      },
+      {
+        "path": "real-browser.xml",
+        "sha256": "3dc4af882a549b83d5411db2266693585dbe30c4561691472531a95577a6f59c"
+      },
+      {
+        "path": "real-browser/output.log",
+        "sha256": "261b13f0d81f6fe55de5ed947b7df69d7015b33fff17c780b2bd9008c0739b96"
+      },
+      {
+        "path": "real-browser-summary.json",
+        "sha256": "304ecb806f0ef363d076a775a30efeb827b3fc62ce5c6791b9999bb3da34bcb1"
+      }
+    ],
+    "note": "Real local Django/MySQL API, synthetic test records, isolated frontend test builds; not production endpoints.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "pdf-acceptance",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "PASS",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "backend/functional-tests.json",
+        "sha256": "8eecf91699ec677df11f1ee7c1d3cbbdb42926f05763a01b2ef7b5f3165098d5"
+      },
+      {
+        "path": "backend/functional.xml",
+        "sha256": "d243f8823985f6e22f61e608b5613297a820751d1e24d28cfdc19ef2e4084f30"
+      }
+    ],
+    "note": "",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "pdf-resource-register",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "PASS",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "pdf-measurements/measurement.json",
+        "sha256": "43e067ecbfd9e89df7fd71b82351a4d3862761897dc1d8af1d62e546ed5935b0"
+      }
+    ],
+    "note": "A completed measurement/register does not close R-PDF-RESOURCE or authorize release.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "readiness-tool",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "PASS",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "backend/functional-tests.json",
+        "sha256": "8eecf91699ec677df11f1ee7c1d3cbbdb42926f05763a01b2ef7b5f3165098d5"
+      },
+      {
+        "path": "backend/functional.xml",
+        "sha256": "d243f8823985f6e22f61e608b5613297a820751d1e24d28cfdc19ef2e4084f30"
+      }
+    ],
+    "note": "",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "external-gates-register",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "PASS",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "external-gates-register.json",
+        "sha256": "9426a0815f2b3f93306c80501265c9be2d1d4b7a839c7434282e40a4548bf371"
+      }
+    ],
+    "note": "Outstanding gates explicitly registered; their acceptance is not implied.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "pdf-resource-release-decision",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "NOT_RUN",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "external-gates-register.json",
+        "sha256": "9426a0815f2b3f93306c80501265c9be2d1d4b7a839c7434282e40a4548bf371"
+      }
+    ],
+    "note": "Pending identified release-security assessment and release-manager decision for R-PDF-RESOURCE; fresh local measurements do not implement production controls.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "staging-rehearsal-60m",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "NOT_RUN",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "external-gates-register.json",
+        "sha256": "9426a0815f2b3f93306c80501265c9be2d1d4b7a839c7434282e40a4548bf371"
+      }
+    ],
+    "note": "No designated staging candidate deployment or 60-minute observation evidence supplied.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "capacity",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "NOT_RUN",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "external-gates-register.json",
+        "sha256": "9426a0815f2b3f93306c80501265c9be2d1d4b7a839c7434282e40a4548bf371"
+      }
+    ],
+    "note": "No approved production-like workload, capacity targets, deployment limits or measured load-test evidence supplied.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "disaster-recovery",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "NOT_RUN",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "external-gates-register.json",
+        "sha256": "9426a0815f2b3f93306c80501265c9be2d1d4b7a839c7434282e40a4548bf371"
+      }
+    ],
+    "note": "No approved staging backup/restore/rollback exercise supplied; automated isolated DB tests are not an operational recovery signoff.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "wechat-payment",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "NOT_RUN",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "external-gates-register.json",
+        "sha256": "9426a0815f2b3f93306c80501265c9be2d1d4b7a839c7434282e40a4548bf371"
+      }
+    ],
+    "note": "No authorized real merchant/sandbox credentials and external payment/refund confirmation supplied; cryptographic and service tests are separate.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "signed-apk-devices",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "NOT_RUN",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "external-gates-register.json",
+        "sha256": "9426a0815f2b3f93306c80501265c9be2d1d4b7a839c7434282e40a4548bf371"
+      }
+    ],
+    "note": "App bundle compilation is separate from signed APK installation and physical scanner/printer/NFC acceptance.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "manual-196",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "NOT_RUN",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "external-gates-register.json",
+        "sha256": "9426a0815f2b3f93306c80501265c9be2d1d4b7a839c7434282e40a4548bf371"
+      }
+    ],
+    "note": "No current candidate-matched human acceptance records for the required 196 cases supplied.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "release-approval",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "NOT_RUN",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "external-gates-register.json",
+        "sha256": "9426a0815f2b3f93306c80501265c9be2d1d4b7a839c7434282e40a4548bf371"
+      }
+    ],
+    "note": "No release-manager approval supplied; user asked to run gates, not deploy.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "deployed-artifact-identity",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "NOT_RUN",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "external-gates-register.json",
+        "sha256": "9426a0815f2b3f93306c80501265c9be2d1d4b7a839c7434282e40a4548bf371"
+      }
+    ],
+    "note": "No deployment performed in this task.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  },
+  {
+    "gate_id": "production-observation-60m",
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "status": "NOT_RUN",
+    "finished_at": "2026-10-05T05:36:40.411844+00:00",
+    "artifacts": [
+      {
+        "path": "external-gates-register.json",
+        "sha256": "9426a0815f2b3f93306c80501265c9be2d1d4b7a839c7434282e40a4548bf371"
+      }
+    ],
+    "note": "No production deployment or observation performed in this task.",
+    "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  }
+]

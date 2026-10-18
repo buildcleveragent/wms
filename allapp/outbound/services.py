@@ -580,6 +580,11 @@ def allocate_inventory(order, by_user=None, allow_backorder=True):
     ctx, ctx_text = build_log_payload(order=order, user=by_user)
     logger.info("outbound.allocate_inventory.begin %s", ctx_text, extra=ctx)
     task = _get_or_create_reserved_task(order, by_user=by_user)
+    from .ownership import reserve_transfer_inventory, transfer_for_order
+
+    transfer = transfer_for_order(order)
+    if transfer:
+        return reserve_transfer_inventory(order, task, transfer, actor=by_user)
     existing_lines = (
         WmsTaskLine.objects.select_for_update()
         .filter(task=task)
@@ -876,8 +881,21 @@ def create_warehouse_assisted_order(*, validated_data, by_user):
     OutboundOrderLine = OutboundOrder._meta.apps.get_model("outbound", "OutboundOrderLine")
     owner = validated_data["owner"]
     require_assisted_owner_warehouse(owner, warehouse_id)
+    source_owner = owner
+    new_owner = validated_data.get("new_owner")
+    if new_owner:
+        require_assisted_owner_warehouse(new_owner, warehouse_id)
+        owner = new_owner
     customer = validated_data["customer"]
     items = validated_data["items"]
+    from allapp.baseinfo.customer_access import customer_binding
+
+    from .ownership import create_transfer, create_transfer_line, prepare_transfer_items
+
+    if not customer_binding(customer, owner.pk):
+        raise ValidationError("客户未关联最终销售货主。")
+    if new_owner:
+        items = prepare_transfer_items(items, source_owner, new_owner, actor=by_user)
     now = timezone.now()
 
     order = OutboundOrder.objects.create(
@@ -905,9 +923,10 @@ def create_warehouse_assisted_order(*, validated_data, by_user):
         updated_by=by_user,
     )
 
+    transfer = create_transfer(order, source_owner, actor=by_user) if new_owner else None
     for item in items:
         product = item["product"]
-        OutboundOrderLine.objects.create(
+        sales_line = OutboundOrderLine.objects.create(
             order=order,
             product=product,
             base_uom=product.base_uom,
@@ -921,6 +940,8 @@ def create_warehouse_assisted_order(*, validated_data, by_user):
             created_by=by_user,
             updated_by=by_user,
         )
+        if transfer:
+            create_transfer_line(transfer, sales_line, item, actor=by_user)
 
     task = approve_and_release_order(
         order,
@@ -1516,6 +1537,11 @@ def unallocate_for_order(order, *, by_user=None) -> Decimal:
     ctx, ctx_text = build_log_payload(order=order)
     logger.info("outbound.unallocate.begin %s", ctx_text, extra=ctx)
     _validate_allocation_can_be_released(order)
+    from .ownership import release_transfer_inventory, transfer_for_order
+
+    transfer = transfer_for_order(order)
+    if transfer:
+        return release_transfer_inventory(order, transfer, actor=by_user)
     tasks = (
         WmsTask.objects.select_for_update()
         .filter(task_type=TASK_TYPE_PICK)

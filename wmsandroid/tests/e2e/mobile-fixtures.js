@@ -41,6 +41,9 @@ export const product = {
   price: '5.80',
   min_price: '5.80',
   available_qty: '120.000',
+  base_unit: { code: 'EA', name: '盒' },
+  matched_barcode: { package_id: null, label: '盒', multiplier: 1, code_type: 'UNIT' },
+  barcode_error: '',
   unit_options: [
     { kind: 'base', package_id: null, label: '盒', multiplier: 1, barcode: '690000000001' },
     { kind: 'package', package_id: 22, label: '箱', multiplier: 12, barcode: 'CASE-690000000001' },
@@ -54,7 +57,11 @@ export async function installLoggedInMocks(page, overrides = {}) {
     if (message.type() === 'error') runtimeErrors.push(message.text())
   })
   await page.addInitScript(() => {
-    localStorage.setItem('access', 'e2e-access')
+    // Seed one login, without silently logging back in after a 401/reLaunch.
+    if (!sessionStorage.getItem('mobile-test-login-seeded')) {
+      localStorage.setItem('access', 'e2e-access')
+      sessionStorage.setItem('mobile-test-login-seeded', '1')
+    }
   })
   await page.route('http://127.0.0.1:8001/api/**', async (route) => {
     const request = route.request()

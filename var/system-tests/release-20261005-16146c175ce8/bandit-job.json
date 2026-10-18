@@ -1,0 +1,1 @@
+{"name": "bandit", "command": ["/wms/.venv/bin/python", "-m", "bandit", "-r", "allapp/", "-ll", "-x", "allapp/*/migrations/*,allapp/*/test*.py,allapp/*/tests.py", "-f", "json", "-o", "/tmp/wms-release-20261005-aohudxd1/bandit.json"], "timeout": 180}

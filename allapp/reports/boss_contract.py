@@ -6,10 +6,43 @@ from decimal import Decimal
 
 from django.db.models import Count, Sum
 from django.utils import timezone
-
+from django.utils.dateparse import parse_date
 
 ZERO_MONEY = Decimal("0.00")
 ZERO_QTY = Decimal("0.0000")
+
+
+def parse_boss_date_range(raw_from=None, raw_to=None, *, today=None):
+    """Validate supplied dates before using either to derive a default."""
+    if today is None:
+        now = timezone.now()
+        today = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
+
+    def parsed(value, name, default):
+        if value is None or value == "":
+            return default
+        if not isinstance(value, str):
+            raise ValueError(f"{name} must be YYYY-MM-DD.")
+        value = value.strip()
+        if not value:
+            return default
+        try:
+            result = parse_date(value)
+        except ValueError:
+            result = None
+        if result is None:
+            raise ValueError(f"{name} must be YYYY-MM-DD.")
+        return result
+
+    date_to = parsed(raw_to, "date_to", today)
+    date_from = parsed(raw_from, "date_from", date_to.replace(day=1))
+    if date_from > date_to:
+        raise ValueError("date_from cannot be after date_to.")
+    if date_to > today:
+        raise ValueError("date_to cannot be after today.")
+    if (date_to - date_from).days > 366:
+        raise ValueError("date range cannot exceed 367 days.")
+    return date_from, date_to
 
 
 def normalize_currency(value) -> str:
@@ -102,9 +135,7 @@ def build_meta(*, scope: dict, warnings=None, unavailable: bool = False):
     return {
         "generated_at": timezone.now(),
         "data_status": data_status,
-        "scope_fingerprint": hashlib.sha256(
-            canonical_scope.encode("utf-8")
-        ).hexdigest()[:20],
+        "scope_fingerprint": hashlib.sha256(canonical_scope.encode("utf-8")).hexdigest()[:20],
         "warnings": warning_rows,
     }
 

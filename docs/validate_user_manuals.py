@@ -33,6 +33,8 @@ from PIL import Image
 
 SPECIALIST_GUIDES = (
     "pos_user_manual.md",
+    "pda-return-user-guide.md",
+    "android-user-guide.md",
     "sales-miniapp-user-guide.md",
     "billing_services_guide.md",
 )

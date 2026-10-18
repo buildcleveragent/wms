@@ -1,0 +1,1 @@
+{"name": "pdf-resource", "command": ["/wms/.venv/bin/python", "scripts/measure_pdf_resource.py", "--output", "/tmp/wms-release-20261005-aohudxd1/pdf-measurements"], "env": {"APP_ENV": "test", "DB_NAME": "wms_db_test", "DB_TEST_NAME": "wms_db_test"}, "timeout": 400}

@@ -5,6 +5,8 @@
 </template>
 
 <script>
+import { getStoredToken } from './utils/request'
+
 export default {
   data() {
     return {
@@ -22,7 +24,7 @@ export default {
         return
       }
       this.bootRedirectDone = true
-      if (current !== 'pages/login') {
+      if (current !== 'pages/login' && !getStoredToken()) {
         uni.reLaunch({ url: '/pages/login' })
       }
     },

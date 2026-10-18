@@ -369,6 +369,44 @@ def _resolved_scan_payload(
     }
 
 
+def _replay_pick_scan(task, barcode, qty, location_id, user_id, client_seq):
+    """Recover an acknowledged scan from its stored semantics, without another write."""
+    if task.task_type != WmsTask.TaskType.PICK or not client_seq:
+        return None
+    scans = TaskScanLog.objects.filter(
+        task_id=task.id,
+        barcode=barcode,
+        qty_aux=_q3(qty),
+        by_user_id=user_id,
+        status=TaskScanLog.ScanStatus.OK,
+        task_line__isnull=False,
+    ).select_related("task_line")
+    if location_id is not None:
+        scans = scans.filter(location_id=location_id)
+    for scan in scans:
+        if scan.fp != _compute_fp(
+            task.id, barcode, _q3(scan.qty_base_delta), scan.location_id, user_id, client_seq
+        ):
+            continue
+        return {
+            "idempotent": True,
+            "line_id": scan.task_line_id,
+            "qty_done": scan.task_line.qty_done,
+            "scan_id": scan.id,
+            "resolved": _resolved_scan_payload(
+                product_id=scan.product_id,
+                product_package_id=scan.product_package_id,
+                code_type=scan.code_type,
+                matched_fields=scan.matched_fields,
+                uom_code=scan.uom_code,
+                uom_name=scan.uom_name,
+                pack_qty=scan.pack_qty,
+                effective_qty=scan.qty_base_delta,
+            ),
+        }
+    return None
+
+
 @transaction.atomic
 def scan_task(
     task_id: int,
@@ -387,6 +425,9 @@ def scan_task(
 
         validate_pick_task_sale_mini_payment(task_scope)
     task = WmsTask.objects.select_for_update().get(id=task_id)
+    replay = _replay_pick_scan(task, barcode, qty, location_id, user_id, client_seq)
+    if replay is not None:
+        return replay
     if task.status in ("CANCELLED", "COMPLETED"):
         raise ValidationError("任务当前状态不允许扫码。")
     if task.status not in ("RELEASED", "IN_PROGRESS", "RESERVED"):
@@ -396,7 +437,16 @@ def scan_task(
 
     # 2) 解析条码
     resolve = _resolver()
-    r: Dict[str, Any] = resolve(task.owner_id, barcode) or {}
+    from allapp.outbound.ownership import (
+        map_transfer_scan,
+        transfer_for_task,
+        validate_transfer_scan,
+    )
+
+    transfer = transfer_for_task(task)
+    r: Dict[str, Any] = (
+        resolve(transfer.source_owner_id if transfer else task.owner_id, barcode) or {}
+    )
 
     # —— 新增：把解析结果归一为 dict（兼容 SimpleNamespace / 对象 / pydantic）
     if not isinstance(r, dict):
@@ -407,6 +457,9 @@ def scan_task(
         else:
             raise ValidationError(f"条码解析器返回不受支持的类型：{type(r).__name__}，期望 dict。")
 
+    transfer_line_ids = None
+    if transfer:
+        r, transfer_line_ids = map_transfer_scan(task, r, transfer)
     product_id = r.get("product_id")
     if not product_id:
         raise ValidationError("条码解析未识别商品。")
@@ -464,6 +517,8 @@ def scan_task(
             task_id=task.id,
             product_id=product_id,
         )
+        if transfer_line_ids is not None:
+            retry_lines = retry_lines.filter(pk__in=transfer_line_ids)
         if location_id is not None:
             retry_lines = retry_lines.filter(from_location_id=location_id)
         retry_fps = [
@@ -512,6 +567,8 @@ def scan_task(
         task_id=task.id,
         product_id=product_id,
     )
+    if transfer_line_ids is not None:
+        line_qs = line_qs.filter(pk__in=transfer_line_ids)
     if task.task_type == WmsTask.TaskType.PICK:
         line_qs = line_qs.filter(qty_done__lt=F("qty_plan")).exclude(
             status__in=[WmsTaskLine.Status.COMPLETED, WmsTaskLine.Status.CANCELLED]
@@ -528,6 +585,10 @@ def scan_task(
         )
     if not line:
         raise ValidationError("未找到匹配任务行（非 RECEIVE/COUNT 不自动建行）。")
+    if transfer:
+        lot_no, mfg_date, exp_date, serial_no = validate_transfer_scan(
+            line, lot_no=lot_no, mfg_date=mfg_date, exp_date=exp_date, serial_no=serial_no
+        )
 
     # 4) 计算增量与 FP
     # 所有商品库存任务都以基础单位记账；qty 表示扫描到的包装数量。

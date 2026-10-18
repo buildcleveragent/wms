@@ -25,6 +25,7 @@ import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import WmsIcon from '@/components/WmsIcon.vue'
 import { useAuth } from '@/store/auth'
+import { getToken } from '@/utils/request'
 
 const username = ref('')
 const password = ref('')
@@ -47,7 +48,13 @@ async function doLogin() {
 }
 
 onShow(() => {
-  if (auth.access) uni.switchTab({ url: '/pages/index/index' })
+  // 请求层清除过期 token 后，Pinia 仍可能保留上一次的登录资料。
+  auth.access = getToken()
+  if (!auth.access) {
+    auth.clearProfile()
+    return
+  }
+  uni.switchTab({ url: '/pages/index/index' })
 })
 </script>
 

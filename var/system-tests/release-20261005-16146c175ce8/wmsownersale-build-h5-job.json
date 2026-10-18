@@ -1,0 +1,1 @@
+{"name": "wmsownersale-build-h5", "cwd": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsownersale", "command": ["npm", "run", "build:h5"], "env": {"CI": "1", "npm_config_cache": "/tmp/wms-release-20261005-aohudxd1/npm-cache"}, "timeout": 300}

@@ -1,0 +1,1 @@
+{"name": "wmspda-audit", "cwd": "/wms/wmspda", "command": ["npm", "audit", "--omit=dev", "--audit-level=high", "--json"], "timeout": 180}

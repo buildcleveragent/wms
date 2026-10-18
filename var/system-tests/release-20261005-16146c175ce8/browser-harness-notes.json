@@ -1,0 +1,15 @@
+{
+  "source": "candidate snapshot",
+  "browser_plugin": "absent",
+  "framework": "Playwright",
+  "mock_api_suites": "Outbound application API traffic blocked unless fulfilled by existing mocks.",
+  "real_api_suites": "Only loopback test frontend servers and pytest live server are allowed.",
+  "app_code_modified": false,
+  "test_assertions_modified": false,
+  "test_harness_changes": [
+    "Artifact paths and module ROOT redirected to temporary source snapshot.",
+    "Network fences added to temporary test harness."
+  ],
+  "production_build_products": "/tmp/wms-release-20261005-aohudxd1/build-products",
+  "real_browser_api_override": "http://127.0.0.1:18081"
+}

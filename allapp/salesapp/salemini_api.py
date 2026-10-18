@@ -10,7 +10,7 @@ from urllib import request as url_request
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Count, DecimalField, F, Q, Sum, Value
+from django.db.models import Count, DecimalField, Exists, F, OuterRef, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.http import Http404
 from django.shortcuts import get_object_or_404
@@ -23,7 +23,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from allapp.baseinfo.models import Customer
+from allapp.baseinfo.customer_access import active_bindings, customer_binding, customers_for_owner
+from allapp.baseinfo.models import Customer, OwnerCustomerBinding
 from allapp.core.url_security import require_https_endpoint
 from allapp.inventory.models import InventoryDetail
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
@@ -415,6 +416,13 @@ def _buyer_bindings_for_user(user):
             owner__is_active=True,
             customer__is_active=True,
         )
+        .filter(
+            Exists(
+                active_bindings().filter(
+                    owner_id=OuterRef("owner_id"), customer_id=OuterRef("customer_id")
+                )
+            )
+        )
         .select_related("owner", "customer", "user", "user__warehouse")
         .order_by("owner__code", "id")
     )
@@ -435,7 +443,7 @@ def _mini_customer_code(owner, user):
     for index in range(20):
         suffix = "" if index == 0 else f"-{index}"
         candidate = f"{base}{suffix}"[:30]
-        if not Customer.objects.filter(owner=owner, code=candidate).exists():
+        if not OwnerCustomerBinding.all_objects.filter(owner=owner, code=candidate).exists():
             return candidate
     return f"MINI-{uuid.uuid4().hex[:24]}"[:30]
 
@@ -443,11 +451,13 @@ def _mini_customer_code(owner, user):
 def _ensure_buyer_for_owner(owner, user, customer=None):
     buyer = _buyer_for_user(owner, user)
     if buyer and buyer.customer_id:
+        if not customer_binding(buyer.customer, owner.pk):
+            raise PermissionDenied("客户与当前货主的关联已停用。")
         return buyer.customer, buyer
 
     existing = _buyer_record_for_user(owner, user)
     if existing:
-        if not existing.is_active or not existing.customer.is_active:
+        if not existing.is_active or not customer_binding(existing.customer, owner.pk):
             raise PermissionDenied("当前账号购买权限无效或已停用，请联系客服。")
         return existing.customer, existing
 
@@ -502,12 +512,14 @@ def _customer_for_context(owner, user, data=None, *, required=True, auto_create=
     data = data or {}
     buyer = _buyer_for_user(owner, user)
     if buyer and buyer.customer_id:
+        if not customer_binding(buyer.customer, owner.pk):
+            raise PermissionDenied("客户与当前货主的关联已停用。")
         return buyer.customer, buyer
 
     customer_id = data.get("customer_id")
     if customer_id:
         customer = get_object_or_404(
-            Customer.objects.filter(owner=owner, is_active=True),
+            customers_for_owner(owner.pk),
             pk=customer_id,
         )
         if auto_create:
@@ -602,7 +614,7 @@ def _validate_wechat_buyer(buyer, openid, unionid):
         raise PermissionDenied("当前绑定账号已停用。")
     if not buyer.customer_id or not buyer.customer.is_active:
         raise PermissionDenied("当前账号购买权限无效或已停用，请联系客服。")
-    if buyer.customer.owner_id != buyer.owner_id:
+    if not customer_binding(buyer.customer, buyer.owner_id):
         raise PermissionDenied("当前账号购买权限配置异常，请联系客服处理。")
     if not buyer.user.warehouse_id:
         raise PermissionDenied("当前账号暂未完成商城履约配置，请联系客服处理。")

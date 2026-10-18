@@ -145,6 +145,7 @@ import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import { api, buildQuery } from '@/utils/request'
 import { useAuth } from '@/store/auth'
+import { useLatestRequest } from '@/utils/use-latest-request'
 import { asList, billStatusLabel, chargeTypeLabel, money, qty, toNumber } from '@/utils/billing'
 
 const auth = useAuth()
@@ -235,7 +236,10 @@ const groupedRows = computed(() => {
   return Array.from(groups.values()).sort((a, b) => b.total - a.total)
 })
 
+const requests = useLatestRequest()
+
 async function loadBill() {
+  const current = requests.begin()
   if (!billId.value) {
     uni.showToast({
       title: '缺少账单编号',
@@ -247,6 +251,7 @@ async function loadBill() {
   loading.value = true
   try {
     const payload = await api.billingBillDetail(billId.value)
+    if (!current()) return
     bill.value = payload || null
     lines.value = asList(payload?.lines)
     ownerId.value = ownerId.value || String(payload?.owner || '')
@@ -254,12 +259,15 @@ async function loadBill() {
     periodId.value = periodId.value || String(payload?.period || '')
     applyFilters()
   } catch (error) {
+    if (!current()) return
     bill.value = null
     lines.value = []
     console.error('load billing bill detail failed:', error)
   } finally {
-    loading.value = false
-    uni.stopPullDownRefresh()
+    if (current()) {
+      loading.value = false
+      uni.stopPullDownRefresh()
+    }
   }
 }
 

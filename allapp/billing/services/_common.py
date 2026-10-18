@@ -14,12 +14,13 @@
 
 其他子模块通过 from ._common import ... 引用这些函数。
 """
+
 import datetime
 import logging
 from calendar import monthrange
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
-from typing import Optional, Tuple, Iterable
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Iterable, Optional, Tuple
 
 from django.db import connection
 from django.db.models import F, Q, Sum
@@ -28,15 +29,16 @@ from allapp.billing.enums import (
     AccrualStatus,
     BundleScope,
     BundleType,
+    CalcMethod,
     CapMode,
     LadderMode,
 )
 from allapp.billing.models import (
     BillingAccrual,
     BillingJobRun,
+    BillingPeriod,
     BillingRule,
     BillingRuleTier,
-    BillingPeriod,
 )
 
 # 全局 logger，所有计费子模块共用此 logger 名称
@@ -156,9 +158,7 @@ def _select_rule(
         匹配到的 BillingRule 或 None（未配置规则时跳过计费，不报错）
     """
     qs = (
-        BillingRule.objects.filter(
-            active=True, charge_type=charge_type, calc_method=calc_method
-        )
+        BillingRule.objects.filter(active=True, charge_type=charge_type, calc_method=calc_method)
         .filter(Q(owner_id=owner_id) | Q(owner__isnull=True))
         .filter(Q(warehouse_id=warehouse_id) | Q(warehouse__isnull=True))
     )
@@ -193,9 +193,7 @@ def _select_rule(
 # ============================================================================
 
 
-def _event_fp(
-    task_id, scanlog_id, charge_type, calc_method, service_date, qty, scope_key=None
-):
+def _event_fp(task_id, scanlog_id, charge_type, calc_method, service_date, qty, scope_key=None):
     """
     生成 BillingEvent 的唯一指纹。
 
@@ -208,7 +206,10 @@ def _event_fp(
     scope_key: 可选前缀（如 "{owner_id}:{warehouse_id}"），用于区分不同
     owner/warehouse 在 task_id 为 None 时的指纹碰撞。
     """
-    base = f"{task_id or '-'}|{scanlog_id or '-'}|{charge_type}|{calc_method}|{service_date}|{_q(qty,'0.0001')}"
+    base = (
+        f"{task_id or '-'}|{scanlog_id or '-'}|{charge_type}|{calc_method}|"
+        f"{service_date}|{_q(qty, '0.0001')}"
+    )
     if scope_key:
         return f"{scope_key}|{base}"
     return base
@@ -234,7 +235,10 @@ def _acc_fp(
 
     配合 BillingAccrual.acc_fingerprint 的 unique 约束 + get_or_create 实现幂等。
     """
-    return f"{owner_id}|{warehouse_id}|{rule_id}|{charge_type}|{service_date}|{_q(qty,'0.0001')}|{_q(unit_price,'0.0001')}|{currency}|{ev_fp}"
+    return (
+        f"{owner_id}|{warehouse_id}|{rule_id}|{charge_type}|{service_date}|"
+        f"{_q(qty, '0.0001')}|{_q(unit_price, '0.0001')}|{currency}|{ev_fp}"
+    )
 
 
 # ============================================================================
@@ -378,9 +382,7 @@ def _apply_fixed_bundle_total(accs, target_total: Decimal) -> None:
 # ============================================================================
 
 
-def _compute_fee_with_rule(
-    rule: BillingRule, base_value: Decimal
-) -> Tuple[Decimal, Decimal]:
+def _compute_fee_with_rule(rule: BillingRule, base_value: Decimal) -> Tuple[Decimal, Decimal]:
     """
     核心定价函数：根据规则和基础值计算费用。
 
@@ -480,6 +482,16 @@ def _compute_fee_with_rule(
     return (amt, eff)
 
 
+def _compute_daily_fee_with_rule(rule, base_value, service_date):
+    """Price a service day before minimum charges, daily caps and tax."""
+    amount, effective_price = _compute_fee_with_rule(rule, base_value)
+    if rule.calc_method == CalcMethod.PER_AREA_MONTH:
+        days = Decimal(_days_in_month(service_date))
+        amount = _q(amount / days, "0.01")
+        effective_price = _q(effective_price / days, "0.0001")
+    return amount, effective_price
+
+
 # ============================================================================
 # 日封顶 / 日打包
 # ============================================================================
@@ -575,9 +587,7 @@ def _apply_caps_bundles_day(
         and rule.bundle_type == BundleType.CAP
         and rule.bundle_key
     ):
-        used_b = _sum_amount_bundle_day(
-            rule.bundle_key, owner_id, warehouse_id, service_date
-        )
+        used_b = _sum_amount_bundle_day(rule.bundle_key, owner_id, warehouse_id, service_date)
         remain_b = max(Decimal("0.00"), Decimal(rule.bundle_price) - used_b)
         amt = min(amt, remain_b)
 

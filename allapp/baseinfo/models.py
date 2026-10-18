@@ -1,7 +1,7 @@
 # models.py for baseinfo app
 from django.conf import settings
 from django.core.validators import MinValueValidator, RegexValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
@@ -106,10 +106,8 @@ class OwnerWarehouseBinding(BaseModel):
 
 class Customer(BaseModel, AddressMixin):
     """
-    终端客户。多货主隔离：同一Owner下code、external_code唯一。
-    说明：
-    - 不采用全局唯一code，而是 (owner, code) 唯一：便于3PL场景不同货主可复用相同编码体系。
-    - 通过 save() 统一将空字符串标准化为 NULL，避免 MySQL 下 unique + '' 产生“看似有值实为空”的问题。
+    共享终端客户档案。业务归属、编号和业务员以 OwnerCustomerBinding 为准。
+    owner/code 等旧字段保留为首条关联的兼容数据，不用于判定权限。
     """
 
     code = models.CharField("客户编号", max_length=30, db_index=True)
@@ -178,17 +176,7 @@ class Customer(BaseModel, AddressMixin):
         # ---- 索引（INDEX）与约束（CONSTRAINTS） ----
         # 注意：MySQL 8 不支持“条件唯一索引”；以下均为可在 MySQL 8.0.43 上直接生效的定义
         constraints = [
-            # 1) (owner, code) 唯一：多货主隔离，允许不同货主用相同code
-            models.UniqueConstraint(
-                fields=["owner", "code"],
-                name="uq_customer_owner_code",
-            ),
-            # 2) (owner, external_code) 唯一：外部系统对照码在同一货主内唯一
-            #    允许 NULL 重复（MySQL 对 NULL 不参与唯一性），我们会在 save() 将空字符串标准化为 NULL
-            models.UniqueConstraint(
-                fields=["owner", "external_code"],
-                name="uq_cust_owner_ext_code",
-            ),
+            # 编号唯一性由 OwnerCustomerBinding 的货主业务资料约束。
             # 3) 非负/非空检查（MySQL 8.0.16+生效；8.0.43可强制执行）
             models.CheckConstraint(
                 condition=Q(delivery_distance_km__gte=0) | Q(delivery_distance_km__isnull=True),
@@ -217,7 +205,7 @@ class Customer(BaseModel, AddressMixin):
         ]
 
     def __str__(self):
-        return f"{self.code} - {self.name}"
+        return self.name
 
     # --- 规范化：将空字符串统一转为 None，避免 unique + '' 的边界问题 ---
     def _normalize_blanks_to_nulls(self):
@@ -245,9 +233,111 @@ class Customer(BaseModel, AddressMixin):
         if isinstance(self.name, str):
             self.name = self.name.strip()
 
+    @transaction.atomic
     def save(self, *args, **kwargs):
         self._normalize_blanks_to_nulls()
+        adding = self._state.adding
+        # Legacy creation/update callers still describe the first relationship.
+        # Never copy unchanged legacy values over an independently edited binding.
+        changed = {}
+        if not adding:
+            previous = (
+                type(self)
+                .all_objects.filter(pk=self.pk)
+                .values(*OwnerCustomerBinding.LEGACY_FIELDS)
+                .first()
+            )
+            fields = kwargs.get("update_fields")
+            if previous:
+                changed = {
+                    key: getattr(self, key)
+                    for key, value in previous.items()
+                    if getattr(self, key) != value
+                    and (fields is None or key in fields or key.removesuffix("_id") in fields)
+                }
         super().save(*args, **kwargs)
+        if adding:
+            OwnerCustomerBinding.objects.create(
+                owner_id=self.owner_id,
+                customer=self,
+                created_by=self.created_by,
+                updated_by=self.updated_by,
+                **{field: getattr(self, field) for field in OwnerCustomerBinding.LEGACY_FIELDS},
+            )
+        elif changed:
+            binding = OwnerCustomerBinding.all_objects.filter(
+                owner_id=self.owner_id, customer=self
+            ).first()
+            if binding:
+                for field, value in changed.items():
+                    setattr(binding, field, value)
+                binding.save()
+
+
+class OwnerCustomerBinding(BaseModel):
+    """Owner-specific commercial relationship with a shared customer identity."""
+
+    LEGACY_FIELDS = (
+        "code",
+        "external_code",
+        "salesperson_id",
+        "area",
+        "delivery_route",
+        "delivery_seq",
+        "level",
+        "delivery_distance_km",
+        "promised_days",
+    )
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="customer_bindings")
+    customer = models.ForeignKey(Customer, on_delete=models.PROTECT, related_name="owner_bindings")
+    code = models.CharField("客户编号", max_length=30)
+    external_code = models.CharField("客户接口对照编号", max_length=60, null=True, blank=True)
+    salesperson = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="owner_customer_bindings",
+        verbose_name="业务员",
+    )
+    area = models.CharField("客户区域", max_length=60, null=True, blank=True)
+    delivery_route = models.CharField("配送线路", max_length=60, null=True, blank=True)
+    delivery_seq = models.PositiveIntegerField("配送序号", null=True, blank=True)
+    level = models.PositiveSmallIntegerField("客户等级", null=True, blank=True)
+    delivery_distance_km = models.DecimalField(
+        "配送距离(公里)",
+        max_digits=6,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+    )
+    promised_days = models.PositiveSmallIntegerField("应达天数", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "货主客户关联"
+        verbose_name_plural = "货主客户关联"
+        ordering = ("owner_id", "code", "id")
+        constraints = [
+            models.UniqueConstraint(fields=["owner", "customer"], name="uq_owner_customer"),
+            models.UniqueConstraint(fields=["owner", "code"], name="uq_owner_customer_code"),
+            models.UniqueConstraint(
+                fields=["owner", "external_code"], name="uq_owner_customer_external"
+            ),
+            models.CheckConstraint(condition=~Q(code=""), name="ck_owner_customer_code"),
+            models.CheckConstraint(
+                condition=Q(delivery_distance_km__gte=0) | Q(delivery_distance_km__isnull=True),
+                name="ck_owner_customer_distance",
+            ),
+        ]
+        indexes = [models.Index(fields=["owner", "salesperson"], name="ix_owner_customer_sales")]
+
+    def __str__(self):
+        return f"{self.owner} / {self.code} - {self.customer.name}"
+
+    def save(self, *args, **kwargs):
+        self.code = (self.code or "").strip()
+        self.external_code = (self.external_code or "").strip() or None
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 
 class Employee(BaseModel):

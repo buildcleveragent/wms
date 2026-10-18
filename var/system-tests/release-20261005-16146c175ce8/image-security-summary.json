@@ -1,0 +1,59 @@
+[
+  {
+    "target": "wms-release:20261005-16146c175ce8 (debian 13.6)",
+    "class": "os-pkgs",
+    "type": "debian",
+    "counts": {
+      "HIGH": 73,
+      "CRITICAL": 7
+    },
+    "packages": [
+      "bsdutils",
+      "gzip",
+      "libacl1",
+      "libblkid1",
+      "libexpat1",
+      "liblastlog2-2",
+      "libmariadb3",
+      "libmount1",
+      "libncursesw6",
+      "libpcre2-8-0",
+      "libsmartcols1",
+      "libsqlite3-0",
+      "libssl3t64",
+      "libsystemd0",
+      "libtinfo6",
+      "libudev1",
+      "libuuid1",
+      "login",
+      "mariadb-common",
+      "mount",
+      "ncurses-base",
+      "ncurses-bin",
+      "openssl",
+      "openssl-provider-legacy",
+      "perl-base",
+      "util-linux"
+    ]
+  },
+  {
+    "target": "Node.js",
+    "class": "lang-pkgs",
+    "type": "node-pkg",
+    "counts": {},
+    "packages": []
+  },
+  {
+    "target": "Python",
+    "class": "lang-pkgs",
+    "type": "python-pkg",
+    "counts": {
+      "CRITICAL": 1,
+      "HIGH": 7
+    },
+    "packages": [
+      "PyJWT",
+      "urllib3"
+    ]
+  }
+]

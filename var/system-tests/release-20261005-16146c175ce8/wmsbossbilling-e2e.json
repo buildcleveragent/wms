@@ -1,0 +1,1824 @@
+{
+  "config": {
+    "argv": [
+      "/usr/bin/node",
+      "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/node_modules/.bin/playwright",
+      "test",
+      "--output=/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results",
+      "--reporter=line,json"
+    ],
+    "configFile": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/playwright.config.js",
+    "rootDir": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "line"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": {
+      "command": "npm run dev:h5",
+      "url": "http://127.0.0.1:5176",
+      "reuseExistingServer": false,
+      "timeout": 120000
+    }
+  },
+  "suites": [
+    {
+      "title": "billing-navigation.spec.js",
+      "file": "billing-navigation.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "accrual returns to scoped overview after drilldown at 390px",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "timedOut",
+                  "duration": 60320,
+                  "error": {
+                    "message": "\u001b[31mTest timeout of 60000ms exceeded.\u001b[39m",
+                    "stack": "\u001b[31mTest timeout of 60000ms exceeded.\u001b[39m"
+                  },
+                  "errors": [
+                    {
+                      "message": "\u001b[31mTest timeout of 60000ms exceeded.\u001b[39m"
+                    },
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js",
+                        "column": 66,
+                        "line": 50
+                      },
+                      "message": "Error: locator.click: Test timeout of 60000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('uni-page-body').last().getByText('测试货主', { exact: true }).last()\u001b[22m\n\n\n  48 |       if (entry === 'drilldown') {\n  49 |         await page.goto(`/#/pages/billing/overview?${query}`)\n> 50 |         await active().getByText('测试货主', { exact: true }).last().click()\n     |                                                                  ^\n  51 |         await expect(page).toHaveURL(/billing\\/owner_detail/)\n  52 |         await active().getByText('REG-INVOICE', { exact: true }).click()\n  53 |         await expect(page).toHaveURL(/billing\\/bill_detail/)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js:50:66"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:13:49.778Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/billing-navigation-accrual-f7e43-ew-after-drilldown-at-390px/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/billing-navigation-accrual-f7e43-ew-after-drilldown-at-390px/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/billing-navigation-accrual-f7e43-ew-after-drilldown-at-390px/trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "32e91fa2b651147dbb9a-3fdf856959d2db49f539",
+          "file": "billing-navigation.spec.js",
+          "line": 14,
+          "column": 9
+        },
+        {
+          "title": "accrual returns to scoped overview after direct at 390px",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7705,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last().getByText('基础信息', { exact: true })\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last().getByText('基础信息', { exact: true })\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last().getByText('基础信息', { exact: true })\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last().getByText('基础信息', { exact: true })\u001b[22m\n\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js:59:65",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js",
+                      "column": 65,
+                      "line": 59
+                    },
+                    "snippet": "  57 |       }\n  58 |       await expect(page).toHaveURL(/billing\\/accrual_detail/)\n> 59 |       await expect(active().getByText('基础信息', { exact: true })).toBeVisible()\n     |                                                                 ^\n  60 |       const detailScope = new URLSearchParams(page.url().split('?')[1])\n  61 |       await active().getByText('返回总览', { exact: true }).click()\n  62 |       await expect(page).toHaveURL(/billing\\/overview\\?/)"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js",
+                        "column": 65,
+                        "line": 59
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last().getByText('基础信息', { exact: true })\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last().getByText('基础信息', { exact: true })\u001b[22m\n\n\n  57 |       }\n  58 |       await expect(page).toHaveURL(/billing\\/accrual_detail/)\n> 59 |       await expect(active().getByText('基础信息', { exact: true })).toBeVisible()\n     |                                                                 ^\n  60 |       const detailScope = new URLSearchParams(page.url().split('?')[1])\n  61 |       await active().getByText('返回总览', { exact: true }).click()\n  62 |       await expect(page).toHaveURL(/billing\\/overview\\?/)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js:59:65"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:14:53.274Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/billing-navigation-accrual-2d19d-rview-after-direct-at-390px/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/billing-navigation-accrual-2d19d-rview-after-direct-at-390px/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/billing-navigation-accrual-2d19d-rview-after-direct-at-390px/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js",
+                    "column": 65,
+                    "line": 59
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "32e91fa2b651147dbb9a-8e06b32aa6194a8c8fba",
+          "file": "billing-navigation.spec.js",
+          "line": 14,
+          "column": 9
+        },
+        {
+          "title": "accrual returns to scoped overview after drilldown at 1440px",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "timedOut",
+                  "duration": 60261,
+                  "error": {
+                    "message": "\u001b[31mTest timeout of 60000ms exceeded.\u001b[39m",
+                    "stack": "\u001b[31mTest timeout of 60000ms exceeded.\u001b[39m"
+                  },
+                  "errors": [
+                    {
+                      "message": "\u001b[31mTest timeout of 60000ms exceeded.\u001b[39m"
+                    },
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js",
+                        "column": 66,
+                        "line": 50
+                      },
+                      "message": "Error: locator.click: Test timeout of 60000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('uni-page-body').last().getByText('测试货主', { exact: true }).last()\u001b[22m\n\n\n  48 |       if (entry === 'drilldown') {\n  49 |         await page.goto(`/#/pages/billing/overview?${query}`)\n> 50 |         await active().getByText('测试货主', { exact: true }).last().click()\n     |                                                                  ^\n  51 |         await expect(page).toHaveURL(/billing\\/owner_detail/)\n  52 |         await active().getByText('REG-INVOICE', { exact: true }).click()\n  53 |         await expect(page).toHaveURL(/billing\\/bill_detail/)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js:50:66"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:15:03.788Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/billing-navigation-accrual-18f1d-w-after-drilldown-at-1440px/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/billing-navigation-accrual-18f1d-w-after-drilldown-at-1440px/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/billing-navigation-accrual-18f1d-w-after-drilldown-at-1440px/trace.zip"
+                    }
+                  ]
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "32e91fa2b651147dbb9a-ccfba412868adef517ec",
+          "file": "billing-navigation.spec.js",
+          "line": 14,
+          "column": 9
+        },
+        {
+          "title": "accrual returns to scoped overview after direct at 1440px",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 3,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7297,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last().getByText('基础信息', { exact: true })\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last().getByText('基础信息', { exact: true })\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last().getByText('基础信息', { exact: true })\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last().getByText('基础信息', { exact: true })\u001b[22m\n\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js:59:65",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js",
+                      "column": 65,
+                      "line": 59
+                    },
+                    "snippet": "  57 |       }\n  58 |       await expect(page).toHaveURL(/billing\\/accrual_detail/)\n> 59 |       await expect(active().getByText('基础信息', { exact: true })).toBeVisible()\n     |                                                                 ^\n  60 |       const detailScope = new URLSearchParams(page.url().split('?')[1])\n  61 |       await active().getByText('返回总览', { exact: true }).click()\n  62 |       await expect(page).toHaveURL(/billing\\/overview\\?/)"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js",
+                        "column": 65,
+                        "line": 59
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last().getByText('基础信息', { exact: true })\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last().getByText('基础信息', { exact: true })\u001b[22m\n\n\n  57 |       }\n  58 |       await expect(page).toHaveURL(/billing\\/accrual_detail/)\n> 59 |       await expect(active().getByText('基础信息', { exact: true })).toBeVisible()\n     |                                                                 ^\n  60 |       const detailScope = new URLSearchParams(page.url().split('?')[1])\n  61 |       await active().getByText('返回总览', { exact: true }).click()\n  62 |       await expect(page).toHaveURL(/billing\\/overview\\?/)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js:59:65"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:16:06.446Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/billing-navigation-accrual-e158e-view-after-direct-at-1440px/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/billing-navigation-accrual-e158e-view-after-direct-at-1440px/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/billing-navigation-accrual-e158e-view-after-direct-at-1440px/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/billing-navigation.spec.js",
+                    "column": 65,
+                    "line": 59
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "32e91fa2b651147dbb9a-7e800be0239a1f7849b8",
+          "file": "billing-navigation.spec.js",
+          "line": 14,
+          "column": 9
+        }
+      ]
+    },
+    {
+      "title": "boss-regressions.spec.js",
+      "file": "boss-regressions.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "late success or failure cannot replace the selected cockpit tab",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 4,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7827,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:77:3",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:77:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:16:16.280Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-late-succ-8e241-ce-the-selected-cockpit-tab/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-late-succ-8e241-ce-the-selected-cockpit-tab/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-late-succ-8e241-ce-the-selected-cockpit-tab/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-e3db1c146ea37c18de07",
+          "file": "boss-regressions.spec.js",
+          "line": 67,
+          "column": 5
+        },
+        {
+          "title": "home ignores an old failed refresh after the latest one succeeds",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 5,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7121,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:101:3",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:101:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:16:26.662Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-home-igno-1b897-ter-the-latest-one-succeeds/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-home-igno-1b897-ter-the-latest-one-succeeds/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-home-igno-1b897-ter-the-latest-one-succeeds/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-21727a729d7537d42313",
+          "file": "boss-regressions.spec.js",
+          "line": 90,
+          "column": 5
+        },
+        {
+          "title": "home owner drilldown and return preserve warehouse 11 and dates",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 6,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7536,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:117:5",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:117:5"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:16:36.195Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-home-owne-7cdc5-erve-warehouse-11-and-dates/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-home-owne-7cdc5-erve-warehouse-11-and-dates/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-home-owne-7cdc5-erve-warehouse-11-and-dates/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-30ec9c6d414e3f6492dd",
+          "file": "boss-regressions.spec.js",
+          "line": 115,
+          "column": 7
+        },
+        {
+          "title": "home owner drilldown and return preserve warehouse ALL and dates",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 7,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7163,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:117:5",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:117:5"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:16:45.830Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-home-owne-d5b6c-rve-warehouse-ALL-and-dates/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-home-owne-d5b6c-rve-warehouse-ALL-and-dates/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-home-owne-d5b6c-rve-warehouse-ALL-and-dates/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-556b4e2fdc53e1aa9d5f",
+          "file": "boss-regressions.spec.js",
+          "line": 115,
+          "column": 7
+        },
+        {
+          "title": "explicit ALL warehouse in a URL overrides a cached single warehouse",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 8,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7639,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:137:3",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:137:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:16:55.178Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-explicit--aff26-s-a-cached-single-warehouse/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-explicit--aff26-s-a-cached-single-warehouse/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-explicit--aff26-s-a-cached-single-warehouse/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-d909c564a79be43b0050",
+          "file": "boss-regressions.spec.js",
+          "line": 135,
+          "column": 5
+        },
+        {
+          "title": "closed-loop alerts paginate 0 records and reset after changing tabs",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 9,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7362,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:158:5",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:158:5"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:17:05.025Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-closed-lo-80254-d-reset-after-changing-tabs/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-closed-lo-80254-d-reset-after-changing-tabs/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-closed-lo-80254-d-reset-after-changing-tabs/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-9fbdf35445bd21347d16",
+          "file": "boss-regressions.spec.js",
+          "line": 145,
+          "column": 7
+        },
+        {
+          "title": "closed-loop alerts paginate 20 records and reset after changing tabs",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 10,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7103,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:158:5",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:158:5"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:17:14.478Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-closed-lo-87df7-d-reset-after-changing-tabs/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-closed-lo-87df7-d-reset-after-changing-tabs/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-closed-lo-87df7-d-reset-after-changing-tabs/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-eba5953964a3b1305ea7",
+          "file": "boss-regressions.spec.js",
+          "line": 145,
+          "column": 7
+        },
+        {
+          "title": "closed-loop alerts paginate 21 records and reset after changing tabs",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 11,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 6981,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:158:5",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:158:5"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:17:23.628Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-closed-lo-1af09-d-reset-after-changing-tabs/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-closed-lo-1af09-d-reset-after-changing-tabs/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-closed-lo-1af09-d-reset-after-changing-tabs/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-1fb89a9230e448b6ffb1",
+          "file": "boss-regressions.spec.js",
+          "line": 145,
+          "column": 7
+        },
+        {
+          "title": "closed-loop alerts paginate 25 records and reset after changing tabs",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 12,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7308,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:158:5",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:158:5"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:17:33.137Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-closed-lo-7e8e7-d-reset-after-changing-tabs/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-closed-lo-7e8e7-d-reset-after-changing-tabs/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-closed-lo-7e8e7-d-reset-after-changing-tabs/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-08f051c07d2d7abb2173",
+          "file": "boss-regressions.spec.js",
+          "line": 145,
+          "column": 7
+        },
+        {
+          "title": "failed second alert page retries page two without skipping",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 13,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 6850,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:185:3",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:185:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:17:42.572Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-failed-se-d1672-s-page-two-without-skipping/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-failed-se-d1672-s-page-two-without-skipping/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-failed-se-d1672-s-page-two-without-skipping/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-ae2fa5eae00ad63b660d",
+          "file": "boss-regressions.spec.js",
+          "line": 177,
+          "column": 5
+        },
+        {
+          "title": "warehouse context failure restores selection; success resets alert pagination",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 14,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7004,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:210:3",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:210:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:17:51.476Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-warehouse-6cc0f-ess-resets-alert-pagination/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-warehouse-6cc0f-ess-resets-alert-pagination/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-warehouse-6cc0f-ess-resets-alert-pagination/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-3334c67635e87cf31ddb",
+          "file": "boss-regressions.spec.js",
+          "line": 196,
+          "column": 5
+        },
+        {
+          "title": "context 403 shows an error and recovers after retry",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 15,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7103,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:243:5",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:243:5"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:18:00.501Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-context-4-f16c3-or-and-recovers-after-retry/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-context-4-f16c3-or-and-recovers-after-retry/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-context-4-f16c3-or-and-recovers-after-retry/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-9b2da98baddfb4d5e6a4",
+          "file": "boss-regressions.spec.js",
+          "line": 235,
+          "column": 7
+        },
+        {
+          "title": "context 503 shows an error and recovers after retry",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 16,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 6996,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:243:5",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:243:5"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:18:09.458Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-context-5-bec29-or-and-recovers-after-retry/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-context-5-bec29-or-and-recovers-after-retry/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-context-5-bec29-or-and-recovers-after-retry/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-281b11a9fd001f908379",
+          "file": "boss-regressions.spec.js",
+          "line": 235,
+          "column": 7
+        },
+        {
+          "title": "context network shows an error and recovers after retry",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 17,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7211,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:243:5",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:243:5"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:18:18.581Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-context-n-ae053-or-and-recovers-after-retry/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-context-n-ae053-or-and-recovers-after-retry/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-context-n-ae053-or-and-recovers-after-retry/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-157abcecbebd0da7f231",
+          "file": "boss-regressions.spec.js",
+          "line": 235,
+          "column": 7
+        },
+        {
+          "title": "export capability controls both buttons; revoked permission shows the server reason",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 18,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7528,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:261:3",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:261:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:18:28.118Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-export-ca-8510e-ion-shows-the-server-reason/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-export-ca-8510e-ion-shows-the-server-reason/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-export-ca-8510e-ion-shows-the-server-reason/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-0b4fb6ced7c470fdee11",
+          "file": "boss-regressions.spec.js",
+          "line": 257,
+          "column": 5
+        },
+        {
+          "title": "inventory search replaces a pending page and keeps the new result",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 19,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 6903,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:289:3",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:289:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:18:37.823Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-inventory-1a615-ge-and-keeps-the-new-result/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-inventory-1a615-ge-and-keeps-the-new-result/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-inventory-1a615-ge-and-keeps-the-new-result/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-3c85a9dd1910c9e23688",
+          "file": "boss-regressions.spec.js",
+          "line": 278,
+          "column": 5
+        },
+        {
+          "title": "owner billing commits all responses from the latest refresh together",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 20,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7155,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:313:3",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:313:3"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:18:46.780Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-owner-bil-22abe-the-latest-refresh-together/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-owner-bil-22abe-the-latest-refresh-together/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-owner-bil-22abe-the-latest-refresh-together/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-210b463a17900333be68",
+          "file": "boss-regressions.spec.js",
+          "line": 301,
+          "column": 5
+        },
+        {
+          "title": "all 12 page routes render at width 390",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 21,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7069,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:334:7",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:334:7"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:18:56.090Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-all-12-page-routes-render-at-width-390/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-all-12-page-routes-render-at-width-390/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-all-12-page-routes-render-at-width-390/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-af8c59c2833f55e3c5d6",
+          "file": "boss-regressions.spec.js",
+          "line": 325,
+          "column": 7
+        },
+        {
+          "title": "all 12 page routes render at width 1440",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 22,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 7289,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:334:7",
+                    "location": {
+                      "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                      "column": 58,
+                      "line": 63
+                    },
+                    "snippet": "  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps."
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                        "column": 58,
+                        "line": 63
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).not.\u001b[22mtoBeEmpty\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: locator('uni-page-body').last()\nExpected: not empty\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"not toBeEmpty\" with timeout 5000ms\u001b[22m\n\u001b[2m  - waiting for locator('uni-page-body').last()\u001b[22m\n\n\n  61 |   await expect(page).toHaveURL(`/#/pages/${path}`)\n  62 |   await expect(page).not.toHaveTitle('')\n> 63 |   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()\n     |                                                          ^\n  64 | }\n  65 |\n  66 | // Controlled completions reproduce races without timing-dependent sleeps.\n    at open (/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:63:58)\n    at /tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js:334:7"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:19:05.303Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "screenshot",
+                      "contentType": "image/png",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-all-12-page-routes-render-at-width-1440/test-failed-1.png"
+                    },
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-all-12-page-routes-render-at-width-1440/error-context.md"
+                    },
+                    {
+                      "name": "trace",
+                      "contentType": "application/zip",
+                      "path": "/tmp/wms-release-20261005-aohudxd1/wmsbossbilling-browser-results/boss-regressions-all-12-page-routes-render-at-width-1440/trace.zip"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsbossbilling/e2e/boss-regressions.spec.js",
+                    "column": 58,
+                    "line": 63
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "a0bed585ea8f99048418-9ccb88ab8a380fecce52",
+          "file": "boss-regressions.spec.js",
+          "line": 325,
+          "column": 7
+        }
+      ]
+    },
+    {
+      "title": "login.spec.js",
+      "file": "login.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "renders the boss login without framework errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 60000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 23,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4639,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:19:15.020Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "badc1754af1944f68b2b-4255ed83007d5303b096",
+          "file": "login.spec.js",
+          "line": 3,
+          "column": 5
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-05T04:13:43.107Z",
+    "duration": 337190.938,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 23,
+    "flaky": 0
+  }
+}

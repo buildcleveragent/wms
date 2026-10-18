@@ -1,0 +1,9 @@
+{
+  "severity_package_matches": {
+    "HIGH": 80,
+    "CRITICAL": 8
+  },
+  "unique_advisory_ids": 42,
+  "fixed_version_available_matches": 28,
+  "scope": "Scanner package/advisory matches, not validated exploitation paths; one advisory can affect multiple installed packages."
+}

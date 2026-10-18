@@ -1,0 +1,848 @@
+[
+  {
+    "app": "contenttypes",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:02:49.283199",
+    "seconds_since_previous": null
+  },
+  {
+    "app": "contenttypes",
+    "migration": "0002_remove_content_type_name",
+    "applied": "2026-10-05T12:02:49.483858",
+    "seconds_since_previous": 0.2
+  },
+  {
+    "app": "auth",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:02:50.165111",
+    "seconds_since_previous": 0.68
+  },
+  {
+    "app": "auth",
+    "migration": "0002_alter_permission_name_max_length",
+    "applied": "2026-10-05T12:02:50.324643",
+    "seconds_since_previous": 0.16
+  },
+  {
+    "app": "auth",
+    "migration": "0003_alter_user_email_max_length",
+    "applied": "2026-10-05T12:02:50.420438",
+    "seconds_since_previous": 0.1
+  },
+  {
+    "app": "auth",
+    "migration": "0004_alter_user_username_opts",
+    "applied": "2026-10-05T12:02:50.463827",
+    "seconds_since_previous": 0.04
+  },
+  {
+    "app": "auth",
+    "migration": "0005_alter_user_last_login_null",
+    "applied": "2026-10-05T12:02:50.498915",
+    "seconds_since_previous": 0.04
+  },
+  {
+    "app": "auth",
+    "migration": "0006_require_contenttypes_0002",
+    "applied": "2026-10-05T12:02:50.502629",
+    "seconds_since_previous": 0.0
+  },
+  {
+    "app": "auth",
+    "migration": "0007_alter_validators_add_error_messages",
+    "applied": "2026-10-05T12:02:50.543705",
+    "seconds_since_previous": 0.04
+  },
+  {
+    "app": "auth",
+    "migration": "0008_alter_user_username_max_length",
+    "applied": "2026-10-05T12:02:50.578715",
+    "seconds_since_previous": 0.04
+  },
+  {
+    "app": "auth",
+    "migration": "0009_alter_user_last_name_max_length",
+    "applied": "2026-10-05T12:02:50.615899",
+    "seconds_since_previous": 0.04
+  },
+  {
+    "app": "auth",
+    "migration": "0010_alter_group_name_max_length",
+    "applied": "2026-10-05T12:02:50.673187",
+    "seconds_since_previous": 0.06
+  },
+  {
+    "app": "auth",
+    "migration": "0011_update_proxy_permissions",
+    "applied": "2026-10-05T12:02:50.725287",
+    "seconds_since_previous": 0.05
+  },
+  {
+    "app": "auth",
+    "migration": "0012_alter_user_first_name_max_length",
+    "applied": "2026-10-05T12:02:50.759600",
+    "seconds_since_previous": 0.03
+  },
+  {
+    "app": "accounts",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:02:51.514108",
+    "seconds_since_previous": 0.75
+  },
+  {
+    "app": "baseinfo",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:02:54.004783",
+    "seconds_since_previous": 2.49
+  },
+  {
+    "app": "products",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:03:37.063802",
+    "seconds_since_previous": 43.06
+  },
+  {
+    "app": "locations",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:03:47.274516",
+    "seconds_since_previous": 10.21
+  },
+  {
+    "app": "baseinfo",
+    "migration": "0002_initial",
+    "applied": "2026-10-05T12:04:14.619093",
+    "seconds_since_previous": 27.34
+  },
+  {
+    "app": "accounts",
+    "migration": "0002_initial",
+    "applied": "2026-10-05T12:04:25.655680",
+    "seconds_since_previous": 11.04
+  },
+  {
+    "app": "accounts",
+    "migration": "0003_userrolescope",
+    "applied": "2026-10-05T12:04:27.106215",
+    "seconds_since_previous": 1.45
+  },
+  {
+    "app": "accounts",
+    "migration": "0004_auditevent",
+    "applied": "2026-10-05T12:04:28.723957",
+    "seconds_since_previous": 1.62
+  },
+  {
+    "app": "accounts",
+    "migration": "0005_loginthrottlecacheentry",
+    "applied": "2026-10-05T12:04:28.833538",
+    "seconds_since_previous": 0.11
+  },
+  {
+    "app": "admin",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:04:29.942736",
+    "seconds_since_previous": 1.11
+  },
+  {
+    "app": "admin",
+    "migration": "0002_logentry_remove_auto_add",
+    "applied": "2026-10-05T12:04:30.548271",
+    "seconds_since_previous": 0.61
+  },
+  {
+    "app": "admin",
+    "migration": "0003_logentry_add_action_flag_choices",
+    "applied": "2026-10-05T12:04:30.899997",
+    "seconds_since_previous": 0.35
+  },
+  {
+    "app": "authtoken",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:04:31.698797",
+    "seconds_since_previous": 0.8
+  },
+  {
+    "app": "authtoken",
+    "migration": "0002_auto_20160226_1747",
+    "applied": "2026-10-05T12:04:33.303936",
+    "seconds_since_previous": 1.61
+  },
+  {
+    "app": "authtoken",
+    "migration": "0003_tokenproxy",
+    "applied": "2026-10-05T12:04:33.316572",
+    "seconds_since_previous": 0.01
+  },
+  {
+    "app": "authtoken",
+    "migration": "0004_alter_tokenproxy_options",
+    "applied": "2026-10-05T12:04:33.343150",
+    "seconds_since_previous": 0.03
+  },
+  {
+    "app": "locations",
+    "migration": "0002_alter_subwarehouse_options",
+    "applied": "2026-10-05T12:04:33.621004",
+    "seconds_since_previous": 0.28
+  },
+  {
+    "app": "locations",
+    "migration": "0003_clarify_warehouse_subwarehouse_scope",
+    "applied": "2026-10-05T12:04:35.858989",
+    "seconds_since_previous": 2.24
+  },
+  {
+    "app": "products",
+    "migration": "0002_add_cross_owner_product_permissions",
+    "applied": "2026-10-05T12:04:36.230899",
+    "seconds_since_previous": 0.37
+  },
+  {
+    "app": "baseinfo",
+    "migration": "0003_owner_allow_warehouse_assisted_outbound",
+    "applied": "2026-10-05T12:04:36.900063",
+    "seconds_since_previous": 0.67
+  },
+  {
+    "app": "baseinfo",
+    "migration": "0004_owner_next_sku_sequence",
+    "applied": "2026-10-05T12:04:38.125558",
+    "seconds_since_previous": 1.23
+  },
+  {
+    "app": "baseinfo",
+    "migration": "0005_ownerwarehousebinding",
+    "applied": "2026-10-05T12:04:39.537408",
+    "seconds_since_previous": 1.41
+  },
+  {
+    "app": "locations",
+    "migration": "0004_alter_location_zone_type",
+    "applied": "2026-10-05T12:04:40.083902",
+    "seconds_since_previous": 0.55
+  },
+  {
+    "app": "products",
+    "migration": "0003_alter_product_sku",
+    "applied": "2026-10-05T12:04:40.614010",
+    "seconds_since_previous": 0.53
+  },
+  {
+    "app": "products",
+    "migration": "0004_productcategory_mall_fields",
+    "applied": "2026-10-05T12:04:42.479915",
+    "seconds_since_previous": 1.87
+  },
+  {
+    "app": "inbound",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:05:40.261189",
+    "seconds_since_previous": 57.78
+  },
+  {
+    "app": "inventory",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:06:19.885029",
+    "seconds_since_previous": 39.62
+  },
+  {
+    "app": "inventory",
+    "migration": "0002_clarify_warehouse_subwarehouse_scope",
+    "applied": "2026-10-05T12:06:20.979936",
+    "seconds_since_previous": 1.09
+  },
+  {
+    "app": "inventory",
+    "migration": "0003_operations_report_indexes",
+    "applied": "2026-10-05T12:06:22.074533",
+    "seconds_since_previous": 1.09
+  },
+  {
+    "app": "inventory",
+    "migration": "0004_alter_inventory_zone_type",
+    "applied": "2026-10-05T12:06:23.907867",
+    "seconds_since_previous": 1.83
+  },
+  {
+    "app": "tasking",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:07:56.888166",
+    "seconds_since_previous": 92.98
+  },
+  {
+    "app": "inbound",
+    "migration": "0002_pdanoorderreceive",
+    "applied": "2026-10-05T12:07:56.898313",
+    "seconds_since_previous": 0.01
+  },
+  {
+    "app": "inbound",
+    "migration": "0003_noorderreceiverequest_and_permission",
+    "applied": "2026-10-05T12:07:58.033877",
+    "seconds_since_previous": 1.14
+  },
+  {
+    "app": "inbound",
+    "migration": "0004_operations_report_indexes",
+    "applied": "2026-10-05T12:07:59.068862",
+    "seconds_since_previous": 1.03
+  },
+  {
+    "app": "inventory",
+    "migration": "0005_remove_inventorydetail_ux_inv_dim_active_mysql_and_more",
+    "applied": "2026-10-05T12:08:04.154661",
+    "seconds_since_previous": 5.09
+  },
+  {
+    "app": "inventory",
+    "migration": "0006_inventorytransaction_move_pair_constraint",
+    "applied": "2026-10-05T12:08:05.260683",
+    "seconds_since_previous": 1.11
+  },
+  {
+    "app": "billing",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:08:08.105427",
+    "seconds_since_previous": 2.84
+  },
+  {
+    "app": "billing",
+    "migration": "0002_initial",
+    "applied": "2026-10-05T12:08:30.017133",
+    "seconds_since_previous": 21.91
+  },
+  {
+    "app": "billing",
+    "migration": "0003_allow_void_bill_reinvoice",
+    "applied": "2026-10-05T12:08:30.386568",
+    "seconds_since_previous": 0.37
+  },
+  {
+    "app": "billing",
+    "migration": "0004_billing_integrity",
+    "applied": "2026-10-05T12:08:37.999696",
+    "seconds_since_previous": 7.61
+  },
+  {
+    "app": "inventory",
+    "migration": "0007_snapshot_approximate_lineage",
+    "applied": "2026-10-05T12:08:38.840590",
+    "seconds_since_previous": 0.84
+  },
+  {
+    "app": "billing",
+    "migration": "0005_billing_integrity_enforcement",
+    "applied": "2026-10-05T12:08:40.549456",
+    "seconds_since_previous": 1.71
+  },
+  {
+    "app": "billing",
+    "migration": "0006_bill_document_status_bill_payment_status_and_more",
+    "applied": "2026-10-05T12:08:51.053963",
+    "seconds_since_previous": 10.5
+  },
+  {
+    "app": "billing",
+    "migration": "0007_paymentreceipt_date_quality",
+    "applied": "2026-10-05T12:08:52.368703",
+    "seconds_since_previous": 1.31
+  },
+  {
+    "app": "core",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:08:53.300290",
+    "seconds_since_previous": 0.93
+  },
+  {
+    "app": "core",
+    "migration": "0002_systemsetting",
+    "applied": "2026-10-05T12:08:54.609690",
+    "seconds_since_previous": 1.31
+  },
+  {
+    "app": "core",
+    "migration": "0003_printconfig",
+    "applied": "2026-10-05T12:08:55.669166",
+    "seconds_since_previous": 1.06
+  },
+  {
+    "app": "core",
+    "migration": "0004_normalize_print_config_mm_names",
+    "applied": "2026-10-05T12:08:56.339077",
+    "seconds_since_previous": 0.67
+  },
+  {
+    "app": "core",
+    "migration": "0005_printconfig_font_and_outbound_default",
+    "applied": "2026-10-05T12:08:57.016868",
+    "seconds_since_previous": 0.68
+  },
+  {
+    "app": "core",
+    "migration": "0006_systemsetting_secret_and_gs1_config",
+    "applied": "2026-10-05T12:08:57.809304",
+    "seconds_since_previous": 0.79
+  },
+  {
+    "app": "core",
+    "migration": "0007_remove_obsolete_gs1_enabled_setting",
+    "applied": "2026-10-05T12:08:58.563046",
+    "seconds_since_previous": 0.75
+  },
+  {
+    "app": "driverapp",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:09:28.267838",
+    "seconds_since_previous": 29.7
+  },
+  {
+    "app": "inbound",
+    "migration": "0005_alter_inboundreceiptline_product_code_and_more",
+    "applied": "2026-10-05T12:09:31.646636",
+    "seconds_since_previous": 3.38
+  },
+  {
+    "app": "tasking",
+    "migration": "0002_allow_reserved_task_status_logs",
+    "applied": "2026-10-05T12:09:34.833409",
+    "seconds_since_previous": 3.19
+  },
+  {
+    "app": "tasking",
+    "migration": "0003_wmstask_assisted_source_index",
+    "applied": "2026-10-05T12:09:36.136425",
+    "seconds_since_previous": 1.3
+  },
+  {
+    "app": "tasking",
+    "migration": "0004_operations_report_indexes",
+    "applied": "2026-10-05T12:09:37.661820",
+    "seconds_since_previous": 1.53
+  },
+  {
+    "app": "tasking",
+    "migration": "0005_taskscanlog_serial_no",
+    "applied": "2026-10-05T12:09:38.479060",
+    "seconds_since_previous": 0.82
+  },
+  {
+    "app": "tasking",
+    "migration": "0006_count_production_closure",
+    "applied": "2026-10-05T12:09:46.874517",
+    "seconds_since_previous": 8.4
+  },
+  {
+    "app": "tasking",
+    "migration": "0007_replenishment_feature",
+    "applied": "2026-10-05T12:10:01.798539",
+    "seconds_since_previous": 14.92
+  },
+  {
+    "app": "tasking",
+    "migration": "0008_reloclineextra_from_container_and_more",
+    "applied": "2026-10-05T12:10:27.313445",
+    "seconds_since_previous": 25.51
+  },
+  {
+    "app": "inventory",
+    "migration": "0008_boss_dashboard_scope_fields",
+    "applied": "2026-10-05T12:10:32.349722",
+    "seconds_since_previous": 5.04
+  },
+  {
+    "app": "inventory",
+    "migration": "0009_inventory_snapshot_unit_source",
+    "applied": "2026-10-05T12:10:33.772730",
+    "seconds_since_previous": 1.42
+  },
+  {
+    "app": "inventory",
+    "migration": "0010_inventorycostlayer_inventorycostadjustment_and_more",
+    "applied": "2026-10-05T12:10:47.134314",
+    "seconds_since_previous": 13.36
+  },
+  {
+    "app": "locations",
+    "migration": "0005_warehouse_default_receive_location",
+    "applied": "2026-10-05T12:10:48.174579",
+    "seconds_since_previous": 1.04
+  },
+  {
+    "app": "outbound",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:10:48.483015",
+    "seconds_since_previous": 0.31
+  },
+  {
+    "app": "outbound",
+    "migration": "0002_initial",
+    "applied": "2026-10-05T12:11:25.912937",
+    "seconds_since_previous": 37.43
+  },
+  {
+    "app": "outbound",
+    "migration": "0003_alter_outboundorder_options_and_more",
+    "applied": "2026-10-05T12:11:31.323077",
+    "seconds_since_previous": 5.41
+  },
+  {
+    "app": "outbound",
+    "migration": "0004_outboundorder_assisted_history_index",
+    "applied": "2026-10-05T12:11:32.195850",
+    "seconds_since_previous": 0.87
+  },
+  {
+    "app": "outbound",
+    "migration": "0005_outbound_order_idempotency",
+    "applied": "2026-10-05T12:11:38.344588",
+    "seconds_since_previous": 6.15
+  },
+  {
+    "app": "outbound",
+    "migration": "0006_outbound_owner_reject_reason",
+    "applied": "2026-10-05T12:11:42.241521",
+    "seconds_since_previous": 3.9
+  },
+  {
+    "app": "outbound",
+    "migration": "0007_operations_report_indexes",
+    "applied": "2026-10-05T12:11:44.935937",
+    "seconds_since_previous": 2.69
+  },
+  {
+    "app": "pos",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:11:58.075611",
+    "seconds_since_previous": 13.14
+  },
+  {
+    "app": "pos",
+    "migration": "0002_possale_idempotency_fingerprint",
+    "applied": "2026-10-05T12:11:59.569837",
+    "seconds_since_previous": 1.49
+  },
+  {
+    "app": "pos",
+    "migration": "0003_pos_shift_print_export_foundation",
+    "applied": "2026-10-05T12:12:07.384826",
+    "seconds_since_previous": 7.81
+  },
+  {
+    "app": "pos",
+    "migration": "0004_print_log_source_shift_reopen",
+    "applied": "2026-10-05T12:12:15.473762",
+    "seconds_since_previous": 8.09
+  },
+  {
+    "app": "pos",
+    "migration": "0005_pos_return_payment_audit",
+    "applied": "2026-10-05T12:12:46.242127",
+    "seconds_since_previous": 30.77
+  },
+  {
+    "app": "pos",
+    "migration": "0006_backfill_pos_payment_lines",
+    "applied": "2026-10-05T12:12:47.568988",
+    "seconds_since_previous": 1.33
+  },
+  {
+    "app": "pos",
+    "migration": "0007_posreceiptwarehouseinfo",
+    "applied": "2026-10-05T12:12:49.270736",
+    "seconds_since_previous": 1.7
+  },
+  {
+    "app": "pos",
+    "migration": "0008_pos_credit_repayment",
+    "applied": "2026-10-05T12:12:55.729948",
+    "seconds_since_previous": 6.46
+  },
+  {
+    "app": "pos",
+    "migration": "0009_poscustomer_and_more",
+    "applied": "2026-10-05T12:13:18.370758",
+    "seconds_since_previous": 22.64
+  },
+  {
+    "app": "pos",
+    "migration": "0010_poscustomerrepayment_idempotency_fingerprint_and_more",
+    "applied": "2026-10-05T12:13:22.494558",
+    "seconds_since_previous": 4.12
+  },
+  {
+    "app": "products",
+    "migration": "0005_alter_product_code_alter_product_external_code_and_more",
+    "applied": "2026-10-05T12:13:26.721816",
+    "seconds_since_previous": 4.23
+  },
+  {
+    "app": "products",
+    "migration": "0006_productidentifierregistry",
+    "applied": "2026-10-05T12:13:29.781624",
+    "seconds_since_previous": 3.06
+  },
+  {
+    "app": "products",
+    "migration": "0007_package_identifier_registry",
+    "applied": "2026-10-05T12:13:33.352323",
+    "seconds_since_previous": 3.57
+  },
+  {
+    "app": "products",
+    "migration": "0008_product_carton_package",
+    "applied": "2026-10-05T12:13:35.238889",
+    "seconds_since_previous": 1.89
+  },
+  {
+    "app": "products",
+    "migration": "0009_remove_productidentifierregistry_product_package_and_more",
+    "applied": "2026-10-05T12:13:43.961181",
+    "seconds_since_previous": 8.72
+  },
+  {
+    "app": "products",
+    "migration": "0010_remove_productbarcode_uniq_primary_product_barcode_scope_and_more",
+    "applied": "2026-10-05T12:13:52.447728",
+    "seconds_since_previous": 8.49
+  },
+  {
+    "app": "products",
+    "migration": "0011_identifier_normalized_value_indexes",
+    "applied": "2026-10-05T12:13:55.337950",
+    "seconds_since_previous": 2.89
+  },
+  {
+    "app": "products",
+    "migration": "0012_gs1_lookup_cache_and_sku_format",
+    "applied": "2026-10-05T12:13:58.259899",
+    "seconds_since_previous": 2.92
+  },
+  {
+    "app": "products",
+    "migration": "0013_expand_category_uom_codes",
+    "applied": "2026-10-05T12:14:00.992839",
+    "seconds_since_previous": 2.73
+  },
+  {
+    "app": "products",
+    "migration": "0014_product_purchase_price",
+    "applied": "2026-10-05T12:14:02.419491",
+    "seconds_since_previous": 1.43
+  },
+  {
+    "app": "reports",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:14:15.199547",
+    "seconds_since_previous": 12.78
+  },
+  {
+    "app": "reports",
+    "migration": "0002_etljobrun_operations_permissions",
+    "applied": "2026-10-05T12:14:15.314850",
+    "seconds_since_previous": 0.12
+  },
+  {
+    "app": "reports",
+    "migration": "0003_reporting_governance_fields",
+    "applied": "2026-10-05T12:14:16.445327",
+    "seconds_since_previous": 1.13
+  },
+  {
+    "app": "reports",
+    "migration": "0004_billing_fact_reversals",
+    "applied": "2026-10-05T12:14:20.552702",
+    "seconds_since_previous": 4.11
+  },
+  {
+    "app": "reports",
+    "migration": "0005_factbilling_dedup_constraint",
+    "applied": "2026-10-05T12:14:22.772435",
+    "seconds_since_previous": 2.22
+  },
+  {
+    "app": "reports",
+    "migration": "0006_alertcase_alertcasehistory_businessreviewsnapshot_and_more",
+    "applied": "2026-10-05T12:14:40.077429",
+    "seconds_since_previous": 17.3
+  },
+  {
+    "app": "reports",
+    "migration": "0007_factoutboundordersla",
+    "applied": "2026-10-05T12:14:41.211968",
+    "seconds_since_previous": 1.13
+  },
+  {
+    "app": "reports",
+    "migration": "0008_business_review_snapshot_permission",
+    "applied": "2026-10-05T12:14:43.576453",
+    "seconds_since_previous": 2.36
+  },
+  {
+    "app": "salesapp",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:16:22.614958",
+    "seconds_since_previous": 99.04
+  },
+  {
+    "app": "salesapp",
+    "migration": "0002_miniprogramuser_minicustomeraddress_saleminibanner_and_more",
+    "applied": "2026-10-05T12:16:58.467641",
+    "seconds_since_previous": 35.85
+  },
+  {
+    "app": "salesapp",
+    "migration": "0003_saleminicart_saleminicartitem_and_more",
+    "applied": "2026-10-05T12:17:12.934317",
+    "seconds_since_previous": 14.47
+  },
+  {
+    "app": "salesapp",
+    "migration": "0004_saleminipayment_saleminipaymentevent_saleminirefund_and_more",
+    "applied": "2026-10-05T12:18:06.680901",
+    "seconds_since_previous": 53.75
+  },
+  {
+    "app": "salesapp",
+    "migration": "0005_saleminicoupon_saleminicoupontemplate_and_more",
+    "applied": "2026-10-05T12:19:42.346779",
+    "seconds_since_previous": 95.67
+  },
+  {
+    "app": "salesapp",
+    "migration": "0006_saleminiaftersalerequest",
+    "applied": "2026-10-05T12:19:44.992438",
+    "seconds_since_previous": 2.65
+  },
+  {
+    "app": "salesapp",
+    "migration": "0007_allow_multi_owner_mini_program_user",
+    "applied": "2026-10-05T12:19:47.286459",
+    "seconds_since_previous": 2.29
+  },
+  {
+    "app": "salesapp",
+    "migration": "0008_alter_minicustomeraddress_options_and_more",
+    "applied": "2026-10-05T12:20:36.653377",
+    "seconds_since_previous": 49.37
+  },
+  {
+    "app": "salesapp",
+    "migration": "0009_saleproductconfig_enable_qty_rules",
+    "applied": "2026-10-05T12:20:38.418510",
+    "seconds_since_previous": 1.77
+  },
+  {
+    "app": "salesapp",
+    "migration": "0010_saleminiproductreview_saleminiproductreviewimage_and_more",
+    "applied": "2026-10-05T12:21:00.856733",
+    "seconds_since_previous": 22.44
+  },
+  {
+    "app": "salesapp",
+    "migration": "0011_saleminirefund_idempotency_key_and_more",
+    "applied": "2026-10-05T12:21:16.914856",
+    "seconds_since_previous": 16.06
+  },
+  {
+    "app": "salesapp",
+    "migration": "0012_payment_reliability",
+    "applied": "2026-10-05T12:21:39.181091",
+    "seconds_since_previous": 22.27
+  },
+  {
+    "app": "salesapp",
+    "migration": "0013_localize_admin_fields",
+    "applied": "2026-10-05T12:25:46.155101",
+    "seconds_since_previous": 246.97
+  },
+  {
+    "app": "sessions",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:25:46.244453",
+    "seconds_since_previous": 0.09
+  },
+  {
+    "app": "strategies",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:25:54.052568",
+    "seconds_since_previous": 7.81
+  },
+  {
+    "app": "tasking",
+    "migration": "0009_taskscanlog_barcode_resolution_snapshot",
+    "applied": "2026-10-05T12:25:59.124487",
+    "seconds_since_previous": 5.07
+  },
+  {
+    "app": "token_blacklist",
+    "migration": "0001_initial",
+    "applied": "2026-10-05T12:26:02.391015",
+    "seconds_since_previous": 3.27
+  },
+  {
+    "app": "token_blacklist",
+    "migration": "0002_outstandingtoken_jti_hex",
+    "applied": "2026-10-05T12:26:03.982982",
+    "seconds_since_previous": 1.59
+  },
+  {
+    "app": "token_blacklist",
+    "migration": "0003_auto_20171017_2007",
+    "applied": "2026-10-05T12:26:05.562909",
+    "seconds_since_previous": 1.58
+  },
+  {
+    "app": "token_blacklist",
+    "migration": "0004_auto_20171017_2013",
+    "applied": "2026-10-05T12:26:06.576413",
+    "seconds_since_previous": 1.01
+  },
+  {
+    "app": "token_blacklist",
+    "migration": "0005_remove_outstandingtoken_jti",
+    "applied": "2026-10-05T12:26:07.737689",
+    "seconds_since_previous": 1.16
+  },
+  {
+    "app": "token_blacklist",
+    "migration": "0006_auto_20171017_2113",
+    "applied": "2026-10-05T12:26:09.188606",
+    "seconds_since_previous": 1.45
+  },
+  {
+    "app": "token_blacklist",
+    "migration": "0007_auto_20171017_2214",
+    "applied": "2026-10-05T12:26:11.961791",
+    "seconds_since_previous": 2.77
+  },
+  {
+    "app": "token_blacklist",
+    "migration": "0008_migrate_to_bigautofield",
+    "applied": "2026-10-05T12:26:13.789968",
+    "seconds_since_previous": 1.83
+  },
+  {
+    "app": "token_blacklist",
+    "migration": "0010_fix_migrate_to_bigautofield",
+    "applied": "2026-10-05T12:26:15.179597",
+    "seconds_since_previous": 1.39
+  },
+  {
+    "app": "token_blacklist",
+    "migration": "0011_linearizes_history",
+    "applied": "2026-10-05T12:26:15.182343",
+    "seconds_since_previous": 0.0
+  },
+  {
+    "app": "token_blacklist",
+    "migration": "0012_alter_outstandingtoken_user",
+    "applied": "2026-10-05T12:26:17.014464",
+    "seconds_since_previous": 1.83
+  },
+  {
+    "app": "token_blacklist",
+    "migration": "0013_alter_blacklistedtoken_options_and_more",
+    "applied": "2026-10-05T12:26:18.165254",
+    "seconds_since_previous": 1.15
+  }
+]

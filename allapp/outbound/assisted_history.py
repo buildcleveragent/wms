@@ -12,8 +12,8 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.db.models import (
-    Case,
     BigIntegerField,
+    Case,
     CharField,
     Count,
     DecimalField,
@@ -33,11 +33,13 @@ from django.utils.dateparse import parse_date
 from rest_framework.exceptions import ValidationError
 
 from allapp.accounts.access import AccessScope
+from allapp.baseinfo.customer_access import customer_code
+from allapp.baseinfo.models import OwnerCustomerBinding
 from allapp.products.identifier_lookup import product_search_q
 from allapp.tasking.models import WmsTask
 
 from .models import OutboundOrder, OutboundOrderLine
-
+from .ownership import transfer_summary
 
 BUSINESS_STATUS_LABELS = {
     "READY_TO_PICK": "等待拣货",
@@ -160,7 +162,7 @@ def assisted_history_queryset(user):
             warehouse_id__in=warehouse_ids,
             processing_mode=OutboundOrder.ProcessingMode.WAREHOUSE_ASSISTED,
         )
-        .select_related("owner", "customer", "assisted_by")
+        .select_related("owner", "customer", "assisted_by", "assisted_transfer__source_owner")
         .annotate(
             history_line_count=Coalesce(
                 Subquery(line_count, output_field=IntegerField()), Value(0)
@@ -270,13 +272,24 @@ def filter_history_queryset(qs, params, *, include_status=True):
         product_match = OutboundOrderLine.objects.filter(
             order_id=OuterRef("pk"), is_deleted=False
         ).filter(product_search_q(search))
-        qs = qs.annotate(_history_product_match=Exists(product_match)).filter(
+        customer_match = OwnerCustomerBinding.all_objects.filter(
+            owner_id=OuterRef("owner_id"),
+            customer_id=OuterRef("customer_id"),
+            code__icontains=search,
+        )
+        qs = qs.annotate(
+            _history_product_match=Exists(product_match),
+            _history_customer_match=Exists(customer_match),
+        ).filter(
             Q(order_no__icontains=search)
             | Q(src_bill_no__icontains=search)
             | Q(owner__name__icontains=search)
             | Q(owner__code__icontains=search)
             | Q(customer__name__icontains=search)
-            | Q(customer__code__icontains=search)
+            | Q(_history_customer_match=True)
+            | Q(assisted_transfer__transfer_no__icontains=search)
+            | Q(assisted_transfer__source_owner__name__icontains=search)
+            | Q(assisted_transfer__source_owner__code__icontains=search)
             | Q(contact__icontains=search)
             | Q(contact_phone__icontains=search)
             | Q(_history_product_match=True)
@@ -330,6 +343,7 @@ def serialize_history_order(order):
     return {
         "id": order.id,
         "order_no": order.order_no,
+        **transfer_summary(order),
         "src_bill_no": order.src_bill_no or "",
         "assisted_at": _iso_datetime(order.assisted_at),
         "owner": {
@@ -337,36 +351,42 @@ def serialize_history_order(order):
             "code": order.owner.code,
             "name": order.owner.name,
         },
-        "customer": {
-            "id": order.customer_id,
-            "code": getattr(order.customer, "code", "") or "",
-            "name": customer_name,
-        }
-        if order.customer_id
-        else None,
+        "customer": (
+            {
+                "id": order.customer_id,
+                "code": customer_code(order.customer, order.owner_id),
+                "name": customer_name,
+            }
+            if order.customer_id
+            else None
+        ),
         "receiver_name": receiver_name,
         "contact_phone": order.contact_phone or "",
-        "assisted_by": {
-            "id": order.assisted_by_id,
-            "name": _display_name(order.assisted_by),
-        }
-        if order.assisted_by_id
-        else None,
+        "assisted_by": (
+            {
+                "id": order.assisted_by_id,
+                "name": _display_name(order.assisted_by),
+            }
+            if order.assisted_by_id
+            else None
+        ),
         "line_count": int(order.history_line_count or 0),
         "total_base_qty": str(order.history_total_qty or Decimal("0")),
         "submit_status": order.submit_status,
         "approval_status": order.approval_status,
         "is_closed": order.is_closed,
-        "task": {
-            "id": task_id,
-            "task_no": order.history_task_no or "",
-            "status": order.history_task_status or "",
-            "review_status": order.history_review_status or "",
-            "posting_status": order.history_posting_status or "",
-            "posted_at": _iso_datetime(order.history_posted_at),
-        }
-        if task_id
-        else None,
+        "task": (
+            {
+                "id": task_id,
+                "task_no": order.history_task_no or "",
+                "status": order.history_task_status or "",
+                "review_status": order.history_review_status or "",
+                "posting_status": order.history_posting_status or "",
+                "posted_at": _iso_datetime(order.history_posted_at),
+            }
+            if task_id
+            else None
+        ),
         "business_status": status_value,
         "business_status_label": BUSINESS_STATUS_LABELS[status_value],
         "can_reprint": can_reprint,

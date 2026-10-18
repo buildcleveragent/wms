@@ -1,0 +1,5 @@
+{
+  "file": "/wms/allapp/salesapp/migrations/0013_localize_admin_fields.py",
+  "state_only_field_operations": 183,
+  "observation": "Fresh migration progress remains after salesapp 0012 while applying 0013, which has no SQL operations but many state AlterField operations. Suspected cost is Django historical model-state rendering; not proven by a runtime CPU profile. Historical migrations left unchanged."
+}

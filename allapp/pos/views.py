@@ -21,6 +21,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from allapp.baseinfo.owner_warehouse_access import owner_queryset_for_warehouses
 from allapp.core.choices import ZoneType
 from allapp.inventory.locking import InventoryConcurrencyError
 from allapp.inventory.models import InventoryDetail
@@ -156,6 +157,8 @@ class PosProductListApi(generics.ListAPIView):
         user = self.request.user
         if not getattr(user, "warehouse_id", None):
             return "当前用户未绑定仓库(warehouse)，无法查询 POS 商品。"
+        if self.request.query_params.get("include_out_of_stock", "0") not in {"0", "1"}:
+            return "缺货候选参数无效。"
         zone_type = (self.request.query_params.get("zone_type") or "").strip()
         if zone_type:
             try:
@@ -178,12 +181,16 @@ class PosProductListApi(generics.ListAPIView):
         if not warehouse_id:
             return Product.objects.none()
 
-        queryset = Product.objects.filter(
-            is_active=True,
-            pk__in=InventoryDetail.objects.filter(warehouse_id=warehouse_id, is_active=True).values(
-                "product_id"
-            ),
-        ).select_related("base_uom")
+        queryset = Product.objects.filter(is_active=True).select_related("base_uom", "owner")
+        if self.request.query_params.get("include_out_of_stock") == "1":
+            # Mobile needs every authorized owner, including products without a stock layer.
+            queryset = queryset.filter(owner__in=owner_queryset_for_warehouses([warehouse_id]))
+        else:
+            queryset = queryset.filter(
+                pk__in=InventoryDetail.objects.filter(
+                    warehouse_id=warehouse_id, is_active=True
+                ).values("product_id")
+            )
         search = (self.request.query_params.get("search") or "").strip()
         barcode = (self.request.query_params.get("barcode") or "").strip()
 
@@ -232,6 +239,7 @@ class PosProductListApi(generics.ListAPIView):
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context["warehouse_id"] = getattr(self.request.user, "warehouse_id", None)
+        context["barcode"] = (self.request.query_params.get("barcode") or "").strip()
         zone_type = (self.request.query_params.get("zone_type") or "").strip()
         if zone_type:
             try:
@@ -352,7 +360,8 @@ def _sale_queryset_for_user(user):
         "selected_customer",
         "shift",
     ).prefetch_related(
-        "lines__product",
+        "lines__product__base_uom",
+        "lines__owner",
         "payment_lines",
         "sale_orders__outbound_order",
     )

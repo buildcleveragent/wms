@@ -37,9 +37,8 @@ describe('product archive export contracts', () => {
 
     expect(home).toContain('key: "missing-gtin-export"')
     expect(home).toContain('requiresProductExport: true')
-    expect(home).toContain('if (missingGtinExporting.value) return')
-    expect(home).toContain("import { downloadMissingGtinProducts } from '@/utils/request'")
-    expect(home).toContain('await downloadMissingGtinProducts()')
+    expect(home).toContain('allProductExporting.value || missingGtinExporting.value')
+    expect(home).toContain("exportProducts(missingGtinExporting, downloadMissingGtinProducts, '无标准条码商品')")
     expect(home).toContain("title: '正在导出…'")
     expect(request).toContain('export function downloadMissingGtinProducts')
     expect(request).toContain('/api/products/export-missing-gtin/')

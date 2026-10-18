@@ -114,11 +114,22 @@ function rawRequest(options, token = '') {
       },
       success: (res) => {
         if (res.statusCode >= 200 && res.statusCode < 300) resolve(options.rawResponse ? res : res.data)
-        else reject(classifyError(res.statusCode, res.data))
+        else reject(classifyError(res.statusCode, decodeErrorData(res.data)))
       },
       fail: (error) => reject(classifyError(0, error)),
     })
   })
+}
+
+function decodeErrorData(data) {
+  if (Object.prototype.toString.call(data) !== '[object ArrayBuffer]') return data
+  // Download requests still receive JSON error bodies; decode them on H5 and mini-programs.
+  try {
+    const encoded = Array.from(new Uint8Array(data), byte => `%${byte.toString(16).padStart(2, '0')}`).join('')
+    return JSON.parse(decodeURIComponent(encoded))
+  } catch (error) {
+    return { detail: '下载失败，请重试' }
+  }
 }
 
 let refreshFlight = null
@@ -163,9 +174,9 @@ async function refreshAccessToken() {
   return flight
 }
 
-export function buildQuery(params = {}) {
+export function buildQuery(params = {}, { keepEmpty = [] } = {}) {
   return Object.entries(params)
-    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .filter(([key, value]) => value !== undefined && value !== null && (value !== '' || keepEmpty.includes(key)))
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join('&')
 }

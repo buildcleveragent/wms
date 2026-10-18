@@ -13,6 +13,9 @@ x-wms-service: &wms-service
 services:
   web:
     <<: *wms-service
+    mem_limit: ${WMS_WEB_MEMORY_LIMIT:-2g}
+    cpus: ${WMS_WEB_CPUS:-2.0}
+    pids_limit: 128
     command: /app/docker/start-web.sh
     restart: unless-stopped
     ports:

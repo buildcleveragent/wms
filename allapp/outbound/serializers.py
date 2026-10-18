@@ -1,6 +1,6 @@
+import logging
 from datetime import date
 from decimal import Decimal
-import logging
 from zoneinfo import ZoneInfo
 
 from django.apps import apps
@@ -10,15 +10,15 @@ from django.db import transaction
 from django.utils.dateparse import parse_datetime
 from rest_framework import serializers
 
-from .models import OutboundOrder, OutboundOrderLine
-
-
 from allapp.accounts.access import AccessScope
 from allapp.accounts.models import UserRoleScope
+from allapp.baseinfo.customer_access import customer_binding, customers_for_owner
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.services import can_edit_standard_draft, get_default_product_price
 from allapp.outbound.warehouse_access import owner_can_use_warehouse
 from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
+
+from .models import OutboundOrder, OutboundOrderLine
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,9 @@ class OutboundOrderLineCreateSerializer(serializers.Serializer):
 
 
 class AssistedOutboundLineSerializer(serializers.Serializer):
+    transfer_price = serializers.DecimalField(
+        max_digits=18, decimal_places=4, min_value=Decimal("0"), required=False, allow_null=True
+    )
     product_id = serializers.IntegerField(min_value=1)
     qty = serializers.DecimalField(
         max_digits=18,
@@ -148,6 +151,7 @@ class AssistedOutboundOrderCreateSerializer(serializers.Serializer):
 
     request_id = serializers.UUIDField()
     owner_id = serializers.IntegerField(min_value=1)
+    new_owner_id = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     customer_id = serializers.IntegerField(min_value=1)
     items = AssistedOutboundLineSerializer(many=True, allow_empty=False)
     src_bill_no = serializers.CharField(required=False, allow_blank=True, max_length=100)
@@ -170,7 +174,6 @@ class AssistedOutboundOrderCreateSerializer(serializers.Serializer):
 
     def validate(self, data):
         Owner = apps.get_model("baseinfo", "Owner")
-        Customer = apps.get_model("baseinfo", "Customer")
         Product = apps.get_model("products", "Product")
         ProductPackage = apps.get_model("products", "ProductPackage")
 
@@ -184,11 +187,19 @@ class AssistedOutboundOrderCreateSerializer(serializers.Serializer):
                 {"owner_id": "货主不存在、未启用，或未授权仓库代办出库。"}
             )
 
-        customer = Customer.objects.filter(
-            pk=data["customer_id"],
-            owner_id=owner.id,
-            is_active=True,
-        ).first()
+        new_owner = None
+        if data.get("new_owner_id"):
+            if data["new_owner_id"] == owner.pk:
+                raise serializers.ValidationError({"new_owner_id": "新货主不能与原货主相同。"})
+            new_owner = Owner.objects.filter(
+                pk=data["new_owner_id"], is_active=True, allow_warehouse_assisted_outbound=True
+            ).first()
+            if new_owner is None:
+                raise serializers.ValidationError(
+                    {"new_owner_id": "新货主不存在、未启用或未授权代办。"}
+                )
+        sales_owner = new_owner or owner
+        customer = customers_for_owner(sales_owner.pk).filter(pk=data["customer_id"]).first()
         if customer is None:
             raise serializers.ValidationError(
                 {"customer_id": "客户不存在、未启用，或不属于所选货主。"}
@@ -266,13 +277,17 @@ class AssistedOutboundOrderCreateSerializer(serializers.Serializer):
             # 仓库代办出库只负责货物流转：已知价格可由操作员填写，未填则
             # 使用服务端默认价；货主未提供售价时允许以零价创建订单行。
             item["price"] = price if price > 0 else Decimal("0")
+            if not new_owner and item.get("transfer_price") is not None:
+                raise serializers.ValidationError({"items": "转货单价仅用于填写了新货主的订单。"})
+            if item.get("transfer_price") is None:
+                item["transfer_price"] = item["price"]
 
         for key in ("src_bill_no", "contact", "contact_phone", "ship_to"):
             data[key] = (data.get(key) or "").strip()
 
         if data["src_bill_no"]:
             existing = OutboundOrder.objects.filter(
-                owner_id=owner.id,
+                owner_id=sales_owner.id,
                 src_bill_no=data["src_bill_no"],
             ).first()
             if existing:
@@ -283,7 +298,7 @@ class AssistedOutboundOrderCreateSerializer(serializers.Serializer):
                     }
                 )
 
-        if (customer.code or "").strip().upper() == "CASH":
+        if (customer.owner_customer_code or "").strip().upper() == "CASH":
             if not data["contact"]:
                 raise serializers.ValidationError({"contact": "散客代发必须填写收件人。"})
             if not data["contact_phone"]:
@@ -296,6 +311,7 @@ class AssistedOutboundOrderCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"contact_phone": "联系电话格式不正确。"})
 
         data["owner"] = owner
+        data["new_owner"] = new_owner
         data["customer"] = customer
         return data
 # class OutboundOrderCreateSerializer(serializers.Serializer):
@@ -480,9 +496,11 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
     def _assert_customer_access(self, customer, owner_id, user):
         if not customer:
             return
-        if customer.owner_id != owner_id:
+        binding = customer_binding(customer, owner_id)
+        if binding is None:
             self._raise_customer_access_error()
-        if not self._is_cash_customer(customer) and customer.salesperson_id != getattr(
+        customer.owner_customer_code = binding.code
+        if not self._is_cash_customer(customer) and binding.salesperson_id != getattr(
             user, "id", None
         ):
             self._raise_customer_access_error()
@@ -573,7 +591,7 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         return {"non_field_errors": list(exc.messages)}
 
     def _is_cash_customer(self, customer):
-        code = (getattr(customer, "code", "") or "").strip().upper()
+        code = (getattr(customer, "owner_customer_code", "") or "").strip().upper()
         return code == "CASH"
 
     # ---------- 校验 ----------
@@ -656,7 +674,6 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"ship_to": "一件代发客户必须填写收货地址。"})
             if len(data["contact_phone"]) < 6 or not any(ch.isdigit() for ch in data["contact_phone"]):
                 raise serializers.ValidationError({"contact_phone": "联系电话格式不正确。"})
-
 
         # 把后端推断出的 owner/warehouse 放入 validated_data，供 create 使用
         data["owner_id__from_user"] = owner_id
@@ -937,8 +954,6 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
 #         for l in getattr(obj, "lines").all():
 #             total += (Decimal(l.base_qty or 0) * Decimal(l.base_price or 0))
 #         return total.quantize(Decimal("0.01"))
-
-
 
 
 # class OutboundOrderReadSerializer(serializers.ModelSerializer):

@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "run_id": "dfb192a4a51b4ba780c839a3208a1ba3",
+  "status": "FAIL",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026532637]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "382221",
+    "state": "R"
+  },
+  "command": [
+    "/wms/.venv/bin/python",
+    "/tmp/wms-release-20261005-aohudxd1/production_check.py"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026532637]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "382239",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 7,
+  "exit_code": 1,
+  "cleaned_containers": [],
+  "duration_seconds": 8.766
+}

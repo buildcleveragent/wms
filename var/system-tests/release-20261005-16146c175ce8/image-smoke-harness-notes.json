@@ -1,0 +1,5 @@
+{
+  "initial_image_pdf_smoke": "Expected configuration failure: image contains no SECRET_KEY; no production secret was supplied.",
+  "configured_measurement_script": "Cannot use host measurement helper unchanged in production image because its sample-data import imports pytest, which is deliberately not installed in the production image.",
+  "successful_native_smoke": "Generated an ephemeral process-local SECRET_KEY, reused only the pure sample_note data function via AST, and ran actual Django template + production WeasyPrint renderer with network disabled. No application or image dependencies changed."
+}

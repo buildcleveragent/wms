@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "run_id": "337d443e39e345de8f372513ff3d93b5",
+  "status": "PASS",
+  "owner": {
+    "pid": 1388,
+    "pid_namespace": "pid:[4026533131]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "382432",
+    "state": "R"
+  },
+  "command": [
+    "node",
+    "--test",
+    "tests/payment-service.test.mjs",
+    "tests/request-auth.test.mjs",
+    "tests/cart-recovery.test.mjs"
+  ],
+  "cwd": "/wms/sales-miniapp",
+  "child": {
+    "pid": 1389,
+    "pid_namespace": "pid:[4026533131]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "382452",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 1389,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 0.589
+}

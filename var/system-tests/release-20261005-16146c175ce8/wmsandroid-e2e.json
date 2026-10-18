@@ -1,0 +1,638 @@
+{
+  "config": {
+    "argv": [
+      "/usr/bin/node",
+      "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsandroid/node_modules/.bin/playwright",
+      "test",
+      "--output=/tmp/wms-release-20261005-aohudxd1/wmsandroid-browser-results",
+      "--reporter=line,json"
+    ],
+    "configFile": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsandroid/playwright.config.js",
+    "rootDir": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsandroid/tests/e2e",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/tmp/wms-release-20261005-aohudxd1/wmsandroid-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "android-360",
+        "name": "android-360",
+        "testDir": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsandroid/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 90000
+      },
+      {
+        "outputDir": "/tmp/wms-release-20261005-aohudxd1/wmsandroid-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "android-390",
+        "name": "android-390",
+        "testDir": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsandroid/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 90000
+      },
+      {
+        "outputDir": "/tmp/wms-release-20261005-aohudxd1/wmsandroid-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "android-412",
+        "name": "android-412",
+        "testDir": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsandroid/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 90000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "line"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": {
+      "command": "VITE_API_BASE_URL=http://127.0.0.1:8001 npm run dev:h5",
+      "url": "http://127.0.0.1:5173",
+      "reuseExistingServer": false,
+      "timeout": 120000
+    }
+  },
+  "suites": [
+    {
+      "title": "mobile-pos.spec.js",
+      "file": "mobile-pos.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "POS search, cart, payment and checkout use one mobile flow and a whole-warehouse payload",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-360",
+              "projectName": "android-360",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5350,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:12:33.597Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "49bf215d3308f74239c5-ba40849aef00af3c9ef3",
+          "file": "mobile-pos.spec.js",
+          "line": 4,
+          "column": 5
+        },
+        {
+          "title": "sales history exposes detail, return and void only with their permissions",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-360",
+              "projectName": "android-360",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4236,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:12:39.590Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "49bf215d3308f74239c5-87775af3c8c9752a7aff",
+          "file": "mobile-pos.spec.js",
+          "line": 42,
+          "column": 5
+        },
+        {
+          "title": "POS search, cart, payment and checkout use one mobile flow and a whole-warehouse payload",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-390",
+              "projectName": "android-390",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5126,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:12:58.269Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "49bf215d3308f74239c5-58508a3643931feaf2a1",
+          "file": "mobile-pos.spec.js",
+          "line": 4,
+          "column": 5
+        },
+        {
+          "title": "sales history exposes detail, return and void only with their permissions",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-390",
+              "projectName": "android-390",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4285,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:13:03.847Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "49bf215d3308f74239c5-1dbe8c5e2d13d79352b9",
+          "file": "mobile-pos.spec.js",
+          "line": 42,
+          "column": 5
+        },
+        {
+          "title": "POS search, cart, payment and checkout use one mobile flow and a whole-warehouse payload",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-412",
+              "projectName": "android-412",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4588,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:13:20.952Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "49bf215d3308f74239c5-08346a1c644c2c32e411",
+          "file": "mobile-pos.spec.js",
+          "line": 4,
+          "column": 5
+        },
+        {
+          "title": "sales history exposes detail, return and void only with their permissions",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-412",
+              "projectName": "android-412",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3712,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:13:25.896Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "49bf215d3308f74239c5-a1d0f0373046aaca9beb",
+          "file": "mobile-pos.spec.js",
+          "line": 42,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "mobile-shell.spec.js",
+      "file": "mobile-shell.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "mobile workbench shows only retained warehouse operations without desktop leftovers",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-360",
+              "projectName": "android-360",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4325,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:12:43.914Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a6a5ae62378cc937bf50-538f923a0aa428c32647",
+          "file": "mobile-shell.spec.js",
+          "line": 4,
+          "column": 5
+        },
+        {
+          "title": "operation tab lists the retained workflows and hides forbidden entries",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-360",
+              "projectName": "android-360",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4246,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:12:48.297Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a6a5ae62378cc937bf50-77452e79b99a41c21293",
+          "file": "mobile-shell.spec.js",
+          "line": 22,
+          "column": 5
+        },
+        {
+          "title": "relocation task renders an explicit source-product-target scan sequence",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-360",
+              "projectName": "android-360",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3763,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:12:52.587Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a6a5ae62378cc937bf50-b207fe4b37bfa7bafa2e",
+          "file": "mobile-shell.spec.js",
+          "line": 42,
+          "column": 5
+        },
+        {
+          "title": "mobile workbench shows only retained warehouse operations without desktop leftovers",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-390",
+              "projectName": "android-390",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3882,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:13:08.200Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a6a5ae62378cc937bf50-92018720dbcbd9cacc5e",
+          "file": "mobile-shell.spec.js",
+          "line": 4,
+          "column": 5
+        },
+        {
+          "title": "operation tab lists the retained workflows and hides forbidden entries",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-390",
+              "projectName": "android-390",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3941,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:13:12.128Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a6a5ae62378cc937bf50-38ced83129b6f5bda288",
+          "file": "mobile-shell.spec.js",
+          "line": 22,
+          "column": 5
+        },
+        {
+          "title": "relocation task renders an explicit source-product-target scan sequence",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-390",
+              "projectName": "android-390",
+              "results": [
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3121,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:13:16.110Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a6a5ae62378cc937bf50-83ac084a891644955cf0",
+          "file": "mobile-shell.spec.js",
+          "line": 42,
+          "column": 5
+        },
+        {
+          "title": "mobile workbench shows only retained warehouse operations without desktop leftovers",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-412",
+              "projectName": "android-412",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3650,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:13:29.661Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a6a5ae62378cc937bf50-ac4be11647eb118b4d06",
+          "file": "mobile-shell.spec.js",
+          "line": 4,
+          "column": 5
+        },
+        {
+          "title": "operation tab lists the retained workflows and hides forbidden entries",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-412",
+              "projectName": "android-412",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3763,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:13:33.344Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a6a5ae62378cc937bf50-6590790e4a097cc0801a",
+          "file": "mobile-shell.spec.js",
+          "line": 22,
+          "column": 5
+        },
+        {
+          "title": "relocation task renders an explicit source-product-target scan sequence",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "android-412",
+              "projectName": "android-412",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2849,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:13:37.144Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "a6a5ae62378cc937bf50-54bd44da90f03000c563",
+          "file": "mobile-shell.spec.js",
+          "line": 42,
+          "column": 5
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-05T04:12:26.389Z",
+    "duration": 73854.965,
+    "expected": 15,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

@@ -1,0 +1,8 @@
+[
+  {
+    "container": "wms-test-migration-6c5869e7e89f42c5b78decd03d83ae68",
+    "database": "wms_db_test",
+    "migrations": 29,
+    "last_migration": "pos\t0002_possale_idempotency_fingerprint"
+  }
+]

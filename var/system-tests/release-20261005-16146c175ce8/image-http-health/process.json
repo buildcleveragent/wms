@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "run_id": "ae5e19dfa5ab45e38dee6804e5533b08",
+  "status": "FAIL",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026532992]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "733683",
+    "state": "R"
+  },
+  "command": [
+    "docker",
+    "run",
+    "--rm",
+    "--network",
+    "none",
+    "--name",
+    "wms-release-http-probe-16146c175ce8",
+    "-v",
+    "/tmp/wms-release-20261005-aohudxd1/image_health_probe.py:/tmp/image_health_probe.py:ro",
+    "wms-release:20261005-16146c175ce8",
+    "python",
+    "/tmp/image_health_probe.py"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026532992]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "733779",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 7,
+  "exit_code": 1,
+  "cleaned_containers": [],
+  "duration_seconds": 47.105
+}

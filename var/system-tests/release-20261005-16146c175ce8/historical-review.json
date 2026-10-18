@@ -1,0 +1,25 @@
+{
+  "status": "CONSISTENT_WITH_REPORTED_MAIN_PASS",
+  "testcase_elements": 1122,
+  "suite_reported_tests": [
+    2067
+  ],
+  "xml_failures": {
+    "failure": 0,
+    "error": 0,
+    "skipped": 0
+  },
+  "missing_cases": [],
+  "extra_cases": [],
+  "log_summary": {
+    "main_passed": 1122,
+    "subtests_passed": 945
+  },
+  "subtest_identity_recoverable": false,
+  "limitation": "Historical subtests have aggregate counts only. A new run cannot recover their original identities.",
+  "source_files": {
+    "backend.xml": "f99abc61f81c9b90848aed15925609fb3652c8e11771f12cf818af3f2f4089c5",
+    "backend-tests.json": "52535c4da85881abadb8d833f08a4418730f773ff51eba57d45fd595996eb7ff",
+    "backend-manifest.json": "73ada60b7b6da8dd260dfedc6cd887427135522f6367215bb293407be5aeec67"
+  }
+}

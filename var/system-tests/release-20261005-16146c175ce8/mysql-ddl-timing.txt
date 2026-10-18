@@ -1,0 +1,12 @@
+Read-only aggregate statement timings since isolated test server start.
+DATABASE()	VERSION()
+wms_db_test	8.0.46
+migrations
+113
+EVENT_NAME	COUNT_STAR	total_seconds
+statement/sql/alter_table	942	154.51
+statement/sql/select	11223	11.31
+statement/sql/create_table	175	9.08
+statement/sql/insert	1473	1.00
+statement/sql/update	368	0.18
+statement/sql/drop_table	0	0.00

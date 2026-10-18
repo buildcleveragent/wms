@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "database": "wms_db_test",
+  "mysql": "8.0.46",
+  "migrations": 141,
+  "mode": "reuse",
+  "reason": "Full serial functional suite passed. Remaining migration scenarios use separate disposable MySQL instances and distinct ports."
+}

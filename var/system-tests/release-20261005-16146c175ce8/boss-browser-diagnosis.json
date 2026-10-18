@@ -1,0 +1,5 @@
+{
+  "default_dev_failure": "Existing broad **/api/** page mock also intercepted Vite @fs dependency CSS paths containing /api/, returned application/json. Built preview resolves this without app code edits.",
+  "built_route_failure": "Temporary network fence blocked the fixed public decoration asset https://cdn.dcloud.net.cn/img/shadow-grey.png, producing console errors; all page assertions had passed.",
+  "harness_correction": "Allow only that exact public image URL; keep application API requests fenced/mocked. Preserve all original test assertions and failed attempts."
+}

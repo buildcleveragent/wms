@@ -1,6 +1,8 @@
 <template>
-  <view :class="['assisted-order-panel', `mode-${mode}`]">
+  <view :class="['assisted-order-panel', `mode-${mode}`, { 'transfer-mode': draft.newOwner }]">
     <view class="header-card">
+      <view v-if="draft.newOwner" class="transfer-route">{{ draft.routeLabel }}</view>
+      <template v-else>
       <view>
         <text class="label">货主：</text>
         <text>{{ draft.owner?.name || '-' }}</text>
@@ -9,6 +11,7 @@
         <text class="label">客户：</text>
         <text>{{ draft.customer?.name || '-' }}</text>
       </view>
+      </template>
     </view>
 
     <view v-if="showItems" class="section items-section">
@@ -20,7 +23,8 @@
           <text>基本数量</text>
           <view class="edit-table-header">
             <text>出库数量</text>
-            <text>基本单价</text>
+            <text>{{ draft.newOwner ? '客户销售单价' : '基本单价' }}</text>
+            <text v-if="draft.newOwner">转货单价</text>
             <text>操作</text>
           </view>
         </view>
@@ -65,7 +69,7 @@
               />
             </view>
             <view class="field-block">
-              <text class="field-label">基本单价（可不填）</text>
+              <text class="field-label">{{ draft.newOwner ? '客户销售单价' : '基本单价' }}（可不填）</text>
               <input
                 class="value-input"
                 type="digit"
@@ -74,6 +78,17 @@
                 :disabled="submissionLocked"
                 @input="setItemPrice(index, $event)"
                 @blur="finalizeItemPrice(index)"
+              />
+            </view>
+            <view v-if="draft.newOwner" class="field-block">
+              <text class="field-label">转货单价（基本单位）</text>
+              <input
+                class="value-input transfer-price-input"
+                type="digit"
+                :value="item.transfer_price"
+                placeholder="同销售单价"
+                :disabled="submissionLocked"
+                @input="setItemTransferPrice(index, $event)"
               />
             </view>
             <button
@@ -249,8 +264,11 @@ const canSubmit = computed(() => {
     const available = Number(item.available_qty || 0)
     const priceIsValid = item.price === '' || item.price === null || item.price === undefined
       || (Number.isFinite(Number(item.price)) && Number(item.price) >= 0)
+    const transferPriceIsValid = !draft.newOwner || item.transfer_price === ''
+      || item.transfer_price === null || item.transfer_price === undefined
+      || (Number.isFinite(Number(item.transfer_price)) && Number(item.transfer_price) >= 0)
     return Number.isFinite(packageQty) && packageQty > 0
-      && Number.isFinite(qty) && qty > 0 && qty <= available && priceIsValid
+      && Number.isFinite(qty) && qty > 0 && qty <= available && priceIsValid && transferPriceIsValid
   })
 })
 
@@ -271,6 +289,11 @@ function setItemPackageQty(index, event) {
 function setItemPrice(index, event) {
   if (submissionLocked.value) return
   draft.setPrice(index, eventValue(event))
+}
+
+function setItemTransferPrice(index, event) {
+  if (submissionLocked.value) return
+  draft.setTransferPrice(index, eventValue(event))
 }
 
 function itemUnitOptions(item) {
@@ -374,6 +397,11 @@ function validateItem(index) {
       return false
     }
   }
+  if (draft.newOwner && item.transfer_price !== '' && item.transfer_price != null
+    && (!Number.isFinite(Number(item.transfer_price)) || Number(item.transfer_price) < 0)) {
+    uni.showToast({ title: `${item.name} 的转货单价必须为空或不小于 0`, icon: 'none' })
+    return false
+  }
   return true
 }
 
@@ -438,6 +466,7 @@ function makeUuid() {
 function buildBusinessPayload() {
   return {
     owner_id: draft.owner.id,
+    ...(draft.newOwner ? { new_owner_id: draft.newOwner.id } : {}),
     customer_id: draft.customer.id,
     src_bill_no: String(draft.form.src_bill_no || '').trim(),
     delivery_method: draft.form.delivery_method || null,
@@ -458,6 +487,9 @@ function buildBusinessPayload() {
       }
       if (item.price !== '' && item.price !== null && item.price !== undefined) {
         line.price = Number(item.price)
+      }
+      if (draft.newOwner && item.transfer_price !== '' && item.transfer_price != null) {
+        line.transfer_price = Number(item.transfer_price)
       }
       return line
     }),
@@ -489,7 +521,7 @@ function requestSubmit() {
   draft.submissionState = 'confirming'
   uni.showModal({
     title: '确认创建代办出库单',
-    content: `共 ${draft.itemCount} 种商品，基本数量 ${formatQty(draft.totalQty)}。创建后将立即分配库存并发布拣货任务，是否继续？`,
+    content: `${draft.routeLabel}\n共 ${draft.itemCount} 种商品，基本数量 ${formatQty(draft.totalQty)}。创建后将立即分配库存并发布拣货任务，是否继续？`,
     confirmText: '确认创建',
     cancelText: '返回检查',
     success: (result) => {
@@ -554,6 +586,8 @@ onMounted(() => {
 .package-picker { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .base-qty-summary { margin-top: 10rpx; color: #1677ff; font-size: 23rpx; text-align: right; }
 .edit-row { display: flex; align-items: flex-end; gap: 12rpx; margin-top: 14rpx; }
+.transfer-route { margin-bottom: 12rpx; color: #1677ff; overflow-wrap: anywhere; }
+.transfer-mode .edit-row { flex-wrap: wrap; }
 .field-block { min-width: 0; flex: 1; }
 .field-label { display: block; margin-bottom: 6rpx; font-size: 22rpx; }
 .value-input, .picker-field { box-sizing: border-box; width: 100%; height: 64rpx; padding: 0 14rpx; border: 1rpx solid #d9dee7; border-radius: 8rpx; background: #fff; }
@@ -612,6 +646,10 @@ onMounted(() => {
 .mode-embedded .package-summary { font-size: 22rpx; }
 .mode-embedded .base-qty-summary { text-align: left; }
 .mode-embedded .edit-row { margin: 0; }
+.mode-embedded.transfer-mode .edit-table-header,
+.mode-embedded.transfer-mode .edit-row {
+  grid-template-columns: minmax(55px, 1fr) minmax(55px, 1fr) minmax(70px, 1fr) auto;
+}
 .mode-embedded .edit-row .field-label, .mode-embedded .narrow-label { display: none; }
 .mode-embedded .value-input { height: 54rpx; padding: 0 10rpx; }
 .mode-embedded .delete-button { height: 54rpx; padding: 0 12rpx; line-height: 54rpx; }

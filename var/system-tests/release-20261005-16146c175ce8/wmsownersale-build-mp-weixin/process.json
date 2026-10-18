@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "05847d7b0eb640a598e8b7d06c48957d",
+  "status": "FAIL",
+  "owner": {
+    "pid": 222,
+    "pid_namespace": "pid:[4026532638]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "399918",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "run",
+    "build:mp-weixin"
+  ],
+  "cwd": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsownersale",
+  "child": {
+    "pid": 223,
+    "pid_namespace": "pid:[4026532638]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "399931",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 223,
+  "exit_code": 1,
+  "cleaned_containers": [],
+  "duration_seconds": 2.147
+}

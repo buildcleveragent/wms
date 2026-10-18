@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "run_id": "2b89cc6f00ad4e7ba557b33682daab9e",
+  "status": "FAIL",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026532997]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "540037",
+    "state": "R"
+  },
+  "command": [
+    "docker",
+    "run",
+    "--rm",
+    "--network",
+    "none",
+    "--name",
+    "wms-release-pdf-smoke-16146c175ce8",
+    "-e",
+    "APP_ENV=test",
+    "-e",
+    "DB_NAME=wms_db_test",
+    "-e",
+    "DB_TEST_NAME=wms_db_test",
+    "wms-release:20261005-16146c175ce8",
+    "python",
+    "-c",
+    "import os,secrets,runpy,sys; os.environ['SECRET_KEY']=secrets.token_hex(32); sys.argv=['scripts/measure_pdf_resource.py','--worker','1','--output','/tmp/dispatch.pdf']; runpy.run_path('scripts/measure_pdf_resource.py',run_name='__main__')"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026532997]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "540059",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 7,
+  "exit_code": 1,
+  "cleaned_containers": [],
+  "duration_seconds": 11.804
+}

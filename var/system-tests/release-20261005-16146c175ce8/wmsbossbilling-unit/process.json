@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "run_id": "d93eab7f9993448b909f45194914246d",
+  "status": "PASS",
+  "owner": {
+    "pid": 1191,
+    "pid_namespace": "pid:[4026533131]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "381508",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "run",
+    "test:unit",
+    "--",
+    "--maxWorkers=2"
+  ],
+  "cwd": "/wms/wmsbossbilling",
+  "child": {
+    "pid": 1192,
+    "pid_namespace": "pid:[4026533131]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "381523",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 1192,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 6.967
+}

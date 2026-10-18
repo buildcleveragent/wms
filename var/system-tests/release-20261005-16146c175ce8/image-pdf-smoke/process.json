@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "run_id": "56c3eb24e1e444e7b91ff758428058e0",
+  "status": "FAIL",
+  "owner": {
+    "pid": 99,
+    "pid_namespace": "pid:[4026532610]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "537826",
+    "state": "R"
+  },
+  "command": [
+    "docker",
+    "run",
+    "--rm",
+    "--network",
+    "none",
+    "--name",
+    "wms-release-pdf-smoke-16146c175ce8",
+    "-e",
+    "APP_ENV=test",
+    "-e",
+    "DB_NAME=wms_db_test",
+    "-e",
+    "DB_TEST_NAME=wms_db_test",
+    "wms-release:20261005-16146c175ce8",
+    "python",
+    "scripts/measure_pdf_resource.py",
+    "--worker",
+    "1",
+    "--output",
+    "/tmp/dispatch.pdf"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 100,
+    "pid_namespace": "pid:[4026532610]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "537838",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 100,
+  "exit_code": 1,
+  "cleaned_containers": [],
+  "duration_seconds": 2.86
+}

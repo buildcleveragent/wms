@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "run_id": "4eb3e4a21e30463c8f9dec2ee253d4fc",
+  "status": "PASS",
+  "owner": {
+    "pid": 68,
+    "pid_namespace": "pid:[4026532610]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "537579",
+    "state": "R"
+  },
+  "command": [
+    "docker",
+    "run",
+    "--rm",
+    "--network",
+    "none",
+    "--name",
+    "wms-release-image-source-16146c175ce8",
+    "-v",
+    "/tmp/wms-release-20261005-aohudxd1/candidate.json:/evidence/candidate.json:ro",
+    "wms-release:20261005-16146c175ce8",
+    "python",
+    "-c",
+    "import json; from scripts.test_candidate import verify_candidate; verify_candidate('/app', json.load(open('/evidence/candidate.json'))); print('Candidate source files verified')"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 69,
+    "pid_namespace": "pid:[4026532610]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "537598",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 69,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 2.26
+}

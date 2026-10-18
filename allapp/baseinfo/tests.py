@@ -1,8 +1,9 @@
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
-from allapp.baseinfo.models import CarrierCompany, Customer, Employee, Owner
+from allapp.baseinfo.models import CarrierCompany, Customer, Employee, Owner, OwnerCustomerBinding
 
 
 class BaseinfoWarehouseScopeTests(TestCase):
@@ -24,9 +25,7 @@ class CustomerTenantConstraintTests(TestCase):
             name="Other Customer Owner",
             code="CUSTOWN2",
         )
-        self.salesperson = get_user_model().objects.create_user(
-            username="customer-salesperson"
-        )
+        self.salesperson = get_user_model().objects.create_user(username="customer-salesperson")
 
     def test_customer_code_is_unique_per_owner_but_reusable_across_owners(self):
         Customer.objects.create(
@@ -42,7 +41,7 @@ class CustomerTenantConstraintTests(TestCase):
             name="Other owner's customer",
         )
 
-        with self.assertRaises(IntegrityError):
+        with self.assertRaises(ValidationError):
             with transaction.atomic():
                 Customer.objects.create(
                     owner=self.owner,
@@ -52,6 +51,19 @@ class CustomerTenantConstraintTests(TestCase):
                 )
 
         self.assertIsNotNone(other_owner_customer.pk)
+        self.assertEqual(Customer.objects.count(), 2)
+        # The same uniqueness is enforced by MySQL even when model validation is bypassed.
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            OwnerCustomerBinding.objects.bulk_create(
+                [
+                    OwnerCustomerBinding(
+                        owner=self.owner,
+                        customer=other_owner_customer,
+                        code="CUSTOMER-001",
+                        salesperson=self.salesperson,
+                    )
+                ]
+            )
 
     def test_blank_external_codes_are_normalized_and_do_not_collide(self):
         first = Customer.objects.create(

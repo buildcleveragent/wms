@@ -3,7 +3,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, router, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -1399,6 +1399,8 @@ class PaymentAllocation(BillingValidationMixin, models.Model):
 
     def clean(self):
         errors = {}
+        if self.receipt_id and self.receipt.status != PaymentReceiptStatus.DRAFT:
+            errors["receipt"] = "只有草稿收款单允许写入核销分录。"
         if self.amount is not None and self.amount <= 0:
             errors["amount"] = "核销金额必须大于零。"
         if self.receipt_id and self.bill_id:
@@ -1418,6 +1420,45 @@ class PaymentAllocation(BillingValidationMixin, models.Model):
                 errors["receipt"] = "已过账核销分录不可修改。"
         if errors:
             raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        using = kwargs.get("using") or router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=using):
+            receipt_ids = {self.receipt_id} if self.receipt_id else set()
+            if self.pk:
+                original_id = (
+                    type(self)
+                    .objects.using(using)
+                    .filter(pk=self.pk)
+                    .values_list("receipt_id", flat=True)
+                    .first()
+                )
+                if original_id:
+                    receipt_ids.add(original_id)
+            # Match posting's lock order: receipt first, then allocations.
+            receipts = list(
+                PaymentReceipt.objects.using(using)
+                .select_for_update()
+                .filter(pk__in=receipt_ids)
+                .order_by("pk")
+            )
+            for receipt in receipts:
+                if receipt.status != PaymentReceiptStatus.DRAFT:
+                    raise ValidationError({"receipt": "只有草稿收款单允许写入核销分录。"})
+                if receipt.pk == self.receipt_id:
+                    self.receipt = receipt  # Discard any cached pre-posting state.
+            if self.pk:
+                current_receipt_id = (
+                    type(self)
+                    .objects.using(using)
+                    .select_for_update()
+                    .filter(pk=self.pk)
+                    .values_list("receipt_id", flat=True)
+                    .first()
+                )
+                if current_receipt_id and current_receipt_id not in receipt_ids:
+                    raise ValidationError({"receipt": "核销所属收款单已变更，请刷新后重试。"})
+            return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
         if self.receipt.status != PaymentReceiptStatus.DRAFT:

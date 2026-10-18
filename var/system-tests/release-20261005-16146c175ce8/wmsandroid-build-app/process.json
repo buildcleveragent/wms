@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "5e342e09c5774c42b39d398daf208dbb",
+  "status": "PASS",
+  "owner": {
+    "pid": 120,
+    "pid_namespace": "pid:[4026532638]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "397293",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "run",
+    "build:app"
+  ],
+  "cwd": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsandroid",
+  "child": {
+    "pid": 121,
+    "pid_namespace": "pid:[4026532638]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "397307",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 121,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 7.713
+}

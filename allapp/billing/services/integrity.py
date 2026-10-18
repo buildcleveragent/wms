@@ -1,11 +1,11 @@
 """Non-configurable billing integrity gates and safe event repricing."""
 
 import datetime
-
 from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 
 from allapp.billing.enums import AccrualStatus, PricingStatus, SourceQuality
 from allapp.billing.models import (
@@ -19,7 +19,7 @@ from allapp.tasking.models import WmsTask
 
 from ._common import (
     _acc_fp,
-    _compute_fee_with_rule,
+    _compute_daily_fee_with_rule,
     _finalize_daily_price,
     _q,
     _select_rule,
@@ -44,9 +44,7 @@ def _blocker(code, queryset, fields, detail):
     }
 
 
-def build_close_readiness(
-    *, owner_id, warehouse_id, start_date, end_date, for_invoice=False
-):
+def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_invoice=False):
     event_scope = BillingEvent.objects.filter(
         owner_id=owner_id,
         warehouse_id=warehouse_id,
@@ -65,9 +63,7 @@ def build_close_readiness(
     blockers = [
         _blocker(
             "BILLING_EVENT_PRICING_INCOMPLETE",
-            event_scope.filter(
-                pricing_status__in=[PricingStatus.PENDING, PricingStatus.UNPRICED]
-            ),
+            event_scope.filter(pricing_status__in=[PricingStatus.PENDING, PricingStatus.UNPRICED]),
             (
                 "id",
                 "service_date",
@@ -93,9 +89,7 @@ def build_close_readiness(
         _blocker(
             "BILLING_NO_CHARGE_EVIDENCE_MISSING",
             event_scope.filter(pricing_status=PricingStatus.NO_CHARGE).filter(
-                Q(pricing_rule__isnull=True)
-                | Q(pricing_reason="")
-                | Q(pricing_detail={})
+                Q(pricing_rule__isnull=True) | Q(pricing_reason="") | Q(pricing_detail={})
             ),
             ("id", "service_date", "charge_type", "calc_method"),
             "零费用事件缺少规则、原因或计价明细。",
@@ -292,7 +286,9 @@ def reprice_unpriced_events(
                 event.pricing_reason = "NO_ACTIVE_RULE"
                 event.save(update_fields=["pricing_status", "pricing_reason"])
             continue
-        raw_amount, _ = _compute_fee_with_rule(rule, Decimal(event.quantity))
+        raw_amount, _ = _compute_daily_fee_with_rule(
+            rule, Decimal(event.quantity), event.service_date
+        )
         pricing = _finalize_daily_price(
             rule,
             event.owner_id,
@@ -310,8 +306,6 @@ def reprice_unpriced_events(
                     pricing.limit_reasons[-1] if pricing.limit_reasons else "ZERO_RATE"
                 )
                 event.pricing_detail = pricing.as_detail()
-                from django.utils import timezone
-
                 event.priced_at = timezone.now()
                 event.save(
                     update_fields=[
@@ -360,26 +354,19 @@ def reprice_unpriced_events(
                 "created_by": by_user,
                 "bundle_key": event.bundle_key or rule.bundle_key or "",
                 "source_quality": (
-                    event.metric.source_quality
-                    if event.metric_id
-                    else SourceQuality.VERIFIED
+                    event.metric.source_quality if event.metric_id else SourceQuality.VERIFIED
                 ),
                 "source_note": (
                     f"Inherited from metric {event.metric_id}"
-                    if event.metric_id
-                    and event.metric.source_quality == SourceQuality.APPROXIMATE
+                    if event.metric_id and event.metric.source_quality == SourceQuality.APPROXIMATE
                     else ""
                 ),
             },
         )
         if accrual.status == AccrualStatus.VOID:
             result["repriced"] -= 1
-            result["errors"].append(
-                {"event": event.id, "code": "VOID_ACCRUAL_REQUIRES_REPAIR"}
-            )
+            result["errors"].append({"event": event.id, "code": "VOID_ACCRUAL_REQUIRES_REPAIR"})
             continue
-        from django.utils import timezone
-
         event.pricing_status = PricingStatus.ACCRUED
         event.pricing_rule = rule
         event.pricing_reason = "PRICED"

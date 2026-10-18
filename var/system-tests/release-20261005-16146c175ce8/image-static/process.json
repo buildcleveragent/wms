@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "run_id": "3127879cf4af4a00b4e0bb1e04ba41af",
+  "status": "FAIL",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026532994]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "690559",
+    "state": "R"
+  },
+  "command": [
+    "docker",
+    "run",
+    "--rm",
+    "--network",
+    "none",
+    "--name",
+    "wms-release-static-16146c175ce8",
+    "-e",
+    "APP_ENV=test",
+    "-e",
+    "DB_NAME=wms_db_test",
+    "-e",
+    "DB_TEST_NAME=wms_db_test",
+    "wms-release:20261005-16146c175ce8",
+    "python",
+    "-c",
+    "import os,secrets; os.environ['SECRET_KEY']=secrets.token_hex(32); os.environ.setdefault('DJANGO_SETTINGS_MODULE','wmsmaster.settings'); from django.core.management import execute_from_command_line; execute_from_command_line(['manage.py','collectstatic','--noinput'])"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026532994]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "690584",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 7,
+  "exit_code": 1,
+  "cleaned_containers": [],
+  "duration_seconds": 10.146
+}

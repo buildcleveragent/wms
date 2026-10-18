@@ -1,0 +1,1 @@
+{"name": "mall-unit", "cwd": "/wms/sales-miniapp", "command": ["node", "--test", "tests/payment-service.test.mjs", "tests/request-auth.test.mjs", "tests/cart-recovery.test.mjs"], "timeout": 120}

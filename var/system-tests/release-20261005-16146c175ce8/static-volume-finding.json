@@ -1,0 +1,19 @@
+{
+  "status": "FAIL",
+  "scenario": "Fresh named static/media Docker volumes mounted as in compose.production.yml, candidate image default non-root user UID 10001. Network disabled, synthetic process-local SECRET_KEY, no DB access.",
+  "observed": {
+    "static_volume_owner_uid": 0,
+    "media_volume_owner_uid": 0,
+    "mode": "0755",
+    "writable_by_uid_10001": false,
+    "collectstatic_exit_code": 1
+  },
+  "impact": "A fresh Compose deployment cannot collect static assets; the same fresh media mount is not writable for uploads. Existing volumes that were manually initialized with different ownership were not inspected.",
+  "source_files": [
+    "Dockerfile:29",
+    "compose.production.yml:7",
+    "docker/production_release.sh:73"
+  ],
+  "raw_log": "image-static-volumes/output.log",
+  "cleanup": "Both temporary volumes and the probe container were removed."
+}

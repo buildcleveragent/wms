@@ -612,3 +612,6 @@ class _FuncBaseAdmin(admin.ModelAdmin):
 
     def changelist_view(self, request, extra_context=None):
         return redirect(reverse(self.target_url_name))
+
+
+from . import transfer_admin  # noqa: E402,F401

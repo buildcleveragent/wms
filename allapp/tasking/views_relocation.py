@@ -132,11 +132,20 @@ class RelocationRequestViewSet(viewsets.GenericViewSet):
 
     def get_queryset(self):
         qs = RelocationRequest.objects.select_related(
-            "owner", "warehouse", "source_container", "to_location", "target_parent_container",
-            "created_by", "reviewed_by", "generated_task",
+            "owner",
+            "warehouse",
+            "source_container",
+            "to_location",
+            "target_parent_container",
+            "created_by",
+            "reviewed_by",
+            "generated_task",
         ).prefetch_related(
-            "lines__inventory_detail__product", "lines__inventory_detail__location",
-            "lines__inventory_detail__container", "lines__to_location", "lines__to_container",
+            "lines__inventory_detail__product",
+            "lines__inventory_detail__location",
+            "lines__inventory_detail__container",
+            "lines__to_location",
+            "lines__to_container",
         )
         qs = _scoped(qs, self.request.user)
         if not _is_manager(self.request.user):
@@ -147,7 +156,9 @@ class RelocationRequestViewSet(viewsets.GenericViewSet):
         return Response(RelocationRequestSerializer(self.get_queryset(), many=True).data)
 
     def retrieve(self, request, pk=None):
-        return Response(RelocationRequestSerializer(get_object_or_404(self.get_queryset(), pk=pk)).data)
+        return Response(
+            RelocationRequestSerializer(get_object_or_404(self.get_queryset(), pk=pk)).data
+        )
 
     @transaction.atomic
     def create(self, request):
@@ -165,8 +176,11 @@ class RelocationRequestViewSet(viewsets.GenericViewSet):
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages) from exc
         record_audit_event(
-            action="relocation.request.create", module="tasking", request=request,
-            obj=obj, after={"status": obj.status, "mode": obj.mode},
+            action="relocation.request.create",
+            module="tasking",
+            request=request,
+            obj=obj,
+            after={"status": obj.status, "mode": obj.mode},
         )
         return Response(RelocationRequestSerializer(obj).data, status=status.HTTP_201_CREATED)
 
@@ -184,8 +198,11 @@ class RelocationRequestViewSet(viewsets.GenericViewSet):
             raise ValidationError(exc.messages) from exc
         obj.refresh_from_db()
         record_audit_event(
-            action="relocation.request.approve", module="tasking", request=request,
-            obj=obj, after={"status": obj.status, "task_id": obj.generated_task_id},
+            action="relocation.request.approve",
+            module="tasking",
+            request=request,
+            obj=obj,
+            after={"status": obj.status, "task_id": obj.generated_task_id},
         )
         return Response(RelocationRequestSerializer(obj).data)
 
@@ -202,8 +219,11 @@ class RelocationRequestViewSet(viewsets.GenericViewSet):
             raise ValidationError(exc.messages) from exc
         obj.refresh_from_db()
         record_audit_event(
-            action="relocation.request.reject", module="tasking", request=request,
-            obj=obj, after={"status": obj.status, "review_note": obj.review_note},
+            action="relocation.request.reject",
+            module="tasking",
+            request=request,
+            obj=obj,
+            after={"status": obj.status, "review_note": obj.review_note},
         )
         return Response(RelocationRequestSerializer(obj).data)
 
@@ -216,8 +236,11 @@ class RelocationRequestViewSet(viewsets.GenericViewSet):
             raise ValidationError(exc.messages) from exc
         obj.refresh_from_db()
         record_audit_event(
-            action="relocation.request.cancel", module="tasking", request=request,
-            obj=obj, after={"status": obj.status},
+            action="relocation.request.cancel",
+            module="tasking",
+            request=request,
+            obj=obj,
+            after={"status": obj.status},
         )
         return Response(RelocationRequestSerializer(obj).data)
 
@@ -242,10 +265,16 @@ class RelocationDirectReleaseView(APIView):
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages) from exc
         record_audit_event(
-            action="relocation.direct_release", module="tasking", request=request,
-            obj=task, after={"status": task.status, "request_id": obj.pk},
+            action="relocation.direct_release",
+            module="tasking",
+            request=request,
+            obj=task,
+            after={"status": task.status, "request_id": obj.pk},
         )
-        return Response(RelocationTaskSerializer(task, context={"request": request}).data, status=status.HTTP_201_CREATED)
+        return Response(
+            RelocationTaskSerializer(task, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class RelocationOptionsView(APIView):
@@ -316,9 +345,7 @@ class RelocationOptionsView(APIView):
             locations = Location.objects.filter(
                 warehouse_id=warehouse_id, is_active=True, is_disabled=False, is_frozen=False
             ).order_by("code")
-            containers = Container.objects.filter(
-                warehouse_id=warehouse_id, is_active=True
-            )
+            containers = Container.objects.filter(warehouse_id=warehouse_id, is_active=True)
             if owner_id:
                 containers = containers.filter(
                     Q(scope=Container.Scope.PUBLIC) | Q(owner_id=owner_id)
@@ -330,13 +357,9 @@ class RelocationOptionsView(APIView):
             {
                 "owner_id": int(owner_id) if owner_id else None,
                 "warehouse_id": int(warehouse_id) if warehouse_id else None,
-                "owners": [
-                    {"id": row.pk, "code": row.code, "name": row.name}
-                    for row in owner_qs
-                ],
+                "owners": [{"id": row.pk, "code": row.code, "name": row.name} for row in owner_qs],
                 "warehouses": [
-                    {"id": row.pk, "code": row.code, "name": row.name}
-                    for row in warehouse_qs
+                    {"id": row.pk, "code": row.code, "name": row.name} for row in warehouse_qs
                 ],
                 "inventory": [
                     {
@@ -353,7 +376,9 @@ class RelocationOptionsView(APIView):
                     }
                     for row in inventory_qs.order_by("location__code", "product__code", "id")[:200]
                 ],
-                "locations": [{"id": row.pk, "code": row.code, "name": row.name or ""} for row in locations],
+                "locations": [
+                    {"id": row.pk, "code": row.code, "name": row.name or ""} for row in locations
+                ],
                 "containers": [
                     {
                         "id": row.pk,
@@ -374,13 +399,19 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         _require_feature("RELOCATION_PDA_ENABLED", "移库 PDA 功能尚未启用。")
-        active_assignment = TaskAssignment.objects.filter(task_id=OuterRef("pk"), finished_at__isnull=True)
+        active_assignment = TaskAssignment.objects.filter(
+            task_id=OuterRef("pk"), finished_at__isnull=True
+        )
         qs = (
             WmsTask.objects.filter(task_type=WmsTask.TaskType.RELOC)
             .select_related("owner", "warehouse", "reloctaskextra")
             .prefetch_related(
-                "assignments", "lines__product__packages", "lines__from_location", "lines__to_location",
-                "lines__reloclineextra__from_container", "lines__reloclineextra__to_container",
+                "assignments",
+                "lines__product__packages",
+                "lines__from_location",
+                "lines__to_location",
+                "lines__reloclineextra__from_container",
+                "lines__reloclineextra__to_container",
             )
             .annotate(has_active_assignment=Exists(active_assignment))
         )
@@ -418,8 +449,11 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
             raise ValidationError(exc.messages) from exc
         task.refresh_from_db()
         record_audit_event(
-            action="relocation.task.claim", module="tasking", request=request,
-            obj=task, after={"status": task.status},
+            action="relocation.task.claim",
+            module="tasking",
+            request=request,
+            obj=task,
+            after={"status": task.status},
         )
         return Response(self.get_serializer(task).data)
 
@@ -428,7 +462,9 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
         if not _is_operator(request.user):
             raise PermissionDenied("只有仓库操作员可以开始移库任务。")
         task = self.get_object()
-        if not TaskAssignment.objects.filter(task=task, assignee=request.user, finished_at__isnull=True).exists():
+        if not TaskAssignment.objects.filter(
+            task=task, assignee=request.user, finished_at__isnull=True
+        ).exists():
             raise PermissionDenied("请先领取移库任务。")
         try:
             task_services.task_start(request=request, task=task)
@@ -438,8 +474,11 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
         task.reloctaskextra.save(update_fields=["execution_state"])
         task.refresh_from_db()
         record_audit_event(
-            action="relocation.task.start", module="tasking", request=request,
-            obj=task, after={"status": task.status},
+            action="relocation.task.start",
+            module="tasking",
+            request=request,
+            obj=task,
+            after={"status": task.status},
         )
         return Response(self.get_serializer(task).data)
 
@@ -451,14 +490,18 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = RelocationRecordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            result = record_relocation(task_id=task.pk, by_user=request.user, **serializer.validated_data)
+            result = record_relocation(
+                task_id=task.pk, by_user=request.user, **serializer.validated_data
+            )
         except RelocationIdempotencyConflict as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages) from exc
         if result["posting_required"]:
             try:
-                task_services._run_posting_handler(task.pk, by_user=request.user, note="移库自动过账")
+                task_services._run_posting_handler(
+                    task.pk, by_user=request.user, note="移库自动过账"
+                )
             except Exception as exc:
                 from allapp.tasking.models import RelocTaskExtra
 
@@ -486,7 +529,9 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 _raise_posting_failure(exc)
         task.refresh_from_db()
         record_audit_event(
-            action="relocation.task.record", module="tasking", request=request,
+            action="relocation.task.record",
+            module="tasking",
+            request=request,
             obj=task,
             after={
                 "line_id": serializer.validated_data["line_id"],
@@ -495,7 +540,9 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 "posting_status": task.posting_status,
             },
         )
-        return Response({"idempotent": result["idempotent"], "task": self.get_serializer(task).data})
+        return Response(
+            {"idempotent": result["idempotent"], "task": self.get_serializer(task).data}
+        )
 
     @action(detail=True, methods=["post"], url_path="report-exception")
     def report_exception_action(self, request, pk=None):
@@ -508,8 +555,11 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
             raise ValidationError(exc.messages) from exc
         task.refresh_from_db()
         record_audit_event(
-            action="relocation.task.exception", module="tasking", request=request,
-            obj=task, after=serializer.validated_data,
+            action="relocation.task.exception",
+            module="tasking",
+            request=request,
+            obj=task,
+            after=serializer.validated_data,
         )
         return Response(self.get_serializer(task).data)
 
@@ -524,8 +574,11 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
             raise ValidationError(exc.messages) from exc
         task.refresh_from_db()
         record_audit_event(
-            action="relocation.task.resume", module="tasking", request=request,
-            obj=task, after={"execution_state": task.reloctaskextra.execution_state},
+            action="relocation.task.resume",
+            module="tasking",
+            request=request,
+            obj=task,
+            after={"execution_state": task.reloctaskextra.execution_state},
         )
         return Response(self.get_serializer(task).data)
 
@@ -543,8 +596,11 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
             raise ValidationError(exc.messages) from exc
         task.refresh_from_db()
         record_audit_event(
-            action="relocation.task.void", module="tasking", request=request,
-            obj=task, after={"status": task.status, "note": note},
+            action="relocation.task.void",
+            module="tasking",
+            request=request,
+            obj=task,
+            after={"status": task.status, "note": note},
         )
         return Response(self.get_serializer(task).data)
 
@@ -554,18 +610,23 @@ class RelocationTaskViewSet(viewsets.ReadOnlyModelViewSet):
             raise PermissionDenied("只有仓库管理员可以重试移库过账。")
         task = self.get_object()
         if task.status != WmsTask.Status.COMPLETED or task.posting_status not in {
-            WmsTask.PostingStatus.PENDING, WmsTask.PostingStatus.FAILED,
+            WmsTask.PostingStatus.PENDING,
+            WmsTask.PostingStatus.FAILED,
         }:
             raise ValidationError("当前移库任务不允许重试过账。")
         try:
             task_services._run_posting_handler(task.pk, by_user=request.user, note="移库过账重试")
         except Exception as exc:
             from allapp.tasking.models import RelocTaskExtra
+
             RelocTaskExtra.objects.filter(task_id=task.pk).update(execution_state="POSTING_FAILED")
             _raise_posting_failure(exc)
         task.refresh_from_db()
         record_audit_event(
-            action="relocation.task.retry_posting", module="tasking", request=request,
-            obj=task, after={"posting_status": task.posting_status},
+            action="relocation.task.retry_posting",
+            module="tasking",
+            request=request,
+            obj=task,
+            after={"posting_status": task.posting_status},
         )
         return Response(self.get_serializer(task).data)

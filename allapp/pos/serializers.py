@@ -5,6 +5,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
@@ -12,6 +13,7 @@ from rest_framework import serializers
 from allapp.inventory.models import InventoryDetail
 from allapp.outbound.serializers import OutboundOrderReadSerializer
 from allapp.products.models import Product
+from allapp.tasking.plugins.barcodes import default_resolver
 
 from .models import (
     PosCustomer,
@@ -88,6 +90,9 @@ def available_qty_for_product_in_scope(*, owner_id=None, warehouse_id, product_i
 
 
 class PosProductSerializer(serializers.ModelSerializer):
+    owner_name = serializers.CharField(source="owner.name", read_only=True)
+    matched_barcode = serializers.SerializerMethodField()
+    barcode_error = serializers.SerializerMethodField()
     base_unit = serializers.SerializerMethodField()
     price = serializers.SerializerMethodField()
     min_price = serializers.SerializerMethodField()
@@ -100,6 +105,9 @@ class PosProductSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "owner_id",
+            "owner_name",
+            "matched_barcode",
+            "barcode_error",
             "code",
             "sku",
             "name",
@@ -114,6 +122,35 @@ class PosProductSerializer(serializers.ModelSerializer):
             "available_qty",
             "unit_options",
         ]
+
+    def _barcode_match(self, obj):
+        barcode = self.context.get("barcode")
+        if not barcode:
+            return None, ""
+        cache = self.context.setdefault("pos_barcode_matches", {})
+        if obj.pk not in cache:
+            try:
+                resolved = default_resolver(obj.owner_id, barcode)
+                if resolved.product_id != obj.pk:
+                    raise DjangoValidationError("条码未匹配到当前商品。")
+                cache[obj.pk] = (
+                    {
+                        "package_id": resolved.product_package_id,
+                        "label": resolved.uom_name or resolved.uom_code,
+                        "multiplier": resolved.pack_qty,
+                        "code_type": resolved.code_type,
+                    },
+                    "",
+                )
+            except DjangoValidationError as exc:
+                cache[obj.pk] = (None, "；".join(exc.messages))
+        return cache[obj.pk]
+
+    def get_matched_barcode(self, obj):
+        return self._barcode_match(obj)[0]
+
+    def get_barcode_error(self, obj):
+        return self._barcode_match(obj)[1]
 
     def get_base_unit(self, obj):
         uom = getattr(obj, "base_uom", None)
@@ -379,6 +416,9 @@ class PosPaymentLineReadSerializer(serializers.ModelSerializer):
 
 
 class PosSaleLineReadSerializer(serializers.ModelSerializer):
+    owner_name = serializers.CharField(source="owner.name", read_only=True)
+    product_spec = serializers.CharField(source="product.spec", read_only=True)
+    base_unit = serializers.CharField(source="product.base_uom.name", read_only=True)
     product_code = serializers.CharField(source="product.code", read_only=True)
     product_name = serializers.CharField(source="product.name", read_only=True)
     returned_qty = serializers.SerializerMethodField()
@@ -392,6 +432,9 @@ class PosSaleLineReadSerializer(serializers.ModelSerializer):
             "id",
             "line_no",
             "owner_id",
+            "owner_name",
+            "product_spec",
+            "base_unit",
             "product_id",
             "product_code",
             "product_name",
@@ -443,6 +486,8 @@ class PosSaleLineReadSerializer(serializers.ModelSerializer):
 
 
 class PosSaleReadSerializer(serializers.ModelSerializer):
+    warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
+    cashier_name = serializers.CharField(source="cashier.username", read_only=True)
     payment = PosPaymentReadSerializer(read_only=True)
     payment_lines = PosPaymentLineReadSerializer(many=True, read_only=True)
     lines = PosSaleLineReadSerializer(many=True, read_only=True)
@@ -458,7 +503,9 @@ class PosSaleReadSerializer(serializers.ModelSerializer):
             "sale_no",
             "src_bill_no",
             "warehouse_id",
+            "warehouse_name",
             "cashier_id",
+            "cashier_name",
             "shift_id",
             "pos_customer_id",
             "selected_customer_id",

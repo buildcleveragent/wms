@@ -1,0 +1,11 @@
+{
+  "runtime_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10",
+  "scanner_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10",
+  "matching_repo_digests": [
+    "wms-release@sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  ],
+  "scanner_artifact": "wms-release:20261005-16146c175ce8",
+  "status": "PASS",
+  "sbom_image_id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10",
+  "sbom_matches": true
+}

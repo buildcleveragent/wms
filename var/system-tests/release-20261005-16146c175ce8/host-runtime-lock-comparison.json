@@ -1,0 +1,230 @@
+[
+  {
+    "name": "asgiref",
+    "locked": "3.9.1",
+    "installed": "3.9.1",
+    "match": true
+  },
+  {
+    "name": "brotli",
+    "locked": "1.2.0",
+    "installed": "1.2.0",
+    "match": true
+  },
+  {
+    "name": "certifi",
+    "locked": "2026.7.22",
+    "installed": "2026.7.22",
+    "match": true
+  },
+  {
+    "name": "cffi",
+    "locked": "2.1.1",
+    "installed": "2.1.1",
+    "match": true
+  },
+  {
+    "name": "cryptography",
+    "locked": "50.0.0",
+    "installed": "50.0.0",
+    "match": true
+  },
+  {
+    "name": "cssselect2",
+    "locked": "0.9.0",
+    "installed": "0.9.0",
+    "match": true
+  },
+  {
+    "name": "diff-match-patch",
+    "locked": "20241021",
+    "installed": "20241021",
+    "match": true
+  },
+  {
+    "name": "django",
+    "locked": "5.2.17",
+    "installed": "5.2.17",
+    "match": true
+  },
+  {
+    "name": "django-autocomplete-light",
+    "locked": "3.12.1",
+    "installed": "3.12.1",
+    "match": true
+  },
+  {
+    "name": "django-cors-headers",
+    "locked": "4.9.0",
+    "installed": "4.9.0",
+    "match": true
+  },
+  {
+    "name": "django-environ",
+    "locked": "0.12.0",
+    "installed": "0.12.0",
+    "match": true
+  },
+  {
+    "name": "django-filter",
+    "locked": "25.1",
+    "installed": "25.1",
+    "match": true
+  },
+  {
+    "name": "django-htmx",
+    "locked": "1.28.0",
+    "installed": "1.28.0",
+    "match": true
+  },
+  {
+    "name": "django-import-export",
+    "locked": "4.4.1",
+    "installed": "4.4.1",
+    "match": true
+  },
+  {
+    "name": "djangorestframework",
+    "locked": "3.17.2",
+    "installed": "3.17.2",
+    "match": true
+  },
+  {
+    "name": "djangorestframework-simplejwt",
+    "locked": "5.5.1",
+    "installed": "5.5.1",
+    "match": true
+  },
+  {
+    "name": "et-xmlfile",
+    "locked": "2.0.0",
+    "installed": "2.0.0",
+    "match": true
+  },
+  {
+    "name": "fonttools",
+    "locked": "4.63.0",
+    "installed": "4.63.0",
+    "match": true
+  },
+  {
+    "name": "gunicorn",
+    "locked": "23.0.0",
+    "installed": null,
+    "match": false
+  },
+  {
+    "name": "mysqlclient",
+    "locked": "2.2.7",
+    "installed": "2.2.7",
+    "match": true
+  },
+  {
+    "name": "openpyxl",
+    "locked": "3.1.5",
+    "installed": "3.1.5",
+    "match": true
+  },
+  {
+    "name": "packaging",
+    "locked": "26.3",
+    "installed": "26.3",
+    "match": true
+  },
+  {
+    "name": "pillow",
+    "locked": "12.3.0",
+    "installed": "12.3.0",
+    "match": true
+  },
+  {
+    "name": "pycparser",
+    "locked": "2.22",
+    "installed": "2.22",
+    "match": true
+  },
+  {
+    "name": "pydyf",
+    "locked": "0.12.1",
+    "installed": "0.12.1",
+    "match": true
+  },
+  {
+    "name": "pyjwt",
+    "locked": "2.13.0",
+    "installed": "2.13.0",
+    "match": true
+  },
+  {
+    "name": "pyphen",
+    "locked": "0.17.2",
+    "installed": "0.17.2",
+    "match": true
+  },
+  {
+    "name": "pypinyin",
+    "locked": "0.55.0",
+    "installed": "0.55.0",
+    "match": true
+  },
+  {
+    "name": "sentry-sdk",
+    "locked": "2.68.0",
+    "installed": null,
+    "match": false
+  },
+  {
+    "name": "sqlparse",
+    "locked": "0.6.0",
+    "installed": "0.6.0",
+    "match": true
+  },
+  {
+    "name": "tablib",
+    "locked": "3.10.0",
+    "installed": "3.10.0",
+    "match": true
+  },
+  {
+    "name": "tinycss2",
+    "locked": "1.5.1",
+    "installed": "1.5.1",
+    "match": true
+  },
+  {
+    "name": "tinyhtml5",
+    "locked": "2.1.0",
+    "installed": "2.1.0",
+    "match": true
+  },
+  {
+    "name": "typing-extensions",
+    "locked": "4.16.0",
+    "installed": "4.16.0",
+    "match": true
+  },
+  {
+    "name": "urllib3",
+    "locked": "2.7.0",
+    "installed": "2.7.0",
+    "match": true
+  },
+  {
+    "name": "weasyprint",
+    "locked": "69.0",
+    "installed": "69.0",
+    "match": true
+  },
+  {
+    "name": "webencodings",
+    "locked": "0.5.1",
+    "installed": "0.5.1",
+    "match": true
+  },
+  {
+    "name": "zopfli",
+    "locked": "0.4.3",
+    "installed": "0.4.3",
+    "match": true
+  }
+]

@@ -50,8 +50,10 @@
           class="history-meta"
           :title="`${row.owner?.name || '-'} · ${row.receiver_name || row.customer?.name || '-'}`"
         >
-          {{ row.owner?.name || '-' }} · {{ row.receiver_name || row.customer?.name || '-' }}
+          <template v-if="row.transfer_no">{{ row.source_owner?.name }} → </template>
+          {{ row.owner?.name || '-' }} → {{ row.receiver_name || row.customer?.name || '-' }}
         </text>
+        <text v-if="row.transfer_no" class="history-meta">转货单 {{ row.transfer_no }}</text>
         <text
           class="history-meta"
           :title="`${dateTimeText(row.assisted_at)} · ${row.line_count || 0} 种 · 基本数量 ${qtyText(row.total_base_qty)}`"

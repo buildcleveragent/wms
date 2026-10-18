@@ -688,9 +688,35 @@ class InventoryTransaction(BaseModel):
             CheckConstraint(
                 name="ck_tx_sign_by_type",
                 condition=(
-                    (Q(tx_type__in=[InvTxType.RECEIVE, InvTxType.MOVE_IN]) & Q(qty_delta__gt=0))
-                    | (Q(tx_type__in=[InvTxType.ISSUE, InvTxType.MOVE_OUT]) & Q(qty_delta__lt=0))
+                    (
+                        Q(
+                            tx_type__in=[
+                                InvTxType.RECEIVE,
+                                InvTxType.MOVE_IN,
+                                InvTxType.OWNER_XFER_IN,
+                            ]
+                        )
+                        & Q(qty_delta__gt=0)
+                    )
+                    | (
+                        Q(
+                            tx_type__in=[
+                                InvTxType.ISSUE,
+                                InvTxType.MOVE_OUT,
+                                InvTxType.OWNER_XFER_OUT,
+                            ]
+                        )
+                        & Q(qty_delta__lt=0)
+                    )
                     | Q(tx_type__in=[InvTxType.ADJ_GAIN, InvTxType.ADJ_LOSS])  # 调整由业务控制正负
+                ),
+            ),
+            # 货权转移必须记录双方流水的配对标识。
+            models.CheckConstraint(
+                name="ck_owner_xfer_pair",
+                condition=(
+                    ~Q(tx_type__in=[InvTxType.OWNER_XFER_IN, InvTxType.OWNER_XFER_OUT])
+                    | Q(pair_id__isnull=False)
                 ),
             ),
             # 幂等（如需允许同一来源行多分录，请改为指纹 fp 唯一）
@@ -763,6 +789,8 @@ class InventoryTransaction(BaseModel):
 
         # 5) pair_id 使用范围
         paired_types = (
+            InvTxType.OWNER_XFER_IN,
+            InvTxType.OWNER_XFER_OUT,
             InvTxType.RECEIVE,
             InvTxType.ISSUE,
             InvTxType.MOVE_IN,

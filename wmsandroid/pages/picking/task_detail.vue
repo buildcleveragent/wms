@@ -20,11 +20,18 @@
       <view v-if="task?.is_warehouse_assisted" class="assisted-badge">仓库代办出库</view>
     </view>
 
+    <view v-if="pendingScan" class="pending-scan">
+      <text>拣货结果待确认：{{ pendingScan.payload.barcode }} × {{ pendingScan.payload.qty }}</text>
+      <text>保留原请求编号，确认结果后再继续拣货。</text>
+      <button :disabled="scanning" @click="retryScan">继续确认结果</button>
+    </view>
+    <view v-if="recoveryError" class="pending-scan">{{ recoveryError }}</view>
     <!-- 扫码 + 数量 -->
     <view v-if="isPickable" class="scan-bar">
 			    <input
         class="input flex-input"
         v-model="scanBarcode"
+        :disabled="scanLocked"
         placeholder="扫描或输入条码"
         @confirm="submitScan()"
       />
@@ -32,10 +39,11 @@
         class="input qty-input"
         type="number"
         v-model="scanQty"
+        :disabled="scanLocked"
         @confirm="submitScan()"
       />
-      <button class="btn-outline" :disabled="scanning || adjustingCount > 0" @click="handleScan">扫码</button>
-      <button class="btn-outline" :disabled="scanning || adjustingCount > 0" @click="submitScan()">
+      <button class="btn-outline" :disabled="scanLocked || adjustingCount > 0" @click="handleScan">扫码</button>
+      <button class="btn-outline" :disabled="scanLocked || adjustingCount > 0" @click="submitScan()">
         {{ scanning ? '录入中…' : '录入' }}
       </button>
     </view>
@@ -68,7 +76,7 @@
 		      placeholder=""
 		      @input="(e) => onEditQty(e, ln)"
 				  @blur="applyManualQty(ln)"
-				  :disabled="!isPickable || scanning || isAdjustingLine(ln)"
+				  :disabled="!isPickable || scanLocked || isAdjustingLine(ln)"
 
 		    />
 		    <text v-if="isAdjustingLine(ln)" class="qty-saving">保存中…</text>
@@ -82,7 +90,7 @@
       <button
         v-if="isPickable"
         class="btn-primary"
-        :disabled="!allDone || submittingReview || scanning"
+        :disabled="!allDone || submittingReview || scanLocked"
         @click="createReviewTask"
       >
         {{ submittingReview ? '正在保存并提交…' : '完成拣货' }}
@@ -90,7 +98,7 @@
       <button
         v-else-if="canSelfReview"
         class="btn-danger"
-        :disabled="posting || confirmingPost"
+        :disabled="posting || confirmingPost || scanLocked"
         @click="confirmAndPost"
       >
         {{ posting ? '正在复核过账…' : task.review_status === 'APPROVED' ? '重试确认出库' : '复核并确认出库' }}
@@ -102,11 +110,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
-import { api } from '@/utils/request'
+import { ref, reactive, computed, watch } from 'vue'
+import { onLoad, onShow } from '@dcloudio/uni-app'
+import { api, createIdempotencyUuid } from '@/utils/request'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
 import { useAuth } from '@/store/auth'
+import { businessScope, captureSession, clearPending, definitelyRejected, isCurrentSession, operationKey, readPending, writePending } from '@/utils/pendingOperation'
 
 const taskId = ref<number | null>(null)
 const auth = useAuth()
@@ -120,6 +129,11 @@ const submittingReview = ref(false)
 const posting = ref(false)
 const confirmingPost = ref(false)
 const scanning = ref(false)
+const preparingScan = ref(false)
+const pendingScan = ref<any>(null)
+const recoveryError = ref('')
+const scanLocked = computed(() => scanning.value || preparingScan.value || !!pendingScan.value || !!recoveryError.value || !businessScope(auth))
+function pendingScanKey() { return operationKey(auth, 'pick-scan', taskId.value) }
 const adjustingLineIds = reactive(new Set<number>())
 const adjustingCount = computed(() => adjustingLineIds.size)
 const dirtyLineIds = new Set<number>()
@@ -149,15 +163,17 @@ const canSelfReview = computed(() => {
 
 // 每次扫描生成一个唯一的 client_seq
 function genClientSeq(): string {
-  return Date.now().toString() + '-' + Math.random().toString(36).slice(2, 8)
+  return createIdempotencyUuid()
 }
 
 async function loadTask() {
   if (!taskId.value) return
+  const session = captureSession(auth)
   try {
     const res: any = await api.pickTaskDetail(taskId.value)
-    task.value = res
+    if (isCurrentSession(auth, session)) task.value = res
   } catch (e) {
+    if (!isCurrentSession(auth, session)) return
     console.error(e)
     uni.showToast({ title: '加载任务头失败', icon: 'none' })
   }
@@ -165,9 +181,11 @@ async function loadTask() {
 
 async function loadLines() {
   if (!taskId.value) return
+  const session = captureSession(auth)
   loading.value = true
   try {
     const res: any = await api.pickTaskLines(taskId.value)
+    if (!isCurrentSession(auth, session)) return
     const list = Array.isArray(res) ? res : (res.results || [])
     // ✅ 初始化每行的可编辑拣货数
     lines.value = list.map((ln: any) => ({
@@ -176,10 +194,11 @@ async function loadLines() {
     }))
     dirtyLineIds.clear()
   } catch (e) {
+    if (!isCurrentSession(auth, session)) return
     console.error(e)
     uni.showToast({ title: '加载任务行失败', icon: 'none' })
   } finally {
-    loading.value = false
+    if (isCurrentSession(auth, session)) loading.value = false
   }
 }
 
@@ -193,6 +212,7 @@ function restoreConfirmedQty(ln: any) {
 }
 
 async function refreshConfirmedLine(lineId: number, fallbackLine: any) {
+  const session = captureSession(auth)
   let confirmedQty = fallbackLine?.qty_done
   try {
     const res: any = await api.pickTaskLines(taskId.value)
@@ -205,6 +225,7 @@ async function refreshConfirmedLine(lineId: number, fallbackLine: any) {
     console.error('刷新拣货行数量失败', refreshError)
   }
 
+  if (!isCurrentSession(auth, session)) return
   const currentLine = lines.value.find((item: any) => Number(item?.id) === lineId)
   if (currentLine) {
     currentLine.qty_done = confirmedQty
@@ -216,7 +237,7 @@ async function refreshConfirmedLine(lineId: number, fallbackLine: any) {
 
 function applyManualQty(ln: any): Promise<boolean> {
   const lineId = Number(ln?.id)
-  if (!lineId || !taskId.value || !isPickable.value || scanning.value) {
+  if (!lineId || !taskId.value || !isPickable.value || scanning.value || pendingScan.value || recoveryError.value) {
     return Promise.resolve(false)
   }
 
@@ -243,6 +264,7 @@ function applyManualQty(ln: any): Promise<boolean> {
     return Promise.resolve(true)
   }
 
+  const session = captureSession(auth)
   const request = (async (): Promise<boolean> => {
     adjustingLineIds.add(lineId)
     try {
@@ -251,18 +273,19 @@ function applyManualQty(ln: any): Promise<boolean> {
         final_qty_done: val,
         client_seq: genClientSeq(),
       })
+      if (!isCurrentSession(auth, session)) return false
       ln.qty_done = res.qty_done
       ln._edit_qty_done = formatQty(res.qty_done)
       dirtyLineIds.delete(lineId)
       return true
     } catch (e: any) {
+      if (!isCurrentSession(auth, session)) return false
       const msg = e?.data?.detail || e?.data?.message || '调整拣货数量失败'
       uni.showToast({ title: String(msg), icon: 'none' })
       await refreshConfirmedLine(lineId, ln)
       return false
     } finally {
-      adjustingLineIds.delete(lineId)
-      adjustmentPromises.delete(lineId)
+      if (isCurrentSession(auth, session)) { adjustingLineIds.delete(lineId); adjustmentPromises.delete(lineId) }
     }
   })()
 
@@ -287,23 +310,33 @@ async function flushManualQtyEdits(): Promise<boolean> {
 
 
 async function submitScan(barcodeOverride?: string) {
-  if (!taskId.value || !isPickable.value || scanning.value) return
-  if (!await flushManualQtyEdits()) return
-  if (!isPickable.value || scanning.value) return
+  if (!taskId.value || !isPickable.value || scanLocked.value) return
+  const session = captureSession(auth)
   const code = (barcodeOverride || scanBarcode.value || '').trim()
   if (!code) {
     uni.showToast({ title: '请先扫描或输入条码', icon: 'none' })
     return
   }
-  const q = Number(scanQty.value) || 1
+  const q = Number(scanQty.value)
+  if (!Number.isFinite(q) || q <= 0 || Number(q.toFixed(3)) <= 0) { uni.showToast({ title: '请输入大于零的有效数量', icon: 'none' }); return }
+  preparingScan.value = true
+  try {
+    if (!await flushManualQtyEdits() || !isCurrentSession(auth, session) || !isPickable.value) return
+    pendingScan.value = writePending(pendingScanKey(), { barcode: code, qty: q.toFixed(3), client_seq: genClientSeq() }, { task_id: taskId.value })
+    await sendPendingScan(session)
+  } catch (error: any) { if (isCurrentSession(auth, session)) uni.showToast({ title: error?.message || '拣货结果待确认', icon: 'none' }) }
+  finally { if (isCurrentSession(auth, session)) preparingScan.value = false }
+}
 
+async function sendPendingScan(session: any) {
+  const pending = pendingScan.value
+  const key = pendingScanKey()
+  if (!pending || !isCurrentSession(auth, session)) return
   scanning.value = true
   try {
-    const res: any = await api.scanPick(taskId.value, {
-      barcode: code,
-      qty: q,
-      client_seq: genClientSeq(), // 每次扫描一个新的 client_seq
-    })
+    const res: any = await api.scanPick(pending.display.task_id, pending.payload)
+    if (!isCurrentSession(auth, session)) return
+    if (!res?.line_id || (res.qty_done == null && res.line?.qty_done == null)) throw new Error('拣货响应不完整，请继续确认原请求')
 
     const lineId = res.line_id
     if (lineId) {
@@ -324,43 +357,56 @@ async function submitScan(barcodeOverride?: string) {
     }
 
     uni.showToast({ title: '已记录拣货', icon: 'none' })
+    clearPending(key); pendingScan.value = null
     scanBarcode.value = ''
+    await loadTask()
   } catch (err: any) {
+    if (!isCurrentSession(auth, session)) return
+    if (definitelyRejected(err)) { clearPending(key); pendingScan.value = null }
     console.error(err)
-    const msg = err?.data?.detail || err?.data?.message || '拣货失败'
+    const msg = err?.message || err?.data?.detail || err?.data?.message || '拣货结果待确认，请继续确认原请求'
     uni.showToast({ title: String(msg), icon: 'none' })
   } finally {
-    scanning.value = false
+    if (isCurrentSession(auth, session)) scanning.value = false
   }
+}
+
+async function retryScan() {
+  if (!pendingScan.value || scanning.value || preparingScan.value) return
+  await sendPendingScan(captureSession(auth))
 }
 
 // 点击“扫码”按钮
 async function handleScan() {
-  if (!isPickable.value || scanning.value) return
+  if (!isPickable.value || scanLocked.value) return
   if (!await flushManualQtyEdits()) return
   quickScan()
 }
 
 // 注册扫描回调：扫码→直接提交
 function handleBarcodeScanned(barcode: string) {
+  if (scanLocked.value) return
   console.log('拣货页面收到条码:', barcode)
   scanBarcode.value = barcode
   submitScan(barcode)
 }
 
 async function postTask() {
-  if (!taskId.value || posting.value) return
+  if (!taskId.value || posting.value || scanLocked.value) return
   posting.value = true
+  const session = captureSession(auth)
   try {
     const res: any = await api.postPickTask(taskId.value)
+    if (!isCurrentSession(auth, session)) return
     uni.showToast({
       title: res?.message || '拣货已过账',
       icon: 'none',
     })
     setTimeout(() => {
-      uni.navigateBack()
+      if (isCurrentSession(auth, session)) uni.navigateBack()
     }, 800)
   } catch (err: any) {
+    if (!isCurrentSession(auth, session)) return
     console.error(err)
     if (Number(err?.statusCode || err?.code) === 403 && task.value?.is_warehouse_assisted) {
       auth.invalidateAssistedCapability()
@@ -368,12 +414,13 @@ async function postTask() {
     const msg = err?.data?.detail || err?.data?.message || '过账失败'
     uni.showToast({ title: String(msg), icon: 'none' })
   } finally {
-    posting.value = false
+    if (isCurrentSession(auth, session)) posting.value = false
   }
 }
 
 function confirmAndPost() {
-  if (!canSelfReview.value || posting.value || confirmingPost.value) return
+  if (!canSelfReview.value || posting.value || confirmingPost.value || scanLocked.value) return
+  const session = captureSession(auth)
   confirmingPost.value = true
   uni.showModal({
     title: '确认单人复核并出库',
@@ -381,10 +428,10 @@ function confirmAndPost() {
     confirmText: '确认出库',
     confirmColor: '#c62828',
     success: (result) => {
-      if (result.confirm) postTask()
+      if (result.confirm && isCurrentSession(auth, session)) postTask()
     },
     complete: () => {
-      confirmingPost.value = false
+      if (isCurrentSession(auth, session)) confirmingPost.value = false
     },
   })
 }
@@ -394,20 +441,22 @@ async function createReviewTask() {
     !taskId.value ||
     !isPickable.value ||
     submittingReview.value ||
-    scanning.value
+    scanLocked.value
   ) return
 
   submittingReview.value = true
+  const session = captureSession(auth)
   try {
     // 点击按钮会先触发当前数量输入框的 blur。等待该保存请求，或者
     // 主动保存尚未失焦的编辑，避免第一次点击只保存数量、第二次才提交。
-    if (!await flushManualQtyEdits()) return
+    if (!await flushManualQtyEdits() || !isCurrentSession(auth, session)) return
     if (!allDone.value) {
       uni.showToast({ title: '还有未拣完的行，不能提交复核', icon: 'none' })
       return
     }
 
     const res: any = await api.createPickReviewTask(taskId.value)
+    if (!isCurrentSession(auth, session)) return
     uni.showToast({
       title: res?.message || '拣货完成，已创建复核任务',
       icon: 'none',
@@ -415,6 +464,7 @@ async function createReviewTask() {
     await loadTask()
     await loadLines()
   } catch (err: any) {
+    if (!isCurrentSession(auth, session)) return
     console.error(err)
     const msg = err?.data?.detail || err?.data?.message || '提交复核任务失败'
     uni.showToast({ title: String(msg), icon: 'none' })
@@ -422,7 +472,7 @@ async function createReviewTask() {
     await loadTask()
     await loadLines()
   } finally {
-    submittingReview.value = false
+    if (isCurrentSession(auth, session)) submittingReview.value = false
   }
 }
 
@@ -455,6 +505,7 @@ function formatQty(value) {
 }
 
 function onEditQty(e: any, ln: any) {
+  if (scanLocked.value) return
   // uni-app 的 input 事件里，值在 e.detail.value
   const raw = e?.detail?.value ?? e?.target?.value ?? ''
   // 输入过程中保留原始字符串（包括空字符串），只在失焦/提交时转成数值。
@@ -469,8 +520,30 @@ onLoad((opts: any) => {
     return
   }
   taskId.value = id
-  loadTask()
-  loadLines()
+})
+let restoringTask = false
+async function restoreTaskState() {
+  if (!businessScope(auth) || !taskId.value || restoringTask) return
+  const session = captureSession(auth)
+  restoringTask = true
+  try {
+    pendingScan.value = readPending(pendingScanKey()); recoveryError.value = ''
+    await loadTask()
+    if (isCurrentSession(auth, session)) await loadLines()
+  } catch (error: any) { if (isCurrentSession(auth, session)) recoveryError.value = error.message }
+  finally { if (isCurrentSession(auth, session)) restoringTask = false }
+}
+watch(() => businessScope(auth), (scope) => {
+  pendingScan.value = null; task.value = null; lines.value = []; scanning.value = false
+  preparingScan.value = false; recoveryError.value = ''; scanBarcode.value = ''; scanQty.value = '1'
+  posting.value = false; confirmingPost.value = false; submittingReview.value = false; loading.value = false
+  dirtyLineIds.clear(); adjustmentPromises.clear(); adjustingLineIds.clear()
+  restoringTask = false
+  if (scope) void restoreTaskState()
+}, { flush: 'sync' })
+onShow(async () => {
+  await auth.loadProfile().catch(() => null)
+  await restoreTaskState()
 })
 
 </script>
@@ -630,4 +703,7 @@ onLoad((opts: any) => {
   background: #f1f5f9;
   text-align: center;
 }
+
+.pending-scan{margin:12px 0;padding:14px;background:#fff7ed;border:1px solid #f5c16c;border-radius:12px;font-size:14px;overflow-wrap:anywhere}.pending-scan text{display:block;margin-bottom:8px}.pending-scan button{min-height:48px;background:#e77800;color:white}
+.scan-bar{flex-wrap:wrap}.flex-input{min-width:50%;box-sizing:border-box}.scan-bar .input,.scan-bar button,.line-qty-input,.footer button{min-height:48px;box-sizing:border-box}.scan-bar button{flex:1}.name,.row-meta{overflow-wrap:anywhere}.footer{padding-bottom:max(12px,env(safe-area-inset-bottom))}
 </style>

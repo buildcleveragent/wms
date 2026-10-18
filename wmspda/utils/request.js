@@ -456,9 +456,18 @@ export function downloadProductImportTemplate(alreadyRetried = false) {
 }
 
 export function downloadProductArchive(ownerId, ownerCode = '', alreadyRetried = false) {
+  const url = `${BASE_URL}/api/products/export-excel/?owner_id=${encodeURIComponent(ownerId)}`
+  return downloadProductArchiveFile(url, `商品档案-${ownerCode || ownerId}.xlsx`, alreadyRetried)
+}
+
+export function downloadAllProductArchives(alreadyRetried = false) {
+  const url = `${BASE_URL}/api/products/export-all-excel/`
+  return downloadProductArchiveFile(url, '全部商品档案.xlsx', alreadyRetried)
+}
+
+function downloadProductArchiveFile(url, fallbackFilename, alreadyRetried) {
   const epoch = sessionEpoch
   const token = getToken()
-  const url = `${BASE_URL}/api/products/export-excel/?owner_id=${encodeURIComponent(ownerId)}`
 
   // #ifdef H5
   if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
@@ -469,7 +478,7 @@ export function downloadProductArchive(ownerId, ownerCode = '', alreadyRetried =
       if (response.status === 401) {
         return retryAfterUnauthorized(
           token,
-          () => downloadProductArchive(ownerId, ownerCode, true),
+          () => downloadProductArchiveFile(url, fallbackFilename, true),
           alreadyRetried,
           epoch,
         )
@@ -494,7 +503,7 @@ export function downloadProductArchive(ownerId, ownerCode = '', alreadyRetried =
       const matched = disposition.match(/filename\*=UTF-8''([^;]+)/i)
       const filename = matched
         ? decodeURIComponent(matched[1])
-        : `商品档案-${ownerCode || ownerId}.xlsx`
+        : fallbackFilename
       const objectUrl = window.URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = objectUrl
@@ -521,7 +530,7 @@ export function downloadProductArchive(ownerId, ownerCode = '', alreadyRetried =
         if (res.statusCode === 401) {
           retryAfterUnauthorized(
             token,
-            () => downloadProductArchive(ownerId, ownerCode, true),
+            () => downloadProductArchiveFile(url, fallbackFilename, true),
             alreadyRetried,
             epoch,
           ).then(resolve, reject)
@@ -1521,4 +1530,9 @@ export const api = {
   },
 
 
+}
+
+export function downloadReturnOrders(filters = {}) {
+  const query = Object.entries(filters).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&')
+  return downloadProductArchiveFile(`${BASE_URL}/api/pda/return-orders/export/?${query}`, '退货出库.xlsx')
 }

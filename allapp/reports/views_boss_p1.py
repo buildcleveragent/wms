@@ -10,7 +10,6 @@ from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
-from django.utils.dateparse import parse_date
 from openpyxl import Workbook
 from rest_framework import permissions, serializers, viewsets
 from rest_framework.exceptions import PermissionDenied
@@ -24,7 +23,7 @@ from allapp.inventory.models import InventoryLayerPosition
 from allapp.locations.models import Warehouse
 from allapp.tasking.models import WmsTask
 
-from .boss_contract import build_meta, warning
+from .boss_contract import build_meta, parse_boss_date_range, warning
 from .models import (
     AlertCase,
     AlertCaseHistory,
@@ -47,16 +46,17 @@ from .services_operations import (
     build_operations_summary,
     paginate_operations_details,
 )
-from .views_boss import BossScopedApiMixin
+from .views_boss import BossScopedApiMixin, CanViewBossDashboard
+from .views_operations import CanExportOperations
 
 
 class BossP1Mixin(BossScopedApiMixin):
     def parse_scope(self, request):
         def raw(name):
-            return request.query_params.get(name) or request.data.get(name) or ""
+            return request.query_params.get(name) or request.data.get(name, "")
 
         def integer(name):
-            value = str(raw(name)).strip()
+            value = str(raw(name) or "").strip()
             if not value:
                 return None
             if not value.isdigit():
@@ -65,16 +65,7 @@ class BossP1Mixin(BossScopedApiMixin):
 
         owner_id = integer("owner")
         warehouse_id = integer("warehouse")
-        current = timezone.now()
-        today = timezone.localtime(current).date() if timezone.is_aware(current) else current.date()
-        date_to = parse_date(str(raw("date_to"))) if raw("date_to") else today
-        date_from = (
-            parse_date(str(raw("date_from"))) if raw("date_from") else date_to.replace(day=1)
-        )
-        if date_from is None or date_to is None:
-            raise ValueError("date_from and date_to must be YYYY-MM-DD.")
-        if date_from > date_to or date_to > today or (date_to - date_from).days > 366:
-            raise ValueError("Invalid date range; maximum 367 days and date_to cannot be future.")
+        date_from, date_to = parse_boss_date_range(raw("date_from"), raw("date_to"))
         self._validate_scope(request, owner_id=owner_id, warehouse_id=warehouse_id)
         scope = self._scope_payload(
             owner_id=owner_id,
@@ -291,6 +282,8 @@ def _workbook_response(workbook, filename):
 
 
 class BossCockpitExportApi(BossP1Mixin, APIView):
+    permission_classes = [CanViewBossDashboard, CanExportOperations]
+
     def post(self, request):
         try:
             owner_id, warehouse_id, date_from, date_to, scope = self.parse_scope(request)
@@ -996,6 +989,8 @@ class BossReviewSnapshotDetailApi(BossScopedApiMixin, APIView):
 
 
 class BossReviewSnapshotExportApi(BossReviewSnapshotDetailApi):
+    permission_classes = [CanViewBossDashboard, CanExportOperations]
+
     def get(self, request, share_code):
         detail_response = super().get(request, share_code)
         if detail_response.status_code != 200:

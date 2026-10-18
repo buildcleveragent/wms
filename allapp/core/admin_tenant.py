@@ -26,7 +26,9 @@ TENANT_ADMIN_POLICIES = {
         "owner": "owner_id",
         "warehouse": "warehouse_id",
     },
-    "baseinfo.customer": {"owner": "owner_id"},
+    "baseinfo.customer": {"owner": "owner_bindings__owner_id"},
+    "baseinfo.ownercustomerbinding": {"owner": "owner_id"},
+    "salesapp.miniprogramuser": {"owner": "owner_id"},
     "baseinfo.supplier": {"owner": "owner_id"},
     "baseinfo.employee": {"warehouse": "warehouse_id"},
     "baseinfo.carriercompany": {
@@ -73,6 +75,13 @@ def scope_admin_queryset(user, queryset, *, for_write: bool = False):
         return queryset.none()
     if scope.is_global:
         return queryset
+    if _model_label(queryset.model) == "baseinfo.customer":
+        from allapp.baseinfo.models import OwnerCustomerBinding
+
+        owner_ids = scope.owner_ids or owner_ids_for_warehouses(scope.warehouse_ids)
+        return queryset.filter(
+            pk__in=OwnerCustomerBinding.objects.filter(owner_id__in=owner_ids).values("customer_id")
+        )
     if _model_label(queryset.model).startswith("products.") and _product_global_access(
         user, for_write=for_write
     ):
@@ -129,7 +138,11 @@ def admin_object_in_scope(user, obj, *, for_write: bool = False) -> bool:
                 return None
         return value
 
-    owner_id = resolve(policy["owner"]) if policy.get("owner") else None
+    owner_id = (
+        obj.owner_id
+        if _model_label(obj.__class__) == "baseinfo.customer"
+        else resolve(policy["owner"]) if policy.get("owner") else None
+    )
     warehouse_id = resolve(policy["warehouse"]) if policy.get("warehouse") else None
     if scope.owner_ids:
         if owner_id is not None and int(owner_id) not in scope.owner_ids:

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "run_id": "bbf781edc77c4a0c8dae7fca182a6c63",
+  "status": "PASS",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026532644]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "459686",
+    "state": "R"
+  },
+  "command": [
+    "docker",
+    "run",
+    "--rm",
+    "--name",
+    "wms-release-trivy-db-16146c175ce8",
+    "-v",
+    "/tmp/wms-release-20261005-aohudxd1/trivy-cache:/root/.cache/trivy",
+    "aquasec/trivy:0.73.0",
+    "image",
+    "--download-db-only",
+    "--no-progress",
+    "--timeout",
+    "8m"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026532644]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "459717",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 7,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 256.343
+}

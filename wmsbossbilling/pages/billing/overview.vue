@@ -193,6 +193,7 @@ import BossNav from '@/components/boss-nav.vue'
 import BossScopeFilter from '@/components/boss-scope-filter.vue'
 import BossDataStatus from '@/components/boss-data-status.vue'
 import { useAuth } from '@/store/auth'
+import { useLatestRequest } from '@/utils/use-latest-request'
 import { useBossScope } from '@/store/bossScope'
 import { api, buildQuery } from '@/utils/request'
 import {
@@ -212,7 +213,10 @@ const payload = ref(null)
 const loading = ref(false)
 const dataError = ref(null)
 const loadedFingerprint = ref('')
-const stale = computed(() => !!dataError.value && loadedFingerprint.value === bossScope.fingerprint && !!payload.value)
+const requestKey = () => JSON.stringify(requestParams())
+const requests = useLatestRequest(requestKey)
+const initialization = useLatestRequest()
+const stale = computed(() => !!dataError.value && loadedFingerprint.value === requestKey() && !!payload.value)
 
 const draftChargeType = ref('')
 const draftStatus = ref('')
@@ -325,19 +329,27 @@ function requestParams() {
 }
 
 async function refreshAll() {
-  const fingerprint = bossScope.fingerprint
+  const current = requests.begin()
+  const fingerprint = requestKey()
+  const params = requestParams()
+  if (loadedFingerprint.value !== fingerprint) payload.value = null
   loading.value = true
+  dataError.value = null
   try {
-    payload.value = await api.billingWarehouseOverview(requestParams())
+    const result = await api.billingWarehouseOverview(params)
+    if (!current()) return
+    payload.value = result
     loadedFingerprint.value = fingerprint
     dataError.value = null
   } catch (error) {
+    if (!current()) return
     dataError.value = error
     if (loadedFingerprint.value !== fingerprint || error.kind === 'FORBIDDEN') payload.value = null
-    console.error('load boss billing overview failed:', error)
   } finally {
-    loading.value = false
-    uni.stopPullDownRefresh()
+    if (current()) {
+      loading.value = false
+      uni.stopPullDownRefresh()
+    }
   }
 }
 
@@ -366,12 +378,12 @@ function onStatusChange(event) {
 function openOwnerDetail(ownerId) {
   const query = buildQuery({
     owner: ownerId,
-    warehouse: scope.value.warehouse,
+    warehouse: bossScope.warehouse,
     date_from: bossScope.date_from,
     date_to: bossScope.date_to,
     charge_type: draftChargeType.value,
     status: draftStatus.value,
-  })
+  }, { keepEmpty: ['warehouse'] })
   uni.navigateTo({
     url: `/pages/billing/owner_detail?${query}`,
   })
@@ -416,11 +428,19 @@ onLoad((query) => {
     return
   }
   bossScope.restore(auth.user)
-  if (query?.owner) bossScope.owner = String(query.owner)
+  if (query?.owner !== undefined) bossScope.owner = String(query.owner || '')
+  if (query?.warehouse !== undefined) {
+    bossScope.warehouse = String(query.warehouse || '')
+    bossScope.loaded = false
+  }
   if (query?.date_from && query?.date_to) bossScope.setDates(String(query.date_from), String(query.date_to))
   draftChargeType.value = query?.charge_type ? String(query.charge_type) : ''
   draftStatus.value = query?.status ? String(query.status) : ''
-  bossScope.loadContext(auth.user).then(refreshAll).catch((error) => {
+  const current = initialization.begin()
+  bossScope.loadContext(auth.user).then((applied) => {
+    if (current() && applied) refreshAll()
+  }).catch((error) => {
+    if (!current()) return
     dataError.value = error
     payload.value = null
   })

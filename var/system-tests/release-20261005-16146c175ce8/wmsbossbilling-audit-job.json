@@ -1,0 +1,1 @@
+{"name": "wmsbossbilling-audit", "cwd": "/wms/wmsbossbilling", "command": ["npm", "audit", "--omit=dev", "--audit-level=high", "--json"], "timeout": 180}

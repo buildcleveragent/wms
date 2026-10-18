@@ -46,6 +46,7 @@
 
       <view v-if="draft.owner" class="section">
         <view class="section-title">2. 选择客户</view>
+        <view class="hint">{{ draft.salesOwner?.name }} 的客户</view>
         <view v-if="draft.customer" class="selected-row">
           <view>
             <view class="selected-name">{{ draft.customer.name }}</view>
@@ -81,12 +82,39 @@
         </template>
       </view>
 
+      <view v-if="draft.owner" class="section" data-testid="new-owner-section">
+        <view class="section-title">3. 新货主（选填）</view>
+        <view class="hint">留空由原货主直接出库；选择后先转给新货主，再由新货主出库给客户。</view>
+        <view v-if="draft.newOwner" class="selected-row">
+          <view>
+            <view class="selected-name">{{ draft.newOwner.name }}</view>
+            <view class="hint">{{ draft.newOwner.code }}</view>
+          </view>
+          <button class="small-button" @click="chooseNewOwner(null)">清空新货主</button>
+        </view>
+        <template v-else>
+          <view class="search-row">
+            <input v-model="newOwnerSearch" class="input search-input" placeholder="新货主名称或编码（可不填）" @confirm="loadNewOwners" />
+            <button class="small-button" :disabled="loadingNewOwners" @click="loadNewOwners">搜索</button>
+          </view>
+          <view v-for="owner in newOwners" :key="owner.id" class="choice-row" @click="chooseNewOwner(owner)">
+            <view>
+              <view class="selected-name">{{ owner.name }}</view>
+              <view class="hint">{{ owner.code }}</view>
+            </view>
+            <text class="choose-text">选择</text>
+          </view>
+          <view v-if="newOwnerSearch.trim() && searchedNewOwners && !loadingNewOwners && !newOwners.length" class="empty">没有匹配的新货主</view>
+        </template>
+      </view>
+
       <view v-if="draft.customer" class="summary-card">
         <view>
           <view class="selected-name">当前代办出库单</view>
+          <view class="hint">{{ draft.routeLabel }}</view>
           <view class="hint">已选择 {{ draft.itemCount }} 种商品，共 {{ formatQty(draft.totalQty) }}</view>
         </view>
-        <button class="primary-button" @click="continueToProducts">
+        <button class="primary-button" :disabled="loadingCustomers" @click="continueToProducts">
           继续选品
         </button>
       </view>
@@ -112,6 +140,11 @@ const checkingPermission = ref(true)
 const authorized = ref(false)
 const ownerSearch = ref('')
 const customerSearch = ref('')
+const newOwnerSearch = ref('')
+const newOwners = ref([])
+const loadingNewOwners = ref(false)
+const searchedNewOwners = ref(false)
+let newOwnerRequestSequence = 0
 const owners = ref([])
 const customers = ref([])
 const loadingOwners = ref(false)
@@ -148,17 +181,21 @@ async function loadOwners() {
   }
 }
 
-async function loadCustomers() {
-  const ownerId = Number(draft.owner?.id)
+async function loadCustomers({ validateSelected = false } = {}) {
+  const ownerId = Number(draft.salesOwner?.id)
   if (!ownerId) return
   const requestSequence = ++customerRequestSequence
   loadingCustomers.value = true
   try {
     const result = await api.assistedCustomers(ownerId, customerSearch.value, 1)
-    if (requestSequence === customerRequestSequence && Number(draft.owner?.id) === ownerId) {
+    if (requestSequence === customerRequestSequence && Number(draft.salesOwner?.id) === ownerId) {
       customers.value = normalizeList(result)
+      if (validateSelected && draft.customer) {
+        draft.setCustomer(customers.value.find((customer) => Number(customer.id) === Number(draft.customer.id)) || null)
+      }
     }
   } catch (error) {
+    if (validateSelected && requestSequence === customerRequestSequence) draft.setCustomer(null)
     handleApiError(error)
   } finally {
     if (requestSequence === customerRequestSequence) loadingCustomers.value = false
@@ -170,6 +207,7 @@ function chooseOwner(owner) {
   draft.setOwner(owner)
   customers.value = []
   customerSearch.value = ''
+  resetNewOwnerSearch()
   loadCustomers()
 }
 
@@ -178,11 +216,45 @@ function clearOwner() {
   draft.setOwner(null)
   customers.value = []
   customerSearch.value = ''
+  resetNewOwnerSearch()
+}
+
+function resetNewOwnerSearch() {
+  newOwnerRequestSequence += 1
+  newOwnerSearch.value = ''
+  newOwners.value = []
+  loadingNewOwners.value = false
+  searchedNewOwners.value = false
+}
+
+async function loadNewOwners() {
+  const sequence = ++newOwnerRequestSequence
+  const ownerId = Number(draft.owner?.id)
+  loadingNewOwners.value = true
+  try {
+    const result = await api.assistedOwners(newOwnerSearch.value, 1)
+    if (sequence === newOwnerRequestSequence && Number(draft.owner?.id) === ownerId) {
+      newOwners.value = normalizeList(result).filter((owner) => Number(owner.id) !== ownerId)
+      searchedNewOwners.value = true
+    }
+  } catch (error) {
+    handleApiError(error)
+  } finally {
+    if (sequence === newOwnerRequestSequence) loadingNewOwners.value = false
+  }
+}
+
+async function chooseNewOwner(owner) {
+  if (!draft.setNewOwner(owner)) return
+  resetNewOwnerSearch()
+  customerRequestSequence += 1
+  customerSearch.value = ''
+  customers.value = []
+  await loadCustomers({ validateSelected: true })
 }
 
 function chooseCustomer(customer) {
   draft.setCustomer(customer)
-  continueToProducts()
 }
 
 function clearCustomer() {
@@ -198,6 +270,11 @@ function openAssistedStats() {
 }
 
 function continueToProducts() {
+  if (!draft.newOwner && newOwnerSearch.value.trim()) {
+    uni.showToast({ title: '请选择搜索到的新货主，或清空新货主输入框', icon: 'none' })
+    return
+  }
+  if (loadingCustomers.value) return
   if (!draft.owner?.id || !draft.customer?.id || navigatingToProducts.value) return
   navigatingToProducts.value = true
   uni.navigateTo({
@@ -217,7 +294,7 @@ async function checkPermission() {
     authorized.value = auth.canProcessAssistedOutbound
     if (!authorized.value) return
     await loadOwners()
-    if (draft.owner?.id && !draft.customer?.id) await loadCustomers()
+    if (draft.owner?.id) await loadCustomers({ validateSelected: true })
   } catch (error) {
     console.warn('无法读取代办权限', error)
   } finally {

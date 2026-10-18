@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "run_id": "fb204e122ebc40418e5af2a3a1e3b394",
+  "status": "PASS",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026532640]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "452052",
+    "state": "R"
+  },
+  "command": [
+    "/wms/.venv/bin/python",
+    "scripts/measure_pdf_resource.py",
+    "--output",
+    "/tmp/wms-release-20261005-aohudxd1/pdf-measurements"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026532640]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "452074",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 7,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 88.443
+}

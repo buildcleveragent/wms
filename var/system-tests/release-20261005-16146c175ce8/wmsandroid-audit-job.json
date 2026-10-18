@@ -1,0 +1,1 @@
+{"name": "wmsandroid-audit", "cwd": "/wms/wmsandroid", "command": ["npm", "audit", "--omit=dev", "--audit-level=high", "--json"], "timeout": 180}

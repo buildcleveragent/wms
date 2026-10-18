@@ -1,0 +1,1 @@
+{"name": "runtime-build-retry", "command": ["docker", "build", "--progress=plain", "--tag", "wms-release:20261005-16146c175ce8", "."], "env": {"BUILDX_CONFIG": "/tmp/wms-release-20261005-aohudxd1/buildx"}, "timeout": 1800}

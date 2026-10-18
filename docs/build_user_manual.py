@@ -228,7 +228,9 @@ def compose_consolidated(
 ## 系统组成与角色入口
 
 - **仓库 PDA（wmspda）**：现场收货、上架、代办出库、拣货、复核、库存和仓库报表。
+- **Android 移动端（wmsandroid）**：移动收货、上架、拣货及收银；具体能力和库存范围按 Android 专项手册核对。
 - **货主业务端（wmsownersale）**：授权仓库选单、货主开单、审核、库存、履约、销售报表和账单。
+- **商城小程序（sales-miniapp）**：终端买家浏览、加购、下单、付款和售后，不属于六类 WMS 岗位入口。
 - **仓储经营分析中心（wmsbossbilling）**：老板只读查看经营、库存库容、收入计费和预警。
 - **Web 控制台 / Django Admin**：仓库管理、系统配置、基础资料、权限和审计。
 
@@ -558,6 +560,8 @@ def compose_index(manifest: dict[str, str], specs: list[ManualSpec]) -> str:
 专项指南：
 
 - [POS 使用手册](../pos_user_manual.md)
+- [PDA 退货出库使用手册](../pda-return-user-guide.md)
+- [Android 移动端使用手册](../android-user-guide.md)
 - [商城小程序使用教程](../sales-miniapp-user-guide.md)
 - [计费服务技术讲解](../billing_services_guide.md)
 

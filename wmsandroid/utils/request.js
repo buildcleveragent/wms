@@ -17,6 +17,7 @@ function requireApiBaseUrl() {
 const ACCESS_TOKEN_STORAGE_KEY = 'access'
 const REFRESH_TOKEN_STORAGE_KEY = 'refresh'
 let sessionEpoch = 0
+export function getSessionEpoch() { return sessionEpoch }
 function sessionChangedError() {
   return { code: 409, statusCode: 409, sessionChanged: true, message: '登录账号已变化，请重新操作' }
 }

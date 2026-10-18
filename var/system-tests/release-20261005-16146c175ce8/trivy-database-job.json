@@ -1,0 +1,1 @@
+{"name": "trivy-database", "command": ["docker", "run", "--rm", "--name", "wms-release-trivy-db-16146c175ce8", "-v", "/tmp/wms-release-20261005-aohudxd1/trivy-cache:/root/.cache/trivy", "aquasec/trivy:0.73.0", "image", "--download-db-only", "--no-progress", "--timeout", "8m"], "timeout": 540, "docker_cleanup": true}

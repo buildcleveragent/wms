@@ -1,7 +1,8 @@
-FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS base
+FROM python:3.12.15-slim-trixie@sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d AS base
 ARG DEBIAN_MIRROR=https://deb.debian.org
 RUN sed -i "s|http://deb.debian.org/debian$|${DEBIAN_MIRROR}/debian|" /etc/apt/sources.list.d/debian.sources \
-    && apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+    && apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update \
+    && apt-get upgrade -y --no-install-recommends
 
 FROM base AS builder
 
@@ -29,6 +30,7 @@ RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/* \
 WORKDIR /app
 COPY --chown=wms:wms . /app
 RUN chmod +x /app/docker/start-web.sh /app/docker/start-scheduler.sh /app/docker/release.sh
+RUN install -d -o 10001 -g 10001 -m 0755 /app/staticfiles /app/media
 USER wms
 EXPOSE 8000
 CMD ["/app/docker/start-web.sh"]

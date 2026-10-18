@@ -460,6 +460,26 @@ if IS_PRODUCTION and not ALLOWED_HOSTS:
 SESSION_COOKIE_SECURE = IS_PRODUCTION
 CSRF_COOKIE_SECURE = IS_PRODUCTION
 SECURE_SSL_REDIRECT = IS_PRODUCTION
+SECURE_REDIRECT_EXEMPT = [r"^healthz/live$", r"^healthz/ready$"]
+# Linux renderer limits; one active render per container, with no waiting queue.
+PDF_MEMORY_BYTES = env.int("PDF_MEMORY_BYTES", default=1024 * 1024 * 1024)
+PDF_CPU_SECONDS = env.int("PDF_CPU_SECONDS", default=120)
+PDF_TIMEOUT_SECONDS = env.int("PDF_TIMEOUT_SECONDS", default=150)
+PDF_MAX_HTML_BYTES = env.int("PDF_MAX_HTML_BYTES", default=4 * 1024 * 1024)
+PDF_MAX_OUTPUT_BYTES = env.int("PDF_MAX_OUTPUT_BYTES", default=16 * 1024 * 1024)
+PDF_MAX_LINES = env.int("PDF_MAX_LINES", default=1000)
+if (
+    min(
+        PDF_MEMORY_BYTES,
+        PDF_CPU_SECONDS,
+        PDF_TIMEOUT_SECONDS,
+        PDF_MAX_HTML_BYTES,
+        PDF_MAX_OUTPUT_BYTES,
+        PDF_MAX_LINES,
+    )
+    <= 0
+):
+    raise ImproperlyConfigured("PDF resource limits must be positive.")
 SECURE_PROXY_SSL_HEADER = (
     ("HTTP_X_FORWARDED_PROTO", "https")
     if env.bool("TRUST_PROXY_SSL_HEADER", default=IS_PRODUCTION)

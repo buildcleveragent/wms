@@ -9,6 +9,7 @@
       <view class="card">
         <view class="card-title">1. 下载标准模板</view>
         <view class="muted">请使用系统模板填写，只支持 .xlsx，单次最多 1000 条、5 MB。</view>
+        <view class="muted">基本单位的类型和小数位数由系统自动识别，无需填写；新单位请先在 admin 的计量单位中创建并启用。</view>
         <button class="primary-btn outline-btn" :disabled="busy" @click="downloadTemplate">
           {{ downloading ? '模板下载中…' : '下载 Excel 模板' }}
         </button>

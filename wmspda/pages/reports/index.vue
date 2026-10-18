@@ -6,6 +6,7 @@
         <view class="subtitle">{{ periodText }} · 实绩截至 {{ dataAsOf }}</view>
       </view>
       <view class="header-actions">
+        <button class="secondary-btn" @click="openReturnReport">退货出库统计</button>
         <button class="secondary-btn" @click="openPosReport">POS销售报表</button>
         <button class="secondary-btn" @click="openPosAccuracy">POS数据对账</button>
         <button class="refresh-btn" :disabled="loading" @click="loadData">刷新</button>
@@ -113,6 +114,7 @@
 </template>
 
 <script setup>
+function openReturnReport() { uni.navigateTo({ url: "/pages/returns/index?tab=stats" }) }
 import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { api } from '../../utils/request'

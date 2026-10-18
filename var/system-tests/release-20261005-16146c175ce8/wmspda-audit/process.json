@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "run_id": "37a901ffd28840a1a7314a7d86a019c4",
+  "status": "FAIL",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026532622]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "355546",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "audit",
+    "--omit=dev",
+    "--audit-level=high",
+    "--json"
+  ],
+  "cwd": "/wms/wmspda",
+  "child": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026532622]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "355629",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 7,
+  "exit_code": 1,
+  "cleaned_containers": [],
+  "duration_seconds": 22.136
+}

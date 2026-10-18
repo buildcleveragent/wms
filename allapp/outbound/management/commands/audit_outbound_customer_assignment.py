@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 
 from django.core.management.base import BaseCommand, CommandError
-from django.db.models import F, Q
+from django.db.models import F, OuterRef, Q, Subquery
 
+from allapp.baseinfo.customer_access import active_bindings
 from allapp.outbound.models import OutboundOrder
 
 
@@ -15,6 +16,9 @@ class Command(BaseCommand):
     )
 
     def handle(self, *args, **options):
+        binding = active_bindings().filter(
+            owner_id=OuterRef("owner_id"), customer_id=OuterRef("customer_id")
+        )
         editable_orders = (
             OutboundOrder.objects.select_related(
                 "owner", "warehouse", "customer", "customer__salesperson", "created_by"
@@ -26,10 +30,15 @@ class Command(BaseCommand):
                 is_closed=False,
                 customer__isnull=False,
             )
-            .exclude(customer__code__iexact="CASH")
+            .annotate(
+                bound_code=Subquery(binding.values("code")[:1]),
+                bound_salesperson_id=Subquery(binding.values("salesperson_id")[:1]),
+            )
+            .exclude(bound_code__iexact="CASH")
             .filter(
                 Q(created_by__isnull=True)
-                | ~Q(created_by_id=F("customer__salesperson_id"))
+                | Q(bound_salesperson_id__isnull=True)
+                | ~Q(created_by_id=F("bound_salesperson_id"))
             )
             .order_by("id")
         )
@@ -40,8 +49,8 @@ class Command(BaseCommand):
                 "owner_id": order.owner_id,
                 "warehouse_id": order.warehouse_id,
                 "customer_id": order.customer_id,
-                "customer_code": order.customer.code,
-                "customer_salesperson_id": order.customer.salesperson_id,
+                "customer_code": order.bound_code,
+                "customer_salesperson_id": order.bound_salesperson_id,
                 "created_by_id": order.created_by_id,
                 "submit_status": order.submit_status,
                 "approval_status": order.approval_status,

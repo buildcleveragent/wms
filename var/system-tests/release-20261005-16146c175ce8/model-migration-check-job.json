@@ -1,0 +1,1 @@
+{"name": "model-migration-check", "command": ["/wms/.venv/bin/python", "manage.py", "makemigrations", "--check", "--dry-run"], "env": {"APP_ENV": "test", "DB_NAME": "wms_db_test", "DB_TEST_NAME": "wms_db_test"}, "timeout": 120}

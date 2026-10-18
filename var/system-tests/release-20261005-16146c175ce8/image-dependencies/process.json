@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "run_id": "4f60c064e1ce4ea1ada1b51b9fb3d651",
+  "status": "PASS",
+  "owner": {
+    "pid": 38,
+    "pid_namespace": "pid:[4026532610]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "537216",
+    "state": "R"
+  },
+  "command": [
+    "docker",
+    "run",
+    "--rm",
+    "--network",
+    "none",
+    "--name",
+    "wms-release-image-dependencies-16146c175ce8",
+    "-v",
+    "/tmp/wms-release-20261005-aohudxd1/candidate.json:/evidence/candidate.json:ro",
+    "wms-release:20261005-16146c175ce8",
+    "python",
+    "-m",
+    "pip",
+    "check"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 39,
+    "pid_namespace": "pid:[4026532610]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "537229",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 39,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 3.457
+}

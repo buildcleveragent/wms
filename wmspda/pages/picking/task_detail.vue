@@ -52,6 +52,12 @@
           <view class="meta">
             <text>货位：{{ ln.from_loc_code || '-' }}</text>
           </view>
+          <view v-if="ln.source_inventory" class="meta">
+            原货主商品：{{ ln.source_inventory.code }} / {{ ln.source_inventory.sku }}
+            <text v-if="ln.source_inventory.batch_no"> · 批次 {{ ln.source_inventory.batch_no }}</text>
+            <text v-if="ln.source_inventory.expiry_date"> · 效期 {{ ln.source_inventory.expiry_date }}</text>
+            <text v-if="ln.source_inventory.serial_no"> · 序列号 {{ ln.source_inventory.serial_no }}</text>
+          </view>
 
           <!-- 原有计划/已拣显示 -->
           <view class="qty-row">

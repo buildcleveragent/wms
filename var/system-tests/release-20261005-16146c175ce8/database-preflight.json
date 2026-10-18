@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "database": {
+    "database": "wms_db_test",
+    "mysql_version": "8.0.46"
+  },
+  "user": "wms_test",
+  "database_recreation_reason": "User explicitly requested the full test suite and final release gate."
+}

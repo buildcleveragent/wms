@@ -138,19 +138,25 @@ def _resolve_order(task: WmsTask) -> OutboundOrder:
     return order
 
 
-def build_dispatch_note(task_id: int) -> DispatchNote:
-    task = (
-        WmsTask.objects.select_related("owner", "warehouse")
-        .prefetch_related(
-            "lines__product__base_uom",
-        )
-        .get(pk=task_id)
-    )
+class DispatchNoteLimitError(DispatchNoteDataError):
+    """The requested PDF exceeds the validated preparation budget."""
+
+
+def build_dispatch_note(task_id: int, *, max_lines=None) -> DispatchNote:
+    tasks = WmsTask.objects.select_related("owner", "warehouse")
+    if max_lines is None:
+        tasks = tasks.prefetch_related("lines__product__base_uom")
+    task = tasks.get(pk=task_id)
     if task.task_type != WmsTask.TaskType.DISPATCH:
         raise DispatchNoteDataError("仅配送任务可生成配送单。")
 
     order = _resolve_order(task)
-    lines = list(task.lines.exclude(status=WmsTaskLine.Status.CANCELLED).order_by("id"))
+    line_query = task.lines.exclude(status=WmsTaskLine.Status.CANCELLED).order_by("id")
+    if max_lines is not None:
+        line_query = line_query.select_related("product__base_uom")[: max_lines + 1]
+    lines = list(line_query)
+    if max_lines is not None and len(lines) > max_lines:
+        raise DispatchNoteLimitError(f"PDF 当前最多支持 {max_lines} 行，请拆分单据后重试。")
     if not lines:
         raise DispatchNoteDataError("配送任务没有有效明细。")
     if any(
@@ -172,7 +178,10 @@ def build_dispatch_note(task_id: int) -> DispatchNote:
     is_preview = task.status != WmsTask.Status.COMPLETED
     dte = getattr(task, "dispatchtaskextra", None)
     note_no = getattr(dte, "manifest_no", "") or task.task_no or str(task.pk)
-    salesperson = getattr(order.customer, "salesperson", None) if order.customer else None
+    from allapp.baseinfo.customer_access import customer_binding
+
+    binding = customer_binding(order.customer, order.owner_id, active=False)
+    salesperson = binding.salesperson if binding else None
     note_date = task.finished_at or task.updated_at or timezone.now()
     if timezone.is_aware(note_date):
         note_date = timezone.localtime(note_date)

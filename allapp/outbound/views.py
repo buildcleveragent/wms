@@ -42,10 +42,12 @@ from rest_framework.response import Response
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 from allapp.accounts.models import UserRoleScope
+from allapp.baseinfo.customer_access import active_bindings, customer_code, customers_for_owner
 from allapp.baseinfo.owner_warehouse_access import owner_ids_for_warehouses
 from allapp.billing.enums import PeriodStatus
 from allapp.billing.models import BillingPeriod
 from allapp.core.utils.log_context import build_log_payload
+from allapp.inventory.locking import run_inventory_write_with_retry
 from allapp.inventory.models import PostingJournal
 from allapp.outbound import services as outbound_services
 from allapp.outbound.assisted_history import (
@@ -78,6 +80,7 @@ from allapp.outbound.drop_ship_import import (
 )
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.models import OutboundOrderLine
+from allapp.outbound.ownership import transfer_for_order, transfer_summary
 from allapp.outbound.serializers import (
     AssistedOutboundOrderCreateSerializer,
     ConfirmPricingSerializer,
@@ -590,9 +593,23 @@ class CustomerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         qs = Customer.objects.filter(is_active=True)
         if not scope.is_global:
             if scope.owner_ids:
-                qs = qs.filter(owner_id__in=scope.owner_ids)
+                bindings = active_bindings().filter(owner_id__in=scope.owner_ids)
                 if UserRoleScope.Role.OWNER_MANAGER not in scope.roles:
-                    qs = qs.filter(Q(salesperson=user) | Q(code__iexact="CASH"))
+                    bindings = bindings.filter(Q(salesperson=user) | Q(code__iexact="CASH"))
+                requested_owner = self.request.query_params.get(
+                    "owner_id"
+                ) or self.request.query_params.get("owner")
+                if requested_owner:
+                    bindings = bindings.filter(
+                        owner_id=_parse_catalog_id(requested_owner, "owner_id")
+                    )
+                qs = qs.filter(pk__in=bindings.values("customer_id")).annotate(
+                    owner_customer_code=Subquery(
+                        bindings.filter(customer_id=OuterRef("pk"))
+                        .order_by("owner_id")
+                        .values("code")[:1]
+                    )
+                )
             else:
                 param_name = (
                     "owner_id" if self.request.query_params.get("owner_id") is not None else "owner"
@@ -602,23 +619,28 @@ class CustomerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     param_name=param_name,
                     default_to_user_owner=False,
                 )
-                qs = qs.filter(owner_id=owner_id) if owner_id else qs.none()
+                if not owner_id:
+                    return qs.none()
+                qs = customers_for_owner(owner_id)
         else:
             requested_owner = self.request.query_params.get(
                 "owner_id"
             ) or self.request.query_params.get("owner")
             if requested_owner:
-                qs = qs.filter(owner_id=_parse_catalog_id(requested_owner, "owner_id"))
+                qs = customers_for_owner(_parse_catalog_id(requested_owner, "owner_id"))
+            else:
+                bindings = active_bindings().filter(customer_id=OuterRef("pk")).order_by("owner_id")
+                qs = qs.annotate(owner_customer_code=Subquery(bindings.values("code")[:1]))
 
         q = self.request.query_params.get("search")
         if q:
-            qs = qs.filter(Q(code__icontains=q) | Q(name__icontains=q))
+            qs = qs.filter(Q(owner_customer_code__icontains=q) | Q(name__icontains=q))
 
         return qs.order_by("id")
 
     def list(self, request, *args, **kwargs):
         page = self.paginate_queryset(self.get_queryset())
-        data = [{"id": c.id, "code": c.code, "name": c.name} for c in page]
+        data = [{"id": c.id, "code": c.owner_customer_code, "name": c.name} for c in page]
         return self.get_paginated_response(data)
 
 
@@ -936,13 +958,15 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         if not owner_id:
             raise ValidationError({"owner_id": "owner_id 参数必填。"})
         owner = self._enabled_owner(owner_id)
-        Customer = apps.get_model("baseinfo", "Customer")
-        qs = Customer.objects.filter(owner=owner, is_active=True).order_by("id")
+        qs = customers_for_owner(owner.pk).order_by("id")
         search = (request.query_params.get("search") or "").strip()
         if search:
-            qs = qs.filter(Q(code__icontains=search) | Q(name__icontains=search))
+            qs = qs.filter(Q(owner_customer_code__icontains=search) | Q(name__icontains=search))
         return Response(
-            [{"id": customer.id, "code": customer.code, "name": customer.name} for customer in qs]
+            [
+                {"id": customer.id, "code": customer.owner_customer_code, "name": customer.name}
+                for customer in qs
+            ]
         )
 
     @action(detail=False, methods=["get"], url_path="history-options")
@@ -1077,6 +1101,7 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
                 "task_status": task.status,
                 "idempotent": idempotent,
                 "replayed": idempotent,
+                **transfer_summary(order),
             },
             status=http_status,
         )
@@ -1129,6 +1154,7 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
                 items = "__invalid__"
         return {
             "owner_id": str(payload.get("owner_id")),
+            "new_owner_id": str(payload["new_owner_id"]) if payload.get("new_owner_id") else None,
             "customer_id": str(payload.get("customer_id")),
             "items": items,
             "src_bill_no": (payload.get("src_bill_no") or "").strip(),
@@ -1142,22 +1168,37 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         }
 
     def _persisted_fingerprint(self, order):
-        return {
-            "owner_id": str(order.owner_id),
-            "customer_id": str(order.customer_id),
-            "items": sorted(
+        transfer = transfer_for_order(order)
+        lines = order.lines.filter(is_deleted=False)
+        if transfer:
+            items = sorted(
+                (
+                    str(line.source_product_id),
+                    self._canonical_qty(line.quantity),
+                    str(line.source_package_id) if line.source_package_id else None,
+                    self._canonical_optional_qty(line.package_qty),
+                )
+                for line in transfer.lines.all()
+            )
+        else:
+            items = sorted(
                 (
                     str(line.product_id),
                     self._canonical_qty(line.base_qty),
                     (
                         str(getattr(line, "aux_uom_id", None))
-                        if getattr(line, "aux_uom_id", None) is not None
+                        if getattr(line, "aux_uom_id", None)
                         else None
                     ),
                     self._canonical_optional_qty(getattr(line, "aux_qty", None)),
                 )
-                for line in order.lines.filter(is_deleted=False)
-            ),
+                for line in lines
+            )
+        return {
+            "owner_id": str(transfer.source_owner_id if transfer else order.owner_id),
+            "new_owner_id": str(order.owner_id) if transfer else None,
+            "customer_id": str(order.customer_id),
+            "items": items,
             "src_bill_no": (order.src_bill_no or "").strip(),
             "delivery_method": order.delivery_method or None,
             "etd": self._canonical_datetime(order.etd),
@@ -1181,7 +1222,10 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         supplied_items = [
             item
             for item in (payload.get("items") or [])
-            if isinstance(item, dict) and item.get("price") not in (None, "")
+            if isinstance(item, dict)
+            and (
+                item.get("price") not in (None, "") or item.get("transfer_price") not in (None, "")
+            )
         ]
         if not supplied_items:
             return True
@@ -1190,14 +1234,23 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
             line.product_id: Decimal(line.base_price or 0)
             for line in order.lines.filter(is_deleted=False)
         }
+        transfer = transfer_for_order(order)
+        transfer_prices = {}
+        if transfer:
+            transfer_lines = list(transfer.lines.select_related("sales_line"))
+            lines = {line.source_product_id: line.sales_line.base_price for line in transfer_lines}
+            transfer_prices = {
+                line.source_product_id: line.transfer_price for line in transfer_lines
+            }
         for item in supplied_items:
             try:
                 product_id = int(item.get("product_id"))
-                supplied = Decimal(str(item["price"])).quantize(Decimal("0.0001"))
-                persisted = lines[product_id].quantize(Decimal("0.0001"))
+                for field, prices in (("price", lines), ("transfer_price", transfer_prices)):
+                    if item.get(field) not in (None, ""):
+                        supplied = Decimal(str(item[field])).quantize(Decimal("0.0001"))
+                        if supplied != prices[product_id].quantize(Decimal("0.0001")):
+                            return False
             except (ArithmeticError, InvalidOperation, KeyError, TypeError, ValueError):
-                return False
-            if supplied != persisted:
                 return False
         return True
 
@@ -1225,6 +1278,9 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         ):
             raise IdempotencyConflict()
         outbound_services.require_assisted_owner_warehouse(order.owner, warehouse_id)
+        transfer = transfer_for_order(order)
+        if transfer:
+            outbound_services.require_assisted_owner_warehouse(transfer.source_owner, warehouse_id)
         task = (
             WmsTask.objects.filter(task_type=WmsTask.TaskType.PICK)
             .filter(outbound_services._task_source_q(order))
@@ -1242,12 +1298,35 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        try:
+
+        @transaction.atomic
+        def create_and_audit():
+            # Keep the audit insert under the warehouse lock too. Its owner and
+            # warehouse foreign keys otherwise acquire shared locks in reverse
+            # order to the next transfer's warehouse -> owner write locks.
             order, task = outbound_services.create_warehouse_assisted_order(
                 validated_data=serializer.validated_data,
                 by_user=request.user,
             )
-        except IntegrityError:
+            record_audit_event(
+                action="outbound.assisted.create_release",
+                module="outbound",
+                request=request,
+                obj=order,
+                after={
+                    "submit_status": order.submit_status,
+                    "approval_status": order.approval_status,
+                    "task_id": task.id,
+                    "task_status": task.status,
+                },
+            )
+            return order, task
+
+        try:
+            order, task = run_inventory_write_with_retry(
+                create_and_audit, operation_name="outbound.assisted.create"
+            )
+        except (IntegrityError, DjangoValidationError) as exc:
             existing = self._idempotent_result(request.data, request.user)
             if existing:
                 return self._response(
@@ -1255,23 +1334,11 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
                     idempotent=True,
                     http_status=status.HTTP_200_OK,
                 )
+            if isinstance(exc, DjangoValidationError):
+                raise ValidationError(
+                    exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+                ) from exc
             raise
-        except DjangoValidationError as exc:
-            raise ValidationError(
-                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
-            ) from exc
-        record_audit_event(
-            action="outbound.assisted.create_release",
-            module="outbound",
-            request=request,
-            obj=order,
-            after={
-                "submit_status": order.submit_status,
-                "approval_status": order.approval_status,
-                "task_id": task.id,
-                "task_status": task.status,
-            },
-        )
         return self._response(
             order,
             task,
@@ -1671,7 +1738,7 @@ class OutboundOrderViewSet(
                 "customer": (
                     {
                         "id": order.customer_id,
-                        "code": order.customer.code,
+                        "code": customer_code(order.customer, order.owner_id),
                         "name": order.customer.name,
                     }
                     if order.customer_id
@@ -1715,7 +1782,10 @@ class OutboundOrderViewSet(
                 | Q(contact__icontains=q)
                 | Q(contact_phone__icontains=q)
                 | Q(customer__name__icontains=q)
-                | Q(customer__code__icontains=q)
+                | Q(
+                    customer__owner_bindings__owner_id=F("owner_id"),
+                    customer__owner_bindings__code__icontains=q,
+                )
                 | Q(supplier__name__icontains=q)
                 | product_search_q(q, product_field="lines__product_id")
             ).distinct()
@@ -2266,7 +2336,6 @@ class OutboundOrderViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        Customer = apps.get_model("baseinfo", "Customer")
         if not owner_can_use_warehouse(owner_id, warehouse_id):
             return Response(
                 {"warehouse_id": "仓库不可用或未关联当前货主。"},
@@ -2274,7 +2343,7 @@ class OutboundOrderViewSet(
             )
 
         cash_customer = (
-            Customer.objects.filter(owner_id=owner_id, code="CASH").order_by("id").first()
+            customers_for_owner(owner_id).filter(owner_customer_code="CASH").order_by("id").first()
         )
         if not cash_customer:
             return Response(
@@ -2359,6 +2428,7 @@ class PickTaskSerializer(serializers.ModelSerializer):
 
 
 class PickTaskLineSerializer(serializers.ModelSerializer):
+    source_inventory = serializers.SerializerMethodField()
     product_sku = serializers.CharField(source="product.sku", read_only=True)
     product_name = serializers.CharField(source="product.name", read_only=True)
     from_loc_code = serializers.CharField(source="from_location.code", read_only=True)
@@ -2379,7 +2449,28 @@ class PickTaskLineSerializer(serializers.ModelSerializer):
             "qty_plan",
             "qty_done",
             "status",
+            "source_inventory",
         ]
+
+    def get_source_inventory(self, obj):
+        reservation = getattr(obj, "transfer_reservation", None)
+        if not reservation:
+            return None
+        product = reservation.transfer_line.source_product
+        return {
+            "product_id": product.pk,
+            "code": product.code,
+            "sku": product.sku,
+            **{
+                key: reservation.source_snapshot.get(key)
+                for key in (
+                    "batch_no",
+                    "production_date",
+                    "expiry_date",
+                    "serial_no",
+                )
+            },
+        }
 
 
 class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
@@ -2486,7 +2577,12 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         logger.info("outbound.pick.lines.request %s", ctx_text, extra=ctx)
         lines = (
             WmsTaskLine.objects.filter(task_id=task.id)
-            .select_related("product", "from_location", "to_location")
+            .select_related(
+                "product",
+                "from_location",
+                "to_location",
+                "transfer_reservation__transfer_line__source_product",
+            )
             .order_by("id")
         )
         data = PickTaskLineSerializer(lines, many=True).data

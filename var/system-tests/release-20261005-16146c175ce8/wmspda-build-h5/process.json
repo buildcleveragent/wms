@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "105e544fe20341c18684d80b42634a0f",
+  "status": "PASS",
+  "owner": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026532638]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "392299",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "run",
+    "build:h5"
+  ],
+  "cwd": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmspda",
+  "child": {
+    "pid": 8,
+    "pid_namespace": "pid:[4026532638]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "392310",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 8,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 26.978
+}

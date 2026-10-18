@@ -1,0 +1,1 @@
+{"name": "lint", "command": ["/wms/.venv/bin/python", "scripts/lint_ratchet.py", "--previous-baseline-ref", "HEAD^"], "timeout": 600}

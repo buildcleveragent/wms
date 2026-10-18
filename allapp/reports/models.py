@@ -149,7 +149,7 @@ class CustomerDim(CreatedMixin, Scd2Mixin):
         verbose_name = "客户维(SCD2)"
         verbose_name_plural = "客户维(SCD2)"
         constraints = [
-            UniqueConstraint(fields=["customer_id", "valid_from"], name="uq_cust_scd2"),
+            UniqueConstraint(fields=["owner_id", "customer_id", "valid_from"], name="uq_cust_owner_scd2"),
         ]
         indexes = [
             models.Index(fields=["owner_id", "is_current"], name="idx_cust_cur"),

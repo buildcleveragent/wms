@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "9ed979dfb40a40c7be8ff1287d98d061",
+  "status": "PASS",
+  "owner": {
+    "pid": 165,
+    "pid_namespace": "pid:[4026532638]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "398080",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "run",
+    "build:h5"
+  ],
+  "cwd": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmsownersale",
+  "child": {
+    "pid": 166,
+    "pid_namespace": "pid:[4026532638]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "398095",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 166,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 18.203
+}

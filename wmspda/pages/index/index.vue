@@ -29,15 +29,17 @@
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useAuth } from '@/store/auth'
-import { downloadMissingGtinProducts } from '@/utils/request'
+import { downloadAllProductArchives, downloadMissingGtinProducts } from '@/utils/request'
 
 export default {
   name: "WarehouseAdminHome",
   setup() {
     const auth = useAuth()
+    const allProductExporting = ref(false)
     const missingGtinExporting = ref(false)
     // 响应式数据
     const allActions = [
+      { key: "pda-returns", title: "退货出库", emoji: "↩️", path: "/pages/returns/index", requiresReturns: true },
       { key: "assisted-outbound", title: "代货主出库", emoji: "🚛", desc: "仓库代货主创建并完成出库", path: "/pages/outbound/assisted", requiresAssistedOutbound: true },
       { key: "receiving", title: "收货(有订单)", emoji: "📋", desc: "到货验收/收货登记", op: "receive", path: "/pages/inbound/receive_task_list" },
       { key: "receivewithoutorder", title: "收货(无订单)", emoji: "📥", desc: "到货验收/收货登记", op: "receivewithoutorder",path: "/pages/inbound/createwithoutorder/selectowner" },
@@ -49,6 +51,7 @@ export default {
       { key: "pos-accuracy", title: "POS数据对账", emoji: "✓", desc: "销售数据核查", op: "pos_accuracy", path: "/pages/pos/accuracy" },
       { key: "product-import", title: "商品导入", emoji: "📊", desc: "Excel批量创建商品档案", path: "/pages/products/import", requiresProductImport: true },
       { key: "product-export", title: "商品导出", emoji: "📤", desc: "按货主导出商品档案", path: "/pages/products/export", requiresProductExport: true },
+      { key: "all-product-export", title: "全部商品档案导出", emoji: "📚", desc: "导出权限范围内全部商品及包装档案", requiresProductExport: true },
       { key: "missing-gtin-export", title: "无标准条码导出", emoji: "📥", desc: "导出未维护标准条码的商品", requiresProductExport: true },
       { key: "pack",      title: "打包", emoji: "🎁", desc: "装箱/封箱/打印",     op: "pack" },
       { key: "shipping",  title: "发运", emoji: "🚚", desc: "复核装车/出库发运",  op: "ship" },
@@ -61,23 +64,26 @@ export default {
       allActions
         .filter(
           (item) =>
+            (!item.requiresReturns || auth.canProcessPdaReturn) &&
             (!item.requiresAssistedOutbound || auth.canProcessAssistedOutbound) &&
             (!item.requiresProductImport || auth.canImportProducts) &&
             (!item.requiresProductExport || auth.canExportProducts),
         )
         .map((item) =>
-          item.key === 'missing-gtin-export' && missingGtinExporting.value
+          (item.key === 'all-product-export' && allProductExporting.value) ||
+          (item.key === 'missing-gtin-export' && missingGtinExporting.value)
             ? { ...item, title: '正在导出…' }
             : item,
         ),
     )
 
-    const exportMissingGtinProducts = async () => {
-      if (missingGtinExporting.value) return
-      missingGtinExporting.value = true
+    const exportProducts = async (exporting, download, label) => {
+      if (!auth.canExportProducts || allProductExporting.value || missingGtinExporting.value) return
+      exporting.value = true
       uni.showLoading({ title: '正在生成 Excel' })
+      let toast = { title: `${label}已导出`, icon: 'success' }
       try {
-        const result = await downloadMissingGtinProducts()
+        const result = await download()
         if (result?.tempFilePath) {
           // #ifndef H5
           const filePath = await new Promise((resolve) => {
@@ -96,20 +102,30 @@ export default {
           })
           // #endif
         }
-        uni.showToast({ title: '无标准条码商品已导出', icon: 'success' })
       } catch (error) {
         if (Number(error?.statusCode) === 403) {
           await auth.loadProfile({ force: true }).catch(() => {})
         }
-        uni.showToast({ title: error?.message || '无标准条码商品导出失败', icon: 'none' })
+        toast = { title: error?.message || `${label}导出失败`, icon: 'none' }
       } finally {
         uni.hideLoading()
-        missingGtinExporting.value = false
+        exporting.value = false
       }
+      uni.showToast(toast)
     }
+
+    const exportAllProducts = () =>
+      exportProducts(allProductExporting, downloadAllProductArchives, '全部商品档案')
+
+    const exportMissingGtinProducts = () =>
+      exportProducts(missingGtinExporting, downloadMissingGtinProducts, '无标准条码商品')
     
     // 方法
     const go = (item) => {
+      if (item.key === 'all-product-export') {
+        exportAllProducts()
+        return
+      }
       if (item.key === 'missing-gtin-export') {
         exportMissingGtinProducts()
         return
@@ -138,7 +154,7 @@ export default {
 
 <style scoped>
 /* 样式部分完全兼容，无需修改 */
-.page { padding: 24rpx; }
+.page { box-sizing: border-box; padding: 24rpx; }
 .header { margin-top: 8rpx; margin-bottom: 20rpx; }
 .title { font-size: 40rpx; font-weight: 700; }
 .subtitle { margin-top: 8rpx; color: #666; font-size: 26rpx; }

@@ -4,7 +4,6 @@ import datetime
 
 from django.db.models import Q
 from django.utils import timezone
-from django.utils.dateparse import parse_date
 from rest_framework import permissions, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
@@ -31,7 +30,7 @@ from allapp.locations.models import Warehouse
 from allapp.products.identifier_lookup import product_search_q
 from allapp.tasking.models import WmsTask
 
-from .boss_contract import build_meta, warning
+from .boss_contract import build_meta, parse_boss_date_range, warning
 from .services_boss import (
     build_boss_alert_payload,
     build_boss_context_payload,
@@ -79,11 +78,7 @@ class BossScopedApiMixin:
                 "detail": "No access to other owners in boss dashboard.",
             }
             raise exc
-        if (
-            scope.warehouse_ids
-            and warehouse_id
-            and not scope.allows(warehouse_id=warehouse_id)
-        ):
+        if scope.warehouse_ids and warehouse_id and not scope.allows(warehouse_id=warehouse_id):
             exc = PermissionDenied("No access to other warehouses in boss dashboard.")
             exc.detail = {
                 "code": "SCOPE_FORBIDDEN",
@@ -92,34 +87,18 @@ class BossScopedApiMixin:
             raise exc
 
     def _parse_date_range(self, request):
-        now = timezone.now()
-        today = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
-        raw_from = (request.query_params.get("date_from") or "").strip()
-        raw_to = (request.query_params.get("date_to") or "").strip()
-        date_to = parse_date(raw_to) if raw_to else today
-        date_from = parse_date(raw_from) if raw_from else date_to.replace(day=1)
-        if (raw_from and date_from is None) or (raw_to and date_to is None):
-            raise ValueError("date_from and date_to must be YYYY-MM-DD.")
-        if date_from > date_to:
-            raise ValueError("date_from cannot be after date_to.")
-        if date_to > today:
-            raise ValueError("date_to cannot be after today.")
-        if (date_to - date_from).days > 366:
-            raise ValueError("date range cannot exceed 367 days.")
-        return date_from, date_to
+        return parse_boss_date_range(
+            request.query_params.get("date_from"), request.query_params.get("date_to")
+        )
 
     def _date_cutoff(self, date_to):
         current = timezone.now()
         current_date = (
-            timezone.localtime(current).date()
-            if timezone.is_aware(current)
-            else current.date()
+            timezone.localtime(current).date() if timezone.is_aware(current) else current.date()
         )
         if date_to == current_date:
             return current
-        cutoff = datetime.datetime.combine(
-            date_to + datetime.timedelta(days=1), datetime.time.min
-        )
+        cutoff = datetime.datetime.combine(date_to + datetime.timedelta(days=1), datetime.time.min)
         if timezone.is_aware(current):
             cutoff = timezone.make_aware(cutoff, timezone.get_current_timezone())
         return cutoff
@@ -129,9 +108,7 @@ class BossScopedApiMixin:
             "mode": "WAREHOUSE" if warehouse_id else "ALL_AUTHORIZED",
             "warehouse": warehouse_id,
             "warehouse_name": (
-                Warehouse.objects.filter(pk=warehouse_id)
-                .values_list("name", flat=True)
-                .first()
+                Warehouse.objects.filter(pk=warehouse_id).values_list("name", flat=True).first()
                 if warehouse_id
                 else "全部授权仓库"
             ),
@@ -153,9 +130,7 @@ class BossContextApi(BossScopedApiMixin, APIView):
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         self._validate_scope(request, warehouse_id=warehouse_id)
-        return Response(
-            build_boss_context_payload(user=request.user, warehouse_id=warehouse_id)
-        )
+        return Response(build_boss_context_payload(user=request.user, warehouse_id=warehouse_id))
 
 
 class BossHomeApi(BossScopedApiMixin, APIView):
@@ -251,20 +226,14 @@ class BossInventoryDetailListApi(BossScopedApiMixin, APIView):
             owner_id = self._parse_int_param(request, "owner")
             warehouse_id = self._parse_int_param(request, "warehouse")
             page = max(1, self._parse_int_param(request, "page") or 1)
-            page_size = min(
-                100, max(1, self._parse_int_param(request, "page_size") or 20)
-            )
+            page_size = min(100, max(1, self._parse_int_param(request, "page_size") or 20))
             date_from, date_to = self._parse_date_range(request)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         self._validate_scope(request, owner_id=owner_id, warehouse_id=warehouse_id)
         access = AccessScope.for_user(request.user)
         current = timezone.now()
-        today = (
-            timezone.localtime(current).date()
-            if timezone.is_aware(current)
-            else current.date()
-        )
+        today = timezone.localtime(current).date() if timezone.is_aware(current) else current.date()
         historical = date_to != today
         if historical:
             qs = InventorySnapshotDaily.objects.select_related(
@@ -274,9 +243,7 @@ class BossInventoryDetailListApi(BossScopedApiMixin, APIView):
             qs = InventoryDetail.objects.select_related(
                 "owner", "warehouse", "product", "location"
             ).filter(onhand_qty__gt=0)
-        qs = access.filter_queryset(
-            qs, owner_field="owner_id", warehouse_field="warehouse_id"
-        )
+        qs = access.filter_queryset(qs, owner_field="owner_id", warehouse_field="warehouse_id")
         if owner_id:
             qs = qs.filter(owner_id=owner_id)
         if warehouse_id:
@@ -312,9 +279,7 @@ class BossInventoryDetailListApi(BossScopedApiMixin, APIView):
                 ]
             ).count()
             if approximate:
-                warnings.append(
-                    warning("HISTORICAL_INVENTORY_APPROXIMATE", approximate)
-                )
+                warnings.append(warning("HISTORICAL_INVENTORY_APPROXIMATE", approximate))
         scope_payload = self._scope_payload(
             owner_id=owner_id,
             warehouse_id=warehouse_id,
@@ -358,9 +323,7 @@ class BossInventoryDetailListApi(BossScopedApiMixin, APIView):
         return Response(
             {
                 "scope": scope_payload,
-                "meta": build_meta(
-                    scope=scope_payload, warnings=warnings, unavailable=unavailable
-                ),
+                "meta": build_meta(scope=scope_payload, warnings=warnings, unavailable=unavailable),
                 "count": count,
                 "page": page,
                 "page_size": page_size,
@@ -419,9 +382,7 @@ class BossAlertSectionApi(BossScopedApiMixin, APIView):
 class BossAlertDetailApi(BossScopedApiMixin, APIView):
     def _scope(self, request, qs, *, owner_id, warehouse_id):
         scope = AccessScope.for_user(request.user)
-        qs = scope.filter_queryset(
-            qs, owner_field="owner_id", warehouse_field="warehouse_id"
-        )
+        qs = scope.filter_queryset(qs, owner_field="owner_id", warehouse_field="warehouse_id")
         if owner_id:
             qs = qs.filter(owner_id=owner_id)
         if warehouse_id:
@@ -495,9 +456,7 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
             obj = (
                 self._scope(
                     request,
-                    WmsTask.objects.prefetch_related("lines").select_related(
-                        "owner", "warehouse"
-                    ),
+                    WmsTask.objects.prefetch_related("lines").select_related("owner", "warehouse"),
                     owner_id=owner_id,
                     warehouse_id=warehouse_id,
                 )
@@ -508,10 +467,7 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
                 closed = [WmsTask.Status.COMPLETED, WmsTask.Status.CANCELLED]
                 if obj.status in closed:
                     obj = None
-                elif (
-                    section == "pending_review_tasks"
-                    and obj.task_type != WmsTask.TaskType.REVIEW
-                ):
+                elif section == "pending_review_tasks" and obj.task_type != WmsTask.TaskType.REVIEW:
                     obj = None
                 elif section == "overdue_tasks" and (
                     not obj.planned_end or obj.planned_end >= self._date_cutoff(date_to)
@@ -548,14 +504,11 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
             )
             if obj is not None:
                 if section == "overdue_bills" and not (
-                    obj.status == BillStatus.ISSUED
-                    and obj.due_date
-                    and obj.due_date < date_to
+                    obj.status == BillStatus.ISSUED and obj.due_date and obj.due_date < date_to
                 ):
                     obj = None
                 elif section == "bills_missing_due_date" and not (
-                    obj.status in {BillStatus.ISSUED, BillStatus.PAID}
-                    and obj.due_date is None
+                    obj.status in {BillStatus.ISSUED, BillStatus.PAID} and obj.due_date is None
                 ):
                     obj = None
             data = (
@@ -660,9 +613,7 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
             obj = (
                 self._scope(
                     request,
-                    BillingEvent.objects.select_related(
-                        "owner", "warehouse", "pricing_rule"
-                    ),
+                    BillingEvent.objects.select_related("owner", "warehouse", "pricing_rule"),
                     owner_id=owner_id,
                     warehouse_id=warehouse_id,
                 )
@@ -727,8 +678,7 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
                 .first()
             )
             if obj is not None and (
-                obj.source_quality != SourceQuality.APPROXIMATE
-                or obj.status == AccrualStatus.VOID
+                obj.source_quality != SourceQuality.APPROXIMATE or obj.status == AccrualStatus.VOID
             ):
                 obj = None
             data = (
@@ -750,9 +700,7 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
             data = None
 
         if data is None:
-            return Response(
-                {"detail": "Alert item not found."}, status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"detail": "Alert item not found."}, status=status.HTTP_404_NOT_FOUND)
         scope_payload = self._scope_payload(
             owner_id=owner_id,
             warehouse_id=warehouse_id,

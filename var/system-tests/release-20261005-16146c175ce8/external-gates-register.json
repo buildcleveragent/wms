@@ -1,0 +1,56 @@
+{
+  "candidate_id": "7be0a23ddf1c-16146c175ce8",
+  "recorded_at": "2026-10-05T04:22:07.876297+00:00",
+  "gates": [
+    {
+      "gate_id": "pdf-resource-release-decision",
+      "status": "NOT_RUN",
+      "reason": "Pending identified release-security assessment and release-manager decision for R-PDF-RESOURCE; fresh local measurements do not implement production controls."
+    },
+    {
+      "gate_id": "staging-rehearsal-60m",
+      "status": "NOT_RUN",
+      "reason": "No designated staging candidate deployment or 60-minute observation evidence supplied."
+    },
+    {
+      "gate_id": "capacity",
+      "status": "NOT_RUN",
+      "reason": "No approved production-like workload, capacity targets, deployment limits or measured load-test evidence supplied."
+    },
+    {
+      "gate_id": "disaster-recovery",
+      "status": "NOT_RUN",
+      "reason": "No approved staging backup/restore/rollback exercise supplied; automated isolated DB tests are not an operational recovery signoff."
+    },
+    {
+      "gate_id": "wechat-payment",
+      "status": "NOT_RUN",
+      "reason": "No authorized real merchant/sandbox credentials and external payment/refund confirmation supplied; cryptographic and service tests are separate."
+    },
+    {
+      "gate_id": "signed-apk-devices",
+      "status": "NOT_RUN",
+      "reason": "App bundle compilation is separate from signed APK installation and physical scanner/printer/NFC acceptance."
+    },
+    {
+      "gate_id": "manual-196",
+      "status": "NOT_RUN",
+      "reason": "No current candidate-matched human acceptance records for the required 196 cases supplied."
+    },
+    {
+      "gate_id": "release-approval",
+      "status": "NOT_RUN",
+      "reason": "No release-manager approval supplied; user asked to run gates, not deploy."
+    },
+    {
+      "gate_id": "deployed-artifact-identity",
+      "status": "NOT_RUN",
+      "reason": "No deployment performed in this task."
+    },
+    {
+      "gate_id": "production-observation-60m",
+      "status": "NOT_RUN",
+      "reason": "No production deployment or observation performed in this task."
+    }
+  ]
+}

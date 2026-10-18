@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test'
 
+test('opening a detail without a session still requires login', async ({ page }) => {
+  await page.route('**/api/**', route => route.fulfill({ status: 401, json: { detail: 'login required' } }))
+  await page.goto('/#/pages/billing/accrual_detail?id=1')
+  await expect(page.locator('.app-title')).toHaveText('仓储经营分析中心')
+  await expect(page.locator('.submit-btn')).toBeVisible()
+})
+
 test('renders the boss login without framework errors', async ({ page }) => {
   const errors = []
   page.on('console', (message) => {

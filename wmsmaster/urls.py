@@ -23,6 +23,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path("api/pda/", include("allapp.outbound.return_urls")),
     path("api/print-tickets/", PrintTicketApi.as_view(), name="print-ticket"),
     path("healthz/live", health_live_view, name="health-live"),
     path("healthz/ready", health_ready_view, name="health-ready"),

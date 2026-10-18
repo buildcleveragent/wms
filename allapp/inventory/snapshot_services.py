@@ -411,6 +411,24 @@ def generate_inventory_snapshot_for_date(
         warehouse_id=warehouse_id,
     )
 
+    # Return quality events must roll forward alongside their physical movements.
+    from allapp.outbound.return_models import ReturnEvent
+
+    quality_events = ReturnEvent.objects.filter(occurred_at__date=service_date)
+    if owner_id is not None:
+        quality_events = quality_events.filter(line__order__owner_id=owner_id)
+    if warehouse_id is not None:
+        quality_events = quality_events.filter(line__order__warehouse_id=warehouse_id)
+    damaged_by_key = {}
+    for event in quality_events.select_related("line").iterator(chunk_size=1000):
+        dimension = dict(event.line.dimensions)
+        for field in ("production_date", "expiry_date"):
+            dimension[field] = (
+                datetime.date.fromisoformat(dimension[field]) if dimension[field] else None
+            )
+        key = _tx_aggregate_dim_key(dimension)
+        damaged_by_key[key] = damaged_by_key.get(key, Decimal("0")) + event.damaged_delta
+
     missing_baseline_scopes = sorted(tx_scopes - previous_scopes)
     if missing_baseline_scopes:
         missing = ", ".join(
@@ -474,6 +492,9 @@ def generate_inventory_snapshot_for_date(
             final_payloads[key] = payload
 
         payload["onhand_qty"] = _q4(Decimal(payload["onhand_qty"]) + Decimal(qty_delta))
+        payload["damaged_qty"] = _q4(
+            Decimal(payload["damaged_qty"]) + damaged_by_key.get(key, Decimal("0"))
+        )
         available_qty = (
             Decimal(payload["onhand_qty"])
             - Decimal(payload["allocated_qty"] or 0)

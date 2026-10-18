@@ -1,11 +1,12 @@
+import datetime
+
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
-from django.http import HttpResponseNotAllowed
 from django.db import transaction
+from django.http import HttpResponseNotAllowed
 from django.shortcuts import redirect
 from django.urls import path
 from django.utils.dateparse import parse_date
-import datetime
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import object_snapshot, record_audit_event
@@ -13,16 +14,16 @@ from allapp.baseinfo.models import Owner
 from allapp.locations.models import Warehouse
 
 from .models import (
+    Bill,
+    BillingAccrual,
+    BillingEvent,
+    BillingJobRun,
+    BillingMetricDaily,
+    BillingPeriod,
     BillingRule,
     BillingRuleTier,
-    BillingEvent,
-    BillingAccrual,
-    BillingPeriod,
-    Bill,
-    BillLine,
-    BillingMetricDaily,
-    BillingJobRun,
     BillingServiceContract,
+    BillLine,
     CollectionActivity,
     PaymentAllocation,
     PaymentReceipt,
@@ -52,27 +53,18 @@ class ScopedBillingAdminMixin:
             scope.is_valid
             and (
                 (scope.owner_ids and user.has_perm("accounts.view_owner_financials"))
-                or (
-                    scope.warehouse_ids
-                    and user.has_perm("reports.view_warehouse_finance")
-                )
+                or (scope.warehouse_ids and user.has_perm("reports.view_warehouse_finance"))
             )
         )
 
     def has_module_permission(self, request):
-        return self._has_financial_access(request) and super().has_module_permission(
-            request
-        )
+        return self._has_financial_access(request) and super().has_module_permission(request)
 
     def has_view_permission(self, request, obj=None):
-        return self._has_financial_access(request) and super().has_view_permission(
-            request, obj
-        )
+        return self._has_financial_access(request) and super().has_view_permission(request, obj)
 
     def has_add_permission(self, request):
-        return self._has_financial_access(request) and super().has_add_permission(
-            request
-        )
+        return self._has_financial_access(request) and super().has_add_permission(request)
 
     def has_change_permission(self, request, obj=None):
         if not self._has_financial_access(request) or not super().has_change_permission(
@@ -109,9 +101,7 @@ class ScopedBillingAdminMixin:
             kwargs["queryset"] = (
                 Owner.objects.filter(id__in=scope.owner_ids)
                 if scope.owner_ids
-                else (
-                    Owner.objects.all() if scope.warehouse_ids else Owner.objects.none()
-                )
+                else (Owner.objects.all() if scope.warehouse_ids else Owner.objects.none())
             )
         elif not scope.is_global and db_field.name == "warehouse":
             # The inverse is safe for owner roles because save_model validates
@@ -119,11 +109,7 @@ class ScopedBillingAdminMixin:
             kwargs["queryset"] = (
                 Warehouse.objects.filter(id__in=scope.warehouse_ids)
                 if scope.warehouse_ids
-                else (
-                    Warehouse.objects.all()
-                    if scope.owner_ids
-                    else Warehouse.objects.none()
-                )
+                else (Warehouse.objects.all() if scope.owner_ids else Warehouse.objects.none())
             )
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
@@ -476,9 +462,7 @@ class BillingPeriodAdmin(ScopedBillingAdminMixin, admin.ModelAdmin):
             return None, HttpResponseNotAllowed(["POST"])
         period = self.get_object(request, pk)
         if not period:
-            self.message_user(
-                request, "账期不存在或不在授权范围内。", level=messages.ERROR
-            )
+            self.message_user(request, "账期不存在或不在授权范围内。", level=messages.ERROR)
             return None, redirect("admin:billing_billingperiod_changelist")
         if not self.has_change_permission(request, period):
             raise PermissionDenied("No permission to change this billing period.")
@@ -504,8 +488,8 @@ class BillingPeriodAdmin(ScopedBillingAdminMixin, admin.ModelAdmin):
             return redirect(f"../../{pk}/change/")
         before = object_snapshot(period)
         from allapp.billing.services import (
-            accrue_storage_for_date,
             accrue_metrics_for_date,
+            accrue_storage_for_date,
             generate_metrics_for_date,
         )
 
@@ -513,9 +497,7 @@ class BillingPeriodAdmin(ScopedBillingAdminMixin, admin.ModelAdmin):
         total_ev = total_acc = 0
         total_metrics_created = total_metrics_updated = 0
         while d <= period.end_date:
-            metric_summary = generate_metrics_for_date(
-                period.owner_id, period.warehouse_id, d
-            )
+            metric_summary = generate_metrics_for_date(period.owner_id, period.warehouse_id, d)
             total_metrics_created += metric_summary["created"]
             total_metrics_updated += metric_summary["updated"]
             ev1, acc1 = accrue_storage_for_date(
@@ -529,7 +511,8 @@ class BillingPeriodAdmin(ScopedBillingAdminMixin, admin.ModelAdmin):
             d += datetime.timedelta(days=1)
         self.message_user(
             request,
-            f"仓储计费完成：指标新增 {total_metrics_created} 条，指标更新 {total_metrics_updated} 条，事件 {total_ev} 条，应计 {total_acc} 条。",
+            f"仓储计费完成：指标新增 {total_metrics_created} 条，指标更新 {total_metrics_updated} 条，"
+            f"事件 {total_ev} 条，应计 {total_acc} 条。",
             level=messages.SUCCESS,
         )
         self._audit_period_action(
@@ -611,9 +594,7 @@ class BillingPeriodAdmin(ScopedBillingAdminMixin, admin.ModelAdmin):
             return redirect(f"../../{pk}/change/")
         due_date = parse_date((request.POST.get("due_date") or "").strip())
         if due_date is None:
-            self.message_user(
-                request, "生成失败：必须填写有效到期日。", level=messages.ERROR
-            )
+            self.message_user(request, "生成失败：必须填写有效到期日。", level=messages.ERROR)
             return redirect(f"../../{pk}/change/")
         before = object_snapshot(period)
         from allapp.billing.services import generate_invoice_for_period
@@ -624,9 +605,7 @@ class BillingPeriodAdmin(ScopedBillingAdminMixin, admin.ModelAdmin):
             ).count()
             + 1
         )
-        invoice_no = (
-            f"INV-{period.label}-{period.owner_id}-{period.warehouse_id}-{seq:04d}"
-        )
+        invoice_no = f"INV-{period.label}-{period.owner_id}-{period.warehouse_id}-{seq:04d}"
         try:
             bill = generate_invoice_for_period(
                 period,
@@ -705,15 +684,20 @@ class PaymentAllocationInline(admin.TabularInline):
     extra = 0
     readonly_fields = ("allocated_at", "is_reversal", "reversal_of", "created_by")
 
+    def has_add_permission(self, request, obj=None):
+        return bool(obj is None or obj.status == "DRAFT") and super().has_add_permission(
+            request, obj
+        )
+
     def has_change_permission(self, request, obj=None):
-        return bool(
-            obj is None or obj.status == "DRAFT"
-        ) and super().has_change_permission(request, obj)
+        return bool(obj is None or obj.status == "DRAFT") and super().has_change_permission(
+            request, obj
+        )
 
     def has_delete_permission(self, request, obj=None):
-        return bool(
-            obj is None or obj.status == "DRAFT"
-        ) and super().has_delete_permission(request, obj)
+        return bool(obj is None or obj.status == "DRAFT") and super().has_delete_permission(
+            request, obj
+        )
 
 
 @admin.register(PaymentReceipt)
@@ -740,9 +724,9 @@ class PaymentReceiptAdmin(ScopedBillingAdminMixin, admin.ModelAdmin):
     inlines = [PaymentAllocationInline]
 
     def has_delete_permission(self, request, obj=None):
-        return bool(
-            obj is None or obj.status == "DRAFT"
-        ) and super().has_delete_permission(request, obj)
+        return bool(obj is None or obj.status == "DRAFT") and super().has_delete_permission(
+            request, obj
+        )
 
 
 @admin.register(ReceivableCollectionCase)

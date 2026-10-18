@@ -1,0 +1,1 @@
+{"name": "runtime-build", "command": ["docker", "build", "--progress=plain", "--tag", "wms-release:20261005-16146c175ce8", "."], "timeout": 1800}

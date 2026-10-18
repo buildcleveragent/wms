@@ -5,16 +5,19 @@ import shutil
 import subprocess
 from decimal import Decimal
 from io import BytesIO
+from unittest.mock import patch
 
 import pytest
 from django.template.loader import render_to_string
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from PIL import Image
 from weasyprint import HTML
 
 from allapp.reports import tests as report_fixtures
-from allapp.reports.views import _offline_url_fetcher
+from allapp.reports.pdf_fetcher import OfflineURLFetcher
+
+_offline_url_fetcher = OfflineURLFetcher()
 
 
 def pdf_text(data):
@@ -104,9 +107,10 @@ def test_nested_css_and_svg_resources_never_reach_default_fetcher(monkeypatch, t
         assert url.startswith("data:")
         return original(fetcher, url, *args, **kwargs)
 
-    def guarded_fetch(url, *args, **kwargs):
-        attempted.append(url)
-        return _offline_url_fetcher(url, *args, **kwargs)
+    class GuardedFetcher(OfflineURLFetcher):
+        def fetch(self, url, *args, **kwargs):
+            attempted.append(url)
+            return super().fetch(url, *args, **kwargs)
 
     monkeypatch.setattr(weasyprint.URLFetcher, "fetch", default_fetch)
     image = BytesIO()
@@ -124,12 +128,37 @@ def test_nested_css_and_svg_resources_never_reach_default_fetcher(monkeypatch, t
         f'<img src="{secret.as_uri()}"><img src="data:image/png;base64,{data}">'
         f'<img src="data:image/svg+xml;base64,{svg}"><p>RESOURCE-BOUNDARY</p>'
     )
-    pdf = HTML(string=html, url_fetcher=guarded_fetch).write_pdf(presentational_hints=False)
+    pdf = HTML(string=html, url_fetcher=GuardedFetcher()).write_pdf(presentational_hints=False)
     assert any(url.startswith("file:") for url in attempted)
     assert any(url.startswith("https:") for url in attempted)
     assert allowed and all(url.startswith("data:") for url in allowed)
     assert "RESOURCE-BOUNDARY" in pdf_text(pdf)
     assert secret.read_text() not in pdf_text(pdf)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mime", ["image/x-eps", "image/png"])
+def test_inline_postscript_never_invokes_an_external_interpreter(monkeypatch, mime):
+    import subprocess
+
+    calls = []
+
+    def forbidden_interpreter(*args, **kwargs):
+        calls.append(True)
+        raise AssertionError("PDF images must not invoke Ghostscript")
+
+    # Observe the external process boundary without replacing the upstream guard.
+    monkeypatch.setattr(subprocess, "Popen", forbidden_interpreter)
+    eps = base64.b64encode(
+        b"%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\nshowpage\n%%EOF\n"
+    ).decode()
+    pdf = HTML(
+        string=f'<img src="data:{mime};base64,{eps}"><p>SAFE-CONTROL</p>',
+        url_fetcher=_offline_url_fetcher,
+    ).write_pdf()
+    assert not calls
+    monkeypatch.undo()
+    assert "SAFE-CONTROL" in pdf_text(pdf)
 
 
 class DispatchPdfEndpointTests(TestCase):
@@ -151,3 +180,27 @@ class DispatchPdfEndpointTests(TestCase):
         text = pdf_text(response.content)
         self.assertIn("配送单商品", text)
         self.assertIn("0.00", text)
+
+    def test_busy_renderer_rejects_before_loading_note_or_rendering_html(self):
+        from allapp.reports.pdf_rendering import rendering_slot
+
+        task = report_fixtures.ReportsWarehouseScopeTests._create_dispatch_task(self)
+        self.client.force_login(self.staff_user)
+        with rendering_slot(), patch("allapp.reports.views._safe_dispatch_note") as prepare:
+            response = self.client.get(reverse("report_dispatch_pdf", args=[task.pk]))
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response["Retry-After"], "5")
+        prepare.assert_not_called()
+
+    @override_settings(PDF_MAX_LINES=1)
+    def test_line_limit_returns_explicit_error_without_rendering_partial_pdf(self):
+        task = report_fixtures.ReportsWarehouseScopeTests._create_dispatch_task(self)
+        line = task.lines.get()
+        line.pk = None
+        line.save()
+        self.client.force_login(self.staff_user)
+        with patch("allapp.reports.pdf_rendering.render_pdf") as render:
+            response = self.client.get(reverse("report_dispatch_pdf", args=[task.pk]))
+        self.assertEqual(response.status_code, 422)
+        self.assertContains(response, "最多支持 1 行", status_code=422)
+        render.assert_not_called()

@@ -1,22 +1,24 @@
 <template>
   <view class="page">
     <boss-nav active="cockpit" />
-    <boss-scope-filter @change="refresh" />
+    <boss-scope-filter :disabled="contextLoading" @change="refresh" />
     <scroll-view scroll-x class="tabs">
       <view class="tab-track">
         <view v-for="item in tabs" :key="item.key" class="tab" :class="{ active: tab === item.key }" @click="selectTab(item.key)">{{ item.label }}</view>
       </view>
     </scroll-view>
     <boss-data-status :meta="payload?.meta" :error="error" />
+    <button v-if="error" class="retry" size="mini" :disabled="loading || contextLoading" @click="retry">重试</button>
     <view class="toolbar">
       <text class="asof">数据截至 {{ payload?.meta?.generated_at || '-' }}</text>
-      <button v-if="auth.user?.capabilities?.can_create_business_review_snapshot" size="mini" class="snapshot" @click="createSnapshot">创建例会快照</button>
-      <button v-if="tab === 'operations'" size="mini" class="snapshot" @click="exportOperations">导出运营明细</button>
-      <button v-else-if="tab !== 'cases'" size="mini" class="snapshot" @click="exportCurrent">导出当前报表</button>
+      <button v-if="auth.user?.capabilities?.can_create_business_review_snapshot" :disabled="!actionsReady" size="mini" class="snapshot" @click="createSnapshot">创建例会快照</button>
+      <button v-if="canExport && tab === 'operations'" :disabled="!actionsReady" size="mini" class="snapshot" @click="exportOperations">导出运营明细</button>
+      <button v-else-if="canExport && tab !== 'cases'" :disabled="!actionsReady" size="mini" class="snapshot" @click="exportCurrent">导出当前报表</button>
     </view>
 
-    <view v-if="loading" class="empty">正在加载...</view>
-    <template v-else-if="tab === 'assurance'">
+    <view v-if="loading || contextLoading" class="empty">正在加载...</view>
+    <template v-else-if="payload && !error">
+    <template v-if="tab === 'assurance'">
       <view class="grid">
         <view v-for="(section, key) in payload?.sections || {}" :key="key" class="card">
           <text class="label">{{ assuranceLabels[key] || key }}</text>
@@ -103,12 +105,20 @@
       </view>
       <view class="empty">老板端仅查看，预警处置由授权管理员或财务完成。</view>
     </template>
-    <view v-if="!loading && !error && !payload" class="empty">当前范围暂无数据</view>
+    </template>
+    <view v-if="tab === 'cases' && payload && !error" class="pager">
+      <text>共 {{ payload.count || 0 }} 条 · 第 {{ casePage }} / {{ totalPages }} 页</text>
+      <view class="pager-buttons">
+        <button size="mini" :disabled="loading || casePage <= 1" @click="loadReport(casePage - 1)">上一页</button>
+        <button size="mini" :disabled="loading || casePage >= totalPages" @click="loadReport(casePage + 1)">下一页</button>
+      </view>
+    </view>
+    <view v-if="hasLoaded && !loading && !contextLoading && !error && empty" class="empty">当前范围暂无数据</view>
   </view>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import BossNav from '@/components/boss-nav.vue'
 import BossScopeFilter from '@/components/boss-scope-filter.vue'
@@ -117,6 +127,7 @@ import { useAuth } from '@/store/auth'
 import { useBossScope } from '@/store/bossScope'
 import { api, downloadBinary } from '@/utils/request'
 import { money } from '@/utils/billing'
+import { useLatestRequest } from '@/utils/use-latest-request'
 
 const auth = useAuth()
 const scope = useBossScope()
@@ -124,6 +135,30 @@ const tab = ref('assurance')
 const payload = ref(null)
 const error = ref(null)
 const loading = ref(false)
+const contextLoading = ref(false)
+const contextReady = ref(false)
+const hasLoaded = ref(false)
+const casePage = ref(1)
+const retryPage = ref(1)
+const requestKey = () => `${tab.value}:${scope.fingerprint}`
+const requests = useLatestRequest(requestKey)
+const initialization = useLatestRequest()
+const canExport = computed(() => !!auth.user?.capabilities?.can_export_operations)
+const actionsReady = computed(() => contextReady.value && scope.loaded && !contextLoading.value && !loading.value && !error.value)
+const totalPages = computed(() => Math.max(1, Math.ceil(Number(payload.value?.count || 0) / 20)))
+const empty = computed(() => {
+  const value = payload.value
+  if (!value) return true
+  switch (tab.value) {
+    case 'assurance': return !Object.keys(value.sections || {}).length
+    case 'receivables': return !value.outstanding_by_currency?.length && !value.dso_by_currency?.length
+    case 'yield': return !value.rankings_by_currency?.length
+    case 'performance': return !value.selected_period_vs_prior?.length && !value.forecasts?.length
+    case 'risk': return !value.value_by_currency?.length && !value.age_bands?.length
+    case 'cases': return !value.results?.length
+    default: return !value.operations
+  }
+})
 const tabs = [
   { key: 'assurance', label: '收入保障' }, { key: 'receivables', label: '应收回款' },
   { key: 'operations', label: '运营履约' }, { key: 'yield', label: '资源收益' },
@@ -150,21 +185,73 @@ function duration(seconds) {
   const hours = Number(seconds) / 3600
   return hours < 24 ? `${hours.toFixed(1)}小时` : `${(hours / 24).toFixed(1)}天`
 }
-async function refresh() {
+async function loadReport(nextPage = 1) {
+  if (!contextReady.value || !scope.loaded) return
+  const current = requests.begin()
+  const selectedTab = tab.value
+  const params = { ...scope.params }
+  if (selectedTab === 'cases') Object.assign(params, { page: nextPage, page_size: 20 })
+  retryPage.value = nextPage
   loading.value = true
   error.value = null
-  try { payload.value = await loaders[tab.value](scope.params) }
-  catch (err) { payload.value = null; error.value = err }
-  finally { loading.value = false; uni.stopPullDownRefresh() }
+  try {
+    const result = await loaders[selectedTab](params)
+    if (!current()) return
+    payload.value = result
+    if (selectedTab === 'cases') casePage.value = nextPage
+    hasLoaded.value = true
+  } catch (err) {
+    if (!current()) return
+    payload.value = null
+    hasLoaded.value = false
+    error.value = err
+  } finally {
+    if (current()) { loading.value = false; uni.stopPullDownRefresh() }
+  }
 }
-function selectTab(value) { tab.value = value; refresh() }
+function refresh() {
+  casePage.value = 1
+  payload.value = null
+  hasLoaded.value = false
+  return loadReport(1)
+}
+function selectTab(value) {
+  if (value === tab.value) return
+  tab.value = value
+  refresh()
+}
+async function initialize() {
+  const current = initialization.begin()
+  requests.invalidate()
+  contextLoading.value = true
+  contextReady.value = false
+  loading.value = false
+  hasLoaded.value = false
+  payload.value = null
+  error.value = null
+  try {
+    const applied = await scope.loadContext(auth.user, true)
+    if (!current() || !applied) return
+    contextReady.value = true
+    await refresh()
+  } catch (err) {
+    if (current()) error.value = err
+  } finally {
+    if (current()) { contextLoading.value = false; uni.stopPullDownRefresh() }
+  }
+}
+function retry() {
+  return contextReady.value && scope.loaded ? loadReport(retryPage.value) : initialize()
+}
 async function createSnapshot() {
+  if (!actionsReady.value) return
   try {
     const result = await api.createBusinessReviewSnapshot({ ...scope.params })
     uni.showModal({ title: '快照已创建', content: `分享码：${result.share_code}`, showCancel: false })
   } catch (err) { uni.showToast({ title: err.message || '创建失败', icon: 'none' }) }
 }
 async function exportOperations() {
+  if (!actionsReady.value || !canExport.value) return
   try {
     await downloadBinary({
       url: '/api/reports/boss/operations/export/', method: 'POST',
@@ -174,6 +261,7 @@ async function exportOperations() {
   } catch (err) { uni.showToast({ title: err.message || '导出失败', icon: 'none' }) }
 }
 async function exportCurrent() {
+  if (!actionsReady.value || !canExport.value) return
   const reportTypes = { assurance: 'revenue_assurance', receivables: 'receivables', yield: 'resource_yield', performance: 'performance', risk: 'inventory_risk' }
   const reportType = reportTypes[tab.value]
   if (!reportType) return
@@ -187,9 +275,9 @@ async function exportCurrent() {
 }
 onLoad(() => {
   if (!auth.ensureAuth()) return uni.reLaunch({ url: '/pages/login' })
-  scope.loadContext(auth.user).then(refresh)
+  initialize()
 })
-onPullDownRefresh(refresh)
+onPullDownRefresh(() => contextReady.value ? refresh() : initialize())
 </script>
 
 <style scoped>
@@ -205,5 +293,8 @@ onPullDownRefresh(refresh)
 .card, .wide-card { display: flex; flex-direction: column; gap: 10rpx; padding: 24rpx; margin-bottom: 16rpx; border-radius: 20rpx; background: white; }
 .label { color: #697791; font-size: 23rpx; }.value { font-size: 42rpx; font-weight: 800; }.money { font-size: 38rpx; font-weight: 800; color: #0b5fff; }.minor { color: #8792a8; font-size: 22rpx; }
 .line { display: flex; justify-content: space-between; gap: 18rpx; padding: 14rpx 0; border-top: 1rpx solid #edf0f5; font-size: 23rpx; }
+.pager { padding: 20rpx; text-align: center; color: #697791; font-size: 24rpx; }
+.pager-buttons { display: flex; gap: 16rpx; margin-top: 16rpx; }
+.retry { margin: 16rpx auto; }
 .empty { padding: 80rpx 20rpx; text-align: center; color: #8b96aa; }
 </style>

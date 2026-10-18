@@ -50,6 +50,7 @@ trap release_exit EXIT
 
 compose config --quiet
 compose pull
+compose run --rm web python /app/docker/check_volume_access.py
 compose run --rm web python manage.py check --deploy
 compose run --rm web python manage.py migrate --plan
 "$WMS_DB_BACKUP_SCRIPT"

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "run_id": "1989e66ed2a64e1eb06f2ef194f7ba2d",
+  "status": "FAIL",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026532621]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "355546",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "audit",
+    "--omit=dev",
+    "--audit-level=high",
+    "--json"
+  ],
+  "cwd": "/wms/wmsownersale",
+  "child": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026532621]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "355627",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 7,
+  "exit_code": 1,
+  "cleaned_containers": [],
+  "duration_seconds": 32.187
+}

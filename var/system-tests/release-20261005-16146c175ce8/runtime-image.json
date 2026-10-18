@@ -1,0 +1,14 @@
+{
+  "Id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10",
+  "Created": "2026-10-05T12:32:06.354959257+08:00",
+  "Size": 252411461,
+  "Architecture": "amd64",
+  "Os": "linux",
+  "RepoTags": [
+    "wms-release:20261005-16146c175ce8"
+  ],
+  "RepoDigests": [
+    "wms-release@sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+  ],
+  "user": "wms"
+}

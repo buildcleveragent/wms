@@ -1,10 +1,19 @@
 # wmsbossbilling
 
-独立的 uni-app 项目，只保留仓库老板查看计费看板相关功能。
+独立的 uni-app 项目，提供仓库老板的经营、库存、计费和预警查询。
+
+使用说明见 [仓库老板经营看板手册](../docs/manuals/金桥融通WMS仓库老板经营看板手册.md)（V2.2，2026-10-17 工作区基线），包含筛选恢复、账单下钻及经营驾驶舱七个标签的口径。
 
 页面范围：
 
 - `pages/login`
+- `pages/home/index`
+- `pages/inventory/index`
+- `pages/inventory/detail`
+- `pages/alerts/index`
+- `pages/alerts/section`
+- `pages/alerts/detail`
+- `pages/cockpit/index`
 - `pages/billing/overview`
 - `pages/billing/owner_detail`
 - `pages/billing/accrual_detail`
@@ -18,6 +27,8 @@
 - `/api/billing/periods/`
 - `/api/billing/bills/`
 - `/api/billing/accruals/`
+
+经营、库存及预警还使用 `/api/reports/boss/` 下的接口；以客户端请求定义和后端路由为准。
 
 这个项目不依赖 `wmsownersale` 的业务页，只复用同一套后端接口。
 # API 与生产构建

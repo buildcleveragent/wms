@@ -1,0 +1,829 @@
+{
+  "candidate_id": "7be0a23ddf1c-16146c175ce8",
+  "completed_at": "2026-10-05T05:36:40.411844+00:00",
+  "source_verified": true,
+  "database": "wms_db_test",
+  "main_database_mode": "Recreated once for real clean migrations, then reused",
+  "production_database_operations": "None",
+  "deployment_performed": false,
+  "backend_functional": {
+    "status": "PASS",
+    "collected": 1317,
+    "main_counts": {
+      "PASS": 1317
+    },
+    "subtest_counts": {
+      "passed": 1014
+    },
+    "exit_code": 0,
+    "password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher"
+  },
+  "backend_migrations": {
+    "status": "PASS",
+    "collected": 3,
+    "main_counts": {
+      "PASS": 3
+    },
+    "subtest_counts": {},
+    "exit_code": 0,
+    "password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher"
+  },
+  "real_api_browser": {
+    "status": "PASS",
+    "collected": 2,
+    "main_counts": {
+      "PASS": 2
+    },
+    "subtest_counts": {},
+    "exit_code": 0,
+    "password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher"
+  },
+  "coverage": {
+    "status": "PASS",
+    "measured": {
+      "allapp": 74.09817220370158,
+      "relocation_api": 87.46177370030581,
+      "replenishment_api": 93.27354260089686
+    },
+    "minimum": {
+      "allapp": 72.38,
+      "relocation_api": 80,
+      "replenishment_api": 80
+    }
+  },
+  "real_api_browser_details": {
+    "scope": "Real local API browser acceptance",
+    "status": "PASS",
+    "pytest_cases": 2,
+    "user_flows": 7,
+    "movement_flows": [
+      {
+        "app": "wmspda",
+        "kind": "move",
+        "status": "PASS",
+        "url": "http://127.0.0.1:18081/#/pages/inventory/move/detail?task_id=5",
+        "title": "移库作业",
+        "viewport": {
+          "width": 1280,
+          "height": 900
+        },
+        "consoleMessages": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+          "Failed to load resource: net::ERR_CONTENT_LENGTH_MISMATCH"
+        ],
+        "scope": "real API login/claim/start/4+4+2, lost response, edited retry blocked, same-payload replay, final posting"
+      },
+      {
+        "app": "wmsandroid",
+        "kind": "move",
+        "status": "PASS",
+        "url": "http://127.0.0.1:18081/#/pages/inventory/move/detail?task_id=6",
+        "title": "移库作业",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "consoleMessages": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+          "Failed to load resource: net::ERR_CONTENT_LENGTH_MISMATCH"
+        ],
+        "scope": "real API login/claim/start/4+4+2, lost response, edited retry blocked, same-payload replay, final posting"
+      },
+      {
+        "app": "wmspda",
+        "kind": "replenish",
+        "status": "PASS",
+        "url": "http://127.0.0.1:18081/#/pages/inventory/replenish/detail?task_id=7",
+        "title": "补货作业",
+        "viewport": {
+          "width": 1280,
+          "height": 900
+        },
+        "consoleMessages": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+          "Failed to load resource: net::ERR_CONTENT_LENGTH_MISMATCH"
+        ],
+        "scope": "real API login/claim/start/4+4+2, lost response, edited retry blocked, same-payload replay, final posting"
+      },
+      {
+        "app": "wmsandroid",
+        "kind": "replenish",
+        "status": "PASS",
+        "url": "http://127.0.0.1:18081/#/pages/inventory/replenish/detail?task_id=8",
+        "title": "补货作业",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "consoleMessages": [
+          "Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector",
+          "Failed to load resource: net::ERR_CONTENT_LENGTH_MISMATCH"
+        ],
+        "scope": "real API login/claim/start/4+4+2, lost response, edited retry blocked, same-payload replay, final posting"
+      }
+    ],
+    "warnings": "Movement cases intentionally lose a committed response; ERR_CONTENT_LENGTH_MISMATCH is retained as injected transport failure evidence. The temporary network fence also produces ERR_BLOCKED_BY_CLIENT for denied requests. These are not a claim of a zero-console-error run; original assertions require no uncaught page exceptions and correct persisted quantities/replay behavior."
+  },
+  "frontend_unit_tests": {
+    "passed": 258,
+    "by_app": {
+      "wmspda": 70,
+      "wmsandroid": 47,
+      "wmsownersale": 97,
+      "wmsbossbilling": 28,
+      "sales-miniapp": 16
+    }
+  },
+  "mocked_browser_tests": {
+    "wmspda-e2e": {
+      "startTime": "2026-10-05T04:11:30.392Z",
+      "duration": 53180.78200000001,
+      "expected": 10,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "wmsandroid-e2e": {
+      "startTime": "2026-10-05T04:12:26.389Z",
+      "duration": 73854.965,
+      "expected": 15,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "boss-built-final": {
+      "startTime": "2026-10-05T04:22:23.669Z",
+      "duration": 58049.725,
+      "expected": 24,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    }
+  },
+  "gate_evidence": "gate-evidence.json",
+  "readiness_report": "release-readiness.json",
+  "additional_checks": {
+    "lint": "FAIL",
+    "bandit": "PASS",
+    "secret-scan": "FAIL",
+    "security-exceptions": "PASS",
+    "production-config": "FAIL",
+    "model-migration-check": "PASS",
+    "image-sbom": "PASS"
+  },
+  "lock_reproduction": [
+    {
+      "lock": "requirements",
+      "status": "BLOCKED_TIMEOUT",
+      "identical": false
+    },
+    {
+      "lock": "prod",
+      "exit_code": 0,
+      "identical": true,
+      "status": "PASS"
+    },
+    {
+      "lock": "dev",
+      "status": "BLOCKED_TIMEOUT",
+      "identical": false
+    },
+    {
+      "lock": "test",
+      "status": "BLOCKED_TIMEOUT",
+      "identical": false
+    }
+  ],
+  "security_scan_disposition": {
+    "raw_findings": 557,
+    "candidate_source_findings": [
+      {
+        "file": ".github/workflows/ci.yml",
+        "line": 193,
+        "rule": "generic-api-key",
+        "disposition": "synthetic fixture / test identifier"
+      },
+      {
+        "file": ".github/workflows/ci.yml",
+        "line": 341,
+        "rule": "generic-api-key",
+        "disposition": "synthetic fixture / test identifier"
+      },
+      {
+        "file": "allapp/outbound/test_standard_order_idempotency.py",
+        "line": 136,
+        "rule": "generic-api-key",
+        "disposition": "synthetic fixture / test identifier"
+      },
+      {
+        "file": "allapp/salesapp/test_salemini_unit.py",
+        "line": 553,
+        "rule": "generic-api-key",
+        "disposition": "synthetic fixture / test identifier"
+      },
+      {
+        "file": "allapp/salesapp/tests.py",
+        "line": 2893,
+        "rule": "generic-api-key",
+        "disposition": "synthetic fixture / test identifier"
+      }
+    ],
+    "note": "Candidate-source matches are synthetic test fixtures or test identifiers, manually inspected with values redacted. Non-candidate evidence matches were not exhaustively adjudicated. Raw scanner remains failed; no scanner exclusions or source edits made.",
+    "non_candidate_findings": 552
+  },
+  "production_health_probe": {
+    "status": 301,
+    "location": "https://127.0.0.1:8000/healthz/ready"
+  },
+  "production_image_http_probe": {
+    "http_status": 301,
+    "location": "https://127.0.0.1:8000/healthz/ready",
+    "runtime": "candidate Gunicorn process with production settings",
+    "network": "none; loopback probe only",
+    "scope": "Determine whether HTTP health checking reaches readiness handling or is redirected before DB access."
+  },
+  "fresh_production_volume_check": {
+    "status": "FAIL",
+    "scenario": "Fresh named static/media Docker volumes mounted as in compose.production.yml, candidate image default non-root user UID 10001. Network disabled, synthetic process-local SECRET_KEY, no DB access.",
+    "observed": {
+      "static_volume_owner_uid": 0,
+      "media_volume_owner_uid": 0,
+      "mode": "0755",
+      "writable_by_uid_10001": false,
+      "collectstatic_exit_code": 1
+    },
+    "impact": "A fresh Compose deployment cannot collect static assets; the same fresh media mount is not writable for uploads. Existing volumes that were manually initialized with different ownership were not inspected.",
+    "source_files": [
+      "Dockerfile:29",
+      "compose.production.yml:7",
+      "docker/production_release.sh:73"
+    ],
+    "raw_log": "image-static-volumes/output.log",
+    "cleanup": "Both temporary volumes and the probe container were removed."
+  },
+  "runtime_image": {
+    "Id": "sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10",
+    "Created": "2026-10-05T12:32:06.354959257+08:00",
+    "Size": 252411461,
+    "Architecture": "amd64",
+    "Os": "linux",
+    "RepoTags": [
+      "wms-release:20261005-16146c175ce8"
+    ],
+    "RepoDigests": [
+      "wms-release@sha256:db00c83942383bcfafb821054a9aac47abc20b2ce7fcd8e0ec19a09a9b17ff10"
+    ],
+    "user": "wms"
+  },
+  "image_advisory_counts": {
+    "severity_package_matches": {
+      "HIGH": 80,
+      "CRITICAL": 8
+    },
+    "unique_advisory_ids": 42,
+    "fixed_version_available_matches": 28,
+    "scope": "Scanner package/advisory matches, not validated exploitation paths; one advisory can affect multiple installed packages."
+  },
+  "frontend_installed_dependency_versions": [
+    {
+      "app": "wmspda",
+      "installed_packages_checked": 642,
+      "version_mismatches": [],
+      "missing_installed_manifests": [],
+      "status": "PASS",
+      "scope": "Compare installed package versions listed by npm with candidate package lock; not a fresh npm ci or package-content integrity verification."
+    },
+    {
+      "app": "wmsandroid",
+      "installed_packages_checked": 642,
+      "version_mismatches": [],
+      "missing_installed_manifests": [],
+      "status": "PASS",
+      "scope": "Compare installed package versions listed by npm with candidate package lock; not a fresh npm ci or package-content integrity verification."
+    },
+    {
+      "app": "wmsownersale",
+      "installed_packages_checked": 711,
+      "version_mismatches": [],
+      "missing_installed_manifests": [],
+      "status": "PASS",
+      "scope": "Compare installed package versions listed by npm with candidate package lock; not a fresh npm ci or package-content integrity verification."
+    },
+    {
+      "app": "wmsbossbilling",
+      "installed_packages_checked": 723,
+      "version_mismatches": [],
+      "missing_installed_manifests": [],
+      "status": "PASS",
+      "scope": "Compare installed package versions listed by npm with candidate package lock; not a fresh npm ci or package-content integrity verification."
+    },
+    {
+      "app": "sales-miniapp",
+      "installed_packages_checked": 583,
+      "version_mismatches": [],
+      "missing_installed_manifests": [],
+      "status": "PASS",
+      "scope": "Compare installed package versions listed by npm with candidate package lock; not a fresh npm ci or package-content integrity verification."
+    }
+  ],
+  "pdf_resource": {
+    "risk": "R-PDF-RESOURCE",
+    "risk_status": "REVIEW_REQUIRED",
+    "production_limits_implemented": false,
+    "scope": "synthetic local measurement; not a production capacity or DoS guarantee",
+    "samples": [
+      {
+        "rows": 1,
+        "input_html_bytes": 3438,
+        "pdf_bytes": 299066,
+        "elapsed_seconds": 0.996,
+        "peak_rss_kib": 266892,
+        "weasyprint": "69.0",
+        "python": "3.12.3",
+        "status": "MEASURED"
+      },
+      {
+        "rows": 100,
+        "input_html_bytes": 36310,
+        "pdf_bytes": 325582,
+        "elapsed_seconds": 6.49,
+        "peak_rss_kib": 287852,
+        "weasyprint": "69.0",
+        "python": "3.12.3",
+        "status": "MEASURED"
+      },
+      {
+        "rows": 1000,
+        "input_html_bytes": 335112,
+        "pdf_bytes": 565096,
+        "elapsed_seconds": 61.7,
+        "peak_rss_kib": 506500,
+        "weasyprint": "69.0",
+        "python": "3.12.3",
+        "status": "MEASURED"
+      }
+    ]
+  },
+  "external_gates": {
+    "candidate_id": "7be0a23ddf1c-16146c175ce8",
+    "recorded_at": "2026-10-05T04:22:07.876297+00:00",
+    "gates": [
+      {
+        "gate_id": "pdf-resource-release-decision",
+        "status": "NOT_RUN",
+        "reason": "Pending identified release-security assessment and release-manager decision for R-PDF-RESOURCE; fresh local measurements do not implement production controls."
+      },
+      {
+        "gate_id": "staging-rehearsal-60m",
+        "status": "NOT_RUN",
+        "reason": "No designated staging candidate deployment or 60-minute observation evidence supplied."
+      },
+      {
+        "gate_id": "capacity",
+        "status": "NOT_RUN",
+        "reason": "No approved production-like workload, capacity targets, deployment limits or measured load-test evidence supplied."
+      },
+      {
+        "gate_id": "disaster-recovery",
+        "status": "NOT_RUN",
+        "reason": "No approved staging backup/restore/rollback exercise supplied; automated isolated DB tests are not an operational recovery signoff."
+      },
+      {
+        "gate_id": "wechat-payment",
+        "status": "NOT_RUN",
+        "reason": "No authorized real merchant/sandbox credentials and external payment/refund confirmation supplied; cryptographic and service tests are separate."
+      },
+      {
+        "gate_id": "signed-apk-devices",
+        "status": "NOT_RUN",
+        "reason": "App bundle compilation is separate from signed APK installation and physical scanner/printer/NFC acceptance."
+      },
+      {
+        "gate_id": "manual-196",
+        "status": "NOT_RUN",
+        "reason": "No current candidate-matched human acceptance records for the required 196 cases supplied."
+      },
+      {
+        "gate_id": "release-approval",
+        "status": "NOT_RUN",
+        "reason": "No release-manager approval supplied; user asked to run gates, not deploy."
+      },
+      {
+        "gate_id": "deployed-artifact-identity",
+        "status": "NOT_RUN",
+        "reason": "No deployment performed in this task."
+      },
+      {
+        "gate_id": "production-observation-60m",
+        "status": "NOT_RUN",
+        "reason": "No production deployment or observation performed in this task."
+      }
+    ]
+  },
+  "all_attempts": {
+    "bandit": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 39.687,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "boss-built-e2e": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 80.993,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "boss-built-final": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 59.923,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "boss-built-focused": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 10.795,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "boss-built-routes": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 18.415,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "dependency-locks": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 240.256,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "dependency-locks-bounded": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 472.462,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "image-dependencies": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 3.457,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "image-http-health": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 47.105,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "image-pdf-native": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 27.489,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "image-pdf-smoke": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 2.86,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "image-pdf-smoke-configured": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 11.804,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "image-python": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 1.363,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "image-sbom": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 1.872,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "image-security": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 36.534,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "image-source": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 2.26,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "image-static": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 10.146,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "image-static-volumes": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 10.378,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "lint": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 118.437,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "mall-structure": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 0.582,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "mall-unit": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 0.589,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "model-migration-check": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 5.88,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "owner-contracts": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 1.199,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "pdf-resource": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 88.443,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "post-backend-schema": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 5.731,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "production-config": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 8.766,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "python-audit": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 2.997,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "python-audit-retry": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 21.511,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "real-browser": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 60.82,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "runtime-build": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 1.013,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "runtime-build-retry": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 1782.395,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "sales-miniapp-audit": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 31.33,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "sales-miniapp-build-h5": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 20.022,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "sales-miniapp-build-mp-weixin": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 1.941,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "secret-scan": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 175.788,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "security-exceptions": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 0.728,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "trivy-database": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 256.343,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsandroid-audit": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 24.263,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsandroid-browser-build": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 26.252,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsandroid-build-app": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 7.713,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsandroid-build-h5": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 22.687,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsandroid-e2e": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 76.491,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsandroid-unit": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 18.664,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsbossbilling-audit": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 31.305,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsbossbilling-build-h5": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 17.999,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsbossbilling-build-mp-weixin": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 2.193,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsbossbilling-e2e": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 339.888,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsbossbilling-unit": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 6.967,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsownersale-audit": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 32.187,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsownersale-build-h5": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 18.203,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsownersale-build-mp-weixin": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 2.147,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmsownersale-unit": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 28.625,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmspda-audit": {
+      "status": "FAIL",
+      "exit_code": 1,
+      "duration_seconds": 22.136,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmspda-browser-build": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 30.792,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmspda-build-h5": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 26.978,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmspda-e2e": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 55.534,
+      "cleanup_complete": true,
+      "reason": null
+    },
+    "wmspda-unit": {
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_seconds": 38.726,
+      "cleanup_complete": true,
+      "reason": null
+    }
+  },
+  "limitations": [
+    "Host backend tests use Python 3.12.3 and a fast test-only password hasher; not production performance evidence.",
+    "Frontend API mocks, real local API tests, physical-device tests and real merchant integration are separate scopes.",
+    "Warnings and failed initial attempts remain in raw logs; no candidate source fixes or dependency upgrades were made."
+  ]
+}

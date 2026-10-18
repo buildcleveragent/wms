@@ -7,7 +7,7 @@ from django.test import SimpleTestCase
 
 
 class ReleaseOrchestrationTests(SimpleTestCase):
-    def _release(self, *, fail_migration=False):
+    def _release(self, *, fail_migration=False, fail_volumes=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             events = root / "events"
@@ -15,6 +15,7 @@ class ReleaseOrchestrationTests(SimpleTestCase):
                 "docker": """#!/bin/sh
 echo "docker $*" >> "$TEST_EVENTS"
 case "$*" in
+  *'check_volume_access.py'*) [ "$TEST_FAIL_VOLUMES" = 1 ] && exit 8 ;;
   *'migrate --noinput'*) [ "$TEST_FAIL_MIGRATION" = 1 ] && exit 9 ;;
   *'ps -q scheduler'*) echo scheduler-id ;;
 esac
@@ -47,6 +48,7 @@ echo backup >> "$TEST_EVENTS"
                     "PATH": f"{root}:/usr/bin:/bin",
                     "TEST_EVENTS": str(events),
                     "TEST_FAIL_MIGRATION": "1" if fail_migration else "0",
+                    "TEST_FAIL_VOLUMES": "1" if fail_volumes else "0",
                     "WMS_DB_BACKUP_SCRIPT": str(root / "backup"),
                     "WMS_MEDIA_BACKUP_SCRIPT": str(root / "backup"),
                     "WMS_OBSERVE_SECONDS": "0",
@@ -79,3 +81,11 @@ echo backup >> "$TEST_EVENTS"
         self.assertIn("restore the verified database/media backup", result.stderr)
         self.assertFalse(any(event.startswith("systemctl start") for event in events))
         self.assertIn("stop scheduler web", events[-1])
+
+    def test_unwritable_volumes_abort_before_stopping_writers_or_migrating(self):
+        result, events = self._release(fail_volumes=True)
+        self.assertEqual(result.returncode, 8)
+        self.assertFalse(any("systemctl stop" in event for event in events))
+        self.assertFalse(any("stop scheduler web" in event for event in events))
+        self.assertFalse(any("migrate --noinput" in event for event in events))
+        self.assertFalse(any(event == "backup" for event in events))

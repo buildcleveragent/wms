@@ -1,0 +1,1 @@
+{"name": "post-backend-schema", "command": ["/wms/.venv/bin/python", "scripts/run_system_tests.py", "preflight", "--candidate-manifest", "/tmp/wms-release-20261005-aohudxd1/candidate.json", "--artifacts", "/tmp/wms-release-20261005-aohudxd1/schema"], "env": {"APP_ENV": "test", "DB_NAME": "wms_db_test", "DB_TEST_NAME": "wms_db_test"}, "timeout": 180}

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "run_id": "ad40987eccc244c29c3e768e5aed1973",
+  "status": "FAIL",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026532637]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "357618",
+    "state": "R"
+  },
+  "command": [
+    "docker",
+    "run",
+    "--rm",
+    "--network=none",
+    "--volume",
+    "/wms:/repo:ro",
+    "--volume",
+    "/tmp/wms-release-20261005-aohudxd1:/out",
+    "ghcr.io/gitleaks/gitleaks:v8.30.1",
+    "dir",
+    "/repo",
+    "--redact=100",
+    "--report-format",
+    "json",
+    "--report-path",
+    "/out/gitleaks.json",
+    "--no-banner"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026532637]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "357659",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 7,
+  "exit_code": 1,
+  "cleaned_containers": [],
+  "duration_seconds": 175.788
+}

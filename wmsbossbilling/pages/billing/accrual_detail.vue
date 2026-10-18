@@ -105,6 +105,7 @@ import { ref } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import { api, buildQuery } from '@/utils/request'
 import { useAuth } from '@/store/auth'
+import { useLatestRequest } from '@/utils/use-latest-request'
 import { accrualStatusLabel, billStatusLabel, chargeTypeLabel, money, qty } from '@/utils/billing'
 
 const auth = useAuth()
@@ -117,7 +118,10 @@ const dateTo = ref('')
 const detail = ref(null)
 const loading = ref(false)
 
+const requests = useLatestRequest()
+
 async function loadDetail() {
+  const current = requests.begin()
   if (!accrualId.value) {
     uni.showToast({
       title: '缺少收费记录编号',
@@ -128,13 +132,18 @@ async function loadDetail() {
 
   loading.value = true
   try {
-    detail.value = await api.billingAccrualDetail(accrualId.value)
+    const result = await api.billingAccrualDetail(accrualId.value)
+    if (!current()) return
+    detail.value = result
   } catch (error) {
+    if (!current()) return
     detail.value = null
     console.error('load billing accrual detail failed:', error)
   } finally {
-    loading.value = false
-    uni.stopPullDownRefresh()
+    if (current()) {
+      loading.value = false
+      uni.stopPullDownRefresh()
+    }
   }
 }
 
@@ -174,10 +183,6 @@ function goBackOverview() {
     date_from: dateFrom.value,
     date_to: dateTo.value,
   })
-  if (getCurrentPages().length > 1) {
-    uni.navigateBack()
-    return
-  }
   uni.redirectTo({
     url: query ? `/pages/billing/overview?${query}` : '/pages/billing/overview',
   })

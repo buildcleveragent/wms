@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "run_id": "8059621a182e458b88dd5c1ccdf343e9",
+  "status": "PASS",
+  "owner": {
+    "pid": 7,
+    "pid_namespace": "pid:[4026532634]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "408185",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "run",
+    "test:e2e",
+    "--",
+    "--output=/tmp/wms-release-20261005-aohudxd1/wmspda-browser-results",
+    "--reporter=line,json"
+  ],
+  "cwd": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmspda",
+  "child": {
+    "pid": 8,
+    "pid_namespace": "pid:[4026532634]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "408198",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 8,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 55.534
+}

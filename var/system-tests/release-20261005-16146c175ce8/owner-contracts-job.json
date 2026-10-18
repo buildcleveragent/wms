@@ -1,0 +1,1 @@
+{"name": "owner-contracts", "cwd": "/wms/wmsownersale", "command": ["npm", "run", "test:contracts"], "timeout": 60}

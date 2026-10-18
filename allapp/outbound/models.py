@@ -877,3 +877,14 @@ class FuncShippingBoard(WmsTask):
         proxy = True
         verbose_name = "发运看板"
         verbose_name_plural = verbose_name
+
+
+# Register the transfer models with the outbound app without enlarging this module.
+from .transfer_models import (  # noqa: E402,F401
+    AssistedOwnershipTransfer,
+    AssistedOwnershipTransferLine,
+    AssistedTransferReservation,
+    OwnerProductMapping,
+)
+
+from .return_models import ReturnEvent, ReturnLine, ReturnOrder  # noqa: E402,F401

@@ -25,6 +25,7 @@ export const useAuth = defineStore('auth', {
   state: emptyState,
 
   getters: {
+    canProcessPdaReturn: (state) => state.profileLoaded === true && state.profile?.capabilities?.can_process_pda_return === true,
     canProcessAssistedOutbound: (state) =>
       state.profileLoaded === true &&
       state.profile?.capabilities?.can_process_warehouse_assisted_outbound === true,

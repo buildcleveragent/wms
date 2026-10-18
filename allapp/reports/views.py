@@ -1,5 +1,6 @@
 """HTML and PDF endpoints for warehouse reports."""
 
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -9,7 +10,11 @@ from allapp.accounts.audit import record_audit_event
 from allapp.outbound.authz import strict_pick_queryset
 from allapp.tasking.models import WmsTask
 
-from .dispatch_note_builder import DispatchNoteDataError, build_dispatch_note
+from .dispatch_note_builder import (
+    DispatchNoteDataError,
+    DispatchNoteLimitError,
+    build_dispatch_note,
+)
 from .models import ReportSnapshot
 from .services import snapshot_dispatch_note
 
@@ -27,9 +32,11 @@ def _dispatch_task_queryset(user):
     return strict_pick_queryset(base, user)
 
 
-def _safe_dispatch_note(task):
+def _safe_dispatch_note(task, *, max_lines=None):
     try:
-        return build_dispatch_note(task.id), None
+        return build_dispatch_note(task.id, max_lines=max_lines), None
+    except DispatchNoteLimitError as exc:
+        return None, HttpResponse(str(exc), status=422)
     except DispatchNoteDataError as exc:
         return None, HttpResponse(str(exc), status=409)
 
@@ -81,21 +88,9 @@ def dispatch_note_html(request, task_id: int):
     return HttpResponse(html)
 
 
-def _offline_url_fetcher(url, *args, **kwargs):
-    """Allow inline data only; report rendering must never fetch remote URLs."""
-
-    if not url.startswith("data:"):
-        raise ValueError("External resources are disabled for PDF reports.")
-    from weasyprint import URLFetcher
-
-    kwargs["allowed_protocols"] = {"data"}
-    kwargs["allow_redirects"] = False
-    return URLFetcher(*args, **kwargs).fetch(url)
-
-
 @login_required
 def dispatch_note_pdf(request, task_id: int):
-    from weasyprint import HTML
+    from .pdf_rendering import PdfUnavailable, render_pdf, rendering_slot
 
     task = get_object_or_404(_dispatch_task_queryset(request.user), pk=task_id)
     record_audit_event(
@@ -105,13 +100,17 @@ def dispatch_note_pdf(request, task_id: int):
         obj=task,
         metadata={"format": "pdf"},
     )
-    note, error_response = _safe_dispatch_note(task)
-    if error_response:
-        return error_response
-    html = render_to_string("reports/dispatch_note.html", {"note": note})
-    pdf_bytes = HTML(string=html, url_fetcher=_offline_url_fetcher).write_pdf(
-        presentational_hints=False
-    )
+    try:
+        with rendering_slot() as slot:
+            note, error_response = _safe_dispatch_note(task, max_lines=settings.PDF_MAX_LINES)
+            if error_response:
+                return error_response
+            html = render_to_string("reports/dispatch_note.html", {"note": note})
+            pdf_bytes = render_pdf(html, slot=slot)
+    except PdfUnavailable:
+        response = HttpResponse("PDF 暂时无法生成，请稍后重试。", status=503)
+        response["Retry-After"] = "5"
+        return response
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
     response["Content-Disposition"] = f"inline; filename=dispatch_{task_id}.pdf"
     return response

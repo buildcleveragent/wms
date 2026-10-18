@@ -1,0 +1,23 @@
+[
+  {
+    "lock": "requirements",
+    "status": "BLOCKED_TIMEOUT",
+    "identical": false
+  },
+  {
+    "lock": "prod",
+    "exit_code": 0,
+    "identical": true,
+    "status": "PASS"
+  },
+  {
+    "lock": "dev",
+    "status": "BLOCKED_TIMEOUT",
+    "identical": false
+  },
+  {
+    "lock": "test",
+    "status": "BLOCKED_TIMEOUT",
+    "identical": false
+  }
+]

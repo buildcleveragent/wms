@@ -112,6 +112,27 @@ def _explicit_billing_scope(user) -> AccessScope:
     return scope
 
 
+def _validate_billing_write_scope(user, owner_id, warehouse_id):
+    """Validate the final tenant target using the existing explicit role semantics."""
+    if getattr(user, "is_superuser", False):
+        return
+    scope = _explicit_billing_scope(user)
+    if (
+        not owner_id
+        or not warehouse_id
+        or not scope.allows(owner_id=owner_id, warehouse_id=warehouse_id)
+    ):
+        raise PermissionDenied("无权写入目标货主或仓库的计费数据。")
+
+
+def _final_serializer_scope_ids(serializer):
+    instance = getattr(serializer, "instance", None)
+    data = serializer.validated_data
+    owner = data.get("owner", getattr(instance, "owner", None))
+    warehouse = data.get("warehouse", getattr(instance, "warehouse", None))
+    return _scope_id(owner), _scope_id(warehouse)
+
+
 class PaymentReceiptViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentReceiptSerializer
     permission_classes = [BillingModelPermissions]
@@ -141,6 +162,7 @@ class PaymentReceiptViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         if not self.request.user.has_perm("billing.change_paymentreceipt"):
             raise PermissionDenied("需要收款修改权限。")
+        _validate_billing_write_scope(self.request.user, *_final_serializer_scope_ids(serializer))
         serializer.save()
 
     def perform_destroy(self, instance):
@@ -166,7 +188,10 @@ class PaymentReceiptViewSet(viewsets.ModelViewSet):
         if not receipt_no:
             return Response({"detail": "receipt_no is required."}, status=400)
         raw_date = request.data.get("receipt_date")
-        reversal_date = parse_date(str(raw_date)) if raw_date else None
+        try:
+            reversal_date = parse_date(str(raw_date)) if raw_date else None
+        except ValueError:
+            reversal_date = None
         if raw_date and reversal_date is None:
             return Response({"detail": "receipt_date must be YYYY-MM-DD."}, status=400)
         try:
@@ -325,30 +350,14 @@ class OwnerWarehouseSaveMixin:
     """
 
     def _final_serializer_scope_ids(self, serializer):
-        instance = getattr(serializer, "instance", None)
-        data = serializer.validated_data
-        owner = data.get("owner", getattr(instance, "owner", None))
-        warehouse = data.get("warehouse", getattr(instance, "warehouse", None))
-        return _scope_id(owner), _scope_id(warehouse)
+        return _final_serializer_scope_ids(serializer)
 
     def _validate_serializer_write_scope(self, serializer):
         owner_id, warehouse_id = self._final_serializer_scope_ids(serializer)
         self._validate_owner_warehouse_write_scope(owner_id, warehouse_id)
 
     def _validate_owner_warehouse_write_scope(self, owner_id, warehouse_id):
-        user = self.request.user
-        if getattr(user, "is_superuser", False):
-            return
-        scope = _explicit_billing_scope(user)
-        if (
-            not owner_id
-            or not warehouse_id
-            or not scope.allows(
-                owner_id=owner_id,
-                warehouse_id=warehouse_id,
-            )
-        ):
-            raise PermissionDenied("无权写入目标货主或仓库的计费数据。")
+        _validate_billing_write_scope(self.request.user, owner_id, warehouse_id)
 
     def perform_create(self, serializer):
         self._validate_serializer_write_scope(serializer)

@@ -76,6 +76,8 @@ class TxType(models.TextChoices):
 
 
 class InvTxType(models.TextChoices):
+        OWNER_XFER_IN = "OWNER_XFER_IN", "货权转入"
+        OWNER_XFER_OUT = "OWNER_XFER_OUT", "货权转出"
         MOVE_IN = "MOVE_IN", "移入"
         MOVE_OUT = "MOVE_OUT", "移出"
         RECEIVE = "RECEIVE", "入"

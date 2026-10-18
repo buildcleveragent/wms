@@ -785,7 +785,9 @@ function getBatch(pid: number): string {
   box-shadow: 0 4rpx 6rpx rgba(50, 150, 230, 0.2);
   white-space: nowrap;
   width: 100rpx;
-  height: 30rpx;
+  min-height: 48px;
+  height: auto;
+  min-width: 48px;
 }
 
 .btn-set {
@@ -1570,4 +1572,8 @@ function getBatch(pid: number): string {
   line-height: 1.4;
   margin-bottom: 8rpx;
 }
+.row-actions{flex-wrap:wrap}.name,.product-name{overflow-wrap:anywhere}.row-actions .btnnew{padding:8px;box-sizing:border-box}
+.bar .btn-outline,.footer .btn-outline,.retry-button,.picker-button,.pkg-radio-row,.input{min-height:48px;min-width:48px}
+.picker-button-text{min-height:48px;display:flex;align-items:center}.footer{padding-bottom:max(10rpx,env(safe-area-inset-bottom))}
+.container{height:calc(100vh - var(--window-top,0px) - var(--window-bottom,0px));min-height:0}.content{min-height:0;padding-bottom:calc(76px + env(safe-area-inset-bottom))}
 </style>

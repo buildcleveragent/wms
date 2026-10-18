@@ -1,0 +1,1 @@
+{"name": "mall-structure", "cwd": "/wms/sales-miniapp", "command": ["npm", "run", "test:structure"], "timeout": 60}

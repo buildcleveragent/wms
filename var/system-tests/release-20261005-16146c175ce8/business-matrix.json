@@ -1,0 +1,64 @@
+{
+  "candidate_id": "7be0a23ddf1c-16146c175ce8",
+  "scope": "Actual collected automated cases, grouped by module; not manual UAT or proof of exhaustive business coverage.",
+  "modules": {
+    "accounts": {
+      "PASS": 63
+    },
+    "baseinfo": {
+      "PASS": 4
+    },
+    "billing": {
+      "PASS": 150
+    },
+    "console": {
+      "PASS": 16
+    },
+    "core": {
+      "PASS": 170
+    },
+    "driverapp": {
+      "PASS": 3
+    },
+    "inbound": {
+      "PASS": 50
+    },
+    "inventory": {
+      "PASS": 59
+    },
+    "locations": {
+      "PASS": 7
+    },
+    "outbound": {
+      "PASS": 186
+    },
+    "pos": {
+      "PASS": 113
+    },
+    "products": {
+      "PASS": 167
+    },
+    "reports": {
+      "PASS": 91
+    },
+    "salesapp": {
+      "PASS": 135
+    },
+    "strategies": {
+      "PASS": 3
+    },
+    "tasking": {
+      "PASS": 87
+    },
+    "cross_module": {
+      "PASS": 12
+    },
+    "api": {
+      "PASS": 3
+    },
+    "labeling": {
+      "PASS": 1
+    }
+  },
+  "collected": 1320
+}

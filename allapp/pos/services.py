@@ -258,7 +258,9 @@ def _audit(*, action, user, sale=None, return_order=None, shift=None, reason="",
 
 def _cash_customer(owner_id, user):
     Customer = apps.get_model("baseinfo", "Customer")
-    customer = Customer.objects.filter(owner_id=owner_id, code="CASH").order_by("id").first()
+    from allapp.baseinfo.customer_access import customers_for_owner
+
+    customer = customers_for_owner(owner_id).filter(owner_customer_code="CASH").order_by("id").first()
     if customer:
         return customer
     return Customer.objects.create(owner_id=owner_id, code="CASH", name="散客", salesperson=user)

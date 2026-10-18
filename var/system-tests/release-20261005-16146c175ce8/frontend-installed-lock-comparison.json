@@ -1,0 +1,42 @@
+[
+  {
+    "app": "wmspda",
+    "installed_packages_checked": 642,
+    "version_mismatches": [],
+    "missing_installed_manifests": [],
+    "status": "PASS",
+    "scope": "Compare installed package versions listed by npm with candidate package lock; not a fresh npm ci or package-content integrity verification."
+  },
+  {
+    "app": "wmsandroid",
+    "installed_packages_checked": 642,
+    "version_mismatches": [],
+    "missing_installed_manifests": [],
+    "status": "PASS",
+    "scope": "Compare installed package versions listed by npm with candidate package lock; not a fresh npm ci or package-content integrity verification."
+  },
+  {
+    "app": "wmsownersale",
+    "installed_packages_checked": 711,
+    "version_mismatches": [],
+    "missing_installed_manifests": [],
+    "status": "PASS",
+    "scope": "Compare installed package versions listed by npm with candidate package lock; not a fresh npm ci or package-content integrity verification."
+  },
+  {
+    "app": "wmsbossbilling",
+    "installed_packages_checked": 723,
+    "version_mismatches": [],
+    "missing_installed_manifests": [],
+    "status": "PASS",
+    "scope": "Compare installed package versions listed by npm with candidate package lock; not a fresh npm ci or package-content integrity verification."
+  },
+  {
+    "app": "sales-miniapp",
+    "installed_packages_checked": 583,
+    "version_mismatches": [],
+    "missing_installed_manifests": [],
+    "status": "PASS",
+    "scope": "Compare installed package versions listed by npm with candidate package lock; not a fresh npm ci or package-content integrity verification."
+  }
+]

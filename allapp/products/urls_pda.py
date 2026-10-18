@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views_excel import (
+    ProductAllExportExcelApi,
     ProductExportExcelApi,
     ProductExportOwnersApi,
     ProductIdentifierExportApi,
@@ -32,6 +33,7 @@ urlpatterns = [
     ),
     path("export-owners/", ProductExportOwnersApi.as_view(), name="export-owners"),
     path("export-excel/", ProductExportExcelApi.as_view(), name="export-excel"),
+    path("export-all-excel/", ProductAllExportExcelApi.as_view(), name="export-all-excel"),
     path(
         "export-missing-gtin/",
         ProductMissingGtinExportApi.as_view(),

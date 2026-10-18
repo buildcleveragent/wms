@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "run_id": "802dc7c1a19b4172a0887ed19ae2ef30",
+  "status": "PASS",
+  "owner": {
+    "pid": 2,
+    "pid_namespace": "pid:[4026532606]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "352322",
+    "state": "R"
+  },
+  "command": [
+    "/wms/.venv/bin/python",
+    "-m",
+    "pytest",
+    "--reuse-db",
+    "-q",
+    "--durations=20",
+    "--fast-password-hashers",
+    "allapp",
+    "--wms-group=migrations",
+    "--cov=allapp",
+    "--cov-report=",
+    "--cov-fail-under=0",
+    "--junitxml=/tmp/wms-release-20261005-aohudxd1/backend/migrations.xml"
+  ],
+  "cwd": "/wms",
+  "child": {
+    "pid": 396,
+    "pid_namespace": "pid:[4026532606]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "632864",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 396,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 2814.894
+}

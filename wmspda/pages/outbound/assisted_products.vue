@@ -6,7 +6,8 @@
       <view :class="['assisted-workspace', { 'wide-workspace': isWideScreen }]">
         <view class="product-pane">
           <view class="header-card">
-            <view class="context-line">
+            <view v-if="draft.newOwner" class="context-line">{{ draft.routeLabel }}</view>
+            <view v-else class="context-line">
               <text class="context-label">货主</text>
               <text>{{ draft.owner?.name || '-' }}</text>
               <text class="context-label customer-label">客户</text>
@@ -178,7 +179,7 @@
               <text>可用库存</text>
               <text>出库包装</text>
               <text>最终包装数量</text>
-              <text>基本单价</text>
+              <text>{{ draft.newOwner ? '客户销售单价' : '基本单价' }}</text>
               <text>基本数量</text>
               <text>操作</text>
             </view>
@@ -193,6 +194,12 @@
                 <text class="product-name">{{ item.name }}</text>
                 <text class="identity-meta"> · {{ item.sku || '-' }}</text>
                 <text v-if="item.spec" class="identity-meta"> · {{ item.spec }}</text>
+                <view v-if="draft.newOwner" class="transfer-price-field">
+                  <text>转货单价：</text>
+                  <input class="value-input transfer-price-input" type="digit"
+                    :value="item.transfer_price" placeholder="同销售单价"
+                    :disabled="submissionLocked" @input="setSelectedTransferPrice(index, $event)" />
+                </view>
               </view>
 
               <view class="stock-cell">
@@ -791,6 +798,11 @@ function setSelectedPrice(index, event) {
   draft.setPrice(index, eventValue(event))
 }
 
+function setSelectedTransferPrice(index, event) {
+  if (submissionLocked.value) return
+  draft.setTransferPrice(index, eventValue(event))
+}
+
 function finalizeSelectedPrice(index) {
   if (submissionLocked.value) return
   const item = draft.items[index]
@@ -891,6 +903,8 @@ onUnload(stopResizeListener)
 .shortcut-button { flex: none; margin: 0; padding: 0 18rpx; height: 56rpx; line-height: 56rpx; color: #475569; background: #f1f5f9; font-size: 22rpx; }
 .assisted-workspace, .product-pane, .order-pane { min-width: 0; }
 .wide-workspace { display: grid; grid-template-columns: minmax(0, 13fr) minmax(360px, 7fr); align-items: start; gap: 18rpx; }
+.transfer-price-field { margin-top: 12rpx; font-size: 24rpx; color: #475569; }
+.transfer-price-field .value-input { max-width: 220rpx; margin-top: 6rpx; }
 .is-wide .product-pane, .order-pane { max-height: calc(100vh - 40rpx); overflow-y: auto; overscroll-behavior: contain; }
 .order-pane { border-radius: 16rpx; }
 .section-card { margin-bottom: 16rpx; overflow-x: auto; border-radius: 14rpx; background: #fff; box-shadow: 0 3rpx 14rpx rgba(15,23,42,.04); }

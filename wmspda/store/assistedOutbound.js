@@ -79,6 +79,7 @@ function printPreferenceKey(userId, warehouseId) {
 export const useAssistedOutbound = defineStore('assistedOutbound', {
   state: () => ({
     owner: null,
+    newOwner: null,
     customer: null,
     items: [],
     form: emptyForm(),
@@ -88,6 +89,8 @@ export const useAssistedOutbound = defineStore('assistedOutbound', {
   }),
 
   getters: {
+    salesOwner: (state) => state.newOwner || state.owner,
+    routeLabel: (state) => [state.owner?.name, state.newOwner?.name, state.customer?.name].filter(Boolean).join(' → '),
     itemCount: (state) => state.items.length,
     totalQty: (state) => state.items.reduce(
       (total, item) => total + Number(item.qty || 0),
@@ -142,6 +145,7 @@ export const useAssistedOutbound = defineStore('assistedOutbound', {
       const changed = Number(this.owner?.id || 0) !== Number(owner?.id || 0)
       this.owner = owner || null
       if (changed) {
+        this.newOwner = null
         this.customer = null
         this.clearOrderDetails()
       }
@@ -151,6 +155,20 @@ export const useAssistedOutbound = defineStore('assistedOutbound', {
       const changed = Number(this.customer?.id || 0) !== Number(customer?.id || 0)
       this.customer = customer || null
       if (changed) this.clearOrderDetails()
+    },
+
+    setNewOwner(owner) {
+      if (owner && Number(owner.id) === Number(this.owner?.id)) return false
+      const changed = Number(this.newOwner?.id || 0) !== Number(owner?.id || 0)
+      this.newOwner = owner || null
+      if (changed) this.clearOrderDetails()
+      return true
+    },
+
+    setTransferPrice(index, value) {
+      if (!this.items[index]) return
+      this.items[index].transfer_price = value
+      this.clearRequestIdentity()
     },
 
     addItem(product, baseQty, price, selectedUnit = null, selectedQty = null) {
@@ -192,6 +210,7 @@ export const useAssistedOutbound = defineStore('assistedOutbound', {
         price: optionalPrice(
           price !== undefined ? price : (product.default_price ?? product.price),
         ),
+        transfer_price: '',
         qty: addBaseQty,
         package_id: unit.package_id,
         package_qty: addSelectedQty,
@@ -236,6 +255,7 @@ export const useAssistedOutbound = defineStore('assistedOutbound', {
         price: optionalPrice(
           price !== undefined ? price : (product.default_price ?? product.price),
         ),
+        transfer_price: '',
         qty: baseQty,
         package_id: unit.package_id,
         package_qty: packageQty,
@@ -373,6 +393,7 @@ export const useAssistedOutbound = defineStore('assistedOutbound', {
 
     resetAll() {
       this.owner = null
+      this.newOwner = null
       this.customer = null
       this.clearOrderDetails()
     },

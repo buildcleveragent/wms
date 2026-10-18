@@ -1,0 +1,460 @@
+{
+  "config": {
+    "argv": [
+      "/usr/bin/node",
+      "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmspda/node_modules/.bin/playwright",
+      "test",
+      "--output=/tmp/wms-release-20261005-aohudxd1/wmspda-browser-results",
+      "--reporter=line,json"
+    ],
+    "configFile": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmspda/playwright.config.js",
+    "rootDir": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmspda/tests/e2e",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/tmp/wms-release-20261005-aohudxd1/wmspda-browser-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/tmp/wms-release-20261005-aohudxd1/frontend-source/wmspda/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 90000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "line"
+      ],
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.61.1",
+    "workers": 1,
+    "webServer": {
+      "command": "npm run dev:h5",
+      "url": "http://127.0.0.1:5173",
+      "reuseExistingServer": false,
+      "timeout": 120000
+    }
+  },
+  "suites": [
+    {
+      "title": "app-smoke.spec.js",
+      "file": "app-smoke.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "H5 application renders without a framework error overlay",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4251,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:11:36.832Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "869f22acd2b4ae26e6ba-80e5434e2564e39911dd",
+          "file": "app-smoke.spec.js",
+          "line": 3,
+          "column": 5
+        },
+        {
+          "title": "no-order receiving loads and selects an explicitly authorized owner",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3327,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:11:41.990Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "869f22acd2b4ae26e6ba-008e0f24ec23672eae08",
+          "file": "app-smoke.spec.js",
+          "line": 16,
+          "column": 5
+        },
+        {
+          "title": "committed checkout rotates the key before a failed print is reported",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2608,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:11:45.364Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "869f22acd2b4ae26e6ba-2691f50080386d883e03",
+          "file": "app-smoke.spec.js",
+          "line": 53,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "gs1-quick-create.spec.js",
+      "file": "gs1-quick-create.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "unknown GTIN can be created immediately and added to the receiving cart",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6527,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:11:48.033Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "cd216cde1bdd53d09dc2-84c1af9b923e6aad7280",
+          "file": "gs1-quick-create.spec.js",
+          "line": 16,
+          "column": 5
+        },
+        {
+          "title": "unknown GTIN shows a specific retryable backend error and request id",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3614,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:11:54.602Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "cd216cde1bdd53d09dc2-a2537233e5773efb8ffc",
+          "file": "gs1-quick-create.spec.js",
+          "line": 146,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "pos-product-spec.spec.js",
+      "file": "pos-product-spec.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "POS search results and cart show each non-empty product specification after its name",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5957,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:11:58.268Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "595068f6c5b0cbf7e38e-3fd80b0f5a5339dd3081",
+          "file": "pos-product-spec.spec.js",
+          "line": 39,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "pos-search-all-results.spec.js",
+      "file": "pos-search-all-results.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "POS loads, scrolls, and selects all paginated matches and accepts a zero gift amount",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 90000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5587,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:12:04.270Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "e8c571dda6f1d31aab52-50dfb453056cd54d9517",
+          "file": "pos-search-all-results.spec.js",
+          "line": 20,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "product-search-keyboard-scanner.spec.js",
+      "file": "product-search-keyboard-scanner.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "fast keyboard scans submit the complete confirmed barcode",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5039,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:12:09.899Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "89dd29f8e89f6e1de939-d577cda5b45b5916945d",
+          "file": "product-search-keyboard-scanner.spec.js",
+          "line": 40,
+          "column": 5
+        },
+        {
+          "title": "a scan during the initial empty search is not discarded or overwritten",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3793,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:12:14.982Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "89dd29f8e89f6e1de939-79c384a3a55993c389cb",
+          "file": "product-search-keyboard-scanner.spec.js",
+          "line": 74,
+          "column": 5
+        },
+        {
+          "title": "rapid consecutive scans keep only the newest response",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4293,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-05T04:12:18.822Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "89dd29f8e89f6e1de939-e23ae4173840b13fc1b8",
+          "file": "product-search-keyboard-scanner.spec.js",
+          "line": 112,
+          "column": 5
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-05T04:11:30.392Z",
+    "duration": 53180.78200000001,
+    "expected": 10,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

@@ -205,6 +205,7 @@ import BossNav from '@/components/boss-nav.vue'
 import BossScopeFilter from '@/components/boss-scope-filter.vue'
 import BossDataStatus from '@/components/boss-data-status.vue'
 import { useAuth } from '@/store/auth'
+import { useLatestRequest } from '@/utils/use-latest-request'
 import { useBossScope } from '@/store/bossScope'
 import { api, buildQuery } from '@/utils/request'
 import { asList, percent, qty, toNumber } from '@/utils/billing'
@@ -215,7 +216,10 @@ const payload = ref(null)
 const loading = ref(false)
 const dataError = ref(null)
 const loadedFingerprint = ref('')
-const stale = computed(() => !!dataError.value && loadedFingerprint.value === bossScope.fingerprint && !!payload.value)
+const requestKey = () => bossScope.fingerprint
+const requests = useLatestRequest(requestKey)
+const initialization = useLatestRequest()
+const stale = computed(() => !!dataError.value && loadedFingerprint.value === requestKey() && !!payload.value)
 
 const operatorName = computed(() => auth.user?.display_name || auth.user?.username || '老板账号')
 const scope = computed(() => payload.value?.scope || {})
@@ -333,19 +337,27 @@ function coldUtilizationText(value) {
 }
 
 async function refreshAll() {
-  const fingerprint = bossScope.fingerprint
+  const current = requests.begin()
+  const fingerprint = requestKey()
+  const params = { ...bossScope.params }
+  if (loadedFingerprint.value !== fingerprint) payload.value = null
   loading.value = true
+  dataError.value = null
   try {
-    payload.value = await api.bossInventory(bossScope.params)
+    const result = await api.bossInventory(params)
+    if (!current()) return
+    payload.value = result
     loadedFingerprint.value = fingerprint
     dataError.value = null
   } catch (error) {
+    if (!current()) return
     dataError.value = error
     if (loadedFingerprint.value !== fingerprint || error.kind === 'FORBIDDEN') payload.value = null
-    console.error('boss inventory overview failed:', error)
   } finally {
-    loading.value = false
-    uni.stopPullDownRefresh()
+    if (current()) {
+      loading.value = false
+      uni.stopPullDownRefresh()
+    }
   }
 }
 
@@ -375,7 +387,11 @@ onLoad(() => {
     uni.reLaunch({ url: '/pages/login' })
     return
   }
-  bossScope.loadContext(auth.user).then(refreshAll).catch((error) => {
+  const current = initialization.begin()
+  bossScope.loadContext(auth.user).then((applied) => {
+    if (current() && applied) refreshAll()
+  }).catch((error) => {
+    if (!current()) return
     dataError.value = error
     payload.value = null
   })

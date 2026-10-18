@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from rest_framework.exceptions import PermissionDenied
 
 from allapp.accounts.access import AccessScope
@@ -15,17 +15,29 @@ from .excel_import import (
     PACKAGE_SHEET_NAME,
     PRODUCT_HEADERS,
     _add_template_validations,
+    _match_package_uom,
     _write_import_sheet,
     _write_instruction_sheet,
     _write_meta_sheet,
     _write_package_sheet,
     _write_reference_sheet,
 )
-from .models import Brand, Product, ProductCategory, ProductUom
+from .models import Brand, Product, ProductCategory, ProductPackage, ProductUom
 from .permissions import can_view_all_owner_products
 
 MISSING_GTIN_SHEET_NAME = "无标准条码商品"
-MISSING_GTIN_HEADERS = ("商品名称", "商品编码", "货主名称")
+MISSING_GTIN_HEADERS = (
+    "商品名称",
+    "商品编码",
+    "规格",
+    "品牌",
+    "基本单位",
+    "默认价格",
+    "材质",
+    "厂家",
+    "原产国",
+    "货主名称",
+)
 
 
 @dataclass(frozen=True)
@@ -95,7 +107,7 @@ def missing_gtin_product_queryset(user):
     queryset = (
         Product.objects.filter(owner__is_active=True, owner__is_deleted=False)
         .filter(Q(gtin__isnull=True) | Q(gtin=""))
-        .select_related("owner")
+        .select_related("owner", "brand", "base_uom")
         .order_by("owner__name", "code", "id")
     )
     if access.allowed_owner_ids is not None:
@@ -104,10 +116,11 @@ def missing_gtin_product_queryset(user):
 
 
 def build_missing_gtin_export_workbook(user) -> tuple[bytes, int]:
-    """Build the scoped three-column workbook used by the PDA home-page export."""
+    """Build the scoped label-data workbook used by the PDA home-page export."""
 
     from openpyxl import Workbook
     from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
 
     workbook = Workbook()
     sheet = workbook.active
@@ -123,18 +136,32 @@ def build_missing_gtin_export_workbook(user) -> tuple[bytes, int]:
     product_count = 0
     queryset = missing_gtin_product_queryset(user)
     for row_number, product in enumerate(queryset.iterator(chunk_size=2000), start=2):
-        values = (product.name, product.code, product.owner.name)
+        values = (
+            product.name,
+            product.code,
+            product.spec,
+            product.brand.name if product.brand_id else None,
+            product.base_uom.name,
+            product.price,
+            product.material_quality,
+            product.vender,
+            product.origin_country,
+            product.owner.name,
+        )
         for column, value in enumerate(values, start=1):
+            if column == 6:
+                cell = sheet.cell(row=row_number, column=column, value=value)
+                cell.number_format = "0.00"
+                continue
             cell = sheet.cell(row=row_number, column=column, value=str(value or ""))
             # Force strings so leading zeroes survive and formula-looking values stay inert.
             cell.data_type = "s"
             cell.number_format = "@"
         product_count += 1
 
-    sheet.auto_filter.ref = f"A1:C{product_count + 1}"
-    sheet.column_dimensions["A"].width = 40
-    sheet.column_dimensions["B"].width = 24
-    sheet.column_dimensions["C"].width = 24
+    sheet.auto_filter.ref = f"A1:{get_column_letter(len(MISSING_GTIN_HEADERS))}{product_count + 1}"
+    for column, width in enumerate((40, 24, 30, 24, 14, 16, 20, 36, 14, 24), start=1):
+        sheet.column_dimensions[get_column_letter(column)].width = width
 
     output = io.BytesIO()
     workbook.save(output)
@@ -142,9 +169,24 @@ def build_missing_gtin_export_workbook(user) -> tuple[bytes, int]:
 
 
 def build_product_export_workbook(owner: Owner) -> tuple[bytes, int, int]:
+    return _build_product_export_workbook(
+        [(owner.code, owner.name)], Product.objects.filter(owner=owner)
+    )
+
+
+def build_all_product_export_workbook(user) -> tuple[bytes, int, int]:
+    """Export all non-deleted product archives in the user's permitted owner scope."""
+
+    owners = list(export_owner_queryset(user).values_list("id", "code", "name"))
+    return _build_product_export_workbook(
+        [(code, name) for _owner_id, code, name in owners],
+        Product.objects.filter(owner_id__in=[owner_id for owner_id, _code, _name in owners]),
+    )
+
+
+def _build_product_export_workbook(owners, products) -> tuple[bytes, int, int]:
     from openpyxl import Workbook
 
-    owners = [(owner.code, owner.name)]
     uoms = list(
         ProductUom.objects.filter(is_active=True)
         .order_by("code")
@@ -175,43 +217,63 @@ def build_product_export_workbook(owner: Owner) -> tuple[bytes, int, int]:
         workbook, product_sheet, package_sheet, owners, uoms, categories, brands
     )
 
-    products = list(
-        Product.objects.filter(owner=owner)
-        .select_related("owner", "category", "brand", "base_uom", "carton_package__uom")
-        .prefetch_related("packages__uom")
-        .order_by("code", "id")
+    products = (
+        products.select_related(
+            "owner", "category__parent__parent", "brand", "base_uom", "carton_package__uom"
+        )
+        .prefetch_related(
+            Prefetch(
+                "packages",
+                queryset=ProductPackage.objects.select_related("uom").order_by(
+                    "sort_order", "uom__code", "id"
+                ),
+                to_attr="export_packages",
+            )
+        )
+        .order_by("owner__code", "code", "id")
     )
+    product_count = 0
     package_count = 0
+    package_unit_labels = {}
     package_row_number = 2
-    for product_row_number, product in enumerate(products, start=2):
+    for product_row_number, product in enumerate(products.iterator(chunk_size=2000), start=2):
         _write_safe_row(
             product_sheet,
             product_row_number,
             PRODUCT_HEADERS,
             _product_values(product),
         )
-        for package in product.packages.all().order_by("sort_order", "uom__code", "id"):
+        product_count += 1
+        for package in product.export_packages:
+            if package.uom_id not in package_unit_labels:
+                name = package.uom.name.strip()
+                matched, error = _match_package_uom(name, allow_name=True)
+                package_unit_labels[package.uom_id] = (
+                    name
+                    if name and not error and matched.pk == package.uom_id
+                    else package.uom.code
+                )
             _write_safe_row(
                 package_sheet,
                 package_row_number,
                 PACKAGE_HEADERS,
-                _package_values(product, package),
+                _package_values(product, package, unit_label=package_unit_labels[package.uom_id]),
             )
             package_row_number += 1
             package_count += 1
 
-    if len(products) > 1000:
+    if product_count > 1000:
         instructions.append(
             [
                 "回导限制",
-                f"本档案包含 {len(products)} 条商品；系统单次最多导入 1000 条，请拆分后回导。",
+                f"本档案包含 {product_count} 条商品；系统单次最多导入 1000 条，请拆分后回导。",
             ]
         )
     meta.sheet_state = "hidden"
     workbook.active = workbook.sheetnames.index(IMPORT_SHEET_NAME)
     output = io.BytesIO()
     workbook.save(output)
-    return output.getvalue(), len(products), package_count
+    return output.getvalue(), product_count, package_count
 
 
 def _write_safe_row(sheet, row_number, headers, values):
@@ -231,7 +293,7 @@ def _write_safe_row(sheet, row_number, headers, values):
             "箱码",
             "箱码对应包装单位编码",
             "外部系统商品编码",
-            "包装单位编码",
+            "包装单位",
             "包装条码",
         }:
             cell.number_format = "@"
@@ -251,8 +313,6 @@ def _product_values(product):
         "商品名称": product.name,
         "分类": product.category.full_path if product.category_id else None,
         "基本单位": product.base_uom.name,
-        "基本单位类型": product.base_uom.get_kind_display(),
-        "单位小数位数": product.base_uom.decimal_places,
         "基本单位数量": None,
         "规格": product.spec,
         "品牌编码": product.brand.code if product.brand_id else None,
@@ -286,11 +346,11 @@ def _product_values(product):
     }
 
 
-def _package_values(product, package):
+def _package_values(product, package, *, unit_label):
     return {
         "货主编码": product.owner.code,
         "货主商品编码": product.code,
-        "包装单位编码": package.uom.code,
+        "包装单位": unit_label,
         "包装换算数量": package.qty_in_base,
         "包装条码": package.barcode,
         "长cm": package.length_cm,

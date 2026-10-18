@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "run_id": "0995978f20634622b29e8436393eb7fa",
+  "status": "PASS",
+  "owner": {
+    "pid": 358,
+    "pid_namespace": "pid:[4026532638]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "402200",
+    "state": "R"
+  },
+  "command": [
+    "npm",
+    "run",
+    "build:h5"
+  ],
+  "cwd": "/tmp/wms-release-20261005-aohudxd1/frontend-source/sales-miniapp",
+  "child": {
+    "pid": 359,
+    "pid_namespace": "pid:[4026532638]",
+    "boot_id": "b5929dbe-f48e-4058-bb05-34417dad1e61",
+    "start_time": "402213",
+    "state": "R"
+  },
+  "cleanup_complete": true,
+  "process_group": 359,
+  "exit_code": 0,
+  "cleaned_containers": [],
+  "duration_seconds": 20.022
+}

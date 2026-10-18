@@ -1,8 +1,8 @@
 # WMS 角色操作手册索引
 
-**版本：** V2.1
+**版本：** V2.2
 
-**业务基线：** 2026-09-07 当前工作区代码
+**业务基线：** 2026-10-17 当前工作区代码
 
 请按实际岗位领取对应手册。每本分册均包含该角色所需的登录、安全、状态、操作、异常处理和检查表，可独立使用。
 
@@ -31,6 +31,8 @@
 专项指南：
 
 - [POS 使用手册](../pos_user_manual.md)
+- [PDA 退货出库使用手册](../pda-return-user-guide.md)
+- [Android 移动端使用手册](../android-user-guide.md)
 - [商城小程序使用教程](../sales-miniapp-user-guide.md)
 - [计费服务技术讲解](../billing_services_guide.md)
 

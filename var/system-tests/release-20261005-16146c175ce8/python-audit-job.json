@@ -1,0 +1,1 @@
+{"name": "python-audit", "command": ["/wms/.venv/bin/python", "-m", "pip_audit", "-r", "requirements/prod.txt", "--no-deps", "--disable-pip", "--format=json", "--output", "/tmp/wms-release-20261005-aohudxd1/python-audit.json"], "timeout": 600}
