@@ -1,3 +1,6 @@
+import { makeInventoryAuth, inventoryCapabilities } from './inventoryAuth'
+const inventoryAuth = makeInventoryAuth()
+vi.mock('@/store/auth', () => ({useAuth: () => inventoryAuth}))
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -9,6 +12,8 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@dcloudio/uni-app', () => ({
+  onShow: vi.fn(),
+  onHide: vi.fn(),
   onReachBottom: (callback) => { mocks.onReachBottom = callback },
   onPullDownRefresh: (callback) => { mocks.onPullDownRefresh = callback },
   onUnload: (callback) => { mocks.onUnload = callback },
@@ -56,8 +61,9 @@ function render() {
 
 describe('实时库存分页组件', () => {
   beforeEach(() => {
+    inventoryAuth.capabilities=inventoryCapabilities()
     mocks.inventorySummary.mockReset()
-    vi.stubGlobal('uni', { stopPullDownRefresh: vi.fn() })
+    vi.stubGlobal('uni', { stopPullDownRefresh: vi.fn(), navigateTo: vi.fn() })
   })
 
   it('第一页加载 50 条并通过触底完整合并第二页', async () => {
@@ -143,6 +149,16 @@ describe('实时库存分页组件', () => {
     await mocks.onReachBottom()
     expect(mocks.inventorySummary).toHaveBeenCalledOnce()
     expect(wrapper.text()).toContain('已加载全部库存')
+  })
+
+  it('商品名称进入对应库存明细且保留列表', async () => {
+    mocks.inventorySummary.mockResolvedValueOnce({ count: 1, next: null, results: [inventory(7)] })
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.find('[role="link"]').trigger('click')
+    expect(uni.navigateTo).toHaveBeenCalledWith({ url: '/pages/inventory/detail?id=7' })
+    expect(wrapper.findAll('.table-row')).toHaveLength(1)
+    expect(mocks.inventorySummary).toHaveBeenCalledOnce()
   })
 
   it('新搜索完成后丢弃旧搜索响应', async () => {

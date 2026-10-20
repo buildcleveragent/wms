@@ -10,6 +10,8 @@ OWNER_ACCESS = CLIENT_ROOT / "utils" / "ownerAccess.js"
 PAGES_MANIFEST = CLIENT_ROOT / "pages.json"
 
 EXPECTED_FEATURE_ROUTES = {
+    "/pages/inventory/alerts", "/pages/inbound/index",
+    "/pages/customers/addresses", "/pages/returns/index",
     "/pages/warehouses/select",
     "/pages/orders/index",
     "/pages/orders/import_drop_ship",

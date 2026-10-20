@@ -215,6 +215,7 @@ def move_fifo(
     inventory_transaction_id=None,
     occurred_at=None,
     by_user=None,
+    layer_ids=None,
 ):
     """Move the oldest matching positions while preserving layer age and cost."""
 
@@ -237,6 +238,9 @@ def move_fifo(
     )
     if from_container_id is not None:
         positions = positions.filter(container_id=from_container_id)
+    if layer_ids is not None:
+        # Receipt putaway moves its proven layers, including their original expiry and cost.
+        positions = positions.filter(layer_id__in=layer_ids)
     available = sum((row.remaining_qty for row in positions), Decimal("0"))
     if available < remaining:
         raise ValueError(

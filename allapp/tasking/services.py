@@ -11,7 +11,7 @@ from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.db import IntegrityError, transaction
-from django.db.models import F, OneToOneRel
+from django.db.models import F, OneToOneRel, Q
 from django.utils import timezone
 from django.utils.module_loading import import_string
 from rest_framework.exceptions import ValidationError
@@ -44,155 +44,88 @@ def adjust_pick_line_qty(
     by_user=None,
     client_seq: str | None = None,
 ) -> dict:
-    user_id = getattr(by_user, "id", None)
-
-    # 1) 锁任务，校验类型 & 状态
-    task_scope = WmsTask.objects.get(
-        id=task_id,
-        task_type=WmsTask.TaskType.PICK,
-    )
+    """Append a signed pick adjustment with the allocated stock's real dimensions."""
+    from decimal import InvalidOperation
+    from django.core.exceptions import ValidationError as DjangoValidationError
     from allapp.outbound.services import validate_pick_task_sale_mini_payment
+    from .pick_inventory import manual_pick_sources, validate_manual_pick_scans
 
+    task_scope = WmsTask.objects.get(id=task_id, task_type=WmsTask.TaskType.PICK)
     validate_pick_task_sale_mini_payment(task_scope)
     task = WmsTask.objects.select_for_update().get(pk=task_scope.pk)
-    if task.status in ("CANCELLED", "COMPLETED"):
-        raise ValidationError("任务当前状态不允许调整拣货数。")
-    if task.status not in ("RELEASED", "IN_PROGRESS", "RESERVED"):
-        raise ValidationError(f"状态 {task.status} 不允许调整拣货数。")
     validate_pick_task_sale_mini_payment(task)
-
-    # 2) 锁这一行
     line = WmsTaskLine.objects.select_for_update().get(id=line_id, task_id=task.id)
-
-    final_qty_dec = _q3(final_qty)
-    cur_qty = _q3(line.qty_done or 0)
-    diff = final_qty_dec - cur_qty
-
-    # 没变化就直接返回
-    if diff == 0:
-        return {
-            "idempotent": True,
-            "line_id": line.id,
-            "qty_done": line.qty_done,
-        }
-
-    # 3) 超量控制（沿用你 _allow_overdone 规则）
-    if not _allow_overdone(task.task_type):
-        plan = _q3(line.qty_plan or 0)
-        if final_qty_dec > plan:
-            raise ValidationError(
-                f"{task.task_type} 不允许超量：目标 {final_qty_dec} > 计划 {plan}"
-            )
-
-    # 4) 确定库位（跟 scan_task 保持一致优先级）
-    # loc_id = (
-    #     getattr(line, "from_location_id", None)
-    #     or getattr(line, "to_location_id", None)
-    # )
-
-    loc_id = line.from_location_id
-
-    # 5) 生成一个 fp，用 client_seq 做幂等（可复用 _compute_fp）
-    fp = _compute_fp(
-        task.id,
-        f"MANUAL-{line.id}",  # 这里不是真条码，用一个稳定前缀即可
-        diff,
-        loc_id,
-        user_id,
-        client_seq,
-    )
-
-    # if TaskScanLog.objects.filter(task_id=task.id, fp=fp).exists():
-    #     return {"idempotent": True, "line_id": line.id, "qty_done": line.qty_done}
-
-    # ✅ 硬幂等：先插入 TaskScanLog（依赖 ux_tscan_fp 唯一约束）
-    # 插入成功才继续做快照/改 qty_done；插入失败说明重复请求/重试
     try:
+        target = _q3(final_qty)
+        if not target.is_finite() or target < 0 or target > line.qty_plan:
+            raise ValidationError("拣货数量必须在零与计划数量之间。")
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValidationError("拣货数量必须为有效数字。") from exc
+
+    # A retry is identified by the request, not by a delta that changes after success.
+    fp = None
+    if client_seq:
+        fp = hashlib.sha256(
+            json.dumps(
+                ["manual-pick", task.pk, line.pk, getattr(by_user, "pk", None), str(client_seq)]
+            ).encode()
+        ).hexdigest()
+        previous = TaskScanLog.objects.filter(task=task, fp=fp).first()
+        if previous:
+            if previous.qty_base != target:
+                raise ValidationError("同一请求标识不能用于不同的拣货数量。")
+            return {"idempotent": True, "line_id": line.pk, "qty_done": line.qty_done}
+    if (
+        task.status not in ("RELEASED", "IN_PROGRESS", "RESERVED")
+        or task.posting_status == "POSTED"
+    ):
+        raise ValidationError("任务当前状态不允许调整拣货数。")
+    diff = target - _q3(line.qty_done or 0)
+    if not diff:
+        return {"idempotent": True, "line_id": line.pk, "qty_done": line.qty_done}
+    try:
+        source = manual_pick_sources(task, [line])[line.pk]
+        if source.serial_no and target not in (0, 1):
+            raise ValidationError("序列号商品的拣货数量必须为 0 或 1。")
+        if not fp:
+            import uuid
+
+            fp = uuid.uuid4().hex
         scan = TaskScanLog.objects.create(
-            scan_snapshot_rev=0,  # 先占位，保存快照后再回填
+            scan_snapshot_rev=line.scan_snapshot_rev,
             owner_id=task.owner_id,
             warehouse_id=task.warehouse_id,
-            task_id=task.id,
-            task_line_id=line.id,
+            task=task,
+            task_line=line,
             product_id=line.product_id,
-            location_id=loc_id,
+            location_id=source.location_id,
             method="MANUAL",
             source="PDA",
-            by_user_id=user_id,
-            barcode="",  # 手工调整无条码
-            label_key=None,
-            code_type=None,
-            uom_code=None,
-            pack_qty=None,
-            qty_aux=None,
-            qty_base=None,
-            qty_base_delta=diff,  # 关键：调整量（可正可负）
-            lot_no=None,
-            mfg_date=None,
-            exp_date=None,
-            container_no=None,
+            by_user=by_user,
+            barcode="",
+            qty_base=target,
+            qty_base_delta=diff,
+            lot_no=source.batch_no,
+            mfg_date=source.production_date,
+            exp_date=source.expiry_date,
+            serial_no=source.serial_no,
             fp=fp,
             reason_code="MANUAL_ADJUST",
             remark="PDA 手工调整拣货数量",
         )
-    except IntegrityError:
-        # fp 重复：同一次请求重试/连点 -> 幂等返回（不重复生效）
-        if TaskScanLog.objects.filter(fp=fp).exists():
-            line.refresh_from_db(fields=["qty_done"])
-            return {"idempotent": True, "line_id": line.id, "qty_done": line.qty_done}
-        raise
-
-    # 6) PICK 一律使用 from_location。TaskScanLog 是追加式作业事实，
-    # 不能再调用 save_receiving_snapshot() 覆盖之前的扫描。
-    if not line.from_location_id:
-        raise ValidationError("拣货行缺少 from_location_id，无法调整拣货数。")
-
-    ctx, ctx_text = build_log_payload(task=task, user=by_user)
-    logger.info(
-        "tasking.pick.manual_adjust.appended %s line_id=%s scan_id=%s diff=%s",
-        ctx_text,
-        line.id,
-        scan.id,
-        diff,
-        extra=ctx,
-    )
-
-    #
-    # scan = TaskScanLog.objects.create(
-    #     scan_snapshot_rev=rev,
-    #     owner_id=task.owner_id,
-    #     task_id=task.id,
-    #     task_line_id=line.id,
-    #     product_id=line.product_id,
-    #     location_id=loc_id,
-    #     method="MANUAL",      # ✅ 新的枚举值，不是新字段
-    #     source="PDA",
-    #     by_user_id=user_id,
-    #     barcode="",           # 无条码
-    #     label_key=None,
-    #     code_type=None,
-    #     uom_code=None,
-    #     pack_qty=None,
-    #     qty_base_delta=diff,  # 关键：调整量，可以是正/负
-    #     qty_base=None,
-    #     lot_no=None,
-    #     mfg_date=None,
-    #     exp_date=None,
-    #     fp=fp,
-    #     reason_code="MANUAL_ADJUST",  # 用现有 reason_code 字段
-    #     remark="PDA 手工调整拣货数量",
-    # )
-
-    # 7) 更新行完成数；调整日志本身的 diff 就是可回放事实。
-    line.qty_done = final_qty_dec
-    line.save(update_fields=["qty_done"])
-
-    return {
-        "idempotent": False,
-        "line_id": line.id,
-        "qty_done": line.qty_done,
-        # "scan_id": scan.id,
-    }
+        line.qty_done = target
+        line.save(update_fields=["qty_done"])
+        history = list(
+            TaskScanLog.objects.filter(
+                task_line=line,
+                status="OK",
+                posted_at__isnull=True,
+            ).select_related("task_line")
+        )
+        validate_manual_pick_scans(task, history)
+    except DjangoValidationError as exc:
+        raise ValidationError(exc.messages) from exc
+    return {"idempotent": False, "line_id": line.pk, "qty_done": line.qty_done, "scan_id": scan.pk}
 
 
 def build_scan_fp(
@@ -239,6 +172,17 @@ def _run_posting_handler(task_id: int, by_user=None, note: str = "过账"):
     """
 
     task = WmsTask.objects.get(id=task_id)
+    from allapp.inbound.models import InboundReceipt
+
+    arrival = (
+        InboundReceipt.objects.filter(Q(task_id=task_id) | Q(putaway_task_id=task_id))
+        .exclude(stage="LEGACY")
+        .first()
+    )
+    if arrival:
+        from allapp.inbound.arrival_posting import post_batch
+
+        return post_batch(by_user, arrival.pk, putaway=arrival.putaway_task_id == task_id)
     if task.task_type == WmsTask.TaskType.PICK:
         from allapp.outbound.services import validate_pick_task_sale_mini_payment
 
@@ -407,6 +351,17 @@ def _replay_pick_scan(task, barcode, qty, location_id, user_id, client_seq):
     return None
 
 
+def _reject_arrival_legacy_write(task_id):
+    from allapp.inbound.models import InboundReceipt
+
+    if (
+        InboundReceipt.objects.filter(Q(task_id=task_id) | Q(putaway_task_id=task_id))
+        .exclude(stage="LEGACY")
+        .exists()
+    ):
+        raise ValidationError("此任务使用分批验收，请通过 PDA 入库管理或批次作业处理。")
+
+
 @transaction.atomic
 def scan_task(
     task_id: int,
@@ -419,6 +374,7 @@ def scan_task(
     user_id = getattr(by_user, "id", None)
 
     # 1) 锁任务并校验状态
+    _reject_arrival_legacy_write(task_id)
     task_scope = WmsTask.objects.get(id=task_id)
     if task_scope.task_type == WmsTask.TaskType.PICK:
         from allapp.outbound.services import validate_pick_task_sale_mini_payment
@@ -569,7 +525,7 @@ def scan_task(
     )
     if transfer_line_ids is not None:
         line_qs = line_qs.filter(pk__in=transfer_line_ids)
-    if task.task_type == WmsTask.TaskType.PICK:
+    if task.task_type in {WmsTask.TaskType.PICK, WmsTask.TaskType.PACK, WmsTask.TaskType.DISPATCH}:
         line_qs = line_qs.filter(qty_done__lt=F("qty_plan")).exclude(
             status__in=[WmsTaskLine.Status.COMPLETED, WmsTaskLine.Status.CANCELLED]
         )
@@ -751,7 +707,9 @@ def post_scan(*, request, task):
     )
 
 
-def claim_task(task, *, by_user, allowed_wh_ids: set[int], to_status: str | None = None):
+def claim_task(
+    task, *, by_user, allowed_wh_ids: set[int], to_status: str | None = None, arrival=False
+):
     """
     抢单：为 task 创建/激活一条未完成的 TaskAssignment（同一个任务同一时刻仅允许一个“未完成”指派）。
     - 仅允许在用户所属仓库范围内
@@ -760,6 +718,8 @@ def claim_task(task, *, by_user, allowed_wh_ids: set[int], to_status: str | None
     """
     from allapp.tasking.models import TaskAssignment, WmsTask  # 避免循环依赖
 
+    if not arrival:
+        _reject_arrival_legacy_write(task.pk)
     if task.warehouse_id not in allowed_wh_ids:
         raise ValidationError("非本人所属仓库，不能认领。")
     if task.status != WmsTask.Status.RELEASED:
@@ -786,13 +746,8 @@ def claim_task(task, *, by_user, allowed_wh_ids: set[int], to_status: str | None
         if has_active:
             raise ValidationError("任务已被他人认领。")
 
-        # 为本用户拿/建一条记录并激活
-        ta, _ = TaskAssignment.objects.get_or_create(task=task, assignee=by_user)
-        if ta.finished_at is not None:
-            ta.finished_at = None
-        if ta.accepted_at is None:
-            ta.accepted_at = timezone.now()
-        ta.save(update_fields=["accepted_at", "finished_at"])
+        # Each claim is a new assignment; finished assignment history remains immutable.
+        ta = TaskAssignment.objects.create(task=locked, assignee=by_user, accepted_at=timezone.now())
 
         # 认领后的目标状态：ASSIGNED（如无需变更，可置 None）
         if to_status:
@@ -809,6 +764,7 @@ def unclaim_task(task, *, by_user, allowed_wh_ids: set[int], back_to_status: str
     """
     from allapp.tasking.models import TaskAssignment
 
+    _reject_arrival_legacy_write(task.pk)
     if task.warehouse_id not in allowed_wh_ids:
         raise ValidationError("非本人所属仓库，不能放回。")
 
@@ -871,6 +827,124 @@ def _request_actor(request):
     return user if getattr(user, "is_authenticated", False) else None
 
 
+def _assignment_task(request, task):
+    from allapp.accounts.access import AccessScope
+    from rest_framework.exceptions import APIException, NotFound, PermissionDenied
+
+    actor = _request_actor(request)
+    scope = AccessScope.for_user(actor)
+    if (
+        not actor
+        or not scope.is_valid
+        or (
+            not actor.is_superuser
+            and (
+                "warehouse_manager" not in scope.roles
+                or not actor.has_perm("tasking.taskconfirm_as_wh_manager")
+            )
+        )
+    ):
+        raise PermissionDenied("需要仓库管理及任务指派权限。")
+    if not scope.allows(owner_id=task.owner_id, warehouse_id=task.warehouse_id):
+        raise NotFound()
+    _reject_arrival_legacy_write(task.pk)
+    locked = WmsTask.objects.select_for_update().get(pk=task.pk)
+    if not scope.allows(owner_id=locked.owner_id, warehouse_id=locked.warehouse_id):
+        raise NotFound()
+    if (
+        locked.status != WmsTask.Status.RELEASED
+        or locked.posting_status
+        not in {
+            WmsTask.PostingStatus.NOT_READY,
+            WmsTask.PostingStatus.PENDING,
+            WmsTask.PostingStatus.NONE,
+        }
+        or locked.started_at is not None
+        or locked.lines.exclude(qty_done=0).exists()
+        or TaskScanLog.objects.filter(task=locked).exists()
+        or TaskStatusLog.objects.filter(task=locked, new_status="IN_PROGRESS").exists()
+    ):
+        exc = APIException("只有已发布且尚未开始作业的任务可以指派或撤销指派。")
+        exc.status_code = 409
+        raise exc
+    return locked
+
+
+@transaction.atomic
+def assign_task(*, request, task, assignee):
+    """Assign a released task without changing its operational state or history."""
+    from allapp.accounts.access import AccessScope
+    from allapp.accounts.audit import record_audit_event
+    from rest_framework.exceptions import APIException
+
+    locked = _assignment_task(request, task)
+    scope = AccessScope.for_user(assignee)
+    if (
+        not assignee.is_active
+        or not scope.is_valid
+        or "warehouse_operator" not in scope.roles
+        or locked.warehouse_id not in scope.warehouse_ids
+        or not assignee.has_perm("tasking.claim_task_as_wh_operator")
+    ):
+        raise ValidationError("只能指派给本仓有效且具有作业权限的操作员。")
+    active = list(
+        TaskAssignment.objects.select_for_update().filter(
+            task=locked,
+            finished_at__isnull=True,
+        )
+    )
+    if active:
+        if all(row.assignee_id == assignee.pk for row in active):
+            return active[0]
+        exc = APIException("任务已有其他有效指派，请先撤销原指派。")
+        exc.status_code = 409
+        raise exc
+    assignment = TaskAssignment.objects.create(
+        task=locked,
+        assignee=assignee,
+        accepted_at=timezone.now(),
+    )
+    record_audit_event(
+        action="tasking.assign",
+        module="tasking",
+        request=request,
+        obj=locked,
+        after={"assignee_id": assignee.pk, "assignment_id": assignment.pk},
+    )
+    return assignment
+
+
+@transaction.atomic
+def unassign_task(*, request, task, assignee=None):
+    """Close active assignments; never erase or reactivate previous assignments."""
+    from allapp.accounts.audit import record_audit_event
+
+    locked = _assignment_task(request, task)
+    active = TaskAssignment.objects.select_for_update().filter(
+        task=locked,
+        finished_at__isnull=True,
+    )
+    if assignee is not None:
+        active = active.filter(assignee=assignee)
+    ids = list(active.values_list("id", flat=True))
+    if ids:
+        from django.db.models.functions import Coalesce
+
+        # Older unaccepted assignments still need a valid interval for the existing
+        # database constraint. Their recorded creation time is the known lower bound.
+        active.update(accepted_at=Coalesce("accepted_at", "created_at"), finished_at=timezone.now())
+        record_audit_event(
+            action="tasking.unassign",
+            module="tasking",
+            request=request,
+            obj=locked,
+            before={"assignment_ids": ids},
+            after={"finished": True},
+            metadata={"missing_accepted_at_basis": "assignment.created_at"},
+        )
+    return ids
+
+
 @transaction.atomic
 def task_release(*, request, task):
     """Release a task through the shared validation and assignment service."""
@@ -889,9 +963,11 @@ def task_release(*, request, task):
 
 
 @transaction.atomic
-def task_start(*, request, task):
+def task_start(*, request, task, arrival=False):
     """Start a released task and keep its status transition auditable."""
 
+    if not arrival:
+        _reject_arrival_legacy_write(task.pk)
     if task.task_type == WmsTask.TaskType.COUNT:
         raise ValidationError("盘点任务必须通过盘点专用认领和录入接口执行。")
 
@@ -927,6 +1003,7 @@ def task_start(*, request, task):
 
 @transaction.atomic
 def task_complete(*, request, task):
+    _reject_arrival_legacy_write(task.pk)
     """Complete PACK/DISPATCH work and advance the standard outbound chain."""
 
     locked = WmsTask.objects.select_for_update().get(pk=task.pk)
@@ -1020,6 +1097,7 @@ def task_complete(*, request, task):
 
 @transaction.atomic
 def task_cancel(*, request, task, reason=None):
+    _reject_arrival_legacy_write(task.pk)
     """Cancel only untouched tasks; outbound PICK cancellation goes via its order."""
 
     if task.task_type == WmsTask.TaskType.COUNT:
@@ -1471,7 +1549,9 @@ def _as_wh_mgr(user):
 
 
 @transaction.atomic
-def approve_task(task_id, *, by_user, note=""):
+def approve_task(task_id, *, by_user, note="", arrival=False):
+    if not arrival:
+        _reject_arrival_legacy_write(task_id)
     if not _as_wh_mgr(by_user):
         raise PermissionDenied("无审核权限。")
 
@@ -1502,6 +1582,7 @@ def approve_task(task_id, *, by_user, note=""):
 
 @transaction.atomic
 def reject_task(task_id, *, by_user, note=""):
+    _reject_arrival_legacy_write(task_id)
     if not _as_wh_mgr(by_user):
         raise PermissionDenied("无审核权限。")
     t = WmsTask.objects.select_for_update().get(pk=task_id)
@@ -1579,6 +1660,7 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
             .select_related("task", "product")
             .get(pk=task_line_id)
         )
+        _reject_arrival_legacy_write(tl.task_id)
         ctx, ctx_text = build_log_payload(task=tl.task, user=operator)
         logger.info(
             "tasking.snapshot.save.begin %s line_id=%s items=%s source=%s",

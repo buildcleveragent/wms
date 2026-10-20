@@ -127,6 +127,14 @@ class InboundOrder(BaseModel):
         "交货方式", max_length=15, choices=DELIVERY_METHOD_CHOICES, blank=True, null=True
     )
     eta = models.DateTimeField("预计到货时间", blank=True, null=True)
+    receipt_mode = models.CharField(max_length=10, default="LEGACY", editable=False)
+    version = models.PositiveIntegerField(default=1, editable=False)
+    delivery_contact = models.CharField("送货联系人", max_length=80, blank=True, default="")
+    delivery_phone = models.CharField("送货电话", max_length=40, blank=True, default="")
+    vehicle_no = models.CharField("送货车牌", max_length=30, blank=True, default="")
+    delivery_note = models.CharField("送货说明", max_length=500, blank=True, default="")
+    workflow_reason = models.CharField(max_length=500, blank=True, default="", editable=False)
+    receiving_closed_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     submit_status = models.CharField(
         "提交状态", max_length=15, choices=SUBMIT_CHOICES, default="DRAFT", db_index=True
@@ -169,6 +177,7 @@ class InboundOrder(BaseModel):
             ("approve_as_owner_manager", "货主管理员可执行审核动作"),
             ("approve_as_wh_manager", "仓库管理员可执行确认动作"),
             ("submit_as_owner_buyers", "货主业务员可提交入库订单"),
+            ("manage_arrival", "PDA 管理入库申请和分批验收"),
         ]
         indexes = [
             models.Index(
@@ -465,6 +474,15 @@ class InboundOrderLine(BaseModel):
         return Decimal(ratio)
 
     def clean(self):
+        if (
+            self.order_id
+            and self.order.receipt_mode == "BATCH"
+            and self.order.submit_status == "SUBMITTED"
+        ):
+            keys = ("product_id", "base_qty", "base_price", "base_uom", "note", "is_deleted")
+            old = type(self).objects.filter(pk=self.pk).values(*keys).first() if self.pk else None
+            if old is None or any(getattr(self, key) != old[key] for key in keys):
+                raise ValidationError("已提交的入库申请明细已冻结，请先撤回或退回修改。")
         errors = {}
 
         # 去空格
@@ -573,6 +591,26 @@ class InboundOrderLine(BaseModel):
 
 # ===================== 入库单（收货凭证） =====================
 class InboundReceipt(BaseModel):
+    task = models.OneToOneField(
+        "tasking.WmsTask",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="arrival_receipt",
+    )
+    putaway_task = models.OneToOneField(
+        "tasking.WmsTask",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="arrival_putaway_receipt",
+    )
+    stage = models.CharField(max_length=16, default="LEGACY", editable=False)
+    version = models.PositiveIntegerField(default=1, editable=False)
+    submitted_at = models.DateTimeField(null=True, blank=True, editable=False)
+    posted_at = models.DateTimeField(null=True, blank=True, editable=False)
+    posting_error = models.BooleanField(default=False, editable=False)
+    reason = models.CharField(max_length=500, blank=True, default="")
     SUBMIT_CHOICES = [("SUBMITTED", "提交"), ("DRAFT", "未提交")]
     INBOUND_TYPE_CHOICES = [
         ("PURCHASE", "采购入库"),
@@ -722,6 +760,33 @@ class InboundReceiptLine(BaseModel):
     - SKU 条码也仅保存“快照”：sku_barcode
     """
 
+    order_line = models.ForeignKey(
+        "inbound.InboundOrderLine",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="arrival_lines",
+    )
+    task_line = models.OneToOneField(
+        "tasking.WmsTaskLine",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="arrival_receipt_line",
+    )
+    qty_ok = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    qty_damage = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    qty_reject = models.DecimalField(max_digits=14, decimal_places=3, default=0)
+    serial_no = models.CharField(max_length=64, blank=True, default="")
+    damage_reason = models.CharField(max_length=500, blank=True, default="")
+    reject_reason = models.CharField(max_length=500, blank=True, default="")
+    inventory_transaction = models.OneToOneField(
+        "inventory.InventoryTransaction",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="arrival_receipt_line",
+    )
     receipt = models.ForeignKey(
         "InboundReceipt",
         verbose_name="入库单",
@@ -792,6 +857,14 @@ class InboundReceiptLine(BaseModel):
         ordering = ["receipt_id", "line_no"]
         constraints = [
             # 同单内行号唯一 & 行号>=1
+            models.CheckConstraint(
+                condition=Q(qty_ok__gte=0, qty_damage__gte=0, qty_reject__gte=0),
+                name="arrival_qty_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=Q(order_line__isnull=True) | Q(base_qty=F("qty_ok") + F("qty_damage")),
+                name="arrival_accepted_qty",
+            ),
             models.UniqueConstraint(fields=["receipt", "line_no"], name="uq_rcpt_line_no"),
             models.CheckConstraint(condition=Q(line_no__gte=1), name="ck_rcpt_lineno_pos"),
             # 数量/单价非负
@@ -881,6 +954,19 @@ class InboundReceiptLine(BaseModel):
                 type(self)
                 .objects.filter(pk=self.pk)
                 .values(
+                    "base_qty",
+                    "qty_ok",
+                    "qty_damage",
+                    "qty_reject",
+                    "location_id",
+                    "order_line_id",
+                    "product_id",
+                    "serial_no",
+                    "lot_no",
+                    "mfg_date",
+                    "exp_date",
+                    "damage_reason",
+                    "reject_reason",
                     "pack_barcode",
                     "product_code",
                     "product_name",
@@ -1457,3 +1543,16 @@ class NoOrderReceiveRequest(models.Model):
                 name="ix_no_order_recv_wh_time",
             ),
         ]
+
+
+# Register the independent customer return domain with Django's model registry.
+from .arrival_models import ArrivalCommand, ArrivalEvent, ArrivalPhoto  # noqa: E402,F401
+from .customer_return_models import (  # noqa: E402,F401
+    CustomerReturn,
+    CustomerReturnCommand,
+    CustomerReturnEvent,
+    CustomerReturnLine,
+    CustomerReturnPhoto,
+    CustomerReturnReceipt,
+    CustomerReturnReceiptLine,
+)

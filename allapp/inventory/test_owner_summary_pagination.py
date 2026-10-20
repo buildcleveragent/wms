@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.contrib.auth.models import Permission
 from rest_framework.test import APIClient
 
 from allapp.accounts.models import UserRoleScope
@@ -25,6 +26,7 @@ class OwnerInventorySummaryPaginationTests(TestCase):
             owner=cls.owner,
         )
 
+        cls.user.user_permissions.add(Permission.objects.get(codename="access_owner_sales"))
         for index in range(55):
             Product.objects.create(
                 owner=cls.owner,

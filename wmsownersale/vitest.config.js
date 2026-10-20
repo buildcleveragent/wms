@@ -13,6 +13,7 @@ export default defineConfig({
     },
   })],
   resolve: {
+    dedupe: ["vue"],
     alias: {
       '@': fileURLToPath(new URL('.', import.meta.url)),
     },

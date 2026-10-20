@@ -13,6 +13,7 @@ from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.locations.models import Warehouse
 from allapp.outbound import services as outbound_services
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+from allapp.outbound.testing import stock_for_owner_order
 from allapp.outbound.views import OutboundOrderViewSet
 from allapp.products.models import Product, ProductUom
 
@@ -85,6 +86,8 @@ class OwnerOrderReviewStateMachineTests(TestCase):
             price=Decimal("10.00"),
             min_price=Decimal("1.00"),
         )
+        stock_for_owner_order(self.product, self.warehouse)
+        stock_for_owner_order(self.product, self.other_warehouse)
         self.factory = APIRequestFactory()
 
     def make_order(self, *, submit="SUBMITTED", approval="OWNER_PENDING"):
@@ -251,7 +254,8 @@ class OwnerOrderReviewStateMachineTests(TestCase):
             pk=order.pk
         )
         self.assertEqual(catalog_order.catalog_total_qty, Decimal("2.000"))
-        self.assertEqual(catalog_order.catalog_total_amount, Decimal("18.0000"))
+        from allapp.outbound.serializers import OutboundOrderReadSerializer
+        self.assertEqual(OutboundOrderReadSerializer(catalog_order).data["total_amount"], Decimal("18.00"))
 
         active_line_id = order.lines.get().id
         repeated = self.call(

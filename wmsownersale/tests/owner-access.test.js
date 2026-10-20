@@ -40,3 +40,12 @@ describe('货主端共享权限矩阵', () => {
     expect(keys(disabled.reports)).not.toContain('operations')
   })
 })
+
+it('inventory menu requires an explicit server capability and fails closed', () => {
+  const disabled=buildOwnerMenu({roles:['owner_salesperson']})
+  expect(keys(disabled.reports)).not.toContain('inventory')
+  expect(keys(disabled.reports)).not.toContain('inventory_alerts')
+  const enabled=buildOwnerMenu({roles:['owner_salesperson'],capabilities:{can_view_owner_inventory:true}})
+  expect(keys(enabled.reports)).toContain('inventory')
+  expect(keys(enabled.reports)).toContain('inventory_alerts')
+})

@@ -14,14 +14,19 @@
           <view class="font-bold">{{ order.order_no || ('订单#' + order.id) }}</view>
           <view class="badge">¥ {{ money(order.total_amount) }}</view>
         </view>
-        <view class="text-gray">提交状态：{{ order.submit_status_name || order.submit_status || '—' }}</view>
-        <view class="text-gray">审核状态：{{ order.approval_status_name || order.approval_status || '—' }}</view>
+        <view class="text-gray">提交状态：{{ orderStatus(order, 'submit_status') }}</view>
+        <view class="text-gray">审核状态：{{ orderStatus(order, 'approval_status') }}</view>
         <view v-if="order.owner_reject_reason" class="reject-reason">最近退回原因：{{ order.owner_reject_reason }}</view>
         <button v-if="order.can_edit" class="btn edit-btn" :disabled="loadingEdit" @click="editOrder">
           {{ loadingEdit ? '正在加载…' : '修改订单' }}
         </button>
+        <button v-if="order.can_reorder" class="btn edit-btn" @click="reorderOrder">再次下单</button>
       </view>
 
+    </template>
+    <view v-if="orderId > 0" class="card"><button @click="openReturns(true)">申请退货</button><button @click="openReturns(false)">关联退货记录</button></view>
+    <OrderProgress v-if="orderId > 0" :order-id="orderId" :active="pageVisible" />
+    <template v-if="order && !loading && !error">
       <view class="card detail-card">
         <view class="section-title">订单信息</view>
         <view class="field"><text>货主</text><text>{{ order.owner_name || '—' }}</text></view>
@@ -57,17 +62,22 @@
 </template>
 
 <script setup>
+import { orderStatus } from '@/utils/orderStatus'
 import { ref } from 'vue'
-import { onLoad, onShow, onUnload } from '@dcloudio/uni-app'
+import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
+import OrderProgress from '@/components/OrderProgress.vue'
 import { api } from '@/utils/request'
 import { useAuth } from '@/store/auth'
 import { useCart } from '@/store/cart'
 
+function openReturns(apply) { uni.navigateTo({url: '/pages/returns/index?' + (apply ? 'order_id=' : 'filter_order=') + orderId.value}) }
+function reorderOrder() { uni.navigateTo({url: '/pages/orders/reorder?id=' + orderId.value}) }
 const order = ref(null)
 const loading = ref(false)
 const loadingEdit = ref(false)
 const error = ref('')
 const orderId = ref(0)
+const pageVisible = ref(true)
 const firstShow = ref(true)
 const auth = useAuth()
 const cart = useCart()
@@ -76,6 +86,7 @@ let alive = true
 let requestGeneration = 0
 
 onUnload(() => {
+  pageVisible.value = false
   alive = false
   requestGeneration += 1
 })
@@ -162,12 +173,15 @@ onLoad((query) => {
 })
 
 onShow(() => {
+  pageVisible.value = true
   if (firstShow.value) {
     firstShow.value = false
     return
   }
   loadOrder()
 })
+
+onHide(() => { pageVisible.value = false })
 </script>
 
 <style scoped>

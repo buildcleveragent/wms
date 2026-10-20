@@ -7,6 +7,9 @@ export function ownerAccess({ roles = [], capabilities = {} } = {}) {
     salesperson,
     manager,
     ownerRole,
+    canViewInventory: ownerRole && capabilities?.can_view_owner_inventory === true,
+    canExportInventory: ownerRole && capabilities?.can_export_owner_inventory === true,
+    canManageInventoryAlerts: manager && capabilities?.can_manage_owner_inventory_alerts === true,
     canViewOperations: ownerRole && Boolean(capabilities?.can_view_owner_operations),
   }
 }
@@ -29,8 +32,16 @@ export function buildOwnerMenu(context = {}) {
       { key: 'order_list', text: '访销订单', path: '/pages/orders/index', emoji: '📄', color: 'blue' },
     )
     reports.push(
-      { key: 'inventory', text: '实时库存', path: '/pages/inventory/index', emoji: '📦', color: 'green' },
+      { key: 'customer_addresses', text: '客户地址簿', path: '/pages/customers/addresses', emoji: '📍', color: 'blue' },
+      { key: 'arrival', text: '到货预报／入库申请', path: '/pages/inbound/index', emoji: '📥', color: 'blue' },
+      { key: 'customer_returns', text: '退货与异常', path: '/pages/returns/index', emoji: '↩️', color: 'orange' },
       { key: 'sales_reports', text: '销售报表', path: '/pages/reports/index', navigation: 'tab', emoji: '🗂️', color: 'blue' },
+    )
+  }
+  if (access.canViewInventory) {
+    reports.push(
+      { key: 'inventory', text: '实时库存', path: '/pages/inventory/index', emoji: '📦', color: 'green' },
+      { key: 'inventory_alerts', text: '库存预警', path: '/pages/inventory/alerts', emoji: '🔔', color: 'orange' },
     )
   }
   if (access.canViewOperations) {

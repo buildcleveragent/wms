@@ -15,6 +15,7 @@ from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.locations.models import Warehouse
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+from allapp.outbound.testing import stock_for_owner_order
 from allapp.outbound.views import OutboundOrderViewSet, ProductViewSet, WarehouseViewSet
 from allapp.products.models import Product, ProductUom
 
@@ -109,6 +110,7 @@ class OwnerWarehouseOrderApiTests(TestCase):
             base_uom=self.uom,
             price="10.00",
         )
+        stock_for_owner_order(self.product, self.warehouse)
         self.factory = APIRequestFactory()
 
     def _create(self, warehouse_id_marker=...):

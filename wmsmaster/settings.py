@@ -536,6 +536,9 @@ if IS_PRODUCTION and CORS_ALLOW_ALL_ORIGINS:
 # Media文件配置
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+# Return evidence is never served by the public media route.
+PRIVATE_ARRIVAL_ROOT = env("PRIVATE_ARRIVAL_ROOT", default=str(BASE_DIR / "private_arrivals"))
+PRIVATE_RETURN_ROOT = env("PRIVATE_RETURN_ROOT", default=str(BASE_DIR / "private_returns"))
 
 # 可选：调整上传文件大小限制
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB

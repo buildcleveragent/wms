@@ -477,13 +477,15 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):
         """指派任务给用户（body: {"user_id": <id>}）。"""
+        from rest_framework import serializers
+
         task = self.get_object()
         self._gate_task_action(
             task,
             permission=_TASKING_MANAGER_PERMISSION,
             required_role=_TASKING_MANAGER_ROLE,
         )
-        user_id = request.data.get("user_id")
+        user_id = serializers.IntegerField(min_value=1).run_validation(request.data.get("user_id"))
         assignee = get_object_or_404(User, pk=user_id)
         res = self._svc_or_501("assign_task", request=request, task=task, assignee=assignee)
         if isinstance(res, Response):
@@ -492,6 +494,8 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="unassign")
     def unassign(self, request, pk=None):
+        from rest_framework import serializers
+
         task = self.get_object()
         self._gate_task_action(
             task,
@@ -499,6 +503,8 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
             required_role=_TASKING_MANAGER_ROLE,
         )
         user_id = request.data.get("user_id")
+        if user_id is not None:
+            user_id = serializers.IntegerField(min_value=1).run_validation(user_id)
         assignee = get_object_or_404(User, pk=user_id) if user_id else None
         res = self._svc_or_501("unassign_task", request=request, task=task, assignee=assignee)
         if isinstance(res, Response):

@@ -340,6 +340,42 @@ class OwnerCustomerBinding(BaseModel):
         return super().save(*args, **kwargs)
 
 
+class OwnerCustomerAddress(BaseModel):
+    """Owner-portal addresses, independent of customers' private mini-program addresses."""
+
+    binding = models.ForeignKey(
+        OwnerCustomerBinding, on_delete=models.PROTECT, related_name="shipping_addresses"
+    )
+    private_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="private_owner_shipping_addresses",
+        verbose_name="散客地址所属业务员",
+    )
+    contact = models.CharField("收件人", max_length=80)
+    phone = models.CharField("联系电话", max_length=40)
+    address = models.CharField("完整收货地址", max_length=200)
+    is_default = models.BooleanField("默认地址", default=False)
+    version = models.PositiveIntegerField("版本", default=1)
+    request_key = models.CharField(max_length=64, null=True, blank=True)
+
+    class Meta:
+        verbose_name = "货主客户收货地址"
+        verbose_name_plural = verbose_name
+        indexes = [
+            models.Index(
+                fields=["binding", "private_user", "is_default"], name="ix_owner_address_scope"
+            )
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["binding", "request_key"], name="uq_owner_address_request"
+            )
+        ]
+
+
 class Employee(BaseModel):
     code = models.CharField("职员代码", max_length=30, unique=True, db_index=True)
     name = models.CharField("姓名", max_length=50, db_index=True)

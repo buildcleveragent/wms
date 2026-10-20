@@ -2,6 +2,8 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .arrival_api import ArrivalOrderViewSet
+from .customer_return_api import CustomerReturnViewSet
 from .excel_views import (
     NoOrderReceiveImportConfirmApi,
     NoOrderReceiveImportPreviewApi,
@@ -10,10 +12,11 @@ from .excel_views import (
 from .export_print import ReceiveTaskPrintView
 from .export_views import export_receive_task_excel
 from .gs1_views import Gs1LookupApi, Gs1OptionsApi, Gs1QuickCreateApi
-from .views import InboundOrderViewSet, InboundTaskViewSet, ReceiveGoodsWithoutOrder
+from .views import InboundTaskViewSet, ReceiveGoodsWithoutOrder
 
 router = DefaultRouter()
-router.register(r"orders", InboundOrderViewSet, basename="inbound-order")
+router.register("customer-returns", CustomerReturnViewSet, basename="customer-return")
+router.register(r"orders", ArrivalOrderViewSet, basename="inbound-order")
 router.register(r"pda/tasks", InboundTaskViewSet, basename="inbound-pda-task")
 
 urlpatterns = [

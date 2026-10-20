@@ -248,6 +248,10 @@ def close_inbound_order_after_putaway(putaway_task, *, by_user=None):
     )
     if not order or order.is_closed:
         return order
+    if order.receipt_mode == "BATCH":
+        from .arrival_services import update_completion
+        update_completion(order)
+        return order
     order.is_closed = True
     order.close_reason = "上架完成并已过账"
     order.updated_by = by_user
@@ -318,7 +322,7 @@ def create_receive_task_draft(order, by_user=None):
     ReceiveTaskExtra.objects.create(task=task)
 
     # 4) 任务行：按订单行生成计划数量（这里使用 base_qty；如有“已收数量”，你可自行扣减）
-    for orderline in order.lines.select_related("product").all():
+    for orderline in order.lines.select_related("product").filter(is_deleted=False):
         plan = orderline.base_qty or 0
         if plan and plan > 0:
             taskline = WmsTaskLine.objects.create(

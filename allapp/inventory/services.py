@@ -151,12 +151,9 @@ def _lock_and_validate_scans(
         raise ValidationError("过账扫描包含重复记录。")
 
     # 与标准处理器保持相同锁序：task -> journal -> task lines -> scans。
-    valid_line_ids = set(
-        WmsTaskLine.objects.select_for_update()
-        .filter(task_id=task.id)
-        .order_by("id")
-        .values_list("id", flat=True)
-    )
+    valid_lines = {line.pk: line for line in WmsTaskLine.objects.select_for_update()
+                   .filter(task_id=task.id).order_by("id")}
+    valid_line_ids = set(valid_lines)
     locked_scans = list(
         TaskScanLog.objects.select_for_update()
         .filter(pk__in=scan_ids, task_id=task.id)
@@ -168,6 +165,8 @@ def _lock_and_validate_scans(
     status_ok = getattr(TaskScanLog.ScanStatus, "OK", "OK")
     rejected = getattr(TaskScanLog.ReviewStatus, "REJECTED", "REJECTED")
     for scan in locked_scans:
+        if scan.task_line_id in valid_lines:
+            scan._state.fields_cache["task_line"] = valid_lines[scan.task_line_id]
         if scan.task_id != task.id:
             raise ValidationError(f"扫描 {scan.id} 不属于任务 {task.id}。")
         if scan.owner_id != task.owner_id or scan.warehouse_id != task.warehouse_id:
@@ -730,6 +729,8 @@ def _qty_for_type(task_type: str, scan: TaskScanLog) -> Decimal:
     if t in ("PICK", "DISPATCH", "LOAD"):
         if q == 0:
             raise ValidationError(f"{task_type} 需要非零 qty_base_delta")
+        if t == "PICK" and scan.method == "MANUAL":
+            return _q4(-q)
         if q > 0:
             q = -q
         return _q4(q)
@@ -913,6 +914,10 @@ def _group_receive_like(
     agg: Dict[_AggKey, Decimal] = defaultdict(lambda: Decimal("0"))
     is_pos_pick = _is_pos_pick(task, tx_type)
     source_details = _pos_scan_source_details(task, scans) if is_pos_pick else {}
+    manual_sources = {}
+    if qty_task_type == "PICK" and not is_pos_pick:
+        from allapp.tasking.pick_inventory import validate_manual_pick_scans
+        manual_sources, _ = validate_manual_pick_scans(task, scans)
 
     for s in scans:
         # 1) 商品：scan.product → line.product
@@ -1007,6 +1012,14 @@ def _group_receive_like(
             serial_no = source_detail.serial_no
             task_line_id = line.id
             source_detail_id = source_detail.id
+        elif s.task_line_id in manual_sources:
+            source_detail = manual_sources[s.task_line_id]
+            batch_value = source_detail.batch_no
+            production_date = source_detail.production_date
+            expiry_date = source_detail.expiry_date
+            serial_no = source_detail.serial_no
+            task_line_id = None
+            source_detail_id = None
         else:
             batch_value = getattr(s, "lot_no", "")
             production_date = getattr(s, "mfg_date", None)
@@ -1789,6 +1802,16 @@ def post_task(
         len(scans),
         extra=pj_ctx,
     )
+
+    if task_type == "PICK" and (task.source_app or "").lower() != "pos":
+        from allapp.tasking.pick_inventory import validate_manual_pick_scans
+        from allapp.accounts.audit import record_audit_event
+        _, recovered = validate_manual_pick_scans(task, scans)
+        if recovered:
+            record_audit_event(
+                action="inventory.pick.resolve_manual_source", module="inventory",
+                user=user, obj=task, metadata={"resolved_scans": recovered},
+            )
 
     # 4) 聚合 + 入账
     affected = 0

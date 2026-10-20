@@ -1,14 +1,17 @@
 from django.db.models import Q, Sum
 from rest_framework import mixins, viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 from allapp.products.identifier_lookup import product_search_q
 
 from .models import InventoryDetail, InventorySummary
+from .owner_permissions import owner_inventory_scope
 from .serializers import (
     CompanyInventoryAllSummarySerializer,
     CompanyInventoryWarehouseSummarySerializer,
@@ -37,27 +40,45 @@ class OwnerInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericViewSe
     serializer_class = OwnerInventorySummarySerializer
     pagination_class = DefaultPagination
 
+    @action(detail=False, methods=["get"], url_path="export")
+    def export_summary(self, request):
+        from .owner_export import export_summary
+
+        return export_summary(request)
+
+    @action(detail=True, methods=["get"], url_path="detail/export")
+    def export_detail(self, request, pk=None):
+        from .owner_export import export_detail
+
+        owner_inventory_scope(request.user)
+        return export_detail(request, self.get_object())
+
+    @action(detail=True, methods=["get"], url_path="detail")
+    def inventory_detail(self, request, pk=None):
+        from .owner_detail import InventoryFilters, build_inventory_detail
+
+        summary = self.get_object()
+        filters = InventoryFilters(data=request.query_params)
+        filters.is_valid(raise_exception=True)
+        return Response(build_inventory_detail(summary, filters.validated_data))
+
+    @action(detail=True, methods=["get"])
+    def transactions(self, request, pk=None):
+        from .owner_detail import InventoryFilters, build_inventory_transactions
+
+        summary = self.get_object()
+        filters = InventoryFilters(data=request.query_params)
+        filters.is_valid(raise_exception=True)
+        return Response(build_inventory_transactions(summary, filters.validated_data, request.user))
+
     def get_queryset(self):
         user = self.request.user
-        scope = AccessScope.for_user(user)
-        qs = scope.filter_queryset(
-            InventorySummary.objects.filter(is_active=True),
-            owner_field="owner_id",
-            warehouse_field=None,
-        )
-        if scope.is_global:
-            owner_id = (self.request.query_params.get("owner_id") or "").strip()
-            if not owner_id:
-                return InventorySummary.objects.none()
-            qs = qs.filter(owner_id=owner_id)
+        scope = owner_inventory_scope(user)
+        qs = InventorySummary.objects.filter(is_active=True, owner_id=scope.single_owner_id)
 
-        qs = qs.select_related("product").order_by("product_id")
-
+        from .owner_export import filter_summary
         q = (self.request.query_params.get("search") or "").strip()
-        if q:
-            qs = qs.filter(product_search_q(q))
-
-        return qs
+        return filter_summary(qs, q)
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)

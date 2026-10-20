@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   onLoad: null,
   products: vi.fn(),
+  frequentProducts: vi.fn(),
   cart: {
     customer: { id: 1, name: '客户' },
     warehouse_id: 2,
@@ -18,8 +19,10 @@ const mocks = vi.hoisted(() => ({
   auth: { user: { id: 1, owner_id: 3 }, ensureAuth: vi.fn() },
 }))
 
-vi.mock('@dcloudio/uni-app', () => ({ onLoad: (callback) => { mocks.onLoad = callback } }))
-vi.mock('@/utils/request', () => ({ api: { products: mocks.products } }))
+vi.mock('@dcloudio/uni-app', () => ({
+  onLoad: (callback) => { mocks.onLoad = callback }, onShow: vi.fn(), onHide: vi.fn(),
+}))
+vi.mock('@/utils/request', () => ({ api: { products: mocks.products, frequentProducts: mocks.frequentProducts } }))
 vi.mock('@/utils/pricing', () => ({
   enforceMinimumPrice: () => ({ valid: true }),
   initializePriceGuard: (item) => item,
@@ -66,6 +69,7 @@ function render() {
 describe('商品搜索分页组件', () => {
   beforeEach(() => {
     mocks.products.mockReset()
+    mocks.frequentProducts.mockReset()
     mocks.cart.items = []
     vi.stubGlobal('uni', {
       showToast: vi.fn(),
@@ -111,11 +115,28 @@ describe('商品搜索分页组件', () => {
     await wrapper.find('input').setValue('new')
     await wrapper.findAll('button')[0].trigger('click')
     await flushPromises()
+    expect(mocks.products).toHaveBeenCalledTimes(1)
     oldSearch.resolve({ results: [product(1, '旧结果')], next: null })
     await flushPromises()
 
     expect(wrapper.text()).toContain('新结果')
     expect(wrapper.text()).not.toContain('旧结果')
+  })
+
+  it('常购使用当前客户和仓库，零库存商品显示且不能加入', async () => {
+    mocks.products.mockResolvedValue({ results: [], next: null })
+    mocks.frequentProducts.mockResolvedValue({ results: [{
+      ...product(5, '客户常买商品'), purchase_count: 4, last_order_date: '2026-10-19',
+      available: '0.0000', can_add: false, issues: [],
+    }], next: null })
+    const wrapper = render()
+    await mocks.onLoad(); await flushPromises()
+    await wrapper.findAll('button').find(node => node.text() === '客户常购').trigger('click')
+    await flushPromises()
+    expect(mocks.frequentProducts).toHaveBeenCalledWith(1, {warehouse_id:2,page:1,search:''})
+    expect(wrapper.text()).toContain('订购 4 次')
+    expect(wrapper.text()).toContain('当前仓库没有可用库存')
+    expect(wrapper.find('.add-button').attributes('disabled')).toBeDefined()
   })
 
   it('首次加载失败显示错误并可重试', async () => {

@@ -14,6 +14,8 @@ from allapp.core.models import BaseModel, DocSequence
 from allapp.outbound import services as ob_services
 from allapp.outbound.enums import PricingStatus
 
+from .amounts import line_amount as calculate_line_amount
+
 
 # ===================== 订单:出库订单 =====================
 class OutboundOrder(BaseModel):
@@ -365,6 +367,16 @@ class OutboundOrder(BaseModel):
         self.refresh_from_db()
         return approved
 
+    @classmethod
+    def approval_status_label(cls, status):
+        """Describe approval independently of later warehouse fulfillment."""
+        if status == "WHS_APPROVED":
+            return "仓库管理员已确认"
+        return dict(cls.APPROVAL_CHOICES).get(status, status)
+
+    def get_approval_status_display(self):
+        return self.approval_status_label(self.approval_status)
+
     def _calculate_final_order_amount(self):
         """
         用订单行 base_qty * base_price 计算最终订单金额，
@@ -386,7 +398,7 @@ class OutboundOrder(BaseModel):
             if price < 0 or (price == 0 and not allow_zero_price):
                 raise ValidationError(f"订单行 {line.line_no} 的价格未填写或不合法。")
 
-            line_amount = (qty * price).quantize(Decimal("0.01"))
+            line_amount = calculate_line_amount(qty, price)
             line.final_line_amount = line_amount
             line.save(update_fields=["final_line_amount", "updated_at"])
             total += line_amount
@@ -414,7 +426,7 @@ class OutboundOrder(BaseModel):
             if price < 0 or (price == 0 and not allow_zero_price):
                 raise ValidationError(f"订单行 {line.line_no} 的价格未填写或不合法。")
 
-            line_total = (qty * price).quantize(Decimal("0.01"))
+            line_total = calculate_line_amount(qty, price)
 
             if line.final_line_amount != line_total:
                 type(line).objects.filter(pk=line.pk).update(
@@ -644,7 +656,9 @@ class OutboundOrderLine(BaseModel):
             order = Order.objects.select_for_update().get(pk=self.order_id)
             if not order.next_line_no:
                 last = (
-                    type(self).objects.filter(order_id=order.id).aggregate(m=Max("line_no"))["m"]
+                    # Historical draft revisions retain deleted rows under the
+                    # same unique (order, line_no) constraint.
+                    type(self).all_objects.filter(order_id=order.id).aggregate(m=Max("line_no"))["m"]
                     or 0
                 )
                 order.next_line_no = (last // 10 + 1) * 10 or 10

@@ -4,12 +4,14 @@
     <view class="item-main">
       <view class="item-heading">
         <view class="product-name">{{ item.name || item.sku || item.product_id }}</view>
-        <button class="remove-button" @click="$emit('remove')">删除</button>
+        <button class="remove-button" :disabled="disabled" @click="$emit('remove')">删除</button>
       </view>
       <text v-if="item.sku" class="meta">SKU：{{ item.sku }}</text>
       <text v-if="item.spec" class="meta">规格：{{ item.spec }}</text>
       <text v-if="item.gtin" class="meta">条码：{{ item.gtin }}</text>
-      <text class="meta">可用库存：{{ item.available ?? '—' }} {{ item.base_unit_name }}</text>
+      <text class="meta">可用库存：{{ item.available ?? '—' }} {{ item.current_base_unit_name || item.base_unit_name }}</text>
+      <text v-if="item.historical_price != null" class="meta">历史价：¥{{ item.historical_price }} · 当前参考价：¥{{ item.orig_price ?? '未配置' }}</text>
+      <text v-for="issue in item.validation_issues || item.issues || []" :key="issue" class="field-error">{{ issue }}</text>
 
       <view class="editor-grid">
         <view class="field">
@@ -23,6 +25,7 @@
             type="digit"
             inputmode="decimal"
             :value="item.price"
+            :disabled="disabled"
             @input="$emit('price-input', $event.detail.value)"
             @blur="$emit('price-commit')"
           />
@@ -34,6 +37,7 @@
             type="digit"
             inputmode="decimal"
             :value="quantityDraft"
+            :disabled="disabled"
             @input="$emit('quantity-input', $event.detail.value)"
             @blur="$emit('quantity-commit')"
           />
@@ -54,6 +58,7 @@ defineProps({
   quantityDraft: { type: String, required: true },
   quantityError: { type: String, default: '' },
   amount: { type: String, default: '0.00' },
+  disabled: { type: Boolean, default: false },
 })
 
 defineEmits(['remove', 'price-input', 'price-commit', 'quantity-input', 'quantity-commit'])

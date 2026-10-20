@@ -173,6 +173,13 @@ class OutboundWarehouseScopeTests(TestCase):
         self.assertEqual(task.lines.first().qty_plan, Decimal("3.000"))
 
     def test_outbound_order_api_submit_reject_and_cancel_status_transitions(self):
+        from allapp.baseinfo.models import OwnerWarehouseBinding
+        OwnerWarehouseBinding.objects.get_or_create(owner=self.owner, warehouse=self.warehouse)
+        self.customer.salesperson = self.api_user
+        self.customer.save()
+        InventoryDetail.objects.create(
+            owner=self.owner, product=self.product, location=self.location, onhand_qty=10,
+        )
         order = OutboundOrder.objects.create(
             owner=self.owner,
             customer=self.customer,
@@ -181,6 +188,8 @@ class OutboundWarehouseScopeTests(TestCase):
             submit_status="DRAFT",
             approval_status="OWNER_PENDING",
         )
+
+        order.lines.create(product=self.product, base_qty=3, base_price=10, base_uom=self.base_uom)
 
         submit_view = OutboundOrderViewSet.as_view({"post": "submit"})
         response = submit_view(

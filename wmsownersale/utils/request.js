@@ -116,6 +116,17 @@ function buildQuery(params = {}) {
     .join('&')
 }
 
+function decodeDownloadError(data) {
+  if (Object.prototype.toString.call(data) !== '[object ArrayBuffer]') return data
+  try {
+    const bytes = new Uint8Array(data)
+    let text = ''
+    if (typeof TextDecoder !== 'undefined') text = new TextDecoder().decode(bytes)
+    else text = decodeURIComponent(Array.from(bytes, byte => '%' + byte.toString(16).padStart(2, '0')).join(''))
+    return JSON.parse(text)
+  } catch { return { detail: '下载失败，请重试' } }
+}
+
 function rawRequest(opts = {}, access = '') {
   return new Promise((resolve, reject) => {
     uni.request({
@@ -131,7 +142,7 @@ function rawRequest(opts = {}, access = '') {
 
       success: (res) => {
         const statusCode = res.statusCode
-        const data = res.data
+        const data = opts.responseType === 'arraybuffer' && !(statusCode >= 200 && statusCode < 300) ? decodeDownloadError(res.data) : res.data
 
         if (statusCode >= 200 && statusCode < 300) {
           resolve(data)
@@ -248,35 +259,71 @@ export async function fetchAllPages(fetchPage, params = {}) {
   }
 }
 
-function rawDownload(url, access) {
+function rawDownload(url, access, excel = false) {
   return new Promise((resolve, reject) => {
     uni.downloadFile({
       url: BASE_URL + url,
       header: access ? { Authorization: `Bearer ${access}` } : {},
       success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.tempFilePath)
-        else reject({ statusCode: res.statusCode, message: '下载失败' })
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          if (!excel) {resolve(res.tempFilePath);return}
+          if (!uni.getFileSystemManager) {reject({message:'当前环境不支持校验下载文件'});return}
+          uni.getFileSystemManager().readFile({filePath:res.tempFilePath,
+            success(result) {
+              const bytes=new Uint8Array(result.data)
+              if(bytes[0]===0x50 && bytes[1]===0x4b) resolve(res.tempFilePath)
+              else reject({message:getFriendlyMessage(decodeDownloadError(result.data),'导出响应不是有效的 Excel 文件')})
+            }, fail:()=>reject({message:'下载文件读取失败，请重试'}),
+          })
+        }
+        else {
+          const fallback = { statusCode: res.statusCode, message: '下载失败' }
+          if (!res.tempFilePath || !uni.getFileSystemManager) { reject(fallback); return }
+          uni.getFileSystemManager().readFile({filePath: res.tempFilePath, encoding: 'utf8',
+            success(result) { let data; try {data=JSON.parse(result.data)} catch {data=null} reject({...fallback, message:getFriendlyMessage(data, '下载失败')}) },
+            fail() {reject(fallback)},
+          })
+        }
       },
       fail: (error) => reject({ statusCode: 0, message: '网络异常，请稍后重试', data: error }),
     })
   })
 }
 
-export async function downloadAuthenticatedFile(url, filename) {
+export async function downloadAuthenticatedFile(url, filename, { isCurrent = () => true, excel = false } = {}) {
+  const epoch = sessionEpoch
+  const current = () => { checkSession(epoch); return isCurrent() }
+
   // #ifdef H5
   const data = await request({ url, responseType: 'arraybuffer', silent: true })
-  const blob = new Blob([data])
+  if (!current()) return false
+  if (excel) {
+    const bytes = new Uint8Array(data)
+    if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) throw {message: getFriendlyMessage(decodeDownloadError(data), '导出响应不是有效的 Excel 文件')}
+  }
+  const blob = new Blob([data], {type: excel ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/octet-stream'})
   const objectUrl = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = objectUrl
   anchor.download = filename
   anchor.click()
-  URL.revokeObjectURL(objectUrl)
-  return
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+  return true
   // #endif
 
   // #ifndef H5
-  const path = await recoverRequest(access => rawDownload(url, access))
+  const discard = path => uni.getFileSystemManager?.().unlink({filePath:path,fail:()=>{}})
+  const path = await recoverRequest(async access => {
+    const result = await rawDownload(url, access, excel)
+    try { checkSession(epoch) } catch (error) { discard(result); throw error }
+    return result
+  })
+  let valid
+  try { valid = current() } catch (error) { discard(path); throw error }
+  if (!valid) {
+    discard(path)
+    return false
+  }
   return new Promise((resolve, reject) => {
     uni.openDocument({ filePath: path, showMenu: true, success: resolve, fail: reject })
   })
@@ -420,6 +467,18 @@ export const api = {
     })
   },
 
+  inventoryAlerts: () => request({ url: '/api/inventory/owner-alerts/', silent: true }),
+  inventoryAlertItems: (params = {}) => request({ url: '/api/inventory/owner-alerts/items/', data: params, silent: true }),
+  inventoryAlertSettings: (productId) => request({ url: productId ? `/api/inventory/owner-alerts/products/${productId}/settings/` : '/api/inventory/owner-alerts/settings/', silent: true }),
+  saveInventoryAlertSettings: (productId, data) => request({ url: productId ? `/api/inventory/owner-alerts/products/${productId}/settings/` : '/api/inventory/owner-alerts/settings/', method: 'PATCH', data, silent: true }),
+  inventoryAlertProducts: (params = {}) => request({ url: '/api/inventory/owner-alerts/products/', data: params, silent: true }),
+  inventoryDetail: (id, params = {}) => request({
+    url: `/api/inventory/summary/${id}/detail/?${buildQuery(params)}`, silent: true,
+  }),
+  inventoryTransactions: (id, params = {}) => request({
+    url: `/api/inventory/summary/${id}/transactions/?${buildQuery(params)}`, silent: true,
+  }),
+
   billingPeriods: (params = {}) => {
     const qs = buildQuery(params)
     return request({
@@ -491,14 +550,14 @@ export const api = {
   // 2) api.orders({ approval_status:'OWNER_PENDING', page:1 })
   orders: (arg1 = '', page = 1) => {
     if (arg1 && typeof arg1 === 'object' && !Array.isArray(arg1)) {
-      const qs = buildQuery(arg1)
+      const qs = buildQuery({ ...arg1, owner_portal: 1 })
       const url = qs ? `/api/outbound/orders/?${qs}` : `/api/outbound/orders/`
       return request({ url })
     }
 
     const q = arg1 || ''
     return request({
-      url: `/api/outbound/orders?search=${encodeURIComponent(q)}&page=${page}`,
+      url: `/api/outbound/orders/?owner_portal=1&search=${encodeURIComponent(q)}&page=${page}`,
     })
   },
 
@@ -507,8 +566,41 @@ export const api = {
       url: `/api/outbound/orders/${id}/`,
     }),
 
+  orderProgress: (id) => request({
+    url: `/api/outbound/orders/${id}/progress/`,
+    silent: true,
+  }),
+
+  ownerWorkbench: () => request({ url: '/api/outbound/owner-workbench/', silent: true }),
+  ownerWorkbenchItems: (params = {}) => request({
+    url: `/api/outbound/owner-workbench/items/?${buildQuery(params)}`, silent: true,
+  }),
+
   orderEditContext: (id) =>
     request({ url: `/api/outbound/orders/${id}/edit-context/` }),
+
+  reorderContext: (id, params = {}) => request({
+    url: `/api/outbound/orders/${id}/reorder-context/?${buildQuery(params)}`, silent: true,
+  }),
+  validateOrder: payload => request({
+    url: '/api/outbound/orders/validate/', method: 'POST', data: payload, silent: true,
+  }),
+  frequentProducts: (customerId, params = {}) => request({
+    url: `/api/outbound/customers/${customerId}/frequent-products/?${buildQuery(params)}`,
+    silent: true,
+  }),
+  customerAddresses: customerId => request({
+    url: `/api/outbound/customers/${customerId}/addresses/`, silent: true,
+  }),
+  saveCustomerAddress: (customerId, addressId, data, key) => request({
+    url: `/api/outbound/customers/${customerId}/addresses/${addressId ? `${addressId}/` : ''}`,
+    method: addressId ? 'PATCH' : 'POST', data, silent: true,
+    header: key ? { 'Idempotency-Key': key } : {},
+  }),
+  removeCustomerAddress: (customerId, addressId, version) => request({
+    url: `/api/outbound/customers/${customerId}/addresses/${addressId}/`,
+    method: 'DELETE', data: { version }, silent: true,
+  }),
 
   updateOutboundOrder: (id, payload) =>
     request({
@@ -517,10 +609,12 @@ export const api = {
       data: payload,
     }),
 
-  submitOutboundOrder: (id) =>
+  submitOutboundOrder: (id, payload = {}, key) =>
     request({
       url: `/api/outbound/orders/${id}/submit/`,
       method: 'POST',
+      data: payload,
+      header: key ? { 'Idempotency-Key': key } : {},
     }),
 
   pendingOrders: (page = 1, search = '') =>
@@ -561,4 +655,17 @@ export const api = {
       },
     })
   },
+}
+
+// Authenticated evidence never uses a public media URL.
+export async function returnPhotoURL(url) {
+  // #ifdef H5
+  const bytes = await request({url,responseType:'arraybuffer',silent:true})
+  const source = URL.createObjectURL(new Blob([bytes],{type:'image/jpeg'}))
+  setTimeout(()=>URL.revokeObjectURL(source),60000)
+  return source
+  // #endif
+  // #ifndef H5
+  return recoverRequest(access => rawDownload(url, access))
+  // #endif
 }

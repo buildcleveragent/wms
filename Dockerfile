@@ -30,7 +30,8 @@ RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/* \
 WORKDIR /app
 COPY --chown=wms:wms . /app
 RUN chmod +x /app/docker/start-web.sh /app/docker/start-scheduler.sh /app/docker/release.sh
-RUN install -d -o 10001 -g 10001 -m 0755 /app/staticfiles /app/media
+RUN install -d -o 10001 -g 10001 -m 0755 /app/staticfiles /app/media \
+    && install -d -o 10001 -g 10001 -m 0700 /app/private_returns /app/private_arrivals
 USER wms
 EXPOSE 8000
 CMD ["/app/docker/start-web.sh"]

@@ -15,6 +15,63 @@ from allapp.core.models import BaseModel
 
 
 # =========================A. 现存量 =========================
+class OwnerInventoryAlertPolicy(models.Model):
+    """Owner defaults; absent rows use the same defaults without writing on reads."""
+
+    owner = models.OneToOneField("baseinfo.Owner", on_delete=models.PROTECT)
+    low_enabled = models.BooleanField(default=True)
+    expiry_enabled = models.BooleanField(default=True)
+    slow_enabled = models.BooleanField(default=True)
+    expiry_days = models.PositiveSmallIntegerField(default=30)
+    slow_days = models.PositiveSmallIntegerField(default=90)
+    revision = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(expiry_days__range=(1, 3650)), name="alert_expiry_days"
+            ),
+            models.CheckConstraint(condition=Q(slow_days__range=(1, 3650)), name="alert_slow_days"),
+        ]
+
+
+class ProductInventoryAlertPolicy(models.Model):
+    """Product overrides; low-stock quantity remains Product.min_stock."""
+
+    product = models.OneToOneField("products.Product", on_delete=models.PROTECT)
+    expiry_mode = models.CharField(
+        max_length=8,
+        default="inherit",
+        choices=[("inherit", "继承"), ("custom", "自定义"), ("off", "关闭")],
+    )
+    expiry_days = models.PositiveSmallIntegerField(null=True, blank=True)
+    slow_mode = models.CharField(
+        max_length=8,
+        default="inherit",
+        choices=[("inherit", "继承"), ("custom", "自定义"), ("off", "关闭")],
+    )
+    slow_days = models.PositiveSmallIntegerField(null=True, blank=True)
+    revision = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(expiry_mode="custom", expiry_days__isnull=False, expiry_days__range=(1, 3650))
+                    | Q(expiry_mode__in=("inherit", "off"), expiry_days__isnull=True)
+                ),
+                name="alert_product_expiry",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(slow_mode="custom", slow_days__isnull=False, slow_days__range=(1, 3650))
+                    | Q(slow_mode__in=("inherit", "off"), slow_days__isnull=True)
+                ),
+                name="alert_product_slow",
+            ),
+        ]
+
+
 class InventoryDetail(BaseModel):
     """
     现存量快照（Django 5.x + MySQL 8.0.43）

@@ -20,6 +20,8 @@ from allapp.products.excel_import import can_import_products, can_receive_produc
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])  # 确保用户已认证
 def profile_view(request):
+    from allapp.inventory.owner_permissions import inventory_capabilities
+
     user = request.user  # 获取当前用户
     access_scope = AccessScope.for_user(user)
     perms = sorted(list(user.get_all_permissions()))  # 获取用户的所有权限
@@ -80,6 +82,7 @@ def profile_view(request):
             },
             "perms": perms,
             "capabilities": {
+                **inventory_capabilities(user),
                 "can_process_pda_return": can_process_return(user),
                 "can_process_warehouse_assisted_outbound": can_process_warehouse_assisted_outbound,
                 "can_view_warehouse_operations": is_warehouse_role

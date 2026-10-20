@@ -1,0 +1,11 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>{{ record.number }} · {{ record.status_label }}</h1>
+<p>原订单：{{ record.original_order_no }} · 客户：{{ record.customer }} · 仓库：{{ record.warehouse }}</p>
+<table><thead><tr><th>商品</th><th>单位</th><th>申请量</th><th>可再售</th><th>残次</th><th>拒收</th><th>待到货</th><th>原因及照片</th></tr></thead><tbody>
+{% for line in record.lines %}<tr><td>{{ line.product_name }}</td><td>{{ line.unit }}</td><td>{{ line.qty }}</td><td>{{ line.qty_ok }}</td><td>{{ line.qty_damage }}</td><td>{{ line.qty_reject }}</td><td>{{ line.pending_qty }}</td><td>{{ line.reason }}{% for photo in line.photos %}<a href="{{ photo.url }}" target="_blank" rel="noopener"> 照片 {{ photo.id }}</a>{% endfor %}</td></tr>{% endfor %}
+</tbody></table>
+{% if action_choices %}<form method="post" style="margin:24px 0">{% csrf_token %}<input type="hidden" name="version" value="{{ record.version }}"><label>处理说明（退回或关闭必填） <textarea name="reason" maxlength="500"></textarea></label><p>{% for code,label in action_choices %}<button type="submit" name="operation" value="{{ code }}">{{ label }}</button> {% endfor %}</p></form>{% endif %}
+<h2>分批验收</h2>{% for receipt in record.receipts %}<h3>{{ receipt.created_at }} · {{ receipt.actor }} · {{ receipt.posting_label }}</h3>{% for row in receipt.lines %}<p>{{ row.product_name }} · 单位：{{ row.unit }} · 合格 {{ row.qty_ok }} / 残次 {{ row.qty_damage }} / 拒收 {{ row.qty_reject }} · 批次 {{ row.batch_no }} · 库位 {{ row.location }} · {{ row.reason }} {% for photo in row.photos %}<a href="{{ photo.url }}" target="_blank" rel="noopener">验收照片 {{ photo.id }}</a>{% endfor %}</p>{% endfor %}{% empty %}<p>尚未验收</p>{% endfor %}
+<h2>处理记录</h2>{% for item in record.events %}<p>{{ item.occurred_at }} · {{ item.actor }} · {{ item.label }} · {{ item.reason }}</p>{% endfor %}
+{% endblock %}

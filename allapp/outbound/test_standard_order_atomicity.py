@@ -11,6 +11,7 @@ from allapp.accounts.models import AuditEvent, UserRoleScope
 from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.locations.models import Warehouse
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+from allapp.outbound.testing import stock_for_owner_order
 from allapp.outbound.views import OutboundOrderViewSet
 from allapp.products.models import Product, ProductUom
 
@@ -58,6 +59,7 @@ class StandardOrderAtomicityTests(TestCase):
             batch_control=False,
             expiry_control=False,
         )
+        stock_for_owner_order(self.product, self.warehouse)
         self.factory = APIRequestFactory()
         self.view = OutboundOrderViewSet.as_view({"post": "create"})
         self.key_number = 0
@@ -87,9 +89,7 @@ class StandardOrderAtomicityTests(TestCase):
     def assert_no_creation_side_effects(self):
         self.assertFalse(OutboundOrder.objects.exists())
         self.assertFalse(OutboundOrderLine.objects.exists())
-        self.assertFalse(
-            AuditEvent.objects.filter(action="outbound.order.create").exists()
-        )
+        self.assertFalse(AuditEvent.objects.filter(action="outbound.order.create").exists())
 
     def test_zero_negative_and_oversized_quantities_are_rejected_before_write(self):
         for qty in ("0.000", "-0.001", "123456789012.000"):
@@ -119,6 +119,25 @@ class StandardOrderAtomicityTests(TestCase):
 
         self.assertEqual(response.status_code, 400, response.data)
         self.assertIn("qty", response.data["items"][1])
+        self.assert_no_creation_side_effects()
+
+    def test_empty_order_is_rejected_without_creation_side_effects(self):
+        response = self.create([])
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assert_no_creation_side_effects()
+
+    def test_insufficient_inventory_is_rejected_without_creation_side_effects(self):
+        from allapp.inventory.models import InventoryDetail
+
+        InventoryDetail.objects.filter(
+            owner=self.owner, product=self.product, warehouse=self.warehouse
+        ).update(onhand_qty=0, available_qty=0)
+        response = self.create([self.item()])
+
+        self.assertEqual(response.status_code, 409, response.data)
+        self.assertEqual(response.data["code"], "checkout_changed")
+        self.assertIn("缺口", response.data["validation"]["items"][0]["issues"][0])
         self.assert_no_creation_side_effects()
 
     def test_second_line_model_validation_error_is_mapped_and_rolls_back(self):

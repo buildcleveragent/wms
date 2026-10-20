@@ -60,6 +60,17 @@ export const useAuth = defineStore('auth', {
     },
   },
   actions: {
+    revokeInventoryAccess() {
+      this.capabilities = {...this.capabilities,
+        can_view_owner_inventory: false,
+        can_export_owner_inventory: false,
+        can_manage_owner_inventory_alerts: false,
+      }
+      if (this.user) {
+        this.user = {...this.user, capabilities: this.capabilities}
+        persistUser(this.user)
+      }
+    },
     ensureAuth() {
       this.access = storedAccess()
       this.refresh = getRefreshToken()

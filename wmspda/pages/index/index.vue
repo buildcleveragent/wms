@@ -39,6 +39,8 @@ export default {
     const missingGtinExporting = ref(false)
     // 响应式数据
     const allActions = [
+      { key: "arrival-manage", title: "入库管理", emoji: "📋", desc: "确认发布 / 验收审核 / 入账 / 结束收货", path: "/pages/inbound/arrivals", requiresArrivalManager: true },
+      { key: "customer-return", title: "客户退货验收", emoji: "↩️", desc: "原销售订单退回 / 分批验收", path: "/pages/customer-returns/index", requiresCustomerReturns: true },
       { key: "pda-returns", title: "退货出库", emoji: "↩️", path: "/pages/returns/index", requiresReturns: true },
       { key: "assisted-outbound", title: "代货主出库", emoji: "🚛", desc: "仓库代货主创建并完成出库", path: "/pages/outbound/assisted", requiresAssistedOutbound: true },
       { key: "receiving", title: "收货(有订单)", emoji: "📋", desc: "到货验收/收货登记", op: "receive", path: "/pages/inbound/receive_task_list" },
@@ -64,7 +66,9 @@ export default {
       allActions
         .filter(
           (item) =>
+            (!item.requiresArrivalManager || auth.perms.includes("inbound.manage_arrival")) &&
             (!item.requiresReturns || auth.canProcessPdaReturn) &&
+            (!item.requiresCustomerReturns || auth.perms.includes("inbound.receive_customer_return")) &&
             (!item.requiresAssistedOutbound || auth.canProcessAssistedOutbound) &&
             (!item.requiresProductImport || auth.canImportProducts) &&
             (!item.requiresProductExport || auth.canExportProducts),

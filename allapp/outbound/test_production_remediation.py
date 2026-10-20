@@ -146,6 +146,7 @@ class OutboundProductionRemediationTests(TestCase):
         )
 
     def test_salesperson_without_legacy_warehouse_can_select_warehouse(self):
+        self._inventory()
         self.salesperson.warehouse = None
         self.salesperson.save(update_fields=["warehouse"])
         request = APIRequestFactory().post(
@@ -176,6 +177,7 @@ class OutboundProductionRemediationTests(TestCase):
 
     @override_settings(USE_TZ=False, TIME_ZONE="Asia/Shanghai")
     def test_offset_etd_is_persisted_as_local_business_time(self):
+        self._inventory()
         request = APIRequestFactory().post(
             "/api/outbound/orders/",
             {

@@ -632,6 +632,10 @@ class SharedCustomerIntegrationTests(TransferFixtures, TestCase):
             name="target",
             base_uom=self.uom,
             volume=self.product.volume,
+            price=Decimal("12"),
+        )
+        InventoryDetail.objects.create(
+            owner=self.target_owner, product=target, location=self.location, onhand_qty=10,
         )
         catalog = CustomerViewSet.as_view({"get": "list"})
         response = catalog(

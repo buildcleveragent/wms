@@ -185,7 +185,31 @@ class PutawayFixtureMixin:
     ):
         selected_warehouse = warehouse or self.warehouse
         selected_owner = owner or self.owner
+        supplier, _ = Supplier.objects.get_or_create(
+            owner=selected_owner, code="PUT-SOURCE", defaults={"name": "Source supplier"}
+        )
+        order = InboundOrder.objects.create(
+            order_no="ORDER-" + task_no,
+            owner=selected_owner,
+            warehouse=selected_warehouse,
+            supplier=supplier,
+        )
+        source_fields = dict(
+            source_app="inbound", source_model="InboundOrder", source_pk=str(order.pk)
+        )
+        if task_type == WmsTask.TaskType.PUTAWAY:
+            receive = WmsTask.objects.create(
+                task_no="RECEIVE-" + task_no,
+                task_type="RECEIVE",
+                owner=selected_owner,
+                warehouse=selected_warehouse,
+                **source_fields,
+            )
+            source_fields = dict(
+                source_app="tasking", source_model="WmsTask", source_pk=str(receive.pk)
+            )
         task = WmsTask.objects.create(
+            **source_fields,
             task_no=task_no,
             task_type=task_type,
             owner=selected_owner,

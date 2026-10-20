@@ -4,23 +4,30 @@
     <view class="product-main">
       <view class="product-heading">
         <view class="product-name">{{ product.name || product.sku }}</view>
-        <button class="add-button" @click="$emit('add')">加入</button>
+        <button class="add-button" :disabled="product.can_add === false" @click="$emit('add')">加入</button>
       </view>
       <text v-if="product.sku" class="meta">SKU：{{ product.sku }}</text>
       <text v-if="product.spec" class="meta">规格：{{ product.spec }}</text>
       <text v-if="product.gtin" class="meta">条码：{{ product.gtin }}</text>
       <text class="stock">可用库存：{{ product.available }} {{ product.base_unit_name }}</text>
+      <text v-if="product.purchase_count" class="meta">订购 {{ product.purchase_count }} 次 · 最近 {{ product.last_order_date }}</text>
+      <text v-for="issue in product.issues || []" :key="issue" class="issue">{{ issue }}</text>
+      <text v-if="product.can_add === false && !product.issues?.length" class="issue">当前仓库没有可用库存</text>
 
-      <radio-group
-        v-if="product.unitOptions?.length > 1"
-        class="unit-options"
-        @change="$emit('unit-change', $event.detail.value)"
-      >
-        <label v-for="(option, index) in product.unitOptions" :key="option.key || index" class="unit-option">
-          <radio :value="String(index)" :checked="selectedUnitIndex === index" />
-          <text>{{ option.label }}（×{{ option.multiplier }}{{ product.base_unit_name }}）</text>
-        </label>
-      </radio-group>
+      <view class="unit-field">
+        <text class="unit-label">单位：</text>
+        <radio-group
+          v-if="product.unitOptions?.length > 1"
+          class="unit-options"
+          @change="$emit('unit-change', $event.detail.value)"
+        >
+          <label v-for="(option, index) in product.unitOptions" :key="option.key || index" class="unit-option">
+            <radio :value="String(index)" :checked="selectedUnitIndex === index" />
+            <text>{{ option.label }}（×{{ option.multiplier }}{{ product.base_unit_name }}）</text>
+          </label>
+        </radio-group>
+        <text v-else class="unit-value">{{ product.unitOptions?.[0]?.label || product.base_unit_name || '—' }}</text>
+      </view>
 
       <view class="editor-grid">
         <label class="field">
@@ -87,7 +94,11 @@ defineEmits(['add', 'unit-change', 'quantity-input', 'price-input', 'price-commi
 .add-button { width: 128rpx; min-height: 88rpx; margin: 0; font-size: 26rpx; color: #fff; background: #2563eb; }
 .meta, .stock { display: block; margin-top: 6rpx; font-size: 23rpx; color: #6b7280; }
 .stock { color: #166534; }
-.unit-options { margin-top: 14rpx; padding: 12rpx; background: #f8fafc; border-radius: 10rpx; }
+.issue { display: block; color: #9a3412; margin-top: 8rpx; overflow-wrap: anywhere; }
+.unit-field { display: flex; align-items: flex-start; gap: 8rpx; margin-top: 14rpx; padding: 12rpx; background: #f8fafc; border-radius: 10rpx; font-size: 24rpx; }
+.unit-label { flex-shrink: 0; line-height: 60rpx; color: #6b7280; }
+.unit-options { flex: 1; min-width: 0; }
+.unit-value { line-height: 60rpx; color: #374151; overflow-wrap: anywhere; }
 .unit-option { display: flex; align-items: center; min-height: 60rpx; font-size: 24rpx; color: #374151; }
 .editor-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12rpx; margin-top: 16rpx; }
 .field { min-width: 0; font-size: 22rpx; color: #6b7280; }

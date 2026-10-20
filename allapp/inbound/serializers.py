@@ -13,7 +13,6 @@ from allapp.products.models import Product
 from allapp.tasking.models import (
     PutawayLineExtra,
     ReceiveLineExtra,
-    TaskAssignment,
     WmsTask,
     WmsTaskLine,
 )
@@ -164,7 +163,9 @@ class InboundOrderCreateSerializer(serializers.Serializer):
     warehouse_id = serializers.IntegerField(min_value=1)
     supplier_id = serializers.IntegerField(min_value=1)
     biz_date = serializers.DateField(required=False)
-    src_bill_no = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    src_bill_no = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, allow_null=True
+    )
     inbound_type = serializers.ChoiceField(
         choices=InboundOrder.INBOUND_TYPE_CHOICES,
         required=False,
@@ -177,7 +178,9 @@ class InboundOrderCreateSerializer(serializers.Serializer):
         allow_null=True,
     )
     eta = serializers.DateTimeField(required=False, allow_null=True)
-    address = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    address = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, allow_null=True
+    )
     memo = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
     lines = InboundOrderLineInputSerializer(many=True, allow_empty=False)
 
@@ -213,14 +216,16 @@ class InboundOrderCreateSerializer(serializers.Serializer):
         try:
             supplier = Supplier.objects.get(pk=attrs["supplier_id"], owner_id=owner_id)
         except Supplier.DoesNotExist as exc:
-            raise serializers.ValidationError({"supplier_id": "供应商不存在或不属于当前货主。"}) from exc
+            raise serializers.ValidationError(
+                {"supplier_id": "供应商不存在或不属于当前货主。"}
+            ) from exc
 
         product_ids = {line["product_id"] for line in attrs["lines"]}
         products = {
             product.pk: product
-            for product in Product.objects.filter(pk__in=product_ids, owner_id=owner_id).select_related(
-                "base_uom"
-            )
+            for product in Product.objects.filter(
+                pk__in=product_ids, owner_id=owner_id
+            ).select_related("base_uom")
         }
         missing_ids = sorted(product_ids - set(products))
         if missing_ids:
@@ -288,7 +293,9 @@ class InboundOrderReadSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(source="supplier.name", read_only=True)
     created_by_name = serializers.SerializerMethodField()
     submit_status_name = serializers.CharField(source="get_submit_status_display", read_only=True)
-    approval_status_name = serializers.CharField(source="get_approval_status_display", read_only=True)
+    approval_status_name = serializers.CharField(
+        source="get_approval_status_display", read_only=True
+    )
     inbound_type_name = serializers.CharField(source="get_inbound_type_display", read_only=True)
     lines = InboundOrderLineReadSerializer(many=True, read_only=True)
     planned_qty = serializers.SerializerMethodField()
@@ -389,10 +396,7 @@ class InboundOrderReadSerializer(serializers.ModelSerializer):
         is_superuser = bool(user.is_superuser)
         can_submit = bool(
             user.has_perm("inbound.submit_as_owner_buyers")
-            and (
-                is_superuser
-                or UserRoleScope.Role.OWNER_SALESPERSON in scope.roles
-            )
+            and (is_superuser or UserRoleScope.Role.OWNER_SALESPERSON in scope.roles)
             and obj.created_by_id == user.pk
             and not obj.is_closed
             and obj.submit_status == "DRAFT"
@@ -402,19 +406,13 @@ class InboundOrderReadSerializer(serializers.ModelSerializer):
             "can_submit": can_submit,
             "can_owner_approve": bool(
                 user.has_perm("inbound.approve_as_owner_manager")
-                and (
-                    is_superuser
-                    or UserRoleScope.Role.OWNER_MANAGER in scope.roles
-                )
+                and (is_superuser or UserRoleScope.Role.OWNER_MANAGER in scope.roles)
                 and obj.submit_status == "SUBMITTED"
                 and obj.approval_status == "OWNER_PENDING"
             ),
             "can_owner_reject": bool(
                 user.has_perm("inbound.approve_as_owner_manager")
-                and (
-                    is_superuser
-                    or UserRoleScope.Role.OWNER_MANAGER in scope.roles
-                )
+                and (is_superuser or UserRoleScope.Role.OWNER_MANAGER in scope.roles)
                 and obj.submit_status == "SUBMITTED"
                 and obj.approval_status == "OWNER_PENDING"
             ),
@@ -485,6 +483,20 @@ class InboundTaskLineSerializer(serializers.ModelSerializer):
 
 
 class InboundTaskSerializer(serializers.ModelSerializer):
+    arrival = serializers.SerializerMethodField()
+
+    def get_arrival(self, obj):
+        receipt = getattr(obj, "arrival_receipt", None) or getattr(
+            obj, "arrival_putaway_receipt", None
+        )
+        if receipt and receipt.stage != "LEGACY":
+            return {
+                "order_id": receipt.order_id,
+                "receipt_id": receipt.pk,
+                "version": receipt.version,
+            }
+        return None
+
     owner_name = serializers.CharField(source="owner.name", read_only=True)
     warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
     task_type_name = serializers.CharField(source="get_task_type_display", read_only=True)
@@ -498,6 +510,7 @@ class InboundTaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = WmsTask
         fields = (
+            "arrival",
             "id",
             "task_no",
             "task_type",
@@ -530,11 +543,9 @@ class InboundTaskSerializer(serializers.ModelSerializer):
         user = self._request_user()
         return bool(
             user
-            and TaskAssignment.objects.filter(
-                task=obj,
-                assignee=user,
-                finished_at__isnull=True,
-            ).exists()
+            and any(
+                a.assignee_id == user.pk and a.finished_at is None for a in obj.assignments.all()
+            )
         )
 
     def get_can_claim(self, obj):
@@ -543,12 +554,10 @@ class InboundTaskSerializer(serializers.ModelSerializer):
             return False
         if obj.status != WmsTask.Status.RELEASED:
             return False
-        return not TaskAssignment.objects.filter(task=obj, finished_at__isnull=True).exists()
+        return not any(a.finished_at is None for a in obj.assignments.all())
 
     def get_can_start(self, obj):
-        return bool(
-            obj.status == WmsTask.Status.RELEASED and self.get_is_assigned_to_me(obj)
-        )
+        return bool(obj.status == WmsTask.Status.RELEASED and self.get_is_assigned_to_me(obj))
 
     def get_can_record(self, obj):
         return bool(
@@ -563,30 +572,52 @@ class ReceiptRecordSerializer(serializers.Serializer):
     location_id = serializers.IntegerField(min_value=1)
     qty_ok = serializers.DecimalField(max_digits=14, decimal_places=3, min_value=Decimal("0"))
     qty_damage = serializers.DecimalField(
-        max_digits=14, decimal_places=3, min_value=Decimal("0"), required=False, default=Decimal("0")
+        max_digits=14,
+        decimal_places=3,
+        min_value=Decimal("0"),
+        required=False,
+        default=Decimal("0"),
     )
     qty_reject = serializers.DecimalField(
-        max_digits=14, decimal_places=3, min_value=Decimal("0"), required=False, default=Decimal("0")
+        max_digits=14,
+        decimal_places=3,
+        min_value=Decimal("0"),
+        required=False,
+        default=Decimal("0"),
     )
     lot_no = serializers.CharField(max_length=60, required=False, allow_blank=True, default="")
     serial_no = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
     mfg_date = serializers.DateField(required=False, allow_null=True)
     exp_date = serializers.DateField(required=False, allow_null=True)
-    damage_reason_code = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")
-    reject_reason_code = serializers.CharField(max_length=20, required=False, allow_blank=True, default="")
+    damage_reason_code = serializers.CharField(
+        max_length=20, required=False, allow_blank=True, default=""
+    )
+    reject_reason_code = serializers.CharField(
+        max_length=20, required=False, allow_blank=True, default=""
+    )
     finalize = serializers.BooleanField(required=False, default=False)
-    variance_reason = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+    variance_reason = serializers.CharField(
+        max_length=200, required=False, allow_blank=True, default=""
+    )
 
     def validate(self, attrs):
-        if attrs.get("mfg_date") and attrs.get("exp_date") and attrs["exp_date"] < attrs["mfg_date"]:
+        if (
+            attrs.get("mfg_date")
+            and attrs.get("exp_date")
+            and attrs["exp_date"] < attrs["mfg_date"]
+        ):
             raise serializers.ValidationError({"exp_date": "有效期不得早于生产日期。"})
         processed = attrs["qty_ok"] + attrs["qty_damage"] + attrs["qty_reject"]
         if processed == 0 and not attrs.get("finalize"):
             raise serializers.ValidationError("数量均为零时必须明确结束该差异行。")
         if attrs["qty_damage"] > 0 and not attrs.get("damage_reason_code"):
-            raise serializers.ValidationError({"damage_reason_code": "存在破损数量时必须填写原因。"})
+            raise serializers.ValidationError(
+                {"damage_reason_code": "存在破损数量时必须填写原因。"}
+            )
         if attrs["qty_reject"] > 0 and not attrs.get("reject_reason_code"):
-            raise serializers.ValidationError({"reject_reason_code": "存在拒收数量时必须填写原因。"})
+            raise serializers.ValidationError(
+                {"reject_reason_code": "存在拒收数量时必须填写原因。"}
+            )
         return attrs
 
 

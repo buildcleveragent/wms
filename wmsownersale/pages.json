@@ -1,13 +1,22 @@
 {
 "pages": [
+
 	{"path":"pages/bootstrap","style":{"navigationBarTitleText":"正在启动","navigationStyle":"custom"}},
 	{"path":"pages/login","style":{"navigationBarTitleText":"登录"}},
+ {"path":"pages/inbound/index","style":{"navigationBarTitleText":"到货预报／入库申请"}},
+	{"path":"pages/workbench/items","style":{"navigationBarTitleText":"待办清单","enablePullDownRefresh":true}},
+	{"path":"pages/returns/index","style":{"navigationBarTitleText":"退货与异常"}},
+	{"path":"pages/inventory/detail","style":{"navigationBarTitleText":"库存明细"}},
+	{"path":"pages/inventory/alerts","style":{"navigationBarTitleText":"库存预警","enablePullDownRefresh":true}},
+	{"path":"pages/inventory/alert-settings","style":{"navigationBarTitleText":"预警阈值"}},
 	{"path":"pages/home/index","style":{"navigationBarTitleText":"首页"}},
 	{"path":"pages/warehouses/select","style":{"navigationBarTitleText":"选择出库仓库"}},
 
 	{"path":"pages/customers/select","style":{"navigationBarTitleText":"选择客户:点击选中的客户"}},
 	{"path":"pages/products/search","style":{"navigationBarTitleText":"选品"}},
 	{"path":"pages/orders/cart","style":{"navigationBarTitleText":"销售订单：商品清单"}},
+	{"path":"pages/orders/reorder","style":{"navigationBarTitleText":"再次下单"}},
+	{"path":"pages/customers/addresses","style":{"navigationBarTitleText":"客户地址簿"}},
 	{"path":"pages/orders/index","style":{"navigationBarTitleText":"我的订单"}},
 		{"path":"pages/orders/detail","style":{"navigationBarTitleText":"订单详情"}},
 		{"path": "pages/features/index","style": { "navigationBarTitleText": "功能" } },
@@ -19,14 +28,14 @@
 		{"path":"pages/me/index","style":{"navigationBarTitleText":"我的"}},
 		{"path":"pages/me/change_password","style":{"navigationBarTitleText":"修改密码"}},
 		{"path": "pages/approval/index", "style": { "navigationBarTitleText": "订单审核" } },
-	
+
 	{
 	  "path": "pages/orders/import_drop_ship",
 	  "style": {
 	    "navigationBarTitleText": "一件代发导入"
 	  }
 	},
-	
+
 	{
 	  "path": "pages/inventory/index",
 	  "style": {
@@ -34,9 +43,9 @@
 	    "enablePullDownRefresh": true
 	  }
 	}
-		
+
 	],
-	
+
 "tabBar": {
 	"color": "#6b7280",
 	"selectedColor": "#111827",
@@ -46,14 +55,14 @@
 	  "fontSize": "32px",  // 设置字体大小
 	  "fontWeight": "normal"
 	},
-	
+
 	"list": [
 		{"pagePath":"pages/home/index","text":"首页", "iconPath": "static/tabbar/home.png","selectedIconPath": "static/tabbar/home_active.png"},
         { "pagePath": "pages/features/index","text": "功能", "iconPath": "static/tabbar/feat.png", "selectedIconPath": "static/tabbar/feat_active.png" },
 		{"pagePath":"pages/reports/index","text":"报表","iconPath": "static/tabbar/reports.png","selectedIconPath": "static/tabbar/reports_active.png"},
 		{"pagePath":"pages/me/index","text":"我的","iconPath": "static/tabbar/mine.png","selectedIconPath": "static/tabbar/mine_active.png"}
 		],
-	
+
 	"iconfont": {
 	  "fontSize": "24px"   // 如果使用字体图标，设置图标大小
 	}

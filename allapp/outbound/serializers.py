@@ -3,6 +3,8 @@ from datetime import date
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+from .amounts import line_amount, order_amount
+
 from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -99,6 +101,10 @@ class ConfirmPricingSerializer(serializers.Serializer):
 # ---------- 创建用 ----------
 class OutboundOrderLineCreateSerializer(serializers.Serializer):
     product_id = serializers.IntegerField()
+    line_key = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    base_uom_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    catalog_version = serializers.CharField(required=False, allow_blank=True, max_length=64)
+    unit_unverified = serializers.BooleanField(required=False, default=False)
     uom_id     = serializers.IntegerField(required=False, allow_null=True)  # 如需包装下单可使用
     qty = serializers.DecimalField(
         max_digits=14,
@@ -456,6 +462,7 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
     etd             = serializers.DateTimeField(required=False, allow_null=True)
     remark          = serializers.CharField(required=False, allow_blank=True, default="")
     items           = OutboundOrderLineCreateSerializer(many=True)
+    reorder_source_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
 
     # 新增：一件代发/收件信息
     src_bill_no   = serializers.CharField(required=False, allow_blank=True)
@@ -598,11 +605,15 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
     def validate(self, data):
         if not data.get("items"):
             raise serializers.ValidationError("至少需要一条明细。")
+        line_keys = [item["line_key"] for item in data["items"] if item.get("line_key")]
+        if len(line_keys) != len(set(line_keys)):
+            raise serializers.ValidationError({"items": "商品行标识重复，请重新加载订单。"})
 
         # owner 只能来自服务端角色范围；货主角色必须显式选择目标仓库。
         req = self.context.get("request")
         user = getattr(req, "user", None)
         scope = self.context.get("access_scope") or AccessScope.for_user(user)
+        structural_only = self.context.get("structural_only", False)
         owner_id = scope.single_owner_id
         warehouse_id = data.get("warehouse_id")
 
@@ -610,7 +621,7 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError("当前用户没有单一有效货主角色范围，请联系管理员。")
         if not warehouse_id:
             raise serializers.ValidationError({"warehouse_id": "请选择出库仓库。"})
-        if not owner_can_use_warehouse(owner_id, warehouse_id):
+        if not structural_only and not owner_can_use_warehouse(owner_id, warehouse_id):
             raise serializers.ValidationError(
                 {"warehouse_id": "仓库不可用或未关联当前货主。"}
             )
@@ -635,6 +646,8 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         allowed_ot = self._allowed("outbound_type")
         if allowed_ot and ot not in allowed_ot:
             raise serializers.ValidationError(f"不支持的出库类型：{ot}")
+        if data.get("reorder_source_id") and ot != "SALES":
+            raise serializers.ValidationError("再次下单只能创建标准销售订单。")
 
         dm = data.get("delivery_method")
         allowed_dm = self._allowed("delivery_method")
@@ -645,18 +658,20 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         if ot == "SUPPLIER_RETURN":
             if not data.get("supplier_id") or data.get("customer_id"):
                 raise serializers.ValidationError("退供单必须提供 supplier_id 且 customer_id 为空。")
-            self._assert_supplier_belongs_to_owner(data["supplier_id"], owner_id)
+            if not structural_only:
+                self._assert_supplier_belongs_to_owner(data["supplier_id"], owner_id)
             customer = None
         else:
             if not data.get("customer_id") or data.get("supplier_id"):
                 raise serializers.ValidationError("非退供出库单必须提供 customer_id 且 supplier_id 为空。")
-            customer = self._get_customer(data.get("customer_id"))
+            customer = None if structural_only else self._get_customer(data.get("customer_id"))
 
         # 一致性：客户、商品均需属于当前用户的 owner
-        self._assert_customer_access(customer, owner_id, user)
-        self._assert_products_belong_to_owner(data["items"], owner_id)
-        if ot == "SALES":
-            self._validate_standard_sales_prices(data["items"], owner_id)
+        if not structural_only:
+            self._assert_customer_access(customer, owner_id, user)
+            self._assert_products_belong_to_owner(data["items"], owner_id)
+            if ot == "SALES" and not self.context.get("allow_problem_draft"):
+                self._validate_standard_sales_prices(data["items"], owner_id)
 
         # 清洗字符串
         data["src_bill_no"]   = (data.get("src_bill_no") or "").strip() or None
@@ -766,11 +781,12 @@ class OutboundOrderLineReadSerializer(serializers.ModelSerializer):
 
     def get_amount(self, obj):
         try:
-            return (Decimal(obj.base_qty or 0) * Decimal(obj.base_price or 0)).quantize(Decimal("0.01"))
+            return line_amount(obj.base_qty, obj.base_price)
         except Exception:
             return Decimal("0.00")
 
 class OutboundOrderReadSerializer(serializers.ModelSerializer):
+    can_reorder = serializers.SerializerMethodField()
     customer_name        = serializers.CharField(
         source="customer.name", read_only=True, allow_null=True
     )
@@ -816,7 +832,7 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
             "memo", "is_closed", "close_reason",
             "lines",
             "total_qty", "total_amount",
-            "can_edit", "can_submit", "can_owner_review",
+            "can_edit", "can_submit", "can_owner_review", "can_reorder",
         ]
 
     def _access_scope(self):
@@ -837,6 +853,23 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
             getattr(request, "user", None),
             scope=self._access_scope(),
         )
+
+    def get_can_reorder(self, obj):
+        user = getattr(self.context.get("request"), "user", None)
+        scope = self._access_scope()
+        if not (
+            user and scope.is_valid and scope.single_owner_id
+            and "owner_salesperson" in scope.roles
+            and user.has_perm("outbound.submit_outbound_as_owner_buyers")
+            and obj.owner_id == scope.single_owner_id and obj.created_by_id == user.pk
+            and obj.outbound_type == "SALES" and not obj.is_deleted
+            and not (obj.memo or "").startswith("[POS]")
+        ):
+            return False
+        if hasattr(obj, "owner_pos_link"):
+            return not (obj.owner_pos_link or obj.owner_pos_line)
+        from .reorder import non_pos_orders
+        return non_pos_orders(OutboundOrder.objects.filter(pk=obj.pk)).exists()
 
     def get_can_submit(self, obj):
         return self.get_can_edit(obj)
@@ -867,19 +900,16 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
             return ""
         return getattr(u, "name", None) or getattr(u, "username", None) or ""
 
-    def _name_of(self, obj, field, fallback):
-        try:
-            mapping = dict(getattr(OutboundOrder, field))
-            code = getattr(obj, field.replace("_name", ""))
-            return mapping.get(code, code)
-        except Exception:
-            return getattr(obj, fallback, None)
+    def _status_name(self, obj, field):
+        if getattr(obj, field) not in dict(obj._meta.get_field(field).choices):
+            return "状态待核对"
+        return getattr(obj, f"get_{field}_display")()
 
     def get_submit_status_name(self, obj):
-        return self._name_of(obj, "SUBMIT_CHOICES", "submit_status")
+        return self._status_name(obj, "submit_status")
 
     def get_approval_status_name(self, obj):
-        return self._name_of(obj, "APPROVAL_CHOICES", "approval_status")
+        return self._status_name(obj, "approval_status")
 
     def get_created_by_name(self, obj):
         u = getattr(obj, "created_by", None)
@@ -897,12 +927,7 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
         return total
 
     def get_total_amount(self, obj):
-        if hasattr(obj, "catalog_total_amount"):
-            return Decimal(obj.catalog_total_amount).quantize(Decimal("0.01"))
-        total = Decimal("0")
-        for line in obj.lines.all():
-            total += Decimal(line.base_qty or 0) * Decimal(line.base_price or 0)
-        return total.quantize(Decimal("0.01"))
+        return order_amount(obj.lines.all())
 
 
 # class OutboundOrderReadSerializer(serializers.ModelSerializer):

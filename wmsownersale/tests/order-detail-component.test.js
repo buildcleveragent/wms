@@ -11,9 +11,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@dcloudio/uni-app', () => ({
   onLoad: (callback) => { mocks.onLoad = callback },
   onShow: vi.fn(),
+  onHide: vi.fn(),
   onUnload: vi.fn(),
 }))
-vi.mock('@/utils/request', () => ({ api: { orderDetail: mocks.detail, orderEditContext: vi.fn() } }))
+vi.mock('@/utils/request', () => ({ api: {
+  orderDetail: mocks.detail, orderEditContext: vi.fn(),
+  orderProgress: vi.fn().mockRejectedValue({ statusCode: 404 }),
+} }))
 vi.mock('@/store/auth', () => ({ useAuth: () => mocks.auth }))
 vi.mock('@/store/cart', () => ({ useCart: () => mocks.cart }))
 

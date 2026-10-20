@@ -14,6 +14,7 @@ from allapp.accounts.models import AuditEvent, UserRoleScope
 from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.locations.models import Warehouse
 from allapp.outbound.models import OutboundOrder
+from allapp.outbound.testing import stock_for_owner_order
 from allapp.outbound.views import OutboundOrderViewSet
 from allapp.products.models import Product, ProductUom
 
@@ -76,6 +77,9 @@ class StandardOrderIdempotencyTests(TestCase):
             batch_control=False,
             expiry_control=False,
         )
+        for warehouse in (self.warehouse, self.other_warehouse):
+            for product in (self.product, self.other_product):
+                stock_for_owner_order(product, warehouse)
         self.factory = APIRequestFactory()
         self.view = OutboundOrderViewSet.as_view({"post": "create"})
 
@@ -309,6 +313,7 @@ class StandardOrderIdempotencyConcurrencyTests(TransactionTestCase):
             code="IDEM-CON-CUSTOMER",
             name="Concurrent Customer",
         )
+        stock_for_owner_order(self.product, self.warehouse)
 
     def payload(self, src_bill_no=""):
         return {

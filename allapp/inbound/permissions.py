@@ -1,10 +1,9 @@
-from rest_framework.permissions import BasePermission
 from django.db.models import Exists, OuterRef, Q
+from rest_framework.permissions import BasePermission
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.models import UserRoleScope
 from allapp.tasking.models import TaskAssignment, WmsTask
-
 
 RECEIVE_TASK_VIEW_PERMISSIONS = (
     "tasking.view_wmstask",
@@ -20,9 +19,7 @@ def can_view_receive_tasks(user):
         return False
     return bool(
         getattr(user, "is_superuser", False)
-        or any(
-            user.has_perm(permission) for permission in RECEIVE_TASK_VIEW_PERMISSIONS
-        )
+        or any(user.has_perm(permission) for permission in RECEIVE_TASK_VIEW_PERMISSIONS)
     )
 
 
@@ -45,6 +42,7 @@ def scoped_receive_tasks(user, queryset=None):
             scoped.annotate(_has_active_assignment=Exists(active_assignment))
             .filter(
                 Q(assignments__assignee_id=user.pk, assignments__finished_at__isnull=True)
+                | Q(assignments__assignee_id=user.pk, status__in=["COMPLETED", "CANCELLED"])
                 | Q(created_by_id=user.pk)
                 | Q(posted_by_id=user.pk)
                 | Q(

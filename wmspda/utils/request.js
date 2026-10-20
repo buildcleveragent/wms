@@ -305,6 +305,7 @@ export function request(opts = {}, alreadyRetried = false) {
       url: BASE_URL + (opts.url || ''),
       method: opts.method || 'GET',
       data: opts.data || {},
+      ...(opts.responseType ? { responseType: opts.responseType } : {}),
       header: {
         'Content-Type': 'application/json',
         ...(opts.header || {}),
@@ -1535,4 +1536,39 @@ export const api = {
 export function downloadReturnOrders(filters = {}) {
   const query = Object.entries(filters).map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&')
   return downloadProductArchiveFile(`${BASE_URL}/api/pda/return-orders/export/?${query}`, '退货出库.xlsx')
+}
+
+// Customer-return photos remain authenticated and account-isolated.
+export function uploadAuthenticatedFile(opts, retried = false) {
+  const epoch = sessionEpoch, token = getToken()
+  return new Promise((resolve,reject)=>uni.uploadFile({
+    url: BASE_URL + opts.url, filePath: opts.filePath, name: 'file', formData:opts.formData || {},
+    header: {Authorization:`Bearer ${token}`},
+    success(res) {
+      if(epoch!==sessionEpoch) {reject(sessionChangedError());return}
+      if(res.statusCode===401) {retryAfterUnauthorized(token,()=>uploadAuthenticatedFile(opts,true),retried,epoch).then(resolve,reject);return}
+      let data;try{data=typeof res.data==='string'?JSON.parse(res.data):res.data}catch{reject({message:'上传响应无效'});return}
+      if(res.statusCode>=200 && res.statusCode<300) resolve(data)
+      else reject({statusCode:res.statusCode,message:getFriendlyMessage(data,'照片上传失败')})
+    },fail:()=>reject({message:'照片上传失败，请重试'})
+  }))
+}
+export async function returnPhotoURL(url, retried = false) {
+  // #ifdef H5
+  const bytes = await request({url, responseType: 'arraybuffer', silentError: true})
+  const source = URL.createObjectURL(new Blob([bytes], {type: 'image/jpeg'}))
+  setTimeout(() => URL.revokeObjectURL(source), 60000)
+  return source
+  // #endif
+  // #ifndef H5
+  const epoch=sessionEpoch, token=getToken()
+  return new Promise((resolve,reject)=>uni.downloadFile({url:BASE_URL+url,header:{Authorization:`Bearer ${token}`},
+    success(res) {
+      if(epoch!==sessionEpoch){reject(sessionChangedError());return}
+      if(res.statusCode===401){retryAfterUnauthorized(token,()=>returnPhotoURL(url,true),retried,epoch).then(resolve,reject);return}
+      if(res.statusCode===200)resolve(res.tempFilePath)
+      else reject({statusCode:res.statusCode,message:'无权查看照片或照片已失效'})
+    },fail:()=>reject({message:'照片加载失败'})
+  }))
+  // #endif
 }

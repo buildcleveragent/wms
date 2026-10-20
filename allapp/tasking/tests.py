@@ -438,7 +438,6 @@ class TaskingApiContractTests(TestCase):
             tasking_views.task_svc,
             "assign_task",
             return_value={"ok": True},
-            create=True,
         ) as mocked_assign:
             assign_view = WmsTaskViewSet.as_view({"post": "assign"})
             response = assign_view(
@@ -457,7 +456,6 @@ class TaskingApiContractTests(TestCase):
             tasking_views.task_svc,
             "unassign_task",
             return_value={"ok": True},
-            create=True,
         ) as mocked_unassign:
             unassign_view = WmsTaskViewSet.as_view({"post": "unassign"})
             response = unassign_view(

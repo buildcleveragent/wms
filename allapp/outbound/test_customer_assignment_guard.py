@@ -15,6 +15,7 @@ from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.locations.models import Warehouse
 from allapp.outbound.models import OutboundOrder
 from allapp.outbound.serializers import OutboundOrderReadSerializer
+from allapp.outbound.testing import stock_for_owner_order
 from allapp.outbound.views import CustomerViewSet, OutboundOrderViewSet
 from allapp.products.models import Product, ProductUom
 
@@ -60,6 +61,7 @@ class CustomerAssignmentGuardTests(TestCase):
             price=Decimal("10.0000"),
             min_price=Decimal("8.0000"),
         )
+        stock_for_owner_order(self.product, self.warehouse)
         self.factory = APIRequestFactory()
         self.sequence = 0
 

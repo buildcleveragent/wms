@@ -5,6 +5,8 @@
       <input class="input" v-model="q" placeholder="单号 / 客户" @confirm="search" />
       <button class="btn-outline search-btn" :disabled="firstLoading" @click="search">搜索</button>
     </view>
+    <button class="btn-outline export-btn" :disabled="exporting || firstLoading" @click="exportExcel('/api/outbound/orders/owner-export/', {search: appliedSearch}, '订单明细')">{{ exporting ? '正在导出…' : '导出 Excel' }}</button>
+    <view v-if="exportError" class="state-card error-state">{{ exportError }}</view>
 
     <view v-if="firstLoading" class="state-card">正在加载订单…</view>
     <view v-else-if="error && !rows.length" class="state-card error-state">
@@ -13,17 +15,18 @@
     </view>
     <view v-else-if="!rows.length" class="state-card">没有符合条件的订单</view>
 
-    <button v-for="(order, index) in rows" :key="order?.id ?? index" class="order-card" @click="goDetail(order)">
+    <view v-for="(order, index) in rows" :key="order?.id ?? index" class="order-card" @click="goDetail(order)">
       <view class="row">
         <view class="font-bold">{{ order?.order_no || ('订单#' + order?.id) }}</view>
         <view class="badge">¥ {{ money(order?.total_amount) }}</view>
       </view>
       <view class="text-gray">客户：{{ order?.customer_name || '—' }}</view>
       <view class="text-gray">仓库：{{ order?.warehouse_name || '—' }}</view>
-      <view class="text-gray">提交：{{ order?.submit_status_name || order?.submit_status || '—' }}</view>
-      <view class="text-gray">审核：{{ order?.approval_status_name || order?.approval_status || '—' }}</view>
+      <view class="text-gray">提交：{{ orderStatus(order, 'submit_status') }}</view>
+      <view class="text-gray">审核：{{ orderStatus(order, 'approval_status') }}</view>
       <view v-if="order?.biz_date" class="text-gray">业务日期：{{ order.biz_date }}</view>
-    </button>
+      <button v-if="order?.can_reorder" class="btn-outline" @click.stop="reorder(order)">再次下单</button>
+    </view>
 
     <view v-if="loadingMore" class="state-card">正在加载更多…</view>
     <view v-else-if="error && rows.length" class="state-card error-state">
@@ -35,11 +38,15 @@
 </template>
 
 <script setup>
+import { orderStatus } from '@/utils/orderStatus'
 import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh, onReachBottom, onShow, onUnload } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
+import { useOwnerExport } from '@/composables/useOwnerExport'
 
 const q = ref('')
+const appliedSearch = ref('')
+const { exporting, exportError, exportExcel } = useOwnerExport(() => appliedSearch.value)
 const list = ref({ count: 0, next: null, previous: null, results: [] })
 const rows = computed(() => list.value.results || [])
 const firstLoading = ref(false)
@@ -69,7 +76,7 @@ async function loadOrders({ reset = false, page: requestedPage } = {}) {
 
   const requestGeneration = reset ? ++generation : generation
   const page = requestedPage || (reset ? 1 : currentPage.value + 1)
-  const searchText = q.value
+  const searchText = appliedSearch.value
 
   if (reset) {
     firstLoading.value = true
@@ -106,6 +113,7 @@ async function loadOrders({ reset = false, page: requestedPage } = {}) {
 }
 
 function search() {
+  appliedSearch.value = q.value.trim()
   return loadOrders({ reset: true })
 }
 
@@ -117,6 +125,7 @@ function goDetail(order) {
   if (!order?.id) return
   uni.navigateTo({ url: `/pages/orders/detail?id=${order.id}` })
 }
+function reorder(order) { uni.navigateTo({ url: `/pages/orders/reorder?id=${order.id}` }) }
 
 function money(value) {
   const number = Number(value)
@@ -125,23 +134,27 @@ function money(value) {
 
 onLoad(search)
 onReachBottom(() => loadOrders())
-onPullDownRefresh(search)
+onPullDownRefresh(() => loadOrders({reset:true}))
 onShow(() => {
   if (firstShow.value) {
     firstShow.value = false
     return
   }
-  search()
+  loadOrders({reset:true})
 })
 </script>
 
 <style scoped>
 .search-row { display: flex; align-items: center; gap: 12rpx; }
 .search-row .input { flex: 1; min-width: 0; }
+.export-btn { margin: 12rpx 0; }
 .search-btn, .retry-btn { width: auto; min-height: 80rpx; }
 .state-card { padding: 36rpx 12rpx; color: #6b7280; text-align: center; }
 .error-state { margin-top: 16rpx; color: #b42318; background: #fff7ed; border-radius: 12rpx; }
 .order-card {
+  box-sizing: border-box;
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: block;
   width: 100%;
   min-height: 96rpx;
@@ -153,5 +166,7 @@ onShow(() => {
   border: 1rpx solid #e5e7eb;
   border-radius: 16rpx;
 }
+.order-card .row { display:flex; flex-wrap:wrap; gap:12rpx; }
+.order-card .row > view { min-width:0; max-width:100%; }
 .order-card::after { border: 0; }
 </style>

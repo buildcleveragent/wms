@@ -9,6 +9,8 @@ x-wms-service: &wms-service
   volumes:
     - wms-static:/app/staticfiles
     - wms-media:/app/media
+    - wms-private-returns:/app/private_returns
+    - wms-private-arrivals:/app/private_arrivals
 
 services:
   web:
@@ -51,3 +53,5 @@ services:
 volumes:
   wms-static:
   wms-media:
+  wms-private-arrivals:
+  wms-private-returns:

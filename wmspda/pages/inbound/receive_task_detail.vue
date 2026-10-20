@@ -297,7 +297,9 @@ async function loadTask() {
   if (!taskId.value) return
   loading.value = true
   try {
-    hydrateTask(await api.inboundPdaTask(taskId.value))
+    const result = await api.inboundPdaTask(taskId.value)
+    if (result.arrival) {uni.redirectTo({url:'/pages/inbound/arrivals?id='+result.arrival.order_id});return}
+    hydrateTask(result)
   } catch (error) {
     console.error('加载收货任务失败', error)
     task.value = null

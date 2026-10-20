@@ -11,6 +11,7 @@ from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.locations.models import Warehouse
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.models import OutboundOrder
+from allapp.outbound.testing import stock_for_owner_order
 from allapp.outbound.views import OutboundOrderViewSet
 from allapp.products.models import Product, ProductUom
 from allapp.tasking.models import WmsTask
@@ -88,6 +89,8 @@ class OutboundSalePriceGuardTests(TestCase):
             code="PRICE-CUSTOMER",
             name="Price Customer",
         )
+        stock_for_owner_order(self.product, self.warehouse)
+        stock_for_owner_order(self.other_product, self.warehouse)
         self.factory = APIRequestFactory()
 
     def create_order(self, items):

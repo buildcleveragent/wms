@@ -86,6 +86,27 @@ class PickScanIntegrityTests(TestCase):
             status=WmsTaskLine.Status.RELEASED,
         )
 
+        from allapp.inventory.models import InventoryDetail
+        for line in (self.line_1, self.line_2):
+            detail = InventoryDetail.objects.create(
+                owner=self.owner, product=self.product, location=line.from_location,
+                onhand_qty=line.qty_plan, allocated_qty=line.qty_plan,
+            )
+            line.plan_meta = {"inventory_detail_id": detail.pk}
+            line.save(update_fields=["plan_meta"])
+
+    def test_dispatch_scans_preserve_duplicate_original_lines(self):
+        WmsTask.objects.filter(pk=self.task.pk).update(task_type="DISPATCH")
+        for index, quantity in enumerate((1, 2)):
+            result = services.scan_task(
+                self.task.pk, self.product.sku, quantity, by_user=self.user,
+                client_seq=f"dispatch-{index}",
+            )
+            self.assertEqual(result["line_id"], (self.line_1, self.line_2)[index].pk)
+        self.line_1.refresh_from_db()
+        self.line_2.refresh_from_db()
+        self.assertEqual((self.line_1.qty_done, self.line_2.qty_done), (1, 2))
+
     def test_pick_scans_select_unfinished_location_lines_and_remain_append_only(self):
         def resolver(_owner_id, _barcode):
             return {

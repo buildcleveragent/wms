@@ -15,10 +15,10 @@ from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import (
-    BigIntegerField,
     DecimalField,
-    ExpressionWrapper,
+    Exists,
     F,
+    Max,
     OuterRef,
     Prefetch,
     Q,
@@ -26,11 +26,11 @@ from django.db.models import (
     Sum,
     Value,
 )
-from django.db.models.functions import Cast, Coalesce
+from django.db.models.functions import Coalesce
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.utils.dateparse import parse_date, parse_datetime
+from django.utils.dateparse import parse_datetime
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
@@ -79,6 +79,7 @@ from allapp.outbound.drop_ship_import import (
     import_drop_ship_workbook,
 )
 from allapp.outbound.enums import PricingStatus
+from allapp.outbound.amounts import line_amount as calculate_line_amount
 from allapp.outbound.models import OutboundOrderLine
 from allapp.outbound.ownership import transfer_for_order, transfer_summary
 from allapp.outbound.serializers import (
@@ -93,10 +94,7 @@ from allapp.outbound.warehouse_access import (
     owner_warehouse_ids,
     owner_warehouse_queryset,
 )
-from allapp.products.identifier_lookup import (
-    filter_by_product_search,
-    product_search_q,
-)
+from allapp.products.identifier_lookup import filter_by_product_search
 from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
 from allapp.tasking import services as task_services
 from allapp.tasking.models import WmsTask, WmsTaskLine
@@ -146,9 +144,7 @@ def confirm_pricing(self, request, pk=None):
         line = lines_map[item["line_id"]]
         line.base_price = item["base_price"]
 
-        line_amount = (Decimal(line.base_qty or 0) * Decimal(line.base_price or 0)).quantize(
-            Decimal("0.01")
-        )
+        line_amount = calculate_line_amount(line.base_qty, line.base_price)
         line.final_line_amount = line_amount
         line.save(update_fields=["base_price", "final_line_amount", "updated_at"])
         total_amount += line_amount
@@ -576,6 +572,17 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "base_quantity": 0,
                 }
             )
+        if scope.single_owner_id and warehouse_ids is not None and len(warehouse_ids) == 1:
+            from .reorder import product_facts
+            current = product_facts(
+                scope.single_owner_id, next(iter(warehouse_ids)), [row["id"] for row in data],
+                request=request,
+            )
+            for row in data:
+                fact = current.get(row["id"])
+                if fact:
+                    for field in ("base_uom_id", "catalog_version", "can_add", "issues", "available"):
+                        row[field] = fact[field]
         logger.debug("outbound.product_list.response %s count=%s", ctx_text, len(data), extra=ctx)
         return self.get_paginated_response(data)
 
@@ -1364,6 +1371,8 @@ class OutboundOrderViewSet(
 
     @staticmethod
     def _optimized_order_queryset():
+        from allapp.pos.models import PosSaleLine, PosSaleOrder
+
         line_qs = OutboundOrderLine.objects.select_related(
             "product",
             "product__base_uom",
@@ -1382,6 +1391,10 @@ class OutboundOrderViewSet(
             )
             .prefetch_related(Prefetch("lines", queryset=line_qs))
             .annotate(
+                owner_pos_link=Exists(PosSaleOrder.objects.filter(outbound_order_id=OuterRef("pk"))),
+                owner_pos_line=Exists(
+                    PosSaleLine.objects.filter(outbound_order_line__order_id=OuterRef("pk"))
+                ),
                 catalog_total_qty=Coalesce(
                     Sum(
                         "lines__base_qty",
@@ -1390,17 +1403,6 @@ class OutboundOrderViewSet(
                     Value(Decimal("0")),
                     output_field=DecimalField(max_digits=20, decimal_places=4),
                 ),
-                catalog_total_amount=Coalesce(
-                    Sum(
-                        ExpressionWrapper(
-                            F("lines__base_qty") * F("lines__base_price"),
-                            output_field=DecimalField(max_digits=28, decimal_places=4),
-                        ),
-                        filter=Q(lines__is_deleted=False),
-                    ),
-                    Value(Decimal("0")),
-                    output_field=DecimalField(max_digits=28, decimal_places=4),
-                ),
             )
         )
 
@@ -1408,6 +1410,11 @@ class OutboundOrderViewSet(
         base = self._optimized_order_queryset().order_by("-biz_date", "-id")
         scope = self._access_scope()
         scoped = strict_order_queryset(base, self.request.user, scope=scope)
+        if self.request.query_params.get("owner_portal") == "1":
+            from allapp.core.owner_exports import owner_scope
+
+            owner_scope(self.request.user)
+            return scoped
         # Assisted operators are newly introduced, tightly scoped identities;
         # never grant them historical fail-open visibility in shadow mode.
         if is_assisted_operator(self.request.user):
@@ -1504,6 +1511,40 @@ class OutboundOrderViewSet(
             return OutboundOrderDraftUpdateSerializer
         return OutboundOrderReadSerializer
 
+    @action(detail=False, methods=["get"], url_path="owner-export")
+    def owner_export(self, request):
+        from .owner_export import export_orders
+
+        return export_orders(request)
+
+    @action(detail=True, methods=["get"], url_path="progress")
+    def progress(self, request, pk=None):
+        """Expose fulfilment facts only through the strict order read scope."""
+        from allapp.outbound.progress import build_order_progress
+
+        queryset = strict_order_queryset(
+            OutboundOrder.objects.all(), request.user, scope=self._access_scope()
+        )
+        order = get_object_or_404(queryset, pk=pk)
+        response = Response(build_order_progress(order))
+        response["Cache-Control"] = "no-store"
+        return response
+
+    @action(detail=True, methods=["get"], url_path="reorder-context")
+    def reorder_context(self, request, pk=None):
+        from .reorder import reorder_context
+
+        options = {}
+        for field in ("warehouse_id", "customer_id"):
+            if request.query_params.get(field):
+                value = serializers.IntegerField(min_value=1).run_validation(
+                    request.query_params[field]
+                )
+                options[field] = value
+        response = Response(reorder_context(request.user, pk, request, **options))
+        response["Cache-Control"] = "no-store"
+        return response
+
     @staticmethod
     def _editable_order_error(order, user):
         if order.created_by_id != user.id:
@@ -1528,7 +1569,7 @@ class OutboundOrderViewSet(
 
         serializer = OutboundOrderDraftUpdateSerializer(
             data=request.data,
-            context={"request": request},
+            context={"request": request, "allow_problem_draft": True},
         )
         serializer.is_valid(raise_exception=True)
         fingerprint = self._standard_order_fingerprint(serializer.validated_data)
@@ -1587,6 +1628,12 @@ class OutboundOrderViewSet(
         order.priced_by = None
         order.final_order_amount = Decimal("0.00")
         order.updated_by = request.user
+        # Legacy headers can have a stale counter. Deleted revisions still
+        # occupy their original line numbers, so allocate beyond all revisions.
+        last_line_no = OutboundOrderLine.all_objects.filter(order=order).aggregate(
+            highest=Max("line_no")
+        )["highest"] or 0
+        order.next_line_no = max(order.next_line_no or 10, (last_line_no // 10 + 1) * 10)
         order.save(
             update_fields=[
                 "warehouse",
@@ -1607,6 +1654,7 @@ class OutboundOrderViewSet(
                 "final_order_amount",
                 "updated_by",
                 "updated_at",
+                "next_line_no",
             ]
         )
 
@@ -1617,9 +1665,14 @@ class OutboundOrderViewSet(
         )
         for index, item in enumerate(validated["items"]):
             try:
+                if item.get("unit_unverified"):
+                    raise DjangoValidationError({
+                        "base_uom": "历史单位未记录，请重新选品并确认数量后保存。"
+                    })
                 OutboundOrderLine.objects.create(
                     order=order,
                     product_id=item["product_id"],
+                    base_uom_id=item.get("base_uom_id"),
                     base_qty=item["qty"],
                     base_price=item.get("price") or Decimal("0.0000"),
                     created_by=request.user,
@@ -1696,6 +1749,9 @@ class OutboundOrderViewSet(
                 {
                     "id": product.id,
                     "product_id": product.id,
+                    "line_key": f"edit-{line.pk}",
+                    "base_uom_id": line.base_uom_id,
+                    "unit_unverified": not line.base_uom_id,
                     "sku": product.sku or product.code or "",
                     "name": product.name or "",
                     "spec": product.spec,
@@ -1759,100 +1815,9 @@ class OutboundOrderViewSet(
         )
 
     def list(self, request, *args, **kwargs):
-        qs = self.get_queryset()
-        q = (request.query_params.get("search") or "").strip()
-        product_q = (
-            request.query_params.get("product") or request.query_params.get("sku") or ""
-        ).strip()
-        owner_id = request.query_params.get("owner_id")
-        warehouse_id = request.query_params.get("warehouse_id")
-        submit_status = request.query_params.get("submit_status")
-        approval_status = request.query_params.get("approval_status")
-        outbound_type = request.query_params.get("outbound_type")
-        delivery_method = request.query_params.get("delivery_method")
-        source_no = request.query_params.get("src_bill_no")
-        task_no = request.query_params.get("task_no")
-        task_status = request.query_params.get("task_status")
-        waybill_no = request.query_params.get("waybill_no")
+        from .order_filters import filter_orders
 
-        if q:
-            qs = qs.filter(
-                Q(order_no__icontains=q)
-                | Q(src_bill_no__icontains=q)
-                | Q(contact__icontains=q)
-                | Q(contact_phone__icontains=q)
-                | Q(customer__name__icontains=q)
-                | Q(
-                    customer__owner_bindings__owner_id=F("owner_id"),
-                    customer__owner_bindings__code__icontains=q,
-                )
-                | Q(supplier__name__icontains=q)
-                | product_search_q(q, product_field="lines__product_id")
-            ).distinct()
-        if product_q:
-            qs = qs.filter(
-                product_search_q(product_q, product_field="lines__product_id")
-            ).distinct()
-        if owner_id:
-            qs = qs.filter(owner_id=owner_id)
-        if warehouse_id:
-            qs = qs.filter(warehouse_id=warehouse_id)
-        if submit_status:
-            qs = qs.filter(submit_status=submit_status)
-        if approval_status:
-            qs = qs.filter(approval_status=approval_status)
-        if outbound_type:
-            qs = qs.filter(outbound_type=outbound_type)
-        if delivery_method:
-            qs = qs.filter(delivery_method=delivery_method)
-        if source_no:
-            qs = qs.filter(src_bill_no__icontains=source_no)
-
-        date_from = request.query_params.get("date_from") or request.query_params.get(
-            "biz_date_from"
-        )
-        date_to = request.query_params.get("date_to") or request.query_params.get("biz_date_to")
-        if date_from:
-            parsed = parse_date(date_from)
-            if parsed is None:
-                raise ValidationError({"date_from": "日期格式必须为 YYYY-MM-DD。"})
-            qs = qs.filter(biz_date__gte=parsed)
-        if date_to:
-            parsed = parse_date(date_to)
-            if parsed is None:
-                raise ValidationError({"date_to": "日期格式必须为 YYYY-MM-DD。"})
-            qs = qs.filter(biz_date__lte=parsed)
-
-        closed = request.query_params.get("is_closed")
-        if closed is not None:
-            if closed.lower() not in {"1", "0", "true", "false"}:
-                raise ValidationError({"is_closed": "必须为 true/false 或 1/0。"})
-            qs = qs.filter(is_closed=closed.lower() in {"1", "true"})
-        overdue = request.query_params.get("overdue")
-        if overdue is not None:
-            if overdue.lower() not in {"1", "0", "true", "false"}:
-                raise ValidationError({"overdue": "必须为 true/false 或 1/0。"})
-            overdue_q = Q(etd__lt=timezone.now(), is_closed=False) & ~Q(approval_status="CANCELLED")
-            qs = qs.filter(overdue_q) if overdue.lower() in {"1", "true"} else qs.exclude(overdue_q)
-
-        if task_no or task_status or waybill_no:
-            task_qs = WmsTask.objects.filter(
-                source_model__in=("outboundorder", "OutboundOrder"),
-            )
-            if task_no:
-                task_qs = task_qs.filter(task_no__icontains=task_no)
-            if task_status:
-                task_qs = task_qs.filter(status=task_status)
-            if waybill_no:
-                task_qs = task_qs.filter(lines__dispatchlineextra__waybill_no__icontains=waybill_no)
-            task_order_ids = task_qs.annotate(
-                _source_order_id=Cast(
-                    "source_pk",
-                    output_field=BigIntegerField(),
-                )
-            ).values("_source_order_id")
-            qs = qs.filter(pk__in=task_order_ids)
-
+        qs = filter_orders(self.get_queryset(), request.query_params)
         page = self.paginate_queryset(qs.distinct())
         ser = OutboundOrderReadSerializer(page, many=True, context={"request": request})
         return self.get_paginated_response(ser.data)
@@ -1902,6 +1867,11 @@ class OutboundOrderViewSet(
                 for item in validated["items"]
             ],
         }
+        if validated.get("reorder_source_id"):
+            canonical["reorder_source_id"] = validated["reorder_source_id"]
+        for original, item in zip(validated["items"], canonical["items"]):
+            if original.get("base_uom_id"):
+                item["base_uom_id"] = original["base_uom_id"]
         encoded = json.dumps(
             canonical,
             ensure_ascii=False,
@@ -1945,7 +1915,29 @@ class OutboundOrderViewSet(
 
     @transaction.atomic
     def _persist_standard_order(self, *, serializer, request, key, fingerprint):
+        from allapp.inventory.locking import lock_warehouses_for_inventory_write
+        from .reorder import validate_submission
+
         owner_id = serializer.validated_data["owner_id__from_user"]
+        if not owner_can_use_warehouse(owner_id, serializer.validated_data["warehouse_id"]):
+            raise ValidationError({"warehouse_id": ["仓库不可用或未关联当前货主。"]})
+        lock_warehouses_for_inventory_write(serializer.validated_data["warehouse_id"])
+        existing = self._existing_idempotent_order(
+            owner_id=owner_id, user_id=request.user.id, key=key, fingerprint=fingerprint
+        )
+        if existing:
+            existing._owner_replayed = True
+            return existing
+        # The first pass only normalizes a replay's immutable business payload.
+        # Fresh requests revalidate all mutable facts inside the write transaction.
+        serializer = OutboundOrderCreateSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        if serializer.validated_data.get("outbound_type", "SALES") == "SALES":
+            validate_submission(
+                request.user, serializer.validated_data, request=request, lock=True
+            )
         src_bill_no = serializer.validated_data.get("src_bill_no")
         if src_bill_no:
             duplicate = (
@@ -1971,6 +1963,7 @@ class OutboundOrderViewSet(
             after={
                 "submit_status": order.submit_status,
                 "approval_status": order.approval_status,
+                "reorder_source_id": serializer.validated_data.get("reorder_source_id"),
             },
         )
         return order
@@ -1978,7 +1971,9 @@ class OutboundOrderViewSet(
     def create(self, request, *args, **kwargs):
         self._require_owner_buyer("outbound.orders.create")
         key = self._standard_order_idempotency_key(request)
-        ser = OutboundOrderCreateSerializer(data=request.data, context={"request": request})
+        ser = OutboundOrderCreateSerializer(
+            data=request.data, context={"request": request, "structural_only": True}
+        )
         ser.is_valid(raise_exception=True)
         fingerprint = self._standard_order_fingerprint(ser.validated_data)
         owner_id = ser.validated_data["owner_id__from_user"]
@@ -2041,8 +2036,11 @@ class OutboundOrderViewSet(
         return self._standard_order_response(
             order,
             request,
-            replayed=False,
-            http_status=status.HTTP_201_CREATED,
+            replayed=getattr(order, "_owner_replayed", False),
+            http_status=(
+                status.HTTP_200_OK if getattr(order, "_owner_replayed", False)
+                else status.HTTP_201_CREATED
+            ),
         )
 
     # 提交：DRAFT -> SUBMITTED
@@ -2051,13 +2049,57 @@ class OutboundOrderViewSet(
     def submit(self, request, pk=None):
         order = self.get_object()
         self._require_owner_buyer("outbound.orders.submit")
+        if order.created_by_id != request.user.pk:
+            raise PermissionDenied("仅订单原创建业务员可以重新提交该订单。")
+        # Keep the inventory -> order lock order shared by approvals and posting.
+        from allapp.accounts.models import AuditEvent
+        from allapp.inventory.locking import lock_warehouses_for_inventory_write
+
+        warehouse_id = order.warehouse_id
+        lock_warehouses_for_inventory_write(warehouse_id)
+        order = OutboundOrder.objects.select_for_update().get(pk=order.pk)
+        if order.warehouse_id != warehouse_id:
+            raise StaleOrderEdit(order.updated_at)
+        key = (
+            self._standard_order_idempotency_key(request)
+            if request.headers.get("Idempotency-Key") else None
+        )
+        fingerprint = hashlib.sha256(
+            json.dumps(request.data, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()
+        if key:
+            completed = AuditEvent.objects.filter(
+                action="outbound.order.submit", object_type="outbound.outboundorder",
+                object_id=str(order.pk), actor=request.user, succeeded=True,
+                metadata__submit_request_key=key,
+            ).first()
+            if completed:
+                if completed.metadata.get("submit_fingerprint") != fingerprint:
+                    raise StandardOrderIdempotencyConflict()
+                return self._standard_order_response(
+                    order, request, replayed=True, http_status=status.HTTP_200_OK
+                )
         self._editable_order_error(order, request.user)
+        if "expected_updated_at" in request.data:
+            expected = serializers.DateTimeField().run_validation(
+                request.data["expected_updated_at"]
+            )
+            if expected != order.updated_at:
+                raise StaleOrderEdit(order.updated_at)
         before = {
             "submit_status": order.submit_status,
             "approval_status": order.approval_status,
         }
         try:
-            order = outbound_services.submit_owner_draft(order, by_user=request.user)
+            validation_items = None
+            if "items" in request.data:
+                from .serializers import OutboundOrderLineCreateSerializer
+                inputs = OutboundOrderLineCreateSerializer(data=request.data["items"], many=True)
+                inputs.is_valid(raise_exception=True)
+                validation_items = inputs.validated_data
+            order = outbound_services.submit_owner_draft(
+                order, by_user=request.user, validation_items=validation_items
+            )
         except DjangoValidationError as exc:
             raise ValidationError(
                 exc.message_dict if hasattr(exc, "message_dict") else exc.messages
@@ -2072,6 +2114,9 @@ class OutboundOrderViewSet(
                 "submit_status": order.submit_status,
                 "approval_status": order.approval_status,
             },
+            metadata={
+                "submit_request_key": key, "submit_fingerprint": fingerprint,
+            } if key else {},
         )
         return Response(OutboundOrderReadSerializer(order, context={"request": request}).data)
 
@@ -2780,11 +2825,16 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                     f"任务审核/过账状态组合不一致：{task.review_status}/{task.posting_status}。"
                 )
 
-        result = _run_posting_handler(
-            task_id=int(pk),
-            by_user=request.user,
-            note="PDA拣货复核通过并过账",
-        )
+        try:
+            result = _run_posting_handler(
+                task_id=int(pk),
+                by_user=request.user,
+                note="PDA拣货复核通过并过账",
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(
+                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+            ) from exc
         with transaction.atomic():
             task = self._get_pick_task_for_update(pk)
             journal = PostingJournal.objects.select_for_update().get(

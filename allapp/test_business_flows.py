@@ -149,6 +149,7 @@ class BusinessFlowTests(TestCase):
             warehouse=self.warehouse,
         )
         self.owner_user.user_permissions.add(
+            Permission.objects.get(content_type__app_label="accounts", codename="access_owner_sales"),
             Permission.objects.get(
                 content_type__app_label="outbound",
                 codename="submit_outbound_as_owner_buyers",

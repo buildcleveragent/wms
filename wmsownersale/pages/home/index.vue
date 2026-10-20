@@ -1,6 +1,19 @@
 <template>
   <view class="home-page">
-    <view v-if="quickItems.length" class="quick-grid">
+    <view v-if="checking" class="empty-access">正在验证登录状态…</view>
+    <view v-else-if="sessionStatus === 'offline'" class="empty-access">
+      <text class="empty-title">暂时无法连接服务器</text>
+      <text class="empty-hint">登录信息已保留，请检查网络后重试。</text>
+      <button class="btn mt-4" @click="checkSession">重试</button>
+      <button class="btn-outline mt-4" @click="changeAccount">退出登录</button>
+    </view>
+    <view v-else-if="sessionStatus === 'anonymous'" class="empty-access">
+      <text class="empty-title">请先登录</text>
+      <button class="btn mt-4" @click="goLogin">前往登录</button>
+    </view>
+    <template v-else-if="quickItems.length">
+    <OwnerWorkbench :active="homeVisible && sessionStatus === 'authenticated'" :identity="sessionIdentity" />
+    <view class="quick-grid">
       <view
         v-for="item in quickItems"
         :key="item.key"
@@ -16,23 +29,57 @@
         <text class="quick-title">{{ item.text }}</text>
       </view>
     </view>
-
+    </template>
     <view v-else class="empty-access">
       <view class="empty-icon">🔒</view>
       <text class="empty-title">暂无可用功能</text>
       <text class="empty-hint">当前账号没有货主端功能权限</text>
+      <button class="btn mt-4" @click="changeAccount">切换账号</button>
     </view>
   </view>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import { useAuth } from '@/store/auth'
 import { buildOwnerMenu } from '@/utils/ownerAccess'
 import { downloadAuthenticatedFile } from '@/utils/request.js'
+import OwnerWorkbench from '@/components/OwnerWorkbench.vue'
 
 const auth = useAuth()
-auth.ensureAuth()
+const checking = ref(true)
+const sessionStatus = ref('')
+let checkingSession = false
+const homeVisible = ref(false)
+const sessionIdentity = computed(() => `${auth.user?.id || ''}:${auth.user?.owner_id || ''}:${auth.roles.join(',')}`)
+
+function goLogin() {
+  uni.reLaunch({ url: '/pages/login' })
+}
+
+async function checkSession() {
+  if (checkingSession) return
+  checkingSession = true
+  checking.value = true
+  try {
+    const result = await auth.bootstrap()
+    sessionStatus.value = result.status
+    if (result.status === 'anonymous') goLogin()
+  } finally {
+    checking.value = false
+    checkingSession = false
+  }
+}
+
+async function changeAccount() {
+  await auth.logout()
+  goLogin()
+}
+
+onShow(() => { homeVisible.value = true; checkSession() })
+onHide(() => { homeVisible.value = false })
+onUnload(() => { homeVisible.value = false })
 
 const menu = computed(() => buildOwnerMenu({
   roles: auth.roles,

@@ -34,8 +34,11 @@ auth.json
 *.ipa
 *.wgt
 media/
+private_returns/
 staticfiles/
 backups/
 
 var/
 docs/remediation-execution-2026-09-06.md
+
+private_arrivals/

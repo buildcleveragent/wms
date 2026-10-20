@@ -127,11 +127,26 @@ class InboundOrderAndPdaApiTests(TestCase):
         )
         return user
 
+    def create_task(self, **values):
+        # Ordered PDA work must have a real, same-scope purchase source.
+        if not values.get("source_pk"):
+            owner = values["owner"]
+            order = InboundOrder.objects.create(
+                order_no="ORDER-" + values["task_no"],
+                owner=owner,
+                warehouse=values["warehouse"],
+                supplier=self.supplier if owner == self.owner else self.other_supplier,
+            )
+            values.update(
+                source_app="inbound", source_model="InboundOrder", source_pk=str(order.pk)
+            )
+        return WmsTask.objects.create(**values)
+
     def test_serial_receipt_is_unitary_accumulative_idempotent_and_unique(self):
         self.product.serial_control = True
         self.product.save(update_fields=["serial_control"])
         operator = self.warehouse_user("api-serial-operator")
-        task = WmsTask.objects.create(
+        task = self.create_task(
             task_no="API-RECEIVE-SERIAL",
             task_type=WmsTask.TaskType.RECEIVE,
             status=WmsTask.Status.RELEASED,
@@ -233,7 +248,7 @@ class InboundOrderAndPdaApiTests(TestCase):
             ["SN-API-001", "SN-API-002"],
         )
 
-        normal_task = WmsTask.objects.create(
+        normal_task = self.create_task(
             task_no="API-RECEIVE-NORMAL-SERIAL-REJECT",
             task_type=WmsTask.TaskType.RECEIVE,
             status=WmsTask.Status.RELEASED,
@@ -377,9 +392,7 @@ class InboundOrderAndPdaApiTests(TestCase):
 
         # A direct permission grant cannot turn a salesperson into an owner
         # manager; role scope and capability must both be present.
-        salesperson.user_permissions.add(
-            self.permission("inbound", "approve_as_owner_manager")
-        )
+        salesperson.user_permissions.add(self.permission("inbound", "approve_as_owner_manager"))
         self.assertEqual(
             client.post(f"/api/inbound/orders/{order.pk}/owner-approve/").status_code,
             403,
@@ -387,9 +400,7 @@ class InboundOrderAndPdaApiTests(TestCase):
         # The conflicting direct marker makes the security resolver fail
         # closed for that request. Remove the deliberately bad grant before
         # continuing the normal salesperson workflow.
-        salesperson.user_permissions.remove(
-            self.permission("inbound", "approve_as_owner_manager")
-        )
+        salesperson.user_permissions.remove(self.permission("inbound", "approve_as_owner_manager"))
 
         manager_client = self.client_for(manager)
         manager_list = manager_client.get("/api/inbound/orders/")
@@ -418,7 +429,7 @@ class InboundOrderAndPdaApiTests(TestCase):
             "api-foreign-operator",
             warehouse=self.other_warehouse,
         )
-        task = WmsTask.objects.create(
+        task = self.create_task(
             task_no="API-RECEIVE-1",
             task_type=WmsTask.TaskType.RECEIVE,
             status=WmsTask.Status.RELEASED,
@@ -435,7 +446,7 @@ class InboundOrderAndPdaApiTests(TestCase):
             status=WmsTaskLine.Status.RELEASED,
         )
         ReceiveLineExtra.objects.create(line=line)
-        assigned_elsewhere = WmsTask.objects.create(
+        assigned_elsewhere = self.create_task(
             task_no="API-RECEIVE-OTHER",
             task_type=WmsTask.TaskType.RECEIVE,
             status=WmsTask.Status.RELEASED,
@@ -446,7 +457,7 @@ class InboundOrderAndPdaApiTests(TestCase):
             task=assigned_elsewhere,
             assignee=other_operator,
         )
-        foreign_task = WmsTask.objects.create(
+        foreign_task = self.create_task(
             task_no="API-RECEIVE-FOREIGN",
             task_type=WmsTask.TaskType.RECEIVE,
             status=WmsTask.Status.RELEASED,
@@ -515,7 +526,7 @@ class InboundOrderAndPdaApiTests(TestCase):
             ).exists()
         )
 
-        over_task = WmsTask.objects.create(
+        over_task = self.create_task(
             task_no="API-RECEIVE-OVER",
             task_type=WmsTask.TaskType.RECEIVE,
             status=WmsTask.Status.RELEASED,
@@ -572,7 +583,7 @@ class InboundOrderAndPdaApiTests(TestCase):
             product=self.product,
             base_qty=Decimal("2.000"),
         )
-        receive_task = WmsTask.objects.create(
+        receive_task = self.create_task(
             task_no="API-RECEIVE-PUTAWAY-SOURCE",
             task_type=WmsTask.TaskType.RECEIVE,
             status=WmsTask.Status.COMPLETED,
@@ -584,7 +595,7 @@ class InboundOrderAndPdaApiTests(TestCase):
             review_status=WmsTask.ReviewStatus.APPROVED,
             posting_status=WmsTask.PostingStatus.POSTED,
         )
-        task = WmsTask.objects.create(
+        task = self.create_task(
             task_no="API-PUTAWAY-1",
             task_type=WmsTask.TaskType.PUTAWAY,
             status=WmsTask.Status.RELEASED,

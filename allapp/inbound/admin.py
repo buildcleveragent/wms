@@ -294,6 +294,36 @@ class InboundOrderAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
             },
         )
 
+    def _arrival_or_legacy(self, request, obj, action, legacy_method):
+        if obj.receipt_mode != "BATCH":
+            return getattr(obj, legacy_method)(request.user)
+        from uuid import uuid4
+
+        from rest_framework.exceptions import APIException
+
+        from .arrival_services import order_action
+
+        try:
+            return order_action(
+                request.user,
+                obj.pk,
+                action,
+                {
+                    "version": obj.version,
+                    "request_id": request.POST.get("arrival_request_id") or str(uuid4()),
+                    "reason": request.POST.get("reason", ""),
+                },
+            )
+        except APIException as exc:
+            raise ValidationError(
+                "分批入库操作未完成，请到 PDA／货主端处理：" + str(exc.detail)
+            ) from exc
+
+    def has_delete_permission(self, request, obj=None):
+        if obj and obj.receipt_mode == "BATCH":
+            return False
+        return super().has_delete_permission(request, obj)
+
     def _as_owner_mgr(self, request):
         return request.user.is_superuser or request.user.has_perm(
             "inbound.approve_as_owner_manager"
@@ -348,7 +378,7 @@ class InboundOrderAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
                         "submit_status": obj.submit_status,
                         "approval_status": obj.approval_status,
                     }
-                    obj.owner_approve(request.user)
+                    self._arrival_or_legacy(request, obj, "owner-approve", "owner_approve")
                     self._audit_order_action(request, obj, "inbound.order.owner_approve", before)
                     ok += 1
                 except ValidationError:
@@ -380,7 +410,7 @@ class InboundOrderAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
                         "submit_status": obj.submit_status,
                         "approval_status": obj.approval_status,
                     }
-                    obj.owner_reject(request.user)
+                    self._arrival_or_legacy(request, obj, "owner-reject", "owner_reject")
                     self._audit_order_action(request, obj, "inbound.order.owner_reject", before)
                     ok += 1
                 except ValidationError:
@@ -418,7 +448,7 @@ class InboundOrderAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
                         "submit_status": obj.submit_status,
                         "approval_status": obj.approval_status,
                     }
-                    obj.wh_confirm(request.user)
+                    self._arrival_or_legacy(request, obj, "warehouse-confirm", "wh_confirm")
                     self._audit_order_action(
                         request, obj, "inbound.order.warehouse_confirm", before
                     )
@@ -471,7 +501,7 @@ class InboundOrderAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
                         "submit_status": obj.submit_status,
                         "approval_status": obj.approval_status,
                     }
-                    obj.wh_reject(request.user)
+                    self._arrival_or_legacy(request, obj, "warehouse-reject", "wh_reject")
                     self._audit_order_action(request, obj, "inbound.order.warehouse_reject", before)
                     ok += 1
                 except ValidationError:
@@ -508,7 +538,7 @@ class InboundOrderAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
                         "submit_status": obj.submit_status,
                         "approval_status": obj.approval_status,
                     }
-                    obj.submit_by_owner_buyers(request.user)
+                    self._arrival_or_legacy(request, obj, "submit", "submit_by_owner_buyers")
                     self._audit_order_action(request, obj, "inbound.order.submit", before)
                     ok += 1
                 except ValidationError:
@@ -565,7 +595,7 @@ class InboundOrderAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
 
     # 只显示 `已关闭` 的订单可以通过 `close_reason` 提供理由
     def has_change_permission(self, request, obj=None):
-        if obj and obj.is_closed:
+        if obj and (obj.is_closed or obj.receipt_mode == "BATCH"):
             return False
         return super().has_change_permission(request, obj)
 
@@ -1000,6 +1030,16 @@ class InboundReceiptAdmin(AdvancedAdminBase, BaseReadonlyAdmin):
     inlines = [InboundReceiptLineInline]
     readonly_fields = ("approved_at",)
 
+    def has_change_permission(self, request, obj=None):
+        if obj and obj.stage != "LEGACY":
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj and obj.stage != "LEGACY":
+            return False
+        return super().has_delete_permission(request, obj)
+
     def get_queryset(self, request):
         return AccessScope.for_user(request.user).filter_queryset(
             super().get_queryset(request),
@@ -1219,3 +1259,6 @@ class ReturnInspectionInline(admin.StackedInline):  # 也可以使用 admin.Tabu
         if obj and obj.status == "POSTED":
             return False
         return super().has_delete_permission(request, obj)
+
+
+from . import customer_return_admin  # noqa: E402,F401

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 import { useCart } from '@/store/cart'
+import { lineAmount } from '@/utils/orderAmount'
 import {
   previewBaseQuantity,
   validateCartQuantity,
@@ -31,6 +32,20 @@ describe('商品数量校验', () => {
 
 describe('购物车数量防线', () => {
   beforeEach(() => setActivePinia(createPinia()))
+
+  it('逐行按后端 Decimal 舍入后合计，重复小数行金额与新订单一致', () => {
+    const cart = useCart()
+    cart.items = [
+      { product_id: 1, qty: '2.125', price: '12.5000' },
+      { product_id: 1, qty: '1.125', price: '12.5000' },
+      { product_id: 1, qty: '1.000', price: '12.5000' },
+    ]
+    expect(cart.totalAmount).toBe('53.12')
+    expect(cart.items.map(item => lineAmount(item.qty, item.price))).toEqual(['26.56', '14.06', '12.50'])
+    expect(lineAmount('1', '1.0050')).toBe('1.00')
+    expect(lineAmount('1', '1.0150')).toBe('1.02')
+    expect(lineAmount('999999999.999', '99999999.9999')).toBe('99999999999800000.00')
+  })
 
   it.each([undefined, '', 0, -1, 'bad'])(
     'addItem 拒绝数量 %s 且不改变购物车',

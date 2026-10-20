@@ -1,6 +1,7 @@
 <template>
   <view class="page">
-    <view class="search-bar">
+    <button v-if="canView" class="inventory-alert-entry" size="mini" @click="openAlerts">库存预警 ›</button>
+    <view v-if="canView" class="search-bar">
       <input
         v-model="q"
         class="search-input"
@@ -10,7 +11,8 @@
       />
       <button class="search-btn" size="mini" @click="onSearch">搜索</button>
     </view>
-
+    <button v-if="canExport" size="mini" :disabled="exporting || loading || refreshing" @click="exportExcel('/api/inventory/summary/export/', {search: appliedSearch}, '库存汇总')">{{ exporting ? '正在导出…' : '导出 Excel' }}</button>
+    <view v-if="exportError" class="state-wrap">{{ exportError }}</view>
     <view v-if="(loading || refreshing) && rows.length === 0" class="state-wrap">
       <text class="state-text">加载中...</text>
     </view>
@@ -44,7 +46,9 @@
           :key="item.id"
           :class="['table-row', { odd: index % 2 === 1 }]"
         >
-          <view class="cell col-name strong">{{ item.product_name || '-' }}</view>
+          <view class="cell col-name strong" role="link" @click="openInventory(item.id)">
+            <text>{{ item.product_name || '-' }}</text><text style="color: #2563eb; font-size: 12px; margin-left: 6px">查看明细 ›</text>
+          </view>
           <view class="cell col-code">{{ item.product_code || '-' }}</view>
           <view class="cell col-sku">{{ item.product_sku || '-' }}</view>
           <view class="cell col-spec">{{ item.product_spec || '-' }}</view>
@@ -57,19 +61,19 @@
 		  <view class="cell col-num">
 		    <text class="num-text">{{ fmtQty(item.onhand_qty_display || item.onhand_qty) }}</text>
 		  </view>
-		  
+
 		  <view class="cell col-num primary">
 		    <text class="num-text">{{ fmtQty(item.available_qty_display || item.available_qty) }}</text>
 		  </view>
-		  
+
 		  <view class="cell col-num">
 		    <text class="num-text">{{ fmtQty(item.allocated_qty_display || item.allocated_qty) }}</text>
 		  </view>
-		  
+
 		  <view class="cell col-num">
 		    <text class="num-text">{{ fmtQty(item.locked_qty_display || item.locked_qty) }}</text>
 		  </view>
-		  
+
 		  <view class="cell col-num">
 		    <text class="num-text">{{ fmtQty(item.damaged_qty_display || item.damaged_qty) }}</text>
 		  </view>
@@ -94,14 +98,22 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
-import { onPullDownRefresh, onReachBottom, onUnload } from '@dcloudio/uni-app'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { onPullDownRefresh, onReachBottom, onUnload, onShow, onHide } from '@dcloudio/uni-app'
+import { useInventoryAccess } from '@/composables/useInventoryAccess'
 import { api } from '@/utils/request'
+import { useOwnerExport } from '@/composables/useOwnerExport'
 import { mergeUniqueById } from '@/utils/pagination'
 
+const { canView, canExport, identity, revoke } = useInventoryAccess()
 const PAGE_SIZE = 50
 
+function openInventory(id) { uni.navigateTo({ url: `/pages/inventory/detail?id=${id}` }) }
+function openAlerts() { uni.navigateTo({ url: '/pages/inventory/alerts' }) }
+
 const q = ref('')
+const appliedSearch = ref('')
+const { exporting, exportError, exportExcel } = useOwnerExport(() => JSON.stringify([appliedSearch.value, identity.value]), {allowed: () => canExport.value, onDenied: revoke})
 const rows = ref([])
 const page = ref(1)
 const loading = ref(false)
@@ -126,9 +138,16 @@ function isBusy() {
   return loading.value || loadingMore.value || refreshing.value
 }
 
+function clearInventory() {
+  requestGeneration++; rows.value=[]; total.value=0; hasNext.value=false
+  loading.value=false; loadingMore.value=false; refreshing.value=false
+  error.value='登录状态或库存访问权限已失效'
+}
+watch(identity, () => { clearInventory(); if (active && canView.value) loadFirst() }, {flush:'sync'})
 async function loadFirst({ refresh = false } = {}) {
+  if (!canView.value) { clearInventory(); return }
   const generation = ++requestGeneration
-  const search = q.value
+  const search = appliedSearch.value
 
   page.value = 1
   hasNext.value = true
@@ -155,6 +174,7 @@ async function loadFirst({ refresh = false } = {}) {
     error.value = ''
   } catch (e) {
     if (active && generation === requestGeneration) {
+      if ([401,403].includes(Number(e?.statusCode || e?.status))) { revoke(); clearInventory(); return }
       error.value = e?.message || '库存加载失败，请稍后重试'
     }
   } finally {
@@ -166,6 +186,7 @@ async function loadFirst({ refresh = false } = {}) {
 }
 
 function onSearch() {
+  appliedSearch.value = q.value.trim()
   loadFirst()
 }
 
@@ -174,11 +195,12 @@ function reload() {
 }
 
 async function loadMore() {
+  if (!canView.value) { clearInventory(); return }
   if (!active || isBusy() || !hasNext.value) return
 
   const generation = requestGeneration
   const requestedPage = page.value
-  const search = q.value
+  const search = appliedSearch.value
   loadingMore.value = true
 
   try {
@@ -197,6 +219,7 @@ async function loadMore() {
     error.value = ''
   } catch (e) {
     if (active && generation === requestGeneration) {
+      if ([401,403].includes(Number(e?.statusCode || e?.status))) { revoke(); clearInventory(); return }
       error.value = e?.message || '库存加载失败，请稍后重试'
     }
   } finally {
@@ -212,6 +235,8 @@ async function refreshPage() {
   }
 }
 
+onHide(() => { active=false; requestGeneration++; loading.value=false; loadingMore.value=false; refreshing.value=false })
+onShow(() => { const returning=!active; active=true; if (returning) loadFirst() })
 onReachBottom(loadMore)
 onPullDownRefresh(refreshPage)
 onUnload(() => {

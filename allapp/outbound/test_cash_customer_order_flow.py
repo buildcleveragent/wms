@@ -9,6 +9,7 @@ from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Customer, Owner, OwnerWarehouseBinding
 from allapp.locations.models import Warehouse
 from allapp.outbound.models import OutboundOrder
+from allapp.outbound.testing import stock_for_owner_order
 from allapp.outbound.views import CustomerViewSet, OutboundOrderViewSet
 from allapp.products.models import Product, ProductUom
 
@@ -59,6 +60,7 @@ class CashCustomerOrderFlowTests(TestCase):
             batch_control=False,
             expiry_control=False,
         )
+        stock_for_owner_order(self.product, self.warehouse)
         self.factory = APIRequestFactory()
         self.order_view = OutboundOrderViewSet.as_view({"post": "create"})
         self.key_number = 0

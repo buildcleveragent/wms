@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@dcloudio/uni-app', () => ({
   onLoad: callback => { mocks.onLoad = callback },
+  onShow: vi.fn(), onHide: vi.fn(), onUnload: vi.fn(),
 }))
 vi.mock('@/store/auth', () => ({ useAuth: () => mocks.auth }))
 vi.mock('@/utils/request', () => ({ api: {} }))
@@ -66,7 +67,7 @@ describe('购物车页面数量与纠错', () => {
     expect(wrapper.find('.primary-button').attributes('disabled')).toBeDefined()
   })
 
-  it('超过库存时失焦回落到可用库存', async () => {
+  it('超过库存时保留输入，要求用户主动调整', async () => {
     const cart = preparedCart()
     const wrapper = render()
     mocks.onLoad()
@@ -74,10 +75,10 @@ describe('购物车页面数量与纠错', () => {
     await quantityInput.trigger('input', { detail: { value: '3' } })
     await quantityInput.trigger('blur')
 
-    expect(cart.items[0].qty).toBe(2)
-    expect(uni.showToast).toHaveBeenCalledWith(expect.objectContaining({
-      title: '已调整为可用库存 2',
-    }))
+    expect(cart.items[0].qty).toBe(3)
+    expect(quantityInput.element.value).toBe('3')
+    expect(wrapper.text()).toContain('基本数量不能超过可用库存 2')
+    expect(wrapper.find('.primary-button').attributes('disabled')).toBeDefined()
   })
 
   it('删除操作移除商品，继续选品使用 redirectTo', async () => {

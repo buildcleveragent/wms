@@ -144,3 +144,7 @@ media/
 staticfiles/
 
 .idea/
+
+/private_returns/
+
+private_arrivals/

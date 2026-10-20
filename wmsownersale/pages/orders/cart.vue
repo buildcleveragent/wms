@@ -6,8 +6,8 @@
         <view><text class="context-label">仓库</text>{{ cart.warehouse_name || '未选择' }}</view>
       </view>
       <view class="context-actions">
-        <button class="link-button" @click="changeWarehouse">更换仓库</button>
-        <button class="link-button" @click="changeCustomer">更换客户</button>
+        <button class="link-button" :disabled="submitting || !!cart.pending_submission" @click="changeWarehouse">更换仓库</button>
+        <button class="link-button" :disabled="submitting || !!cart.pending_submission" @click="changeCustomer">更换客户</button>
       </view>
       <view v-if="cart.owner_reject_reason" class="reject-reason">
         最近退回原因：{{ cart.owner_reject_reason }}
@@ -17,24 +17,35 @@
     <scroll-view class="content" scroll-y>
       <view class="receiver-card">
         <view class="section-title">订单与收件信息</view>
+        <view v-if="cart.historical_address" class="address-hint">来自历史订单，请确认收件信息。</view>
+        <button class="link-button address-button" :disabled="submitting || !!cart.pending_submission" @click="openAddresses">选择常用地址 / 管理地址</button>
+        <view v-if="addressError" class="validation-error">{{ addressError }}</view>
         <view class="receiver-grid">
           <label class="receiver-item">
             <text class="field-label">平台单号</text>
-            <input v-model="form.src_bill_no" class="field-input" placeholder="可选，平台单号" />
+            <input v-model="form.src_bill_no" :disabled="submitting || !!cart.pending_submission" class="field-input" placeholder="可选，平台单号" />
           </label>
-          <label v-if="isCashCustomer" class="receiver-item">
+          <label class="receiver-item">
             <text class="field-label">收件人</text>
-            <input v-model="form.contact" class="field-input" placeholder="请输入收件人" />
+            <input v-model="form.contact" :disabled="submitting || !!cart.pending_submission" class="field-input" placeholder="请输入收件人" maxlength="80" />
           </label>
-          <label v-if="isCashCustomer" class="receiver-item">
+          <label class="receiver-item">
             <text class="field-label">联系电话</text>
-            <input v-model="form.contact_phone" class="field-input" placeholder="请输入联系电话" />
+            <input v-model="form.contact_phone" :disabled="submitting || !!cart.pending_submission" class="field-input" placeholder="请输入联系电话" maxlength="40" />
           </label>
-          <label v-if="isCashCustomer" class="receiver-item receiver-item-full">
+          <label class="receiver-item receiver-item-full">
             <text class="field-label">收货地址</text>
-            <input v-model="form.ship_to" class="field-input" placeholder="请输入完整收货地址" />
+            <input v-model="form.ship_to" :disabled="submitting || !!cart.pending_submission" class="field-input" placeholder="请输入完整收货地址" maxlength="200" />
           </label>
         </view>
+      </view>
+      <view class="receiver-card">
+        <view>价格与库存复核</view>
+        <view class="address-hint">{{ checkedAt ? '最近成功检查：' + checkedAt : '尚未完成当前条件检查' }}</view>
+        <view class="address-hint">提交不锁定库存，审核时重新分配。</view>
+        <view v-if="checkError" class="validation-error">{{ checkError }}</view>
+        <view v-if="cart.pending_submission" class="validation-error">提交结果待确认，请重试确认结果。重试不会重复下单。</view>
+        <button :disabled="checking || submitting || !!cart.pending_submission || denied" @click="checkCurrent">{{ checking ? '检查中…' : '确认当前信息并重新校验' }}</button>
       </view>
 
       <view v-if="!cart.items.length" class="empty-state">
@@ -44,11 +55,12 @@
 
       <CartItemEditor
         v-for="(item, index) in cart.items"
-        :key="item.product_id"
+        :key="lineKey(item)"
         :item="item"
         :quantity-draft="quantityDraft(item)"
-        :quantity-error="quantityErrors[item.product_id] || ''"
-        :amount="fmt(Number(item.qty || 0) * Number(item.price || 0))"
+        :quantity-error="quantityErrors[lineKey(item)] || ''"
+        :disabled="submitting || !!cart.pending_submission"
+        :amount="lineAmount(item.qty, item.price)"
         @price-input="setPrice(item, $event)"
         @price-commit="enforceMin(item)"
         @quantity-input="onQuantityInput(item, index, $event)"
@@ -59,15 +71,15 @@
 
     <view class="footer">
       <view class="total-row">
-        <text>共 {{ cart.items.length }} 种，{{ cart.totalQty }} 件</text>
-        <text class="total-amount">合计：¥ {{ fmt(cart.totalAmount) }}</text>
+        <text>共 {{ cart.items.length }} 行</text>
+        <text class="total-amount">合计：¥ {{ cart.totalAmount }}</text>
       </view>
       <view class="button-row">
-        <button class="secondary-button" @click="backToProducts">继续选品</button>
+        <button class="secondary-button" :disabled="submitting || !!cart.pending_submission" @click="backToProducts">继续选品</button>
         <button
           v-if="cart.editing_order_id"
           class="secondary-button"
-          :disabled="!canSubmit"
+          :disabled="submitting || !cart.items.length || !!cart.pending_submission"
           :loading="submitting"
           @click="saveDraft(false)"
         >保存草稿</button>
@@ -76,15 +88,15 @@
           :disabled="!canSubmit"
           :loading="submitting"
           @click="submitOrder"
-        >{{ submitting ? '提交中' : (cart.editing_order_id ? '保存并重新提交' : '提交订单') }}</button>
+        >{{ submitting ? '提交中' : (cart.pending_submission ? '重试确认提交结果' : cart.editing_order_id ? '保存并重新提交' : '提交订单') }}</button>
       </view>
     </view>
   </view>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 
 import CartItemEditor from '@/components/CartItemEditor.vue'
 import { useAuth } from '@/store/auth'
@@ -92,6 +104,7 @@ import { useCart } from '@/store/cart'
 import { isCashCustomer as isCashCustomerRecord } from '@/utils/customer'
 import { enforceMinimumPrice, initializePriceGuard, isPriceAllowed } from '@/utils/pricing'
 import { validateCartQuantity } from '@/utils/quantity'
+import { lineAmount } from '@/utils/orderAmount'
 import { api } from '@/utils/request'
 
 const cart = useCart()
@@ -100,21 +113,25 @@ const submitting = ref(false)
 const quantityDrafts = reactive({})
 const quantityErrors = reactive({})
 const form = cart.order_header
+const checkedAt = ref(''), checkError = ref(''), checking = ref(false), denied = ref(false), addressError = ref('')
+let alive = true, active = true, generation = 0, firstShow = true, validationFlight = null, addressFlight = null
+const identity = () => `${auth.user?.id}:${auth.user?.owner_id}`
+const lineKey = item => String(item.line_key || item.product_id)
+const checkoutSignature = () => JSON.stringify(buildPayload())
 
 const isCashCustomer = computed(() => isCashCustomerRecord(cart.customer))
-const fmt = value => Number(value || 0).toFixed(2)
 
 function quantityDraft(item) {
-  const key = String(item.product_id)
+  const key = lineKey(item)
   if (!(key in quantityDrafts)) quantityDrafts[key] = String(item.qty ?? '')
   return quantityDrafts[key]
 }
 
 function validateAllQuantities() {
   let valid = true
-  cart.items.forEach(item => {
-    const key = String(item.product_id)
-    const result = validateCartQuantity(quantityDraft(item), item.available)
+  cart.items.forEach((item, index) => {
+    const key = lineKey(item)
+    const result = validateCartQuantity(quantityDraft(item), cart.remainingFor(index))
     quantityErrors[key] = result.error
     if (!result.valid || Number(item.qty) !== result.value) valid = false
   })
@@ -122,15 +139,17 @@ function validateAllQuantities() {
 }
 
 const canSubmit = computed(() => {
+  if (denied.value || submitting.value) return false
+  if (cart.pending_submission) return true
   if (
     submitting.value ||
     !cart.warehouse_id ||
     !cart.customer ||
     !cart.items.length
   ) return false
-  return cart.items.every(item => {
-    const result = validateCartQuantity(quantityDraft(item), item.available)
-    return result.valid && Number(item.qty) === result.value && !quantityErrors[item.product_id]
+  return cart.items.every((item, index) => {
+    const result = validateCartQuantity(quantityDraft(item), cart.remainingFor(index))
+    return result.valid && Number(item.qty) === result.value && !quantityErrors[lineKey(item)]
   })
 })
 
@@ -141,37 +160,35 @@ function setPrice(item, value) {
 function enforceMin(item) {
   const result = enforceMinimumPrice(item)
   if (!result.valid) uni.showToast({ title: result.error, icon: 'none' })
+  checkCurrent()
 }
 
 function onQuantityInput(item, index, value) {
-  const key = String(item.product_id)
+  const key = lineKey(item)
   quantityDrafts[key] = value == null ? '' : String(value)
-  const result = validateCartQuantity(quantityDrafts[key], item.available)
-  quantityErrors[key] = result.error
-  if (result.valid) cart.setQty(index, result.value)
+  const result = validateCartQuantity(quantityDrafts[key])
+  // Keep the requested quantity even above stock. Submission is guarded using
+  // the sum of every row of this product, so editing another row can resolve it.
+  if (result.valid) item.qty = result.value
+  validateAllQuantities()
 }
 
 function commitQuantity(item, index) {
-  const key = String(item.product_id)
-  const result = validateCartQuantity(quantityDrafts[key], item.available)
-  if (result.overAvailable && Number(result.available) >= 0.001) {
-    const adjusted = Number(Number(result.available).toFixed(3))
-    quantityDrafts[key] = String(adjusted)
-    quantityErrors[key] = ''
-    cart.setQty(index, adjusted)
-    uni.showToast({ title: `已调整为可用库存 ${adjusted}`, icon: 'none' })
-    return
-  }
+  const key = lineKey(item)
+  const result = validateCartQuantity(quantityDrafts[key], cart.remainingFor(index))
   quantityErrors[key] = result.error
+  if (validateCartQuantity(quantityDrafts[key]).valid) checkCurrent()
 }
 
 function removeItem(index) {
   const item = cart.items[index]
   if (!item) return
-  const key = String(item.product_id)
+  const key = lineKey(item)
   cart.remove(index)
   delete quantityDrafts[key]
   delete quantityErrors[key]
+  validateAllQuantities()
+  checkCurrent()
 }
 
 function backToProducts() {
@@ -194,6 +211,9 @@ function changeWarehouse() {
 function changeCustomer() {
   uni.navigateTo({ url: '/pages/customers/select?mode=change&returnTo=cart' })
 }
+function openAddresses() {
+  uni.navigateTo({url: `/pages/customers/addresses?customer_id=${cart.customer?.id}&select=1`})
+}
 
 function buildPayload({ includeVersion = false } = {}) {
   const payload = {
@@ -207,17 +227,22 @@ function buildPayload({ includeVersion = false } = {}) {
     contact: String(form.contact || '').trim(),
     contact_phone: String(form.contact_phone || '').trim(),
     ship_to: String(form.ship_to || '').trim(),
+    ...(cart.reorder_source_id ? { reorder_source_id: cart.reorder_source_id } : {}),
     items: cart.items.map(item => ({
       product_id: item.product_id,
-      qty: Number(item.qty),
-      price: Number(item.price),
+      qty: String(quantityDraft(item)),
+      price: item.price === '' || item.price == null ? null : String(item.price),
+      line_key: lineKey(item),
+      base_uom_id: item.base_uom_id || null,
+      catalog_version: item.catalog_version || '',
+      unit_unverified: Boolean(item.unit_unverified),
     })),
   }
   if (includeVersion) payload.expected_updated_at = cart.editing_updated_at
   return payload
 }
 
-function validateOrder() {
+function validateOrder({draft = false} = {}) {
   if (!cart.warehouse_id) {
     uni.showToast({ title: '请先选择出库仓库', icon: 'none' })
     return false
@@ -230,11 +255,11 @@ function validateOrder() {
     uni.showToast({ title: '请先添加商品', icon: 'none' })
     return false
   }
-  if (!validateAllQuantities()) {
+  if (!draft && !validateAllQuantities()) {
     uni.showToast({ title: '存在数量不正确的商品，请修正后再提交', icon: 'none' })
     return false
   }
-  if (cart.items.some(item => !isPriceAllowed(item))) {
+  if (!draft && cart.items.some(item => !isPriceAllowed(item))) {
     uni.showToast({ title: '存在价格低于系统最低价的商品，请修正后再提交', icon: 'none' })
     return false
   }
@@ -261,7 +286,7 @@ function validateOrder() {
 }
 
 async function saveDraft(resubmit = false) {
-  if (submitting.value || !cart.editing_order_id || !validateOrder()) return false
+  if (submitting.value || !cart.editing_order_id || !validateOrder({draft:!resubmit})) return false
   if (!cart.editing_updated_at) {
     uni.showModal({
       title: '编辑上下文已失效',
@@ -272,18 +297,28 @@ async function saveDraft(resubmit = false) {
   }
 
   submitting.value = true
+  const actor = identity(), tag = generation
   try {
+    if (resubmit && !await checkCurrent()) return false
     const updated = await api.updateOutboundOrder(
       cart.editing_order_id,
       buildPayload({ includeVersion: true }),
     )
+    if (!alive || !active || actor !== identity() || tag !== generation) return false
     cart.setEditingUpdatedAt(updated?.updated_at)
     if (!resubmit) {
       uni.showToast({ title: '草稿已保存', icon: 'none' })
       return true
     }
 
-    const result = await api.submitOutboundOrder(cart.editing_order_id)
+    cart.pending_submission = {
+      kind: 'resubmit', orderId: cart.editing_order_id,
+      payload: JSON.parse(JSON.stringify(buildPayload({includeVersion: true}))),
+      key: cart.ensureIdempotencyKey(),
+    }
+    const pending = cart.pending_submission
+    const result = await api.submitOutboundOrder(pending.orderId, pending.payload, pending.key)
+    if (!alive || !active || actor !== identity() || tag !== generation) return false
     const orderId = cart.editing_order_id
     cart.resetOrder()
     uni.showToast({ title: '已重新提交', icon: 'none' })
@@ -292,21 +327,18 @@ async function saveDraft(resubmit = false) {
     }, 200)
     return true
   } catch (error) {
+    if (!alive || !active || actor !== identity() || tag !== generation) return false
     const data = error?.data || {}
+    const status = Number(error?.statusCode || error?.code)
+    if (status >= 400 && status < 500) cart.pending_submission = null
+    if ([401,403].includes(status)) { cart.resetOrder(); denied.value = true; checkError.value = '下单权限已失效'; return false }
+    if (data.validation) { applyValidation(data.validation); checkError.value = data.detail; return false }
     if (
       Number(error?.statusCode || error?.code) === 409 &&
       String(data?.code || '') === 'stale_order_edit'
     ) {
       const orderId = cart.editing_order_id
-      uni.showModal({
-        title: '订单已被修改',
-        content: data?.detail || '订单已被其他会话修改，请重新加载。',
-        showCancel: false,
-        success: () => {
-          cart.resetOrder()
-          uni.redirectTo({ url: `/pages/orders/detail?id=${orderId}` })
-        },
-      })
+      checkError.value = `订单 ${orderId} 已被修改，当前输入已保留；请返回详情核对并重新进入编辑。`
       return false
     }
     uni.showToast({ title: error?.message || data?.detail || '保存订单失败', icon: 'none' })
@@ -318,17 +350,31 @@ async function saveDraft(resubmit = false) {
 
 async function submitOrder() {
   if (submitting.value) return
-  if (cart.editing_order_id) return saveDraft(true)
-  if (!validateOrder()) return
+  if (cart.editing_order_id && !cart.pending_submission) return saveDraft(true)
+  if (!cart.pending_submission && !validateOrder()) return
 
   submitting.value = true
+  const actor = identity(), tag = generation
   try {
-    const response = await api.createOutboundOrder(buildPayload(), cart.ensureIdempotencyKey())
+    if (!cart.pending_submission) {
+      if (!await checkCurrent()) return
+      cart.pending_submission = { payload: JSON.parse(JSON.stringify(buildPayload())), key: cart.ensureIdempotencyKey() }
+    }
+    const pending = cart.pending_submission
+    const response = pending.kind === 'resubmit'
+      ? await api.submitOutboundOrder(pending.orderId, pending.payload, pending.key)
+      : await api.createOutboundOrder(pending.payload, pending.key)
+    if (!alive || !active || actor !== identity() || tag !== generation) return
     uni.showToast({ title: `已创建：${response?.order_no || response?.id}`, icon: 'none' })
     cart.resetOrder()
-    uni.switchTab({ url: '/pages/features/index' })
+    uni.redirectTo({ url: `/pages/orders/detail?id=${response.id}` })
   } catch (error) {
+    if (!alive || !active || actor !== identity() || tag !== generation) return
     const data = error?.data || {}
+    const status = Number(error?.statusCode || error?.code)
+    if (status >= 400 && status < 500) cart.pending_submission = null
+    if ([401,403].includes(status)) { cart.resetOrder(); denied.value = true; checkError.value = '下单权限已失效'; return }
+    if (data.validation) { applyValidation(data.validation); checkError.value = data.detail; return }
     if (Number(error?.statusCode || error?.code) === 409) {
       uni.showModal({
         title: '提交内容冲突',
@@ -369,7 +415,7 @@ async function submitOrder() {
 onMounted(() => {
   cart.items.forEach(item => {
     initializePriceGuard(item)
-    quantityDrafts[String(item.product_id)] = String(item.qty ?? '')
+    quantityDrafts[lineKey(item)] = String(item.qty ?? '')
   })
 })
 
@@ -381,16 +427,96 @@ onLoad(() => {
     return
   }
   cart.ensureIdempotencyKey()
+  loadCart()
 })
+
+function applyValidation(report) {
+  const facts = new Map((report.items || []).map(row => [String(row.line_key), row]))
+  cart.items.forEach(item => {
+    const row = facts.get(lineKey(item))
+    if (!row) return
+    item.available = row.available
+    item.orig_price = row.price
+    item.minimum_sale_price = row.minimum_sale_price
+    item.catalog_version = row.catalog_version || ''
+    item.current_base_unit_name = row.base_unit_name
+    item.unit_mismatch = Boolean(item.base_uom_id && row.base_uom_id && item.base_uom_id !== row.base_uom_id)
+    if (!item.base_uom_id && !item.unit_unverified) item.base_uom_id = row.base_uom_id
+    item.validation_issues = row.issues || []
+    initializePriceGuard(item)
+  })
+  validateAllQuantities()
+  checkedAt.value = new Date(report.checked_at).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai', hour12: false})
+}
+async function checkCurrent() {
+  while (validationFlight) await validationFlight
+  if (!alive || !active || denied.value || cart.pending_submission || !cart.items.length ||
+      !cart.customer?.id || !cart.warehouse_id) return false
+  if (cart.items.some(item => !validateCartQuantity(quantityDraft(item)).valid)) return false
+  const payload = buildPayload(), signature = checkoutSignature(), actor = identity(), tag = generation
+  checking.value = true; checkError.value = ''
+  validationFlight = (async () => {
+    try {
+      const report = await api.validateOrder(payload)
+      if (!alive || !active || tag !== generation || actor !== identity() || signature !== checkoutSignature()) return false
+      applyValidation(report)
+      if (!report.can_submit) checkError.value = '请处理商品提示，确认当前信息后重新校验。'
+      return Boolean(report.can_submit)
+    } catch (e) {
+      if (!alive || !active || tag !== generation || actor !== identity()) return false
+      const status = Number(e?.statusCode || e?.code)
+      if ([401,403].includes(status)) { cart.resetOrder(); denied.value = true; checkedAt.value = '' }
+      checkError.value = [404,405].includes(status) ? '快捷下单暂不可用' :
+        (checkedAt.value ? '更新失败，当前为上次数据；请重试校验后再提交。' : e?.data?.detail || e?.message || '校验失败，请重试。')
+      return false
+    } finally { checking.value = false }
+  })()
+  try { return await validationFlight } finally { validationFlight = null }
+}
+async function loadCart() {
+  if (!cart.default_address_loaded && !cart.pending_submission && !addressFlight && cart.customer?.id) {
+    const actor = identity(), customer = cart.customer.id, tag = generation
+    try {
+      addressFlight = api.customerAddresses(customer)
+      const result = await addressFlight
+      if (!alive || !active || tag !== generation || actor !== identity() || customer !== cart.customer?.id) return
+      const address = result.results?.find(row => row.is_default)
+      if (address && !form.contact && !form.contact_phone && !form.ship_to) {
+        Object.assign(form, {contact: address.contact, contact_phone: address.phone, ship_to: address.address})
+      }
+      cart.default_address_loaded = true; addressError.value = ''
+    } catch (e) {
+      if (tag === generation && actor === identity()) addressError.value = '常用地址暂不可用，可手动填写。'
+    } finally { addressFlight = null }
+  }
+  await checkCurrent()
+}
+onShow(() => { active = true; if (firstShow) { firstShow = false; return }; loadCart() })
+onHide(() => { active = false; generation++ })
+function dispose() {
+  alive = false; active = false; generation++
+  if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', visibility)
+}
+function visibility() { generation++; if (!document.hidden && active) loadCart() }
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', visibility)
+onUnload(dispose); onUnmounted(dispose)
+watch(identity, () => { generation++; cart.resetOrder(); denied.value = true; checkedAt.value = ''; checkError.value = '账号已切换，请重新开单' })
 </script>
 
 <style scoped>
 .page-shell { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: #f5f7fa; }
+/* #ifdef H5 */
+.page-shell {
+  height: calc(100vh - var(--window-top, 0px) - var(--window-bottom, 0px));
+  height: calc(100dvh - var(--window-top, 0px) - var(--window-bottom, 0px));
+}
+/* #endif */
 .page-header { flex: 0 0 auto; padding: 20rpx; background: #fff; border-bottom: 1rpx solid #e5e7eb; }
 .context-summary { display: flex; flex-wrap: wrap; gap: 12rpx 30rpx; font-size: 28rpx; font-weight: 600; color: #111827; }
 .context-label { margin-right: 10rpx; font-size: 24rpx; font-weight: 400; color: #6b7280; }
 .context-actions { display: flex; gap: 16rpx; margin-top: 14rpx; }
 .link-button { min-height: 88rpx; width: 210rpx; margin: 0; font-size: 26rpx; color: #2563eb; background: #fff; border: 1rpx solid #2563eb; }
+.address-button { width: auto; max-width: 100%; padding: 0 24rpx; margin-bottom: 16rpx; }
 .reject-reason { margin-top: 14rpx; padding: 14rpx; color: #9a3412; background: #fff7ed; border-radius: 10rpx; }
 .content { flex: 1; min-height: 0; box-sizing: border-box; padding-top: 18rpx; }
 .receiver-card { margin: 0 20rpx 18rpx; padding: 22rpx; background: #fff; border-radius: 16rpx; }

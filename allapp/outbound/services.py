@@ -195,12 +195,40 @@ def reject_owner_order(order, *, by_user, reason):
 
 
 @transaction.atomic
-def submit_owner_draft(order, *, by_user):
+def submit_owner_draft(order, *, by_user, validation_items=None):
     """Submit an editable draft while preserving the latest reject reason."""
 
     Order = type(order)
+    warehouse_id = Order.objects.filter(pk=order.pk).values_list("warehouse_id", flat=True).get()
+    lock_warehouses_for_inventory_write(warehouse_id)
     locked = Order.objects.select_for_update().get(pk=order.pk)
+    if locked.warehouse_id != warehouse_id:
+        raise ValidationError("仓库已变化，请重新加载订单。")
     validate_standard_draft_edit_preconditions(locked, by_user)
+    if locked.outbound_type == "SALES":
+        from .reorder import validate_submission
+
+        lines = list(locked.lines.order_by("line_no", "pk"))
+        items = [{
+            "product_id": line.product_id, "qty": line.base_qty, "price": line.base_price,
+            "base_uom_id": line.base_uom_id, "unit_unverified": not line.base_uom_id,
+        } for line in lines]
+        if validation_items is not None:
+            if len(validation_items) != len(items) or any(
+                any(a.get(k) != b.get(k) for k in ("product_id", "qty", "price"))
+                for a, b in zip(items, validation_items)
+            ):
+                raise ValidationError("草稿明细已变化，请重新加载并校验。")
+            for item, expected in zip(items, validation_items):
+                if expected.get("base_uom_id") and expected["base_uom_id"] != item["base_uom_id"]:
+                    raise ValidationError("草稿商品单位已变化，请重新选品并核对数量。")
+                item["unit_unverified"] = item["unit_unverified"] or expected.get(
+                    "unit_unverified", False
+                )
+                item["catalog_version"] = expected.get("catalog_version")
+        validate_submission(by_user, {
+            "warehouse_id": locked.warehouse_id, "customer_id": locked.customer_id, "items": items,
+        }, lock=True)
     locked.submit_status = "SUBMITTED"
     locked.approval_status = "OWNER_PENDING"
     locked.approved_by_ownermanager = None

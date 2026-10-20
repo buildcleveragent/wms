@@ -14,8 +14,8 @@
       <view class="text-gray">仓库：{{ order.warehouse_name || '—' }}</view>
       <view class="text-gray" v-if="order.biz_date">业务日期：{{ order.biz_date }}</view>
       <view class="text-gray">业务员：{{ order.created_by_name || order.salesperson_name || order.created_by || '—' }}</view>
-      <view class="text-gray">提交状态：{{ order.submit_status_name || order.submit_status || '—' }}</view>
-      <view class="text-gray">审核状态：{{ order.approval_status_name || order.approval_status_display || order.approval_status || '—' }}</view>
+      <view class="text-gray">提交状态：{{ orderStatus(order, 'submit_status') }}</view>
+      <view class="text-gray">审核状态：{{ orderStatus(order, 'approval_status') }}</view>
       <view class="text-gray" v-if="order.memo">备注：{{ order.memo }}</view>
       <view class="reject-box" v-if="canReview">
         <view class="font-bold">退回原因（必填）</view>
@@ -78,10 +78,13 @@
 </template>
 
 <script setup>
+import { orderStatus } from '@/utils/orderStatus'
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
 import { useOrderReviewActions } from '@/utils/useOrderReviewActions'
+
+defineOptions({ inheritAttrs: false })
 
 const id = ref(0)
 const order = ref(null)

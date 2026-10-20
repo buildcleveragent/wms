@@ -265,6 +265,10 @@ class InboundOrderViewSet(
         ):
             raise PermissionDenied("没有提交入库单的权限。")
         order = self._locked_scoped_order(pk)
+        if order.receipt_mode == "BATCH":
+            from .arrival_services import ArrivalConflict
+
+            raise ArrivalConflict("该申请使用分批流程，请使用带版本和请求编号的申请动作接口。")
         if not request.user.is_superuser and order.created_by_id != request.user.pk:
             raise PermissionDenied("货主业务员只能提交本人创建的入库单。")
         before = {
@@ -292,6 +296,10 @@ class InboundOrderViewSet(
         if not (request.user.has_perm(permission) and self._has_role(request.user, role)):
             raise PermissionDenied("没有执行该审核动作的权限。")
         order = self._locked_scoped_order(pk)
+        if order.receipt_mode == "BATCH":
+            from .arrival_services import ArrivalConflict
+
+            raise ArrivalConflict("该申请使用分批流程，请使用带版本和请求编号的申请动作接口。")
         before = {
             "submit_status": order.submit_status,
             "approval_status": order.approval_status,
@@ -391,7 +399,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 )
             )
         ):
-            return WmsTask.objects.none()
+            raise PermissionDenied("没有查看收货或上架任务的权限。")
         queryset = scoped_receive_tasks(
             user,
             WmsTask.objects.filter(
@@ -407,6 +415,15 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 "lines__putawaylineextra__to_location",
             ),
         )
+        from .arrival_task_scope import ordered_tasks
+
+        queryset = ordered_tasks(queryset)
+        if UserRoleScope.Role.WAREHOUSE_OPERATOR in scope.roles:
+            queryset = queryset.filter(
+                Q(assignments__assignee=user, assignments__finished_at__isnull=True)
+                | Q(assignments__assignee=user, status__in=["COMPLETED", "CANCELLED"])
+                | Q(status="RELEASED", _has_active_assignment=False)
+            )
         task_type = (self.request.query_params.get("task_type") or "").upper()
         if task_type:
             if task_type not in {WmsTask.TaskType.RECEIVE, WmsTask.TaskType.PUTAWAY}:
@@ -416,13 +433,11 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
         if statuses:
             queryset = queryset.filter(status__in=statuses)
         elif self.action == "list":
-            queryset = queryset.filter(
-                status__in=(
-                    WmsTask.Status.RELEASED,
-                    WmsTask.Status.IN_PROGRESS,
-                    WmsTask.Status.COMPLETED,
-                )
-            )
+            if self.request.query_params.get("history") == "1":
+                queryset = queryset.filter(status__in=["COMPLETED", "CANCELLED"])
+            else:
+                queryset = queryset.filter(status__in=["RELEASED", "IN_PROGRESS"])
+
         search = (self.request.query_params.get("search") or "").strip()
         if search:
             queryset = queryset.filter(
@@ -459,12 +474,23 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
     def claim(self, request, pk=None):
         self._require_operator()
         task = self._locked_task(pk)
+        from .models import InboundReceipt
+
+        if (
+            InboundReceipt.objects.filter(Q(task=task) | Q(putaway_task=task))
+            .exclude(stage="LEGACY")
+            .exists()
+        ):
+            from .arrival_services import ArrivalConflict
+
+            raise ArrivalConflict("该任务使用分批验收，请刷新并进入对应批次处理。")
         try:
             task_services.claim_task(
                 task,
                 by_user=request.user,
                 allowed_wh_ids={task.warehouse_id},
             )
+            task._prefetched_objects_cache.pop("assignments", None)
         except (DjangoValidationError, ValidationError) as exc:
             if isinstance(exc, DjangoValidationError):
                 raise _drf_validation_error(exc) from exc
@@ -483,6 +509,16 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
     def start(self, request, pk=None):
         self._require_operator()
         task = self._locked_task(pk)
+        from .models import InboundReceipt
+
+        if (
+            InboundReceipt.objects.filter(Q(task=task) | Q(putaway_task=task))
+            .exclude(stage="LEGACY")
+            .exists()
+        ):
+            from .arrival_services import ArrivalConflict
+
+            raise ArrivalConflict("该任务使用分批验收，请刷新并进入对应批次处理。")
         self._require_owned(task)
         try:
             task_services.task_start(request=request, task=task)
@@ -557,10 +593,20 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
     @transaction.atomic
     def record_receipt(self, request, pk=None):
         self._require_operator()
+        task = self._locked_task(pk)
+        from .models import InboundReceipt
+
+        if (
+            InboundReceipt.objects.filter(Q(task=task) | Q(putaway_task=task))
+            .exclude(stage="LEGACY")
+            .exists()
+        ):
+            from .arrival_services import ArrivalConflict
+
+            raise ArrivalConflict("该任务使用分批验收，请刷新并进入对应批次处理。")
         serializer = ReceiptRecordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
-        task = self._locked_task(pk)
         if task.task_type != WmsTask.TaskType.RECEIVE:
             raise ValidationError("该任务不是收货任务。")
         line = get_object_or_404(
@@ -744,10 +790,20 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
     @transaction.atomic
     def record_putaway(self, request, pk=None):
         self._require_operator()
+        task = self._locked_task(pk)
+        from .models import InboundReceipt
+
+        if (
+            InboundReceipt.objects.filter(Q(task=task) | Q(putaway_task=task))
+            .exclude(stage="LEGACY")
+            .exists()
+        ):
+            from .arrival_services import ArrivalConflict
+
+            raise ArrivalConflict("该任务使用分批验收，请刷新并进入对应批次处理。")
         serializer = PutawayRecordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         payload = serializer.validated_data
-        task = self._locked_task(pk)
         if task.task_type != WmsTask.TaskType.PUTAWAY:
             raise ValidationError("该任务不是上架任务。")
         line = get_object_or_404(
