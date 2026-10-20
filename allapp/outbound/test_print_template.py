@@ -7,6 +7,26 @@ from allapp.outbound.export_print import OUTBOUND_PRINT_CSS_DEFAULTS
 
 
 class PickTaskPrintTemplateTests(SimpleTestCase):
+    def test_dispatch_print_distinguishes_unpriced_from_legacy_numeric_amounts(self):
+        legacy = {"sku_name": "历史商品", "qty": 2, "price": 12.5, "amount": 25}
+        note = {"items": [legacy], "total_amount": 25, "total_amount_upper": "贰拾伍元整"}
+        html = render_to_string("reports/dispatch_note.html", {"note": note})
+        self.assertNotIn("未计价", html)
+        self.assertIn("12.50", html)
+        note.update(
+            items=[{**legacy, "is_priced": False, "price": None, "amount": None}],
+            amount_status="UNPRICED",
+            unpriced_line_count=1,
+            total_amount=0,
+        )
+        html = render_to_string("reports/dispatch_note.html", {"note": note})
+        self.assertIn("历史商品（未计价）", html)
+        self.assertNotIn("12.50", html)
+        self.assertNotIn("金额：0.00", html)
+        note.update(items=[legacy, *note["items"]], amount_status="PARTIAL", total_amount=25)
+        html = render_to_string("reports/dispatch_note.html", {"note": note})
+        self.assertIn("已计价小计 ¥25.00，另有 1 行未计价", html)
+
     def test_print_css_controls_each_outbound_section(self):
         print_css = {
             **OUTBOUND_PRINT_CSS_DEFAULTS,

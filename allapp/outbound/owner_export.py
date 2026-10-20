@@ -76,6 +76,7 @@ def export_orders(request):
         "base_uom__name",
         "base_qty",
         "base_price",
+        "is_priced",
         "aux_uom__uom__name",
         "aux_qty",
         "note",
@@ -99,7 +100,7 @@ def export_orders(request):
         line = {k: record[f"valid_line__{k}"] for k in line_fields}
         amount = (
             line_amount(line["base_qty"], line["base_price"])
-            if line["id"] is not None
+            if line["id"] is not None and line["is_priced"]
             else None
         )
         rows.append(
@@ -117,12 +118,13 @@ def export_orders(request):
                 line["product__spec"],
                 line["base_uom__name"] or "未记录",
                 line["base_qty"],
-                line["base_price"],
+                line["base_price"] if line["is_priced"] else None,
                 amount,
                 line["aux_uom__uom__name"],
                 line["aux_qty"],
                 line["note"],
                 record["remark"],
+                ("已计价" if line["is_priced"] else "未计价") if line["id"] else None,
             ]
         )
     return xlsx_download(
@@ -152,6 +154,7 @@ def export_orders(request):
             "包装数量",
             "行备注",
             "订单备注",
+            "计价状态",
         ],
         rows=rows,
         filters="；".join(f"{FILTER_LABELS[k]}：{v}" for k, v in params.items()),

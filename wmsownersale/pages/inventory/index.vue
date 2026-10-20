@@ -98,6 +98,7 @@
 </template>
 
 <script setup>
+import { formatQuantity } from '@/utils/quantity'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { onPullDownRefresh, onReachBottom, onUnload, onShow, onHide } from '@dcloudio/uni-app'
 import { useInventoryAccess } from '@/composables/useInventoryAccess'
@@ -128,10 +129,7 @@ let active = true
 function fmtQty(value) {
   if (value === null || value === undefined || value === '') return '-'
 
-  const n = Number(value)
-  if (!Number.isFinite(n)) return String(value)
-
-  return String(Number(n.toFixed(4)))
+  return formatQuantity(value)
 }
 
 function isBusy() {

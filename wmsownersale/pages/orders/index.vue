@@ -18,7 +18,7 @@
     <view v-for="(order, index) in rows" :key="order?.id ?? index" class="order-card" @click="goDetail(order)">
       <view class="row">
         <view class="font-bold">{{ order?.order_no || ('订单#' + order?.id) }}</view>
-        <view class="badge">¥ {{ money(order?.total_amount) }}</view>
+        <view class="badge">{{ amountSummaryLabel(order) }}</view>
       </view>
       <view class="text-gray">客户：{{ order?.customer_name || '—' }}</view>
       <view class="text-gray">仓库：{{ order?.warehouse_name || '—' }}</view>
@@ -38,6 +38,7 @@
 </template>
 
 <script setup>
+import { amountSummaryLabel } from '@/utils/orderAmount'
 import { orderStatus } from '@/utils/orderStatus'
 import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh, onReachBottom, onShow, onUnload } from '@dcloudio/uni-app'

@@ -1064,6 +1064,17 @@ export const api = {
       url: `/api/outbound/orders/${id}/`,
     }),
 
+  warehouseReviewOrders: (params = {}) =>
+    request({ url: `/api/outbound/warehouse-review/?${buildQuery(params)}` }),
+  warehouseReviewOptions: () =>
+    request({ url: '/api/outbound/warehouse-review/options/' }),
+  warehouseReviewDetail: (id) =>
+    request({ url: `/api/outbound/warehouse-review/${id}/` }),
+  warehouseConfirm: (id, data) =>
+    request({ url: `/api/outbound/orders/${id}/warehouse-confirm/`, method: 'POST', data }),
+  warehouseReject: (id, data) =>
+    request({ url: `/api/outbound/orders/${id}/warehouse-reject/`, method: 'POST', data }),
+
   pendingOrders: (page = 1, search = '') =>
     request({
       url: `/api/outbound/orders?approval_status=OWNER_PENDING&page=${page}${
@@ -1372,15 +1383,12 @@ export const api = {
 
   reviewPickTasks: (params = {}) =>
     request({
-      url: '/api/pda/pick-tasks/',
+      url: `/api/pda/pick-tasks/?${buildQuery({ ...params, for_review: 1 })}`,
       method: 'GET',
-      data: {
-        status: 'COMPLETED',
-        review_status: 'PENDING',
-        for_review: 1,
-        ...params,
-      },
     }),
+
+  pickReviewContext: (id) =>
+    request({ url: `/api/pda/pick-tasks/${id}/review-context/`, method: 'GET' }),
 
   adjustPickLineQty: (taskId, data) =>
     request({

@@ -30,6 +30,9 @@ def _dispatch_payload(note):
         "items": items,
         "total_amount": str(note.total_amount),
         "total_amount_upper": note.total_amount_upper,
+        "amount_status": note.amount_status,
+        "priced_amount": str(note.total_amount),
+        "unpriced_line_count": note.unpriced_line_count,
     }
 
 

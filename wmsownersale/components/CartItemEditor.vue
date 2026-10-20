@@ -9,8 +9,8 @@
       <text v-if="item.sku" class="meta">SKU：{{ item.sku }}</text>
       <text v-if="item.spec" class="meta">规格：{{ item.spec }}</text>
       <text v-if="item.gtin" class="meta">条码：{{ item.gtin }}</text>
-      <text class="meta">可用库存：{{ item.available ?? '—' }} {{ item.current_base_unit_name || item.base_unit_name }}</text>
-      <text v-if="item.historical_price != null" class="meta">历史价：¥{{ item.historical_price }} · 当前参考价：¥{{ item.orig_price ?? '未配置' }}</text>
+      <text class="meta">可用库存：{{ formatQuantity(item.available ?? '—') }} {{ item.current_base_unit_name || item.base_unit_name }}</text>
+      <text v-if="item.historical_price != null && item.is_priced !== false" class="meta">历史价：¥{{ item.historical_price }} · 当前参考价：{{ Number(item.orig_price) > 0 ? '¥' + item.orig_price : '未计价' }}</text>
       <text v-for="issue in item.validation_issues || item.issues || []" :key="issue" class="field-error">{{ issue }}</text>
 
       <view class="editor-grid">
@@ -18,7 +18,7 @@
           <text>基本单位</text>
           <text class="field-value">{{ item.base_unit_name || '—' }}</text>
         </view>
-        <label class="field">
+        <label v-if="item.is_priced !== false" class="field">
           <text>基本单价</text>
           <input
             class="field-input"
@@ -43,16 +43,18 @@
           />
           <text v-if="quantityError" class="field-error">{{ quantityError }}</text>
         </label>
-        <view class="field amount-field">
+        <view v-if="item.is_priced !== false" class="field amount-field">
           <text>金额</text>
           <text class="amount">¥ {{ amount }}</text>
         </view>
+        <view v-else class="field">未计价</view>
       </view>
     </view>
   </view>
 </template>
 
 <script setup>
+import { formatQuantity } from '@/utils/quantity'
 defineProps({
   item: { type: Object, required: true },
   quantityDraft: { type: String, required: true },

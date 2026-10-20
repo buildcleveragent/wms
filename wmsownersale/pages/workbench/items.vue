@@ -24,6 +24,7 @@
   </view>
 </template>
 <script setup>
+import { formatQuantity } from '@/utils/quantity'
 import { ref, watch, onUnmounted } from 'vue'
 import { onLoad, onShow, onHide, onUnload, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
@@ -75,7 +76,7 @@ function reload() {
   return fetchPage(1)
 }
 function openOrder(row) { uni.navigateTo({ url: `/pages/${row.action === 'review' ? 'approval/approvedetail' : 'orders/detail'}?id=${row.id}` }) }
-function qty(value) { return String(value).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '') }
+function qty(value) { return formatQuantity(value) }
 function formatTime(value) { return (value || '').replace('T', ' ').replace(/\.\d+/, '').replace(/\+08:00$/, '（北京时间）') }
 onLoad(options => { category.value = options.category || ''; if (!labels[category.value]) error.value = '待办类别不正确' })
 onShow(() => { active = true; reload() })

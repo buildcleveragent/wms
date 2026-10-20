@@ -76,7 +76,7 @@ class ArrivalTests(TestCase):
             r, **({"pk": str(pk)} if pk else {}), **kwargs
         )
 
-    def draft(self, qty="10"):
+    def draft(self, qty="10", price="2.5000"):
         response = self.call(
             "create",
             {
@@ -88,11 +88,31 @@ class ArrivalTests(TestCase):
                 "eta": "2026-10-25T09:00:00+08:00",
                 "delivery_contact": "送货人",
                 "delivery_phone": "13800000000",
-                "lines": [{"product_id": self.product.pk, "base_qty": qty, "base_price": "2.5000"}],
+                "lines": [{"product_id": self.product.pk, "base_qty": qty, "base_price": price}],
             },
         )
         self.assertEqual(response.status_code, 201, response.data)
         return response.data
+
+    def test_purchase_reference_is_optional_through_submission_and_approval(self):
+        for price in (None, Decimal("12.5000")):
+            type(self.product).objects.filter(pk=self.product.pk).update(purchase_price=price)
+            response = self.call("arrival_options", method="get")
+            self.assertEqual(response.status_code, 200, response.data)
+            product = next(row for row in response.data["results"] if row["id"] == self.product.pk)
+            if price is None:
+                self.assertIsNone(product["purchase_price"])
+            else:
+                self.assertEqual(Decimal(product["purchase_price"]), price)
+        type(self.product).objects.filter(pk=self.product.pk).update(purchase_price=None)
+        obj = self.draft(price="0")
+        for action, actor in [
+            ("submit", self.user),
+            ("owner-approve", self.manager),
+            ("warehouse-confirm", self.wh),
+        ]:
+            obj = self.act(obj, action, actor)
+        self.assertEqual(Decimal(obj["lines"][0]["base_price"]), 0)
 
     def act(self, obj, action, actor=None, **extra):
         r = self.call(

@@ -259,30 +259,70 @@ export async function fetchAllPages(fetchPage, params = {}) {
   }
 }
 
+function readDownloadedFile(filePath, encoding) {
+  return new Promise((resolve, reject) => {
+    const manager = uni.getFileSystemManager?.()
+    if (manager?.readFile) {
+      manager.readFile({filePath, ...(encoding ? {encoding} : {}), success: result => resolve(result.data), fail: reject})
+      return
+    }
+    // Android App uses HTML5+ IO; getFileSystemManager is not available there.
+    if (typeof plus === 'undefined' || !plus.io) {
+      reject({message: '当前环境不支持读取下载文件'})
+      return
+    }
+    plus.io.resolveLocalFileSystemURL(filePath, entry => entry.file(file => {
+      const reader = new plus.io.FileReader()
+      reader.onerror = reject
+      reader.onload = event => {
+        try {
+          const result = event.target.result
+          resolve(encoding ? result : uni.base64ToArrayBuffer(result.slice(result.indexOf(',') + 1)))
+        } catch (error) { reject(error) }
+      }
+      if (encoding) reader.readAsText(file, 'utf-8')
+      else reader.readAsDataURL(file)
+    }, reject), reject)
+  })
+}
+
+function discardDownloadedFile(filePath) {
+  const manager = uni.getFileSystemManager?.()
+  if (manager?.unlink) manager.unlink({filePath, fail: () => {}})
+  else if (typeof plus !== 'undefined' && plus.io) {
+    plus.io.resolveLocalFileSystemURL(filePath, entry => entry.remove(() => {}, () => {}), () => {})
+  }
+}
+
 function rawDownload(url, access, excel = false) {
   return new Promise((resolve, reject) => {
     uni.downloadFile({
       url: BASE_URL + url,
       header: access ? { Authorization: `Bearer ${access}` } : {},
-      success: (res) => {
+      success: async (res) => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           if (!excel) {resolve(res.tempFilePath);return}
-          if (!uni.getFileSystemManager) {reject({message:'当前环境不支持校验下载文件'});return}
-          uni.getFileSystemManager().readFile({filePath:res.tempFilePath,
-            success(result) {
-              const bytes=new Uint8Array(result.data)
-              if(bytes[0]===0x50 && bytes[1]===0x4b) resolve(res.tempFilePath)
-              else reject({message:getFriendlyMessage(decodeDownloadError(result.data),'导出响应不是有效的 Excel 文件')})
-            }, fail:()=>reject({message:'下载文件读取失败，请重试'}),
-          })
-        }
-        else {
+          try {
+            const data = await readDownloadedFile(res.tempFilePath)
+            const bytes = new Uint8Array(data)
+            if (bytes[0] === 0x50 && bytes[1] === 0x4b) resolve(res.tempFilePath)
+            else {
+              discardDownloadedFile(res.tempFilePath)
+              reject({message: getFriendlyMessage(decodeDownloadError(data), '导出响应不是有效的 Excel 文件')})
+            }
+          } catch {
+            discardDownloadedFile(res.tempFilePath)
+            reject({message: '下载文件读取失败，请重试'})
+          }
+        } else {
           const fallback = { statusCode: res.statusCode, message: '下载失败' }
-          if (!res.tempFilePath || !uni.getFileSystemManager) { reject(fallback); return }
-          uni.getFileSystemManager().readFile({filePath: res.tempFilePath, encoding: 'utf8',
-            success(result) { let data; try {data=JSON.parse(result.data)} catch {data=null} reject({...fallback, message:getFriendlyMessage(data, '下载失败')}) },
-            fail() {reject(fallback)},
-          })
+          if (!res.tempFilePath) { reject(fallback); return }
+          try {
+            const text = await readDownloadedFile(res.tempFilePath, 'utf8')
+            let data; try { data = JSON.parse(text) } catch { data = null }
+            reject({...fallback, message: getFriendlyMessage(data, '下载失败')})
+          } catch { reject(fallback) }
+          finally { discardDownloadedFile(res.tempFilePath) }
         }
       },
       fail: (error) => reject({ statusCode: 0, message: '网络异常，请稍后重试', data: error }),
@@ -312,7 +352,7 @@ export async function downloadAuthenticatedFile(url, filename, { isCurrent = () 
   // #endif
 
   // #ifndef H5
-  const discard = path => uni.getFileSystemManager?.().unlink({filePath:path,fail:()=>{}})
+  const discard = discardDownloadedFile
   const path = await recoverRequest(async access => {
     const result = await rawDownload(url, access, excel)
     try { checkSession(epoch) } catch (error) { discard(result); throw error }
@@ -575,6 +615,9 @@ export const api = {
   ownerWorkbenchItems: (params = {}) => request({
     url: `/api/outbound/owner-workbench/items/?${buildQuery(params)}`, silent: true,
   }),
+
+  withdrawOrder: (id) =>
+    request({ url: `/api/outbound/orders/${id}/withdraw/`, method: 'POST' }),
 
   orderEditContext: (id) =>
     request({ url: `/api/outbound/orders/${id}/edit-context/` }),

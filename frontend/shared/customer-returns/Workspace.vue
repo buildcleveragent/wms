@@ -25,7 +25,7 @@
         <text class="hint">数量按基本单位填写；提交时会重新校验剩余可退数量。</text>
         <view v-for="(line, i) in form" :key="line.original_line_id" class="card">
           <text class="name">{{ line.product_name }}</text><text class="muted">{{ line.original_line_no ? `原单行 ${line.original_line_no} · ` : '' }}{{ line.product_code }} · 规格：{{ line.spec || '未记录' }} · 单位：{{ line.unit_label || line.unit }}</text>
-          <text v-if="!editing">实际履约 {{ line.fulfilled_qty }} · 已退 {{ line.returned_qty }}</text><text v-if="!editing">处理中 {{ line.pending_qty }} · 剩余可退 {{ line.available_qty }}</text>
+          <text v-if="!editing">实际履约 {{ formatQuantity(line.fulfilled_qty) }} · 已退 {{ formatQuantity(line.returned_qty) }}</text><text v-if="!editing">处理中 {{ formatQuantity(line.pending_qty) }} · 剩余可退 {{ formatQuantity(line.available_qty) }}</text>
           <text v-if="!editing && line.reason" class="warning">{{ line.reason }}</text>
           <label>申请数量<input v-model="line.qty" type="digit" :disabled="!editing && !line.can_apply" placeholder="0" /></label>
           <picker :range="reasons" range-key="label" :value="reasonIndex(line.reason_code)" @change="line.reason_code = reasons[Number($event.detail.value)].code"><view class="select">退货原因：{{ reasons[reasonIndex(line.reason_code)].label }} ▾</view></picker>
@@ -41,7 +41,7 @@
         </view>
         <view v-for="line in data.lines" :key="line.id" class="card">
           <text class="name">{{ line.product_name }}</text><text class="muted">{{ line.original_line_no ? `原单行 ${line.original_line_no} · ` : '' }}{{ line.product_code }} · 规格：{{ line.spec || '未记录' }} · 单位：{{ line.unit_label || line.unit }}</text>
-          <view class="numbers"><text>申请 {{ line.qty }}</text><text>已验收 {{ line.received_qty }}</text><text>可再售 {{ line.qty_ok }}</text><text>残次 {{ line.qty_damage }}</text><text>拒收 {{ line.qty_reject }}</text><text>待到货 {{ line.pending_qty }}</text></view>
+          <view class="numbers"><text>申请 {{ formatQuantity(line.qty) }}</text><text>已验收 {{ formatQuantity(line.received_qty) }}</text><text>可再售 {{ formatQuantity(line.qty_ok) }}</text><text>残次 {{ formatQuantity(line.qty_damage) }}</text><text>拒收 {{ formatQuantity(line.qty_reject) }}</text><text>待到货 {{ formatQuantity(line.pending_qty) }}</text></view>
           <text>原因：{{ line.reason }}</text><view class="buttons"><button v-for="photo in line.photos" :key="photo.id" size="mini" @click="preview(photo)">申请照片 {{ photo.id }}</button></view>
         </view>
         <template v-if="data.allowed_actions.includes('receive')">
@@ -60,10 +60,10 @@
         <text class="section">分批验收与库存回补</text><text v-if="!data.receipts.length" class="empty">仓库尚未登记验收</text>
         <view v-for="receipt in data.receipts" :key="receipt.id" class="card">
           <text class="name">{{ time(receipt.created_at) }} · {{ receipt.actor }}</text><text :class="receipt.posted_at ? 'success' : 'warning'">{{ receipt.posting_label }}</text><text v-if="receipt.posted_at" class="muted">入账时间：{{ time(receipt.posted_at) }}</text>
-          <view v-for="row in receipt.lines" :key="row.id" class="batch"><text>{{ row.product_name }} · 单位：{{ row.unit }}</text><text>合格 {{ row.qty_ok }} · 残次 {{ row.qty_damage }} · 拒收 {{ row.qty_reject }}</text><text>库位 {{ row.location }} · 批次 {{ row.batch_no || '未记录' }}</text><text>生产日期 {{ row.production_date || '未记录' }} · 到期 {{ row.expiry_date || '未记录' }}</text><text v-if="row.serial_no">序列号：{{ row.serial_no }}</text><text>说明：{{ row.reason || '无异常说明' }}</text><view class="buttons"><button v-for="photo in row.photos" :key="photo.id" size="mini" @click="preview(photo)">验收照片 {{ photo.id }}</button></view></view>
+          <view v-for="row in receipt.lines" :key="row.id" class="batch"><text>{{ row.product_name }} · 单位：{{ row.unit }}</text><text>合格 {{ formatQuantity(row.qty_ok) }} · 残次 {{ formatQuantity(row.qty_damage) }} · 拒收 {{ formatQuantity(row.qty_reject) }}</text><text>库位 {{ row.location }} · 批次 {{ row.batch_no || '未记录' }}</text><text>生产日期 {{ row.production_date || '未记录' }} · 到期 {{ row.expiry_date || '未记录' }}</text><text v-if="row.serial_no">序列号：{{ row.serial_no }}</text><text>说明：{{ row.reason || '无异常说明' }}</text><view class="buttons"><button v-for="photo in row.photos" :key="photo.id" size="mini" @click="preview(photo)">验收照片 {{ photo.id }}</button></view></view>
           <button v-if="!receipt.posted_at && data.allowed_actions.includes('retry-posting')" :disabled="busy" @click="retryPosting(receipt.id)">重试库存入账</button>
         </view>
-        <text class="section">处理记录</text><view class="card timeline"><view v-for="item in data.events" :key="item.id" class="event"><text class="name">{{ item.label }}</text><text class="muted">{{ time(item.occurred_at) }} · {{ item.actor }}</text><text v-if="item.reason">{{ item.reason }}</text><view v-if="['submit','edit'].includes(item.action)" class="muted"><view v-for="line in item.lines || []" :key="line.id"><text>{{ line.product_name }} · {{ line.qty }} {{ line.unit }} · {{ line.reason }}</text><button v-for="photoId in line.photo_ids || []" :key="photoId" size="mini" @click="preview({url:url('photos/'+photoId+'/')})">当时的照片 {{ photoId }}</button></view></view></view></view>
+        <text class="section">处理记录</text><view class="card timeline"><view v-for="item in data.events" :key="item.id" class="event"><text class="name">{{ item.label }}</text><text class="muted">{{ time(item.occurred_at) }} · {{ item.actor }}</text><text v-if="item.reason">{{ item.reason }}</text><view v-if="['submit','edit'].includes(item.action)" class="muted"><view v-for="line in item.lines || []" :key="line.id"><text>{{ line.product_name }} · {{ formatQuantity(line.qty) }} {{ line.unit }} · {{ line.reason }}</text><button v-for="photoId in line.photo_ids || []" :key="photoId" size="mini" @click="preview({url:url('photos/'+photoId+'/')})">当时的照片 {{ photoId }}</button></view></view></view></view>
         <view v-if="data.allowed_actions.includes('note')" class="card"><textarea v-model="note" maxlength="500" placeholder="补充处理说明，保存后保留记录" /><button :disabled="busy || !note.trim()" @click="act('note', note)">追加说明</button><button v-if="data.lines.length" size="mini" :disabled="busy" @click="upload(data.lines[0], 'NOTE')">追加证据照片</button></view>
         <view class="buttons"><button v-for="photo in data.photos" :key="photo.id" size="mini" @click="preview(photo)">补充照片 {{ photo.id }}</button></view>
       </template>
@@ -71,6 +71,7 @@
   </view>
 </template>
 <script setup>
+import { formatQuantity } from '../quantity'
 import { computed, ref, watch, onUnmounted } from 'vue'
 const props = defineProps({ transport: {type: Object, required: true}, identity: String, visible: Boolean, recordId: [Number, String], originalId: [Number, String], filterOrder: [Number, String], warehouse: Boolean })
 const receiptChoices = computed(()=>(data.value?.lines || []).map((line,index)=>({...line,choice_label:`${line.product_name} · 原单行 ${line.original_line_no || index+1}`})))
@@ -116,7 +117,7 @@ async function load(next=1) {
 }
 function refresh() { generation++; load(1) }
 function filter() { appliedSearch=search.value; generation++; data.value=null; load(1) }
-function startEdit() { formVersion=data.value.version; form.value=data.value.lines.map(l=>({...l,reason_text:l.reason})); editing.value=true }
+function startEdit() { formVersion=data.value.version; form.value=data.value.lines.map(l=>({...l,qty:formatQuantity(l.qty),reason_text:l.reason})); editing.value=true }
 function uuid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const n=Math.floor(Math.random()*16);return(c==='x'?n:(n&3)|8).toString(16)}) }
 async function write(path, body, method='POST', completed=null) {
   if (busy.value || loading.value || !active()) return

@@ -1,0 +1,12 @@
+.page { box-sizing: border-box; width: 100%; padding: 24rpx; max-width: 1040px; margin: 0 auto; color: #243247; }
+.header { font-size: 36rpx; font-weight: 600; margin-bottom: 24rpx; }
+.card { padding: 24rpx; margin-bottom: 20rpx; background: #fff; border: 1px solid #e5e7eb; border-radius: 12rpx; line-height: 1.8; overflow-wrap: anywhere; }
+.row-first { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16rpx; }
+.task-no { font-weight: 600; }
+.status { color: #0f766e; }
+.warning { color: #a63a19; margin: 16rpx 0; }
+.hint { color: #64748b; padding: 24rpx 0; }
+.primary { background: #2563eb; color: white; margin-top: 20rpx; }
+button[disabled] { opacity: .5; }
+.toggle-picking { margin-top: 16rpx; font-size: 28rpx; color: #2563eb; }
+.picking-record { padding: 16rpx 0; border-bottom: 1px solid #e5e7eb; font-size: 28rpx; }

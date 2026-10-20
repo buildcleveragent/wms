@@ -198,7 +198,7 @@
       <tr>
         <td>{{ forloop.counter }}</td>
 
-        <td class="name-cell nowrap" title="{{ line.product.name }}">{{ line.product.name }}</td>
+        <td class="name-cell nowrap" title="{{ line.product.name }}">{{ line.product.name }}{% if line.is_priced == False %}（未计价）{% endif %}</td>
 
         <td class="nowrap" title="{{ line.product.spec|default_if_none:"" }}">
           {% if line.product.spec %}{{ line.product.spec }}{% endif %}
@@ -216,7 +216,7 @@
         <!-- 数量：整数不显示小数；有小数保留最多3位并去尾0 -->
         <td class="nowrap">{{ line.base_qty|floatformat:"-3" }}</td>
 
-        <td class="nowrap">{{ line.base_price|floatformat:2 }}</td>
+        <td class="nowrap">{% if line.is_priced != False %}{{ line.base_price|floatformat:2 }}{% endif %}</td>
 
         <td class="nowrap">{{ line.amount|floatformat:2 }}</td>
 
@@ -231,7 +231,9 @@
 
         <!-- 大写在合计右边，同一行（覆盖：货物名称+包装规格+单位 三列） -->
         <td colspan="3" class="name-cell nowrap" title="{{ total_amount_upper|default_if_none:"" }}">
-          <b>大写：</b>{{ total_amount_upper|default_if_none:"" }}
+          {% if all_unpriced %}未计价{% else %}
+          <b>{% if unpriced_line_count %}已计价小计大写：{% else %}大写：{% endif %}</b>{{ total_amount_upper|default_if_none:"" }}
+          {% endif %}
         </td>
 
         <!-- 数量合计落在“数量”列 -->
@@ -241,13 +243,14 @@
         <td></td>
 
         <!-- 金额合计落在“金额”列 -->
-        <td class="nowrap"><b>{{ total_amount|floatformat:2 }}</b></td>
+        <td class="nowrap"><b>{% if all_unpriced %}—{% else %}{{ total_amount|floatformat:2 }}{% endif %}</b></td>
 
         <!-- 备注空 -->
         <td></td>
       </tr>
     </tbody>
   </table>
+  {% if unpriced_line_count and not all_unpriced %}<p>另有 {{ unpriced_line_count }} 行未计价，以上金额为已计价小计。</p>{% endif %}
 
   <!-- 签字区（无框线） -->
   <div class="sign">

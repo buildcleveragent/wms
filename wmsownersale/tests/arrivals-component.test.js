@@ -8,6 +8,25 @@ function render(props={}){const w=mount(Workspace,{props:{transport:{request},vi
 beforeEach(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:false});request=vi.fn().mockResolvedValue(record());global.uni={showModal:vi.fn(o=>o.success({confirm:true,content:'确认原因'}))}})
 afterEach(()=>{wrappers.splice(0).forEach(w=>w.unmount());vi.useRealTimers()})
 describe('到货预报与PDA共同页面',()=>{
+ it('采购参考价预填，无参考价留空仍可保存草稿',async()=>{
+  request.mockResolvedValueOnce({
+   suppliers:[{id:1,name:'供应商'}],warehouses:[{id:2,name:'仓库'}],
+   results:[{id:3,name:'有采购价',purchase_price:'12.5000'},{id:4,name:'无采购价',purchase_price:null}],
+  })
+  const w=render({recordId:0,creating:true,canCreate:true});await flushPromises()
+  const pickers=w.findAll('picker')
+  await pickers[0].trigger('change',{detail:{value:'0'}})
+  await pickers[1].trigger('change',{detail:{value:'0'}})
+  for(const b of w.findAll('button').filter(b=>b.text()==='添加一行'))await b.trigger('click')
+  const prices=w.findAll('input[placeholder="未记录可留空"]')
+  expect(prices[0].element.value).toBe('12.5000');expect(prices[1].element.value).toBe('')
+  const qtys=w.findAll('label').filter(l=>l.text()==='计划数量')
+  await qtys[0].find('input').setValue('2');await qtys[1].find('input').setValue('1.25')
+  await button(w,'保存草稿').trigger('click');await flushPromises()
+  expect(request.mock.lastCall[0].data.lines).toMatchObject([
+   {product_id:3,base_qty:'2',base_price:'12.5000'},{product_id:4,base_qty:'1.25',base_price:'0'},
+  ])
+ })
  it('按原单行展示单位、计划、验收、待到货和入账结果',async()=>{const w=render();await flushPromises();for(const t of ['ASN-001','单位：瓶','已确认破损 1','待到货 5','已入账 4','创建申请'])expect(w.text()).toContain(t)})
  it('首次失败可重试，刷新失败保留数据，权限失效清空',async()=>{request.mockRejectedValueOnce({statusCode:404});const w=render();await flushPromises();expect(w.text()).toContain('暂不可用');await button(w,'重新加载').trigger('click');await flushPromises();expect(w.text()).toContain('ASN-001');request.mockRejectedValueOnce({statusCode:500});await button(w,'刷新').trigger('click');await flushPromises();expect(w.text()).toContain('当前为上次数据');expect(w.text()).toContain('ASN-001');request.mockRejectedValueOnce({statusCode:403});await button(w,'刷新').trigger('click');await flushPromises();expect(w.text()).not.toContain('ASN-001');expect(w.text()).toContain('权限已失效')})
  it('网络重试复用幂等编号，失败保留动作',async()=>{const w=render();await flushPromises();request.mockRejectedValueOnce({message:'网络失败'});await button(w,'审核通过').trigger('click');await flushPromises();const first=request.mock.lastCall[0].data.request_id;await button(w,'审核通过').trigger('click');await flushPromises();expect(request.mock.lastCall[0].data.request_id).toBe(first)})

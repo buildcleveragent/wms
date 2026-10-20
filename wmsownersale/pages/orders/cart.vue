@@ -60,7 +60,7 @@
         :quantity-draft="quantityDraft(item)"
         :quantity-error="quantityErrors[lineKey(item)] || ''"
         :disabled="submitting || !!cart.pending_submission"
-        :amount="lineAmount(item.qty, item.price)"
+        :amount="item.is_priced === false ? '' : lineAmount(item.qty, item.price)"
         @price-input="setPrice(item, $event)"
         @price-commit="enforceMin(item)"
         @quantity-input="onQuantityInput(item, index, $event)"
@@ -72,7 +72,7 @@
     <view class="footer">
       <view class="total-row">
         <text>共 {{ cart.items.length }} 行</text>
-        <text class="total-amount">合计：¥ {{ cart.totalAmount }}</text>
+        <text class="total-amount">{{ amountSummaryLabel({items: cart.items, total_amount: cart.totalAmount}) }}</text>
       </view>
       <view class="button-row">
         <button class="secondary-button" :disabled="submitting || !!cart.pending_submission" @click="backToProducts">继续选品</button>
@@ -103,8 +103,8 @@ import { useAuth } from '@/store/auth'
 import { useCart } from '@/store/cart'
 import { isCashCustomer as isCashCustomerRecord } from '@/utils/customer'
 import { enforceMinimumPrice, initializePriceGuard, isPriceAllowed } from '@/utils/pricing'
-import { validateCartQuantity } from '@/utils/quantity'
-import { lineAmount } from '@/utils/orderAmount'
+import { formatQuantity, validateCartQuantity } from '@/utils/quantity'
+import { amountSummaryLabel, lineAmount } from '@/utils/orderAmount'
 import { api } from '@/utils/request'
 
 const cart = useCart()
@@ -123,7 +123,7 @@ const isCashCustomer = computed(() => isCashCustomerRecord(cart.customer))
 
 function quantityDraft(item) {
   const key = lineKey(item)
-  if (!(key in quantityDrafts)) quantityDrafts[key] = String(item.qty ?? '')
+  if (!(key in quantityDrafts)) quantityDrafts[key] = formatQuantity(item.qty)
   return quantityDrafts[key]
 }
 
@@ -227,11 +227,12 @@ function buildPayload({ includeVersion = false } = {}) {
     contact: String(form.contact || '').trim(),
     contact_phone: String(form.contact_phone || '').trim(),
     ship_to: String(form.ship_to || '').trim(),
+    ...(cart.editing_order_id ? { editing_order_id: cart.editing_order_id } : {}),
     ...(cart.reorder_source_id ? { reorder_source_id: cart.reorder_source_id } : {}),
     items: cart.items.map(item => ({
       product_id: item.product_id,
       qty: String(quantityDraft(item)),
-      price: item.price === '' || item.price == null ? null : String(item.price),
+      price: item.is_priced === false || item.price === '' || item.price == null ? null : String(item.price),
       line_key: lineKey(item),
       base_uom_id: item.base_uom_id || null,
       catalog_version: item.catalog_version || '',
@@ -306,6 +307,20 @@ async function saveDraft(resubmit = false) {
     )
     if (!alive || !active || actor !== identity() || tag !== generation) return false
     cart.setEditingUpdatedAt(updated?.updated_at)
+    // Draft saves replace database lines; keep the identities returned by the server.
+    if (updated?.lines?.length === cart.items.length) {
+      cart.items.forEach((item, index) => {
+        const line = updated.lines[index], oldKey = lineKey(item)
+        const draft = quantityDraft(item), error = quantityErrors[oldKey] || ''
+        delete quantityDrafts[oldKey]
+        delete quantityErrors[oldKey]
+        item.line_key = `edit-${line.id}`
+        item.is_priced = line.is_priced !== false
+        if (!item.is_priced) item.price = null
+        quantityDrafts[lineKey(item)] = draft
+        quantityErrors[lineKey(item)] = error
+      })
+    }
     if (!resubmit) {
       uni.showToast({ title: '草稿已保存', icon: 'none' })
       return true
@@ -415,7 +430,7 @@ async function submitOrder() {
 onMounted(() => {
   cart.items.forEach(item => {
     initializePriceGuard(item)
-    quantityDrafts[lineKey(item)] = String(item.qty ?? '')
+    quantityDrafts[lineKey(item)] = formatQuantity(item.qty)
   })
 })
 
@@ -436,6 +451,10 @@ function applyValidation(report) {
     const row = facts.get(lineKey(item))
     if (!row) return
     item.available = row.available
+    const wasUnpriced = item.is_priced === false
+    item.is_priced = row.is_priced !== false
+    if (!item.is_priced) item.price = null
+    else if (wasUnpriced) item.price = row.price
     item.orig_price = row.price
     item.minimum_sale_price = row.minimum_sale_price
     item.catalog_version = row.catalog_version || ''

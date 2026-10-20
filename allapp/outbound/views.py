@@ -95,13 +95,14 @@ from allapp.outbound.warehouse_access import (
     owner_warehouse_queryset,
 )
 from allapp.products.identifier_lookup import filter_by_product_search
-from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
+from allapp.products.pricing import InvalidSalePriceRule
 from allapp.tasking import services as task_services
 from allapp.tasking.models import WmsTask, WmsTaskLine
 from allapp.tasking.services import _run_posting_handler, adjust_pick_line_qty
 
 from ..products.models import ProductPackage
 from .models import OutboundOrder
+from .pricing import has_reference_price, pricing_applies, sale_minimum, saved_pricing_lines
 
 logger = logging.getLogger(__name__)
 
@@ -536,11 +537,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 # product_image_url = "http://192.168.1.6:8001"+p.product_image.url  # 获取图片的 URL 地址
 
             try:
-                lowest_price = minimum_sale_price(
-                    base_price=p.price,
-                    min_price=p.min_price,
-                    max_discount=p.max_discount,
-                )
+                lowest_price = sale_minimum(p)
             except InvalidSalePriceRule as exc:
                 raise ValidationError(
                     {"detail": f"商品 {p.code or p.sku or p.pk} 价格配置错误：{exc}"}
@@ -557,7 +554,8 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "carton_unit": carton_unit,
                     "carton_conv": carton_conv,
                     "available": p.available,
-                    "price": getattr(p, "price", None) or getattr(p, "sale_price", None) or 0,
+                    "is_priced": has_reference_price(p),
+                    "price": p.price if has_reference_price(p) else None,
                     "product_image_url": product_image_url,
                     "gtin": p.gtin,
                     "aux_uom_name": aux_uom_name,
@@ -868,11 +866,7 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 # product_image_url = "http://192.168.1.6:8001"+p.product_image.url  # 获取图片的 URL 地址
 
             try:
-                lowest_price = minimum_sale_price(
-                    base_price=p.price,
-                    min_price=p.min_price,
-                    max_discount=p.max_discount,
-                )
+                lowest_price = sale_minimum(p)
             except InvalidSalePriceRule as exc:
                 raise ValidationError(
                     {"detail": f"商品 {p.code or p.sku or p.pk} 价格配置错误：{exc}"}
@@ -888,7 +882,8 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "base_unit_name": getattr(getattr(p, "base_uom", None), "name", None),
                     "carton_unit": carton_unit,
                     "carton_conv": carton_conv,
-                    "price": getattr(p, "price", None) or getattr(p, "sale_price", None) or 0,
+                    "is_priced": has_reference_price(p),
+                    "price": p.price if has_reference_price(p) else None,
                     "product_image_url": product_image_url,
                     "gtin": p.gtin,
                     "aux_uom_name": aux_uom_name,
@@ -1387,6 +1382,7 @@ class OutboundOrderViewSet(
                 "supplier",
                 "created_by",
                 "priced_by",
+                "approved_by_warehouse",
                 "assisted_by",
             )
             .prefetch_related(Prefetch("lines", queryset=line_qs))
@@ -1569,7 +1565,11 @@ class OutboundOrderViewSet(
 
         serializer = OutboundOrderDraftUpdateSerializer(
             data=request.data,
-            context={"request": request, "allow_problem_draft": True},
+            context={
+                "request": request,
+                "allow_problem_draft": True,
+                "saved_pricing_lines": saved_pricing_lines(current),
+            },
         )
         serializer.is_valid(raise_exception=True)
         fingerprint = self._standard_order_fingerprint(serializer.validated_data)
@@ -1599,7 +1599,13 @@ class OutboundOrderViewSet(
         if duplicate:
             raise self._duplicate_source_error(duplicate)
 
-        if order.idempotency_fingerprint == fingerprint:
+        saved_states = list(
+            order.lines.order_by("line_no", "pk").values_list("is_priced", flat=True)
+        )
+        incoming_states = [
+            item.get("is_priced", True) for item in serializer.validated_data["items"]
+        ]
+        if order.idempotency_fingerprint == fingerprint and saved_states == incoming_states:
             data = dict(OutboundOrderReadSerializer(order, context={"request": request}).data)
             data["changed"] = False
             return Response(data)
@@ -1675,6 +1681,7 @@ class OutboundOrderViewSet(
                     base_uom_id=item.get("base_uom_id"),
                     base_qty=item["qty"],
                     base_price=item.get("price") or Decimal("0.0000"),
+                    is_priced=item.get("is_priced", True),
                     created_by=request.user,
                 )
             except DjangoValidationError as exc:
@@ -1723,11 +1730,7 @@ class OutboundOrderViewSet(
         for line in lines:
             product = line.product
             try:
-                lowest_price = minimum_sale_price(
-                    base_price=product.price,
-                    min_price=product.min_price,
-                    max_discount=product.max_discount,
-                )
+                lowest_price = sale_minimum(product) if pricing_applies(product, line) else None
             except InvalidSalePriceRule as exc:
                 raise ValidationError(
                     {
@@ -1755,7 +1758,8 @@ class OutboundOrderViewSet(
                     "sku": product.sku or product.code or "",
                     "name": product.name or "",
                     "spec": product.spec,
-                    "price": line.base_price,
+                    "is_priced": pricing_applies(product, line),
+                    "price": line.base_price if pricing_applies(product, line) else None,
                     "orig_price": product.price,
                     "min_price": product.min_price,
                     "product_min_price": product.min_price,
@@ -1935,9 +1939,13 @@ class OutboundOrderViewSet(
         )
         serializer.is_valid(raise_exception=True)
         if serializer.validated_data.get("outbound_type", "SALES") == "SALES":
-            validate_submission(
+            report = validate_submission(
                 request.user, serializer.validated_data, request=request, lock=True
             )
+            for item, row in zip(serializer.validated_data["items"], report["items"]):
+                item["is_priced"] = row["is_priced"]
+                if not row["is_priced"]:
+                    item["price"] = Decimal("0")
         src_bill_no = serializer.validated_data.get("src_bill_no")
         if src_bill_no:
             duplicate = (
@@ -2191,14 +2199,20 @@ class OutboundOrderViewSet(
     @transaction.atomic
     def warehouse_confirm(self, request, pk=None):
         """Confirm a fully allocated standard order and release its PICK task."""
+        from .warehouse_review import scoped_review_orders
 
-        order = self.get_object()
-        self._require_warehouse_manager(order, "outbound.orders.warehouse_confirm")
+        order = get_object_or_404(
+            scoped_review_orders(self._optimized_order_queryset(), request.user), pk=pk
+        )
+        expected = None
+        if "expected_updated_at" in request.data:
+            expected = serializers.DateTimeField().run_validation(request.data["expected_updated_at"])
         before = {"approval_status": order.approval_status}
         try:
             order, task = outbound_services.confirm_warehouse_order(
                 order,
                 by_user=request.user,
+                expected_updated_at=expected,
             )
         except DjangoValidationError as exc:
             raise ValidationError(
@@ -2217,6 +2231,40 @@ class OutboundOrderViewSet(
         if order.approval_status == "WHS_PENDING":
             data["replenishment_wait"] = outbound_services.replenishment_waiting_detail(order)
         return Response(data)
+
+    @action(detail=True, methods=["post"], url_path="warehouse-reject")
+    @transaction.atomic
+    def warehouse_reject(self, request, pk=None):
+        from .warehouse_review import scoped_review_orders
+
+        order = get_object_or_404(
+            scoped_review_orders(self._optimized_order_queryset(), request.user), pk=pk
+        )
+        reason = serializers.CharField(max_length=500, allow_blank=False).run_validation(
+            request.data.get("reason", "")
+        )
+        expected = serializers.DateTimeField().run_validation(
+            request.data.get("expected_updated_at")
+        )
+        before = {"approval_status": order.approval_status}
+        try:
+            order = outbound_services.reject_warehouse_order(
+                order, by_user=request.user, reason=reason, expected_updated_at=expected
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(
+                exc.message_dict if hasattr(exc, "message_dict") else exc.messages
+            ) from exc
+        record_audit_event(
+            action="outbound.order.warehouse_reject",
+            module="outbound",
+            request=request,
+            obj=order,
+            before=before,
+            after={"approval_status": order.approval_status},
+            metadata={"reason": reason},
+        )
+        return Response(OutboundOrderReadSerializer(order, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="withdraw")
     @transaction.atomic
@@ -2578,22 +2626,68 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         )
         return get_object_or_404(qs, pk=pk)
 
+    def _review_queryset(self, *, lock=False):
+        from .physical_review import review_pick_queryset
+
+        qs = WmsTask.objects.select_related("owner", "warehouse", "picked_by")
+        if lock:
+            qs = qs.select_for_update()
+        return review_pick_queryset(qs, self.request.user)
+
+    def list(self, request, *args, **kwargs):
+        if request.query_params.get("for_review") not in ("1", "true", "True"):
+            return super().list(request, *args, **kwargs)
+        from .physical_review import PhysicalReviewPagination, pending_reviews, review_summary
+
+        qs = pending_reviews(self._review_queryset(), request.user).order_by("-id")
+        pagination = PhysicalReviewPagination()
+        tasks = pagination.paginate_queryset(qs, request)
+        rows = []
+        for task in tasks:
+            row = dict(self.get_serializer(task).data)
+            row.update(review_summary(task, request.user))
+            rows.append(row)
+        response = pagination.get_paginated_response(rows)
+        response["Cache-Control"] = "no-store"
+        return response
+
+    @action(methods=["get"], detail=True, url_path="review-context")
+    def review_context(self, request, pk=None):
+        from .physical_review import (
+            review_content,
+            review_line_details,
+            review_order_data,
+            review_quantity_totals,
+            review_summary,
+        )
+
+        task = get_object_or_404(self._review_queryset(), pk=pk)
+        content = review_content(task)
+        data = dict(self.get_serializer(task).data)
+        data.update(review_summary(task, request.user, content=content))
+        lines, totals = [], []
+        if not content["error"]:
+            details = review_line_details(task, content)
+            for line in PickTaskLineSerializer(content["lines"], many=True).data:
+                lines.append({**line, **details[line["id"]]})
+            totals = review_quantity_totals(content, details)
+        response = Response(
+            {
+                "task": data,
+                "order": review_order_data(content),
+                "lines": lines,
+                "content_error": content["error"],
+                "quantity_totals": totals,
+            }
+        )
+        response["Cache-Control"] = "no-store"
+        return response
+
     def get_queryset(self):
         qs = self._scope_pick_queryset(
-            WmsTask.objects.filter(
-                task_type=WmsTask.TaskType.PICK,
-            )
+            WmsTask.objects.filter(task_type=WmsTask.TaskType.PICK)
         ).order_by("-id")
-
         action = getattr(self, "action", None)
-
-        for_review = self.request.query_params.get("for_review")
-        if for_review in ("1", "true", "True"):
-            qs = qs.filter(
-                status=WmsTask.Status.COMPLETED,
-                review_status=WmsTask.ReviewStatus.PENDING,
-            ).exclude(picked_by=self.request.user)
-            return qs
 
         # Normal lists retain their default in-progress status filter.  The
         # review queue above deliberately bypasses it.
@@ -2729,6 +2823,29 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
     # === 修改：复核通过 + 过账 ==============================================
+    def _finalize_review_with_audit(self, task, review_task, request):
+        # Called while the source PICK is locked: retries share one success audit.
+        from allapp.accounts.models import AuditEvent
+
+        outbound_services.finalize_review_after_pick_post(review_task, by_user=request.user)
+        if not AuditEvent.objects.filter(
+            action="outbound.review.approve_post",
+            object_type=task._meta.label_lower,
+            object_id=str(task.pk),
+        ).exists():
+            record_audit_event(
+                action="outbound.review.approve_post",
+                module="outbound",
+                request=request,
+                obj=task,
+                after={
+                    "status": task.status,
+                    "review_status": task.review_status,
+                    "posting_status": task.posting_status,
+                },
+                metadata={"review_task_id": review_task.pk},
+            )
+
     @action(methods=["post"], detail=True)
     def post(self, request, pk=None):
         """Approve the actual REVIEW, then journal-post its source PICK."""
@@ -2739,7 +2856,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         )
         review_task = None
         with transaction.atomic():
-            task = self._get_pick_task_for_update(pk)
+            task = get_object_or_404(self._review_queryset(lock=True), pk=pk)
             ctx, ctx_text = build_log_payload(task=task, user=request.user)
             logger.info("outbound.pick.post.begin %s", ctx_text, extra=ctx)
 
@@ -2754,10 +2871,23 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             )
             journal = PostingJournal.objects.select_for_update().get(pk=journal.pk)
             assisted_order = get_assisted_order_for_task(task, for_update=True)
-            review_task = outbound_services.get_review_task_for_pick(
-                task,
-                for_update=True,
-            )
+            try:
+                review_task = outbound_services.get_review_task_for_pick(task, for_update=True)
+            except DjangoValidationError as exc:
+                raise ValidationError(exc.messages) from exc
+
+            if task.picked_by_id == request.user.id and not can_self_review_assisted_task(
+                request.user, task
+            ):
+                raise ValidationError("拣货人不能作为本任务的复核人。")
+            if review_task is None:
+                raise ValidationError("缺少实际 REVIEW 任务，不能复核过账。")
+            from .physical_review import validate_review_content
+
+            try:
+                validate_review_content(task)
+            except DjangoValidationError as exc:
+                raise ValidationError(exc.messages) from exc
 
             if journal.status == "POSTED":
                 update_fields = []
@@ -2779,10 +2909,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 if update_fields:
                     task.save(update_fields=update_fields)
                 if review_task is not None:
-                    outbound_services.finalize_review_after_pick_post(
-                        review_task,
-                        by_user=request.user,
-                    )
+                    self._finalize_review_with_audit(task, review_task, request)
                 if assisted_order is not None:
                     outbound_services.close_assisted_order_for_posted_task(task)
                 return Response(
@@ -2794,17 +2921,6 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                         "batch_no": journal.message or "",
                     }
                 )
-
-            picker = getattr(task, "picked_by", None)
-            if (
-                picker
-                and picker.id == request.user.id
-                and not can_self_review_assisted_task(request.user, task)
-            ):
-                logger.warning("outbound.pick.post.self_review_blocked %s", ctx_text, extra=ctx)
-                raise ValidationError("拣货人不能作为本任务的复核人。")
-            if review_task is None:
-                raise ValidationError("缺少实际 REVIEW 任务，不能复核过账。")
 
             try:
                 review_task = outbound_services.approve_review_task_for_pick(
@@ -2836,7 +2952,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 exc.message_dict if hasattr(exc, "message_dict") else exc.messages
             ) from exc
         with transaction.atomic():
-            task = self._get_pick_task_for_update(pk)
+            task = get_object_or_404(self._review_queryset(lock=True), pk=pk)
             journal = PostingJournal.objects.select_for_update().get(
                 src_model="WmsTask", src_id=task.id, tx_type="POST"
             )
@@ -2844,27 +2960,10 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 raise ValidationError("过账处理未将任务及日记账确认为 POSTED。")
             if review_task is None:
                 raise ValidationError("复核任务不存在，不能完成出库链。")
-            outbound_services.finalize_review_after_pick_post(
-                review_task,
-                by_user=request.user,
-            )
+            self._finalize_review_with_audit(task, review_task, request)
             if get_assisted_order_for_task(task, for_update=True) is not None:
                 outbound_services.close_assisted_order_for_posted_task(task)
         logger.info("outbound.pick.post.completed %s", ctx_text, extra=ctx)
-
-        task.refresh_from_db()
-        record_audit_event(
-            action="outbound.review.approve_post",
-            module="outbound",
-            request=request,
-            obj=task,
-            after={
-                "status": task.status,
-                "review_status": task.review_status,
-                "posting_status": task.posting_status,
-            },
-            metadata={"review_task_id": review_task.id if review_task else None},
-        )
 
         return Response(
             {

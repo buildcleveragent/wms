@@ -556,7 +556,13 @@ class BusinessFlowTests(TestCase):
         )
 
     def test_flow_2_outbound_approve_scan_post(self):
-        product = self.create_product("PICKSKU")
+        self._assert_outbound_approve_scan_post(price="10.00")
+
+    def test_unpriced_outbound_approve_scan_post(self):
+        self._assert_outbound_approve_scan_post(price="0.00")
+
+    def _assert_outbound_approve_scan_post(self, *, price):
+        product = self.create_product("PICKSKU", price=price)
         detail = self.seed_inventory(product, "10.0000")
         owner_client = self.api_client_for(self.owner_user)
 
@@ -578,6 +584,7 @@ class BusinessFlowTests(TestCase):
         )
         self.assertEqual(create_response.status_code, 201, create_response.json())
         order_id = create_response.json()["id"]
+        self.assertEqual(create_response.json()["lines"][0]["is_priced"], Decimal(price) > 0)
 
         approve_response = owner_client.post(
             f"/api/outbound/orders/{order_id}/owner-approve/",
@@ -590,6 +597,9 @@ class BusinessFlowTests(TestCase):
             OutboundOrder.objects.get(pk=order_id),
             by_user=self.superuser,
         )
+        if Decimal(price) == 0:
+            self.assertEqual(order.final_order_amount, Decimal("0.00"))
+            self.assertFalse(order.lines.get().is_priced)
 
         picker_client = self.api_client_for(self.picker_user)
         scan_response = picker_client.post(

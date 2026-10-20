@@ -1,5 +1,11 @@
 <template>
   <view class="page">
+    <view v-if="auth.canReviewWarehouseOutbound" class="section">
+      <view class="section-title">仓库管理</view>
+      <view class="grid"><view class="tile" @click="go('/pages/outbound/review/index')">
+        <view class="tile-inner"><view class="icon icon-box icon-green">✅</view><text class="tile-text">出库确认</text></view>
+      </view></view>
+    </view>
     <view class="section" v-for="grp in groups" :key="grp.title">
       <view class="section-title">{{ grp.title }}</view>
       <view class="grid">
@@ -27,6 +33,10 @@
 </template>
 <script setup>
 import { ref } from 'vue'
+import { onShow } from '@dcloudio/uni-app'
+import { useAuth } from '@/store/auth'
+const auth = useAuth()
+onShow(() => auth.loadProfile({ force: true }).catch(() => {}))
 const isAdmin = ref(!!uni.getStorageSync('isAdmin')) // 同步读取标志，保证页面稳定渲染
 
 const groups = ref([

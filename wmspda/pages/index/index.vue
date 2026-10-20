@@ -39,6 +39,7 @@ export default {
     const missingGtinExporting = ref(false)
     // 响应式数据
     const allActions = [
+      { key: "outbound-review", title: "出库确认", emoji: "✅", path: "/pages/outbound/review/index", requiresWarehouseReview: true },
       { key: "arrival-manage", title: "入库管理", emoji: "📋", desc: "确认发布 / 验收审核 / 入账 / 结束收货", path: "/pages/inbound/arrivals", requiresArrivalManager: true },
       { key: "customer-return", title: "客户退货验收", emoji: "↩️", desc: "原销售订单退回 / 分批验收", path: "/pages/customer-returns/index", requiresCustomerReturns: true },
       { key: "pda-returns", title: "退货出库", emoji: "↩️", path: "/pages/returns/index", requiresReturns: true },
@@ -66,6 +67,7 @@ export default {
       allActions
         .filter(
           (item) =>
+            (!item.requiresWarehouseReview || auth.canReviewWarehouseOutbound) &&
             (!item.requiresArrivalManager || auth.perms.includes("inbound.manage_arrival")) &&
             (!item.requiresReturns || auth.canProcessPdaReturn) &&
             (!item.requiresCustomerReturns || auth.perms.includes("inbound.receive_customer_return")) &&

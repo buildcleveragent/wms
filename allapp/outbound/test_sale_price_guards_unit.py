@@ -38,6 +38,7 @@ class OutboundSalePriceGuardUnitTests(SimpleTestCase):
         line = SimpleNamespace(
             line_no=10,
             base_price=Decimal(line_price),
+            is_priced=True,
             product=current_product,
         )
         return SimpleNamespace(

@@ -9,7 +9,7 @@
       <text v-if="product.sku" class="meta">SKU：{{ product.sku }}</text>
       <text v-if="product.spec" class="meta">规格：{{ product.spec }}</text>
       <text v-if="product.gtin" class="meta">条码：{{ product.gtin }}</text>
-      <text class="stock">可用库存：{{ product.available }} {{ product.base_unit_name }}</text>
+      <text class="stock">可用库存：{{ formatQuantity(product.available) }} {{ product.base_unit_name }}</text>
       <text v-if="product.purchase_count" class="meta">订购 {{ product.purchase_count }} 次 · 最近 {{ product.last_order_date }}</text>
       <text v-for="issue in product.issues || []" :key="issue" class="issue">{{ issue }}</text>
       <text v-if="product.can_add === false && !product.issues?.length" class="issue">当前仓库没有可用库存</text>
@@ -23,7 +23,7 @@
         >
           <label v-for="(option, index) in product.unitOptions" :key="option.key || index" class="unit-option">
             <radio :value="String(index)" :checked="selectedUnitIndex === index" />
-            <text>{{ option.label }}（×{{ option.multiplier }}{{ product.base_unit_name }}）</text>
+            <text>{{ option.label }}（×{{ formatQuantity(option.multiplier) }}{{ product.base_unit_name }}）</text>
           </label>
         </radio-group>
         <text v-else class="unit-value">{{ product.unitOptions?.[0]?.label || product.base_unit_name || '—' }}</text>
@@ -43,9 +43,9 @@
         </label>
         <view class="field">
           <text>基本数量</text>
-          <text class="field-value">{{ baseQuantity }}</text>
+          <text class="field-value">{{ formatQuantity(baseQuantity) }}</text>
         </view>
-        <label class="field">
+        <label v-if="product.is_priced !== false" class="field">
           <text>基本单价</text>
           <input
             class="field-input"
@@ -56,16 +56,19 @@
             @blur="$emit('price-commit')"
           />
         </label>
-        <view class="field amount-field">
+        <view v-if="product.is_priced !== false" class="field amount-field">
           <text>金额</text>
           <text class="amount">¥ {{ amount }}</text>
         </view>
+        <view v-else class="field">未计价</view>
       </view>
     </view>
   </view>
 </template>
 
 <script setup>
+import { formatQuantity } from '@/utils/quantity'
+
 defineProps({
   product: { type: Object, required: true },
   quantity: { type: String, default: '' },

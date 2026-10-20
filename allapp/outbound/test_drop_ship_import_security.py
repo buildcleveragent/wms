@@ -143,6 +143,19 @@ class DropShipImportSecurityTests(TestCase):
         self.assertEqual(MAX_XLSX_UNCOMPRESSED_SIZE, 50 * 1024 * 1024)
         self.assertEqual(MAX_XLSX_ENTRIES, 300)
 
+    def test_unpriced_import_and_retry_keep_original_pricing(self):
+        Product.objects.filter(pk=self.product.pk).update(price=None)
+        result = self.service().import_file(self.workbook_file([self.row()]))
+        self.assertEqual(result["success_count"], 1, result)
+        order = OutboundOrder.objects.get(src_bill_no="EXCEL-1")
+        self.assertFalse(order.lines.get().is_priced)
+        self.assertEqual(order.lines.get().base_price, Decimal("0"))
+        Product.objects.filter(pk=self.product.pk).update(price=20)
+        retry = self.service().import_file(self.workbook_file([self.row()]))
+        self.assertEqual(retry["skip_count"], 1, retry)
+        self.assertEqual(OutboundOrder.objects.count(), 1)
+        self.assertFalse(order.lines.get().is_priced)
+
     def test_empty_non_zip_corrupt_and_oversized_files_are_rejected(self):
         valid_zip = self.zip_file([("entry.txt", b"content")])
         corrupt_zip = SimpleUploadedFile("corrupt.xlsx", valid_zip.read()[:-8])

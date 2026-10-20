@@ -27,16 +27,16 @@ assert.equal(pagesManifest.pages[0].path, 'pages/bootstrap', 'bootstrap must be 
 
 const permissions = manifest['app-plus'].distribute.android.permissions
 assert.deepEqual(permissions, [
+  '<uses-permission android:name="android.permission.INTERNET"/>',
   '<uses-permission android:name="android.permission.VIBRATE"/>',
   '<uses-permission android:name="android.permission.CAMERA"/>',
-  '<uses-feature android:name="android.hardware.camera" android:required="false"/>',
-  '<uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>',
 ])
 
 const source = walk(root)
   .filter((file) => /\.(js|vue|nvue|json|mjs)$/.test(file)
     && !file.includes('node_modules')
     && !file.includes(`${path.sep}unpackage${path.sep}`)
+    && !file.includes(`${path.sep}dist${path.sep}`)
     && !file.includes(`${path.sep}scripts${path.sep}`))
   .map((file) => fs.readFileSync(file, 'utf8'))
   .join('\n')

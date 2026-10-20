@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from django.contrib import admin, messages
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.shortcuts import redirect
 from django.urls import reverse
-from django.utils import timezone
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
-from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.outbound import services as ob_services
 from allapp.outbound.authz import strict_order_queryset
 
@@ -163,6 +161,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         "approved_at_ownermanager",
         "approved_by_warehouse",
         "approved_at_warehouse",
+        "warehouse_reject_reason",
         "processing_mode",
         "assisted_by",
         "assisted_at",
@@ -187,6 +186,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         "memo",
         ("approved_by_ownermanager", "approved_at_ownermanager"),
         ("approved_by_warehouse", "approved_at_warehouse"),
+        "warehouse_reject_reason",
         ("created_by", "created_at"),
     )
 
@@ -406,9 +406,9 @@ class OutboundOrderAdmin(admin.ModelAdmin):
             self.message_user(request, "；".join(errors)[:2000], messages.ERROR)
 
     def _as_wh_mgr(self, request):
-        return request.user.is_superuser or request.user.has_perm(
-            "outbound.approve_outbound_as_wh_manager"
-        )
+        from .warehouse_review import can_review_warehouse_outbound
+
+        return can_review_warehouse_outbound(request.user)
 
     @admin.action(description="仓库管理员确认（审核 + 生成拣货任务）")
     def action_whs_approve(self, request, queryset):
@@ -456,33 +456,29 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         if not self._as_wh_mgr(request):
             raise PermissionDenied("需要仓库管理员权限。")
 
+        from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
+        from django.template.response import TemplateResponse
+
+        reason = (request.POST.get("reason") or "").strip()
+        if not request.POST.get("apply") or not reason or len(reason) > 500:
+            return TemplateResponse(request, "admin/outbound/outboundorder/warehouse_reject.html", {
+                **self.admin_site.each_context(request),
+                "title": "仓库退回出库订单",
+                "opts": self.model._meta,
+                "orders": queryset,
+                "action_checkbox_name": ACTION_CHECKBOX_NAME,
+                "reason": reason,
+                "error": "请填写 1 至 500 字的退回原因。" if request.POST.get("apply") else "",
+            })
         ok, err = 0, []
         for order in queryset:
             try:
                 if not self._in_warehouse_scope(request, order):
                     raise PermissionDenied("禁止驳回其他仓库的订单。")
                 with transaction.atomic():
-                    warehouse_id = (
-                        type(order)
-                        .objects.filter(pk=order.pk)
-                        .values_list("warehouse_id", flat=True)
-                        .get()
-                    )
-                    lock_warehouses_for_inventory_write(warehouse_id)
-                    order = type(order).objects.select_for_update().get(pk=order.pk)
-                    if order.warehouse_id != warehouse_id:
-                        raise ValidationError("出库单仓库在驳回期间发生变化，请重试。")
                     before = {"approval_status": order.approval_status}
-                    ob_services.unallocate_for_order(order, by_user=request.user)
-                    order.approval_status = "WHS_REJECTED"
-                    order.approved_by_warehouse = request.user
-                    order.approved_at_warehouse = timezone.now()
-                    order.save(
-                        update_fields=[
-                            "approval_status",
-                            "approved_by_warehouse",
-                            "approved_at_warehouse",
-                        ]
+                    order = ob_services.reject_warehouse_order(
+                        order, by_user=request.user, reason=reason
                     )
                     record_audit_event(
                         action="outbound.order.warehouse_reject",
@@ -491,7 +487,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
                         obj=order,
                         before=before,
                         after={"approval_status": order.approval_status},
-                        metadata={"channel": "django_admin"},
+                        metadata={"channel": "django_admin", "reason": reason},
                     )
 
                 ok += 1

@@ -556,6 +556,7 @@ class ArrivalOrderViewSet(InboundOrderViewSet):
                     "code": p.code,
                     "spec": p.spec or "",
                     "unit": p.base_uom.name,
+                    "purchase_price": str(p.purchase_price) if p.purchase_price else None,
                 }
                 for p in page
             ]

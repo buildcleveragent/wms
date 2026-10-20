@@ -402,8 +402,7 @@ def create_demand_tasks(order, shortages: list[dict], *, by_user=None) -> list[W
             extra = ReplenishTaskExtra.objects.select_for_update().filter(task=task).first()
             if extra and order.pk not in (extra.demand_order_ids or []):
                 extra.demand_order_ids = [*(extra.demand_order_ids or []), order.pk]
-                extra.updated_by = by_user
-                extra.save(update_fields=["demand_order_ids", "updated_by", "updated_at"])
+                extra.save(update_fields=["demand_order_ids"])
             if task.status in {WmsTask.Status.DRAFT, WmsTask.Status.READY}:
                 _release_task(task, by_user=by_user)
             tasks.append(task)

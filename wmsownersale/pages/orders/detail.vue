@@ -12,11 +12,16 @@
       <view class="card summary-card">
         <view class="row">
           <view class="font-bold">{{ order.order_no || ('订单#' + order.id) }}</view>
-          <view class="badge">¥ {{ money(order.total_amount) }}</view>
+          <view class="badge">{{ amountSummaryLabel(order) }}</view>
         </view>
         <view class="text-gray">提交状态：{{ orderStatus(order, 'submit_status') }}</view>
         <view class="text-gray">审核状态：{{ orderStatus(order, 'approval_status') }}</view>
         <view v-if="order.owner_reject_reason" class="reject-reason">最近退回原因：{{ order.owner_reject_reason }}</view>
+        <view v-if="order.warehouse_reject_reason" class="reject-reason">
+          <view>仓库退回原因：{{ order.warehouse_reject_reason }}</view>
+          <view v-if="order.approval_status === 'WHS_REJECTED'">请原开单业务员撤回修改，重新提交后由货主管理员审核。</view>
+        </view>
+        <button v-if="order.can_withdraw" class="btn edit-btn withdraw-btn" :disabled="withdrawing || loadingEdit" @click="withdrawAndEdit">{{ withdrawing ? '正在撤回…' : '撤回并修改' }}</button>
         <button v-if="order.can_edit" class="btn edit-btn" :disabled="loadingEdit" @click="editOrder">
           {{ loadingEdit ? '正在加载…' : '修改订单' }}
         </button>
@@ -52,8 +57,9 @@
         <view v-for="(line, index) in (order.lines || [])" :key="line?.id ?? index" class="line-row">
           <view class="line-name">{{ line?.product_name || line?.product_code || ('商品#' + line?.product) }}</view>
           <view class="line-meta">
-            <text>¥ {{ rate(line?.base_price) }} × {{ qty(line?.base_qty) }}</text>
-            <text class="line-amount">¥ {{ lineAmount(line) }}</text>
+            <text v-if="line.is_priced !== false">¥ {{ rate(line?.base_price) }} × {{ qty(line?.base_qty) }}</text>
+            <text v-else>数量 {{ qty(line?.base_qty) }}</text>
+            <text class="line-amount">{{ line.is_priced === false ? '未计价' : '¥ ' + lineAmount(line) }}</text>
           </view>
         </view>
       </view>
@@ -62,6 +68,8 @@
 </template>
 
 <script setup>
+import { amountSummaryLabel } from '@/utils/orderAmount'
+import { formatQuantity } from '@/utils/quantity'
 import { orderStatus } from '@/utils/orderStatus'
 import { ref } from 'vue'
 import { onHide, onLoad, onShow, onUnload } from '@dcloudio/uni-app'
@@ -75,6 +83,7 @@ function reorderOrder() { uni.navigateTo({url: '/pages/orders/reorder?id=' + ord
 const order = ref(null)
 const loading = ref(false)
 const loadingEdit = ref(false)
+const withdrawing = ref(false)
 const error = ref('')
 const orderId = ref(0)
 const pageVisible = ref(true)
@@ -129,8 +138,7 @@ function rate(value) {
 
 function qty(value) {
   if (value === null || value === undefined || value === '') return '—'
-  const result = Number(value)
-  return Number.isFinite(result) ? String(Number(result.toFixed(3))) : String(value)
+  return formatQuantity(value)
 }
 
 function lineAmount(line) {
@@ -164,6 +172,27 @@ async function editOrder() {
     })
   } finally {
     loadingEdit.value = false
+  }
+}
+
+async function withdrawAndEdit() {
+  if (!order.value?.can_withdraw || withdrawing.value || loadingEdit.value) return
+  withdrawing.value = true
+  try {
+    const accepted = await new Promise(resolve => uni.showModal({
+      title: '撤回并修改',
+      content: '撤回后可修改订单，重新提交时仍需货主管理员审核。',
+      confirmText: '确定', cancelText: '取消',
+      success: result => resolve(Boolean(result.confirm)), fail: () => resolve(false),
+    }))
+    if (!accepted) return
+    order.value = await api.withdrawOrder(order.value.id)
+    await editOrder()
+  } catch (e) {
+    uni.showToast({ title: e?.data?.detail || e?.message || '撤回失败，请刷新订单后重试', icon: 'none' })
+    await loadOrder()
+  } finally {
+    withdrawing.value = false
   }
 }
 

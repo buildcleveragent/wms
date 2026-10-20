@@ -59,6 +59,12 @@ export function comparePrice4(left, right) {
 }
 
 export function initializePriceGuard(item) {
+  if (item.is_priced === false) {
+    item.minimum_sale_price = null
+    item.min_price = null
+    item.price_rule_error = ''
+    return item
+  }
   const serverMinimum = item.minimum_sale_price ?? item.min_price
   if (serverMinimum === null || serverMinimum === undefined || serverMinimum === '') {
     item.minimum_sale_price = null
@@ -82,6 +88,7 @@ export function initializePriceGuard(item) {
 
 export function enforceMinimumPrice(item) {
   initializePriceGuard(item)
+  if (item.is_priced === false) return { valid: true, adjusted: false, error: '' }
   if (item.price_rule_error) {
     return { valid: false, adjusted: false, error: item.price_rule_error }
   }
@@ -123,6 +130,7 @@ export function enforceMinimumPrice(item) {
 
 export function isPriceAllowed(item) {
   initializePriceGuard(item)
+  if (item.is_priced === false) return true
   if (item.price_rule_error) return false
   const priceScaled = parseDecimal(item.price)
   if (priceScaled === null || compareScaled(priceScaled, '0') <= 0) return false

@@ -346,6 +346,16 @@ class StandardOrderIdempotencyConcurrencyTests(TransactionTestCase):
             close_old_connections()
 
     def test_concurrent_same_key_creates_exactly_one_order(self):
+        self._assert_concurrent_same_key_order()
+
+    def test_concurrent_unpriced_same_key_creates_exactly_one_order(self):
+        Product.objects.filter(pk=self.product.pk).update(price=None)
+        self._assert_concurrent_same_key_order()
+        line = OutboundOrder.objects.get().lines.get()
+        self.assertFalse(line.is_priced)
+        self.assertEqual(line.base_price, Decimal("0"))
+
+    def _assert_concurrent_same_key_order(self):
         barrier = threading.Barrier(2)
         payload = self.payload()
         with ThreadPoolExecutor(max_workers=2) as pool:

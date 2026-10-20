@@ -57,6 +57,7 @@
 </template>
 
 <script setup>
+import { formatQuantity } from '@/utils/quantity'
 import { toRef } from 'vue'
 import { useOrderProgress } from '@/composables/useOrderProgress'
 
@@ -80,7 +81,7 @@ function formatTime(value) {
 }
 function qty(value) {
   if (value == null) return '未记录'
-  return String(value).replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1')
+  return formatQuantity(value)
 }
 function productName(id) {
   return progress.value?.quantities?.find(item => item.product_id === id)?.product_name || `#${id}`

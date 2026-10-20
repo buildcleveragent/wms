@@ -25,6 +25,7 @@ from allapp.outbound.serializers import OutboundOrderLineCreateSerializer
 
 
 class CheckoutInput(serializers.Serializer):
+    editing_order_id = serializers.IntegerField(min_value=1, required=False)
     warehouse_id = serializers.IntegerField(min_value=1)
     customer_id = serializers.IntegerField(min_value=1)
     reorder_source_id = serializers.IntegerField(min_value=1, required=False, allow_null=True)

@@ -43,6 +43,7 @@
   </view>
 </template>
 <script setup>
+import { formatQuantity } from '@/utils/quantity'
 import { computed, reactive, ref, watch, onUnmounted } from 'vue'
 import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import { useInventoryAccess } from '@/composables/useInventoryAccess'
@@ -76,6 +77,7 @@ watch(data, value => {
   Object.keys(form).forEach(key => delete form[key])
   if (!value) return
   for (const key of ['low_enabled','expiry_enabled','slow_enabled','expiry_days','slow_days','min_stock','expiry_mode','slow_mode']) form[key] = value[key] ?? ''
+  form.min_stock = formatQuantity(value.min_stock)
   conflict.value=false
 })
 watch([identity,productId], () => { epoch++; saveError.value=''; saved.value=false; conflict.value=false })

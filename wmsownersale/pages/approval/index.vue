@@ -29,7 +29,7 @@
         <view class="badge">{{ statusText(o) }}</view>
       </view>
       <view class="text-gray">客户：{{ o.customer_name || '—' }}</view>
-      <view class="text-gray">数量：{{ o.total_qty ?? '—' }} · 金额：¥ {{ o.total_amount ?? 0 }}</view>
+      <view class="text-gray">数量：{{ formatQuantity(o.total_qty ?? '—') }} · {{ amountSummaryLabel(o) }}</view>
       <view class="text-gray">业务日期：{{ o.biz_date }}</view>
 
       <view class="row mt-2">
@@ -60,6 +60,8 @@
 </template>
 
 <script setup>
+import { amountSummaryLabel } from '@/utils/orderAmount'
+import { formatQuantity } from '@/utils/quantity'
 import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh, onReachBottom, onShow, onUnload } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'

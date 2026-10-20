@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   onLoad: null,
   detail: vi.fn(),
+  withdraw: vi.fn(),
+  editContext: vi.fn(),
   auth: { user: { id: 1, owner_id: 2 }, ensureAuth: vi.fn() },
   cart: { beginEdit: vi.fn() },
 }))
@@ -15,7 +17,7 @@ vi.mock('@dcloudio/uni-app', () => ({
   onUnload: vi.fn(),
 }))
 vi.mock('@/utils/request', () => ({ api: {
-  orderDetail: mocks.detail, orderEditContext: vi.fn(),
+  orderDetail: mocks.detail, orderEditContext: mocks.editContext, withdrawOrder: mocks.withdraw,
   orderProgress: vi.fn().mockRejectedValue({ statusCode: 404 }),
 } }))
 vi.mock('@/store/auth', () => ({ useAuth: () => mocks.auth }))
@@ -26,10 +28,44 @@ import OrderDetail from '@/pages/orders/detail.vue'
 describe('订单详情核单信息', () => {
   beforeEach(() => {
     mocks.detail.mockReset()
+    mocks.withdraw.mockReset()
+    mocks.editContext.mockReset()
+    mocks.cart.beginEdit.mockReset().mockReturnValue(true)
     vi.stubGlobal('uni', {
       redirectTo: vi.fn(),
       showToast: vi.fn(),
+      showModal: vi.fn(({ success }) => success({ confirm: true })),
     })
+  })
+
+  it('显示仓库退回原因，原业务员撤回后进入修改流程', async () => {
+    mocks.detail.mockResolvedValue({
+      id: 7, order_no: 'SO-7', approval_status: 'WHS_REJECTED',
+      warehouse_reject_reason: '地址错误', can_withdraw: true, lines: [],
+    })
+    mocks.withdraw.mockResolvedValue({ id: 7, can_edit: true, lines: [] })
+    mocks.editContext.mockResolvedValue({ order_id: 7 })
+    const wrapper = mount(OrderDetail)
+    mocks.onLoad({ id: '7' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('仓库退回原因：地址错误')
+    await wrapper.find('.withdraw-btn').trigger('click')
+    await flushPromises()
+    expect(mocks.withdraw).toHaveBeenCalledWith(7)
+    expect(mocks.editContext).toHaveBeenCalledWith(7)
+    expect(uni.redirectTo).toHaveBeenCalledWith({ url: '/pages/orders/cart' })
+    expect(wrapper.find('.withdraw-btn').exists()).toBe(false)
+  })
+
+  it('没有撤回权限时只读展示退回原因', async () => {
+    mocks.detail.mockResolvedValue({
+      id: 7, warehouse_reject_reason: '地址错误', can_withdraw: false, lines: [],
+    })
+    const wrapper = mount(OrderDetail)
+    mocks.onLoad({ id: '7' })
+    await flushPromises()
+    expect(wrapper.find('.withdraw-btn').exists()).toBe(false)
+    expect(mocks.withdraw).not.toHaveBeenCalled()
   })
 
   it('加载失败显示稳定错误态且可以重试', async () => {

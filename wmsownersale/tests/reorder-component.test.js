@@ -128,6 +128,27 @@ describe('再次下单',()=>{
 })
 
 describe('购物车服务端复核',()=>{
+  it('未计价草稿连续保存使用新行标识，并保持未计价',async()=>{
+    const cart=prepare()
+    cart.editing_order_id=12;cart.editing_updated_at='2026-10-20T10:00:00'
+    Object.assign(cart.items[0],{line_key:'edit-10',is_priced:false,price:null})
+    mocks.api.validateOrder.mockImplementation(payload=>Promise.resolve(checked(payload,{
+      items:payload.items.map(item=>({...product(),...item,is_priced:false,price:null,issues:[]})),
+    })))
+    mocks.api.updateOutboundOrder
+      .mockResolvedValueOnce({updated_at:'2026-10-20T10:01:00',lines:[{id:20,is_priced:false}]})
+      .mockResolvedValueOnce({updated_at:'2026-10-20T10:02:00',lines:[{id:30,is_priced:false}]})
+    render(Cart);mocks.load();await flushPromises()
+    expect(wrapper.text()).toContain('未计价')
+    expect(wrapper.text()).not.toContain('基本单价')
+    await button('保存草稿').trigger('click');await flushPromises()
+    expect(cart.items[0].line_key).toBe('edit-20')
+    await button('保存草稿').trigger('click');await flushPromises()
+    expect(mocks.api.updateOutboundOrder.mock.calls[1][1].items[0]).toMatchObject({
+      line_key:'edit-20',price:null,qty:'1',
+    })
+    expect(cart.items[0]).toMatchObject({line_key:'edit-30',is_priced:false,price:null})
+  })
   it('重复商品分别编辑，缺货不自动改数量且不提交',async()=>{
     const cart=useCart()
     const source=context();source.items[0].qty='7.000'
@@ -176,7 +197,7 @@ describe('购物车服务端复核',()=>{
     mocks.api.validateOrder.mockRejectedValue(new Error('网络失败'))
     await button('确认当前信息并重新校验').trigger('click');await flushPromises()
     expect(wrapper.text()).toContain('更新失败，当前为上次数据')
-    expect(wrapper.text()).toContain('7.0000')
+    expect(wrapper.text()).toContain('可用库存：7 件')
     await wrapper.find('.primary-button').trigger('click');await flushPromises()
     expect(mocks.api.createOutboundOrder).not.toHaveBeenCalled()
   })

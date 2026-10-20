@@ -25,6 +25,8 @@ export const useAuth = defineStore('auth', {
   state: emptyState,
 
   getters: {
+    canReviewWarehouseOutbound: (state) =>
+      state.profileLoaded === true && state.profile?.capabilities?.can_review_warehouse_outbound === true,
     canProcessPdaReturn: (state) => state.profileLoaded === true && state.profile?.capabilities?.can_process_pda_return === true,
     canProcessAssistedOutbound: (state) =>
       state.profileLoaded === true &&
@@ -118,6 +120,7 @@ export const useAuth = defineStore('auth', {
               this.perms = previousState.perms
               this.profileLoaded = previousState.profileLoaded
               this.invalidateAssistedCapability()
+              this.invalidateWarehouseReviewCapability()
             } else {
               // 网络、5xx 和响应格式异常均 fail closed，并允许下次重试。
               this.clearProfile()
@@ -154,6 +157,14 @@ export const useAuth = defineStore('auth', {
       this.perms = this.perms.filter(
         (permission) => permission !== 'outbound.process_warehouse_assisted_outbound',
       )
+    },
+
+    invalidateWarehouseReviewCapability() {
+      if (this.profile) {
+        this.profile = { ...this.profile, capabilities: {
+          ...this.profile.capabilities, can_review_warehouse_outbound: false,
+        } }
+      }
     },
 
     async login(username, password) {

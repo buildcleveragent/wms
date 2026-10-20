@@ -20,6 +20,7 @@ import environ
 from django.core.exceptions import ImproperlyConfigured
 
 from wmsmaster.environment import is_test_command, load_environment
+from wmsmaster.security import http_api_authority
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -262,7 +263,7 @@ SALE_MINI_DISTRIBUTION_COMMISSION_RATE = env(
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",  # 放在最上面
-    "django.middleware.security.SecurityMiddleware",
+    "wmsmaster.security.AndroidApiSecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -460,6 +461,8 @@ if IS_PRODUCTION and not ALLOWED_HOSTS:
 SESSION_COOKIE_SECURE = IS_PRODUCTION
 CSRF_COOKIE_SECURE = IS_PRODUCTION
 SECURE_SSL_REDIRECT = IS_PRODUCTION
+WMS_ANDROID_HTTP_API_ORIGIN = env("WMS_ANDROID_HTTP_API_ORIGIN", default="").strip()
+http_api_authority(WMS_ANDROID_HTTP_API_ORIGIN)
 SECURE_REDIRECT_EXEMPT = [r"^healthz/live$", r"^healthz/ready$"]
 # Linux renderer limits; one active render per container, with no waiting queue.
 PDF_MEMORY_BYTES = env.int("PDF_MEMORY_BYTES", default=1024 * 1024 * 1024)

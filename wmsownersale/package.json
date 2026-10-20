@@ -6,11 +6,13 @@
     "test:contracts": "node scripts/verify-owner-client.mjs",
     "test:unit": "vitest run",
     "build:h5": "CI=1 UNI_INPUT_DIR=$PWD uni build -p h5",
+    "build:android": "CI=1 UNI_INPUT_DIR=$PWD UNI_APP_PLATFORM=android uni build -p app && node scripts/verify-android-build.mjs",
     "build:mp-weixin": "CI=1 UNI_INPUT_DIR=$PWD uni build -p mp-weixin",
     "test:quality": "npm run test:contracts && npm run test:unit && npm run build:h5 && npm run build:mp-weixin"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-alpha-1000920260909822",
+    "@dcloudio/uni-app-plus": "3.0.0-alpha-1000920260909822",
     "@dcloudio/uni-h5": "3.0.0-alpha-1000920260909822",
     "@dcloudio/uni-mp-weixin": "3.0.0-alpha-1000920260909822",
     "pinia": "2.3.1",

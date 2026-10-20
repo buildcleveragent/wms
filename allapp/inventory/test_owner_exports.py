@@ -80,7 +80,8 @@ class OwnerExportTests(TestCase):
         self.assertEqual(sheet["T2"].value, "=1+1")
         self.assertEqual(sheet["T2"].data_type, "s")
         self.assertEqual(sheet.freeze_panes, "A2")
-        self.assertEqual(sheet.auto_filter.ref, "A1:U3")
+        self.assertEqual(sheet.auto_filter.ref, "A1:V3")
+        self.assertEqual(sheet["V2"].value, "已计价")
         self.assertTrue(AuditEvent.objects.filter(action="EXPORT", module="owner.orders").exists())
 
     def test_deleted_lines_leave_placeholder_deleted_orders_excluded(self):

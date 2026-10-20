@@ -1,0 +1,22 @@
+.review-page { max-width: 1040px; margin: 0 auto; padding: 24rpx; color: #263445; box-sizing: border-box; }
+.review-page .title { font-size: 38rpx; font-weight: 700; margin: 12rpx 0 24rpx; }
+.review-page .card { background: #fff; border: 1px solid #e3e8ee; border-radius: 16rpx; padding: 24rpx; margin-bottom: 20rpx; line-height: 1.8; overflow-wrap: anywhere; }
+.review-page .tabs, .review-page .filters, .review-page .search-row, .review-page .row { display: flex; gap: 12rpx; align-items: center; flex-wrap: wrap; }
+.review-page .tabs { margin-bottom: 20rpx; }
+.review-page .tabs button { flex: 1; padding: 0 8rpx; font-size: 26rpx; min-width: 0; white-space: nowrap; }
+.review-page .tabs .active, .review-page .primary { background: #1764c0; color: #fff; }
+.review-page .row { justify-content: space-between; }
+.review-page .search-row input { flex: 1; min-width: 120px; padding: 12rpx; border: 1px solid #d7dfe9; border-radius: 8rpx; }
+.review-page .search-row button { font-size: 28rpx; margin: 0; }
+.review-page .filters { margin-top: 18rpx; }
+.review-page .filters picker { flex: 1; min-width: 120px; }
+.review-page .filter { background: #f3f6fa; padding: 12rpx; border-radius: 8rpx; }
+.review-page .strong { font-weight: 600; }
+.review-page .muted, .review-page .hint { color: #6c7c8c; }
+.review-page .hint { text-align: center; padding: 20rpx; }
+.review-page .status { font-size: 26rpx; color: #1764c0; }
+.review-page .warning { color: #a54113; }
+.review-page .order-row { cursor: pointer; }
+.review-page .product-line { border-top: 1px solid #edf0f4; margin-top: 16rpx; padding-top: 16rpx; }
+.review-page textarea { width: 100%; box-sizing: border-box; height: 150rpx; margin: 24rpx 0; padding: 12rpx; border: 1px solid #d7dfe9; border-radius: 8rpx; }
+.review-page .reject-button { color: #a54113; }

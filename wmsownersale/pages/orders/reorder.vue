@@ -33,13 +33,13 @@
       <view v-for="item in data.items" :key="item.line_key" class="card">
         <view class="name">{{ item.name }}<text class="hint"> · 原行 {{ item.source_line_no }}</text></view>
         <view>{{ item.sku }} {{ item.spec }}</view>
-        <view>单位：{{ item.base_unit_name || '待核对' }} · 计划数量：{{ item.qty }}</view>
+        <view>单位：{{ item.base_unit_name || '待核对' }} · 计划数量：{{ formatQuantity(item.qty) }}</view>
         <view v-if="item.current_base_unit_name && item.current_base_unit_name !== item.historical_unit_name" class="error">
           当前单位：{{ item.current_base_unit_name }}；原数量按历史单位保留，请重新选品。
         </view>
-        <view>历史价：¥{{ item.historical_price }} → 当前参考价：{{ item.price == null ? '未配置' : '¥' + item.price }}</view>
-        <view v-if="item.price !== item.historical_price" class="changed">价格与原订单不同，请确认。</view>
-        <view>当前可用：{{ item.available ?? '待核对' }} {{ item.current_base_unit_name }}</view>
+        <view>历史价：{{ item.historical_price == null ? '未计价' : '¥' + item.historical_price }} → 当前参考价：{{ item.is_priced === false ? '未计价' : '¥' + item.price }}</view>
+        <view v-if="item.is_priced !== false && item.price !== item.historical_price" class="changed">价格与原订单不同，请确认。</view>
+        <view>当前可用：{{ formatQuantity(item.available ?? '待核对') }} {{ item.current_base_unit_name }}</view>
         <view v-for="message in item.issues" :key="message" class="error">{{ message }}</view>
       </view>
       <view class="hint">商品问题可在新订单中调整或移除。{{ data.notice }}</view>
@@ -53,6 +53,7 @@
   </view>
 </template>
 <script setup>
+import { formatQuantity } from '@/utils/quantity'
 import { ref, watch } from 'vue'
 import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'

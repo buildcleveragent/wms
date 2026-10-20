@@ -107,7 +107,7 @@ export const useCart = defineStore('cart', {
         line_key: item.line_key || `edit-${index}`,
         product_id: item.product_id || item.id,
         qty: Number(item.qty || 0),
-        price: Number(item.price || 0),
+        price: item.is_priced === false ? null : Number(item.price || 0),
         available: item.available == null ? null : Number(item.available),
       }))
       return true
@@ -217,7 +217,8 @@ export const useCart = defineStore('cart', {
         sku: product.sku,
         name: product.name,
         spec: product.spec,
-        price: Number(product.price || 0),
+        is_priced: product.is_priced !== false,
+        price: product.is_priced === false ? null : Number(product.price || 0),
         orig_price: Number(product.orig_price ?? product.price ?? 0),
         minimum_sale_price: product.minimum_sale_price == null
           ? null

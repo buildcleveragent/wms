@@ -27,5 +27,9 @@ export function lineAmount(qty, price) {
 }
 
 export function orderAmount(items) {
-  return formatCents(items.reduce((total, item) => total + lineCents(item.qty, item.price), 0n))
+  return formatCents(items.reduce(
+    (total, item) => total + (item.is_priced === false ? 0n : lineCents(item.qty, item.price)), 0n,
+  ))
 }
+
+export { amountSummaryLabel } from '../../frontend/shared/amountSummary.js'

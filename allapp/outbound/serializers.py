@@ -3,8 +3,6 @@ from datetime import date
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from .amounts import line_amount, order_amount
-
 from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -18,8 +16,9 @@ from allapp.baseinfo.customer_access import customer_binding, customers_for_owne
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.services import can_edit_standard_draft, get_default_product_price
 from allapp.outbound.warehouse_access import owner_can_use_warehouse
-from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
+from allapp.products.pricing import InvalidSalePriceRule
 
+from .amounts import line_amount
 from .models import OutboundOrder, OutboundOrderLine
 
 logger = logging.getLogger(__name__)
@@ -100,6 +99,7 @@ class ConfirmPricingSerializer(serializers.Serializer):
 
 # ---------- 创建用 ----------
 class OutboundOrderLineCreateSerializer(serializers.Serializer):
+    is_priced = serializers.BooleanField(read_only=True)
     product_id = serializers.IntegerField()
     line_key = serializers.CharField(required=False, allow_blank=True, max_length=100)
     base_uom_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
@@ -533,7 +533,9 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         if bad:
             raise serializers.ValidationError(f"存在不属于当前货主的商品：{bad}")
 
-    def _validate_standard_sales_prices(self, items, owner_id):
+    def _validate_standard_sales_prices(self, items, owner_id, *, draft=False):
+        from .pricing import match_saved_line, pricing_applies, sale_minimum
+
         Product = apps.get_model("products", "Product")
         product_ids = [item["product_id"] for item in items]
         products = {
@@ -562,15 +564,22 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
 
             label = product.code or product.sku or str(product.pk)
             price = item.get("price")
+            saved = match_saved_line(item, self.context.get("saved_pricing_lines"))
+            try:
+                item["is_priced"] = pricing_applies(product, saved)
+            except InvalidSalePriceRule as exc:
+                errors[index] = {"price": f"{label} 价格配置错误：{exc}"}
+                continue
+            if not item["is_priced"]:
+                item["price"] = Decimal("0")
+                continue
+            if draft:
+                continue
             if price is None or price <= 0:
                 errors[index] = {"price": f"{label} 成交价必须大于 0。"}
                 continue
             try:
-                lowest = minimum_sale_price(
-                    base_price=product.price,
-                    min_price=product.min_price,
-                    max_discount=product.max_discount,
-                )
+                lowest = sale_minimum(product)
             except InvalidSalePriceRule as exc:
                 errors[index] = {"price": f"{label} 价格配置错误：{exc}"}
                 continue
@@ -670,8 +679,10 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
         if not structural_only:
             self._assert_customer_access(customer, owner_id, user)
             self._assert_products_belong_to_owner(data["items"], owner_id)
-            if ot == "SALES" and not self.context.get("allow_problem_draft"):
-                self._validate_standard_sales_prices(data["items"], owner_id)
+            if ot == "SALES":
+                self._validate_standard_sales_prices(
+                    data["items"], owner_id, draft=self.context.get("allow_problem_draft", False)
+                )
 
         # 清洗字符串
         data["src_bill_no"]   = (data.get("src_bill_no") or "").strip() or None
@@ -740,6 +751,7 @@ class OutboundOrderCreateSerializer(serializers.Serializer):
                     product_id=it["product_id"],
                     base_qty=it["qty"],
                     base_price=it.get("price") or Decimal("0.0000"),
+                    is_priced=it.get("is_priced", True),
                     # 如需包装下单：可额外写入 aux_uom_id / aux_qty / aux_price
                 )
             except DjangoValidationError as exc:
@@ -760,6 +772,7 @@ class OutboundOrderDraftUpdateSerializer(OutboundOrderCreateSerializer):
     )
 
 class OutboundOrderLineReadSerializer(serializers.ModelSerializer):
+    is_priced = serializers.BooleanField(read_only=True)
     product_name = serializers.SerializerMethodField()
     product_sku  = serializers.SerializerMethodField()
     amount       = serializers.SerializerMethodField()
@@ -767,10 +780,24 @@ class OutboundOrderLineReadSerializer(serializers.ModelSerializer):
     class Meta:
         model  = OutboundOrderLine
         fields = [
-            "id","line_no","product","product_sku","product_name",
-            "base_uom","base_qty","base_price","amount",
-            "aux_uom","aux_qty","aux_price","ratio",
-            "lot_no","pack_requirement","pack_note","note",
+            "id",
+            "line_no",
+            "product",
+            "product_sku",
+            "product_name",
+            "base_uom",
+            "base_qty",
+            "base_price",
+            "is_priced",
+            "amount",
+            "aux_uom",
+            "aux_qty",
+            "aux_price",
+            "ratio",
+            "lot_no",
+            "pack_requirement",
+            "pack_note",
+            "note",
         ]
 
     def get_product_name(self, obj):
@@ -780,12 +807,16 @@ class OutboundOrderLineReadSerializer(serializers.ModelSerializer):
         return _get(obj.product, ["sku","code","barcode"], "")
 
     def get_amount(self, obj):
+        if not obj.is_priced:
+            return Decimal("0.00")
         try:
             return line_amount(obj.base_qty, obj.base_price)
         except Exception:
             return Decimal("0.00")
 
 class OutboundOrderReadSerializer(serializers.ModelSerializer):
+    approved_by_warehouse_name = serializers.SerializerMethodField()
+    can_withdraw = serializers.SerializerMethodField()
     can_reorder = serializers.SerializerMethodField()
     customer_name        = serializers.CharField(
         source="customer.name", read_only=True, allow_null=True
@@ -798,6 +829,9 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
     approval_status_name = serializers.SerializerMethodField()
     total_amount         = serializers.SerializerMethodField()
     total_qty            = serializers.SerializerMethodField()
+    amount_status = serializers.SerializerMethodField()
+    priced_amount = serializers.SerializerMethodField()
+    unpriced_line_count = serializers.SerializerMethodField()
     created_by_name      = serializers.SerializerMethodField()
     priced_by_name       = serializers.SerializerMethodField()
     can_edit             = serializers.SerializerMethodField()
@@ -810,29 +844,63 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = OutboundOrder
         fields = [
-            "id", "order_no", "biz_date",
-            "submit_status", "submit_status_name",
-            "approval_status", "approval_status_name",
-
+            "id",
+            "order_no",
+            "biz_date",
+            "submit_status",
+            "submit_status_name",
+            "approval_status",
+            "approval_status_name",
             "pricing_status",
             "priced_at",
             "priced_by",
             "priced_by_name",
             "final_order_amount",
-
-            "outbound_type", "delivery_method", "etd",
-            "owner", "owner_name", "customer", "customer_name",
-            "supplier", "warehouse", "warehouse_name",
-            "processing_mode", "assisted_by", "assisted_at",
-            "assistance_reason", "assistance_request_id",
-            "created_by", "created_by_name",
-            "created_at", "updated_at",
-            "src_bill_no", "owner_reject_reason",
-            "ship_to", "contact", "contact_phone",
-            "memo", "is_closed", "close_reason",
+            "outbound_type",
+            "delivery_method",
+            "etd",
+            "owner",
+            "owner_name",
+            "customer",
+            "customer_name",
+            "supplier",
+            "warehouse",
+            "warehouse_name",
+            "processing_mode",
+            "assisted_by",
+            "assisted_at",
+            "assistance_reason",
+            "assistance_request_id",
+            "created_by",
+            "created_by_name",
+            "created_at",
+            "updated_at",
+            "src_bill_no",
+            "owner_reject_reason",
+            "warehouse_reject_reason",
+            "approved_by_warehouse",
+            "approved_by_warehouse_name",
+            "approved_at_warehouse",
+            "ship_to",
+            "contact",
+            "contact_phone",
+            "memo",
+            "is_closed",
+            "close_reason",
             "lines",
-            "total_qty", "total_amount",
-            "can_edit", "can_submit", "can_owner_review", "can_reorder",
+            "total_qty",
+            "total_amount",
+            "amount_status",
+            "priced_amount",
+            "unpriced_line_count",
+            "can_edit",
+            "can_withdraw",
+            "can_submit",
+            "can_owner_review",
+            "can_reorder",
+        ]
+        read_only_fields = [
+            "warehouse_reject_reason", "approved_by_warehouse", "approved_at_warehouse",
         ]
 
     def _access_scope(self):
@@ -845,6 +913,26 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
                 self.context.get("access_scope") or AccessScope.for_user(user)
             )
         return self._resolved_access_scope
+
+    def get_approved_by_warehouse_name(self, obj):
+        user = obj.approved_by_warehouse
+        return (user.get_full_name() or user.username) if user else ""
+
+    def get_can_withdraw(self, obj):
+        user = getattr(self.context.get("request"), "user", None)
+        scope = self._access_scope()
+        return bool(
+            user and user.is_authenticated
+            and obj.created_by_id == user.pk
+            and obj.processing_mode == "STANDARD"
+            and obj.submit_status == "SUBMITTED"
+            and obj.approval_status == "WHS_REJECTED"
+            and not obj.is_closed
+            and scope.is_valid
+            and UserRoleScope.Role.OWNER_SALESPERSON in scope.roles
+            and scope.allows(owner_id=obj.owner_id, warehouse_id=obj.warehouse_id)
+            and user.has_perm("outbound.submit_outbound_as_owner_buyers")
+        )
 
     def get_can_edit(self, obj):
         request = self.context.get("request")
@@ -927,7 +1015,26 @@ class OutboundOrderReadSerializer(serializers.ModelSerializer):
         return total
 
     def get_total_amount(self, obj):
-        return order_amount(obj.lines.all())
+        return self.get_priced_amount(obj)
+
+    def _pricing_summary(self, obj):
+        from .amounts import pricing_summary
+
+        cache = getattr(self, "_pricing_summaries", None)
+        if cache is None:
+            cache = self._pricing_summaries = {}
+        if obj.pk not in cache:
+            cache[obj.pk] = pricing_summary(obj.lines.all())
+        return cache[obj.pk]
+
+    def get_amount_status(self, obj):
+        return self._pricing_summary(obj)["amount_status"]
+
+    def get_priced_amount(self, obj):
+        return self._pricing_summary(obj)["priced_amount"]
+
+    def get_unpriced_line_count(self, obj):
+        return self._pricing_summary(obj)["unpriced_line_count"]
 
 
 # class OutboundOrderReadSerializer(serializers.ModelSerializer):

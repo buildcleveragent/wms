@@ -283,12 +283,12 @@ class OwnerReorderTests(ReorderFixture, TestCase):
         self.assertEqual(len(data["items"]), 1)
         self.assertEqual(self.create().status_code, 400)
 
-    def test_missing_reference_price_and_changed_base_unit_require_correction(self):
+    def test_missing_reference_is_optional_but_changed_base_unit_requires_correction(self):
         Product.objects.filter(pk=self.product.pk).update(price=None)
         preview = self.preview().data
         self.assertIsNone(preview["items"][0]["price"])
-        self.assertIn("参考价未配置", str(preview["items"][0]["issues"]))
-        self.assertFalse(preview["can_submit"])
+        self.assertFalse(preview["items"][0]["is_priced"])
+        self.assertTrue(preview["can_submit"])
         other_unit = ProductUom.objects.create(code="REORDERBOX", name="箱")
         Product.objects.filter(pk=self.product.pk).update(price=12, base_uom=other_unit)
         item = self.preview().data["items"][0]

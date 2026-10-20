@@ -210,6 +210,7 @@
 </template>
 
 <script setup>
+import { formatQuantity } from '@/utils/quantity'
 import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh, onUnload } from '@dcloudio/uni-app'
 import { api, fetchAllPages } from '@/utils/request'
@@ -289,7 +290,7 @@ function money(value) {
 }
 
 function qty(value) {
-  return toNumber(value).toFixed(4)
+  return formatQuantity(value ?? 0)
 }
 
 function rate(value) {

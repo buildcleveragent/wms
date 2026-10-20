@@ -20,7 +20,10 @@ from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.outbound.warehouse_access import owner_can_use_warehouse
 from allapp.pos.models import PosSaleLine, PosSaleOrder
 from allapp.products.models import Product, ProductPackage
-from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
+from allapp.products.pricing import InvalidSalePriceRule
+
+from .amounts import line_amount
+from .pricing import has_reference_price, match_saved_line, sale_minimum, saved_pricing_lines
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 ZERO = Decimal("0")
@@ -151,12 +154,10 @@ def product_facts(owner_id, warehouse_id, product_ids, *, request=None, lock=Fal
         if mismatch:
             issues.append("库存单位不一致，数据待核对。")
         lowest = None
-        if p.price is None or p.price <= ZERO:
-            issues.append("当前参考价未配置，请联系货主管理员核对后重新选品。")
+        is_priced = True
         try:
-            lowest = minimum_sale_price(
-                base_price=p.price, min_price=p.min_price, max_discount=p.max_discount
-            )
+            is_priced = has_reference_price(p)
+            lowest = sale_minimum(p)
         except InvalidSalePriceRule:
             issues.append("商品价格规则异常，请联系货主管理员核对。")
         options = [
@@ -205,7 +206,8 @@ def product_facts(owner_id, warehouse_id, product_ids, *, request=None, lock=Fal
             "base_uom_id": p.base_uom_id,
             "base_unit": unit,
             "base_unit_name": p.base_uom.name,
-            "price": decimal_text(p.price, "0.0001"),
+            "is_priced": is_priced,
+            "price": decimal_text(p.price, "0.0001") if is_priced else None,
             "orig_price": decimal_text(p.price, "0.0001"),
             "minimum_sale_price": decimal_text(lowest, "0.0001"),
             "available": None if mismatch else decimal_text(available, "0.0000"),
@@ -221,7 +223,7 @@ def product_facts(owner_id, warehouse_id, product_ids, *, request=None, lock=Fal
     return result
 
 
-def check_items(owner_id, warehouse_id, items, *, request=None, lock=False):
+def check_items(owner_id, warehouse_id, items, *, request=None, lock=False, saved_lines=None):
     facts = product_facts(
         owner_id, warehouse_id, [it["product_id"] for it in items], request=request, lock=lock
     )
@@ -238,6 +240,15 @@ def check_items(owner_id, warehouse_id, items, *, request=None, lock=False):
     for index, it in enumerate(items):
         pk = it["product_id"]
         fact = facts.get(pk)
+        saved = match_saved_line(it, saved_lines)
+        if fact:
+            fact = dict(fact)
+            if saved is not None and (not saved.is_priced or saved.base_price > ZERO):
+                fact["is_priced"] = saved.is_priced
+                if not saved.is_priced:
+                    fact["minimum_sale_price"] = None
+                    fact["price"] = None
+                    fact["issues"] = [issue for issue in fact["issues"] if "价格规则" not in issue]
         issues = list(fact["issues"]) if fact else ["商品不存在、已删除或不属于当前货主。"]
         if fact:
             if it.get("base_uom_id") and it["base_uom_id"] != fact["base_uom_id"]:
@@ -247,8 +258,15 @@ def check_items(owner_id, warehouse_id, items, *, request=None, lock=False):
             if it.get("catalog_version") and it["catalog_version"] != fact["catalog_version"]:
                 issues.append("商品价格或单位规则已变化，请确认当前信息后重试。")
             price = it.get("price")
-            if price is None or Decimal(price) <= 0:
-                issues.append("请填写大于零的成交价。")
+            if not fact["is_priced"]:
+                pass
+            elif price is None or Decimal(price) <= 0:
+                if saved is not None and saved.base_price == ZERO:
+                    issues.append(
+                        f"该历史订单行尚未确认价格，当前参考价为 {fact['price']}，请确认成交价。"
+                    )
+                else:
+                    issues.append("请填写大于零的成交价。")
             elif fact["minimum_sale_price"] is not None and Decimal(price) < Decimal(
                 fact["minimum_sale_price"]
             ):
@@ -270,10 +288,19 @@ def check_items(owner_id, warehouse_id, items, *, request=None, lock=False):
                 "line_key": it.get("line_key") or str(index),
                 "qty": decimal_text(it["qty"], "0.001"),
                 "entered_price": decimal_text(it.get("price"), "0.0001"),
+                "amount": (
+                    line_amount(it["qty"], it.get("price")) if fact and fact["is_priced"] else None
+                ),
                 "issues": issues,
             }
         )
+    unpriced = sum(row.get("is_priced") is False for row in rows)
     return {
+        "amount_status": (
+            "UNPRICED" if rows and unpriced == len(rows) else "PARTIAL" if unpriced else "PRICED"
+        ),
+        "priced_amount": sum((row["amount"] or ZERO for row in rows), ZERO),
+        "unpriced_line_count": unpriced,
         "can_submit": bool(items) and not any(row["issues"] for row in rows),
         "checked_at": datetime.now(SHANGHAI).isoformat(),
         "items": rows,
@@ -281,7 +308,9 @@ def check_items(owner_id, warehouse_id, items, *, request=None, lock=False):
     }
 
 
-def validate_submission(user, data, *, request=None, lock=False, raise_error=True):
+def validate_submission(
+    user, data, *, request=None, lock=False, raise_error=True, saved_lines=None
+):
     """Shared final owner sales validation, also used by draft resubmission."""
     scope = owner_scope(user, buyer=True)
     scoped_binding(user, data.get("customer_id"), buyer=True, lock=lock)
@@ -289,12 +318,24 @@ def validate_submission(user, data, *, request=None, lock=False, raise_error=Tru
         raise ValidationError({"warehouse_id": "仓库不可用或未关联当前货主。"})
     if data.get("reorder_source_id"):
         source_order(user, data["reorder_source_id"])
+    if data.get("editing_order_id"):
+        order = source_order(user, data["editing_order_id"])
+        if (
+            order.created_by_id != user.pk
+            or order.processing_mode != "STANDARD"
+            or order.submit_status != "DRAFT"
+            or order.is_closed
+            or order.approval_status not in {"OWNER_PENDING", "OWNER_REJECTED"}
+        ):
+            raise PermissionDenied("当前订单不允许修改。")
+        saved_lines = saved_pricing_lines(order)
     report = check_items(
         scope.single_owner_id,
         data["warehouse_id"],
         data["items"],
         request=request,
         lock=lock,
+        saved_lines=saved_lines,
     )
     if raise_error and not report["can_submit"]:
         raise CheckoutConflict(
@@ -355,7 +396,10 @@ def reorder_context(user, pk, request, *, warehouse_id=None, customer_id=None):
             {
                 "source_line_id": line.pk,
                 "source_line_no": line.line_no,
-                "historical_price": decimal_text(line.base_price, "0.0001"),
+                "historical_price": (
+                    decimal_text(line.base_price, "0.0001") if line.is_priced else None
+                ),
+                "historical_is_priced": line.is_priced,
                 "base_uom_id": line.base_uom_id,
                 "unit_unverified": not line.base_uom_id,
                 "unit_mismatch": bool(

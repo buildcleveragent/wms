@@ -1,5 +1,7 @@
 const MIN_BASE_QUANTITY = 0.001
 
+export { formatQuantity } from '../../frontend/shared/quantity'
+
 function hasAtMostThreeDecimals(value) {
   return /^(?:\d+|\d*\.\d{1,3})$/.test(value)
 }

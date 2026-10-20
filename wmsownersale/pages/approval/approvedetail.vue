@@ -7,7 +7,7 @@
     <view class="card" v-else-if="order">
       <view class="row">
         <view class="font-bold">{{ order.order_no || ('#' + order.id) }}</view>
-        <view class="badge">¥ {{ money(order.total_amount) }}</view>
+        <view class="badge">{{ amountSummaryLabel(order) }}</view>
       </view>
 
       <view class="text-gray">客户：{{ order.customer_name || '—' }}</view>
@@ -22,7 +22,7 @@
         <textarea v-model="rejectReason" maxlength="200" class="reject-input" placeholder="请说明需要业务员修改的内容" />
       </view>
       <view class="text-gray" style="margin-top:8rpx">
-        汇总：数量 {{ order.total_qty ?? '—' }} · 金额 ¥ {{ money(order.total_amount) }}
+        汇总：数量 {{ formatQuantity(order.total_qty ?? '—') }} · 金额 {{ amountSummaryLabel(order) }}
       </view>
     </view>
 
@@ -52,9 +52,9 @@
             <view class="text-gray" v-if="l.product_sku">SKU：{{ l.product_sku }}</view>
           </view>
 
-          <view style="flex:2;">¥ {{ money(linePrice(l)) }}</view>
+          <view style="flex:2;">{{ l.is_priced === false ? '未计价' : '¥ ' + money(linePrice(l)) }}</view>
           <view style="flex:2;">{{ lineQty(l) }}</view>
-          <view style="flex:2; text-align:right;">¥ {{ money(lineAmount(l)) }}</view>
+          <view style="flex:2; text-align:right;">{{ l.is_priced === false ? '—' : '¥ ' + money(lineAmount(l)) }}</view>
         </view>
       </view>
     </view>
@@ -78,6 +78,8 @@
 </template>
 
 <script setup>
+import { amountSummaryLabel } from '@/utils/orderAmount'
+import { formatQuantity } from '@/utils/quantity'
 import { orderStatus } from '@/utils/orderStatus'
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
@@ -129,7 +131,7 @@ function money(v) {
 }
 
 function lineQty(l) {
-  return l.base_qty ?? l.qty ?? l.qty_plan ?? l.qty_done ?? '—'
+  return formatQuantity(l.base_qty ?? l.qty ?? l.qty_plan ?? l.qty_done ?? '—')
 }
 
 function linePrice(l) {

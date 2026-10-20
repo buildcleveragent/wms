@@ -23,7 +23,7 @@ from allapp.inventory.services import (
     _refresh_summaries,
     lock_active_inventory_details_for_update,
 )
-from allapp.products.pricing import InvalidSalePriceRule, minimum_sale_price
+from allapp.products.pricing import InvalidSalePriceRule
 from allapp.tasking.models import (
     DispatchTaskExtra,
     PackTaskExtra,
@@ -207,15 +207,24 @@ def submit_owner_draft(order, *, by_user, validation_items=None):
     validate_standard_draft_edit_preconditions(locked, by_user)
     if locked.outbound_type == "SALES":
         from .reorder import validate_submission
+        from .pricing import pricing_applies, saved_pricing_lines
 
-        lines = list(locked.lines.order_by("line_no", "pk"))
-        items = [{
-            "product_id": line.product_id, "qty": line.base_qty, "price": line.base_price,
-            "base_uom_id": line.base_uom_id, "unit_unverified": not line.base_uom_id,
-        } for line in lines]
+        lines = list(locked.lines.select_related("product").order_by("line_no", "pk"))
+        items = [
+            {
+                "product_id": line.product_id,
+                "qty": line.base_qty,
+                "price": line.base_price,
+                "base_uom_id": line.base_uom_id,
+                "unit_unverified": not line.base_uom_id,
+                "line_key": f"edit-{line.pk}",
+            }
+            for line in lines
+        ]
         if validation_items is not None:
             if len(validation_items) != len(items) or any(
-                any(a.get(k) != b.get(k) for k in ("product_id", "qty", "price"))
+                any(a.get(k) != b.get(k) for k in ("product_id", "qty"))
+                or Decimal(a.get("price") or 0) != Decimal(b.get("price") or 0)
                 for a, b in zip(items, validation_items)
             ):
                 raise ValidationError("草稿明细已变化，请重新加载并校验。")
@@ -226,9 +235,21 @@ def submit_owner_draft(order, *, by_user, validation_items=None):
                     "unit_unverified", False
                 )
                 item["catalog_version"] = expected.get("catalog_version")
-        validate_submission(by_user, {
-            "warehouse_id": locked.warehouse_id, "customer_id": locked.customer_id, "items": items,
-        }, lock=True)
+        validate_submission(
+            by_user,
+            {
+                "warehouse_id": locked.warehouse_id,
+                "customer_id": locked.customer_id,
+                "items": items,
+            },
+            lock=True,
+            saved_lines=saved_pricing_lines(locked),
+        )
+        for line in lines:
+            if not pricing_applies(line.product, line):
+                line.is_priced = False
+                line.base_price = Decimal("0")
+                line.save(update_fields=["is_priced", "base_price", "updated_at"])
     locked.submit_status = "SUBMITTED"
     locked.approval_status = "OWNER_PENDING"
     locked.approved_by_ownermanager = None
@@ -261,8 +282,58 @@ def submit_owner_draft(order, *, by_user, validation_items=None):
     return locked
 
 
+def validate_warehouse_review(order, *, expected_updated_at=None):
+    """Check a locked order before either warehouse review decision."""
+    from .warehouse_review import WarehouseReviewConflict, review_orders, review_state_allows_action
+
+    if expected_updated_at is not None and expected_updated_at != order.updated_at:
+        raise WarehouseReviewConflict()
+    if (
+        not review_state_allows_action(order)
+        or not review_orders(type(order).objects.filter(pk=order.pk)).exists()
+    ):
+        raise ValidationError("仅已提交、货主审核通过且未关闭的标准销售订单可由仓库确认或退回。")
+    _validate_allocation_can_be_released(order)
+
+
 @transaction.atomic
-def confirm_warehouse_order(order, *, by_user):
+def reject_warehouse_order(order, *, by_user, reason, expected_updated_at=None):
+    """Atomically reject an unstarted order and release its reserved resources."""
+    from .warehouse_review import require_warehouse_reviewer
+
+    reason = (reason or "").strip()
+    if not reason or len(reason) > 500:
+        raise ValidationError("请填写 1 至 500 字的仓库退回原因。")
+    Order = type(order)
+    warehouse_id = Order.objects.filter(pk=order.pk).values_list("warehouse_id", flat=True).get()
+    lock_warehouses_for_inventory_write(warehouse_id)
+    locked = Order.objects.select_for_update().get(pk=order.pk)
+    if locked.warehouse_id != warehouse_id:
+        raise ValidationError("出库单仓库已变化，请刷新后重试。")
+    require_warehouse_reviewer(by_user, locked)
+    validate_warehouse_review(locked, expected_updated_at=expected_updated_at)
+    _cancel_unstarted_demand_replenishments(locked, by_user=by_user)
+    unallocate_for_order(locked, by_user=by_user)
+    locked.approval_status = "WHS_REJECTED"
+    locked.warehouse_reject_reason = reason
+    locked.approved_by_warehouse = by_user
+    locked.approved_at_warehouse = timezone.now()
+    locked.updated_by = by_user
+    locked.save(
+        update_fields=[
+            "approval_status",
+            "warehouse_reject_reason",
+            "approved_by_warehouse",
+            "approved_at_warehouse",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+    return locked
+
+
+@transaction.atomic
+def confirm_warehouse_order(order, *, by_user, expected_updated_at=None):
     """Lock and confirm a still-submitted owner-approved standard order."""
 
     Order = type(order)
@@ -271,12 +342,7 @@ def confirm_warehouse_order(order, *, by_user):
     locked = Order.objects.select_for_update().get(pk=order.pk)
     if locked.warehouse_id != warehouse_id:
         raise ValidationError("出库单仓库在仓库确认期间发生变化，请重试。")
-    if (
-        locked.submit_status != "SUBMITTED"
-        or locked.is_closed
-        or locked.approval_status not in {"OWNER_APPROVED", "WHS_PENDING"}
-    ):
-        raise ValidationError("仅已提交、货主审核通过且未关闭的订单可由仓库确认。")
+    validate_warehouse_review(locked, expected_updated_at=expected_updated_at)
 
     validate_sale_mini_payment_for_fulfillment(locked)
     shortages = allocation_shortfalls(locked)
@@ -307,12 +373,14 @@ def confirm_warehouse_order(order, *, by_user):
         return locked, task
 
     locked.approval_status = "WHS_APPROVED"
+    locked.warehouse_reject_reason = ""
     locked.approved_by_warehouse = by_user
     locked.approved_at_warehouse = timezone.now()
     locked.updated_by = by_user
     locked.save(
         update_fields=[
             "approval_status",
+            "warehouse_reject_reason",
             "approved_by_warehouse",
             "approved_at_warehouse",
             "updated_by",
@@ -398,6 +466,8 @@ def validate_standard_order_sale_prices(order) -> None:
     if order.processing_mode != "STANDARD" or order.outbound_type != "SALES":
         return
 
+    from .pricing import pricing_applies, sale_minimum
+
     errors = []
     lines = order.lines.filter(is_deleted=False).select_related("product")
     for line in lines:
@@ -408,16 +478,22 @@ def validate_standard_order_sale_prices(order) -> None:
         if product.owner_id != order.owner_id or not product.is_active:
             errors.append(f"订单行 {line.line_no} 的商品 {label} 不可用。")
             continue
+        if not line.is_priced:
+            continue
+        try:
+            if price == 0 and not pricing_applies(product, line):
+                line.is_priced = False
+                line.save(update_fields=["is_priced", "updated_at"])
+                continue
+        except InvalidSalePriceRule as exc:
+            errors.append(f"商品 {label} 价格配置错误：{exc}")
+            continue
         if price <= 0:
             errors.append(f"订单行 {line.line_no} 的商品 {label} 成交价必须大于 0。")
             continue
 
         try:
-            lowest = minimum_sale_price(
-                base_price=product.price,
-                min_price=product.min_price,
-                max_discount=product.max_discount,
-            )
+            lowest = sale_minimum(product)
         except InvalidSalePriceRule as exc:
             errors.append(f"商品 {label} 价格配置错误：{exc}")
             continue
@@ -1684,8 +1760,7 @@ def _cancel_unstarted_demand_replenishments(order, *, by_user=None):
         other_order_ids = linked_order_ids - {order.pk}
         if other_order_ids:
             extra.demand_order_ids = sorted(other_order_ids)
-            extra.updated_by = by_user
-            extra.save(update_fields=["demand_order_ids", "updated_by", "updated_at"])
+            extra.save(update_fields=["demand_order_ids"])
             continue
         if task.lines.filter(qty_done__gt=0).exists():
             continue

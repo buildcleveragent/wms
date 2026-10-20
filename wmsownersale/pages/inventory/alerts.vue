@@ -45,6 +45,7 @@
   </view>
 </template>
 <script setup>
+import { formatQuantity } from '@/utils/quantity'
 import { computed, ref } from 'vue'
 import { onPullDownRefresh } from '@dcloudio/uni-app'
 import { useAuth } from '@/store/auth'
@@ -67,7 +68,7 @@ const selectedCategory = computed(() => categories.value.find(c => c.code === ca
 function applySearch() { if (appliedSearch.value === search.value.trim()) refresh(); else appliedSearch.value = search.value.trim() }
 function settings(id) { uni.navigateTo({url: '/pages/inventory/alert-settings' + (id ? `?product_id=${id}` : '')}) }
 function openDetail(id) { uni.navigateTo({url: `/pages/inventory/detail?id=${id}`}) }
-function qty(v) { return v == null ? '未设置' : String(v).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '') }
+function qty(v) { return v == null ? '未设置' : formatQuantity(v) }
 function unitLabel(row, code) { return code === row.product.base_unit ? row.product.unit_label || code : code }
 function time(v) { return (v || '').replace('T',' ').replace(/\.\d+/, '').replace(/\+08:00$/, '（北京时间）') }
 onPullDownRefresh(refresh)

@@ -9,6 +9,15 @@ import {
 } from '@/utils/pricing'
 
 describe('服务端最低价四位小数契约', () => {
+  it('未计价行跳过价格校验，有价行仍拒绝空值和零', () => {
+    for (const price of [null, '', 0]) {
+      const item = { is_priced: false, price, minimum_sale_price: '9.0000' }
+      expect(enforceMinimumPrice(item)).toMatchObject({ valid: true, adjusted: false })
+      expect(isPriceAllowed(item)).toBe(true)
+      expect(item.price).toBe(price)
+      expect(isPriceAllowed({ is_priced: true, price })).toBe(false)
+    }
+  })
   it('规范化四位小数且不使用二进制浮点比较', () => {
     expect(normalizePrice4('10.12344')).toBe('10.1234')
     expect(normalizePrice4('10.12345')).toBe('10.1235')

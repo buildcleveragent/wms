@@ -76,9 +76,10 @@ class NoteItem:
     spec: str
     qty: Decimal
     uom: str
-    price: Decimal
-    amount: Decimal
+    price: Optional[Decimal]
+    amount: Optional[Decimal]
     piece_qty: Optional[Decimal]
+    is_priced: bool = True
 
 
 @dataclass
@@ -103,6 +104,8 @@ class DispatchNote:
     total_amount: Decimal
     total_amount_upper: str
     is_preview: bool
+    amount_status: str = "PRICED"
+    unpriced_line_count: int = 0
 
 
 def _display_name(user) -> str | None:
@@ -206,9 +209,13 @@ def build_dispatch_note(task_id: int, *, max_lines=None) -> DispatchNote:
         if order_line.product_id != task_line.product_id:
             raise DispatchNoteDataError("配送任务明细与出库单行商品不一致。")
         quantity = Decimal(task_line.qty_plan if is_preview else task_line.qty_done or 0)
-        price = Decimal(order_line.base_price)
-        amount = (quantity * price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        total_amount += amount
+        price = Decimal(order_line.base_price) if order_line.is_priced else None
+        amount = (
+            (quantity * price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if price is not None
+            else None
+        )
+        total_amount += amount or Decimal("0.00")
         product = task_line.product
         spec_text = (
             getattr(product, "spec", None) or getattr(product, "sales_pack_spec", None) or ""
@@ -231,14 +238,18 @@ def build_dispatch_note(task_id: int, *, max_lines=None) -> DispatchNote:
                 price=price,
                 amount=amount,
                 piece_qty=piece_quantity,
+                is_priced=order_line.is_priced,
             )
         )
 
     total_amount = total_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    unpriced = sum(not item.is_priced for item in items)
     return DispatchNote(
         header=header,
         items=items,
         total_amount=total_amount,
         total_amount_upper=amount_to_cny_upper(total_amount),
         is_preview=is_preview,
+        amount_status="UNPRICED" if unpriced == len(items) else "PARTIAL" if unpriced else "PRICED",
+        unpriced_line_count=unpriced,
     )

@@ -55,7 +55,7 @@
         :quantity="qtyMap[product.id] ?? ''"
         :base-quantity="baseQtyPreview(product)"
         :selected-unit-index="getUnitIndex(product)"
-        :amount="lineAmount(baseQtyPreview(product), product.price)"
+        :amount="product.is_priced === false ? '' : lineAmount(baseQtyPreview(product), product.price)"
         @quantity-input="setQty(product.id, $event)"
         @unit-change="onUnitChange(product, $event)"
         @price-input="setPrice(product, $event)"
@@ -83,7 +83,7 @@
 
     <view class="footer">
       <button class="cart-button" @click="goCart">
-        查看订单 · {{ cart.items.length }} 行 · ¥{{ cart.totalAmount }}
+        查看订单 · {{ cart.items.length }} 行 · {{ amountSummaryLabel({items: cart.items, total_amount: cart.totalAmount}) }}
       </button>
     </view>
   </view>
@@ -99,7 +99,7 @@ import { useAuth } from '@/store/auth'
 import { useCart } from '@/store/cart'
 import { enforceMinimumPrice, initializePriceGuard } from '@/utils/pricing'
 import { previewBaseQuantity, validateDesiredQuantity } from '@/utils/quantity'
-import { lineAmount } from '@/utils/orderAmount'
+import { amountSummaryLabel, lineAmount } from '@/utils/orderAmount'
 import { api } from '@/utils/request'
 import { mergeUniqueById } from '@/utils/pagination'
 // #ifndef H5
@@ -275,7 +275,8 @@ function add(product: any) {
       sku: product.sku,
       name: product.name,
       spec: product.spec,
-      price: Number(product.price || 0),
+      is_priced: product.is_priced !== false,
+      price: product.is_priced === false ? null : Number(product.price || 0),
       orig_price: Number(product.orig_price ?? product.price ?? 0),
       minimum_sale_price: product.minimum_sale_price,
       min_price: product.min_price,

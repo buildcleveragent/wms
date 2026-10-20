@@ -157,6 +157,7 @@ class OutboundOrder(BaseModel):
         related_name="appr_by_wh_out_orders",
     )
     approved_at_warehouse = models.DateTimeField("仓库管理员审核时间", blank=True, null=True)
+    warehouse_reject_reason = models.CharField("仓库退回原因", max_length=500, blank=True, default="")
 
     next_line_no = models.PositiveIntegerField("下一个订单行号", default=10)
 
@@ -395,10 +396,10 @@ class OutboundOrder(BaseModel):
             qty = Decimal(line.base_qty or 0)
             price = Decimal(line.base_price or 0)
 
-            if price < 0 or (price == 0 and not allow_zero_price):
+            if line.is_priced and (price < 0 or (price == 0 and not allow_zero_price)):
                 raise ValidationError(f"订单行 {line.line_no} 的价格未填写或不合法。")
 
-            line_amount = calculate_line_amount(qty, price)
+            line_amount = calculate_line_amount(qty, price) if line.is_priced else Decimal("0.00")
             line.final_line_amount = line_amount
             line.save(update_fields=["final_line_amount", "updated_at"])
             total += line_amount
@@ -423,10 +424,10 @@ class OutboundOrder(BaseModel):
             qty = Decimal(line.base_qty or 0)
             price = Decimal(line.base_price or 0)
 
-            if price < 0 or (price == 0 and not allow_zero_price):
+            if line.is_priced and (price < 0 or (price == 0 and not allow_zero_price)):
                 raise ValidationError(f"订单行 {line.line_no} 的价格未填写或不合法。")
 
-            line_total = calculate_line_amount(qty, price)
+            line_total = calculate_line_amount(qty, price) if line.is_priced else Decimal("0.00")
 
             if line.final_line_amount != line_total:
                 type(line).objects.filter(pk=line.pk).update(
@@ -523,6 +524,7 @@ class OutboundOrderLine(BaseModel):
 
     base_qty = models.DecimalField("基本数量", max_digits=14, decimal_places=3, default=0)
     base_price = models.DecimalField("基本价格", max_digits=14, decimal_places=4, default=0)
+    is_priced = models.BooleanField("已计价", default=True)
     base_uom = models.ForeignKey(
         "products.ProductUom",
         verbose_name="基本单位",

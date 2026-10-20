@@ -202,6 +202,23 @@ class ReportsWarehouseScopeTests(TestCase):
         self.assertEqual(note.total_amount, Decimal("0.00"))
         self.assertEqual(note.items[0].price, Decimal("0"))
 
+    def test_unpriced_dispatch_note_keeps_price_and_amount_empty(self):
+        task = self._create_dispatch_task()
+        OutboundOrderLine.objects.filter(pk=task.lines.get().src_id).update(is_priced=False)
+        note = build_dispatch_note(task.pk)
+        self.assertEqual(note.amount_status, "UNPRICED")
+        self.assertEqual(note.unpriced_line_count, 1)
+        self.assertEqual(note.total_amount, Decimal("0.00"))
+        self.assertIsNone(note.items[0].price)
+        self.assertIsNone(note.items[0].amount)
+        snapshot = snapshot_dispatch_note(task, self.staff_user, finalize=True)
+        self.assertEqual(snapshot.payload["amount_status"], "UNPRICED")
+        self.assertIsNone(snapshot.payload["items"][0]["price"])
+        self.assertIsNone(snapshot.payload["items"][0]["amount"])
+        self.assertIn("（未计价）", snapshot.html)
+        self.assertNotIn("999.00", snapshot.html)
+        self.assertNotIn("12.50", snapshot.html)
+
     def test_snapshot_is_v2_and_does_not_modify_v1(self):
         task = self._create_dispatch_task()
         v1 = ReportSnapshot.objects.create(

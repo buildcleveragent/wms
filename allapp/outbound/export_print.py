@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import DecimalField, ExpressionWrapper, F, Sum
+from django.db.models import Case, DecimalField, ExpressionWrapper, F, Sum, When
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.utils import timezone
@@ -174,7 +174,7 @@ def pick_task_print(request, task_id: int):
             "product__base_uom",
             "aux_uom__uom",
         )
-        .annotate(amount=amount_expr)
+        .annotate(amount=Case(When(is_priced=True, then=amount_expr)))
         .order_by("line_no", "id")
     )
 
@@ -184,6 +184,8 @@ def pick_task_print(request, task_id: int):
     )
     total_qty = agg["total_qty"] or Decimal("0")
     total_amount = agg["total_amount"] or Decimal("0")
+    unpriced_line_count = sum(not line.is_priced for line in lines)
+    all_unpriced = bool(lines) and unpriced_line_count == len(lines)
 
     # 4) 打印头部字段（按你的要求）
     # 发货人：货主（不是业务员）
@@ -233,6 +235,8 @@ def pick_task_print(request, task_id: int):
             "total_qty": total_qty,
             "total_amount": total_amount,
             "total_amount_upper": total_amount_upper,
+            "unpriced_line_count": unpriced_line_count,
+            "all_unpriced": all_unpriced,
             "print_config": print_config,
             "print_css": print_css,
         },

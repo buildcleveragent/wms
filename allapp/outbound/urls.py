@@ -16,6 +16,7 @@ from .views import (
     WarehouseViewSet,
 )
 from .workbench import OwnerWorkbenchItemsView, OwnerWorkbenchView
+from .warehouse_review_api import WarehouseReviewOptionsView, WarehouseReviewView
 from .reorder_api import (
     CheckoutValidationView,
     CustomerAddressView,
@@ -42,6 +43,9 @@ router.register(r"catalog/receive_products", ReceiveProductViewSet, basename="ob
 router.register(r"pda/pick-tasks", PickTaskViewSet, basename="pda-pick-task")
 
 urlpatterns = [
+    path("outbound/warehouse-review/options/", WarehouseReviewOptionsView.as_view()),
+    path("outbound/warehouse-review/", WarehouseReviewView.as_view()),
+    path("outbound/warehouse-review/<int:pk>/", WarehouseReviewView.as_view()),
     path("outbound/orders/validate/", CheckoutValidationView.as_view(), name="owner-checkout"),
     path(
         "outbound/customers/<int:customer_id>/frequent-products/",

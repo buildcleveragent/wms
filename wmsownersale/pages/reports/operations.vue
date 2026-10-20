@@ -36,12 +36,12 @@
     <view class="summary-grid">
       <view class="summary-card inbound">
         <view class="label">{{ basis === 'actual' ? '实际入库' : '计划入库' }}</view>
-        <view class="value">{{ inbound.qty }}</view>
+        <view class="value">{{ formatQuantity(inbound.qty) }}</view>
         <view class="meta">{{ inbound.orders }} 单 / {{ inbound.lines }} 行</view>
       </view>
       <view class="summary-card outbound">
         <view class="label">{{ basis === 'actual' ? '实际发运' : '计划出库' }}</view>
-        <view class="value">{{ outbound.qty }}</view>
+        <view class="value">{{ formatQuantity(outbound.qty) }}</view>
         <view class="meta">{{ outbound.orders }} 单 / {{ outbound.lines }} 行</view>
       </view>
     </view>
@@ -62,7 +62,7 @@
       <view class="sub">{{ row.product.code }} · 批次 {{ row.lot_no || '-' }} · {{ row.status }}</view>
       <view class="row-foot">
         <text>{{ row.operator || '系统过账' }}</text>
-        <text class="qty">{{ basis === 'plan' ? row.planned_qty : row.actual_qty }}</text>
+        <text class="qty">{{ formatQuantity(basis === 'plan' ? row.planned_qty : row.actual_qty) }}</text>
       </view>
       <view v-if="row.exception_type" class="exception">异常：{{ row.exception_type }}</view>
     </view>
@@ -77,6 +77,7 @@
 </template>
 
 <script setup>
+import { formatQuantity } from '@/utils/quantity'
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'

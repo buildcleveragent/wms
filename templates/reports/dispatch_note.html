@@ -76,7 +76,7 @@
       {% for it in note.items %}
       <tr>
         <td>{{ it.sku_code }}</td>
-        <td class="tl">{{ it.sku_name }}</td>
+        <td class="tl">{{ it.sku_name }}{% if it.is_priced == False %}（未计价）{% endif %}</td>
         <td>{{ it.spec }}</td>
         <td>{{ it.qty|floatformat:2 }}</td>
         <td>{{ it.uom }}</td>
@@ -89,7 +89,7 @@
   </table>
 
   <div class="sum">
-    <div class="bold">金额：{{ note.total_amount|floatformat:2 }} （￥ {{ note.total_amount_upper }}）</div>
+    <div class="bold">{% if note.amount_status == "UNPRICED" %}未计价{% elif note.unpriced_line_count %}已计价小计 ¥{{ note.total_amount|floatformat:2 }}，另有 {{ note.unpriced_line_count }} 行未计价{% else %}金额：{{ note.total_amount|floatformat:2 }} （￥ {{ note.total_amount_upper }}）{% endif %}</div>
     <div class="muted">共 {{ note.items|length }} 行</div>
   </div>
 

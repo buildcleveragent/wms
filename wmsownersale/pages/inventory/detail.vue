@@ -83,6 +83,7 @@
 </template>
 
 <script setup>
+import { formatQuantity } from '@/utils/quantity'
 import { computed, onUnmounted, reactive, ref } from 'vue'
 import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import { useInventoryDetail } from '@/composables/useInventoryDetail'
@@ -102,7 +103,7 @@ const warehouseIndex = computed(() => Math.max(0, warehouseOptions.value.findInd
 const expiryOptions = [{ value: '', label: '全部' }, { value: 'expired', label: '已过期' }, { value: 'valid', label: '未过期' }, { value: 'unknown', label: '未记录' }]
 const typeOptions = Object.entries({ '': '全部', RECEIVE: '入库', ISSUE: '出库（库存扣减）', ADJ_GAIN: '调整增加', ADJ_LOSS: '调整减少', MOVE_IN: '移入', MOVE_OUT: '移出', OWNER_XFER_IN: '货权转入', OWNER_XFER_OUT: '货权转出' }).map(([value, label]) => ({ value, label }))
 const qtyFields = [{ key: 'onhand_qty', label: '现有' }, { key: 'available_qty', label: '可用' }, { key: 'allocated_qty', label: '分配' }, { key: 'locked_qty', label: '锁定' }, { key: 'damaged_qty', label: '残次' }]
-function qty(value) { return String(value ?? '0').replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '') }
+function qty(value) { return formatQuantity(value ?? '0') }
 function signed(value) { const v = qty(value); return v.startsWith('-') ? v : `+${v}` }
 function formatTime(value) { return value ? value.replace('T', ' ').replace(/\.\d+/, '').replace(/\+08:00$/, '（北京时间）') : '时间未记录' }
 function search() {

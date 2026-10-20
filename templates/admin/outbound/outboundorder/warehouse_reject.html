@@ -1,0 +1,16 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<form method="post">{% csrf_token %}
+  <p>退回将释放库存分配并取消未执行的拣货任务。业务员需撤回修改后重新提交审核。</p>
+  <ul>{% for order in orders %}
+    <li>{{ order.order_no }}</li>
+    <input type="hidden" name="{{ action_checkbox_name }}" value="{{ order.pk }}">
+  {% endfor %}</ul>
+  {% if error %}<p class="errornote">{{ error }}</p>{% endif %}
+  <p><label for="reason">退回原因（必填，最多 500 字）</label></p>
+  <textarea id="reason" name="reason" required maxlength="500" rows="4" cols="60">{{ reason }}</textarea>
+  <input type="hidden" name="action" value="action_whs_reject">
+  <input type="hidden" name="apply" value="1">
+  <p><input type="submit" value="确认退回"></p>
+</form>
+{% endblock %}
