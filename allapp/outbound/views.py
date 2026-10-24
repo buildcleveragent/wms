@@ -2566,6 +2566,27 @@ class PickTaskLineSerializer(serializers.ModelSerializer):
         }
 
 
+def filter_pick_queue(qs, params, action="list"):
+    """Apply the existing picking list status filters to an authorized queryset."""
+    status_list = params.getlist("status")
+    if status_list:
+        qs = qs.filter(status__in=status_list)
+    elif action == "list":
+        qs = qs.filter(
+            status__in=[
+                WmsTask.Status.RELEASED,
+                WmsTask.Status.IN_PROGRESS,
+                WmsTask.Status.RESERVED,
+            ]
+        )
+
+    review_status_list = params.getlist("review_status")
+    if review_status_list:
+        qs = qs.filter(review_status__in=review_status_list)
+
+    return qs
+
+
 class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
     """
     PDA 拣货任务接口：
@@ -2691,23 +2712,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
         # Normal lists retain their default in-progress status filter.  The
         # review queue above deliberately bypasses it.
-        status_list = self.request.query_params.getlist("status")
-        if status_list:
-            qs = qs.filter(status__in=status_list)
-        elif action == "list":
-            qs = qs.filter(
-                status__in=[
-                    WmsTask.Status.RELEASED,
-                    WmsTask.Status.IN_PROGRESS,
-                    WmsTask.Status.RESERVED,
-                ]
-            )
-
-        review_status_list = self.request.query_params.getlist("review_status")
-        if review_status_list:
-            qs = qs.filter(review_status__in=review_status_list)
-
-        return qs
+        return filter_pick_queue(qs, self.request.query_params, action)
 
     @action(methods=["get"], detail=True)
     def lines(self, request, pk=None):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import Case, DecimalField, ExpressionWrapper, F, Sum, When
+from django.db.models import Case, DecimalField, ExpressionWrapper, F, Q, Sum, When
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.utils import timezone
@@ -15,6 +15,7 @@ from allapp.outbound.authz import (
     strict_pick_queryset,
 )
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+from allapp.pos.models import PosReceiptWarehouseInfo
 from allapp.tasking.models import WmsTask
 
 OUTBOUND_PRINT_CSS_DEFAULTS = {
@@ -102,7 +103,7 @@ def _money_to_rmb_upper(amount: Decimal) -> str:
 
 
 def pick_task_print(request, task_id: int):
-    """拣货任务打印页（给 PDA 打开用，打印“出库单格式”）。
+    """拣货任务送货单打印页（给 PDA 打开用）。
     MVP：用 ?ticket=<document-ticket> 认证（因为 window.open/openURL 不带 Authorization 头）。
     """
     token = request.GET.get("ticket")
@@ -161,6 +162,23 @@ def pick_task_print(request, task_id: int):
 
     order: OutboundOrder = ol.order
 
+    # 与 POS 销售单共用仓库信息，按实际出库仓库限定可选范围。
+    warehouse_infos = list(
+        PosReceiptWarehouseInfo.objects.filter(is_active=True)
+        .filter(Q(warehouse_id=order.warehouse_id) | Q(warehouse__isnull=True))
+        .order_by("warehouse_id", "-is_default", "sort_order", "id")
+    )
+    selected_info_id = request.GET.get("warehouse_info_id", "")
+    selected_info = None
+    if selected_info_id:
+        selected_info = next(
+            (info for info in warehouse_infos if str(info.pk) == selected_info_id), None
+        )
+        if selected_info is None:
+            return HttpResponse("所选仓库信息不可用，请重新选择。", status=400)
+    elif len(warehouse_infos) == 1:
+        selected_info = warehouse_infos[0]
+
     # 3) 订单行 + 金额（amount = base_qty * base_price）
     amount_expr = ExpressionWrapper(
         F("base_qty") * F("base_price"),
@@ -204,7 +222,15 @@ def pick_task_print(request, task_id: int):
     receiver_phone = order.contact_phone or ""
     if not receiver_phone and order.customer_id:
         receiver_phone = order.customer.phone or ""
-    receiver_address = order.ship_to or ""
+    is_pickup = order.delivery_method == "PICKUP"
+    receiver_address = ""
+    if not is_pickup:
+        receiver_address = (order.ship_to or "").strip()
+        if not receiver_address and order.customer_id:
+            receiver_address = "".join(
+                (getattr(order.customer, field, "") or "").strip()
+                for field in ("province", "city", "district", "street", "address")
+            )
 
     # 发货时间：优先仓库确认时间，其次预计发货时间(etd)
     ship_time = order.approved_at_warehouse or order.etd or timezone.now()
@@ -217,7 +243,10 @@ def pick_task_print(request, task_id: int):
         module="outbound",
         request=request,
         obj=task,
-        metadata={"order_id": order.id},
+        metadata={
+            "order_id": order.id,
+            "warehouse_info_id": selected_info.pk if selected_info else None,
+        },
     )
 
     return render(
@@ -232,6 +261,11 @@ def pick_task_print(request, task_id: int):
             "receiver_name": receiver_name,
             "receiver_phone": receiver_phone,
             "receiver_address": receiver_address,
+            "is_pickup": is_pickup,
+            "warehouse_address": selected_info.address if selected_info else "",
+            "warehouse_infos": warehouse_infos,
+            "selected_warehouse_info": selected_info,
+            "auto_print": len(warehouse_infos) <= 1 or selected_info is not None,
             "total_qty": total_qty,
             "total_amount": total_amount,
             "total_amount_upper": total_amount_upper,

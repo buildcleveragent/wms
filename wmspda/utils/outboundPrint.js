@@ -7,7 +7,7 @@ export function prepareOutboundPrintWindow() {
     try {
       preparedWindow = window.open('', '_blank', 'width=1200,height=800')
     } catch (error) {
-      console.warn('无法预先打开出库单打印窗口', error)
+      console.warn('无法预先打开送货单打印窗口', error)
     }
   }
   // #endif
@@ -19,7 +19,7 @@ export function closePreparedOutboundPrintWindow(preparedWindow) {
   try {
     preparedWindow.close()
   } catch (error) {
-    console.warn('无法关闭未使用的出库单打印窗口', error)
+    console.warn('无法关闭未使用的送货单打印窗口', error)
   }
 }
 
@@ -39,7 +39,7 @@ export async function openOutboundPrintPage(taskId, preparedWindow = null) {
   }
   if (!url) {
     closePreparedOutboundPrintWindow(preparedWindow)
-    uni.showToast({ title: '登录已失效，暂时无法打印出库单', icon: 'none' })
+    uni.showToast({ title: '登录已失效，暂时无法打印送货单', icon: 'none' })
     return false
   }
 
@@ -61,8 +61,8 @@ export async function openOutboundPrintPage(taskId, preparedWindow = null) {
     plus.runtime.openURL(url)
     opened = true
   } catch (error) {
-    console.warn('无法打开出库单打印页', error)
-    uni.showToast({ title: '当前设备无法打开出库单打印页，请稍后重试', icon: 'none' })
+    console.warn('无法打开送货单打印页', error)
+    uni.showToast({ title: '当前设备无法打开送货单打印页，请稍后重试', icon: 'none' })
   }
   // #endif
   return opened

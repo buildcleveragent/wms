@@ -283,47 +283,57 @@ class ReplenishmentEvaluateView(APIView):
         return Response({"results": results})
 
 
+PENDING_REPLENISHMENT_STATUSES = ("RELEASED", "RESERVED", "IN_PROGRESS")
+
+
+def replenishment_task_queryset(user, params, action="list"):
+    """Return the authorized replenishment queue, optionally limited to pending work."""
+    _require_feature("REPLENISHMENT_PDA_ENABLED", "补货 PDA 功能尚未启用。")
+    active_assignment = TaskAssignment.objects.filter(
+        task_id=OuterRef("pk"), finished_at__isnull=True
+    )
+    qs = (
+        WmsTask.objects.filter(task_type=WmsTask.TaskType.REPLEN)
+        .select_related("owner", "warehouse", "replenishtaskextra")
+        .prefetch_related(
+            "assignments",
+            "lines__product__packages",
+            "lines__from_location",
+            "lines__to_location",
+        )
+        .annotate(has_active_assignment=Exists(active_assignment))
+    )
+    qs = _scoped(qs, user)
+    if _is_operator(user) and not _is_manager(user):
+        assignment_scope = Q(assignments__assignee=user)
+        # A completed operator retains access to confirm/replay their scan.
+        if action not in {"retrieve", "record"}:
+            assignment_scope &= Q(assignments__finished_at__isnull=True)
+        qs = qs.filter(
+            assignment_scope
+            | Q(status=WmsTask.Status.RELEASED, has_active_assignment=False)
+            | Q(created_by=user)
+        ).distinct()
+    search = (params.get("search") or "").strip()
+    if search:
+        qs = qs.filter(
+            Q(task_no__icontains=search)
+            | product_search_q(search, product_field="lines__product_id")
+        ).distinct()
+    statuses = params.getlist("status")
+    if statuses:
+        qs = qs.filter(status__in=statuses)
+    if params.get("pending") == "1":
+        qs = qs.filter(status__in=PENDING_REPLENISHMENT_STATUSES)
+    return qs.order_by("-priority", "id")
+
+
 class ReplenishmentTaskViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = ReplenishmentTaskSerializer
 
     def get_queryset(self):
-        _require_feature("REPLENISHMENT_PDA_ENABLED", "补货 PDA 功能尚未启用。")
-        active_assignment = TaskAssignment.objects.filter(
-            task_id=OuterRef("pk"), finished_at__isnull=True
-        )
-        qs = (
-            WmsTask.objects.filter(task_type=WmsTask.TaskType.REPLEN)
-            .select_related("owner", "warehouse", "replenishtaskextra")
-            .prefetch_related(
-                "assignments",
-                "lines__product__packages",
-                "lines__from_location",
-                "lines__to_location",
-            )
-            .annotate(has_active_assignment=Exists(active_assignment))
-        )
-        qs = _scoped(qs, self.request.user)
-        if _is_operator(self.request.user) and not _is_manager(self.request.user):
-            assignment_scope = Q(assignments__assignee=self.request.user)
-            # A completed operator retains access to confirm/replay their scan.
-            if self.action not in {"retrieve", "record"}:
-                assignment_scope &= Q(assignments__finished_at__isnull=True)
-            qs = qs.filter(
-                assignment_scope
-                | Q(status=WmsTask.Status.RELEASED, has_active_assignment=False)
-                | Q(created_by=self.request.user)
-            ).distinct()
-        search = (self.request.query_params.get("search") or "").strip()
-        if search:
-            qs = qs.filter(
-                Q(task_no__icontains=search)
-                | product_search_q(search, product_field="lines__product_id")
-            ).distinct()
-        statuses = self.request.query_params.getlist("status")
-        if statuses:
-            qs = qs.filter(status__in=statuses)
-        return qs.order_by("-priority", "id")
+        return replenishment_task_queryset(self.request.user, self.request.query_params, self.action)
 
     @action(detail=True, methods=["post"])
     def claim(self, request, pk=None):

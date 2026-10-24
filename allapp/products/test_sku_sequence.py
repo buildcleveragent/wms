@@ -93,3 +93,27 @@ class ProductSkuSequenceTests(TestCase):
 
         owner.refresh_from_db()
         self.assertEqual(owner.next_sku_sequence, 2)
+
+    def test_new_instance_with_existing_id_cannot_replace_identifiers(self):
+        owner = Owner.objects.create(code="KEEP", name="编号不可覆盖货主")
+        original = self.create_product(owner, "ORIGINAL")
+        identifiers = (original.code, original.sku)
+        replacement = Product(
+            pk=original.pk,
+            created_at=original.created_at,
+            owner=owner,
+            code="",
+            name=original.name,
+            base_uom=self.uom,
+            expiry_control=False,
+            expiry_basis=None,
+        )
+        replacement._derive_code_from_owner_id_on_create = True
+
+        with self.assertRaises(IntegrityError):
+            replacement.save()
+
+        original.refresh_from_db()
+        owner.refresh_from_db()
+        self.assertEqual((original.code, original.sku), identifiers)
+        self.assertEqual(owner.next_sku_sequence, 2)

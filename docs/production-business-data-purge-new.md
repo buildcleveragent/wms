@@ -12,6 +12,8 @@
 - 商品条码 `ProductBarcode`
 - 商品外部标识 `ProductExternalIdentifier`
 - 商品标识注册表 `ProductIdentifierRegistry`
+- 商品库存预警策略 `ProductInventoryAlertPolicy`
+- 货主商品映射 `OwnerProductMapping`
 
 商品分类、品牌、计量单位和温区属于可复用字典，仍然保留。GS1 查询缓存和服务商限流
 状态与其他业务运行数据一样会被清理。
@@ -40,7 +42,7 @@
   --maintenance-confirmed
 ```
 
-新版清单版本为 `2026-08-14.2`，成功和失败尝试使用审计事件
+新版清单版本为 `2026-10-23.1`，成功和失败尝试使用审计事件
 `BUSINESS_DATA_PURGE_NEW`，审计来源为 `purge_business_data_new`。成功审计的
 `after.reset_owner_sku_sequences` 记录实际发生序号变化的货主数量。
 

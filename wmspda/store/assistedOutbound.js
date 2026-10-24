@@ -12,7 +12,7 @@ function emptyForm() {
     ship_to: '',
     remark: '',
     assistance_reason: '',
-    print_after_create: false,
+    print_after_create: true,
   }
 }
 
@@ -118,10 +118,9 @@ export const useAssistedOutbound = defineStore('assistedOutbound', {
 
     loadPrintPreference(userId, warehouseId) {
       const key = printPreferenceKey(userId, warehouseId)
-      if (!key) return false
-      let checked = false
+      let checked = true
       try {
-        checked = uni.getStorageSync(key) === '1'
+        if (key) checked = uni.getStorageSync(key) !== '0'
       } catch (error) {
         console.warn('读取代办出库打印偏好失败', error)
       }

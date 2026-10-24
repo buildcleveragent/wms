@@ -91,7 +91,7 @@
                 :disabled="!row.can_reprint"
                 @click="reprint(row)"
               >
-                打印出库单
+                打印送货单
               </button>
             </view>
             <view v-if="!row.can_reprint && row.reprint_unavailable_reason" class="disabled-reason">

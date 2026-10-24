@@ -304,7 +304,10 @@ class AssistedOutboundOrderCreateSerializer(serializers.Serializer):
                     }
                 )
 
-        if (customer.owner_customer_code or "").strip().upper() == "CASH":
+        if (
+            (customer.owner_customer_code or "").strip().upper() == "CASH"
+            and data.get("delivery_method") != "PICKUP"
+        ):
             if not data["contact"]:
                 raise serializers.ValidationError({"contact": "散客代发必须填写收件人。"})
             if not data["contact_phone"]:

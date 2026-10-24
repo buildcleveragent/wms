@@ -5,6 +5,7 @@
       <text class="title">仓库作业工作台</text>
     </view> -->
 
+    <HomeTodos />
     <view class="grid">
       <view class="card" v-for="item in actions" :key="item.key" @click="go(item)">
         <view class="emoji">{{ item.emoji }}</view>
@@ -27,12 +28,14 @@
 
 <script>
 import { computed, ref } from 'vue'
+import HomeTodos from '@/components/HomeTodos.vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useAuth } from '@/store/auth'
 import { downloadAllProductArchives, downloadMissingGtinProducts } from '@/utils/request'
 
 export default {
   name: "WarehouseAdminHome",
+  components: { HomeTodos },
   setup() {
     const auth = useAuth()
     const allProductExporting = ref(false)

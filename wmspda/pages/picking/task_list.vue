@@ -24,7 +24,7 @@
 	      <text class="task-no">任务号：{{ t.task_no }}</text>
 	      <view class="right">
 	        <text class="status">{{ t.status }}</text>
-	        <button class="btn-print" @click.stop="printPickList(t)">打印出库单</button>
+	        <button class="btn-print" @click.stop="printPickList(t)">打印送货单</button>
 	      </view>
 	    </view>
 	  

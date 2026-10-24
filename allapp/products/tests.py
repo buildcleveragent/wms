@@ -1692,6 +1692,320 @@ class ProductExcelImportApiTests(TestCase):
             ],
         )
 
+    def test_separate_imports_preserve_previously_generated_identifiers(self):
+        first = self._post_rows([self._valid_row("", **{"商品名称": "第一批无码商品"})])
+        self.assertEqual(first.status_code, 200, first.data)
+        original = Product.objects.get(pk=first.data["created"][0]["product_id"])
+        original_identifiers = (original.code, original.sku)
+
+        second = self._post_rows([self._valid_row("", **{"商品名称": "第二批无码商品"})])
+        self.assertEqual(second.status_code, 200, second.data)
+        original.refresh_from_db()
+        self.assertEqual((original.code, original.sku), original_identifiers)
+        self.assertEqual(original.name, "第一批无码商品")
+        added = Product.objects.get(pk=second.data["created"][0]["product_id"])
+        self.assertNotEqual(added.pk, original.pk)
+        self.assertEqual(
+            (added.code, added.sku),
+            (format_owner_product_code_identifier(self.owner.pk, 2), "PXIA2"),
+        )
+
+    def test_reimport_existing_code_preserves_identifiers_and_sequence(self):
+        first = self._post_rows([self._valid_row("IMPORT-STABLE")])
+        self.assertEqual(first.status_code, 200, first.data)
+        original = Product.objects.get(pk=first.data["created"][0]["product_id"])
+        original_identifiers = (original.code, original.sku)
+        self.owner.refresh_from_db()
+        sequence = self.owner.next_sku_sequence
+
+        second = self._post_rows([self._valid_row("IMPORT-STABLE", **{"商品名称": "不得覆盖"})])
+        self.assertEqual(second.status_code, 400, second.data)
+        original.refresh_from_db()
+        self.owner.refresh_from_db()
+        self.assertEqual((original.code, original.sku), original_identifiers)
+        self.assertEqual(original.name, "导入商品 IMPORT-STABLE")
+        self.assertEqual(self.owner.next_sku_sequence, sequence)
+        self.assertEqual(Product.objects.filter(owner=self.owner).count(), 1)
+
+    def test_import_quantity_after_registration_receives_original_product(self):
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
+        self.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
+        rows = [
+            self._valid_row("", **{"商品名称": f"先建档后收货 {number}", "规格": "500g"})
+            for number in range(1, 4)
+        ]
+        first = self._post_rows(rows)
+        self.assertEqual(first.status_code, 200, first.data)
+        archives = list(Product.objects.filter(owner=self.owner).order_by("pk").values())
+        self.assertEqual([item["sku"] for item in archives], ["PXIA1", "PXIA2", "PXIA3"])
+
+        second = self._post_rows(
+            [{**row, "基本单位数量": number} for number, row in enumerate(rows, start=1)],
+            warehouse_id=self.warehouse.pk,
+        )
+        self.assertEqual(second.status_code, 200, second.data)
+        self.assertEqual(
+            list(Product.objects.filter(owner=self.owner).order_by("pk").values()), archives
+        )
+        self.owner.refresh_from_db()
+        self.assertEqual(self.owner.next_sku_sequence, 4)
+        self.assertEqual(second.data["created_count"], 0)
+        self.assertEqual(second.data["reused_count"], 3)
+        self.assertEqual(second.data["received_product_count"], 3)
+        for quantity, archive in enumerate(archives, start=1):
+            self.assertEqual(
+                InventoryDetail.objects.get(
+                    product_id=archive["id"], warehouse=self.warehouse
+                ).onhand_qty,
+                quantity,
+            )
+        third = self._post_rows([self._valid_row("", **{"商品名称": "真正新增的第四件商品"})])
+        self.assertEqual(third.status_code, 200, third.data)
+        added = Product.objects.get(pk=third.data["created"][0]["product_id"])
+        self.assertEqual(added.sku, "PXIA4")
+        self.assertEqual(added.code, format_owner_product_code_identifier(self.owner.pk, 4))
+
+    def test_existing_receipt_matches_codes_gtin_and_preserves_inline_packages(self):
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
+        self.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
+        for code, gtin, receipt_code in (
+            ("RECEIVE-CODE", "", "RECEIVE-CODE"),
+            ("", "12345678", ""),
+            ("RECEIVE-GTIN", "87654321", ""),
+        ):
+            with self.subTest(code=code, gtin=gtin):
+                row = self._valid_row(
+                    code,
+                    **{
+                        "标准贸易条码": gtin,
+                        "包装单位": self.carton_uom.name,
+                        "包装换算数量": 12,
+                    },
+                )
+                first = self._post_rows([row])
+                self.assertEqual(first.status_code, 200, first.data)
+                original = Product.objects.get(pk=first.data["created"][0]["product_id"])
+                package = original.packages.get()
+                second = self._post_rows(
+                    [{**row, "货主商品编码": receipt_code, "基本单位数量": 3}],
+                    warehouse_id=self.warehouse.pk,
+                )
+                self.assertEqual(second.status_code, 200, second.data)
+                self.assertEqual(second.data["created_count"], 0)
+                self.assertEqual(second.data["reused"][0]["product_id"], original.pk)
+                self.assertEqual(original.packages.get().pk, package.pk)
+                self.assertEqual(InventoryDetail.objects.get(product=original).onhand_qty, 3)
+
+    def test_dyj_six_existing_products_keep_original_identifiers_when_receiving(self):
+        self.owner.code = "dyj"
+        self.owner.save(update_fields=["code"])
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
+        self.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
+        uom = ProductUom.objects.create(code="DYJ-JIAN", name="件")
+        category = ProductCategory.objects.create(code="DYJ-DRINKS", name="乳品饮料酒类")
+        examples = [
+            ("大窑橙诺橙味果汁汽水玻璃瓶件480ml", "1*12*480ml"),
+            ("大窑荔爱荔枝味果汁汽水玻璃瓶件480ml", "1*12*480ml"),
+            ("大窑嘉宾果汁汽水玻璃瓶件480ml", "1*12*480ml"),
+            ("大窑冰畅凤梨味果汁汽水玻璃瓶件480ml", "1*12*480ml"),
+            ("窑果立黄桃果粒复合果汁饮料490ml", "490ml(1*15)"),
+            ("窑果立葡萄果粒复合果汁饮料490ml", "490ml(1*15)"),
+        ]
+        rows = []
+        for number, (name, spec) in enumerate(examples, start=1):
+            Product.objects.create(
+                owner=self.owner,
+                code=f"0008{number:05d}",
+                name=name,
+                spec=spec,
+                base_uom=uom,
+                category=category,
+                batch_control=False,
+                expiry_control=False,
+                expiry_basis=None,
+            )
+            rows.append(
+                {
+                    "货主编码": "DYJ",
+                    "商品名称": name,
+                    "规格": spec,
+                    "基本单位": uom.name,
+                    "分类": category.full_path,
+                    "基本单位数量": number,
+                }
+            )
+        archives = list(Product.objects.filter(owner=self.owner).order_by("pk").values())
+        self.assertEqual([item["sku"] for item in archives], [f"DYJ{i}" for i in range(1, 7)])
+
+        response = self._post_rows(rows, warehouse_id=self.warehouse.pk)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["created_count"], 0)
+        self.assertEqual(response.data["reused_count"], 6)
+        self.assertEqual(response.data["received_product_count"], 6)
+        self.assertEqual(
+            list(Product.objects.filter(owner=self.owner).order_by("pk").values()), archives
+        )
+        self.owner.refresh_from_db()
+        self.assertEqual(self.owner.next_sku_sequence, 7)
+        for quantity, archive in enumerate(archives, start=1):
+            self.assertEqual(
+                InventoryDetail.objects.get(product_id=archive["id"]).onhand_qty, quantity
+            )
+
+    def test_existing_receipt_rejects_ambiguous_unidentified_products(self):
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
+        self.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
+        for code in ("SAME-NAME-1", "SAME-NAME-2"):
+            first = self._post_rows([self._valid_row(code, **{"商品名称": "同名商品"})])
+            self.assertEqual(first.status_code, 200, first.data)
+
+        response = self._post_rows(
+            [self._valid_row("", **{"商品名称": "同名商品", "基本单位数量": 3})],
+            warehouse_id=self.warehouse.pk,
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertTrue(any("多个" in error["message"] for error in response.data["errors"]))
+        self.assertEqual(Product.objects.filter(owner=self.owner).count(), 2)
+        self.assertFalse(InventoryDetail.objects.filter(owner=self.owner).exists())
+
+    def test_existing_receipt_rejects_changed_master_data_and_package_conversion(self):
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
+        self.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
+        row = self._valid_row(
+            "UNCHANGED",
+            **{"包装单位": self.carton_uom.name, "包装换算数量": 12, "默认价格": "10.00"},
+        )
+        first = self._post_rows([row])
+        self.assertEqual(first.status_code, 200, first.data)
+        for changes in ({"默认价格": "20.00"}, {"包装换算数量": 24}):
+            with self.subTest(changes=changes):
+                response = self._post_rows(
+                    [{**row, "基本单位数量": 3, **changes}], warehouse_id=self.warehouse.pk
+                )
+                self.assertEqual(response.status_code, 400, response.data)
+                self.assertTrue(
+                    any("不一致" in error["message"] for error in response.data["errors"])
+                )
+        original = Product.objects.get(code="UNCHANGED")
+        self.assertEqual(original.price, Decimal("10.00"))
+        self.assertEqual(original.packages.get().qty_in_base, 12)
+        self.assertFalse(InventoryDetail.objects.filter(product=original).exists())
+
+    def test_existing_receipt_preserves_package_sheet_and_carton_binding(self):
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
+        self.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
+        row = self._valid_row(
+            "RECEIVE-PACKAGE",
+            **{"箱码": "RECEIVE-CARTON", "箱码对应包装单位编码": self.carton_uom.code},
+        )
+        package_row = {
+            "货主编码": self.owner.code,
+            "货主商品编码": "RECEIVE-PACKAGE",
+            "包装单位": self.carton_uom.name,
+            "包装换算数量": 12,
+        }
+        first = self._post_package_rows([row], [package_row])
+        self.assertEqual(first.status_code, 200, first.data)
+        original = Product.objects.get(code="RECEIVE-PACKAGE")
+        package_id = original.carton_package_id
+        workbook = load_workbook(self._workbook_file([{**row, "基本单位数量": 3}]))
+        sheet = workbook.create_sheet(PACKAGE_SHEET_NAME)
+        sheet.append(list(PACKAGE_HEADERS))
+        sheet.append([package_row.get(header) for header in PACKAGE_HEADERS])
+        output = io.BytesIO()
+        workbook.save(output)
+        response = self.client.post(
+            "/api/products/import-excel/",
+            {
+                "file": SimpleUploadedFile("packages.xlsx", output.getvalue()),
+                "warehouse_id": self.warehouse.pk,
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["reused_count"], 1)
+        original.refresh_from_db()
+        self.assertEqual(original.carton_package_id, package_id)
+        self.assertEqual(original.packages.count(), 1)
+        self.assertEqual(ProductBarcode.objects.filter(product=original).count(), 1)
+        self.assertEqual(InventoryDetail.objects.get(product=original).onhand_qty, 3)
+
+    def test_existing_receipt_rejects_same_product_referenced_twice(self):
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
+        self.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
+        row = self._valid_row("RECEIVE-TWICE", **{"商品名称": "重复收货商品"})
+        first = self._post_rows([row])
+        self.assertEqual(first.status_code, 200, first.data)
+        response = self._post_rows(
+            [
+                {**row, "基本单位数量": 3},
+                {**row, "货主商品编码": "", "基本单位数量": 3},
+            ],
+            warehouse_id=self.warehouse.pk,
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertTrue(any("重复收货" in error["message"] for error in response.data["errors"]))
+        self.assertFalse(InventoryDetail.objects.filter(owner=self.owner).exists())
+
+    def test_existing_receipt_still_requires_permission_and_uses_stored_controls(self):
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
+        row = self._valid_row("RECEIVE-GUARD")
+        first = self._post_rows([row])
+        self.assertEqual(first.status_code, 200, first.data)
+        denied = self._post_rows([{**row, "基本单位数量": 3}], warehouse_id=self.warehouse.pk)
+        self.assertEqual(denied.status_code, 400, denied.data)
+        self.assertFalse(InventoryDetail.objects.filter(owner=self.owner).exists())
+
+        self.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
+        self.user = get_user_model().objects.get(pk=self.user.pk)
+        self.client.force_authenticate(self.user)
+        original = Product.objects.get(code="RECEIVE-GUARD")
+        for field in ("batch_control", "is_active"):
+            with self.subTest(field=field):
+                setattr(original, field, field != "is_active")
+                original.save(update_fields=[field])
+                response = self._post_rows(
+                    [{**row, "基本单位数量": 3}], warehouse_id=self.warehouse.pk
+                )
+                self.assertEqual(response.status_code, 400, response.data)
+                setattr(original, field, field == "is_active")
+                original.save(update_fields=[field])
+        self.assertFalse(InventoryDetail.objects.filter(product=original).exists())
+
+    def test_existing_receipt_failure_rolls_back_new_archives_and_stock(self):
+        OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
+        self.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
+        row = self._valid_row("RECEIVE-ROLLBACK")
+        first = self._post_rows([row])
+        self.assertEqual(first.status_code, 200, first.data)
+        original = Product.objects.get(code="RECEIVE-ROLLBACK")
+        identifiers = (original.code, original.sku)
+        from allapp.products.excel_import import receive_goods_without_order
+
+        def fail_after_receipt(**kwargs):
+            receive_goods_without_order(**kwargs)
+            raise ValidationError("模拟收货后失败")
+
+        with patch(
+            "allapp.products.excel_import.receive_goods_without_order",
+            side_effect=fail_after_receipt,
+        ):
+            response = self._post_rows(
+                [
+                    {**row, "基本单位数量": 3},
+                    self._valid_row("NEW-ROLLBACK", **{"基本单位数量": 2}),
+                ],
+                warehouse_id=self.warehouse.pk,
+            )
+        self.assertEqual(response.status_code, 400, response.data)
+        original.refresh_from_db()
+        self.owner.refresh_from_db()
+        self.assertEqual((original.code, original.sku), identifiers)
+        self.assertEqual(self.owner.next_sku_sequence, 2)
+        self.assertFalse(Product.objects.filter(code="NEW-ROLLBACK").exists())
+        self.assertFalse(InventoryDetail.objects.filter(owner=self.owner).exists())
+
     def test_generated_code_skips_owner_identifier_collision(self):
         existing = Product.objects.create(
             owner=self.owner,

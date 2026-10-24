@@ -13,6 +13,20 @@ from .serializers import OutboundOrderReadSerializer
 from .warehouse_review import review_detail, scoped_review_orders
 
 
+def review_stage_orders(qs, stage):
+    """Apply the warehouse review stage shared by list and reminder counts."""
+    states = {
+        "pending": "OWNER_APPROVED",
+        "waiting": "WHS_PENDING",
+        "approved": "WHS_APPROVED",
+        "rejected": "WHS_REJECTED",
+    }
+    qs = qs.filter(approval_status=states[stage])
+    if stage in {"pending", "waiting"}:
+        qs = qs.filter(submit_status="SUBMITTED", is_closed=False)
+    return qs
+
+
 class ReviewQuery(serializers.Serializer):
     stage = serializers.ChoiceField(
         choices=["pending", "waiting", "approved", "rejected"], default="pending"
@@ -60,15 +74,7 @@ class WarehouseReviewView(APIView):
         inputs.is_valid(raise_exception=True)
         params = dict(inputs.validated_data)
         stage = params.pop("stage")
-        states = {
-            "pending": "OWNER_APPROVED",
-            "waiting": "WHS_PENDING",
-            "approved": "WHS_APPROVED",
-            "rejected": "WHS_REJECTED",
-        }
-        qs = filter_orders(qs, params).filter(approval_status=states[stage])
-        if stage in {"pending", "waiting"}:
-            qs = qs.filter(submit_status="SUBMITTED", is_closed=False)
+        qs = review_stage_orders(filter_orders(qs, params), stage)
         pagination = ReviewPagination()
         page = pagination.paginate_queryset(qs.order_by("-biz_date", "-id"), request)
         return pagination.get_paginated_response(

@@ -1020,6 +1020,9 @@ class Product(BaseModel):
                 if package.is_deleted or not package.is_active:
                     raise ValidationError({"carton_package": "箱码对应包装层级必须启用且未删除。"})
 
+            if adding:
+                # A new instance carrying an existing PK must never fall back to UPDATE.
+                kwargs["force_insert"] = True
             result = super().save(*args, **kwargs)
 
             if adding:

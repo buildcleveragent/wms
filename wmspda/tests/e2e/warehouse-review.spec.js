@@ -21,6 +21,7 @@ async function setup(page, { allowed = true, waiting = false } = {}) {
     const url = new URL(route.request().url()), path = url.pathname
     if (!path.startsWith('/api/')) return route.continue()
     if (path.endsWith('/token/')) return route.fulfill({ json: { access: 'test-access', refresh: 'test-refresh' } })
+    if (path.endsWith('/home-todos/')) return route.fulfill({ json: { scope: 'test', items: [] } })
     if (path.endsWith('/profile/')) return route.fulfill({ json: {
       user: { id: 3, username: 'warehouse-manager' }, perms: ['outbound.approve_outbound_as_wh_manager'],
       capabilities: { can_review_warehouse_outbound: allowed },

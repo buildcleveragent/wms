@@ -39,6 +39,7 @@
           <view class="muted warehouse-help">
             基本单位数量为空或 0 时可不选；填写正数时必须选择已配置默认收货库位的仓库。
           </view>
+          <view class="muted">已有商品补填数量后导入会沿用原商品编号和 SKU；同名同规格商品无法唯一匹配时，请填写已有货主商品编码。</view>
           <view v-if="unreadyWarehouseCount" class="muted">
             另有 {{ unreadyWarehouseCount }} 个仓库尚未配置可用的默认收货库位。
           </view>
@@ -86,6 +87,13 @@
           <view class="section-heading success-text">新增成功</view>
           <view v-for="item in result.created" :key="`created-${item.row}`" class="result-line ok-line">
             第 {{ item.row }} 行：{{ item.code }} · {{ item.name }}
+          </view>
+        </view>
+
+        <view v-if="result.reused?.length" class="result-section" data-testid="product-import-reused">
+          <view class="section-heading success-text">已有商品入库 {{ result.reused_count }} 条（编号保持不变）</view>
+          <view v-for="item in result.reused" :key="`reused-${item.product_id}`" class="result-line ok-line">
+            第 {{ item.row }} 行：{{ item.code }} · SKU {{ item.sku }} · {{ item.name }} · 入库 {{ item.received_qty }}
           </view>
         </view>
 
@@ -257,7 +265,7 @@ async function submitImport() {
     )
     await scrollToResult()
     uni.showToast({
-      title: `新增 ${result.value?.created_count || 0} 条，跳过 ${result.value?.skipped_count || 0} 条`,
+      title: `新增 ${result.value?.created_count || 0} 条，已有商品入库 ${result.value?.reused_count || 0} 条`,
       icon: 'none',
       duration: 2200,
     })

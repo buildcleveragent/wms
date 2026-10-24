@@ -754,7 +754,7 @@ const FALLBACK_SALE_PRINT_CONFIGS = [
     paper_height: '93mm',
     page_size_css: '241mm 93mm',
     page_margin: '0',
-    sheet_width: '200mm',
+    sheet_width: '235mm',
     sheet_padding_top: '3mm',
     sheet_padding_right: '0',
     sheet_padding_bottom: '0',
@@ -1259,9 +1259,16 @@ function fallbackSalePrintConfigFor(config = {}) {
 
 function normalizeSalePrintConfig(config = {}) {
   const fallback = fallbackSalePrintConfigFor(config)
+  // 已保存的三等分默认配置仍可能使用旧的 200mm 宽度；自定义配置保持原值。
+  const legacyThirdSheetWidth =
+    (config.code || fallback.code) === 'pos_dot_241_93' &&
+    String(config.sheet_width || '').trim() === '200mm'
   return {
     ...fallback,
     ...config,
+    sheet_width: legacyThirdSheetWidth
+      ? fallback.sheet_width
+      : config.sheet_width || fallback.sheet_width,
     code: config.code || fallback.code,
     name: config.name || config.label || fallback.name,
     paper_mode: config.paper_mode || config.value || fallback.paper_mode,
@@ -2227,10 +2234,10 @@ function buildDotMatrixSalePrintHtml(data, printConfig) {
 	    @page { size: ${css.pageSizeCss}; margin: ${css.pageMargin}; }
 	    * { box-sizing: border-box; }
 	    body { margin: 0; color: #111; font-family: SimSun, "Microsoft YaHei", Arial, sans-serif; font-size: ${css.bodyFontSize}; line-height: ${css.bodyLineHeight}; }
-	    .sheet { width: ${css.sheetWidth}; margin: 0 auto; padding: ${css.sheetPadding}; }
+	    .sheet { width: ${css.sheetWidth}; max-width: 100%; margin: 0 auto; padding: ${css.sheetPadding}; }
 	    .company { text-align: center; font-size: ${css.companyFontSize}; font-weight: 700; line-height: 1.05; }
 	    .title { text-align: center; font-size: ${css.titleFontSize}; line-height: 1.05; margin-bottom: 2px; }
-	    .meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 8px; font-size: ${css.metaFontSize}; line-height: ${css.metaLineHeight}; margin-bottom: 2px; }
+	    .meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 8px; font-size: ${css.metaFontSize}; line-height: ${css.metaLineHeight}; margin-bottom: 2px; overflow-wrap: anywhere; }
 	    .meta .wide { grid-column: 1 / -1; }
 	    table { width: 100%; border-collapse: collapse; border-spacing: 0; table-layout: fixed; font-size: ${css.tableFontSize}; }
 	    th, td { border: 1px solid #111; padding: ${css.tableCellPadding}; line-height: ${css.tableLineHeight}; vertical-align: middle; word-break: break-all; }
@@ -2238,8 +2245,8 @@ function buildDotMatrixSalePrintHtml(data, printConfig) {
 	    .name { text-align: left; }
 	    .num { text-align: right; font-variant-numeric: tabular-nums; }
 	    .summary-name { text-align: left; }
-	    .money-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: ${css.moneyGap}; margin-top: ${css.moneyMarginTop}; font-size: ${css.moneyFontSize}; line-height: ${css.moneyLineHeight}; }
-	    .footer-line { margin-top: 1px; font-size: ${css.footerFontSize}; line-height: ${css.footerLineHeight}; white-space: normal; }
+	    .money-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: ${css.moneyGap}; margin-top: ${css.moneyMarginTop}; font-size: ${css.moneyFontSize}; line-height: ${css.moneyLineHeight}; overflow-wrap: anywhere; }
+	    .footer-line { margin-top: 1px; font-size: ${css.footerFontSize}; line-height: ${css.footerLineHeight}; white-space: normal; overflow-wrap: anywhere; }
 	  </style>
 </head>
 <body>

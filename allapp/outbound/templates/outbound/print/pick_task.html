@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>{{ object.owner.name }}出库单 {{ object.order_no }}</title>
+  <title>{{ object.owner.name }}送货单 {{ object.order_no }}</title>
 
   <style>
     @page { size: {{ print_css.page_size_css }}; margin: {{ print_css.page_margin }}; }
@@ -18,9 +18,24 @@
     .print-sheet {
       box-sizing: border-box;
       width: {{ print_css.sheet_width }};
+      /* 9.5 英寸连续纸两侧各保留至少 5mm，即使打印对话框选择“无边距”。 */
+      max-width: min(100%, 231.3mm);
+      margin-inline: auto;
       padding: {{ print_css.sheet_padding_top }} {{ print_css.sheet_padding_right }}
         {{ print_css.sheet_padding_bottom }} {{ print_css.sheet_padding_left }};
     }
+
+    @media screen {
+      body { width: 9.5in; max-width: 100%; margin-inline: auto; }
+    }
+    @media print {
+      .print-controls { display: none; }
+      thead { display: table-header-group; }
+      tr, .sign, .copies { break-inside: avoid; }
+    }
+    .print-controls { padding: 12px; margin-bottom: 12px; background: #f2f4f7; }
+    .print-controls select { max-width: 100%; padding: 6px; }
+    .print-controls button { margin-left: 8px; padding: 6px 12px; }
 
     /* 标题 */
     .title {
@@ -51,7 +66,7 @@
       gap: 14px;
       margin-bottom: 6px;
     }
-    .meta-col { width: 49%; }
+    .meta-col { flex: 1; min-width: 0; }
     .meta-line {
       display: flex;
       gap: 6px;
@@ -61,11 +76,14 @@
     .label { min-width: 70px; }
     .value {
       flex: 1;
+      min-width: 0;
       min-height: 18px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+
+    .address-value { white-space: normal; overflow-wrap: anywhere; }
 
     /* 只有货物列表表格有框线 */
     table.goods {
@@ -82,7 +100,7 @@
       vertical-align: middle;
 
       /* 固定行高，避免换行撑高 */
-      height: 28px;
+      height: 18px;
       line-height: {{ print_css.table_line_height }};
     }
     table.goods th {
@@ -109,36 +127,52 @@
       font-size: {{ print_css.footer_font_size }};
       line-height: {{ print_css.footer_line_height }};
     }
-    .sign { margin-top: 10px; }
+    .sign { margin-top: 6px; }
     .sign-row {
       display: flex;
       justify-content: space-between;
       gap: 16px;
-      margin: 6px 0;
+      margin: 4px 0;
     }
-    .sign-item { flex: 1; white-space: nowrap; }
+    .sign-item { flex: 1; min-width: 0; display: flex; align-items: end; white-space: nowrap; }
     .line {
       display: inline-block;
       border-bottom: 1px solid #000;
-      min-width: 120px;
+      width: 120px;
+      max-width: 100%;
+      min-width: 0;
+      flex: 0 1 120px;
       height: 16px;
       vertical-align: bottom;
     }
-    .line.long { min-width: 260px; }
+    .line.long { width: 260px; flex-basis: 260px; }
 
     .copies {
-      margin-top: 10px;
+      margin-top: 6px;
       display: flex;
       justify-content: space-between;
     }
   </style>
 </head>
 
-<body onload="window.print()">
+<body{% if auto_print %} onload="window.print()"{% endif %}>
+{% if warehouse_infos|length > 1 %}
+<form class="print-controls" method="get">
+  {% if request.GET.ticket %}<input type="hidden" name="ticket" value="{{ request.GET.ticket }}">{% endif %}
+  <label for="warehouse-info">仓库信息：</label>
+  <select id="warehouse-info" name="warehouse_info_id" required>
+    <option value="">请选择送货单使用的仓库信息</option>
+    {% for info in warehouse_infos %}
+    <option value="{{ info.pk }}"{% if info.pk == selected_warehouse_info.pk %} selected{% endif %}>{{ info.name }} — {{ info.address }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">确认并打印</button>
+</form>
+{% endif %}
 <div class="print-sheet">
 
   <!-- 标题 -->
-  <div class="title"><span class="company-name">金桥融通仓</span><span class="document-title">出库单</span></div>
+  <div class="title"><span class="company-name">金桥融通仓</span><span class="document-title">送货单</span></div>
 
   <!-- 送货单号（居中） -->
   <div class="top-row">
@@ -156,10 +190,14 @@
         <span class="label">联系电话：</span>
         <span class="value">{{ receiver_phone|default_if_none:"" }}</span>
       </div>
+      {% if is_pickup %}
+      <div class="meta-line"><span class="label">提货方式：</span><span class="value">客户自提</span></div>
+      {% else %}
       <div class="meta-line">
-        <span class="label">地址：</span>
-        <span class="value">{{ receiver_address|default_if_none:"" }}</span>
+        <span class="label">客户地址：</span>
+        <span class="value address-value">{{ receiver_address|default_if_none:"" }}</span>
       </div>
+      {% endif %}
     </div>
 
     <div class="meta-col">
@@ -178,18 +216,23 @@
     </div>
   </div>
 
+  <div class="meta-line warehouse-address">
+    <span class="label">仓库地址：</span>
+    <span class="value address-value">{{ warehouse_address|default_if_none:"" }}</span>
+  </div>
+
   <!-- 货物列表（唯一有框线区域） -->
   <table class="goods">
     <thead>
       <tr>
-        <th style="width:36px;">序号</th>
-        <th>货物名称</th>
-        <th style="width:110px;">包装规格</th>
-        <th style="width:52px;">单位</th>
-        <th style="width:70px;">数量</th>
-        <th style="width:72px;">单价</th>
-        <th style="width:86px;">金额</th>
-        <th style="width:80px;">备注</th>
+        <th style="width:5%;">序号</th>
+        <th style="width:33%;">货物名称</th>
+        <th style="width:14%;">包装规格</th>
+        <th style="width:7%;">单位</th>
+        <th style="width:9%;">数量</th>
+        <th style="width:9%;">单价</th>
+        <th style="width:11%;">金额</th>
+        <th style="width:12%;">备注</th>
       </tr>
     </thead>
 
