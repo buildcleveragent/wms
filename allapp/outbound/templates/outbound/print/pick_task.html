@@ -320,20 +320,30 @@
       const charWidth = parseFloat(getComputedStyle(content.querySelector('.top-row')).fontSize);
       content.style.removeProperty('--delivery-left-clearance');
       const clearance = originalTableWidth - table.getBoundingClientRect().width;
-      // 左侧安全空间由货物名称列让出，包装规格至备注保持原位和原宽。
-      widths[1] = Math.max(2 * charWidth, widths[1] - clearance);
+      // 保留左侧校准位置，货物名称额外加宽四个表格正文字宽；其他列只向右平移。
+      const nameExpansion = 4 * parseFloat(getComputedStyle(table).fontSize);
+      widths[1] = Math.max(2 * charWidth, widths[1] - clearance) + nameExpansion;
       const last = widths.length - 1;
-      const reduction = Math.min(charWidth, Math.max(0, widths[last] - 2 * charWidth));
+      // 备注保留三个汉字及内边距、边框，不挤占货物名称。
+      const remarksStyle = getComputedStyle(cells[last]);
+      const remarksWidth = 3 * Math.max(
+        parseFloat(remarksStyle.fontSize), parseFloat(getComputedStyle(table).fontSize)
+      ) + parseFloat(remarksStyle.paddingLeft) + parseFloat(remarksStyle.paddingRight)
+        + parseFloat(remarksStyle.borderLeftWidth) + parseFloat(remarksStyle.borderRightWidth);
+      const reduction = Math.max(0, widths[last] - remarksWidth);
       const columnsWidth = widths.reduce((sum, width) => sum + width, 0) - reduction;
       columns.replaceChildren(...widths.map((width, index) => {
         const column = document.createElement('col');
-        column.style.width = `${100 * (width - (index === last ? reduction : 0)) / columnsWidth}%`;
+        // 备注保持实际字宽，防止自定义窄纸在分页时再次按比例压窄标题。
+        column.style.width = index === last
+          ? `${width - reduction}px`
+          : `${100 * width / columnsWidth}%`;
         return column;
       }));
       cells.forEach(cell => { cell.style.width = 'auto'; });
       table.prepend(columns);
       // 使用流式宽度，让真正分页时的纸张宽度优先于屏幕窗口宽度。
-      table.style.width = `calc(100% - ${reduction}px)`;
+      table.style.width = `calc(100% - ${reduction}px + ${nameExpansion}px)`;
     };
 
     fitDeliveryColumns();
