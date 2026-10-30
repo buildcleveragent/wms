@@ -83,7 +83,7 @@
 
     <view class="footer">
       <button class="cart-button" @click="goCart">
-        查看订单 · {{ cart.items.length }} 行 · {{ amountSummaryLabel({items: cart.items, total_amount: cart.totalAmount}) }}
+        查看订单 · {{ cart.items.length }} 行 · 已加入 {{ formatQuantity(cart.totalQty.toFixed(4)) }}（基本数量） · {{ amountSummaryLabel({items: cart.items, total_amount: cart.totalAmount}) }}
       </button>
     </view>
   </view>
@@ -98,7 +98,7 @@ import ProductCard from '@/components/ProductCard.vue'
 import { useAuth } from '@/store/auth'
 import { useCart } from '@/store/cart'
 import { enforceMinimumPrice, initializePriceGuard } from '@/utils/pricing'
-import { previewBaseQuantity, validateDesiredQuantity } from '@/utils/quantity'
+import { formatQuantity, previewBaseQuantity, validateDesiredQuantity } from '@/utils/quantity'
 import { amountSummaryLabel, lineAmount } from '@/utils/orderAmount'
 import { api } from '@/utils/request'
 import { mergeUniqueById } from '@/utils/pagination'

@@ -83,6 +83,7 @@
               </view>
             </view>
             <view class="history-actions">
+              <button class="action-button" :disabled="!row.can_print_pick" @click="openOutboundPrintPage(row.task.id, null, 'pick')">打印拣货单</button>
               <button class="action-button" :disabled="!row.task?.id" @click="openTask(row)">
                 查看任务
               </button>
@@ -91,7 +92,7 @@
                 :disabled="!row.can_reprint"
                 @click="reprint(row)"
               >
-                打印送货单
+                补打送货单
               </button>
             </view>
             <view v-if="!row.can_reprint && row.reprint_unavailable_reason" class="disabled-reason">

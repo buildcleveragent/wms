@@ -29,7 +29,7 @@ export function useHomeTodos({ fetchTodos }) {
       if (!visible || tag !== sequence) return
       if (!data?.scope || !Array.isArray(data.items) || data.items.some(item =>
         !todoKinds[item.key] || !Number.isSafeInteger(item.count) || item.count < 0
-      )) throw new Error('待办响应不完整')
+      )) throw new Error('待办响应不完整', { cause: 'invalid-todos-response' })
       if (scope !== data.scope) clear()
       scope = data.scope
       items.value = data.items.map(item => ({ ...todoKinds[item.key], ...item }))
@@ -42,8 +42,27 @@ export function useHomeTodos({ fetchTodos }) {
       if (!visible || tag !== sequence) return
       // Failed refreshes never leave an actionable stale popup or permission data.
       items.value = []; popup.value = false; loaded.value = false
-      if ([401, 403, 409].includes(Number(e?.statusCode || e?.code))) clear()
-      error.value = '更新失败，请重试'
+      const status = Number(e?.statusCode ?? e?.code)
+      if ([401, 403, 409].includes(status)) clear()
+      if (e?.cause === 'invalid-todos-response') {
+        error.value = '待办接口返回格式异常，请联系管理员检查服务版本'
+      } else if (status === 401) {
+        error.value = '登录已失效，请重新登录后查看待办（HTTP 401）'
+      } else if (status === 403) {
+        error.value = '当前账号无法查看待办，请联系管理员核对仓库角色和范围（HTTP 403）'
+      } else if (status === 404) {
+        error.value = '待办接口不存在，请联系管理员检查后端地址和服务版本（HTTP 404）'
+      } else if (status >= 500 && status <= 599) {
+        error.value = `待办服务异常（HTTP ${status}），请稍后重试`
+      } else if (status === 0) {
+        error.value = '无法连接待办服务，请检查网络或后端地址后重试'
+      } else if (e instanceof TypeError || e instanceof ReferenceError) {
+        // Log only the JavaScript error text, never request objects or login tokens.
+        console.error('[HomeTodos] 前端执行异常：', e.name, e.message)
+        error.value = `待办前端执行异常（${e.name}），请停止并重新运行前端项目`
+      } else {
+        error.value = '更新失败，请重试'
+      }
     } finally {
       if (tag === sequence) loading.value = false
     }

@@ -64,6 +64,17 @@ describe('购物车数量防线', () => {
     expect(cart.items[0].qty).toBe(2)
   })
 
+  it('小数累计不受浮点误差影响，仍然拒绝超库存加入', () => {
+    const cart = useCart()
+    const product = { id: 1, available: 0.3, price: 2 }
+    expect(cart.addItem({ ...product, qty: 0.1 })).toBe(true)
+    expect(cart.addItem({ ...product, qty: 0.2 })).toBe(true)
+    expect(cart.items[0].qty).toBe(0.3)
+    expect(cart.totalQty).toBe(0.3)
+    expect(cart.addItem({ ...product, qty: 0.001 })).toBe(false)
+    expect(cart.items[0].qty).toBe(0.3)
+  })
+
   it('拒绝零、负数、超过三位小数和超过库存的修改', () => {
     expect(validateCartQuantity('0', 10).valid).toBe(false)
     expect(validateCartQuantity('-1', 10).valid).toBe(false)

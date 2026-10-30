@@ -9,11 +9,13 @@ const BASE_MAP = {
   onsite: 'http://192.168.2.6:8001',
 }
 
-// export const BASE_URL = BASE_MAP[ENV] || BASE_MAP.develop
-export const BASE_URL = String(import.meta.env.VITE_API_BASE_URL || BASE_MAP.develop).trim().replace(/\/$/, '')
-if (!/^https?:\/\/[^/?#@]+(?::\d+)?(?:\/[^?#]*)?$/.test(BASE_URL)) {
-  throw new Error('VITE_API_BASE_URL 必须是无凭据、查询参数和片段的 HTTP(S) 地址。')
-}
+// 优先使用构建时配置，未配置时连接默认开发服务。
+// export const BASE_URL = String(import.meta.env.VITE_API_BASE_URL || BASE_MAP.develop).trim().replace(/\/$/, '')
+// if (!/^https?:\/\/[^/?#@]+(?::\d+)?(?:\/[^?#]*)?$/.test(BASE_URL)) {
+//   throw new Error('VITE_API_BASE_URL 必须是无凭据、查询参数和片段的 HTTP(S) 地址。')
+// }
+
+export const BASE_URL = BASE_MAP.develop
 
 const PRODUCT_IMPORT_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000
 const ACCESS_TOKEN_STORAGE_KEY = 'access'

@@ -6,6 +6,7 @@ export function prepareOutboundPrintWindow() {
   if (typeof window !== 'undefined' && typeof window.open === 'function') {
     try {
       preparedWindow = window.open('', '_blank', 'width=1200,height=800')
+      if (preparedWindow) preparedWindow.document.body.textContent = '正在处理，请稍候…成功后将打开打印单据。'
     } catch (error) {
       console.warn('无法预先打开送货单打印窗口', error)
     }
@@ -23,16 +24,16 @@ export function closePreparedOutboundPrintWindow(preparedWindow) {
   }
 }
 
-export async function outboundPrintUrl(taskId) {
+export async function outboundPrintUrl(taskId, kind = 'delivery') {
   const token = getToken()
   if (!token || !Number(taskId)) return ''
-  return withAuthToken(`${BASE_URL}/api/pda/pick-tasks/${Number(taskId)}/print/`)
+  return withAuthToken(`${BASE_URL}/api/pda/pick-tasks/${Number(taskId)}/print/?kind=${kind}`)
 }
 
-export async function openOutboundPrintPage(taskId, preparedWindow = null) {
+export async function openOutboundPrintPage(taskId, preparedWindow = null, kind = 'delivery') {
   preparedWindow = preparedWindow || prepareOutboundPrintWindow()
   let url
-  try { url = await outboundPrintUrl(taskId) } catch (error) {
+  try { url = await outboundPrintUrl(taskId, kind) } catch (error) {
     closePreparedOutboundPrintWindow(preparedWindow)
     uni.showToast({ title: '无法取得打印票据，请稍后重试', icon: 'none' })
     return false
@@ -49,10 +50,15 @@ export async function openOutboundPrintPage(taskId, preparedWindow = null) {
     ? preparedWindow
     : prepareOutboundPrintWindow()
   if (printWindow) {
-    printWindow.location.href = url
-    opened = true
+    try {
+      printWindow.location.href = url
+      opened = true
+    } catch (error) {
+      closePreparedOutboundPrintWindow(printWindow)
+      uni.showToast({ title: '打印窗口加载失败，可点击补打送货单重试', icon: 'none' })
+    }
   } else {
-    uni.showToast({ title: '浏览器阻止打印窗口，请稍后从历史出库单重试', icon: 'none' })
+    uni.showToast({ title: '浏览器阻止打印窗口，请点击打印按钮重试', icon: 'none' })
   }
   // #endif
 

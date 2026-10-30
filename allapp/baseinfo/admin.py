@@ -62,6 +62,7 @@ class OwnerAdmin(TenantScopedAdminMixin, HideAuditFieldsMixin, BaseReadonlyAdmin
         "allow_warehouse_assisted_outbound",
     )
     list_display = (
+        "owner_id_display",
         "name",
         "code",
         "next_sku_sequence",
@@ -69,10 +70,15 @@ class OwnerAdmin(TenantScopedAdminMixin, HideAuditFieldsMixin, BaseReadonlyAdmin
         "phone",
         "allow_warehouse_assisted_outbound",
     )
+    list_display_links = ("name",)
     search_fields = ("name", "code", "contact_person", "phone", "email")
     list_filter = ("allow_warehouse_assisted_outbound", "name", "code", "contact_person")
     readonly_fields = ("next_sku_sequence",)
     inlines = (OwnerWarehouseBindingInline,)
+
+    @admin.display(description="货主ID", ordering="id")
+    def owner_id_display(self, obj):
+        return obj.pk
 
     class Media:
         css = {"all": ("css/admin/owner_admin.css",)}  # 引入你自定义的 CSS 文件

@@ -42,6 +42,13 @@ for (const width of [390, 1280]) {
     await page.getByText('查看待办', { exact: true }).click()
     await expect(page.getByRole('dialog')).toHaveCount(0)
     await expect(page.locator('.todo-item')).toHaveCount(6)
+    // A hard reload restores the stored login before the home component mounts.
+    const beforeReload = requests.filter(url => url === '/api/pda/home-todos/').length
+    await page.reload()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect.poll(() => requests.filter(url => url === '/api/pda/home-todos/').length).toBeGreaterThan(beforeReload)
+    await page.getByText('查看待办', { exact: true }).click()
+    await expect(page.locator('.todo-item')).toHaveCount(6)
     const reminder = await page.locator('.todo-panel').boundingBox()
     const grid = await page.locator('.page > .grid').boundingBox()
     expect(reminder.y + reminder.height).toBeLessThan(grid.y + 1)
@@ -54,7 +61,7 @@ for (const width of [390, 1280]) {
     await page.getByText('稍后处理', { exact: true }).click()
     failed = true
     await page.locator('.todo-heading').getByText('刷新', { exact: true }).click()
-    await expect(page.getByText('更新失败，请重试')).toBeVisible()
+    await expect(page.getByText('待办服务异常（HTTP 503），请稍后重试')).toBeVisible()
     await expect(page.locator('.todo-item')).toHaveCount(0)
     failed = false
     await page.locator('.todo-heading').getByText('刷新', { exact: true }).click()

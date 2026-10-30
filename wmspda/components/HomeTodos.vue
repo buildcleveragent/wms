@@ -34,15 +34,14 @@
 </template>
 <script setup>
 import { watch, onUnmounted } from 'vue'
-import { onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import { useAuth } from '@/store/auth'
 import { api } from '@/utils/request'
 import { useHomeTodos } from '@/utils/homeTodos'
 const auth = useAuth()
+const props = defineProps({ pageVisible: { type: Boolean, default: false } })
 const session = useHomeTodos({ fetchTodos: () => api.homeTodos() })
 const { items, pending, loading, loaded, error, popup, refresh } = session
-let pageVisible = false
-const active = () => pageVisible && auth.access && (typeof document === 'undefined' || !document.hidden)
+const active = () => props.pageVisible && auth.access && (typeof document === 'undefined' || !document.hidden)
 function sync() { if (active()) session.show(); else session.hide() }
 function open(item) { uni.navigateTo({ url: item.path }) }
 function viewTodos() { popup.value = false; uni.pageScrollTo({ scrollTop: 0, duration: 200 }) }
@@ -54,9 +53,7 @@ watch(() => auth.profileLoaded ? JSON.stringify([auth.perms, auth.profile?.capab
     if (permissionIdentity && value !== permissionIdentity) session.reset()
     permissionIdentity = value
   })
-onShow(() => { pageVisible = true; sync() })
-onHide(() => { pageVisible = false; sync() })
-onUnload(() => session.hide())
+watch(() => props.pageVisible, sync, { immediate: true })
 if (typeof document !== 'undefined') document.addEventListener('visibilitychange', sync)
 onUnmounted(() => {
   session.hide()

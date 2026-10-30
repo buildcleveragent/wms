@@ -5,7 +5,7 @@
       <text class="title">仓库作业工作台</text>
     </view> -->
 
-    <HomeTodos />
+    <HomeTodos :page-visible="homeVisible" />
     <view class="grid">
       <view class="card" v-for="item in actions" :key="item.key" @click="go(item)">
         <view class="emoji">{{ item.emoji }}</view>
@@ -29,7 +29,7 @@
 <script>
 import { computed, ref } from 'vue'
 import HomeTodos from '@/components/HomeTodos.vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import { useAuth } from '@/store/auth'
 import { downloadAllProductArchives, downloadMissingGtinProducts } from '@/utils/request'
 
@@ -38,6 +38,7 @@ export default {
   components: { HomeTodos },
   setup() {
     const auth = useAuth()
+    const homeVisible = ref(false)
     const allProductExporting = ref(false)
     const missingGtinExporting = ref(false)
     // 响应式数据
@@ -145,14 +146,18 @@ export default {
     }
 
     onShow(() => {
+      homeVisible.value = true
       // 每次回到工作台都重新确认能力，保证后台撤权能及时生效。
       auth.loadProfile({ force: true }).catch((error) => {
         console.warn('权限资料暂不可用，代货主出库入口保持隐藏', error)
       })
     })
+    onHide(() => { homeVisible.value = false })
+    onUnload(() => { homeVisible.value = false })
 
     // 返回模板需要的数据和方法
     return {
+      homeVisible,
       actions,
       go,
       missingGtinExporting,

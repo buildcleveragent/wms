@@ -54,7 +54,8 @@
         </template>
         <view v-else class="warning">无有效明细，不能复核</view>
         <view v-if="!ready && lines.length" class="warning">当前数据尚未核验成功，请刷新成功后再提交</view>
-        <button class="primary submit-review" :disabled="!canSubmit" @click="submit()">{{ busy ? '正在处理…' : task.can_retry_post ? '重试过账' : '复核通过' }}</button>
+        <button v-if="task.can_print_delivery" @click="openOutboundPrintPage(task.id)">补打送货单</button>
+        <button v-else class="primary submit-review" :disabled="!canSubmit" @click="submit()">{{ busy ? '正在处理…' : task.can_retry_post ? '重试过账' : '复核通过' }}</button>
       </view>
     </template>
     <view v-if="loading" class="hint">加载中…</view>
@@ -67,12 +68,14 @@ import { ref } from 'vue'
 import { onLoad, onShow, onUnload, onPullDownRefresh } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
 import { useAuth } from '@/store/auth'
+import { prepareOutboundPrintWindow, closePreparedOutboundPrintWindow, openOutboundPrintPage } from '@/utils/outboundPrint'
 import { usePhysicalReview, formatQuantity } from '@/utils/physicalReview'
 const id = ref(0)
 const expanded = ref({})
 const session = usePhysicalReview({
   api, auth: useAuth(), id,
-  confirm: content => new Promise(resolve => uni.showModal({ title: '确认复核', content, confirmText: '确定', cancelText: '取消', success: r => resolve(Boolean(r.confirm)), fail: () => resolve(false) })),
+  print: { prepare: prepareOutboundPrintWindow, close: closePreparedOutboundPrintWindow, open: openOutboundPrintPage },
+  confirm: (content, reserve) => new Promise(resolve => uni.showModal({ title: '确认复核', content, confirmText: '确定', cancelText: '取消', success: r => { if (r.confirm) reserve(); resolve(Boolean(r.confirm)) }, fail: () => resolve(false) })),
   notify: title => uni.showToast({ title, icon: 'none' }),
 })
 const { task, order, lines, totals, ready, loading, busy, denied, error, canSubmit, load, submit } = session

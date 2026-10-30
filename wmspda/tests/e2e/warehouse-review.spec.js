@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 
-async function setup(page, { allowed = true, waiting = false } = {}) {
+async function setup(page, { allowed = true, waiting = false, role = 'warehouse_manager' } = {}) {
   const errors = [], mutations = []
+  const username = role === 'warehouse_operator' ? 'warehouse-operator' : 'warehouse-manager'
   page.on('pageerror', e => errors.push(e.message))
   page.on('console', e => { if (e.type() === 'error' && /SyntaxError|ReferenceError|TypeError|Failed to resolve|Unhandled/.test(e.text())) errors.push(e.text()) })
   let order = {
@@ -23,7 +24,8 @@ async function setup(page, { allowed = true, waiting = false } = {}) {
     if (path.endsWith('/token/')) return route.fulfill({ json: { access: 'test-access', refresh: 'test-refresh' } })
     if (path.endsWith('/home-todos/')) return route.fulfill({ json: { scope: 'test', items: [] } })
     if (path.endsWith('/profile/')) return route.fulfill({ json: {
-      user: { id: 3, username: 'warehouse-manager' }, perms: ['outbound.approve_outbound_as_wh_manager'],
+      user: { id: 3, username, roles: [role] },
+      perms: [...(role === 'warehouse_operator' ? ['tasking.claim_task_as_wh_operator'] : []), ...(allowed ? ['outbound.approve_outbound_as_wh_manager'] : [])],
       capabilities: { can_review_warehouse_outbound: allowed },
     } })
     if (path.endsWith('/warehouse-review/options/')) return route.fulfill({ json: {
@@ -39,7 +41,7 @@ async function setup(page, { allowed = true, waiting = false } = {}) {
         ...order, updated_at: '2026-10-21T00:01:00Z',
         approval_status: reject ? 'WHS_REJECTED' : waiting ? 'WHS_PENDING' : 'WHS_APPROVED',
         can_warehouse_confirm: waiting && !reject, can_warehouse_reject: waiting && !reject,
-        approved_by_warehouse_name: '仓库管理员', approved_at_warehouse: '2026-10-21T00:01:00Z',
+        approved_by_warehouse_name: role === 'warehouse_operator' ? '兼岗操作员' : '仓库管理员', approved_at_warehouse: '2026-10-21T00:01:00Z',
         warehouse_reject_reason: reject ? payload.reason : '',
         replenishment_wait: { shortages: [], task_nos: waiting ? ['RPL-007'] : [] },
       }
@@ -49,7 +51,7 @@ async function setup(page, { allowed = true, waiting = false } = {}) {
     return route.fulfill({ status: 404, json: { detail: 'unexpected endpoint' } })
   })
   await page.goto('/')
-  await page.locator('uni-input input').nth(0).fill('warehouse-manager')
+  await page.locator('uni-input input').nth(0).fill(username)
   await page.locator('uni-input input').nth(1).fill('test-password')
   await page.locator('uni-button').filter({ hasText: '登录' }).click()
   await expect(page).toHaveURL(/pages\/index\/index/)
@@ -117,11 +119,26 @@ test('shortfall confirmation displays waiting and the replenishment task', async
 })
 
 test('unauthorized role has no entry and direct access remains blocked', async ({ page }) => {
-  const context = await setup(page, { allowed: false })
+  const context = await setup(page, { allowed: false, role: 'warehouse_operator' })
   await expect(page.getByText('出库确认', { exact: true })).toHaveCount(0)
   await page.goto('/#/pages/outbound/review/detail?id=7')
   await expect(page.getByText('没有当前仓库的出库审核权限', { exact: true })).toBeVisible()
   await expect(page.locator('.confirm-button')).toHaveCount(0)
   expect(context.mutations).toHaveLength(0)
+  expect(context.errors).toEqual([])
+})
+
+test('individually authorized operator can confirm from the existing review entry', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const context = await setup(page, { role: 'warehouse_operator' })
+  await openDetail(page)
+  await expect(page.locator('vite-error-overlay')).toHaveCount(0)
+  await page.locator('.confirm-button').click()
+  await page.locator('.uni-modal').getByText('确定', { exact: true }).click()
+  await expect(page.locator('.status')).toHaveText('已确认')
+  await expect(page.locator('.confirm-button')).toHaveCount(0)
+  await expect(page.getByText(/兼岗操作员/)).toBeVisible()
+  await page.screenshot({ path: '/tmp/wms-operator-review-mobile.png', fullPage: true })
+  expect(context.mutations).toHaveLength(1)
   expect(context.errors).toEqual([])
 })

@@ -1297,6 +1297,34 @@ class SyncWmsUserRoleMembershipsCommandTests(TestCase):
 
 
 class AuditWmsRoleScopesCommandTests(TestCase):
+    def test_operator_review_grant_is_allowed_but_other_manager_grants_are_reported(self):
+        from allapp.accounts.management.commands.audit_wms_role_scopes import Command
+
+        warehouse = Warehouse.objects.create(code="AUDREV", name="兼岗仓库")
+        user = get_user_model().objects.create_user(username="audit-optional-reviewer")
+        UserRoleScope.objects.create(user=user, role="warehouse_operator", warehouse=warehouse)
+        user.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="outbound", codename="approve_outbound_as_wh_manager"
+            )
+        )
+        audit = Command()
+        row = audit._audit_user(user)
+        self.assertEqual(row["risk_codes"], "")
+        self.assertEqual(row["explicit_roles"], "warehouse_operator")
+        self.assertTrue(row["is_valid"])
+        user.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="tasking", codename="taskconfirm_as_wh_manager"
+            )
+        )
+        self.assertIn("LEGACY_PERMISSION_ROLE_CONFLICT", audit._audit_user(user)["risk_codes"])
+        manager_group = Group.objects.create(name=role_group_name("warehouse_manager"))
+        user.groups.add(manager_group)
+        row = audit._audit_user(user)
+        self.assertIn("ROLE_GROUP_CONFLICT", row["risk_codes"])
+        self.assertIn("INVALID_ACCESS_SCOPE", row["risk_codes"])
+
     def test_csv_reports_mixed_binding_missing_scope_and_role_conflict_read_only(self):
         owner = Owner.objects.create(name="Audit Scope Owner", code="AUDSCOPE")
         warehouse = Warehouse.objects.create(code="AUDWH1", name="Audit Warehouse")

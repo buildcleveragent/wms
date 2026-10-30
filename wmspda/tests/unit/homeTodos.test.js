@@ -9,6 +9,41 @@ function setup() {
 }
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
 describe('home reminders', () => {
+  it('reports synchronous frontend failures that never create a network request', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const s = setup()
+    s.fetchTodos.mockImplementationOnce(() => { throw new TypeError('api.homeTodos is not a function') })
+    s.show(); await settle()
+    expect(s.error.value).toContain('待办前端执行异常（TypeError）')
+    expect(log).toHaveBeenCalledWith('[HomeTodos] 前端执行异常：', 'TypeError', 'api.homeTodos is not a function')
+    expect(s.loading.value).toBe(false)
+    await s.refresh()
+    expect(s.loaded.value).toBe(true); expect(s.error.value).toBe('')
+  })
+  it.each([
+    [401, '登录已失效'],
+    [403, '仓库角色和范围'],
+    [404, '后端地址和服务版本'],
+    [500, 'HTTP 500'],
+    [503, 'HTTP 503'],
+    [0, '无法连接待办服务'],
+  ])('explains request failure %s and recovers after retry', async (statusCode, message) => {
+    const s = setup(); s.show(); await settle()
+    s.fetchTodos.mockRejectedValueOnce({ statusCode, message: '<html>private server output</html>' })
+    await s.refresh()
+    expect(s.error.value).toContain(message)
+    expect(s.error.value).not.toContain('private server output')
+    expect(s.items.value).toEqual([]); expect(s.popup.value).toBe(false)
+    await s.refresh()
+    expect(s.error.value).toBe(''); expect(s.loaded.value).toBe(true)
+  })
+  it('distinguishes malformed successful responses from connection errors', async () => {
+    const s = setup()
+    s.fetchTodos.mockResolvedValue('<html>wrong backend</html>')
+    s.show(); await settle()
+    expect(s.error.value).toContain('待办接口返回格式异常')
+    expect(s.loaded.value).toBe(false)
+  })
   it('opens on first nonzero response and increases only, using decreased counts as baseline', async () => {
     const s = setup(); s.show(); await settle()
     expect(s.popup.value).toBe(true); s.popup.value = false

@@ -2,19 +2,16 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import Case, DecimalField, ExpressionWrapper, F, Q, Sum, When
+from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.http import HttpResponse
 from django.shortcuts import render
-from django.utils import timezone
 
 from allapp.accounts.audit import record_audit_event
 from allapp.core.models import PrintConfig
 from allapp.core.print_tickets import user_from_print_ticket
 from allapp.core.printing import normalize_print_css
-from allapp.outbound.authz import (
-    strict_pick_queryset,
-)
-from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+from allapp.outbound.print_documents import build_document, document_queryset
 from allapp.pos.models import PosReceiptWarehouseInfo
 from allapp.tasking.models import WmsTask
 
@@ -103,14 +100,9 @@ def _money_to_rmb_upper(amount: Decimal) -> str:
 
 
 def pick_task_print(request, task_id: int):
-    """拣货任务送货单打印页（给 PDA 打开用）。
-    MVP：用 ?ticket=<document-ticket> 认证（因为 window.open/openURL 不带 Authorization 头）。
-    """
+    """Print a scoped picking list or a delivery note backed by successful posting."""
     token = request.GET.get("ticket")
-
-    # 允许两种方式：
-    # 1) 已有 session 登录（后台/PC）
-    # 2) PDA 传 token（JWT）
+    # PDA windows use a short-lived, document-scoped ticket; admin sessions remain supported.
     if not request.user.is_authenticated:
         if not token:
             return HttpResponse("Unauthorized: missing token", status=401)
@@ -134,75 +126,52 @@ def pick_task_print(request, task_id: int):
     base = WmsTask.objects.select_related("owner", "warehouse").filter(
         task_type=WmsTask.TaskType.PICK
     )
-    allowed = strict_pick_queryset(base, request.user)
+    allowed = document_queryset(base, request.user)
     try:
         task = allowed.get(id=task_id)
     except WmsTask.DoesNotExist:
         return HttpResponse("Not Found", status=404)
 
-    # 2) 通过任务行的 src_id 解析出库单
-    tl = (
-        task.lines.filter(src_model="OutboundOrderLine", src_id__isnull=False)
-        .order_by("id")
-        .first()
-    )
-    if not tl:
-        return HttpResponse("Bad Request: pick task has no OutboundOrderLine binding", status=400)
-
+    kind = request.GET.get("kind", "delivery")
+    if kind not in {"pick", "delivery"}:
+        return HttpResponse("kind 必须为 pick 或 delivery。", status=400)
     try:
-        ol = OutboundOrderLine.objects.select_related(
-            "order",
-            "order__owner",
-            "order__customer",
-            "order__supplier",
-            "order__warehouse",
-        ).get(pk=tl.src_id)
-    except OutboundOrderLine.DoesNotExist:
-        return HttpResponse("Bad Request: outbound order line not found", status=400)
+        order, lines = build_document(task, kind)
+    except ValidationError as exc:
+        return HttpResponse("；".join(exc.messages), status=409)
 
-    order: OutboundOrder = ol.order
-
-    # 与 POS 销售单共用仓库信息，按实际出库仓库限定可选范围。
-    warehouse_infos = list(
-        PosReceiptWarehouseInfo.objects.filter(is_active=True)
-        .filter(Q(warehouse_id=order.warehouse_id) | Q(warehouse__isnull=True))
-        .order_by("warehouse_id", "-is_default", "sort_order", "id")
-    )
-    selected_info_id = request.GET.get("warehouse_info_id", "")
+    # 拣货单用于库内作业，不依赖送货单地址配置。
+    warehouse_infos = []
     selected_info = None
-    if selected_info_id:
-        selected_info = next(
-            (info for info in warehouse_infos if str(info.pk) == selected_info_id), None
+    if kind == "delivery":
+        # 与 POS 销售单共用仓库信息，按实际出库仓库限定可选范围。
+        warehouse_infos = list(
+            PosReceiptWarehouseInfo.objects.filter(is_active=True)
+            .filter(Q(warehouse_id=order.warehouse_id) | Q(warehouse__isnull=True))
+            .order_by("warehouse_id", "-is_default", "sort_order", "id")
         )
-        if selected_info is None:
-            return HttpResponse("所选仓库信息不可用，请重新选择。", status=400)
-    elif len(warehouse_infos) == 1:
-        selected_info = warehouse_infos[0]
+        warehouse_infos = [info for info in warehouse_infos if (info.address or "").strip()]
+        if not warehouse_infos:
+            return HttpResponse("请先补充当前仓库的有效打印地址配置，再补打送货单。", status=409)
+        selected_info_id = request.GET.get("warehouse_info_id", "")
+        if selected_info_id:
+            selected_info = next(
+                (info for info in warehouse_infos if str(info.pk) == selected_info_id), None
+            )
+            if selected_info is None:
+                return HttpResponse("所选仓库信息不可用，请重新选择。", status=400)
+        elif len(warehouse_infos) == 1:
+            selected_info = warehouse_infos[0]
 
-    # 3) 订单行 + 金额（amount = base_qty * base_price）
-    amount_expr = ExpressionWrapper(
-        F("base_qty") * F("base_price"),
-        output_field=DecimalField(max_digits=18, decimal_places=2),
+    total_qty = sum(
+        (line["base_qty"] if kind == "pick" else line.base_qty for line in lines), Decimal(0)
     )
-    lines = (
-        OutboundOrderLine.objects.filter(order_id=order.id)
-        .select_related(
-            "product",
-            "base_uom",
-            "product__base_uom",
-            "aux_uom__uom",
-        )
-        .annotate(amount=Case(When(is_priced=True, then=amount_expr)))
-        .order_by("line_no", "id")
+    total_amount = (
+        sum((line.amount or Decimal(0) for line in lines), Decimal(0))
+        if kind == "delivery"
+        else Decimal(0)
     )
-
-    agg = lines.aggregate(
-        total_qty=Sum("base_qty"),
-        total_amount=Sum("amount"),
-    )
-    total_qty = agg["total_qty"] or Decimal("0")
-    total_amount = agg["total_amount"] or Decimal("0")
-    unpriced_line_count = sum(not line.is_priced for line in lines)
+    unpriced_line_count = sum(not line.is_priced for line in lines) if kind == "delivery" else 0
     all_unpriced = bool(lines) and unpriced_line_count == len(lines)
 
     # 4) 打印头部字段（按你的要求）
@@ -232,8 +201,8 @@ def pick_task_print(request, task_id: int):
                 for field in ("province", "city", "district", "street", "address")
             )
 
-    # 发货时间：优先仓库确认时间，其次预计发货时间(etd)
-    ship_time = order.approved_at_warehouse or order.etd or timezone.now()
+    # 正式送货单记录实际过账时间。
+    ship_time = task.posted_at
 
     total_amount_upper = _money_to_rmb_upper(total_amount)
     print_config = PrintConfig.get_default(PrintConfig.Module.OUTBOUND)
@@ -245,6 +214,7 @@ def pick_task_print(request, task_id: int):
         obj=task,
         metadata={
             "order_id": order.id,
+            "kind": kind,
             "warehouse_info_id": selected_info.pk if selected_info else None,
         },
     )
@@ -253,8 +223,15 @@ def pick_task_print(request, task_id: int):
         request,
         "outbound/print/pick_task.html",
         {
-            "object": order,  # ✅ 模板里 object 现在就是 OutboundOrder
-            "lines": lines,  # ✅ 明细是 OutboundOrderLine（带 base_price / amount）
+            "task": task,
+            "kind": kind,
+            "document_title": "拣货单" if kind == "pick" else "送货单",
+            "customer_name": (order.customer.name or "").strip() if order.customer_id else "",
+            "warehouse_name": task.warehouse.name,
+            "warehouse_phone": selected_info.phone if selected_info else "",
+            "document_ready": kind == "pick" or selected_info is not None,
+            "object": order,
+            "lines": lines,
             "ship_time": ship_time,
             "sender_name": sender_name,
             "sender_phone": sender_phone,
@@ -275,163 +252,3 @@ def pick_task_print(request, task_id: int):
             "print_css": print_css,
         },
     )
-
-
-#
-# from decimal import Decimal
-# from django.http import HttpResponse
-# from django.shortcuts import render
-# # from django.utils import timezone
-# from allapp.core.print_tickets import user_from_print_ticket
-#
-# from allapp.tasking.models import WmsTask, WmsTaskLine
-# from allapp.outbound.models import OutboundOrder, OutboundOrderLine
-#
-#
-# def pick_task_print(request, task_id: int):
-#     """
-#     拣货任务打印页（给 PDA 打开用）
-#     MVP：用 ?ticket=<document-ticket> 认证（因为 window.open/openURL 不带 Authorization 头）
-#     """
-#     token = request.GET.get("ticket")
-#
-#     # 允许两种方式：
-#     # 1) 已有 session 登录（后台/PC）
-#     # 2) PDA 传 token（JWT）
-#     if not request.user.is_authenticated:
-#         if not token:
-#             return HttpResponse("Unauthorized: missing token", status=401)
-#         try:
-#             at = AccessToken(token)
-#             user_id = at.get("user_id")
-#             if not user_id:
-#                 return HttpResponse("Unauthorized: invalid token", status=401)
-#             user = get_user_model().objects.get(id=user_id)
-#             request.user = user
-#         except Exception:
-#             return HttpResponse("Unauthorized: invalid token", status=401)
-#
-#     task = (
-#         WmsTask.objects
-#         .select_related("owner", "warehouse")
-#         .get(id=task_id, task_type=WmsTask.TaskType.PICK)
-#     )
-#
-#     # 任务行（如果你打印用它）
-#     task_lines = (
-#         WmsTaskLine.objects
-#         .filter(task_id=task.id)
-#         .select_related("product__base_uom", "from_location")
-#         .order_by("id")
-#     )
-#
-#     # --- 关键：找到对应 OutboundOrder ---
-#     order = None
-#
-# # 1) 优先用 task.source_pk（你 outbound/services.py 已经 canonical 写了 source_model=outboundorder,
-# source_pk=str(order.pk)）
-#     if task.source_pk:
-#         try:
-#             order = (
-#                 OutboundOrder.objects
-#                 .select_related("owner", "warehouse", "created_by", "approved_by_warehouse")
-#                 .get(pk=task.source_pk)
-#             )
-#         except OutboundOrder.DoesNotExist:
-#             order = None
-#
-#     # 2) 兜底：从 taskline.src_id 找 OutboundOrderLine -> order
-#     if order is None:
-#         tl = (
-#             WmsTaskLine.objects
-#             .filter(task_id=task.id, src_model="OutboundOrderLine", src_id__isnull=False)
-#             .order_by("id")
-#             .first()
-#         )
-#         if tl:
-#             try:
-#                 ol = (
-#                     OutboundOrderLine.objects
-# .select_related("order", "order__owner", "order__warehouse", "order__created_by",
-# "order__approved_by_warehouse")
-#                     .get(pk=tl.src_id)
-#                 )
-#                 order = ol.order
-#             except OutboundOrderLine.DoesNotExist:
-#                 order = None
-#
-#     if order is None:
-# return HttpResponse("Bad Request: cannot resolve outbound order for this pick task", status=400)
-#
-#     # --- 要打印的“头部字段” ---
-#     receiver_name = order.contact or ""
-#     receiver_phone = order.contact_phone or ""
-#     receiver_address = order.ship_to or ""
-#
-#     # 发货时间（你可以按业务选：仓库确认时间/预计发货时间/订单日期）
-#     ship_time = order.approved_at_warehouse or order.etd or timezone.now()
-#
-#     sender_user = order.approved_by_warehouse or order.created_by or request.user
-#     sender_name = getattr(sender_user, "name", "") or str(sender_user)
-#     sender_phone = getattr(sender_user, "phone", "") or ""
-#
-#     # 如果你模板需要合计（按任务行 qty_plan 合计）
-#     total_qty = Decimal("0")
-#     for l in task_lines:
-#         total_qty += (l.qty_plan or Decimal("0"))
-#
-#     return render(request, "outbound/print/pick_task.html", {
-#         # ✅ object 改成 order：模板里可直接用 object.order_no / object.owner.name
-#         "object": order,
-#
-#         # ✅ 明细你可以继续用任务行（qty_plan），也可以改成订单行（base_qty）
-#         "lines": task_lines,
-#
-#         # ✅ 额外字段单独传给模板
-#         "ship_time": ship_time,
-#         "receiver_name": receiver_name,
-#         "receiver_phone": receiver_phone,
-#         "receiver_address": receiver_address,
-#         "sender_name": sender_name,
-#         "sender_phone": sender_phone,
-#         "total_qty": total_qty,
-#     })
-
-
-# def pick_task_print(request, task_id: int):
-#     """
-#     拣货任务打印页（给 PDA 打开用）
-#     MVP：用 ?ticket=<document-ticket> 认证（因为 window.open/openURL 不带 Authorization 头）
-#     """
-#     token = request.GET.get("ticket")
-#
-#     # 允许两种方式：
-#     # 1) 已有 session 登录（后台/PC）
-#     # 2) PDA 传 token（JWT）
-#     if not request.user.is_authenticated:
-#         if not token:
-#             return HttpResponse("Unauthorized: missing token", status=401)
-#         try:
-#             at = AccessToken(token)
-#             user_id = at.get("user_id")
-#             if not user_id:
-#                 return HttpResponse("Unauthorized: invalid token", status=401)
-#             user = get_user_model().objects.get(id=user_id)
-#             request.user = user
-#         except Exception:
-#             return HttpResponse("Unauthorized: invalid token", status=401)
-#
-#     task = (
-#         WmsTask.objects
-#         .select_related("owner", "warehouse")
-#         .get(id=task_id, task_type=WmsTask.TaskType.PICK)
-#     )
-#
-#     lines = (
-#         WmsTaskLine.objects
-#         .filter(task_id=task.id)
-#         .select_related("product", "from_location")
-#         .order_by("id")
-#     )
-#
-#     return render(request, "outbound/print/pick_task.html", {"object": task, "lines": lines})

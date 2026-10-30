@@ -27,7 +27,7 @@ describe('physical review workflow', () => {
     await s.load()
     s.api.reviewPickTasks.mockResolvedValueOnce({ results: [{ ...row, id: 9 }], next: null })
     await s.load({ more: true })
-    expect(s.api.reviewPickTasks).toHaveBeenLastCalledWith({ page: 2 })
+    expect(s.api.reviewPickTasks).toHaveBeenLastCalledWith({ page: 2, stage: 'pending', search: '' })
     expect(s.rows.value.map(x => x.id)).toEqual([7, 9])
     s.api.reviewPickTasks.mockResolvedValueOnce({ results: [], next: null })
     await s.load()
@@ -90,7 +90,7 @@ describe('physical review workflow', () => {
     await s.load()
     expect(s.canSubmit.value).toBe(true)
     await s.submit()
-    expect(s.confirm).toHaveBeenCalledWith('确认重试库存过账？')
+    expect(s.confirm).toHaveBeenCalledWith('确认重试库存过账？', expect.any(Function))
   })
 
   it('clears sensitive content and reloads permissions after revocation', async () => {
@@ -177,5 +177,47 @@ describe('physical review workflow', () => {
     expect(s.error.value).toBe('来源订单异常')
     expect(s.canSubmit.value).toBe(false)
     expect(s.totals.value).toEqual([])
+  })
+})
+
+describe('delivery printing after posting', () => {
+  function printable({ cancel = false, failed = false, printFailed = false } = {}) {
+    const handle = { close: vi.fn() }
+    const print = { prepare: vi.fn(() => handle), close: vi.fn(), open: vi.fn() }
+    if (printFailed) print.open.mockRejectedValue(new Error('print failed'))
+    const api = { pickReviewContext: vi.fn().mockResolvedValue(detail()), postPickTask: vi.fn().mockResolvedValue({ posted: true }) }
+    if (failed) api.postPickTask.mockRejectedValue({ statusCode: 500, message: 'posting failed' })
+    const confirm = vi.fn(async (_, reserve) => { if (cancel) return false; reserve(); return true })
+    const notify = vi.fn()
+    return { handle, print, api, notify, ...usePhysicalReview({ api, auth: {}, confirm, notify, print, id: 7 }) }
+  }
+  it('reserves on confirmation and opens only after successful posting; refresh never prints', async () => {
+    const s = printable()
+    await s.load()
+    expect(s.print.open).not.toHaveBeenCalled()
+    await s.submit()
+    expect(s.print.prepare.mock.invocationCallOrder[0]).toBeLessThan(s.api.postPickTask.mock.invocationCallOrder[0])
+    expect(s.print.open).toHaveBeenCalledWith(7, s.handle)
+    await s.load()
+    expect(s.print.open).toHaveBeenCalledTimes(1)
+  })
+  it('cancel neither posts nor opens a window', async () => {
+    const s = printable({ cancel: true })
+    await s.load(); await s.submit()
+    expect(s.api.postPickTask).not.toHaveBeenCalled()
+    expect(s.print.prepare).not.toHaveBeenCalled()
+  })
+  it('failed posting closes the waiting window and never prints', async () => {
+    const s = printable({ failed: true })
+    await s.load(); await s.submit()
+    expect(s.print.close).toHaveBeenCalledWith(s.handle)
+    expect(s.print.open).not.toHaveBeenCalled()
+  })
+  it('print failure does not repost and still refreshes successful business state', async () => {
+    const s = printable({ printFailed: true })
+    await s.load(); await s.submit()
+    expect(s.api.postPickTask).toHaveBeenCalledTimes(1)
+    expect(s.notify).toHaveBeenCalledWith('出库已成功，打印失败，请补打送货单')
+    expect(s.api.pickReviewContext).toHaveBeenCalledTimes(2)
   })
 })

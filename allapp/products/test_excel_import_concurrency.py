@@ -13,12 +13,18 @@ from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
 from allapp.inventory.models import InventoryDetail
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 
-from .excel_import import IMPORT_SHEET_NAME, PRODUCT_HEADERS
+from .excel_import import IMPORT_SHEET_NAME, OWNER_NAME_PRODUCT_HEADERS, PRODUCT_HEADERS
 from .models import Product, ProductCategory, ProductUom
 
 
 class ProductImportConcurrencyTests(TransactionTestCase):
     def test_concurrent_unidentified_receipts_share_one_archive(self):
+        self._assert_concurrent_receipts_share_one_archive(use_owner_names=False)
+
+    def test_concurrent_owner_name_receipts_share_one_archive(self):
+        self._assert_concurrent_receipts_share_one_archive(use_owner_names=True)
+
+    def _assert_concurrent_receipts_share_one_archive(self, *, use_owner_names):
         owner = Owner.objects.create(code="IMP-CON", name="并发导入货主")
         uom = ProductUom.objects.create(code="IMP-EA", name="件")
         category = ProductCategory.objects.create(code="IMP-CAT", name="并发分类")
@@ -34,15 +40,17 @@ class ProductImportConcurrencyTests(TransactionTestCase):
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = IMPORT_SHEET_NAME
-        sheet.append(list(PRODUCT_HEADERS))
+        headers = OWNER_NAME_PRODUCT_HEADERS if use_owner_names else PRODUCT_HEADERS
+        sheet.append(list(headers))
         row = {
             "货主编码": owner.code,
+            "货主名称": owner.name,
             "商品名称": "并发无码商品",
             "基本单位": uom.name,
             "分类": category.name,
             "基本单位数量": 2,
         }
-        sheet.append([row.get(header) for header in PRODUCT_HEADERS])
+        sheet.append([row.get(header) for header in headers])
         output = io.BytesIO()
         workbook.save(output)
         content = output.getvalue()

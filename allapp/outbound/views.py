@@ -982,8 +982,10 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         qs = qs.order_by(F("assisted_at").desc(nulls_last=True), "-id")
         page = self.paginate_queryset(qs)
         if page is None:
-            return Response([serialize_history_order(order) for order in qs])
-        return self.get_paginated_response([serialize_history_order(order) for order in page])
+            return Response([serialize_history_order(order, request.user) for order in qs])
+        return self.get_paginated_response(
+            [serialize_history_order(order, request.user) for order in page]
+        )
 
     @action(detail=False, methods=["get"])
     def stats(self, request):
@@ -2658,15 +2660,41 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
     def list(self, request, *args, **kwargs):
         if request.query_params.get("for_review") not in ("1", "true", "True"):
             return super().list(request, *args, **kwargs)
-        from .physical_review import PhysicalReviewPagination, pending_reviews, review_summary
+        from .physical_review import (
+            PhysicalReviewPagination,
+            pending_reviews,
+            review_content,
+            review_order_data,
+            review_summary,
+        )
+        from .print_documents import completed_documents, document_queryset
 
-        qs = pending_reviews(self._review_queryset(), request.user).order_by("-id")
+        stage = request.query_params.get("stage", "pending")
+        if stage not in {"pending", "completed"}:
+            raise ValidationError("stage 必须为 pending 或 completed。")
+        if stage == "completed":
+            qs = completed_documents(
+                document_queryset(
+                    WmsTask.objects.select_related("owner", "warehouse", "picked_by"), request.user
+                )
+            )
+        else:
+            qs = pending_reviews(self._review_queryset(), request.user)
+        search = (request.query_params.get("search") or "").strip()
+        if search:
+            source_lines = OutboundOrderLine.objects.filter(
+                Q(order__order_no__icontains=search) | Q(order__customer__name__icontains=search)
+            ).values("pk")
+            qs = qs.filter(lines__src_id__in=source_lines).distinct()
+        qs = qs.order_by("-id")
         pagination = PhysicalReviewPagination()
         tasks = pagination.paginate_queryset(qs, request)
         rows = []
         for task in tasks:
             row = dict(self.get_serializer(task).data)
             row.update(review_summary(task, request.user))
+            row["order"] = review_order_data(review_content(task))
+            row["can_print_delivery"] = stage == "completed"
             rows.append(row)
         response = pagination.get_paginated_response(rows)
         response["Cache-Control"] = "no-store"
@@ -2682,10 +2710,19 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             review_summary,
         )
 
-        task = get_object_or_404(self._review_queryset(), pk=pk)
+        from .print_documents import completed_documents, document_queryset
+
+        qs = WmsTask.objects.select_related("owner", "warehouse", "picked_by")
+        completed = completed_documents(document_queryset(qs, request.user))
+        task = completed.filter(pk=pk).first()
+        if task is None:
+            task = get_object_or_404(
+                self._review_queryset().exclude(posting_status="POSTED"), pk=pk
+            )
         content = review_content(task)
         data = dict(self.get_serializer(task).data)
         data.update(review_summary(task, request.user, content=content))
+        data["can_print_delivery"] = completed_documents(qs.filter(pk=task.pk)).exists()
         lines, totals = [], []
         if not content["error"]:
             details = review_line_details(task, content)

@@ -210,6 +210,13 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
         changed = {**payload, "items": [{**payload["items"][0], "transfer_price": "9"}]}
         self.assertEqual(self._create(changed).status_code, 409)
         self.assertEqual(self._create({**payload, "new_owner_id": None}).status_code, 409)
+        self.review(task)
+        self.assertEqual(self.post(task).status_code, 200)
+        from allapp.pos.models import PosReceiptWarehouseInfo
+
+        PosReceiptWarehouseInfo.objects.create(
+            warehouse=task.warehouse, name="测试仓", address="测试仓库地址"
+        )
         print_request = self.factory.get(f"/api/outbound/pda/pick-tasks/{task.pk}/print/")
         print_request.user = self.operator
         printed = pick_task_print(print_request, task.pk)
@@ -217,8 +224,6 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
         self.assertContains(printed, self.target_owner.name)
         self.assertContains(printed, self.target_owner.phone)
         self.assertContains(printed, "12.00")
-        self.review(task)
-        self.assertEqual(self.post(task).status_code, 200)
 
     def test_shortage_rolls_back_cloned_product_order_mapping_and_reservation(self):
         payload = self.payload(items=[{"product_id": self.product.pk, "qty": "101", "price": "12"}])

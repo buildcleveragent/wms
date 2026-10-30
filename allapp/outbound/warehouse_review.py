@@ -26,7 +26,12 @@ def can_review_warehouse_outbound(user, *, scope=None):
             or (
                 scope.source == "user_role_scope"
                 and scope.warehouse_ids
-                and UserRoleScope.Role.WAREHOUSE_MANAGER in scope.roles
+                and scope.roles.intersection(
+                    {
+                        UserRoleScope.Role.WAREHOUSE_MANAGER,
+                        UserRoleScope.Role.WAREHOUSE_OPERATOR,
+                    }
+                )
                 and user.has_perm(REVIEW_PERMISSION)
             )
         )

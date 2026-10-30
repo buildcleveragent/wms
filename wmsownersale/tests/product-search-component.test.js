@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 
 const mocks = vi.hoisted(() => ({
   onLoad: null,
@@ -32,6 +33,9 @@ vi.mock('@/store/auth', () => ({ useAuth: () => mocks.auth }))
 vi.mock('@/store/cart', () => ({ useCart: () => mocks.cart }))
 
 import ProductSearch from '@/pages/products/search.vue'
+import ProductCard from '@/components/ProductCard.vue'
+
+const { useCart: useRealCart } = await vi.importActual('@/store/cart')
 
 const product = (id, name) => ({
   id,
@@ -160,5 +164,43 @@ describe('商品搜索分页组件', () => {
     await mocks.onLoad()
     await flushPromises()
     expect(wrapper.text()).toContain('没有符合条件的商品')
+  })
+
+  it('订单按钮实时累计加入的基本数量，重复加入、小数和未计价商品均计入', async () => {
+    const previousCart = mocks.cart
+    setActivePinia(createPinia())
+    const cart = useRealCart()
+    cart.beginOrder({ user_id: 1, owner_id: 3, warehouse: { id: 2 } })
+    cart.customer = { id: 1, name: '客户' }
+    mocks.cart = cart
+    mocks.products.mockResolvedValue({ results: [
+      product(1, '计价商品'),
+      { ...product(2, '未计价商品'), is_priced: false },
+    ], next: null })
+    const wrapper = render()
+    try {
+      await mocks.onLoad()
+      await flushPromises()
+      const button = () => wrapper.find('.cart-button').text()
+      expect(button()).toContain('已加入 0（基本数量）')
+      const cards = wrapper.findAllComponents(ProductCard)
+      cards[0].vm.$emit('quantity-input', '0.1')
+      await cards[0].find('.add-button').trigger('click')
+      cards[0].vm.$emit('quantity-input', '0.2')
+      await cards[0].find('.add-button').trigger('click')
+      expect(button()).toContain('1 行 · 已加入 0.3（基本数量）')
+      cards[1].vm.$emit('quantity-input', '43')
+      await cards[1].find('.add-button').trigger('click')
+      expect(button()).toContain('2 行 · 已加入 43.3（基本数量）')
+      expect(button()).toContain('未计价')
+      cart.remove(0)
+      await flushPromises()
+      expect(button()).toContain('1 行 · 已加入 43（基本数量）')
+      await wrapper.find('.cart-button').trigger('click')
+      expect(uni.redirectTo).toHaveBeenCalledWith({ url: '/pages/orders/cart' })
+    } finally {
+      wrapper.unmount()
+      mocks.cart = previousCart
+    }
   })
 })

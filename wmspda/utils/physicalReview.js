@@ -4,11 +4,11 @@ export { formatQuantity } from '../../frontend/shared/quantity.js'
 const message = e => Array.isArray(e?.data) ? e.data.join('；') : e?.data?.detail || e?.message || '加载失败，请重试'
 const status = e => Number(e?.statusCode || e?.status)
 
-export function usePhysicalReview({ api, auth, confirm, notify, id = null }) {
+export function usePhysicalReview({ api, auth, confirm, notify, print = null, id = null }) {
   const rows = ref([]), task = ref(null), lines = ref([]), order = ref(null), totals = ref([])
   const ready = ref(false)
   const loading = ref(false), busy = ref(false), denied = ref(false), error = ref('')
-  const page = ref(1), hasMore = ref(false)
+  const page = ref(1), hasMore = ref(false), stage = ref('pending'), search = ref('')
   const canSubmit = computed(() => ready.value && order.value && lines.value.length > 0 && !loading.value && !busy.value && !denied.value &&
     (task.value?.can_review === true || task.value?.can_retry_post === true))
   let alive = true, sequence = 0
@@ -34,7 +34,7 @@ export function usePhysicalReview({ api, auth, confirm, notify, id = null }) {
     try {
       if (id === null) {
         const next = more ? page.value + 1 : 1
-        const data = await api.reviewPickTasks({ page: next })
+        const data = await api.reviewPickTasks({ page: next, stage: stage.value, search: search.value.trim() })
         if (!alive || current !== sequence) return
         const items = Array.isArray(data) ? data : data.results
         rows.value = more ? [...rows.value, ...items] : items
@@ -70,24 +70,31 @@ export function usePhysicalReview({ api, auth, confirm, notify, id = null }) {
     if (!canSubmit.value) return
     const currentTask = task.value
     busy.value = true; error.value = ''
-    let refresh = false, actionError = ''
+    let refresh = false, actionError = '', preparedWindow = null
     try {
-      if (!await confirm(currentTask.can_retry_post ? '确认重试库存过账？' : '确认商品、数量及库位核对无误，并复核过账？') || !alive) return
+      if (!await confirm(currentTask.can_retry_post ? '确认重试库存过账？' : '确认商品、数量及库位核对无误，并复核过账？', () => { preparedWindow = print?.prepare() }) || !alive) return
       const result = await api.postPickTask(currentTask.id)
       if (!alive) return
-      task.value = { ...currentTask, can_review: false, can_retry_post: false, posting_status: 'POSTED', blocked_reason: '任务已完成复核并过账。' }
+      if (result?.posted !== true) throw new Error('未确认库存过账成功，请刷新查看任务状态')
+      task.value = { ...currentTask, can_review: false, can_retry_post: false, posting_status: 'POSTED', can_print_delivery: true, blocked_reason: '任务已完成复核并过账。' }
       refresh = true
       notify(result.idempotent ? '任务已处理，已刷新结果' : '复核通过，已过账')
+      if (print) {
+        try { await print.open(currentTask.id, preparedWindow) }
+        catch { print.close(preparedWindow); notify('出库已成功，打印失败，请补打送货单') }
+        preparedWindow = null
+      }
     } catch (e) {
       await fail(e)
       actionError = message(e)
       refresh = !denied.value && [400, 409, 500].includes(status(e))
     } finally {
+      print?.close(preparedWindow)
       busy.value = false
       if (alive && refresh) await load()
       if (alive && actionError) error.value = actionError
     }
   }
   function dispose() { alive = false; sequence++ }
-  return { rows, task, lines, order, totals, ready, loading, busy, denied, error, page, hasMore, canSubmit, load, submit, dispose }
+  return { rows, task, lines, order, totals, ready, loading, busy, denied, error, page, hasMore, stage, search, canSubmit, load, submit, dispose }
 }

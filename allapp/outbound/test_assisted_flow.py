@@ -135,6 +135,29 @@ class AssistedOutboundFlowTests(TestCase):
         view = AssistedOutboundOrderViewSet.as_view({"post": "create"})
         return view(self._request("post", "/api/outbound/assisted-orders/", payload))
 
+    def _post_for_print(self, task_id):
+        task = WmsTask.objects.get(pk=task_id)
+        line = task.lines.get()
+        line.qty_done = line.qty_plan
+        line.save(update_fields=["qty_done"])
+        TaskScanLog.objects.create(
+            task=task,
+            task_line=line,
+            owner=self.owner,
+            warehouse=self.warehouse,
+            product=self.product,
+            location=self.location,
+            by_user=self.operator,
+            qty_base_delta=line.qty_plan,
+            fp=f"print-{task.pk}",
+            scan_snapshot_rev=0,
+        )
+        for action, endpoint in (("create_review_task", "create-review-task"), ("post", "post")):
+            response = PickTaskViewSet.as_view({"post": action})(
+                self._request("post", f"/api/pda/pick-tasks/{task_id}/{endpoint}/"), pk=task_id
+            )
+            self.assertEqual(response.status_code, 200, response.data)
+
     def test_delivery_note_uses_order_warehouse_and_hides_pickup_address(self):
         info = PosReceiptWarehouseInfo.objects.create(
             warehouse=self.warehouse, name="一号仓", address="测试市仓储路 88 号一号仓"
@@ -142,6 +165,7 @@ class AssistedOutboundFlowTests(TestCase):
         created = self._create(self._payload())
         self.assertEqual(created.status_code, 201, created.data)
         task_id = created.data["task_id"]
+        self._post_for_print(task_id)
         order = OutboundOrder.objects.get(pk=created.data["order_id"])
         request = self.factory.get(f"/api/pda/pick-tasks/{task_id}/print/")
         request.user = self.operator
@@ -162,6 +186,9 @@ class AssistedOutboundFlowTests(TestCase):
                     self.assertContains(response, order.ship_to)
 
     def test_delivery_note_combines_customer_address_when_order_address_is_empty(self):
+        PosReceiptWarehouseInfo.objects.create(
+            warehouse=self.warehouse, name="测试仓", address="仓库地址"
+        )
         self.customer.province = " 广西壮族自治区 "
         self.customer.city = "南宁市"
         self.customer.district = "兴宁区"
@@ -172,6 +199,7 @@ class AssistedOutboundFlowTests(TestCase):
         created = self._create(self._payload())
         self.assertEqual(created.status_code, 201, created.data)
         task_id = created.data["task_id"]
+        self._post_for_print(task_id)
         order = OutboundOrder.objects.get(pk=created.data["order_id"])
         request = self.factory.get(f"/api/pda/pick-tasks/{task_id}/print/")
         request.user = self.operator
@@ -223,6 +251,7 @@ class AssistedOutboundFlowTests(TestCase):
         created = self._create(self._payload())
         self.assertEqual(created.status_code, 201, created.data)
         task_id = created.data["task_id"]
+        self._post_for_print(task_id)
         path = f"/api/pda/pick-tasks/{task_id}/print/"
         request = self.factory.get(path, {"ticket": "keep-document-ticket"})
         request.user = self.operator
@@ -272,7 +301,9 @@ class AssistedOutboundFlowTests(TestCase):
             self.operator.id,
         )
 
-        own_print_request = self.factory.get(f"/api/outbound/pda/pick-tasks/{task.id}/print/")
+        own_print_request = self.factory.get(
+            f"/api/outbound/pda/pick-tasks/{task.id}/print/?kind=pick"
+        )
         own_print_request.user = self.operator
         self.assertEqual(pick_task_print(own_print_request, task.id).status_code, 200)
 
@@ -555,6 +586,10 @@ class AssistedOutboundFlowTests(TestCase):
         self.detail.refresh_from_db()
         self.assertEqual(self.detail.allocated_qty, Decimal("8.0000"))
 
+        self._post_for_print(created.data["task_id"])
+        PosReceiptWarehouseInfo.objects.create(
+            warehouse=self.warehouse, name="打印仓", address="仓储路88号"
+        )
         print_request = self.factory.get(f"/api/pda/pick-tasks/{created.data['task_id']}/print/")
         print_request.user = self.operator
         PrintConfig.objects.create(
@@ -603,7 +638,7 @@ class AssistedOutboundFlowTests(TestCase):
         self.assertContains(print_response, "箱")
         self.assertContains(print_response, "1 箱=4")
         self.assertContains(print_response, "实际收件人张三")
-        self.assertNotContains(print_response, self.customer.name)
+        self.assertContains(print_response, self.customer.name)
 
         replayed = self._create(payload)
         self.assertEqual(replayed.status_code, 200, replayed.data)

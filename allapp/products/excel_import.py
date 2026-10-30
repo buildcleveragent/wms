@@ -47,7 +47,7 @@ MAX_XLSX_UNCOMPRESSED_SIZE = 50 * 1024 * 1024
 MAX_XLSX_ENTRIES = 300
 IMPORT_SHEET_NAME = "商品导入"
 PACKAGE_SHEET_NAME = "商品包装"
-TEMPLATE_VERSION = "11"
+TEMPLATE_VERSION = "12"
 
 
 # Freeze legacy layouts independently of the current template column order.
@@ -111,6 +111,8 @@ V10_PRODUCT_HEADERS = (
 PRODUCT_HEADERS = tuple(
     "包装单位" if header == "包装单位编码" else header for header in V10_PRODUCT_HEADERS
 )
+# Keep code-based headers for archive exports and legacy import callers.
+OWNER_NAME_PRODUCT_HEADERS = ("货主名称",) + PRODUCT_HEADERS[1:]
 
 # Backwards-compatible public constant used by legacy v2 import callers/tests.
 HEADERS = PRODUCT_HEADERS
@@ -351,12 +353,41 @@ def build_product_import_template(user) -> bytes:
     _write_reference_sheet(refs, owners, uoms, categories, brands)
     _write_meta_sheet(meta)
     _add_template_validations(workbook, data_sheet, package_sheet, owners, uoms, categories, brands)
+    _use_owner_names_in_template(workbook)
     meta.sheet_state = "hidden"
     workbook.active = workbook.sheetnames.index(IMPORT_SHEET_NAME)
 
     output = io.BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+def _use_owner_names_in_template(workbook) -> None:
+    """Present owner names in new templates while keeping archive exports compatible."""
+    for sheet_name in (IMPORT_SHEET_NAME, PACKAGE_SHEET_NAME):
+        sheet = workbook[sheet_name]
+        sheet["A1"] = "货主名称"
+        sheet["A1"].comment = Comment("请选择货主名称，系统会自动对应货主编码。", "WMS")
+        for validation in sheet.data_validations.dataValidation:
+            if validation.formula1 == "ProductImportOwnerCodes":
+                validation.formula1 = "ProductImportOwnerNames"
+    if "ProductImportOwnerCodes" in workbook.defined_names:
+        codes = workbook.defined_names.pop("ProductImportOwnerCodes")
+        workbook.defined_names.add(
+            DefinedName("ProductImportOwnerNames", attr_text=codes.attr_text.replace("$A$", "$B$"))
+        )
+    workbook["基础资料"].column_dimensions["A"].hidden = True
+    instructions = workbook["填写说明"]
+    for row in instructions.iter_rows():
+        label = row[0].value
+        if label == "货主规则":
+            row[1].value = "请选择当前账号有权使用的货主名称，系统自动对应货主编码，无需填写编码。"
+        elif label in {"必填字段", "包装必填字段"}:
+            row[1].value = row[1].value.replace("货主编码", "货主名称")
+        elif label == "货主编码":
+            row[0].value = "货主名称"
+        elif label == "OWNER-001":
+            row[0].value = "示例货主"
 
 
 def _write_instruction_sheet(sheet) -> None:
@@ -695,6 +726,7 @@ class ProductExcelImporter:
         self.skipped: list[dict[str, Any]] = []
         self.total_rows = 0
         self._owner_cache: dict[str, Owner | None] = {}
+        self._owner_name_codes: dict[str, str | None] = {}
         self._uom_cache: dict[str, ProductUom | None] = {}
         self._package_uom_cache: dict[tuple[bool, str], tuple[ProductUom | None, str | None]] = {}
         self._category_cache: dict[str, ProductCategory | None] = {}
@@ -832,13 +864,14 @@ class ProductExcelImporter:
         if duplicates:
             raise ProductImportFileError(f"Excel 表头重复：{', '.join(duplicates)}。")
         if tuple(raw_headers) not in (
+            OWNER_NAME_PRODUCT_HEADERS,
             PRODUCT_HEADERS,
             V10_PRODUCT_HEADERS,
             V9_PRODUCT_HEADERS,
             V8_PRODUCT_HEADERS,
         ):
             raise ProductImportFileError(
-                "Excel 商品导入表头或列顺序与 v11 模板不一致（兼容原始 v8、v9、v10 模板）。"
+                "Excel 商品导入表头或列顺序与 v12 模板不一致（兼容原始 v8、v9、v10、v11 模板）。"
                 "请重新下载最新商品批量导入模板。"
             )
 
@@ -865,7 +898,8 @@ class ProductExcelImporter:
             if formula_header:
                 self._error(row_number, formula_header, "业务单元格不能使用公式。")
                 continue
-            raw_rows.append((row_number, values))
+            if self._normalize_owner_name(row_number, values):
+                raw_rows.append((row_number, values))
         if self.total_rows == 0:
             raise ProductImportFileError("“商品导入”工作表没有数据行。")
 
@@ -949,8 +983,11 @@ class ProductExcelImporter:
             )
         if "包装单位" in nonempty_headers and "包装单位编码" in nonempty_headers:
             raise ProductImportFileError("“商品包装”不能同时包含“包装单位”和“包装单位编码”。")
+        if "货主名称" in nonempty_headers and "货主编码" in nonempty_headers:
+            raise ProductImportFileError("“商品包装”不能同时包含“货主名称”和“货主编码”。")
         normalized_headers = [
-            "包装单位" if header == "包装单位编码" else header for header in nonempty_headers
+            {"包装单位编码": "包装单位", "货主名称": "货主编码"}.get(header, header)
+            for header in nonempty_headers
         ]
         unknown = [header for header in normalized_headers if header not in PACKAGE_HEADERS]
         if unknown:
@@ -1001,6 +1038,8 @@ class ProductExcelImporter:
                     "业务单元格不能使用公式。",
                     sheet=PACKAGE_SHEET_NAME,
                 )
+                continue
+            if not self._normalize_owner_name(row_number, values):
                 continue
             parsed_row = self._parse_package_row(
                 row_number,
@@ -1492,6 +1531,32 @@ class ProductExcelImporter:
             self._error(
                 row_number, "包装单位", "包装或换算数量与已有商品不一致；补数量导入不修改包装档案。"
             )
+
+    def _normalize_owner_name(self, row_number: int, values: dict[str, Any]) -> bool:
+        """Resolve scoped owner names before code-based validation and locking."""
+        if "货主名称" not in values:
+            return True
+        name = _text(values["货主名称"])
+        if not name:
+            self._error(row_number, "货主名称", "不能为空。")
+            return False
+        if name not in self._owner_name_codes:
+            codes = list(
+                _owner_queryset_for_access(self.access)
+                .filter(name__iexact=name)
+                .values_list("code", flat=True)[:2]
+            )
+            self._owner_name_codes[name] = codes[0] if len(codes) == 1 else None
+        code = self._owner_name_codes[name]
+        if code is None:
+            self._error(
+                row_number,
+                "货主名称",
+                f"无法匹配可用的货主名称“{name}”，请从最新模板中选择有权使用的货主。",
+            )
+            return False
+        values["货主编码"] = code
+        return True
 
     def _resolve_owner(self, row_number: int, value) -> Owner | None:
         code = _text(value).upper()

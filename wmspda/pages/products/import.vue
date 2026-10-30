@@ -171,7 +171,9 @@ onShow(async () => {
 async function loadWarehouseOptions() {
   const data = await api.productImportWarehouses()
   warehouses.value = Array.isArray(data?.results) ? data.results : []
-  warehouseIndex.value = 0
+  warehouseIndex.value = readyWarehouses.value.findIndex((item) => (
+    item.name === '大仓' && item.default_receive_location?.code === '8-1-1-1'
+  )) + 1
 }
 
 function selectWarehouse(event) {
