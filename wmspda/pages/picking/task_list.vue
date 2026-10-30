@@ -24,7 +24,7 @@
 	      <text class="task-no">任务号：{{ t.task_no }}</text>
 	      <view class="right">
 	        <text class="status">{{ t.status }}</text>
-	        <button class="btn-print" @click.stop="printPickList(t)">打印出库单</button>
+	        <button class="btn-print" @click.stop="printPickList(t)">打印拣货单</button>
 	      </view>
 	    </view>
 	  
@@ -72,7 +72,7 @@ function openTask(t: any) {
 }
 
 function printPickList(t: any) {
-  if (t?.id) openOutboundPrintPage(t.id)
+  if (t?.id) openOutboundPrintPage(t.id, null, 'pick')
 }
 
 

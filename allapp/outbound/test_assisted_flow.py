@@ -26,6 +26,7 @@ from allapp.outbound.views import (
     OutboundOrderViewSet,
     PickTaskViewSet,
 )
+from allapp.pos.models import PosReceiptWarehouseInfo
 from allapp.products.identifier_services import add_product_barcode
 from allapp.products.models import Product, ProductBarcode, ProductPackage, ProductUom
 from allapp.tasking.models import TaskScanLog, TaskStatusLog, WmsTask
@@ -134,6 +135,145 @@ class AssistedOutboundFlowTests(TestCase):
         view = AssistedOutboundOrderViewSet.as_view({"post": "create"})
         return view(self._request("post", "/api/outbound/assisted-orders/", payload))
 
+    def _post_for_print(self, task_id):
+        task = WmsTask.objects.get(pk=task_id)
+        line = task.lines.get()
+        line.qty_done = line.qty_plan
+        line.save(update_fields=["qty_done"])
+        TaskScanLog.objects.create(
+            task=task,
+            task_line=line,
+            owner=self.owner,
+            warehouse=self.warehouse,
+            product=self.product,
+            location=self.location,
+            by_user=self.operator,
+            qty_base_delta=line.qty_plan,
+            fp=f"print-{task.pk}",
+            scan_snapshot_rev=0,
+        )
+        for action, endpoint in (("create_review_task", "create-review-task"), ("post", "post")):
+            response = PickTaskViewSet.as_view({"post": action})(
+                self._request("post", f"/api/pda/pick-tasks/{task_id}/{endpoint}/"), pk=task_id
+            )
+            self.assertEqual(response.status_code, 200, response.data)
+
+    def test_delivery_note_uses_order_warehouse_and_hides_pickup_address(self):
+        info = PosReceiptWarehouseInfo.objects.create(
+            warehouse=self.warehouse, name="一号仓", address="测试市仓储路 88 号一号仓"
+        )
+        created = self._create(self._payload())
+        self.assertEqual(created.status_code, 201, created.data)
+        task_id = created.data["task_id"]
+        self._post_for_print(task_id)
+        order = OutboundOrder.objects.get(pk=created.data["order_id"])
+        request = self.factory.get(f"/api/pda/pick-tasks/{task_id}/print/")
+        request.user = self.operator
+        for method in ("OWN_TRUCK", "COURIER", "PICKUP"):
+            with self.subTest(method=method):
+                order.delivery_method = method
+                order.save(update_fields=["delivery_method"])
+                response = pick_task_print(request, task_id)
+                self.assertContains(response, "送货单</span>")
+                self.assertContains(response, info.address)
+                self.assertContains(response, order.contact)
+                self.assertContains(response, order.contact_phone)
+                if method == "PICKUP":
+                    self.assertNotContains(response, order.ship_to)
+                    self.assertNotContains(response, "客户地址：")
+                    self.assertContains(response, "客户自提")
+                else:
+                    self.assertContains(response, order.ship_to)
+
+    def test_delivery_note_combines_customer_address_when_order_address_is_empty(self):
+        PosReceiptWarehouseInfo.objects.create(
+            warehouse=self.warehouse, name="测试仓", address="仓库地址"
+        )
+        self.customer.province = " 广西壮族自治区 "
+        self.customer.city = "南宁市"
+        self.customer.district = "兴宁区"
+        self.customer.street = "昆仑大道"
+        self.customer.address = " 88号一楼 "
+        address_fields = ["province", "city", "district", "street", "address"]
+        self.customer.save(update_fields=address_fields)
+        created = self._create(self._payload())
+        self.assertEqual(created.status_code, 201, created.data)
+        task_id = created.data["task_id"]
+        self._post_for_print(task_id)
+        order = OutboundOrder.objects.get(pk=created.data["order_id"])
+        request = self.factory.get(f"/api/pda/pick-tasks/{task_id}/print/")
+        request.user = self.operator
+        full_address = "广西壮族自治区南宁市兴宁区昆仑大道88号一楼"
+        for method, ship_to, expected in (
+            ("OWN_TRUCK", "", full_address),
+            ("COURIER", "  ", full_address),
+            ("OWN_TRUCK", "本单另指定收货地址", "本单另指定收货地址"),
+            ("PICKUP", "", None),
+            ("PICKUP", "本单另指定收货地址", None),
+        ):
+            with self.subTest(method=method, ship_to=ship_to):
+                order.delivery_method = method
+                order.ship_to = ship_to
+                order.save(update_fields=["delivery_method", "ship_to"])
+                response = pick_task_print(request, task_id)
+                if expected is None:
+                    self.assertNotContains(response, "客户地址：")
+                    self.assertNotContains(response, full_address)
+                    self.assertNotContains(response, "本单另指定收货地址")
+                else:
+                    self.assertContains(response, f'class="value address-value">{expected}</span>')
+                    if ship_to.strip():
+                        self.assertNotContains(response, full_address)
+
+        self.customer.province = None
+        self.customer.city = ""
+        self.customer.district = None
+        self.customer.street = " "
+        self.customer.save(update_fields=address_fields)
+        order.delivery_method = "OWN_TRUCK"
+        order.ship_to = ""
+        order.save(update_fields=["delivery_method", "ship_to"])
+        response = pick_task_print(request, task_id)
+        self.assertContains(response, 'class="value address-value">88号一楼</span>')
+
+    def test_delivery_note_requires_selection_among_scoped_pos_warehouse_infos(self):
+        own = PosReceiptWarehouseInfo.objects.create(
+            warehouse=self.warehouse, name="一号仓", address="一号仓地址"
+        )
+        common = PosReceiptWarehouseInfo.objects.create(name="通用仓", address="通用仓地址")
+        other_warehouse = Warehouse.objects.create(code="PRINT-OTH", name="其他仓库")
+        other = PosReceiptWarehouseInfo.objects.create(
+            warehouse=other_warehouse, name="其他仓", address="其他仓秘密地址"
+        )
+        inactive = PosReceiptWarehouseInfo.objects.create(
+            warehouse=self.warehouse, name="停用仓", address="停用地址", is_active=False
+        )
+        created = self._create(self._payload())
+        self.assertEqual(created.status_code, 201, created.data)
+        task_id = created.data["task_id"]
+        self._post_for_print(task_id)
+        path = f"/api/pda/pick-tasks/{task_id}/print/"
+        request = self.factory.get(path, {"ticket": "keep-document-ticket"})
+        request.user = self.operator
+        response = pick_task_print(request, task_id)
+        self.assertContains(response, "请选择送货单使用的仓库信息")
+        self.assertContains(response, 'value="keep-document-ticket"')
+        self.assertContains(response, own.address)
+        self.assertContains(response, common.address)
+        self.assertNotContains(response, other.address)
+        self.assertNotContains(response, inactive.address)
+        self.assertNotContains(response, 'onload="window.print()"')
+        for info in (own, common):
+            selected = self.factory.get(path, {"warehouse_info_id": info.pk})
+            selected.user = self.operator
+            response = pick_task_print(selected, task_id)
+            self.assertContains(response, 'onload="window.print()"')
+            self.assertContains(response, f'class="value address-value">{info.address}</span>')
+        for invalid_id in (other.pk, inactive.pk, "not-an-id"):
+            selected = self.factory.get(path, {"warehouse_info_id": invalid_id})
+            selected.user = self.operator
+            self.assertEqual(pick_task_print(selected, task_id).status_code, 400)
+
     def test_create_approves_allocates_and_releases_with_real_actor(self):
         response = self._create(self._payload())
 
@@ -161,7 +301,9 @@ class AssistedOutboundFlowTests(TestCase):
             self.operator.id,
         )
 
-        own_print_request = self.factory.get(f"/api/outbound/pda/pick-tasks/{task.id}/print/")
+        own_print_request = self.factory.get(
+            f"/api/outbound/pda/pick-tasks/{task.id}/print/?kind=pick"
+        )
         own_print_request.user = self.operator
         self.assertEqual(pick_task_print(own_print_request, task.id).status_code, 200)
 
@@ -444,6 +586,10 @@ class AssistedOutboundFlowTests(TestCase):
         self.detail.refresh_from_db()
         self.assertEqual(self.detail.allocated_qty, Decimal("8.0000"))
 
+        self._post_for_print(created.data["task_id"])
+        PosReceiptWarehouseInfo.objects.create(
+            warehouse=self.warehouse, name="打印仓", address="仓储路88号"
+        )
         print_request = self.factory.get(f"/api/pda/pick-tasks/{created.data['task_id']}/print/")
         print_request.user = self.operator
         PrintConfig.objects.create(
@@ -492,7 +638,7 @@ class AssistedOutboundFlowTests(TestCase):
         self.assertContains(print_response, "箱")
         self.assertContains(print_response, "1 箱=4")
         self.assertContains(print_response, "实际收件人张三")
-        self.assertNotContains(print_response, self.customer.name)
+        self.assertContains(print_response, self.customer.name)
 
         replayed = self._create(payload)
         self.assertEqual(replayed.status_code, 200, replayed.data)
@@ -571,6 +717,52 @@ class AssistedOutboundFlowTests(TestCase):
         self.assertEqual(response.status_code, 400, response.data)
         self.assertIn("收件人", str(response.data))
         self.assertEqual(OutboundOrder.objects.count(), 0)
+
+    def test_cash_pickup_allows_blank_or_omitted_recipient_details(self):
+        cash = Customer.objects.create(
+            owner=self.owner, salesperson=self.operator, code="CASH", name="自提散客"
+        )
+        for omit in (False, True):
+            with self.subTest(omit=omit):
+                payload = self._payload(qty="1.000")
+                payload.update(
+                    customer_id=cash.pk,
+                    delivery_method="PICKUP",
+                    src_bill_no=f"CASH-PICKUP-{omit}",
+                )
+                for field in ("contact", "contact_phone", "ship_to"):
+                    if omit:
+                        payload.pop(field)
+                    else:
+                        payload[field] = "  "
+                response = self._create(payload)
+                self.assertEqual(response.status_code, 201, response.data)
+                order = OutboundOrder.objects.get(pk=response.data["order_id"])
+                self.assertEqual(order.delivery_method, "PICKUP")
+                for field in ("contact", "contact_phone", "ship_to"):
+                    self.assertFalse(getattr(order, field))
+                self.assertEqual(order.lines.get().base_qty, Decimal("1.000"))
+                self.assertEqual(self._create(payload).status_code, 200)
+
+    def test_cash_delivery_still_requires_valid_recipient_details(self):
+        cash = Customer.objects.create(
+            owner=self.owner, salesperson=self.operator, code="CASH", name="配送散客"
+        )
+        for method in (None, "OWN_TRUCK", "COURIER"):
+            for field, value in (
+                ("contact", ""),
+                ("contact_phone", ""),
+                ("contact_phone", "abc"),
+                ("ship_to", ""),
+            ):
+                with self.subTest(method=method, field=field, value=value):
+                    payload = self._payload()
+                    payload.update(customer_id=cash.pk, delivery_method=method)
+                    payload[field] = value
+                    response = self._create(payload)
+                    self.assertEqual(response.status_code, 400, response.data)
+                    self.assertIn(field, response.data)
+        self.assertFalse(OutboundOrder.objects.exists())
 
     def test_same_operator_can_submit_review_post_close_and_retry(self):
         created = self._create(self._payload())

@@ -53,7 +53,12 @@ from allapp.strategies.models import (
 class BusinessDataPurgeManifestTests(SimpleTestCase):
     newly_preserved = {
         "baseinfo.ownerwarehousebinding",
+        "baseinfo.ownercustomeraddress",
+        "baseinfo.ownercustomerbinding",
         "billing.billingservicecontract",
+        "inventory.ownerinventoryalertpolicy",
+        "inventory.productinventoryalertpolicy",
+        "outbound.ownerproductmapping",
         "products.product",
         "products.productbarcode",
         "products.productexternalidentifier",
@@ -71,6 +76,22 @@ class BusinessDataPurgeManifestTests(SimpleTestCase):
         "inventory.inventorycostlayer",
         "inventory.inventorylayermovement",
         "inventory.inventorylayerposition",
+        "inbound.arrivalcommand",
+        "inbound.arrivalevent",
+        "inbound.arrivalphoto",
+        "inbound.customerreturn",
+        "inbound.customerreturncommand",
+        "inbound.customerreturnevent",
+        "inbound.customerreturnline",
+        "inbound.customerreturnphoto",
+        "inbound.customerreturnreceipt",
+        "inbound.customerreturnreceiptline",
+        "outbound.assistedownershiptransfer",
+        "outbound.assistedownershiptransferline",
+        "outbound.assistedtransferreservation",
+        "outbound.returnevent",
+        "outbound.returnline",
+        "outbound.returnorder",
         "products.gs1lookupcache",
         "products.gs1providerratelimit",
         "reports.alertcase",
@@ -128,6 +149,10 @@ class BusinessDataPurgeManifestTests(SimpleTestCase):
         self.assertTrue(PRODUCT_MASTER_MODEL_LABELS <= NEW_PURGE_PURGED_MODEL_LABELS)
         self.assertIn("products_product", manifest.purged_tables)
         self.assertIn("products_productpackage", manifest.purged_tables)
+        self.assertIn("inventory_productinventoryalertpolicy", manifest.purged_tables)
+        self.assertIn("outbound_ownerproductmapping", manifest.purged_tables)
+        self.assertIn("inventory_ownerinventoryalertpolicy", manifest.preserved_tables)
+        self.assertIn("baseinfo_ownercustomerbinding", manifest.preserved_tables)
         self.assertIn("products_productcategory", manifest.preserved_tables)
         self.assertIn("accounts_user", manifest.preserved_tables)
 
@@ -424,7 +449,7 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
         self.assertEqual(success.metadata["source"], "purge_business_data_new")
         self.assertEqual(
             success.metadata["manifest_version"],
-            "2026-08-14.2",
+            "2026-10-23.1",
         )
         self.assertTrue(success.metadata["owner_sku_sequence_reset"])
         self.assertEqual(success.after["reset_owner_sku_sequences"], 1)

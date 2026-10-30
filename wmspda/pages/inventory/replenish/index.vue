@@ -28,10 +28,12 @@
 
 <script setup>
 import { ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
 
 const tasks = ref([])
+const pendingOnly = ref(false)
+onLoad(options => { pendingOnly.value = options?.pending === '1' })
 const search = ref('')
 const loading = ref(false)
 
@@ -40,7 +42,7 @@ const triggerName = (value) => ({ MINMAX: '阈值', DEMAND: '出库需求', MANU
 
 async function load() {
   loading.value = true
-  try { tasks.value = rows(await api.replenishmentTasks({ search: search.value })) }
+  try { tasks.value = rows(await api.replenishmentTasks({ search: search.value, ...(pendingOnly.value ? { pending: '1' } : {}) })) }
   finally { loading.value = false }
 }
 

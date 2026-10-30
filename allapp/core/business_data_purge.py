@@ -15,8 +15,8 @@ from django.db import connections, transaction
 
 from allapp.accounts.audit import record_audit_event
 
-PURGE_MANIFEST_VERSION = "2026-08-11.1"
-PURGE_BUSINESS_DATA_NEW_MANIFEST_VERSION = "2026-08-14.2"
+PURGE_MANIFEST_VERSION = "2026-10-23.1"
+PURGE_BUSINESS_DATA_NEW_MANIFEST_VERSION = "2026-10-23.1"
 
 
 PRESERVED_MODEL_LABELS = frozenset(
@@ -45,6 +45,8 @@ PRESERVED_MODEL_LABELS = frozenset(
         "baseinfo.driver",
         "baseinfo.employee",
         "baseinfo.owner",
+        "baseinfo.ownercustomeraddress",
+        "baseinfo.ownercustomerbinding",
         "baseinfo.ownerwarehousebinding",
         "baseinfo.route",
         "baseinfo.supplier",
@@ -64,6 +66,10 @@ PRESERVED_MODEL_LABELS = frozenset(
         "products.productpackage",
         "products.productuom",
         "products.temperaturezone",
+        # Reusable inventory and cross-owner product configuration.
+        "inventory.ownerinventoryalertpolicy",
+        "inventory.productinventoryalertpolicy",
+        "outbound.ownerproductmapping",
         # Reusable billing and strategy definitions.
         "billing.billingrule",
         "billing.billingruletier",
@@ -110,6 +116,16 @@ PURGED_MODEL_LABELS = frozenset(
         "products.gs1lookupcache",
         "products.gs1providerratelimit",
         # Inbound.
+        "inbound.arrivalcommand",
+        "inbound.arrivalevent",
+        "inbound.arrivalphoto",
+        "inbound.customerreturn",
+        "inbound.customerreturncommand",
+        "inbound.customerreturnevent",
+        "inbound.customerreturnline",
+        "inbound.customerreturnphoto",
+        "inbound.customerreturnreceipt",
+        "inbound.customerreturnreceiptline",
         "inbound.inboundorder",
         "inbound.inboundorderline",
         "inbound.inboundorderreturninfo",
@@ -132,10 +148,16 @@ PURGED_MODEL_LABELS = frozenset(
         "inventory.reviewdifference",
         "inventory.reviewdifferenceline",
         # Outbound.
+        "outbound.assistedownershiptransfer",
+        "outbound.assistedownershiptransferline",
+        "outbound.assistedtransferreservation",
         "outbound.orderlinesourcelink",
         "outbound.outboundorder",
         "outbound.outboundorderextra",
         "outbound.outboundorderline",
+        "outbound.returnevent",
+        "outbound.returnline",
+        "outbound.returnorder",
         # Task execution and scans.
         "tasking.adjustlineextra",
         "tasking.adjusttaskextra",
@@ -277,6 +299,8 @@ PURGED_MODEL_LABELS = frozenset(
 
 PRODUCT_MASTER_MODEL_LABELS = frozenset(
     {
+        "inventory.productinventoryalertpolicy",
+        "outbound.ownerproductmapping",
         "products.product",
         "products.productbarcode",
         "products.productexternalidentifier",

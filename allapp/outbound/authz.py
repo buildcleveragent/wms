@@ -105,8 +105,10 @@ def strict_order_queryset(qs: QuerySet, user, *, scope=None) -> QuerySet:
             VIEW_ALL_PERMISSION,
             "outbound.submit_outbound_as_owner_buyers",
             "outbound.approve_outbound_as_owner_manager",
-            "outbound.approve_outbound_as_wh_manager",
         )
+    ) or (
+        UserRoleScope.Role.WAREHOUSE_OPERATOR not in scope.roles
+        and user.has_perm("outbound.approve_outbound_as_wh_manager")
     )
     if can_read_orders:
         scoped = scope.filter_queryset(
@@ -118,13 +120,14 @@ def strict_order_queryset(qs: QuerySet, user, *, scope=None) -> QuerySet:
             scoped = scoped.filter(created_by_id=user.pk)
         return scoped
 
+    # An operator's optional review grant exposes standard review orders, not
+    # unrelated POS/return documents. Independent read grants above still apply.
+    from .warehouse_review import can_review_warehouse_outbound, review_orders
+
+    readable = review_orders(qs) if can_review_warehouse_outbound(user, scope=scope) else qs.none()
     if is_assisted_operator(user):
-        return scope.filter_queryset(
-            qs.filter(processing_mode="WAREHOUSE_ASSISTED"),
-            owner_field="owner_id",
-            warehouse_field="warehouse_id",
-        )
-    return qs.none()
+        readable = readable | qs.filter(processing_mode="WAREHOUSE_ASSISTED")
+    return scope.filter_queryset(readable, owner_field="owner_id", warehouse_field="warehouse_id")
 
 
 def strict_pick_queryset(qs: QuerySet, user) -> QuerySet:

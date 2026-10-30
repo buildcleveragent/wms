@@ -377,6 +377,70 @@ def _canonical_hash(payload):
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def inbound_task_queryset(user, params, action="list"):
+    """Return the authorized inbound queue shared by lists and home reminders."""
+    scope = AccessScope.for_user(user)
+    if not (
+        can_view_receive_tasks(user)
+        and (
+            scope.is_global
+            or scope.roles.intersection(
+                {
+                    UserRoleScope.Role.WAREHOUSE_OPERATOR,
+                    UserRoleScope.Role.WAREHOUSE_MANAGER,
+                }
+            )
+        )
+    ):
+        raise PermissionDenied("没有查看收货或上架任务的权限。")
+    queryset = scoped_receive_tasks(
+        user,
+        WmsTask.objects.filter(
+            task_type__in=(WmsTask.TaskType.RECEIVE, WmsTask.TaskType.PUTAWAY)
+        )
+        .select_related("owner", "warehouse")
+        .prefetch_related(
+            "assignments",
+            "lines__product",
+            "lines__from_location",
+            "lines__to_location",
+            "lines__receivelineextra",
+            "lines__putawaylineextra__to_location",
+        ),
+    )
+    from .arrival_task_scope import ordered_tasks
+
+    queryset = ordered_tasks(queryset)
+    if UserRoleScope.Role.WAREHOUSE_OPERATOR in scope.roles:
+        queryset = queryset.filter(
+            Q(assignments__assignee=user, assignments__finished_at__isnull=True)
+            | Q(assignments__assignee=user, status__in=["COMPLETED", "CANCELLED"])
+            | Q(status="RELEASED", _has_active_assignment=False)
+        )
+    task_type = (params.get("task_type") or "").upper()
+    if task_type:
+        if task_type not in {WmsTask.TaskType.RECEIVE, WmsTask.TaskType.PUTAWAY}:
+            return queryset.none()
+        queryset = queryset.filter(task_type=task_type)
+    statuses = params.getlist("status")
+    if statuses:
+        queryset = queryset.filter(status__in=statuses)
+    elif action == "list":
+        if params.get("history") == "1":
+            queryset = queryset.filter(status__in=["COMPLETED", "CANCELLED"])
+        else:
+            queryset = queryset.filter(status__in=["RELEASED", "IN_PROGRESS"])
+
+    search = (params.get("search") or "").strip()
+    if search:
+        queryset = queryset.filter(
+            Q(task_no__icontains=search)
+            | Q(ref_no__icontains=search)
+            | product_search_q(search, product_field="lines__product_id")
+        ).distinct()
+    return queryset.order_by("-priority", "id")
+
+
 class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
     """JWT PDA entry point for ordered RECEIVE and PUTAWAY work."""
 
@@ -385,67 +449,7 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
     pagination_class = InboundOrderPagination
 
     def get_queryset(self):
-        user = self.request.user
-        scope = AccessScope.for_user(user)
-        if not (
-            can_view_receive_tasks(user)
-            and (
-                scope.is_global
-                or scope.roles.intersection(
-                    {
-                        UserRoleScope.Role.WAREHOUSE_OPERATOR,
-                        UserRoleScope.Role.WAREHOUSE_MANAGER,
-                    }
-                )
-            )
-        ):
-            raise PermissionDenied("没有查看收货或上架任务的权限。")
-        queryset = scoped_receive_tasks(
-            user,
-            WmsTask.objects.filter(
-                task_type__in=(WmsTask.TaskType.RECEIVE, WmsTask.TaskType.PUTAWAY)
-            )
-            .select_related("owner", "warehouse")
-            .prefetch_related(
-                "assignments",
-                "lines__product",
-                "lines__from_location",
-                "lines__to_location",
-                "lines__receivelineextra",
-                "lines__putawaylineextra__to_location",
-            ),
-        )
-        from .arrival_task_scope import ordered_tasks
-
-        queryset = ordered_tasks(queryset)
-        if UserRoleScope.Role.WAREHOUSE_OPERATOR in scope.roles:
-            queryset = queryset.filter(
-                Q(assignments__assignee=user, assignments__finished_at__isnull=True)
-                | Q(assignments__assignee=user, status__in=["COMPLETED", "CANCELLED"])
-                | Q(status="RELEASED", _has_active_assignment=False)
-            )
-        task_type = (self.request.query_params.get("task_type") or "").upper()
-        if task_type:
-            if task_type not in {WmsTask.TaskType.RECEIVE, WmsTask.TaskType.PUTAWAY}:
-                return queryset.none()
-            queryset = queryset.filter(task_type=task_type)
-        statuses = self.request.query_params.getlist("status")
-        if statuses:
-            queryset = queryset.filter(status__in=statuses)
-        elif self.action == "list":
-            if self.request.query_params.get("history") == "1":
-                queryset = queryset.filter(status__in=["COMPLETED", "CANCELLED"])
-            else:
-                queryset = queryset.filter(status__in=["RELEASED", "IN_PROGRESS"])
-
-        search = (self.request.query_params.get("search") or "").strip()
-        if search:
-            queryset = queryset.filter(
-                Q(task_no__icontains=search)
-                | Q(ref_no__icontains=search)
-                | product_search_q(search, product_field="lines__product_id")
-            ).distinct()
-        return queryset.order_by("-priority", "id")
+        return inbound_task_queryset(self.request.user, self.request.query_params, self.action)
 
     def _require_operator(self):
         if not can_operate_inbound_tasks(self.request.user):

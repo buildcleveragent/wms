@@ -162,7 +162,8 @@ class AssistedOutboundHistoryTests(TestCase):
         self.assertEqual(row["id"], order.id)
         self.assertEqual(row["task"]["id"], task.id)
         self.assertEqual(row["business_status"], "READY_TO_PICK")
-        self.assertTrue(row["can_reprint"])
+        self.assertFalse(row["can_reprint"])
+        self.assertTrue(row["can_print_pick"])
 
         cross_warehouse = self._view(
             "history", "/api/outbound/assisted-orders/history/", self.other_operator

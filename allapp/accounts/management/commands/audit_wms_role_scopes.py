@@ -4,10 +4,18 @@ import csv
 from io import StringIO
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.core.management.base import BaseCommand
+from django.db.models import Q
 
 from allapp.accounts.access import AccessScope
-from allapp.accounts.roles import infer_legacy_user_roles, infer_user_group_roles
+from allapp.accounts.models import UserRoleScope
+from allapp.accounts.roles import (
+    ROLE_PERMISSION_MARKERS,
+    infer_legacy_user_roles,
+    infer_user_group_roles,
+)
+from allapp.outbound.warehouse_review import REVIEW_PERMISSION
 
 FIELDS = (
     "user_id",
@@ -74,6 +82,24 @@ class Command(BaseCommand):
         legacy_inferred_roles = infer_legacy_user_roles(user)
         permission_inferred_roles = legacy_inferred_roles - group_roles
         scope = AccessScope.for_user(user)
+        # Explicit operators may be individually authorized to review orders.
+        # Ignore only that marker; unrelated manager grants remain audit risks.
+        manager_role = UserRoleScope.Role.WAREHOUSE_MANAGER
+        if (
+            scope.is_valid
+            and explicit_roles == {UserRoleScope.Role.WAREHOUSE_OPERATOR}
+            and manager_role in permission_inferred_roles
+        ):
+            permissions = {
+                f"{app}.{code}"
+                for app, code in Permission.objects.filter(Q(user=user) | Q(group__user=user))
+                .values_list("content_type__app_label", "codename")
+                .distinct()
+            }
+            if permissions.intersection(ROLE_PERMISSION_MARKERS[manager_role]) == {
+                REVIEW_PERMISSION
+            }:
+                permission_inferred_roles = permission_inferred_roles - {manager_role}
         risk_codes = []
 
         if user.owner_id and user.warehouse_id:

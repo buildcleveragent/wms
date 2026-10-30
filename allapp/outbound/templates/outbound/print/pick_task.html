@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>{{ object.owner.name }}出库单 {{ object.order_no }}</title>
+  <title>{{ object.owner.name }}{{ document_title|default:"送货单" }} {{ object.order_no }}</title>
 
   <style>
     @page { size: {{ print_css.page_size_css }}; margin: {{ print_css.page_margin }}; }
@@ -18,9 +18,34 @@
     .print-sheet {
       box-sizing: border-box;
       width: {{ print_css.sheet_width }};
+      /* 内部留白不依赖打印对话框页边距，避开连续纸的顶部盲区和两侧孔位。 */
+      max-width: min(100%, 231.3mm);
+      margin-inline: auto;
       padding: {{ print_css.sheet_padding_top }} {{ print_css.sheet_padding_right }}
         {{ print_css.sheet_padding_bottom }} {{ print_css.sheet_padding_left }};
     }
+    .print-content { padding: 5mm 10mm 0; }
+    .print-content--delivery {
+      /* LQ-635KII 实打校准：13mm 档起完整，另留 0.5mm 边框容差。
+         9.5in 连续纸居中的纸面容器已有 5mm 外留白，内部补足至 8.5mm。
+         右侧沿用原内边距，不随左侧校准一起移动。 */
+      --delivery-left-inset: max(1px, calc(10mm - 3 * {{ print_css.meta_font_size }}));
+      --delivery-left-clearance: max(0px, calc(8.5mm - var(--delivery-left-inset)));
+      padding-left: calc(var(--delivery-left-inset) + var(--delivery-left-clearance));
+      padding-right: calc(20mm - var(--delivery-left-inset));
+    }
+
+    @media screen {
+      body { width: 9.5in; max-width: 100%; margin-inline: auto; }
+    }
+    @media print {
+      .print-controls { display: none; }
+      thead { display: table-header-group; }
+      tr, .sign, .copies, .document-header { break-inside: avoid; }
+    }
+    .print-controls { padding: 12px; margin-bottom: 12px; background: #f2f4f7; }
+    .print-controls select { max-width: 100%; padding: 6px; }
+    .print-controls button { margin-left: 8px; padding: 6px 12px; }
 
     /* 标题 */
     .title {
@@ -51,7 +76,7 @@
       gap: 14px;
       margin-bottom: 6px;
     }
-    .meta-col { width: 49%; }
+    .meta-col { flex: 1; min-width: 0; }
     .meta-line {
       display: flex;
       gap: 6px;
@@ -61,11 +86,19 @@
     .label { min-width: 70px; }
     .value {
       flex: 1;
+      min-width: 0;
       min-height: 18px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+
+    .document-header { break-inside: avoid; font-size: {{ print_css.meta_font_size }}; line-height: {{ print_css.meta_line_height }}; }
+    .document-header .meta-line { margin: 0; }
+    .document-header .title { margin: 0 0 3px; }
+    .document-header .top-row { margin-bottom: 2px; }
+    .document-header .value { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+    .address-value { white-space: normal; overflow-wrap: anywhere; }
 
     /* 只有货物列表表格有框线 */
     table.goods {
@@ -82,7 +115,7 @@
       vertical-align: middle;
 
       /* 固定行高，避免换行撑高 */
-      height: 28px;
+      height: 18px;
       line-height: {{ print_css.table_line_height }};
     }
     table.goods th {
@@ -101,6 +134,7 @@
       text-overflow: ellipsis;
     }
     .name-cell { text-align: left !important; }
+    .pick-product { overflow-wrap: anywhere; }
     .note-cell { text-align: left !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .t-right { text-align: right !important; }
 
@@ -109,87 +143,76 @@
       font-size: {{ print_css.footer_font_size }};
       line-height: {{ print_css.footer_line_height }};
     }
-    .sign { margin-top: 10px; }
+    .sign { margin-top: 6px; }
     .sign-row {
       display: flex;
       justify-content: space-between;
       gap: 16px;
-      margin: 6px 0;
+      margin: 4px 0;
     }
-    .sign-item { flex: 1; white-space: nowrap; }
+    .sign-item { flex: 1; min-width: 0; display: flex; align-items: end; white-space: nowrap; }
     .line {
       display: inline-block;
       border-bottom: 1px solid #000;
-      min-width: 120px;
+      width: 120px;
+      max-width: 100%;
+      min-width: 0;
+      flex: 0 1 120px;
       height: 16px;
       vertical-align: bottom;
     }
-    .line.long { min-width: 260px; }
+    .line.long { width: 260px; flex-basis: 260px; }
 
     .copies {
-      margin-top: 10px;
+      margin-top: 6px;
       display: flex;
       justify-content: space-between;
     }
   </style>
 </head>
 
-<body onload="window.print()">
+<body{% if auto_print %} onload="window.print()"{% endif %}>
+{% if warehouse_infos|length > 1 %}
+<form class="print-controls" method="get">
+  {% if request.GET.ticket %}<input type="hidden" name="ticket" value="{{ request.GET.ticket }}">{% endif %}
+  <input type="hidden" name="kind" value="{{ kind }}">
+  <label for="warehouse-info">仓库信息：</label>
+  <select id="warehouse-info" name="warehouse_info_id" required>
+    <option value="">请选择送货单使用的仓库信息</option>
+    {% for info in warehouse_infos %}
+    <option value="{{ info.pk }}"{% if info.pk == selected_warehouse_info.pk %} selected{% endif %}>{{ info.name }} — {{ info.address }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">确认并打印</button>
+</form>
+{% endif %}
+{% if document_ready != False %}
+<div class="print-controls">
+  <button type="button" onclick="window.print()">重新打印</button>
+</div>
 <div class="print-sheet">
+<div class="print-content{% if kind != 'pick' %} print-content--delivery{% endif %}">
 
-  <!-- 标题 -->
-  <div class="title"><span class="company-name">金桥融通仓</span><span class="document-title">出库单</span></div>
-
-  <!-- 送货单号（居中） -->
-  <div class="top-row">
-    <div class="center">送货单号　{{ object.order_no }}</div>
-  </div>
-
-  <!-- 收发信息（无框线，两列） -->
-  <div class="meta">
-    <div class="meta-col">
-      <div class="meta-line">
-        <span class="label">收货人：</span>
-        <span class="value">{{ receiver_name|default_if_none:"" }}</span>
-      </div>
-      <div class="meta-line">
-        <span class="label">联系电话：</span>
-        <span class="value">{{ receiver_phone|default_if_none:"" }}</span>
-      </div>
-      <div class="meta-line">
-        <span class="label">地址：</span>
-        <span class="value">{{ receiver_address|default_if_none:"" }}</span>
-      </div>
-    </div>
-
-    <div class="meta-col">
-      <div class="meta-line">
-        <span class="label">发货人：</span>
-        <span class="value">{{ sender_name|default_if_none:"" }}</span>
-      </div>
-      <div class="meta-line">
-        <span class="label">联系电话：</span>
-        <span class="value">{{ sender_phone|default_if_none:"" }}</span>
-      </div>
-      <div class="meta-line">
-        <span class="label">发货时间：</span>
-        <span class="value">{{ ship_time|date:"Y年n月j日" }}</span>
-      </div>
-    </div>
-  </div>
-
+  {% include "outbound/print/_header.html" %}
+  {% if kind == 'pick' %}
+  <table class="goods">
+    <thead><tr><th>序号</th><th style="width:25%">商品／规格</th><th>库位</th><th>批次</th><th>单位</th><th>应拣数量</th><th>实拣填写</th></tr></thead>
+    <tbody>{% for line in lines %}<tr><td>{{ forloop.counter }}</td><td class="name-cell pick-product">{{ line.product.name }}{% if line.product.spec %}<br>{{ line.product.spec }}{% endif %}</td><td>{{ line.location.code }}</td><td>{{ line.lot_no|default:"—" }}</td><td>{{ line.base_uom.name|default:line.product.base_uom.name }}</td><td>{{ line.base_qty|floatformat:"-4" }}</td><td></td></tr>{% endfor %}</tbody>
+  </table>
+  <div class="sign">拣货人：________________　日期：________________</div>
+  {% else %}
   <!-- 货物列表（唯一有框线区域） -->
   <table class="goods">
     <thead>
       <tr>
-        <th style="width:36px;">序号</th>
-        <th>货物名称</th>
-        <th style="width:110px;">包装规格</th>
-        <th style="width:52px;">单位</th>
-        <th style="width:70px;">数量</th>
-        <th style="width:72px;">单价</th>
-        <th style="width:86px;">金额</th>
-        <th style="width:80px;">备注</th>
+        <th style="width:5%;">序号</th>
+        <th style="width:33%;">货物名称</th>
+        <th style="width:14%;">包装规格</th>
+        <th style="width:7%;">单位</th>
+        <th style="width:9%;">数量</th>
+        <th style="width:9%;">单价</th>
+        <th style="width:11%;">金额</th>
+        <th style="width:12%;">备注</th>
       </tr>
     </thead>
 
@@ -204,7 +227,7 @@
           {% if line.product.spec %}{{ line.product.spec }}{% endif %}
           {% if line.aux_uom %}
             {% if line.product.spec %}<br>{% endif %}
-            {{ line.aux_qty|floatformat:"-3" }} {{ line.aux_uom.uom.name }}
+            {{ line.aux_qty|floatformat:"-4" }} {{ line.aux_uom.uom.name }}
             （1 {{ line.aux_uom.uom.name }}={{ line.ratio|floatformat:"-3" }} {{ line.base_uom.name }}）
           {% endif %}
         </td>
@@ -214,7 +237,7 @@
         </td>
 
         <!-- 数量：整数不显示小数；有小数保留最多3位并去尾0 -->
-        <td class="nowrap">{{ line.base_qty|floatformat:"-3" }}</td>
+        <td class="nowrap">{{ line.base_qty|floatformat:"-4" }}</td>
 
         <td class="nowrap">{% if line.is_priced != False %}{{ line.base_price|floatformat:2 }}{% endif %}</td>
 
@@ -237,7 +260,7 @@
         </td>
 
         <!-- 数量合计落在“数量”列 -->
-        <td class="nowrap"><b>{{ total_qty|floatformat:"-3" }}</b></td>
+        <td class="nowrap"><b>{{ total_qty|floatformat:"-4" }}</b></td>
 
         <!-- 单价列按图为空 -->
         <td></td>
@@ -272,7 +295,63 @@
     <div>第三联：客户</div>
   </div>
 
+  {% endif %}
 </div>
+</div>
+{% else %}<p class="print-controls">请选择有效的仓库地址后生成正式送货单。</p>{% endif %}
 
+<script>
+  (() => {
+    const content = document.querySelector('.print-content--delivery');
+    const table = content && content.querySelector('table.goods');
+    if (!table) return;
+
+    const columns = document.createElement('colgroup');
+    const cells = Array.from(table.tHead.rows[0].cells);
+    const originalWidths = cells.map(cell => cell.style.width);
+    const fitDeliveryColumns = () => {
+      // 从校准前的列宽计算，避免重打或窗口缩放时累计收窄。
+      columns.remove();
+      table.style.width = '';
+      cells.forEach((cell, index) => { cell.style.width = originalWidths[index]; });
+      content.style.setProperty('--delivery-left-clearance', '0px');
+      const widths = cells.map(cell => cell.getBoundingClientRect().width);
+      const originalTableWidth = table.getBoundingClientRect().width;
+      const charWidth = parseFloat(getComputedStyle(content.querySelector('.top-row')).fontSize);
+      content.style.removeProperty('--delivery-left-clearance');
+      const clearance = originalTableWidth - table.getBoundingClientRect().width;
+      // 保留左侧校准位置，货物名称额外加宽四个表格正文字宽；其他列只向右平移。
+      const nameExpansion = 4 * parseFloat(getComputedStyle(table).fontSize);
+      widths[1] = Math.max(2 * charWidth, widths[1] - clearance) + nameExpansion;
+      const last = widths.length - 1;
+      // 备注保留三个汉字及内边距、边框，不挤占货物名称。
+      const remarksStyle = getComputedStyle(cells[last]);
+      const remarksWidth = 3 * Math.max(
+        parseFloat(remarksStyle.fontSize), parseFloat(getComputedStyle(table).fontSize)
+      ) + parseFloat(remarksStyle.paddingLeft) + parseFloat(remarksStyle.paddingRight)
+        + parseFloat(remarksStyle.borderLeftWidth) + parseFloat(remarksStyle.borderRightWidth);
+      const reduction = Math.max(0, widths[last] - remarksWidth);
+      const columnsWidth = widths.reduce((sum, width) => sum + width, 0) - reduction;
+      columns.replaceChildren(...widths.map((width, index) => {
+        const column = document.createElement('col');
+        // 备注保持实际字宽，防止自定义窄纸在分页时再次按比例压窄标题。
+        column.style.width = index === last
+          ? `${width - reduction}px`
+          : `${100 * width / columnsWidth}%`;
+        return column;
+      }));
+      cells.forEach(cell => { cell.style.width = 'auto'; });
+      table.prepend(columns);
+      // 使用流式宽度，让真正分页时的纸张宽度优先于屏幕窗口宽度。
+      table.style.width = `calc(100% - ${reduction}px + ${nameExpansion}px)`;
+    };
+
+    fitDeliveryColumns();
+    document.fonts.ready.then(fitDeliveryColumns);
+    window.addEventListener('beforeprint', fitDeliveryColumns);
+    window.addEventListener('afterprint', fitDeliveryColumns);
+    window.addEventListener('resize', fitDeliveryColumns);
+  })();
+</script>
 </body>
 </html>

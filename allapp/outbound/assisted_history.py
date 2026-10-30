@@ -318,16 +318,32 @@ def _iso_datetime(value):
     return value.isoformat()
 
 
-def serialize_history_order(order):
+def serialize_history_order(order, user=None):
     status_value = order.business_status
     valid_task = bool(
         order.history_task_count == 1
         and order.history_task_id
         and order.history_task_owner_id == order.owner_id
     )
-    can_reprint = valid_task and status_value not in REPRINT_DISABLED_STATUSES
+    can_access_task = valid_task
+    if valid_task and user is not None:
+        from .print_documents import document_queryset
+
+        can_access_task = document_queryset(
+            WmsTask.objects.filter(pk=order.history_task_id), user
+        ).exists()
+    can_print_pick = can_access_task and status_value not in REPRINT_DISABLED_STATUSES
+    from .print_documents import completed_documents
+
+    can_reprint = (
+        can_access_task
+        and status_value == "COMPLETED"
+        and completed_documents(WmsTask.objects.filter(pk=order.history_task_id)).exists()
+    )
     if can_reprint:
         unavailable_reason = ""
+    elif can_print_pick:
+        unavailable_reason = "复核并成功过账后可补打送货单。"
     elif status_value == "CANCELLED":
         unavailable_reason = "已取消的出库单不能重新打印。"
     elif order.history_task_count == 0:
@@ -389,7 +405,8 @@ def serialize_history_order(order):
         ),
         "business_status": status_value,
         "business_status_label": BUSINESS_STATUS_LABELS[status_value],
-        "can_reprint": can_reprint,
+        "can_reprint": bool(can_reprint),
+        "can_print_pick": can_print_pick,
         "reprint_unavailable_reason": unavailable_reason,
     }
 

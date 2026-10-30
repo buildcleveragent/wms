@@ -249,9 +249,13 @@ class TaskAndPrintBoundaryTests(TestCase):
             base_uom=self.base_uom,
             line_no=1,
         )
+        tasks[1].source_model = "OutboundOrder"
+        tasks[1].source_pk = str(order.pk)
+        tasks[1].save(update_fields=["source_model", "source_pk"])
         WmsTaskLine.objects.create(
             task=tasks[1],
             product=self.product,
+            from_location=self.location,
             qty_plan=1,
             src_model="OutboundOrderLine",
             src_id=line.pk,
@@ -263,12 +267,16 @@ class TaskAndPrintBoundaryTests(TestCase):
         client = Client()
         tickets = {url: issue_print_ticket(user, url) for url in urls}
         for url in urls:
-            self.assertEqual(client.get(url, {"ticket": tickets[url]}).status_code, 200)
+            self.assertEqual(
+                client.get(url, {"ticket": tickets[url], "kind": "pick"}).status_code, 200
+            )
             self.assertEqual(client.get(url, {"token": token}).status_code, 401)
         user.set_password("Changed-print-test-password!")
         user.save(update_fields=["password"])
         for url in urls:
-            self.assertEqual(client.get(url, {"ticket": tickets[url]}).status_code, 401)
+            self.assertEqual(
+                client.get(url, {"ticket": tickets[url], "kind": "pick"}).status_code, 401
+            )
             self.assertEqual(client.get(url, {"token": token}).status_code, 401)
             self.assertEqual(client.get(url, {"access": token}).status_code, 401)
 

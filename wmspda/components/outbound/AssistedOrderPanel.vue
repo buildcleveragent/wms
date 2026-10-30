@@ -138,19 +138,19 @@
       <input
         v-model="draft.form.contact"
         class="input recipient-input"
-        placeholder="收件人（散客必填）"
+        :placeholder="recipientRequired ? '收件人（散客必填）' : '收件人（可选）'"
         :disabled="submissionLocked"
       />
       <input
         v-model="draft.form.contact_phone"
         class="input recipient-input"
-        placeholder="联系电话（散客必填）"
+        :placeholder="recipientRequired ? '联系电话（散客必填）' : '联系电话（可选）'"
         :disabled="submissionLocked"
       />
       <textarea
         v-model="draft.form.ship_to"
         class="textarea"
-        placeholder="收货地址（散客必填）"
+        :placeholder="recipientRequired ? '收货地址（散客必填）' : '收货地址（可选）'"
         :disabled="submissionLocked"
       />
       <textarea
@@ -178,8 +178,8 @@
             color="#1677ff"
           />
           <view>
-            <view class="print-title">创建后打印出库单</view>
-            <view class="print-hint">不勾选则直接进入拣货任务，可稍后在任务列表打印出库单</view>
+            <view class="print-title">创建后打印送货单</view>
+            <view class="print-hint">复写纸 9.5 × 3⅔ 英寸；取消勾选后可在任务列表补打送货单</view>
           </view>
         </label>
       </checkbox-group>
@@ -255,6 +255,9 @@ const submitButtonText = computed(() => {
 })
 const isCashCustomer = computed(
   () => String(draft.customer?.code || '').trim().toUpperCase() === 'CASH',
+)
+const recipientRequired = computed(
+  () => isCashCustomer.value && draft.form.delivery_method !== 'PICKUP',
 )
 const canSubmit = computed(() => {
   if (!draft.owner?.id || !draft.customer?.id || !draft.items.length) return false
@@ -433,7 +436,7 @@ function validateBeforeSubmit() {
     return false
   }
 
-  if (isCashCustomer.value) {
+  if (recipientRequired.value) {
     if (!String(draft.form.contact || '').trim()) {
       uni.showToast({ title: '请填写收件人', icon: 'none' })
       return false

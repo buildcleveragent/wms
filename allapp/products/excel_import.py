@@ -12,6 +12,7 @@ from typing import Any
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -46,7 +47,7 @@ MAX_XLSX_UNCOMPRESSED_SIZE = 50 * 1024 * 1024
 MAX_XLSX_ENTRIES = 300
 IMPORT_SHEET_NAME = "商品导入"
 PACKAGE_SHEET_NAME = "商品包装"
-TEMPLATE_VERSION = "11"
+TEMPLATE_VERSION = "12"
 
 
 # Freeze legacy layouts independently of the current template column order.
@@ -110,6 +111,8 @@ V10_PRODUCT_HEADERS = (
 PRODUCT_HEADERS = tuple(
     "包装单位" if header == "包装单位编码" else header for header in V10_PRODUCT_HEADERS
 )
+# Keep code-based headers for archive exports and legacy import callers.
+OWNER_NAME_PRODUCT_HEADERS = ("货主名称",) + PRODUCT_HEADERS[1:]
 
 # Backwards-compatible public constant used by legacy v2 import callers/tests.
 HEADERS = PRODUCT_HEADERS
@@ -243,6 +246,7 @@ class ParsedProductRow:
     carton_barcode: str | None = None
     carton_package_uom_code: str | None = None
     receipt_qty: Decimal = Decimal("0")
+    is_existing: bool = False
 
 
 @dataclass
@@ -349,12 +353,41 @@ def build_product_import_template(user) -> bytes:
     _write_reference_sheet(refs, owners, uoms, categories, brands)
     _write_meta_sheet(meta)
     _add_template_validations(workbook, data_sheet, package_sheet, owners, uoms, categories, brands)
+    _use_owner_names_in_template(workbook)
     meta.sheet_state = "hidden"
     workbook.active = workbook.sheetnames.index(IMPORT_SHEET_NAME)
 
     output = io.BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+def _use_owner_names_in_template(workbook) -> None:
+    """Present owner names in new templates while keeping archive exports compatible."""
+    for sheet_name in (IMPORT_SHEET_NAME, PACKAGE_SHEET_NAME):
+        sheet = workbook[sheet_name]
+        sheet["A1"] = "货主名称"
+        sheet["A1"].comment = Comment("请选择货主名称，系统会自动对应货主编码。", "WMS")
+        for validation in sheet.data_validations.dataValidation:
+            if validation.formula1 == "ProductImportOwnerCodes":
+                validation.formula1 = "ProductImportOwnerNames"
+    if "ProductImportOwnerCodes" in workbook.defined_names:
+        codes = workbook.defined_names.pop("ProductImportOwnerCodes")
+        workbook.defined_names.add(
+            DefinedName("ProductImportOwnerNames", attr_text=codes.attr_text.replace("$A$", "$B$"))
+        )
+    workbook["基础资料"].column_dimensions["A"].hidden = True
+    instructions = workbook["填写说明"]
+    for row in instructions.iter_rows():
+        label = row[0].value
+        if label == "货主规则":
+            row[1].value = "请选择当前账号有权使用的货主名称，系统自动对应货主编码，无需填写编码。"
+        elif label in {"必填字段", "包装必填字段"}:
+            row[1].value = row[1].value.replace("货主编码", "货主名称")
+        elif label == "货主编码":
+            row[0].value = "货主名称"
+        elif label == "OWNER-001":
+            row[0].value = "示例货主"
 
 
 def _write_instruction_sheet(sheet) -> None:
@@ -397,6 +430,9 @@ def _write_instruction_sheet(sheet) -> None:
             _joined_text(
                 "基本单位数量留空或填 0 时仅建档；填写正数时，上传页必须选择仓库，",
                 "系统使用该仓库的默认收货库位立即完成无订单收货。",
+                "已有商品补填数量时沿用原编号和 SKU，不修改档案。",
+                "编码与标准贸易条码都为空时，按同货主下唯一的同名同规格商品匹配；",
+                "有多个候选或资料不一致时，请填写已有货主商品编码并核对资料。",
             ),
         ]
     )
@@ -466,6 +502,7 @@ def _write_instruction_sheet(sheet) -> None:
             _joined_text(
                 "货主商品编码、条码或外部系统商品编码与已有商品冲突，",
                 "或 Excel 内部重复，都会使整批不写入。",
+                "填写正数数量且资料一致的已有商品仅收货，不重复建档。",
             ),
         ]
     )
@@ -689,6 +726,7 @@ class ProductExcelImporter:
         self.skipped: list[dict[str, Any]] = []
         self.total_rows = 0
         self._owner_cache: dict[str, Owner | None] = {}
+        self._owner_name_codes: dict[str, str | None] = {}
         self._uom_cache: dict[str, ProductUom | None] = {}
         self._package_uom_cache: dict[tuple[bool, str], tuple[ProductUom | None, str | None]] = {}
         self._category_cache: dict[str, ProductCategory | None] = {}
@@ -697,6 +735,7 @@ class ProductExcelImporter:
         self.created_uoms: list[ProductUom] = []
         self.receipts: list[dict[str, Any]] = []
         self.received_product_count = 0
+        self.reused: list[dict[str, Any]] = []
         self._active_sheet = IMPORT_SHEET_NAME
 
     def import_file(self, uploaded_file) -> dict[str, Any]:
@@ -825,13 +864,14 @@ class ProductExcelImporter:
         if duplicates:
             raise ProductImportFileError(f"Excel 表头重复：{', '.join(duplicates)}。")
         if tuple(raw_headers) not in (
+            OWNER_NAME_PRODUCT_HEADERS,
             PRODUCT_HEADERS,
             V10_PRODUCT_HEADERS,
             V9_PRODUCT_HEADERS,
             V8_PRODUCT_HEADERS,
         ):
             raise ProductImportFileError(
-                "Excel 商品导入表头或列顺序与 v11 模板不一致（兼容原始 v8、v9、v10 模板）。"
+                "Excel 商品导入表头或列顺序与 v12 模板不一致（兼容原始 v8、v9、v10、v11 模板）。"
                 "请重新下载最新商品批量导入模板。"
             )
 
@@ -858,16 +898,32 @@ class ProductExcelImporter:
             if formula_header:
                 self._error(row_number, formula_header, "业务单元格不能使用公式。")
                 continue
-            raw_rows.append((row_number, values))
+            if self._normalize_owner_name(row_number, values):
+                raw_rows.append((row_number, values))
         if self.total_rows == 0:
             raise ProductImportFileError("“商品导入”工作表没有数据行。")
 
+        # Serialize matching and creation for each owner, including rows without identifiers.
+        owner_codes = {_text(values.get("货主编码")).upper() for _, values in raw_rows}
+        list(
+            _owner_queryset_for_access(self.access)
+            .filter(code__in=owner_codes)
+            .order_by("pk")
+            .select_for_update()
+        )
         parsed: list[ParsedProductRow] = []
+        seen_products: set[int] = set()
         seen_identifiers: dict[tuple[object, str], dict[str, Any]] = {}
         for row_number, values in raw_rows:
             row = self._parse_row(row_number, values)
             self._check_file_duplicates(row_number, values, seen_identifiers)
             if row is not None:
+                if row.is_existing:
+                    if row.product.pk in seen_products:
+                        self._error(
+                            row_number, "货主商品编码", "同一已有商品不能在一份文件中重复收货。"
+                        )
+                    seen_products.add(row.product.pk)
                 parsed.append(row)
         package_rows: list[ParsedPackageRow] = []
         if PACKAGE_SHEET_NAME in workbook.sheetnames:
@@ -927,8 +983,11 @@ class ProductExcelImporter:
             )
         if "包装单位" in nonempty_headers and "包装单位编码" in nonempty_headers:
             raise ProductImportFileError("“商品包装”不能同时包含“包装单位”和“包装单位编码”。")
+        if "货主名称" in nonempty_headers and "货主编码" in nonempty_headers:
+            raise ProductImportFileError("“商品包装”不能同时包含“货主名称”和“货主编码”。")
         normalized_headers = [
-            "包装单位" if header == "包装单位编码" else header for header in nonempty_headers
+            {"包装单位编码": "包装单位", "货主名称": "货主编码"}.get(header, header)
+            for header in nonempty_headers
         ]
         unknown = [header for header in normalized_headers if header not in PACKAGE_HEADERS]
         if unknown:
@@ -979,6 +1038,8 @@ class ProductExcelImporter:
                     "业务单元格不能使用公式。",
                     sheet=PACKAGE_SHEET_NAME,
                 )
+                continue
+            if not self._normalize_owner_name(row_number, values):
                 continue
             parsed_row = self._parse_package_row(
                 row_number,
@@ -1136,7 +1197,9 @@ class ProductExcelImporter:
                     )
                 elif flag is True:
                     default_rows[default_key] = row_number
-        if len(self.errors) == before_error_count and product is not None:
+        if len(self.errors) == before_error_count and product is not None and product.pk:
+            self._validate_existing_package(row_number, product, package_data)
+        elif len(self.errors) == before_error_count and product is not None:
             package = ProductPackage(product=product, **package_data)
             try:
                 package.full_clean(exclude={"product"}, validate_constraints=False)
@@ -1161,18 +1224,6 @@ class ProductExcelImporter:
         code = supplied_code or gtin or ""
         derive_code_from_owner_id = not supplied_code and not _text(values.get("标准贸易条码"))
         if owner is None:
-            return None
-
-        existing = (
-            Product.all_objects.filter(owner=owner, code__iexact=code).first() if code else None
-        )
-        if existing:
-            message = (
-                "货主商品编码命中已软删除商品，请恢复旧商品或更换编号；整批不会写入。"
-                if existing.is_deleted
-                else "货主商品编码已存在；整批不会写入。"
-            )
-            self._error(row_number, "货主商品编码", message)
             return None
 
         name = self._required_text(
@@ -1321,6 +1372,10 @@ class ProductExcelImporter:
             product.fefo_required = False
 
         receipt_qty = self._receipt_quantity(row_number, values.get("基本单位数量"), base_uom)
+        existing = self._match_existing_product(row_number, product, values, receipt_qty)
+        if existing is not None:
+            product = existing
+            derive_code_from_owner_id = False
         if receipt_qty > 0:
             if not product.is_active:
                 self._error(row_number, "基本单位数量", "自动收货的商品必须启用。")
@@ -1382,19 +1437,20 @@ class ProductExcelImporter:
                     ),
                 }
 
-        if len(self.errors) == before_error_count:
+        if len(self.errors) == before_error_count and not product.pk:
             try:
                 product.full_clean(exclude={"code", "sku"} if derive_code_from_owner_id else None)
             except DjangoValidationError as exc:
                 self._add_validation_errors(row_number, exc)
         if len(self.errors) == before_error_count and package_data:
-            package = ProductPackage(product=product, **package_data)
-            try:
-                package.full_clean(
-                    exclude={"product"},
-                )
-            except DjangoValidationError as exc:
-                self._add_validation_errors(row_number, exc)
+            if product.pk:
+                self._validate_existing_package(row_number, product, package_data)
+            else:
+                package = ProductPackage(product=product, **package_data)
+                try:
+                    package.full_clean(exclude={"product"})
+                except DjangoValidationError as exc:
+                    self._add_validation_errors(row_number, exc)
         if len(self.errors) != before_error_count:
             return None
         return ParsedProductRow(
@@ -1404,7 +1460,103 @@ class ProductExcelImporter:
             carton_barcode=carton_barcode,
             carton_package_uom_code=carton_package_uom_code,
             receipt_qty=receipt_qty,
+            is_existing=bool(product.pk),
         )
+
+    def _match_existing_product(self, row_number, candidate, values, receipt_qty):
+        """Reuse one existing archive for receipt; never rewrite its master data."""
+        queryset = Product.all_objects.select_for_update().filter(owner_id=candidate.owner_id)
+        if candidate.code:
+            matches = list(queryset.filter(code__iexact=candidate.code)[:2])
+            if not matches and not _text(values.get("货主商品编码")) and candidate.gtin:
+                matches = list(queryset.filter(gtin=candidate.gtin)[:2])
+        elif receipt_qty > 0:
+            specs = Q(spec=candidate.spec) if candidate.spec else Q(spec="") | Q(spec__isnull=True)
+            matches = list(queryset.filter(specs, name=candidate.name)[:2])
+        else:
+            return None
+        if not matches:
+            return None
+        if len(matches) != 1:
+            self._error(
+                row_number, "货主商品编码", "存在多个同名同规格商品，请填写已有货主商品编码。"
+            )
+            return None
+        existing = matches[0]
+        if existing.is_deleted:
+            self._error(
+                row_number,
+                "货主商品编码",
+                "命中已软删除商品，请恢复旧商品或更换编号；整批不会写入。",
+            )
+            return None
+        if receipt_qty <= 0:
+            self._error(row_number, "货主商品编码", "货主商品编码已存在；整批不会写入。")
+            return None
+        for field in Product._meta.concrete_fields:
+            label = MODEL_FIELD_LABELS.get(field.name)
+            if field.name in {"owner", "code", "sku", "carton_package", "carton_barcode"}:
+                continue
+            if not label or not _text(values.get(label)):
+                continue
+            supplied = getattr(candidate, field.attname)
+            stored = getattr(existing, field.attname)
+            if supplied != stored and not (supplied in (None, "") and stored in (None, "")):
+                self._error(
+                    row_number,
+                    label,
+                    f"与已有商品 {existing.code} 不一致；补数量导入仅收货，不修改商品档案。",
+                )
+        carton_barcode = _text(values.get("箱码"))
+        if carton_barcode and (
+            carton_barcode != existing.carton_barcode
+            or not existing.carton_package_id
+            or _text(values.get("箱码对应包装单位编码")).upper()
+            != existing.carton_package.uom.code.upper()
+        ):
+            self._error(row_number, "箱码", "与已有商品的箱码或包装绑定不一致。")
+        return existing
+
+    def _validate_existing_package(self, row_number, product, package_data):
+        package = (
+            ProductPackage.objects.select_for_update()
+            .filter(product=product, uom=package_data["uom"], is_active=True)
+            .first()
+        )
+        if (
+            package is None
+            or package.qty_in_base != package_data["qty_in_base"]
+            or (package_data.get("barcode") and package.barcode != package_data["barcode"])
+        ):
+            self._error(
+                row_number, "包装单位", "包装或换算数量与已有商品不一致；补数量导入不修改包装档案。"
+            )
+
+    def _normalize_owner_name(self, row_number: int, values: dict[str, Any]) -> bool:
+        """Resolve scoped owner names before code-based validation and locking."""
+        if "货主名称" not in values:
+            return True
+        name = _text(values["货主名称"])
+        if not name:
+            self._error(row_number, "货主名称", "不能为空。")
+            return False
+        if name not in self._owner_name_codes:
+            codes = list(
+                _owner_queryset_for_access(self.access)
+                .filter(name__iexact=name)
+                .values_list("code", flat=True)[:2]
+            )
+            self._owner_name_codes[name] = codes[0] if len(codes) == 1 else None
+        code = self._owner_name_codes[name]
+        if code is None:
+            self._error(
+                row_number,
+                "货主名称",
+                f"无法匹配可用的货主名称“{name}”，请从最新模板中选择有权使用的货主。",
+            )
+            return False
+        values["货主编码"] = code
+        return True
 
     def _resolve_owner(self, row_number: int, value) -> Owner | None:
         code = _text(value).upper()
@@ -1758,8 +1910,27 @@ class ProductExcelImporter:
         with transaction.atomic():
             product_by_key = {}
             package_by_key = {}
+            existing_keys = {
+                (row.product.owner.code.upper(), row.product.code.upper())
+                for row in rows
+                if row.is_existing
+            }
             for row in rows:
                 product = row.product
+                if row.is_existing:
+                    product_by_key[(product.owner.code.upper(), product.code.upper())] = product
+                    self.reused.append(
+                        {
+                            "row": row.row_number,
+                            "product_id": product.pk,
+                            "owner_code": product.owner.code,
+                            "code": product.code,
+                            "sku": product.sku,
+                            "name": product.name,
+                            "received_qty": str(row.receipt_qty),
+                        }
+                    )
+                    continue
                 product.full_clean(
                     exclude=(
                         {"code", "sku"}
@@ -1791,11 +1962,14 @@ class ProductExcelImporter:
                         "product_id": product.pk,
                         "owner_code": product.owner.code,
                         "code": product.code,
+                        "sku": product.sku,
                         "name": product.name,
                         "received_qty": str(row.receipt_qty),
                     }
                 )
             for row in package_rows:
+                if row.product_key in existing_keys:
+                    continue
                 package = ProductPackage(
                     product=product_by_key[row.product_key],
                     created_by=self.user,
@@ -1806,7 +1980,7 @@ class ProductExcelImporter:
                 package.save()
                 package_by_key[(*row.product_key, package.uom.code.upper())] = package
             for row in rows:
-                if not row.carton_barcode:
+                if not row.carton_barcode or row.is_existing:
                     continue
                 product = row.product
                 package = package_by_key[
@@ -1875,6 +2049,7 @@ class ProductExcelImporter:
                     "filename": Path(filename).name,
                     "total_rows": self.total_rows,
                     "created_count": len(created),
+                    "reused_count": len(self.reused),
                     "package_count": len(package_rows)
                     + sum(bool(row.package_data) for row in rows),
                     "skipped_count": len(self.skipped),
@@ -1897,13 +2072,15 @@ class ProductExcelImporter:
         return created
 
     def _result(self, *, created):
-        committed = bool(created) and not self.errors
+        committed = bool(created or self.reused) and not self.errors
         return {
             "total_rows": self.total_rows,
             "created_count": len(created),
             "skipped_count": len(self.skipped),
             "error_count": len(self.errors),
             "created": created,
+            "reused_count": len(self.reused) if committed else 0,
+            "reused": self.reused if committed else [],
             "created_categories": (
                 [
                     {"id": item.pk, "code": item.code, "name": item.name}

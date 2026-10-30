@@ -201,11 +201,12 @@ export const useCart = defineStore('cart', {
       const existingIndex = this.items.findIndex(item => item.product_id === product.id && !item.source_line_id)
       const existingTotal = this.items.filter(item => item.product_id === product.id)
         .reduce((sum, item) => sum + Number(item.qty || 0), 0)
-      if (!validateCartQuantity(existingTotal + quantity.value, product.available).valid) return false
+      const totalQuantity = Number((existingTotal + quantity.value).toFixed(4))
+      if (!validateCartQuantity(totalQuantity, product.available).valid) return false
       if (existingIndex >= 0 && !this.items[existingIndex].source_line_id) {
         return this.setQty(
           existingIndex,
-          Number(this.items[existingIndex].qty) + quantity.value,
+          Number((Number(this.items[existingIndex].qty) + quantity.value).toFixed(4)),
         )
       }
 

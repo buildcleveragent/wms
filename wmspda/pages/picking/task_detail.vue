@@ -17,6 +17,8 @@
         <text style="margin-left: 24rpx;">复核：{{ task?.review_status || '-' }}</text>
         <text style="margin-left: 24rpx;">过账：{{ task?.posting_status || '-' }}</text>
       </view>
+      <button v-if="task && task.status !== 'CANCELLED'" @click="openOutboundPrintPage(taskId, null, 'pick')">打印拣货单</button>
+      <button v-if="task?.posting_status === 'POSTED'" @click="openOutboundPrintPage(taskId)">补打送货单</button>
       <view v-if="task?.is_warehouse_assisted" class="assisted-badge">仓库代办出库</view>
     </view>
 
@@ -108,6 +110,7 @@
 </template>
 
 <script setup lang="ts">
+import { prepareOutboundPrintWindow, closePreparedOutboundPrintWindow, openOutboundPrintPage } from '@/utils/outboundPrint'
 import { ref, reactive, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
@@ -354,8 +357,8 @@ function handleBarcodeScanned(barcode: string) {
   submitScan(barcode)
 }
 
-async function postTask() {
-  if (!taskId.value || posting.value) return
+async function postTask(preparedWindow: any) {
+  if (!taskId.value || posting.value) { closePreparedOutboundPrintWindow(preparedWindow); return }
   posting.value = true
   try {
     const res: any = await api.postPickTask(taskId.value)
@@ -363,9 +366,15 @@ async function postTask() {
       title: res?.message || '拣货已过账',
       icon: 'none',
     })
-    setTimeout(() => {
-      uni.navigateBack()
-    }, 800)
+    if (res?.posted !== true) throw new Error('未确认过账成功，请刷新查看状态')
+    task.value = { ...task.value, posting_status: 'POSTED', review_status: 'APPROVED' }
+    try {
+      await openOutboundPrintPage(taskId.value, preparedWindow)
+    } catch {
+      closePreparedOutboundPrintWindow(preparedWindow)
+      uni.showToast({ title: '出库已成功，打印失败，请补打送货单', icon: 'none' })
+    }
+    preparedWindow = null
   } catch (err: any) {
     console.error(err)
     if (Number(err?.statusCode || err?.code) === 403 && task.value?.is_warehouse_assisted) {
@@ -374,6 +383,7 @@ async function postTask() {
     const msg = err?.data?.detail || err?.data?.message || '过账失败'
     uni.showToast({ title: String(msg), icon: 'none' })
   } finally {
+    closePreparedOutboundPrintWindow(preparedWindow)
     posting.value = false
   }
 }
@@ -387,7 +397,7 @@ function confirmAndPost() {
     confirmText: '确认出库',
     confirmColor: '#c62828',
     success: (result) => {
-      if (result.confirm) postTask()
+      if (result.confirm) postTask(prepareOutboundPrintWindow())
     },
     complete: () => {
       confirmingPost.value = false

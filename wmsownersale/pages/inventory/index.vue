@@ -46,8 +46,14 @@
           :key="item.id"
           :class="['table-row', { odd: index % 2 === 1 }]"
         >
-          <view class="cell col-name strong" role="link" @click="openInventory(item.id)">
-            <text>{{ item.product_name || '-' }}</text><text style="color: #2563eb; font-size: 12px; margin-left: 6px">查看明细 ›</text>
+          <view class="cell col-name strong">
+            <text
+              class="product-link"
+              role="link"
+              tabindex="0"
+              @click="openInventory(item.id)"
+              @keydown.enter="openInventory(item.id)"
+            >{{ item.product_name || '-' }}</text>
           </view>
           <view class="cell col-code">{{ item.product_code || '-' }}</view>
           <view class="cell col-sku">{{ item.product_sku || '-' }}</view>
@@ -369,6 +375,16 @@ onUnmounted(() => {
 .strong {
   font-weight: 600;
   color: #222;
+}
+
+.product-link {
+  color: #2563eb;
+  cursor: pointer;
+}
+
+.product-link:hover,
+.product-link:focus-visible {
+  text-decoration: underline;
 }
 
 .primary {
