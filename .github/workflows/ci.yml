@@ -196,7 +196,7 @@ jobs:
       SECRET_KEY: ci-test-key-0123456789abcdef0123456789abcdef0123456789abcdef
       DEBUG: 'False'
       DJANGO_SETTINGS_MODULE: wmsmaster.settings
-      WMS_TEST_COORDINATION_DIR: ${{ runner.temp }}/wms-test-coordination
+      WMS_TEST_COORDINATION_DIR: /tmp/wms-test-coordination
     services:
       mysql:
         image: mysql:8.0.46@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
