@@ -13,7 +13,7 @@ function defaultOrderHeader() {
     ship_to: '',
     delivery_method: null,
     etd: null,
-    remark: '业务员下单',
+    remark: '',
   }
 }
 

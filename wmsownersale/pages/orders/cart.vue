@@ -37,6 +37,11 @@
             <text class="field-label">收货地址</text>
             <input v-model="form.ship_to" :disabled="submitting || !!cart.pending_submission" class="field-input" placeholder="请输入完整收货地址" maxlength="200" />
           </label>
+          <label class="receiver-item receiver-item-full">
+            <text class="field-label">订单备注（选填）</text>
+            <textarea v-model="form.remark" :disabled="submitting || !!cart.pending_submission" class="field-input remark-input" placeholder="可填写原出库日期、原单号或其他说明" maxlength="100" />
+            <view class="remark-count">{{ form.remark.length }}/100</view>
+          </label>
         </view>
       </view>
       <view class="receiver-card">
@@ -222,7 +227,7 @@ function buildPayload({ includeVersion = false } = {}) {
     outbound_type: 'SALES',
     delivery_method: form.delivery_method || null,
     etd: form.etd || null,
-    remark: String(form.remark || '业务员下单').trim(),
+    remark: String(form.remark || '').trim(),
     src_bill_no: String(form.src_bill_no || '').trim(),
     contact: String(form.contact || '').trim(),
     contact_phone: String(form.contact_phone || '').trim(),
@@ -545,6 +550,8 @@ watch(identity, () => { generation++; cart.resetOrder(); denied.value = true; ch
 .receiver-item-full { grid-column: 1 / -1; }
 .field-label { display: block; margin-bottom: 8rpx; font-size: 24rpx; color: #4b5563; }
 .field-input { box-sizing: border-box; width: 100%; min-height: 80rpx; padding: 0 16rpx; font-size: 27rpx; border: 1rpx solid #d1d5db; border-radius: 10rpx; }
+.remark-input { height: 160rpx; padding: 16rpx; }
+.remark-count { margin-top: 8rpx; text-align: right; font-size: 24rpx; color: #6b7280; }
 .empty-state { padding: 60rpx 24rpx; text-align: center; color: #6b7280; }
 .empty-action { min-height: 88rpx; width: 260rpx; margin-top: 20rpx; color: #2563eb; background: #fff; border: 1rpx solid #2563eb; }
 .footer { flex: 0 0 auto; padding: 14rpx 20rpx calc(14rpx + env(safe-area-inset-bottom)); background: #fff; border-top: 1rpx solid #d1d5db; }
