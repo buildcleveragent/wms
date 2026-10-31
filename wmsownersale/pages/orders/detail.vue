@@ -48,7 +48,7 @@
         <view class="field"><text>收件人</text><text>{{ order.contact || order.consignee || '—' }}</text></view>
         <view class="field"><text>联系电话</text><text>{{ order.contact_phone || order.phone || '—' }}</text></view>
         <view class="field field-top"><text>收件地址</text><text>{{ order.ship_to || order.address || '—' }}</text></view>
-        <view class="field field-top"><text>备注</text><text>{{ order.memo || order.remark || '—' }}</text></view>
+        <view class="field field-top"><text>备注</text><text style="white-space: pre-wrap; overflow-wrap: anywhere;">{{ order.memo || order.remark || '—' }}</text></view>
       </view>
 
       <view class="card line-card">

@@ -16,7 +16,7 @@
       <view class="text-gray">业务员：{{ order.created_by_name || order.salesperson_name || order.created_by || '—' }}</view>
       <view class="text-gray">提交状态：{{ orderStatus(order, 'submit_status') }}</view>
       <view class="text-gray">审核状态：{{ orderStatus(order, 'approval_status') }}</view>
-      <view class="text-gray" v-if="order.memo">备注：{{ order.memo }}</view>
+      <view class="text-gray" style="white-space: pre-wrap; overflow-wrap: anywhere;" v-if="order.memo">备注：{{ order.memo }}</view>
       <view class="reject-box" v-if="canReview">
         <view class="font-bold">退回原因（必填）</view>
         <textarea v-model="rejectReason" maxlength="200" class="reject-input" placeholder="请说明需要业务员修改的内容" />
