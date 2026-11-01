@@ -47,7 +47,7 @@ for (const width of [390, 1440]) {
       const active = () => page.locator('uni-page-body').last()
       if (entry === 'drilldown') {
         await page.goto(`/#/pages/billing/overview?${query}`)
-        await active().getByText('测试货主', { exact: true }).last().click()
+        await active().locator('.row-card.clickable').filter({ hasText: '测试货主' }).click()
         await expect(page).toHaveURL(/billing\/owner_detail/)
         await active().getByText('REG-INVOICE', { exact: true }).click()
         await expect(page).toHaveURL(/billing\/bill_detail/)

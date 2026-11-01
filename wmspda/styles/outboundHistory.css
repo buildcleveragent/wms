@@ -1,0 +1,22 @@
+.history-page { box-sizing: border-box; min-height: 100vh; padding: 20rpx; background: #f6f7fb; color: #1e293b; font-size: 28rpx; }
+.history-page .history-card { padding: 24rpx; background: #fff; border-radius: 16rpx; margin-bottom: 18rpx; min-width: 0; }
+.history-page .history-head, .history-page .history-actions { display: flex; align-items: center; justify-content: space-between; gap: 14rpx; flex-wrap: wrap; }
+.history-page .history-title { font-size: 32rpx; font-weight: 700; }
+.history-page .history-muted, .history-page .history-meta { display: block; font-size: 25rpx; color: #64748b; margin: 12rpx 0; line-height: 1.6; overflow-wrap: anywhere; }
+.history-page .history-actions { justify-content: flex-end; margin-top: 18rpx; }
+.history-page .history-button { margin: 0; background: #eef5ff; color: #1677ff; font-size: 26rpx; padding: 0 22rpx; }
+.history-page .history-button.primary { background: #1677ff; color: #fff; }
+.history-page .history-button.more { margin: 20rpx auto 0; }
+.history-page .history-button[disabled] { opacity: .5; }
+.history-page .history-row { padding: 22rpx 0; border-bottom: 1rpx solid #e2e8f0; overflow-wrap: anywhere; }
+.history-page .history-order-no { font-size: 29rpx; font-weight: 600; }
+.history-page .history-badge { padding: 6rpx 12rpx; border-radius: 8rpx; background: #eef5ff; color: #1677ff; font-size: 23rpx; }
+.history-page .history-link { color: #1677ff; font-size: 25rpx; }
+.history-page .history-empty { padding: 44rpx 0; text-align: center; color: #64748b; }
+.history-page .history-error { margin: 18rpx 0; padding: 22rpx; color: #b42318; background: #fff1f0; border-radius: 12rpx; }
+.history-page .history-error button { margin-top: 14rpx; }
+.history-page .history-summary { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14rpx; margin-bottom: 18rpx; }
+.history-page .history-metric { background: #eaf3ff; padding: 22rpx 14rpx; text-align: center; border-radius: 14rpx; overflow-wrap: anywhere; }
+.history-page .history-metric-value { display: block; font-size: 36rpx; font-weight: 700; margin-top: 10rpx; }
+.history-page .history-sections { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18rpx; }
+@media (max-width: 600px) { .history-page .history-sections { grid-template-columns: 1fr; } .history-page .history-summary { grid-template-columns: repeat(2, minmax(0,1fr)); } }

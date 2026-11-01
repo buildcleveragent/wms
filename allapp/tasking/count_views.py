@@ -10,18 +10,20 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from allapp.accounts.access import AccessScope
+from allapp.core.choices import ZoneType
 from allapp.tasking import counting
+from allapp.tasking.count_options import can_manage_count, count_options, count_scope_details
 from allapp.tasking.models import TaskAssignment, WmsTask, WmsTaskLine
 
 
 class CountTaskCreateSerializer(serializers.Serializer):
-    owner_id = serializers.IntegerField()
-    warehouse_id = serializers.IntegerField()
+    owner_id = serializers.IntegerField(min_value=1)
+    warehouse_id = serializers.IntegerField(min_value=1)
     scope = serializers.ChoiceField(
         choices=["ALL", "ZONE", "LOC", "SKU"], default="ALL"
     )
     subwarehouse_id = serializers.IntegerField(required=False, allow_null=True)
-    zone_type = serializers.IntegerField(required=False, allow_null=True)
+    zone_type = serializers.ChoiceField(choices=ZoneType.choices, required=False, allow_null=True)
     location_id = serializers.IntegerField(required=False, allow_null=True)
     location_prefix = serializers.CharField(required=False, allow_blank=True)
     product_id = serializers.IntegerField(required=False, allow_null=True)
@@ -32,7 +34,7 @@ class CountTaskCreateSerializer(serializers.Serializer):
     recount_threshold = serializers.DecimalField(
         max_digits=14, decimal_places=4, default=0
     )
-    task_remark = serializers.CharField(required=False, allow_blank=True)
+    task_remark = serializers.CharField(required=False, allow_blank=True, max_length=200)
 
 
 class CountRecordSerializer(serializers.Serializer):
@@ -110,6 +112,9 @@ class CountTaskSerializer(serializers.ModelSerializer):
 class CountLineSerializer(serializers.ModelSerializer):
     product_sku = serializers.CharField(source="product.sku", read_only=True)
     product_name = serializers.CharField(source="product.name", read_only=True)
+    brand_model = serializers.CharField(source="product.brand_model", read_only=True)
+    product_display_name = serializers.CharField(source="product.display_name", read_only=True)
+    product_spec = serializers.CharField(source="product.spec", read_only=True)
     product_code = serializers.CharField(source="product.code", read_only=True)
     unit_barcode = serializers.CharField(source="product.unit_barcode", read_only=True)
     carton_barcode = serializers.CharField(
@@ -152,6 +157,9 @@ class CountLineSerializer(serializers.ModelSerializer):
             "product_id",
             "product_sku",
             "product_name",
+            "brand_model",
+            "product_display_name",
+            "product_spec",
             "product_code",
             "unit_barcode",
             "carton_barcode",
@@ -211,10 +219,28 @@ class CountTaskViewSet(viewsets.GenericViewSet):
                 Q(is_my_assignment=True)
                 | Q(status=WmsTask.Status.RELEASED, has_active_assignment=False)
             )
+        stage = self.request.query_params.get("stage") if self.action == "list" else None
+        if stage:
+            stages = {
+                "draft": Q(status__in=["DRAFT", "READY"]),
+                "work": Q(status__in=["RELEASED", "IN_PROGRESS"]),
+                "review": Q(status="COMPLETED", review_status="PENDING"),
+                "posting": Q(
+                    status="COMPLETED", review_status="APPROVED",
+                    posting_status__in=["PENDING", "FAILED"],
+                ),
+            }
+            if stage not in stages:
+                raise serializers.ValidationError({"stage": "无效的盘点阶段。"})
+            if stage != "work" and not self._manager():
+                from rest_framework.exceptions import PermissionDenied
+
+                raise PermissionDenied("无盘点管理权限。")
+            qs = qs.filter(stages[stage])
         requested = self.request.query_params.getlist("status")
         if requested:
             qs = qs.filter(status__in=requested)
-        elif self.action == "list":
+        elif self.action == "list" and not stage:
             qs = qs.filter(
                 Q(status__in=[WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS])
                 | Q(
@@ -231,8 +257,7 @@ class CountTaskViewSet(viewsets.GenericViewSet):
         return get_object_or_404(qs, pk=pk)
 
     def _manager(self):
-        user = self.request.user
-        return user.is_superuser or user.has_perm("tasking.taskconfirm_as_wh_manager")
+        return can_manage_count(self.request.user)
 
     def _run(self, fn, *args, **kwargs):
         try:
@@ -256,9 +281,14 @@ class CountTaskViewSet(viewsets.GenericViewSet):
         return Response(data)
 
     def retrieve(self, request, pk=None):
-        return Response(
-            CountTaskSerializer(self._task(pk), context={"request": request}).data
-        )
+        task = self._task(pk)
+        data = CountTaskSerializer(task, context={"request": request}).data
+        data.update(count_scope_details(task))
+        return Response(data)
+
+    @action(methods=["get"], detail=False, url_path="options")
+    def creation_options(self, request):
+        return Response(count_options(request.user, request.query_params))
 
     def create(self, request):
         if not self._manager():
@@ -289,6 +319,7 @@ class CountTaskViewSet(viewsets.GenericViewSet):
                 "task",
                 "task__counttaskextra",
                 "product",
+                "product__brand",
                 "from_location",
                 "countlineextra",
             )

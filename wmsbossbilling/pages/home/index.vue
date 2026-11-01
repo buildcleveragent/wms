@@ -23,7 +23,7 @@
       <BossScopeFilter @change="refreshAll" />
       <view class="filter-row">
         <view class="picker-box info-box">
-          <text class="picker-label">今日关注</text>
+          <text class="picker-label">截至所选日期关注</text>
           <text class="picker-value">{{ summary.openAlertCount }} 项预警</text>
           <text class="picker-sub">逾期应收 {{ moneyGroupText(summary.overdueReceivables) }}</text>
         </view>
@@ -39,12 +39,12 @@
     <view v-if="loading" class="loading-banner">正在同步仓储经营分析中心数据...</view>
     <BossDataStatus :meta="payload?.meta" :error="dataError" :stale="stale" />
 
-    <template v-if="!loading">
+    <template v-if="!loading && payload">
       <view class="kpi-grid">
         <view class="kpi-card blue">
-          <view class="kpi-label">今日实际收发量</view>
-          <view class="kpi-value">{{ qty(summary.todayInboundQty) }}</view>
-          <view class="kpi-sub">入库 {{ summary.todayInboundOrders }} 单 · 发运 {{ qty(summary.todayOutboundQty) }} / {{ summary.todayOutboundOrders }} 单</view>
+          <view class="kpi-label">所选区间实际收发单量</view>
+          <view class="kpi-value">{{ summary.todayInboundOrders }} 单</view>
+          <view class="kpi-sub">发运 {{ summary.todayOutboundOrders }} 单 · 数量在明细中按基本单位查看</view>
         </view>
         <view class="kpi-card gold">
           <view class="kpi-label">库存 SKU</view>
@@ -67,7 +67,7 @@
           <view class="kpi-sub">已出账 {{ moneyGroupText(summary.issuedBills) }}</view>
         </view>
         <view class="kpi-card orange">
-          <view class="kpi-label">逾期应收</view>
+          <view class="kpi-label">截至所选日期逾期未收</view>
           <view class="kpi-value multi-money">{{ moneyGroupText(summary.overdueReceivables) }}</view>
           <view class="kpi-sub">草稿 {{ moneyGroupText(summary.draftBills) }}（不计入已出账）</view>
         </view>
@@ -75,8 +75,8 @@
 
       <view class="section">
         <view class="section-head">
-          <view class="section-title">今日作业节奏</view>
-          <view class="section-desc">用“今日新任务完成率 + 当前积压”判断仓库有没有卡在某个环节。</view>
+          <view class="section-title">截止日任务与当前积压</view>
+          <view class="section-desc">所选截止日创建任务的当前完成率；积压反映当前状态。</view>
         </view>
         <view class="task-grid">
           <view v-for="row in taskRows" :key="row.taskType" class="task-card">
@@ -97,7 +97,7 @@
           <view v-if="!revenueRows.length" class="empty-inline">当前范围暂无收入排行。</view>
           <view
             v-for="(row, index) in revenueRows"
-            :key="row.owner"
+            :key="`${row.currency || ''}-${row.owner}`"
             class="row-card clickable"
             @click="openOwnerRevenue(row.owner)"
           >
@@ -116,7 +116,7 @@
             <view class="section-desc">先看谁最占资源，再决定要不要去收入页对比计费。</view>
           </view>
           <view v-if="!inventoryRows.length" class="empty-inline">当前范围暂无占仓排行。</view>
-          <view v-for="(row, index) in inventoryRows" :key="row.owner" class="row-card">
+          <view v-for="(row, index) in inventoryRows" :key="`${row.currency || ''}-${row.owner}`" class="row-card">
             <view class="rank-pill soft">{{ index + 1 }}</view>
             <view class="row-main">
               <view class="row-title">{{ row.ownerName }}</view>
@@ -143,7 +143,7 @@
             </view>
           </view>
           <view class="trend-side">
-            <text>收 {{ qty(row.inboundQty) }} / 发 {{ qty(row.outboundQty) }}</text>
+            <text>收 {{ row.inboundOrders }} 单 / 发 {{ row.outboundOrders }} 单</text>
             <text>{{ moneyGroupText(row.accruals) }}</text>
           </view>
         </view>
@@ -183,7 +183,7 @@ import { useAuth } from '@/store/auth'
 import { useLatestRequest } from '@/utils/use-latest-request'
 import { useBossScope } from '@/store/bossScope'
 import { api, buildQuery } from '@/utils/request'
-import { asList, money, percent, qty, toNumber } from '@/utils/billing'
+import { inventoryAvailable, decimalText, asList, money, percent, qty, toNumber } from '@/utils/billing'
 
 const auth = useAuth()
 const bossScope = useBossScope()
@@ -203,26 +203,27 @@ const ownerScopeText = computed(() => scope.value.owner_name || '全部货主')
 const granularityLabel = computed(() => ({ day: '日', week: '周', month: '月' }[payload.value?.granularity] || '日'))
 
 const summary = computed(() => {
-  const source = payload.value?.summary || {}
+  const source = { ...(payload.value?.summary || {}) }
+  if (!inventoryAvailable(payload.value?.meta)) {
+    for (const key of ['sku_count', 'owner_count', 'occupied_location_count', 'active_location_count', 'location_occupancy_rate', 'volume_utilization_rate', 'used_volume_m3', 'capacity_volume_m3']) source[key] = null
+  }
   return {
     dataAsOf: source.data_as_of ? new Date(source.data_as_of).toLocaleString() : '-',
-    todayInboundOrders: Number(source.today_inbound_orders || 0),
-    todayInboundQty: toNumber(source.today_inbound_qty),
-    todayOutboundOrders: Number(source.today_outbound_orders || 0),
-    todayOutboundQty: toNumber(source.today_outbound_qty),
-    skuCount: Number(source.sku_count || 0),
-    ownerCount: Number(source.owner_count || 0),
-    occupiedLocationCount: Number(source.occupied_location_count || 0),
-    activeLocationCount: Number(source.active_location_count || 0),
+    todayInboundOrders: qty(source.today_inbound_orders),
+    todayOutboundOrders: qty(source.today_outbound_orders),
+    skuCount: qty(source.sku_count),
+    ownerCount: qty(source.owner_count),
+    occupiedLocationCount: qty(source.occupied_location_count),
+    activeLocationCount: qty(source.active_location_count),
     locationOccupancyRate: source.location_occupancy_rate,
     volumeUtilizationRate: source.volume_utilization_rate,
-    usedVolumeText: toNumber(source.used_volume_m3).toFixed(3),
-    capacityVolumeText: toNumber(source.capacity_volume_m3).toFixed(3),
+    usedVolumeText: decimalText(source.used_volume_m3),
+    capacityVolumeText: decimalText(source.capacity_volume_m3),
     accruals: asList(source.accruals_by_currency),
     issuedBills: asList(source.issued_bills_by_currency),
     draftBills: asList(source.draft_bills_by_currency),
     overdueReceivables: asList(source.overdue_receivables_by_currency),
-    openAlertCount: Number(source.open_alert_count || 0),
+    openAlertCount: qty(source.open_alert_count),
   }
 })
 
@@ -230,10 +231,10 @@ const taskRows = computed(() =>
   asList(payload.value?.task_progress).map((row) => ({
     taskType: row.task_type,
     label: row.label || row.task_type,
-    todayTotal: Number(row.today_total || 0),
-    todayCompleted: Number(row.today_completed || 0),
+    todayTotal: qty(row.today_total),
+    todayCompleted: qty(row.today_completed),
     completionRate: row.completion_rate,
-    backlog: Number(row.backlog || 0),
+    backlog: qty(row.backlog),
   }))
 )
 
@@ -242,7 +243,7 @@ const revenueRows = computed(() =>
     asList(group.rows).map((row) => ({
     owner: row.owner,
     ownerName: row.owner_name,
-    accrualCount: Number(row.accrual_count || 0),
+    accrualCount: qty(row.accrual_count),
     total: toNumber(row.total),
     currency: group.currency,
   })))
@@ -252,9 +253,9 @@ const inventoryRows = computed(() =>
   asList(payload.value?.rankings?.inventory_top_owners).map((row) => ({
     owner: row.owner,
     ownerName: row.owner_name,
-    skuCount: Number(row.sku_count || 0),
-    locationCount: Number(row.location_count || 0),
-    usedVolumeText: toNumber(row.used_volume_m3).toFixed(3),
+    skuCount: qty(row.sku_count),
+    locationCount: qty(row.location_count),
+    usedVolumeText: decimalText(row.used_volume_m3),
   }))
 )
 
@@ -262,7 +263,7 @@ const attentionRows = computed(() =>
   asList(payload.value?.attention_items).map((item) => ({
     key: item.key,
     label: item.label,
-    count: Number(item.count || 0),
+    count: qty(item.count),
     severity: item.severity || 'medium',
   }))
 )
@@ -270,18 +271,16 @@ const attentionRows = computed(() =>
 const trendRows = computed(() => {
   const rows = asList(payload.value?.trend_7d).map((row) => ({
     date: row.date,
-    inboundOrders: Number(row.inbound_orders || 0),
-    outboundOrders: Number(row.outbound_orders || 0),
-    inboundQty: toNumber(row.inbound_qty),
-    outboundQty: toNumber(row.outbound_qty),
+    inboundOrders: qty(row.inbound_orders),
+    outboundOrders: qty(row.outbound_orders),
     accruals: asList(row.accruals_by_currency),
   }))
-  const inboundMax = Math.max(1, ...rows.map((row) => row.inboundQty))
-  const outboundMax = Math.max(1, ...rows.map((row) => row.outboundQty))
+  const inboundMax = Math.max(1, ...rows.map((row) => toNumber(row.inboundOrders) ?? 0))
+  const outboundMax = Math.max(1, ...rows.map((row) => toNumber(row.outboundOrders) ?? 0))
   return rows.map((row) => ({
     ...row,
-    inboundWidth: Math.max(8, (row.inboundQty / inboundMax) * 100),
-    outboundWidth: Math.max(8, (row.outboundQty / outboundMax) * 100),
+    inboundWidth: ((toNumber(row.inboundOrders) ?? 0) / inboundMax) * 100,
+    outboundWidth: ((toNumber(row.outboundOrders) ?? 0) / outboundMax) * 100,
   }))
 })
 

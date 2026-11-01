@@ -47,7 +47,7 @@ MAX_XLSX_UNCOMPRESSED_SIZE = 50 * 1024 * 1024
 MAX_XLSX_ENTRIES = 300
 IMPORT_SHEET_NAME = "商品导入"
 PACKAGE_SHEET_NAME = "商品包装"
-TEMPLATE_VERSION = "12"
+TEMPLATE_VERSION = "13"
 
 
 # Freeze legacy layouts independently of the current template column order.
@@ -108,9 +108,10 @@ V10_PRODUCT_HEADERS = (
     )
 )
 
-PRODUCT_HEADERS = tuple(
+V12_PRODUCT_HEADERS = tuple(
     "包装单位" if header == "包装单位编码" else header for header in V10_PRODUCT_HEADERS
 )
+PRODUCT_HEADERS = V12_PRODUCT_HEADERS + ("型号", "品牌", "品牌型号")
 # Keep code-based headers for archive exports and legacy import callers.
 OWNER_NAME_PRODUCT_HEADERS = ("货主名称",) + PRODUCT_HEADERS[1:]
 
@@ -176,6 +177,7 @@ MODEL_FIELD_LABELS = {
     "sku": "仓库SKU编码",
     "name": "商品名称",
     "spec": "规格",
+    "model": "型号",
     "category": "分类",
     "brand": "品牌编码",
     "base_uom": "基本单位",
@@ -404,6 +406,12 @@ def _write_instruction_sheet(sheet) -> None:
     sheet.append(["必填字段", "货主编码、商品名称、分类、基本单位。"])
     sheet.append(
         [
+            "商品身份",
+            "商品名称填写通用品名；品牌编码与型号分别维护，规格单独填写。品牌、品牌型号为只读展示列，回导时忽略。修改已有商品资料请使用商品资料整理映射表，收货导入不修改已有档案。",
+        ]
+    )
+    sheet.append(
+        [
             "价格规则",
             "默认价格和进价均可留空；填写时必须为大于等于 0 的两位小数金额，且不会互相回填。",
         ]
@@ -431,7 +439,7 @@ def _write_instruction_sheet(sheet) -> None:
                 "基本单位数量留空或填 0 时仅建档；填写正数时，上传页必须选择仓库，",
                 "系统使用该仓库的默认收货库位立即完成无订单收货。",
                 "已有商品补填数量时沿用原编号和 SKU，不修改档案。",
-                "编码与标准贸易条码都为空时，按同货主下唯一的同名同规格商品匹配；",
+                "编码与标准贸易条码都为空时，按同货主下名称、品牌、型号、规格完整匹配；品牌或型号缺失且已有同名商品时须填写商品编码；",
                 "有多个候选或资料不一致时，请填写已有货主商品编码并核对资料。",
             ),
         ]
@@ -866,12 +874,14 @@ class ProductExcelImporter:
         if tuple(raw_headers) not in (
             OWNER_NAME_PRODUCT_HEADERS,
             PRODUCT_HEADERS,
+            V12_PRODUCT_HEADERS,
+            ("货主名称",) + V12_PRODUCT_HEADERS[1:],
             V10_PRODUCT_HEADERS,
             V9_PRODUCT_HEADERS,
             V8_PRODUCT_HEADERS,
         ):
             raise ProductImportFileError(
-                "Excel 商品导入表头或列顺序与 v12 模板不一致（兼容原始 v8、v9、v10、v11 模板）。"
+                "Excel 商品导入表头或列顺序与 v13 模板不一致（兼容原始 v8、v9、v10、v11、v12 模板）。"
                 "请重新下载最新商品批量导入模板。"
             )
 
@@ -1264,6 +1274,7 @@ class ProductExcelImporter:
             code=code,
             sku="",
             name=name,
+            model=self._optional_text(row_number, "型号", values.get("型号"), max_length=200) or "",
             spec=self._optional_text(row_number, "规格", values.get("规格"), max_length=200),
             category=category,
             brand=brand,
@@ -1472,14 +1483,28 @@ class ProductExcelImporter:
                 matches = list(queryset.filter(gtin=candidate.gtin)[:2])
         elif receipt_qty > 0:
             specs = Q(spec=candidate.spec) if candidate.spec else Q(spec="") | Q(spec__isnull=True)
-            matches = list(queryset.filter(specs, name=candidate.name)[:2])
+            named = queryset.filter(name=candidate.name)
+            if named.exists() and (
+                not candidate.brand_id or not candidate.model or not candidate.spec
+            ):
+                self._error(
+                    row_number,
+                    "货主商品编码",
+                    "无编码收货须填写完整品牌、型号、规格；请填写已有商品编码。",
+                )
+                return None
+            matches = list(
+                named.filter(specs, brand_id=candidate.brand_id, model=candidate.model)[:2]
+            )
         else:
             return None
         if not matches:
             return None
         if len(matches) != 1:
             self._error(
-                row_number, "货主商品编码", "存在多个同名同规格商品，请填写已有货主商品编码。"
+                row_number,
+                "货主商品编码",
+                "存在多个名称、品牌、型号、规格相同的商品，请填写已有货主商品编码。",
             )
             return None
         existing = matches[0]
@@ -1927,6 +1952,8 @@ class ProductExcelImporter:
                             "code": product.code,
                             "sku": product.sku,
                             "name": product.name,
+                            "brand_model": product.brand_model,
+                            "display_name": product.display_name,
                             "received_qty": str(row.receipt_qty),
                         }
                     )
@@ -1964,6 +1991,8 @@ class ProductExcelImporter:
                         "code": product.code,
                         "sku": product.sku,
                         "name": product.name,
+                        "brand_model": product.brand_model,
+                        "display_name": product.display_name,
                         "received_qty": str(row.receipt_qty),
                     }
                 )

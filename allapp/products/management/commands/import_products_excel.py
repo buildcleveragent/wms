@@ -280,6 +280,8 @@ class Command(BaseCommand):
                 owner_val = _norm_str(_pick_first(row, OWNER_KEYS))
                 name_val = _norm_str(_pick_first(row, NAME_KEYS))
                 spec_val = _norm_str(_pick_first(row, SPEC_KEYS)) or None
+                model_raw = _pick_first(row, ("型号", "model"))
+                model_val = _norm_str(model_raw)
                 uom_val = _norm_str(_pick_first(row, UOM_KEYS))
                 code_val = _norm_str(_pick_first(row, CODE_KEYS))
                 category_val = _norm_str(_pick_first(row, CATEGORY_KEYS))
@@ -361,6 +363,8 @@ class Command(BaseCommand):
                         if do_update:
                             existing.name = name_val
                             existing.spec = spec_val
+                            if model_raw is not None:
+                                existing.model = model_val
                             existing.base_uom = base_uom
                             existing.category = category
                             existing.price = price_val
@@ -394,6 +398,7 @@ class Command(BaseCommand):
                             code=code_val,
                             name=name_val,
                             spec=spec_val,
+                            model=model_val,
                             sku="",
                             base_uom=base_uom,
                             category=category,

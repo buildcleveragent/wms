@@ -60,7 +60,7 @@
             <text>第 {{ row.row }} 行 · {{ row.product_code }}</text>
             <text class="base-qty">{{ row.base_qty }} {{ row.base_uom_code }}</text>
           </view>
-          <view class="product-name">{{ row.product_name }}</view>
+          <view class="product-name">{{ (row.product_display_name || row.product_name) }}</view>
           <view class="preview-meta">{{ row.input_qty }} {{ row.uom_code }} × {{ row.multiplier }}</view>
           <view v-if="row.lot_no || row.mfg_date || row.exp_date" class="preview-meta">
             批次 {{ row.lot_no || '-' }} · 生产 {{ row.mfg_date || '-' }} · 有效 {{ row.exp_date || '-' }}

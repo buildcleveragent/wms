@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime
 from collections import defaultdict
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, QuerySet, Sum
 from django.utils import timezone
@@ -18,6 +18,10 @@ from allapp.billing.models import (
     BillingMetricDaily,
 )
 from allapp.billing.services.ledger import financial_ledger_accruals
+from allapp.billing.services.receivable_reporting import (
+    outstanding_money_groups,
+    receivable_bills_as_of,
+)
 from allapp.inbound.models import InboundOrder
 from allapp.inventory.models import (
     InventoryDetail,
@@ -30,11 +34,6 @@ from allapp.outbound.models import OutboundOrder
 from allapp.products.models import ProductUom
 from allapp.tasking.models import WmsTask
 
-from .services_operations import (
-    OperationFilters,
-    build_operations_detail_rows,
-    build_operations_summary,
-)
 from .boss_contract import (
     build_meta,
     money_groups,
@@ -42,6 +41,12 @@ from .boss_contract import (
     quantity_groups,
     trend_granularity,
     warning,
+)
+from .product_display import product_display_fields
+from .services_operations import (
+    OperationFilters,
+    build_operations_detail_rows,
+    build_operations_summary,
 )
 
 ZERO_MONEY = Decimal("0.00")
@@ -79,9 +84,7 @@ def _date_cutoff(date_to: datetime.date, now=None):
     current = now or timezone.now()
     if date_to == _current_date(current):
         return current
-    cutoff = datetime.datetime.combine(
-        date_to + datetime.timedelta(days=1), datetime.time.min
-    )
+    cutoff = datetime.datetime.combine(date_to + datetime.timedelta(days=1), datetime.time.min)
     if timezone.is_aware(current):
         cutoff = timezone.make_aware(cutoff, timezone.get_current_timezone())
     return cutoff
@@ -116,9 +119,7 @@ def _hotspot_level(rate: Decimal | None):
 
 
 def _inventory_summary_fallback_queryset(*, user, owner_id: int | None = None):
-    qs = InventorySummary.objects.select_related("owner", "product").filter(
-        is_active=True
-    )
+    qs = InventorySummary.objects.select_related("owner", "product").filter(is_active=True)
     qs = AccessScope.for_user(user).filter_queryset(
         qs, owner_field="owner_id", warehouse_field=None
     )
@@ -135,7 +136,12 @@ def _inventory_as_of_queryset(
         qs = _apply_scope_filter(
             scope_queryset_for_user(
                 InventoryDetail.objects.select_related(
-                    "owner", "warehouse", "product", "product__base_uom", "location"
+                    "owner",
+                    "warehouse",
+                    "product",
+                    "product__brand",
+                    "product__base_uom",
+                    "location",
                 ),
                 user,
             ),
@@ -147,13 +153,13 @@ def _inventory_as_of_queryset(
     qs = _apply_scope_filter(
         scope_queryset_for_user(
             InventorySnapshotDaily.objects.select_related(
-                "owner", "warehouse", "product", "product__base_uom", "location"
+                "owner", "warehouse", "product", "product__brand", "product__base_uom", "location"
             ),
             user,
         ),
         owner_id=owner_id,
         warehouse_id=warehouse_id,
-    ).filter(snapshot_date=as_of, onhand_qty__gt=0)
+    ).filter(snapshot_date=as_of)
     if not qs.exists():
         return (
             qs,
@@ -167,13 +173,16 @@ def _inventory_as_of_queryset(
                 )
             ],
         )
+    qs = qs.filter(onhand_qty__gt=0)
     approximate_count = qs.filter(
         snapshot_source__in=[
             InventorySnapshotDaily.Source.BOOTSTRAP_DETAIL,
             InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX,
         ]
     ).count()
-    missing_unit_count = qs.filter(base_unit_code="").count()
+    missing_unit_count = qs.filter(
+        Q(base_unit_code="") | Q(base_unit_source=InventorySnapshotDaily.UnitSource.UNKNOWN)
+    ).count()
     inferred_unit_count = qs.filter(
         base_unit_source=InventorySnapshotDaily.UnitSource.LEGACY_INFERRED
     ).count()
@@ -181,13 +190,9 @@ def _inventory_as_of_queryset(
     if approximate_count:
         warnings.append(warning("HISTORICAL_INVENTORY_APPROXIMATE", approximate_count))
     if missing_unit_count:
-        warnings.append(
-            warning("HISTORICAL_INVENTORY_UNIT_UNKNOWN", missing_unit_count)
-        )
+        warnings.append(warning("HISTORICAL_INVENTORY_UNIT_UNKNOWN", missing_unit_count))
     if inferred_unit_count:
-        warnings.append(
-            warning("HISTORICAL_INVENTORY_UNIT_INFERRED", inferred_unit_count)
-        )
+        warnings.append(warning("HISTORICAL_INVENTORY_UNIT_INFERRED", inferred_unit_count))
     return qs, "SNAPSHOT", False, warnings
 
 
@@ -195,16 +200,14 @@ def _quantity_groups_for_inventory(queryset, source_kind: str):
     if source_kind != "CURRENT":
         queryset = queryset.filter(
             base_unit_source=InventorySnapshotDaily.UnitSource.VERIFIED
-        )
+        ).exclude(base_unit_code="")
     groups = quantity_groups(
         queryset,
         unit_field="base_unit" if source_kind == "CURRENT" else "base_unit_code",
     )
     uom_rows = {
         row.code.upper(): row
-        for row in ProductUom.objects.filter(
-            code__in=[group["unit_code"] for group in groups]
-        )
+        for row in ProductUom.objects.filter(code__in=[group["unit_code"] for group in groups])
     }
     for group in groups:
         uom = uom_rows.get(group["unit_code"])
@@ -231,9 +234,7 @@ def _inventory_summary_aggregate(summary_qs):
         available_qty = row.available_qty or ZERO_QTY
         locked_qty = row.locked_qty or ZERO_QTY
         damaged_qty = row.damaged_qty or ZERO_QTY
-        product_volume = getattr(
-            getattr(row, "product", None), "volume", None
-        ) or Decimal("0")
+        product_volume = getattr(getattr(row, "product", None), "volume", None) or Decimal("0")
 
         totals["onhand_qty"] += onhand_qty
         totals["available_qty"] += available_qty
@@ -255,9 +256,7 @@ def _inventory_summary_aggregate(summary_qs):
         "damaged_qty": _decimal_or_zero(totals["damaged_qty"], ZERO_QTY),
         "sku_count": totals["sku_count"] or 0,
         "owner_count": totals["owner_count"] or 0,
-        "used_volume_m3": _decimal_or_zero(
-            totals["used_volume_m3"], Decimal("0.000000")
-        ),
+        "used_volume_m3": _decimal_or_zero(totals["used_volume_m3"], Decimal("0.000000")),
     }
 
 
@@ -279,9 +278,7 @@ def _inventory_owner_rankings_from_summary(summary_qs, *, item_limit: int):
             },
         )
         onhand_qty = row.onhand_qty or ZERO_QTY
-        product_volume = getattr(
-            getattr(row, "product", None), "volume", None
-        ) or Decimal("0")
+        product_volume = getattr(getattr(row, "product", None), "volume", None) or Decimal("0")
 
         owner_bucket["onhand_qty"] += onhand_qty
         owner_bucket["available_qty"] += row.available_qty or ZERO_QTY
@@ -373,19 +370,15 @@ def _inventory_location_rows_from_detail(inventory_qs, *, today: datetime.date):
             row.location_id,
             {
                 "location": row.location_id,
-                "location_code": getattr(getattr(row, "location", None), "code", "")
-                or "",
-                "location_name": getattr(getattr(row, "location", None), "name", "")
-                or "",
+                "location_code": getattr(getattr(row, "location", None), "code", "") or "",
+                "location_name": getattr(getattr(row, "location", None), "name", "") or "",
                 "subwarehouse_name": getattr(
                     getattr(getattr(row, "location", None), "subwarehouse", None),
                     "name",
                     "",
                 )
                 or "",
-                "is_frozen": bool(
-                    getattr(getattr(row, "location", None), "is_frozen", False)
-                ),
+                "is_frozen": bool(getattr(getattr(row, "location", None), "is_frozen", False)),
                 "capacity_volume_m3": _decimal_or_zero(
                     getattr(getattr(row, "location", None), "max_volume_m3", None),
                     Decimal("0.000"),
@@ -414,19 +407,11 @@ def _inventory_location_rows_from_detail(inventory_qs, *, today: datetime.date):
 
     rows = []
     for location_id, location_bucket in location_map.items():
-        capacity = _decimal_or_zero(
-            location_bucket["capacity_volume_m3"], Decimal("0.000")
-        )
-        used_volume = _decimal_or_zero(
-            location_bucket["used_volume_m3"], Decimal("0.000000")
-        )
+        capacity = _decimal_or_zero(location_bucket["capacity_volume_m3"], Decimal("0.000"))
+        used_volume = _decimal_or_zero(location_bucket["used_volume_m3"], Decimal("0.000000"))
         utilization_rate = _percent(used_volume, capacity)
         latest_updated_at = location_bucket["latest_updated_at"]
-        stale_days = (
-            max((today - latest_updated_at.date()).days, 0)
-            if latest_updated_at
-            else None
-        )
+        stale_days = max((today - latest_updated_at.date()).days, 0) if latest_updated_at else None
         rows.append(
             {
                 "location": location_id,
@@ -542,9 +527,7 @@ def _build_owner_options(*, user, warehouse_id: int | None = None):
         return []
     if scope.owner_ids:
         return list(
-            Owner.objects.filter(id__in=scope.owner_ids)
-            .values("id", "name")
-            .order_by("name", "id")
+            Owner.objects.filter(id__in=scope.owner_ids).values("id", "name").order_by("name", "id")
         )
 
     inbound_qs = _apply_scope_filter(
@@ -588,9 +571,7 @@ def _build_owner_options(*, user, warehouse_id: int | None = None):
     elif scope.warehouse_ids:
         if warehouse_id and warehouse_id not in scope.warehouse_ids:
             return []
-        allowed_warehouse_ids = (
-            {warehouse_id} if warehouse_id else set(scope.warehouse_ids)
-        )
+        allowed_warehouse_ids = {warehouse_id} if warehouse_id else set(scope.warehouse_ids)
     else:
         return []
     if allowed_warehouse_ids:
@@ -600,16 +581,11 @@ def _build_owner_options(*, user, warehouse_id: int | None = None):
             | Q(tasks__warehouse_id__in=allowed_warehouse_ids)
             | Q(inventorydetail__warehouse_id__in=allowed_warehouse_ids)
         ).distinct()
-    owner_rows = [
-        {"id": owner.id, "name": owner.name}
-        for owner in owner_qs.order_by("name", "id")
-    ]
+    owner_rows = [{"id": owner.id, "name": owner.name} for owner in owner_qs.order_by("name", "id")]
     if owner_rows:
         return owner_rows
 
-    summary_options = _collect_owner_options(
-        _inventory_summary_fallback_queryset(user=user)
-    )
+    summary_options = _collect_owner_options(_inventory_summary_fallback_queryset(user=user))
     if summary_options:
         return summary_options
     return []
@@ -621,9 +597,7 @@ def build_boss_context_payload(*, user, warehouse_id: int | None = None):
     warehouse_qs = Warehouse.objects.filter(is_active=True).order_by("name", "id")
     if not access_scope.is_global:
         warehouse_qs = warehouse_qs.filter(pk__in=access_scope.warehouse_ids)
-    warehouse_options = [
-        {"id": row.id, "code": row.code, "name": row.name} for row in warehouse_qs
-    ]
+    warehouse_options = [{"id": row.id, "code": row.code, "name": row.name} for row in warehouse_qs]
     owner_options = _build_owner_options(user=user, warehouse_id=warehouse_id)
     scope = _build_scope_payload(
         user=user,
@@ -748,9 +722,7 @@ def _build_trend_payload(
         tax_total = _decimal_or_zero(row["tax_total"])
         currency = normalize_currency(row["currency"])
         accrual_map[row["service_date"]][currency] = (
-            accrual_map[row["service_date"]].get(currency, ZERO_MONEY)
-            + subtotal
-            + tax_total
+            accrual_map[row["service_date"]].get(currency, ZERO_MONEY) + subtotal + tax_total
         )
 
     rows = []
@@ -837,12 +809,14 @@ def _build_alert_counts(
             expiry_date__gte=today,
             expiry_date__lte=today + datetime.timedelta(days=7),
         ).count(),
-        "overdue_bills": bill_qs.filter(
-            status=BillStatus.ISSUED,
+        "overdue_bills": receivable_bills_as_of(bill_qs, today)
+        .filter(
+            report_outstanding_amount__gt=0,
             due_date__isnull=False,
             due_date__lt=today,
             issue_date__lte=today,
-        ).count(),
+        )
+        .count(),
         "bills_missing_due_date": bill_qs.filter(
             status__in=[BillStatus.ISSUED, BillStatus.PAID],
             due_date__isnull=True,
@@ -878,9 +852,7 @@ def build_boss_home_payload(
 
     resolved_scope = AccessScope.for_user(user)
     default_warehouse_id = (
-        next(iter(resolved_scope.warehouse_ids))
-        if len(resolved_scope.warehouse_ids) == 1
-        else None
+        next(iter(resolved_scope.warehouse_ids)) if len(resolved_scope.warehouse_ids) == 1 else None
     )
     owner_options = _build_owner_options(
         user=user, warehouse_id=warehouse_id or default_warehouse_id
@@ -918,23 +890,17 @@ def build_boss_home_payload(
             daily_order_keys[day][item["direction"]].add(order_key)
 
     inbound_qs = _apply_scope_filter(
-        scope_queryset_for_user(
-            InboundOrder.objects.select_related("owner", "warehouse"), user
-        ),
+        scope_queryset_for_user(InboundOrder.objects.select_related("owner", "warehouse"), user),
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )
     outbound_qs = _apply_scope_filter(
-        scope_queryset_for_user(
-            OutboundOrder.objects.select_related("owner", "warehouse"), user
-        ),
+        scope_queryset_for_user(OutboundOrder.objects.select_related("owner", "warehouse"), user),
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )
     task_qs = _apply_scope_filter(
-        scope_queryset_for_user(
-            WmsTask.objects.select_related("owner", "warehouse"), user
-        ),
+        scope_queryset_for_user(WmsTask.objects.select_related("owner", "warehouse"), user),
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )
@@ -954,9 +920,7 @@ def build_boss_home_payload(
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )
-    accrual_qs = scoped_accrual_qs.filter(is_reversal=False).exclude(
-        status=AccrualStatus.VOID
-    )
+    accrual_qs = scoped_accrual_qs.filter(is_reversal=False).exclude(status=AccrualStatus.VOID)
     ledger_accrual_qs = financial_ledger_accruals(scoped_accrual_qs)
     bill_qs = _apply_scope_filter(
         scope_queryset_for_user(
@@ -967,9 +931,7 @@ def build_boss_home_payload(
         warehouse_id=warehouse_id,
     )
     job_qs = _apply_scope_filter(
-        scope_queryset_for_user(
-            BillingJobRun.objects.select_related("owner", "warehouse"), user
-        ),
+        scope_queryset_for_user(BillingJobRun.objects.select_related("owner", "warehouse"), user),
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )
@@ -1007,9 +969,7 @@ def build_boss_home_payload(
         Decimal("0.000"),
     )
 
-    range_accrual_qs = ledger_accrual_qs.filter(
-        service_date__range=(date_from, date_to)
-    )
+    range_accrual_qs = ledger_accrual_qs.filter(service_date__range=(date_from, date_to))
     issued_bill_qs = bill_qs.filter(
         status__in=[BillStatus.ISSUED, BillStatus.PAID],
         issue_date__range=(date_from, date_to),
@@ -1018,8 +978,8 @@ def build_boss_home_payload(
         status=BillStatus.DRAFT,
         issue_date__range=(date_from, date_to),
     )
-    overdue_bill_qs = bill_qs.filter(
-        status=BillStatus.ISSUED,
+    overdue_bill_qs = receivable_bills_as_of(bill_qs, date_to).filter(
+        report_outstanding_amount__gt=0,
         due_date__isnull=False,
         due_date__lt=date_to,
         issue_date__lte=date_to,
@@ -1039,12 +999,7 @@ def build_boss_home_payload(
         tax_field="tax_total",
         total_field="total",
     )
-    overdue_receivables_by_currency = money_groups(
-        overdue_bill_qs,
-        subtotal_field="subtotal",
-        tax_field="tax_total",
-        total_field="total",
-    )
+    overdue_receivables_by_currency = outstanding_money_groups(overdue_bill_qs)
 
     alert_counts = _build_alert_counts(
         task_qs=task_qs,
@@ -1085,23 +1040,18 @@ def build_boss_home_payload(
                 "owner": row["owner_id"],
                 "owner_name": row["owner__name"] or f"Owner #{row['owner_id']}",
                 "currency": currency,
-                "accrual_count": revenue_accrual_counts.get(
-                    (row["owner_id"], row["currency"]), 0
-                ),
+                "accrual_count": revenue_accrual_counts.get((row["owner_id"], row["currency"]), 0),
                 "subtotal": subtotal,
                 "tax_total": tax_total,
                 "total": subtotal + tax_total,
             }
         )
     revenue_contribution_by_currency = [
-        {"currency": currency, "rows": rows}
-        for currency, rows in sorted(revenue_groups.items())
+        {"currency": currency, "rows": rows} for currency, rows in sorted(revenue_groups.items())
     ]
 
     if detail_inventory_exists:
-        inventory_top_owners = _inventory_owner_rankings_from_detail(
-            inventory_qs, item_limit=5
-        )
+        inventory_top_owners = _inventory_owner_rankings_from_detail(inventory_qs, item_limit=5)
     else:
         inventory_top_owners = []
 
@@ -1166,9 +1116,7 @@ def build_boss_home_payload(
         "owner_count": inventory_qs.values("owner_id").distinct().count(),
         "occupied_location_count": occupied_location_count,
         "active_location_count": active_location_count,
-        "location_occupancy_rate": _percent(
-            occupied_location_count, active_location_count
-        ),
+        "location_occupancy_rate": _percent(occupied_location_count, active_location_count),
         "used_volume_m3": used_volume_total,
         "capacity_volume_m3": volume_capacity_total,
         "volume_utilization_rate": _percent(used_volume_total, volume_capacity_total),
@@ -1253,18 +1201,14 @@ def build_boss_alert_payload(
 
     access_scope = AccessScope.for_user(user)
     default_warehouse_id = (
-        next(iter(access_scope.warehouse_ids))
-        if len(access_scope.warehouse_ids) == 1
-        else None
+        next(iter(access_scope.warehouse_ids)) if len(access_scope.warehouse_ids) == 1 else None
     )
     owner_options = _build_owner_options(
         user=user, warehouse_id=warehouse_id or default_warehouse_id
     )
 
     task_qs = _apply_scope_filter(
-        scope_queryset_for_user(
-            WmsTask.objects.select_related("owner", "warehouse"), user
-        ),
+        scope_queryset_for_user(WmsTask.objects.select_related("owner", "warehouse"), user),
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )
@@ -1285,9 +1229,7 @@ def build_boss_alert_payload(
         warehouse_id=warehouse_id,
     )
     job_qs = _apply_scope_filter(
-        scope_queryset_for_user(
-            BillingJobRun.objects.select_related("owner", "warehouse"), user
-        ),
+        scope_queryset_for_user(BillingJobRun.objects.select_related("owner", "warehouse"), user),
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )
@@ -1323,7 +1265,7 @@ def build_boss_alert_payload(
         scope_queryset_for_user(
             ReviewDifference.objects.select_related(
                 "owner", "warehouse", "source_task", "source_task_line"
-            ).prefetch_related("lines__product", "lines__location"),
+            ).prefetch_related("lines__product__brand", "lines__location"),
             user,
         ),
         owner_id=owner_id,
@@ -1337,9 +1279,7 @@ def build_boss_alert_payload(
         .filter(planned_end__isnull=False, planned_end__lt=cutoff)
         .order_by("planned_end", "id")[:item_limit]
     ):
-        overdue_hours = Decimal(
-            (now - task.planned_end).total_seconds() / 3600
-        ).quantize(
+        overdue_hours = Decimal((now - task.planned_end).total_seconds() / 3600).quantize(
             Decimal("0.1"),
             rounding=ROUND_HALF_UP,
         )
@@ -1386,33 +1326,33 @@ def build_boss_alert_payload(
             {
                 "id": row.id,
                 "item_type": (
-                    "inventory_detail"
-                    if inventory_source == "CURRENT"
-                    else "inventory_snapshot"
+                    "inventory_detail" if inventory_source == "CURRENT" else "inventory_snapshot"
                 ),
                 "owner": row.owner_id,
                 "owner_name": getattr(row.owner, "name", ""),
                 "product": row.product_id,
-                "product_name": getattr(row.product, "name", ""),
+                **product_display_fields(row.product),
                 "location": row.location_id,
                 "location_code": getattr(row.location, "code", ""),
                 "expiry_date": row.expiry_date,
                 "onhand_qty": row.onhand_qty,
                 "base_unit": (
-                    row.base_unit
-                    if inventory_source == "CURRENT"
-                    else row.base_unit_code
+                    row.base_unit if inventory_source == "CURRENT" else row.base_unit_code
                 ),
             }
         )
 
     overdue_bills = []
-    for bill in bill_qs.filter(
-        status=BillStatus.ISSUED,
-        due_date__isnull=False,
-        due_date__lt=date_to,
-        issue_date__lte=date_to,
-    ).order_by("due_date", "id")[:item_limit]:
+    for bill in (
+        receivable_bills_as_of(bill_qs, date_to)
+        .filter(
+            report_outstanding_amount__gt=0,
+            due_date__isnull=False,
+            due_date__lt=date_to,
+            issue_date__lte=date_to,
+        )
+        .order_by("due_date", "id")[:item_limit]
+    ):
         overdue_bills.append(
             {
                 "id": bill.id,
@@ -1421,6 +1361,8 @@ def build_boss_alert_payload(
                 "owner_name": getattr(bill.owner, "name", ""),
                 "due_date": bill.due_date,
                 "total": bill.total,
+                "paid_amount": bill.report_paid_amount,
+                "outstanding_amount": bill.report_outstanding_amount,
                 "currency": normalize_currency(bill.currency),
                 "status": bill.status,
             }
@@ -1579,14 +1521,16 @@ def build_boss_alert_payload(
         "overdue_bills": {
             "label": "逾期应收账单",
             "severity": "high",
-            "count": bill_qs.filter(
-                status=BillStatus.ISSUED,
+            "count": receivable_bills_as_of(bill_qs, date_to)
+            .filter(
+                report_outstanding_amount__gt=0,
                 due_date__isnull=False,
                 due_date__lt=date_to,
                 issue_date__lte=date_to,
-            ).count(),
+            )
+            .count(),
             "items": overdue_bills,
-            "date_semantics": "当前未付款且到期日早于所选截止日",
+            "date_semantics": "截至所选日期仍有未收余额且已逾期",
         },
         "bills_missing_due_date": {
             "label": "已开票账单缺少到期日",
@@ -1635,12 +1579,8 @@ def build_boss_alert_payload(
         "approximate_billing_data": {
             "label": "近似来源计费数据",
             "severity": "high",
-            "count": approximate_accrual_qs.filter(
-                service_date__range=(date_from, date_to)
-            ).count()
-            + approximate_metric_qs.filter(
-                service_date__range=(date_from, date_to)
-            ).count(),
+            "count": approximate_accrual_qs.filter(service_date__range=(date_from, date_to)).count()
+            + approximate_metric_qs.filter(service_date__range=(date_from, date_to)).count(),
             "items": approximate_billing_data,
             "date_semantics": "服务日期位于所选区间",
         },
@@ -1652,9 +1592,7 @@ def build_boss_alert_payload(
 
     total_items = sum(section["count"] for section in sections.values())
     high_risk_items = sum(
-        section["count"]
-        for section in sections.values()
-        if section["severity"] == "high"
+        section["count"] for section in sections.values() if section["severity"] == "high"
     )
 
     scope_payload = _build_scope_payload(
@@ -1668,12 +1606,8 @@ def build_boss_alert_payload(
     data_warnings = list(inventory_warnings)
     legacy_difference_count = review_qs.filter(owner__isnull=True).count()
     if legacy_difference_count:
-        data_warnings.append(
-            warning("LEGACY_REVIEW_OWNER_UNKNOWN", legacy_difference_count)
-        )
-    unknown_currency_count = bill_qs.filter(
-        Q(currency__isnull=True) | Q(currency="")
-    ).count()
+        data_warnings.append(warning("LEGACY_REVIEW_OWNER_UNKNOWN", legacy_difference_count))
+    unknown_currency_count = bill_qs.filter(Q(currency__isnull=True) | Q(currency="")).count()
     if unknown_currency_count:
         data_warnings.append(warning("UNKNOWN_CURRENCY", unknown_currency_count))
     payload = {
@@ -1712,9 +1646,7 @@ def build_boss_inventory_payload(
 
     access_scope = AccessScope.for_user(user)
     default_warehouse_id = (
-        next(iter(access_scope.warehouse_ids))
-        if len(access_scope.warehouse_ids) == 1
-        else None
+        next(iter(access_scope.warehouse_ids)) if len(access_scope.warehouse_ids) == 1 else None
     )
     owner_options = _build_owner_options(
         user=user,
@@ -1793,9 +1725,7 @@ def build_boss_inventory_payload(
     )
 
     if detail_inventory_exists:
-        owner_rankings = _inventory_owner_rankings_from_detail(
-            inventory_qs, item_limit=item_limit
-        )
+        owner_rankings = _inventory_owner_rankings_from_detail(inventory_qs, item_limit=item_limit)
     else:
         owner_rankings = []
 
@@ -1807,7 +1737,7 @@ def build_boss_inventory_payload(
                 "owner": row.owner_id,
                 "owner_name": getattr(row.owner, "name", ""),
                 "product": row.product_id,
-                "product_name": getattr(row.product, "name", ""),
+                **product_display_fields(row.product),
                 "product_code": getattr(row.product, "code", ""),
                 "location": row.location_id,
                 "location_code": getattr(row.location, "code", ""),
@@ -1819,9 +1749,7 @@ def build_boss_inventory_payload(
                 "onhand_qty": row.onhand_qty,
                 "available_qty": row.available_qty,
                 "base_unit": (
-                    row.base_unit
-                    if inventory_source == "CURRENT"
-                    else row.base_unit_code
+                    row.base_unit if inventory_source == "CURRENT" else row.base_unit_code
                 ),
             }
         )
@@ -1839,7 +1767,7 @@ def build_boss_inventory_payload(
                 "owner": row.owner_id,
                 "owner_name": getattr(row.owner, "name", ""),
                 "product": row.product_id,
-                "product_name": getattr(row.product, "name", ""),
+                **product_display_fields(row.product),
                 "product_code": getattr(row.product, "code", ""),
                 "location": row.location_id,
                 "location_code": getattr(row.location, "code", ""),
@@ -1897,9 +1825,7 @@ def build_boss_inventory_payload(
         "owner_count": inventory_summary["owner_count"] or 0,
         "occupied_location_count": occupied_location_count,
         "active_location_count": active_location_count,
-        "location_occupancy_rate": _percent(
-            occupied_location_count, active_location_count
-        ),
+        "location_occupancy_rate": _percent(occupied_location_count, active_location_count),
         "used_volume_m3": used_volume_total,
         "capacity_volume_m3": volume_capacity_total,
         "volume_utilization_rate": _percent(used_volume_total, volume_capacity_total),

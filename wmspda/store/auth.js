@@ -25,6 +25,8 @@ export const useAuth = defineStore('auth', {
   state: emptyState,
 
   getters: {
+    canManageCount: (state) =>
+      state.profileLoaded === true && state.profile?.capabilities?.can_manage_count === true,
     canReviewWarehouseOutbound: (state) =>
       state.profileLoaded === true && state.profile?.capabilities?.can_review_warehouse_outbound === true,
     canProcessPdaReturn: (state) => state.profileLoaded === true && state.profile?.capabilities?.can_process_pda_return === true,

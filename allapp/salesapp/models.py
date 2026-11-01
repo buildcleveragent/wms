@@ -9,6 +9,7 @@ from django.db import models
 
 from allapp.baseinfo.models import Customer, Owner
 from allapp.core.models import BaseModel
+from allapp.core.product_identity import ProductIdentitySnapshotMixin
 from allapp.products.models import Product  # 你现有商品模型
 
 # 如有 Warehouse / UOM 模型，也可在此引入
@@ -1466,7 +1467,7 @@ class SalesOrder(BaseModel):
         indexes = [models.Index(fields=["owner", "customer", "status"])]
 
 
-class SalesOrderLine(BaseModel):
+class SalesOrderLine(ProductIdentitySnapshotMixin, BaseModel):
     owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="sales_order_lines")
     order = models.ForeignKey(SalesOrder, on_delete=models.PROTECT, related_name="lines")
     product = models.ForeignKey(Product, on_delete=models.PROTECT)

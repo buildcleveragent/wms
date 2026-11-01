@@ -1,7 +1,7 @@
 <template>
   <view class="inventory-detail">
     <view v-if="header" class="card product">
-      <text class="title">{{ header.product.name }}</text>
+      <text class="title">{{ header.product.display_name || header.product.name }}</text>
       <text class="muted">编码：{{ header.product.code || '未记录' }} · 规格：{{ header.product.spec || '未记录' }}</text>
       <text>单位：{{ header.product.base_unit || '未记录' }}</text>
     </view>

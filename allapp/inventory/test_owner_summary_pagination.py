@@ -1,11 +1,15 @@
+from types import SimpleNamespace
+
 from django.contrib.auth import get_user_model
-from django.test import TestCase
 from django.contrib.auth.models import Permission
+from django.test import TestCase
 from rest_framework.test import APIClient
 
 from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Owner
 from allapp.inventory.models import InventorySummary
+from allapp.inventory.serializers import OwnerInventorySummarySerializer
+from allapp.inventory.views import OwnerInventorySummaryViewSet
 from allapp.products.models import Product, ProductUom
 
 
@@ -93,3 +97,45 @@ class OwnerInventorySummaryPaginationTests(TestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["count"], 1)
         self.assertEqual(response.data["results"][0]["product_code"], "PAG054")
+
+    def test_summary_returns_unit_name_without_changing_code(self):
+        response = self.client.get("/api/inventory/summary/", {"page_size": 50})
+
+        self.assertEqual(response.status_code, 200)
+        for row in response.data["results"]:
+            self.assertEqual(row["base_unit"], "IPCS")
+            self.assertEqual(row["base_unit_name"], "件")
+
+    def test_unit_name_matches_inventory_snapshot_not_current_product_unit(self):
+        ProductUom.objects.create(code="OLD-BOX", name="箱")
+        summary_id = min(self.summary_ids)
+        InventorySummary.objects.filter(pk=summary_id).update(base_unit="OLD-BOX")
+
+        response = self.client.get("/api/inventory/summary/")
+
+        self.assertEqual(response.status_code, 200)
+        row = next(row for row in response.data["results"] if row["id"] == summary_id)
+        self.assertEqual(row["base_unit"], "OLD-BOX")
+        self.assertEqual(row["base_unit_name"], "箱")
+
+    def test_unknown_snapshot_unit_retains_code_and_has_no_guessed_name(self):
+        summary_id = min(self.summary_ids)
+        InventorySummary.objects.filter(pk=summary_id).update(base_unit="UNKNOWN")
+
+        response = self.client.get("/api/inventory/summary/")
+
+        self.assertEqual(response.status_code, 200)
+        row = next(row for row in response.data["results"] if row["id"] == summary_id)
+        self.assertEqual(row["base_unit"], "UNKNOWN")
+        self.assertIsNone(row["base_unit_name"])
+
+    def test_serializing_a_page_does_not_query_units_per_row(self):
+        view = OwnerInventorySummaryViewSet()
+        view.request = SimpleNamespace(user=self.user, query_params={})
+        queryset = view.get_queryset()[:50]
+
+        with self.assertNumQueries(1):
+            rows = OwnerInventorySummarySerializer(queryset, many=True).data
+
+        self.assertEqual(len(rows), 50)
+        self.assertTrue(all(row["base_unit_name"] == "件" for row in rows))

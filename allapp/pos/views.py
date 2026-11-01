@@ -181,7 +181,9 @@ class PosProductListApi(generics.ListAPIView):
         if not warehouse_id:
             return Product.objects.none()
 
-        queryset = Product.objects.filter(is_active=True).select_related("base_uom", "owner")
+        queryset = Product.objects.filter(is_active=True).select_related(
+            "base_uom", "owner", "brand"
+        )
         if self.request.query_params.get("include_out_of_stock") == "1":
             # Mobile needs every authorized owner, including products without a stock layer.
             queryset = queryset.filter(owner__in=owner_queryset_for_warehouses([warehouse_id]))

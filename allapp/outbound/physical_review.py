@@ -298,7 +298,18 @@ def review_line_details(task, content):
             )
         result[line.pk] = {
             "product_code": product.code if product else None,
-            "product_spec": product.spec if product else None,
+            "product_spec": (
+                origin.frozen_product_spec if origin else (product.spec if product else None)
+            ),
+            "product_name": (
+                origin.frozen_product_name if origin else (product.name if product else None)
+            ),
+            "brand_model": (
+                origin.frozen_brand_model if origin else (product.brand_model if product else "")
+            ),
+            "product_display_name": (
+                origin.product_display_name if origin else (product.display_name if product else "")
+            ),
             "base_uom_id": unit.pk if unit else None,
             "base_uom_name": unit.name if unit else None,
             "order_line_id": origin.pk if origin else None,

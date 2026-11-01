@@ -34,6 +34,7 @@ from .models import (
     OperatingTarget,
     TaskStateSnapshotDaily,
 )
+from .product_display import product_display_fields
 from .services_boss_p1 import (
     build_inventory_risk,
     build_performance,
@@ -453,10 +454,28 @@ class BossInventoryRiskDetailsApi(BossP1Mixin, APIView):
             page_size = min(100, max(1, int(request.query_params.get("page_size", 20))))
         except (ValueError, TypeError) as exc:
             return Response({"detail": str(exc)}, status=400)
+        now = timezone.now()
+        today = timezone.localtime(now).date() if timezone.is_aware(now) else now.date()
+        if date_to != today:
+            return Response(
+                {
+                    "scope": scope,
+                    "meta": build_meta(
+                        scope=scope,
+                        warnings=[warning("FIFO_HISTORY_NOT_AVAILABLE", 1)],
+                        unavailable=True,
+                    ),
+                    "count": 0,
+                    "page": page,
+                    "page_size": page_size,
+                    "results": [],
+                }
+            )
         qs = AccessScope.for_user(request.user).filter_queryset(
             InventoryLayerPosition.objects.filter(remaining_qty__gt=0).select_related(
                 "layer",
                 "layer__product",
+                "layer__product__brand",
                 "layer__base_uom",
                 "location",
                 "location__subwarehouse",
@@ -515,7 +534,7 @@ class BossInventoryRiskDetailsApi(BossP1Mixin, APIView):
                     "owner_id": layer.owner_id,
                     "warehouse_id": layer.warehouse_id,
                     "product_id": layer.product_id,
-                    "product_name": layer.product.name,
+                    **product_display_fields(layer.product),
                     "batch_no": layer.batch_no,
                     "serial_no": layer.serial_no,
                     "location_id": position.location_id,

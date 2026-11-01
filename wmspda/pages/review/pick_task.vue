@@ -23,7 +23,7 @@
         <view v-if="task.blocked_reason" class="warning">{{ task.blocked_reason }}</view>
       </view>
       <view v-for="line in lines" :key="line.id" class="card review-line">
-        <view class="task-no">{{ line.product_name }}</view>
+        <view class="task-no">{{ (line.product_display_name || line.product_name) }}</view>
         <view>编码：{{ recorded(line.product_code) }} · SKU：{{ recorded(line.product_sku) }}</view>
         <view>规格：{{ recorded(line.product_spec) }} · 基本单位：{{ recorded(line.base_uom_name) }}</view>
         <view>订单第 {{ line.order_line_no }} 行数量：{{ quantity(line.order_qty) }} {{ line.base_uom_name }}（同一订单行仅汇总一次）</view>

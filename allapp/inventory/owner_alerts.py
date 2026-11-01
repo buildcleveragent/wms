@@ -61,6 +61,8 @@ def product_info(product):
     return {
         "id": product.pk,
         "name": product.name,
+        "brand_model": product.brand_model,
+        "display_name": product.display_name,
         "code": product.code,
         "sku": product.sku,
         "spec": product.spec or "",

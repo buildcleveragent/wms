@@ -16,6 +16,7 @@ from allapp.outbound.return_services import can_process_return
 from allapp.outbound.warehouse_review import can_review_warehouse_outbound
 from allapp.products.excel_export import can_export_products
 from allapp.products.excel_import import can_import_products, can_receive_product_import
+from allapp.tasking.count_options import can_manage_count
 
 
 @api_view(["GET"])
@@ -83,9 +84,12 @@ def profile_view(request):
             },
             "perms": perms,
             "capabilities": {
+                "can_manage_count": can_manage_count(user),
                 **inventory_capabilities(user),
                 "can_process_pda_return": can_process_return(user),
-                "can_review_warehouse_outbound": can_review_warehouse_outbound(user, scope=access_scope),
+                "can_review_warehouse_outbound": can_review_warehouse_outbound(
+                    user, scope=access_scope
+                ),
                 "can_process_warehouse_assisted_outbound": can_process_warehouse_assisted_outbound,
                 "can_view_warehouse_operations": is_warehouse_role
                 and user.has_perm("reports.view_warehouse_operations"),

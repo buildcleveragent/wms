@@ -51,7 +51,7 @@
 
     <view v-if="loading" class="loading-banner">正在同步货主计费明细...</view>
 
-    <template v-else>
+    <template v-else-if="overview && overview.meta?.data_status !== 'UNAVAILABLE'">
       <view class="kpi-grid">
         <view class="kpi-card blue">
           <view class="kpi-label">应计条数</view>
@@ -143,7 +143,7 @@ import {
   chargeTypeLabel,
   defaultDateRange,
   money,
-  toNumber,
+  qty,
 } from '@/utils/billing'
 
 const auth = useAuth()
@@ -173,7 +173,7 @@ const accruals = ref([])
 const summary = computed(() => {
   const source = overview.value?.summary || {}
   return {
-    accrualCount: Number(source.accrual_count || 0),
+    accrualCount: qty(source.accrual_count),
     accruals: asList(source.accruals_by_currency),
     issuedBills: asList(source.issued_bills_by_currency),
   }

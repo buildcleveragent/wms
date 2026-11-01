@@ -217,9 +217,7 @@ def build_dispatch_note(task_id: int, *, max_lines=None) -> DispatchNote:
         )
         total_amount += amount or Decimal("0.00")
         product = task_line.product
-        spec_text = (
-            getattr(product, "spec", None) or getattr(product, "sales_pack_spec", None) or ""
-        )
+        spec_text = order_line.frozen_product_spec
         inner_quantity = parse_spec_inner_qty(spec_text)
         piece_quantity = (
             (quantity / Decimal(inner_quantity)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
@@ -231,7 +229,7 @@ def build_dispatch_note(task_id: int, *, max_lines=None) -> DispatchNote:
             NoteItem(
                 idx=index,
                 sku_code=product.sku or product.code or str(product.pk),
-                sku_name=product.name,
+                sku_name=order_line.product_display_name,
                 spec=spec_text,
                 qty=quantity,
                 uom=base_uom.name or base_uom.code,

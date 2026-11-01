@@ -6,7 +6,7 @@
       <view class="task-actions"><button v-if="task.can_claim" @click="claim">领取</button><button v-if="task.can_start" class="primary" @click="start">开始</button><button v-if="task.can_record" @click="reportException">报告异常</button><button v-if="canManage&&task.execution_state==='EXCEPTION'" @click="resume">恢复</button><button v-if="canManage&&task.posting_status==='FAILED'" @click="retry">重试过账</button><button v-if="canManage&&task.posting_status!=='POSTED'" class="danger" @click="voidTask">整单作废</button></view>
 
       <view v-for="line in task.lines" :key="line.id" class="line-card">
-        <view class="line-title"><view><text>{{line.product_name||line.product_code}}</text><text>{{line.from_location_code}} → {{line.to_location_code}}</text></view><text>剩余 {{line.qty_pending}}</text></view>
+        <view class="line-title"><view><text>{{(line.product_display_name || line.product_name)||line.product_code}}</text><text>{{line.from_location_code}} → {{line.to_location_code}}</text></view><text>剩余 {{line.qty_pending}}</text></view>
         <view v-if="task.can_record&&!line.finished_at" class="steps">
           <view v-for="(step,index) in stepsFor(line)" :key="step.key" :class="['step',{done:step.value,current:activeStep(line)===step.key}]">
             <view class="step-index">{{step.value?'✓':index+1}}</view>

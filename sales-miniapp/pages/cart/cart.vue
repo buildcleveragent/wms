@@ -26,7 +26,7 @@
               <view v-else class="thumb placeholder">货</view>
               <view class="main">
                 <view class="between">
-                  <view class="name">{{ item.name }}</view>
+                  <view class="name">{{ item.display_name || item.name }}</view>
                   <button class="remove" @click="remove(item)">删</button>
                 </view>
                 <view v-if="item.spec || item.order_uom_name" class="meta">{{ [item.spec, item.order_uom_name].filter(Boolean).join(' · ') }}</view>

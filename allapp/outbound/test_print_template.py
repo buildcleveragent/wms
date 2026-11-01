@@ -27,6 +27,8 @@ class PickTaskPrintTemplateTests(SimpleTestCase):
             "lines": [
                 {
                     "product": {"name": "茶叶", "spec": "250g×4罐", "base_uom": {"name": "件"}},
+                    "product_display_name": "茶叶",
+                    "frozen_product_spec": "250g×4罐",
                     "location": {"code": "A-01"},
                     "lot_no": "LOT-001",
                     "base_uom": {"name": "件"},
@@ -77,6 +79,60 @@ class PickTaskPrintTemplateTests(SimpleTestCase):
         ]
         self.assertIn("仓库路2号", warehouse_row)
         self.assertIn("0771-1234567", warehouse_row)
+
+    def test_delivery_matches_reference_columns_addresses_and_copy_labels(self):
+        from bs4 import BeautifulSoup
+
+        html = render_to_string(
+            "outbound/print/pick_task.html",
+            {
+                "kind": "delivery",
+                "warehouse_name": "金桥融通仓",
+                "object": {"order_no": "CK-20261102"},
+                "receiver_name": "本单收货人",
+                "receiver_address": "客户路1号",
+                "warehouse_address": "仓库路2号",
+                "sender_name": "发货货主",
+                "print_css": OUTBOUND_PRINT_CSS_DEFAULTS,
+                "lines": [
+                    {
+                        "product": {"gtin": "6901234567892", "unit_barcode": ""},
+                        "product_display_name": "测试商品",
+                        "frozen_product_spec": "480ml×12瓶",
+                        "base_uom": {"name": "件"},
+                        "base_price": "25.50",
+                        "base_qty": "40",
+                        "amount": "1020.00",
+                        "is_priced": True,
+                    }
+                ],
+                "total_qty": "40",
+                "total_amount": "1020.00",
+            },
+        )
+        soup = BeautifulSoup(html, "html.parser")
+        self.assertEqual(soup.select_one(".document-title").text, "出库单")
+        self.assertEqual(soup.select_one(".delivery-number").text, "送货单号：CK-20261102")
+        parties = soup.select(".delivery-parties > .meta-col")
+        self.assertIn("本单收货人", parties[0].text)
+        self.assertIn("收货地址：", parties[0].text)
+        header = soup.select_one(".document-header")
+        self.assertLess(header.text.index("客户路1号"), header.text.index("仓库路2号"))
+        self.assertIsNone(soup.select_one(".delivery-parties .warehouse-address"))
+        self.assertIn("发货货主", parties[1].text)
+        self.assertEqual(
+            [cell.text for cell in soup.select("table.goods th")],
+            ["序号", "条码", "货物名称", "包装规格", "单位", "单价", "数量", "金额", "备注"],
+        )
+        cells = soup.select("table.goods tbody tr:first-child td")
+        self.assertEqual(len(cells), 9)
+        self.assertEqual(cells[1].text, "6901234567892")
+        self.assertEqual(cells[5].text.strip(), "25.50")
+        self.assertEqual(cells[6].text.strip(), "40")
+        self.assertEqual(
+            [cell.text for cell in soup.select(".copies > div")],
+            ["第一联：仓库", "第二联：客户", "第三联：财务"],
+        )
 
     def test_dispatch_print_distinguishes_unpriced_from_legacy_numeric_amounts(self):
         legacy = {"sku_name": "历史商品", "qty": 2, "price": 12.5, "amount": 25}

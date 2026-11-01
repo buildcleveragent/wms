@@ -19,7 +19,7 @@
     <text v-if="loading && !data" class="empty">正在加载预警…</text>
     <text v-if="data && !data.results.length" class="empty">{{ selectedCategory?.enabled === false ? '本类预警已关闭' : '暂无符合条件的商品' }}</text>
     <view v-for="row in data?.results || []" :key="row.product.id" class="alert-card">
-      <text class="product-name">{{ row.product.name }}</text>
+      <text class="product-name">{{ row.product.display_name || row.product.name }}</text>
       <text v-if="row.product.is_active === false" class="muted">商品已停用，仍有现存库存</text>
       <text class="muted">编码：{{ row.product.code }} · SKU：{{ row.product.sku || '未记录' }}</text>
       <text class="muted">规格：{{ row.product.spec || '未记录' }} · 单位：{{ row.product.unit_label || row.product.base_unit }}</text>

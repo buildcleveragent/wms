@@ -109,6 +109,21 @@ describe('商品搜索分页组件', () => {
     expect(mocks.products).toHaveBeenCalledOnce()
   })
 
+  it('加入购物车时保留品牌型号展示信息', async () => {
+    mocks.cart.addItem.mockReturnValue(true)
+    mocks.products.mockResolvedValue({ results: [{ ...product(9, '汽水'),
+      brand_model: '大窑·橙诺橙味', display_name: '汽水 · 大窑·橙诺橙味' }], next: null })
+    const wrapper = render()
+    await mocks.onLoad()
+    await flushPromises()
+    expect(wrapper.text()).toContain('汽水 · 大窑·橙诺橙味')
+    wrapper.findComponent(ProductCard).vm.$emit('quantity-input', '1')
+    await wrapper.find('.add-button').trigger('click')
+    expect(mocks.cart.addItem).toHaveBeenCalledWith(expect.objectContaining({
+      id: 9, name: '汽水', brand_model: '大窑·橙诺橙味', display_name: '汽水 · 大窑·橙诺橙味',
+    }))
+  })
+
   it('新搜索完成后旧响应不得追加', async () => {
     const oldSearch = deferred()
     mocks.products

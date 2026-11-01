@@ -1,13 +1,22 @@
 <div class="document-header">
-  <div class="title"><span class="company-name">{{ warehouse_name }}</span> <span class="document-title">{{ document_title|default:"送货单" }}</span></div>
-  <div class="top-row">来源订单：{{ object.order_no }}　拣货任务：{{ task.task_no }}{% if kind != 'pick' %}　过账时间：{{ ship_time|date:"Y-m-d H:i:s" }}{% endif %}</div>
+  <div class="title"><span class="company-name">{{ warehouse_name }}</span> <span class="document-title">{% if kind == 'pick' %}拣货单{% else %}出库单{% endif %}</span></div>
   {% if kind == 'pick' %}
+  <div class="top-row">来源订单：{{ object.order_no }}　拣货任务：{{ task.task_no }}</div>
   <div class="meta-line"><span class="label">货主：</span><span class="value">{{ sender_name }}{% if customer_name %}　客户：{{ customer_name }}{% endif %}</span></div>
   {% else %}
-  <div class="meta-line"><span class="label">货主：</span><span class="value">{{ sender_name }}　联系电话：{{ sender_phone }}</span></div>
-  <div class="meta-line"><span class="label">客户：</span><span class="value">{{ customer_name }}{% if receiver_name and receiver_name != customer_name %}　收货人：{{ receiver_name }}{% endif %}　联系电话：{{ receiver_phone }}</span></div>
-  {% if is_pickup %}<div class="meta-line">提货方式：客户自提</div>{% else %}
-  <div class="meta-line"><span class="label">客户地址：</span><span class="value address-value">{{ receiver_address }}</span></div>{% endif %}
-  <div class="meta-line warehouse-address"><span class="label">仓库地址：</span><span class="value address-value">{{ warehouse_address }}{% if warehouse_phone %}　电话：{{ warehouse_phone }}{% endif %}</span></div>
+  <div class="delivery-number">送货单号：{{ object.order_no }}</div>
+  <div class="delivery-parties">
+    <div class="meta-col">
+      <div class="meta-line"><span class="label">收货人：</span><span class="value">{% if receiver_name %}{{ receiver_name }}{% else %}{{ customer_name }}{% endif %}</span></div>
+      <div class="meta-line"><span class="label">联系电话：</span><span class="value">{{ receiver_phone }}</span></div>
+      <div class="meta-line"><span class="label">收货地址：</span><span class="value address-value">{% if is_pickup %}客户自提{% else %}{{ receiver_address }}{% endif %}</span></div>
+    </div>
+    <div class="meta-col">
+      <div class="meta-line"><span class="label">发货人：</span><span class="value">{{ sender_name }}</span></div>
+      <div class="meta-line"><span class="label">联系电话：</span><span class="value">{{ sender_phone }}</span></div>
+      <div class="meta-line"><span class="label">发货时间：</span><span class="value">{{ ship_time|date:"Y-m-d" }}</span></div>
+    </div>
+  </div>
+  <div class="meta-line warehouse-address"><span class="label">仓库地址：</span><span class="value address-value"><span class="warehouse-location">{{ warehouse_address }}</span>{% if warehouse_phone %}<span class="warehouse-phone">电话：{{ warehouse_phone }}</span>{% endif %}</span></div>
   {% endif %}
 </div>

@@ -9,6 +9,7 @@ from django.core.files.storage import FileSystemStorage
 from django.db import models
 from django.db.models import Q
 
+from allapp.core.product_identity import ProductIdentitySnapshotMixin
 
 def private_return_storage():
     location = Path(
@@ -78,7 +79,7 @@ class CustomerReturn(models.Model):
         ]
 
 
-class CustomerReturnLine(models.Model):
+class CustomerReturnLine(ProductIdentitySnapshotMixin, models.Model):
     order = models.ForeignKey(CustomerReturn, on_delete=models.PROTECT, related_name="lines")
     original_line = models.ForeignKey("outbound.OutboundOrderLine", on_delete=models.PROTECT)
     product = models.ForeignKey("products.Product", on_delete=models.PROTECT)

@@ -58,7 +58,7 @@
         <text class="order">{{ row.order_no || row.task_no || '-' }}</text>
         <text class="date">{{ dateText(row.event_at) }}</text>
       </view>
-      <view class="product">{{ row.product.name || row.product.code }}</view>
+      <view class="product">{{ row.product.display_name || row.product.name || row.product.code }}</view>
       <view class="sub">{{ row.product.code }} · 批次 {{ row.lot_no || '-' }} · {{ row.status }}</view>
       <view class="row-foot">
         <text>{{ row.operator || '系统过账' }}</text>

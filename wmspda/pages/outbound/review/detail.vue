@@ -20,7 +20,7 @@
       <view class="card">
         <view class="strong">商品与库存分配</view>
         <view v-for="line in order.lines" :key="line.id" class="product-line">
-          <view class="strong">{{ line.product_name }} <text class="muted">{{ line.product_sku }}</text></view>
+          <view class="strong">{{ (line.product_display_name || line.product_name) }} <text class="muted">{{ line.product_sku }}</text></view>
           <view>出库数量 {{ formatQuantity(line.base_qty) }} {{ line.base_unit_name }} · 已分配 {{ formatQuantity(line.allocated_qty) }} · 缺口 {{ formatQuantity(line.shortage_qty) }}</view>
           <view v-if="line.is_priced === false">未计价</view>
           <view v-else>单价 ¥{{ formatQuantity(line.base_price) }} · 金额 ¥{{ money(line.amount) }}</view>

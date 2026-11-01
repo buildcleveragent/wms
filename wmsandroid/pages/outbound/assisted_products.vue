@@ -87,7 +87,7 @@
               >
                 <view class="product-identity">
                   <text v-if="product.gtin" class="product-gtin">{{ product.gtin }} · </text>
-                  <text class="product-name">{{ product.name }}</text>
+                  <text class="product-name">{{ (product.display_name || product.name) }}</text>
                   <text class="identity-meta"> · {{ product.sku || product.code || '-' }}</text>
                   <text v-if="product.spec" class="identity-meta"> · {{ product.spec }}</text>
                 </view>

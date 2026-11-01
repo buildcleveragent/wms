@@ -3,7 +3,7 @@
     <image class="product-image" :src="item.product_image_url" mode="aspectFill" />
     <view class="item-main">
       <view class="item-heading">
-        <view class="product-name">{{ item.name || item.sku || item.product_id }}</view>
+        <view class="product-name">{{ item.display_name || item.name || item.sku || item.product_id }}</view>
         <button class="remove-button" :disabled="disabled" @click="$emit('remove')">删除</button>
       </view>
       <text v-if="item.sku" class="meta">SKU：{{ item.sku }}</text>

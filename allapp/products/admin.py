@@ -449,6 +449,7 @@ class ProductAdmin(TenantScopedAdminMixin, AdvancedAdminBase, BaseReadonlyAdmin)
     list_display = (
         "owner",
         "name",
+        "model",
         "spec",
         "sku",
         "code",
@@ -494,7 +495,7 @@ class ProductAdmin(TenantScopedAdminMixin, AdvancedAdminBase, BaseReadonlyAdmin)
 
     list_display_links = ("name",)
 
-    search_fields = ("code", "name", "spec", "sku")
+    search_fields = ("code", "name", "spec", "sku", "brand__name", "model")
     autocomplete_fields = (
         "owner",
         "category",
@@ -516,6 +517,7 @@ class ProductAdmin(TenantScopedAdminMixin, AdvancedAdminBase, BaseReadonlyAdmin)
     fields = (
         "owner",
         "name",
+        "model",
         "spec",
         "sku",
         "code",

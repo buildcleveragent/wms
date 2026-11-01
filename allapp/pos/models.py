@@ -5,6 +5,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 
+from allapp.core.product_identity import ProductIdentitySnapshotMixin
 
 class PosSale(models.Model):
     class Status(models.TextChoices):
@@ -323,7 +324,7 @@ class PosReceiptWarehouseInfo(models.Model):
             )
 
 
-class PosSaleLine(models.Model):
+class PosSaleLine(ProductIdentitySnapshotMixin, models.Model):
     sale = models.ForeignKey(PosSale, on_delete=models.PROTECT, related_name="lines")
     owner = models.ForeignKey(
         "baseinfo.Owner", on_delete=models.PROTECT, related_name="pos_sale_lines"
@@ -578,7 +579,7 @@ class PosReturn(models.Model):
         return self.return_no
 
 
-class PosReturnLine(models.Model):
+class PosReturnLine(ProductIdentitySnapshotMixin, models.Model):
     return_order = models.ForeignKey(PosReturn, on_delete=models.PROTECT, related_name="lines")
     sale_line = models.ForeignKey(
         PosSaleLine, on_delete=models.PROTECT, related_name="return_lines"

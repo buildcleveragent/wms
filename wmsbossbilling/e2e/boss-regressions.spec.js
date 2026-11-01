@@ -323,6 +323,8 @@ test('owner billing commits all responses from the latest refresh together', asy
 
 for (const width of [390, 1440]) {
   test(`all 12 page routes render at width ${width}`, async ({ page }, testInfo) => {
+    // This smoke case loads 12 pages; allow for their combined navigation time.
+    test.setTimeout(120000)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const { errors, consoleErrors } = await mockBoss(page)
     const routes = ['login', 'home/index', 'inventory/index', 'alerts/index', 'cockpit/index',

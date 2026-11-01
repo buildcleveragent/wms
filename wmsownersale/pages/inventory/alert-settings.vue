@@ -6,7 +6,7 @@
     <template v-if="data">
       <text v-if="!data.can_edit" class="notice">仅货主管理员可修改，当前为只读。</text>
       <view v-if="productId" class="card">
-        <text class="product-name">{{ data.product.name }}</text><text>编码：{{ data.product.code }}</text>
+        <text class="product-name">{{ data.product.display_name || data.product.name }}</text><text>编码：{{ data.product.code }}</text>
         <text>规格：{{ data.product.spec || '未记录' }} · 单位：{{ data.product.unit_label }}</text>
         <text v-if="data.product.is_active === false" class="muted">商品已停用：低库存提醒暂停，现存库存仍参与效期和未动销检查。</text>
         <text class="muted">低库存按本货主全仓可用数量判断；留空表示不启用该商品低库存提醒。</text>
@@ -35,7 +35,7 @@
         <view class="search-row"><input v-model="search" placeholder="商品名称 / 编码 / SKU" @confirm="findProducts" /><button class="product-search" size="mini" @click="findProducts">搜索</button></view>
         <text v-if="productsError" class="error">{{ productsError }}</text>
         <button v-if="productsError" size="mini" @click="findProducts">重试商品查询</button>
-        <button v-for="product in products?.results || []" :key="product.id" class="product-row" @click="openProduct(product.id)"><text>{{ product.name }}</text><text class="muted">{{ product.code }} · 单位：{{ product.unit_label }} ›</text></button>
+        <button v-for="product in products?.results || []" :key="product.id" class="product-row" @click="openProduct(product.id)"><text>{{ (product.display_name || product.name) }}</text><text class="muted">{{ product.code }} · 单位：{{ product.unit_label }} ›</text></button>
         <text v-if="products && !products.results.length" class="muted">暂无符合条件的商品</text>
         <button v-if="products?.next_page" class="more-products" size="mini" :disabled="productsLoading" @click="moreProducts(products.next_page)">加载更多商品</button>
       </view>

@@ -277,7 +277,9 @@ def _quantities(order, tasks, lines, order_lines, exceptions):
         if key not in grouped:
             grouped[key] = {
                 "product_id": line.product_id,
-                "product_name": line.product.name,
+                "product_name": line.frozen_product_name,
+                "brand_model": line.frozen_brand_model,
+                "product_display_name": line.product_display_name,
                 "sku": line.product.sku,
                 "unit_id": unit.pk,
                 "unit": unit.name,

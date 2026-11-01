@@ -13,6 +13,7 @@ async function start(page, { emptySource = false } = {}) {
     if (message.type() === 'error' && /SyntaxError|ReferenceError|TypeError|Failed to resolve/.test(message.text())) errors.push(message.text())
   })
   await page.route('**/api/pda/token/', route => route.fulfill({ json: { access: 'test', refresh: 'test-refresh' } }))
+  await page.route('**/api/pda/home-todos/', route => route.fulfill({ json: { scope: 'test', items: [] } }))
   await page.route('**/api/auth/profile/', route => route.fulfill({ json: {
     user: { id: 7, username: 'operator', warehouse_id: 1 }, perms: [],
     capabilities: { can_process_warehouse_assisted_outbound: true },
@@ -45,11 +46,13 @@ async function chooseNewOwner(page, name = target.name) {
   await section.locator('.choice-row').filter({ hasText: name }).click()
 }
 
-test('optional owner follows customer section and retains or clears customer by relationship', async ({ page }) => {
+test('optional owner precedes customer section and retains or clears customer by relationship', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const errors = await start(page)
   const section = page.getByTestId('new-owner-section')
-  expect(await section.evaluate(el => el.previousElementSibling.textContent)).toContain('2. 选择客户')
+  await expect(page.locator('.section-title')).toHaveText([
+    '1. 选择货主', '2. 新货主（选填）', '3. 选择客户',
+  ])
   await page.locator('.choice-row').filter({ hasText: shared.name }).click()
   await expect(page).toHaveURL(/pages\/outbound\/assisted$/)
   await section.locator('input').fill('未选定')
@@ -105,6 +108,10 @@ test('no source customers still allows transfer, two prices and stable retry pay
   await result.locator('input').nth(1).fill('12')
   await result.getByText('加入', { exact: true }).click()
   await page.locator('.selected-row .transfer-price-input input').fill('8')
+  const printOption = page.locator('.print-option .uni-checkbox-input')
+  await expect(printOption).toBeVisible()
+  await expect(printOption).not.toHaveClass(/uni-checkbox-input-checked/)
+  await page.locator('.print-section').screenshot({ path: '/tmp/wmspda-default-no-print.png' })
   await expect(page.locator('.transfer-route')).toContainText('原货主甲 → 新货主乙 → 乙的客户')
   await expect(page.locator('vite-error-overlay')).toHaveCount(0)
   await expect(page.getByText('已加入 10 件', { exact: true })).toBeHidden()

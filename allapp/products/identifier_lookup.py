@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from django.db.models import Exists, OuterRef, Q, QuerySet, Subquery
+from django.db.models import CharField, Exists, OuterRef, Q, QuerySet, Subquery, Value
+from django.db.models.functions import Coalesce, Concat
 from django.utils import timezone
 
 from .models import (
@@ -68,12 +69,22 @@ def matching_product_ids(search, *, at=None) -> QuerySet:
     )
     return (
         products.annotate(
+            _brand_model=Concat(
+                Coalesce("brand__name", Value("")), Value("·"), "model", output_field=CharField()
+            ),
+            _brand_model_words=Concat(
+                Coalesce("brand__name", Value("")), Value(" "), "model", output_field=CharField()
+            ),
             _identifier_barcode_match=Exists(barcode_match),
             _identifier_external_match=Exists(external_match),
         )
         .filter(
             Q(name__icontains=term)
             | Q(spec__icontains=term)
+            | Q(brand__name__icontains=term)
+            | Q(model__icontains=term)
+            | Q(_brand_model__icontains=term)
+            | Q(_brand_model_words__icontains=term)
             | Q(code__icontains=term)
             | Q(sku__icontains=term)
             | Q(_identifier_barcode_match=True)

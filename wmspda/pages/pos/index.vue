@@ -97,7 +97,7 @@
       >
         <view class="product-row" v-for="product in products" :key="product.id" data-testid="pos-product-row">
           <view class="product-main">
-            <text class="product-name" data-testid="pos-product-name">{{ product.name || product.sku || product.code }}<text v-if="product.spec" class="product-spec">　{{ product.spec }}</text></text>
+            <text class="product-name" data-testid="pos-product-name">{{ (product.display_name || product.name) || product.sku || product.code }}<text v-if="product.spec" class="product-spec">　{{ product.spec }}</text></text>
             <text class="product-meta">{{ product.code }} {{ product.sku || '' }}</text>
             <text class="product-meta">
               售价 {{ money(product.price) }} / 可售 {{ qtyText(stockAvailableQty(product), product) }}
@@ -551,7 +551,7 @@
         <text class="void-title">退货 {{ saleDisplayNo(pendingReturnSale) }}</text>
         <view class="return-line" v-for="(line, index) in returnLines" :key="line.id">
           <view class="return-line-main">
-            <text class="return-name">{{ line.product_name || line.product_code }}</text>
+            <text class="return-name">{{ (line.product_display_name || line.product_name) || line.product_code }}</text>
             <text class="history-meta">可退 {{ qtyText(line.returnable_qty) }} / 单价 {{ money(line.price) }}</text>
           </view>
           <input class="input return-qty-input" v-model.trim="line.return_qty" type="digit" placeholder="退货数量" @blur="normalizeReturnLine(index)" />
@@ -2011,7 +2011,7 @@ function buildSalePrintData(response = {}) {
         const amount = numberFromValue(line.amount, qty * price)
         return {
           index: index + 1,
-          name: line.name || line.product_name || line.code || line.product_code || '',
+          name: line.product_display_name || line.name || line.product_name || line.code || line.product_code || '',
           code: line.code || line.product_code || '',
           spec: line.spec || '',
           unit: line.unit || '',
@@ -3459,7 +3459,7 @@ function unitOptions(product) {
 }
 
 function productDisplayName(product) {
-  return product?.name || product?.sku || product?.code || String(product?.id || '')
+  return product?.display_name || product?.name || product?.sku || product?.code || String(product?.id || '')
 }
 
 function hasAvailableStock(product) {
@@ -5852,5 +5852,32 @@ button {
 .submit-btn[disabled],
 .primary-btn[disabled] {
   opacity: 0.45;
+}
+/* Keep the identifying text visible when fixed-width quantity/price controls fill a phone row. */
+@media (max-width: 600px) {
+  .pos-main {
+    flex-direction: column;
+    height: auto;
+  }
+  .pos-left,
+  .pos-right {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+  .cart-table-head {
+    display: none !important;
+  }
+  .cart-line-row {
+    flex-wrap: wrap !important;
+  }
+  .cart-line-row .cart-goods-col {
+    flex: 0 0 100% !important;
+    padding-right: 0 !important;
+    margin-bottom: 12rpx;
+    text-align: left !important;
+  }
+  .cart-line-row .cart-goods-line {
+    text-align: left;
+  }
 }
 </style>

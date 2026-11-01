@@ -11,6 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from allapp.core.models import BaseModel, DocSequence
+from allapp.core.product_identity import ProductIdentitySnapshotMixin
 from allapp.products.models import Product
 from allapp.tasking.models import WmsTask
 
@@ -384,7 +385,7 @@ class InboundOrder(BaseModel):
         self.save(update_fields=["submit_status", "approval_status"])
 
 
-class InboundOrderLine(BaseModel):
+class InboundOrderLine(ProductIdentitySnapshotMixin, BaseModel):
     order = models.ForeignKey(
         "InboundOrder", verbose_name="订单", on_delete=models.PROTECT, related_name="lines"
     )
@@ -752,7 +753,7 @@ class InboundReceipt(BaseModel):
         return super().save(*args, **kwargs)
 
 
-class InboundReceiptLine(BaseModel):
+class InboundReceiptLine(ProductIdentitySnapshotMixin, BaseModel):
     """
     入库单行（回执凭证行）
     - 数量统一以“基本单位”落账：base_qty

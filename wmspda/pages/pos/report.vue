@@ -121,7 +121,7 @@
       <view v-else class="rank-list">
         <view class="rank-row" v-for="row in productRows" :key="row.product_id + '-' + row.owner_id">
           <view class="rank-main">
-            <text class="rank-title">{{ row.product_name || row.product_code || '-' }}</text>
+            <text class="rank-title">{{ (row.product_display_name || row.product_name) || row.product_code || '-' }}</text>
             <text class="rank-meta">{{ row.product_code || row.product_sku || '-' }} / {{ row.owner_name || '未指定货主' }}</text>
           </view>
           <view class="rank-amount">
@@ -215,7 +215,7 @@
               <view v-if="saleLineCount(sale)" class="sale-lines">
                 <view class="sale-line" v-for="line in sale.lines" :key="line.id || line.line_no">
                   <view class="sale-line-product">
-                    <text class="sale-line-name">{{ line.product_name || line.product_code || '-' }}</text>
+                    <text class="sale-line-name">{{ (line.product_display_name || line.product_name) || line.product_code || '-' }}</text>
                     <text class="sale-line-code">编码：{{ line.product_code || '-' }}</text>
                   </view>
                   <view class="sale-line-values">

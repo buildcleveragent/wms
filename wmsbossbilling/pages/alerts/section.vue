@@ -18,6 +18,7 @@
 </template>
 
 <script setup>
+import { productName, money } from '@/utils/billing'
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import BossDataStatus from '@/components/boss-data-status.vue'
@@ -39,8 +40,8 @@ const dataError = ref(null)
 function itemType(item) {
   return item.item_type || ({ overdue_tasks: 'task', pending_review_tasks: 'task', overdue_bills: 'bill', bills_missing_due_date: 'bill', failed_billing_jobs: 'billing_job', review_differences: 'review_difference', unpriced_billing_events: 'billing_event' }[section.value] || 'item')
 }
-function titleOf(item) { return item.invoice_no || item.task_no || item.order_no || item.product_name || item.job_name || `${item.owner_name || ''} #${item.id}` }
-function metaOf(item) { return [item.service_date, item.issue_date, item.due_date, item.status, item.reason].filter(Boolean).join(' · ') }
+function titleOf(item) { return item.invoice_no || item.task_no || item.order_no || (item.product_name ? productName(item) : '') || item.job_name || `${item.owner_name || ''} #${item.id}` }
+function metaOf(item) { return [item.product_spec, item.service_date, item.issue_date, item.due_date, item.status, item.reason, item.outstanding_amount != null ? `未收 ${money(item.outstanding_amount, item.currency)}` : ''].filter(Boolean).join(' · ') }
 async function load(nextPage = 1) {
   const current = requests.begin()
   const query = { ...params.value, page: nextPage, page_size: 20 }

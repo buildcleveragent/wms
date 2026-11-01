@@ -11,6 +11,7 @@ from django.db.models import F, Max, Q
 from django.utils import timezone
 
 from allapp.core.models import BaseModel, DocSequence
+from allapp.core.product_identity import ProductIdentitySnapshotMixin
 from allapp.outbound import services as ob_services
 from allapp.outbound.enums import PricingStatus
 
@@ -508,7 +509,7 @@ class OutboundOrder(BaseModel):
         )
 
 
-class OutboundOrderLine(BaseModel):
+class OutboundOrderLine(ProductIdentitySnapshotMixin, BaseModel):
     PACK_REQ_CHOICES = [
         ("NONE", "无（不需要打包）"),
         ("BAG", "袋装/气泡袋"),
@@ -895,6 +896,8 @@ class FuncShippingBoard(WmsTask):
         verbose_name_plural = verbose_name
 
 
+from .return_models import ReturnEvent, ReturnLine, ReturnOrder  # noqa: E402,F401
+
 # Register the transfer models with the outbound app without enlarging this module.
 from .transfer_models import (  # noqa: E402,F401
     AssistedOwnershipTransfer,
@@ -902,5 +905,3 @@ from .transfer_models import (  # noqa: E402,F401
     AssistedTransferReservation,
     OwnerProductMapping,
 )
-
-from .return_models import ReturnEvent, ReturnLine, ReturnOrder  # noqa: E402,F401

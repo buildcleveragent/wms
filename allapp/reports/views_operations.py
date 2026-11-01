@@ -13,15 +13,14 @@ from rest_framework.views import APIView
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 
-from .services_operations import (
+from .services_operations import (  # noqa: F401 - compatibility for older test patches
     OperationFilters,
-    build_operations_detail_rows,  # noqa: F401 - compatibility for older test patches
+    build_operations_detail_rows,
     build_operations_summary,
     count_operations_details,
     iter_operations_details,
     paginate_operations_details,
 )
-
 
 VIEW_PERMISSIONS = (
     "reports.view_warehouse_operations",
@@ -40,9 +39,7 @@ class CanViewOperations(permissions.BasePermission):
         if user.is_superuser:
             return True
         scope = AccessScope.for_user(user)
-        return bool(
-            scope.is_valid and any(user.has_perm(code) for code in VIEW_PERMISSIONS)
-        )
+        return bool(scope.is_valid and any(user.has_perm(code) for code in VIEW_PERMISSIONS))
 
 
 class CanExportOperations(CanViewOperations):
@@ -50,8 +47,7 @@ class CanExportOperations(CanViewOperations):
 
     def has_permission(self, request, view):
         return super().has_permission(request, view) and (
-            request.user.is_superuser
-            or request.user.has_perm("reports.export_operations")
+            request.user.is_superuser or request.user.has_perm("reports.export_operations")
         )
 
 
@@ -61,9 +57,7 @@ def _value(request, name, default=""):
         return request.data.get(name, default)
     if request.method == "POST" and aliases.get(name) in request.data:
         return request.data.get(aliases[name], default)
-    return request.query_params.get(
-        name, request.query_params.get(aliases.get(name), default)
-    )
+    return request.query_params.get(name, request.query_params.get(aliases.get(name), default))
 
 
 def _parse_date(value, name):
@@ -93,13 +87,9 @@ def parse_operation_filters(request) -> OperationFilters:
         start_date=_parse_date(
             _value(request, "start_date", month_start.isoformat()), "start_date"
         ),
-        end_date=_parse_date(
-            _value(request, "end_date", today.isoformat()), "end_date"
-        ),
+        end_date=_parse_date(_value(request, "end_date", today.isoformat()), "end_date"),
         direction=str(_value(request, "direction", "all") or "all").strip().lower(),
-        metric_basis=str(_value(request, "metric_basis", "actual") or "actual")
-        .strip()
-        .lower(),
+        metric_basis=str(_value(request, "metric_basis", "actual") or "actual").strip().lower(),
         owner_id=_parse_optional_int(_value(request, "owner"), "owner"),
         warehouse_id=_parse_optional_int(_value(request, "warehouse"), "warehouse"),
         status=str(_value(request, "status") or "").strip().upper(),
@@ -114,9 +104,7 @@ def parse_operation_filters(request) -> OperationFilters:
     filters.validate()
     scope = AccessScope.for_user(request.user)
     if "warehouse_operator" in scope.roles and filters.metric_basis == "plan":
-        raise PermissionError(
-            "Warehouse operators may view only their own actual work facts."
-        )
+        raise PermissionError("Warehouse operators may view only their own actual work facts.")
     if filters.owner_id and scope.owner_ids and filters.owner_id not in scope.owner_ids:
         raise PermissionError("No access to the requested owner.")
     if (
@@ -135,13 +123,9 @@ class OperationsApiMixin:
         try:
             return parse_operation_filters(request), None
         except PermissionError as exc:
-            return None, Response(
-                {"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN
-            )
+            return None, Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         except ValueError as exc:
-            return None, Response(
-                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return None, Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class OperationsSummaryApi(OperationsApiMixin, APIView):
@@ -199,9 +183,7 @@ class OperationsDetailsApi(OperationsApiMixin, APIView):
         )
         scope_payload = AccessScope.for_user(request.user).as_dict()
         scope_payload["actor_only"] = bool(
-            {"warehouse_operator", "owner_salesperson"}.intersection(
-                scope_payload["roles"]
-            )
+            {"warehouse_operator", "owner_salesperson"}.intersection(scope_payload["roles"])
         )
         return Response(
             {
@@ -233,9 +215,7 @@ class OperationsExportApi(OperationsApiMixin, APIView):
         count = count_operations_details(user=request.user, filters=filters)
         if count > self.max_rows:
             return Response(
-                {
-                    "detail": f"Export is limited to {self.max_rows} rows; narrow the filters."
-                },
+                {"detail": f"Export is limited to {self.max_rows} rows; narrow the filters."},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             )
 
@@ -270,28 +250,46 @@ class OperationsExportApi(OperationsApiMixin, APIView):
             "planned_qty",
             "actual_qty",
             "exception_type",
+            "brand_model",
+            "product_spec",
+            "product_display_name",
         ]
         ws.append(headers)
+        from openpyxl.cell import WriteOnlyCell
+
+        def literal(value):
+            if isinstance(value, str):
+                cell = WriteOnlyCell(ws, value=value)
+                cell.data_type = "s"
+                return cell
+            return value
+
         for row in iter_operations_details(user=request.user, filters=filters):
             ws.append(
                 [
-                    row["direction"],
-                    row["metric_basis"],
-                    row["event_at"],
-                    row["order_no"],
-                    row["source_no"],
-                    row["task_no"],
-                    row["owner"]["name"],
-                    row["warehouse"]["name"],
-                    row["product"]["code"],
-                    row["product"]["sku"],
-                    row["product"]["name"],
-                    row["lot_no"],
-                    row["status"],
-                    row["operator"],
-                    row["planned_qty"],
-                    row["actual_qty"],
-                    row["exception_type"],
+                    literal(value)
+                    for value in [
+                        row["direction"],
+                        row["metric_basis"],
+                        row["event_at"],
+                        row["order_no"],
+                        row["source_no"],
+                        row["task_no"],
+                        row["owner"]["name"],
+                        row["warehouse"]["name"],
+                        row["product"]["code"],
+                        row["product"]["sku"],
+                        row["product"]["name"],
+                        row["lot_no"],
+                        row["status"],
+                        row["operator"],
+                        row["planned_qty"],
+                        row["actual_qty"],
+                        row["exception_type"],
+                        row["product"].get("brand_model", ""),
+                        row["product"].get("spec", ""),
+                        row["product"].get("display_name", row["product"]["name"]),
+                    ]
                 ]
             )
         output = SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")

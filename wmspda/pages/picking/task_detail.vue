@@ -50,7 +50,7 @@
         :class="['row item', { odd: i % 2 === 0 }]"
       >
         <view class="col-info">
-          <text class="name">{{ ln.product_name || ln.product_sku || ln.product_id }}</text>
+          <text class="name">{{ (ln.product_display_name || ln.product_name) || ln.product_sku || ln.product_id }}</text>
           <view class="meta">
             <text>货位：{{ ln.from_loc_code || '-' }}</text>
           </view>

@@ -44,8 +44,34 @@
         </template>
       </view>
 
+      <view v-if="draft.owner" class="section" data-testid="new-owner-section">
+        <view class="section-title">2. 新货主（选填）</view>
+        <view class="hint">留空由原货主直接出库；选择后先转给新货主，再由新货主出库给客户。</view>
+        <view v-if="draft.newOwner" class="selected-row">
+          <view>
+            <view class="selected-name">{{ draft.newOwner.name }}</view>
+            <view class="hint">{{ draft.newOwner.code }}</view>
+          </view>
+          <button class="small-button" @click="chooseNewOwner(null)">清空新货主</button>
+        </view>
+        <template v-else>
+          <view class="search-row">
+            <input v-model="newOwnerSearch" class="input search-input" placeholder="新货主名称或编码（可不填）" @confirm="loadNewOwners" />
+            <button class="small-button" :disabled="loadingNewOwners" @click="loadNewOwners">搜索</button>
+          </view>
+          <view v-for="owner in newOwners" :key="owner.id" class="choice-row" @click="chooseNewOwner(owner)">
+            <view>
+              <view class="selected-name">{{ owner.name }}</view>
+              <view class="hint">{{ owner.code }}</view>
+            </view>
+            <text class="choose-text">选择</text>
+          </view>
+          <view v-if="newOwnerSearch.trim() && searchedNewOwners && !loadingNewOwners && !newOwners.length" class="empty">没有匹配的新货主</view>
+        </template>
+      </view>
+
       <view v-if="draft.owner" class="section">
-        <view class="section-title">2. 选择客户</view>
+        <view class="section-title">3. 选择客户</view>
         <view class="hint">{{ draft.salesOwner?.name }} 的客户</view>
         <view v-if="draft.customer" class="selected-row">
           <view>
@@ -79,32 +105,6 @@
             <text class="choose-text">选择</text>
           </view>
           <view v-if="!loadingCustomers && !customers.length" class="empty">没有匹配客户</view>
-        </template>
-      </view>
-
-      <view v-if="draft.owner" class="section" data-testid="new-owner-section">
-        <view class="section-title">3. 新货主（选填）</view>
-        <view class="hint">留空由原货主直接出库；选择后先转给新货主，再由新货主出库给客户。</view>
-        <view v-if="draft.newOwner" class="selected-row">
-          <view>
-            <view class="selected-name">{{ draft.newOwner.name }}</view>
-            <view class="hint">{{ draft.newOwner.code }}</view>
-          </view>
-          <button class="small-button" @click="chooseNewOwner(null)">清空新货主</button>
-        </view>
-        <template v-else>
-          <view class="search-row">
-            <input v-model="newOwnerSearch" class="input search-input" placeholder="新货主名称或编码（可不填）" @confirm="loadNewOwners" />
-            <button class="small-button" :disabled="loadingNewOwners" @click="loadNewOwners">搜索</button>
-          </view>
-          <view v-for="owner in newOwners" :key="owner.id" class="choice-row" @click="chooseNewOwner(owner)">
-            <view>
-              <view class="selected-name">{{ owner.name }}</view>
-              <view class="hint">{{ owner.code }}</view>
-            </view>
-            <text class="choose-text">选择</text>
-          </view>
-          <view v-if="newOwnerSearch.trim() && searchedNewOwners && !loadingNewOwners && !newOwners.length" class="empty">没有匹配的新货主</view>
         </template>
       </view>
 

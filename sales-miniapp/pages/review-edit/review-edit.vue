@@ -5,7 +5,7 @@
         <image v-if="review.product_image_url" class="product-image" :src="review.product_image_url" mode="aspectFill" />
         <view v-else class="product-image placeholder">货</view>
         <view class="product-main">
-          <view class="product-name">{{ review.product_name }}</view>
+          <view class="product-name">{{ (review.product_display_name || review.product_name) }}</view>
           <view v-if="review.product_spec" class="product-spec">{{ review.product_spec }}</view>
         </view>
       </view>

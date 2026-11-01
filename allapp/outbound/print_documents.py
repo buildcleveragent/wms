@@ -87,6 +87,8 @@ def build_document(task, kind):
             lines.append(
                 {
                     "product": line.product,
+                    "product_display_name": origins[line.src_id].product_display_name,
+                    "frozen_product_spec": origins[line.src_id].frozen_product_spec,
                     "base_uom": origins[line.src_id].base_uom,
                     "location": line.from_location,
                     "lot_no": detail.batch_no if detail else "",

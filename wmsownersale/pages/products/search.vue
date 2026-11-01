@@ -274,6 +274,8 @@ function add(product: any) {
       id: product.id,
       sku: product.sku,
       name: product.name,
+      display_name: product.display_name,
+      brand_model: product.brand_model,
       spec: product.spec,
       is_priced: product.is_priced !== false,
       price: product.is_priced === false ? null : Number(product.price || 0),
@@ -300,7 +302,7 @@ function add(product: any) {
     return
   }
   uni.showToast({
-    title: `已加入：${product.name || product.sku} × ${quantity.saleQty}${selected.label}`,
+    title: `已加入：${product.display_name || product.name || product.sku} × ${quantity.saleQty}${selected.label}`,
     icon: 'none',
   })
 }

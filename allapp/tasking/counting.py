@@ -99,8 +99,10 @@ def _infer_scope(*, scope, zone_type, location_id, location_prefix, product_id) 
 
 
 def _validate_params(params: CountScopeParams) -> tuple[Warehouse, Owner]:
-    warehouse = Warehouse.objects.get(pk=params.warehouse_id)
-    owner = Owner.objects.get(pk=params.owner_id)
+    warehouse = Warehouse.objects.filter(pk=params.warehouse_id, is_active=True).first()
+    owner = Owner.objects.filter(pk=params.owner_id, is_active=True).first()
+    if not warehouse or not owner:
+        raise ValidationError("仓库或货主不存在或未启用。")
     if not OwnerWarehouseBinding.objects.filter(
         owner=owner, warehouse=warehouse, is_active=True
     ).exists():
@@ -110,13 +112,19 @@ def _validate_params(params: CountScopeParams) -> tuple[Warehouse, Owner]:
     if params.recount_threshold < 0:
         raise ValidationError({"recount_threshold": "复盘阈值不能为负数。"})
     if params.subwarehouse_id:
-        subwarehouse = Subwarehouse.objects.get(pk=params.subwarehouse_id)
-        if subwarehouse.warehouse_id != warehouse.id:
+        subwarehouse = Subwarehouse.objects.filter(
+            pk=params.subwarehouse_id, is_active=True
+        ).first()
+        if not subwarehouse or subwarehouse.warehouse_id != warehouse.id:
             raise ValidationError({"subwarehouse_id": "子仓必须隶属于所选仓库。"})
     if params.location_id:
-        location = Location.objects.get(pk=params.location_id)
-        if location.warehouse_id != warehouse.id:
+        location = Location.objects.filter(
+            pk=params.location_id, is_active=True, is_disabled=False
+        ).first()
+        if not location or location.warehouse_id != warehouse.id:
             raise ValidationError({"location_id": "库位必须隶属于所选仓库。"})
+        if params.subwarehouse_id and location.subwarehouse_id != params.subwarehouse_id:
+            raise ValidationError({"location_id": "库位必须隶属于所选子仓。"})
     if params.scope == "LOC" and not (params.location_id or params.location_prefix):
         raise ValidationError({"location_id": "按库位盘点必须指定库位或库位前缀。"})
     if params.scope == "ZONE" and params.zone_type is None:
@@ -399,7 +407,11 @@ def release_count_task(task_id: int, *, by_user) -> WmsTask:
     extra = CountTaskExtra.objects.select_for_update().get(task=task)
     params = _params_from_extra(extra)
     _validate_params(params)
-    _rebuild_count_lines(task, params)
+    _, truncated = _rebuild_count_lines(task, params)
+    if truncated:
+        raise ValidationError(
+            "盘点范围超过最多生成行数，发布已拒绝。请取消草稿，缩小范围或提高行数上限后重建。"
+        )
     candidates = _candidate_locks(task, params)
     existing = list(
         CountScopeLock.objects.select_for_update().filter(

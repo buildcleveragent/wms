@@ -90,6 +90,8 @@ def available_qty_for_product_in_scope(*, owner_id=None, warehouse_id, product_i
 
 
 class PosProductSerializer(serializers.ModelSerializer):
+    brand_model = serializers.CharField(read_only=True)
+    display_name = serializers.CharField(read_only=True)
     owner_name = serializers.CharField(source="owner.name", read_only=True)
     matched_barcode = serializers.SerializerMethodField()
     barcode_error = serializers.SerializerMethodField()
@@ -112,6 +114,9 @@ class PosProductSerializer(serializers.ModelSerializer):
             "sku",
             "name",
             "spec",
+            "model",
+            "brand_model",
+            "display_name",
             "gtin",
             "unit_barcode",
             "carton_barcode",
@@ -416,11 +421,13 @@ class PosPaymentLineReadSerializer(serializers.ModelSerializer):
 
 
 class PosSaleLineReadSerializer(serializers.ModelSerializer):
+    brand_model = serializers.CharField(source="frozen_brand_model", read_only=True)
+    product_display_name = serializers.CharField(read_only=True)
     owner_name = serializers.CharField(source="owner.name", read_only=True)
-    product_spec = serializers.CharField(source="product.spec", read_only=True)
+    product_spec = serializers.CharField(source="frozen_product_spec", read_only=True)
     base_unit = serializers.CharField(source="product.base_uom.name", read_only=True)
     product_code = serializers.CharField(source="product.code", read_only=True)
-    product_name = serializers.CharField(source="product.name", read_only=True)
+    product_name = serializers.CharField(source="frozen_product_name", read_only=True)
     returned_qty = serializers.SerializerMethodField()
     returnable_qty = serializers.SerializerMethodField()
     returned_amount = serializers.SerializerMethodField()
@@ -438,6 +445,8 @@ class PosSaleLineReadSerializer(serializers.ModelSerializer):
             "product_id",
             "product_code",
             "product_name",
+            "brand_model",
+            "product_display_name",
             "qty",
             "price",
             "amount",
@@ -634,8 +643,11 @@ class PosRefundReadSerializer(serializers.ModelSerializer):
 
 
 class PosReturnLineReadSerializer(serializers.ModelSerializer):
+    product_spec = serializers.CharField(source="frozen_product_spec", read_only=True)
+    brand_model = serializers.CharField(source="frozen_brand_model", read_only=True)
+    product_display_name = serializers.CharField(read_only=True)
     product_code = serializers.CharField(source="product.code", read_only=True)
-    product_name = serializers.CharField(source="product.name", read_only=True)
+    product_name = serializers.CharField(source="frozen_product_name", read_only=True)
     created_at = SafeDateTimeField(read_only=True)
 
     class Meta:
@@ -648,6 +660,9 @@ class PosReturnLineReadSerializer(serializers.ModelSerializer):
             "product_id",
             "product_code",
             "product_name",
+            "product_spec",
+            "brand_model",
+            "product_display_name",
             "qty",
             "price",
             "amount",

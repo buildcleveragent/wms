@@ -3,7 +3,7 @@
     <view class="header-card"><text class="task-no">复核 {{ task.task_no || taskId }}</text><text>{{ task.ref_no || '-' }} · {{ task.executor_name || '未分配' }}</text><text>{{ headerStatusText }}</text></view>
     <view class="scan-panel"><text>扫描商品逐项核对</text><ScanInput v-model="reviewCode" placeholder="商品条码" @scan="locateLine" @confirm="locateLine" /></view>
     <view v-for="line in lines" :key="line.id" :class="['line-card', { abnormal: isAbnormal(line), scanned: scannedLineId === line.id }]">
-      <view class="line-head"><text>{{ line.product_name }}</text><text>{{ scannedLineId === line.id ? '已定位' : line.from_location_code }}</text></view>
+      <view class="line-head"><text>{{ (line.product_display_name || line.product_name) }}</text><text>{{ scannedLineId === line.id ? '已定位' : line.from_location_code }}</text></view>
       <text class="line-code">{{ line.product_code || '-' }}</text>
       <view class="line-qty"><text>计划 {{ line.qty_plan }} {{ line.uom }}</text><text>实拣 {{ line.qty_done }} {{ line.uom }}</text></view>
       <text v-if="isAbnormal(line)" class="warning">{{ abnormalText(line) }}</text>

@@ -174,7 +174,7 @@ class AssistedOutboundFlowTests(TestCase):
                 order.delivery_method = method
                 order.save(update_fields=["delivery_method"])
                 response = pick_task_print(request, task_id)
-                self.assertContains(response, "送货单</span>")
+                self.assertContains(response, "出库单</span>")
                 self.assertContains(response, info.address)
                 self.assertContains(response, order.contact)
                 self.assertContains(response, order.contact_phone)
@@ -236,7 +236,7 @@ class AssistedOutboundFlowTests(TestCase):
         response = pick_task_print(request, task_id)
         self.assertContains(response, 'class="value address-value">88号一楼</span>')
 
-    def test_delivery_note_requires_selection_among_scoped_pos_warehouse_infos(self):
+    def test_delivery_note_defaults_and_allows_selection_among_scoped_pos_warehouse_infos(self):
         own = PosReceiptWarehouseInfo.objects.create(
             warehouse=self.warehouse, name="一号仓", address="一号仓地址"
         )
@@ -256,19 +256,19 @@ class AssistedOutboundFlowTests(TestCase):
         request = self.factory.get(path, {"ticket": "keep-document-ticket"})
         request.user = self.operator
         response = pick_task_print(request, task_id)
-        self.assertContains(response, "请选择送货单使用的仓库信息")
+        self.assertContains(response, f'value="{own.pk}" selected')
         self.assertContains(response, 'value="keep-document-ticket"')
         self.assertContains(response, own.address)
         self.assertContains(response, common.address)
         self.assertNotContains(response, other.address)
         self.assertNotContains(response, inactive.address)
-        self.assertNotContains(response, 'onload="window.print()"')
+        self.assertContains(response, 'onload="window.print()"')
         for info in (own, common):
             selected = self.factory.get(path, {"warehouse_info_id": info.pk})
             selected.user = self.operator
             response = pick_task_print(selected, task_id)
             self.assertContains(response, 'onload="window.print()"')
-            self.assertContains(response, f'class="value address-value">{info.address}</span>')
+            self.assertContains(response, f'class="warehouse-location">{info.address}</span>')
         for invalid_id in (other.pk, inactive.pk, "not-an-id"):
             selected = self.factory.get(path, {"warehouse_info_id": invalid_id})
             selected.user = self.operator

@@ -66,6 +66,52 @@ describe('实时库存分页组件', () => {
     vi.stubGlobal('uni', { stopPullDownRefresh: vi.fn(), navigateTo: vi.fn() })
   })
 
+  it('优先展示三项库存和完整商品名称，并使用中文单位名称', async () => {
+    const name = '大窑橙诺橙味果汁汽水玻璃瓶件480ml'
+    mocks.inventorySummary.mockResolvedValueOnce({ count: 1, next: null, results: [{
+      ...inventory(7, name), product_spec: '1*12*480ml',
+      base_unit: 'JIAN', base_unit_name: '件',
+      onhand_qty: '1100.0000', available_qty: '800.0000', allocated_qty: '300.0000',
+    }] })
+    const wrapper = render()
+    await flushPromises()
+
+    expect(wrapper.findAll('.table-header .cell').map((cell) => cell.text())).toEqual([
+      '现存', '可用', '分配', '商品名称', '规格', '单位', '编码', 'SKU', '锁定', '残次',
+    ])
+    expect(wrapper.findAll('.table-row .cell').map((cell) => cell.text())).toEqual([
+      '1100', '800', '300', name, '1*12*480ml', '件', 'CODE-7', 'SKU-7', '0', '0',
+    ])
+    expect(wrapper.find('.table-row .primary').text()).toBe('800')
+    await wrapper.find('[role="link"]').trigger('keydown.enter')
+    expect(uni.navigateTo).toHaveBeenCalledWith({ url: '/pages/inventory/detail?id=7' })
+  })
+
+  it.each([
+    ['JIAN', null, 'JIAN'],
+    ['瓶', undefined, '瓶'],
+    ['', '', '-'],
+  ])('单位名称缺失时安全回退：%s', async (code, name, expected) => {
+    mocks.inventorySummary.mockResolvedValueOnce({ count: 1, next: null, results: [{
+      ...inventory(1), base_unit: code, base_unit_name: name,
+    }] })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('.table-row .col-unit').text()).toBe(expected)
+  })
+
+  it('完整保留大数、小数和零值，不用数量缩写', async () => {
+    mocks.inventorySummary.mockResolvedValueOnce({ count: 1, next: null, results: [{
+      ...inventory(1), onhand_qty: '12345678901234.1250',
+      available_qty: '12.1250', allocated_qty: '0.0000',
+    }] })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.findAll('.table-row .num-text').map((cell) => cell.text())).toEqual([
+      '12345678901234.125', '12.125', '0', '0', '0',
+    ])
+  })
+
   it('第一页加载 50 条并通过触底完整合并第二页', async () => {
     const firstPage = Array.from({ length: 50 }, (_, index) => inventory(index + 1))
     mocks.inventorySummary

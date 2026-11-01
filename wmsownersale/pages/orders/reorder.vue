@@ -31,7 +31,7 @@
         <view>{{ data.header.ship_to || '收货地址未记录' }}</view>
       </view>
       <view v-for="item in data.items" :key="item.line_key" class="card">
-        <view class="name">{{ item.name }}<text class="hint"> · 原行 {{ item.source_line_no }}</text></view>
+        <view class="name">{{ item.display_name || item.name }}<text class="hint"> · 原行 {{ item.source_line_no }}</text></view>
         <view>{{ item.sku }} {{ item.spec }}</view>
         <view>单位：{{ item.base_unit_name || '待核对' }} · 计划数量：{{ formatQuantity(item.qty) }}</view>
         <view v-if="item.current_base_unit_name && item.current_base_unit_name !== item.historical_unit_name" class="error">

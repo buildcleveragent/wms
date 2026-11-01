@@ -144,6 +144,8 @@ def build_inventory_detail(summary, filters):
         "product": {
             "id": product.pk,
             "name": product.name,
+            "brand_model": product.brand_model,
+            "display_name": product.display_name,
             "code": product.code,
             "spec": product.spec,
             "base_unit": summary.base_unit,

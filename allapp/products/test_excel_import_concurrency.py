@@ -14,7 +14,7 @@ from allapp.inventory.models import InventoryDetail
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 
 from .excel_import import IMPORT_SHEET_NAME, OWNER_NAME_PRODUCT_HEADERS, PRODUCT_HEADERS
-from .models import Product, ProductCategory, ProductUom
+from .models import Brand, Product, ProductCategory, ProductUom
 
 
 class ProductImportConcurrencyTests(TransactionTestCase):
@@ -27,6 +27,7 @@ class ProductImportConcurrencyTests(TransactionTestCase):
     def _assert_concurrent_receipts_share_one_archive(self, *, use_owner_names):
         owner = Owner.objects.create(code="IMP-CON", name="并发导入货主")
         uom = ProductUom.objects.create(code="IMP-EA", name="件")
+        brand = Brand.objects.create(code="IMP-BRAND", name="并发品牌")
         category = ProductCategory.objects.create(code="IMP-CAT", name="并发分类")
         user = get_user_model().objects.create_superuser(username="import-concurrency")
         warehouse = Warehouse.objects.create(code="IMP-WH", name="并发仓库")
@@ -46,6 +47,9 @@ class ProductImportConcurrencyTests(TransactionTestCase):
             "货主编码": owner.code,
             "货主名称": owner.name,
             "商品名称": "并发无码商品",
+            "品牌编码": brand.code,
+            "型号": "原味",
+            "规格": "500g",
             "基本单位": uom.name,
             "分类": category.name,
             "基本单位数量": 2,

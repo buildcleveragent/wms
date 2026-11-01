@@ -22,7 +22,7 @@ def summary_queryset(user, search=""):
 def filter_summary(qs, search):
     if search:
         qs = qs.filter(product_search_q(search))
-    return qs.select_related("product").order_by("product_id", "id")
+    return qs.select_related("product", "product__brand").order_by("product_id", "id")
 
 
 def export_summary(request):
@@ -38,6 +38,7 @@ def export_summary(request):
             r.product.spec,
             r.base_unit,
             *[getattr(r, key) for key in QTY_FIELDS],
+            r.product.brand_model,
         ]
         for r in records
     ]
@@ -46,7 +47,7 @@ def export_summary(request):
         scope=scope,
         kind="inventory",
         title="商品库存汇总",
-        headers=[*PRODUCT_HEADERS, "基本单位", *QUANTITY_HEADERS],
+        headers=[*PRODUCT_HEADERS, "基本单位", *QUANTITY_HEADERS, "品牌型号"],
         rows=rows,
         filters=f"商品搜索：{search}" if search else "",
         basis="当前商品库存汇总；可用＝现有－分配－锁定－残次；数量按基本单位，不跨商品或单位合计。",
@@ -75,6 +76,7 @@ def export_detail(request, summary):
             r["expiry_date"] or "未记录",
             r["base_unit"] or "未记录",
             *[r[key] for key in QTY_FIELDS],
+            product.brand_model,
         ]
         for r in records
     ]
@@ -93,6 +95,7 @@ def export_detail(request, summary):
             "到期日",
             "基本单位",
             *QUANTITY_HEADERS,
+            "品牌型号",
         ],
         rows=rows,
         filters="；".join(

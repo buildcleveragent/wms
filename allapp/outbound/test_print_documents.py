@@ -23,11 +23,12 @@ class OutboundDocumentTests(PhysicalReviewFixture, TestCase):
             warehouse=self.wh, name="打印仓", address="仓储路88号", phone="0771-1234567"
         )
 
-    def printed(self, task, kind="delivery", user=None, **params):
+    def printed(self, task, kind="delivery", user=None, cookies=None, **params):
         request = RequestFactory().get(
             f"/api/pda/pick-tasks/{task.pk}/print/", {"kind": kind, **params}
         )
         request.user = user or self.reviewer
+        request.COOKIES.update(cookies or {})
         return pick_task_print(request, task.pk)
 
     def posted(self):
@@ -42,6 +43,7 @@ class OutboundDocumentTests(PhysicalReviewFixture, TestCase):
         response = self.printed(task, "pick", self.picker)
         self.assertContains(response, "拣货单")
         self.assertContains(response, "实拣填写")
+        self.assertContains(response, f'class="company-name">{self.wh.name}</span>')
         self.assertNotContains(response, "单价")
         self.assertNotContains(response, "金额")
         self.assertEqual(self.printed(task, user=self.picker).status_code, 409)
@@ -61,6 +63,8 @@ class OutboundDocumentTests(PhysicalReviewFixture, TestCase):
         self.assertContains(response, "送货单")
         self.assertContains(response, self.info.address)
         self.assertContains(response, self.info.phone)
+        self.assertContains(response, f'class="company-name">{self.info.name}</span>')
+        self.assertNotContains(response, f'class="company-name">{self.wh.name}</span>')
         html = response.content.decode()
         self.assertLess(
             (
@@ -90,13 +94,71 @@ class OutboundDocumentTests(PhysicalReviewFixture, TestCase):
         self.assertContains(self.printed(task), "补充", status_code=409)
         self.info.address = "地址甲"
         self.info.save()
-        common = PosReceiptWarehouseInfo.objects.create(name="公共地址", address="地址乙")
-        response = self.printed(task)
-        self.assertNotContains(response, '<table class="goods">')
-        self.assertNotContains(response, 'onload="window.print()"')
-        self.assertContains(
-            self.printed(task, warehouse_info_id=common.pk), 'onload="window.print()"'
+        common = PosReceiptWarehouseInfo.objects.create(
+            name="公共打印仓", address="地址乙", phone="0771-7654321", is_default=True
         )
+        response = self.printed(task)
+        self.assertContains(response, '<table class="goods">')
+        self.assertContains(response, 'onload="window.print()"')
+        self.assertContains(response, f'class="company-name">{common.name}</span>')
+        self.assertContains(response, 'name="warehouse_info_id"')
+        for info in (self.info, common):
+            with self.subTest(warehouse_info=info.pk):
+                selected = self.printed(task, warehouse_info_id=info.pk)
+                self.assertContains(selected, 'onload="window.print()"')
+                self.assertContains(selected, f'class="company-name">{info.name}</span>')
+                self.assertContains(selected, info.address)
+                self.assertContains(selected, info.phone)
+        self.assertEqual(self.printed(task, warehouse_info_id="invalid").status_code, 400)
+        common.is_default = False
+        common.save()
+        self.assertContains(self.printed(task), f'class="company-name">{self.info.name}</span>')
+
+    def test_print_remembers_last_configuration_and_allows_switching(self):
+        task = self.posted()
+        common = PosReceiptWarehouseInfo.objects.create(
+            name="默认打印仓", address="默认地址", phone="0771-0000000", is_default=True
+        )
+        first = self.printed(task, warehouse_info_id=self.info.pk)
+        cookies = {name: cookie.value for name, cookie in first.cookies.items()}
+        remembered = self.printed(task, cookies=cookies)
+        self.assertContains(remembered, f'class="company-name">{self.info.name}</span>')
+        self.assertContains(remembered, self.info.phone)
+        self.assertContains(remembered, 'onload="window.print()"')
+        self.assertContains(remembered, f'value="{self.info.pk}" selected')
+        self.assertContains(
+            self.printed(task, cookies=cookies, user=self.picker),
+            f'class="company-name">{common.name}</span>',
+        )
+        switched = self.printed(task, cookies=cookies, warehouse_info_id=common.pk)
+        cookies = {name: cookie.value for name, cookie in switched.cookies.items()}
+        self.assertContains(
+            self.printed(task, cookies=cookies), f'class="company-name">{common.name}</span>'
+        )
+
+    def test_unavailable_remembered_configuration_falls_back_to_default(self):
+        task = self.posted()
+        common = PosReceiptWarehouseInfo.objects.create(
+            name="默认打印仓", address="默认地址", is_default=True
+        )
+        chosen = self.printed(task, warehouse_info_id=self.info.pk)
+        cookies = {name: cookie.value for name, cookie in chosen.cookies.items()}
+        foreign = Warehouse.objects.create(code="PRTALT", name="其他仓")
+        for changes in (
+            {"is_active": False},
+            {"is_active": True, "address": " "},
+            {"address": "其他地址", "warehouse": foreign},
+        ):
+            with self.subTest(changes=tuple(changes)):
+                for key, value in changes.items():
+                    setattr(self.info, key, value)
+                self.info.save()
+                response = self.printed(task, cookies=cookies)
+                self.assertContains(response, f'class="company-name">{common.name}</span>')
+                self.assertNotContains(response, f'value="{self.info.pk}"')
+                self.assertEqual(
+                    self.printed(task, warehouse_info_id=self.info.pk).status_code, 400
+                )
 
     def test_manual_pick_print_does_not_depend_on_delivery_address_configuration(self):
         task = self.ready_pick()

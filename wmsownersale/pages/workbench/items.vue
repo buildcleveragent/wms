@@ -15,7 +15,7 @@
       <text>预计发货：{{ row.etd ? formatTime(row.etd) : '未设置' }}</text>
       <text class="reason">{{ row.reason }}</text>
       <view v-for="(item, index) in row.shortages" :key="index" class="shortage-item">
-        <text>{{ item.product_name }} · 缺口 {{ qty(item.quantity) }} {{ item.unit }}</text><text>{{ item.reason }}</text>
+        <text>{{ (item.product_display_name || item.product_name) }} · 缺口 {{ qty(item.quantity) }} {{ item.unit }}</text><text>{{ item.reason }}</text>
       </view>
       <text class="open-order">{{ row.action === 'review' ? '前往审核' : '查看订单与履约进度' }} ›</text>
     </view>

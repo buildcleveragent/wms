@@ -2,6 +2,7 @@ from django.http import HttpResponse
 from django.views.generic import DetailView
 
 from allapp.core.print_tickets import user_from_print_ticket
+from allapp.inbound.models import InboundOrderLine
 from allapp.inbound.permissions import can_view_receive_tasks, scoped_receive_tasks
 from allapp.tasking.models import WmsTask
 
@@ -51,7 +52,22 @@ class ReceiveTaskPrintView(DetailView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         task = self.object
-        lines = task.lines.select_related("product", "product__base_uom").order_by("id")
+        lines = list(
+            task.lines.select_related("product__brand", "product__base_uom").order_by("id")
+        )
+        source_ids = [line.src_id for line in lines if line.src_model == "inbound.InboundOrderLine"]
+        sources = InboundOrderLine._base_manager.filter(
+            pk__in=source_ids, order__owner_id=task.owner_id
+        ).in_bulk()
+        for line in lines:
+            source = (
+                sources.get(line.src_id) if line.src_model == "inbound.InboundOrderLine" else None
+            )
+            line.product_display_name = (
+                source.product_display_name
+                if source and source.product_id == line.product_id
+                else (line.product.display_name if line.product_id else "")
+            )
         ctx["lines"] = lines
         return ctx
 

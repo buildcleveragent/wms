@@ -157,6 +157,8 @@ def stock_payload(detail):
         "id": detail.id,
         "product_id": detail.product_id,
         "product_name": detail.product.name,
+        "brand_model": detail.product.brand_model,
+        "product_display_name": detail.product.display_name,
         "product_code": detail.product.code,
         "spec": detail.product.spec or "",
         "owner_id": detail.owner_id,
@@ -274,7 +276,10 @@ def write_draft(user, data, order_id=None):
                     fingerprint=fp,
                     **fields,
                 )
-            ReturnLine.objects.bulk_create([ReturnLine(order=order, **row) for row in values])
+            lines = [ReturnLine(order=order, **row) for row in values]
+            for line in lines:
+                line.capture_product_snapshot()
+            ReturnLine.objects.bulk_create(lines)
             return order
 
     return run_inventory_write_with_retry(operation, operation_name="pda_return.draft")

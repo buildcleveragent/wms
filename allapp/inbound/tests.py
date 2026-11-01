@@ -24,6 +24,7 @@ from allapp.inbound.constants import (
 )
 from allapp.inbound.models import (
     InboundOrder,
+    InboundOrderLine,
     InboundReceipt,
     Lot,
     LotWarehouse,
@@ -592,6 +593,11 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         )
 
     def test_receive_export_and_print_are_scoped_and_use_actual_quantity(self):
+        self.product.model = "原型号"
+        self.product.save(update_fields=["model"])
+        original = InboundOrderLine.objects.create(
+            order=self._order("INB-EXPORT-SOURCE"), product=self.product, base_qty=5
+        )
         user = self.user_model.objects.create_user(
             username="inbound-task-viewer",
             password="x",
@@ -612,6 +618,8 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         )
         line = WmsTaskLine.objects.create(
             task=own_task,
+            src_model="inbound.InboundOrderLine",
+            src_id=original.pk,
             product=self.product,
             to_location=self.location,
             qty_plan=Decimal("5.000"),
@@ -639,6 +647,8 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
             status=WmsTask.Status.RELEASED,
         )
 
+        self.product.name, self.product.model = "商品通用品名", "新型号"
+        self.product.save(update_fields=["name", "model"])
         api_client = APIClient()
         api_client.force_authenticate(user)
         exported = api_client.get(f"/api/inbound/receive_task/{own_task.pk}/export_excel/")
@@ -651,6 +661,8 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         self.assertEqual(worksheet["J7"].value, 5)
         self.assertEqual(worksheet["K7"].value, 3)
         self.assertEqual(worksheet["F7"].value, "LOT-ACTUAL")
+        self.assertEqual(worksheet["C7"].value, "Inbound Scope Product")
+        self.assertEqual(worksheet["L7"].value, "原型号")
         self.assertEqual(denied_export.status_code, 404)
         self.assertIn(anonymous_export.status_code, (401, 403))
 
@@ -661,6 +673,9 @@ class InboundAuthorizationAndWorkflowTests(TestCase):
         self.assertEqual(printed.status_code, 200)
         self.assertContains(printed, "实际收货数量")
         self.assertContains(printed, "3.000")
+        self.assertContains(printed, "Inbound Scope Product")
+        self.assertContains(printed, "原型号")
+        self.assertNotContains(printed, "新型号")
         self.assertEqual(denied_print.status_code, 404)
 
     def test_receive_transactions_create_one_traceable_ready_putaway_task(self):

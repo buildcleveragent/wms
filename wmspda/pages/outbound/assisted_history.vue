@@ -2,18 +2,18 @@
   <view class="page">
     <view v-if="checkingPermission" class="state-card">正在读取代办出库权限…</view>
     <view v-else-if="!authorized" class="state-card">
-      <view>当前账号无代办出库权限。</view>
+      <view>{{ errorMessage || "当前账号无代货主出库权限。" }}</view>
       <button class="retry-button" @click="initialize">重新读取权限</button>
     </view>
 
     <template v-else>
       <view class="filter-card">
-        <view class="filter-title">历史出库单查询</view>
+        <view class="filter-title">代货主出库历史 · 按代办时间</view>
         <view class="filter-grid">
           <input
             v-model.trim="filters.search"
             class="input search-input"
-            placeholder="订单号、货主、收件人、商品或条码"
+            placeholder="订单号、货主、收件人、商品新旧名称或条码"
             confirm-type="search"
             @confirm="reload"
           />
@@ -33,6 +33,7 @@
             <view class="picker-field">{{ statusLabels[statusIndex] || '全部状态' }}</view>
           </picker>
         </view>
+        <view v-if="dirty" class="history-meta">筛选条件已修改，点击查询后生效；当前结果仍按上次查询条件。</view>
         <view class="filter-actions">
           <button class="reset-button" :disabled="loading" @click="resetFilters">重置</button>
           <button class="query-button" :disabled="loading" @click="reload">
@@ -47,13 +48,13 @@
           <text class="result-count">共 {{ totalCount }} 张</text>
         </view>
 
-        <view v-if="errorMessage && !rows.length" class="error-card">
+        <view v-if="errorMessage" class="error-card">
           <text>{{ errorMessage }}</text>
-          <button class="retry-button" @click="reload">重试</button>
+          <button class="retry-button" @click="retry">重试</button>
         </view>
-        <view v-else-if="loading && !rows.length" class="empty">正在查询历史出库单…</view>
-        <view v-else-if="!rows.length" class="empty">没有符合条件的历史出库单</view>
-        <view v-else class="history-list">
+        <view v-if="loading && !rows.length" class="empty">正在查询历史出库单…</view>
+        <view v-else-if="!rows.length && !errorMessage" class="empty">没有符合条件的历史出库单</view>
+        <view v-if="rows.length" class="history-list">
           <view v-for="row in rows" :key="row.id" class="history-row">
             <view class="history-main">
               <view class="history-title-line">
@@ -67,8 +68,8 @@
                 客户 {{ row.customer?.name || '-' }}
               </view>
               <view class="history-meta">
-                收件人 {{ row.receiver_name || '-' }} · 商品 {{ row.line_count || 0 }} 种 ·
-                基本数量 {{ qtyText(row.total_base_qty) }}
+                收件人 {{ row.receiver_name || '-' }} · 商品行 {{ row.line_count || 0 }} ·
+                订单基本数量 {{ qtyText(row.total_base_qty) }}
               </view>
               <view class="history-meta">
                 <template v-if="row.transfer_no">
@@ -110,197 +111,46 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { computed } from 'vue'
+import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import { useAuth } from '@/store/auth'
 import { api } from '@/utils/request'
 import { openOutboundPrintPage } from '@/utils/outboundPrint'
-
-function transferStatus(status) {
-  return { RESERVED: '已预留', POSTED: '已完成', CANCELLED: '已取消' }[status] || status
-}
-
-const auth = useAuth()
-const checkingPermission = ref(true)
-const authorized = ref(false)
-const loading = ref(false)
-const errorMessage = ref('')
-const rows = ref([])
-const totalCount = ref(0)
-const page = ref(1)
-const hasMore = ref(false)
-const options = ref({ owners: [], operators: [], statuses: [] })
-let requestSequence = 0
-let routeFilters = {}
-
-function localDateText(date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function defaultDates() {
-  const end = new Date()
-  const start = new Date(end)
-  start.setDate(start.getDate() - 29)
-  return { start_date: localDateText(start), end_date: localDateText(end) }
-}
-
-const initialDates = defaultDates()
-const filters = reactive({
-  search: '',
-  start_date: initialDates.start_date,
-  end_date: initialDates.end_date,
-  owner_id: '',
-  operator_id: '',
-  status: '',
-})
-
+import { useOutboundHistory, quantity as qtyText, localDate } from '@/utils/outboundHistory'
+const session = useOutboundHistory({ api, auth: useAuth(), assisted: true })
+const { filters, rows, options, count: totalCount, hasMore, loading, authorized, dirty, error: errorMessage, initialize, retry } = session
+const checkingPermission = computed(() => loading.value && !authorized.value)
 const ownerChoices = computed(() => [{ id: '', name: '全部货主' }, ...(options.value.owners || [])])
 const operatorChoices = computed(() => [{ id: '', name: '全部操作员' }, ...(options.value.operators || [])])
 const statusChoices = computed(() => [{ value: '', label: '全部状态' }, ...(options.value.statuses || [])])
-const ownerLabels = computed(() => ownerChoices.value.map((item) => item.name || item.code || '-'))
-const operatorLabels = computed(() => operatorChoices.value.map((item) => item.name || item.username || '-'))
-const statusLabels = computed(() => statusChoices.value.map((item) => item.label || item.value))
-const ownerIndex = computed(() => Math.max(0, ownerChoices.value.findIndex((item) => String(item.id) === String(filters.owner_id))))
-const operatorIndex = computed(() => Math.max(0, operatorChoices.value.findIndex((item) => String(item.id) === String(filters.operator_id))))
-const statusIndex = computed(() => Math.max(0, statusChoices.value.findIndex((item) => item.value === filters.status)))
-
-function eventValue(event) {
-  return event?.detail?.value ?? ''
-}
-
-function setStartDate(event) { filters.start_date = eventValue(event) }
-function setEndDate(event) { filters.end_date = eventValue(event) }
-function setOwner(event) { filters.owner_id = ownerChoices.value[Number(eventValue(event))]?.id || '' }
-function setOperator(event) { filters.operator_id = operatorChoices.value[Number(eventValue(event))]?.id || '' }
-function setStatus(event) { filters.status = statusChoices.value[Number(eventValue(event))]?.value || '' }
-
-function qtyText(value) {
-  const number = Number(value || 0)
-  return Number.isFinite(number) ? String(Number(number.toFixed(3))) : '0'
-}
-
+const ownerLabels = computed(() => ownerChoices.value.map(x => x.name || x.code))
+const operatorLabels = computed(() => operatorChoices.value.map(x => x.name || x.username))
+const statusLabels = computed(() => statusChoices.value.map(x => x.label))
+const ownerIndex = computed(() => Math.max(0, ownerChoices.value.findIndex(x => String(x.id) === String(filters.owner_id))))
+const operatorIndex = computed(() => Math.max(0, operatorChoices.value.findIndex(x => String(x.id) === String(filters.operator_id))))
+const statusIndex = computed(() => Math.max(0, statusChoices.value.findIndex(x => x.value === filters.status)))
+function setStartDate(e) { filters.start_date = e.detail.value }
+function setEndDate(e) { filters.end_date = e.detail.value }
+function setOwner(e) { filters.owner_id = ownerChoices.value[Number(e.detail.value)].id }
+function setOperator(e) { filters.operator_id = operatorChoices.value[Number(e.detail.value)].id }
+function setStatus(e) { filters.status = statusChoices.value[Number(e.detail.value)].value }
+function reload() { return session.load() }
+function loadMore() { return session.load({ more: true }) }
+function resetFilters() { return session.reset() }
 function dateTimeText(value) {
   if (!value) return '-'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value).replace('T', ' ').slice(0, 16)
-  return `${localDateText(date)} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  return Number.isNaN(date.getTime()) ? '-' : `${localDate(date)} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
-
+function transferStatus(status) { return { RESERVED: '已预留', POSTED: '已完成', CANCELLED: '已取消' }[status] || status }
 function statusClass(value) {
   if (value === 'COMPLETED') return 'completed'
   if (['POSTING_FAILED', 'NEED_RECOUNT', 'INCONSISTENT'].includes(value)) return 'exception'
-  if (value === 'CANCELLED') return 'cancelled'
-  return 'pending'
+  return value === 'CANCELLED' ? 'cancelled' : 'pending'
 }
-
-function normalizeRows(result) {
-  if (Array.isArray(result)) return result
-  return Array.isArray(result?.results) ? result.results : []
-}
-
-function handleError(error) {
-  if (Number(error?.statusCode || error?.code) === 403) {
-    auth.invalidateAssistedCapability()
-    authorized.value = false
-  }
-  errorMessage.value = error?.message || '历史出库单查询失败'
-}
-
-async function loadOptions() {
-  options.value = await api.assistedOutboundHistoryOptions()
-}
-
-async function loadPage(targetPage, append = false) {
-  if (loading.value) return
-  const sequence = ++requestSequence
-  loading.value = true
-  errorMessage.value = ''
-  try {
-    const result = await api.assistedOutboundHistory({
-      ...filters,
-      page: targetPage,
-      page_size: 20,
-    })
-    if (sequence !== requestSequence) return
-    const nextRows = normalizeRows(result)
-    rows.value = append ? [...rows.value, ...nextRows] : nextRows
-    page.value = targetPage
-    totalCount.value = Number(result?.count ?? rows.value.length)
-    hasMore.value = Boolean(result?.next) || rows.value.length < totalCount.value
-  } catch (error) {
-    handleError(error)
-  } finally {
-    if (sequence === requestSequence) loading.value = false
-  }
-}
-
-function reload() {
-  rows.value = []
-  totalCount.value = 0
-  hasMore.value = false
-  loadPage(1)
-}
-
-function loadMore() {
-  if (!hasMore.value) return
-  loadPage(page.value + 1, true)
-}
-
-function resetFilters() {
-  const dates = defaultDates()
-  Object.assign(filters, {
-    search: '',
-    start_date: dates.start_date,
-    end_date: dates.end_date,
-    owner_id: '',
-    operator_id: '',
-    status: '',
-  })
-  reload()
-}
-
-function applyRouteFilters() {
-  for (const key of ['search', 'start_date', 'end_date', 'owner_id', 'operator_id', 'status']) {
-    if (routeFilters[key] !== undefined && routeFilters[key] !== '') filters[key] = routeFilters[key]
-  }
-}
-
-function reprint(row) {
-  if (!row?.can_reprint || !row?.task?.id) {
-    uni.showToast({ title: row?.reprint_unavailable_reason || '该出库单暂时不能打印', icon: 'none' })
-    return
-  }
-  openOutboundPrintPage(row.task.id)
-}
-
-function openTask(row) {
-  if (!row?.task?.id) return
-  uni.navigateTo({ url: `/pages/picking/task_detail?task_id=${row.task.id}` })
-}
-
-async function initialize() {
-  checkingPermission.value = true
-  try {
-    await auth.ensureProfile()
-    authorized.value = auth.canProcessAssistedOutbound
-    if (!authorized.value) return
-    await loadOptions()
-    applyRouteFilters()
-    await loadPage(1)
-  } catch (error) {
-    handleError(error)
-  } finally {
-    checkingPermission.value = false
-  }
-}
-
-onLoad((query = {}) => {
-  routeFilters = query
-  initialize()
-})
+function reprint(row) { if (row.can_reprint && row.task?.id) openOutboundPrintPage(row.task.id) }
+function openTask(row) { if (row.task?.id) uni.navigateTo({ url: `/pages/picking/task_detail?task_id=${row.task.id}` }) }
+onLoad(session.applyRoute); onShow(session.initialize); onHide(session.suspend); onUnload(session.dispose)
 </script>
 
 <style scoped>

@@ -37,7 +37,7 @@
       <view class="section-title quantity-title">商品履约数量</view>
       <view class="progress-hint">按商品及基本单位汇总</view>
       <view v-for="item in progress.quantities" :key="`${item.product_id}-${item.unit_id}`" class="quantity-row">
-        <view class="stage-name">{{ item.product_name }}</view>
+        <view class="stage-name">{{ (item.product_display_name || item.product_name) }}</view>
         <view class="progress-hint">SKU：{{ item.sku || '—' }} · 单位：{{ item.unit }}</view>
         <view class="quantity-grid">
           <view><text>计划</text><text>{{ qty(item.planned_qty) }}</text></view>

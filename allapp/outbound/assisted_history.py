@@ -7,7 +7,6 @@ to ``WAREHOUSE_ASSISTED`` orders.
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 
@@ -27,7 +26,7 @@ from django.db.models import (
     Value,
     When,
 )
-from django.db.models.functions import Cast, Coalesce
+from django.db.models.functions import Cast, Coalesce, TruncDate
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework.exceptions import ValidationError
@@ -35,9 +34,9 @@ from rest_framework.exceptions import ValidationError
 from allapp.accounts.access import AccessScope
 from allapp.baseinfo.customer_access import customer_code
 from allapp.baseinfo.models import OwnerCustomerBinding
-from allapp.products.identifier_lookup import product_search_q
 from allapp.tasking.models import WmsTask
 
+from .history_products import history_product_q, product_ranking
 from .models import OutboundOrder, OutboundOrderLine
 from .ownership import transfer_summary
 
@@ -84,7 +83,10 @@ def _date_param(params, name):
     raw = (params.get(name) or "").strip()
     if not raw:
         return None
-    value = parse_date(raw)
+    try:
+        value = parse_date(raw)
+    except (ValueError, TypeError):
+        value = None
     if value is None:
         raise ValidationError({name: f"{name} 必须使用 YYYY-MM-DD 格式。"})
     return value
@@ -118,9 +120,7 @@ def parse_period(params, *, default_today=False, max_days=None):
         and end_date
         and (end_date - start_date).days + 1 > max_days
     ):
-        raise ValidationError(
-            {"end_date": f"单次统计范围不能超过 {max_days} 天。"}
-        )
+        raise ValidationError({"end_date": f"单次统计范围不能超过 {max_days} 天。"})
     return start_date, end_date
 
 
@@ -192,8 +192,7 @@ def assisted_history_queryset(user):
     qs = qs.annotate(
         business_status=Case(
             When(
-                Q(approval_status="CANCELLED")
-                | Q(history_task_status=WmsTask.Status.CANCELLED),
+                Q(approval_status="CANCELLED") | Q(history_task_status=WmsTask.Status.CANCELLED),
                 then=Value("CANCELLED"),
             ),
             When(~valid_task, then=Value("INCONSISTENT")),
@@ -206,8 +205,7 @@ def assisted_history_queryset(user):
                 then=Value("COMPLETED"),
             ),
             When(
-                valid_task
-                & Q(history_posting_status=WmsTask.PostingStatus.FAILED),
+                valid_task & Q(history_posting_status=WmsTask.PostingStatus.FAILED),
                 then=Value("POSTING_FAILED"),
             ),
             When(
@@ -235,15 +233,11 @@ def assisted_history_queryset(user):
                 then=Value("PENDING_REVIEW"),
             ),
             When(
-                valid_task
-                & Q(history_task_status=WmsTask.Status.IN_PROGRESS)
-                & Q(is_closed=False),
+                valid_task & Q(history_task_status=WmsTask.Status.IN_PROGRESS) & Q(is_closed=False),
                 then=Value("PICKING"),
             ),
             When(
-                valid_task
-                & Q(history_task_status=WmsTask.Status.RELEASED)
-                & Q(is_closed=False),
+                valid_task & Q(history_task_status=WmsTask.Status.RELEASED) & Q(is_closed=False),
                 then=Value("READY_TO_PICK"),
             ),
             default=Value("INCONSISTENT"),
@@ -271,7 +265,7 @@ def filter_history_queryset(qs, params, *, include_status=True):
     if search:
         product_match = OutboundOrderLine.objects.filter(
             order_id=OuterRef("pk"), is_deleted=False
-        ).filter(product_search_q(search))
+        ).filter(history_product_q(search))
         customer_match = OwnerCustomerBinding.all_objects.filter(
             owner_id=OuterRef("owner_id"),
             customer_id=OuterRef("customer_id"),
@@ -443,185 +437,93 @@ def history_options(user):
             for row in operators
         ],
         "statuses": [
-            {"value": value, "label": label}
-            for value, label in BUSINESS_STATUS_LABELS.items()
+            {"value": value, "label": label} for value, label in BUSINESS_STATUS_LABELS.items()
         ],
     }
 
 
-def _new_stats_bucket(**identity):
+def _stats_metrics():
     return {
-        **identity,
-        "order_count": 0,
-        "completed_count": 0,
-        "pending_count": 0,
-        "exception_count": 0,
-        "cancelled_count": 0,
-        "line_count": 0,
-        "total_base_qty": Decimal("0"),
+        "order_count": Count("pk", distinct=True),
+        "completed_count": Count("pk", filter=Q(business_status="COMPLETED"), distinct=True),
+        "pending_count": Count("pk", filter=Q(business_status__in=PENDING_STATUSES), distinct=True),
+        "exception_count": Count(
+            "pk", filter=Q(business_status__in=EXCEPTION_STATUSES), distinct=True
+        ),
+        "cancelled_count": Count("pk", filter=Q(business_status="CANCELLED"), distinct=True),
+        "line_count": Sum("history_line_count"),
+        "total_base_qty": Sum("history_total_qty"),
     }
-
-
-def _accumulate(bucket, row):
-    status_value = row["business_status"]
-    bucket["order_count"] += 1
-    bucket["line_count"] += int(row["history_line_count"] or 0)
-    bucket["total_base_qty"] += row["history_total_qty"] or Decimal("0")
-    if status_value == "COMPLETED":
-        bucket["completed_count"] += 1
-    elif status_value == "CANCELLED":
-        bucket["cancelled_count"] += 1
-    elif status_value in EXCEPTION_STATUSES:
-        bucket["exception_count"] += 1
-    elif status_value in PENDING_STATUSES:
-        bucket["pending_count"] += 1
 
 
 def _json_bucket(bucket):
     return {
-        key: str(value) if isinstance(value, Decimal) else value
-        for key, value in bucket.items()
+        **bucket,
+        "line_count": bucket["line_count"] or 0,
+        "total_base_qty": str(bucket["total_base_qty"] or Decimal("0")),
     }
 
 
 def build_stats(user, params):
+    """Aggregate the full authorized result in SQL, independently of list pagination."""
     start_date, end_date = parse_period(params, default_today=True, max_days=366)
     top_n = _integer_param(params, "top_n", minimum=1, maximum=50) or 10
-    qs = assisted_history_queryset(user)
-    # ``parse_period`` supplies today's range when the caller omits dates.  Feed
-    # that normalized range back into the common filter; otherwise an empty
-    # query string would accidentally aggregate the warehouse's full history.
     filter_params = params.copy()
     filter_params["start_date"] = start_date.isoformat()
     filter_params["end_date"] = end_date.isoformat()
-    qs = filter_history_queryset(qs, filter_params, include_status=False)
-    rows = list(
-        qs.values(
-            "id",
-            "assisted_at",
-            "owner_id",
-            "owner__code",
-            "owner__name",
-            "assisted_by_id",
-            "assisted_by__name",
-            "assisted_by__username",
-            "history_line_count",
-            "history_total_qty",
-            "business_status",
-        )
+    qs = filter_history_queryset(assisted_history_queryset(user), filter_params).order_by()
+    status_counts = {
+        row["business_status"]: row["n"]
+        for row in qs.values("business_status").annotate(n=Count("pk", distinct=True))
+    }
+    daily = (
+        qs.annotate(history_date=TruncDate("assisted_at"))
+        .values("history_date")
+        .annotate(**_stats_metrics())
+        .order_by("history_date")
     )
-
-    summary = _new_stats_bucket()
-    status_counts = defaultdict(int)
-    daily = {}
-    owners = {}
-    operators = {}
-    order_ids = []
-    for row in rows:
-        order_ids.append(row["id"])
-        _accumulate(summary, row)
-        status_counts[row["business_status"]] += 1
-
-        assisted_at = row["assisted_at"]
-        if assisted_at:
-            if timezone.is_aware(assisted_at):
-                assisted_at = timezone.localtime(assisted_at)
-            date_key = assisted_at.date().isoformat()
-            daily.setdefault(date_key, _new_stats_bucket(date=date_key))
-            _accumulate(daily[date_key], row)
-
-        owner_key = row["owner_id"]
-        owners.setdefault(
-            owner_key,
-            _new_stats_bucket(
-                owner_id=owner_key,
-                owner_code=row["owner__code"] or "",
-                owner_name=row["owner__name"] or "",
-            ),
-        )
-        _accumulate(owners[owner_key], row)
-
-        operator_key = row["assisted_by_id"]
-        operators.setdefault(
-            operator_key,
-            _new_stats_bucket(
-                operator_id=operator_key,
-                operator_name=row["assisted_by__name"]
-                or row["assisted_by__username"]
-                or "未记录",
-                operator_username=row["assisted_by__username"] or "",
-            ),
-        )
-        _accumulate(operators[operator_key], row)
-
-    products = []
-    if order_ids:
-        products = list(
-            OutboundOrderLine.objects.filter(
-                order_id__in=order_ids, is_deleted=False
+    owners = (
+        qs.values("owner_id", "owner__code", "owner__name")
+        .annotate(**_stats_metrics())
+        .order_by("-order_count", "owner_id")
+    )
+    operators = (
+        qs.values("assisted_by_id", "assisted_by__name", "assisted_by__username")
+        .annotate(**_stats_metrics())
+        .order_by("-order_count", "assisted_by_id")
+    )
+    daily_rows = []
+    for row in daily:
+        date = row.pop("history_date")
+        if date:
+            daily_rows.append(_json_bucket({**row, "date": date.isoformat()}))
+    owner_rows = []
+    for row in owners:
+        code, name = row.pop("owner__code"), row.pop("owner__name")
+        owner_rows.append(_json_bucket({**row, "owner_code": code or "", "owner_name": name or ""}))
+    operator_rows = []
+    for row in operators:
+        operator_id = row.pop("assisted_by_id")
+        name, username = row.pop("assisted_by__name"), row.pop("assisted_by__username")
+        operator_rows.append(
+            _json_bucket(
+                {
+                    **row,
+                    "operator_id": operator_id,
+                    "operator_name": name or username or "未记录",
+                    "operator_username": username or "",
+                }
             )
-            .values(
-                "product_id",
-                "product__code",
-                "product__sku",
-                "product__name",
-                "base_uom__code",
-                "base_uom__name",
-            )
-            .annotate(
-                order_count=Count("order_id", distinct=True),
-                total_base_qty=Coalesce(
-                    Sum("base_qty"),
-                    Value(
-                        Decimal("0.000"),
-                        output_field=DecimalField(max_digits=24, decimal_places=3),
-                    ),
-                ),
-            )
-            .order_by("-total_base_qty", "product_id")[:top_n]
         )
-
     return {
-        "period": {
-            "start_date": start_date.isoformat(),
-            "end_date": end_date.isoformat(),
-        },
-        "summary": _json_bucket(summary),
+        "period": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+        "summary": _json_bucket(qs.aggregate(**_stats_metrics())),
         "status_rows": [
-            {
-                "status": value,
-                "label": label,
-                "order_count": status_counts[value],
-            }
+            {"status": value, "label": label, "order_count": status_counts.get(value, 0)}
             for value, label in BUSINESS_STATUS_LABELS.items()
         ],
-        "daily_rows": [
-            _json_bucket(daily[key]) for key in sorted(daily.keys())
-        ],
-        "owner_rows": [
-            _json_bucket(row)
-            for row in sorted(
-                owners.values(), key=lambda item: (-item["order_count"], item["owner_id"])
-            )
-        ],
-        "operator_rows": [
-            _json_bucket(row)
-            for row in sorted(
-                operators.values(),
-                key=lambda item: (-item["order_count"], item["operator_id"] or 0),
-            )
-        ],
-        "product_rows": [
-            {
-                "product_id": row["product_id"],
-                "product_code": row["product__code"] or "",
-                "product_sku": row["product__sku"] or "",
-                "product_name": row["product__name"] or "",
-                "base_uom_code": row["base_uom__code"] or "",
-                "base_uom_name": row["base_uom__name"] or row["base_uom__code"] or "",
-                "order_count": row["order_count"],
-                "total_base_qty": str(row["total_base_qty"] or Decimal("0")),
-            }
-            for row in products
-        ],
+        "daily_rows": daily_rows,
+        "owner_rows": owner_rows,
+        "operator_rows": operator_rows,
+        "product_rows": product_ranking(qs, top_n),
     }

@@ -295,6 +295,8 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
             "出库单号",
             "行号",
             "销售时间",
+            "品牌型号",
+            "规格",
         ]
     )
     lines = (
@@ -321,13 +323,15 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
                 getattr(line.owner, "name", ""),
                 getattr(line.product, "code", ""),
                 getattr(line.product, "sku", ""),
-                getattr(line.product, "name", ""),
+                line.frozen_product_name,
                 Decimal(line.qty),
                 Decimal(line.price),
                 Decimal(line.amount),
                 getattr(outbound_order, "order_no", "") if outbound_order else "",
                 line.line_no,
                 _dt(line.sale.created_at),
+                line.frozen_brand_model,
+                line.frozen_product_spec,
             ]
         )
 
@@ -383,6 +387,8 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
             "金额",
             "原销售行号",
             "退货时间",
+            "品牌型号",
+            "规格",
         ]
     )
     return_lines = (
@@ -406,12 +412,14 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
                 getattr(line.owner, "name", ""),
                 getattr(line.product, "code", ""),
                 getattr(line.product, "sku", ""),
-                getattr(line.product, "name", ""),
+                line.frozen_product_name,
                 Decimal(line.qty),
                 Decimal(line.price),
                 Decimal(line.amount),
                 line.sale_line.line_no if line.sale_line_id else "",
                 _dt(line.return_order.created_at),
+                line.frozen_brand_model,
+                line.frozen_product_spec,
             ]
         )
 
@@ -449,6 +457,12 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
 
     if include_all_sheet:
         _prepend_all_information_sheet(workbook)
+    # Product names, models and other exported text must remain literal Excel values.
+    for worksheet in workbook.worksheets:
+        for row in worksheet:
+            for cell in row:
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
     return workbook
 
 

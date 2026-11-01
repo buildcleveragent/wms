@@ -366,6 +366,8 @@ class RelocationOptionsView(APIView):
                         "id": row.pk,
                         "product_code": row.product.code,
                         "product_name": row.product.name,
+                        "brand_model": row.product.brand_model,
+                        "product_display_name": row.product.display_name,
                         "location_id": row.location_id,
                         "location_code": row.location.code,
                         "container_id": row.container_id,

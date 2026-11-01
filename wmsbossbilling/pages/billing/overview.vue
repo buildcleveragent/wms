@@ -50,12 +50,12 @@
     <view v-if="loading" class="loading-banner">正在同步仓库计费数据...</view>
     <BossDataStatus :meta="payload?.meta" :error="dataError" :stale="stale" />
 
-    <view v-if="!loading && !hasAnyData" class="empty-card">
+    <view v-if="!loading && payload && payload.meta?.data_status !== 'UNAVAILABLE' && !hasAnyData" class="empty-card">
       <view class="empty-title">当前范围没有计费数据</view>
       <view class="empty-desc">可以切换货主、日期、收费类型或状态后继续查看。</view>
     </view>
 
-    <template v-if="!loading && hasAnyData">
+    <template v-if="!loading && payload?.meta?.data_status !== 'UNAVAILABLE' && hasAnyData">
       <view class="kpi-grid">
         <view class="kpi-card blue">
           <view class="kpi-label">货主数</view>
@@ -238,10 +238,10 @@ const scopeDateText = computed(() => `${bossScope.date_from} 至 ${bossScope.dat
 const summary = computed(() => {
   const source = payload.value?.summary || {}
   return {
-    ownerCount: Number(source.owner_count || 0),
-    accrualCount: Number(source.accrual_count || 0),
+    ownerCount: qty(source.owner_count),
+    accrualCount: qty(source.accrual_count),
     accruals: asList(source.accruals_by_currency),
-    issuedBillCount: Number(source.issued_bill_count || 0),
+    issuedBillCount: qty(source.issued_bill_count),
     issuedBills: asList(source.issued_bills_by_currency),
     draftBills: asList(source.draft_bills_by_currency),
   }
@@ -262,7 +262,7 @@ const ownerRows = computed(() =>
     .map((item) => ({
       owner: item.owner,
       ownerName: item.owner_name,
-      accrualCount: Number(item.accrual_count || 0),
+      accrualCount: qty(item.accrual_count),
       taxTotal: toNumber(item.tax_total),
       total: toNumber(item.total),
       currency: item.currency,
@@ -274,7 +274,7 @@ const chargeRows = computed(() =>
     .map((item) => ({
       chargeType: item.charge_type,
       label: chargeTypeLabel(item.charge_type),
-      accrualCount: Number(item.accrual_count || 0),
+      accrualCount: qty(item.accrual_count),
       taxTotal: toNumber(item.tax_total),
       total: toNumber(item.total),
       currency: item.currency,
@@ -285,7 +285,7 @@ const statusRows = computed(() =>
   asList(payload.value?.by_status).map((item) => ({
     status: item.status,
     label: ACCRUAL_STATUS_LABELS[item.status] || item.status || '-',
-    accrualCount: Number(item.accrual_count || 0),
+    accrualCount: qty(item.accrual_count),
     total: toNumber(item.total),
     currency: item.currency,
   }))
@@ -303,8 +303,8 @@ const trendRows = computed(() => {
   }, {})
   return rows.map((row) => ({
     ...row,
-    width: maxByCurrency[row.currency] > 0
-      ? Math.max((row.total / maxByCurrency[row.currency]) * 100, 8)
+    width: row.total > 0 && maxByCurrency[row.currency] > 0
+      ? (row.total / maxByCurrency[row.currency]) * 100
       : 0,
   }))
 })

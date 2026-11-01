@@ -146,7 +146,7 @@ import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import { api, buildQuery } from '@/utils/request'
 import { useAuth } from '@/store/auth'
 import { useLatestRequest } from '@/utils/use-latest-request'
-import { asList, billStatusLabel, chargeTypeLabel, money, qty, toNumber } from '@/utils/billing'
+import { asList, billStatusLabel, chargeTypeLabel, money, qty, sumAmounts } from '@/utils/billing'
 
 const auth = useAuth()
 const billId = ref('')
@@ -214,7 +214,7 @@ const filteredLines = computed(() =>
 
 const filteredSummary = computed(() => ({
   lineCount: filteredLines.value.length,
-  total: filteredLines.value.reduce((sum, line) => sum + toNumber(line.amount) + toNumber(line.tax_amount), 0),
+  total: filteredLines.value.reduce((sum, line) => sumAmounts(sum, line.amount, line.tax_amount), 0),
 }))
 
 const groupedRows = computed(() => {
@@ -229,8 +229,8 @@ const groupedRows = computed(() => {
       total: 0,
     }
     row.lineCount += 1
-    row.taxTotal += toNumber(line.tax_amount)
-    row.total += toNumber(line.amount) + toNumber(line.tax_amount)
+    row.taxTotal = sumAmounts(row.taxTotal, line.tax_amount)
+    row.total = sumAmounts(row.total, line.amount, line.tax_amount)
     groups.set(key, row)
   })
   return Array.from(groups.values()).sort((a, b) => b.total - a.total)
