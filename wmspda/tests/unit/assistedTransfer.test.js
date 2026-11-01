@@ -8,6 +8,14 @@ describe('assisted ownership transfer draft', () => {
     setActivePinia(createPinia())
   })
 
+  it('keeps brand model descriptions when selecting same-name products', () => {
+    const draft = useAssistedOutbound()
+    draft.selectItem({ id: 7, name: '汽水', display_name: '汽水 · 大窑·橙诺橙味', available_qty: 100 }, '1', null, 10)
+    draft.selectItem({ id: 8, name: '汽水', display_name: '汽水 · 大窑·嘉宾原味', available_qty: 100 }, '1', null, 10)
+    expect(draft.items).toHaveLength(2)
+    expect(draft.items.map(item => item.name)).toEqual(['汽水 · 大窑·橙诺橙味', '汽水 · 大窑·嘉宾原味'])
+  })
+
   it('defaults to direct sale and keeps the source catalog owner in transfer mode', () => {
     const draft = useAssistedOutbound()
     draft.setOwner({ id: 1, name: '原货主' })

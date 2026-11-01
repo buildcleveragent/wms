@@ -96,3 +96,39 @@ test('POS search results and cart show each non-empty product specification afte
 
   await page.screenshot({ path: '/tmp/wmspda-pos-cart-product-spec.png', fullPage: false })
 })
+
+test('same-name products remain distinguishable by brand model in search and cart', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+  const products = [
+    { ...productResults[0], name: '汽水', brand_model: '大窑·橙诺橙味', display_name: '汽水 · 大窑·橙诺橙味', spec: '480ml×12瓶' },
+    { ...productResults[1], name: '汽水', brand_model: '大窑·嘉宾原味', display_name: '汽水 · 大窑·嘉宾原味', spec: '480ml×12瓶' },
+  ]
+  await page.route('http://192.168.1.6:8001/api/**', async route => {
+    const url = new URL(route.request().url())
+    await route.fulfill({ json: url.pathname === '/api/pos/products/'
+      ? { count: 2, next: null, previous: null, results: products } : {} })
+  })
+  await page.goto('/#/pages/pos/index')
+  await expect(page).toHaveURL(/pages\/pos\/index/)
+  const input = page.getByTestId('pos-product-input').locator('input')
+  for (const index of [0, 1]) {
+    await input.fill('汽水')
+    await input.press('Enter')
+    await expect(page.getByTestId('pos-product-name').nth(index)).toContainText(products[index].brand_model)
+    await page.getByTestId('pos-product-row').nth(index).locator('.add-btn').click()
+  }
+  const cart = page.getByTestId('pos-cart-product')
+  await expect(cart).toHaveCount(2)
+  await expect(cart.nth(0)).toContainText('大窑·橙诺橙味')
+  await expect(cart.nth(1)).toContainText('大窑·嘉宾原味')
+  await expect(cart.nth(0)).toContainText('480ml×12瓶')
+  await expect(page.locator('vite-error-overlay')).toHaveCount(0)
+  await page.screenshot({ path: '/tmp/product-identity-pos-desktop.png', fullPage: false })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(cart.nth(0)).toBeVisible()
+  await expect(cart.nth(1)).toBeVisible()
+  await page.screenshot({ path: '/tmp/product-identity-pos-mobile.png', fullPage: false })
+  expect(errors).toEqual([])
+})

@@ -4,7 +4,7 @@
     <view v-else class="hero-img placeholder">货</view>
 
     <view class="info">
-      <view class="name">{{ product.name }}</view>
+      <view class="name">{{ (product.display_name || product.name) }}</view>
       <view v-if="productSubtitle" class="meta">{{ productSubtitle }}</view>
       <view class="price-row">
         <PriceText :value="product.price" />

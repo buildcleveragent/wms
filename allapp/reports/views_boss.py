@@ -13,7 +13,13 @@ from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 from allapp.accounts.models import UserRoleScope
 from allapp.baseinfo.models import Owner
-from allapp.billing.enums import AccrualStatus, BillStatus, PricingStatus, SourceQuality
+from allapp.billing.enums import (
+    AccrualStatus,
+    BillDocumentStatus,
+    BillStatus,
+    PricingStatus,
+    SourceQuality,
+)
 from allapp.billing.models import (
     Bill,
     BillingAccrual,
@@ -21,6 +27,7 @@ from allapp.billing.models import (
     BillingJobRun,
     BillingMetricDaily,
 )
+from allapp.billing.services.receivable_reporting import receivable_bills_as_of
 from allapp.inventory.models import (
     InventoryDetail,
     InventorySnapshotDaily,
@@ -28,9 +35,11 @@ from allapp.inventory.models import (
 )
 from allapp.locations.models import Warehouse
 from allapp.products.identifier_lookup import product_search_q
+from allapp.products.models import ProductUom
 from allapp.tasking.models import WmsTask
 
 from .boss_contract import build_meta, parse_boss_date_range, warning
+from .product_display import product_display_fields
 from .services_boss import (
     build_boss_alert_payload,
     build_boss_context_payload,
@@ -237,11 +246,11 @@ class BossInventoryDetailListApi(BossScopedApiMixin, APIView):
         historical = date_to != today
         if historical:
             qs = InventorySnapshotDaily.objects.select_related(
-                "owner", "warehouse", "product", "location"
+                "owner", "warehouse", "product", "product__brand", "location"
             ).filter(snapshot_date=date_to, onhand_qty__gt=0)
         else:
             qs = InventoryDetail.objects.select_related(
-                "owner", "warehouse", "product", "location"
+                "owner", "warehouse", "product", "product__brand", "location"
             ).filter(onhand_qty__gt=0)
         qs = access.filter_queryset(qs, owner_field="owner_id", warehouse_field="warehouse_id")
         if owner_id:
@@ -259,6 +268,15 @@ class BossInventoryDetailListApi(BossScopedApiMixin, APIView):
         count = qs.count()
         start = (page - 1) * page_size
         objects = list(qs[start : start + page_size])
+        unit_names = dict(
+            ProductUom.all_objects.filter(
+                code__in={
+                    getattr(row, "base_unit", "") or getattr(row, "base_unit_code", "")
+                    for row in objects
+                }
+            ).values_list("code", "name")
+        )
+
         snapshot_marker_qs = access.filter_queryset(
             InventorySnapshotDaily.objects.filter(snapshot_date=date_to),
             owner_field="owner_id",
@@ -280,6 +298,17 @@ class BossInventoryDetailListApi(BossScopedApiMixin, APIView):
             ).count()
             if approximate:
                 warnings.append(warning("HISTORICAL_INVENTORY_APPROXIMATE", approximate))
+        if historical:
+            inferred = qs.filter(
+                base_unit_source=InventorySnapshotDaily.UnitSource.LEGACY_INFERRED
+            ).count()
+            unknown = qs.filter(
+                Q(base_unit_code="") | Q(base_unit_source=InventorySnapshotDaily.UnitSource.UNKNOWN)
+            ).count()
+            if inferred:
+                warnings.append(warning("HISTORICAL_INVENTORY_UNIT_INFERRED", inferred))
+            if unknown:
+                warnings.append(warning("HISTORICAL_INVENTORY_UNIT_UNKNOWN", unknown))
         scope_payload = self._scope_payload(
             owner_id=owner_id,
             warehouse_id=warehouse_id,
@@ -296,7 +325,7 @@ class BossInventoryDetailListApi(BossScopedApiMixin, APIView):
                 "product_id": row.product_id,
                 "product_code": row.product.code,
                 "product_sku": row.product.sku,
-                "product_name": row.product.name,
+                **product_display_fields(row.product),
                 "location_id": row.location_id,
                 "location_code": row.location.code,
                 "onhand_qty": row.onhand_qty,
@@ -307,6 +336,9 @@ class BossInventoryDetailListApi(BossScopedApiMixin, APIView):
                 "base_unit": getattr(row, "base_unit", "")
                 or getattr(row, "base_unit_code", "")
                 or "UNKNOWN",
+                "base_unit_name": unit_names.get(
+                    getattr(row, "base_unit", "") or getattr(row, "base_unit_code", ""), ""
+                ),
                 "base_unit_source": getattr(row, "base_unit_source", "VERIFIED"),
                 "snapshot_date": getattr(row, "snapshot_date", None),
                 "snapshot_source": getattr(row, "snapshot_source", None),
@@ -401,11 +433,11 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
         if section == "expiring_inventory":
             if item_type == "inventory_snapshot":
                 queryset = InventorySnapshotDaily.objects.select_related(
-                    "owner", "warehouse", "product", "location"
+                    "owner", "warehouse", "product", "product__brand", "location"
                 )
             elif item_type == "inventory_detail":
                 queryset = InventoryDetail.objects.select_related(
-                    "owner", "warehouse", "product", "location"
+                    "owner", "warehouse", "product", "product__brand", "location"
                 )
             else:
                 queryset = InventoryDetail.objects.none()
@@ -438,7 +470,7 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
                     "warehouse": obj.warehouse_id,
                     "warehouse_name": obj.warehouse.name,
                     "product": obj.product_id,
-                    "product_name": obj.product.name,
+                    **product_display_fields(obj.product),
                     "location": obj.location_id,
                     "location_code": obj.location.code,
                     "expiry_date": obj.expiry_date,
@@ -495,7 +527,9 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
             obj = (
                 self._scope(
                     request,
-                    Bill.objects.select_related("owner", "warehouse", "period"),
+                    receivable_bills_as_of(
+                        Bill.objects.select_related("owner", "warehouse", "period"), date_to
+                    ),
                     owner_id=owner_id,
                     warehouse_id=warehouse_id,
                 )
@@ -504,7 +538,10 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
             )
             if obj is not None:
                 if section == "overdue_bills" and not (
-                    obj.status == BillStatus.ISSUED and obj.due_date and obj.due_date < date_to
+                    obj.document_status == BillDocumentStatus.ISSUED
+                    and obj.report_outstanding_amount > 0
+                    and obj.due_date
+                    and obj.due_date < date_to
                 ):
                     obj = None
                 elif section == "bills_missing_due_date" and not (
@@ -525,6 +562,8 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
                     "subtotal": obj.subtotal,
                     "tax_total": obj.tax_total,
                     "total": obj.total,
+                    "paid_amount": obj.report_paid_amount,
+                    "outstanding_amount": obj.report_outstanding_amount,
                     "owner": obj.owner_id,
                     "owner_name": obj.owner.name,
                     "warehouse": obj.warehouse_id,
@@ -565,7 +604,7 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
                     request,
                     ReviewDifference.objects.select_related(
                         "owner", "warehouse", "source_task"
-                    ).prefetch_related("lines__product", "lines__location"),
+                    ).prefetch_related("lines__product__brand", "lines__location"),
                     owner_id=owner_id,
                     warehouse_id=warehouse_id,
                 )
@@ -597,7 +636,7 @@ class BossAlertDetailApi(BossScopedApiMixin, APIView):
                         {
                             "id": line.id,
                             "product": line.product_id,
-                            "product_name": line.product.name,
+                            **product_display_fields(line.product),
                             "location": line.location_id,
                             "location_code": line.location.code,
                             "quantity_before": line.quantity_before,

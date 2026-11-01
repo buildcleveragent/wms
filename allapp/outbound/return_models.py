@@ -5,7 +5,7 @@ from django.db import models
 from django.db.models import Q
 
 from allapp.core.models import BaseModel
-
+from allapp.core.product_identity import ProductIdentitySnapshotMixin
 
 class ReturnOrder(BaseModel):
     class Status(models.TextChoices):
@@ -58,7 +58,7 @@ class ReturnOrder(BaseModel):
         ordering = ["-id"]
 
 
-class ReturnLine(models.Model):
+class ReturnLine(ProductIdentitySnapshotMixin, models.Model):
     order = models.ForeignKey(ReturnOrder, related_name="lines", on_delete=models.CASCADE)
     inventory = models.ForeignKey("inventory.InventoryDetail", on_delete=models.PROTECT)
     product = models.ForeignKey("products.Product", on_delete=models.PROTECT)

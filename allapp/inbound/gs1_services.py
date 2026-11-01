@@ -77,6 +77,8 @@ def receive_product_card(product: Product) -> dict:
         "id": product.pk,
         "sku": product.sku or product.code,
         "name": product.name,
+        "brand_model": product.brand_model,
+        "display_name": product.display_name,
         "spec": product.spec,
         "base_unit": base_uom.code,
         "base_unit_name": base_uom.name,

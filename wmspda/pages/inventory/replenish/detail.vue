@@ -14,7 +14,7 @@
       </view>
 
       <view v-for="line in task.lines" :key="line.id" class="card">
-        <text class="product">{{ line.product_name || line.product_code }}</text>
+        <text class="product">{{ (line.product_display_name || line.product_name) || line.product_code }}</text>
         <text class="meta">{{ line.from_location_code }} → {{ line.to_location_code }}</text>
         <text class="meta">计划 {{ line.qty_plan }} · 已完成 {{ line.qty_done }} · 剩余 {{ line.qty_pending }}</text>
         <text v-if="line.lot_no" class="meta">批次 {{ line.lot_no }} · 效期 {{ line.exp_date || '-' }}</text>

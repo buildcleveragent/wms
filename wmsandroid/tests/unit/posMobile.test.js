@@ -12,6 +12,12 @@ const product = {
 }
 
 describe('mobile POS cart and checkout', () => {
+  it('keeps same-name products separate and displays their brand models', () => {
+    const first = addProductToCart([], { ...product, name: '汽水', display_name: '汽水 · 大窑·橙诺橙味' })
+    const second = addProductToCart(first.items, { ...product, id: 8, name: '汽水', display_name: '汽水 · 大窑·嘉宾原味' })
+    expect(second.items).toHaveLength(2)
+    expect(second.items.map(item => item.name)).toEqual(['汽水 · 大窑·橙诺橙味', '汽水 · 大窑·嘉宾原味'])
+  })
   it('matches a package barcode and keeps product+unit as the line identity', () => {
     expect(unitIndexForBarcode(product, ' CASE-7 ')).toBe(1)
     const result = addProductToCart([], product, 'CASE-7')

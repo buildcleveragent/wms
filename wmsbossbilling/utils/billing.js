@@ -32,38 +32,54 @@ export function asList(value) {
   return []
 }
 
+// Missing or invalid data must never become a business zero.
 export function toNumber(value) {
+  if (value == null || typeof value === 'boolean' || typeof value === 'object') return null
+  if (typeof value === 'string' && !value.trim()) return null
   const num = Number(value)
-  return Number.isFinite(num) ? num : 0
+  return Number.isFinite(num) ? num : null
+}
+
+export function decimalText(value, digits = 3) {
+  const num = toNumber(value)
+  return num == null ? '-' : num.toFixed(digits)
+}
+
+export function sumAmounts(...values) {
+  const numbers = values.map(toNumber)
+  return numbers.some(value => value == null) ? null : numbers.reduce((a, b) => a + b, 0)
 }
 
 export function money(value, currency) {
-  const code = String(currency || 'UNKNOWN').toUpperCase()
-  const amount = toNumber(value).toFixed(2)
-  if (code === 'CNY') return `¥${amount}`
-  if (code === 'USD') return `$${amount}`
-  if (code === 'EUR') return `€${amount}`
-  if (code === 'GBP') return `£${amount}`
-  return `${code} ${amount}`
+  const num = toNumber(value)
+  if (num == null) return '-'
+  const code = String(currency || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN'
+  const amount = num.toFixed(2)
+  const symbols = { CNY: '¥', USD: '$', EUR: '€', GBP: '£' }
+  return symbols[code] ? `${symbols[code]}${amount}` : `${code} ${amount}`
 }
 
-// export function qty(value) {
-//   return toNumber(value).toFixed(4)
-// }
-
 export function qty(value) {
-  if (value === null || value === undefined || value === '') return '-'
-
-  const num = Number(value)
-  if (!Number.isFinite(num)) return String(value)
-
-  return String(Number(num.toFixed(4)))
+  const num = toNumber(value)
+  return num == null ? '-' : String(Number(num.toFixed(4)))
 }
 
 export function percent(value) {
-  const num = Number(value)
-  if (!Number.isFinite(num)) return '--'
-  return `${num.toFixed(2)}%`
+  const num = toNumber(value)
+  return num == null ? '--' : `${num.toFixed(2)}%`
+}
+
+export function productName(item = {}) {
+  return item.product_display_name || [item.product_name, item.brand_model].filter(Boolean).join(' · ')
+    || item.product_code || item.product_sku || '-'
+}
+
+export function hasWarning(meta, code) {
+  return (meta?.warnings || []).some(row => row.code === code)
+}
+
+export function inventoryAvailable(meta) {
+  return !hasWarning(meta, 'HISTORICAL_INVENTORY_MISSING')
 }
 
 export function chargeTypeLabel(code) {

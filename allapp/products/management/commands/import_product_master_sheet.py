@@ -358,6 +358,8 @@ class Command(BaseCommand):
                         gtin_val = _as_gtin(gtin_raw)
                         name_val = _norm_str(name_raw)
                         spec_val = _norm_str(spec_raw) or None
+                        model_raw = _pick_first(row, ("型号", "model"))
+                        model_val = _norm_str(model_raw)
                         base_uom = self.get_or_create_uom(base_uom_raw)
                         extra_val = _as_json_dict(extra_raw)
                         code_val = _norm_code(code_raw, "code")
@@ -444,6 +446,8 @@ class Command(BaseCommand):
 
                             existing.name = name_val
                             existing.spec = spec_val
+                            if model_raw is not None:
+                                existing.model = model_val
                             existing.base_uom = base_uom
                             existing.category = category
                             existing.extra = extra_val
@@ -463,6 +467,7 @@ class Command(BaseCommand):
                                 gtin=gtin_val,
                                 name=name_val,
                                 spec=spec_val,
+                                model=model_val,
                                 base_uom=base_uom,
                                 category=category,
                                 extra=extra_val,

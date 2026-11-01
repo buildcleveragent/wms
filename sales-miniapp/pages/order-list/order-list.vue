@@ -13,7 +13,7 @@
         </view>
         <view class="meta">{{ order.created_at }} · {{ order.delivery_method_name }}{{ order.is_combined ? ` · ${order.order_count} 个配送包裹` : '' }}</view>
         <view class="products">
-          <text v-for="line in order.lines.slice(0, 2)" :key="line.id">{{ line.product_name }} × {{ line.qty }}</text>
+          <text v-for="line in order.lines.slice(0, 2)" :key="line.id">{{ (line.product_display_name || line.product_name) }} × {{ line.qty }}</text>
         </view>
         <view class="foot">
           <text>{{ order.line_count }} 件</text>

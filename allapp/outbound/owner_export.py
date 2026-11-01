@@ -69,6 +69,7 @@ def export_orders(request):
     line_fields = [
         "id",
         "line_no",
+        "product_snapshot",
         "product__code",
         "product__sku",
         "product__name",
@@ -114,8 +115,12 @@ def export_orders(request):
                 line["line_no"],
                 line["product__code"],
                 line["product__sku"],
-                line["product__name"] if line["id"] else "无有效商品行",
-                line["product__spec"],
+                (
+                    line["product_snapshot"].get("name", line["product__name"])
+                    if line["id"]
+                    else "无有效商品行"
+                ),
+                (line["product_snapshot"] or {}).get("spec", line["product__spec"]),
                 line["base_uom__name"] or "未记录",
                 line["base_qty"],
                 line["base_price"] if line["is_priced"] else None,
@@ -125,6 +130,7 @@ def export_orders(request):
                 line["note"],
                 record["remark"],
                 ("已计价" if line["is_priced"] else "未计价") if line["id"] else None,
+                (line["product_snapshot"] or {}).get("brand_model", ""),
             ]
         )
     return xlsx_download(
@@ -155,6 +161,7 @@ def export_orders(request):
             "行备注",
             "订单备注",
             "计价状态",
+            "品牌型号",
         ],
         rows=rows,
         filters="；".join(f"{FILTER_LABELS[k]}：{v}" for k, v in params.items()),

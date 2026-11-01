@@ -5,7 +5,7 @@
       <view v-else class="thumb placeholder">货</view>
     </view>
     <view class="main">
-      <view class="name">{{ product.name }}</view>
+      <view class="name">{{ (product.display_name || product.name) }}</view>
       <view v-if="subtitle" class="subtitle">{{ subtitle }}</view>
       <view class="badges">
         <text v-if="product.badges && product.badges.hot" class="badge hot">热卖</text>

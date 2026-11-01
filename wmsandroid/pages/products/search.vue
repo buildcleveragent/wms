@@ -35,7 +35,7 @@
         <!-- 商品信息 -->
         <view class="col-info">
           <view class="name-price-row">
-            <view class="product-name">{{ p?.name }}</view>  
+            <view class="product-name">{{ p?.display_name || p?.name }}</view>
           </view>
 		  
 		    <view class="product-spec" v-if="p?.spec">
@@ -460,7 +460,7 @@ function setCartLineToInput(p: any) {
     cart.addItem({
       id: p.id,
       sku: p.sku,
-      name: p.name,
+      name: p.display_name || p.name,
       spec: p.spec,
       qty: desired,
       product_image_url: p.product_image_url,
@@ -482,7 +482,7 @@ function setCartLineToInput(p: any) {
   }
 
   uni.showToast({
-    title: '已改为：' + (p.name || p.sku) + ' × ' + desired,
+    title: '已改为：' + (p.display_name || p.name || p.sku) + ' × ' + desired,
     icon: 'none'
   })
 }
@@ -525,7 +525,7 @@ function add(p: any) {
     cart.addItem({
       id: p.id,
       sku: p.sku,
-      name: p.name,
+      name: p.display_name || p.name,
 	  spec: p.spec,
       qty: desired,
       product_image_url: p.product_image_url,
@@ -555,7 +555,7 @@ function add(p: any) {
   }
 
   uni.showToast({
-    title: '已加入：' + (p.name || p.sku) + ' × ' + desired,
+    title: '已加入：' + (p.display_name || p.name || p.sku) + ' × ' + desired,
     icon: 'none'
   });
 }

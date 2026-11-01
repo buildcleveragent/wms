@@ -12,7 +12,7 @@
 
     <text class="section">申请记录</text>
     <view v-for="item in requests" :key="item.id" class="card">
-      <text class="product">{{ item.product_name }} → {{ item.target_location_code }}</text>
+      <text class="product">{{ (item.product_display_name || item.product_name) }} → {{ item.target_location_code }}</text>
       <text class="meta">数量 {{ item.requested_qty }} · {{ item.status }}</text>
       <text class="meta">原因：{{ item.reason }}</text>
       <view v-if="canApprove && item.status === 'PENDING'" class="actions">

@@ -1,14 +1,14 @@
 # allapp/inbound/export_views.py
-from django.http import HttpResponse
 from django.db.models import Prefetch
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
-from rest_framework.exceptions import PermissionDenied
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, Side
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, Border, Side
-
+from allapp.inbound.models import InboundOrderLine
 from allapp.inbound.permissions import can_view_receive_tasks, scoped_receive_tasks
 from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
 
@@ -32,17 +32,20 @@ def export_receive_task_excel(request, task_id):
     export_scans = (
         TaskScanLog.objects.filter(status=TaskScanLog.ScanStatus.OK)
         .exclude(review_status=TaskScanLog.ReviewStatus.REJECTED)
-        .select_related("location", "product")
+        .select_related("location", "product__brand", "product__base_uom")
         .order_by("id")
     )
     lines = (
         WmsTaskLine.objects.filter(task_id=task.id)
-        .select_related("product", "product__base_uom", "to_location")
-        .prefetch_related(
-            Prefetch("scan_logs", queryset=export_scans, to_attr="export_scans")
-        )
+        .select_related("product__brand", "product__base_uom", "to_location")
+        .prefetch_related(Prefetch("scan_logs", queryset=export_scans, to_attr="export_scans"))
         .order_by("id")
     )
+    lines = list(lines)
+    sources = InboundOrderLine._base_manager.filter(
+        pk__in=[line.src_id for line in lines if line.src_model == "inbound.InboundOrderLine"],
+        order__owner_id=task.owner_id,
+    ).in_bulk()
 
     # 2) 创建工作簿/工作表
     wb = Workbook()
@@ -70,11 +73,12 @@ def export_receive_task_excel(request, task_id):
     ws.column_dimensions["I"].width = 12  # 库位
     ws.column_dimensions["J"].width = 12  # 计划数量
     ws.column_dimensions["K"].width = 14  # 实收数量
+    ws.column_dimensions["L"].width = 30  # 品牌型号
 
     row = 1
 
     # 3) 标题行：入库单 + 单号
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=11)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=12)
     cell = ws.cell(row=row, column=1, value=f"入 库 单（{task.task_no}）")
     cell.alignment = center
     cell.font = title_font
@@ -82,19 +86,13 @@ def export_receive_task_excel(request, task_id):
 
     # 4) 任务头信息
     ws.cell(row=row, column=1, value="货主：").alignment = left
-    ws.cell(
-        row=row, column=2, value=task.owner.name if task.owner else ""
-    ).alignment = left
+    ws.cell(row=row, column=2, value=task.owner.name if task.owner else "").alignment = left
 
     ws.cell(row=row, column=4, value="仓库：").alignment = left
-    ws.cell(
-        row=row, column=5, value=task.warehouse.name if task.warehouse else ""
-    ).alignment = left
+    ws.cell(row=row, column=5, value=task.warehouse.name if task.warehouse else "").alignment = left
 
     ws.cell(row=row, column=7, value="日期：").alignment = left
-    ws.cell(
-        row=row, column=8, value=task.created_at.date().strftime("%Y-%m-%d")
-    ).alignment = left
+    ws.cell(row=row, column=8, value=task.created_at.date().strftime("%Y-%m-%d")).alignment = left
     row += 1
 
     ws.cell(row=row, column=1, value="类型：").alignment = left
@@ -122,6 +120,7 @@ def export_receive_task_excel(request, task_id):
         "库位",
         "计划数量",
         "实际收货数量",
+        "品牌型号",
     ]
     for col, title in enumerate(headers, start=1):
         c = ws.cell(row=row, column=col, value=title)
@@ -137,9 +136,7 @@ def export_receive_task_excel(request, task_id):
         facts = scans or [None]
         for fact_index, scan in enumerate(facts):
             display_index += 1
-            product = (
-                scan.product if scan and scan.product_id else None
-            ) or line.product
+            product = (scan.product if scan and scan.product_id else None) or line.product
             uom = getattr(product, "base_uom", None)
             actual_qty = (
                 scan.qty_base_delta
@@ -147,11 +144,16 @@ def export_receive_task_excel(request, task_id):
                 else scan.qty_base if scan else line.qty_done
             )
             location = scan.location if scan else line.to_location
+            source = (
+                sources.get(line.src_id) if line.src_model == "inbound.InboundOrderLine" else None
+            )
+            if source and source.product_id != getattr(product, "pk", None):
+                source = None
             values = [
                 display_index,
                 getattr(product, "sku", "") or getattr(product, "code", ""),
-                getattr(product, "name", ""),
-                getattr(product, "spec", ""),
+                source.frozen_product_name if source else getattr(product, "name", ""),
+                source.frozen_product_spec if source else getattr(product, "spec", ""),
                 (getattr(uom, "name", "") or getattr(uom, "code", "")),
                 scan.lot_no if scan else "",
                 scan.mfg_date.strftime("%Y-%m-%d") if scan and scan.mfg_date else "",
@@ -159,13 +161,14 @@ def export_receive_task_excel(request, task_id):
                 (getattr(location, "code", "") or getattr(location, "name", "")),
                 float(line.qty_plan) if fact_index == 0 else None,
                 float(actual_qty or 0),
+                source.frozen_brand_model if source else getattr(product, "brand_model", ""),
             ]
             for column, value in enumerate(values, start=1):
                 cell = ws.cell(row=row, column=column, value=value)
+                if isinstance(value, str):
+                    cell.data_type = "s"
                 cell.alignment = (
-                    right
-                    if column in (10, 11)
-                    else center if column in (1, 5, 7, 8) else left
+                    right if column in (10, 11) else center if column in (1, 5, 7, 8) else left
                 )
                 cell.border = border
             row += 1
@@ -173,9 +176,7 @@ def export_receive_task_excel(request, task_id):
     # 7) 输出为 Excel 响应
     filename = f"receive_{task.task_no}.xlsx"
     resp = HttpResponse(
-        content_type=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        content_type=("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     )
     resp["Content-Disposition"] = f'attachment; filename="{filename}"'
     wb.save(resp)

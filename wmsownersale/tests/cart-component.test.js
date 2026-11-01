@@ -67,6 +67,20 @@ describe('购物车页面数量与纠错', () => {
     expect(wrapper.find('.primary-button').attributes('disabled')).toBeDefined()
   })
 
+  it('同名商品按商品 ID 分开并显示各自品牌型号', () => {
+    const cart = preparedCart()
+    cart.items = []
+    for (const [id, model] of [[5, '橙诺橙味'], [6, '嘉宾原味']]) {
+      cart.addItem({ id, name: '汽水', display_name: `汽水 · 大窑·${model}`,
+        brand_model: `大窑·${model}`, qty: 1, price: 2, available: 2, base_unit_name: '瓶' })
+    }
+    const wrapper = render()
+    mocks.onLoad()
+    expect(cart.items).toHaveLength(2)
+    expect(wrapper.text()).toContain('汽水 · 大窑·橙诺橙味')
+    expect(wrapper.text()).toContain('汽水 · 大窑·嘉宾原味')
+  })
+
   it('超过库存时保留输入，要求用户主动调整', async () => {
     const cart = preparedCart()
     const wrapper = render()

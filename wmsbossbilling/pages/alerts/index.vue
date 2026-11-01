@@ -37,7 +37,7 @@
     <view v-if="loading" class="loading-banner">正在同步预警中心...</view>
     <BossDataStatus :meta="payload?.meta" :error="dataError" :stale="stale" />
 
-    <template v-if="!loading">
+    <template v-if="!loading && payload">
       <view class="summary-grid">
         <view class="summary-card danger">
           <view class="summary-label">高风险</view>
@@ -94,7 +94,7 @@ import { useAuth } from '@/store/auth'
 import { useLatestRequest } from '@/utils/use-latest-request'
 import { useBossScope } from '@/store/bossScope'
 import { api, buildQuery } from '@/utils/request'
-import { asList, billStatusLabel, money, qty } from '@/utils/billing'
+import { productName, asList, billStatusLabel, money, qty } from '@/utils/billing'
 
 const auth = useAuth()
 const bossScope = useBossScope()
@@ -115,9 +115,9 @@ const ownerScopeText = computed(() => scope.value.owner_name || '全部货主')
 const summary = computed(() => {
   const source = payload.value?.summary || {}
   return {
-    sectionCount: Number(source.section_count || 0),
-    totalItems: Number(source.total_items || 0),
-    highRiskItems: Number(source.high_risk_items || 0),
+    sectionCount: qty(source.section_count),
+    totalItems: qty(source.total_items),
+    highRiskItems: qty(source.high_risk_items),
   }
 })
 
@@ -140,8 +140,8 @@ const sectionRows = computed(() =>
       key,
       label: section.label || key,
       severity: section.severity || 'medium',
-      count: Number(section.count || 0),
-      shownCount: Number(section.shown_count || 0),
+      count: qty(section.count),
+      shownCount: qty(section.shown_count),
       hasMore: !!section.has_more,
       items: Array.isArray(section.items) ? section.items : [],
     }
@@ -209,7 +209,7 @@ function itemTitle(sectionKey, item) {
   }
   if (sectionKey === 'overdue_tasks') return `${item.task_no} · ${item.owner_name || '未识别货主'}`
   if (sectionKey === 'pending_review_tasks') return `${item.task_no} · ${item.owner_name || '未识别货主'}`
-  if (sectionKey === 'expiring_inventory') return `${item.product_name} · ${item.owner_name || '未识别货主'}`
+  if (sectionKey === 'expiring_inventory') return `${productName(item)} · ${item.owner_name || '未识别货主'}`
   if (sectionKey === 'overdue_bills') return item.invoice_no
   if (sectionKey === 'bills_missing_due_date') return item.invoice_no
   if (sectionKey === 'failed_billing_jobs') return `${item.owner_name || '未识别货主'} · ${item.job_name}`
@@ -248,7 +248,8 @@ function itemSide(sectionKey, item) {
   if (sectionKey === 'approximate_billing_data') return '近似'
   if (sectionKey === 'overdue_tasks') return `${item.overdue_hours || 0}h`
   if (sectionKey === 'expiring_inventory') return `${qty(item.onhand_qty)} ${item.base_unit || 'UNKNOWN'}`
-  if (sectionKey === 'overdue_bills' || sectionKey === 'bills_missing_due_date') return money(item.total, item.currency)
+  if (sectionKey === 'overdue_bills') return `未收 ${money(item.outstanding_amount ?? item.total, item.currency)}`
+  if (sectionKey === 'bills_missing_due_date') return money(item.total, item.currency)
   if (sectionKey === 'pending_review_tasks') return item.status || '-'
   if (sectionKey === 'failed_billing_jobs') return '失败'
   if (sectionKey === 'review_differences') return item.status || '-'

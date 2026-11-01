@@ -34,7 +34,7 @@
         <view v-for="line in order.lines" :key="line.id" class="line">
           <image v-if="line.image_url" class="thumb" :src="line.image_url" mode="aspectFill" />
           <view class="line-main">
-            <view class="line-name">{{ line.product_name }}</view>
+            <view class="line-name">{{ (line.product_display_name || line.product_name) }}</view>
             <view v-if="line.product_spec" class="muted">{{ line.product_spec }}</view>
             <view class="muted">{{ line.qty }} {{ line.order_uom_name || line.order_uom }}</view>
           </view>

@@ -14,6 +14,8 @@ class ReplenishmentPolicySerializer(serializers.ModelSerializer):
     owner_name = serializers.CharField(source="owner.name", read_only=True)
     warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
     product_name = serializers.CharField(source="product.name", read_only=True)
+    brand_model = serializers.CharField(source="product.brand_model", read_only=True)
+    product_display_name = serializers.CharField(source="product.display_name", read_only=True)
     product_code = serializers.CharField(source="product.code", read_only=True)
     target_location_code = serializers.CharField(
         source="target_location.code", read_only=True
@@ -32,6 +34,8 @@ class ReplenishmentPolicySerializer(serializers.ModelSerializer):
             "warehouse_name",
             "product",
             "product_name",
+            "brand_model",
+            "product_display_name",
             "product_code",
             "target_location",
             "target_location_code",
@@ -55,6 +59,8 @@ class ReplenishmentRequestSerializer(serializers.ModelSerializer):
     owner_name = serializers.CharField(source="owner.name", read_only=True)
     warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
     product_name = serializers.CharField(source="product.name", read_only=True)
+    brand_model = serializers.CharField(source="product.brand_model", read_only=True)
+    product_display_name = serializers.CharField(source="product.display_name", read_only=True)
     product_code = serializers.CharField(source="product.code", read_only=True)
     target_location_code = serializers.CharField(
         source="target_location.code", read_only=True
@@ -79,6 +85,8 @@ class ReplenishmentRequestSerializer(serializers.ModelSerializer):
             "warehouse_name",
             "product",
             "product_name",
+            "brand_model",
+            "product_display_name",
             "product_code",
             "target_location",
             "target_location_code",

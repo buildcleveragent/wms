@@ -129,6 +129,8 @@ def order_payload(order, user):
                 "inventory_id": line.inventory_id,
                 "product_id": line.product_id,
                 "product_name": line.product_name,
+                "brand_model": line.frozen_brand_model,
+                "product_display_name": line.product_display_name,
                 "product_code": line.product_code,
                 "spec": line.spec,
                 "base_unit": line.base_unit,

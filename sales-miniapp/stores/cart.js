@@ -17,6 +17,8 @@ function itemFromServer(line) {
     product_id: line.product_id,
     code: line.product_code,
     name: line.product_name,
+    display_name: line.product_display_name,
+    brand_model: line.brand_model,
     spec: line.product_spec,
     image_url: line.image_url,
     order_uom: line.order_uom,

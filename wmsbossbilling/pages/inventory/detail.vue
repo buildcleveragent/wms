@@ -12,21 +12,21 @@
       </view>
       <view class="hero-meta">
         <text>{{ operatorName }}</text>
-        <text>共 {{ total }} 条</text>
+        <text>共 {{ meta?.data_status === 'UNAVAILABLE' ? '-' : fmtQty(total) }} 条</text>
         <text>已加载 {{ rows.length }} 条</text>
       </view>
     </view>
 
 
     <BossScopeFilter @change="onScopeChange" />
-    <BossDataStatus :meta="meta" :error="dataError" />
+    <BossDataStatus :meta="meta" :error="dataError" :stale="!!dataError && rows.length > 0" />
 
     <view class="filter-card">
       <view class="filter-row">
         <input
           v-model="search"
           class="search-input"
-          placeholder="搜索商品名称、编码、SKU、货主"
+          placeholder="搜索名称、品牌型号、规格、编码、货主"
           confirm-type="search"
           @confirm="onSearch"
         />
@@ -50,7 +50,10 @@
       </view>
     </view>
 
-    <view class="table-card">
+    <view class="product-sub">商品资料采用当前档案；历史库存数量采用所选日期快照。</view>
+    <view v-if="meta?.data_status !== 'UNAVAILABLE' && (!dataError || rows.length)" class="table-card">
+      <scroll-view scroll-x class="table-scroll">
+      <view class="table-content">
       <view class="table-head">
         <view class="cell col-product">商品</view>
         <view class="cell col-owner">货主</view>
@@ -73,11 +76,12 @@
           class="table-row"
         >
           <view class="cell col-product">
-            <view class="product-name">{{ item.product_name || '-' }}</view>
+            <view class="product-name">{{ productName(item) }}</view>
             <view class="product-sub">
               {{ item.product_code || item.product_sku || '-' }}
               <text v-if="item.product_spec"> · {{ item.product_spec }}</text>
-              <text> · 单位 {{ item.base_unit || 'UNKNOWN' }}</text>
+              <text v-if="item.base_unit_source && item.base_unit_source !== 'VERIFIED'"> · 单位待核实</text>
+              <text> · 单位 {{ item.base_unit_name || item.base_unit || 'UNKNOWN' }}</text>
             </view>
           </view>
 
@@ -91,23 +95,23 @@
           </view>
 
           <view class="cell col-num">
-            <text class="num-text">{{ fmtQty(item.onhand_qty_display || item.onhand_qty) }} {{ item.base_unit }}</text>
+            <text class="num-text">{{ fmtQty(item.onhand_qty) }} {{ item.base_unit_name || item.base_unit }}</text>
           </view>
 
           <view class="cell col-num primary">
-            <text class="num-text">{{ fmtQty(item.available_qty_display || item.available_qty) }}</text>
+            <text class="num-text">{{ fmtQty(item.available_qty) }}</text>
           </view>
 
           <view class="cell col-num">
-            <text class="num-text">{{ fmtQty(item.allocated_qty_display || item.allocated_qty) }}</text>
+            <text class="num-text">{{ fmtQty(item.allocated_qty) }}</text>
           </view>
 
           <view class="cell col-num">
-            <text class="num-text">{{ fmtQty(item.locked_qty_display || item.locked_qty) }}</text>
+            <text class="num-text">{{ fmtQty(item.locked_qty) }}</text>
           </view>
 
           <view class="cell col-num">
-            <text class="num-text">{{ fmtQty(item.damaged_qty_display || item.damaged_qty) }}</text>
+            <text class="num-text">{{ fmtQty(item.damaged_qty) }}</text>
           </view>
         </view>
 
@@ -116,6 +120,8 @@
           <text v-else-if="finished">已经到底了</text>
           <text v-else>上拉加载更多</text>
         </view>
+      </scroll-view>
+      </view>
       </scroll-view>
     </view>
   </view>
@@ -130,13 +136,14 @@ import BossDataStatus from '@/components/boss-data-status.vue'
 import { useAuth } from '@/store/auth'
 import { useBossScope } from '@/store/bossScope'
 import { api } from '@/utils/request'
+import { productName, qty as fmtQty, toNumber } from '@/utils/billing'
 import { useLatestRequest } from '@/utils/use-latest-request'
 
 const auth = useAuth()
 const bossScope = useBossScope()
 
 const rows = ref([])
-const total = ref(0)
+const total = ref(null)
 const page = ref(1)
 const pageSize = ref(50)
 const pageSizeOptions = [10, 20, 50, 100]
@@ -148,15 +155,6 @@ const dataError = ref(null)
 
 const operatorName = computed(() => auth.user?.display_name || auth.user?.username || '老板账号')
 
-
-function fmtQty(value) {
-  if (value === null || value === undefined || value === '') return '-'
-
-  const n = Number(value)
-  if (!Number.isFinite(n)) return String(value)
-
-  return String(Number(n.toFixed(4)))
-}
 
 function rowKey(item) {
   return `${item.warehouse_id || ''}-${item.owner_id || ''}-${item.product_id || ''}-${item.location_id || ''}-${item.id || ''}`
@@ -186,7 +184,7 @@ async function load(reset = false) {
   if (reset) {
     page.value = 1
     rows.value = []
-    total.value = 0
+    total.value = null
     meta.value = null
     finished.value = false
   }
@@ -197,16 +195,16 @@ async function load(reset = false) {
     if (!current()) return
     const list = Array.isArray(res?.results) ? res.results : []
     meta.value = res?.meta || null
-    total.value = Number(res?.count || 0)
+    total.value = toNumber(res?.count)
     rows.value = reset ? list : [...rows.value, ...list]
     page.value = nextPage
-    finished.value = !res?.next_page || rows.value.length >= total.value
+    finished.value = !res?.next_page || (total.value != null && rows.value.length >= total.value)
   } catch (error) {
     if (!current()) return
     dataError.value = error
     if (error.kind === 'FORBIDDEN') {
       rows.value = []
-      total.value = 0
+      total.value = null
       meta.value = null
     }
     // Keep the last committed page so retry cannot skip a failed append.
@@ -258,7 +256,7 @@ onLoad(async (query = {}) => {
     if (!current()) return
     dataError.value = error
     rows.value = []
-    total.value = 0
+    total.value = null
   }
 })
 
@@ -409,6 +407,9 @@ function onScopeChange() {
   overflow: hidden;
 }
 
+.table-scroll { width: 100%; }
+.table-content { min-width: 1260rpx; }
+
 .table-head,
 .table-row {
   display: flex;
@@ -457,7 +458,7 @@ function onScopeChange() {
 
 .col-num {
   flex: 0.72;
-  min-width: 104rpx;
+  min-width: 128rpx;
   display: flex;
   justify-content: flex-end;
   align-items: center;
@@ -479,18 +480,16 @@ function onScopeChange() {
 .product-name {
   font-weight: 700;
   color: #102047;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .product-sub {
   margin-top: 6rpx;
   font-size: 21rpx;
   color: #7a879f;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .empty-inline,

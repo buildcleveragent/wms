@@ -7,7 +7,7 @@
     <view v-if="loading && !rows.length" class="state">正在查询库存…</view>
     <view v-else-if="!rows.length" class="state">暂无库存数据</view>
     <view v-for="(item,index) in rows" :key="rowKey(item,index)" class="inventory-card">
-      <view class="product-head"><view><text>{{item.product_name||'-'}}</text><text>{{item.product_code||item.product_sku||'-'}} · {{item.product_spec||'无规格'}}</text></view><text>{{item.base_unit||''}}</text></view>
+      <view class="product-head"><view><text>{{(item.product_display_name || item.product_name)||'-'}}</text><text>{{item.product_code||item.product_sku||'-'}} · {{item.product_spec||'无规格'}}</text></view><text>{{item.base_unit||''}}</text></view>
       <view class="owner-line">{{item.owner_name||'-'}} · {{item.warehouse_name||'当前仓库'}}</view>
       <view class="quantity-grid"><view><text>可用</text><strong>{{fmtQty(item.available_qty_display||item.available_qty)}}</strong></view><view><text>现有</text><strong>{{fmtQty(item.onhand_qty_display||item.onhand_qty)}}</strong></view><view><text>分配</text><strong>{{fmtQty(item.allocated_qty_display||item.allocated_qty)}}</strong></view><view><text>锁定</text><strong>{{fmtQty(item.locked_qty_display||item.locked_qty)}}</strong></view></view>
       <text v-if="Number(item.damaged_qty||0)>0" class="damaged">残次数量 {{fmtQty(item.damaged_qty_display||item.damaged_qty)}}</text>

@@ -11,6 +11,7 @@ from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 
 from allapp.accounts.access import AccessScope
+from allapp.core.product_identity import combine_brand_model, identity_display_name
 
 from .models import (
     PosCustomerRepayment,
@@ -376,6 +377,8 @@ def _product_rows(line_qs, return_line_qs, *, top_n):
             "product__code",
             "product__sku",
             "product__name",
+            "product__brand__name",
+            "product__model",
             "owner_id",
             "owner__name",
         )
@@ -392,6 +395,7 @@ def _product_rows(line_qs, return_line_qs, *, top_n):
             "product_code": row["product__code"] or "",
             "product_sku": row["product__sku"] or "",
             "product_name": row["product__name"] or "",
+            "brand_model": combine_brand_model(row["product__brand__name"], row["product__model"]),
             "owner_id": row["owner_id"],
             "owner_name": row["owner__name"] or "",
             "sale_count": row["sale_count"] or 0,
@@ -409,6 +413,8 @@ def _product_rows(line_qs, return_line_qs, *, top_n):
             "product__code",
             "product__sku",
             "product__name",
+            "product__brand__name",
+            "product__model",
             "owner_id",
             "owner__name",
         )
@@ -428,6 +434,9 @@ def _product_rows(line_qs, return_line_qs, *, top_n):
                 "product_code": row["product__code"] or "",
                 "product_sku": row["product__sku"] or "",
                 "product_name": row["product__name"] or "",
+                "brand_model": combine_brand_model(
+                    row["product__brand__name"], row["product__model"]
+                ),
                 "owner_id": row["owner_id"],
                 "owner_name": row["owner__name"] or "",
                 "sale_count": 0,
@@ -453,6 +462,10 @@ def _product_rows(line_qs, return_line_qs, *, top_n):
                 "product_code": row["product_code"],
                 "product_sku": row["product_sku"],
                 "product_name": row["product_name"],
+                "brand_model": row["brand_model"],
+                "product_display_name": identity_display_name(
+                    {"name": row["product_name"], "brand_model": row["brand_model"]}
+                ),
                 "owner_id": row["owner_id"],
                 "owner_name": row["owner_name"],
                 "sale_count": row["sale_count"],

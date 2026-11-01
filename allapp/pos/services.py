@@ -260,7 +260,9 @@ def _cash_customer(owner_id, user):
     Customer = apps.get_model("baseinfo", "Customer")
     from allapp.baseinfo.customer_access import customers_for_owner
 
-    customer = customers_for_owner(owner_id).filter(owner_customer_code="CASH").order_by("id").first()
+    customer = (
+        customers_for_owner(owner_id).filter(owner_customer_code="CASH").order_by("id").first()
+    )
     if customer:
         return customer
     return Customer.objects.create(owner_id=owner_id, code="CASH", name="散客", salesperson=user)
@@ -1092,8 +1094,12 @@ def _receipt_line(line):
         "code": product.code,
         "product_code": product.code,
         "sku": product.sku,
-        "name": product.name,
-        "product_name": product.name,
+        "name": line.frozen_product_name,
+        "brand_model": line.frozen_brand_model,
+        "display_name": line.product_display_name,
+        "product_name": line.frozen_product_name,
+        "product_display_name": line.product_display_name,
+        "spec": line.frozen_product_spec,
         "qty": str(line.qty),
         "price": str(line.price),
         "amount": str(line.amount),

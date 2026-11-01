@@ -147,7 +147,7 @@ export const useAssistedOutbound = defineStore('assistedOutbound', {
       const item = {
         product_id: productId,
         sku: product.sku || '',
-        name: product.name || product.sku || `商品 ${productId}`,
+        name: product.display_name || product.name || product.sku || `商品 ${productId}`,
         spec: product.spec || '',
         base_unit: product.base_unit || '',
         base_unit_name: product.base_unit_name || product.base_unit || '',
@@ -191,7 +191,7 @@ export const useAssistedOutbound = defineStore('assistedOutbound', {
       const item = {
         product_id: productId,
         sku: product.sku || '',
-        name: product.name || product.sku || `商品 ${productId}`,
+        name: product.display_name || product.name || product.sku || `商品 ${productId}`,
         spec: product.spec || '',
         base_unit: product.base_unit || '',
         base_unit_name: product.base_unit_name || product.base_unit || '',

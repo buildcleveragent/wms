@@ -12,7 +12,7 @@
     </view>
 
     <view v-for="line in lines" :key="line.id" :class="['line', 'card', `count-line-${line.id}`]">
-      <view class="line-title">{{ line.product_name || line.product_sku }}</view>
+      <view class="line-title">{{ (line.product_display_name || line.product_name) || line.product_sku }}</view>
       <view class="meta">库位：{{ line.location_code }}　批次：{{ line.lot_no || '-' }}</view>
       <view v-if="line.qty_book !== undefined" class="meta">
         账面：{{ line.qty_book }}　差异：{{ line.qty_diff }}

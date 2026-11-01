@@ -112,7 +112,7 @@ def decimal_text(value, scale=None):
 def product_facts(owner_id, warehouse_id, product_ids, *, request=None, lock=False):
     """Load current products, packages and stock in a fixed number of queries."""
     products = Product.objects.filter(owner_id=owner_id, pk__in=product_ids).select_related(
-        "base_uom"
+        "base_uom", "brand"
     )
     if lock:
         products = products.select_for_update().order_by("pk")
@@ -202,6 +202,9 @@ def product_facts(owner_id, warehouse_id, product_ids, *, request=None, lock=Fal
             "code": p.code,
             "sku": p.sku or p.code,
             "name": p.name,
+            "brand_model": p.brand_model,
+            "display_name": p.display_name,
+            "model": p.model,
             "spec": p.spec or "",
             "base_uom_id": p.base_uom_id,
             "base_unit": unit,

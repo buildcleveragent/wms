@@ -56,7 +56,16 @@ class ProductQuerySet(models.QuerySet):
 
     def update(self, **kwargs):
         blocked = set(kwargs).intersection(
-            (*PRODUCT_IDENTIFIER_FIELDS, "carton_package", "carton_package_id")
+            (
+                *PRODUCT_IDENTIFIER_FIELDS,
+                "carton_package",
+                "carton_package_id",
+                "name",
+                "spec",
+                "brand",
+                "brand_id",
+                "model",
+            )
         )
         if blocked:
             fields = ", ".join(sorted(blocked))
@@ -65,7 +74,16 @@ class ProductQuerySet(models.QuerySet):
 
     def bulk_update(self, objs, fields, batch_size=None):
         blocked = set(fields).intersection(
-            (*PRODUCT_IDENTIFIER_FIELDS, "carton_package", "carton_package_id")
+            (
+                *PRODUCT_IDENTIFIER_FIELDS,
+                "carton_package",
+                "carton_package_id",
+                "name",
+                "spec",
+                "brand",
+                "brand_id",
+                "model",
+            )
         )
         if blocked:
             names = ", ".join(sorted(blocked))
@@ -401,7 +419,36 @@ class ProductCategory(BaseModel):
             raise ValidationError(errors)
 
 
+class BrandQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if "name" in kwargs:
+            raise ValidationError("品牌名称请通过 save() 修改，以保护历史单据。")
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        if "name" in fields:
+            raise ValidationError("品牌名称请通过 save() 修改，以保护历史单据。")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+
 class Brand(BaseModel):
+    objects = SoftDeleteManager.from_queryset(BrandQuerySet)()
+    all_objects = models.Manager.from_queryset(BrandQuerySet)()
+
+    def save(self, *args, **kwargs):
+        from allapp.core.product_identity import require_product_snapshots
+
+        with transaction.atomic():
+            if self.pk and not self._state.adding:
+                original = type(self).all_objects.select_for_update().get(pk=self.pk)
+                if original.name != self.name and (
+                    kwargs.get("update_fields") is None or "name" in kwargs["update_fields"]
+                ):
+                    require_product_snapshots(
+                        Product.all_objects.filter(brand_id=self.pk).values("pk")
+                    )
+            return super().save(*args, **kwargs)
+
     code = models.CharField("品牌编码", max_length=50, help_text="全局唯一")
     name = models.CharField("品牌名称", max_length=100)
     remark = models.CharField("备注", max_length=255, blank=True)  # 如需 NULL -> null=True
@@ -429,6 +476,12 @@ class Brand(BaseModel):
             self.name = self.name.strip()
         if not self.code:
             raise ValidationError({"code": "品牌编码不能为空"})
+        if self.pk and not self._state.adding:
+            original = type(self).all_objects.filter(pk=self.pk).first()
+            if original and original.name != self.name:
+                from allapp.core.product_identity import require_product_snapshots
+
+                require_product_snapshots(Product.all_objects.filter(brand_id=self.pk).values("pk"))
 
     def __str__(self):
         return f"{self.code} - {self.name}"
@@ -622,7 +675,8 @@ class Product(BaseModel):
 
     # 基本信息
     code = models.CharField("货主商品编码", max_length=50, help_text="货主内唯一")
-    name = models.CharField("商品名称", max_length=200)
+    name = models.CharField("商品名称", max_length=200, help_text="通用品名，例如汽水、抽纸")
+    model = models.CharField("型号", max_length=200, blank=True, default="")
     spec = models.CharField("规格", max_length=200, blank=True, null=True)
     sku = models.CharField(
         "仓库SKU编码",
@@ -907,7 +961,8 @@ class Product(BaseModel):
         ]
 
     def __str__(self):
-        return f"{self.code} - {self.name}"
+        label = " · ".join(value for value in (self.display_name, self.spec) if value)
+        return f"{self.code} - {label}"
 
     def delete(self, *args, **kwargs):
         raise ValidationError("商品包含永久标识占用，不允许硬删除；请使用软删除。")
@@ -972,9 +1027,29 @@ class Product(BaseModel):
                         "sku",
                         *LEGACY_PRODUCT_IDENTIFIER_FIELDS,
                         "carton_package_id",
+                        "name",
+                        "spec",
+                        "brand_id",
+                        "model",
                     )
                     .get(pk=self.pk)
                 )
+                from allapp.core.product_identity import require_product_snapshots
+
+                identity_fields = {"name", "spec", "brand_id", "model"}
+                saved_fields = kwargs.get("update_fields")
+                if saved_fields is not None:
+                    effective_fields = set(saved_fields)
+                    if "brand" in effective_fields:
+                        effective_fields.add("brand_id")
+                    identity_fields &= effective_fields
+                changed = [
+                    field
+                    for field in identity_fields
+                    if getattr(self, field) != getattr(original, field)
+                ]
+                if changed:
+                    require_product_snapshots([self.pk])
                 stable_changes = []
                 if self.owner_id != original.owner_id:
                     stable_changes.append("owner")
@@ -1037,6 +1112,16 @@ class Product(BaseModel):
                 bootstrap_product_identifiers(self)
             return result
 
+    @property
+    def brand_model(self):
+        from allapp.core.product_identity import combine_brand_model
+
+        return combine_brand_model(self.brand.name if self.brand_id else "", self.model)
+
+    @property
+    def display_name(self):
+        return " · ".join(value for value in (self.name, self.brand_model) if value)
+
     # 便捷：首选拣配包装
     # @property
     # def primary_pick_package(self) -> Optional["ProductPackage"]:
@@ -1053,6 +1138,22 @@ class Product(BaseModel):
     def clean(self):
         super().clean()
         errors = {}
+        if self.pk and not self._state.adding:
+            from allapp.core.product_identity import require_product_snapshots
+
+            original_identity = (
+                type(self)
+                .all_objects.filter(pk=self.pk)
+                .values("name", "spec", "model", "brand_id")
+                .first()
+            )
+            if original_identity and any(
+                getattr(self, field) != value for field, value in original_identity.items()
+            ):
+                try:
+                    require_product_snapshots([self.pk])
+                except ValidationError as exc:
+                    errors["name"] = exc.messages
         # 统一大小写 & 去两端空白
         if self.code:
             self.code = self.code.strip().upper()

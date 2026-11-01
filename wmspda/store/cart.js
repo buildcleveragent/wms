@@ -65,7 +65,7 @@ export const useCart = defineStore('cart',
 			this.items.push({ 
 				                   id: p.id, 
 				                   sku: p.sku, 
-					              name: p.name, 
+					              name: p.display_name || p.name,
 					               qty: qty,
 								  spec: p.spec,
 					 product_image_url: p.product_image_url,

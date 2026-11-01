@@ -27,9 +27,10 @@ from allapp.billing.models import (
     BillingEvent,
     BillingJobRun,
     BillingPeriod,
-    PaymentAllocation,
 )
 from allapp.billing.services.integrity import build_close_readiness
+from allapp.billing.services.ledger import financial_ledger_accruals
+from allapp.billing.services.receivable_reporting import receivable_bills_as_of
 from allapp.inventory.models import InventoryLayerPosition, InventorySnapshotDaily
 from allapp.locations.models import Location
 from allapp.tasking.models import WmsTask
@@ -42,11 +43,7 @@ ZERO = Decimal("0.00")
 
 def _today():
     current = timezone.now()
-    return (
-        timezone.localtime(current).date()
-        if timezone.is_aware(current)
-        else current.date()
-    )
+    return timezone.localtime(current).date() if timezone.is_aware(current) else current.date()
 
 
 def _scoped(
@@ -56,7 +53,7 @@ def _scoped(
     warehouse_id=None,
     *,
     owner_field="owner_id",
-    warehouse_field="warehouse_id"
+    warehouse_field="warehouse_id",
 ):
     qs = AccessScope.for_user(user).filter_queryset(
         qs, owner_field=owner_field, warehouse_field=warehouse_field
@@ -128,9 +125,7 @@ def build_revenue_assurance(*, user, owner_id, warehouse_id, date_from, date_to,
         owner_id,
         warehouse_id,
     )
-    unpriced = events.filter(
-        pricing_status__in=[PricingStatus.PENDING, PricingStatus.UNPRICED]
-    )
+    unpriced = events.filter(pricing_status__in=[PricingStatus.PENDING, PricingStatus.UNPRICED])
     missing_accrual = events.filter(pricing_status=PricingStatus.ACCRUED).exclude(
         billingaccrual__status__in=[
             AccrualStatus.OPEN,
@@ -175,20 +170,14 @@ def build_revenue_assurance(*, user, owner_id, warehouse_id, date_from, date_to,
     variance_rows = []
     blockers = defaultdict(int)
     for period in periods.order_by("start_date", "id"):
-        period_accruals = accruals.filter(period=period).exclude(
-            status=AccrualStatus.VOID
-        )
+        period_accruals = accruals.filter(period=period).exclude(status=AccrualStatus.VOID)
         acc = period_accruals.aggregate(subtotal=Sum("amount"), tax=Sum("tax_amount"))
         bill = (
             Bill.objects.filter(period=period)
             .exclude(document_status=BillDocumentStatus.VOID)
             .first()
         )
-        line = (
-            bill.lines.aggregate(subtotal=Sum("amount"), tax=Sum("tax_amount"))
-            if bill
-            else {}
-        )
+        line = bill.lines.aggregate(subtotal=Sum("amount"), tax=Sum("tax_amount")) if bill else {}
         currency = normalize_currency(period.currency)
         a_sub = acc["subtotal"] or ZERO
         a_tax = acc["tax"] or ZERO
@@ -252,49 +241,37 @@ def build_revenue_assurance(*, user, owner_id, warehouse_id, date_from, date_to,
             "count": missing_accrual.count()
             + blockers.get("BILLING_CONTRACT_EVENT_MISSING", 0)
             + blockers.get("BILLING_CONTRACT_METRIC_EVENT_MISSING", 0),
-            "samples": list(
-                missing_accrual.values("id", "service_date", "charge_type")[:10]
-            ),
+            "samples": list(missing_accrual.values("id", "service_date", "charge_type")[:10]),
         },
         "late_arriving_charges": {
             "count": late_events.distinct().count() + late_open_accruals.count(),
             "impact_by_currency": _amounts_by_currency(late_open_accruals),
-            "samples": list(
-                late_events.distinct().values("id", "service_date", "created_at")[:10]
-            )
+            "samples": list(late_events.distinct().values("id", "service_date", "created_at")[:10])
             + list(
-                late_open_accruals.values(
-                    "id", "service_date", "created_at", "currency", "amount"
-                )[:10]
+                late_open_accruals.values("id", "service_date", "created_at", "currency", "amount")[
+                    :10
+                ]
             ),
         },
         "approximate_sources": {
             "count": approximate.count(),
             "impact_by_currency": _amounts_by_currency(approximate),
             "samples": list(
-                approximate.values("id", "service_date", "charge_type", "source_note")[
-                    :10
-                ]
+                approximate.values("id", "service_date", "charge_type", "source_note")[:10]
             ),
         },
         "billing_job_failures": {
             "count": failed_jobs.count(),
             "samples": list(
-                failed_jobs.values(
-                    "id", "service_date", "job_name", "status", "message"
-                )[:10]
+                failed_jobs.values("id", "service_date", "job_name", "status", "message")[:10]
             ),
         },
         "periods_pending_close": {
             "count": pending_close.count(),
             "impact_by_currency": _amounts_by_currency(
-                accruals.filter(period__in=pending_close).exclude(
-                    status=AccrualStatus.VOID
-                )
+                accruals.filter(period__in=pending_close).exclude(status=AccrualStatus.VOID)
             ),
-            "samples": list(
-                pending_close.values("id", "label", "end_date", "currency")[:10]
-            ),
+            "samples": list(pending_close.values("id", "label", "end_date", "currency")[:10]),
         },
         "accrual_invoice_variance": {
             "count": len(variance_rows),
@@ -316,33 +293,19 @@ def build_revenue_assurance(*, user, owner_id, warehouse_id, date_from, date_to,
 def build_receivables(*, user, owner_id, warehouse_id, date_from, date_to, scope):
     bills = _scoped(
         user,
-        Bill.objects.filter(
-            issue_date__lte=date_to, document_status=BillDocumentStatus.ISSUED
-        ),
+        Bill.objects.filter(issue_date__lte=date_to, document_status=BillDocumentStatus.ISSUED),
         owner_id,
         warehouse_id,
     ).select_related("owner", "warehouse")
-    allocations = PaymentAllocation.objects.filter(
-        receipt__status__in=["POSTED", "REVERSED"]
-    ).filter(
-        Q(receipt__date_quality="VERIFIED", receipt__receipt_date__lte=date_to)
-        | Q(receipt__date_quality="UNKNOWN", receipt__created_at__date__lte=date_to)
-    )
-    by_bill = defaultdict(Decimal)
-    for row in allocations.filter(bill__in=bills).values(
-        "bill_id", "amount", "is_reversal"
-    ):
-        by_bill[row["bill_id"]] += (
-            -row["amount"] if row["is_reversal"] else row["amount"]
-        )
+    bills = receivable_bills_as_of(bills, date_to)
 
     buckets = {}
     owner_overdue = defaultdict(lambda: defaultdict(Decimal))
     rows = []
     missing_due = 0
     for bill in bills.order_by("due_date", "id"):
-        paid = max(ZERO, by_bill[bill.id])
-        outstanding = max(ZERO, bill.total - paid)
+        paid = bill.report_paid_amount
+        outstanding = bill.report_outstanding_amount
         bucket = _money_bucket(buckets, bill.currency)
         bucket["record_count"] += 1
         bucket["total"] += outstanding
@@ -357,12 +320,8 @@ def build_receivables(*, user, owner_id, warehouse_id, date_from, date_to, scope
         elif outstanding and bill.due_date < date_to:
             days = (date_to - bill.due_date).days
             age_band = "1_30" if days <= 30 else "31_60" if days <= 60 else "61_PLUS"
-            owner_overdue[normalize_currency(bill.currency)][
-                bill.owner_id
-            ] += outstanding
-        elif bill.due_date and date_to < bill.due_date <= date_to + datetime.timedelta(
-            days=7
-        ):
+            owner_overdue[normalize_currency(bill.currency)][bill.owner_id] += outstanding
+        elif bill.due_date and date_to < bill.due_date <= date_to + datetime.timedelta(days=7):
             age_band = "DUE_SOON"
         rows.append(
             {
@@ -377,9 +336,7 @@ def build_receivables(*, user, owner_id, warehouse_id, date_from, date_to, scope
                 "total": bill.total,
                 "paid_amount": paid,
                 "outstanding_amount": outstanding,
-                "payment_status": (
-                    "PAID" if outstanding == 0 else "PARTIAL" if paid else "UNPAID"
-                ),
+                "payment_status": ("PAID" if outstanding == 0 else "PARTIAL" if paid else "UNPAID"),
                 "aging_band": age_band,
             }
         )
@@ -401,9 +358,9 @@ def build_receivables(*, user, owner_id, warehouse_id, date_from, date_to, scope
     window_start = date_to - datetime.timedelta(days=89)
     for currency, bucket in sorted(buckets.items()):
         issued_90 = (
-            bills.filter(
-                currency=currency, issue_date__range=(window_start, date_to)
-            ).aggregate(v=Sum("total"))["v"]
+            bills.filter(currency=currency, issue_date__range=(window_start, date_to)).aggregate(
+                v=Sum("total")
+            )["v"]
             or ZERO
         )
         dso.append(
@@ -421,9 +378,7 @@ def build_receivables(*, user, owner_id, warehouse_id, date_from, date_to, scope
                 "currency": currency,
                 "items": [
                     {"owner_id": oid, "overdue_amount": value}
-                    for oid, value in sorted(
-                        owners.items(), key=lambda item: (-item[1], item[0])
-                    )
+                    for oid, value in sorted(owners.items(), key=lambda item: (-item[1], item[0]))
                 ],
             }
         )
@@ -500,11 +455,7 @@ def build_inventory_risk(*, user, owner_id, warehouse_id, date_from, date_to, sc
                     else (
                         "8_30"
                         if days <= 30
-                        else (
-                            "31_60"
-                            if days <= 60
-                            else "61_90" if days <= 90 else "90_PLUS"
-                        )
+                        else ("31_60" if days <= 60 else "61_90" if days <= 90 else "90_PLUS")
                     )
                 )
             )
@@ -512,9 +463,7 @@ def build_inventory_risk(*, user, owner_id, warehouse_id, date_from, date_to, sc
         if layer.unit_cost is None or not layer.cost_currency:
             missing_cost += 1
         else:
-            values[normalize_currency(layer.cost_currency)] += (
-                pos.remaining_qty * layer.unit_cost
-            )
+            values[normalize_currency(layer.cost_currency)] += pos.remaining_qty * layer.unit_cost
     warnings = []
     if missing_cost:
         warnings.append(warning("INVENTORY_COST_MISSING", missing_cost))
@@ -555,8 +504,8 @@ def build_inventory_risk(*, user, owner_id, warehouse_id, date_from, date_to, sc
 def build_resource_yield(*, user, owner_id, warehouse_id, date_from, date_to, scope):
     accruals = _scoped(
         user,
-        BillingAccrual.objects.filter(service_date__range=(date_from, date_to)).exclude(
-            status=AccrualStatus.VOID
+        financial_ledger_accruals(
+            BillingAccrual.objects.filter(service_date__range=(date_from, date_to))
         ),
         owner_id,
         warehouse_id,
@@ -567,9 +516,7 @@ def build_resource_yield(*, user, owner_id, warehouse_id, date_from, date_to, sc
     }
     snapshots = _scoped(
         user,
-        InventorySnapshotDaily.objects.filter(
-            snapshot_date__range=(date_from, date_to)
-        ),
+        InventorySnapshotDaily.objects.filter(snapshot_date__range=(date_from, date_to)),
         owner_id,
         warehouse_id,
     )
@@ -585,9 +532,7 @@ def build_resource_yield(*, user, owner_id, warehouse_id, date_from, date_to, sc
     if approximate:
         warnings.append(warning("RESOURCE_SNAPSHOT_APPROXIMATE", approximate))
     if coverage < expected_days:
-        warnings.append(
-            warning("RESOURCE_SNAPSHOT_DAYS_MISSING", expected_days - coverage)
-        )
+        warnings.append(warning("RESOURCE_SNAPSHOT_DAYS_MISSING", expected_days - coverage))
     unavailable = approximate > 0 or coverage < expected_days
     if unavailable:
         return {
@@ -629,15 +574,11 @@ def build_resource_yield(*, user, owner_id, warehouse_id, date_from, date_to, sc
     currency_totals = defaultdict(Decimal)
     total_volume = sum((item["average_volume_m3"] for item in resource.values()), ZERO)
     owner_names = dict(
-        Owner.objects.filter(pk__in={oid for oid, _currency in revenue}).values_list(
-            "id", "name"
-        )
+        Owner.objects.filter(pk__in={oid for oid, _currency in revenue}).values_list("id", "name")
     )
     for (oid, currency), amount in revenue.items():
         currency_totals[currency] += amount
-        row = resource.get(
-            oid, {"average_volume_m3": ZERO, "average_occupied_locations": ZERO}
-        )
+        row = resource.get(oid, {"average_volume_m3": ZERO, "average_occupied_locations": ZERO})
         orders = order_counts.get(oid, 0)
         by_currency[currency].append(
             {
@@ -647,9 +588,7 @@ def build_resource_yield(*, user, owner_id, warehouse_id, date_from, date_to, sc
                 **row,
                 "completed_orders": orders,
                 "revenue_per_m3": (
-                    amount / row["average_volume_m3"]
-                    if row["average_volume_m3"]
-                    else None
+                    amount / row["average_volume_m3"] if row["average_volume_m3"] else None
                 ),
                 "revenue_per_location": (
                     amount / row["average_occupied_locations"]
@@ -665,19 +604,24 @@ def build_resource_yield(*, user, owner_id, warehouse_id, date_from, date_to, sc
             revenue_share = (
                 item["revenue_subtotal"] / currency_totals[currency]
                 if currency_totals[currency]
-                else ZERO
+                else None
             )
-            capacity_share = (
-                item["average_volume_m3"] / total_volume if total_volume else ZERO
-            )
+            capacity_share = item["average_volume_m3"] / total_volume if total_volume else ZERO
             item["revenue_share"] = revenue_share
             item["capacity_share"] = capacity_share
-            item["contribution_gap"] = revenue_share - capacity_share
+            item["contribution_gap"] = (
+                revenue_share - capacity_share if revenue_share is not None else None
+            )
         groups.append(
             {
                 "currency": currency,
                 "items": sorted(
-                    items, key=lambda item: (item["contribution_gap"], item["owner_id"])
+                    items,
+                    key=lambda item: (
+                        item["contribution_gap"] is None,
+                        item["contribution_gap"] or ZERO,
+                        item["owner_id"],
+                    ),
                 ),
             }
         )
@@ -692,8 +636,8 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
     def revenue_range(start, end):
         qs = _scoped(
             user,
-            BillingAccrual.objects.filter(service_date__range=(start, end)).exclude(
-                status=AccrualStatus.VOID
+            financial_ledger_accruals(
+                BillingAccrual.objects.filter(service_date__range=(start, end))
             ),
             owner_id,
             warehouse_id,
@@ -712,10 +656,7 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
                 "current": current_values.get(currency, ZERO),
                 "prior": prior_values.get(currency, ZERO),
                 "change_rate": (
-                    (
-                        current_values.get(currency, ZERO)
-                        - prior_values.get(currency, ZERO)
-                    )
+                    (current_values.get(currency, ZERO) - prior_values.get(currency, ZERO))
                     / prior_values[currency]
                     if prior_values.get(currency)
                     else None
@@ -726,8 +667,8 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
 
     accruals = _scoped(
         user,
-        BillingAccrual.objects.filter(service_date__range=(date_from, date_to)).exclude(
-            status=AccrualStatus.VOID
+        financial_ledger_accruals(
+            BillingAccrual.objects.filter(service_date__range=(date_from, date_to))
         ),
         owner_id,
         warehouse_id,
@@ -737,17 +678,15 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
             "currency": normalize_currency(row["currency"]),
             "subtotal": row["subtotal"] or ZERO,
         }
-        for row in accruals.values("currency")
-        .annotate(subtotal=Sum("amount"))
-        .order_by("currency")
+        for row in accruals.values("currency").annotate(subtotal=Sum("amount")).order_by("currency")
     ]
     prior_to = date_from - datetime.timedelta(days=1)
     prior_from = prior_to - (date_to - date_from)
     prior_qs = _scoped(
         user,
-        BillingAccrual.objects.filter(
-            service_date__range=(prior_from, prior_to)
-        ).exclude(status=AccrualStatus.VOID),
+        financial_ledger_accruals(
+            BillingAccrual.objects.filter(service_date__range=(prior_from, prior_to))
+        ),
         owner_id,
         warehouse_id,
     )
@@ -762,9 +701,7 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
             {
                 **row,
                 "prior_subtotal": before,
-                "change_rate": (
-                    (row["subtotal"] - before) / before if before else None
-                ),
+                "change_rate": ((row["subtotal"] - before) / before if before else None),
             }
         )
 
@@ -813,9 +750,9 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
     daily = (
         _scoped(
             user,
-            BillingAccrual.objects.filter(
-                service_date__range=(month_start, date_to)
-            ).exclude(status=AccrualStatus.VOID),
+            financial_ledger_accruals(
+                BillingAccrual.objects.filter(service_date__range=(month_start, date_to))
+            ),
             owner_id,
             warehouse_id,
         )
@@ -830,10 +767,12 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
     training_qs = (
         _scoped(
             user,
-            BillingAccrual.objects.filter(
-                service_date__range=(complete_start, complete_end),
-                source_quality=SourceQuality.VERIFIED,
-            ).exclude(status=AccrualStatus.VOID),
+            financial_ledger_accruals(
+                BillingAccrual.objects.filter(
+                    service_date__range=(complete_start, complete_end),
+                    source_quality=SourceQuality.VERIFIED,
+                )
+            ),
             owner_id,
             warehouse_id,
         )
@@ -856,9 +795,7 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
         if valid_days >= 28:
             weekday_values = defaultdict(list)
             for row in history:
-                weekday_values[row["service_date"].weekday()].append(
-                    row["value"] or ZERO
-                )
+                weekday_values[row["service_date"].weekday()].append(row["value"] or ZERO)
             remainder = sum(
                 (
                     (
@@ -875,9 +812,7 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
             algorithm = "EIGHT_COMPLETE_WEEKS_WEEKDAY_RUN_RATE"
             sample_days = valid_days
         else:
-            forecast = total + (
-                total / elapsed * len(remaining_dates) if elapsed else ZERO
-            )
+            forecast = total + (total / elapsed * len(remaining_dates) if elapsed else ZERO)
             algorithm = "MTD_DAILY_RUN_RATE_FALLBACK"
             sample_days = len(points)
         forecasts.append(
@@ -897,23 +832,17 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
     target_qs = OperatingTarget.objects.filter(month=month_start)
     target_qs = _scoped(user, target_qs, owner_id, warehouse_id)
     targets = list(
-        target_qs.values(
-            "warehouse_id", "owner_id", "metric", "currency", "target_value"
-        )
+        target_qs.values("warehouse_id", "owner_id", "metric", "currency", "target_value")
     )
     revenue_targets = defaultdict(Decimal)
     for target in targets:
         if target["metric"] == OperatingTarget.Metric.ACCRUAL_REVENUE:
-            revenue_targets[normalize_currency(target["currency"])] += target[
-                "target_value"
-            ]
+            revenue_targets[normalize_currency(target["currency"])] += target["target_value"]
     for forecast in forecasts:
         target = revenue_targets.get(forecast["currency"])
         forecast["target"] = target
         forecast["actual_achievement"] = forecast["actual"] / target if target else None
-        forecast["forecast_achievement"] = (
-            forecast["forecast"] / target if target else None
-        )
+        forecast["forecast_achievement"] = forecast["forecast"] / target if target else None
     capacity_locations = AccessScope.for_user(user).filter_queryset(
         Location.objects.filter(max_volume_m3__gt=0),
         owner_field=None,
@@ -956,8 +885,7 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
         y_mean = sum(ys, ZERO) / len(ys)
         denominator = sum(((x - x_mean) ** 2 for x in xs), ZERO)
         slope = (
-            sum(((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys)), ZERO)
-            / denominator
+            sum(((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys)), ZERO) / denominator
             if denominator
             else ZERO
         )

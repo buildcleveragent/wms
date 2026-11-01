@@ -775,6 +775,9 @@ class OutboundOrderDraftUpdateSerializer(OutboundOrderCreateSerializer):
     )
 
 class OutboundOrderLineReadSerializer(serializers.ModelSerializer):
+    product_spec = serializers.CharField(source="frozen_product_spec", read_only=True)
+    brand_model = serializers.CharField(source="frozen_brand_model", read_only=True)
+    product_display_name = serializers.CharField(read_only=True)
     is_priced = serializers.BooleanField(read_only=True)
     product_name = serializers.SerializerMethodField()
     product_sku  = serializers.SerializerMethodField()
@@ -788,6 +791,9 @@ class OutboundOrderLineReadSerializer(serializers.ModelSerializer):
             "product",
             "product_sku",
             "product_name",
+            "product_spec",
+            "brand_model",
+            "product_display_name",
             "base_uom",
             "base_qty",
             "base_price",
@@ -804,7 +810,7 @@ class OutboundOrderLineReadSerializer(serializers.ModelSerializer):
         ]
 
     def get_product_name(self, obj):
-        return _get(obj.product, ["name","title","full_name","display_name"], "")
+        return obj.frozen_product_name
 
     def get_product_sku(self, obj):
         return _get(obj.product, ["sku","code","barcode"], "")

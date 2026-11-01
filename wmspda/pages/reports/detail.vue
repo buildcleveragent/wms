@@ -39,7 +39,7 @@
           <text class="date-text">{{ item.date }}</text>
         </view>
 
-        <view class="product-name">{{ item.product_name || item.product_code || '未命名商品' }}</view>
+        <view class="product-name">{{ (item.product_display_name || item.product_name) || item.product_code || '未命名商品' }}</view>
         <view class="product-code">{{ productText(item) }}</view>
 
         <view class="trace-line">

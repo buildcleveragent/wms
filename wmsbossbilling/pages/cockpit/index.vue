@@ -17,12 +17,12 @@
     </view>
 
     <view v-if="loading || contextLoading" class="empty">正在加载...</view>
-    <template v-else-if="payload && !error">
+    <template v-else-if="payload && !error && payload.meta?.data_status !== 'UNAVAILABLE'">
     <template v-if="tab === 'assurance'">
       <view class="grid">
         <view v-for="(section, key) in payload?.sections || {}" :key="key" class="card">
           <text class="label">{{ assuranceLabels[key] || key }}</text>
-          <text class="value">{{ section.count || 0 }}</text>
+          <text class="value">{{ qty(section.count) }}</text>
         </view>
       </view>
     </template>
@@ -34,7 +34,7 @@
       </view>
       <view v-for="row in payload?.dso_by_currency || []" :key="`dso-${row.currency}`" class="wide-card">
         <text class="label">滚动90天 DSO · {{ row.currency }}</text>
-        <text class="value">{{ row.days == null ? '不可用' : `${Number(row.days).toFixed(1)} 天` }}</text>
+        <text class="value">{{ toNumber(row.days) == null ? '不可用' : `${decimalText(row.days, 1)} 天` }}</text>
         <text class="minor">分子 {{ money(row.outstanding, row.currency) }} / 90天开票 {{ money(row.issued_90_days, row.currency) }}</text>
       </view>
     </template>
@@ -42,8 +42,8 @@
       <view class="grid">
         <view v-for="(row, direction) in payload?.operations?.summary || {}" :key="direction" class="card">
           <text class="label">{{ direction === 'inbound' ? '入库' : '出库' }}实际</text>
-          <text class="value">{{ row.orders || 0 }} 单</text>
-          <text class="minor">{{ row.lines || 0 }} 行（数量请在按基本单位分组的明细中查看）</text>
+          <text class="value">{{ qty(row.orders) }} 单</text>
+          <text class="minor">{{ qty(row.lines) }} 行（数量请在按基本单位分组的明细中查看）</text>
         </view>
       </view>
       <view class="wide-card">
@@ -62,8 +62,8 @@
       </view>
       <view class="wide-card">
         <text class="label">任务积压</text>
-        <text class="value">{{ payload?.backlog?.count || 0 }}</text>
-        <text class="minor">最老 {{ duration((payload?.backlog?.oldest_age_minutes || 0) * 60) }} · {{ payload?.backlog?.date_semantics }}</text>
+        <text class="value">{{ qty(payload?.backlog?.count) }}</text>
+        <text class="minor">最老 {{ duration(payload?.backlog?.oldest_age_minutes == null ? null : payload.backlog.oldest_age_minutes * 60) }} · {{ payload?.backlog?.date_semantics }}</text>
       </view>
     </template>
     <template v-else-if="tab === 'yield'">
@@ -90,6 +90,7 @@
     <template v-else-if="tab === 'risk'">
       <view class="wide-card">
         <text class="label">FIFO 库存价值</text>
+        <text v-if="payload?.cost_coverage" class="minor">成本覆盖 {{ qty(payload.cost_coverage.covered_positions) }} / {{ qty(payload.cost_coverage.total_positions) }} 个库存位置</text>
         <view v-for="row in payload?.value_by_currency || []" :key="row.currency" class="line"><text>{{ row.currency }}</text><text>{{ money(row.total, row.currency) }}</text></view>
       </view>
       <view class="wide-card">
@@ -106,8 +107,8 @@
       <view class="empty">老板端仅查看，预警处置由授权管理员或财务完成。</view>
     </template>
     </template>
-    <view v-if="tab === 'cases' && payload && !error" class="pager">
-      <text>共 {{ payload.count || 0 }} 条 · 第 {{ casePage }} / {{ totalPages }} 页</text>
+    <view v-if="tab === 'cases' && payload && !error && payload.meta?.data_status !== 'UNAVAILABLE'" class="pager">
+      <text>共 {{ qty(payload.count) }} 条 · 第 {{ casePage }} / {{ totalPages }} 页</text>
       <view class="pager-buttons">
         <button size="mini" :disabled="loading || casePage <= 1" @click="loadReport(casePage - 1)">上一页</button>
         <button size="mini" :disabled="loading || casePage >= totalPages" @click="loadReport(casePage + 1)">下一页</button>
@@ -126,7 +127,7 @@ import BossDataStatus from '@/components/boss-data-status.vue'
 import { useAuth } from '@/store/auth'
 import { useBossScope } from '@/store/bossScope'
 import { api, downloadBinary } from '@/utils/request'
-import { money } from '@/utils/billing'
+import { decimalText, money, toNumber, qty } from '@/utils/billing'
 import { useLatestRequest } from '@/utils/use-latest-request'
 
 const auth = useAuth()
@@ -148,6 +149,7 @@ const actionsReady = computed(() => contextReady.value && scope.loaded && !conte
 const totalPages = computed(() => Math.max(1, Math.ceil(Number(payload.value?.count || 0) / 20)))
 const empty = computed(() => {
   const value = payload.value
+  if (value?.meta?.data_status === 'UNAVAILABLE') return false
   if (!value) return true
   switch (tab.value) {
     case 'assurance': return !Object.keys(value.sections || {}).length
@@ -178,9 +180,10 @@ const loaders = {
   cases: api.bossAlertCases,
 }
 
-function rate(value) { return value == null ? '无可比基数' : `${(Number(value) * 100).toFixed(1)}%` }
-function percentPoint(value) { return value == null ? '-' : `${(Number(value) * 100).toFixed(1)}pp` }
+function rate(value) { value = toNumber(value); return value == null ? '无可比基数' : `${(Number(value) * 100).toFixed(1)}%` }
+function percentPoint(value) { value = toNumber(value); return value == null ? '-' : `${(Number(value) * 100).toFixed(1)}pp` }
 function duration(seconds) {
+  seconds = toNumber(seconds)
   if (seconds == null) return '-'
   const hours = Number(seconds) / 3600
   return hours < 24 ? `${hours.toFixed(1)}小时` : `${(hours / 24).toFixed(1)}天`

@@ -27,7 +27,7 @@ export function money(value) {
 }
 
 export function productName(product = {}) {
-  return product.name || product.sku || product.code || String(product.id || '')
+  return product.display_name || product.name || product.sku || product.code || String(product.id || '')
 }
 
 export function productSpec(product = {}) {

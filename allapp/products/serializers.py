@@ -63,6 +63,8 @@ class ProductIdentifierConflict(APIException):
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    brand_model = serializers.CharField(read_only=True)
+    display_name = serializers.CharField(read_only=True)
     owner_code = serializers.CharField(source="owner.code", read_only=True)
     base_uom_code = serializers.CharField(source="base_uom.code", read_only=True)
     packages = ProductPackageBriefSerializer(many=True, read_only=True)
@@ -274,6 +276,9 @@ class ProductSerializer(serializers.ModelSerializer):
             "external_code",
             "name",
             "spec",
+            "model",
+            "brand_model",
+            "display_name",
             "description",
             "category",
             "brand",

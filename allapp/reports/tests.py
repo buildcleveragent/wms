@@ -722,7 +722,11 @@ class BossDashboardApiTests(TestCase):
             status=BillStatus.DRAFT,
         )
 
-        response = self.client.get("/api/reports/boss/home/")
+        # Include the CNY bill issued two days ago, even on the first days of a month.
+        response = self.client.get(
+            "/api/reports/boss/home/",
+            {"date_from": self.today - datetime.timedelta(days=2), "date_to": self.today},
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -813,7 +817,10 @@ class BossDashboardApiTests(TestCase):
             due_date=None,
         )
 
-        home = self.client.get("/api/reports/boss/home/")
+        home = self.client.get(
+            "/api/reports/boss/home/",
+            {"date_from": self.today - datetime.timedelta(days=2), "date_to": self.today},
+        )
         alerts = self.client.get("/api/reports/boss/alerts/")
 
         self.assertEqual(home.status_code, 200)

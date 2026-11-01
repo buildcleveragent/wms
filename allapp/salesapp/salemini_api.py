@@ -906,6 +906,9 @@ def _product_payload(request, owner, customer, config, available_qty, order_date
         "id": product.id,
         "config_id": config.id,
         "name": product.name,
+        "model": product.model,
+        "brand_model": product.brand_model,
+        "display_name": product.display_name,
         "spec": product.spec or "",
         "brand": getattr(product.brand, "name", "") if product.brand_id else "",
         "category_id": product.category_id,
@@ -969,6 +972,8 @@ def _line_quote_payload(product, config, qty, order_uom, base_price, unit_price,
         "product_id": product.id,
         "product_code": product.code,
         "product_name": product.name,
+        "brand_model": product.brand_model,
+        "product_display_name": product.display_name,
         "product_spec": product.spec or "",
         "image_url": "",
         "order_uom": order_uom,
@@ -1554,6 +1559,8 @@ def _cart_invalid_line(request, item, message):
         "product_id": product.id,
         "product_code": product.code,
         "product_name": product.name,
+        "brand_model": product.brand_model,
+        "product_display_name": product.display_name,
         "product_spec": product.spec or "",
         "image_url": _image_url(request, product),
         "order_uom": item.order_uom,
@@ -1986,8 +1993,10 @@ def _order_line_payload(request, line, config_id=None, *, review=None, review_el
         "config_id": config_id,
         "product_id": product.id,
         "product_code": product.code,
-        "product_name": product.name,
-        "product_spec": product.spec or "",
+        "product_name": line.frozen_product_name,
+        "brand_model": line.frozen_brand_model,
+        "product_display_name": line.product_display_name,
+        "product_spec": line.frozen_product_spec,
         "image_url": _image_url(request, product),
         "order_uom": order_uom,
         "order_uom_name": order_uom_name,
@@ -2460,6 +2469,7 @@ class SaleMiniProductListApi(APIView):
             qs = qs.filter(
                 Q(product__name__icontains=search)
                 | Q(product__spec__icontains=search)
+                | Q(product__model__icontains=search)
                 | Q(product__brand__name__icontains=search)
                 | Q(product__category__name__icontains=search)
             )

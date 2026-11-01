@@ -21,7 +21,7 @@
     <view class="filter-card">
       <BossScopeFilter @change="refreshAll" />
       <view class="filter-row">
-        <view class="picker-box info-box">
+        <view v-if="payload && payload.meta?.data_status !== 'UNAVAILABLE'" class="picker-box info-box">
           <text class="picker-label">当前仓容</text>
           <text class="picker-value">{{ percent(summary.volumeUtilizationRate) }}</text>
           <text class="picker-sub">{{ summary.usedVolumeText }} / {{ summary.capacityVolumeText }} m³</text>
@@ -39,7 +39,7 @@
     <view v-if="loading" class="loading-banner">正在同步库存与库容...</view>
     <BossDataStatus :meta="payload?.meta" :error="dataError" :stale="stale" />
 
-    <template v-if="!loading">
+    <template v-if="!loading && payload && payload.meta?.data_status !== 'UNAVAILABLE'">
       <view class="kpi-grid">
         <view class="kpi-card blue">
           <view class="kpi-label">库存数量（按基本单位）</view>
@@ -137,7 +137,7 @@
               <view class="section-desc">这里按“30 天未变化 + 低利用率”筛冷区，优先找出压仓又不活跃的位置。</view>
             </view>
           </view>
-          <view v-if="!coldRows.length" class="empty-inline">当前范围暂无低效冷区。</view>
+          <view v-if="!coldRows.length" class="empty-inline">{{ hasWarning(payload?.meta, 'HISTORICAL_STALE_METRIC_UNAVAILABLE') ? '历史快照不支持此指标' : '当前范围暂无低效冷区。' }}</view>
           <view v-for="row in coldRows" :key="row.location">
             <view class="row-card">
               <view class="row-main">
@@ -165,6 +165,7 @@
           <view v-for="row in expiringRows" :key="row.id" class="row-card">
             <view class="row-main">
               <view class="row-title">{{ row.productName }}</view>
+              <view v-if="row.productSpec" class="row-sub">{{ row.productSpec }}</view>
               <view class="row-sub">{{ row.ownerName }} · {{ row.locationCode }} · 到期 {{ row.expiryDate }}</view>
             </view>
             <view class="row-side stack">
@@ -182,10 +183,11 @@
             <view class="section-desc">当前按库存明细最近更新时间做代理口径，先把 30 天未变化的货拉出来看。</view>
           </view>
         </view>
-        <view v-if="!staleRows.length" class="empty-inline">当前范围没有 30 天未变化库存。</view>
+        <view v-if="!staleRows.length" class="empty-inline">{{ hasWarning(payload?.meta, 'HISTORICAL_STALE_METRIC_UNAVAILABLE') ? '历史快照不支持此指标' : '当前范围没有 30 天未变化库存。' }}</view>
         <view v-for="row in staleRows" :key="row.id" class="row-card">
           <view class="row-main">
             <view class="row-title">{{ row.productName }}</view>
+              <view v-if="row.productSpec" class="row-sub">{{ row.productSpec }}</view>
             <view class="row-sub">{{ row.ownerName }} · {{ row.locationCode }} · 最近变化 {{ row.updatedDate }}</view>
           </view>
           <view class="row-side stack">
@@ -208,7 +210,7 @@ import { useAuth } from '@/store/auth'
 import { useLatestRequest } from '@/utils/use-latest-request'
 import { useBossScope } from '@/store/bossScope'
 import { api, buildQuery } from '@/utils/request'
-import { asList, percent, qty, toNumber } from '@/utils/billing'
+import { productName, hasWarning, decimalText, asList, percent, qty, toNumber } from '@/utils/billing'
 
 const auth = useAuth()
 const bossScope = useBossScope()
@@ -230,35 +232,35 @@ const summary = computed(() => {
   const source = payload.value?.summary || {}
   return {
     quantityByUom: asList(source.quantity_by_uom),
-    skuCount: Number(source.sku_count || 0),
-    ownerCount: Number(source.owner_count || 0),
-    occupiedLocationCount: Number(source.occupied_location_count || 0),
-    activeLocationCount: Number(source.active_location_count || 0),
+    skuCount: qty(source.sku_count),
+    ownerCount: qty(source.owner_count),
+    occupiedLocationCount: qty(source.occupied_location_count),
+    activeLocationCount: qty(source.active_location_count),
     locationOccupancyRate: source.location_occupancy_rate,
     volumeUtilizationRate: source.volume_utilization_rate,
-    usedVolumeText: toNumber(source.used_volume_m3).toFixed(3),
-    capacityVolumeText: toNumber(source.capacity_volume_m3).toFixed(3),
-    expiringSkuCount7d: Number(source.expiring_sku_count_7d || 0),
-    staleSkuCount30d: Number(source.stale_sku_count_30d || 0),
-    hotLocationCount: Number(source.hot_location_count || 0),
-    coldLocationCount: Number(source.cold_location_count || 0),
+    usedVolumeText: decimalText(source.used_volume_m3),
+    capacityVolumeText: decimalText(source.capacity_volume_m3),
+    expiringSkuCount7d: qty(source.expiring_sku_count_7d),
+    staleSkuCount30d: hasWarning(payload.value?.meta, 'HISTORICAL_STALE_METRIC_UNAVAILABLE') ? '不可用' : qty(source.stale_sku_count_30d),
+    hotLocationCount: qty(source.hot_location_count),
+    coldLocationCount: hasWarning(payload.value?.meta, 'HISTORICAL_STALE_METRIC_UNAVAILABLE') ? '不可用' : qty(source.cold_location_count),
   }
 })
 
 const quantityText = computed(() => summary.value.quantityByUom.length
   ? summary.value.quantityByUom
-      .map((row) => `${qty(row.onhand_qty)} ${row.unit_code || 'UNKNOWN'}`)
+      .map((row) => `${qty(row.onhand_qty)} ${row.unit_name || row.unit_code || 'UNKNOWN'}`)
       .join(' / ')
-  : '-')
+  : summary.value.skuCount === '0' ? '无库存' : '-')
 
 const ownerRows = computed(() =>
   asList(payload.value?.owner_rankings).map((row) => ({
     owner: row.owner,
     ownerName: row.owner_name,
     onhandQty: toNumber(row.onhand_qty),
-    skuCount: Number(row.sku_count || 0),
-    locationCount: Number(row.location_count || 0),
-    usedVolumeText: toNumber(row.used_volume_m3).toFixed(3),
+    skuCount: qty(row.sku_count),
+    locationCount: qty(row.location_count),
+    usedVolumeText: decimalText(row.used_volume_m3),
   }))
 )
 
@@ -266,12 +268,13 @@ const expiringRows = computed(() =>
   asList(payload.value?.expiring_items).map((row) => ({
     id: row.id,
     ownerName: row.owner_name || '-',
-    productName: row.product_name || row.product_code || '-',
+    productName: productName(row),
+    productSpec: row.product_spec || '',
     locationCode: row.location_code || '-',
     expiryDate: row.expiry_date || '-',
     onhandQty: toNumber(row.onhand_qty),
     baseUnit: row.base_unit || 'UNKNOWN',
-    daysLabel: Number(row.days_to_expiry || 0) <= 0 ? '今天到期' : `剩 ${Number(row.days_to_expiry || 0)} 天`,
+    daysLabel: toNumber(row.days_to_expiry) == null ? '到期时间未知' : Number(row.days_to_expiry) <= 0 ? '今天到期' : `剩 ${row.days_to_expiry} 天`,
   }))
 )
 
@@ -279,10 +282,11 @@ const staleRows = computed(() =>
   asList(payload.value?.stale_items).map((row) => ({
     id: row.id,
     ownerName: row.owner_name || '-',
-    productName: row.product_name || row.product_code || '-',
+    productName: productName(row),
+    productSpec: row.product_spec || '',
     locationCode: row.location_code || '-',
     updatedDate: formatDate(row.updated_at),
-    staleDays: Number(row.stale_days || 0),
+    staleDays: qty(row.stale_days),
     onhandQty: toNumber(row.onhand_qty),
     baseUnit: row.base_unit || 'UNKNOWN',
   }))
@@ -295,10 +299,10 @@ const highHeatRows = computed(() =>
     subwarehouseName: row.subwarehouse_name || '',
     onhandQty: toNumber(row.onhand_qty),
     availableQty: toNumber(row.available_qty),
-    skuCount: Number(row.sku_count || 0),
-    ownerCount: Number(row.owner_count || 0),
-    usedVolumeText: toNumber(row.used_volume_m3).toFixed(3),
-    capacityVolumeText: toNumber(row.capacity_volume_m3).toFixed(3),
+    skuCount: qty(row.sku_count),
+    ownerCount: qty(row.owner_count),
+    usedVolumeText: decimalText(row.used_volume_m3),
+    capacityVolumeText: decimalText(row.capacity_volume_m3),
     volumeUtilizationRate: row.volume_utilization_rate,
     hotspotLevel: row.hotspot_level || 'watch',
     hotspotLabel: hotspotLabel(row.hotspot_level),
@@ -312,8 +316,8 @@ const coldRows = computed(() =>
     subwarehouseName: row.subwarehouse_name || '',
     onhandQty: toNumber(row.onhand_qty),
     availableQty: toNumber(row.available_qty),
-    skuCount: Number(row.sku_count || 0),
-    staleDays: Number(row.stale_days || 0),
+    skuCount: qty(row.sku_count),
+    staleDays: qty(row.stale_days),
     updatedDate: formatDate(row.latest_updated_at),
     utilizationText: coldUtilizationText(row.volume_utilization_rate),
   }))

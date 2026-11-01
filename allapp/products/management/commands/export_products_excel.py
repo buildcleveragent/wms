@@ -114,6 +114,9 @@ class Command(BaseCommand):
                 "入库有效天数",
                 "预警天数",
                 "FEFO",
+                "型号",
+                "品牌",
+                "品牌型号",
             ]
         )
 
@@ -148,6 +151,9 @@ class Command(BaseCommand):
                     inbound_valid_days,
                     expiry_warning_days,
                     _yes_no(fefo_required),
+                    product.model,
+                    product.brand.name if product.brand_id else "",
+                    product.brand_model,
                 ]
             )
             count += 1

@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from allapp.inbound.customer_return_api import ReturnEligibilityView
 
 from .export_print import pick_task_print
+from .order_history import OutboundHistoryViewSet
 from .views import (
     AssistedOutboundOrderViewSet,
     CustomerViewSet,
@@ -25,6 +26,7 @@ from .reorder_api import (
 )
 
 router = DefaultRouter()
+router.register(r"outbound/order-history", OutboundHistoryViewSet, basename="outbound-history")
 router.register(r"catalog/products", ProductViewSet, basename="ob-product")
 router.register(r"catalog/customers", CustomerViewSet, basename="ob-customer")
 router.register(r"catalog/warehouses", WarehouseViewSet, basename="ob-warehouse")

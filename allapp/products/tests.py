@@ -780,7 +780,7 @@ class ProductExcelImportApiTests(TestCase):
             ["填写说明", "商品导入", "商品包装", "基础资料", "_meta"],
         )
         self.assertEqual(workbook["_meta"].sheet_state, "hidden")
-        self.assertEqual(workbook["_meta"]["B2"].value, "12")
+        self.assertEqual(workbook["_meta"]["B2"].value, "13")
         headers = [cell.value for cell in workbook[IMPORT_SHEET_NAME][1]]
         self.assertEqual(tuple(headers), OWNER_NAME_PRODUCT_HEADERS)
         self.assertEqual(len(headers), len(set(headers)))
@@ -788,7 +788,7 @@ class ProductExcelImportApiTests(TestCase):
             headers[9:14],
             ["分类", "包装单位", "包装换算数量", "品牌编码", "零码"],
         )
-        moved_headers = {"包装单位", "包装换算数量"}
+        moved_headers = {"包装单位", "包装换算数量", "型号", "品牌", "品牌型号"}
         self.assertEqual(
             [header for header in headers if header not in moved_headers],
             [
@@ -1359,9 +1359,9 @@ class ProductExcelImportApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400, response.data)
-        self.assertIn("v12 模板不一致", response.data["detail"])
+        self.assertIn("v13 模板不一致", response.data["detail"])
 
-    def test_old_and_reordered_headers_are_rejected_with_v12_guidance(self):
+    def test_old_and_reordered_headers_are_rejected_with_v13_guidance(self):
         v6_headers = (
             "货主编码",
             "货主商品编码",
@@ -1431,19 +1431,19 @@ class ProductExcelImportApiTests(TestCase):
         )
 
         self.assertEqual(v6_response.status_code, 400, v6_response.data)
-        self.assertIn("v12 模板不一致", v6_response.data["detail"])
+        self.assertIn("v13 模板不一致", v6_response.data["detail"])
         self.assertEqual(v7_response.status_code, 400, v7_response.data)
-        self.assertIn("v12 模板不一致", v7_response.data["detail"])
+        self.assertIn("v13 模板不一致", v7_response.data["detail"])
         self.assertEqual(reordered_response.status_code, 400, reordered_response.data)
-        self.assertIn("v12 模板不一致", reordered_response.data["detail"])
+        self.assertIn("v13 模板不一致", reordered_response.data["detail"])
         self.assertEqual(missing_default_response.status_code, 400, missing_default_response.data)
-        self.assertIn("v12 模板不一致", missing_default_response.data["detail"])
+        self.assertIn("v13 模板不一致", missing_default_response.data["detail"])
         self.assertEqual(
             missing_purchase_response.status_code,
             400,
             missing_purchase_response.data,
         )
-        self.assertIn("v12 模板不一致", missing_purchase_response.data["detail"])
+        self.assertIn("v13 模板不一致", missing_purchase_response.data["detail"])
 
     def test_category_creates_with_pinyin_code_and_base_uom_resolves_by_name(self):
         ProductCategory.objects.create(code="YINLIAOXINPIN", name="占用分类代码")
@@ -1829,7 +1829,9 @@ class ProductExcelImportApiTests(TestCase):
         OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
         self.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
         rows = [
-            self._valid_row("", **{"商品名称": f"先建档后收货 {number}", "规格": "500g"})
+            self._valid_row(
+                "", **{"商品名称": f"先建档后收货 {number}", "型号": "原味", "规格": "500g"}
+            )
             for number in range(1, 4)
         ]
         first = self._post_rows(rows)
@@ -1925,6 +1927,7 @@ class ProductExcelImportApiTests(TestCase):
             rows.append(
                 {
                     "货主编码": "DYJ",
+                    "货主商品编码": f"0008{number:05d}",
                     "商品名称": name,
                     "规格": spec,
                     "基本单位": uom.name,
@@ -1955,11 +1958,18 @@ class ProductExcelImportApiTests(TestCase):
         OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
         self.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
         for code in ("SAME-NAME-1", "SAME-NAME-2"):
-            first = self._post_rows([self._valid_row(code, **{"商品名称": "同名商品"})])
+            first = self._post_rows(
+                [self._valid_row(code, **{"商品名称": "同名商品", "型号": "原味", "规格": "500g"})]
+            )
             self.assertEqual(first.status_code, 200, first.data)
 
         response = self._post_rows(
-            [self._valid_row("", **{"商品名称": "同名商品", "基本单位数量": 3})],
+            [
+                self._valid_row(
+                    "",
+                    **{"商品名称": "同名商品", "型号": "原味", "规格": "500g", "基本单位数量": 3},
+                )
+            ],
             warehouse_id=self.warehouse.pk,
         )
         self.assertEqual(response.status_code, 400, response.data)
@@ -2032,7 +2042,9 @@ class ProductExcelImportApiTests(TestCase):
     def test_existing_receipt_rejects_same_product_referenced_twice(self):
         OwnerWarehouseBinding.objects.create(owner=self.owner, warehouse=self.warehouse)
         self.user.user_permissions.add(Permission.objects.get(codename="receive_without_order"))
-        row = self._valid_row("RECEIVE-TWICE", **{"商品名称": "重复收货商品"})
+        row = self._valid_row(
+            "RECEIVE-TWICE", **{"商品名称": "重复收货商品", "型号": "原味", "规格": "500g"}
+        )
         first = self._post_rows([row])
         self.assertEqual(first.status_code, 200, first.data)
         response = self._post_rows(
@@ -2775,7 +2787,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(no_rows_response.status_code, 400)
         self.assertIn("没有数据行", no_rows_response.data["detail"])
         self.assertEqual(missing_header_response.status_code, 400)
-        self.assertIn("v12 模板不一致", missing_header_response.data["detail"])
+        self.assertIn("v13 模板不一致", missing_header_response.data["detail"])
         self.assertEqual(duplicate_header_response.status_code, 400)
         self.assertIn("表头重复", duplicate_header_response.data["detail"])
 
@@ -3141,7 +3153,7 @@ class ProductExcelImportApiTests(TestCase):
         self.assertEqual(exported.status_code, 200)
         self.assertIn("filename*=UTF-8", exported["Content-Disposition"])
         workbook = load_workbook(io.BytesIO(exported.content), data_only=False)
-        self.assertEqual(workbook["_meta"]["B2"].value, "12")
+        self.assertEqual(workbook["_meta"]["B2"].value, "13")
         export_headers = [cell.value for cell in workbook[IMPORT_SHEET_NAME][1]]
         self.assertEqual(tuple(export_headers), PRODUCT_HEADERS)
         self.assertEqual(

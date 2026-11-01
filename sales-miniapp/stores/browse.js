@@ -25,6 +25,8 @@ function snapshot(product = {}) {
     product_id: id,
     config_id: product.config_id || '',
     name: product.name || product.product_name || '',
+    display_name: product.display_name || product.product_display_name || '',
+    brand_model: product.brand_model || '',
     spec: product.spec || product.product_spec || '',
     image_url: product.image_url || '',
     price: product.price || product.unit_price || '',

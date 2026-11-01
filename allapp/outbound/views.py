@@ -390,6 +390,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             qs.select_related(
                 "base_uom",
                 "replenish_uom",
+                "brand",
             )
             .prefetch_related(Prefetch("packages", queryset=pkg_qs))
             .only(
@@ -397,6 +398,8 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 "owner_id",
                 "code",
                 "name",
+                "model",
+                "brand__name",
                 "sku",
                 "spec",
                 "product_image",
@@ -548,6 +551,9 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "id": p.id,
                     "sku": p.sku or p.code or "",
                     "name": p.name or "",
+                    "model": p.model,
+                    "brand_model": p.brand_model,
+                    "display_name": p.display_name,
                     "spec": p.spec,
                     "base_unit": getattr(getattr(p, "base_uom", None), "code", None),
                     "base_unit_name": getattr(getattr(p, "base_uom", None), "name", None),
@@ -746,13 +752,15 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
         qs = (
             Product.objects.filter(owner_id=owner_id)
-            .select_related("base_uom", "replenish_uom")
+            .select_related("base_uom", "replenish_uom", "brand")
             .prefetch_related(Prefetch("packages", queryset=pkg_qs))
             .only(
                 "id",
                 "owner_id",
                 "code",
                 "name",
+                "model",
+                "brand__name",
                 "sku",
                 "spec",
                 "product_image",
@@ -877,6 +885,9 @@ class ReceiveProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                     "id": p.id,
                     "sku": p.sku or p.code or "",
                     "name": p.name or "",
+                    "model": p.model,
+                    "brand_model": p.brand_model,
+                    "display_name": p.display_name,
                     "spec": p.spec,
                     "base_unit": getattr(getattr(p, "base_uom", None), "code", None),
                     "base_unit_name": getattr(getattr(p, "base_uom", None), "name", None),
@@ -1080,6 +1091,9 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
                     "sku": product.sku,
                     "gtin": product.gtin,
                     "name": product.name,
+                    "model": product.model,
+                    "brand_model": product.brand_model,
+                    "display_name": product.display_name,
                     "spec": product.spec,
                     "base_unit": getattr(product.base_uom, "code", None),
                     "base_unit_name": getattr(product.base_uom, "name", None),
@@ -1666,6 +1680,7 @@ class OutboundOrderViewSet(
             ]
         )
 
+        identity_sources = {f"edit-{line.pk}": line for line in order.lines.all()}
         order.lines.update(
             is_deleted=True,
             deleted_at=timezone.now(),
@@ -1677,8 +1692,15 @@ class OutboundOrderViewSet(
                     raise DjangoValidationError({
                         "base_uom": "历史单位未记录，请重新选品并确认数量后保存。"
                     })
+                source = identity_sources.get(item.get("line_key"))
+                snapshot = (
+                    dict(source.product_snapshot)
+                    if source and source.product_id == item["product_id"]
+                    else {}
+                )
                 OutboundOrderLine.objects.create(
                     order=order,
+                    product_snapshot=snapshot,
                     product_id=item["product_id"],
                     base_uom_id=item.get("base_uom_id"),
                     base_qty=item["qty"],
@@ -1758,8 +1780,11 @@ class OutboundOrderViewSet(
                     "base_uom_id": line.base_uom_id,
                     "unit_unverified": not line.base_uom_id,
                     "sku": product.sku or product.code or "",
-                    "name": product.name or "",
-                    "spec": product.spec,
+                    "name": line.frozen_product_name,
+                    "model": product.model,
+                    "brand_model": line.frozen_brand_model,
+                    "display_name": line.product_display_name,
+                    "spec": line.frozen_product_spec,
                     "is_priced": pricing_applies(product, line),
                     "price": line.base_price if pricing_applies(product, line) else None,
                     "orig_price": product.price,
@@ -2526,6 +2551,9 @@ class PickTaskLineSerializer(serializers.ModelSerializer):
     source_inventory = serializers.SerializerMethodField()
     product_sku = serializers.CharField(source="product.sku", read_only=True)
     product_name = serializers.CharField(source="product.name", read_only=True)
+    brand_model = serializers.CharField(source="product.brand_model", read_only=True)
+    product_display_name = serializers.CharField(source="product.display_name", read_only=True)
+    product_spec = serializers.CharField(source="product.spec", read_only=True)
     from_loc_code = serializers.CharField(source="from_location.code", read_only=True)
     to_loc_code = serializers.CharField(source="to_location.code", read_only=True)
 
@@ -2537,6 +2565,9 @@ class PickTaskLineSerializer(serializers.ModelSerializer):
             "product_id",
             "product_sku",
             "product_name",
+            "brand_model",
+            "product_display_name",
+            "product_spec",
             "from_location_id",
             "from_loc_code",
             "to_location_id",

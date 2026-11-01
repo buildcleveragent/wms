@@ -143,6 +143,7 @@ def pick_task_print(request, task_id: int):
     # 拣货单用于库内作业，不依赖送货单地址配置。
     warehouse_infos = []
     selected_info = None
+    preference_key = f"outbound_print_warehouse_{request.user.pk}_{task.warehouse_id}"
     if kind == "delivery":
         # 与 POS 销售单共用仓库信息，按实际出库仓库限定可选范围。
         warehouse_infos = list(
@@ -160,8 +161,23 @@ def pick_task_print(request, task_id: int):
             )
             if selected_info is None:
                 return HttpResponse("所选仓库信息不可用，请重新选择。", status=400)
-        elif len(warehouse_infos) == 1:
-            selected_info = warehouse_infos[0]
+        else:
+            # Preferences are local to this browser, account and actual warehouse.
+            # Revalidate every time so disabled or out-of-scope records cannot be reused.
+            remembered_id = request.COOKIES.get(preference_key, "")
+            selected_info = next(
+                (info for info in warehouse_infos if str(info.pk) == remembered_id), None
+            )
+            if selected_info is None:
+                selected_info = min(
+                    warehouse_infos,
+                    key=lambda info: (
+                        not info.is_default,
+                        info.warehouse_id != order.warehouse_id,
+                        info.sort_order,
+                        info.pk,
+                    ),
+                )
 
     total_qty = sum(
         (line["base_qty"] if kind == "pick" else line.base_qty for line in lines), Decimal(0)
@@ -219,7 +235,7 @@ def pick_task_print(request, task_id: int):
         },
     )
 
-    return render(
+    response = render(
         request,
         "outbound/print/pick_task.html",
         {
@@ -227,7 +243,11 @@ def pick_task_print(request, task_id: int):
             "kind": kind,
             "document_title": "拣货单" if kind == "pick" else "送货单",
             "customer_name": (order.customer.name or "").strip() if order.customer_id else "",
-            "warehouse_name": task.warehouse.name,
+            "warehouse_name": (
+                task.warehouse.name
+                if kind == "pick"
+                else selected_info.name if selected_info else ""
+            ),
             "warehouse_phone": selected_info.phone if selected_info else "",
             "document_ready": kind == "pick" or selected_info is not None,
             "object": order,
@@ -252,3 +272,13 @@ def pick_task_print(request, task_id: int):
             "print_css": print_css,
         },
     )
+    if kind == "delivery":
+        response.set_cookie(
+            preference_key,
+            str(selected_info.pk),
+            max_age=365 * 24 * 60 * 60,
+            httponly=True,
+            samesite="Lax",
+            secure=request.is_secure(),
+        )
+    return response

@@ -1,7 +1,3 @@
-const ENV =
-  (uni.getAccountInfoSync && uni.getAccountInfoSync().miniProgram?.envVersion) ||
-  'develop'
-
 const BASE_MAP = {
   develop: 'http://192.168.1.6:8001',
   develop2: 'http://192.168.1.9:8001',
@@ -9,13 +5,12 @@ const BASE_MAP = {
   onsite: 'http://192.168.2.6:8001',
 }
 
-// 优先使用构建时配置，未配置时连接默认开发服务。
-// export const BASE_URL = String(import.meta.env.VITE_API_BASE_URL || BASE_MAP.develop).trim().replace(/\/$/, '')
-// if (!/^https?:\/\/[^/?#@]+(?::\d+)?(?:\/[^?#]*)?$/.test(BASE_URL)) {
-//   throw new Error('VITE_API_BASE_URL 必须是无凭据、查询参数和片段的 HTTP(S) 地址。')
-// }
-
-export const BASE_URL = BASE_MAP.develop
+// Do not read the global uni runtime during module evaluation: H5 loads this
+// chunk before initializing uni. Requests and token access happen after startup.
+export const BASE_URL = String(import.meta.env.VITE_API_BASE_URL || BASE_MAP.develop).trim().replace(/\/$/, '')
+if (!/^https?:\/\/[^/?#@]+(?::\d+)?(?:\/[^?#]*)?$/.test(BASE_URL)) {
+  throw new Error('VITE_API_BASE_URL 必须是无凭据、查询参数和片段的 HTTP(S) 地址。')
+}
 
 const PRODUCT_IMPORT_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000
 const ACCESS_TOKEN_STORAGE_KEY = 'access'
@@ -1037,6 +1032,8 @@ export const api = {
 
   assistedOutboundStats: (params = {}) => {
     const qs = buildQuery({
+      search: params.search || '',
+      status: params.status || '',
       start_date: params.start_date || '',
       end_date: params.end_date || '',
       owner_id: params.owner_id || '',
@@ -1045,6 +1042,11 @@ export const api = {
     })
     return request({ url: `/api/outbound/assisted-orders/stats/?${qs}` })
   },
+
+  outboundHistory: (params = {}) => request({ url: `/api/outbound/order-history/?${buildQuery(params)}` }),
+  outboundHistoryOptions: () => request({ url: '/api/outbound/order-history/options/' }),
+  outboundHistoryStats: (params = {}) => request({ url: `/api/outbound/order-history/stats/?${buildQuery(params)}` }),
+  outboundHistoryDetail: (id) => request({ url: `/api/outbound/order-history/${id}/` }),
 
   // 兼容两种调用：
   // 1) api.orders('关键字')
@@ -1469,6 +1471,18 @@ export const api = {
     request({ url: `/api/relocation/pda/tasks/${id}/retry-posting/`, method: 'POST' }),
 
   // PDA 盘点
+  countOptions: (params = {}) =>
+    request({ url: `/api/pda/count-tasks/options/?${buildQuery(params)}`, silentError: true }),
+
+  createCountTask: (payload) =>
+    request({ url: '/api/pda/count-tasks/', method: 'POST', data: payload, silentError: true }),
+
+  releaseCountTask: (id) =>
+    request({ url: `/api/pda/count-tasks/${id}/release/`, method: 'POST', silentError: true }),
+
+  cancelCountTask: (id, payload = {}) =>
+    request({ url: `/api/pda/count-tasks/${id}/cancel/`, method: 'POST', data: payload, silentError: true }),
+
   countTasks: (params = {}) =>
     request({ url: `/api/pda/count-tasks/?${buildQuery(params)}`, method: 'GET' }),
 

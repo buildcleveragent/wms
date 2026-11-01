@@ -245,7 +245,9 @@ def _shortages(order, tasks, lines, order_lines):
         results.append(
             {
                 "product_id": target.product_id,
-                "product_name": target.product.name,
+                "product_name": target.frozen_product_name,
+                "brand_model": target.frozen_brand_model,
+                "product_display_name": target.product_display_name,
                 "quantity": str(quantity),
                 "unit": (target.base_uom or target.product.base_uom).name,
                 "reason": reason,

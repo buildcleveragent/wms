@@ -86,7 +86,7 @@
             </td>
             <td><span class="tag">{{ line.task.get_task_type_display }}</span></td>
             <td>
-              {{ line.product.name|default:"未绑定商品" }}
+              {{ line.product.display_name|default:"未绑定商品" }}
               {% if line.product.sku %}<div class="location">仓库SKU编码：{{ line.product.sku }}</div>{% endif %}
             </td>
             <td>{{ line.qty_plan }}</td>
@@ -131,7 +131,7 @@
             </td>
             <td><span class="tag">{{ line.task.get_task_type_display }}</span></td>
             <td>
-              {{ line.product.name|default:"未绑定商品" }}
+              {{ line.product.display_name|default:"未绑定商品" }}
               {% if line.product.sku %}<div class="location">仓库SKU编码：{{ line.product.sku }}</div>{% endif %}
             </td>
             <td>{{ line.qty_plan }}</td>

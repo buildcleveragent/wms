@@ -28,63 +28,42 @@
 
     <template v-else>
       <scroll-view class="table-scroll" scroll-x>
-        <view class="table-content">
+        <view class="table-content" :style="{ width: `${tableWidth}rpx` }">
           <view class="table-header">
-            <view class="cell col-name">商品名</view>
-            <view class="cell col-code">编码</view>
-            <view class="cell col-sku">SKU</view>
-            <view class="cell col-spec">规格</view>
-            <view class="cell col-unit">单位</view>
-            <view class="cell col-num">现有</view>
-            <view class="cell col-num">可用</view>
-            <view class="cell col-num">分配</view>
-            <view class="cell col-num">锁定</view>
-            <view class="cell col-num">残次</view>
+            <view
+              v-for="column in columns"
+              :key="column.key"
+              :class="['cell', column.className]"
+              :style="{ width: `${column.width}rpx` }"
+            >{{ column.label }}</view>
           </view>
-        <view
-          v-for="(item, index) in rows"
-          :key="item.id"
-          :class="['table-row', { odd: index % 2 === 1 }]"
-        >
-          <view class="cell col-name strong">
-            <text
-              class="product-link"
-              role="link"
-              tabindex="0"
-              @click="openInventory(item.id)"
-              @keydown.enter="openInventory(item.id)"
-            >{{ item.product_name || '-' }}</text>
+          <view
+            v-for="(item, index) in rows"
+            :key="item.id"
+            :class="['table-row', { odd: index % 2 === 1 }]"
+          >
+            <view
+              v-for="column in columns"
+              :key="column.key"
+              :class="['cell', column.className, {
+                strong: column.key === 'product_name',
+                primary: column.key === 'available_qty',
+              }]"
+              :style="{ width: `${column.width}rpx` }"
+            >
+              <text
+                v-if="column.key === 'product_name'"
+                class="product-link"
+                role="link"
+                tabindex="0"
+                @click="openInventory(item.id)"
+                @keydown.enter="openInventory(item.id)"
+              >{{ (item.product_display_name || item.product_name) || '-' }}</text>
+              <text v-else-if="column.quantity" class="num-text">{{ quantityText(item, column.key) }}</text>
+              <template v-else-if="column.key === 'base_unit'">{{ item.base_unit_name || item.base_unit || '-' }}</template>
+              <template v-else>{{ item[column.key] || '-' }}</template>
+            </view>
           </view>
-          <view class="cell col-code">{{ item.product_code || '-' }}</view>
-          <view class="cell col-sku">{{ item.product_sku || '-' }}</view>
-          <view class="cell col-spec">{{ item.product_spec || '-' }}</view>
-          <view class="cell col-unit">{{ item.base_unit || '-' }}</view>
-<!--          <view class="cell col-num">{{ item.onhand_qty }}</view>
-          <view class="cell col-num primary">{{ item.available_qty }}</view>
-          <view class="cell col-num">{{ item.allocated_qty }}</view>
-          <view class="cell col-num">{{ item.locked_qty }}</view>
-          <view class="cell col-num">{{ item.damaged_qty }}</view> -->
-		  <view class="cell col-num">
-		    <text class="num-text">{{ fmtQty(item.onhand_qty_display || item.onhand_qty) }}</text>
-		  </view>
-
-		  <view class="cell col-num primary">
-		    <text class="num-text">{{ fmtQty(item.available_qty_display || item.available_qty) }}</text>
-		  </view>
-
-		  <view class="cell col-num">
-		    <text class="num-text">{{ fmtQty(item.allocated_qty_display || item.allocated_qty) }}</text>
-		  </view>
-
-		  <view class="cell col-num">
-		    <text class="num-text">{{ fmtQty(item.locked_qty_display || item.locked_qty) }}</text>
-		  </view>
-
-		  <view class="cell col-num">
-		    <text class="num-text">{{ fmtQty(item.damaged_qty_display || item.damaged_qty) }}</text>
-		  </view>
-        </view>
-
         </view>
       </scroll-view>
 
@@ -105,7 +84,7 @@
 
 <script setup>
 import { formatQuantity } from '@/utils/quantity'
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onPullDownRefresh, onReachBottom, onUnload, onShow, onHide } from '@dcloudio/uni-app'
 import { useInventoryAccess } from '@/composables/useInventoryAccess'
 import { api } from '@/utils/request'
@@ -122,6 +101,32 @@ const q = ref('')
 const appliedSearch = ref('')
 const { exporting, exportError, exportExcel } = useOwnerExport(() => JSON.stringify([appliedSearch.value, identity.value]), {allowed: () => canExport.value, onDenied: revoke})
 const rows = ref([])
+const columnDefinitions = [
+  { key: 'onhand_qty', label: '现存', className: 'col-num', width: 96, quantity: true },
+  { key: 'available_qty', label: '可用', className: 'col-num', width: 96, quantity: true },
+  { key: 'allocated_qty', label: '分配', className: 'col-num', width: 96, quantity: true },
+  { key: 'product_name', label: '商品名称', className: 'col-name', width: 240 },
+  { key: 'product_spec', label: '规格', className: 'col-spec', width: 130 },
+  { key: 'base_unit', label: '单位', className: 'col-unit', width: 80 },
+  { key: 'product_code', label: '编码', className: 'col-code', width: 160 },
+  { key: 'product_sku', label: 'SKU', className: 'col-sku', width: 120 },
+  { key: 'locked_qty', label: '锁定', className: 'col-num', width: 100, quantity: true },
+  { key: 'damaged_qty', label: '残次', className: 'col-num', width: 100, quantity: true },
+]
+const columns = computed(() => columnDefinitions.map((column) => {
+  if (!column.quantity) return column
+  // Reserve 15rpx per monospace character plus 8rpx padding for the whole column.
+  const width = rows.value.reduce((current, item) => (
+    Math.max(current, quantityText(item, column.key).length * 15 + 8)
+  ), column.width)
+  return { ...column, width }
+}))
+const tableWidth = computed(() => columns.value.reduce((width, column) => width + column.width, 0))
+
+function quantityText(item, key) {
+  return fmtQty(item[`${key}_display`] || item[key])
+}
+
 const page = ref(1)
 const loading = ref(false)
 const loadingMore = ref(false)
@@ -294,7 +299,7 @@ onUnmounted(() => {
   border-radius: 0;
 }
 
-.table-content { min-width: 1320rpx; background: #fff; }
+.table-content { background: #fff; }
 
 .table-header,
 .table-row {
@@ -325,7 +330,8 @@ onUnmounted(() => {
   box-shadow: none !important;
   outline: none !important;
 
-  padding: 0 10rpx;
+  flex: 0 0 auto;
+  padding: 8rpx 10rpx;
   box-sizing: border-box;
   font-size: 24rpx;
   color: #333;
@@ -340,35 +346,23 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-.col-name {
-  flex: 1.6;
-  min-width: 180rpx;
-}
-
-.col-code {
-  flex: 1;
-  min-width: 120rpx;
-}
-
-.col-sku {
-  flex: 1;
-  min-width: 120rpx;
-}
-
-.col-spec {
-  flex: 1;
-  min-width: 120rpx;
+.col-name,
+.col-spec,
+.col-unit {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-overflow: clip;
+  line-height: 1.4;
 }
 
 .col-unit {
-  flex: 0.6;
-  min-width: 80rpx;
   text-align: center;
 }
 
 .col-num {
-  flex: 0.8;
-  min-width: 100rpx;
+  padding-right: 4rpx;
+  padding-left: 4rpx;
   text-align: right;
 }
 
@@ -440,6 +434,7 @@ onUnmounted(() => {
   display: block;
   width: 100%;
   text-align: right;
+  font-family: monospace;
   font-variant-numeric: tabular-nums;
 }
 

@@ -5,14 +5,16 @@
   "scripts": {
     "dev:h5": "CI=1 UNI_INPUT_DIR=$PWD uni -p h5 --host 127.0.0.1 --port 5176",
     "build:h5": "CI=1 UNI_INPUT_DIR=$PWD uni build -p h5",
+    "build:app": "CI=1 UNI_INPUT_DIR=$PWD UNI_APP_PLATFORM=android uni build -p app && node scripts/verify-android-build.mjs",
     "build:mp-weixin": "CI=1 UNI_INPUT_DIR=$PWD uni build -p mp-weixin",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "test:quality": "npm run test:unit && npm run build:h5 && npm run test:e2e",
-    "test:release": "npm run test:quality && npm run build:mp-weixin"
+    "test:release": "npm run test:quality && npm run build:app"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-alpha-1000920260909822",
+    "@dcloudio/uni-app-plus": "3.0.0-alpha-1000920260909822",
     "@dcloudio/uni-h5": "3.0.0-alpha-1000920260909822",
     "@dcloudio/uni-mp-weixin": "3.0.0-alpha-1000920260909822",
     "pinia": "2.3.1",

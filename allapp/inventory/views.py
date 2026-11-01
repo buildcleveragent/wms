@@ -1,4 +1,4 @@
-from django.db.models import Q, Sum
+from django.db.models import OuterRef, Q, Subquery, Sum
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -8,7 +8,9 @@ from rest_framework.response import Response
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
+from allapp.core.product_identity import combine_brand_model, identity_display_name
 from allapp.products.identifier_lookup import product_search_q
+from allapp.products.models import ProductUom
 
 from .models import InventoryDetail, InventorySummary
 from .owner_permissions import owner_inventory_scope
@@ -78,7 +80,15 @@ class OwnerInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericViewSe
 
         from .owner_export import filter_summary
         q = (self.request.query_params.get("search") or "").strip()
-        return filter_summary(qs, q)
+        return (
+            filter_summary(qs, q)
+            .select_related("product__base_uom", "product__brand")
+            .annotate(
+                base_unit_name=Subquery(
+                    ProductUom.all_objects.filter(code=OuterRef("base_unit")).values("name")[:1]
+                )
+            )
+        )
 
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
@@ -178,6 +188,8 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
                     "product__code",
                     "product__name",
                     "product__spec",
+                    "product__brand__name",
+                    "product__model",
                     "product__sku",
                     "base_unit",
                 )
@@ -199,6 +211,8 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
                     "product__code",
                     "product__name",
                     "product__spec",
+                    "product__brand__name",
+                    "product__model",
                     "product__sku",
                     "base_unit",
                 )
@@ -237,6 +251,17 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
                         "product_id": row["product_id"],
                         "product_code": row.get("product__code") or "",
                         "product_name": row.get("product__name") or "",
+                        "brand_model": combine_brand_model(
+                            row.get("product__brand__name"), row.get("product__model")
+                        ),
+                        "product_display_name": identity_display_name(
+                            {
+                                "name": row.get("product__name"),
+                                "brand_model": combine_brand_model(
+                                    row.get("product__brand__name"), row.get("product__model")
+                                ),
+                            }
+                        ),
                         "product_spec": row.get("product__spec") or "",
                         "product_sku": row.get("product__sku") or "",
                         "base_unit": row.get("base_unit") or "",
@@ -256,6 +281,17 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
                         "product_id": row["product_id"],
                         "product_code": row.get("product__code") or "",
                         "product_name": row.get("product__name") or "",
+                        "brand_model": combine_brand_model(
+                            row.get("product__brand__name"), row.get("product__model")
+                        ),
+                        "product_display_name": identity_display_name(
+                            {
+                                "name": row.get("product__name"),
+                                "brand_model": combine_brand_model(
+                                    row.get("product__brand__name"), row.get("product__model")
+                                ),
+                            }
+                        ),
                         "product_spec": row.get("product__spec") or "",
                         "product_sku": row.get("product__sku") or "",
                         "base_unit": row.get("base_unit") or "",

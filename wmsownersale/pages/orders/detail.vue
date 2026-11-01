@@ -55,7 +55,7 @@
         <view class="section-title">商品明细</view>
         <view v-if="!(order.lines || []).length" class="state-card">暂无商品明细</view>
         <view v-for="(line, index) in (order.lines || [])" :key="line?.id ?? index" class="line-row">
-          <view class="line-name">{{ line?.product_name || line?.product_code || ('商品#' + line?.product) }}</view>
+          <view class="line-name">{{ (line?.product_display_name || line?.product_name) || line?.product_code || ('商品#' + line?.product) }}</view>
           <view class="line-meta">
             <text v-if="line.is_priced !== false">¥ {{ rate(line?.base_price) }} × {{ qty(line?.base_qty) }}</text>
             <text v-else>数量 {{ qty(line?.base_qty) }}</text>

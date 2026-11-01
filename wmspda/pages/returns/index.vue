@@ -23,7 +23,7 @@
           <text v-if="ownerId" class="muted">本单货主：{{ ownerName }}。更换货主请先移除已选商品。</text>
           <view class="search-row"><input v-model="search" placeholder="商品名称、编码或条码" confirm-type="search" :disabled="busy || !!pending" @confirm="searchProducts(true)" /><button :disabled="busy || !!pending" @click="searchProducts(true)">搜索</button></view>
           <view v-for="product in products" :key="product.product_id" class="product-row" @click="chooseProduct(product)">
-            <text class="strong product-name" :title="product.product_name + (product.spec ? ' ' + product.spec : '')">{{ product.product_name }} {{ product.spec }}</text>
+            <text class="strong product-name" :title="(product.product_display_name || product.product_name) + (product.spec ? ' ' + product.spec : '')">{{ (product.product_display_name || product.product_name) }} {{ product.spec }}</text>
             <text class="owner-label" :title="'货主：' + product.owner_name">货主：{{ product.owner_name }}</text>
             <text class="muted product-stock">{{ product.product_code }} · 可用 {{ product.available_qty }} / 破损 {{ product.damaged_qty }} {{ product.base_unit }}</text>
           </view>
@@ -33,7 +33,7 @@
         <view v-if="stockOptions.length && editable" class="card">
           <text class="section-title">2. 选择实际退回的库位与批次</text>
           <view v-for="stock in stockOptions" :key="stock.id" class="stock-row">
-            <text class="strong">{{ stock.product_name }} · {{ stock.location_name }}</text>
+            <text class="strong">{{ (stock.product_display_name || stock.product_name) }} · {{ stock.location_name }}</text>
             <text class="muted">货主 {{ stock.owner_name }} · 批次 {{ stock.batch_no || '无' }} · 效期 {{ stock.expiry_date || '无' }} {{ stock.serial_no ? '· 序列号 ' + stock.serial_no : '' }} {{ stock.container_no ? '· 容器 ' + stock.container_no : '' }}</text>
             <text class="muted">可用 {{ stock.available_qty }} / 破损 {{ stock.damaged_qty }} {{ stock.base_unit }} · 已分配 {{ stock.allocated_qty }} / 锁定 {{ stock.locked_qty }}</text>
             <text class="muted">{{ stock.supplier_name ? '原供应商：' + stock.supplier_name : '无可靠供应商来源，仅可退货主' }}</text>
@@ -44,7 +44,7 @@
         <view v-if="lines.length" class="card">
           <text class="section-title">{{ editable ? '3. 填写数量和退货对象' : '退货明细' }}</text>
           <view v-for="line in lines" :key="line.inventory_id" class="return-line">
-            <text class="strong">{{ line.product_name }} {{ line.spec }} · {{ line.base_unit }}</text>
+            <text class="strong">{{ (line.product_display_name || line.product_name) }} {{ line.spec }} · {{ line.base_unit }}</text>
             <text class="muted">{{ ownerName }} · {{ line.location_name }} · 批次 {{ line.batch_no || '无' }} {{ line.serial_no || '' }} {{ line.container_no ? '· 容器 ' + line.container_no : '' }}</text>
             <text v-if="editable && line.stock_available != null" class="muted">可用 {{ line.stock_available }} / 已登记破损 {{ line.stock_damaged }}</text>
             <view class="quantity-grid">

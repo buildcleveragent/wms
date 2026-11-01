@@ -30,7 +30,7 @@
         <view v-if="detailLoading" class="detail-state">正在加载详情…</view>
         <template v-else>
           <view v-for="line in detailLines" :key="line.id" class="detail-line">
-            <view><text>{{ line.product_name || line.name || line.product_code }}</text><text>{{ ownerLabel(line) }} · {{ line.product_spec || line.product_code || '' }}</text></view>
+            <view><text>{{ (line.product_display_name || line.product_name) || line.name || line.product_code }}</text><text>{{ ownerLabel(line) }} · {{ line.product_spec || line.product_code || '' }}</text></view>
             <text>× {{ qty(line.qty) }} {{ line.base_unit || '基本单位' }}</text><strong>{{ money(line.amount) }}</strong>
           </view>
           <view class="detail-actions">
@@ -49,7 +49,7 @@
         <text class="return-sale-no">{{ saleNo(returnSale) }}</text>
         <scroll-view class="return-lines" scroll-y>
           <view v-for="line in returnLines" :key="line.id" class="return-line">
-            <view><text>{{ line.product_name || line.product_code }}</text><text>{{ ownerLabel(line) }} · 最多可退 {{ qty(line.returnable_qty) }} {{ line.base_unit || '基本单位' }}</text></view>
+            <view><text>{{ (line.product_display_name || line.product_name) || line.product_code }}</text><text>{{ ownerLabel(line) }} · 最多可退 {{ qty(line.returnable_qty) }} {{ line.base_unit || '基本单位' }}</text></view>
             <input v-model="line.return_qty" :disabled="returnSubmitting" type="digit" placeholder="0" @blur="normalizeReturnQty(line)" />
           </view>
         </scroll-view>
@@ -68,7 +68,7 @@
         <view class="receipt-meta">客户：{{ receiptSale.receipt?.customer?.name || '散客' }}</view>
         <view class="receipt-meta">{{ formatTime(receiptSale.created_at) }} · {{ statusLabel(receiptSale.status) }}</view>
         <view v-for="line in receiptSale.lines" :key="line.id" class="receipt-line">
-          <text>{{ ownerLabel(line) }} · {{ line.product_name }} {{ line.product_spec }}</text>
+          <text>{{ ownerLabel(line) }} · {{ (line.product_display_name || line.product_name) }} {{ line.product_spec }}</text>
           <text>{{ qty(line.qty) }} {{ line.base_unit || '基本单位' }} · {{ money(line.amount) }}</text>
         </view>
         <view v-for="order in receiptSale.orders" :key="order.id" class="receipt-meta">{{ order.owner_name || order.owner_id }} · 出库单 {{ order.order_no || order.id }} · {{ order.customer_name || '散客' }} · {{ order.status }}</view>

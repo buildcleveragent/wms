@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -25,6 +26,7 @@ from django.utils import timezone
 
 from allapp.accounts.access import AccessScope
 from allapp.core.choices import InvTxType
+from allapp.core.product_identity import combine_brand_model, identity_display_name
 from allapp.inbound.models import InboundOrder, InboundOrderLine
 from allapp.inbound.selectors import pda_no_order_receive_q
 from allapp.inventory.models import InventoryTransaction
@@ -131,7 +133,7 @@ def _product_query(prefix: str, value: str) -> Q:
 def _plan_lines(direction: str, filters: OperationFilters, scope: AccessScope, user):
     if direction == "inbound":
         qs = InboundOrderLine.objects.select_related(
-            "order", "order__owner", "order__warehouse", "product"
+            "order", "order__owner", "order__warehouse", "product", "product__brand"
         ).filter(
             order__is_deleted=False,
             order__biz_date__range=(filters.start_date, filters.end_date),
@@ -156,7 +158,7 @@ def _plan_lines(direction: str, filters: OperationFilters, scope: AccessScope, u
             qs = qs.filter(order__eta__date__lt=_today(), order__is_closed=False)
     else:
         qs = OutboundOrderLine.objects.select_related(
-            "order", "order__owner", "order__warehouse", "product"
+            "order", "order__owner", "order__warehouse", "product", "product__brand"
         ).filter(
             order__is_deleted=False,
             order__biz_date__range=(filters.start_date, filters.end_date),
@@ -243,7 +245,7 @@ def _inventory_transactions(
 ):
     tx_type = InvTxType.RECEIVE if direction == "inbound" else InvTxType.ISSUE
     qs = InventoryTransaction.objects.select_related(
-        "owner", "warehouse", "product", "product__base_uom", "location"
+        "owner", "warehouse", "product", "product__brand", "product__base_uom", "location"
     ).filter(
         tx_type=tx_type,
         posted_at__date__range=(filters.start_date, filters.end_date),
@@ -313,7 +315,7 @@ def _shipment_lines(filters: OperationFilters, scope: AccessScope, user):
         # The line comparison is applied below.
         pass
     qs = WmsTaskLine.objects.select_related(
-        "task", "task__owner", "task__warehouse", "product", "finished_by"
+        "task", "task__owner", "task__warehouse", "product", "product__brand", "finished_by"
     ).filter(task_id__in=tasks.values_list("id", flat=True))
     if filters.product:
         qs = qs.filter(_product_query("product__", filters.product))
@@ -459,7 +461,10 @@ def _plan_row(direction: str, line, basis: str) -> dict:
             "id": line.product_id,
             "code": line.product.code,
             "sku": line.product.sku,
-            "name": line.product.name,
+            "name": line.frozen_product_name,
+            "spec": line.frozen_product_spec,
+            "brand_model": line.frozen_brand_model,
+            "display_name": line.product_display_name,
         },
         "lot_no": line.lot_no or "",
         "status": order.approval_status,
@@ -518,6 +523,9 @@ def _inventory_rows(direction: str, qs, basis: str) -> list[dict]:
                     "code": tx.product.code,
                     "sku": tx.product.sku,
                     "name": tx.product.name,
+                    "spec": tx.product.spec or "",
+                    "brand_model": tx.product.brand_model,
+                    "display_name": tx.product.display_name,
                 },
                 "location": {
                     "id": tx.location_id,
@@ -557,6 +565,9 @@ def _shipment_row(line, basis: str) -> dict:
             "code": getattr(line.product, "code", ""),
             "sku": getattr(line.product, "sku", ""),
             "name": getattr(line.product, "name", ""),
+            "spec": getattr(line.product, "spec", "") or "",
+            "brand_model": getattr(line.product, "brand_model", ""),
+            "display_name": getattr(line.product, "display_name", ""),
         },
         "lot_no": (line.plan_meta or {}).get("lot_no", ""),
         "status": task.status,
@@ -623,6 +634,10 @@ _DETAIL_VALUE_FIELDS = (
     "_product_code",
     "_product_sku",
     "_product_name",
+    "_product_spec",
+    "_product_snapshot",
+    "_product_brand_name",
+    "_product_model",
     "_location_id",
     "_location_code",
     "_location_name",
@@ -679,6 +694,10 @@ def _plan_detail_branch(direction, basis, filters, scope, user):
             _product_code=_string("product__code"),
             _product_sku=_string(Coalesce("product__sku", _text())),
             _product_name=_string("product__name"),
+            _product_spec=_string(Coalesce("product__spec", _text())),
+            _product_snapshot=_string("product_snapshot"),
+            _product_brand_name=_string("product__brand__name"),
+            _product_model=_string("product__model"),
             _location_id=_integer(),
             _location_code=_text(),
             _location_name=_text(),
@@ -742,6 +761,10 @@ def _inventory_detail_branch(direction, basis, filters, scope, user):
             _product_code=_string("product__code"),
             _product_sku=_string(Coalesce("product__sku", _text())),
             _product_name=_string("product__name"),
+            _product_spec=_string(Coalesce("product__spec", _text())),
+            _product_snapshot=_text("{}"),
+            _product_brand_name=_string("product__brand__name"),
+            _product_model=_string("product__model"),
             _location_id=F("location_id"),
             _location_code=_string(Coalesce("location__code", _text())),
             _location_name=_string(Coalesce("location__name", _text())),
@@ -786,6 +809,10 @@ def _shipment_detail_branch(basis, filters, scope, user):
             _product_code=_string("product__code"),
             _product_sku=_string(Coalesce("product__sku", _text())),
             _product_name=_string("product__name"),
+            _product_spec=_string(Coalesce("product__spec", _text())),
+            _product_snapshot=_text("{}"),
+            _product_brand_name=_string("product__brand__name"),
+            _product_model=_string("product__model"),
             _location_id=_integer(),
             _location_code=_text(),
             _location_name=_text(),
@@ -858,6 +885,16 @@ def _database_detail_row(row):
             "code": row["_product_code"] or "",
             "sku": row["_product_sku"] or "",
             "name": row["_product_name"] or "",
+            "spec": row["_product_spec"] or "",
+            "brand_model": combine_brand_model(row["_product_brand_name"], row["_product_model"]),
+            "display_name": identity_display_name(
+                {
+                    "name": row["_product_name"],
+                    "brand_model": combine_brand_model(
+                        row["_product_brand_name"], row["_product_model"]
+                    ),
+                }
+            ),
         },
         "lot_no": row["_lot_no"] or "",
         "status": row["_status"] or "",
@@ -866,6 +903,14 @@ def _database_detail_row(row):
         "actual_qty": _decimal_text(row["_actual_qty"]),
         "exception_type": row["_exception_type"] or "",
     }
+    snapshot = json.loads(row["_product_snapshot"] or "{}")
+    if snapshot:
+        payload["product"].update(
+            name=snapshot.get("name", ""),
+            spec=snapshot.get("spec", ""),
+            brand_model=snapshot.get("brand_model", ""),
+            display_name=identity_display_name(snapshot),
+        )
     if row["_location_id"]:
         payload["location"] = {
             "id": row["_location_id"],

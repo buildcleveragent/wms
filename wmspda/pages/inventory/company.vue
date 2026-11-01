@@ -88,7 +88,7 @@
           </view>
 
           <view class="cell col-owner">{{ item.owner_name || '-' }}</view>
-          <view class="cell col-name strong">{{ item.product_name || '-' }}</view>
+          <view class="cell col-name strong">{{ (item.product_display_name || item.product_name) || '-' }}</view>
           <view class="cell col-code">{{ item.product_code || '-' }}</view>
           <view class="cell col-sku">{{ item.product_sku || '-' }}</view>
           <view class="cell col-spec">{{ item.product_spec || '-' }}</view>

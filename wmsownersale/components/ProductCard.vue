@@ -3,7 +3,7 @@
     <image class="product-image" :src="product.product_image_url" mode="aspectFill" />
     <view class="product-main">
       <view class="product-heading">
-        <view class="product-name">{{ product.name || product.sku }}</view>
+        <view class="product-name">{{ (product.display_name || product.name) || product.sku }}</view>
         <button class="add-button" :disabled="product.can_add === false" @click="$emit('add')">加入</button>
       </view>
       <text v-if="product.sku" class="meta">SKU：{{ product.sku }}</text>

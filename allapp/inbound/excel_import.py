@@ -485,6 +485,8 @@ def parse_no_order_receive_excel(uploaded_file, *, owner):
                 "product_id": product.id,
                 "product_code": product.code,
                 "product_name": product.name,
+                "brand_model": product.brand_model,
+                "product_display_name": product.display_name,
                 "input_qty": format(qty, "f"),
                 "uom_code": uom_code,
                 "multiplier": format(multiplier, "f"),

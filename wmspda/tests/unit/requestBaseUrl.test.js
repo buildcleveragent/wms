@@ -14,6 +14,13 @@ describe('PDA API base URL', () => {
     expect(BASE_URL).toBe('https://wms.example.test')
   })
 
+  it('can load the production request chunk before the uni runtime exists', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', '')
+    vi.stubGlobal('uni', undefined)
+    const { BASE_URL } = await import('@/utils/request')
+    expect(BASE_URL).toBe('http://192.168.1.6:8001')
+  })
+
   it('retains the onsite default when no build endpoint is supplied', async () => {
     vi.stubEnv('VITE_API_BASE_URL', '')
     vi.stubGlobal('uni', {

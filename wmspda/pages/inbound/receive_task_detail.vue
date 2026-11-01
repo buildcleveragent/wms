@@ -68,7 +68,7 @@
       <view v-for="line in task.lines || []" :key="line.id" class="line-card">
         <view class="line-top">
           <view>
-            <text class="product-name">{{ line.product_name || line.product_sku || `商品 #${line.product_id}` }}</text>
+            <text class="product-name">{{ (line.product_display_name || line.product_name) || line.product_sku || `商品 #${line.product_id}` }}</text>
             <text class="sku">{{ line.product_sku || '-' }}</text>
           </view>
           <text :class="['line-status', line.finished_at ? 'line-done' : '']">

@@ -2,10 +2,32 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>{{ object.owner.name }}{{ document_title|default:"送货单" }} {{ object.order_no }}</title>
+  <title>{% if kind == 'pick' %}拣货单{% else %}出库单{% endif %} {{ object.order_no }}</title>
 
   <style>
     @page { size: {{ print_css.page_size_css }}; margin: {{ print_css.page_margin }}; }
+    {% if kind != 'pick' %}
+    /* 不给浏览器自动页眉页脚留出空间；原上下留白由分页表格逐页提供。 */
+    @page { margin-top: 0; margin-bottom: 0; }
+    .print-pagination {
+      width: 100%;
+      table-layout: fixed;
+      border-collapse: collapse;
+      border-spacing: 0;
+    }
+    .print-pagination > thead > tr > td,
+    .print-pagination > tbody > tr > td,
+    .print-pagination > tfoot > tr > td { padding: 0; border: 0; vertical-align: top; }
+    .print-page-spacer {
+      padding: {{ print_css.page_margin }};
+      padding-left: 0;
+      padding-right: 0;
+      font-size: 0;
+      line-height: 0;
+    }
+    .print-page-spacer--top { padding-bottom: 0; }
+    .print-page-spacer--bottom { padding-top: 0; }
+    {% endif %}
 
     body {
       margin: 0;
@@ -32,16 +54,19 @@
       --delivery-left-inset: max(1px, calc(10mm - 3 * {{ print_css.meta_font_size }}));
       --delivery-left-clearance: max(0px, calc(8.5mm - var(--delivery-left-inset)));
       padding-left: calc(var(--delivery-left-inset) + var(--delivery-left-clearance));
-      padding-right: calc(20mm - var(--delivery-left-inset));
+      padding-right: 8.5mm;
+      padding-top: 0;
     }
 
     @media screen {
       body { width: 9.5in; max-width: 100%; margin-inline: auto; }
+      .print-pagination > thead, .print-pagination > tfoot { display: none; }
     }
     @media print {
       .print-controls { display: none; }
       thead { display: table-header-group; }
-      tr, .sign, .copies, .document-header { break-inside: avoid; }
+      .print-pagination > tfoot { display: table-footer-group; }
+      table.goods tr, .sign, .copies, .delivery-footer, .document-header { break-inside: avoid; }
     }
     .print-controls { padding: 12px; margin-bottom: 12px; background: #f2f4f7; }
     .print-controls select { max-width: 100%; padding: 6px; }
@@ -99,6 +124,25 @@
     .document-header .top-row { margin-bottom: 2px; }
     .document-header .value { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
     .address-value { white-space: normal; overflow-wrap: anywhere; }
+    .delivery-number { text-align: right; font-weight: 700; }
+    .print-content--delivery .document-header .title { line-height: 1.1; margin: 0; }
+    .delivery-parties { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; }
+    .delivery-parties .label, .warehouse-address .label { min-width: 5em; }
+    .warehouse-address .address-value { display: flex; align-items: baseline; gap: 1em; }
+    .warehouse-location { min-width: 0; }
+    .warehouse-phone { flex: none; white-space: nowrap; }
+    .delivery-parties .meta-line { align-items: baseline; }
+    .delivery-sign { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; }
+    .delivery-sign { margin-top: 3px; }
+    .delivery-sign .sign-item { margin: 0; line-height: 1.2; gap: 6px; }
+    .delivery-sign .sign-label { flex: 0 0 5em; text-align: right; }
+    .delivery-sign > div:last-child .line { width: 260px; flex-basis: 260px; }
+    .delivery-sign .line { height: 12px; }
+    .delivery-sign .signature-date { margin-top: 14px; }
+    .barcode-cell { white-space: nowrap; }
+    .print-content--delivery .name-cell,
+    .print-content--delivery .spec-cell { white-space: normal; overflow-wrap: anywhere; }
+    .print-content--delivery .copies { justify-content: space-evenly; margin-top: 2px; }
 
     /* 只有货物列表表格有框线 */
     table.goods {
@@ -118,6 +162,10 @@
       height: 18px;
       line-height: {{ print_css.table_line_height }};
     }
+    .print-content--delivery table.goods { margin-top: 2px; }
+    /* 复写纸表格采用紧凑内边距，四行商品及签字区可放入一联。 */
+    .print-content--delivery table.goods th,
+    .print-content--delivery table.goods td { padding: 1px 3px; }
     table.goods th {
       font-size: {{ print_css.table_header_font_size }};
       font-weight: 700;
@@ -178,7 +226,6 @@
   <input type="hidden" name="kind" value="{{ kind }}">
   <label for="warehouse-info">仓库信息：</label>
   <select id="warehouse-info" name="warehouse_info_id" required>
-    <option value="">请选择送货单使用的仓库信息</option>
     {% for info in warehouse_infos %}
     <option value="{{ info.pk }}"{% if info.pk == selected_warehouse_info.pk %} selected{% endif %}>{{ info.name }} — {{ info.address }}</option>
     {% endfor %}
@@ -190,6 +237,11 @@
 <div class="print-controls">
   <button type="button" onclick="window.print()">重新打印</button>
 </div>
+{% if kind != 'pick' %}
+<table class="print-pagination" role="presentation">
+  <thead aria-hidden="true"><tr><td><div class="print-page-spacer print-page-spacer--top"></div></td></tr></thead>
+  <tbody><tr><td>
+{% endif %}
 <div class="print-sheet">
 <div class="print-content{% if kind != 'pick' %} print-content--delivery{% endif %}">
 
@@ -197,7 +249,7 @@
   {% if kind == 'pick' %}
   <table class="goods">
     <thead><tr><th>序号</th><th style="width:25%">商品／规格</th><th>库位</th><th>批次</th><th>单位</th><th>应拣数量</th><th>实拣填写</th></tr></thead>
-    <tbody>{% for line in lines %}<tr><td>{{ forloop.counter }}</td><td class="name-cell pick-product">{{ line.product.name }}{% if line.product.spec %}<br>{{ line.product.spec }}{% endif %}</td><td>{{ line.location.code }}</td><td>{{ line.lot_no|default:"—" }}</td><td>{{ line.base_uom.name|default:line.product.base_uom.name }}</td><td>{{ line.base_qty|floatformat:"-4" }}</td><td></td></tr>{% endfor %}</tbody>
+    <tbody>{% for line in lines %}<tr><td>{{ forloop.counter }}</td><td class="name-cell pick-product">{{ line.product_display_name }}{% if line.frozen_product_spec %}<br>{{ line.frozen_product_spec }}{% endif %}</td><td>{{ line.location.code }}</td><td>{{ line.lot_no|default:"—" }}</td><td>{{ line.base_uom.name|default:line.product.base_uom.name }}</td><td>{{ line.base_qty|floatformat:"-4" }}</td><td></td></tr>{% endfor %}</tbody>
   </table>
   <div class="sign">拣货人：________________　日期：________________</div>
   {% else %}
@@ -206,13 +258,14 @@
     <thead>
       <tr>
         <th style="width:5%;">序号</th>
-        <th style="width:33%;">货物名称</th>
-        <th style="width:14%;">包装规格</th>
-        <th style="width:7%;">单位</th>
-        <th style="width:9%;">数量</th>
-        <th style="width:9%;">单价</th>
-        <th style="width:11%;">金额</th>
-        <th style="width:12%;">备注</th>
+        <th style="width:14%;">条码</th>
+        <th style="width:40%;">货物名称</th>
+        <th style="width:11%;">包装规格</th>
+        <th style="width:5%;">单位</th>
+        <th style="width:6%;">单价</th>
+        <th style="width:6%;">数量</th>
+        <th style="width:8%;">金额</th>
+        <th style="width:5%;">备注</th>
       </tr>
     </thead>
 
@@ -221,12 +274,13 @@
       <tr>
         <td>{{ forloop.counter }}</td>
 
-        <td class="name-cell nowrap" title="{{ line.product.name }}">{{ line.product.name }}{% if line.is_priced == False %}（未计价）{% endif %}</td>
+        <td class="barcode-cell">{{ line.product.gtin|default:line.product.unit_barcode|default_if_none:"" }}</td>
+        <td class="name-cell" title="{{ line.product_display_name }}">{{ line.product_display_name }}{% if line.is_priced == False %}（未计价）{% endif %}</td>
 
-        <td class="nowrap" title="{{ line.product.spec|default_if_none:"" }}">
-          {% if line.product.spec %}{{ line.product.spec }}{% endif %}
+        <td class="spec-cell" title="{{ line.frozen_product_spec|default_if_none:"" }}">
+          {% if line.frozen_product_spec %}{{ line.frozen_product_spec }}{% endif %}
           {% if line.aux_uom %}
-            {% if line.product.spec %}<br>{% endif %}
+            {% if line.frozen_product_spec %}<br>{% endif %}
             {{ line.aux_qty|floatformat:"-4" }} {{ line.aux_uom.uom.name }}
             （1 {{ line.aux_uom.uom.name }}={{ line.ratio|floatformat:"-3" }} {{ line.base_uom.name }}）
           {% endif %}
@@ -236,10 +290,8 @@
           {% if line.base_uom %}{{ line.base_uom.name }}{% else %}{{ line.product.base_uom.name }}{% endif %}
         </td>
 
-        <!-- 数量：整数不显示小数；有小数保留最多3位并去尾0 -->
-        <td class="nowrap">{{ line.base_qty|floatformat:"-4" }}</td>
-
         <td class="nowrap">{% if line.is_priced != False %}{{ line.base_price|floatformat:2 }}{% endif %}</td>
+        <td class="nowrap">{{ line.base_qty|floatformat:"-4" }}</td>
 
         <td class="nowrap">{{ line.amount|floatformat:2 }}</td>
 
@@ -247,111 +299,51 @@
       </tr>
       {% endfor %}
 
-      <!-- ✅ 合计 + 大写：同一行；“合计”在序号列下面，“大写”在其右侧 -->
       <tr class="total-row">
-        <!-- 合计写到“序号”列下 -->
         <td><b>合计</b></td>
-
-        <!-- 大写在合计右边，同一行（覆盖：货物名称+包装规格+单位 三列） -->
-        <td colspan="3" class="name-cell nowrap" title="{{ total_amount_upper|default_if_none:"" }}">
+        <td></td>
+        <td colspan="4" class="name-cell">
           {% if all_unpriced %}未计价{% else %}
           <b>{% if unpriced_line_count %}已计价小计大写：{% else %}大写：{% endif %}</b>{{ total_amount_upper|default_if_none:"" }}
           {% endif %}
         </td>
-
-        <!-- 数量合计落在“数量”列 -->
         <td class="nowrap"><b>{{ total_qty|floatformat:"-4" }}</b></td>
-
-        <!-- 单价列按图为空 -->
-        <td></td>
-
-        <!-- 金额合计落在“金额”列 -->
         <td class="nowrap"><b>{% if all_unpriced %}—{% else %}{{ total_amount|floatformat:2 }}{% endif %}</b></td>
-
-        <!-- 备注空 -->
         <td></td>
       </tr>
     </tbody>
   </table>
   {% if unpriced_line_count and not all_unpriced %}<p>另有 {{ unpriced_line_count }} 行未计价，以上金额为已计价小计。</p>{% endif %}
 
-  <!-- 签字区（无框线） -->
-  <div class="sign">
-    <div class="sign-row">
-      <div class="sign-item">送货人：<span class="line"></span></div>
-      <div class="sign-item">车牌：<span class="line"></span></div>
-      <div class="sign-item">电话：<span class="line"></span></div>
+  <div class="delivery-footer">
+  <div class="sign delivery-sign">
+    <div>
+      <div class="sign-item"><span class="sign-label">送货人：</span><span class="line"></span></div>
+      <div class="sign-item"><span class="sign-label">车牌：</span><span class="line"></span></div>
+      <div class="sign-item"><span class="sign-label">电话：</span><span class="line"></span></div>
     </div>
-    <div class="sign-row">
-      <div class="sign-item">收货人：<span class="line"></span></div>
-      <div class="sign-item">收货日期：<span class="line long"></span></div>
+    <div>
+      <div class="sign-item"><span class="sign-label">收货人：</span><span class="line"></span></div>
+      <div class="sign-item signature-date"><span class="sign-label">收货日期：</span><span class="line"></span></div>
     </div>
   </div>
-
-  <!-- 联次（无框线） -->
   <div class="copies">
     <div>第一联：仓库</div>
-    <div>第二联：送货</div>
-    <div>第三联：客户</div>
+    <div>第二联：客户</div>
+    <div>第三联：财务</div>
+  </div>
   </div>
 
   {% endif %}
 </div>
 </div>
+{% if kind != 'pick' %}
+  </td></tr></tbody>
+  <tfoot aria-hidden="true"><tr><td><div class="print-page-spacer print-page-spacer--bottom"></div></td></tr></tfoot>
+</table>
+{% endif %}
 {% else %}<p class="print-controls">请选择有效的仓库地址后生成正式送货单。</p>{% endif %}
 
-<script>
-  (() => {
-    const content = document.querySelector('.print-content--delivery');
-    const table = content && content.querySelector('table.goods');
-    if (!table) return;
 
-    const columns = document.createElement('colgroup');
-    const cells = Array.from(table.tHead.rows[0].cells);
-    const originalWidths = cells.map(cell => cell.style.width);
-    const fitDeliveryColumns = () => {
-      // 从校准前的列宽计算，避免重打或窗口缩放时累计收窄。
-      columns.remove();
-      table.style.width = '';
-      cells.forEach((cell, index) => { cell.style.width = originalWidths[index]; });
-      content.style.setProperty('--delivery-left-clearance', '0px');
-      const widths = cells.map(cell => cell.getBoundingClientRect().width);
-      const originalTableWidth = table.getBoundingClientRect().width;
-      const charWidth = parseFloat(getComputedStyle(content.querySelector('.top-row')).fontSize);
-      content.style.removeProperty('--delivery-left-clearance');
-      const clearance = originalTableWidth - table.getBoundingClientRect().width;
-      // 保留左侧校准位置，货物名称额外加宽四个表格正文字宽；其他列只向右平移。
-      const nameExpansion = 4 * parseFloat(getComputedStyle(table).fontSize);
-      widths[1] = Math.max(2 * charWidth, widths[1] - clearance) + nameExpansion;
-      const last = widths.length - 1;
-      // 备注保留三个汉字及内边距、边框，不挤占货物名称。
-      const remarksStyle = getComputedStyle(cells[last]);
-      const remarksWidth = 3 * Math.max(
-        parseFloat(remarksStyle.fontSize), parseFloat(getComputedStyle(table).fontSize)
-      ) + parseFloat(remarksStyle.paddingLeft) + parseFloat(remarksStyle.paddingRight)
-        + parseFloat(remarksStyle.borderLeftWidth) + parseFloat(remarksStyle.borderRightWidth);
-      const reduction = Math.max(0, widths[last] - remarksWidth);
-      const columnsWidth = widths.reduce((sum, width) => sum + width, 0) - reduction;
-      columns.replaceChildren(...widths.map((width, index) => {
-        const column = document.createElement('col');
-        // 备注保持实际字宽，防止自定义窄纸在分页时再次按比例压窄标题。
-        column.style.width = index === last
-          ? `${width - reduction}px`
-          : `${100 * width / columnsWidth}%`;
-        return column;
-      }));
-      cells.forEach(cell => { cell.style.width = 'auto'; });
-      table.prepend(columns);
-      // 使用流式宽度，让真正分页时的纸张宽度优先于屏幕窗口宽度。
-      table.style.width = `calc(100% - ${reduction}px + ${nameExpansion}px)`;
-    };
-
-    fitDeliveryColumns();
-    document.fonts.ready.then(fitDeliveryColumns);
-    window.addEventListener('beforeprint', fitDeliveryColumns);
-    window.addEventListener('afterprint', fitDeliveryColumns);
-    window.addEventListener('resize', fitDeliveryColumns);
-  })();
-</script>
 </body>
 </html>

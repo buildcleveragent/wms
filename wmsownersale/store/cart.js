@@ -217,6 +217,8 @@ export const useCart = defineStore('cart', {
         catalog_version: product.catalog_version || '',
         sku: product.sku,
         name: product.name,
+        display_name: product.display_name,
+        brand_model: product.brand_model,
         spec: product.spec,
         is_priced: product.is_priced !== false,
         price: product.is_priced === false ? null : Number(product.price || 0),

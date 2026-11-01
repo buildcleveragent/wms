@@ -47,7 +47,7 @@
         >
           <view style="flex:3;">
             <view class="font-bold" style="line-height:1.2;">
-              {{ l.product_name || l.product_sku || l.product_code || l.product || l.product_id || ('#' + (l.id ?? i)) }}
+              {{ (l.product_display_name || l.product_name) || l.product_sku || l.product_code || l.product || l.product_id || ('#' + (l.id ?? i)) }}
             </view>
             <view class="text-gray" v-if="l.product_sku">SKU：{{ l.product_sku }}</view>
           </view>

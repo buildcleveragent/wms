@@ -125,7 +125,7 @@ class ProductActiveIdentifierSearchFilter(filters.SearchFilter):
 
 
 class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
-    queryset = Product.objects.all().select_related("owner")
+    queryset = Product.objects.all().select_related("owner", "brand")
     serializer_class = ProductSerializer
     filter_backends = [
         DjangoFilterBackend,
@@ -140,7 +140,7 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
         "batch_control": ["exact"],
         "expiry_control": ["exact"],
     }
-    search_fields = ("code", "sku", "name", "spec")
+    search_fields = ("code", "sku", "name", "spec", "brand__name", "model")
     ordering_fields = ("owner", "code", "name", "updated_at")
     ordering = ("owner", "code")
 
@@ -287,7 +287,7 @@ class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
 ^CI28
 ^PW600
 ^LH0,0
-^FO40,40^A0N,36,36^FD{product.code} {product.name}^FS
+^FO40,40^A0N,36,36^FD{product.code} {product.display_name} {product.spec or ""}^FS
 ^FO40,100^BCN,100,Y,N,N
 ^FD{data_code}^FS
 ^FO40,220^A0N,28,28^FD单位:{base_unit_code}^FS

@@ -264,8 +264,11 @@ class InboundOrderCreateSerializer(serializers.Serializer):
 
 
 class InboundOrderLineReadSerializer(serializers.ModelSerializer):
+    product_spec = serializers.CharField(source="frozen_product_spec", read_only=True)
+    brand_model = serializers.CharField(source="frozen_brand_model", read_only=True)
+    product_display_name = serializers.CharField(read_only=True)
     product_sku = serializers.CharField(source="product.sku", read_only=True)
-    product_name = serializers.CharField(source="product.name", read_only=True)
+    product_name = serializers.CharField(source="frozen_product_name", read_only=True)
     base_uom_name = serializers.CharField(source="product.base_uom.name", read_only=True)
 
     class Meta:
@@ -276,6 +279,9 @@ class InboundOrderLineReadSerializer(serializers.ModelSerializer):
             "product_id",
             "product_sku",
             "product_name",
+            "product_spec",
+            "brand_model",
+            "product_display_name",
             "base_uom",
             "base_uom_name",
             "base_qty",
@@ -422,6 +428,9 @@ class InboundOrderReadSerializer(serializers.ModelSerializer):
 class InboundTaskLineSerializer(serializers.ModelSerializer):
     product_sku = serializers.CharField(source="product.sku", read_only=True)
     product_name = serializers.CharField(source="product.name", read_only=True)
+    brand_model = serializers.CharField(source="product.brand_model", read_only=True)
+    product_display_name = serializers.CharField(source="product.display_name", read_only=True)
+    product_spec = serializers.CharField(source="product.spec", read_only=True)
     from_location_code = serializers.CharField(source="from_location.code", read_only=True)
     to_location_code = serializers.CharField(source="to_location.code", read_only=True)
     qty_pending = serializers.SerializerMethodField()
@@ -435,6 +444,9 @@ class InboundTaskLineSerializer(serializers.ModelSerializer):
             "product_id",
             "product_sku",
             "product_name",
+            "brand_model",
+            "product_display_name",
+            "product_spec",
             "from_location_id",
             "from_location_code",
             "to_location_id",
