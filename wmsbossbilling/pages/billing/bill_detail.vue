@@ -16,6 +16,9 @@
     </view>
 
     <view v-if="loading" class="loading-banner">正在同步账单和明细...</view>
+    <view class="loading-banner">最后成功同步 {{ updatedAt || '等待同步' }} · 约 30 秒检查更新</view>
+    <view v-if="pending" class="loading-banner" @click="apply">账单有更新，点击查看最新内容</view>
+    <view v-if="error" class="loading-banner">同步失败，稍后自动重试。</view>
 
     <template v-else-if="bill">
       <view class="headline-grid">
@@ -141,11 +144,11 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import { api, buildQuery } from '@/utils/request'
 import { useAuth } from '@/store/auth'
-import { useLatestRequest } from '@/utils/use-latest-request'
+import { useLiveResource } from '@/utils/use-live-resource'
 import { asList, billStatusLabel, chargeTypeLabel, money, qty, sumAmounts } from '@/utils/billing'
 
 const auth = useAuth()
@@ -154,9 +157,16 @@ const ownerId = ref('')
 const warehouseId = ref('')
 const periodId = ref('')
 
-const bill = ref(null)
-const lines = ref([])
-const loading = ref(false)
+const { data: bill, pending, error, loading, updatedAt, refresh, apply } = useLiveResource(
+  () => api.billingBillDetail(billId.value, { owner: ownerId.value, warehouse: warehouseId.value }),
+  { key: () => JSON.stringify([auth.user?.id, billId.value]), enabled: () => !!billId.value && !!auth.access, hold: () => true })
+const lines = computed(() => asList(bill.value?.lines))
+watch(bill, payload => {
+  if (!payload) return
+  ownerId.value = ownerId.value || String(payload.owner || '')
+  warehouseId.value = warehouseId.value || String(payload.warehouse || '')
+  periodId.value = periodId.value || String(payload.period || '')
+})
 
 const draftDateFrom = ref('')
 const draftDateTo = ref('')
@@ -236,39 +246,8 @@ const groupedRows = computed(() => {
   return Array.from(groups.values()).sort((a, b) => b.total - a.total)
 })
 
-const requests = useLatestRequest()
-
 async function loadBill() {
-  const current = requests.begin()
-  if (!billId.value) {
-    uni.showToast({
-      title: '缺少账单编号',
-      icon: 'none',
-    })
-    return
-  }
-
-  loading.value = true
-  try {
-    const payload = await api.billingBillDetail(billId.value)
-    if (!current()) return
-    bill.value = payload || null
-    lines.value = asList(payload?.lines)
-    ownerId.value = ownerId.value || String(payload?.owner || '')
-    warehouseId.value = warehouseId.value || String(payload?.warehouse || '')
-    periodId.value = periodId.value || String(payload?.period || '')
-    applyFilters()
-  } catch (error) {
-    if (!current()) return
-    bill.value = null
-    lines.value = []
-    console.error('load billing bill detail failed:', error)
-  } finally {
-    if (current()) {
-      loading.value = false
-      uni.stopPullDownRefresh()
-    }
-  }
+  try { await refresh() } finally { uni.stopPullDownRefresh() }
 }
 
 function applyFilters() {
@@ -337,7 +316,6 @@ onLoad((query) => {
   ownerId.value = query?.owner ? String(query.owner) : ''
   warehouseId.value = query?.warehouse ? String(query.warehouse) : ''
   periodId.value = query?.period ? String(query.period) : ''
-  loadBill()
 })
 
 onPullDownRefresh(() => {

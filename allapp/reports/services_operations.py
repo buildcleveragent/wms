@@ -21,7 +21,7 @@ from django.db.models import (
     Value,
     When,
 )
-from django.db.models.functions import Abs, Cast, Coalesce, Collate, TruncDate
+from django.db.models.functions import Abs, Cast, Coalesce, Collate, Concat, NullIf, TruncDate
 from django.utils import timezone
 
 from allapp.accounts.access import AccessScope
@@ -83,8 +83,6 @@ class OperationFilters:
             raise ValueError("receive_source is only available for inbound metrics.")
         if self.end_date < self.start_date:
             raise ValueError("end_date must not be before start_date.")
-        if self.end_date - self.start_date > timedelta(days=366):
-            raise ValueError("The maximum date range is 367 days.")
         if self.metric_basis == "shipment" and self.direction != "outbound":
             raise ValueError("shipment basis is only available with direction=outbound.")
 
@@ -344,20 +342,26 @@ def _summary_for(direction: str, filters: OperationFilters, scope: AccessScope, 
     elif basis == "inventory":
         qs = _inventory_transactions(direction, filters, scope, user)
         values = qs.aggregate(lines=Count("id"), qty=Coalesce(Sum(Abs("qty_delta")), ZERO))
-        task_ids = set(qs.filter(src_model__iexact="WmsTask").values_list("src_id", flat=True))
-        tasks = WmsTask.objects.filter(id__in=task_ids).values("id", "source_model", "source_pk")
-        task_keys = {
-            (
-                (row["source_model"], row["source_pk"])
-                if row["source_pk"]
-                else ("WmsTask", str(row["id"]))
+        task = WmsTask.objects.filter(pk=OuterRef("src_id"))
+        keys = qs.annotate(
+            order_identity=Case(
+                When(
+                    src_model__iexact="WmsTask",
+                    then=Concat(
+                        Coalesce(Subquery(task.values("source_model")[:1]), Value("WmsTask")),
+                        Value(":"),
+                        Coalesce(
+                            NullIf(Subquery(task.values("source_pk")[:1]), Value("")),
+                            Cast("src_id", CharField()),
+                        ),
+                        output_field=CharField(),
+                    ),
+                ),
+                default=Concat("src_model", Value(":"), Cast("src_id", CharField())),
+                output_field=CharField(),
             )
-            for row in tasks
-        }
-        direct_keys = set(
-            qs.exclude(src_model__iexact="WmsTask").values_list("src_model", "src_id")
         )
-        values["orders"] = len(task_keys | direct_keys)
+        values["orders"] = keys.order_by().values("order_identity").distinct().count()
     elif basis == "shipment" and direction == "outbound":
         qs = _shipment_lines(filters, scope, user)
         values = qs.aggregate(
@@ -410,17 +414,21 @@ def _trend_for(
     return {row["day"]: Decimal(row["qty"] or 0) for row in rows}
 
 
-def build_operations_summary(*, user, filters: OperationFilters) -> dict:
+def build_operations_summary(*, user, filters: OperationFilters, include_trend=True) -> dict:
     filters.validate()
     scope = AccessScope.for_user(user)
     directions = ["inbound", "outbound"] if filters.direction == "all" else [filters.direction]
     summaries = {
         direction: _summary_for(direction, filters, scope, user) for direction in directions
     }
-    trends = {direction: _trend_for(direction, filters, scope, user) for direction in directions}
+    trends = (
+        {direction: _trend_for(direction, filters, scope, user) for direction in directions}
+        if include_trend
+        else {}
+    )
     rows = []
     current = filters.start_date
-    while current <= filters.end_date:
+    while include_trend and current <= filters.end_date:
         row = {"date": current.isoformat()}
         for direction in directions:
             row[f"{direction}_qty"] = _decimal_text(trends[direction].get(current, ZERO))

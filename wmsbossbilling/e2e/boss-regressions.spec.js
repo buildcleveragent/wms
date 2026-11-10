@@ -28,7 +28,7 @@ async function mockBoss(page, { scope = historical, canExport = true, respond } 
     } }))
     localStorage.setItem('boss_scope:991', JSON.stringify(scope))
   }, { scope, canExport })
-  await page.route('**/api/**', async route => {
+  await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const url = new URL(route.request().url())
     requests.push(url)
     const custom = await respond?.(url, route)
@@ -87,7 +87,7 @@ test('late success or failure cannot replace the selected cockpit tab', async ({
   await expect(page.getByText('正在加载...', { exact: true })).toHaveCount(0)
 })
 
-test('home ignores an old failed refresh after the latest one succeeds', async ({ page }) => {
+test('cockpit task and ranking panel ignores an old failed refresh after the latest one succeeds', async ({ page }) => {
   let count = 0
   const old = deferred(), arrived = deferred()
   await mockBoss(page, { respond: async url => {
@@ -96,25 +96,25 @@ test('home ignores an old failed refresh after the latest one succeeds', async (
       await old.promise
       return { status: 503, json: { detail: '旧请求失败' } }
     }
-    if (url.pathname.endsWith('/home/') && count > 2) return { json: { meta, summary: { sku_count: 222 } } }
+    if (url.pathname.endsWith('/home/') && count > 2) return { json: { meta, rankings: { revenue_contribution_by_currency: [{ currency: 'CNY', rows: [{ owner: 31, owner_name: '测试货主', total: '222.00' }] }] } } }
   } })
-  await open(page, 'home/index')
-  await expect(page.locator('.kpi-card').nth(1)).toContainText('12')
-  await page.getByText('刷新', { exact: true }).click()
+  await open(page, 'cockpit/index?tab=periods')
+  await expect(page.locator('.row-money').first()).toContainText('100')
+  await page.getByText('刷新任务和排行', { exact: true }).click()
   await arrived.promise
-  await page.getByText('刷新', { exact: true }).click()
-  await expect(page.locator('.kpi-card').nth(1)).toContainText('222')
+  await page.getByText('刷新任务和排行', { exact: true }).click()
+  await expect(page.locator('.row-money').first()).toContainText('222')
   const finished = page.waitForResponse(response => response.status() === 503)
   old.resolve()
   await finished
-  await expect(page.locator('.kpi-card').nth(1)).toContainText('222')
+  await expect(page.locator('.row-money').first()).toContainText('222')
   await expect(page.getByText('旧请求失败', { exact: true })).toHaveCount(0)
 })
 
 for (const warehouse of ['11', '']) {
-  test(`home owner drilldown and return preserve warehouse ${warehouse || 'ALL'} and dates`, async ({ page }) => {
+  test(`cockpit ranking owner drilldown and return preserve warehouse ${warehouse || 'ALL'} and dates`, async ({ page }) => {
     const { requests } = await mockBoss(page, { scope: { ...historical, warehouse } })
-    await open(page, 'home/index')
+    await open(page, 'cockpit/index?tab=periods')
     await page.locator('.row-title').filter({ hasText: '测试货主' }).click()
     await expect(page).toHaveURL(/owner_detail/)
     await expect.poll(() => requests.filter(url => url.pathname.endsWith('/accruals/')).length).toBe(1)

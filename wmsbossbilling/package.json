@@ -6,10 +6,14 @@
     "dev:h5": "CI=1 UNI_INPUT_DIR=$PWD uni -p h5 --host 127.0.0.1 --port 5176",
     "build:h5": "CI=1 UNI_INPUT_DIR=$PWD uni build -p h5",
     "build:app": "CI=1 UNI_INPUT_DIR=$PWD UNI_APP_PLATFORM=android uni build -p app && node scripts/verify-android-build.mjs",
+    "prepare:android-release": "node scripts/prepare-android-release.mjs --apply",
+    "verify:android-release": "node scripts/prepare-android-release.mjs --check",
+    "build:android-release": "npm run verify:android-release && npm run build:app",
     "build:mp-weixin": "CI=1 UNI_INPUT_DIR=$PWD uni build -p mp-weixin",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
-    "test:quality": "npm run test:unit && npm run build:h5 && npm run test:e2e",
+    "test:e2e:built": "BOSS_E2E_BUILT=1 playwright test",
+    "test:quality": "npm run test:unit && npm run build:h5 && npm run test:e2e:built",
     "test:release": "npm run test:quality && npm run build:app"
   },
   "dependencies": {

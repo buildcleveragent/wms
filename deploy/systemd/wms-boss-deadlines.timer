@@ -1,0 +1,13 @@
+# Deprecated: disable this timer; use compose boss-check-worker.
+[Unit]
+Description=Run Boss deadline checks every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+AccuracySec=1s
+Unit=wms-boss-deadlines.service
+
+[Install]
+WantedBy=timers.target
+

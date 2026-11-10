@@ -1,5 +1,6 @@
 {
   "pages": [
+    { "path": "pages/settings/refresh", "style": { "navigationBarTitleText": "刷新与检查设置" } },
     {
       "path": "pages/login",
       "style": {
@@ -12,6 +13,9 @@
         "navigationBarTitleText": "仓储经营分析中心"
       }
     },
+    { "path": "pages/activity/index", "style": { "navigationBarTitleText": "业务活动" } },
+    { "path": "pages/activity/detail", "style": { "navigationBarTitleText": "业务详情" } },
+    { "path": "pages/cockpit/details", "style": { "navigationBarTitleText": "经营明细" } },
     {
       "path": "pages/inventory/index",
       "style": {
@@ -60,14 +64,14 @@
         "navigationBarTitleText": "仓储经营分析中心 - 账单详情"
       }
     },
-	
+
 	{
 	  "path": "pages/inventory/detail",
 	  "style": {
 	    "navigationBarTitleText": "仓储经营分析中心 - 库存明细"
 	  }
 	}
-	
+
   ],
   "globalStyle": {
     "navigationBarTextStyle": "black",

@@ -39,13 +39,11 @@ from .boss_contract import (
     money_groups,
     normalize_currency,
     quantity_groups,
-    trend_granularity,
     warning,
 )
 from .product_display import product_display_fields
 from .services_operations import (
     OperationFilters,
-    build_operations_detail_rows,
     build_operations_summary,
 )
 
@@ -615,7 +613,9 @@ def build_boss_context_payload(*, user, warehouse_id: int | None = None):
             "date_from": today.replace(day=1),
             "date_to": today,
         },
-        "limits": {"max_range_days": 367},
+        "limits": {"max_range_days": None},
+        "business_today": today,
+        "business_timezone": str(timezone.get_current_timezone()),
         "meta": build_meta(scope=scope),
     }
 
@@ -658,20 +658,15 @@ def _build_scope_payload(
 
 def _task_progress_rows(task_qs, today: datetime.date):
     closed_statuses = [WmsTask.Status.COMPLETED, WmsTask.Status.CANCELLED]
-    labels = {
-        WmsTask.TaskType.RECEIVE: "收货",
-        WmsTask.TaskType.PICK: "拣货",
-        WmsTask.TaskType.REVIEW: "复核",
-    }
+    labels = dict(WmsTask.TaskType.choices)
     rows = []
-    for task_type in [
-        WmsTask.TaskType.RECEIVE,
-        WmsTask.TaskType.PICK,
-        WmsTask.TaskType.REVIEW,
-    ]:
+    for task_type in labels:
         type_qs = task_qs.filter(task_type=task_type)
         today_total = type_qs.filter(created_at__date=today).count()
         today_completed = type_qs.filter(
+            finished_at__date=today, status=WmsTask.Status.COMPLETED
+        ).count()
+        created_completed = type_qs.filter(
             created_at__date=today, status=WmsTask.Status.COMPLETED
         ).count()
         backlog = type_qs.exclude(status__in=closed_statuses).count()
@@ -681,109 +676,12 @@ def _task_progress_rows(task_qs, today: datetime.date):
                 "label": labels[task_type],
                 "today_total": today_total,
                 "today_completed": today_completed,
-                "completion_rate": _percent(today_completed, today_total),
+                "completion_rate": _percent(created_completed, today_total),
+                "created_completed": created_completed,
                 "backlog": backlog,
             }
         )
     return rows
-
-
-def _build_trend_payload(
-    *,
-    inbound_qs,
-    outbound_qs,
-    accrual_qs,
-    start_date: datetime.date,
-    end_date: datetime.date,
-):
-    inbound_map = {
-        row["biz_date"]: row["count"]
-        for row in (
-            inbound_qs.filter(biz_date__range=(start_date, end_date))
-            .values("biz_date")
-            .annotate(count=Count("id"))
-        )
-    }
-    outbound_map = {
-        row["biz_date"]: row["count"]
-        for row in (
-            outbound_qs.filter(biz_date__range=(start_date, end_date))
-            .values("biz_date")
-            .annotate(count=Count("id"))
-        )
-    }
-    accrual_map = defaultdict(dict)
-    for row in (
-        accrual_qs.filter(service_date__range=(start_date, end_date))
-        .values("service_date", "currency")
-        .annotate(subtotal=Sum("amount"), tax_total=Sum("tax_amount"))
-    ):
-        subtotal = _decimal_or_zero(row["subtotal"])
-        tax_total = _decimal_or_zero(row["tax_total"])
-        currency = normalize_currency(row["currency"])
-        accrual_map[row["service_date"]][currency] = (
-            accrual_map[row["service_date"]].get(currency, ZERO_MONEY) + subtotal + tax_total
-        )
-
-    rows = []
-    cursor = start_date
-    while cursor <= end_date:
-        rows.append(
-            {
-                "date": cursor,
-                "inbound_orders": inbound_map.get(cursor, 0),
-                "outbound_orders": outbound_map.get(cursor, 0),
-                "accruals_by_currency": [
-                    {"currency": currency, "total": total}
-                    for currency, total in sorted(accrual_map.get(cursor, {}).items())
-                ],
-            }
-        )
-        cursor += datetime.timedelta(days=1)
-    return rows
-
-
-def _aggregate_trend_rows(rows, granularity):
-    if granularity == "day":
-        return rows
-    buckets = {}
-    for row in rows:
-        day = row["date"]
-        bucket_date = (
-            day - datetime.timedelta(days=day.weekday())
-            if granularity == "week"
-            else day.replace(day=1)
-        )
-        bucket = buckets.setdefault(
-            bucket_date,
-            {
-                "date": bucket_date,
-                "inbound_orders": 0,
-                "outbound_orders": 0,
-                "inbound_qty": Decimal("0"),
-                "outbound_qty": Decimal("0"),
-                "metric_basis": "actual",
-                "currency_totals": defaultdict(lambda: ZERO_MONEY),
-            },
-        )
-        bucket["inbound_orders"] += row.get("inbound_orders", 0)
-        bucket["outbound_orders"] += row.get("outbound_orders", 0)
-        bucket["inbound_qty"] += Decimal(str(row.get("inbound_qty") or 0))
-        bucket["outbound_qty"] += Decimal(str(row.get("outbound_qty") or 0))
-        for money_row in row.get("accruals_by_currency", []):
-            bucket["currency_totals"][money_row["currency"]] += Decimal(
-                str(money_row.get("total") or 0)
-            )
-    result = []
-    for bucket_date in sorted(buckets):
-        bucket = buckets[bucket_date]
-        currency_totals = bucket.pop("currency_totals")
-        bucket["accruals_by_currency"] = [
-            {"currency": currency, "total": total}
-            for currency, total in sorted(currency_totals.items())
-        ]
-        result.append(bucket)
-    return result
 
 
 def _build_alert_counts(
@@ -848,7 +746,6 @@ def build_boss_home_payload(
     today = _current_date(now)
     date_to = date_to or today
     date_from = date_from or date_to.replace(day=1)
-    trend_start = date_from
 
     resolved_scope = AccessScope.for_user(user)
     default_warehouse_id = (
@@ -860,6 +757,7 @@ def build_boss_home_payload(
 
     today_operations = build_operations_summary(
         user=user,
+        include_trend=False,
         filters=OperationFilters(
             start_date=date_from,
             end_date=date_to,
@@ -868,36 +766,6 @@ def build_boss_home_payload(
             owner_id=owner_id,
             warehouse_id=warehouse_id,
         ),
-    )
-    trend_filters = OperationFilters(
-        start_date=trend_start,
-        end_date=date_to,
-        direction="all",
-        metric_basis="actual",
-        owner_id=owner_id,
-        warehouse_id=warehouse_id,
-    )
-    trend_operations = build_operations_summary(user=user, filters=trend_filters)
-    trend_details = build_operations_detail_rows(user=user, filters=trend_filters)
-    daily_order_keys = defaultdict(lambda: {"inbound": set(), "outbound": set()})
-    for item in trend_details:
-        event_at = item.get("event_at") or ""
-        day = event_at[:10]
-        if not day:
-            continue
-        order_key = item.get("order_id") or item.get("task_id")
-        if order_key:
-            daily_order_keys[day][item["direction"]].add(order_key)
-
-    inbound_qs = _apply_scope_filter(
-        scope_queryset_for_user(InboundOrder.objects.select_related("owner", "warehouse"), user),
-        owner_id=owner_id,
-        warehouse_id=warehouse_id,
-    )
-    outbound_qs = _apply_scope_filter(
-        scope_queryset_for_user(OutboundOrder.objects.select_related("owner", "warehouse"), user),
-        owner_id=owner_id,
-        warehouse_id=warehouse_id,
     )
     task_qs = _apply_scope_filter(
         scope_queryset_for_user(WmsTask.objects.select_related("owner", "warehouse"), user),
@@ -1130,25 +998,26 @@ def build_boss_home_payload(
         "open_alert_count": sum(alert_counts.values()),
     }
 
-    trend_rows = _build_trend_payload(
-        inbound_qs=inbound_qs,
-        outbound_qs=outbound_qs,
-        accrual_qs=ledger_accrual_qs,
-        start_date=trend_start,
-        end_date=date_to,
-    )
-    actual_trend = {row["date"]: row for row in trend_operations["trend"]}
-    for row in trend_rows:
-        day_key = row["date"].isoformat()
-        operation_row = actual_trend.get(day_key, {})
-        row["inbound_orders"] = len(daily_order_keys[day_key]["inbound"])
-        row["outbound_orders"] = len(daily_order_keys[day_key]["outbound"])
-        row["inbound_qty"] = operation_row.get("inbound_qty", "0")
-        row["outbound_qty"] = operation_row.get("outbound_qty", "0")
-        row["metric_basis"] = "actual"
+    from .boss_activity import ActivityScope
+    from .boss_periods import period_page
 
-    granularity = trend_granularity(date_from, date_to)
-    trend_rows = _aggregate_trend_rows(trend_rows, granularity)
+    trend_page = period_page(ActivityScope(user, owner_id, warehouse_id), date_from, date_to)
+    granularity = trend_page["granularity"]
+    trend_rows = [
+        {
+            "date": row["date"],
+            "date_from": row["date_from"],
+            "date_to": row["date_to"],
+            "inbound_orders": row["metrics"]["inbound"]["count"],
+            "outbound_orders": row["metrics"]["outbound"]["count"],
+            "metric_basis": "actual",
+            "accruals_by_currency": [
+                {"currency": item["currency"], "total": item.get("total", item["amount"])}
+                for item in row["metrics"]["accruals"]["money"]
+            ],
+        }
+        for row in trend_page["results"]
+    ]
 
     payload = {
         "scope": _build_scope_payload(
@@ -1167,6 +1036,7 @@ def build_boss_home_payload(
             "inventory_top_owners": inventory_top_owners,
         },
         "trend_7d": trend_rows,
+        "trend_pagination": {key: trend_page[key] for key in ("count", "page", "page_size")},
         "granularity": granularity,
         "attention_items": attention_items[:5],
     }

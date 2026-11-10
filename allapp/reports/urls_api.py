@@ -9,18 +9,30 @@ from .views_boss import (
     BossInventoryApi,
     BossInventoryDetailListApi,
 )
-from .views_pda import PdaThroughputApi, PdaThroughputDetailApi
-from .views_operations import (
-    OperationsDetailsApi,
-    OperationsExportApi,
-    OperationsSummaryApi,
+from .views_boss_activity import (
+    BossActivitiesApi,
+    BossActivityDetailApi,
+    BossTaskDetailApi,
+    BossTasksApi,
+)
+from .views_boss_automation import BossAutomationSettingsApi
+from .views_boss_focus import (
+    BossAttentionApi,
+    BossDigestApi,
+    BossDigestDetailsApi,
+    BossPeriodDetailsApi,
+    BossPeriodsApi,
+    BossPeriodSummaryApi,
+    BossSlaDetailsApi,
+    BossTodayApi,
+    BossTodayDetailsApi,
 )
 from .views_boss_p1 import (
     AlertCaseActionApi,
     BossAlertCaseDetailApi,
     BossAlertCasesApi,
-    BossCollectionHistoryApi,
     BossCockpitExportApi,
+    BossCollectionHistoryApi,
     BossInventoryRiskApi,
     BossInventoryRiskDetailsApi,
     BossOperationsApi,
@@ -37,8 +49,28 @@ from .views_boss_p1 import (
     BossReviewSnapshotRevokeApi,
     OperatingTargetViewSet,
 )
+from .views_operations import (
+    OperationsDetailsApi,
+    OperationsExportApi,
+    OperationsSummaryApi,
+)
+from .views_pda import PdaThroughputApi, PdaThroughputDetailApi
 
 urlpatterns = [
+    path("boss/automation-settings/", BossAutomationSettingsApi.as_view()),
+    path("boss/today/", BossTodayApi.as_view()),
+    path("boss/today/details/", BossTodayDetailsApi.as_view()),
+    path("boss/sla/details/", BossSlaDetailsApi.as_view()),
+    path("boss/attention/", BossAttentionApi.as_view()),
+    path("boss/digest/", BossDigestApi.as_view()),
+    path("boss/digest/details/", BossDigestDetailsApi.as_view()),
+    path("boss/periods/", BossPeriodsApi.as_view()),
+    path("boss/periods/summary/", BossPeriodSummaryApi.as_view()),
+    path("boss/periods/details/", BossPeriodDetailsApi.as_view()),
+    path("boss/activities/", BossActivitiesApi.as_view()),
+    path("boss/activities/<str:kind>/<int:pk>/", BossActivityDetailApi.as_view()),
+    path("boss/tasks/", BossTasksApi.as_view()),
+    path("boss/tasks/<int:pk>/", BossTaskDetailApi.as_view()),
     # The documented v2 contract is slashless. Keep slash aliases for existing
     # mini-program clients while they migrate; POST exports must not depend on
     # CommonMiddleware's unsafe body-dropping redirect.
@@ -91,16 +123,12 @@ urlpatterns = [
     path("boss/alert-cases/", BossAlertCasesApi.as_view()),
     path("boss/alert-cases/<int:pk>/", BossAlertCaseDetailApi.as_view()),
     path("boss/review-snapshots/", BossReviewSnapshotCreateApi.as_view()),
-    path(
-        "boss/review-snapshots/<str:share_code>/", BossReviewSnapshotDetailApi.as_view()
-    ),
+    path("boss/review-snapshots/<str:share_code>/", BossReviewSnapshotDetailApi.as_view()),
     path(
         "boss/review-snapshots/<str:share_code>/export/",
         BossReviewSnapshotExportApi.as_view(),
     ),
-    path(
-        "boss/review-snapshots/<int:pk>/revoke/", BossReviewSnapshotRevokeApi.as_view()
-    ),
+    path("boss/review-snapshots/<int:pk>/revoke/", BossReviewSnapshotRevokeApi.as_view()),
     path("alert-cases/<int:pk>/<str:action>/", AlertCaseActionApi.as_view()),
     path(
         "operating-targets/",

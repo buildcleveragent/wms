@@ -27,6 +27,7 @@ db.sqlite3
 .env.local
 .env.production
 .env.development
+release-identity.local.json
 
 # Local auth / secrets
 auth.json

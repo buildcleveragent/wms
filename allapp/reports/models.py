@@ -149,7 +149,9 @@ class CustomerDim(CreatedMixin, Scd2Mixin):
         verbose_name = "客户维(SCD2)"
         verbose_name_plural = "客户维(SCD2)"
         constraints = [
-            UniqueConstraint(fields=["owner_id", "customer_id", "valid_from"], name="uq_cust_owner_scd2"),
+            UniqueConstraint(
+                fields=["owner_id", "customer_id", "valid_from"], name="uq_cust_owner_scd2"
+            ),
         ]
         indexes = [
             models.Index(fields=["owner_id", "is_current"], name="idx_cust_cur"),
@@ -970,3 +972,24 @@ class TaskStateSnapshotDaily(models.Model):
                 name="ix_task_snap_scope",
             )
         ]
+
+
+class BossReadProgress(models.Model):
+    """Only a user's confirmed digest boundary; never changes business state."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    scope_key = models.CharField(max_length=64)
+    confirmed_at = models.DateTimeField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [UniqueConstraint(fields=["user", "scope_key"], name="ux_boss_read_scope")]
+
+
+class BossCheckState(models.Model):
+    """Rule success timestamps plus reserved scheduler heartbeat/completion state."""
+
+    key = models.CharField(max_length=60, unique=True)
+    checked_at = models.DateTimeField(null=True)
+    attempted_at = models.DateTimeField(null=True)
+    failed = models.BooleanField(default=False)

@@ -680,8 +680,10 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
         }
         for row in accruals.values("currency").annotate(subtotal=Sum("amount")).order_by("currency")
     ]
-    prior_to = date_from - datetime.timedelta(days=1)
-    prior_from = prior_to - (date_to - date_from)
+    from .boss_periods import comparison_ranges
+
+    prior_range = comparison_ranges(date_from, date_to)["previous"]
+    prior_from, prior_to = prior_range or (date_from, date_from)
     prior_qs = _scoped(
         user,
         financial_ledger_accruals(
@@ -690,6 +692,8 @@ def build_performance(*, user, owner_id, warehouse_id, date_from, date_to, scope
         owner_id,
         warehouse_id,
     )
+    if prior_range is None:
+        prior_qs = prior_qs.none()
     prior = {
         normalize_currency(row["currency"]): row["subtotal"] or ZERO
         for row in prior_qs.values("currency").annotate(subtotal=Sum("amount"))

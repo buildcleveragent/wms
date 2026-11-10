@@ -40,9 +40,15 @@ Android 构建读取 `config/android/.env.production`，开发读取同目录 `.
 其清单与资源接入方式参见 [DCloud 文档](https://uniapp.dcloud.io/tutorial/app-sec-android#未配置网络安全属性漏洞)。
 H5 和小程序读取项目根目录环境文件；shell 中的同名变量优先。
 
+HBuilder 运行 H5 时，浏览器仍请求同源 `/api/...`。开发模式通过根目录
+`.env.development` 的 `WMS_DEV_API_TARGET` 将这些请求代理到 Django，避免请求落到
+HBuilder 的前端端口并返回 404。修改该配置后需要停止并重新运行 H5。
+
 本次更新与验收范围为 App、H5 和相关后端接口，小程序暂不验收。
 `npm run test:release` 执行前端单元测试、H5 构建与浏览器回归，再构建并校验 Android 原生资源；后端 MySQL 测试单独执行。
 Android 原生安装包仍需通过 HBuilderX 签名打包并做真机验证。
+覆盖旧版的版本预检、云端证书复用和真机验收步骤见
+[Android 内部测试包说明](docs/android-internal-release.md)。
 以后切回 HTTPS 时，修改服务地址并设 `VITE_ALLOW_HTTP_API=false`，重新构建即可撤销 Android 的 HTTP 主机许可。
 
 ## P1 经营驾驶舱
@@ -75,3 +81,30 @@ FIFO 上线必须先在全仓范围执行预览与 `--commit`，确认成本层�
 [商品资料上线说明](../docs/product-identity-rollout.md)。应先完成后端结构与兼容接口更新，
 确认所有服务实例更新后补录快照；核对完成后才能整理商品名称并更新客户端。
 已有单据快照和例会冻结快照不重新生成。
+
+## 首页重要动态与明细
+
+首页筛选下方的“今日重要动态”使用今天的业务时间，只共享仓库、货主筛选，不受经营汇总历史日期影响。首页最多 10 条；“业务活动”页支持日期、类型、经办人编号、单号查询，每次加载 20 条。点经办人可直接筛选。
+
+- 普通出库只展示成功正式提交；草稿不展示，提交不表示已经扣库存。
+- POS 结账、部分退货、作废分别展示一条主动态，关联的任务和流水收进详情；兼容旧版直接扣库存和任务过账。多货主查询只展示可见商品及其金额，无法可靠拆分的整单收退款不展示。
+- 库存只展示已过账流水，按商品与单位分别列示；移位显示配对移出、移入。当前同库位批次库存与本次增减分开，不推算历史余额；缺失历史日志会提示。
+- 全部活动还包括任务领取、状态变化及计费事件；扫码记录在任务详情中分页。运营、应收、收入保障、FIFO 风险、异常卡片提供明细入口。
+- 首页账号菜单提供“刷新与检查设置”，页面自动刷新和后台自动检查均默认关闭，间隔支持 1～1440 整数分钟。页面设置按设备和账号保存，后台设置仅超级用户可修改并全系统生效。关闭页面自动刷新后仍首次加载、响应筛选和手动刷新；开启后前台按所选间隔查询活动及详情，隐藏时暂停、恢复后立即刷新，失败按所选间隔的 2 倍、4 倍退避。阅读历史及详情时提示“有更新”，点击后才替换内容。部署后台常驻进程及状态说明见 `docs/boss-focus-and-periods.md`。
+- SLA 显示当前授权和日期范围内事实记录的最近加工时间；履约周期未保存加工时间时显示未知，不借用其他日期的 ETL 完成时间。接口查询时间不代表报表加工时间。超时与计费异常由 `boss_run_checks` 按全局开关和分钟间隔检查；页面轮询只读取结果。
+
+新增只读接口：
+
+- `GET /api/reports/boss/activities/`：`date_from/date_to`、`warehouse/owner`、`priority=important|all`、`category`、`actor`、`search`、`limit`（默认 20，上限 100）、`cursor`。
+- `GET /api/reports/boss/activities/{kind}/{id}/`：各区块使用 `{section}_page` 和 `page_size`；返回安全投影及历史完整性提示。
+- `GET /api/reports/boss/tasks/`：`mode=created|completed|backlog`、`task_type`、`actor`、`search`、范围及分页参数。
+- `GET /api/reports/boss/tasks/{id}/`：任务商品、作业历史、扫码、领取和真实过账流水。
+- 收入保障 section 接口增加 `details=1` 进入真实分页；关账阻断按账期、阻断类型下钻。原有响应保持兼容。催收历史及异常历史传 `page` 后使用数据库分页。
+
+活动标识为来源类型与记录 ID 的组合；签名游标绑定用户、授权范围及筛选，连续翻页不依赖偏移量。查询不写动态。提交入口补记的日志与业务提交同事务；本次不新增表或迁移，也不补造旧记录。
+
+发布顺序：先部署兼容后端接口，再发布 H5，最后使用现有安装身份和证书打包 Android。保持既有 HTTP 例外和 FRP 链路。`build:app` 只生成 App 资源，签名 APK、远程浏览器生产访问、Wi-Fi／移动网络及 Android 真机仍需部署后验收。
+
+针对性验证：在仓库根目录使用 `.env.test.local` 的 MySQL `wms_db_test`，运行 `APP_ENV=test .venv/bin/pytest --reuse-db allapp/reports/test_boss_activity.py`；前端目录运行 `npm run test:unit`、`npm run build:h5`、`npm run test:e2e:built`、`npm run build:app`。不要为本次无迁移更新重建业务库或测试库。
+
+重点关注、离开期间摘要、超时检查部署及不限天数周期统计见 [Boss 重点关注与周期统计](docs/boss-focus-and-periods.md)。本次不包含主动推送。

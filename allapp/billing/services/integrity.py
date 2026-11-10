@@ -32,7 +32,7 @@ class BillingCloseBlocked(ValueError):
         super().__init__("Billing period is not ready to close or invoice.")
 
 
-def _blocker(code, queryset, fields, detail):
+def _blocker(code, queryset, fields, detail, *, sample_offset=0, sample_limit=10):
     count = queryset.count()
     if not count:
         return None
@@ -40,11 +40,25 @@ def _blocker(code, queryset, fields, detail):
         "code": code,
         "count": count,
         "detail": detail,
-        "samples": list(queryset.values(*fields)[:10]),
+        "samples": list(
+            queryset.order_by("id").values(*fields)[sample_offset : sample_offset + sample_limit]
+        ),
     }
 
 
-def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_invoice=False):
+def build_close_readiness(
+    *,
+    owner_id,
+    warehouse_id,
+    start_date,
+    end_date,
+    for_invoice=False,
+    sample_offset=0,
+    sample_limit=10,
+):
+    from functools import partial
+
+    blocker = partial(_blocker, sample_offset=sample_offset, sample_limit=sample_limit)
     event_scope = BillingEvent.objects.filter(
         owner_id=owner_id,
         warehouse_id=warehouse_id,
@@ -61,7 +75,7 @@ def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_i
         service_date__range=(start_date, end_date),
     )
     blockers = [
-        _blocker(
+        blocker(
             "BILLING_EVENT_PRICING_INCOMPLETE",
             event_scope.filter(pricing_status__in=[PricingStatus.PENDING, PricingStatus.UNPRICED]),
             (
@@ -74,7 +88,7 @@ def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_i
             ),
             "存在待处理或未定价计费事件。",
         ),
-        _blocker(
+        blocker(
             "BILLING_EVENT_ACCRUAL_MISSING",
             event_scope.filter(pricing_status=PricingStatus.ACCRUED).exclude(
                 billingaccrual__status__in=[
@@ -86,7 +100,7 @@ def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_i
             ("id", "service_date", "charge_type", "calc_method"),
             "已计费事件没有有效非 VOID 应计。",
         ),
-        _blocker(
+        blocker(
             "BILLING_NO_CHARGE_EVIDENCE_MISSING",
             event_scope.filter(pricing_status=PricingStatus.NO_CHARGE).filter(
                 Q(pricing_rule__isnull=True) | Q(pricing_reason="") | Q(pricing_detail={})
@@ -94,7 +108,7 @@ def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_i
             ("id", "service_date", "charge_type", "calc_method"),
             "零费用事件缺少规则、原因或计价明细。",
         ),
-        _blocker(
+        blocker(
             "APPROXIMATE_BILLING_DATA",
             accrual_scope.filter(source_quality=SourceQuality.APPROXIMATE).exclude(
                 status=AccrualStatus.VOID
@@ -102,13 +116,13 @@ def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_i
             ("id", "service_date", "charge_type", "source_note"),
             "存在近似来源应计，必须先使用可信快照重建。",
         ),
-        _blocker(
+        blocker(
             "APPROXIMATE_BILLING_METRIC",
             metric_scope.filter(source_quality=SourceQuality.APPROXIMATE),
             ("id", "service_date", "metric_type", "source"),
             "存在近似来源计费指标。",
         ),
-        _blocker(
+        blocker(
             "LOCKED_ACCRUAL_WITHOUT_PERIOD",
             accrual_scope.filter(status=AccrualStatus.LOCKED, period__isnull=True),
             ("id", "owner_id", "warehouse_id", "service_date"),
@@ -123,7 +137,7 @@ def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_i
     ).filter(Q(effective_to__isnull=True) | Q(effective_to__gte=start_date))
     missing_task_samples = []
     missing_task_count = 0
-    for contract in contracts.filter(source_type="TASK"):
+    for contract in contracts.filter(source_type="TASK").order_by("id"):
         task_scope = WmsTask.objects.filter(
             owner_id=owner_id,
             warehouse_id=warehouse_id,
@@ -137,12 +151,14 @@ def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_i
             billingevent__charge_type=contract.charge_type,
             billingevent__calc_method=contract.calc_method,
         )
+        prior_count = missing_task_count
         missing_task_count += task_scope.count()
-        if len(missing_task_samples) < 10:
+        if missing_task_count > sample_offset and len(missing_task_samples) < sample_limit:
+            offset = max(0, sample_offset - prior_count)
             missing_task_samples.extend(
                 list(
-                    task_scope.values("id", "task_no", "task_type", "posted_at")[
-                        : 10 - len(missing_task_samples)
+                    task_scope.order_by("id").values("id", "task_no", "task_type", "posted_at")[
+                        offset : offset + sample_limit - len(missing_task_samples)
                     ]
                 )
             )
@@ -163,7 +179,7 @@ def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_i
     }
     missing_metric_count = 0
     missing_metric_samples = []
-    for contract in contracts.filter(source_type="DAILY_METRIC"):
+    for contract in contracts.filter(source_type="DAILY_METRIC").order_by("id"):
         metric_type = metric_map.get(contract.calc_method)
         if not metric_type:
             continue
@@ -180,7 +196,10 @@ def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_i
         while cursor <= range_end:
             if cursor not in existing_dates:
                 missing_metric_count += 1
-                if len(missing_metric_samples) < 10:
+                if (
+                    missing_metric_count > sample_offset
+                    and len(missing_metric_samples) < sample_limit
+                ):
                     missing_metric_samples.append(
                         {"service_date": cursor, "metric_type": metric_type}
                     )
@@ -189,12 +208,14 @@ def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_i
             billing_events__charge_type=contract.charge_type,
             billing_events__calc_method=contract.calc_method,
         )
+        prior_count = missing_metric_count
         missing_metric_count += no_event.count()
-        if len(missing_metric_samples) < 10:
+        if missing_metric_count > sample_offset and len(missing_metric_samples) < sample_limit:
+            offset = max(0, sample_offset - prior_count)
             missing_metric_samples.extend(
                 list(
-                    no_event.values("id", "service_date", "metric_type")[
-                        : 10 - len(missing_metric_samples)
+                    no_event.order_by("id").values("id", "service_date", "metric_type")[
+                        offset : offset + sample_limit - len(missing_metric_samples)
                     ]
                 )
             )
@@ -209,7 +230,7 @@ def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_i
         )
     if for_invoice:
         blockers.append(
-            _blocker(
+            blocker(
                 "OPEN_ACCRUAL_IN_PERIOD_RANGE",
                 accrual_scope.filter(status=AccrualStatus.OPEN, period__isnull=True),
                 ("id", "service_date", "charge_type", "amount"),
@@ -224,7 +245,7 @@ def build_close_readiness(*, owner_id, warehouse_id, start_date, end_date, for_i
         ).first()
         if period and period.closed_at:
             blockers.append(
-                _blocker(
+                blocker(
                     "LATE_ARRIVING_BILLING_EVENT",
                     event_scope.filter(created_at__gt=period.closed_at),
                     ("id", "service_date", "charge_type", "created_at"),

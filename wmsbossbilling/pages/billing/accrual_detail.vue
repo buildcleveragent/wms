@@ -16,6 +16,9 @@
     </view>
 
     <view v-if="loading" class="loading-banner">正在同步收费记录详情...</view>
+    <view class="loading-banner">最后成功同步 {{ updatedAt || '等待同步' }} · 约 30 秒检查更新</view>
+    <view v-if="pending" class="loading-banner" @click="apply">收费记录有更新，点击查看最新内容</view>
+    <view v-if="error" class="loading-banner">同步失败，稍后自动重试。</view>
 
     <template v-else-if="detail">
       <view class="headline-grid">
@@ -105,7 +108,7 @@ import { ref } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import { api, buildQuery } from '@/utils/request'
 import { useAuth } from '@/store/auth'
-import { useLatestRequest } from '@/utils/use-latest-request'
+import { useLiveResource } from '@/utils/use-live-resource'
 import { accrualStatusLabel, billStatusLabel, chargeTypeLabel, money, qty } from '@/utils/billing'
 
 const auth = useAuth()
@@ -115,36 +118,12 @@ const warehouseId = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
 
-const detail = ref(null)
-const loading = ref(false)
-
-const requests = useLatestRequest()
+const { data: detail, pending, error, loading, updatedAt, refresh, apply } = useLiveResource(
+  () => api.billingAccrualDetail(accrualId.value, { owner: ownerId.value, warehouse: warehouseId.value }),
+  { key: () => JSON.stringify([auth.user?.id, accrualId.value]), enabled: () => !!accrualId.value && !!auth.access, hold: () => true })
 
 async function loadDetail() {
-  const current = requests.begin()
-  if (!accrualId.value) {
-    uni.showToast({
-      title: '缺少收费记录编号',
-      icon: 'none',
-    })
-    return
-  }
-
-  loading.value = true
-  try {
-    const result = await api.billingAccrualDetail(accrualId.value)
-    if (!current()) return
-    detail.value = result
-  } catch (error) {
-    if (!current()) return
-    detail.value = null
-    console.error('load billing accrual detail failed:', error)
-  } finally {
-    if (current()) {
-      loading.value = false
-      uni.stopPullDownRefresh()
-    }
-  }
+  try { await refresh() } finally { uni.stopPullDownRefresh() }
 }
 
 function openBillDetail() {
@@ -198,7 +177,6 @@ onLoad((query) => {
   warehouseId.value = query?.warehouse ? String(query.warehouse) : ''
   dateFrom.value = query?.date_from ? String(query.date_from) : ''
   dateTo.value = query?.date_to ? String(query.date_to) : ''
-  loadDetail()
 })
 
 onPullDownRefresh(() => {

@@ -38,6 +38,20 @@ services:
     command: /app/docker/start-scheduler.sh
     restart: unless-stopped
 
+  boss-check-worker:
+    <<: *wms-service
+    command: python manage.py boss_run_checks
+    restart: unless-stopped
+    mem_limit: ${WMS_BOSS_CHECK_MEMORY_LIMIT:-512m}
+    cpus: ${WMS_BOSS_CHECK_CPUS:-0.5}
+    pids_limit: 64
+
+  boss-deadlines:
+    <<: *wms-service
+    command: python manage.py check_boss_deadlines
+    restart: "no"
+    profiles: [oneshot]
+
   sale-mini-expire:
     <<: *wms-service
     command: python manage.py expire_sale_mini_orders --limit 200

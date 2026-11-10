@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { useRefreshPreferences } from './refreshPreferences'
 import {
   api,
   clearToken,
@@ -29,6 +30,7 @@ export const useAuth = defineStore('auth', {
       this.user = getStoredUser()
       this.access = getStoredToken()
       this.refresh = getStoredRefreshToken()
+      useRefreshPreferences().restore(this.user)
     },
     load() {
       this.restore()
@@ -55,6 +57,7 @@ export const useAuth = defineStore('auth', {
 
       this.user = profileUser || fallbackUser(username)
       setStoredUser(this.user)
+      useRefreshPreferences().restore(this.user)
       return this.user
     },
     async logout() {
@@ -65,6 +68,7 @@ export const useAuth = defineStore('auth', {
         // Local cleanup is mandatory even when the network is unavailable.
       }
       this.user = null
+      useRefreshPreferences().restore(null)
       this.access = ''
       this.refresh = ''
       clearToken()

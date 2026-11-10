@@ -30,7 +30,7 @@ def parse_boss_date_range(raw_from=None, raw_to=None, *, today=None):
             result = parse_date(value)
         except ValueError:
             result = None
-        if result is None:
+        if result is None or result.year < 1000:
             raise ValueError(f"{name} must be YYYY-MM-DD.")
         return result
 
@@ -40,8 +40,6 @@ def parse_boss_date_range(raw_from=None, raw_to=None, *, today=None):
         raise ValueError("date_from cannot be after date_to.")
     if date_to > today:
         raise ValueError("date_to cannot be after today.")
-    if (date_to - date_from).days > 366:
-        raise ValueError("date range cannot exceed 367 days.")
     return date_from, date_to
 
 
@@ -146,4 +144,4 @@ def trend_granularity(date_from, date_to) -> str:
         return "day"
     if days <= 180:
         return "week"
-    return "month"
+    return "month" if days <= 1096 else "year"

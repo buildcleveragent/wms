@@ -7,10 +7,12 @@
         <view v-for="item in tabs" :key="item.key" class="tab" :class="{ active: tab === item.key }" @click="selectTab(item.key)">{{ item.label }}</view>
       </view>
     </scroll-view>
+    <template v-if="tab === 'periods'"><BossPeriodPanel :ready="contextReady && !contextLoading" :refresh-key="periodRefreshKey" /><BossHomeReports :ready="contextReady && !contextLoading" :refresh-key="periodRefreshKey" /></template>
+    <template v-else>
     <boss-data-status :meta="payload?.meta" :error="error" />
     <button v-if="error" class="retry" size="mini" :disabled="loading || contextLoading" @click="retry">重试</button>
     <view class="toolbar">
-      <text class="asof">数据截至 {{ payload?.meta?.generated_at || '-' }}</text>
+      <text class="asof">查询时间 {{ payload?.meta?.generated_at || '-' }}</text>
       <button v-if="auth.user?.capabilities?.can_create_business_review_snapshot" :disabled="!actionsReady" size="mini" class="snapshot" @click="createSnapshot">创建例会快照</button>
       <button v-if="canExport && tab === 'operations'" :disabled="!actionsReady" size="mini" class="snapshot" @click="exportOperations">导出运营明细</button>
       <button v-else-if="canExport && tab !== 'cases'" :disabled="!actionsReady" size="mini" class="snapshot" @click="exportCurrent">导出当前报表</button>
@@ -20,13 +22,14 @@
     <template v-else-if="payload && !error && payload.meta?.data_status !== 'UNAVAILABLE'">
     <template v-if="tab === 'assurance'">
       <view class="grid">
-        <view v-for="(section, key) in payload?.sections || {}" :key="key" class="card">
+        <view v-for="(section, key) in payload?.sections || {}" :key="key" class="card" @click="openDetails('assurance', { section: key })">
           <text class="label">{{ assuranceLabels[key] || key }}</text>
           <text class="value">{{ qty(section.count) }}</text>
         </view>
       </view>
     </template>
     <template v-else-if="tab === 'receivables'">
+      <button size="mini" @click="openDetails('receivables')">查看应收账单与回款记录</button>
       <view v-for="row in payload?.outstanding_by_currency || []" :key="row.currency" class="wide-card">
         <text class="label">未收余额 · {{ row.currency }}</text>
         <text class="money">{{ money(row.total, row.currency) }}</text>
@@ -40,7 +43,7 @@
     </template>
     <template v-else-if="tab === 'operations'">
       <view class="grid">
-        <view v-for="(row, direction) in payload?.operations?.summary || {}" :key="direction" class="card">
+        <view v-for="(row, direction) in payload?.operations?.summary || {}" :key="direction" class="card" @click="openDetails('operations', { direction })">
           <text class="label">{{ direction === 'inbound' ? '入库' : '出库' }}实际</text>
           <text class="value">{{ qty(row.orders) }} 单</text>
           <text class="minor">{{ qty(row.lines) }} 行（数量请在按基本单位分组的明细中查看）</text>
@@ -48,13 +51,15 @@
       </view>
       <view class="wide-card">
         <text class="label">订单级 SLA / OTIF</text>
-        <view class="line"><text>准时率</text><text>{{ rate(payload?.sla?.on_time_rate) }}</text></view>
-        <view class="line"><text>齐套率</text><text>{{ rate(payload?.sla?.in_full_rate) }}</text></view>
-        <view class="line"><text>OTIF</text><text>{{ rate(payload?.sla?.otif_rate) }}</text></view>
-        <view class="line"><text>SLA 覆盖率</text><text>{{ rate(payload?.sla?.coverage) }}</text></view>
+        <text class="minor">当前范围最近加工时间 {{ payload?.meta?.etl_processed_at || '未知' }}</text>
+        <view class="line" @click="openDetails('sla', { ratio: 'on_time' })"><text>准时率 ›</text><text>{{ rate(payload?.sla?.on_time_rate) }}</text></view>
+        <view class="line" @click="openDetails('sla', { ratio: 'in_full' })"><text>齐套率 ›</text><text>{{ rate(payload?.sla?.in_full_rate) }}</text></view>
+        <view class="line" @click="openDetails('sla', { ratio: 'otif' })"><text>OTIF ›</text><text>{{ rate(payload?.sla?.otif_rate) }}</text></view>
+        <view class="line" @click="openDetails('sla', { ratio: 'coverage' })"><text>SLA 覆盖率 ›</text><text>{{ rate(payload?.sla?.coverage) }}</text></view>
       </view>
       <view class="wide-card">
         <text class="label">履约周期（平均 / P50 / P90）</text>
+        <text class="minor">加工更新时间 {{ payload?.meta?.cycles_processed_at || '未知' }}</text>
         <view v-for="(row, key) in payload?.cycles || {}" :key="key" class="line">
           <text>{{ cycleLabels[key] || key }}</text>
           <text>{{ duration(row.average_seconds) }} / {{ duration(row.p50_seconds) }} / {{ duration(row.p90_seconds) }}</text>
@@ -88,6 +93,7 @@
       </view>
     </template>
     <template v-else-if="tab === 'risk'">
+      <button size="mini" @click="openDetails('risk')">查看库存风险明细</button>
       <view class="wide-card">
         <text class="label">FIFO 库存价值</text>
         <text v-if="payload?.cost_coverage" class="minor">成本覆盖 {{ qty(payload.cost_coverage.covered_positions) }} / {{ qty(payload.cost_coverage.total_positions) }} 个库存位置</text>
@@ -95,11 +101,11 @@
       </view>
       <view class="wide-card">
         <text class="label">库龄分层</text>
-        <view v-for="row in payload?.age_bands || []" :key="`${row.band}-${row.base_unit?.code}`" class="line"><text>{{ row.band }} · {{ row.base_unit?.name || row.base_unit?.code }}</text><text>{{ row.quantity }} {{ row.base_unit?.code }}</text></view>
+        <view v-for="row in payload?.age_bands || []" :key="`${row.band}-${row.base_unit?.code}`" class="line" @click="openDetails('risk', { age_band: row.band })"><text>{{ row.band }} · {{ row.base_unit?.name || row.base_unit?.code }}</text><text>{{ row.quantity }} {{ row.base_unit?.code }} ›</text></view>
       </view>
     </template>
     <template v-else>
-      <view v-for="row in payload?.results || []" :key="row.id" class="wide-card">
+      <view v-for="row in payload?.results || []" :key="row.id" class="wide-card" @click="openDetails('case', { id: row.id })">
         <text class="label">{{ row.title }}</text>
         <text class="value">{{ row.severity }} · {{ row.status }}</text>
         <text class="minor">责任人 #{{ row.assignee || '-' }} · 截止 {{ row.due_at || '-' }}</text>
@@ -115,24 +121,31 @@
       </view>
     </view>
     <view v-if="hasLoaded && !loading && !contextLoading && !error && empty" class="empty">当前范围暂无数据</view>
+    </template>
   </view>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
+import BossPeriodPanel from '@/components/boss-period-panel.vue'
+import BossHomeReports from '@/components/boss-home-reports.vue'
 import BossNav from '@/components/boss-nav.vue'
 import BossScopeFilter from '@/components/boss-scope-filter.vue'
 import BossDataStatus from '@/components/boss-data-status.vue'
 import { useAuth } from '@/store/auth'
 import { useBossScope } from '@/store/bossScope'
-import { api, downloadBinary } from '@/utils/request'
+import { api, downloadBinary, buildQuery } from '@/utils/request'
 import { decimalText, money, toNumber, qty } from '@/utils/billing'
 import { useLatestRequest } from '@/utils/use-latest-request'
 
 const auth = useAuth()
 const scope = useBossScope()
+function openDetails(type, extra = {}) {
+  uni.navigateTo({ url: `/pages/cockpit/details?${buildQuery({ ...scope.params, type, ...extra })}` })
+}
 const tab = ref('assurance')
+const periodRefreshKey = ref(0)
 const payload = ref(null)
 const error = ref(null)
 const loading = ref(false)
@@ -162,6 +175,7 @@ const empty = computed(() => {
   }
 })
 const tabs = [
+  { key: 'periods', label: '周期统计' },
   { key: 'assurance', label: '收入保障' }, { key: 'receivables', label: '应收回款' },
   { key: 'operations', label: '运营履约' }, { key: 'yield', label: '资源收益' },
   { key: 'performance', label: '目标预测' }, { key: 'risk', label: '库存风险' },
@@ -190,6 +204,7 @@ function duration(seconds) {
 }
 async function loadReport(nextPage = 1) {
   if (!contextReady.value || !scope.loaded) return
+  if (tab.value === 'periods') { requests.invalidate(); loading.value = false; periodRefreshKey.value++; uni.stopPullDownRefresh(); return }
   const current = requests.begin()
   const selectedTab = tab.value
   const params = { ...scope.params }
@@ -276,7 +291,8 @@ async function exportCurrent() {
     })
   } catch (err) { uni.showToast({ title: err.message || '导出失败', icon: 'none' }) }
 }
-onLoad(() => {
+onLoad(options => {
+  if (tabs.some(item => item.key === options.tab)) tab.value = options.tab
   if (!auth.ensureAuth()) return uni.reLaunch({ url: '/pages/login' })
   initialize()
 })
