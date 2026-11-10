@@ -35,9 +35,13 @@ export default {
     }, 80)
   },
   onShow() {
+    uni.$emit('boss:foreground')
     setTimeout(() => {
       this.ensureLoginEntry()
     }, 80)
+  },
+  onHide() {
+    uni.$emit('boss:background')
   },
 }
 </script>

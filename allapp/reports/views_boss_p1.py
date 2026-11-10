@@ -7,7 +7,7 @@ import secrets
 
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.http import HttpResponse
 from django.utils import timezone
 from openpyxl import Workbook
@@ -219,6 +219,22 @@ class BossRevenueAssuranceApi(BossP1Mixin, APIView):
 
 class BossRevenueAssuranceSectionApi(BossP1Mixin, APIView):
     def get(self, request, section):
+        if request.query_params.get("details") == "1":
+            from .boss_activity import ActivityScope
+            from .boss_assurance_detail import assurance_details
+
+            try:
+                owner, warehouse, start, end, scope = self.parse_scope(request)
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=400)
+            data = assurance_details(
+                ActivityScope(request.user, owner, warehouse),
+                section,
+                start,
+                end,
+                request.query_params,
+            )
+            return Response({"scope": scope, "meta": build_meta(scope=scope), **data})
         payload, error = self.get_payload(request, build_revenue_assurance)
         if error:
             return error
@@ -346,7 +362,14 @@ class BossReceivableBillsApi(BossP1Mixin, APIView):
         aging_band = (request.query_params.get("aging_band") or "").upper()
         if payment_status:
             rows = [row for row in rows if row["payment_status"] == payment_status]
-        if aging_band:
+        if aging_band == "OVERDUE":
+            rows = [
+                row
+                for row in rows
+                if row["aging_band"] in {"1_30", "31_60", "61_PLUS"}
+                and row["outstanding_amount"] > 0
+            ]
+        elif aging_band:
             rows = [row for row in rows if row["aging_band"] == aging_band]
         start = (page - 1) * page_size
         return Response(
@@ -368,9 +391,7 @@ class BossCollectionHistoryApi(BossP1Mixin, APIView):
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         bills = AccessScope.for_user(request.user).filter_queryset(
-            Bill.objects.select_related("owner", "warehouse").prefetch_related(
-                "payment_allocations__receipt", "collection_case__activities"
-            ),
+            Bill.objects.select_related("owner", "warehouse"),
             owner_field="owner_id",
             warehouse_field="warehouse_id",
         )
@@ -381,6 +402,17 @@ class BossCollectionHistoryApi(BossP1Mixin, APIView):
         bill = bills.filter(pk=pk).first()
         if not bill:
             return Response(status=404)
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+            size = min(100, max(1, int(request.query_params.get("page_size", 20))))
+        except (ValueError, TypeError):
+            return Response({"detail": "Invalid pagination."}, status=400)
+        allocation_qs = bill.payment_allocations.select_related("receipt").order_by(
+            "allocated_at", "id"
+        )
+        allocation_count = allocation_qs.count()
+        if "page" in request.query_params:
+            allocation_qs = allocation_qs[(page - 1) * size : page * size]
         allocations = [
             {
                 "id": row.id,
@@ -390,9 +422,13 @@ class BossCollectionHistoryApi(BossP1Mixin, APIView):
                 "amount": row.amount,
                 "is_reversal": row.is_reversal,
             }
-            for row in bill.payment_allocations.order_by("allocated_at", "id")
+            for row in allocation_qs
         ]
         case = getattr(bill, "collection_case", None)
+        activity_qs = case.activities.order_by("contacted_at", "id") if case else None
+        activity_count = activity_qs.count() if case else 0
+        if case and "page" in request.query_params:
+            activity_qs = activity_qs[(page - 1) * size : page * size]
         activities = (
             []
             if not case
@@ -405,7 +441,7 @@ class BossCollectionHistoryApi(BossP1Mixin, APIView):
                     "note": row.note,
                     "next_follow_up_at": row.next_follow_up_at,
                 }
-                for row in case.activities.all()
+                for row in activity_qs
             ]
         )
         return Response(
@@ -413,6 +449,11 @@ class BossCollectionHistoryApi(BossP1Mixin, APIView):
                 "scope": scope,
                 "meta": build_meta(scope=scope),
                 "bill_id": bill.id,
+                "currency": bill.currency,
+                "allocations_count": allocation_count,
+                "activities_count": activity_count,
+                "page": page,
+                "page_size": size,
                 "allocations": allocations,
                 "collection_case": (
                     None
@@ -588,8 +629,25 @@ class BossOperationsApi(BossP1Mixin, APIView):
             operator="",
             exception_type=(request.query_params.get("exception_type") or "").lower(),
         )
-        operation_filters.validate()
-        payload = build_operations_summary(user=request.user, filters=operation_filters)
+        try:
+            operation_filters.validate()
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        payload = build_operations_summary(
+            user=request.user,
+            filters=operation_filters,
+            # Preserve the bounded legacy daily response for existing clients.
+            include_trend=(date_to - date_from).days <= 366,
+        )
+        from .boss_activity import ActivityScope
+        from .boss_periods import period_page
+
+        payload["periods"] = period_page(
+            ActivityScope(request.user, owner_id, warehouse_id),
+            date_from,
+            date_to,
+            request.query_params.get("granularity", "auto"),
+        )
         sla_qs = AccessScope.for_user(request.user).filter_queryset(
             FactOutboundOrderSLA.objects.filter(order_date__date__range=(date_from, date_to)),
             owner_field="owner__owner_id",
@@ -698,10 +756,15 @@ class BossOperationsApi(BossP1Mixin, APIView):
                 else "CURRENT_UNRESOLVED_CREATED_BEFORE_CUTOFF"
             ),
         }
+        meta = build_meta(scope=scope, warnings=backlog_warnings)
+        # A global ETL job may have processed a different date range. Report only
+        # the actual scoped SLA fact timestamp; cycle facts do not store one.
+        meta["etl_processed_at"] = sla_qs.aggregate(latest=Max("updated_at"))["latest"]
+        meta["cycles_processed_at"] = None
         return Response(
             {
                 "scope": scope,
-                "meta": build_meta(scope=scope, warnings=backlog_warnings),
+                "meta": meta,
                 "operations": payload,
                 "sla": sla,
                 "cycles": cycles,
@@ -727,14 +790,17 @@ class BossOperationsDetailsApi(BossOperationsApi):
             warehouse_id=warehouse_id,
             status=(request.query_params.get("status") or "").upper(),
             order_no=(request.query_params.get("order_no") or ""),
-            source_no="",
-            product="",
-            lot_no="",
-            task_no="",
-            operator="",
+            source_no=request.query_params.get("source_no", ""),
+            product=request.query_params.get("product", ""),
+            lot_no=request.query_params.get("lot_no", ""),
+            task_no=request.query_params.get("task_no", ""),
+            operator=request.query_params.get("operator", ""),
             exception_type=(request.query_params.get("exception_type") or "").lower(),
         )
-        filters.validate()
+        try:
+            filters.validate()
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
         count, rows = paginate_operations_details(
             user=request.user, filters=filters, page=page, page_size=page_size
         )
@@ -751,7 +817,10 @@ class BossOperationsDetailsApi(BossOperationsApi):
 
 
 def _alert_payload(case):
+    from .boss_attention import case_payload
+
     return {
+        **case_payload(case),
         "id": case.id,
         "alert_type": case.alert_type,
         "source_type": case.source_type,
@@ -810,16 +879,29 @@ class BossAlertCaseDetailApi(BossAlertCasesApi):
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         qs = AccessScope.for_user(request.user).filter_queryset(
-            AlertCase.objects.prefetch_related("history"),
+            AlertCase.objects.all(),
             owner_field="owner_id",
             warehouse_field="warehouse_id",
         )
+        if owner_id:
+            qs = qs.filter(Q(owner_id=owner_id) | Q(owner__isnull=True))
+        if warehouse_id:
+            qs = qs.filter(warehouse_id=warehouse_id)
         case = qs.filter(pk=pk).first()
         if not case:
             return Response(status=404)
         data = _alert_payload(case)
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+            size = min(100, max(1, int(request.query_params.get("page_size", 20))))
+        except (ValueError, TypeError):
+            return Response({"detail": "Invalid pagination."}, status=400)
+        history = case.history.order_by("created_at", "id")
+        history_count = history.count()
+        if "page" in request.query_params:
+            history = history[(page - 1) * size : page * size]
         data["history"] = list(
-            case.history.values(
+            history.values(
                 "id",
                 "action",
                 "from_status",
@@ -830,7 +912,16 @@ class BossAlertCaseDetailApi(BossAlertCasesApi):
                 "created_by_id",
             )
         )
-        return Response({"scope": scope, "meta": build_meta(scope=scope), "case": data})
+        return Response(
+            {
+                "scope": scope,
+                "meta": build_meta(scope=scope),
+                "case": data,
+                "history_count": history_count,
+                "page": page,
+                "page_size": size,
+            }
+        )
 
 
 class AlertCaseActionApi(APIView):

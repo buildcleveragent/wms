@@ -1,671 +1,77 @@
 <template>
-  <view class="page">
+  <view class="page home-today">
     <BossNav active="home" />
-
-    <view class="hero">
-      <view class="hero-head">
-        <view class="hero-copy">
-          <view class="hero-tag">仓储经营分析中心</view>
-          <view class="hero-title">首页总览</view>
-      <!--    <view class="hero-desc">先看今天仓库忙不忙、顺不顺、钱算得对不对，再决定要不要深挖到收入页或预警中心。</view> -->
-        </view>
-        <button class="btn-ghost hero-btn" @click="logout">退出</button>
-      </view>
-      <view class="hero-meta">
-        <text>{{ operatorName }}</text>
-        <text>{{ warehouseName }}</text>
-        <text>{{ ownerScopeText }}</text>
-        <text>实绩截至 {{ summary.dataAsOf }}</text>
+    <view class="account-row"><text @click="showSync = !showSync">{{ error ? '同步失败 · ' : '' }}{{ updatedAt ? `更新于 ${shortTime(updatedAt)}` : '等待同步' }} ⓘ</text><text class="refresh-now" @click="refreshAll">立即刷新</text><text @click="accountMenu">{{ auth.user?.display_name || auth.user?.username || '账号' }} ▾</text></view>
+    <BossScopeFilter compact hide-dates :disabled="!ready" />
+    <view v-if="contextError" class="warning" @click="initialize">{{ contextError }} · 点击重试</view>
+    <view v-if="error" class="warning" @click="refresh">{{ error.statusCode === 404 ? '今日接口尚未上线，请先更新后端。' : '同步失败，保留上次结果，点击重试。' }}</view>
+    <view class="section-heading"><text>今日业务</text><text class="date">{{ data?.business_today || scope.businessToday }} <text class="link" @click="openStatistics">周期统计 ›</text></text></view>
+    <view class="order-grid">
+      <view v-for="item in directions" :key="item.key" class="order-card" :class="item.key">
+        <view @click="openMetric(item.key)"><view class="label">{{ item.label }} ›</view><view class="order-number">{{ data?.orders?.[item.key]?.count ?? '—' }} <text>单</text></view><view class="value-label">本日{{ item.key === 'inbound' ? '实收' : '实发' }}货值</view><view class="goods-value">{{ goodsValue(item.key) }}</view></view>
+        <view class="submitted" @click="openMetric(`${item.key}_submitted`)">今日新增 {{ data?.orders?.[item.key]?.submitted ?? '—' }} 单 ›</view>
+        <view v-if="data?.orders?.[item.key]?.unlinked_records" class="unlinked" @click="openMetric(`${item.key}_unlinked`)">{{ data.orders[item.key].unlinked_records }} 条未关联订单 ›</view>
       </view>
     </view>
-
-    <view class="filter-card">
-      <BossScopeFilter @change="refreshAll" />
-      <view class="filter-row">
-        <view class="picker-box info-box">
-          <text class="picker-label">截至所选日期关注</text>
-          <text class="picker-value">{{ summary.openAlertCount }} 项预警</text>
-          <text class="picker-sub">逾期应收 {{ moneyGroupText(summary.overdueReceivables) }}</text>
-        </view>
-      </view>
-
-      <view class="filter-actions">
-        <button class="btn-primary" @click="refreshAll">刷新</button>
-        <button class="btn-ghost" @click="openRevenue">看收入页</button>
-        <button class="btn-ghost" @click="openAlerts">看预警</button>
-      </view>
-    </view>
-
-    <view v-if="loading" class="loading-banner">正在同步仓储经营分析中心数据...</view>
-    <BossDataStatus :meta="payload?.meta" :error="dataError" :stale="stale" />
-
-    <template v-if="!loading && payload">
-      <view class="kpi-grid">
-        <view class="kpi-card blue">
-          <view class="kpi-label">所选区间实际收发单量</view>
-          <view class="kpi-value">{{ summary.todayInboundOrders }} 单</view>
-          <view class="kpi-sub">发运 {{ summary.todayOutboundOrders }} 单 · 数量在明细中按基本单位查看</view>
-        </view>
-        <view class="kpi-card gold">
-          <view class="kpi-label">库存 SKU</view>
-          <view class="kpi-value">{{ summary.skuCount }}</view>
-          <view class="kpi-sub">{{ summary.ownerCount }} 个货主 · 数量按单位分组</view>
-        </view>
-        <view class="kpi-card pink">
-          <view class="kpi-label">库位占用率</view>
-          <view class="kpi-value">{{ percent(summary.locationOccupancyRate) }}</view>
-          <view class="kpi-sub">{{ summary.occupiedLocationCount }}/{{ summary.activeLocationCount }} 库位占用</view>
-        </view>
-        <view class="kpi-card green">
-          <view class="kpi-label">体积利用率</view>
-          <view class="kpi-value">{{ percent(summary.volumeUtilizationRate) }}</view>
-          <view class="kpi-sub">已用 {{ summary.usedVolumeText }} / 容量 {{ summary.capacityVolumeText }}</view>
-        </view>
-        <view class="kpi-card navy">
-          <view class="kpi-label">所选区间应计</view>
-          <view class="kpi-value multi-money">{{ moneyGroupText(summary.accruals) }}</view>
-          <view class="kpi-sub">已出账 {{ moneyGroupText(summary.issuedBills) }}</view>
-        </view>
-        <view class="kpi-card orange">
-          <view class="kpi-label">截至所选日期逾期未收</view>
-          <view class="kpi-value multi-money">{{ moneyGroupText(summary.overdueReceivables) }}</view>
-          <view class="kpi-sub">草稿 {{ moneyGroupText(summary.draftBills) }}（不计入已出账）</view>
-        </view>
-      </view>
-
-      <view class="section">
-        <view class="section-head">
-          <view class="section-title">截止日任务与当前积压</view>
-          <view class="section-desc">所选截止日创建任务的当前完成率；积压反映当前状态。</view>
-        </view>
-        <view class="task-grid">
-          <view v-for="row in taskRows" :key="row.taskType" class="task-card">
-            <view class="task-title">{{ row.label }}</view>
-            <view class="task-main">{{ row.todayCompleted }}/{{ row.todayTotal }}</view>
-            <view class="task-sub">完成率 {{ percent(row.completionRate) }}</view>
-            <view class="task-backlog">当前积压 {{ row.backlog }}</view>
-          </view>
-        </view>
-      </view>
-
-      <view class="split-grid">
-        <view class="section">
-          <view class="section-head">
-            <view class="section-title">收入贡献排行</view>
-            <view class="section-desc">按原币应计收入分别排序，当前不含任何成本数据。</view>
-          </view>
-          <view v-if="!revenueRows.length" class="empty-inline">当前范围暂无收入排行。</view>
-          <view
-            v-for="(row, index) in revenueRows"
-            :key="`${row.currency || ''}-${row.owner}`"
-            class="row-card clickable"
-            @click="openOwnerRevenue(row.owner)"
-          >
-            <view class="rank-pill">{{ index + 1 }}</view>
-            <view class="row-main">
-              <view class="row-title">{{ row.ownerName }}</view>
-              <view class="row-sub">{{ row.accrualCount }} 条应计</view>
-            </view>
-            <view class="row-money">{{ money(row.total, row.currency) }}</view>
-          </view>
-        </view>
-
-        <view class="section">
-          <view class="section-head">
-            <view class="section-title">占仓 Top 货主</view>
-            <view class="section-desc">先看谁最占资源，再决定要不要去收入页对比计费。</view>
-          </view>
-          <view v-if="!inventoryRows.length" class="empty-inline">当前范围暂无占仓排行。</view>
-          <view v-for="(row, index) in inventoryRows" :key="`${row.currency || ''}-${row.owner}`" class="row-card">
-            <view class="rank-pill soft">{{ index + 1 }}</view>
-            <view class="row-main">
-              <view class="row-title">{{ row.ownerName }}</view>
-              <view class="row-sub">{{ row.skuCount }} 个 SKU · {{ row.locationCount }} 个库位</view>
-            </view>
-            <view class="row-money">{{ row.usedVolumeText }} m³</view>
-          </view>
-        </view>
-      </view>
-
-      <view class="section">
-        <view class="section-head">
-          <view class="section-title">所选区间趋势</view>
-          <view class="section-desc">按 {{ granularityLabel }} 汇总库存过账与实际发运实绩。</view>
-        </view>
-        <view v-for="row in trendRows" :key="row.date" class="trend-row">
-          <view class="trend-date">{{ row.date }}</view>
-          <view class="trend-bars">
-            <view class="trend-line">
-              <view class="trend-bar inbound" :style="{ width: `${row.inboundWidth}%` }"></view>
-            </view>
-            <view class="trend-line">
-              <view class="trend-bar outbound" :style="{ width: `${row.outboundWidth}%` }"></view>
-            </view>
-          </view>
-          <view class="trend-side">
-            <text>收 {{ row.inboundOrders }} 单 / 发 {{ row.outboundOrders }} 单</text>
-            <text>{{ moneyGroupText(row.accruals) }}</text>
-          </view>
-        </view>
-      </view>
-
-      <view class="section">
-        <view class="section-head">
-          <view class="section-title">待关注</view>
-          <view class="section-desc"> 最值得追问的几件事，点进去看完整预警清单。</view>
-        </view>
-        <view v-if="!attentionRows.length" class="empty-inline">当前没有需要优先关注的异常。</view>
-        <view
-          v-for="item in attentionRows"
-          :key="item.key"
-          class="row-card clickable"
-          @click="openAlerts"
-        >
-          <view class="alert-dot" :class="item.severity"></view>
-          <view class="row-main">
-            <view class="row-title">{{ item.label }}</view>
-            <view class="row-sub">{{ item.severity === 'high' ? '高优先级' : '中优先级' }}</view>
-          </view>
-          <view class="row-money">{{ item.count }}</view>
-        </view>
-      </view>
-    </template>
+    <view class="money-grid"><view v-for="item in financialLabels" :key="item.key" class="money-card" @click="openMetric(item.key)"><view class="label">{{ item.label }} ›</view><view class="money-value">{{ financialValue(item.key) }}</view></view></view>
+    <view class="backlog"><view @click="openMetric('inbound_pending')">待收货 <text class="backlog-count">{{ data?.backlog?.inbound ?? '—' }}</text> ›</view><view @click="openMetric('outbound_pending')">待发货 <text class="backlog-count">{{ data?.backlog?.outbound ?? '—' }}</text> ›</view><view class="overdue" @click="openMetric('overdue')">超期 <text class="backlog-count">{{ data?.backlog?.overdue ?? '—' }}</text> ›</view></view>
+    <view v-if="showSync" class="sync-details"><view>今日指标查询时间：{{ data?.meta?.generated_at || '未知' }}</view><view>单数为今日实际收发涉及的订单数，部分收发不代表整单完成；POS 单列。</view><view v-for="notice in data?.notices || []" :key="notice">{{ notice }}</view></view>
+    <view class="live-columns"><BossFocusPanel ref="focus" :ready="ready" :reading="reading" :show-sync="showSync" /><BossActivityFeed ref="activity" compact :ready="ready" :reading="reading" :show-sync="showSync" /></view>
   </view>
 </template>
-
 <script setup>
-import { computed, ref } from 'vue'
-import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
+import { ref } from 'vue'
+import { onLoad, onPullDownRefresh, onPageScroll } from '@dcloudio/uni-app'
 import BossNav from '@/components/boss-nav.vue'
 import BossScopeFilter from '@/components/boss-scope-filter.vue'
-import BossDataStatus from '@/components/boss-data-status.vue'
+import BossFocusPanel from '@/components/boss-focus-panel.vue'
+import BossActivityFeed from '@/components/boss-activity-feed.vue'
 import { useAuth } from '@/store/auth'
-import { useLatestRequest } from '@/utils/use-latest-request'
 import { useBossScope } from '@/store/bossScope'
+import { useLiveResource } from '@/utils/use-live-resource'
 import { api, buildQuery } from '@/utils/request'
-import { inventoryAvailable, decimalText, asList, money, percent, qty, toNumber } from '@/utils/billing'
-
-const auth = useAuth()
-const bossScope = useBossScope()
-const payload = ref(null)
-const loading = ref(false)
-const dataError = ref(null)
-const loadedFingerprint = ref('')
-const requestKey = () => bossScope.fingerprint
-const requests = useLatestRequest(requestKey)
-const initialization = useLatestRequest()
-const stale = computed(() => !!dataError.value && loadedFingerprint.value === requestKey() && !!payload.value)
-
-const operatorName = computed(() => auth.user?.display_name || auth.user?.username || '老板账号')
-const scope = computed(() => payload.value?.scope || {})
-const warehouseName = computed(() => scope.value.warehouse_name || '全部授权仓库')
-const ownerScopeText = computed(() => scope.value.owner_name || '全部货主')
-const granularityLabel = computed(() => ({ day: '日', week: '周', month: '月' }[payload.value?.granularity] || '日'))
-
-const summary = computed(() => {
-  const source = { ...(payload.value?.summary || {}) }
-  if (!inventoryAvailable(payload.value?.meta)) {
-    for (const key of ['sku_count', 'owner_count', 'occupied_location_count', 'active_location_count', 'location_occupancy_rate', 'volume_utilization_rate', 'used_volume_m3', 'capacity_volume_m3']) source[key] = null
-  }
-  return {
-    dataAsOf: source.data_as_of ? new Date(source.data_as_of).toLocaleString() : '-',
-    todayInboundOrders: qty(source.today_inbound_orders),
-    todayOutboundOrders: qty(source.today_outbound_orders),
-    skuCount: qty(source.sku_count),
-    ownerCount: qty(source.owner_count),
-    occupiedLocationCount: qty(source.occupied_location_count),
-    activeLocationCount: qty(source.active_location_count),
-    locationOccupancyRate: source.location_occupancy_rate,
-    volumeUtilizationRate: source.volume_utilization_rate,
-    usedVolumeText: decimalText(source.used_volume_m3),
-    capacityVolumeText: decimalText(source.capacity_volume_m3),
-    accruals: asList(source.accruals_by_currency),
-    issuedBills: asList(source.issued_bills_by_currency),
-    draftBills: asList(source.draft_bills_by_currency),
-    overdueReceivables: asList(source.overdue_receivables_by_currency),
-    openAlertCount: qty(source.open_alert_count),
-  }
+import { money } from '@/utils/billing'
+const auth = useAuth(), scope = useBossScope()
+const ready = ref(false), contextError = ref(''), reading = ref(false), showSync = ref(false)
+const focus = ref(null), activity = ref(null)
+const directions = [{ key: 'inbound', label: '今日实际入库' }, { key: 'outbound', label: '今日实际出库' }]
+const financialLabels = [{ key: 'pos_sales', label: 'POS 销售' }, { key: 'pos_returns', label: '销售退款' }, { key: 'accruals', label: '仓储应计收入' }, { key: 'receipts', label: '回款净额' }]
+const params = () => ({ warehouse: scope.warehouse, owner: scope.owner })
+const { data, error, updatedAt, refresh } = useLiveResource(() => api.bossToday(params()), {
+  key: () => JSON.stringify([auth.user?.id, params()]), enabled: () => ready.value && !!auth.access,
 })
-
-const taskRows = computed(() =>
-  asList(payload.value?.task_progress).map((row) => ({
-    taskType: row.task_type,
-    label: row.label || row.task_type,
-    todayTotal: qty(row.today_total),
-    todayCompleted: qty(row.today_completed),
-    completionRate: row.completion_rate,
-    backlog: qty(row.backlog),
-  }))
-)
-
-const revenueRows = computed(() =>
-  asList(payload.value?.rankings?.revenue_contribution_by_currency).flatMap((group) =>
-    asList(group.rows).map((row) => ({
-    owner: row.owner,
-    ownerName: row.owner_name,
-    accrualCount: qty(row.accrual_count),
-    total: toNumber(row.total),
-    currency: group.currency,
-  })))
-)
-
-const inventoryRows = computed(() =>
-  asList(payload.value?.rankings?.inventory_top_owners).map((row) => ({
-    owner: row.owner,
-    ownerName: row.owner_name,
-    skuCount: qty(row.sku_count),
-    locationCount: qty(row.location_count),
-    usedVolumeText: decimalText(row.used_volume_m3),
-  }))
-)
-
-const attentionRows = computed(() =>
-  asList(payload.value?.attention_items).map((item) => ({
-    key: item.key,
-    label: item.label,
-    count: qty(item.count),
-    severity: item.severity || 'medium',
-  }))
-)
-
-const trendRows = computed(() => {
-  const rows = asList(payload.value?.trend_7d).map((row) => ({
-    date: row.date,
-    inboundOrders: qty(row.inbound_orders),
-    outboundOrders: qty(row.outbound_orders),
-    accruals: asList(row.accruals_by_currency),
-  }))
-  const inboundMax = Math.max(1, ...rows.map((row) => toNumber(row.inboundOrders) ?? 0))
-  const outboundMax = Math.max(1, ...rows.map((row) => toNumber(row.outboundOrders) ?? 0))
-  return rows.map((row) => ({
-    ...row,
-    inboundWidth: ((toNumber(row.inboundOrders) ?? 0) / inboundMax) * 100,
-    outboundWidth: ((toNumber(row.outboundOrders) ?? 0) / outboundMax) * 100,
-  }))
-})
-
-function moneyGroupText(groups) {
-  const rows = asList(groups)
-  return rows.length ? rows.map((row) => money(row.total, row.currency)).join(' / ') : '-'
+function shortTime(value) { const stamp = data.value?.meta?.generated_at; return stamp ? new Date(stamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : value }
+function moneyText(values) { return (values || []).map(row => money(row.amount, row.currency)).join(' / ') }
+function goodsValue(key) { const row = data.value?.orders?.[key]; return !row ? '等待同步' : row.money?.length ? `已知 ${moneyText(row.money)}` : row.execution_records ? '金额未完整记录' : '暂无收发记录' }
+function financialValue(key) { const row = data.value?.financial?.find(item => item.key === key); return !row ? '—' : row.unknown_currency ? `${row.count} 笔 · 币种未记录` : moneyText(row.money) || '暂无记录' }
+function openMetric(metric) {
+  if (!data.value) return
+  const day = data.value.business_today
+  uni.navigateTo({ url: `/pages/cockpit/details?${buildQuery({ ...params(), date_from: day, date_to: day, type: 'today', metric }, { keepEmpty: ['warehouse', 'owner'] })}` })
 }
-
-async function refreshAll() {
-  const current = requests.begin()
-  const fingerprint = requestKey()
-  const params = { ...bossScope.params }
-  if (loadedFingerprint.value !== fingerprint) payload.value = null
-  loading.value = true
-  dataError.value = null
-  try {
-    const result = await api.bossHome(params)
-    if (!current()) return
-    payload.value = result
-    loadedFingerprint.value = fingerprint
-    dataError.value = null
-  } catch (error) {
-    if (!current()) return
-    dataError.value = error
-    if (loadedFingerprint.value !== fingerprint || error.kind === 'FORBIDDEN') payload.value = null
-  } finally {
-    if (current()) {
-      loading.value = false
-      uni.stopPullDownRefresh()
-    }
-  }
+function openStatistics() { uni.reLaunch({ url: '/pages/cockpit/index?tab=periods' }) }
+function accountMenu() { uni.showActionSheet({ itemColor: '#172b4d', itemList: ['刷新与检查设置', '退出登录'], success: async ({ tapIndex }) => { if (tapIndex === 0) return uni.navigateTo({ url: '/pages/settings/refresh' }); if (tapIndex !== 1) return; ready.value = false; await auth.logout(); scope.clear(); uni.reLaunch({ url: '/pages/login' }) } }) }
+async function initialize() {
+  if (!auth.ensureAuth()) return uni.reLaunch({ url: '/pages/login' })
+  contextError.value = ''
+  try { ready.value = !!await scope.loadContext(auth.user) } catch (err) { contextError.value = err.message || '筛选范围加载失败' }
 }
-
-function openRevenue() {
-  uni.reLaunch({ url: '/pages/billing/overview' })
-}
-
-function openAlerts() {
-  uni.reLaunch({ url: '/pages/alerts/index' })
-}
-
-function openOwnerRevenue(ownerId) {
-  const query = buildQuery({
-    ...bossScope.params, warehouse: bossScope.warehouse, owner: ownerId,
-  }, { keepEmpty: ['warehouse'] })
-  uni.navigateTo({ url: `/pages/billing/owner_detail?${query}` })
-}
-
-async function logout() {
-  await auth.logout()
-  bossScope.clear()
-  uni.reLaunch({ url: '/pages/login' })
-}
-
-onLoad(() => {
-  if (!auth.ensureAuth()) {
-    uni.reLaunch({ url: '/pages/login' })
-    return
-  }
-  const current = initialization.begin()
-  bossScope.loadContext(auth.user).then((applied) => {
-    if (current() && applied) refreshAll()
-  }).catch((error) => {
-    if (!current()) return
-    dataError.value = error
-    payload.value = null
-  })
-})
-
-onPullDownRefresh(() => {
-  refreshAll()
-})
+onLoad(initialize)
+onPageScroll(event => { reading.value = event.scrollTop > 120 })
+async function refreshAll() { if (!ready.value) await initialize(); await Promise.allSettled([refresh(), focus.value?.refresh(), activity.value?.refresh()]) }
+onPullDownRefresh(async () => { try { await refreshAll() } finally { uni.stopPullDownRefresh() } })
 </script>
-
 <style scoped>
-.page {
-  min-height: 100vh;
-  padding: 24rpx;
-  background:
-    radial-gradient(circle at top right, rgba(255, 196, 0, 0.08), transparent 30%),
-    linear-gradient(180deg, #f5f7fb 0%, #eef3fb 100%);
-}
-
-.hero,
-.filter-card,
-.section {
-  background: #fff;
-  border-radius: 28rpx;
-  padding: 24rpx;
-  margin-bottom: 18rpx;
-  box-shadow: 0 16rpx 40rpx rgba(20, 38, 84, 0.06);
-}
-
-.hero {
-  background:
-    radial-gradient(circle at top left, rgba(11, 95, 255, 0.12), transparent 32%),
-    linear-gradient(135deg, #ffffff 0%, #f7fbff 58%, #fff8ef 100%);
-}
-
-.hero-head,
-.filter-row,
-.row-card,
-.trend-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
-}
-
-.hero-copy,
-.row-main {
-  flex: 1;
-}
-
-.hero-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 10rpx 18rpx;
-  border-radius: 999rpx;
-  background: #fff;
-  color: #0b5fff;
-  font-size: 22rpx;
-  font-weight: 700;
-}
-
-.hero-title {
-  margin-top: 18rpx;
-  font-size: 44rpx;
-  font-weight: 700;
-  color: #162034;
-}
-
-.hero-desc,
-.section-desc,
-.row-sub,
-.picker-sub,
-.kpi-sub,
-.task-sub,
-.task-backlog,
-.empty-inline {
-  margin-top: 10rpx;
-  font-size: 24rpx;
-  line-height: 1.6;
-  color: #71809c;
-}
-
-.hero-meta {
-  display: flex;
-  gap: 14rpx;
-  flex-wrap: wrap;
-  margin-top: 18rpx;
-}
-
-.hero-meta text {
-  padding: 8rpx 16rpx;
-  border-radius: 999rpx;
-  background: rgba(15, 23, 42, 0.05);
-  font-size: 22rpx;
-  color: #53637f;
-}
-
-.filter-row {
-  align-items: stretch;
-}
-
-.picker-box,
-.kpi-card,
-.task-card {
-  min-height: 116rpx;
-  padding: 18rpx;
-  border-radius: 22rpx;
-  background: #f7f9fd;
-}
-
-.picker-box {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-
-.info-box {
-  justify-content: center;
-}
-
-.picker-label,
-.kpi-label,
-.task-title {
-  font-size: 22rpx;
-  color: #7d8ba5;
-}
-
-.picker-value,
-.kpi-value,
-.task-main {
-  margin-top: 8rpx;
-  font-size: 30rpx;
-  font-weight: 700;
-  color: #1d2940;
-}
-
-.filter-actions {
-  display: flex;
-  gap: 12rpx;
-  margin-top: 16rpx;
-}
-
-.filter-actions button {
-  flex: 1;
-}
-
-.loading-banner {
-  margin-bottom: 16rpx;
-  padding: 16rpx 20rpx;
-  border-radius: 20rpx;
-  background: rgba(11, 95, 255, 0.08);
-  color: #0b5fff;
-  font-size: 24rpx;
-}
-
-.kpi-grid,
-.task-grid,
-.split-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14rpx;
-}
-
-.kpi-card.blue {
-  background: linear-gradient(160deg, #eef5ff, #f8fbff);
-}
-
-.kpi-card.gold {
-  background: linear-gradient(160deg, #fff8e9, #fffdf4);
-}
-
-.kpi-card.pink {
-  background: linear-gradient(160deg, #fff0f6, #fff9fb);
-}
-
-.kpi-card.green {
-  background: linear-gradient(160deg, #eefdf3, #f7fffb);
-}
-
-.kpi-card.navy {
-  background: linear-gradient(160deg, #edf4ff, #f7fbff);
-}
-
-.kpi-card.orange {
-  background: linear-gradient(160deg, #fff4ea, #fffaf5);
-}
-
-.section-head {
-  margin-bottom: 14rpx;
-}
-
-.section-title {
-  font-size: 30rpx;
-  font-weight: 700;
-  color: #182234;
-}
-
-.task-card {
-  background: linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
-}
-
-.row-card {
-  padding: 20rpx 0;
-  border-top: 1rpx solid #edf1f7;
-}
-
-.clickable:active {
-  opacity: 0.72;
-}
-
-.rank-pill {
-  width: 52rpx;
-  height: 52rpx;
-  border-radius: 999rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #eef4ff;
-  color: #0b5fff;
-  font-size: 24rpx;
-  font-weight: 700;
-}
-
-.rank-pill.soft {
-  background: #fff3db;
-  color: #d88b12;
-}
-
-.row-title {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: #192337;
-}
-
-.row-money {
-  font-size: 28rpx;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.trend-row {
-  padding: 18rpx 0;
-  border-top: 1rpx solid #edf1f7;
-}
-
-.trend-date {
-  width: 170rpx;
-  font-size: 24rpx;
-  color: #596780;
-}
-
-.trend-bars {
-  flex: 1;
-  display: grid;
-  gap: 8rpx;
-}
-
-.trend-line {
-  height: 16rpx;
-  border-radius: 999rpx;
-  overflow: hidden;
-  background: #e8eef8;
-}
-
-.trend-bar {
-  height: 100%;
-  border-radius: 999rpx;
-}
-
-.trend-bar.inbound {
-  background: linear-gradient(90deg, #0b5fff, #56a3ff);
-}
-
-.trend-bar.outbound {
-  background: linear-gradient(90deg, #f59e0b, #f97316);
-}
-
-.trend-side {
-  width: 160rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6rpx;
-  font-size: 22rpx;
-  color: #52617b;
-}
-
-.alert-dot {
-  width: 18rpx;
-  height: 18rpx;
-  border-radius: 999rpx;
-  margin-top: 6rpx;
-}
-
-.alert-dot.high {
-  background: #ef4444;
-}
-
-.alert-dot.medium {
-  background: #f59e0b;
-}
-
-.btn-primary,
-.btn-ghost,
-.hero-btn {
-  min-height: 84rpx;
-  border-radius: 18rpx;
-  font-size: 26rpx;
-  font-weight: 700;
-}
-
-.btn-primary {
-  background: #0b5fff;
-  color: #fff;
-}
-
-.btn-ghost,
-.hero-btn {
-  background: rgba(255, 255, 255, 0.92);
-  color: #1a2a46;
-  border: 1rpx solid #dbe5f3;
-}
+.page { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 1400px; margin: auto; padding: 16rpx 24rpx 32rpx; color: #172b4d; background: #f4f7fb; min-height: 100vh; box-sizing: border-box; }
+.account-row { display: flex; justify-content: space-between; gap: 16rpx; font-size: 23rpx; color: #64748b; margin: 6rpx 0 12rpx; }.account-row text { padding: 8rpx 0; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; font-size: 30rpx; font-weight: 700; margin: 18rpx 0 14rpx; }.date { font-size: 22rpx; font-weight: 400; color: #64748b; }.link { color: #1656a4; margin-left: 14rpx; }
+.order-grid, .money-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14rpx; }
+.order-card { border-radius: 18rpx; background: #fff; padding: 20rpx; border-top: 5rpx solid #26877b; }.outbound { border-top-color: #2b65bb; }
+.label { font-size: 25rpx; color: #526581; }.order-number { font-size: 56rpx; font-weight: 750; line-height: 1.2; margin: 8rpx 0; }.order-number text { font-size: 24rpx; font-weight: 400; }
+.value-label { color: #728199; font-size: 21rpx; }.goods-value { font-size: 24rpx; color: #42536b; margin-top: 4rpx; overflow-wrap: anywhere; }
+.submitted { font-size: 24rpx; color: #1656a4; border-top: 1px solid #edf0f5; padding-top: 14rpx; margin-top: 14rpx; }.unlinked { color: #9b5d18; font-size: 22rpx; padding-top: 10rpx; }
+.money-grid { margin-top: 14rpx; }.money-card { background: white; padding: 18rpx 20rpx; border-radius: 16rpx; }.money-value { font-size: 27rpx; font-weight: 650; margin-top: 8rpx; overflow-wrap: anywhere; }
+.backlog { display: flex; justify-content: space-between; gap: 8rpx; background: #eaf0f7; border-radius: 14rpx; padding: 20rpx 16rpx; margin-top: 14rpx; font-size: 24rpx; }.overdue { color: #a35a19; }
+.warning, .sync-details { font-size: 23rpx; padding: 16rpx; margin-top: 12rpx; background: #fff3da; line-height: 1.6; color: #805a20; }.sync-details { background: white; color: #64748b; }
+@media (min-width: 900px) { .money-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }.live-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }.order-number { font-size: 42px; } }
 </style>

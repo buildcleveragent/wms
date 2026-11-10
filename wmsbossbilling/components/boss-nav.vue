@@ -1,6 +1,5 @@
 <template>
   <view class="nav-card">
-    <view class="nav-brand">仓储经营分析中心</view>
     <view class="nav-track">
       <view
         v-for="tab in tabs"
@@ -25,6 +24,7 @@ const props = defineProps({
 
 const tabs = [
   { key: 'home', label: '首页总览', url: '/pages/home/index' },
+  { key: 'activity', label: '业务活动', url: '/pages/activity/index' },
   { key: 'inventory', label: '库存与库容', url: '/pages/inventory/index' },
   { key: 'revenue', label: '收入与计费', url: '/pages/billing/overview' },
   { key: 'alerts', label: '预警中心', url: '/pages/alerts/index' },
@@ -39,7 +39,7 @@ function go(tab) {
 
 <style scoped>
 .nav-card {
-  margin-bottom: 18rpx;
+  margin-bottom: 12rpx;
   padding: 10rpx;
   border-radius: 26rpx;
   background: linear-gradient(135deg, rgba(9, 31, 84, 0.08), rgba(11, 95, 255, 0.04));
@@ -61,8 +61,8 @@ function go(tab) {
 
 .nav-pill {
   flex: 0 0 auto;
-  min-width: 150rpx;
-  min-height: 78rpx;
+  min-width: 110rpx;
+  min-height: 64rpx;
   border-radius: 20rpx;
   display: flex;
   align-items: center;

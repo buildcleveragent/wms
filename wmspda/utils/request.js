@@ -7,10 +7,12 @@ const BASE_MAP = {
 
 // Do not read the global uni runtime during module evaluation: H5 loads this
 // chunk before initializing uni. Requests and token access happen after startup.
-export const BASE_URL = String(import.meta.env.VITE_API_BASE_URL || BASE_MAP.develop).trim().replace(/\/$/, '')
-if (!/^https?:\/\/[^/?#@]+(?::\d+)?(?:\/[^?#]*)?$/.test(BASE_URL)) {
-  throw new Error('VITE_API_BASE_URL 必须是无凭据、查询参数和片段的 HTTP(S) 地址。')
-}
+// export const BASE_URL = String(import.meta.env.VITE_API_BASE_URL || BASE_MAP.develop).trim().replace(/\/$/, '')
+// if (!/^https?:\/\/[^/?#@]+(?::\d+)?(?:\/[^?#]*)?$/.test(BASE_URL)) {
+//   throw new Error('VITE_API_BASE_URL 必须是无凭据、查询参数和片段的 HTTP(S) 地址。')
+// }
+
+export const BASE_URL =BASE_MAP.develop
 
 const PRODUCT_IMPORT_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000
 const ACCESS_TOKEN_STORAGE_KEY = 'access'

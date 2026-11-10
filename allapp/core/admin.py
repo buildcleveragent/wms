@@ -1,5 +1,6 @@
 from django import forms
 from django.contrib import admin
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 
 from .models import PrintConfig, SecretSettingError, SystemSetting
@@ -130,6 +131,46 @@ class SystemSettingAdmin(admin.ModelAdmin):
         ),
         ("使用范围", {"fields": ("client_visible", "is_active", "sort_order")}),
     )
+
+    @staticmethod
+    def _boss_automation(obj):
+        return bool(obj and obj.namespace == "boss" and obj.key == "automation_settings")
+
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request)
+        if not (request.user.is_active and request.user.is_superuser):
+            queryset = queryset.exclude(namespace="boss", key="automation_settings")
+        return queryset
+
+    def has_change_permission(self, request, obj=None):
+        if self._boss_automation(obj) and not (
+            request.user.is_active and request.user.is_superuser
+        ):
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if self._boss_automation(obj) and not (
+            request.user.is_active and request.user.is_superuser
+        ):
+            return False
+        return super().has_delete_permission(request, obj)
+
+    def save_model(self, request, obj, form, change):
+        previous = SystemSetting.objects.filter(pk=obj.pk).first() if obj.pk else None
+        if (self._boss_automation(obj) or self._boss_automation(previous)) and not (
+            request.user.is_active and request.user.is_superuser
+        ):
+            raise PermissionDenied("仅超级用户可以修改全系统自动检查设置。")
+        super().save_model(request, obj, form, change)
+
+    def delete_queryset(self, request, queryset):
+        if (
+            not (request.user.is_active and request.user.is_superuser)
+            and queryset.filter(namespace="boss", key="automation_settings").exists()
+        ):
+            raise PermissionDenied("仅超级用户可以删除全系统自动检查设置。")
+        super().delete_queryset(request, queryset)
 
     @admin.display(description="配置值")
     def display_value(self, obj):

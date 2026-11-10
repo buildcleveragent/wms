@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.contrib import admin, messages
+from django.contrib.admin.views.main import ChangeList
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.shortcuts import redirect
@@ -12,6 +13,8 @@ from allapp.outbound import services as ob_services
 from allapp.outbound.authz import strict_order_queryset
 
 from .models import OutboundOrder, OutboundOrderLine
+from .progress import fulfilment_quantities, fulfilment_status
+from .workbench import _batch_evidence
 
 
 # —— 权限判断：货主业务员（或超管）才允许“提交” —— #
@@ -50,6 +53,39 @@ class OutboundOrderLineInline(admin.TabularInline):
 
 
 # ========= 出库订单 =========
+class OutboundApprovalStatusFilter(admin.SimpleListFilter):
+    title = "审核状态"
+    parameter_name = "approval_status__exact"
+
+    def lookups(self, request, model_admin):
+        return [
+            (value, OutboundOrder.approval_status_label(value))
+            for value, _ in OutboundOrder.APPROVAL_CHOICES
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(approval_status=self.value())
+        return queryset
+
+
+class OutboundOrderChangeList(ChangeList):
+    def get_results(self, request):
+        super().get_results(request)
+        # Load evidence only after permissions, filters and pagination have run.
+        orders = list(self.result_list)
+        if not orders:
+            return
+        tasks, lines, order_lines = _batch_evidence(orders)
+        for order in orders:
+            quantities, exceptions, _ = fulfilment_quantities(
+                order, tasks[order.pk], lines[order.pk], order_lines[order.pk]
+            )
+            _, order.admin_fulfilment_label = fulfilment_status(
+                order, tasks[order.pk], quantities, exceptions
+            )
+
+
 @admin.register(OutboundOrder)
 class OutboundOrderAdmin(admin.ModelAdmin):
     inlines = [OutboundOrderLineInline]
@@ -73,7 +109,8 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         "customer",
         "supplier",
         "submit_status",
-        "approval_status",
+        "approval_status_display",
+        "fulfilment_status_display",
         "processing_mode",
         "delivery_method",
         "is_closed",
@@ -84,7 +121,7 @@ class OutboundOrderAdmin(admin.ModelAdmin):
     list_filter = (
         "outbound_type",
         "submit_status",
-        "approval_status",
+        OutboundApprovalStatusFilter,
         "processing_mode",
         "delivery_method",
         "is_closed",
@@ -106,6 +143,19 @@ class OutboundOrderAdmin(admin.ModelAdmin):
     ordering = ("-biz_date", "-id")
     date_hierarchy = "biz_date"
     show_full_result_count = False
+
+    def get_changelist(self, request, **kwargs):
+        return OutboundOrderChangeList
+
+    @admin.display(description="审核状态", ordering="approval_status")
+    def approval_status_display(self, obj):
+        # Django's direct field rendering uses choices, bypassing the model's
+        # get_approval_status_display() and its corrected approval-only label.
+        return obj.get_approval_status_display()
+
+    @admin.display(description="出库进度")
+    def fulfilment_status_display(self, obj):
+        return obj.admin_fulfilment_label
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -241,6 +291,23 @@ class OutboundOrderAdmin(admin.ModelAdmin):
         if not change and not obj.created_by_id:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        order = form.instance
+        if not change and order.submit_status == "SUBMITTED":
+            # The admin change form wraps both header and lines in one transaction.
+            record_audit_event(
+                action="outbound.order.create",
+                module="outbound",
+                request=request,
+                obj=order,
+                after={
+                    "submit_status": order.submit_status,
+                    "approval_status": order.approval_status,
+                },
+                metadata={"channel": "django_admin"},
+            )
 
     # —— 批量动作 —— #
     actions = (

@@ -1,0 +1,12 @@
+[Unit]
+Description=WMS Boss deadline checks
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=wms
+Group=wms
+WorkingDirectory=/wms
+EnvironmentFile=-/etc/default/wms
+ExecStart=/usr/bin/flock -n /run/lock/wms-boss-deadlines.lock /usr/bin/docker compose -f /wms/compose.production.yml --profile oneshot run --rm boss-deadlines

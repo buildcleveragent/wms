@@ -383,6 +383,16 @@ class InboundOrder(BaseModel):
         self.submit_status = "SUBMITTED"
         self.approval_status = "OWNER_PENDING"
         self.save(update_fields=["submit_status", "approval_status"])
+        # Persist the transition in the same transaction, including non-HTTP callers.
+        from allapp.accounts.audit import record_audit_event
+
+        record_audit_event(
+            action="inbound.order.submitted",
+            module="inbound",
+            user=user,
+            obj=self,
+            after={"submit_status": self.submit_status, "approval_status": self.approval_status},
+        )
 
 
 class InboundOrderLine(ProductIdentitySnapshotMixin, BaseModel):

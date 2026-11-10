@@ -6,6 +6,7 @@ import uni from '@dcloudio/vite-plugin-uni'
 import { validateWeixinManifest } from '../frontend/api-base-policy.mjs'
 import { validateBossApiBase } from './utils/api-base-policy.mjs'
 import { renderAndroidNetworkSecurityConfig } from './config/androidNetworkSecurity.mjs'
+import { buildH5DevProxy } from './config/h5DevProxy.mjs'
 
 export default defineConfig(({ mode }) => {
   const projectDir = fileURLToPath(new URL('.', import.meta.url))
@@ -21,6 +22,11 @@ export default defineConfig(({ mode }) => {
     allowHttp: env.VITE_ALLOW_HTTP_API === 'true',
   }
   const apiBase = validateBossApiBase(options)
+  const devProxy = buildH5DevProxy({
+    platform,
+    mode,
+    target: env.WMS_DEV_API_TARGET,
+  })
   validateWeixinManifest({ platform, root: projectDir })
   return {
     envDir,
@@ -45,5 +51,6 @@ export default defineConfig(({ mode }) => {
         copyFileSync(resolve(projectDir, 'AndroidManifest.xml'), resolve(output, 'AndroidManifest.xml'))
       },
     }, uni()],
+    server: devProxy ? { proxy: devProxy } : undefined,
   }
 })

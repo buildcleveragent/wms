@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { validateBossApiBase } from '../utils/api-base-policy.mjs'
 import { renderAndroidNetworkSecurityConfig } from '../config/androidNetworkSecurity.mjs'
+import { buildH5DevProxy } from '../config/h5DevProxy.mjs'
 
 const http = { value: 'http://8.148.198.200:8080/', platform: 'app', mode: 'production', allowHttp: true }
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.resetModules() })
@@ -48,5 +49,22 @@ describe('temporary boss HTTP configuration', () => {
     expect(xml.match(/<domain /g)).toHaveLength(1)
     const https = renderAndroidNetworkSecurityConfig({ ...http, value: 'https://api.example.com', allowHttp: false })
     expect(https).not.toContain('cleartextTrafficPermitted="true"')
+  })
+
+  it('proxies HBuilder H5 /api requests to the configured development backend', () => {
+    const proxy = buildH5DevProxy({
+      platform: 'h5', mode: 'development', target: 'http://8.148.198.200:8080/',
+    })
+    expect(proxy['/api/']).toMatchObject({
+      target: 'http://8.148.198.200:8080', changeOrigin: true, proxyTimeout: 15000,
+    })
+    expect(buildH5DevProxy({ platform: 'app', mode: 'development', target: http.value })).toBeUndefined()
+    expect(buildH5DevProxy({ platform: 'h5', mode: 'production', target: http.value })).toBeUndefined()
+  })
+
+  it('rejects unsafe H5 development proxy targets', () => {
+    expect(() => buildH5DevProxy({
+      platform: 'h5', mode: 'development', target: 'http://user:pass@example.com/api',
+    })).toThrow(/origin without credentials/)
   })
 })

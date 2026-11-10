@@ -441,35 +441,12 @@ class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
             }
             raise exc
 
-        current = timezone.now()
-        today = timezone.localtime(current).date() if timezone.is_aware(current) else current.date()
-        date_to = parse_date(date_to_raw) if date_to_raw else today
-        date_from = parse_date(date_from_raw) if date_from_raw else date_to.replace(day=1)
-        if date_from_raw and date_from is None:
-            return Response(
-                {"detail": "date_from must be YYYY-MM-DD."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if date_to_raw and date_to is None:
-            return Response(
-                {"detail": "date_to must be YYYY-MM-DD."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if date_from and date_to and date_from > date_to:
-            return Response(
-                {"detail": "date_from cannot be after date_to."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if date_to > today:
-            return Response(
-                {"detail": "date_to cannot be after today."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if date_from and date_to and (date_to - date_from).days > 366:
-            return Response(
-                {"detail": "date range cannot exceed 367 days."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        from allapp.reports.boss_contract import parse_boss_date_range
+
+        try:
+            date_from, date_to = parse_boss_date_range(date_from_raw, date_to_raw)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         recent_limit = int(recent_limit_raw) if recent_limit_raw.isdigit() else 10
         recent_limit = max(1, min(recent_limit, 50))

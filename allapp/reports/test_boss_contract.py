@@ -19,7 +19,7 @@ class BossContractUnitTests(SimpleTestCase):
             parse_boss_date_range(raw_to="2024-02-29", today=today),
             (datetime.date(2024, 2, 1), datetime.date(2024, 2, 29)),
         )
-        start = today - datetime.timedelta(days=366)
+        start = datetime.date(2000, 1, 1)
         self.assertEqual(parse_boss_date_range(str(start), str(today), today=today), (start, today))
 
     def test_invalid_dates_are_validation_errors(self):
@@ -33,7 +33,6 @@ class BossContractUnitTests(SimpleTestCase):
             (None, 123),
             ("2026-10-04", "2026-10-03"),
             (None, "2026-10-05"),
-            (str(today - datetime.timedelta(days=367)), str(today)),
         ]
         for start, end in pairs:
             with self.subTest(start=start, end=end), self.assertRaises(ValueError):
@@ -74,3 +73,23 @@ class BossContractUnitTests(SimpleTestCase):
             data={"issue_date": "2026-08-05", "due_date": "2026-08-05"}
         )
         self.assertTrue(valid.is_valid(), valid.errors)
+
+    def test_unbounded_range_and_safe_comparison_boundaries(self):
+        from allapp.reports.boss_periods import comparison_ranges, floor_period
+
+        start = datetime.date(1000, 1, 1)
+        end = datetime.date(2026, 11, 2)
+        self.assertEqual(parse_boss_date_range(str(start), str(end), today=end), (start, end))
+        self.assertEqual(trend_granularity(start, end), "year")
+        self.assertIsNone(comparison_ranges(start, end)["previous"])
+        self.assertEqual(
+            floor_period(datetime.date(2025, 1, 1), "week"), datetime.date(2024, 12, 30)
+        )
+        leap = comparison_ranges(datetime.date(2024, 2, 29), datetime.date(2024, 2, 29))
+        self.assertEqual(
+            leap["year_over_year"], (datetime.date(2023, 2, 28), datetime.date(2023, 2, 28))
+        )
+        month = comparison_ranges(
+            datetime.date(2024, 3, 1), datetime.date(2024, 3, 31), "this_month"
+        )
+        self.assertEqual(month["previous"], (datetime.date(2024, 2, 1), datetime.date(2024, 2, 29)))

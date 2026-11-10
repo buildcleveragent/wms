@@ -1290,6 +1290,7 @@ def _combined_preview_payload(group_previews):
     }
 
 
+@transaction.atomic
 def _create_sale_mini_order_mapping(
     request,
     owner,
@@ -1402,6 +1403,16 @@ def _create_sale_mini_order_mapping(
         buyer,
         cart_id,
         contexts,
+    )
+    from allapp.accounts.audit import record_audit_event
+
+    record_audit_event(
+        action="outbound.order.create",
+        module="outbound",
+        request=request,
+        obj=order,
+        after={"submit_status": "SUBMITTED", "approval_status": order.approval_status},
+        metadata={"channel": source},
     )
     return mapping
 

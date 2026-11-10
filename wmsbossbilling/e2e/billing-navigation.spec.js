@@ -21,7 +21,7 @@ for (const width of [390, 1440]) {
         localStorage.setItem('user', JSON.stringify({ id: 992, username: '导航测试' }))
         localStorage.setItem('boss_scope:992', JSON.stringify(scope))
       }, scope)
-      await page.route('**/api/**', async route => {
+      await page.route(url => url.pathname.startsWith('/api/'), async route => {
         const url = new URL(route.request().url())
         const path = url.pathname
         let body = { count: 0, results: [] }
