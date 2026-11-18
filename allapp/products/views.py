@@ -125,7 +125,11 @@ class ProductActiveIdentifierSearchFilter(filters.SearchFilter):
 
 
 class ProductViewSet(OwnerScopedMixin, viewsets.ModelViewSet):
-    queryset = Product.objects.all().select_related("owner", "brand")
+    queryset = (
+        Product.objects.all()
+        .select_related("owner", "brand")
+        .prefetch_related("transfer_sources__source_product__owner", "transfer_targets")
+    )
     serializer_class = ProductSerializer
     filter_backends = [
         DjangoFilterBackend,

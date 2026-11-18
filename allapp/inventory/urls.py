@@ -8,6 +8,7 @@ from .owner_alert_views import (
     OwnerAlertSettingsView,
     OwnerAlertsView,
 )
+from .owner_history_views import OwnerHistoryView
 from .views import (
     CompanyInventorySummaryViewSet,
     OwnerInventorySummaryViewSet,
@@ -22,6 +23,13 @@ router.register(
 )
 
 urlpatterns = [
+    *[
+        path(f"inventory/owner-history/{section}/", OwnerHistoryView.as_view(section=section))
+        for section in ("summary", "products", "documents", "events", "periods", "export")
+    ],
+    path(
+        "inventory/owner-history/events/<int:event_id>/", OwnerHistoryView.as_view(section="detail")
+    ),
     path("inventory/owner-alerts/", OwnerAlertsView.as_view()),
     path("inventory/owner-alerts/items/", OwnerAlertItemsView.as_view()),
     path("inventory/owner-alerts/settings/", OwnerAlertSettingsView.as_view()),

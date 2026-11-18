@@ -6,15 +6,16 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.utils import timezone
 
-from allapp.baseinfo.models import Owner
 from allapp.core.models import DocSequence
 from allapp.inventory.models import InventoryDetail, InventoryTransaction, InvTxType
 from allapp.inventory.services import _refresh_summaries
 from allapp.products.identifier_lookup import effective_product_barcodes
 from allapp.products.identifier_services import add_product_barcode
 from allapp.products.models import Product, ProductPackage
+from allapp.products.transfer_protection import _system_write, bind, differences
 from allapp.tasking.models import TaskStatusLog, WmsTask, WmsTaskLine
 
 from .transfer_models import (
@@ -29,6 +30,7 @@ PRODUCT_FIELDS = (
     "spec",
     "category_id",
     "brand_id",
+    "model",
     "temperature_zone_id",
     "description",
     "base_uom_id",
@@ -130,18 +132,27 @@ def inventory_snapshot(detail):
 
 
 def _check_product_pair(source, target, target_owner_id):
+    errors = differences(source, target)
+    if not source.is_active or source.is_deleted or not target.is_active or target.is_deleted:
+        errors.append("来源或接收商品已停用/删除")
+    if target.owner_id != target_owner_id or source.owner_id == target_owner_id:
+        errors.append("货主归属不正确")
+    from allapp.products.models import TransferProductBinding
+
+    if not TransferProductBinding.objects.filter(
+        source_product=source, target_product=target
+    ).exists():
+        errors.append("接收商品缺少永久来源保护绑定")
     if (
-        not source.is_active
-        or source.is_deleted
-        or not target.is_active
-        or target.is_deleted
-        or target.owner_id != target_owner_id
-        or source.owner_id == target_owner_id
-        or any(getattr(source, field) != getattr(target, field) for field in COMPATIBLE_FIELDS)
-        or (source.spec or "").strip() != (target.spec or "").strip()
+        TransferProductBinding.objects.filter(target_product=target)
+        .exclude(source_product=source)
+        .exists()
     ):
+        errors.append("接收商品绑定了多个不同来源")
+    if errors:
         raise ValidationError(
-            f"商品 {source.name} 的新货主商品对应无效或规格、单位、追踪规则不一致。"
+            f"来源商品 {source.pk}（{source.name}）→接收商品 {target.pk} 的转货对应不一致："
+            + "；".join(errors)
         )
 
 
@@ -180,8 +191,14 @@ def _map_package(source_package, target, *, actor=None, create=False, copy_defau
     )
 
 
+@transaction.atomic
 def map_product(source, target_owner, *, actor=None):
-    """Reuse an explicit/exact mapping, or clone only master-data attributes."""
+    """Reuse explicit provenance only; never infer identity from a barcode or name."""
+    from allapp.products.models import TransferProductBinding
+    from allapp.products.transfer_protection import lock_family
+
+    lock_family([source.pk], extra_owner_ids=[target_owner.pk])
+    source.refresh_from_db()
     mapping = (
         OwnerProductMapping.all_objects.select_for_update()
         .filter(source_product=source, target_owner=target_owner)
@@ -191,52 +208,59 @@ def map_product(source, target_owner, *, actor=None):
     if mapping:
         if not mapping.is_active or mapping.is_deleted:
             raise ValidationError(f"商品 {source.name} 的货主对应已停用。")
+        bind(source, mapping.target_product)
         _check_product_pair(source, mapping.target_product, target_owner.pk)
         return mapping.target_product
-
-    barcodes = list(effective_product_barcodes().filter(product=source).select_related("package"))
-    values = {barcode.normalized_value for barcode in barcodes}
-    matches = set(
-        effective_product_barcodes()
-        .filter(owner=target_owner, normalized_value__in=values)
-        .values_list("product_id", flat=True)
+    historic = list(
+        TransferProductBinding.objects.filter(
+            source_product=source, target_product__owner=target_owner
+        ).select_related("target_product")
     )
-    if len(matches) > 1:
-        raise ValidationError(f"商品 {source.name} 的条码在新货主下匹配多个商品，请先维护对应。")
-    if matches:
-        target = Product.objects.get(pk=next(iter(matches)))
+    if len(historic) > 1:
+        raise ValidationError("该来源商品存在多个历史接收档案，请先处理对应冲突。")
+    if historic:
+        target = historic[0].target_product
         _check_product_pair(source, target, target_owner.pk)
-        target_barcodes = effective_product_barcodes().filter(
-            product=target, normalized_value__in=values
-        )
-        for barcode in target_barcodes:
-            expected = {
-                b.qty_in_base for b in barcodes if b.normalized_value == barcode.normalized_value
-            }
-            if expected != {barcode.qty_in_base}:
-                raise ValidationError(f"商品 {source.name} 的条码包装换算冲突。")
     else:
+        barcodes = list(
+            effective_product_barcodes().filter(product=source).select_related("package")
+        )
+        conflicts = list(
+            effective_product_barcodes()
+            .filter(
+                owner=target_owner, normalized_value__in=[row.normalized_value for row in barcodes]
+            )
+            .values_list("product_id", flat=True)
+            .distinct()
+        )
+        if conflicts:
+            raise ValidationError(
+                f"接收货主的商品 {conflicts} 已使用相同条码；请先核实并建立明确的来源对应，不能自动关联。"
+            )
         target = Product(
             owner=target_owner, **{field: getattr(source, field) for field in PRODUCT_FIELDS}
         )
         target._derive_code_from_owner_id_on_create = True
         target.created_by = target.updated_by = actor
         target.save()
-        packages = {
-            package.pk: _map_package(package, target, actor=actor, create=True, copy_defaults=True)
-            for package in source.packages.filter(is_active=True, uom__is_active=True)
-        }
-        for barcode in barcodes:
-            add_product_barcode(
-                product=target,
-                barcode=barcode.barcode,
-                barcode_type=barcode.barcode_type,
-                package=packages.get(barcode.package_id),
-                is_primary=barcode.is_primary,
-                valid_from=barcode.valid_from,
-                valid_to=barcode.valid_to,
-                actor=actor,
-            )
+        bind(source, target)
+        with _system_write([target.pk]):
+            packages = {}
+            for package in source.packages.filter(is_active=True, uom__is_active=True):
+                packages[package.pk] = _map_package(
+                    package, target, actor=actor, create=True, copy_defaults=True
+                )
+            for barcode in barcodes:
+                add_product_barcode(
+                    product=target,
+                    barcode=barcode.barcode,
+                    barcode_type=barcode.barcode_type,
+                    package=packages.get(barcode.package_id),
+                    is_primary=barcode.is_primary,
+                    valid_from=barcode.valid_from,
+                    valid_to=barcode.valid_to,
+                    actor=actor,
+                )
     OwnerProductMapping.objects.create(
         source_product=source,
         target_owner=target_owner,
@@ -248,12 +272,9 @@ def map_product(source, target_owner, *, actor=None):
 
 
 def prepare_transfer_items(items, source_owner, target_owner, *, actor):
-    # Product creation locks owner sequences; acquire both owners in stable order.
-    list(
-        Owner.objects.select_for_update()
-        .filter(pk__in=[source_owner.pk, target_owner.pk])
-        .order_by("pk")
-    )
+    from allapp.products.transfer_protection import lock_family
+
+    lock_family([item["product"].pk for item in items], [source_owner.pk, target_owner.pk])
     result = []
     for item in items:
         source = item["product"]

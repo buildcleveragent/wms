@@ -151,6 +151,46 @@ class ProductPackageInline(TenantScopedInlineMixin, admin.TabularInline):
     )
     readonly_fields = ("volume_m3_status", "barcode")
 
+    def get_readonly_fields(self, request, obj=None):
+        from .models import TransferProductBinding
+
+        fields = list(super().get_readonly_fields(request, obj))
+        if obj and TransferProductBinding.objects.filter(target_product=obj).exists():
+            fields.extend(("uom", "qty_in_base"))
+        return fields
+
+    def get_formset(self, request, obj=None, **kwargs):
+        from .transfer_protection import bindings
+
+        base = super().get_formset(request, obj, **kwargs)
+        if not obj or not bindings(obj.pk).exists():
+            return base
+
+        class ProtectedPackages(base):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                for form in self.forms:
+                    if form.instance.pk:
+                        for field in ("uom", "qty_in_base"):
+                            if field in form.fields:
+                                form.fields[field].disabled = True
+
+        return ProtectedPackages
+
+    def has_add_permission(self, request, obj=None):
+        from .models import TransferProductBinding
+
+        return super().has_add_permission(request, obj) and not (
+            obj and TransferProductBinding.objects.filter(target_product=obj).exists()
+        )
+
+    def has_delete_permission(self, request, obj=None):
+        from .transfer_protection import bindings
+
+        return super().has_delete_permission(request, obj) and not (
+            obj and bindings(obj.pk).exists()
+        )
+
 
 class ProductBarcodeAddForm(forms.ModelForm):
     class Meta:
@@ -437,6 +477,28 @@ class ProductExternalIdentifierHistoryInline(TenantScopedInlineMixin, admin.Tabu
 
 @admin.register(Product)
 class ProductAdmin(TenantScopedAdminMixin, AdvancedAdminBase, BaseReadonlyAdmin):
+    def get_readonly_fields(self, request, obj=None):
+        from .transfer_protection import protected_fields
+
+        fields = list(super().get_readonly_fields(request, obj)) + ["transfer_protection_note"]
+        if obj:
+            fields.extend(field.removesuffix("_id") for field in protected_fields(obj.pk))
+        return tuple(dict.fromkeys(fields))
+
+    def get_fields(self, request, obj=None):
+        return ("transfer_protection_note", *super().get_fields(request, obj))
+
+    @admin.display(description="转货来源保护")
+    def transfer_protection_note(self, obj):
+        from .transfer_protection import protection_info
+
+        if not obj or not obj.pk:
+            return "—"
+        info = protection_info(obj)
+        return (
+            "；".join([info["reason"], *(row["label"] for row in info["sources"])]) or "无来源绑定"
+        )
+
     admin_priority = 1
     list_per_page = 500
     change_list_template = "admin/products/product/change_list.html"
@@ -659,6 +721,21 @@ class ProductAdmin(TenantScopedAdminMixin, AdvancedAdminBase, BaseReadonlyAdmin)
 
 @admin.register(ProductPackage)
 class ProductPackageAdmin(TenantScopedAdminMixin, AdvancedAdminBase, BaseReadonlyAdmin):
+    def get_readonly_fields(self, request, obj=None):
+        from .transfer_protection import bindings
+
+        fields = list(super().get_readonly_fields(request, obj))
+        if obj and bindings(obj.product_id).exists():
+            fields.extend(("product", "uom", "qty_in_base", "is_active"))
+        return fields
+
+    def has_delete_permission(self, request, obj=None):
+        from .transfer_protection import bindings
+
+        return super().has_delete_permission(request, obj) and not (
+            obj and bindings(obj.product_id).exists()
+        )
+
     admin_priority = 2
     list_display = (
         "product",

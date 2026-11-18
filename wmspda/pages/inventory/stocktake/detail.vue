@@ -28,6 +28,7 @@
         <view class="line-title">{{ (line.product_display_name || line.product_name) || line.product_sku }}</view>
         <view class="meta">{{ line.product_code || line.product_sku }}<text v-if="line.product_spec"> · {{ line.product_spec }}</text></view>
         <view class="meta">库位：{{ line.location_code }}　批次：{{ line.lot_no || '-' }}</view>
+        <view class="meta">有效期至：{{ line.exp_date || '未设置' }}</view>
         <view v-if="line.qty_book !== undefined" class="meta">账面：{{ line.qty_book }}　差异：{{ line.qty_diff }}</view>
         <view v-if="!isDraft" class="entry">
           <input type="digit" v-model="line._qty" placeholder="实盘数量（可为0）" :disabled="!canRecord || busy || loading"/>
@@ -41,7 +42,7 @@
           <button type="primary" :disabled="busy || loading" @click="manage('release')">确认发布</button>
         </template>
         <template v-else-if="isWorking">
-          <button v-if="!task.can_record && !task.has_active_assignment" :disabled="busy || loading" @click="claim">认领任务</button>
+          <button v-if="task.can_claim && !task.can_record" :disabled="busy || loading" @click="claim">认领任务</button>
           <button type="primary" :disabled="!canRecord || !allCounted || busy || hasUnsaved" @click="submit">完成并提交</button>
           <view v-if="hasUnsaved" class="hint">请先保存修改后的实盘数量。</view>
         </template>
@@ -64,7 +65,7 @@ import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import { api, createIdempotencyUuid } from '@/utils/request'
 import { useAuth } from '@/store/auth'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
-import { countScopes, countStatus, hasUnsavedCounts, useCountSession } from '@/utils/counting'
+import { countScopes, countStatus, hasUnsavedCounts, validCountQuantity, useCountSession } from '@/utils/counting'
 const auth = useAuth(), taskId = ref(0), truncated = ref(false), localError = ref(''), scanCode = ref(''), note = ref('')
 const confirm = content => new Promise(resolve => uni.showModal({ title: '确认操作', content, success: result => resolve(result.confirm), fail: () => resolve(false) }))
 const session = useCountSession({ api, auth, confirm })
@@ -89,7 +90,7 @@ function locateBarcode() {
 async function claim() { if (await session.act('claim')) await reload() }
 async function saveLine(line) {
   localError.value = ''
-  if (!/^\d+(\.\d{1,4})?$/.test(String(line._qty))) { localError.value = '实盘数量须为非负数，最多四位小数'; return }
+  if (!validCountQuantity(line._qty)) { localError.value = '实盘数量须在 0～99999999999999.9999 之间，最多四位小数'; return }
   if (!line._clientSeq || line._clientQty !== line._qty) { line._clientSeq = createIdempotencyUuid(); line._clientQty = line._qty }
   const result = await session.act('record', { line_id: line.id, qty_counted: line._qty, client_seq: line._clientSeq, barcode: scanCode.value })
   if (!result) return
@@ -102,6 +103,10 @@ async function submit() {
   const result = await session.act('submit', {}, '确认所有明细已盘点并提交？')
   if (!result) return
   if (result.outcome === 'RECOUNT_RELEASED' && result.next_task_id) { uni.redirectTo({ url: `/pages/inventory/stocktake/detail?task_id=${result.next_task_id}` }); return }
+  if (!manager.value) {
+    uni.redirectTo({ url: `/pages/inventory/stocktake/index?mode=work&submitted=${encodeURIComponent(result.outcome)}` })
+    return
+  }
   await reload()
   if (result.outcome === 'POSTING_FAILED') localError.value = '自动过账失败，请主管从待过账列表重试。'
 }

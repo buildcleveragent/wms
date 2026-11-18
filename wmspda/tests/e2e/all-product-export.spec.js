@@ -13,6 +13,10 @@ function profile(canExport) {
 }
 
 async function logIn(page) {
+  // Home reminders must not send the mocked login token to a real backend.
+  await page.route('**/api/pda/home-todos/', (route) => route.fulfill({
+    json: { scope: 'export-test-warehouse', items: [] },
+  }))
   await page.route('**/api/pda/token/', (route) => route.fulfill({
     json: { access: 'export-test-access', refresh: 'export-test-refresh' },
   }))

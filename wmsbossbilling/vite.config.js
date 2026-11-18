@@ -1,3 +1,4 @@
+import localH5Assets from '../frontend/local-h5-assets.mjs'
 import { defineConfig, loadEnv } from 'vite'
 import { fileURLToPath } from 'node:url'
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
@@ -30,6 +31,7 @@ export default defineConfig(({ mode }) => {
   validateWeixinManifest({ platform, root: projectDir })
   return {
     envDir,
+    css: { postcss: { plugins: platform === 'h5' ? [localH5Assets()] : [] } },
     define: {
       'import.meta.env.WMS_BUILD_PLATFORM': JSON.stringify(platform),
       'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiBase),

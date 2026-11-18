@@ -8,12 +8,16 @@
 
 - `pages/login`
 - `pages/home/index`
+- `pages/settings/refresh`
+- `pages/activity/index`
+- `pages/activity/detail`
 - `pages/inventory/index`
 - `pages/inventory/detail`
 - `pages/alerts/index`
 - `pages/alerts/section`
 - `pages/alerts/detail`
 - `pages/cockpit/index`
+- `pages/cockpit/details`
 - `pages/billing/overview`
 - `pages/billing/owner_detail`
 - `pages/billing/accrual_detail`
@@ -47,6 +51,7 @@ HBuilder 的前端端口并返回 404。修改该配置后需要停止并重新�
 本次更新与验收范围为 App、H5 和相关后端接口，小程序暂不验收。
 `npm run test:release` 执行前端单元测试、H5 构建与浏览器回归，再构建并校验 Android 原生资源；后端 MySQL 测试单独执行。
 Android 原生安装包仍需通过 HBuilderX 签名打包并做真机验证。
+Android 报表保存在应用私有文档目录，通过系统应用打开 Excel；设备没有支持的查看器时会提示文件已保存。原生写入及打开仍须真机验收。
 覆盖旧版的版本预检、云端证书复用和真机验收步骤见
 [Android 内部测试包说明](docs/android-internal-release.md)。
 以后切回 HTTPS 时，修改服务地址并设 `VITE_ALLOW_HTTP_API=false`，重新构建即可撤销 Android 的 HTTP 主机许可。
@@ -106,5 +111,16 @@ FIFO 上线必须先在全仓范围执行预览与 `--commit`，确认成本层�
 发布顺序：先部署兼容后端接口，再发布 H5，最后使用现有安装身份和证书打包 Android。保持既有 HTTP 例外和 FRP 链路。`build:app` 只生成 App 资源，签名 APK、远程浏览器生产访问、Wi-Fi／移动网络及 Android 真机仍需部署后验收。
 
 针对性验证：在仓库根目录使用 `.env.test.local` 的 MySQL `wms_db_test`，运行 `APP_ENV=test .venv/bin/pytest --reuse-db allapp/reports/test_boss_activity.py`；前端目录运行 `npm run test:unit`、`npm run build:h5`、`npm run test:e2e:built`、`npm run build:app`。不要为本次无迁移更新重建业务库或测试库。
+
+真实 H5 联测和查询规模检查可在完成 H5 构建后，从仓库根目录单独执行：
+
+```bash
+APP_ENV=test WMS_BROWSER_ARTIFACTS=/tmp/boss-acceptance \
+  .venv/bin/pytest --reuse-db scripts/test_boss_browser_acceptance.py scripts/test_boss_query_acceptance.py
+```
+
+联测使用合成数据和真实登录，通过本地同源代理访问测试后端，覆盖令牌刷新、首页下钻、计费明细、Excel 下载、退出及账号范围隔离。查询检查使用 1000 条合成库存，比较分页查询数量并记录多年查询耗时。它们不代表生产数据负载或 Android 真机验收；截图、下载和查询记录写入指定的仓库外目录。
+
+老板端对 Boss 报表及计费总览显式传入 `decimal_format=string`，使 Decimal 金额和数量在 JSON 中保持精确字符串；计数和 ID 仍为整数。未传该参数的调用保留原响应格式。前端显示、账单求和与排序使用十进制计算，避免大金额或冲销精度丢失。
 
 重点关注、离开期间摘要、超时检查部署及不限天数周期统计见 [Boss 重点关注与周期统计](docs/boss-focus-and-periods.md)。本次不包含主动推送。

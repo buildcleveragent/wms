@@ -426,6 +426,8 @@ class InboundOrderReadSerializer(serializers.ModelSerializer):
 
 
 class InboundTaskLineSerializer(serializers.ModelSerializer):
+    qty_plan = serializers.DecimalField(max_digits=18, decimal_places=3, read_only=True)
+    qty_done = serializers.DecimalField(max_digits=18, decimal_places=3, read_only=True)
     product_sku = serializers.CharField(source="product.sku", read_only=True)
     product_name = serializers.CharField(source="product.name", read_only=True)
     brand_model = serializers.CharField(source="product.brand_model", read_only=True)

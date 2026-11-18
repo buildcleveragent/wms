@@ -4,6 +4,7 @@
       <text class="title">{{ header.product.display_name || header.product.name }}</text>
       <text class="muted">编码：{{ header.product.code || '未记录' }} · 规格：{{ header.product.spec || '未记录' }}</text>
       <text>单位：{{ header.product.base_unit || '未记录' }}</text>
+      <button v-if="historyAccess.canViewStockHistory" size="mini" @click="openHistory">收发历史 ›</button>
     </view>
     <view class="tabs">
       <button :class="{ selected: tab === 'detail' }" @click="select('detail')">库存明细</button>
@@ -89,6 +90,13 @@ import { onLoad, onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import { useInventoryDetail } from '@/composables/useInventoryDetail'
 import { useInventoryAccess } from '@/composables/useInventoryAccess'
 import { useOwnerExport } from '@/composables/useOwnerExport'
+import { useAuth } from '@/store/auth'
+import { ownerAccess } from '@/utils/ownerAccess'
+import { historyURL } from '@/utils/stockHistory'
+
+const historyAuth = useAuth()
+const historyAccess = computed(() => ownerAccess({ roles: historyAuth.roles, capabilities: historyAuth.capabilities }))
+function openHistory() { uni.navigateTo({url: historyURL({product_id: header.value.product.id}, 'events')}) }
 
 const { id, tab, header, denied, sections, setId, show, stop, select, apply, load } = useInventoryDetail()
 const { canExport, identity, revoke } = useInventoryAccess()

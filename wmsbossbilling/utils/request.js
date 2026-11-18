@@ -1,5 +1,8 @@
 export { BASE_URL } from './api-base'
 import { BASE_URL } from './api-base'
+// #ifdef APP-PLUS
+import { saveAndroidReport } from './report-file'
+// #endif
 
 const ACCESS_KEY = 'access'
 const REFRESH_KEY = 'refresh'
@@ -217,7 +220,7 @@ export async function downloadBinary({ url, method = 'GET', data = {}, filename 
   const response = await request({ url, method, data, responseType: 'arraybuffer', rawResponse: true })
   const disposition = response.header?.['content-disposition'] || response.header?.['Content-Disposition'] || ''
   const matched = disposition.match(/filename="?([^";]+)"?/i)
-  const resolvedName = matched?.[1] || filename
+  const resolvedName = (matched?.[1] || filename).split(/[\\/]/).pop().replace(/[\x00-\x1f]/g, '') || 'report.xlsx'
   // #ifdef H5
   const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
   const anchor = document.createElement('a')
@@ -226,7 +229,10 @@ export async function downloadBinary({ url, method = 'GET', data = {}, filename 
   anchor.click()
   URL.revokeObjectURL(anchor.href)
   // #endif
-  // #ifndef H5
+  // #ifdef APP-PLUS
+  await saveAndroidReport(response.data, resolvedName)
+  // #endif
+  // #ifndef H5 || APP-PLUS
   const fs = uni.getFileSystemManager()
   const filePath = `${uni.env.USER_DATA_PATH}/${resolvedName}`
   fs.writeFileSync(filePath, response.data, 'binary')
@@ -236,7 +242,9 @@ export async function downloadBinary({ url, method = 'GET', data = {}, filename 
 }
 
 function get(url, params = {}) {
-  const query = buildQuery(params)
+  // Opt in before the server's JSON renderer can round Decimal values to floats.
+  const exact = url.startsWith('/api/reports/boss/') || url === '/api/billing/dashboard/warehouse-overview/'
+  const query = buildQuery(exact ? { ...params, decimal_format: 'string' } : params)
   return request({ url: query ? `${url}?${query}` : url })
 }
 

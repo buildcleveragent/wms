@@ -13,6 +13,7 @@ from allapp.accounts.access import AccessScope
 from allapp.core.choices import ZoneType
 from allapp.tasking import counting
 from allapp.tasking.count_options import can_manage_count, count_options, count_scope_details
+from allapp.tasking.count_policy import can_operate_count, hide_count_book
 from allapp.tasking.models import TaskAssignment, WmsTask, WmsTaskLine
 
 
@@ -60,6 +61,7 @@ class CountTaskSerializer(serializers.ModelSerializer):
     has_active_assignment = serializers.SerializerMethodField()
     assigned_to_me = serializers.SerializerMethodField()
     can_record = serializers.SerializerMethodField()
+    can_claim = serializers.SerializerMethodField()
 
     class Meta:
         model = WmsTask
@@ -80,6 +82,7 @@ class CountTaskSerializer(serializers.ModelSerializer):
             "has_active_assignment",
             "assigned_to_me",
             "can_record",
+            "can_claim",
             "remark",
             "released_at",
             "finished_at",
@@ -100,13 +103,22 @@ class CountTaskSerializer(serializers.ModelSerializer):
 
     def get_can_record(self, obj):
         request = self.context.get("request")
-        if not request:
-            return False
-        if request.user.is_superuser or request.user.has_perm(
-            "tasking.taskconfirm_as_wh_manager"
+        if (
+            not request or not can_operate_count(request.user)
+            or obj.status not in {WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS}
         ):
+            return False
+        if can_manage_count(request.user):
             return True
         return self._active_assignments(obj).filter(assignee=request.user).exists()
+
+    def get_can_claim(self, obj):
+        request = self.context.get("request")
+        return bool(
+            request and can_operate_count(request.user)
+            and obj.status == WmsTask.Status.RELEASED
+            and not self._active_assignments(obj).exclude(assignee=request.user).exists()
+        )
 
 
 class CountLineSerializer(serializers.ModelSerializer):
@@ -179,20 +191,7 @@ class CountLineSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         request = self.context.get("request")
-        task = instance.task
-        manager = bool(
-            request
-            and (
-                request.user.is_superuser
-                or request.user.has_perm("tasking.taskconfirm_as_wh_manager")
-            )
-        )
-        blind = getattr(getattr(task, "counttaskextra", None), "blind", True)
-        if (
-            blind
-            and task.status not in {WmsTask.Status.COMPLETED, WmsTask.Status.CANCELLED}
-            and not manager
-        ):
+        if hide_count_book(instance.task, request.user if request else None, context=self.context):
             data.pop("qty_book", None)
             data.pop("qty_diff", None)
         return data

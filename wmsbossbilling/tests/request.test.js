@@ -1,9 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { buildQuery, classifyError, request } from '../utils/request'
+import { api, buildQuery, classifyError, request } from '../utils/request'
 
 describe('boss request error classification', () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it('requests exact decimal JSON for reports and aggregate billing without changing serialized bills', async () => {
+    const transport = vi.fn(options => options.success({ statusCode: 200, data: {} }))
+    vi.stubGlobal('uni', { getStorageSync: () => '', request: transport })
+    await api.bossToday({ warehouse: 1 })
+    await api.billingWarehouseOverview({ owner: 2 })
+    await api.billingBillDetail(3)
+    const urls = transport.mock.calls.map(([options]) => options.url)
+    expect(urls[0]).toContain('warehouse=1&decimal_format=string')
+    expect(urls[1]).toContain('owner=2&decimal_format=string')
+    expect(urls[2]).not.toContain('decimal_format')
+  })
 
   it('shows the server reason when a binary download is forbidden', async () => {
     vi.stubGlobal('uni', {

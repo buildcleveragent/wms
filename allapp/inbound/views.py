@@ -843,7 +843,8 @@ class InboundTaskViewSet(viewsets.ReadOnlyModelViewSet):
         if line.to_location_id and line.to_location_id != location.pk:
             raise ValidationError("该任务行已选择其他目标库位，不支持跨库位混合上架。")
         current = Decimal(line.qty_done or 0)
-        total = current + payload["qty"]
+        # Shared task lines store four places for counts; putaway still uses three.
+        total = (current + payload["qty"]).quantize(Decimal("0.001"))
         if total > Decimal(line.qty_plan or 0):
             raise ValidationError("上架数量不能超过计划数量。")
 

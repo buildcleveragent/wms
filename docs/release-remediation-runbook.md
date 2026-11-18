@@ -3,6 +3,29 @@
 本文件是执行要求，不是已部署或已通过的证据。未解决的高危、严重漏洞继续阻断发布，
 不添加风险放行例外。所有证据绑定冻结源码和最终镜像摘要；安全扫描有效期 24 小时。
 
+## 常驻服务发布与 Boss 心跳
+
+生产入口为 `sh docker/production_release.sh <repository@sha256:digest>`；staging 入口为
+`WMS_IMAGE=<repository@sha256:digest> sh docker/staging_release.sh`。两个入口均从仓库根目录
+执行，并共用 `docker/release_services.sh` 管理 `web`、`scheduler`、`boss-check-worker`。
+
+预检通过后停止三个服务，再运行迁移。web 恢复、迁移检查和数据核对通过后，才启动两个
+后台服务。每个服务必须恰有一个运行容器，实际镜像 ID 必须与目标不可变镜像一致；首次
+部署同样创建 Boss worker。生产流程仍负责支付定时器停用、排空和恢复。
+
+Boss worker 的只读探针为 `python manage.py check_boss_worker`：心跳必须存在且在最近
+120 秒内。发布另外传入 `--started-after <容器 StartedAt>`，拒绝沿用旧容器留下的心跳。
+探针支持项目本地时间配置与 Docker UTC 时间比较，不写入心跳、不触发业务巡检。
+自动巡检关闭时 worker 仍发送心跳，因此不应跳过 worker 的发布和健康检查。
+
+启动探针最多等待 120 秒。生产观察期持续检查三个容器、web readiness 和 worker 心跳；
+迁移、启动或观察失败，三个服务及支付定时器保持停止，命令以非零状态退出。按照已验证
+备份和旧镜像恢复数据库、媒体及应用后，重新核对服务数量、镜像、数据和心跳，再恢复
+调度；不要仅重启 web，也不要自动回退数据库迁移。
+
+代码内的编排回归使用模拟 Docker/systemd，并不证明真实服务器已成功部署。真实发布
+还需保存服务镜像、容器状态、启动时间、探针及数据核对结果。
+
 ## 静态与媒体卷
 
 新镜像创建 `/app/staticfiles` 和 `/app/media`，属主为 10001:10001。

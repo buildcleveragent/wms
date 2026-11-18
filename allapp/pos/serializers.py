@@ -27,6 +27,7 @@ from .models import (
     PosSale,
     PosSaleLine,
 )
+from .quantities import document_quantities, unit_fields
 from .services import (
     build_receipt,
     create_customer_repayment,
@@ -425,13 +426,20 @@ class PosSaleLineReadSerializer(serializers.ModelSerializer):
     product_display_name = serializers.CharField(read_only=True)
     owner_name = serializers.CharField(source="owner.name", read_only=True)
     product_spec = serializers.CharField(source="frozen_product_spec", read_only=True)
-    base_unit = serializers.CharField(source="product.base_uom.name", read_only=True)
+    base_unit = serializers.SerializerMethodField()
+
+    def get_base_unit(self, obj):
+        return unit_fields(obj.product)["base_unit"]
+
     product_code = serializers.CharField(source="product.code", read_only=True)
     product_name = serializers.CharField(source="frozen_product_name", read_only=True)
     returned_qty = serializers.SerializerMethodField()
     returnable_qty = serializers.SerializerMethodField()
     returned_amount = serializers.SerializerMethodField()
     returnable_amount = serializers.SerializerMethodField()
+
+    base_unit_id = serializers.IntegerField(source="product.base_uom_id", read_only=True)
+    base_unit_code = serializers.CharField(source="product.base_uom.code", read_only=True)
 
     class Meta:
         model = PosSaleLine
@@ -441,6 +449,8 @@ class PosSaleLineReadSerializer(serializers.ModelSerializer):
             "owner_id",
             "owner_name",
             "product_spec",
+            "base_unit_id",
+            "base_unit_code",
             "base_unit",
             "product_id",
             "product_code",
@@ -505,6 +515,11 @@ class PosSaleReadSerializer(serializers.ModelSerializer):
     created_at = SafeDateTimeField(read_only=True)
     voided_at = SafeDateTimeField(read_only=True)
 
+    quantities_by_unit = serializers.SerializerMethodField()
+
+    def get_quantities_by_unit(self, obj):
+        return document_quantities(obj.lines.all())
+
     class Meta:
         model = PosSale
         fields = [
@@ -528,6 +543,7 @@ class PosSaleReadSerializer(serializers.ModelSerializer):
             "payment",
             "payment_lines",
             "lines",
+            "quantities_by_unit",
             "orders",
             "receipt",
         ]
@@ -650,6 +666,14 @@ class PosReturnLineReadSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="frozen_product_name", read_only=True)
     created_at = SafeDateTimeField(read_only=True)
 
+    base_unit_id = serializers.IntegerField(source="product.base_uom_id", read_only=True)
+    base_unit_code = serializers.CharField(source="product.base_uom.code", read_only=True)
+
+    base_unit = serializers.SerializerMethodField()
+
+    def get_base_unit(self, obj):
+        return unit_fields(obj.product)["base_unit"]
+
     class Meta:
         model = PosReturnLine
         fields = [
@@ -663,6 +687,9 @@ class PosReturnLineReadSerializer(serializers.ModelSerializer):
             "product_spec",
             "brand_model",
             "product_display_name",
+            "base_unit_id",
+            "base_unit_code",
+            "base_unit",
             "qty",
             "price",
             "amount",
@@ -674,6 +701,11 @@ class PosReturnReadSerializer(serializers.ModelSerializer):
     lines = PosReturnLineReadSerializer(many=True, read_only=True)
     refunds = PosRefundReadSerializer(many=True, read_only=True)
     created_at = SafeDateTimeField(read_only=True)
+
+    quantities_by_unit = serializers.SerializerMethodField()
+
+    def get_quantities_by_unit(self, obj):
+        return document_quantities(obj.lines.all())
 
     class Meta:
         model = PosReturn
@@ -689,6 +721,7 @@ class PosReturnReadSerializer(serializers.ModelSerializer):
             "reason",
             "created_at",
             "lines",
+            "quantities_by_unit",
             "refunds",
         ]
 

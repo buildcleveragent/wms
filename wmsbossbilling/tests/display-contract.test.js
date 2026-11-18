@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decimalText, hasWarning, inventoryAvailable, money, percent, productName, qty, sumAmounts } from '../utils/billing'
+import { compareAmounts, decimalText, hasWarning, inventoryAvailable, money, percent, productName, qty, sumAmounts } from '../utils/billing'
 
 describe('boss business data presentation', () => {
   it.each([null, undefined, '', '  ', 'bad', NaN, Infinity, false, {}])('does not turn missing/invalid %s into zero', value => {
@@ -17,7 +17,7 @@ describe('boss business data presentation', () => {
     expect(qty('0.1234')).toBe('0.1234')
   })
   it('does not report a complete bill total when a line amount is missing', () => {
-    expect(sumAmounts(100, -40, 0)).toBe(60)
+    expect(money(sumAmounts(100, -40, 0), 'CNY')).toBe('¥60.00')
     expect(sumAmounts(100, null)).toBeNull()
     expect(sumAmounts(null, 5)).toBeNull()
   })
@@ -33,5 +33,21 @@ describe('boss business data presentation', () => {
     expect(inventoryAvailable(meta)).toBe(false)
     expect(hasWarning(meta, 'HISTORICAL_STALE_METRIC_UNAVAILABLE')).toBe(false)
     expect(inventoryAvailable({ data_status: 'COMPLETE' })).toBe(true)
+  })
+
+  it('preserves model-supported decimal precision beyond JavaScript safe integers', () => {
+    expect(money('9007199254740993.01', 'CNY')).toBe('¥9007199254740993.01')
+    expect(qty('99999999999999.1234')).toBe('99999999999999.1234')
+    expect(decimalText('99999999999999.1234', 4)).toBe('99999999999999.1234')
+    expect(money(sumAmounts('9007199254740993.01', '-9007199254740993.00'), 'CNY')).toBe('¥0.01')
+    expect(money(sumAmounts('9007199254740993.01', '0.09'), 'CNY')).toBe('¥9007199254740993.10')
+    expect(compareAmounts('9007199254740993.01', '9007199254740993.02')).toBe(-1)
+    expect(compareAmounts(null, '0')).toBe(-1)
+  })
+
+  it('rounds decimal ties consistently without binary floating-point artifacts', () => {
+    expect(money('1.005', 'CNY')).toBe('¥1.01')
+    expect(money('-1.005', 'CNY')).toBe('¥-1.01')
+    expect(qty('0.00005')).toBe('0.0001')
   })
 })

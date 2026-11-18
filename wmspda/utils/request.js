@@ -1513,6 +1513,9 @@ export const api = {
     request({ url: `/api/pda/count-tasks/${id}/post/`, method: 'POST', data: payload }),
 
 
+  companyInventoryWarehouses: () =>
+    request({ url: '/api/inventory/company-summary/warehouse-options/' }),
+
   companyInventorySummary: (params = {}) => {
     const qs = buildQuery({
       ...params,

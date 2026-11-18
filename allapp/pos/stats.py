@@ -23,6 +23,7 @@ from .models import (
     PosSale,
     PosSaleLine,
 )
+from .quantities import pos_quantities_by_unit
 
 ZERO_MONEY = Decimal("0.00")
 ZERO_QTY = Decimal("0.000")
@@ -289,6 +290,7 @@ def _payment_rows(line_qs, return_line_qs, repayment_qs):
 
 
 def _owner_rows(line_qs, return_line_qs):
+    quantities = pos_quantities_by_unit(line_qs, return_line_qs, group_by="owner_id")
     result = {}
     sales = (
         line_qs.filter(sale__status=PosSale.Status.COMPLETED)
@@ -350,6 +352,7 @@ def _owner_rows(line_qs, return_line_qs):
         rows.append(
             {
                 "owner_id": row["owner_id"],
+                "quantities_by_unit": quantities.get(row["owner_id"], []),
                 "owner_code": row["owner_code"],
                 "owner_name": row["owner_name"],
                 "sale_count": row["sale_count"],
@@ -376,6 +379,9 @@ def _product_rows(line_qs, return_line_qs, *, top_n):
             "product_id",
             "product__code",
             "product__sku",
+            "product__base_uom_id",
+            "product__base_uom__code",
+            "product__base_uom__name",
             "product__name",
             "product__brand__name",
             "product__model",
@@ -394,6 +400,11 @@ def _product_rows(line_qs, return_line_qs, *, top_n):
             "product_id": row["product_id"],
             "product_code": row["product__code"] or "",
             "product_sku": row["product__sku"] or "",
+            "base_unit_id": row["product__base_uom_id"],
+            "base_unit_code": row["product__base_uom__code"] or "",
+            "base_unit": row["product__base_uom__name"]
+            or row["product__base_uom__code"]
+            or "单位未设置",
             "product_name": row["product__name"] or "",
             "brand_model": combine_brand_model(row["product__brand__name"], row["product__model"]),
             "owner_id": row["owner_id"],
@@ -412,6 +423,9 @@ def _product_rows(line_qs, return_line_qs, *, top_n):
             "product_id",
             "product__code",
             "product__sku",
+            "product__base_uom_id",
+            "product__base_uom__code",
+            "product__base_uom__name",
             "product__name",
             "product__brand__name",
             "product__model",
@@ -433,6 +447,11 @@ def _product_rows(line_qs, return_line_qs, *, top_n):
                 "product_id": row["product_id"],
                 "product_code": row["product__code"] or "",
                 "product_sku": row["product__sku"] or "",
+                "base_unit_id": row["product__base_uom_id"],
+                "base_unit_code": row["product__base_uom__code"] or "",
+                "base_unit": row["product__base_uom__name"]
+                or row["product__base_uom__code"]
+                or "单位未设置",
                 "product_name": row["product__name"] or "",
                 "brand_model": combine_brand_model(
                     row["product__brand__name"], row["product__model"]
@@ -461,6 +480,9 @@ def _product_rows(line_qs, return_line_qs, *, top_n):
                 "product_id": row["product_id"],
                 "product_code": row["product_code"],
                 "product_sku": row["product_sku"],
+                "base_unit_id": row["base_unit_id"],
+                "base_unit_code": row["base_unit_code"],
+                "base_unit": row["base_unit"],
                 "product_name": row["product_name"],
                 "brand_model": row["brand_model"],
                 "product_display_name": identity_display_name(
@@ -618,6 +640,7 @@ def _build_pos_stats_sections(
 
     payload = {
         "summary": {
+            "quantities_by_unit": pos_quantities_by_unit(line_qs, return_line_qs),
             "sale_count": counts["sale_count"] or 0,
             "completed_count": counts["completed_count"] or 0,
             "voided_count": counts["voided_count"] or 0,

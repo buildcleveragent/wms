@@ -2,7 +2,7 @@
   <view class="page drill-page">
     <view class="head">
       <view class="title">{{ title }}</view>
-      <view class="muted">{{ scopeLabel }} · 约 30 秒检查更新</view>
+      <view class="muted">{{ scopeLabel }} · {{ refreshHint }}</view>
       <view v-if="route.type === 'tasks'" class="toolbar">
         <button v-for="item in taskModes" :key="item.key" size="mini" @click="setMode(item.key)">{{ item.label }}</button>
       </view>
@@ -111,7 +111,7 @@ async function load() {
   }
   throw new Error('未知明细类型')
 }
-const { data, pending, error, loading, updatedAt, refresh, apply } = useLiveResource(load,
+const { data, pending, error, loading, updatedAt, refreshHint, refresh, apply } = useLiveResource(load,
   { key: () => JSON.stringify([auth.user?.id, params.value]), enabled: () => ready.value && !!auth.access, hold: () => true })
 function searchNow() { page.value = 1; search.value = searchDraft.value.trim() }
 function setMode(value) { page.value = 1; mode.value = value }

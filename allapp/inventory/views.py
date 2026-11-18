@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 from allapp.core.product_identity import combine_brand_model, identity_display_name
+from allapp.locations.models import Warehouse
 from allapp.products.identifier_lookup import product_search_q
 from allapp.products.models import ProductUom
 
@@ -118,6 +119,15 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
     permission_classes = [IsAuthenticated]
     pagination_class = CompanyInventoryPagination
 
+    @action(detail=False, methods=["get"], url_path="warehouse-options")
+    def warehouse_options(self, request):
+        """Return all warehouses visible to this inventory query account."""
+        scope = self._check_company_level_permission(request.user)
+        warehouses = Warehouse.objects.all()
+        if not scope.is_global:
+            warehouses = warehouses.filter(id__in=scope.warehouse_ids)
+        return Response(list(warehouses.order_by("name", "code", "id").values("id", "code", "name")))
+
     def _check_company_level_permission(self, user):
         if user.is_superuser:
             return AccessScope.for_user(user)
@@ -226,7 +236,11 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
                 .order_by("owner__name", "product__name", "product_id")
             )
 
-        return qs
+        return qs.annotate(
+            base_unit_name=Subquery(
+                ProductUom.all_objects.filter(code=OuterRef("base_unit")).values("name")[:1]
+            )
+        )
 
     def list(self, request, *args, **kwargs):
         """
@@ -265,6 +279,7 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
                         "product_spec": row.get("product__spec") or "",
                         "product_sku": row.get("product__sku") or "",
                         "base_unit": row.get("base_unit") or "",
+                        "base_unit_name": row.get("base_unit_name"),
                         "onhand_qty": row["onhand_qty"],
                         "available_qty": row["available_qty"],
                         "allocated_qty": row["allocated_qty"],
@@ -295,6 +310,7 @@ class CompanyInventorySummaryViewSet(mixins.ListModelMixin, viewsets.GenericView
                         "product_spec": row.get("product__spec") or "",
                         "product_sku": row.get("product__sku") or "",
                         "base_unit": row.get("base_unit") or "",
+                        "base_unit_name": row.get("base_unit_name"),
                         "onhand_qty": row["onhand_qty"],
                         "available_qty": row["available_qty"],
                         "allocated_qty": row["allocated_qty"],

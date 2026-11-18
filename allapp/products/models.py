@@ -54,10 +54,17 @@ def normalize_product_identifier(value) -> str:
 class ProductQuerySet(models.QuerySet):
     """Prevent writes that would bypass Product.save() and its registry sync."""
 
+    @transaction.atomic
     def update(self, **kwargs):
+        from .transfer_protection import guard_bulk_products, lock_family
+
+        lock_family(list(self.values_list("pk", flat=True)))
+        guard_bulk_products(self, kwargs)
         blocked = set(kwargs).intersection(
             (
                 *PRODUCT_IDENTIFIER_FIELDS,
+                "owner",
+                "owner_id",
                 "carton_package",
                 "carton_package_id",
                 "name",
@@ -72,10 +79,18 @@ class ProductQuerySet(models.QuerySet):
             raise ValueError(f"商品标识字段不能通过 QuerySet.update() 修改：{fields}")
         return super().update(**kwargs)
 
+    @transaction.atomic
     def bulk_update(self, objs, fields, batch_size=None):
+        from .transfer_protection import guard_bulk_products, lock_family
+
+        objs = tuple(objs)
+        lock_family([obj.pk for obj in objs if obj.pk])
+        guard_bulk_products(self.filter(pk__in=[obj.pk for obj in objs]), fields)
         blocked = set(fields).intersection(
             (
                 *PRODUCT_IDENTIFIER_FIELDS,
+                "owner",
+                "owner_id",
                 "carton_package",
                 "carton_package_id",
                 "name",
@@ -163,7 +178,12 @@ class ProductExternalIdentifierQuerySet(ImmutableIdentifierQuerySet):
 class ProductPackageQuerySet(models.QuerySet):
     """Prevent writes that would bypass package barcode registry sync."""
 
+    @transaction.atomic
     def update(self, **kwargs):
+        from .transfer_protection import guard_bulk_packages, lock_family
+
+        lock_family(list(self.values_list("product_id", flat=True)))
+        guard_bulk_packages(self, kwargs)
         blocked = set(kwargs).intersection({"barcode", "product", "product_id"})
         if blocked:
             names = ", ".join(sorted(blocked))
@@ -174,7 +194,15 @@ class ProductPackageQuerySet(models.QuerySet):
             raise ValidationError("包含已绑定商品箱码的包装层级，不能停用或删除。")
         return super().update(**kwargs)
 
+    @transaction.atomic
     def bulk_update(self, objs, fields, batch_size=None):
+        from .transfer_protection import guard_bulk_packages, lock_family
+
+        objs = tuple(objs)
+        lock_family(
+            list(self.filter(pk__in=[obj.pk for obj in objs]).values_list("product_id", flat=True))
+        )
+        guard_bulk_packages(self.filter(pk__in=[obj.pk for obj in objs]), fields)
         blocked = set(fields).intersection({"barcode", "product", "product_id"})
         if blocked:
             names = ", ".join(sorted(blocked))
@@ -193,6 +221,14 @@ class ProductPackageQuerySet(models.QuerySet):
         raise ValueError(
             "ProductPackage 不支持 bulk_create()；请逐个调用 save() 以同步商品标识注册表。"
         )
+
+    @transaction.atomic
+    def delete(self):
+        from .transfer_protection import guard_bulk_packages, lock_family
+
+        lock_family(list(self.values_list("product_id", flat=True)))
+        guard_bulk_packages(self, ("is_deleted",))
+        return super().delete()
 
 
 class ProductPackageManager(SoftDeleteManager.from_queryset(ProductPackageQuerySet)):
@@ -969,10 +1005,24 @@ class Product(BaseModel):
 
     def save(self, *args, **kwargs):
         """Save stable master data; identifier projections are service-managed."""
+        from .transfer_protection import (
+            PRODUCT_FIELDS,
+            lock_family,
+            sync_description,
+            validate_product,
+        )
+
         adding = self._state.adding
         if adding and not self.owner_id:
             raise ValueError("新建商品时必须指定货主。")
         with transaction.atomic():
+            if not adding:
+                saved_fields = kwargs.get("update_fields")
+                if saved_fields is None or set(saved_fields).intersection(
+                    {*PRODUCT_FIELDS, *(field.removesuffix("_id") for field in PRODUCT_FIELDS)}
+                ):
+                    lock_family([self.pk])
+                validate_product(self, update_fields=kwargs.get("update_fields"))
             owner = None
             validate_carton_binding = adding
             if adding:
@@ -1110,6 +1160,9 @@ class Product(BaseModel):
                 from .identifier_services import bootstrap_product_identifiers
 
                 bootstrap_product_identifiers(self)
+            else:
+                # Reload so stale instance fields excluded by update_fields never propagate.
+                sync_description(type(self).all_objects.get(pk=self.pk), original)
             return result
 
     @property
@@ -1139,6 +1192,9 @@ class Product(BaseModel):
         super().clean()
         errors = {}
         if self.pk and not self._state.adding:
+            from .transfer_protection import validate_product
+
+            validate_product(self)
             from allapp.core.product_identity import require_product_snapshots
 
             original_identity = (
@@ -1844,8 +1900,18 @@ class ProductPackage(BaseModel):
             f"{self.qty_in_base} {self.product.base_uom.code}"
         )
 
+    def delete(self, *args, **kwargs):
+        return type(self).all_objects.filter(pk=self.pk).delete()
+
     def save(self, *args, **kwargs):
         # ✅ 只做“自动计算/赋值”，不要在 save() 里 full_clean()（否则 admin 容易 500）
+        from .transfer_protection import (
+            PACKAGE_FIELDS,
+            lock_family,
+            sync_new_package,
+            validate_package,
+        )
+
         adding = self._state.adding
         if self.volume_auto:
             if (
@@ -1872,9 +1938,21 @@ class ProductPackage(BaseModel):
                 self.volume_m3 = None
 
         with transaction.atomic():
+            if self.product_id:
+                saved_fields = kwargs.get("update_fields")
+                if (
+                    adding
+                    or saved_fields is None
+                    or set(saved_fields).intersection(
+                        {*PACKAGE_FIELDS, *(field.removesuffix("_id") for field in PACKAGE_FIELDS)}
+                    )
+                ):
+                    lock_family([self.product_id])
+                validate_package(self, kwargs.get("update_fields"))
             if self._state.adding:
                 if not self.product_id:
                     raise ValueError("新建商品包装层级时必须指定商品。")
+                kwargs["force_insert"] = True
             else:
                 original = (
                     type(self)
@@ -1899,6 +1977,8 @@ class ProductPackage(BaseModel):
                 from .identifier_services import bootstrap_package_identifier
 
                 bootstrap_package_identifier(self)
+            if adding:
+                sync_new_package(self)
             return result
 
     def clean(self):
@@ -1906,6 +1986,10 @@ class ProductPackage(BaseModel):
         errors = {}
 
         # --- 规范化 ---
+        from .transfer_protection import validate_package
+
+        if self.product_id:
+            validate_package(self)
         if isinstance(self.barcode, str):
             self.barcode = self.barcode.strip() or None
 
@@ -2049,3 +2133,75 @@ class ProductPackage(BaseModel):
     #
     #     if errors:
     #         raise ValidationError(errors)
+
+
+class TransferBindingQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("转货商品来源绑定不能修改或解除。")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("转货商品来源绑定不能批量修改。")
+
+    def bulk_create(self, *args, **kwargs):
+        raise ValidationError("请通过转货来源绑定服务创建记录。")
+
+    def delete(self):
+        raise ValidationError("转货商品来源绑定不能删除。")
+
+
+class TransferProductBinding(models.Model):
+    """Permanent provenance, including inactive mappings and historical transfers."""
+
+    source_product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name="transfer_targets", verbose_name="来源商品"
+    )
+    target_product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name="transfer_sources", verbose_name="接收商品"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    objects = TransferBindingQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "转货商品来源保护"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("source_product", "target_product"), name="uq_transfer_provenance"
+            ),
+            models.CheckConstraint(
+                condition=~Q(source_product=F("target_product")),
+                name="ck_transfer_provenance_distinct",
+            ),
+        ]
+
+    @transaction.atomic
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("转货商品来源绑定不能修改。")
+        from .transfer_protection import lock_family, validate_no_cycle
+
+        lock_family([self.source_product_id, self.target_product_id])
+        validate_no_cycle(self.source_product_id, self.target_product_id)
+        if self.source_product.owner_id == self.target_product.owner_id:
+            raise ValidationError("来源商品与接收商品必须属于不同货主。")
+        if (
+            type(self)
+            .objects.filter(target_product_id=self.target_product_id)
+            .exclude(source_product_id=self.source_product_id)
+            .exists()
+        ):
+            raise ValidationError("接收商品已有其他来源绑定。")
+        if (
+            type(self)
+            .objects.filter(
+                source_product_id=self.source_product_id,
+                target_product__owner_id=self.target_product.owner_id,
+            )
+            .exclude(target_product_id=self.target_product_id)
+            .exists()
+        ):
+            raise ValidationError("来源商品在该接收货主下已绑定其他档案。")
+        kwargs["force_insert"] = True
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("转货商品来源绑定不能删除。")

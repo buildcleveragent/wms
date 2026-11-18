@@ -45,6 +45,12 @@ services:
     mem_limit: ${WMS_BOSS_CHECK_MEMORY_LIMIT:-512m}
     cpus: ${WMS_BOSS_CHECK_CPUS:-0.5}
     pids_limit: 64
+    healthcheck:
+      test: [CMD, python, manage.py, check_boss_worker]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
 
   boss-deadlines:
     <<: *wms-service

@@ -1,3 +1,7 @@
+import Decimal from 'decimal.js'
+
+const Amount = Decimal.clone({ precision: 40, rounding: Decimal.ROUND_HALF_UP })
+
 export const CHARGE_TYPE_LABELS = {
   RECEIVE: '收货',
   PUTAWAY: '上架',
@@ -41,17 +45,31 @@ export function toNumber(value) {
 }
 
 export function decimalText(value, digits = 3) {
-  const num = toNumber(value)
+  const num = toDecimal(value)
   return num == null ? '-' : num.toFixed(digits)
 }
 
+function toDecimal(value) {
+  try {
+    if (toNumber(value) == null) return null
+    return new Amount(typeof value === 'string' ? value.trim() : value)
+  } catch { return null }
+}
+
+// Keep decimal strings through aggregation; Number cannot preserve all model-supported amounts.
 export function sumAmounts(...values) {
-  const numbers = values.map(toNumber)
-  return numbers.some(value => value == null) ? null : numbers.reduce((a, b) => a + b, 0)
+  const numbers = values.map(toDecimal)
+  return numbers.some(value => value == null) ? null
+    : numbers.reduce((total, value) => total.plus(value), new Amount(0)).toFixed()
+}
+
+export function compareAmounts(left, right) {
+  const a = toDecimal(left), b = toDecimal(right)
+  return a && b ? a.comparedTo(b) : a ? 1 : b ? -1 : 0
 }
 
 export function money(value, currency) {
-  const num = toNumber(value)
+  const num = toDecimal(value)
   if (num == null) return '-'
   const code = String(currency || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN'
   const amount = num.toFixed(2)
@@ -60,8 +78,8 @@ export function money(value, currency) {
 }
 
 export function qty(value) {
-  const num = toNumber(value)
-  return num == null ? '-' : String(Number(num.toFixed(4)))
+  const num = toDecimal(value)
+  return num == null ? '-' : num.toDecimalPlaces(4).toFixed()
 }
 
 export function percent(value) {

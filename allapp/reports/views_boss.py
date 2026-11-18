@@ -39,6 +39,7 @@ from allapp.products.models import ProductUom
 from allapp.tasking.models import WmsTask
 
 from .boss_contract import build_meta, parse_boss_date_range, warning
+from .decimal_response import ExactDecimalResponseMixin
 from .product_display import product_display_fields
 from .services_boss import (
     build_boss_alert_payload,
@@ -67,7 +68,7 @@ class CanViewBossDashboard(permissions.BasePermission):
         )
 
 
-class BossScopedApiMixin:
+class BossScopedApiMixin(ExactDecimalResponseMixin):
     permission_classes = [CanViewBossDashboard]
 
     def _parse_int_param(self, request, name: str):

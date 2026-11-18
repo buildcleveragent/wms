@@ -1,8 +1,9 @@
 # allapp/api/urls.py
-from django.urls import path, include
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from django.urls import path
-from .views import download_page, download_bv2
+
+from .views import download_bv2, download_page
+
 router = DefaultRouter()
 
 urlpatterns = [

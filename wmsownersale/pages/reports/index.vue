@@ -55,10 +55,17 @@ const baseCards = [
 ]
 
 const cards = computed(() =>
-  baseCards.filter((card) => {
+  baseCards.map((card) => {
+    const access = ownerAccess({ roles: auth.roles, capabilities: auth.capabilities })
+    return card.requiresOperations && access.manager ? {...card,
+      title: '出入库记录', desc: '查看全部历史，按月、周、天统计，追溯商品和单据的每次收发',
+      path: '/pages/reports/stock-history', requiresStockHistory: true,
+    } : card
+  }).filter((card) => {
     const access = ownerAccess({ roles: auth.roles, capabilities: auth.capabilities })
     if (!access.ownerRole) return false
     if (card.requiresOperations && !access.canViewOperations) return false
+    if (card.requiresStockHistory && !access.canViewStockHistory) return false
     if (card.managerOnly && !access.manager) return false
     return true
   })

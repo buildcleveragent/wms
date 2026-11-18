@@ -81,6 +81,9 @@ import { formatQuantity } from '@/utils/quantity'
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
+import { useAuth } from '@/store/auth'
+
+const auth = useAuth()
 
 const now = new Date()
 const pad = (value) => String(value).padStart(2, '0')
@@ -178,7 +181,14 @@ function dateText(value) {
   return value ? String(value).slice(0, 10) : '-'
 }
 
-onLoad(loadAll)
+onLoad(async () => {
+  await auth.bootstrap()
+  if (auth.roles.includes('owner_manager')) {
+    uni.redirectTo({ url: '/pages/reports/stock-history' })
+    return
+  }
+  loadAll()
+})
 </script>
 
 <style scoped>

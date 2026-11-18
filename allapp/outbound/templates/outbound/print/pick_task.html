@@ -61,6 +61,8 @@
     @media screen {
       body { width: 9.5in; max-width: 100%; margin-inline: auto; }
       .print-pagination > thead, .print-pagination > tfoot { display: none; }
+      .document-preview { overflow-x: auto; }
+      .document-preview > .print-pagination { min-width: 9.5in; }
     }
     @media print {
       .print-controls { display: none; }
@@ -220,17 +222,30 @@
 </head>
 
 <body{% if auto_print %} onload="window.print()"{% endif %}>
-{% if warehouse_infos|length > 1 %}
+{% if kind == 'delivery' %}
 <form class="print-controls" method="get">
   {% if request.GET.ticket %}<input type="hidden" name="ticket" value="{{ request.GET.ticket }}">{% endif %}
   <input type="hidden" name="kind" value="{{ kind }}">
+  {% if warehouse_infos|length > 1 %}
   <label for="warehouse-info">仓库信息：</label>
   <select id="warehouse-info" name="warehouse_info_id" required>
     {% for info in warehouse_infos %}
     <option value="{{ info.pk }}"{% if info.pk == selected_warehouse_info.pk %} selected{% endif %}>{{ info.name }} — {{ info.address }}</option>
     {% endfor %}
   </select>
-  <button type="submit">确认并打印</button>
+  {% else %}<input type="hidden" name="warehouse_info_id" value="{{ selected_warehouse_info.pk }}">{% endif %}
+  {% for line in lines %}
+  <div>
+    <label for="unit-{{ line.pk }}">{{ line.product_display_name }} · 打印单位：</label>
+    <select id="unit-{{ line.pk }}" name="unit_{{ line.pk }}">
+      {% for option in line.print_options %}
+      <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endfor %}
+  <button type="submit">更新预览</button>
+  <button type="submit" name="print" value="1">确认并打印</button>
 </form>
 {% endif %}
 {% if document_ready != False %}
@@ -238,6 +253,7 @@
   <button type="button" onclick="window.print()">重新打印</button>
 </div>
 {% if kind != 'pick' %}
+<div class="document-preview" aria-label="送货单预览，可横向滚动">
 <table class="print-pagination" role="presentation">
   <thead aria-hidden="true"><tr><td><div class="print-page-spacer print-page-spacer--top"></div></td></tr></thead>
   <tbody><tr><td>
@@ -287,11 +303,11 @@
         </td>
 
         <td class="nowrap">
-          {% if line.base_uom %}{{ line.base_uom.name }}{% else %}{{ line.product.base_uom.name }}{% endif %}
+          {% if line.print_unit_name %}{{ line.print_unit_name }}{% elif line.base_uom %}{{ line.base_uom.name }}{% else %}{{ line.product.base_uom.name }}{% endif %}
         </td>
 
-        <td class="nowrap">{% if line.is_priced != False %}{{ line.base_price|floatformat:2 }}{% endif %}</td>
-        <td class="nowrap">{{ line.base_qty|floatformat:"-4" }}</td>
+        <td class="nowrap">{% if line.is_priced != False %}{% if line.print_price_text %}{{ line.print_price_text }}{% else %}{{ line.base_price|floatformat:2 }}{% endif %}{% endif %}</td>
+        <td class="nowrap">{% if line.print_qty_text %}{{ line.print_qty_text }}{% else %}{{ line.base_qty|floatformat:"-4" }}{% endif %}</td>
 
         <td class="nowrap">{{ line.amount|floatformat:2 }}</td>
 
@@ -307,7 +323,7 @@
           <b>{% if unpriced_line_count %}已计价小计大写：{% else %}大写：{% endif %}</b>{{ total_amount_upper|default_if_none:"" }}
           {% endif %}
         </td>
-        <td class="nowrap"><b>{{ total_qty|floatformat:"-4" }}</b></td>
+        <td class="nowrap"><b>{% for total in unit_totals %}{{ total.text }} {{ total.unit }}{% if not forloop.last %}<br>{% endif %}{% empty %}{{ total_qty|floatformat:"-4" }}{% endfor %}</b></td>
         <td class="nowrap"><b>{% if all_unpriced %}—{% else %}{{ total_amount|floatformat:2 }}{% endif %}</b></td>
         <td></td>
       </tr>
@@ -341,6 +357,7 @@
   </td></tr></tbody>
   <tfoot aria-hidden="true"><tr><td><div class="print-page-spacer print-page-spacer--bottom"></div></td></tr></tfoot>
 </table>
+</div>
 {% endif %}
 {% else %}<p class="print-controls">请选择有效的仓库地址后生成正式送货单。</p>{% endif %}
 

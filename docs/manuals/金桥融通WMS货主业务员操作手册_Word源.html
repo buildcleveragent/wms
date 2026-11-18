@@ -3,13 +3,13 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
-<title>金桥融通WMS货主业务员操作手册</title>
+<title>金桥融通WMS货主端业务员操作手册</title>
 <style>
 @page {
   size: A4;
   margin: 18mm 16mm 19mm 16mm;
   @top-left { content: string(document-title); color: #667085; font-size: 8.2pt; }
-  @top-right { content: "V2.2 · 2026-10-17"; color: #667085; font-size: 8.2pt; }
+  @top-right { content: "V2.3 · 2026-11-13"; color: #667085; font-size: 8.2pt; }
   @bottom-center { content: "第 " counter(page) " 页 / 共 " counter(pages) " 页"; color: #7a8493; font-size: 8.2pt; }
 }
 @page cover {
@@ -81,21 +81,21 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <body>
 <section class="cover" style="page-break-after:always; min-height:900px; padding:70px 60px; color:#17355f; background-color:#eef4ff; position:relative;">
 <img alt="金桥融通" class="cover-logo" height="88" src="file:///wms/docs/manual_assets/logo-word.png" style="width:88px; height:88px;" width="88"/>
-<h1>金桥融通WMS货主业务员操作手册</h1>
+<h1>金桥融通WMS货主端业务员操作手册</h1>
 <div class="lead">岗位操作 · 权限边界 · 异常处理</div>
 <div class="cover-meta">
-<div>文档版本：V2.2</div>
-<div>适用基线：2026-10-17 当前工作区</div>
+<div>文档版本：V2.3</div>
+<div>适用基线：2026-11-13 当前工作区</div>
 <div>文档状态：交付版</div>
-<div>主要读者：货主业务员</div>
+<div>主要读者：货主端业务员</div>
 </div>
 <div class="cover-foot">实际菜单和数据范围以账号角色、权限及显式货主/仓库范围为准</div>
 </section>
-<section class="toc"><h1>目录</h1><ul><li class="level-2"><a href="#section-1-使用范围">使用范围</a></li><li class="level-2"><a href="#section-2-登录-账号与通用安全">登录、账号与通用安全</a></li><li class="level-3"><a href="#section-3-首次登录">首次登录</a></li><li class="level-3"><a href="#section-4-登录失效与切换账号">登录失效与切换账号</a></li><li class="level-3"><a href="#section-5-账号和数据范围">账号和数据范围</a></li><li class="level-3"><a href="#section-6-通用操作原则">通用操作原则</a></li><li class="level-3"><a href="#section-7-修改密码与退出">修改密码与退出</a></li><li class="level-2"><a href="#section-8-角色职责与权限">角色职责与权限</a></li><li class="level-2"><a href="#section-9-首页和开单准备">首页和开单准备</a></li><li class="level-2"><a href="#section-10-创建-保存和提交订单">创建、保存和提交订单</a></li><li class="level-2"><a href="#section-11-防重复提交和冲突处理">防重复提交和冲突处理</a></li><li class="level-2"><a href="#section-12-撤回-退回修改和重新提交">撤回、退回修改和重新提交</a></li><li class="level-2"><a href="#section-13-一件代发-Excel-导入">一件代发 Excel 导入</a></li><li class="level-2"><a href="#section-14-库存-订单和报表查询">库存、订单和报表查询</a></li><li class="level-2"><a href="#section-15-业务员日结检查表">业务员日结检查表</a></li><li class="level-2"><a href="#section-16-常见状态与控制点">常见状态与控制点</a></li><li class="level-2"><a href="#section-17-异常处理与问题上报">异常处理与问题上报</a></li><li class="level-3"><a href="#section-18-无法登录或菜单缺失">无法登录或菜单缺失</a></li><li class="level-3"><a href="#section-19-数据为空或范围不正确">数据为空或范围不正确</a></li><li class="level-3"><a href="#section-20-网络超时或重复提交提示">网络超时或重复提交提示</a></li><li class="level-3"><a href="#section-21-打印失败或打印页过期">打印失败或打印页过期</a></li><li class="level-3"><a href="#section-22-移库-补货过账失败">移库、补货过账失败</a></li><li class="level-3"><a href="#section-23-库存-任务或账单不一致">库存、任务或账单不一致</a></li><li class="level-3"><a href="#section-24-问题上报模板">问题上报模板</a></li><li class="level-2"><a href="#section-25-日常自检与培训验收">日常自检与培训验收</a></li><li class="level-2"><a href="#section-26-专项手册与边界">专项手册与边界</a></li><li class="level-2"><a href="#section-27-文档修订记录">文档修订记录</a></li></ul></section>
+<section class="toc"><h1>目录</h1><ul><li class="level-2"><a href="#section-1-使用范围">使用范围</a></li><li class="level-2"><a href="#section-2-登录-账号与通用安全">登录、账号与通用安全</a></li><li class="level-3"><a href="#section-3-首次登录">首次登录</a></li><li class="level-3"><a href="#section-4-登录失效与切换账号">登录失效与切换账号</a></li><li class="level-3"><a href="#section-5-账号和数据范围">账号和数据范围</a></li><li class="level-3"><a href="#section-6-通用操作原则">通用操作原则</a></li><li class="level-3"><a href="#section-7-修改密码与退出">修改密码与退出</a></li><li class="level-2"><a href="#section-8-角色职责与权限">角色职责与权限</a></li><li class="level-2"><a href="#section-9-常用入口与岗位交接">常用入口与岗位交接</a></li><li class="level-2"><a href="#section-10-首页和开单准备">首页和开单准备</a></li><li class="level-2"><a href="#section-11-创建-保存和提交订单">创建、保存和提交订单</a></li><li class="level-2"><a href="#section-12-到货预报-入库申请">到货预报／入库申请</a></li><li class="level-2"><a href="#section-13-客户退货申请">客户退货申请</a></li><li class="level-2"><a href="#section-14-防重复提交和冲突处理">防重复提交和冲突处理</a></li><li class="level-2"><a href="#section-15-撤回-退回修改和重新提交">撤回、退回修改和重新提交</a></li><li class="level-2"><a href="#section-16-一件代发-Excel-导入">一件代发 Excel 导入</a></li><li class="level-2"><a href="#section-17-库存-订单和报表查询">库存、订单和报表查询</a></li><li class="level-2"><a href="#section-18-业务员日结检查表">业务员日结检查表</a></li><li class="level-2"><a href="#section-19-常见状态与控制点">常见状态与控制点</a></li><li class="level-2"><a href="#section-20-异常处理与问题上报">异常处理与问题上报</a></li><li class="level-3"><a href="#section-21-无法登录或菜单缺失">无法登录或菜单缺失</a></li><li class="level-3"><a href="#section-22-数据为空或范围不正确">数据为空或范围不正确</a></li><li class="level-3"><a href="#section-23-网络超时或重复提交提示">网络超时或重复提交提示</a></li><li class="level-3"><a href="#section-24-打印失败或打印页过期">打印失败或打印页过期</a></li><li class="level-3"><a href="#section-25-移库-补货过账失败">移库、补货过账失败</a></li><li class="level-3"><a href="#section-26-库存-任务或账单不一致">库存、任务或账单不一致</a></li><li class="level-3"><a href="#section-27-问题上报模板">问题上报模板</a></li><li class="level-2"><a href="#section-28-日常自检与培训验收">日常自检与培训验收</a></li><li class="level-2"><a href="#section-29-专项手册与边界">专项手册与边界</a></li><li class="level-2"><a href="#section-30-文档修订记录">文档修订记录</a></li></ul></section>
 <div class="document-note">本手册仅描述当前代码中具有有效权限、页面和业务闭环的功能。</div>
-<p><strong>文档版本：</strong> V2.2</p>
-<p><strong>适用系统版本：</strong> 2026-10-17 当前工作区业务基线</p>
-<p><strong>适用对象：</strong> 货主业务员</p>
+<p><strong>文档版本：</strong> V2.3</p>
+<p><strong>适用系统版本：</strong> 2026-11-13 当前工作区业务基线</p>
+<p><strong>适用对象：</strong> 货主端业务员</p>
 <p><strong>正式权限组：</strong> <code>WMS::货主业务员</code></p>
 <p><strong>主要入口：</strong> 货主业务端（wmsownersale）</p>
 <p><strong>文档状态：</strong> 交付版</p>
@@ -113,7 +113,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <tbody>
 <tr>
 <td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">角色</td>
-<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">货主业务员</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">货主端业务员</td>
 </tr>
 <tr>
 <td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">正式权限组</td>
@@ -176,7 +176,50 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <p>货主业务员负责本货主的客户订单录入、选品、草稿维护、订单提交、一件代发导入和业务查询。规范角色组为 <code>WMS::货主业务员</code>，必须配置一个活动货主范围。</p>
 <p>订单的履约仓库不是用户角色范围。业务员只能从当前货主已经启用的仓库授权关系中明确选择仓库；系统不会因为旧用户字段中存在仓库值就自动扩大权限。</p>
 <p>货主业务员不能执行货主管理员审核、仓库确认、任务过账或查看其他货主数据。</p>
-<h2 id="section-9-首页和开单准备">首页和开单准备</h2>
+<p>本册“货主端业务员”对应系统角色“货主业务员”。按“准备资料 → 保存草稿 → 核对提交 → 查询审核 → 跟踪履约”完成业务；提交后记录原单号。</p>
+<h2 id="section-9-常用入口与岗位交接">常用入口与岗位交接</h2>
+<table border="1" cellpadding="5" cellspacing="0" style="width:670px; border-collapse:collapse;" width="670">
+<thead>
+<tr>
+<th bgcolor="#eaf1fd" style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">要办的事</th>
+<th bgcolor="#eaf1fd" style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">货主端入口</th>
+<th bgcolor="#eaf1fd" style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">本岗完成标志与交接人</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">客户开单</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">功能 → 访销下单</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">提交成功且查到原单，交货主端管理员审核</td>
+</tr>
+<tr>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">跟踪和修改订单</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">功能 → 访销订单</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">本人草稿或退回单修正后重提</td>
+</tr>
+<tr>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">批量开单</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">功能 → 一件代发导入</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">分别核对成功、跳过和失败行</td>
+</tr>
+<tr>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">预报到货</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">功能 → 到货预报／入库申请</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">提交申请后交货主端管理员审核</td>
+</tr>
+<tr>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">客户退货</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">原订单详情 → 申请退货</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">提交后在“退货与异常”跟踪验收</td>
+</tr>
+<tr>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">查询库存与交付</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">功能 → 实时库存／库存预警／入出库履约</td>
+<td style="border:1px solid #bdc9da; padding:4pt; font-size:9pt;" valign="top">记录仓库、查询时间、数量单位和异常单号</td>
+</tr>
+</tbody>
+</table>
+<h2 id="section-10-首页和开单准备">首页和开单准备</h2>
 <ol>
 <li>登录货主业务端，在“功能”页确认能够看到访销下单、访销订单、一件代发导入、实时库存和报表。</li>
 <li>进入开单后先选择出库仓库。没有可用仓库时联系系统管理员维护货主—仓库授权关系。</li>
@@ -184,7 +227,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>搜索商品名称、货主商品编码、仓库SKU编码或条码，核对包装单位、基本数量、价格和所选仓库可用库存。</li>
 </ol>
 <p>同一终端客户可以关联多个货主，但客户编号、负责业务员和配送资料按当前货主分别维护。只能选择与当前货主有效关联且符合本人业务范围的客户；相同客户名称或联系方式不能作为跨货主开单依据。查不到客户时交管理员检查关联和业务员配置，不新建重复档案绕过限制。<code>CASH</code> 也按当前货主的客户关联编号识别。</p>
-<h2 id="section-10-创建-保存和提交订单">创建、保存和提交订单</h2>
+<h2 id="section-11-创建-保存和提交订单">创建、保存和提交订单</h2>
 <ol>
 <li>选择已授权仓库和正确客户。</li>
 <li>添加商品，录入订购数量和成交价；包装单位会换算为基本数量。订购数量和换算系数必须大于零，换算后的基本数量不能小于 <code>0.001</code>。</li>
@@ -196,7 +239,26 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>提交成功后记录订单号，并在“访销订单”确认进入待货主管理员审核。</li>
 </ol>
 <p>服务端会再次校验货主、授权仓库、客户、商品、包装换算、价格和库存。前端展示值不能覆盖服务端规则。</p>
-<h2 id="section-11-防重复提交和冲突处理">防重复提交和冲突处理</h2>
+<h2 id="section-12-到货预报-入库申请">到货预报／入库申请</h2>
+<ol>
+<li>在“功能 → 到货预报／入库申请”点击“新增入库申请”。</li>
+<li>选择本货主的供应商及已授权仓库，填写业务日期；提交前补全预计到货时间、送货联系人和电话，可填写来源单号、交货方式、车牌及备注。</li>
+<li>查找本货主商品，逐行填写基本单位计划数量；采购单价按基本单位填写，未记录时可留空。零库存商品也可申请入库，不用虚建库存后再选品。</li>
+<li>点击“保存草稿”，进入原申请核对后“提交申请”，记录申请单号并交货主端管理员审核。</li>
+<li>需要修改时只在当前允许编辑或撤回的状态办理；退回后查看原因，在原申请修正并重新提交。</li>
+<li>跟踪仓库确认、分批验收和上架。原单中的待审核验收、已确认良品／破损／拒收、已入账和已上架分别表示不同处理阶段。</li>
+</ol>
+<p>申请数量不直接增加库存。批次被退回、入账失败、短收或超收时，把申请号、批次号和差异交货主端管理员与仓库处理，不重复创建入库申请补数量。</p>
+<h2 id="section-13-客户退货申请">客户退货申请</h2>
+<ol>
+<li>从已具备退货条件的原销售订单详情进入“申请退货”，核对原订单、客户、退入仓库和商品行。</li>
+<li>在可申请行填写基本单位数量，选择原因并写明具体情况；不能超过页面和服务端允许的可退数量。</li>
+<li>保存草稿后可上传申请照片，核对后“提交申请”。随后从“功能 → 退货与异常”查询原退货单。</li>
+<li>货主端管理员审核、仓库确认接收后，由仓库操作员分批验收。跟踪合格、残次、拒收、待到货和库存入账情况。</li>
+<li>退回时按原因修正原申请；撤回、取消只在页面允许的状态执行并填写原因。已经验收的实物与记录交管理员处理。</li>
+</ol>
+<p>客户退货申请不代表已退回库存或已退款；付款退还另按财务流程处理。仓库向外退货不从此入口办理。</p>
+<h2 id="section-14-防重复提交和冲突处理">防重复提交和冲突处理</h2>
 <ul>
 <li>每次新建或重新提交使用客户端生成的幂等标识；网络超时后先查订单，再使用原内容重试。</li>
 <li>同一幂等标识对应的内容发生变化时，系统会返回提交冲突；返回购物车重新确认，不要强行重复请求。</li>
@@ -204,7 +266,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>平台单号在规定业务范围内必须唯一。提示平台单号重复时查询原订单，不得改一个空格继续提交。</li>
 <li>整单任意一行价格、库存或数据范围不合法时，系统会拒绝整单，不会只保存合法行。</li>
 </ul>
-<h2 id="section-12-撤回-退回修改和重新提交">撤回、退回修改和重新提交</h2>
+<h2 id="section-15-撤回-退回修改和重新提交">撤回、退回修改和重新提交</h2>
 <ol>
 <li>已提交但尚允许撤回的本人订单，可执行撤回；系统会校验任务是否已经开始并释放已冻结库存。</li>
 <li>货主管理员退回订单时，订单回到可编辑草稿并保存最近退回原因。</li>
@@ -213,7 +275,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>可以先保存草稿，也可以点击“保存并重新提交”。重新提交后确认再次进入待审核。</li>
 <li>不要为同一业务需求另建新单，以免平台单号、库存分配和后续审核重复。</li>
 </ol>
-<h2 id="section-13-一件代发-Excel-导入">一件代发 Excel 导入</h2>
+<h2 id="section-16-一件代发-Excel-导入">一件代发 Excel 导入</h2>
 <ol>
 <li>下载最新一件代发模板，不得修改列名和列顺序。</li>
 <li>进入“一件代发批量导入”，先选择当前货主已授权的出库仓库。</li>
@@ -225,26 +287,29 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>导入逐行保存并允许部分成功。再次导入时只保留需要修正的失败行，避免重复成功行。</li>
 <li>到订单列表抽查仓库、客户、商品、数量、地址和审核状态。</li>
 </ol>
-<h2 id="section-14-库存-订单和报表查询">库存、订单和报表查询</h2>
+<h2 id="section-17-库存-订单和报表查询">库存、订单和报表查询</h2>
 <ul>
 <li>“访销订单”按状态、订单号或客户查询，订单详情显示提交状态、审核状态和最近退回原因。</li>
 <li>“实时库存”只显示本货主数据；开单判断使用所选仓库的可用数量，而不是全部在库数量。</li>
+<li>“库存预警”可只读查看低库存、临期／已过期和长期未动销商品及阈值；需要更改阈值时交货主端管理员。各类预警可能命中同一商品，数量不能简单相加；“待核对”商品须先补齐资料。</li>
 <li>“入出库履约”可以切换“实际”和“计划”口径：实际入库按 RECEIVE 库存过账，实际出库按已完成 DISPATCH 发运；计划口径按订单业务日期和需求数量统计。</li>
 <li>“销售报表”和“入出库履约”按当前货主范围展示；可按日期翻页查看明细，导出权限以服务端能力为准。</li>
+<li>货主端管理员的“出入库记录”是库存实际入账查询，本岗位使用“入出库履约”。两者日期和统计依据不同，核对时说明口径，不把待发计划当作已扣库数量。</li>
 <li>商品搜索使用当前有效标识；新旧条码并存时先核对命中的商品和包装换算，退役条码应由管理员维护，不能临时改编码下单。</li>
 <li>计费账单、移库审批、补货执行和 POS 收款不是本岗位默认流程。库存不足时向货主管理员或仓库反馈订单和商品，不直接创建仓库移动任务代替业务交接。</li>
 <li>发现订单已提交但列表没有、库存数与仓库反馈不一致或看到其他货主数据时立即停止并上报。</li>
 </ul>
-<h2 id="section-15-业务员日结检查表">业务员日结检查表</h2>
+<h2 id="section-18-业务员日结检查表">业务员日结检查表</h2>
 <ul>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>当日草稿均有明确后续处理人。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>已提交订单均进入待审核，没有重复订单或重复平台单号。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>被退回订单已经按原因修正或登记不再处理。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>一件代发导入的成功、跳过和失败行已经逐类核对。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>CASH 客户订单收件信息完整。</li>
+<li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>入库申请及客户退货均已提交或登记待办，已入账数量与申请数量分开核对。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>库存不足、价格规则或仓库授权问题已经反馈。</li>
 </ul>
-<h2 id="section-16-常见状态与控制点">常见状态与控制点</h2>
+<h2 id="section-19-常见状态与控制点">常见状态与控制点</h2>
 <table border="1" cellpadding="5" cellspacing="0" style="width:670px; border-collapse:collapse;" width="670">
 <thead>
 <tr>
@@ -351,14 +416,16 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>移库异常执行状态与过账失败不是同一件事；“恢复”用于异常任务，“重试过账”用于过账失败，均由有权限的仓库管理员处理。</li>
 <li>POS 销售状态和班次状态按《POS 使用手册》核对；现场还款或打印完成情况不能由普通仓库任务状态推断。</li>
 <li>同名状态必须结合单据类型解释：PDA 退货 <code>COMPLETED</code> 已直接扣库；代办货权转移 <code>RESERVED</code> 是待转货，<code>POSTED</code> 是已转货并销售出库。不能套用普通任务的“已完成、待过账”结论。</li>
+<li>到货申请的验收草稿、待仓库审核、已入账和上架完成分别核对；全拒收批次“无需库存入账／无需上架”不表示漏过账。客户退货申请通过也不表示实物已回仓，须核对实际验收批次入账。</li>
+<li>盘点草稿不冻结，发布后冻结范围；超阈值可能转入下一轮复盘。无差异可能自动过账，有差异须审核后过账；过账失败时冻结仍保留。驳回保留盘点记录并释放冻结，已过账不能取消。</li>
 </ul>
 <hr/>
-<h2 id="section-17-异常处理与问题上报">异常处理与问题上报</h2>
-<h3 id="section-18-无法登录或菜单缺失">无法登录或菜单缺失</h3>
+<h2 id="section-20-异常处理与问题上报">异常处理与问题上报</h2>
+<h3 id="section-21-无法登录或菜单缺失">无法登录或菜单缺失</h3>
 <p>按“网络 → 正式入口 → 用户名和密码 → 账号启用状态 → 职员状态（仅 Web 后台）→ 角色范围 → 规范角色组 → 功能开关及额外权限”的顺序检查。移库、补货等功能即使有角色权限，也可能尚未启用。登录过于频繁时按页面提示等待，由系统管理员检查账号和审计日志。</p>
-<h3 id="section-19-数据为空或范围不正确">数据为空或范围不正确</h3>
+<h3 id="section-22-数据为空或范围不正确">数据为空或范围不正确</h3>
 <p>先清除筛选并刷新，再核对当前角色和货主/仓库范围。看到不属于本范围的数据时立即停止操作并上报，不得导出或转发。</p>
-<h3 id="section-20-网络超时或重复提交提示">网络超时或重复提交提示</h3>
+<h3 id="section-23-网络超时或重复提交提示">网络超时或重复提交提示</h3>
 <p>不要连续点击。先回到列表按单号、任务号或平台单号查询；带幂等保护的操作可以使用同一请求重试，但不能改动内容后继续使用原请求标识。</p>
 <ul>
 <li>移库、补货扫描结果未确认时，保留当前页的原库位、商品、容器、序列号和数量再试；提示“已确认此前扫描记录”表示恢复了原结果，不能再次搬货。离开页面后先查原任务再决定下一步。</li>
@@ -367,18 +434,18 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>PDA 退货出库出现“继续确认结果”时，使用原账号、原仓库恢复原请求；冲销待确认也不能另建退货单抵消。跨货主代办同时按销售单号、转货单号和任务号查原结果。</li>
 <li>Android 拣货、收银或 POS 退货出现待确认提示时，保留原设备本地数据，使用页面提供的原请求恢复按钮。不要清应用数据、修改原请求或换账号继续办理，具体区别见《Android 移动端使用手册》和《POS 使用手册》。</li>
 </ul>
-<h3 id="section-21-打印失败或打印页过期">打印失败或打印页过期</h3>
+<h3 id="section-24-打印失败或打印页过期">打印失败或打印页过期</h3>
 <ol>
 <li>先核对原单是否已成功保存或结账，保留单号。</li>
 <li>从原收货任务、出库记录、POS 销售单或班次记录重新点击打印；打印页过期时不要反复使用原链接。</li>
 <li>浏览器阻止新窗口时，按设备提示允许本系统打开打印窗口，再从原记录重试。</li>
 <li>“打印已发起”不代表纸张已输出；核对打印机、纸张和实际份数。结账成功但打印失败时仅补打，不能重新结账。</li>
 </ol>
-<h3 id="section-22-移库-补货过账失败">移库、补货过账失败</h3>
+<h3 id="section-25-移库-补货过账失败">移库、补货过账失败</h3>
 <p>扫描数量已保存不代表库存已移动。保留原任务号、来源和目标库位、已搬数量及完整错误信息，交仓库管理员处理原任务；管理员修复原因后按权限重试过账，不能新建任务重复搬货或修改库存数。</p>
-<h3 id="section-23-库存-任务或账单不一致">库存、任务或账单不一致</h3>
+<h3 id="section-26-库存-任务或账单不一致">库存、任务或账单不一致</h3>
 <p>保留页面截图和原始单号，按“业务单据 → 任务 → 扫描记录 → 过账状态 → 库存流水/计费来源”逐层核对。禁止通过删除记录或直接改汇总数掩盖差异。</p>
-<h3 id="section-24-问题上报模板">问题上报模板</h3>
+<h3 id="section-27-问题上报模板">问题上报模板</h3>
 <ul>
 <li>上报人、角色、用户名：</li>
 <li>发生时间和系统入口：</li>
@@ -391,7 +458,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>已执行的查询和重试：</li>
 <li>截图或导出文件：</li>
 </ul>
-<h2 id="section-25-日常自检与培训验收">日常自检与培训验收</h2>
+<h2 id="section-28-日常自检与培训验收">日常自检与培训验收</h2>
 <ul>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能使用本人账号登录、修改密码并正确退出。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能说明本角色的数据范围和禁止事项。</li>
@@ -401,7 +468,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能区分已保存、已过账和已打印，知道登录切换后必须重新核对业务范围。</li>
 <li class="task-list-item"><input class="task-list-item-checkbox" disabled="" type="checkbox"/>能使用问题模板提交可追踪的异常信息。</li>
 </ul>
-<h2 id="section-26-专项手册与边界">专项手册与边界</h2>
+<h2 id="section-29-专项手册与边界">专项手册与边界</h2>
 <ul>
 <li>POS 收银、赊账、客户还款、退货、打印、交班和对账参见《POS 使用手册》；只有取得相应 POS 权限的账号才能使用。</li>
 <li>仓库向货主/原供应商退货参见《PDA 退货出库使用手册》；Android 现场操作与原请求恢复参见《Android 移动端使用手册》。功能以各客户端已注册页面和实际权限为准。</li>
@@ -409,7 +476,7 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>服务器部署、数据库备份恢复、域名证书、服务启停和版本回滚不属于普通用户手册。</li>
 <li>没有已注册页面、有效权限和可验证业务闭环的功能，不作为正式可用能力发布。</li>
 </ul>
-<h2 id="section-27-文档修订记录">文档修订记录</h2>
+<h2 id="section-30-文档修订记录">文档修订记录</h2>
 <table border="1" cellpadding="5" cellspacing="0" style="width:670px; border-collapse:collapse;" width="670">
 <thead>
 <tr>

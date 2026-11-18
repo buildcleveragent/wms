@@ -20,11 +20,13 @@ from .models import (
     PosPrintLog,
     PosRefund,
     PosReturn,
+    PosReturnLine,
     PosSale,
     PosSaleLine,
     PosShift,
     PosShiftPaymentSummary,
 )
+from .quantities import pos_quantities_by_unit
 
 ZERO_MONEY = Decimal("0.00")
 ZERO_QTY = Decimal("0.000")
@@ -302,6 +304,12 @@ def build_shift_summary(shift):
         "voided_count": sale_counts["voided_count"] or 0,
         "line_count": line_totals["line_count"] or 0,
         "completed_line_count": line_totals["completed_line_count"] or 0,
+        "quantities_by_unit": pos_quantities_by_unit(
+            PosSaleLine.objects.filter(sale__shift=shift),
+            PosReturnLine.objects.filter(
+                return_order__shift=shift, return_order__status=PosReturn.Status.COMPLETED
+            ),
+        ),
         "completed_qty": _qty_text(line_totals["completed_qty"]),
         "voided_qty": _qty_text(line_totals["voided_qty"]),
         "gross_sales_amount": _money_text(sale_counts["net_amount"]),
@@ -551,6 +559,7 @@ def serialize_shift(shift, *, include_dynamic_summary=True):
                 {
                     "line_count": computed["line_count"],
                     "completed_line_count": computed["completed_line_count"],
+                    "quantities_by_unit": computed["quantities_by_unit"],
                     "completed_qty": computed["completed_qty"],
                     "completed_line_amount": computed["completed_line_amount"],
                     "voided_qty": computed["voided_qty"],

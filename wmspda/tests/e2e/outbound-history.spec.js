@@ -3,12 +3,18 @@ import { test, expect as baseExpect } from '@playwright/test'
 // Uni-app compiles newly visited routes on demand in the local dev server.
 test.setTimeout(150_000)
 const expect = baseExpect.configure({ timeout: 15_000 })
+test.use({ baseURL: 'http://localhost:5173' })
 
-async function setup(page) {
+const longParties = {
+  2: { owner_name: '广西港宁农业发展有限公司南宁仓储配送分公司', customer_name: '广西益联餐饮服务有限公司青秀区配送中心客户' },
+  3: { owner_name: '华南商贸供应链管理有限公司', supplier_name: '供应商长名称ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789食品供应有限公司' },
+}
+
+async function setup(page, rowOverrides = {}) {
   const errors = [], requests = []
   page.on('pageerror', e => errors.push(e.message))
   page.on('console', message => {
-    if (message.type() === 'error' && !message.text().includes('503')) errors.push(message.text())
+    if (['error', 'warning'].includes(message.type()) && !message.text().includes('503')) errors.push(message.text())
   })
   const options = {
     owners: [{ id: 1, name: '示例货主' }], warehouses: [{ id: 1, name: '一号仓' }],
@@ -19,8 +25,9 @@ async function setup(page) {
     closed_statuses: [{ value: 'false', label: '未关闭' }, { value: 'true', label: '已关闭' }],
     operators: [{ id: 1, name: '仓库操作员' }], statuses: [{ value: 'COMPLETED', label: '已完成出库' }],
   }
-  const row = (id) => ({ id, order_no: `CK-HISTORY-00${id}`, biz_date: '2026-10-20', owner_name: '示例货主', customer_name: '示例客户', warehouse_name: '一号仓', processing_mode_label: '标准出库', outbound_type_label: '销售出库', submit_status_name: '已提交', approval_status_name: '仓库已确认', is_closed: false, line_count: 2, total_base_qty: '12.500' })
+  const row = (id) => ({ id, order_no: `CK-HISTORY-00${id}`, biz_date: '2026-10-20', owner_name: '示例货主', customer_name: '示例客户', warehouse_name: '一号仓', processing_mode_label: '标准出库', outbound_type_label: '销售出库', submit_status_name: '已提交', approval_status_name: '仓库已确认', is_closed: false, line_count: 2, total_base_qty: '12.500', ...rowOverrides[id] })
   let failMore = false, denied = false
+  await page.context().route('https://cn-shanghai-aliyun-cloudauth.oss-cn-shanghai.aliyuncs.com/**', route => route.fulfill({ body: '', contentType: 'application/javascript' }))
   await page.context().route('**/api/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname, params = Object.fromEntries(url.searchParams)
     if (!path.startsWith('/api/')) return route.continue()
@@ -46,7 +53,7 @@ async function setup(page) {
     if (path.endsWith('/history/')) return json({ results: [{ id: 8, order_no: 'ASSIST-HISTORY-008', assisted_at: '2026-10-20T10:00:00Z', owner: { name: '示例货主' }, customer: { name: '示例客户' }, business_status: 'COMPLETED', business_status_label: '已完成出库', line_count: 2, total_base_qty: '10', can_reprint: false }], count: 1, next: null })
     return json({ results: [], count: 0, next: null })
   })
-  await page.goto('/')
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
   await page.locator('uni-input input').nth(0).fill('history')
   await page.locator('uni-input input').nth(1).fill('test-password')
   await page.locator('uni-button').filter({ hasText: '登录' }).click()
@@ -56,12 +63,16 @@ async function setup(page) {
 
 test('history entry, pagination retry, snapshot detail and empty search on PDA', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  const state = await setup(page)
+  const state = await setup(page, longParties)
   await page.getByText('出库历史', { exact: true }).click()
   await expect(page).toHaveURL(/pages\/orders\/index/)
   await expect(page).toHaveTitle('全部出库订单历史')
   await expect(page.locator('vite-error-overlay')).toHaveCount(0)
   await expect(page.getByText('CK-HISTORY-001', { exact: true })).toBeVisible()
+  const firstRow = page.locator('.order-history-row').first()
+  expect(await firstRow.locator('.order-context').evaluate(el => el.getBoundingClientRect().top)).toBeGreaterThan(
+    await firstRow.locator('.history-order-no').evaluate(el => el.getBoundingClientRect().bottom),
+  )
   state.failNextPage()
   await page.getByText('加载更多', { exact: true }).click()
   await expect(page.locator('.history-error')).toContainText('分页暂时失败')
@@ -85,6 +96,57 @@ test('history entry, pagination retry, snapshot detail and empty search on PDA',
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   expect(state.errors).toEqual([])
 })
+
+for (const width of [1280, 1920]) {
+  test(`desktop history aligns compact rows and wraps full names at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const state = await setup(page, longParties)
+    await page.getByText('出库历史', { exact: true }).click()
+    await expect(page).toHaveURL(/pages\/orders\/index/)
+    await expect(page).toHaveTitle('全部出库订单历史')
+    await expect(page.getByText('CK-HISTORY-001', { exact: true })).toBeVisible()
+    await page.getByText('加载更多', { exact: true }).click()
+    await expect(page.locator('.order-history-row')).toHaveCount(3)
+    const rows = page.locator('.order-history-row')
+    await expect(rows.nth(1).locator('.order-parties')).toHaveText(`货主 ${longParties[2].owner_name} · 客户 ${longParties[2].customer_name}`)
+    await expect(rows.nth(2).locator('.order-parties')).toHaveText(`货主 ${longParties[3].owner_name} · 供应商 ${longParties[3].supplier_name}`)
+    const geometry = await rows.evaluateAll(elements => elements.map(row => {
+      const rect = row.getBoundingClientRect()
+      const selectors = ['.history-order-no', '.order-context', '.order-parties', '.order-status', '.order-quantity', '.history-badge', '.history-link']
+      return {
+        height: rect.height,
+        cells: selectors.map(selector => {
+          const element = row.querySelector(selector), box = element.getBoundingClientRect(), style = getComputedStyle(element)
+          return { left: box.left, right: box.right, centerY: box.top + box.height / 2, height: box.height,
+            contained: box.top >= rect.top && box.bottom <= rect.bottom && box.left >= rect.left && box.right <= rect.right,
+            unclipped: element.scrollHeight <= element.clientHeight + 1 && element.scrollWidth <= element.clientWidth + 1,
+            ellipsis: style.textOverflow === 'ellipsis' }
+        }),
+      }
+    }))
+    for (const row of geometry) {
+      for (const [index, cell] of row.cells.entries()) {
+        expect(cell.contained).toBe(true)
+        expect(cell.unclipped).toBe(true)
+        expect(cell.ellipsis).toBe(false)
+        expect(Math.abs(cell.centerY - row.cells[0].centerY)).toBeLessThan(2)
+        expect(Math.abs(cell.left - geometry[0].cells[index].left)).toBeLessThan(2)
+        if (index) expect(cell.left).toBeGreaterThan(row.cells[index - 1].right)
+      }
+    }
+    expect(geometry[0].height).toBeLessThan(width === 1920 ? 55 : 85)
+    expect(geometry[1].height).toBeGreaterThan(geometry[0].height)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await expect(page.locator('vite-error-overlay')).toHaveCount(0)
+    await page.screenshot({ path: `/tmp/wms-history-list-desktop-${width}.png`, fullPage: true })
+    await rows.first().locator('.order-parties').click()
+    await expect(page).toHaveURL(/pages\/orders\/detail\?id=1/)
+    await expect(page.getByText('旧名称大米', { exact: true })).toBeVisible()
+    await page.goBack()
+    await expect(page.getByText('CK-HISTORY-001', { exact: true })).toBeVisible()
+    expect(state.errors).toEqual([])
+  })
+}
 
 test('statistics drilldown retains successful query rather than unsent filters', async ({ page }) => {
   const state = await setup(page)

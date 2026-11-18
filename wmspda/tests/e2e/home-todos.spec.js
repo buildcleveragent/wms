@@ -50,8 +50,8 @@ for (const width of [390, 1280]) {
     await page.getByText('查看待办', { exact: true }).click()
     await expect(page.locator('.todo-item')).toHaveCount(6)
     const reminder = await page.locator('.todo-panel').boundingBox()
-    const grid = await page.locator('.page > .grid').boundingBox()
-    expect(reminder.y + reminder.height).toBeLessThan(grid.y + 1)
+    const firstSection = await page.locator('.home-section').first().boundingBox()
+    expect(reminder.y + reminder.height).toBeLessThan(firstSection.y + 1)
     await page.locator('.todo-heading').getByText('刷新', { exact: true }).click()
     await expect(page.locator('.todo-heading')).toContainText('刷新')
     await expect(page.getByRole('dialog')).toHaveCount(0)
@@ -70,7 +70,7 @@ for (const width of [390, 1280]) {
     for (const [label, target, empty] of [
       ['出库待审核', 'outbound/review/index', '暂无订单'], ['待收货', 'inbound/receive_task_list', '当前条件下暂无任务'],
       ['待上架', 'inbound/putaway_task_list', '当前条件下暂无任务'], ['待拣货', 'picking/task_list', '暂无可拣货任务'],
-      ['待复核／过账', 'review/pick_task_list', '暂无可复核任务'], ['待补货', 'inventory/replenish/index', '暂无可执行补货任务'],
+      ['待复核／过账', 'review/pick_task_list', '暂无符合条件的任务'], ['待补货', 'inventory/replenish/index', '暂无可执行补货任务'],
     ]) {
       await page.locator('.todo-item').filter({ hasText: label }).click()
       await expect(page).toHaveURL(new RegExp(target))

@@ -10,7 +10,7 @@ DRF serializers for allapp.tasking models
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, Optional, Type
 
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
@@ -95,6 +95,16 @@ class TaskStatusLogSerializer(serializers.ModelSerializer):
 
 
 class TaskScanLogSerializer(serializers.ModelSerializer):
+    def to_representation(self, instance):
+        from allapp.tasking.count_policy import hide_count_book
+
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if hide_count_book(instance.task, request.user if request else None, context=self.context):
+            for key in ("qty_aux", "qty_base", "qty_base_delta"):
+                data.pop(key, None)
+        return data
+
     class Meta:
         model = TaskScanLog
         fields = [
@@ -270,6 +280,18 @@ class RelocLineExtraSerializer(serializers.ModelSerializer):
 
 
 class CountLineExtraSerializer(serializers.ModelSerializer):
+    def to_representation(self, instance):
+        from allapp.tasking.count_policy import hide_count_book
+
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if hide_count_book(
+            instance.line.task, request.user if request else None, context=self.context
+        ):
+            data.pop("qty_book", None)
+            data.pop("qty_diff", None)
+        return data
+
     class Meta:
         model = CountLineExtra
         fields = [
@@ -314,6 +336,24 @@ class WmsTaskLineSerializer(serializers.ModelSerializer):
     读取时：在 extra 字段中返回匹配类型的 Extra；其余类型不返回。
     """
 
+    # Keep the established non-count API's integer capacity and three-place contract.
+    qty_plan = serializers.DecimalField(max_digits=18, decimal_places=3, required=False)
+    qty_done = serializers.DecimalField(max_digits=18, decimal_places=3, required=False)
+
+    def to_representation(self, instance):
+        from allapp.tasking.count_policy import hide_count_book
+
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if instance.task.task_type == WmsTask.TaskType.COUNT:
+            data["qty_plan"] = format(instance.qty_plan, ".4f")
+            data["qty_done"] = format(instance.qty_done, ".4f")
+        if hide_count_book(instance.task, request.user if request else None, context=self.context):
+            data.pop("qty_plan", None)
+            # Legacy metadata is not a public blind-count response contract.
+            data.pop("plan_meta", None)
+        return data
+
     # Generic FK(只暴露基础 id，避免直接跨表展开)
     bound_content_type = serializers.PrimaryKeyRelatedField(
         queryset=ContentType.objects.all(), allow_null=True, required=False
@@ -346,7 +386,7 @@ class WmsTaskLineSerializer(serializers.ModelSerializer):
         extra_obj = getattr(obj, rel_name, None)
         if not extra_obj:
             return None
-        return ser_cls(extra_obj).data
+        return ser_cls(extra_obj, context=self.context).data
 
     # ---- write ----
     def create(self, validated_data: Dict[str, Any]) -> WmsTaskLine:

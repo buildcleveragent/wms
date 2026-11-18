@@ -1,16 +1,11 @@
 # api/views.py
-from rest_framework import viewsets, permissions, decorators, response, status
-from allapp.tasking.models import WmsTask, WmsTaskLine, TaskScanLog
-from allapp.tasking import services as task_services
-
-
+from datetime import datetime
 from pathlib import Path
+
 from django.conf import settings
 from django.http import FileResponse, Http404
-from datetime import datetime
-
 from django.shortcuts import render
-from datetime import datetime
+
 
 def download_page(request):
     ts = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -37,6 +32,7 @@ def download_bv2(request, filename):
     response["Content-Length"] = str(file_path.stat().st_size)
     response["Accept-Ranges"] = "bytes"
     return response
+
 
 # def download_bv2(request):
 #     file_path = Path(settings.BASE_DIR) / "media" / "bv2.apk"
@@ -74,7 +70,8 @@ def download_bv2(request, filename):
 #     #     as_attachment=True,
 #     #     filename="bv2.apk",
 #
-#     response = FileResponse(open(file_path, "rb"), content_type="application/vnd.android.package-archive")
+#     response = FileResponse(open(file_path, "rb"),
+#                             content_type="application/vnd.android.package-archive")
 #     response["Content-Disposition"] = 'inline; filename="bv2.apk"'
 #
 #     return response

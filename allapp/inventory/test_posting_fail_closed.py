@@ -24,7 +24,7 @@ from allapp.inventory.services_quick_adjust import (
 )
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product, ProductUom
-from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
+from allapp.tasking.models import CountLineExtra, TaskScanLog, WmsTask, WmsTaskLine
 from allapp.tasking.plugins.handlers import DefaultPostingHandler
 
 
@@ -111,6 +111,20 @@ class InventoryPostingFailClosedTests(TestCase):
             qty_done=Decimal("1.000"),
             status=WmsTaskLine.Status.COMPLETED,
         )
+        if task.task_type == WmsTask.TaskType.COUNT:
+            # Legacy count fixtures still need a verifiable original layer and book snapshot.
+            line.src_model = "InventoryDetail"
+            line.src_id = self.detail.pk
+            line.qty_plan = self.detail.onhand_qty
+            line.qty_done = (self.detail.onhand_qty + (qty_base or Decimal("0"))).quantize(
+                Decimal("0.0001")
+            )
+            line.to_location = None
+            line.save()
+            CountLineExtra.objects.create(
+                line=line, lot_no=self.detail.batch_no, qty_book=self.detail.onhand_qty,
+                qty_counted=line.qty_done, count_status="COUNTED",
+            )
         return TaskScanLog.objects.create(
             owner=self.owner,
             warehouse=self.warehouse,

@@ -199,11 +199,16 @@ def today_summary(scope):
         from django.db.models import Sum
 
         qs = ranged(metric, day, day).order_by()
-        amounts = list(qs.values(metric.currency).annotate(amount=Sum(metric.money)))
+        count = qs.count()
+        # A constant currency annotation produces one aggregate row even on an empty
+        # queryset. No transactions must not become an unknown-currency warning.
+        amounts = (
+            list(qs.values(metric.currency).annotate(amount=Sum(metric.money))) if count else []
+        )
         financial.append(
             {
                 "key": metric.key,
-                "count": qs.count(),
+                "count": count,
                 "money": [
                     {"currency": x[metric.currency], "amount": x["amount"]}
                     for x in amounts

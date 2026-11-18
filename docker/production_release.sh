@@ -21,9 +21,7 @@ case "$observe_seconds" in
   ''|*[!0-9]*) echo "WMS_OBSERVE_SECONDS must be a non-negative integer" >&2; exit 2 ;;
 esac
 
-compose() {
-  docker compose -f compose.production.yml "$@"
-}
+. ./docker/release_services.sh
 
 payment_timers="wms-sale-mini-expire.timer wms-sale-mini-reconcile.timer"
 payment_services="wms-sale-mini-expire.service wms-sale-mini-reconcile.service"
@@ -41,7 +39,7 @@ release_exit() {
   trap - EXIT
   if [ "$result" -ne 0 ] && [ "$deploy_started" = true ]; then
     systemctl stop $payment_timers || true
-    compose stop scheduler web || true
+    stop_release_services || true
     echo "release failed: writers and payment timers remain stopped; restore the verified database/media backup and previous image before restarting all schedulers" >&2
   fi
   exit "$result"
@@ -68,35 +66,11 @@ while systemctl is-active --quiet wms-sale-mini-expire.service || systemctl is-a
   waited=$((waited + 5))
 done
 deploy_started=true
-compose stop scheduler web
+stop_release_services
 compose run --rm web python manage.py migrate --noinput
 compose run --rm web python manage.py sync_wms_role_groups
 compose run --rm web python manage.py collectstatic --noinput
-compose up -d web
-
-ready_attempt=0
-until compose exec -T web python -c \
-  "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz/ready', timeout=5)"; do
-  ready_attempt=$((ready_attempt + 1))
-  if [ "$ready_attempt" -ge 24 ]; then
-    echo "candidate readiness did not recover within 120 seconds" >&2
-    compose stop web
-    exit 1
-  fi
-  sleep 5
-done
-
-compose exec -T web python manage.py migrate --check
-compose exec -T web python manage.py reconcile_data_accuracy --fail-on-issues
-compose exec -T web python manage.py audit_dispatch_note_snapshots --fail-on-issues
-compose up -d scheduler
-
-scheduler_count="$(compose ps -q scheduler | wc -l | tr -d ' ')"
-if [ "$scheduler_count" -ne 1 ]; then
-  echo "expected exactly one scheduler container, found $scheduler_count" >&2
-  compose stop scheduler web
-  exit 1
-fi
+start_release_services
 
 systemctl start $payment_timers
 for timer in $payment_timers; do
@@ -112,10 +86,9 @@ while [ "$elapsed" -lt "$observe_seconds" ]; do
   for timer in $payment_timers; do
     systemctl is-active --quiet "$timer"
   done
-  if ! compose exec -T web python -c \
-    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz/ready', timeout=5)"; then
-    echo "readiness failed during release observation; traffic must remain stopped" >&2
-    compose stop scheduler web
+  if ! check_release_services; then
+    echo "service readiness failed during release observation; traffic must remain stopped" >&2
+    stop_release_services
     exit 1
   fi
   sleep 10
@@ -124,4 +97,5 @@ done
 
 compose exec -T web python manage.py reconcile_data_accuracy --fail-on-issues
 compose exec -T web python manage.py audit_dispatch_note_snapshots --fail-on-issues
+check_release_services
 compose ps

@@ -49,6 +49,7 @@ from .models import (
     PosSaleOrder,
     PosShift,
 )
+from .quantities import document_quantities, quantity_text, unit_fields
 from .shift_services import current_shift_for_user
 
 ZERO = Decimal("0")
@@ -1086,7 +1087,10 @@ def _restore_stock_for_return_lines(return_lines, return_no, now):
 
 def _receipt_line(line):
     product = line.product
+    unit = unit_fields(product)
     return {
+        **unit,
+        "unit": unit["base_unit"],
         "line_no": line.line_no,
         "owner_id": line.owner_id,
         "owner_name": getattr(line.owner, "name", ""),
@@ -1206,7 +1210,8 @@ def build_receipt(sale):
         }
         for line in sale.payment_lines.order_by("id")
     ]
-    sale_lines = list(sale.lines.select_related("product").order_by("line_no"))
+    sale_lines = list(sale.lines.select_related("product__base_uom", "owner").order_by("line_no"))
+    quantities = document_quantities(sale_lines)
     orders = [
         link.outbound_order
         for link in sale.sale_orders.select_related("outbound_order", "owner").order_by("owner_id")
@@ -1236,6 +1241,8 @@ def build_receipt(sale):
         },
         "payment_lines": payment_lines,
         "lines": [_receipt_line(line) for line in sale_lines],
+        "quantities_by_unit": quantities,
+        "quantity_text": quantity_text(quantities),
         "orders": [
             {"id": order.id, "order_no": order.order_no, "owner_id": order.owner_id}
             for order in orders
@@ -1255,7 +1262,8 @@ def result_for_sale(sale):
             "shift",
         )
         .prefetch_related(
-            "lines__product",
+            "lines__product__base_uom",
+            "lines__owner",
             "lines__return_lines",
             "payment_lines",
             "sale_orders__outbound_order",
@@ -1277,7 +1285,7 @@ def result_for_sale(sale):
 def result_for_return(return_order):
     return_order = (
         PosReturn.objects.select_related("sale", "warehouse", "shift", "cashier")
-        .prefetch_related("lines__sale_line__product", "refunds")
+        .prefetch_related("lines__sale_line__product", "lines__product__base_uom", "refunds")
         .get(pk=return_order.pk)
     )
     return {"return": return_order}

@@ -17,8 +17,8 @@ describe('company inventory pagination contracts', () => {
     const page = read('pages/inventory/company.vue')
 
     expect(page).toContain('const pageSizeOptions = [10, 20, 50, 100, 500, 1000]')
-    expect(page).toContain('pageSize.value = pageSizeOptions[idx] || 100')
-    expect(page).toContain('page.value = 1')
+    expect(page).toContain('const size = pageSizeOptions[idx] || 100')
+    expect(page).toContain('page: 1, page_size: size')
   })
 
   it('uses 100 rows for company inventory requests by default', () => {

@@ -242,6 +242,9 @@ def add_product_barcode(
     actor=None,
     project=True,
 ):
+    from .transfer_protection import lock_family
+
+    lock_family([product.pk])
     product = Product.all_objects.select_for_update().get(pk=product.pk)
     barcode_type = str(barcode_type).strip().upper()
     if barcode_type in {
@@ -303,6 +306,9 @@ def add_external_identifier(
     is_active=True,
     project=True,
 ):
+    from .transfer_protection import lock_family
+
+    lock_family([product.pk])
     product = Product.all_objects.select_for_update().get(pk=product.pk)
     source = normalize_product_identifier(source_system)
     normalized = normalize_product_identifier(external_code)
@@ -343,8 +349,11 @@ def add_external_identifier(
 
 @transaction.atomic
 def set_barcode_primary(record):
+    from .transfer_protection import lock_family
+
     record_id = record.pk
     product_id = record.product_id
+    lock_family([product_id])
     Product.all_objects.select_for_update().get(pk=product_id)
     record = (
         ProductBarcode.all_objects.select_for_update()
@@ -375,8 +384,11 @@ def set_barcode_primary(record):
 
 @transaction.atomic
 def set_external_primary(record):
+    from .transfer_protection import lock_family
+
     record_id = record.pk
     product_id = record.product_id
+    lock_family([product_id])
     Product.all_objects.select_for_update().get(pk=product_id)
     record = (
         ProductExternalIdentifier.all_objects.select_for_update()
@@ -401,6 +413,9 @@ def set_external_primary(record):
 
 @transaction.atomic
 def set_identifier_active(record, active):
+    from .transfer_protection import lock_family
+
+    lock_family([record.product_id])
     record = type(record).all_objects.select_for_update().get(pk=record.pk)
     if active and record.is_deleted:
         raise ValidationError("已软删除的标识不能重新启用。")

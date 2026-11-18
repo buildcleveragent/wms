@@ -9,7 +9,7 @@
       <button size="mini" @click="refresh">刷新</button>
     </view>
     <view v-if="pending" class="notice" @click="apply">详情有更新，点击查看最新数据</view>
-    <view v-if="error" class="notice">{{ error.statusCode === 404 ? '记录不存在或不在当前范围内。' : '同步失败，稍后自动重试。' }}</view>
+    <view v-if="error" class="notice">{{ error.statusCode === 404 ? '记录不存在或不在当前范围内。' : '同步失败，保留上次结果，请点击刷新重试。' }}</view>
     <view v-if="loading">正在读取详情…</view>
     <view v-for="notice in data?.notices || []" :key="notice" class="notice">{{ notice }}</view>
     <view v-for="(section, name) in data?.sections || {}" :key="name" class="detail-section">

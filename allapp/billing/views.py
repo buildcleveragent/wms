@@ -22,6 +22,7 @@ from allapp.accounts.audit import object_snapshot, record_audit_event
 from allapp.baseinfo.models import Owner, OwnerWarehouseBinding
 from allapp.locations.models import Warehouse
 from allapp.reports.boss_contract import build_meta, warning
+from allapp.reports.decimal_response import ExactDecimalResponseMixin
 
 from .enums import AccrualStatus, BillStatus, PeriodStatus
 from .models import (
@@ -375,7 +376,9 @@ class OwnerWarehouseSaveMixin:
         instance.delete()
 
 
-class BillingWarehouseOverviewApi(OwnerWarehouseScopedQuerysetMixin, APIView):
+class BillingWarehouseOverviewApi(
+    ExactDecimalResponseMixin, OwnerWarehouseScopedQuerysetMixin, APIView
+):
     permission_classes = [permissions.IsAuthenticated]
 
     def _scope_dashboard_queryset(self, qs: QuerySet, *, scope: AccessScope):

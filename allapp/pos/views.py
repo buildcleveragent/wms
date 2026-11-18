@@ -379,7 +379,7 @@ def _return_queryset_for_user(user):
         return PosReturn.objects.none()
     return (
         PosReturn.objects.select_related("sale", "warehouse", "shift", "cashier")
-        .prefetch_related("lines__product", "refunds")
+        .prefetch_related("lines__product__base_uom", "refunds")
         .filter(warehouse_id=warehouse_id)
     )
 

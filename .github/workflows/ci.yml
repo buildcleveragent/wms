@@ -44,8 +44,15 @@ jobs:
         working-directory: wmspda
       - run: npx playwright install --with-deps chromium
         working-directory: wmspda
-      - run: npm run test:e2e
+      - run: npm run test:e2e:built
         working-directory: wmspda
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wmspda-browser-evidence-${{ github.run_attempt }}
+          path: wmspda/test-results
+          if-no-files-found: ignore
+
 
   android-client:
     name: Android Client
@@ -91,8 +98,17 @@ jobs:
         working-directory: wmsownersale
       - run: npm audit --audit-level=high
         working-directory: wmsownersale
+      - run: npx playwright install --with-deps chromium
+        working-directory: wmsownersale
       - run: npm run test:quality
         working-directory: wmsownersale
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wmsownersale-browser-evidence-${{ github.run_attempt }}
+          path: wmsownersale/test-results
+          if-no-files-found: ignore
+
 
   boss-client:
     name: Boss Client
@@ -115,6 +131,13 @@ jobs:
         working-directory: wmsbossbilling
       - run: npm run test:release
         working-directory: wmsbossbilling
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wmsbossbilling-browser-evidence-${{ github.run_attempt }}
+          path: wmsbossbilling/test-results
+          if-no-files-found: ignore
+
 
   lint:
     name: Code Quality Checks
@@ -567,16 +590,5 @@ jobs:
             set -euo pipefail
             cd /app/wms
             export WMS_IMAGE="$IMAGE_REF"
-            docker compose -f compose.production.yml pull
-            docker compose -f compose.production.yml run --rm web python /app/docker/check_volume_access.py
-            docker compose -f compose.production.yml run --rm web python manage.py check --deploy
-            docker compose -f compose.production.yml run --rm web python manage.py migrate --plan
-            docker compose -f compose.production.yml stop scheduler
-            docker compose -f compose.production.yml run --rm web python manage.py migrate --noinput
-            docker compose -f compose.production.yml run --rm web python manage.py sync_wms_role_groups
-            docker compose -f compose.production.yml run --rm web python manage.py collectstatic --noinput
-            docker compose -f compose.production.yml up -d web
-            docker compose -f compose.production.yml exec -T web python manage.py migrate --check
-            docker compose -f compose.production.yml exec -T web python manage.py reconcile_data_accuracy --fail-on-issues
-            docker compose -f compose.production.yml up -d scheduler
+            sh docker/staging_release.sh
           REMOTE

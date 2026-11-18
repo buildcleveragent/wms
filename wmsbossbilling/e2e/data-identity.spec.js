@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './browser-test.js'
 
 const scope = { warehouse: '11', owner: '31', date_from: '2024-02-01', date_to: '2024-02-15' }
 const complete = { data_status: 'COMPLETE', warnings: [] }
@@ -13,6 +13,49 @@ async function prepare(page) {
   }, scope)
   return errors
 }
+
+for (const width of [390, 1440]) {
+  test(`large decimal balances and reversals remain exact at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    const errors = await prepare(page)
+    await page.route(url => url.pathname.startsWith('/api/'), route => {
+      const path = new URL(route.request().url()).pathname
+      let data = { meta: complete, count: 0, results: [] }
+      if (path.endsWith('/context/')) data = { warehouse_options: [{ id: 11, name: '测试仓库' }], owner_options: [{ id: 31, name: '测试货主' }] }
+      if (path.endsWith('/warehouse-overview/')) data = {
+        meta: complete,
+        summary: { accruals_by_currency: [
+          { currency: 'CNY', total: '9007199254740993.10' },
+          { currency: 'USD', total: '110.00' },
+        ] },
+        by_owner: [{ owner: 31, owner_name: '大额货主', currency: 'CNY', total: '9007199254740993.10', tax_total: '0.09', accrual_count: 1 }],
+        by_service_date: [{ service_date: '2024-02-07', currency: 'CNY', total: '9007199254740993.10' }],
+      }
+      if (path.endsWith('/bills/1/')) data = {
+        id: 1, owner: 31, warehouse: 11, currency: 'CNY', invoice_no: '精度验收账单',
+        subtotal: '0.01', tax_total: '0.09', total: '0.10',
+        lines: [
+          { id: 1, charge_type: 'DISPATCH', service_date: '2024-02-07', amount: '9007199254740993.01', tax_amount: '0.09' },
+          { id: 2, charge_type: 'STORAGE', service_date: '2024-02-07', amount: '-9007199254740993.00', tax_amount: '0.00' },
+        ],
+      }
+      return route.fulfill({ json: data })
+    })
+    await page.goto('/#/pages/billing/overview', { waitUntil: 'domcontentloaded' })
+    await expect(page.locator('.row-money').first()).toHaveText('¥9007199254740993.10')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    for (const selector of ['.kpi-value', '.trend-total']) {
+      expect(await page.locator(selector).evaluateAll(elements => elements.every(element => element.scrollWidth <= element.clientWidth))).toBe(true)
+    }
+    await page.goto('/#/pages/billing/bill_detail?id=1', { waitUntil: 'domcontentloaded' })
+    await expect(page.locator('.line-amount').first()).toHaveText('¥9007199254740993.01')
+    await expect(page.locator('.headline-card.dark')).toContainText('¥0.10')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`decimal-${width}.png`), fullPage: true })
+    expect(errors).toEqual([])
+  })
+}
+
 for (const width of [390, 1280]) {
   test(`inventory identity, precision and search at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
@@ -40,7 +83,7 @@ for (const width of [390, 1280]) {
       }
       await route.fulfill({ json: data })
     })
-    await page.goto('/#/pages/inventory/detail')
+    await page.goto('/#/pages/inventory/detail', { waitUntil: 'domcontentloaded' })
     await expect(page).toHaveURL(/inventory\/detail/)
     await expect(page).not.toHaveTitle('')
     const active = page.locator('uni-page-body').last()
@@ -81,7 +124,7 @@ test('unavailable inventory does not render zero KPI cards', async ({ page }, te
     }
     await route.fulfill({ json: data })
   })
-  await page.goto('/#/pages/inventory/index')
+  await page.goto('/#/pages/inventory/index', { waitUntil: 'domcontentloaded' })
   const active = page.locator('uni-page-body').last()
   await expect(active.getByText('所选范围数据不可用', { exact: true })).toBeVisible()
   await expect(active.getByText('所选日期缺少库存快照（1）', { exact: true })).toBeVisible()
@@ -108,7 +151,7 @@ test('cockpit shows scoped order counts and a genuine zero trend without mixing 
     }
     await route.fulfill({ json: data })
   })
-  await page.goto('/#/pages/cockpit/index?tab=periods')
+  await page.goto('/#/pages/cockpit/index?tab=periods', { waitUntil: 'domcontentloaded' })
   const active = page.locator('uni-page-body').last()
   await expect(active.locator('.metric').filter({ hasText: '实际收货单数' })).toContainText('2')
   await expect(active.locator('.bucket-cell').filter({ hasText: '实际收货单数' })).toContainText('实际收货单数 0')
@@ -132,7 +175,7 @@ test('overdue bill drilldown distinguishes unpaid balance from the original tota
     }
     await route.fulfill({ json: data })
   })
-  await page.goto('/#/pages/alerts/index')
+  await page.goto('/#/pages/alerts/index', { waitUntil: 'domcontentloaded' })
   const active = () => page.locator('uni-page-body').last()
   await expect(active().locator('.row-side')).toHaveText('未收 ¥70.00')
   await active().getByText('PARTIAL-110', { exact: true }).click()

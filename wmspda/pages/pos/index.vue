@@ -100,7 +100,7 @@
             <text class="product-name" data-testid="pos-product-name">{{ (product.display_name || product.name) || product.sku || product.code }}<text v-if="product.spec" class="product-spec">　{{ product.spec }}</text></text>
             <text class="product-meta">{{ product.code }} {{ product.sku || '' }}</text>
             <text class="product-meta">
-              售价 {{ money(product.price) }} / 可售 {{ qtyText(stockAvailableQty(product), product) }}
+              售价 {{ money(product.price) }} / 可售 {{ quantityWithUnit(stockAvailableQty(product), product) }}
             </text>
           </view>
           <button class="primary-btn add-btn" :disabled="!hasAvailableStock(product)" @click="addToCart(product)">
@@ -139,7 +139,7 @@
         >
           <view class="cart-info cart-goods-col" style="flex: 1 1 auto; min-width: 0; padding-right: 12rpx; text-align: right; box-sizing: border-box;">
             <text class="cart-goods-line" data-testid="pos-cart-product">
-              {{ item.name }}<text v-if="item.spec" class="cart-product-spec">　{{ item.spec }}</text>　{{ item.code }} / 可售 {{ qtyText(item.available_qty, item) }} {{ item.base_unit_name }} / 基本数量 {{ qtyText(lineBaseQty(item), item) }} {{ item.base_unit_name }}
+              {{ item.name }}<text v-if="item.spec" class="cart-product-spec">　{{ item.spec }}</text>　{{ item.code }} / 可售 {{ qtyText(item.available_qty, item) }} {{ basicUnit(item) }} / 基本数量 {{ qtyText(lineBaseQty(item), item) }} {{ basicUnit(item) }}
             </text>
           </view>
 
@@ -366,7 +366,7 @@
           </view>
           <view class="summary-sub">
             <text>商品 {{ cartItems.length }} 项</text>
-            <text>基本数量 {{ qtyText(totalBaseQty) }}</text>
+            <text>基本数量 {{ cartQuantityText }}</text>
             <text v-if="ownerCount > 1">货主 {{ ownerCount }} 个，将自动拆单</text>
           </view>
           <view v-if="selectedCustomer && ownerCount > 1" class="owner-warning">
@@ -552,9 +552,9 @@
         <view class="return-line" v-for="(line, index) in returnLines" :key="line.id">
           <view class="return-line-main">
             <text class="return-name">{{ (line.product_display_name || line.product_name) || line.product_code }}</text>
-            <text class="history-meta">可退 {{ qtyText(line.returnable_qty) }} / 单价 {{ money(line.price) }}</text>
+            <text class="history-meta">可退 {{ quantityWithUnit(line.returnable_qty, line) }} / 单价 {{ money(line.price) }}</text>
           </view>
-          <input class="input return-qty-input" v-model.trim="line.return_qty" type="digit" placeholder="退货数量" @blur="normalizeReturnLine(index)" />
+          <input class="input return-qty-input" v-model.trim="line.return_qty" type="digit" :placeholder="`退货数量（${basicUnit(line)}）`" @blur="normalizeReturnLine(index)" />
         </view>
         <input class="input void-input" v-model.trim="returnReason" placeholder="请输入退货原因" />
         <view class="bill-row payment-row return-refund-row">
@@ -673,6 +673,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onHide, onShow } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
+import { basicUnit, groupBasicQuantities, groupedQuantityText, quantityNumber, quantityWithUnit } from '@/utils/posQuantity'
 import { getPendingRepayment, recordRepayment } from '@/utils/repaymentRecovery'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
 import { CHECKOUT_STATUS, executeCheckoutFlow, executePrintAttempt } from '@/utils/posCheckoutFlow'
@@ -932,9 +933,9 @@ const {
   quickScan,
 } = useBarcodeScanner({ onScan: handleScan })
 
-const totalBaseQty = computed(() =>
-  cartItems.value.reduce((sum, item) => sum + Number(lineBaseQty(item) || 0), 0)
-)
+const cartQuantityText = computed(() => groupedQuantityText(groupBasicQuantities(
+  cartItems.value.map(item => ({ ...item, qty: lineBaseQty(item) }))
+)))
 const totalAmount = computed(() =>
   cartItems.value.reduce((sum, item) => sum + Number(lineAmount(item) || 0), 0)
 )
@@ -1983,18 +1984,19 @@ function buildSalePrintData(response = {}) {
     : Array.isArray(response.lines)
       ? response.lines
       : []
-  const lines = cartItems.value.length
+  const lines = !receiptLines.length && !sale.id && !receipt.sale_no && cartItems.value.length
     ? cartItems.value.map((item, index) => {
         const qty = Number(lineBaseQty(item) || 0)
         const price = Number(item.price || 0)
         const amount = Number(lineAmount(item) || 0)
-        const unit = item.base_unit_name || item.unit_labels?.[item.unit_index] || ''
+        const unit = basicUnit(item)
         return {
           index: index + 1,
           name: item.name || item.code || item.sku || '',
           code: item.code || item.sku || '',
           spec: item.spec || item.product_spec || selectedUnit(item).label || '',
           unit,
+          base_unit_id: item.base_unit_id,
           qty,
           qtyText: plainQty(qty, item),
           price,
@@ -2013,16 +2015,18 @@ function buildSalePrintData(response = {}) {
           index: index + 1,
           name: line.product_display_name || line.name || line.product_name || line.code || line.product_code || '',
           code: line.code || line.product_code || '',
-          spec: line.spec || '',
-          unit: line.unit || '',
+          spec: line.spec || line.product_spec || '',
+          unit: basicUnit(line),
+          base_unit_id: line.base_unit_id,
           qty,
-          qtyText: plainQty(qty),
+          qtyText: quantityNumber(line.qty),
           price,
           priceText: plainPrice(price),
           amount,
           amountText: plainMoney(amount),
           remark: '',
-          locationCode: line.location_code || '',
+          locationCode: line.location_code || (response.sale
+            ? cartItems.value.find(item => item.product_id === line.product_id)?.location_code : '') || '',
         }
       })
   const totalQty = lines.reduce((sum, line) => sum + Number(line.qty || 0), 0)
@@ -2066,7 +2070,9 @@ function buildSalePrintData(response = {}) {
     bankAccount: receiptWarehouseInfo.bank_account || '',
     lines,
     totalQty,
-    totalQtyText: plainQty(totalQty),
+    totalQtyText: groupedQuantityText(receiptLines.length
+      ? receipt.quantities_by_unit ?? groupBasicQuantities(receiptLines)
+      : groupBasicQuantities(lines)),
     totalAmount: total,
     totalAmountText: plainMoney(total),
     totalAmountChinese: amountToChinese(total),
@@ -2181,16 +2187,12 @@ function buildA4SalePrintHtml(data, printConfig) {
       <tbody>
         ${rows}
         <tr>
-          <td colspan="3" class="summary-name">本页小计</td>
-          <td class="num">${escapeHtml(data.totalQtyText)}</td>
-          <td></td>
+          <td colspan="5" class="summary-name">本页小计 · 基本数量：${escapeHtml(data.totalQtyText)}</td>
           <td class="num">${escapeHtml(data.totalAmountText)}</td>
           <td colspan="2"></td>
         </tr>
         <tr>
-          <td colspan="3" class="summary-name">合计: ${escapeHtml(data.totalAmountChinese)}</td>
-          <td class="num">${escapeHtml(data.totalQtyText)}</td>
-          <td></td>
+          <td colspan="5" class="summary-name">合计: ${escapeHtml(data.totalAmountChinese)} · 基本数量：${escapeHtml(data.totalQtyText)}</td>
           <td class="num">${escapeHtml(data.totalAmountText)}</td>
           <td colspan="2"></td>
         </tr>
@@ -2285,16 +2287,12 @@ function buildDotMatrixSalePrintHtml(data, printConfig) {
       <tbody>
         ${rows}
         <tr>
-          <td colspan="3" class="summary-name">本页小计</td>
-          <td class="num">${escapeHtml(data.totalQtyText)}</td>
-          <td></td>
+          <td colspan="5" class="summary-name">本页小计 · 基本数量：${escapeHtml(data.totalQtyText)}</td>
           <td class="num">${escapeHtml(data.totalAmountText)}</td>
           <td colspan="2"></td>
         </tr>
         <tr>
-          <td colspan="3" class="summary-name">合计: ${escapeHtml(data.totalAmountChinese)}</td>
-          <td class="num">${escapeHtml(data.totalQtyText)}</td>
-          <td></td>
+          <td colspan="5" class="summary-name">合计: ${escapeHtml(data.totalAmountChinese)} · 基本数量：${escapeHtml(data.totalQtyText)}</td>
           <td class="num">${escapeHtml(data.totalAmountText)}</td>
           <td colspan="2"></td>
         </tr>
@@ -3519,6 +3517,8 @@ function applyProductSnapshotToCartItem(item, product) {
   item.name = productDisplayName(product) || item.name
   item.spec = product.spec || product.specification || product.product_spec || product.package_spec || item.spec || ''
   item.location_code = product.location_code || product.location || product.bin_code || item.location_code || ''
+  item.base_unit_id = product.base_unit?.id ?? item.base_unit_id
+  item.base_unit_code = product.base_unit?.code || item.base_unit_code || ''
   item.base_unit_name = product.base_unit?.name || product.base_unit?.code || item.base_unit_name || ''
   item.available_qty = stockAvailableQty(product)
   item.list_price = product.price
@@ -3581,6 +3581,8 @@ function addToCart(product) {
     name: productName,
     spec: product.spec || product.specification || product.product_spec || product.package_spec || '',
     location_code: product.location_code || product.location || product.bin_code || '',
+    base_unit_id: product.base_unit?.id,
+    base_unit_code: product.base_unit?.code || '',
     base_unit_name: product.base_unit?.name || product.base_unit?.code || '',
     available_qty: stockAvailableQty(product),
     min_price: product.min_price,

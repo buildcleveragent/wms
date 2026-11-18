@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test'
+import fs from 'node:fs'
+
+const declaredPages = JSON.parse(fs.readFileSync('pages.json', 'utf8')).pages
 
 const meta = { data_status: 'COMPLETE', generated_at: '2026-01-01T00:00:00Z' }
 const historical = { warehouse: '11', owner: '', date_from: '2024-02-01', date_to: '2024-02-15' }
@@ -58,7 +61,8 @@ async function mockBoss(page, { scope = historical, canExport = true, respond } 
 
 async function open(page, path) {
   await page.goto(`/#/pages/${path}`)
-  await expect(page).toHaveURL(`/#/pages/${path}`)
+  if (path === 'home/index') await expect(page).toHaveURL(/\/#\/(?:pages\/home\/index)?$/)
+  else await expect(page).toHaveURL(`/#/pages/${path}`)
   await expect(page).not.toHaveTitle('')
   await expect(page.locator('uni-page-body').last()).not.toBeEmpty()
 }
@@ -322,19 +326,23 @@ test('owner billing commits all responses from the latest refresh together', asy
 })
 
 for (const width of [390, 1440]) {
-  test(`all 12 page routes render at width ${width}`, async ({ page }, testInfo) => {
-    // This smoke case loads 12 pages; allow for their combined navigation time.
+  test(`all ${declaredPages.length} page routes render at width ${width}`, async ({ page }, testInfo) => {
+    // Read the page registry so new routes cannot silently escape this smoke check.
     test.setTimeout(120000)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const { errors, consoleErrors } = await mockBoss(page)
-    const routes = ['login', 'home/index', 'inventory/index', 'alerts/index', 'cockpit/index',
-      'billing/overview', 'billing/owner_detail?owner=31', 'inventory/detail',
-      'alerts/section?section=review_differences',
-      'alerts/detail?section=review_differences&item_type=review_difference&id=1',
-      'billing/bill_detail?id=1', 'billing/accrual_detail?id=1']
+    const queries = {
+      'billing/owner_detail': '?owner=31',
+      'alerts/section': '?section=review_differences',
+      'alerts/detail': '?section=review_differences&item_type=review_difference&id=1',
+      'billing/bill_detail': '?id=1', 'billing/accrual_detail': '?id=1',
+      'activity/detail': '?kind=task&id=1', 'cockpit/details': '?type=tasks',
+    }
+    const routes = declaredPages.map(({ path }) => path.slice('pages/'.length))
+      .map(route => route + (queries[route] || ''))
     for (const route of routes) {
       await open(page, route)
-      await expect(page.locator('uni-page-body').last()).toContainText(/仓储|计费|预警|收费|账单|Owner|Accrual|Bill/)
+      await expect(page.locator('uni-page-body').last()).toContainText(/仓储|计费|预警|收费|账单|刷新|活动|详情|明细|Owner|Accrual|Bill/)
       await expect(page.locator('vite-error-overlay')).toHaveCount(0)
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       if (route === 'cockpit/index') {

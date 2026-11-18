@@ -1,4 +1,4 @@
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { onShow, onHide, onUnload } from '@dcloudio/uni-app'
 import { createLiveRefresh } from './live-refresh'
 import { getStoredToken } from './request'
@@ -6,6 +6,9 @@ import { useRefreshPreferences } from '@/store/refreshPreferences'
 
 export function useLiveResource(load, { key, enabled = () => true, hold = () => false, compare }) {
   const preferences = useRefreshPreferences()
+  const refreshHint = computed(() => preferences.automatic
+    ? `每 ${preferences.minutes} 分钟检查更新`
+    : '自动刷新已关闭，可手动刷新')
   let running = false
   let needsLoad = true
   const data = ref(null)
@@ -14,12 +17,13 @@ export function useLiveResource(load, { key, enabled = () => true, hold = () => 
   const loading = ref(false)
   const updatedAt = ref('')
   let visible = true
+  let mounted = false
   let appVisible = true
   let online = true
   let disposed = false
   let revision = 0
   let acceptNext = false
-  const canRun = () => !disposed && visible && appVisible && online && enabled() && !!getStoredToken()
+  const canRun = () => mounted && !disposed && visible && appVisible && online && enabled() && !!getStoredToken()
     && (typeof document === 'undefined' || !document.hidden)
   const controller = createLiveRefresh(async () => {
     const version = revision
@@ -101,11 +105,13 @@ export function useLiveResource(load, { key, enabled = () => true, hold = () => 
   }
   watch([key, enabled, () => preferences.userId], reset)
   onMounted(() => {
+    // Let onLoad initialize route parameters and their watchers before the first read.
+    mounted = true
     uni.onNetworkStatusChange?.(network)
     uni.$on?.('boss:foreground', appShow); uni.$on?.('boss:background', appHide)
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', sync)
     sync()
   })
   onShow(pageShow); onHide(pageHide); onUnload(dispose); onBeforeUnmount(dispose)
-  return { data, pending, error, loading, updatedAt, refresh, apply, reset }
+  return { data, pending, error, loading, updatedAt, refreshHint, refresh, apply, reset }
 }

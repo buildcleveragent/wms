@@ -374,14 +374,14 @@ class WmsTaskLine(BaseModel):
 
     qty_plan = models.DecimalField(
         _("计划数量"),
-        max_digits=18,
-        decimal_places=3,
+        max_digits=19,
+        decimal_places=4,
         default=0,
     )
     qty_done = models.DecimalField(
         _("已执行数量"),
-        max_digits=18,
-        decimal_places=3,
+        max_digits=19,
+        decimal_places=4,
         default=0,
     )
     status = models.CharField(
@@ -803,14 +803,14 @@ class TaskScanLog(TimeStampedMixin):
         _("包数(+/-)"), max_digits=18, decimal_places=3, null=True, blank=True
     )
     qty_base = models.DecimalField(
-        _("本次基本单位数(+/-)"), max_digits=18, decimal_places=6, null=True, blank=True
+        _("本次基本单位数(+/-)"), max_digits=20, decimal_places=6, null=True, blank=True
     )
     qty_base_delta = models.DecimalField(
-        _("本次增量(基本单位)"), max_digits=18, decimal_places=6, null=True, blank=True
+        _("本次增量(基本单位)"), max_digits=20, decimal_places=6, null=True, blank=True
     )
 
     # —— 批次/日期/容器 —— #
-    lot_no = models.CharField(_("批号"), max_length=60, blank=True, null=True)
+    lot_no = models.CharField(_("批号"), max_length=64, blank=True, null=True)
     mfg_date = models.DateField(_("生产日期"), blank=True, null=True)
     exp_date = models.DateField(_("有效期至"), blank=True, null=True)
     serial_no = models.CharField(_("序列号"), max_length=80, blank=True, null=True)
@@ -3536,7 +3536,7 @@ class CountLineExtra(TaskLineExtraBase):
         SECOND = "SECOND", "第二次盘点"
         THIRD = "THIRD", "第三次盘点"
 
-    lot_no = models.CharField("批号", max_length=60, blank=True, default="", db_index=True)
+    lot_no = models.CharField("批号", max_length=64, blank=True, default="", db_index=True)
     exp_date = models.DateField("有效期至", null=True, blank=True, db_index=True)
     lpn_no = models.CharField("LPN/容器号", max_length=60, blank=True, default="", db_index=True)
 

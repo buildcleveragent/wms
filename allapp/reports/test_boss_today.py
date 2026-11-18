@@ -21,6 +21,18 @@ class BossTodayTests(TestCase):
     checkout = fixtures.BossActivityTests.checkout
     get_report = fixtures.BossActivityTests.get_report
 
+    def test_empty_financial_streams_do_not_claim_unknown_currency(self):
+        empty = self.get_report("today")
+        for row in empty["financial"]:
+            self.assertEqual(row["count"], 0, row["key"])
+            self.assertEqual(row["money"], [], row["key"])
+            self.assertFalse(row["unknown_currency"], row["key"])
+        self.checkout()
+        rows = {row["key"]: row for row in self.get_report("today")["financial"]}
+        self.assertEqual(rows["pos_sales"]["count"], 1)
+        self.assertTrue(rows["pos_sales"]["unknown_currency"])
+        self.assertFalse(rows["pos_returns"]["unknown_currency"])
+
     def order(self, direction="outbound", suffix="1"):
         inbound = direction == "inbound"
         if inbound:

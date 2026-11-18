@@ -28,6 +28,17 @@ export function sameCountQuantity(left, right) {
   }
   return normalized(left) === normalized(right)
 }
+export function validCountQuantity(value) {
+  const text = String(value)
+  if (!/^\d+(\.\d{1,4})?$/.test(text)) return false
+  // Avoid Number: the largest supported quantity exceeds exact IEEE-754 integers.
+  return text.split('.')[0].replace(/^0+/, '').length <= 14
+}
+export const countSubmitMessages = {
+  PENDING_APPROVAL: '盘点已提交，待审核。',
+  AUTO_POSTED_NO_DIFF: '盘点无差异，已完成。',
+  POSTING_FAILED: '盘点已提交，自动过账失败，需主管处理。',
+}
 export function hasUnsavedCounts(lines) {
   return lines.some(line => line.count_status === 'COUNTED'
     ? !sameCountQuantity(line._qty, line.qty_counted)
@@ -69,6 +80,9 @@ export function useCountSession({ api, auth, confirm = async () => true }) {
   const unwatch = watch(identity, clear, { flush: 'sync' })
   const fail = err => {
     error.value = countError(err)
+    if (Number(err?.statusCode) === 404) {
+      task.value = null; lines.value = []
+    }
     if (Number(err?.statusCode) === 403) {
       denied.value = true
       rows.value = []; task.value = null; lines.value = []

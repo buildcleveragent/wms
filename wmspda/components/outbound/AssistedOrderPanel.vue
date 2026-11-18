@@ -563,6 +563,13 @@ async function executeSubmit() {
     if (Number(error?.statusCode || error?.code) === 403) {
       auth.invalidateAssistedCapability()
       emit('authorization-denied')
+    } else if (Number(error?.statusCode || error?.code) === 400) {
+      uni.showModal({
+        title: '出库未成功',
+        content: error?.message || '请检查商品来源、库存和订单资料后重试。',
+        showCancel: false,
+        confirmText: '我知道了',
+      })
     }
     console.error(error)
   } finally {

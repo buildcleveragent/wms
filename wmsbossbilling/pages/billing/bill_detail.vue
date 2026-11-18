@@ -16,11 +16,15 @@
     </view>
 
     <view v-if="loading" class="loading-banner">正在同步账单和明细...</view>
-    <view class="loading-banner">最后成功同步 {{ updatedAt || '等待同步' }} · 约 30 秒检查更新</view>
+    <view class="loading-banner">最后成功同步 {{ updatedAt || '等待同步' }} · {{ refreshHint }}
+      <button size="mini" :disabled="loading" @click="loadBill">刷新</button>
+    </view>
     <view v-if="pending" class="loading-banner" @click="apply">账单有更新，点击查看最新内容</view>
-    <view v-if="error" class="loading-banner">同步失败，稍后自动重试。</view>
+    <view v-if="error" class="loading-banner">{{ error.message || '同步失败，请重试。' }}
+      <button size="mini" :disabled="loading" @click="loadBill">重新加载</button>
+    </view>
 
-    <template v-else-if="bill">
+    <template v-if="bill">
       <view class="headline-grid">
         <view class="headline-card">
           <view class="headline-label">不含税小计</view>
@@ -135,7 +139,7 @@
       </view>
     </template>
 
-    <view v-else class="empty-card">
+    <view v-else-if="!loading && !error" class="empty-card">
       <view class="empty-title">当前账单暂不可用</view>
       <view class="empty-desc">请确认账单已生成，或返回计费总览重新选择账单。</view>
       <button class="btn-ghost return-btn" @click="goBackOverview">返回总览</button>
@@ -149,7 +153,7 @@ import { onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
 import { api, buildQuery } from '@/utils/request'
 import { useAuth } from '@/store/auth'
 import { useLiveResource } from '@/utils/use-live-resource'
-import { asList, billStatusLabel, chargeTypeLabel, money, qty, sumAmounts } from '@/utils/billing'
+import { asList, billStatusLabel, chargeTypeLabel, compareAmounts, money, qty, sumAmounts } from '@/utils/billing'
 
 const auth = useAuth()
 const billId = ref('')
@@ -157,7 +161,7 @@ const ownerId = ref('')
 const warehouseId = ref('')
 const periodId = ref('')
 
-const { data: bill, pending, error, loading, updatedAt, refresh, apply } = useLiveResource(
+const { data: bill, pending, error, loading, updatedAt, refreshHint, refresh, apply } = useLiveResource(
   () => api.billingBillDetail(billId.value, { owner: ownerId.value, warehouse: warehouseId.value }),
   { key: () => JSON.stringify([auth.user?.id, billId.value]), enabled: () => !!billId.value && !!auth.access, hold: () => true })
 const lines = computed(() => asList(bill.value?.lines))
@@ -243,7 +247,7 @@ const groupedRows = computed(() => {
     row.total = sumAmounts(row.total, line.amount, line.tax_amount)
     groups.set(key, row)
   })
-  return Array.from(groups.values()).sort((a, b) => b.total - a.total)
+  return Array.from(groups.values()).sort((a, b) => compareAmounts(b.total, a.total))
 })
 
 async function loadBill() {

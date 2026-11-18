@@ -9,7 +9,7 @@
   size: A4;
   margin: 18mm 16mm 19mm 16mm;
   @top-left { content: string(document-title); color: #667085; font-size: 8.2pt; }
-  @top-right { content: "V2.2 · 2026-10-17"; color: #667085; font-size: 8.2pt; }
+  @top-right { content: "V2.3 · 2026-11-13"; color: #667085; font-size: 8.2pt; }
   @bottom-center { content: "第 " counter(page) " 页 / 共 " counter(pages) " 页"; color: #7a8493; font-size: 8.2pt; }
 }
 @page cover {
@@ -84,8 +84,8 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <h1>金桥融通WMS仓库老板经营看板手册</h1>
 <div class="lead">岗位操作 · 权限边界 · 异常处理</div>
 <div class="cover-meta">
-<div>文档版本：V2.2</div>
-<div>适用基线：2026-10-17 当前工作区</div>
+<div>文档版本：V2.3</div>
+<div>适用基线：2026-11-13 当前工作区</div>
 <div>文档状态：交付版</div>
 <div>主要读者：仓库老板</div>
 </div>
@@ -93,8 +93,8 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 </section>
 <section class="toc"><h1>目录</h1><ul><li class="level-2"><a href="#section-1-使用范围">使用范围</a></li><li class="level-2"><a href="#section-2-登录-账号与通用安全">登录、账号与通用安全</a></li><li class="level-3"><a href="#section-3-首次登录">首次登录</a></li><li class="level-3"><a href="#section-4-登录失效与切换账号">登录失效与切换账号</a></li><li class="level-3"><a href="#section-5-账号和数据范围">账号和数据范围</a></li><li class="level-3"><a href="#section-6-通用操作原则">通用操作原则</a></li><li class="level-3"><a href="#section-7-修改密码与退出">修改密码与退出</a></li><li class="level-2"><a href="#section-8-角色职责与只读边界">角色职责与只读边界</a></li><li class="level-2"><a href="#section-9-登录与范围确认">登录与范围确认</a></li><li class="level-3"><a href="#section-10-筛选-刷新与失败恢复">筛选、刷新与失败恢复</a></li><li class="level-2"><a href="#section-11-首页总览">首页总览</a></li><li class="level-2"><a href="#section-12-库存与库容">库存与库容</a></li><li class="level-2"><a href="#section-13-收入与计费">收入与计费</a></li><li class="level-2"><a href="#section-14-预警中心">预警中心</a></li><li class="level-2"><a href="#section-15-经营驾驶舱">经营驾驶舱</a></li><li class="level-2"><a href="#section-16-经营例会建议">经营例会建议</a></li><li class="level-2"><a href="#section-17-老板日常检查表">老板日常检查表</a></li><li class="level-2"><a href="#section-18-常见状态与控制点">常见状态与控制点</a></li><li class="level-2"><a href="#section-19-异常处理与问题上报">异常处理与问题上报</a></li><li class="level-3"><a href="#section-20-无法登录或菜单缺失">无法登录或菜单缺失</a></li><li class="level-3"><a href="#section-21-数据为空或范围不正确">数据为空或范围不正确</a></li><li class="level-3"><a href="#section-22-网络超时或重复提交提示">网络超时或重复提交提示</a></li><li class="level-3"><a href="#section-23-打印失败或打印页过期">打印失败或打印页过期</a></li><li class="level-3"><a href="#section-24-移库-补货过账失败">移库、补货过账失败</a></li><li class="level-3"><a href="#section-25-库存-任务或账单不一致">库存、任务或账单不一致</a></li><li class="level-3"><a href="#section-26-问题上报模板">问题上报模板</a></li><li class="level-2"><a href="#section-27-日常自检与培训验收">日常自检与培训验收</a></li><li class="level-2"><a href="#section-28-专项手册与边界">专项手册与边界</a></li><li class="level-2"><a href="#section-29-文档修订记录">文档修订记录</a></li></ul></section>
 <div class="document-note">本手册仅描述当前代码中具有有效权限、页面和业务闭环的功能。</div>
-<p><strong>文档版本：</strong> V2.2</p>
-<p><strong>适用系统版本：</strong> 2026-10-17 当前工作区业务基线</p>
+<p><strong>文档版本：</strong> V2.3</p>
+<p><strong>适用系统版本：</strong> 2026-11-13 当前工作区业务基线</p>
 <p><strong>适用对象：</strong> 仓库老板</p>
 <p><strong>正式权限组：</strong> <code>WMS::仓库老板</code></p>
 <p><strong>主要入口：</strong> 仓储经营分析中心（wmsbossbilling）</p>
@@ -388,6 +388,8 @@ img.web-shot { width: 150mm; border: 1px solid #ccd5e2; box-shadow: 0 2mm 7mm rg
 <li>移库异常执行状态与过账失败不是同一件事；“恢复”用于异常任务，“重试过账”用于过账失败，均由有权限的仓库管理员处理。</li>
 <li>POS 销售状态和班次状态按《POS 使用手册》核对；现场还款或打印完成情况不能由普通仓库任务状态推断。</li>
 <li>同名状态必须结合单据类型解释：PDA 退货 <code>COMPLETED</code> 已直接扣库；代办货权转移 <code>RESERVED</code> 是待转货，<code>POSTED</code> 是已转货并销售出库。不能套用普通任务的“已完成、待过账”结论。</li>
+<li>到货申请的验收草稿、待仓库审核、已入账和上架完成分别核对；全拒收批次“无需库存入账／无需上架”不表示漏过账。客户退货申请通过也不表示实物已回仓，须核对实际验收批次入账。</li>
+<li>盘点草稿不冻结，发布后冻结范围；超阈值可能转入下一轮复盘。无差异可能自动过账，有差异须审核后过账；过账失败时冻结仍保留。驳回保留盘点记录并释放冻结，已过账不能取消。</li>
 </ul>
 <hr/>
 <h2 id="section-19-异常处理与问题上报">异常处理与问题上报</h2>

@@ -525,7 +525,7 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
         task = self.get_object()
         qs = TaskScanLog.objects.filter(task=task).order_by("-created_at", "-id")
         page = self.paginate_queryset(qs)
-        ser = TaskScanLogSerializer(page or qs, many=True)
+        ser = TaskScanLogSerializer(page or qs, many=True, context=self.get_serializer_context())
         return self.get_paginated_response(ser.data) if page is not None else Response(ser.data)
 
     @action(detail=True, methods=["get"], url_path="assignments")

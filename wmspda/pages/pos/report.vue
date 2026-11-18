@@ -82,8 +82,8 @@
       </view>
       <view class="summary-card">
         <text class="card-label">净数量</text>
-        <text class="card-value">{{ qtyText(summary.net_qty) }}</text>
-        <text class="card-meta">销售 {{ qtyText(summary.completed_qty) }}</text>
+        <text class="card-value">{{ groupedQuantityText(summary.quantities_by_unit, 'net_qty') }}</text>
+        <text class="card-meta">销售 {{ groupedQuantityText(summary.quantities_by_unit, 'completed_qty') }}</text>
       </view>
       <view class="summary-card">
         <text class="card-label">销售行</text>
@@ -112,7 +112,7 @@
       </view>
     </view>
 
-    <view class="section">
+    <view class="section" data-testid="pos-product-ranking">
       <view class="section-head">
         <text class="section-title">商品排行</text>
       </view>
@@ -126,14 +126,14 @@
           </view>
           <view class="rank-amount">
             <text>{{ money(row.net_amount) }}</text>
-            <text class="rank-sub">{{ qtyText(row.net_qty) }} 件</text>
+            <text class="rank-sub">{{ quantityWithUnit(row.net_qty, row) }}</text>
           </view>
         </view>
       </view>
     </view>
 
     <view class="split-sections">
-      <view class="section compact">
+      <view class="section compact" data-testid="pos-owner-summary">
         <view class="section-head">
           <text class="section-title">货主汇总</text>
         </view>
@@ -147,7 +147,7 @@
             </view>
             <view class="rank-amount">
               <text>{{ money(row.net_amount) }}</text>
-              <text class="rank-sub">{{ qtyText(row.net_qty) }} 件</text>
+              <text class="rank-sub">{{ groupedQuantityText(row.quantities_by_unit, 'net_qty') }}</text>
             </view>
           </view>
         </view>
@@ -219,7 +219,7 @@
                     <text class="sale-line-code">编码：{{ line.product_code || '-' }}</text>
                   </view>
                   <view class="sale-line-values">
-                    <text>数量：{{ qtyText(line.qty) }}</text>
+                    <text>数量：{{ quantityWithUnit(line.qty, line) }}</text>
                     <text>单价：{{ priceText(line.price) }}</text>
                     <text class="sale-line-amount">小计：{{ money(line.amount) }}</text>
                   </view>
@@ -241,6 +241,7 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import { api } from '@/utils/request'
+import { groupedQuantityText, quantityWithUnit } from '@/utils/posQuantity'
 
 const pad = (n) => String(n).padStart(2, '0')
 const today = new Date()
@@ -294,6 +295,7 @@ function defaultStats() {
       return_count: 0,
       line_count: 0,
       return_line_count: 0,
+      quantities_by_unit: [],
       completed_qty: '0.000',
       net_qty: '0.000',
       sales_amount: '0.00',
@@ -339,12 +341,6 @@ function buildDateRange() {
 function money(value) {
   const num = Number(value || 0)
   return `¥${Number.isFinite(num) ? num.toFixed(2) : '0.00'}`
-}
-
-function qtyText(value) {
-  const num = Number(value || 0)
-  if (!Number.isFinite(num)) return '0'
-  return num.toFixed(3).replace(/\.?0+$/, '')
 }
 
 function priceText(value) {
@@ -1077,5 +1073,14 @@ button::after {
     grid-template-columns: 1fr 1fr;
     gap: 18rpx;
   }
+}
+
+.rank-amount {
+  max-width: 100%;
+}
+
+.rank-amount .rank-sub {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 </style>

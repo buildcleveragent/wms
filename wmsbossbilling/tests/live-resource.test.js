@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@dcloudio/uni-app', () => ({ onShow: vi.fn(), onHide: vi.fn(), onUnload: vi.fn() }))
 vi.mock('../utils/request', () => ({ getStoredToken: () => 'session-a' }))
 import { useLiveResource } from '../utils/use-live-resource'
+import { onShow } from '@dcloudio/uni-app'
 
 describe('live resource context and retained reading state', () => {
   let wrapper
@@ -20,6 +21,23 @@ describe('live resource context and retained reading state', () => {
     await nextTick()
     return resource
   }
+
+  it('loads a route once when onLoad sets its id before the first onShow', async () => {
+    useRefreshPreferences().automatic = false
+    const id = ref(''), owner = ref(''), load = vi.fn(() => Promise.resolve({ owner: owner.value }))
+    let resource
+    wrapper = mount(defineComponent({ setup() {
+      resource = useLiveResource(load, { key: () => id.value, enabled: () => !!id.value })
+      id.value = 'bill-1'
+      owner.value = 'owner-2'
+      onShow.mock.lastCall[0]()
+      return () => null
+    } }))
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(resource.data.value).toEqual({ owner: 'owner-2' })
+  })
 
   it('drops a response from a previous warehouse and starts the new request after it', async () => {
     const scope = ref('A')

@@ -315,7 +315,7 @@ def review_line_details(task, content):
             "order_line_id": origin.pk if origin else None,
             "order_line_no": origin.line_no if origin else None,
             "order_qty": str(origin.base_qty) if origin else None,
-            "qty_difference": str(line.qty_done - line.qty_plan),
+            "qty_difference": format(line.qty_done - line.qty_plan, ".3f"),
             "finished_at": line.finished_at,
             "picking_details": details,
         }
@@ -345,6 +345,10 @@ def review_quantity_totals(content, details):
         group["qty_plan"] += line.qty_plan
         group["qty_done"] += line.qty_done
     return [
-        {**group, **{key: str(group[key]) for key in ("order_qty", "qty_plan", "qty_done")}}
+        {
+            **group,
+            "order_qty": str(group["order_qty"]),
+            **{key: format(group[key], ".3f") for key in ("qty_plan", "qty_done")},
+        }
         for group in totals.values()
     ]

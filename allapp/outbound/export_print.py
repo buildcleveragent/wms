@@ -140,6 +140,15 @@ def pick_task_print(request, task_id: int):
     except ValidationError as exc:
         return HttpResponse("；".join(exc.messages), status=409)
 
+    from .print_units import apply_print_units
+
+    unit_totals = []
+    if kind == "delivery":
+        try:
+            unit_totals = apply_print_units(lines, request.GET)
+        except ValidationError as exc:
+            return HttpResponse("；".join(exc.messages), status=400)
+
     # 拣货单用于库内作业，不依赖送货单地址配置。
     warehouse_infos = []
     selected_info = None
@@ -232,6 +241,9 @@ def pick_task_print(request, task_id: int):
             "order_id": order.id,
             "kind": kind,
             "warehouse_info_id": selected_info.pk if selected_info else None,
+            "print_units": (
+                {str(line.pk): line.print_unit_name for line in lines} if kind == "delivery" else {}
+            ),
         },
     )
 
@@ -262,7 +274,10 @@ def pick_task_print(request, task_id: int):
             "warehouse_address": selected_info.address if selected_info else "",
             "warehouse_infos": warehouse_infos,
             "selected_warehouse_info": selected_info,
-            "auto_print": len(warehouse_infos) <= 1 or selected_info is not None,
+            "auto_print": kind == "pick"
+            or request.GET.get("print") == "1"
+            or all(len(line.print_options) == 1 for line in lines),
+            "unit_totals": unit_totals,
             "total_qty": total_qty,
             "total_amount": total_amount,
             "total_amount_upper": total_amount_upper,

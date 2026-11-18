@@ -374,8 +374,8 @@ def payload(user, order):
                                 "",
                             ),
                             "quality": task_line.plan_meta.get("quality"),
-                            "qty_plan": str(task_line.qty_plan),
-                            "qty_done": str(task_line.qty_done),
+                            "qty_plan": format(task_line.qty_plan, ".3f"),
+                            "qty_done": format(task_line.qty_done, ".3f"),
                             "location_id": task_line.to_location_id,
                             "from_location": (
                                 task_line.from_location.code

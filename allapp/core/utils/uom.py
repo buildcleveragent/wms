@@ -1,14 +1,13 @@
 # apps/core/utils/uom.py
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_FLOOR, ROUND_CEILING, ROUND_HALF_UP
+from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from typing import Optional, Tuple, Union
 
-from django.db.models import Q
+from django.db.models import Count
 
 # 建议根据你的项目实际路径修改这三行导入
-from allapp.products.models import Product, ProductUom, ProductPackage
-
+from allapp.products.models import Product, ProductUom
 
 UomLike = Union[ProductUom, int, str]  # 实例 / 主键ID / code字符串
 NumberLike = Union[int, float, Decimal]
@@ -38,7 +37,11 @@ def _resolve_uom_id(product: Product, uom: UomLike) -> Optional[int]:
     if isinstance(uom, str):
         code = uom
         # 3.1 在该商品上下文范围内找（推荐）
-        rel = product.packages.filter(uom__code=code, is_deleted=False).values_list("uom_id", flat=True).first()
+        rel = (
+            product.packages.filter(uom__code=code, is_deleted=False)
+            .values_list("uom_id", flat=True)
+            .first()
+        )
         if rel:
             return int(rel)
         if product.base_uom and product.base_uom.code == code:
@@ -85,11 +88,7 @@ def to_base_qty(product: Product, uom: UomLike, qty: NumberLike) -> Decimal:
         return q
 
     # 非基础单位：查包装换算
-    pkg = (
-        product.packages.filter(uom_id=uom_id, is_deleted=False)
-        .only("qty_in_base")
-        .first()
-    )
+    pkg = product.packages.filter(uom_id=uom_id, is_deleted=False).only("qty_in_base").first()
     if not pkg:
         # 没有定义该包装的换算率 → 明确抛错，避免幽灵库存
         code = None
@@ -141,11 +140,7 @@ def from_base_qty(
             return bq, Decimal(0)
         return bq
 
-    pkg = (
-        product.packages.filter(uom_id=uom_id, is_deleted=False)
-        .only("qty_in_base")
-        .first()
-    )
+    pkg = product.packages.filter(uom_id=uom_id, is_deleted=False).only("qty_in_base").first()
     if not pkg:
         code = None
         if isinstance(uom, ProductUom):
@@ -202,7 +197,7 @@ def validate_packages_against_base_uom(product: Product) -> None:
         product.packages.filter(is_deleted=False)
         .values("uom_id")
         .order_by()
-        .annotate(cnt_id=models.Count("id"))
+        .annotate(cnt_id=Count("id"))
         .filter(cnt_id__gt=1)
         .first()
     )

@@ -18,6 +18,17 @@ from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.inventory.models import InventoryDetail, PostingJournal
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product
+from allapp.tasking.count_inventory import (
+    SNAPSHOT_KEY,
+    count_quantity,
+    inventory_snapshot,
+    validate_count_sources,
+)
+from allapp.tasking.count_policy import can_manage_count as _manager_allowed
+from allapp.tasking.count_policy import (
+    can_operate_count,
+    count_record_response,
+)
 from allapp.tasking.models import (
     CountLineExtra,
     CountScopeLock,
@@ -72,17 +83,6 @@ def _q4(value) -> Decimal:
         )
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise ValidationError("数量格式不正确。") from exc
-
-
-def _manager_allowed(user) -> bool:
-    return bool(
-        user
-        and getattr(user, "is_authenticated", False)
-        and (
-            getattr(user, "is_superuser", False)
-            or user.has_perm("tasking.taskconfirm_as_wh_manager")
-        )
-    )
 
 
 def _infer_scope(*, scope, zone_type, location_id, location_prefix, product_id) -> str:
@@ -170,7 +170,7 @@ def _inventory_queryset(params: CountScopeParams):
         qs = qs.filter(batch_no__iexact=params.batch_no.strip().upper())
     if params.exclude_zero_onhand:
         qs = qs.filter(onhand_qty__gt=0)
-    return qs.select_related("product", "location").order_by(
+    return qs.select_related("product", "location", "container").order_by(
         "location__code", "product__code", "expiry_date", "batch_no", "id"
     )
 
@@ -195,6 +195,74 @@ def _params_from_extra(extra: CountTaskExtra) -> CountScopeParams:
     )
 
 
+def _bulk_count_lines(task, details, *, blind, status, order, previous=None):
+    """Build validated lines in bounded batches, including their one-to-one extras.
+
+    MySQL does not return bulk inserted primary keys. Re-read by task/source ID;
+    neither auto-increment continuity nor returned row order is a contract.
+    """
+    if task.task_type != WmsTask.TaskType.COUNT:
+        raise ValidationError("盘点明细必须属于盘点任务。")
+    lines, extras = [], []
+    previous = previous or {}
+    for detail in details:
+        if (
+            not detail.is_active
+            or detail.owner_id != task.owner_id
+            or detail.warehouse_id != task.warehouse_id
+            or detail.product.owner_id != task.owner_id
+            or detail.location.warehouse_id != task.warehouse_id
+        ):
+            raise ValidationError("盘点原库存层的货主、仓库或库位不匹配。")
+        old = previous.get(detail.pk)
+        book = count_quantity(old.qty_book if old else detail.onhand_qty, field="qty_book")
+        lot = old.lot_no if old else (detail.batch_no or "").strip().upper()
+        if len(lot) > 64:
+            raise ValidationError({"lot_no": "批次不能超过 64 字符。"})
+        meta = dict(old.line.plan_meta or {}) if old else {}
+        meta[SNAPSHOT_KEY] = inventory_snapshot(detail)
+        lines.append(
+            WmsTaskLine(
+                task=task,
+                product_id=detail.product_id,
+                from_location_id=detail.location_id,
+                qty_plan=book,
+                qty_done=0,
+                status=status,
+                src_model="InventoryDetail",
+                src_id=detail.pk,
+                plan_meta=meta,
+            )
+        )
+        extras.append(
+            CountLineExtra(
+                lot_no=lot,
+                exp_date=detail.expiry_date,
+                lpn_no=(
+                    old.lpn_no
+                    if old
+                    else (detail.container.container_no if detail.container else "")
+                ),
+                qty_book=book,
+                qty_counted=0,
+                qty_diff=-book,
+                count_status="NOT_COUNTED",
+                method="BLIND" if blind else "VERIFY",
+                countorder=order,
+            )
+        )
+    source_ids = [line.src_id for line in lines]
+    if len(source_ids) != len(set(source_ids)):
+        raise ValidationError("盘点原库存层引用重复。")
+    WmsTaskLine.objects.bulk_create(lines, batch_size=500)
+    ids_by_source = dict(task.lines.filter(src_model="InventoryDetail").values_list("src_id", "pk"))
+    if set(ids_by_source) != set(source_ids):
+        raise ValidationError("盘点明细生成不完整。")
+    for line, extra in zip(lines, extras):
+        extra.line_id = ids_by_source[line.src_id]
+    CountLineExtra.objects.bulk_create(extras, batch_size=500)
+
+
 def _rebuild_count_lines(task: WmsTask, params: CountScopeParams) -> tuple[int, bool]:
     if task.status not in {WmsTask.Status.DRAFT, WmsTask.Status.READY}:
         raise ValidationError("只有草稿或待发布盘点任务可以刷新范围。")
@@ -207,28 +275,13 @@ def _rebuild_count_lines(task: WmsTask, params: CountScopeParams) -> tuple[int, 
     TaskScanLog.objects.filter(task=task).delete()
     CountLineExtra.objects.filter(line__task=task).delete()
     task.lines.all().delete()
-    for detail in details:
-        line = WmsTaskLine.objects.create(
-            task=task,
-            product_id=detail.product_id,
-            from_location_id=detail.location_id,
-            qty_plan=detail.onhand_qty or Decimal("0"),
-            qty_done=Decimal("0"),
-            status=WmsTaskLine.Status.DRAFT,
-            src_model="InventoryDetail",
-            src_id=detail.id,
-        )
-        CountLineExtra.objects.create(
-            line=line,
-            lot_no=(detail.batch_no or "").strip().upper(),
-            exp_date=detail.expiry_date,
-            qty_book=detail.onhand_qty or Decimal("0"),
-            qty_counted=Decimal("0"),
-            qty_diff=Decimal("0"),
-            count_status="NOT_COUNTED",
-            method="BLIND" if params.blind else "VERIFY",
-            countorder=CountLineExtra.CountOrder.FIRST,
-        )
+    _bulk_count_lines(
+        task,
+        details,
+        blind=params.blind,
+        status=WmsTaskLine.Status.DRAFT,
+        order=CountLineExtra.CountOrder.FIRST,
+    )
     return len(details), truncated
 
 
@@ -497,7 +550,19 @@ def release_count_locks(task: WmsTask, *, by_user=None) -> int:
     ).update(active_key=None, released_at=now, released_by=by_user)
 
 
+@transaction.atomic
 def _mark_count_post_failed(task: WmsTask, *, by_user, exc: Exception):
+    # Same task -> journal lock order as posting; a late failure must not undo success.
+    current = WmsTask.objects.select_for_update().get(pk=task.pk)
+    journal = (
+        PostingJournal.objects.select_for_update()
+        .filter(src_model="WmsTask", src_id=task.pk, tx_type="POST")
+        .first()
+    )
+    if current.posting_status == WmsTask.PostingStatus.POSTED or (
+        journal and journal.status == "POSTED"
+    ):
+        return
     message = (str(exc) or "盘点过账失败")[:200]
     WmsTask.objects.filter(pk=task.pk).exclude(posting_status=WmsTask.PostingStatus.POSTED).update(
         posting_status=WmsTask.PostingStatus.FAILED,
@@ -515,6 +580,8 @@ def _mark_count_post_failed(task: WmsTask, *, by_user, exc: Exception):
 
 @transaction.atomic
 def claim_count_task(task_id: int, *, by_user) -> TaskAssignment:
+    if not can_operate_count(by_user):
+        raise PermissionDenied("无盘点操作权限。")
     task = WmsTask.objects.select_for_update().get(pk=task_id, task_type=WmsTask.TaskType.COUNT)
     if task.status != WmsTask.Status.RELEASED:
         raise ValidationError("仅已发布盘点任务可以认领。")
@@ -535,7 +602,7 @@ def claim_count_task(task_id: int, *, by_user) -> TaskAssignment:
 def _assert_operator(task: WmsTask, user):
     if _manager_allowed(user):
         return
-    if not user or not user.has_perm("tasking.claim_task_as_wh_operator"):
+    if not can_operate_count(user):
         raise PermissionDenied("无盘点操作权限。")
     if not TaskAssignment.objects.filter(
         task=task, assignee=user, finished_at__isnull=True
@@ -561,31 +628,35 @@ def record_count(
     _assert_operator(task, by_user)
     if task.status not in {WmsTask.Status.RELEASED, WmsTask.Status.IN_PROGRESS}:
         raise ValidationError("盘点任务当前状态不允许录入。")
-    line = (
-        WmsTaskLine.objects.select_for_update()
-        .select_related("product", "from_location")
-        .get(pk=line_id, task=task)
-    )
+    try:
+        line = (
+            WmsTaskLine.objects.select_for_update()
+            .select_related("product", "from_location")
+            .get(pk=line_id, task=task)
+        )
+    except WmsTaskLine.DoesNotExist as exc:
+        raise ValidationError({"line_id": "盘点明细不存在或不属于当前任务。"}) from exc
     extra = CountLineExtra.objects.select_for_update().get(line=line)
-    counted = _q4(qty_counted)
-    if counted < 0:
-        raise ValidationError({"qty_counted": "实盘数量不能为负数。"})
+    counted = count_quantity(qty_counted)
     fp = hashlib.sha256(f"COUNT:{task.id}:{line.id}:{client_seq.strip()}".encode()).hexdigest()
     prior = TaskScanLog.objects.filter(fp=fp).first()
     if prior:
-        return {
-            "idempotent": True,
-            "line_id": line.id,
-            "qty_counted": str(extra.qty_counted),
-            "qty_diff": str(extra.qty_diff),
-            "scan_id": prior.id,
-        }
+        return count_record_response(
+            task,
+            by_user,
+            idempotent=True,
+            line_id=line.id,
+            qty_counted=str(extra.qty_counted),
+            qty_diff=str(extra.qty_diff),
+            scan_id=prior.id,
+        )
 
     diff = _q4(counted - _q4(extra.qty_book))
     TaskScanLog.objects.filter(
         task_line=line, posted_at__isnull=True, posting_journal__isnull=True
     ).update(status=TaskScanLog.ScanStatus.IGNORED, remark="SNAPSHOT_REPLACED")
     revision = int(line.scan_snapshot_rev or 0) + 1
+    snapshot = (line.plan_meta or {}).get(SNAPSHOT_KEY) or {}
     scan = TaskScanLog.objects.create(
         owner_id=task.owner_id,
         warehouse_id=task.warehouse_id,
@@ -602,6 +673,9 @@ def record_count(
         qty_base_delta=None,
         lot_no=extra.lot_no or None,
         exp_date=extra.exp_date,
+        mfg_date=snapshot.get("production_date"),
+        serial_no=snapshot.get("serial_no") or None,
+        container_no=extra.lpn_no or None,
         fp=fp,
         scan_snapshot_rev=revision,
     )
@@ -621,13 +695,15 @@ def record_count(
             started_at=task.started_at or timezone.now(),
             updated_by=by_user,
         )
-    return {
-        "idempotent": False,
-        "line_id": line.id,
-        "qty_counted": str(counted),
-        "qty_diff": str(diff),
-        "scan_id": scan.id,
-    }
+    return count_record_response(
+        task,
+        by_user,
+        idempotent=False,
+        line_id=line.id,
+        qty_counted=str(counted),
+        qty_diff=str(diff),
+        scan_id=scan.id,
+    )
 
 
 def _finish_assignments(task: WmsTask):
@@ -636,20 +712,7 @@ def _finish_assignments(task: WmsTask):
     )
 
 
-def _assert_snapshot_unchanged(task: WmsTask):
-    for extra in CountLineExtra.objects.filter(line__task=task).select_related("line"):
-        detail = (
-            InventoryDetail.objects.select_for_update()
-            .filter(pk=extra.line.src_id, is_active=True)
-            .first()
-        )
-        if not detail or _q4(detail.onhand_qty) != _q4(extra.qty_book):
-            raise ValidationError(
-                f"盘点行 {extra.line_id} 的账面库存已变化，请取消任务后重新发布。"
-            )
-
-
-def _create_recount(task: WmsTask, extras: list[CountLineExtra], *, by_user) -> WmsTask:
+def _create_recount(task: WmsTask, extras: list[CountLineExtra], *, by_user, sources) -> WmsTask:
     current_extra = CountTaskExtra.objects.select_for_update().get(task=task)
     root_task = current_extra.root_task or task
     next_round = current_extra.round_no + 1
@@ -687,32 +750,15 @@ def _create_recount(task: WmsTask, extras: list[CountLineExtra], *, by_user) -> 
         round_no=next_round,
         snapshot_at=current_extra.snapshot_at,
     )
-    for old in extras:
-        if _q4(old.qty_diff) == 0:
-            continue
-        old_line = old.line
-        line = WmsTaskLine.objects.create(
-            task=recount,
-            product=old_line.product,
-            from_location=old_line.from_location,
-            qty_plan=old.qty_book,
-            qty_done=0,
-            status=WmsTaskLine.Status.RELEASED,
-            src_model=old_line.src_model,
-            src_id=old_line.src_id,
-        )
-        CountLineExtra.objects.create(
-            line=line,
-            lot_no=old.lot_no,
-            exp_date=old.exp_date,
-            lpn_no=old.lpn_no,
-            qty_book=old.qty_book,
-            qty_counted=0,
-            qty_diff=0,
-            count_status="NOT_COUNTED",
-            method="BLIND" if current_extra.blind else "VERIFY",
-            countorder=order,
-        )
+    changed = [old for old in extras if _q4(old.qty_diff) != 0]
+    _bulk_count_lines(
+        recount,
+        [sources[old.line_id] for old in changed],
+        blind=current_extra.blind,
+        status=WmsTaskLine.Status.RELEASED,
+        order=order,
+        previous={old.line.src_id: old for old in changed},
+    )
     assignment = (
         TaskAssignment.objects.filter(task=task, finished_at__isnull=True)
         .select_related("assignee")
@@ -762,7 +808,7 @@ def submit_count_task(task_id: int, *, by_user) -> dict:
         extras
     ):
         raise ValidationError("盘点有效快照数量与任务行不一致。")
-    _assert_snapshot_unchanged(task)
+    sources = validate_count_sources(task, extras=extras)
     count_extra = CountTaskExtra.objects.select_for_update().get(task=task)
     differences = [extra for extra in extras if _q4(extra.qty_diff) != 0]
     significant = [
@@ -782,7 +828,7 @@ def submit_count_task(task_id: int, *, by_user) -> dict:
             finished_at=now,
             updated_by=by_user,
         )
-        recount = _create_recount(task, differences, by_user=by_user)
+        recount = _create_recount(task, differences, by_user=by_user, sources=sources)
         TaskStatusLog.objects.create(
             task=task,
             old_status=old_status,

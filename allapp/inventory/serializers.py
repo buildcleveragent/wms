@@ -96,6 +96,7 @@ class CompanyInventoryWarehouseSummarySerializer(serializers.Serializer):
     product_spec = serializers.CharField(allow_blank=True, allow_null=True, required=False)
     product_sku = serializers.CharField(allow_blank=True, allow_null=True, required=False)
     base_unit = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    base_unit_name = serializers.CharField(allow_blank=True, allow_null=True, required=False)
 
     onhand_qty = serializers.DecimalField(max_digits=18, decimal_places=4)
     available_qty = serializers.DecimalField(max_digits=18, decimal_places=4)
@@ -115,6 +116,7 @@ class CompanyInventoryAllSummarySerializer(serializers.Serializer):
     product_spec = serializers.CharField(allow_blank=True, allow_null=True, required=False)
     product_sku = serializers.CharField(allow_blank=True, allow_null=True, required=False)
     base_unit = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    base_unit_name = serializers.CharField(allow_blank=True, allow_null=True, required=False)
 
     onhand_qty = serializers.DecimalField(max_digits=18, decimal_places=4)
     available_qty = serializers.DecimalField(max_digits=18, decimal_places=4)

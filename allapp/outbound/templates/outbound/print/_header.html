@@ -7,7 +7,7 @@
   <div class="delivery-number">送货单号：{{ object.order_no }}</div>
   <div class="delivery-parties">
     <div class="meta-col">
-      <div class="meta-line"><span class="label">收货人：</span><span class="value">{% if receiver_name %}{{ receiver_name }}{% else %}{{ customer_name }}{% endif %}</span></div>
+      <div class="meta-line"><span class="label">收货人：</span><span class="value">{% if receiver_name %}{{ receiver_name }}{% if customer_name and customer_name != receiver_name %}（客户：{{ customer_name }}）{% endif %}{% else %}{{ customer_name }}{% endif %}</span></div>
       <div class="meta-line"><span class="label">联系电话：</span><span class="value">{{ receiver_phone }}</span></div>
       <div class="meta-line"><span class="label">收货地址：</span><span class="value address-value">{% if is_pickup %}客户自提{% else %}{{ receiver_address }}{% endif %}</span></div>
     </div>

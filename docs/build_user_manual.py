@@ -219,11 +219,11 @@ def compose_consolidated(
 
 **适用系统版本：** {manifest['baseline_date']} 当前工作区业务基线
 
-**适用对象：** 仓库操作员、仓库管理员、货主业务员、货主管理员、系统管理员、仓库老板
+**适用对象：** 货主端管理员、货主端业务员、仓库端操作员、仓库管理员、系统管理员；附仓库老板扩展指南
 
 **文档状态：** 交付版
 
-> 本合订版与六本角色分册由同一组源内容构建。培训和岗位发放优先使用对应角色分册。
+> 本合订版按五类岗位分别编写，并保留仓库老板经营看板扩展指南。培训和岗位发放优先使用对应角色分册。
 
 ## 系统组成与角色入口
 
@@ -525,9 +525,11 @@ def build_target(target: BuildTarget, *, version: str, baseline_date: str) -> No
 
 def compose_index(manifest: dict[str, str], specs: list[ManualSpec]) -> str:
     rows = []
+    supplements = []
     for spec in specs:
         quoted_stem = spec.output.replace(" ", "%20")
-        rows.append(
+        destination = supplements if spec.slug == "warehouse_boss" else rows
+        destination.append(
             f"| {spec.label} | `{spec.group}` | "
             f"[Markdown]({quoted_stem}.md) · [Word]({quoted_stem}.docx) · "
             f"[PDF]({quoted_stem}.pdf) |"
@@ -538,11 +540,21 @@ def compose_index(manifest: dict[str, str], specs: list[ManualSpec]) -> str:
 
 **业务基线：** {manifest['baseline_date']} 当前工作区代码
 
-请按实际岗位领取对应手册。每本分册均包含该角色所需的登录、安全、状态、操作、异常处理和检查表，可独立使用。
+本次按以下五类岗位分别编写用户手册。每本均包含登录、安全、岗位入口、操作步骤、完成判断、交接、异常处理和检查表，可独立发放与培训。
+
+“货主端管理员”“货主端业务员”“仓库端操作员”分别对应系统角色“货主管理员”“货主业务员”“仓库操作员”；显示称谓不改变正式权限组。为保持已有下载链接可用，分册文件名沿用原名。
 
 | 角色 | 正式权限组 | 手册 |
 |---|---|---|
 {chr(10).join(rows)}
+
+岗位交接：业务员提交 → 货主端管理员审核 → 仓库管理员确认／发布 → 仓库端操作员作业 → 按流程复核、审核及入账。系统管理员负责账号、配置和审计。申请、审批、作业完成与库存已入账分别确认。
+
+保留的扩展指南（按需发放）：
+
+| 角色 | 正式权限组 | 手册 |
+|---|---|---|
+{chr(10).join(supplements)}
 
 完整合订版位于上级目录：
 
@@ -609,7 +621,7 @@ def compose_targets(manifest: dict[str, str], specs: list[ManualSpec]) -> list[B
     targets.append(
         BuildTarget(
             title=f"{manifest['system_name']}操作手册",
-            audience="六类 WMS 角色",
+            audience="五类岗位及仓库老板扩展指南",
             output_stem=DOCS_DIR / CONSOLIDATED_STEM,
             markdown=compose_consolidated(
                 manifest, specs, common_safety, common_status, common_exceptions

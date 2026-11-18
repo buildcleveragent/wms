@@ -56,7 +56,7 @@
               <div>{{ line.product_name }}</div>
               <div>{{ line.product_code }} / 货主 {{ line.owner_name }}</div>
             </td>
-            <td class="qty">{{ line.qty }}</td>
+            <td class="qty">{{ line.qty }} {{ line.unit|default:"单位未设置" }}</td>
             <td class="amount">{{ line.amount }}</td>
           </tr>
         {% endfor %}
@@ -64,6 +64,7 @@
     </table>
 
     <div class="totals">
+      <div class="total-line"><span>基本数量</span><span>{{ receipt.quantity_text }}</span></div>
       <div class="total-line strong"><span>应收</span><span>{{ receipt.total_amount }}</span></div>
       <div class="total-line"><span>支付方式</span><span>{{ receipt.payment.method }}</span></div>
       <div class="total-line"><span>实收</span><span>{{ receipt.payment.amount_received }}</span></div>

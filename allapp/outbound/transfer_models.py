@@ -1,13 +1,33 @@
 """Auditable ownership transfers backing an assisted customer sale."""
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import F, Q
 
-from allapp.core.models import BaseModel
+from allapp.core.models import BaseModel, SoftDeleteManager
+
+
+class MappingQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        if set(kwargs) - {"is_active", "updated_at", "updated_by", "updated_by_id", "remark"}:
+            raise ValidationError("转货商品对应不能改绑或删除；可以停用但不会解除保护。")
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        if set(fields) - {"is_active", "updated_at", "updated_by", "remark"}:
+            raise ValidationError("转货商品对应不能批量改绑或删除。")
+        return super().bulk_update(objs, fields, batch_size=batch_size)
+
+    def bulk_create(self, *args, **kwargs):
+        raise ValidationError("请逐个保存商品对应以建立来源保护。")
+
+    def delete(self):
+        raise ValidationError("转货商品对应不能删除，请停用。")
 
 
 class OwnerProductMapping(BaseModel):
+    objects = SoftDeleteManager.from_queryset(MappingQuerySet)()
+    all_objects = models.Manager.from_queryset(MappingQuerySet)()
     source_product = models.ForeignKey(
         "products.Product",
         verbose_name="来源商品",
@@ -35,6 +55,18 @@ class OwnerProductMapping(BaseModel):
 
     def clean(self):
         super().clean()
+        if self.pk and not self._state.adding:
+            old = type(self).all_objects.get(pk=self.pk)
+            if any(
+                getattr(self, field) != getattr(old, field)
+                for field in (
+                    "source_product_id",
+                    "target_owner_id",
+                    "target_product_id",
+                    "is_deleted",
+                )
+            ):
+                raise ValidationError("转货商品对应不能改绑或删除，请使用停用控制。")
         if self.target_product_id and self.target_owner_id:
             if self.target_product.owner_id != self.target_owner_id:
                 raise ValidationError("目标商品必须属于目标货主。")
@@ -42,9 +74,18 @@ class OwnerProductMapping(BaseModel):
             if self.source_product.owner_id == self.target_owner_id:
                 raise ValidationError("来源商品与目标货主不能相同。")
 
+    @transaction.atomic
     def save(self, *args, **kwargs):
+        from allapp.products.transfer_protection import bind
+
         self.full_clean()
+        bind(self.source_product, self.target_product)
+        if self._state.adding:
+            kwargs["force_insert"] = True
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("转货商品对应不能删除，请停用。")
 
 
 class AssistedOwnershipTransfer(BaseModel):

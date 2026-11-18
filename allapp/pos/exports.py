@@ -16,6 +16,7 @@ from .models import (
     PosSale,
     PosSaleLine,
 )
+from .quantities import document_quantity_map, quantity_text, unit_fields
 
 SHEET_TITLES = {
     "shift": "班次汇总",
@@ -121,7 +122,12 @@ def _append_stats_sheet(workbook, title, headers, rows):
 def _append_summary_rows(sheet, data, fields):
     for key, label in fields:
         if key in data:
-            sheet.append([label, data[key]])
+            value = (
+                quantity_text(data.get("quantities_by_unit"), key)
+                if key.endswith("_qty")
+                else data[key]
+            )
+            sheet.append([label, value])
 
 
 def _payment_method_label(row):
@@ -166,6 +172,9 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
         ).order_by("-created_at", "-id")
     )
     sale_ids = [sale.id for sale in sales]
+    sale_quantities = document_quantity_map(
+        PosSaleLine.objects.filter(sale_id__in=sale_ids), "sale_id"
+    )
     return_amounts = {
         row["sale_id"]: row["amount"] or Decimal("0.00")
         for row in PosReturn.objects.filter(
@@ -210,6 +219,7 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
             "作废时间",
             "作废原因",
             "备注",
+            "基本数量（按单位）",
         ]
     )
     for sale in sales:
@@ -241,6 +251,7 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
                 _dt(sale.voided_at),
                 sale.void_reason,
                 sale.remark,
+                quantity_text(sale_quantities.get(sale.id, [])),
             ]
         )
 
@@ -297,6 +308,7 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
             "销售时间",
             "品牌型号",
             "规格",
+            "基本单位",
         ]
     )
     lines = (
@@ -305,7 +317,7 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
             "sale",
             "sale__shift",
             "owner",
-            "product",
+            "product__base_uom",
             "outbound_order_line",
             "outbound_order_line__order",
         )
@@ -332,6 +344,7 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
                 _dt(line.sale.created_at),
                 line.frozen_brand_model,
                 line.frozen_product_spec,
+                unit_fields(line.product)["base_unit"],
             ]
         )
 
@@ -341,6 +354,9 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
         .order_by("-created_at", "-id")
     )
     return_ids = [return_order.id for return_order in returns]
+    return_quantities = document_quantity_map(
+        PosReturnLine.objects.filter(return_order_id__in=return_ids), "return_order_id"
+    )
 
     return_sheet = workbook.create_sheet(SHEET_TITLES["returns"])
     return_sheet.append(
@@ -354,6 +370,7 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
             "退货金额",
             "退货原因",
             "退货时间",
+            "基本数量（按单位）",
         ]
     )
     for return_order in returns:
@@ -368,6 +385,7 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
                 Decimal(return_order.total_amount),
                 return_order.reason,
                 _dt(return_order.created_at),
+                quantity_text(return_quantities.get(return_order.id, [])),
             ]
         )
 
@@ -389,6 +407,7 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
             "退货时间",
             "品牌型号",
             "规格",
+            "基本单位",
         ]
     )
     return_lines = (
@@ -398,7 +417,7 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
             "return_order__sale",
             "sale_line",
             "owner",
-            "product",
+            "product__base_uom",
         )
         .order_by("-return_order__created_at", "-return_order_id", "line_no")
     )
@@ -420,6 +439,7 @@ def build_sales_export_workbook(sales, *, include_all_sheet=False):
                 _dt(line.return_order.created_at),
                 line.frozen_brand_model,
                 line.frozen_product_spec,
+                unit_fields(line.product)["base_unit"],
             ]
         )
 
@@ -527,9 +547,9 @@ def build_pos_stats_export_workbook(payload, *, include_all_sheet=False):
                 row.get("sale_count", 0),
                 row.get("return_count", 0),
                 row.get("line_count", 0),
-                row.get("sale_qty", row.get("qty", "0.000")),
-                row.get("return_qty", "0.000"),
-                row.get("net_qty", row.get("qty", "0.000")),
+                quantity_text(row.get("quantities_by_unit"), "sale_qty"),
+                quantity_text(row.get("quantities_by_unit"), "return_qty"),
+                quantity_text(row.get("quantities_by_unit"), "net_qty"),
                 row.get("sale_amount", row.get("amount", "0.00")),
                 row.get("return_amount", "0.00"),
                 row.get("net_amount", row.get("amount", "0.00")),
@@ -555,6 +575,7 @@ def build_pos_stats_export_workbook(payload, *, include_all_sheet=False):
             "销售金额",
             "退货金额",
             "净金额",
+            "基本单位",
         ],
         [
             [
@@ -566,12 +587,13 @@ def build_pos_stats_export_workbook(payload, *, include_all_sheet=False):
                 row.get("sale_count", 0),
                 row.get("return_count", 0),
                 row.get("line_count", 0),
-                row.get("sale_qty", row.get("qty", "0.000")),
-                row.get("return_qty", "0.000"),
-                row.get("net_qty", row.get("qty", "0.000")),
+                Decimal(row.get("sale_qty", row.get("qty", "0.000"))),
+                Decimal(row.get("return_qty", "0.000")),
+                Decimal(row.get("net_qty", row.get("qty", "0.000"))),
                 row.get("sale_amount", row.get("amount", "0.00")),
                 row.get("return_amount", "0.00"),
                 row.get("net_amount", row.get("amount", "0.00")),
+                row.get("base_unit") or row.get("base_unit_code") or "单位未设置",
             ]
             for row in payload.get("products", [])
         ],

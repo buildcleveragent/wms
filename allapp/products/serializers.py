@@ -28,6 +28,10 @@ from .permissions import can_manage_all_owner_products
 class ProductPackageBriefSerializer(serializers.ModelSerializer):
     uom_code = serializers.CharField(source="uom.code", read_only=True)
     uom_name = serializers.CharField(source="uom.name", read_only=True)
+    # Legacy optional flags are not stored on ProductPackage; keep the response
+    # compatible without asking ModelSerializer to resolve nonexistent fields.
+    is_stock_uom = serializers.BooleanField(read_only=True, default=False)
+    is_inventory_default = serializers.BooleanField(read_only=True, default=False)
 
     class Meta:
         model = ProductPackage
@@ -63,6 +67,13 @@ class ProductIdentifierConflict(APIException):
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    transfer_protection = serializers.SerializerMethodField()
+
+    def get_transfer_protection(self, obj):
+        from .transfer_protection import protection_info
+
+        return protection_info(obj)
+
     brand_model = serializers.CharField(read_only=True)
     display_name = serializers.CharField(read_only=True)
     owner_code = serializers.CharField(source="owner.code", read_only=True)
@@ -313,6 +324,7 @@ class ProductSerializer(serializers.ModelSerializer):
             "is_active",
             "extra",
             "packages",
+            "transfer_protection",
             "price",
             "purchase_price",
             "min_price",

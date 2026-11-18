@@ -16,11 +16,15 @@
     </view>
 
     <view v-if="loading" class="loading-banner">正在同步收费记录详情...</view>
-    <view class="loading-banner">最后成功同步 {{ updatedAt || '等待同步' }} · 约 30 秒检查更新</view>
+    <view class="loading-banner">最后成功同步 {{ updatedAt || '等待同步' }} · {{ refreshHint }}
+      <button size="mini" :disabled="loading" @click="loadDetail">刷新</button>
+    </view>
     <view v-if="pending" class="loading-banner" @click="apply">收费记录有更新，点击查看最新内容</view>
-    <view v-if="error" class="loading-banner">同步失败，稍后自动重试。</view>
+    <view v-if="error" class="loading-banner">{{ error.message || '同步失败，请重试。' }}
+      <button size="mini" :disabled="loading" @click="loadDetail">重新加载</button>
+    </view>
 
-    <template v-else-if="detail">
+    <template v-if="detail">
       <view class="headline-grid">
         <view class="headline-card">
           <view class="headline-label">不含税金额</view>
@@ -95,7 +99,7 @@
       </view>
     </template>
 
-    <view v-else class="empty-card">
+    <view v-else-if="!loading && !error" class="empty-card">
       <view class="empty-title">收费记录不存在</view>
       <view class="empty-desc">请返回上一页重新选择收费记录。</view>
       <button class="btn-ghost action-btn" @click="goBackOverview">返回总览</button>
@@ -118,7 +122,7 @@ const warehouseId = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
 
-const { data: detail, pending, error, loading, updatedAt, refresh, apply } = useLiveResource(
+const { data: detail, pending, error, loading, updatedAt, refreshHint, refresh, apply } = useLiveResource(
   () => api.billingAccrualDetail(accrualId.value, { owner: ownerId.value, warehouse: warehouseId.value }),
   { key: () => JSON.stringify([auth.user?.id, accrualId.value]), enabled: () => !!accrualId.value && !!auth.access, hold: () => true })
 

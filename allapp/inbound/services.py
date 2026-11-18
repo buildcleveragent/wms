@@ -118,7 +118,7 @@ def finalize_receive_line_with_variance(line_id, *, by_user, variance_reason="")
     if line.finished_at:
         return {
             "line": line.pk,
-            "qty_total": str(line.qty_done or 0),
+            "qty_total": format(line.qty_done, ".3f") if line.qty_done else "0",
             "task_status": task.status,
             "idempotent": True,
         }

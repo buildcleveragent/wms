@@ -17,6 +17,7 @@ EXPECTED_FEATURE_ROUTES = {
     "/pages/orders/import_drop_ship",
     "/pages/inventory/index",
     "/pages/reports/operations",
+    "/pages/reports/stock-history",
     "/pages/reports/index",
     "/pages/approval/index",
     "/pages/billing/overview",

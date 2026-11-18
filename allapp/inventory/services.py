@@ -500,6 +500,8 @@ def lock_active_inventory_details_for_update(
 
 def _lock_inventory_dimensions(
     dimensions: Iterable[Dict[str, Any]],
+    *,
+    require_existing: bool = False,
 ) -> Tuple[Dict[Tuple[Any, ...], InventoryDetail], Dict[Tuple[int, int], InventorySummary]]:
     """
     Lock all inventory rows touched by one posting in a stable order.
@@ -516,6 +518,8 @@ def _lock_inventory_dimensions(
     pairs = sorted({(key[0], key[1]) for key in dimensions_by_key})
     existing = lock_active_inventory_details_for_update(pairs)
     details_by_key = {_detail_key_from_instance(detail): detail for detail in existing}
+    if require_existing and not set(dimensions_by_key).issubset(details_by_key):
+        raise ValidationError("原库存层不存在，拒绝创建替代库存层。")
     existing_pairs = {(detail.owner_id, detail.product_id) for detail in existing}
 
     # With no detail row there is nothing else to lock, so the summary is the pair-level mutex
@@ -564,6 +568,7 @@ def _insert_tx(
     subwarehouse_id: Optional[int] = None,
     zone_type: Optional[int] = None,
     src_no: Optional[str] = None,
+    container_id: Optional[int] = None,
 ) -> InventoryTransaction:
     """
     写一条 InventoryTransaction。
@@ -577,6 +582,8 @@ def _insert_tx(
     # 交易幂等由任务级 PostingJournal + 扫描打点保证，这里不做静默去重。
 
     optional_fields = {}
+    if container_id is not None:
+        optional_fields["container_id"] = container_id
     if subwarehouse_id is not None:
         optional_fields["subwarehouse_id"] = subwarehouse_id
     if zone_type is not None:
@@ -775,6 +782,7 @@ class _AggKey:
         "tx_type",
         "task_line_id",
         "source_detail_id",
+        "container_id",
     )
 
     def __init__(
@@ -792,6 +800,7 @@ class _AggKey:
         tx_type,
         task_line_id=None,
         source_detail_id=None,
+        container_id=None,
     ):
         self.posting_batch = posting_batch
         self.task_id = task_id
@@ -806,6 +815,7 @@ class _AggKey:
         self.tx_type = tx_type
         self.task_line_id = task_line_id
         self.source_detail_id = source_detail_id
+        self.container_id = container_id
 
     def as_tuple(self):
         return (
@@ -822,6 +832,7 @@ class _AggKey:
             self.tx_type,
             self.task_line_id,
             self.source_detail_id,
+            self.container_id,
         )
 
     def __hash__(self):
@@ -905,6 +916,7 @@ def _group_receive_like(
     batch_no: str,
     tx_type: str,
     qty_task_type: str,
+    count_sources=None,
 ) -> Dict[_AggKey, Decimal]:
     """
     针对 RECEIVE/ISSUE（PICK/DISPATCH 等）/COUNT 的聚合过程：
@@ -949,7 +961,20 @@ def _group_receive_like(
 
         # 4) POS uses the exact reserved layer as the authoritative dimension.
         source_detail = source_details.get(s.id)
-        if source_detail is not None:
+        container_id = None
+        if qty_task_type == "COUNT":
+            source_detail = (count_sources or {}).get(s.task_line_id)
+            if source_detail is None:
+                raise ValidationError("盘点过账缺少已验证的原库存层。")
+            loc_id = source_detail.location_id
+            batch_value = source_detail.batch_no
+            production_date = source_detail.production_date
+            expiry_date = source_detail.expiry_date
+            serial_no = source_detail.serial_no
+            container_id = source_detail.container_id
+            task_line_id = s.task_line_id
+            source_detail_id = source_detail.pk
+        elif source_detail is not None:
             meta = line.plan_meta or {}
             if s.owner_id != task.owner_id or s.warehouse_id != task.warehouse_id:
                 raise ValidationError(f"POS PICK 扫描 {s.id} 的货主或仓库归属不一致")
@@ -1043,6 +1068,7 @@ def _group_receive_like(
             tx_type=tx_type,
             task_line_id=task_line_id,
             source_detail_id=source_detail_id,
+            container_id=container_id,
         )
 
         agg[key] += qty
@@ -1188,10 +1214,13 @@ def _apply_receive_like(
             production_date=key.production_date,
             expiry_date=key.expiry_date,
             serial_no=key.serial_no,
+            container_id=key.container_id,
         )
         for key, _qty in pending_groups
     ]
-    details_by_key, locked_summaries = _lock_inventory_dimensions(dimensions)
+    details_by_key, locked_summaries = _lock_inventory_dimensions(
+        dimensions, require_existing=task_type == "COUNT"
+    )
     touched_pairs: Set[Tuple[int, int]] = {
         (key.owner_id, key.product_id) for key, _qty in pending_groups
     }
@@ -1207,6 +1236,7 @@ def _apply_receive_like(
             production_date=key.production_date,
             expiry_date=key.expiry_date,
             serial_no=key.serial_no,
+            container_id=key.container_id,
         )
         return (
             _dimension_sort_key(_detail_dimension_key(values)),
@@ -1224,10 +1254,13 @@ def _apply_receive_like(
             production_date=key.production_date,
             expiry_date=key.expiry_date,
             serial_no=key.serial_no,
+            container_id=key.container_id,
         )
 
         locked_detail = details_by_key[_detail_dimension_key(dimension)]
-        is_pos_group = key.task_line_id is not None or key.source_detail_id is not None
+        is_pos_group = _is_pos_pick(task, key.tx_type)
+        if task_type == "COUNT" and locked_detail.pk != key.source_detail_id:
+            raise ValidationError("盘点原库存层已变化，拒绝创建替代库存层。")
         if is_pos_group:
             if key.task_line_id is None or key.source_detail_id is None:
                 raise ValidationError("POS PICK 聚合缺少任务行或原库存层")
@@ -1270,7 +1303,7 @@ def _apply_receive_like(
             serial_no=key.serial_no,
             src_model="WmsTask",
             src_id=task.id,
-            src_line_id=key.task_line_id if is_pos_group else None,
+            src_line_id=key.task_line_id,
             memo="POS_SALE" if is_pos_group else key.tx_type,
             pair_id=None,
             posted_at=now,
@@ -1278,6 +1311,7 @@ def _apply_receive_like(
             subwarehouse_id=(posted_detail.subwarehouse_id if is_pos_group else None),
             zone_type=(posted_detail.zone_type if is_pos_group else None),
             src_no=(task.ref_no if is_pos_group else None),
+            container_id=key.container_id,
         )
         if getattr(settings, "INVENTORY_FIFO_ENABLED", False):
             from allapp.inventory.fifo import consume_fifo, create_receipt_layer
@@ -1866,6 +1900,11 @@ def post_task(
             affected = _apply_receive_like(task, groups, now=now_ts, batch_no=batch)
 
     elif posting_family in ("COUNT", "ADJUST"):
+        count_sources = None
+        if posting_family == "COUNT":
+            from allapp.tasking.count_inventory import validate_count_sources
+
+            count_sources = validate_count_sources(task, scans=scans)
         # COUNT 读取 qty_base；ADJUST 读取 qty_base_delta。两者均按符号分录。
         pos_scans = []
         neg_scans = []
@@ -1885,6 +1924,7 @@ def post_task(
                 batch_no=batch,
                 tx_type=InvTxType.ADJ_GAIN,
                 qty_task_type=task_type,
+                count_sources=count_sources,
             )
             affected += _apply_receive_like(task, groups_pos, now=now_ts, batch_no=batch)
         if neg_scans:
@@ -1895,6 +1935,7 @@ def post_task(
                 batch_no=batch,
                 tx_type=InvTxType.ADJ_LOSS,
                 qty_task_type=task_type,
+                count_sources=count_sources,
             )
             affected += _apply_receive_like(task, groups_neg, now=now_ts, batch_no=batch)
 

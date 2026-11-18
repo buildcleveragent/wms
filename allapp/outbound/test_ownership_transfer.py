@@ -15,7 +15,7 @@ from allapp.inventory.models import InventoryDetail, InventoryTransaction, Posti
 from allapp.outbound import services
 from allapp.outbound import test_assisted_flow as fixtures
 from allapp.outbound.export_print import pick_task_print
-from allapp.outbound.models import OutboundOrder
+from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.outbound.transfer_models import (
     AssistedOwnershipTransfer,
     AssistedTransferReservation,
@@ -226,6 +226,8 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
         self.assertContains(printed, "12.00")
 
     def test_shortage_rolls_back_cloned_product_order_mapping_and_reservation(self):
+        from allapp.products.models import TransferProductBinding
+
         payload = self.payload(items=[{"product_id": self.product.pk, "qty": "101", "price": "12"}])
         before_products = Product.objects.count()
         response = self._create(payload)
@@ -233,10 +235,13 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
         self.assertEqual(Product.objects.count(), before_products)
         self.assertFalse(AssistedOwnershipTransfer.objects.exists())
         self.assertFalse(OwnerProductMapping.objects.exists())
+        self.assertFalse(TransferProductBinding.objects.exists())
         self.detail.refresh_from_db()
         self.assertEqual(self.detail.allocated_qty, 0)
 
     def test_cancel_releases_source_without_any_stock_transfer(self):
+        from allapp.products.models import TransferProductBinding
+
         self.detail.allocated_qty = 7
         self.detail.save()
         order, task = self.create_order()
@@ -247,6 +252,11 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
         self.assertEqual(self.detail.allocated_qty, 7)
         self.assertEqual(AssistedTransferReservation.objects.get().status, "RELEASED")
         self.assertFalse(InventoryTransaction.objects.filter(src_id=task.pk).exists())
+        target = order.lines.get().product
+        self.assertTrue(TransferProductBinding.objects.filter(target_product=target).exists())
+        target.name = "cancel does not unlock"
+        with self.assertRaises(ValidationError), transaction.atomic():
+            target.save()
 
     def test_failed_second_leg_rolls_back_all_stock_and_retries(self):
         order, task = self.create_order()
@@ -328,7 +338,7 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
         self.assertEqual(sales_line.aux_uom.qty_in_base, 5)
         self.complete(task)
 
-    def test_exact_barcode_match_is_reused_and_incompatible_spec_is_rejected(self):
+    def test_matching_barcode_requires_explicit_confirmed_mapping(self):
         add_product_barcode(product=self.product, barcode="XFER-SAME", barcode_type="UNIT")
         target = Product.objects.create(
             owner=self.target_owner,
@@ -341,14 +351,17 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
         add_product_barcode(product=target, barcode="XFER-SAME", barcode_type="UNIT")
         response = self._create(self.payload())
         self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("明确的来源对应", str(response.data))
         self.assertFalse(OwnerProductMapping.objects.exists())
-        self.assertFalse(OutboundOrder.objects.exists())
-        target.spec = self.product.spec
-        target.save()
-        order, _ = self.create_order()
-        self.assertEqual(order.lines.get().product_id, target.pk)
         target.refresh_from_db()
         self.assertEqual(target.name, "existing")
+        target.name, target.spec = self.product.name, self.product.spec
+        target.save()
+        OwnerProductMapping.objects.create(
+            source_product=self.product, target_owner=self.target_owner, target_product=target
+        )
+        order, _ = self.create_order()
+        self.assertEqual(order.lines.get().product_id, target.pk)
 
     def test_conflicting_package_mapping_is_rejected_atomically(self):
         box = ProductUom.objects.create(code="CONFLICT-BOX", name="箱")
@@ -519,7 +532,7 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
         target = Product.objects.create(
             owner=self.target_owner,
             code="FIFO-TARGET",
-            name="fifo",
+            name=self.product.name,
             base_uom=self.uom,
             volume=self.product.volume,
         )
@@ -590,6 +603,61 @@ class TransferConcurrencyTests(TransferFixtures, TransactionTestCase):
         self.assertEqual(self.detail.allocated_qty, 60)
         self.assertEqual(OutboundOrder.objects.count(), 1)
 
+    def test_concurrent_first_transfers_reuse_one_protected_archive(self):
+        from allapp.products.models import TransferProductBinding
+
+        responses = self.concurrent(self._create, [self.payload(), self.payload()])
+        self.assertEqual([status for status, _ in responses], [201, 201], responses)
+        self.assertEqual(OwnerProductMapping.objects.count(), 1)
+        self.assertEqual(TransferProductBinding.objects.count(), 1)
+        products = OutboundOrderLine.objects.values_list("product_id", flat=True)
+        self.assertEqual(len(set(products)), 1)
+
+    def test_barcode_maintenance_and_source_correction_do_not_deadlock(self):
+        from allapp.outbound.ownership import map_product
+        from allapp.products.models import ProductBarcode
+
+        target = map_product(self.product, self.target_owner)
+        start = Barrier(2)
+
+        def barcode():
+            close_old_connections()
+            try:
+                start.wait(timeout=10)
+                for index in range(3):
+                    add_product_barcode(
+                        product=self.product,
+                        barcode=f"CONCURRENT-OTHER-{index}",
+                        barcode_type=ProductBarcode.BarcodeType.OTHER,
+                        is_primary=True,
+                    )
+            finally:
+                close_old_connections()
+
+        def correct_name():
+            close_old_connections()
+            try:
+                start.wait(timeout=10)
+                for index in range(3):
+                    product = Product.objects.get(pk=self.product.pk)
+                    product.name = f"Concurrent correction {index}"
+                    product.save(update_fields=["name"])
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(barcode), pool.submit(correct_name)]
+            for future in futures:
+                future.result(timeout=30)
+        target.refresh_from_db()
+        self.assertEqual(target.name, "Concurrent correction 2")
+        self.assertEqual(
+            ProductBarcode.objects.filter(
+                product=self.product, barcode__startswith="CONCURRENT-OTHER-"
+            ).count(),
+            3,
+        )
+
     def test_same_request_and_post_concurrently_have_one_business_effect(self):
         payload = self.payload()
         responses = self.concurrent(self._create, [payload, payload])
@@ -640,7 +708,10 @@ class SharedCustomerIntegrationTests(TransferFixtures, TestCase):
             price=Decimal("12"),
         )
         InventoryDetail.objects.create(
-            owner=self.target_owner, product=target, location=self.location, onhand_qty=10,
+            owner=self.target_owner,
+            product=target,
+            location=self.location,
+            onhand_qty=10,
         )
         catalog = CustomerViewSet.as_view({"get": "list"})
         response = catalog(

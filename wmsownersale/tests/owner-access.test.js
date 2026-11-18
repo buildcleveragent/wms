@@ -25,7 +25,7 @@ describe('货主端共享权限矩阵', () => {
   it('无货主角色时不暴露任何货主功能', () => {
     const menu = buildOwnerMenu({
       roles: ['warehouse_manager'],
-      capabilities: { can_view_owner_operations: true },
+      capabilities: { can_view_owner_operations: true, can_view_owner_inventory: true },
     })
     expect([...menu.orders, ...menu.reports, ...menu.administration]).toEqual([])
   })
@@ -33,11 +33,11 @@ describe('货主端共享权限矩阵', () => {
   it('履约报表同时要求货主角色和后端能力', () => {
     const enabled = buildOwnerMenu({
       roles: ['owner_manager'],
-      capabilities: { can_view_owner_operations: true },
+      capabilities: { can_view_owner_operations: true, can_view_owner_inventory: true },
     })
     const disabled = buildOwnerMenu({ roles: ['owner_manager'] })
-    expect(keys(enabled.reports)).toContain('operations')
-    expect(keys(disabled.reports)).not.toContain('operations')
+    expect(keys(enabled.reports)).toContain('stock_history')
+    expect(keys(disabled.reports)).not.toContain('stock_history')
   })
 })
 

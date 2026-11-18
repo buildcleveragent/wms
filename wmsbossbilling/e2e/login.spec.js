@@ -1,8 +1,9 @@
-import { expect, test } from '@playwright/test'
+import { expectHttpFailure } from '../../frontend/browser-diagnostics.mjs'
+import { expect, test } from './browser-test.js'
 
 test('opening a detail without a session still requires login', async ({ page }) => {
-  await page.route(url => url.pathname.startsWith('/api/'), route => route.fulfill({ status: 401, json: { detail: 'login required' } }))
-  await page.goto('/#/pages/billing/accrual_detail?id=1')
+  await page.route(url => url.pathname.startsWith('/api/'), route => { expectHttpFailure(page, new URL(route.request().url()).pathname, 401); return route.fulfill({ status: 401, json: { detail: 'login required' } }) })
+  await page.goto('/#/pages/billing/accrual_detail?id=1', { waitUntil: 'domcontentloaded' })
   await expect(page.locator('.app-title')).toHaveText('仓储经营分析中心')
   await expect(page.locator('.submit-btn')).toBeVisible()
 })
@@ -13,7 +14,7 @@ test('renders the boss login without framework errors', async ({ page }) => {
     if (message.type() === 'error') errors.push(message.text())
   })
   page.on('pageerror', (error) => errors.push(error.message))
-  await page.goto('/#/pages/login')
+  await page.goto('/#/pages/login', { waitUntil: 'domcontentloaded' })
   await expect(page.locator('.app-title')).toHaveText('仓储经营分析中心')
   const inputs = page.getByRole('textbox')
   await expect(inputs).toHaveCount(2)

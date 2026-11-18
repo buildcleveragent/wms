@@ -158,7 +158,9 @@ class OutboundOrder(BaseModel):
         related_name="appr_by_wh_out_orders",
     )
     approved_at_warehouse = models.DateTimeField("仓库管理员审核时间", blank=True, null=True)
-    warehouse_reject_reason = models.CharField("仓库退回原因", max_length=500, blank=True, default="")
+    warehouse_reject_reason = models.CharField(
+        "仓库退回原因", max_length=500, blank=True, default=""
+    )
 
     next_line_no = models.PositiveIntegerField("下一个订单行号", default=10)
 
@@ -550,6 +552,7 @@ class OutboundOrderLine(ProductIdentitySnapshotMixin, BaseModel):
     ratio = models.DecimalField(
         "换算率(快照)", max_digits=14, decimal_places=4, blank=True, null=True
     )  # ←如保留，当快照用
+    print_unit_snapshot = models.JSONField("打印单位快照", default=dict, blank=True, editable=False)
 
     line_no = models.PositiveIntegerField("行号")
 
@@ -598,6 +601,12 @@ class OutboundOrderLine(ProductIdentitySnapshotMixin, BaseModel):
     def _pkg_ratio(self) -> Decimal:
         if not self.aux_uom_id:
             return Decimal("0")
+        if self.pk and not self._state.adding:
+            original = (
+                type(self).all_objects.filter(pk=self.pk).values("aux_uom_id", "ratio").first()
+            )
+            if original and original["aux_uom_id"] == self.aux_uom_id and original["ratio"]:
+                return original["ratio"]
         r = getattr(self.aux_uom, "qty_in_base", None)
         if not r:
             raise ValidationError({"aux_uom": "包装缺少换算系数"})
@@ -661,7 +670,9 @@ class OutboundOrderLine(ProductIdentitySnapshotMixin, BaseModel):
                 last = (
                     # Historical draft revisions retain deleted rows under the
                     # same unique (order, line_no) constraint.
-                    type(self).all_objects.filter(order_id=order.id).aggregate(m=Max("line_no"))["m"]
+                    type(self)
+                    .all_objects.filter(order_id=order.id)
+                    .aggregate(m=Max("line_no"))["m"]
                     or 0
                 )
                 order.next_line_no = (last // 10 + 1) * 10 or 10
@@ -669,7 +680,30 @@ class OutboundOrderLine(ProductIdentitySnapshotMixin, BaseModel):
             order.next_line_no += 10
             order.save(update_fields=["next_line_no"])
 
+    @transaction.atomic
     def save(self, *args, **kwargs):
+        from allapp.products.models import Product
+
+        from .print_units import capture_print_units
+
+        if self.product_id:
+            self.product = Product.all_objects.select_for_update().get(pk=self.product_id)
+        original = None
+        if self.pk and not self._state.adding:
+            original = type(self).all_objects.select_for_update().get(pk=self.pk)
+            if hasattr(original, "transfer_line") and any(
+                getattr(self, field) != getattr(original, field)
+                for field in ("product_id", "base_uom_id", "aux_uom_id")
+            ):
+                raise ValidationError("转货订单行的商品和计量身份已固定，不能改绑其他商品或包装。")
+        if original and original.product_id == self.product_id:
+            self.print_unit_snapshot = original.print_unit_snapshot
+            if original.aux_uom_id == self.aux_uom_id:
+                self.ratio = original.ratio
+        else:
+            self.print_unit_snapshot = capture_print_units(self.product)
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {"print_unit_snapshot"}
         # 自动带出基本单位
         if self.product_id and not self.base_uom_id:
             self.base_uom_id = self.product.base_uom_id
@@ -686,7 +720,7 @@ class OutboundOrderLine(ProductIdentitySnapshotMixin, BaseModel):
                 self.base_price = (Decimal(self.aux_price) / ratio).quantize(Decimal("0.0001"))
 
         # 若保留 ratio 字段，把换算率快照下来
-        if self.aux_uom_id:
+        if self.aux_uom_id and (not original or original.aux_uom_id != self.aux_uom_id):
             try:
                 self.ratio = self._pkg_ratio()
             except ValidationError:

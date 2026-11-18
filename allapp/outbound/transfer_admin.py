@@ -135,6 +135,9 @@ class OwnerProductMappingAdmin(admin.ModelAdmin):
     fields = ("source_product", "target_owner", "target_product", "is_active")
     list_display = fields
 
+    def get_readonly_fields(self, request, obj=None):
+        return ("source_product", "target_owner", "target_product") if obj else ()
+
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs if AccessScope.for_user(request.user).is_global else qs.none()

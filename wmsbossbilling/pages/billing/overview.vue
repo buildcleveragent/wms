@@ -204,7 +204,6 @@ import {
   billStatusLabel,
   money,
   qty,
-  toNumber,
 } from '@/utils/billing'
 
 const auth = useAuth()
@@ -263,8 +262,8 @@ const ownerRows = computed(() =>
       owner: item.owner,
       ownerName: item.owner_name,
       accrualCount: qty(item.accrual_count),
-      taxTotal: toNumber(item.tax_total),
-      total: toNumber(item.total),
+      taxTotal: item.tax_total,
+      total: item.total,
       currency: item.currency,
     }))
 )
@@ -275,8 +274,8 @@ const chargeRows = computed(() =>
       chargeType: item.charge_type,
       label: chargeTypeLabel(item.charge_type),
       accrualCount: qty(item.accrual_count),
-      taxTotal: toNumber(item.tax_total),
-      total: toNumber(item.total),
+      taxTotal: item.tax_total,
+      total: item.total,
       currency: item.currency,
     }))
 )
@@ -286,7 +285,7 @@ const statusRows = computed(() =>
     status: item.status,
     label: ACCRUAL_STATUS_LABELS[item.status] || item.status || '-',
     accrualCount: qty(item.accrual_count),
-    total: toNumber(item.total),
+    total: item.total,
     currency: item.currency,
   }))
 )
@@ -294,7 +293,7 @@ const statusRows = computed(() =>
 const trendRows = computed(() => {
   const rows = asList(payload.value?.by_service_date).map((item) => ({
     serviceDate: item.service_date,
-    total: toNumber(item.total),
+    total: item.total,
     currency: item.currency,
   }))
   const maxByCurrency = rows.reduce((memo, row) => {
@@ -629,6 +628,7 @@ onPullDownRefresh(() => {
   margin-top: 12rpx;
   font-size: 40rpx;
   line-height: 1.1;
+  overflow-wrap: anywhere;
 }
 
 .kpi-sub {
@@ -758,6 +758,8 @@ onPullDownRefresh(() => {
 
 .trend-total {
   width: 150rpx;
+  flex-shrink: 0;
+  overflow-wrap: anywhere;
   text-align: right;
   font-size: 24rpx;
   font-weight: 600;
