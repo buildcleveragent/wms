@@ -57,7 +57,7 @@ const searchDraft = ref('')
 const auth = useAuth()
 const scope = useBossScope()
 const taskModes = [{ key: 'created', label: '期间新增' }, { key: 'completed', label: '期间完成' }, { key: 'backlog', label: '当前积压' }]
-const titles = { today: '今日业务明细', sla: 'SLA 指标明细', attention: '需要立即关注', periods: '周期统计明细', tasks: '作业任务明细', operations: '运营流水明细', receivables: '应收账单', collection: '回款与催收历史', risk: '库存风险明细', case: '异常处理历史', assurance: '收入保障明细' }
+const titles = { today: '今日业务明细', 'business-range': '周期业务明细', sla: 'SLA 指标明细', attention: '需要立即关注', periods: '周期统计明细', tasks: '作业任务明细', operations: '运营流水明细', receivables: '应收账单', collection: '回款与催收历史', risk: '库存风险明细', case: '异常处理历史', assurance: '收入保障明细' }
 const title = computed(() => titles[route.value.type] || '业务明细')
 const params = computed(() => ({ ...scope.params, ...route.value, page: page.value, page_size: 20,
   mode: mode.value, source: source.value, search: search.value, order_no: search.value, details: 1 }))
@@ -66,6 +66,7 @@ const fields = values => Object.entries(values).filter(([, value]) => value !== 
 async function load() {
   const p = { ...params.value }
   const type = route.value.type
+  if (type === 'business-range') return api.bossBusinessRangeDetails(p)
   if (type === 'today') return api.bossTodayDetails(p)
   if (type === 'sla') return api.bossSlaDetails(p)
   if (type === 'periods') return api.bossPeriodDetails(p)
@@ -117,7 +118,7 @@ function searchNow() { page.value = 1; search.value = searchDraft.value.trim() }
 function setMode(value) { page.value = 1; mode.value = value }
 function setSource(value) { page.value = 1; source.value = value }
 function drill(value) {
-  const query = buildQuery({ ...params.value, ...value, page: 1 })
+  const query = buildQuery({ ...params.value, ...value, page: 1 }, { keepEmpty: ['warehouse', 'owner'] })
   uni.navigateTo({ url: `/pages/cockpit/details?${query}` })
 }
 function openRow(row) { openActivity(row.target, params.value) }

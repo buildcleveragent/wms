@@ -9,6 +9,7 @@ from .owner_alert_views import (
     OwnerAlertsView,
 )
 from .owner_history_views import OwnerHistoryView
+from .owner_statistics_views import OwnerStatisticsView
 from .views import (
     CompanyInventorySummaryViewSet,
     OwnerInventorySummaryViewSet,
@@ -23,6 +24,17 @@ router.register(
 )
 
 urlpatterns = [
+    *[
+        path(
+            f"inventory/owner-history/statistics/{section}/",
+            OwnerStatisticsView.as_view(section=section),
+        )
+        for section in ("summary", "products", "documents", "events", "periods", "chart", "export")
+    ],
+    path(
+        "inventory/owner-history/statistics/events/<str:event_id>/",
+        OwnerStatisticsView.as_view(section="detail"),
+    ),
     *[
         path(f"inventory/owner-history/{section}/", OwnerHistoryView.as_view(section=section))
         for section in ("summary", "products", "documents", "events", "periods", "export")

@@ -1,18 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { expectMobileHealthy, fullProfile, installLoggedInMocks, product } from './mobile-fixtures'
+import { camera, expectMobileHealthy, fullProfile, installLoggedInMocks, product, scan } from './mobile-fixtures'
 
-// Only the camera result is synthetic. All page handlers/rendering run unchanged.
-async function camera(page) {
-  await page.route('**/utils/cameraScanner.js*', async (route) => {
-    const response = await route.fetch()
-    const body = (await response.text()).replace(/\b(?:[\w$]+\.)?scanCode\(\s*\{/g, 'window.__mobileTestScan({')
-    await route.fulfill({ response, body })
-  })
-}
-async function scan(page, code) {
-  await page.evaluate((value) => { window.__mobileTestScan = options => options.success({ result: value, scanType: 'CODE_128' }); window.uni.vibrateShort = () => {} }, code)
-  await page.locator('.scan-button').click()
-}
 const rows = (products, extra = {}) => ({ count: products.length, next: null, results: products, ...extra })
 async function addSearch(page) {
   const input = page.getByTestId('pos-product-input').locator('input')

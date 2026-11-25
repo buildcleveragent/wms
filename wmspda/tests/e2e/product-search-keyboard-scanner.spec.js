@@ -18,12 +18,26 @@ function product(id, name, gtin) {
 }
 
 async function openProductSearch(page) {
+  await page.route('**/api/pda/token/', route =>
+    route.fulfill({ json: { access: 'scanner-test', refresh: 'scanner-refresh' } }))
+  await page.route('**/api/auth/profile/', route => route.fulfill({ json: {
+    user: { id: 5, username: 'scanner-operator' },
+    perms: [], capabilities: { can_receive_without_order: true },
+  } }))
+  await page.route('**/api/pda/home-todos/', route =>
+    route.fulfill({ json: { scope: 'test-warehouse', items: [] } }))
+  const owner = { id: 7, name: '键盘扫描测试货主' }
+  await page.route('**/api/catalog/owners?**', route =>
+    route.fulfill({ json: { count: 1, next: null, previous: null, results: [owner] } }))
+
   await page.goto('/')
-  await page.evaluate(async () => {
-    const { useCart } = await import('/store/cart.js')
-    useCart().setOwner({ id: 7, name: '键盘扫描测试货主' })
-    window.location.hash = '#/pages/products/search'
-  })
+  const login = page.locator('uni-input input')
+  await login.nth(0).fill('scanner-operator')
+  await login.nth(1).fill('test-password')
+  await page.locator('uni-button').filter({ hasText: '登录' }).click()
+  await page.locator('[data-action="receivewithoutorder"]').click()
+  await page.getByTestId('owner-row').filter({ hasText: owner.name }).click()
+  await expect(page).toHaveURL(/pages\/products\/search/)
   const input = page.getByTestId('product-search-input').locator('input')
   await expect(input).toBeVisible({ timeout: 20_000 })
   return input

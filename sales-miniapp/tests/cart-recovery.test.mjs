@@ -5,6 +5,7 @@ import test from 'node:test'
 const source = (await fs.readFile(new URL('../stores/cart.js', import.meta.url), 'utf8'))
   .replace("import { reactive } from 'vue'", 'const reactive = value => value')
   .replace("import { cartService } from '../services/cart'", 'const cartService = globalThis.syntheticCartService')
+  .replace("import { checkoutIsCurrent, submitCheckout } from '../services/checkout'", 'const { checkoutIsCurrent, submitCheckout } = globalThis')
 let sequence = 0
 
 async function setup(service) {

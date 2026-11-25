@@ -19,6 +19,7 @@ from allapp.core.models import DocSequence
 from allapp.core.utils.log_context import build_log_payload
 from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.inventory.models import InventoryDetail
+from allapp.inventory.sale_eligibility import sale_layers
 from allapp.inventory.services import (
     _refresh_summaries,
     lock_active_inventory_details_for_update,
@@ -637,7 +638,7 @@ def _compute_line_demands(order) -> list:
 
 
 # Helper: 获取按 FEFO 排序的库存明细（冻结量）
-def _fefo_details_qs(owner_id: int, warehouse_id: int, product_id: int):
+def _fefo_details_qs(owner_id: int, warehouse_id: int, product_id: int, *, for_sale=True):
     """获取某产品按 FEFO 排序的库存明细，按库存可用量递减"""
     qs = (
         InventoryDetail.objects.filter(
@@ -650,7 +651,8 @@ def _fefo_details_qs(owner_id: int, warehouse_id: int, product_id: int):
         .select_for_update(skip_locked=True)  # 锁住行，防止并发冲突
         .order_by(
             F("expiry_date").asc(nulls_last=True),  # FEFO：空效期最后
-            "-onhand_qty",  # 若效期相同，优先使用库存多的
+            "-onhand_qty",
+            "pk",  # 若效期相同，优先使用库存多的
         )
         .only("id", "location_id", "available_qty", "allocated_qty", "onhand_qty")
     )
@@ -667,7 +669,7 @@ def _fefo_details_qs(owner_id: int, warehouse_id: int, product_id: int):
         )
     if target_ids:
         qs = qs.filter(location_id__in=target_ids)
-    return qs
+    return sale_layers(qs) if for_sale else qs
 
 
 # 冻结库存：available → allocated，并将切分结果写入保留态任务（RESERVED）
@@ -710,7 +712,12 @@ def allocate_inventory(order, by_user=None, allow_backorder=True):
         remaining = d["demand"] - already_allocated
         if remaining <= 0:
             continue
-        qs = _fefo_details_qs(order.owner_id, order.warehouse_id, d["product_id"])
+        qs = _fefo_details_qs(
+            order.owner_id,
+            order.warehouse_id,
+            d["product_id"],
+            for_sale=order.outbound_type == "SALES",
+        )
         for det in qs:
             if remaining <= 0:
                 break
@@ -1108,7 +1115,7 @@ def _order_for_outbound_task(task, *, for_update=False):
     OutboundOrder = get_outbound_order_model()
     source_model = (getattr(task, "source_model", "") or "").lower()
     source_pk = getattr(task, "source_pk", None)
-    if source_model == "outboundorder":
+    if source_model in ("outboundorder", "outbound.outboundorder"):
         qs = OutboundOrder.objects
         if for_update:
             qs = qs.select_for_update()
@@ -1868,7 +1875,12 @@ def create_pick_task(order, task_status="DRAFT") -> WmsTask:
     # 生成拣货任务行
     for d in demands:
         remaining = d["demand"]
-        qs = _fefo_details_qs(order.owner_id, order.warehouse_id, d["product_id"])
+        qs = _fefo_details_qs(
+            order.owner_id,
+            order.warehouse_id,
+            d["product_id"],
+            for_sale=order.outbound_type == "SALES",
+        )
 
         for det in qs:
             if remaining <= 0:
@@ -1889,6 +1901,7 @@ def create_pick_task(order, task_status="DRAFT") -> WmsTask:
                 src_model="OutboundOrderLine",
                 src_id=d["line_id"],
                 rule_key="FEFO",
+                plan_meta={"inventory_detail_id": det.pk},
             )
             remaining -= alloc
 

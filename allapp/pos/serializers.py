@@ -6,11 +6,9 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
-from allapp.inventory.models import InventoryDetail
 from allapp.outbound.serializers import OutboundOrderReadSerializer
 from allapp.products.models import Product
 from allapp.tasking.plugins.barcodes import default_resolver
@@ -29,14 +27,13 @@ from .models import (
 )
 from .quantities import document_quantities, unit_fields
 from .services import (
+    available_pos_stock,
     build_receipt,
     create_customer_repayment,
     create_pos_return,
     create_pos_sale,
+    pos_sale_zone_types,
 )
-
-ZERO = Decimal("0")
-
 
 def make_pos_customer_code(warehouse_id):
     now = timezone.now()
@@ -60,12 +57,6 @@ class SafeDateTimeField(serializers.DateTimeField):
         return super().to_representation(value)
 
 
-def decimal_or_zero(value):
-    if value in (None, ""):
-        return ZERO
-    return Decimal(str(value))
-
-
 def available_qty_for_product(*, owner_id=None, warehouse_id, product_id):
     return available_qty_for_product_in_scope(
         owner_id=owner_id,
@@ -76,18 +67,12 @@ def available_qty_for_product(*, owner_id=None, warehouse_id, product_id):
 
 
 def available_qty_for_product_in_scope(*, owner_id=None, warehouse_id, product_id, zone_type=None):
-    queryset = InventoryDetail.objects.filter(
+    return available_pos_stock(
         warehouse_id=warehouse_id,
+        owner_id=owner_id,
         product_id=product_id,
-        is_active=True,
-        available_qty__gt=0,
+        zone_types=pos_sale_zone_types(zone_type),
     )
-    if owner_id:
-        queryset = queryset.filter(owner_id=owner_id)
-    if zone_type is not None:
-        queryset = queryset.filter(zone_type=zone_type)
-    result = queryset.aggregate(total=Sum("available_qty"))
-    return result["total"] or ZERO
 
 
 class PosProductSerializer(serializers.ModelSerializer):
@@ -165,7 +150,7 @@ class PosProductSerializer(serializers.ModelSerializer):
         return {"id": uom.id, "code": uom.code, "name": uom.name}
 
     def get_price(self, obj):
-        return decimal_or_zero(getattr(obj, "price", None))
+        return obj.price
 
     def get_min_price(self, obj):
         value = getattr(obj, "min_price", None)
@@ -321,6 +306,8 @@ class PosCheckoutLineSerializer(serializers.Serializer):
     product_id = serializers.IntegerField()
     qty = serializers.DecimalField(max_digits=18, decimal_places=3, min_value=Decimal("0.001"))
     price = serializers.DecimalField(max_digits=18, decimal_places=4, min_value=Decimal("0.0000"))
+    is_gift = serializers.BooleanField(required=False)
+    onsite_price = serializers.BooleanField(required=False)
     amount = serializers.DecimalField(
         max_digits=18,
         decimal_places=2,

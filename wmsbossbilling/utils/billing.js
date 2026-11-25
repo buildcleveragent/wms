@@ -1,4 +1,5 @@
-import Decimal from 'decimal.js'
+// import Decimal from 'decimal.js'
+import Decimal from '../vender/decimal.js/decimal.mjs'
 
 const Amount = Decimal.clone({ precision: 40, rounding: Decimal.ROUND_HALF_UP })
 

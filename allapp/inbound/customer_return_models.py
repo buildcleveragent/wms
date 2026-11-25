@@ -11,6 +11,7 @@ from django.db.models import Q
 
 from allapp.core.product_identity import ProductIdentitySnapshotMixin
 
+
 def private_return_storage():
     location = Path(
         getattr(settings, "PRIVATE_RETURN_ROOT", Path(settings.BASE_DIR) / "private_returns")
@@ -102,6 +103,7 @@ class CustomerReturnReceipt(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     posted_at = models.DateTimeField(null=True)
     posting_error = models.BooleanField(default=False)
+    posting_hold_reason = models.CharField(max_length=240, blank=True, default="")
 
 
 class CustomerReturnReceiptLine(models.Model):

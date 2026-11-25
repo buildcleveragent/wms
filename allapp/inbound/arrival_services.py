@@ -13,6 +13,7 @@ from rest_framework.exceptions import APIException, NotFound, PermissionDenied, 
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
+from allapp.accounts.owner_readonly import require_business_write
 from allapp.baseinfo.models import Supplier
 from allapp.baseinfo.owner_warehouse_access import owner_can_use_warehouse
 from allapp.core.models import DocSequence
@@ -65,7 +66,10 @@ def scope_for(user):
     scope = AccessScope.for_user(user)
     if not scope.is_valid or scope.is_global:
         raise PermissionDenied("需要有效的货主或仓库角色范围。")
-    if scope.roles & {"owner_salesperson", "owner_manager"} and len(scope.owner_ids) != 1:
+    if (
+        scope.roles & {"owner_salesperson", "owner_manager", "owner_finance"}
+        and len(scope.owner_ids) != 1
+    ):
         raise PermissionDenied("需要单一货主范围。")
     return scope
 
@@ -80,7 +84,7 @@ def orders_for(user):
     qs = InboundOrder.objects.filter(is_deleted=False).select_related(
         "owner", "warehouse", "supplier", "created_by"
     )
-    if scope.roles & {"owner_manager", "owner_salesperson"}:
+    if scope.roles & {"owner_manager", "owner_salesperson", "owner_finance"}:
         if not any(
             user.has_perm(p)
             for p in (
@@ -200,6 +204,7 @@ def event(order, user, action, *, receipt=None, reason="", snapshot=None):
 
 def command(user, data, action, target, operation):
     """Serialize each request identity without locking the actor across inventory operations."""
+    require_business_write(user)
     key = str(data.get("request_id") or "")
     if not 8 <= len(key) <= 64:
         raise ValidationError({"request_id": "需要 8 至 64 位请求编号。"})

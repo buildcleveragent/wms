@@ -1,12 +1,15 @@
 """Materialize dynamic data-quality alerts into a small workflow ledger."""
 
+from itertools import chain
+
 from django.db import transaction
 from django.utils import timezone
 
 from allapp.billing.enums import AccrualStatus, PricingStatus, SourceQuality
 from allapp.billing.models import BillingAccrual, BillingEvent, BillingJobRun
 
-from .models import AlertCase, AlertCaseHistory
+from .models import AlertCase, AlertCaseHistory, BossCheckState
+from .services_daily_billing_alerts import ALERT_TYPE, overdue_daily_metric_sources
 
 
 def _sources():
@@ -46,9 +49,7 @@ def _sources():
                 "note": accrual.source_note,
             },
         }
-    for job in BillingJobRun.objects.filter(
-        status__in=["FAILED", "WARNING"]
-    ).iterator():
+    for job in BillingJobRun.objects.filter(status__in=["FAILED", "WARNING"]).iterator():
         yield {
             "dedup_key": f"BILLING_JOB:{job.pk}",
             "alert_type": "BILLING_JOB_FAILURE",
@@ -57,9 +58,7 @@ def _sources():
             "owner_id": job.owner_id,
             "warehouse_id": job.warehouse_id,
             "severity": (
-                AlertCase.Severity.HIGH
-                if job.status == "FAILED"
-                else AlertCase.Severity.WARNING
+                AlertCase.Severity.HIGH if job.status == "FAILED" else AlertCase.Severity.WARNING
             ),
             "title": "计费作业失败" if job.status == "FAILED" else "计费作业存在风险",
             "detail": {"service_date": str(job.service_date), "message": job.message},
@@ -68,6 +67,9 @@ def _sources():
 
 @transaction.atomic
 def sync_alert_cases():
+    # The manual sync and the Boss worker can overlap. Advance this rule's own
+    # cursor only after a complete scan and the case changes commit together.
+    cursor, _ = BossCheckState.objects.select_for_update().get_or_create(key=ALERT_TYPE)
     now = timezone.now()
     seen = set()
     created = reopened = resolved = 0
@@ -75,8 +77,9 @@ def sync_alert_cases():
         "UNPRICED_BILLING_EVENT",
         "APPROXIMATE_BILLING_DATA",
         "BILLING_JOB_FAILURE",
+        ALERT_TYPE,
     }
-    for source in _sources():
+    for source in chain(_sources(), overdue_daily_metric_sources(now, cursor.checked_at)):
         key = source.pop("dedup_key")
         seen.add(key)
         case, was_created = AlertCase.objects.select_for_update().get_or_create(
@@ -85,9 +88,7 @@ def sync_alert_cases():
         )
         if was_created:
             created += 1
-            AlertCaseHistory.objects.create(
-                case=case, action="DISCOVER", to_status=case.status
-            )
+            AlertCaseHistory.objects.create(case=case, action="DISCOVER", to_status=case.status)
             continue
         before = case.status
         case.last_seen_at = now
@@ -118,6 +119,9 @@ def sync_alert_cases():
             case=case, action="AUTO_RESOLVE", from_status=before, to_status=case.status
         )
         resolved += 1
+    cursor.checked_at = cursor.attempted_at = now
+    cursor.failed = False
+    cursor.save(update_fields=["checked_at", "attempted_at", "failed"])
     return {
         "seen": len(seen),
         "created": created,

@@ -326,6 +326,7 @@ async function scanAdd() {
 
 onLoad(() => {
   auth.ensureAuth()
+  if (auth.isOwnerFinance) return
   if (!cart.hasContextForUser(auth.user?.id, auth.user?.owner_id)) {
     cart.resetOrder()
     uni.redirectTo({ url: '/pages/warehouses/select' })
@@ -338,6 +339,7 @@ onLoad(() => {
   search()
 })
 onShow(() => {
+  if (auth.isOwnerFinance) return
   active = true
   if (firstShow) { firstShow = false; return }
   loadProducts({reset:true})

@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from allapp.core.models import DocSequence
 from allapp.inventory.models import InventoryDetail, InventoryTransaction, InvTxType
+from allapp.inventory.sale_eligibility import require_sale_layers
 from allapp.inventory.services import _refresh_summaries
 from allapp.products.identifier_lookup import effective_product_barcodes
 from allapp.products.identifier_services import add_product_barcode
@@ -519,6 +520,7 @@ def post_transfer_inventory(*, task, transfer, scans, now, batch_no, actor=None)
     reservations = list(
         AssistedTransferReservation.objects.select_for_update()
         .filter(transfer_line__transfer=transfer, task_line__task=task)
+        .exclude(status="RELEASED", task_line__status="CANCELLED")
         .select_related(
             "task_line", "transfer_line__source_product", "transfer_line__sales_line__product"
         )
@@ -566,6 +568,7 @@ def post_transfer_inventory(*, task, transfer, scans, now, batch_no, actor=None)
             .select_related("product", "location")
             .get(pk=reservation.source_inventory_id)
         )
+        require_sale_layers([source])
         if (
             not source.is_active
             or inventory_snapshot(source) != reservation.source_snapshot

@@ -89,6 +89,7 @@ addStep('frontend payment behavior', 'node', ['--test', 'tests/payment-service.t
 
 addStep('frontend authentication recovery', 'node', ['--test', 'tests/request-auth.test.mjs'], { cwd: appRoot })
 addStep('cart uncertainty recovery', 'node', ['--test', 'tests/cart-recovery.test.mjs'], { cwd: appRoot })
+addStep('checkout receipt recovery', 'node', ['--test', 'tests/checkout-recovery.test.mjs'], { cwd: appRoot })
 
 if (fs.existsSync(path.join(repoRoot, 'manage.py'))) {
   addStep('django system check', pythonCommand, ['manage.py', 'check'], {

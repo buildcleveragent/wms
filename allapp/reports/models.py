@@ -993,3 +993,15 @@ class BossCheckState(models.Model):
     checked_at = models.DateTimeField(null=True)
     attempted_at = models.DateTimeField(null=True)
     failed = models.BooleanField(default=False)
+
+
+class OwnerArchiveJob(models.Model):
+    """A private, short-lived export requested by one owner account."""
+
+    owner = models.ForeignKey("baseinfo.Owner", on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    date_from = models.DateField(null=True)
+    date_to = models.DateField(null=True)
+    status = models.CharField(max_length=10, default="queued", db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(db_index=True)

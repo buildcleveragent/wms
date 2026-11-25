@@ -23,7 +23,7 @@ from django.urls import reverse
 from django.views import View
 
 from allapp.baseinfo.models import Owner
-from allapp.inventory.models import InventoryDetail
+from allapp.inventory.sale_eligibility import sale_layers
 from allapp.products.models import Brand, Product, ProductCategory
 from allapp.products.identifier_lookup import filter_by_product_search
 from allapp.salesapp.models import SaleProductConfig
@@ -45,7 +45,7 @@ class CatalogRow:
         return self.product.price
 
 
-def _can_view_catalog(user):
+def can_view_catalog(user):
     return (
         user.is_superuser
         or user.has_perm("salesapp.view_saleproductconfig")
@@ -83,7 +83,8 @@ def _positive_decimal(value, field_name):
 def _available_qty_subquery():
     # Keep catalog operations on the same available-quantity policy as the mall APIs.
     rows = (
-        InventoryDetail.objects.filter(
+        sale_layers()
+        .filter(
             owner_id=OuterRef("owner_id"),
             product_id=OuterRef("pk"),
             is_active=True,
@@ -274,7 +275,7 @@ class SaleMiniProductListingView(LoginRequiredMixin, View):
         if request.method == "POST":
             if not _can_manage_catalog(request.user):
                 raise PermissionDenied("没有商城上架管理权限。")
-        elif not _can_view_catalog(request.user):
+        elif not can_view_catalog(request.user):
             raise PermissionDenied("没有查看商城上架管理页的权限。")
         return super().dispatch(request, *args, **kwargs)
 

@@ -8,6 +8,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -15,6 +16,7 @@ from rest_framework.exceptions import APIException, NotFound, PermissionDenied, 
 
 from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
+from allapp.accounts.owner_readonly import require_business_write
 from allapp.inventory.fifo import create_receipt_layer
 from allapp.inventory.locking import (
     lock_warehouses_for_inventory_write,
@@ -27,6 +29,7 @@ from allapp.outbound.authz import strict_order_queryset
 from allapp.outbound.models import OutboundOrder
 from allapp.outbound.progress import LINE_NAMES, TASK_LINE_NAMES, _tasks_for_order
 from allapp.pos.models import PosSaleLine, PosSaleOrder
+from allapp.tasking.counting import assert_inventory_not_count_locked
 from allapp.tasking.models import WmsTaskLine
 
 from .customer_return_models import (
@@ -51,6 +54,7 @@ REASONS = {
     "OTHER": "其他",
 }
 LABELS = {
+    "complete-trace": "补录验收行效期",
     "retry-posting": "重试库存入账",
     "photo": "补充证据",
     "create": "保存草稿",
@@ -79,7 +83,10 @@ def scope_for(user):
     scope = AccessScope.for_user(user)
     if not scope.is_valid or scope.is_global:
         raise PermissionDenied("需要明确的货主或仓库角色范围。")
-    if set(scope.roles) & {"owner_manager", "owner_salesperson"} and len(scope.owner_ids) != 1:
+    if (
+        set(scope.roles) & {"owner_manager", "owner_salesperson", "owner_finance"}
+        and len(scope.owner_ids) != 1
+    ):
         raise PermissionDenied("需要单一货主范围。")
     return scope
 
@@ -99,7 +106,7 @@ def queryset(user):
     qs = CustomerReturn.objects.select_related(
         "original_order__customer", "owner", "warehouse", "created_by", "assignee"
     ).prefetch_related("receipts")
-    if set(scope.roles) & {"owner_manager", "owner_salesperson"}:
+    if set(scope.roles) & {"owner_manager", "owner_salesperson", "owner_finance"}:
         if len(scope.owner_ids) != 1:
             return qs.none()
         return qs.filter(
@@ -420,6 +427,68 @@ def update_status(order):
         order.status = "PARTIAL" if processed else "RECEIVING"
 
 
+def missing_receipt_dates(row):
+    product = row.line.product
+    if not product.expiry_control or not (row.qty_ok or row.qty_damage):
+        return []
+    required = ["expiry_date"]
+    if product.expiry_basis == "MFG":
+        required.append("production_date")
+    return [name for name in required if getattr(row, name) is None]
+
+
+def complete_receipt_trace(receipt, data):
+    if receipt.posted_at:
+        raise ReturnConflict("已入账的验收记录不能修改。")
+    row = receipt.lines.select_related("line__product").filter(pk=data["receipt_line_id"]).first()
+    if row is None:
+        raise NotFound()
+    fields = missing_receipt_dates(row)
+    dates = {name: data[name] for name in ("production_date", "expiry_date") if name in data}
+    if not fields or set(dates) != set(fields):
+        raise ValidationError("请补齐此行缺少的日期，已经登记的日期不可更改。")
+    for name, value in dates.items():
+        setattr(row, name, value)
+    if row.production_date and row.expiry_date < row.production_date:
+        raise ValidationError("到期日不能早于生产日期。")
+    row.save(update_fields=fields)
+    return {"receipt_line_id": row.pk, "dates_added": {k: v.isoformat() for k, v in dates.items()}}
+
+
+def receipt_hold_reason(order, rows):
+    """Check the whole batch under the warehouse and location locks before posting."""
+    stock_rows = [row for row in rows if row.qty_ok or row.qty_damage]
+    ids = {row.location_id for row in stock_rows}
+    locations = {
+        loc.pk: loc
+        for loc in Location.all_objects.select_for_update().filter(pk__in=ids).order_by("pk")
+    }
+    for row in stock_rows:
+        if missing_receipt_dates(row):
+            return f"{row.line.product_name}：待补齐验收行效期资料。"
+        loc = locations[row.location_id]
+        row.location = loc
+        if (
+            loc.warehouse_id != order.warehouse_id
+            or loc.is_deleted
+            or not loc.is_active
+            or loc.is_disabled
+            or loc.is_frozen
+        ):
+            return f"库位 {loc.code} 当前不可入账，请仓管核实后重试。"
+        try:
+            assert_inventory_not_count_locked(
+                owner_id=order.owner_id,
+                warehouse_id=order.warehouse_id,
+                location_id=loc.pk,
+                product_id=row.line.product_id,
+                batch_no=row.batch_no,
+            )
+        except DjangoValidationError as exc:
+            return exc.messages[0]
+    return ""
+
+
 def receive(order, user, data):
     operator(order, user)
     if order.status not in {"RECEIVING", "PARTIAL"}:
@@ -440,6 +509,8 @@ def receive(order, user, data):
         location = Location.objects.filter(
             pk=item["location_id"],
             warehouse_id=order.warehouse_id,
+            is_active=True,
+            is_deleted=False,
             is_disabled=False,
             is_frozen=False,
         ).first()
@@ -523,6 +594,7 @@ def receive(order, user, data):
 
 
 def command(user, action, data, pk=None):
+    require_business_write(user)
     try:
         return _command(user, action, data, pk)
     except IntegrityError:
@@ -565,6 +637,7 @@ def _command(user, action, data, pk=None):
             check_version(order, data)
         reason = data.get("reason", "")
         receipt = None
+        trace_update = {}
         if action in {"edit", "submit", "withdraw", "cancel"}:
             require(user, {"owner_manager", "owner_salesperson"}, "apply_customer_return")
         if action == "edit":
@@ -603,11 +676,13 @@ def _command(user, action, data, pk=None):
             order.assignee = user
         elif action == "receive":
             receipt = receive(order, user, data)
-        elif action == "retry-posting":
+        elif action in {"retry-posting", "complete-trace"}:
             operator(order, user)
-            receipt = order.receipts.filter(pk=data["receipt_id"]).first()
+            receipt = order.receipts.select_for_update().filter(pk=data["receipt_id"]).first()
             if receipt is None:
                 raise NotFound()
+            if action == "complete-trace":
+                trace_update = complete_receipt_trace(receipt, data)
         elif action == "note":
             if not any(
                 user.has_perm(f"inbound.{permission}")
@@ -643,6 +718,7 @@ def _command(user, action, data, pk=None):
         }
         if receipt:
             snapshot["receipt_id"] = receipt.pk
+            snapshot.update(trace_update)
         event(order, user, action, reason, snapshot)
         CustomerReturnCommand.objects.create(
             actor=user,
@@ -668,11 +744,18 @@ def post_receipt(user, receipt_id):
             operator(order, user)
             receipt = CustomerReturnReceipt.objects.select_for_update().get(pk=receipt_id)
             if receipt.posted_at:
-                return
+                return True
+            rows = list(receipt.lines.select_related("line__product__base_uom"))
+            hold = receipt_hold_reason(order, rows)
+            if hold:
+                receipt.posting_hold_reason = hold[:240]
+                receipt.posting_error = False
+                receipt.save(update_fields=["posting_hold_reason", "posting_error"])
+                return False
             _, _, _, _, issue_map = fulfilment(order.original_order)
             now = timezone.now()
             touched = set()
-            for row in receipt.lines.select_related("line__product__base_uom", "location"):
+            for row in rows:
                 qty = row.qty_ok + row.qty_damage
                 if not qty:
                     continue
@@ -781,20 +864,21 @@ def post_receipt(user, receipt_id):
             _refresh_summaries(touched)
             receipt.posted_at = now
             receipt.posting_error = False
-            receipt.save(update_fields=["posted_at", "posting_error"])
+            receipt.posting_hold_reason = ""
+            receipt.save(update_fields=["posted_at", "posting_error", "posting_hold_reason"])
             update_status(order)
             order.version += 1
             order.save()
             event(order, user, "post", snapshot={"receipt_id": receipt.pk})
+            return True
 
     try:
-        run_inventory_write_with_retry(operation, operation_name="customer_return.post")
+        return run_inventory_write_with_retry(operation, operation_name="customer_return.post")
     except Exception:  # Atomic posting rolled back; expose only a business failure.
         logging.getLogger(__name__).exception(
             "Customer return posting failed: receipt=%s", receipt_id
         )
         CustomerReturnReceipt.objects.filter(pk=receipt_id, posted_at__isnull=True).update(
-            posting_error=True
+            posting_error=True, posting_hold_reason=""
         )
         return False
-    return True

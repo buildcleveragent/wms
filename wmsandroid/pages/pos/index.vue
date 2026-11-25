@@ -15,7 +15,7 @@
             <view class="shift-dot" />
             <text>{{ shiftLoading ? '读取班次…' : shiftIsOpen ? `${currentShift.shift_no || '当前班次'} · 已开班` : '未开班 · 点击处理' }}</text>
           </view>
-          <text class="stock-scope">库存范围：全仓</text>
+          <text class="stock-scope">{{ pendingCheckout ? '按原销售请求核对' : POS_STOCK_SCOPE_LABEL }}</text>
         </view>
 
         <view v-if="pendingCheckout" class="pending-banner">
@@ -24,6 +24,10 @@
             <text>购物车已锁定，将用同一请求编号重试，避免重复销售。</text>
           </view>
           <button class="retry-button" :disabled="submitting" @click="retryCheckout">重试确认</button>
+        </view>
+        <view v-else-if="draftStockUnverified" class="pending-banner">
+          <text class="pending-copy">{{ submitting ? '正在核对草稿商品的可售库存…' : '草稿库存尚未核对，可重试或移除商品。' }}</text>
+          <button v-if="!submitting" class="retry-button" @click="verifyDraftStock">重新核对库存</button>
         </view>
 
         <button class="scan-button" :disabled="cartLocked" @click="quickScan">
@@ -57,9 +61,9 @@
             <view class="product-main">
               <text class="product-name" data-testid="pos-product-name">{{ productTitle(product) }}</text>
               <text class="product-meta">{{ ownerLabel(product) }} · {{ product.code || product.sku || '-' }}</text>
-              <text class="product-meta">全仓可用 {{ qty(product.available_qty) }} {{ baseLabel(product) }}</text>
+              <text class="product-meta">{{ POS_STOCK_SCOPE_LABEL }} {{ qty(product.available_qty) }} {{ baseLabel(product) }}</text>
             </view>
-            <view class="result-price">{{ money(product.price) }}</view>
+            <view class="result-price">{{ hasCatalogPrice(product.price) ? money(product.price) : '待定价' }}</view>
             <button class="add-btn" :disabled="Number(product.available_qty || 0) <= 0 || cartLocked" @click="addProduct(product)">添加</button>
           </view>
           <button v-if="hasMoreProducts" class="load-more" :disabled="productLoading" @click="searchProducts({ reset: false })">
@@ -81,7 +85,7 @@
             <view class="cart-copy">
               <text class="cart-name">{{ productTitle(item) }}</text>
               <text class="cart-code">{{ ownerLabel(item) }} · {{ item.code || item.sku || '-' }}</text>
-              <text class="cart-code">全仓可用 {{ qty(item.available_qty) }} {{ baseLabel(item) }} · 本行 {{ qty(lineBaseQty(item)) }} {{ baseLabel(item) }}</text>
+              <text class="cart-code"><template v-if="draftStockUnverified">库存待核对</template><template v-else>{{ pendingCheckout ? '原购物车库存' : POS_STOCK_SCOPE_LABEL }} {{ qty(item.available_qty) }} {{ baseLabel(item) }}</template> · 本行 {{ qty(lineBaseQty(item)) }} {{ baseLabel(item) }}</text>
             </view>
             <text class="cart-amount">{{ money(lineAmount(item)) }}</text>
           </view>
@@ -95,7 +99,13 @@
           </view>
           <view class="price-row">
             <text>基本单位单价</text>
-            <strong class="fixed-price">{{ money(item.price) }}</strong>
+            <strong v-if="item.is_gift" class="fixed-price">赠品 ¥0.00</strong>
+            <input v-else-if="!hasCatalogPrice(item.list_price)" class="manual-price" type="digit"
+              placeholder="输入正单价" :disabled="cartLocked" :value="item.price"
+              @input="setOnsitePrice(item, $event.detail.value)" />
+            <strong v-else class="fixed-price">{{ money(item.price) }}</strong>
+            <button v-if="hasCatalogPrice(item.list_price)" class="gift-button" :disabled="cartLocked"
+              @click="item.is_gift = !item.is_gift">{{ item.is_gift ? '取消赠送' : '本行赠送' }}</button>
             <text class="remove-link" @click="removeItem(index)">移除</text>
           </view>
         </view>
@@ -110,7 +120,7 @@
 
     <view class="checkout-bar safe-bottom">
       <view class="checkout-total"><text>共 {{ totalPieces }} 件</text><view>合计 <strong>{{ money(totalAmount) }}</strong></view></view>
-      <button data-testid="pos-checkout" :disabled="!cartItems.length || submitting || !!pendingCheckout" @click="openPayment">去收款</button>
+      <button data-testid="pos-checkout" :disabled="!cartItems.length || cartLocked" @click="openPayment">去收款</button>
     </view>
 
     <view v-if="paymentOpen" class="overlay" @click="closePayment">
@@ -167,10 +177,10 @@
     <view v-if="productChoices.length || scanQueryLoading" class="overlay" @click="cancelProductChoices">
       <view class="bottom-sheet choices safe-bottom" @click.stop>
         <view class="sheet-handle" /><text class="sheet-title">选择匹配商品</text>
-        <text class="choice-hint">{{ scanQueryLoading ? '正在查询全部匹配货主…' : '请确认货主和包装后加入；缺货商品不可出库。' }}</text>
+        <text class="choice-hint">{{ scanQueryLoading ? '正在查询全部匹配货主…' : `请确认货主和包装，数量为${POS_STOCK_SCOPE_LABEL}库存。` }}</text>
         <scroll-view class="choice-list" scroll-y>
           <button v-for="product in productChoices" :key="product.id" class="choice-row" :disabled="!canChooseProduct(product)" @click="chooseScannedProduct(product)">
-            <view><text>{{ productTitle(product) }}</text><text>{{ ownerLabel(product) }} · {{ product.code || product.sku }}</text><text>{{ product.matched_barcode ? unitLabel(product.matched_barcode, product) : '包装待确认' }} · {{ product.barcode_error || (availableQty(product) <= 0 ? '缺货，不可出库' : '') }}</text></view>
+            <view><text>{{ productTitle(product) }}</text><text>{{ ownerLabel(product) }} · {{ product.code || product.sku }}</text><text>{{ product.matched_barcode ? unitLabel(product.matched_barcode, product) : '包装待确认' }} · {{ product.barcode_error || (availableQty(product) <= 0 ? '两区缺货，不可出库' : '') }}</text></view>
             <text>{{ qty(product.available_qty) }} {{ baseLabel(product) }}</text>
           </button>
         </scroll-view>
@@ -182,6 +192,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { hasCatalogPrice } from '../../../frontend/shared/posPricing.js'
 import { onBackPress, onShow, onUnload } from '@dcloudio/uni-app'
 import WmsIcon from '@/components/WmsIcon.vue'
 import { useAuth } from '@/store/auth'
@@ -190,7 +201,7 @@ import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
 import { hasPermission } from '@/utils/mobileAccess'
 import { businessScope, captureSession, definitelyRejected, isCurrentSession, readPending } from '@/utils/pendingOperation'
 import {
-  POS_PAYMENT_METHODS, addProductToCart, availableQty, buildCheckoutSnapshot,
+  POS_PAYMENT_METHODS, POS_STOCK_SCOPE_LABEL, addProductToCart, availableQty, buildCheckoutSnapshot,
   cartLineKey, draftStorageKey, finalizeCheckoutSnapshot, lineAmount as calculateLineAmount,
   lineBaseQty, money, normalizeRows, pendingStorageKey, productName, productSpec,
   toNumber, unitOptions, validateCart, validateCartStock,
@@ -221,9 +232,10 @@ const remark = ref('')
 const submitting = ref(false)
 const pendingCheckout = ref(null)
 const restored = ref(false)
+const draftStockUnverified = ref(false)
 const scanQueryLoading = ref(false)
 const quantityRevision = ref(0)
-const cartLocked = computed(() => submitting.value || !!pendingCheckout.value || !restored.value)
+const cartLocked = computed(() => submitting.value || !!pendingCheckout.value || !restored.value || draftStockUnverified.value)
 let restoredScope = ''
 let scanSequence = 0
 let searchSequence = 0
@@ -347,7 +359,14 @@ function normalizeQuantity(index, event) {
 }
 function increase(index) { const item = cartItems.value[index]; if (!item || cartLocked.value) return; normalizeQuantity(index, { detail: { value: toNumber(item.qty, 0) + 1 } }) }
 function decrease(index) { const item = cartItems.value[index]; if (!item || cartLocked.value) return; if (toNumber(item.qty, 1) <= 1) removeItem(index); else item.qty = toNumber(item.qty, 1) - 1 }
-function removeItem(index) { if (cartLocked.value) return; cartItems.value.splice(index, 1) }
+function removeItem(index) {
+  if (!restored.value || submitting.value || pendingCheckout.value) return
+  cartItems.value.splice(index, 1)
+  if (!cartItems.value.length && draftStockUnverified.value) {
+    draftStockUnverified.value = false
+    setFeedback('')
+  }
+}
 function changeUnit(index, event) {
   const item = cartItems.value[index]; if (!item || cartLocked.value) return
   const previous = item.unit_index; item.unit_index = Number(event?.detail?.value || 0)
@@ -366,14 +385,36 @@ function saveDraft() {
 function restoreState() {
   restoredScope = businessScope(auth)
   if (!restoredScope) return
+  pendingCheckout.value = readPending(pendingKey())
   const draft = storageGet(draftKey())
   if (draft?.cart_items?.length && Date.now() - Number(draft.saved_at || 0) < 24 * 60 * 60 * 1000) {
-    cartItems.value = draft.cart_items.map((item) => ({ ...item, cart_id: item.cart_id || createIdempotencyUuid(), unit_options: unitOptions(item) }))
+    draftStockUnverified.value = !pendingCheckout.value
+    cartItems.value = draft.cart_items.map(item => ({
+      ...item, available_qty: draftStockUnverified.value ? null : item.available_qty,
+      cart_id: item.cart_id || createIdempotencyUuid(), unit_options: unitOptions(item),
+    }))
     paymentMethod.value = draft.payment_method || 'WECHAT'; amountReceived.value = draft.amount_received || ''; paymentReference.value = draft.payment_reference || ''; remark.value = draft.remark || ''
     setFeedback(`已恢复未结账购物车：${cartItems.value.length} 项`, 'info')
   }
-  pendingCheckout.value = readPending(pendingKey())
   restored.value = true
+  if (draftStockUnverified.value) void verifyDraftStock()
+}
+
+async function verifyDraftStock() {
+  if (!draftStockUnverified.value || submitting.value || pendingCheckout.value) return
+  const session = captureSession(auth)
+  submitting.value = true
+  try {
+    await refreshCartStock(session)
+    if (!isCurrentSession(auth, session)) return
+    draftStockUnverified.value = false
+    const error = validateCartStock(cartItems.value)
+    setFeedback(error || '已核对购物车库存', error ? 'error' : 'success')
+  } catch (error) {
+    if (isCurrentSession(auth, session)) setFeedback(error?.message || '草稿库存核对失败', 'error')
+  } finally {
+    if (isCurrentSession(auth, session)) submitting.value = false
+  }
 }
 
 async function refreshCartStock(session) {
@@ -389,9 +430,25 @@ async function refreshCartStock(session) {
     }
     const matched = refreshed.get(key)
     item.available_qty = availableQty(matched)
+    if (!hasCatalogPrice(matched.price) && !item.onsite_price) {
+      item.price = ''
+      item.is_gift = false
+    } else if (hasCatalogPrice(matched.price)) {
+      item.price = String(matched.price)
+      item.onsite_price = false
+    }
+    item.list_price = matched.price ?? null
+    item.min_price = matched.min_price ?? null
+    item.max_discount = matched.max_discount ?? null
     item.owner_name = matched.owner_name || ''
     item.base_unit = matched.base_unit
   }
+}
+
+function setOnsitePrice(item, value) {
+  if (cartLocked.value || hasCatalogPrice(item.list_price)) return
+  item.price = value
+  item.onsite_price = Number(value) > 0
 }
 
 async function openPayment() {
@@ -416,13 +473,18 @@ function selectPayment(method) { if (submitting.value) return; paymentMethod.val
 async function checkout() {
   if (submitting.value || pendingCheckout.value) return
   if (!paymentReady.value) { uni.showToast({ title: '现金实付金额不能小于应收金额', icon: 'none' }); return }
+  const confirmedTotal = totalAmount.value
   submitting.value = true
   const session = captureSession(auth)
   try {
     await refreshCartStock(session)
     if (!isCurrentSession(auth, session)) return
     const error = validateCart(cartItems.value)
-    if (error) { uni.showToast({ title: error, icon: 'none' }); return }
+    if (error || confirmedTotal !== totalAmount.value) {
+      paymentOpen.value = false
+      uni.showToast({ title: error || '商品价格已更新，请重新核对后收款', icon: 'none' })
+      return
+    }
     const snapshot = finalizeCheckoutSnapshot(buildCheckoutSnapshot({ items: cartItems.value, paymentMethod: paymentMethod.value, amountReceived: amountReceived.value, referenceNo: paymentReference.value, remark: remark.value }))
     try { uni.setStorageSync(pendingKey(), snapshot) } catch { throw new Error('无法保存待确认销售，请检查手机存储') }
     pendingCheckout.value = snapshot
@@ -443,6 +505,7 @@ async function submitPendingSnapshot() {
   const requestKey = pendingKey()
   const requestDraftKey = draftKey()
   try {
+    // Replay the saved body verbatim, including any historical stock_zone_type.
     const response = await api.posCheckout(snapshot.payload)
     if (!response?.sale?.id) throw new Error('销售响应不完整，请继续确认原请求')
     if (!isCurrentSession(auth, session)) return
@@ -455,7 +518,13 @@ async function submitPendingSnapshot() {
     if (!isCurrentSession(auth, session)) return
     paymentOpen.value = false
     const status = Number(error?.statusCode || 0)
-    if (definitelyRejected(error)) { storageRemove(requestKey); pendingCheckout.value = null; uni.showModal({ title: '销售未提交', content: error?.message || '请修改后重试', showCancel: false }) }
+    if (error?.data?.idempotency_key) {
+      uni.showModal({ title: '原销售需要核对', content: '请按原小票核对销售历史。待确认记录已保留。', showCancel: false })
+    } else if (definitelyRejected(error)) {
+      storageRemove(requestKey); pendingCheckout.value = null
+      draftStockUnverified.value = cartItems.value.length > 0
+      uni.showModal({ title: '销售未提交', content: error?.message || '请修改后重试', showCancel: false })
+    }
     else if (status === 409) { const wait = error?.header?.['Retry-After'] || error?.header?.['retry-after']; uni.showModal({ title: '库存正在被占用', content: wait ? `请等待 ${wait} 秒后点击“重试确认”。` : '请稍后点击“重试确认”，应用会使用原请求避免重复销售。', showCancel: false }) }
     else uni.showModal({ title: '销售结果待确认', content: '网络响应中断，购物车已锁定。恢复网络后点击“重试确认”。', showCancel: false })
     throw error
@@ -485,6 +554,7 @@ function restoreCheckoutState() {
 }
 watch(() => businessScope(auth), (scope) => {
   restored.value = false; restoredScope = ''; cancelProductChoices(); clearSearch()
+  draftStockUnverified.value = false
   cartItems.value = []; pendingCheckout.value = null; currentShift.value = null
   paymentOpen.value = false; shiftPanelOpen.value = false; submitting.value = false; shiftLoading.value = false
   remark.value = ''; amountReceived.value = ''; paymentReference.value = ''; paymentMethod.value = 'WECHAT'
@@ -500,6 +570,8 @@ onShow(async () => {
 </script>
 
 <style scoped>
+.manual-price { width: 120px; min-height: 44px; border-bottom: 1px solid #94a3b8; }
+.gift-button { min-height: 44px; margin: 0; padding: 0 8px; font-size: 13px; }
 .pos-page { height: 100vh; overflow: hidden; background: #fff; color: #0f172a; }.pos-header { height: calc(104rpx + var(--status-bar-height, 0px)); padding: var(--status-bar-height, 0px) 28rpx 0; display: flex; align-items: center; justify-content: space-between; border-bottom: 1rpx solid #eef2f6; background: #fff; }.header-title { font-size: 36rpx; font-weight: 750; }.header-button { width: 72rpx; height: 72rpx; display: flex; align-items: center; justify-content: center; color: #0f172a; font-size: 48rpx; }.header-button :deep(svg){font-size:34rpx}.header-button.disabled{opacity:.3}
 .pos-scroll { height: calc(100vh - 104rpx - var(--status-bar-height, 0px) - 152rpx - env(safe-area-inset-bottom)); }.pos-content { padding: 22rpx 30rpx 0; }.status-row { display:flex;align-items:center;justify-content:space-between;gap:16rpx;margin-bottom:22rpx}.shift-chip{min-height:52rpx;padding:0 18rpx;border-radius:14rpx;background:#f1f5f9;color:#64748b;display:flex;align-items:center;gap:12rpx;font-size:23rpx}.shift-chip.open{background:#edf9f3;color:#159357}.shift-dot{width:12rpx;height:12rpx;border-radius:50%;background:currentColor}.stock-scope{color:#64748b;font-size:22rpx}
 .pending-banner{margin-bottom:22rpx;padding:22rpx;border:1rpx solid #f5c16c;border-radius:20rpx;background:#fff7ed;display:flex;align-items:center;gap:18rpx}.pending-copy{flex:1;color:#9a5b00;font-size:22rpx}.pending-copy text{display:block}.pending-title{margin-bottom:4rpx;color:#713f12;font-size:26rpx;font-weight:700}.retry-button{min-height:72rpx;padding:0 20rpx;border-radius:14rpx;background:#e77800;color:#fff;font-size:24rpx;display:flex;align-items:center}

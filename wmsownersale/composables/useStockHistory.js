@@ -15,7 +15,7 @@ export function useStockHistory() {
   const form = reactive(blankHistoryFilters())
   const applied = ref(blankHistoryFilters())
   const view = ref('products')
-  const eventId = ref(0)
+  const eventId = ref('')
   const summary = ref(null)
   const detail = ref(null)
   const rows = ref([])
@@ -48,12 +48,12 @@ export function useStockHistory() {
     try {
       let header = summary.value
       if (!more && !eventId.value) {
-        header = await api.stockHistory('summary', {...params})
+        header = await api.stockStatistics('summary', {...params})
         if (!current()) return
       }
       params.snapshot = eventId.value ? snapshot.value ?? applied.value.snapshot : header?.snapshot
-      const section = eventId.value ? `events/${eventId.value}` : applied.value.grain !== 'all' ? 'periods' : view.value
-      const data = await api.stockHistory(section, params)
+      const section = eventId.value ? `events/${encodeURIComponent(eventId.value)}` : applied.value.grain !== 'all' ? 'periods' : view.value
+      const data = await api.stockStatistics(section, params)
       if (!current()) return
       if (!Array.isArray(data?.results)) throw new Error('历史数据不完整，请重试')
       summary.value = header
@@ -67,25 +67,37 @@ export function useStockHistory() {
     } finally { if (tag === generation) loading.value = false }
   }
 
+  function loadFilters(filters) {
+    generation++
+    loading.value = false
+    applied.value = filters
+    clear()
+    load()
+  }
+
   function apply(changes = {}) {
     const next = { ...form, ...changes }
     if (next.date_from && next.date_to && next.date_from > next.date_to) {
       error.value = '开始日期不能晚于结束日期'; return
     }
-    generation++; loading.value = false
     Object.assign(form, changes)
     if (form.date_from || form.date_to) delete form.undated
-    applied.value = { ...form }
-    clear(); load()
+    loadFilters({ ...form })
   }
-  function selectView(value) { view.value = value; apply() }
+  function selectView(value) {
+    const grain = value === 'day' ? 'day' : 'all'
+    if (applied.value.grain === grain && (grain === 'day' || view.value === value)) return
+    if (grain === 'all') view.value = value
+    form.grain = grain
+    loadFilters({ ...applied.value, grain })
+  }
   function configure(options = {}) {
     for (const key of Object.keys(form)) if (options[key] != null) form[key] = options[key]
     if (options.undated) form.undated = options.undated
     if (options.snapshot != null) form.snapshot = options.snapshot
     applied.value = { ...form }
     if (['products', 'documents', 'events'].includes(options.view)) view.value = options.view
-    eventId.value = Number(options.event_id) || 0
+    eventId.value = /^\d+$/.test(options.event_id || '') ? `ledger-${options.event_id}` : options.event_id || ''
   }
   function refresh() {
     delete form.snapshot; delete applied.value.snapshot
@@ -103,6 +115,7 @@ export function useStockHistory() {
   onHide(stop); onUnload(stop); onUnmounted(stop)
   watch(identity, () => {
     generation++; loading.value = false; denied.value = false; clear()
+    delete form.snapshot; delete applied.value.snapshot
     error.value = ''
     if (active) load()
   }, {flush: 'sync'})

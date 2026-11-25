@@ -62,9 +62,44 @@
       </view>
     </view>
 
-    <view class="pos-main">
+    <view v-if="returnRecoveryError" class="section">
+      <text>{{ returnRecoveryError }}</text>
+      <button class="ghost-btn" @click="restoreReturns">重新读取待确认退货</button>
+    </view>
+    <view v-for="entry in savedReturns" :key="entry.saleId" data-testid="pos-return-pending" :data-sale-id="entry.saleId" class="section">
+      <text class="section-title">退货结果待确认</text>
+      <view>原销售单 {{ entry.record?.sale_no || entry.saleId }}</view>
+      <view v-if="entry.error">{{ entry.error }}</view>
+      <template v-else>
+        <view v-for="line in entry.record.payload.lines" :key="line.sale_line_id">
+          {{ entry.record.line_labels?.[line.sale_line_id]?.name || ('销售行 ' + line.sale_line_id) }}
+          × {{ Number(line.qty) }} {{ entry.record.line_labels?.[line.sale_line_id]?.unit || '' }}
+        </view>
+        <view>{{ entry.record.payload.reason }} · {{ entry.record.payload.refunds.length ? '退款 ' + money(entry.record.payload.refunds.reduce((sum, row) => sum + Number(row.amount), 0)) : '无需退款' }}</view>
+        <button data-testid="pos-return-retry" class="primary-btn" :disabled="returnSubmitting || !!returnRecoveryError" @click="retryReturn(entry)">继续确认结果</button>
+      </template>
+    </view>
+
+    <view v-if="hasLegacyDraft && !cartItems.length" class="section">
+      <text>本机有升级前的拣货区草稿，请由原收银员在原仓库恢复。</text>
+      <button class="ghost-btn" @click="claimLegacyDraft">恢复旧草稿</button>
+    </view>
+    <view v-if="pendingCheckout || legacyUnconfirmed" class="section">
+      <text class="section-title">销售结果待确认</text>
+      <view>小票 {{ pendingCheckout?.src_bill_no || srcBillNo }} · {{ stockScopeLabel }}</view>
+      <template v-if="legacyUnconfirmed">
+        <view v-for="item in cartItems" :key="item.cart_id" data-testid="pos-cart-product">
+          {{ item.name }} × {{ qtyText(lineBaseQty(item), item) }} {{ basicUnit(item) }} · 原行金额 {{ money(item.amount) }}
+          · {{ stockScopeLabel }} {{ qtyText(item.available_qty, item) }} {{ basicUnit(item) }}
+        </view>
+      </template>
+      <view>请重试原请求确认结果，勿重复收款。</view>
+      <button :data-testid="pendingCheckout ? 'pos-checkout-retry' : 'pos-checkout'" class="primary-btn" :disabled="submitting" @click="checkout">重试确认</button>
+    </view>
+    <view v-else class="pos-main">
       <view class="pos-left">
     <view class="section pos-toolbar">
+      <text class="product-meta">{{ stockScopeLabel }}</text>
       <view class="scan-line">
         <text class="toolbar-label primary-label">商品</text>
         <input
@@ -100,7 +135,7 @@
             <text class="product-name" data-testid="pos-product-name">{{ (product.display_name || product.name) || product.sku || product.code }}<text v-if="product.spec" class="product-spec">　{{ product.spec }}</text></text>
             <text class="product-meta">{{ product.code }} {{ product.sku || '' }}</text>
             <text class="product-meta">
-              售价 {{ money(product.price) }} / 可售 {{ quantityWithUnit(stockAvailableQty(product), product) }}
+              {{ hasCatalogPrice(product.price) ? '售价 ' + money(product.price) : '待定价' }} / {{ stockScopeLabel }} {{ quantityWithUnit(stockAvailableQty(product), product) }}
             </text>
           </view>
           <button class="primary-btn add-btn" :disabled="!hasAvailableStock(product)" @click="addToCart(product)">
@@ -133,14 +168,17 @@
 
         <view
           v-for="(item, index) in cartItems"
-          :key="item.product_id"
+          :key="item.cart_id"
           class="cart-row cart-line-row"
           style="display: flex; flex-direction: row; align-items: center; flex-wrap: nowrap; width: 100%;"
         >
           <view class="cart-info cart-goods-col" style="flex: 1 1 auto; min-width: 0; padding-right: 12rpx; text-align: right; box-sizing: border-box;">
             <text class="cart-goods-line" data-testid="pos-cart-product">
-              {{ item.name }}<text v-if="item.spec" class="cart-product-spec">　{{ item.spec }}</text>　{{ item.code }} / 可售 {{ qtyText(item.available_qty, item) }} {{ basicUnit(item) }} / 基本数量 {{ qtyText(lineBaseQty(item), item) }} {{ basicUnit(item) }}
+              {{ item.name }}<text v-if="item.spec" class="cart-product-spec">　{{ item.spec }}</text>　{{ item.code }} / {{ stockScopeLabel }} {{ qtyText(item.available_qty, item) }} {{ basicUnit(item) }} / 基本数量 {{ qtyText(lineBaseQty(item), item) }} {{ basicUnit(item) }}
             </text>
+            <button v-if="hasCatalogPrice(item.list_price) && !legacyUnconfirmed"
+              class="line-gift-button" :disabled="!!pendingCheckout || submitting"
+              @click="toggleGift(item)">{{ item.is_gift ? '取消赠送' : '本行赠送' }}</button>
           </view>
 
           <view class="cart-unit-col" style="width: 96rpx; flex: 0 0 96rpx; margin-left: 8rpx; box-sizing: border-box;">
@@ -161,7 +199,8 @@
               :type="isCountItem(item) ? 'number' : 'digit'"
               v-model="item.qty"
               confirm-type="done"
-              @blur="normalizeQuantityLine(index)"
+              @focus="beginCartInput"
+              @blur="normalizeQuantityLine(index, $event)"
               @confirm="confirmCartLineEdit(index, 'quantity')"
             />
           </view>
@@ -172,8 +211,11 @@
               <input
                 class="price-input"
                 type="digit"
+                placeholder="输入正单价"
+                :disabled="item.is_gift || !!pendingCheckout || legacyUnconfirmed"
                 :value="item.price"
                 confirm-type="done"
+                @focus="beginCartInput"
                 @input="onLinePriceInput(index, $event)"
                 @blur="normalizePriceLine(index)"
                 @confirm="confirmCartLineEdit(index, 'price')"
@@ -187,8 +229,10 @@
               <input
                 class="amount-input"
                 type="digit"
+                :disabled="item.is_gift || !hasCatalogPrice(item.list_price) || !!pendingCheckout || legacyUnconfirmed"
                 :value="item.amount"
                 confirm-type="done"
+                @focus="beginCartInput"
                 @input="onLineAmountInput(index, $event)"
                 @blur="normalizeAmountLine(index)"
                 @confirm="confirmCartLineEdit(index, 'amount')"
@@ -547,36 +591,37 @@
         </view>
       </view>
 
-      <view v-if="pendingReturnSale" class="void-panel return-panel">
+      <view v-if="pendingReturnSale && !savedReturns[pendingReturnSale.id]" data-testid="pos-return-form" class="void-panel return-panel">
         <text class="void-title">退货 {{ saleDisplayNo(pendingReturnSale) }}</text>
         <view class="return-line" v-for="(line, index) in returnLines" :key="line.id">
           <view class="return-line-main">
             <text class="return-name">{{ (line.product_display_name || line.product_name) || line.product_code }}</text>
             <text class="history-meta">可退 {{ quantityWithUnit(line.returnable_qty, line) }} / 单价 {{ money(line.price) }}</text>
           </view>
-          <input class="input return-qty-input" v-model.trim="line.return_qty" type="digit" :placeholder="`退货数量（${basicUnit(line)}）`" @blur="normalizeReturnLine(index)" />
+          <input class="input return-qty-input" v-model.trim="line.return_qty" :disabled="returnSubmitting" type="digit" :placeholder="`退货数量（${basicUnit(line)}）`" @blur="normalizeReturnLine(index)" />
         </view>
-        <input class="input void-input" v-model.trim="returnReason" placeholder="请输入退货原因" />
+        <input class="input void-input" v-model.trim="returnReason" :disabled="returnSubmitting" placeholder="请输入退货原因" />
         <view class="bill-row payment-row return-refund-row">
           <text class="bill-label">退款</text>
           <picker
             class="payment-picker"
             mode="selector"
             :range="paymentMethodLabels"
+            :disabled="returnSubmitting"
             :value="returnPaymentMethodIndex"
             @change="changeReturnPaymentMethod"
           >
             <view class="payment-value">{{ paymentMethodName(returnRefundMethod) }}</view>
           </picker>
-          <input class="payment-input" type="digit" v-model.trim="returnRefundAmount" placeholder="退款金额" />
+          <input class="payment-input" type="digit" v-model.trim="returnRefundAmount" :disabled="returnSubmitting" placeholder="退款金额" />
         </view>
         <view class="bill-row reference-row">
           <text class="bill-label">参考号</text>
-          <input class="bill-input" v-model.trim="returnRefundReferenceNo" placeholder="退款流水号/可选" />
+          <input class="bill-input" v-model.trim="returnRefundReferenceNo" :disabled="returnSubmitting" placeholder="退款流水号/可选" />
         </view>
         <view class="void-actions">
-          <button class="ghost-btn void-action-btn" @click="cancelReturnSale">取消</button>
-          <button class="danger-btn void-action-btn" :disabled="returnSubmitting" @click="confirmReturnSale">
+          <button class="ghost-btn void-action-btn" :disabled="returnSubmitting" @click="cancelReturnSale">取消</button>
+          <button data-testid="pos-return-confirm" class="danger-btn void-action-btn" :disabled="returnSubmitting || !!returnRecoveryError" @click="confirmReturnSale">
             确认退货 {{ money(returnTotalAmount) }}
           </button>
         </view>
@@ -599,7 +644,7 @@
           <view class="history-actions sale-history-actions">
             <button class="ghost-btn history-action-btn" @click="reprintSale(sale)">重打</button>
             <button class="ghost-btn history-action-btn" :disabled="!saleCanReturn(sale)" @click="startReturnSale(sale)">退货</button>
-            <button class="danger-btn history-action-btn" :disabled="isVoidedSale(sale)" @click="startVoidSale(sale)">作废</button>
+            <button class="danger-btn history-action-btn" :disabled="returnBlocked(sale.id) || isVoidedSale(sale)" @click="startVoidSale(sale)">作废</button>
           </view>
         </view>
       </view>
@@ -626,7 +671,7 @@
           <view class="history-actions sale-history-actions">
             <button class="ghost-btn history-action-btn" @click="reprintSale(sale)">重打</button>
             <button class="ghost-btn history-action-btn" :disabled="!saleCanReturn(sale)" @click="startReturnSale(sale)">退货</button>
-            <button class="danger-btn history-action-btn" :disabled="isVoidedSale(sale)" @click="startVoidSale(sale)">作废</button>
+            <button class="danger-btn history-action-btn" :disabled="returnBlocked(sale.id) || isVoidedSale(sale)" @click="startVoidSale(sale)">作废</button>
           </view>
         </view>
       </view>
@@ -672,8 +717,12 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onHide, onShow } from '@dcloudio/uni-app'
-import { api } from '@/utils/request'
+import { api, BASE_URL, createIdempotencyUuid } from '@/utils/request'
+import { clearPendingReturn, definitelyRejectedReturn, listPendingReturns, readPendingReturn, returnStorageScope, storePendingReturn } from '@/utils/posReturnRecovery'
+import { useAuth } from '@/store/auth'
+import { DUAL_ZONE, PICK_ONLY, queryStockScope, checkoutStockScope, posDraftKey, checkoutDefinitelyRejected } from '@/utils/posStockScope'
 import { basicUnit, groupBasicQuantities, groupedQuantityText, quantityNumber, quantityWithUnit } from '@/utils/posQuantity'
+import { hasCatalogPrice, negotiatedUnitPrice, saleLineAmount } from '../../../frontend/shared/posPricing.js'
 import { getPendingRepayment, recordRepayment } from '@/utils/repaymentRecovery'
 import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
 import { CHECKOUT_STATUS, executeCheckoutFlow, executePrintAttempt } from '@/utils/posCheckoutFlow'
@@ -700,7 +749,7 @@ const scanFeedbackType = ref('info')
 const productLookupQueue = []
 let productLookupRunning = false
 let lastProductLookup = { keyword: '', time: 0 }
-let cartStockRefreshing = false
+let cartStockRefresh = null
 let lastCartStockRefreshAt = 0
 
 const cartItems = ref([])
@@ -728,7 +777,32 @@ const shiftActualCashAmount = ref('')
 const shiftPaymentActuals = ref({})
 const shiftHistory = ref([])
 const shiftHistoryLoading = ref(false)
-const POS_DRAFT_KEY = 'pos_sale_draft_v1'
+const LEGACY_DRAFT_KEY = 'pos_sale_draft_v1'
+const auth = useAuth()
+const shiftIdentity = ref(null)
+const profileIdentity = ref(auth.user)
+watch(() => auth.user, user => { profileIdentity.value = user }, { flush: 'sync' })
+const posIdentity = computed(() => {
+  const user = profileIdentity.value
+  if (user?.id && (user.warehouse_id || user.id !== shiftIdentity.value?.id)) return user
+  return shiftIdentity.value
+})
+const draftKey = computed(() => posDraftKey(posIdentity.value))
+const returnScope = computed(() => returnStorageScope(BASE_URL, posIdentity.value))
+watch(() => auth.access, access => {
+  profileIdentity.value = null
+  shiftIdentity.value = null
+  currentShift.value = null
+  shiftLoading.value = false
+  if (access) nextTick(() => { if (auth.access === access) loadCurrentShift() })
+}, { flush: 'sync' })
+const hasLegacyDraft = ref(false)
+const stockScope = ref(DUAL_ZONE)
+const stockScopeLabel = computed(() => stockScope.value === PICK_ONLY ? '拣货区可售' : '拣货区＋存储区可售')
+const pendingCheckout = ref(null)
+const legacyUnconfirmed = ref(false)
+let cartInputActive = false
+let productFocusRequest = 0
 const POS_PRODUCT_PAGE_SIZE = 100
 const POS_AUTO_PRINT_KEY = 'pos_auto_print_sale_v1'
 const POS_SALE_PRINT_MODE_KEY = 'pos_sale_print_mode_v2'
@@ -739,10 +813,6 @@ const SALE_PRINT_SHOP_ADDRESS = ' '
 const SALE_PRINT_SHOP_PHONE = ' '
 const SALE_PRINT_BANK_ACCOUNT = ' '
 const HISTORY_PREVIEW_LIMIT = 3
-const POS_STOCK_QUERY = {
-  zone_type: 1,
-  picking_only: 1,
-}
 const FALLBACK_SALE_PRINT_CONFIGS = [
   {
     code: 'pos_dot_241_93',
@@ -927,6 +997,18 @@ const returnRefundMethod = ref('CASH')
 const returnRefundAmount = ref('')
 const returnRefundReferenceNo = ref('')
 const returnSubmitting = ref(false)
+const savedReturns = ref({})
+const returnRecoveryError = ref('')
+let returnSession = 0
+let returnDetailSequence = 0
+watch([returnScope, () => auth.access], () => {
+  returnSession++
+  returnDetailSequence++
+  returnSubmitting.value = false
+  cancelReturnSale()
+  cancelVoidSale()
+  restoreReturns()
+}, { immediate: true, flush: 'sync' })
 
 const {
   lastScan,
@@ -1094,7 +1176,7 @@ const canCheckout = computed(() =>
   cartItems.value.length > 0 &&
   cartPricingReady.value &&
   paymentReady.value &&
-  isActiveShift(currentShift.value)
+  !!draftKey.value && (legacyUnconfirmed.value || isActiveShift(currentShift.value))
 )
 const historyPreviewSales = computed(() => historySales.value.slice(0, HISTORY_PREVIEW_LIMIT))
 const historyMoreSales = computed(() => historySales.value.slice(HISTORY_PREVIEW_LIMIT))
@@ -1115,7 +1197,6 @@ onMounted(() => {
   restoreAutoPrintPreference()
   restoreSalePrintModePreference()
   restoreReceiptWarehouseInfoPreference()
-  restoreSaleDraft()
   focusProductInput()
   loadSystemSettings()
   loadSalePrintConfigs()
@@ -1127,6 +1208,7 @@ onMounted(() => {
 })
 
 onShow(() => {
+  restoreReturns()
   focusProductInput()
   loadSystemSettings({ silent: true })
   loadSalePrintConfigs({ silent: true })
@@ -1143,6 +1225,8 @@ onHide(() => {
 })
 
 onUnmounted(() => {
+  returnSession++
+  productFocusRequest++
   saveSaleDraft()
   productInputFocus.value = false
 })
@@ -1223,8 +1307,15 @@ function normalizePage(data) {
   return data && Array.isArray(data.results) ? data.results : []
 }
 
+// uni-app's H5 compiler retains APIs referenced as uni.<method>.
 function getStorage() {
-  return typeof uni !== 'undefined' ? uni : null
+  if (typeof uni === 'undefined') return null
+  return {
+    getStorageInfoSync: () => uni.getStorageInfoSync(),
+    getStorageSync: key => uni.getStorageSync(key),
+    setStorageSync: (key, value) => uni.setStorageSync(key, value),
+    removeStorageSync: key => uni.removeStorageSync(key),
+  }
 }
 
 function restoreAutoPrintPreference() {
@@ -1558,28 +1649,69 @@ function changeReceiptWarehouseInfo(event) {
   saveReceiptWarehouseInfoPreference()
 }
 
-function removeSaleDraft() {
+// The old global draft contains no cashier or warehouse identifier. Claiming it
+// explicitly avoids showing its customer and lines to the next signed-in user.
+function claimLegacyDraft() {
+  if (!draftKey.value || cartItems.value.length) return
   try {
-    getStorage()?.removeStorageSync(POS_DRAFT_KEY)
-  } catch (e) {
-    console.warn('remove POS draft failed', e)
+    const storage = getStorage()
+    const old = storage.getStorageSync(LEGACY_DRAFT_KEY)
+    if (!old?.cart_items?.length) return
+    if (!old.idempotency_key) {
+      throw new Error('旧草稿缺少原请求编号，请先按原小票核对销售记录。')
+    }
+    const draft = { ...old, stock_scope: PICK_ONLY, legacy_unconfirmed: true }
+    storage.setStorageSync(draftKey.value, draft)
+    storage.removeStorageSync(LEGACY_DRAFT_KEY)
+    hasLegacyDraft.value = false
+    restoreSaleDraft(draft)
+  } catch (error) {
+    showPosError(error, '恢复旧草稿失败')
   }
 }
 
-function saveSaleDraft() {
+watch(draftKey, (key, previous) => {
+  if (previous) resetSale({ preserveDraft: true })
+  hasLegacyDraft.value = false
+  if (!key) return
+  const storage = getStorage()
+  const draft = storage?.getStorageSync(key)
+  hasLegacyDraft.value = !!storage?.getStorageSync(LEGACY_DRAFT_KEY)?.cart_items?.length
+  if (draft?.cart_items?.length) restoreSaleDraft(draft)
+}, { immediate: true, flush: 'sync' })
+
+function removeSaleDraft() {
+  const storage = getStorage()
+  const key = draftKey.value
+  if (key && storage?.getStorageSync(key)?.idempotency_key === idempotencyKey.value) {
+    storage.removeStorageSync(key)
+  }
+}
+
+function saveSaleDraft({ required = false } = {}) {
   try {
     const storage = getStorage()
-    if (!storage) return
-
+    if (!storage || !draftKey.value) {
+      if (required) throw new Error('无法确认原收银员及仓库，未发送结账请求。')
+      return
+    }
     if (!cartItems.value.length) {
-      storage.removeStorageSync(POS_DRAFT_KEY)
+      removeSaleDraft()
       return
     }
 
+    const existing = storage.getStorageSync(draftKey.value)
+    if (existing?.pending_checkout && existing.idempotency_key !== idempotencyKey.value) {
+      if (required) throw new Error('已有其他小票结果待确认，请重新打开收银页先恢复原单。')
+      return
+    }
     const draftItems = JSON.parse(JSON.stringify(cartItems.value))
     const draftCustomer = selectedCustomer.value ? JSON.parse(JSON.stringify(selectedCustomer.value)) : null
 
-    storage.setStorageSync(POS_DRAFT_KEY, {
+    storage.setStorageSync(draftKey.value, {
+      stock_scope: stockScope.value,
+      legacy_unconfirmed: legacyUnconfirmed.value,
+      pending_checkout: pendingCheckout.value ? JSON.parse(JSON.stringify(pendingCheckout.value)) : null,
       saved_at: Date.now(),
       cart_items: draftItems,
       selected_customer: draftCustomer,
@@ -1595,25 +1727,26 @@ function saveSaleDraft() {
       idempotency_key: idempotencyKey.value || '',
     })
   } catch (e) {
+    if (required) throw e
     console.warn('save POS draft failed', e)
   }
 }
 
-function restoreSaleDraft() {
+function restoreSaleDraft(draft) {
   try {
-    const draft = getStorage()?.getStorageSync(POS_DRAFT_KEY)
-    if (!draft || !Array.isArray(draft.cart_items) || !draft.cart_items.length) return
-
+    stockScope.value = draft.stock_scope === PICK_ONLY ? PICK_ONLY : DUAL_ZONE
+    pendingCheckout.value = draft.pending_checkout || null
+    legacyUnconfirmed.value = draft.legacy_unconfirmed === true
     const savedAt = Number(draft.saved_at || 0)
-    if (savedAt && Date.now() - savedAt > 24 * 60 * 60 * 1000) {
-      removeSaleDraft()
+    if (!pendingCheckout.value && !legacyUnconfirmed.value && savedAt && Date.now() - savedAt > 24 * 60 * 60 * 1000) {
+      getStorage()?.removeStorageSync(draftKey.value)
       return
     }
 
     cartItems.value = draft.cart_items.map(normalizeDraftCartItem)
     selectedCustomer.value = draft.selected_customer || null
     customerKeyword.value = draft.customer_keyword || ''
-    srcBillNo.value = draft.src_bill_no || makeReceiptNo()
+    srcBillNo.value = draft.src_bill_no ?? makeReceiptNo()
     const draftDate = draft.sale_date ? new Date(draft.sale_date) : new Date()
     saleDate.value = Number.isNaN(draftDate.getTime()) ? new Date() : draftDate
     remark.value = draft.remark || ''
@@ -1635,8 +1768,7 @@ function restoreSaleDraft() {
     setScanFeedback(`已恢复未结账购物车：${cartItems.value.length}项`, 'info')
     refreshCartStock({ force: true, silent: true })
   } catch (e) {
-    console.warn('restore POS draft failed', e)
-    removeSaleDraft()
+    showPosError(e, '收银草稿读取失败，请核对原小票')
   }
 }
 
@@ -1659,17 +1791,20 @@ function normalizeDraftCartItem(item) {
     ...item,
     available_qty: item.available_qty || 0,
     qty: String(item.qty || '1'),
-    price: priceInputText(item.price),
+    cart_id: item.cart_id || createIdempotencyUuid(),
+    price: hasCatalogPrice(item.price) ? priceInputText(item.price) : '',
     amount: item.amount === undefined || item.amount === null || item.amount === ''
       ? ''
       : amountInputText(item.amount),
     pricing_mode: item.pricing_mode === 'amount' ? 'amount' : 'price',
-    list_price: item.list_price ?? item.price,
+    list_price: Object.prototype.hasOwnProperty.call(item, 'list_price') ? item.list_price : item.price,
     price_error: '',
     unit_options: options,
     unit_labels: unitLabels,
     unit_index: unitIndex,
   }
+  // A pending sale belongs to the exact pricing and rounding rules used when it was sent.
+  if ((legacyUnconfirmed.value || pendingCheckout.value) && normalized.amount !== '') return normalized
   return normalizeCartLine(normalized, { silent: true })
 }
 
@@ -1716,13 +1851,13 @@ function stockAvailableQty(source) {
   if (!source || typeof source !== 'object') return 0
 
   const candidates = [
+    source.available_qty,
     source.pos_available_qty,
     source.sale_available_qty,
     source.sales_available_qty,
     source.picking_available_qty,
     source.pick_available_qty,
     source.available_qty_display,
-    source.available_qty,
     source.available,
   ]
 
@@ -2744,17 +2879,29 @@ function exportShift(shift) {
   )
 }
 
+function applyCurrentShift(shift) {
+  currentShift.value = shift || null
+  if (shift?.cashier_id && shift?.warehouse_id) {
+    shiftIdentity.value = { id: shift.cashier_id, warehouse_id: shift.warehouse_id }
+  }
+  syncShiftActualInputs(currentShift.value)
+}
+
 async function loadCurrentShift() {
   if (shiftLoading.value) return
+  const access = auth.access
   shiftLoading.value = true
   try {
     const res = await api.posShiftCurrent()
-    currentShift.value = res.shift || null
-    syncShiftActualInputs(currentShift.value)
+    if (auth.access !== access) return
+    applyCurrentShift(res.shift)
+    if (!draftKey.value && access) await auth.ensureProfile()
   } catch (e) {
-    showPosError(e, '班次加载失败')
+    if (auth.access !== access) return
+    if (!draftKey.value && access) await auth.ensureProfile().catch(() => {})
+    if (auth.access === access) showPosError(e, '班次加载失败')
   } finally {
-    shiftLoading.value = false
+    if (auth.access === access) shiftLoading.value = false
   }
 }
 
@@ -2780,30 +2927,32 @@ async function loadShiftHistory(options = {}) {
 
 async function openCurrentShift() {
   if (shiftLoading.value) return
+  const access = auth.access
   shiftLoading.value = true
   try {
     const res = await api.posShiftOpen({
       opening_cash_amount: shiftOpeningCashAmount.value || '0.00',
     })
-    currentShift.value = res.shift || null
-    syncShiftActualInputs(currentShift.value)
+    if (access !== auth.access) return
+    applyCurrentShift(res.shift)
     loadShiftHistory({ force: true, silent: true })
     uni.showToast({ title: '开班成功', icon: 'none' })
   } catch (e) {
-    showPosError(e, '开班失败')
+    if (access === auth.access) showPosError(e, '开班失败')
   } finally {
-    shiftLoading.value = false
+    if (access === auth.access) shiftLoading.value = false
   }
 }
 
 async function closeCurrentShift() {
   if (!currentShift.value?.id || shiftLoading.value) return
+  const access = auth.access
   const confirmed = await confirmDialog({
     title: '确认交班',
     content: `现金应点 ${money(shiftSummary.value.expected_cash_amount)}，确认交班？`,
     confirmText: '交班',
   })
-  if (!confirmed) return
+  if (!confirmed || access !== auth.access) return
   shiftLoading.value = true
   try {
     await api.posShiftClose(currentShift.value.id, {
@@ -2814,41 +2963,42 @@ async function closeCurrentShift() {
       })),
       remark: '',
     })
-    currentShift.value = null
-    syncShiftActualInputs(currentShift.value)
+    if (access !== auth.access) return
+    applyCurrentShift(null)
     uni.showToast({ title: '交班完成', icon: 'none' })
     loadShiftHistory({ force: true, silent: true })
     loadPosStats({ force: true, silent: true })
     loadPosSaleHistory({ force: true, silent: true })
   } catch (e) {
-    showPosError(e, '交班失败')
+    if (access === auth.access) showPosError(e, '交班失败')
   } finally {
-    shiftLoading.value = false
+    if (access === auth.access) shiftLoading.value = false
   }
 }
 
 async function reopenShift(shift) {
   if (!shift?.id || shiftLoading.value) return
+  const access = auth.access
   const confirmed = await confirmDialog({
     title: '确认重开班次',
     content: `重开 ${shift.shift_no} 后可继续结账，交班时会重新汇总该班次销售。`,
     confirmText: '重开',
   })
-  if (!confirmed) return
+  if (!confirmed || access !== auth.access) return
 
   shiftLoading.value = true
   try {
     const res = await api.posShiftReopen(shift.id, {
       reason: `POS前端重开 ${formatDateTime(new Date())}`,
     })
-    currentShift.value = res.shift || null
-    syncShiftActualInputs(currentShift.value)
+    if (access !== auth.access) return
+    applyCurrentShift(res.shift)
     uni.showToast({ title: '班次已重开', icon: 'none' })
     await loadShiftHistory({ force: true, silent: true })
   } catch (e) {
-    showPosError(e, '重开班次失败')
+    if (access === auth.access) showPosError(e, '重开班次失败')
   } finally {
-    shiftLoading.value = false
+    if (access === auth.access) shiftLoading.value = false
   }
 }
 
@@ -2865,8 +3015,22 @@ async function reprintSale(sale) {
   }
 }
 
+function restoreReturns() {
+  try {
+    savedReturns.value = listPendingReturns(getStorage(), returnScope.value)
+    returnRecoveryError.value = ''
+  } catch {
+    savedReturns.value = {}
+    returnRecoveryError.value = '无法读取待确认退货。请保留本机数据，重新读取后再操作。'
+  }
+}
+
+function returnBlocked(saleId) {
+  return !returnScope.value || !!returnRecoveryError.value || !!savedReturns.value[saleId] || returnSubmitting.value
+}
+
 function saleCanReturn(sale = {}) {
-  if (!sale?.id || isVoidedSale(sale)) return false
+  if (!sale?.id || returnBlocked(sale.id) || isVoidedSale(sale)) return false
   const lines = Array.isArray(sale.lines) ? sale.lines : []
   return lines.some((line) => numberFromValue(line.returnable_qty ?? line.qty, 0) > 0)
 }
@@ -2887,9 +3051,12 @@ function returnLineAmount(line = {}) {
 }
 
 async function startReturnSale(sale) {
+  restoreReturns()
   if (!saleCanReturn(sale)) return
+  const sequence = ++returnDetailSequence
   try {
     const detail = await api.posSaleDetail(sale.id)
+    if (sequence !== returnDetailSequence || returnBlocked(sale.id)) return
     const lines = Array.isArray(detail.lines) ? detail.lines : []
     const returnableLines = lines
       .filter((line) => numberFromValue(line.returnable_qty ?? line.qty, 0) > 0)
@@ -2911,7 +3078,7 @@ async function startReturnSale(sale) {
     returnRefundReferenceNo.value = ''
     returnRefundAmount.value = '0.00'
   } catch (e) {
-    showPosError(e, '加载退货销售单失败')
+    if (sequence === returnDetailSequence) showPosError(e, '加载退货销售单失败')
   }
 }
 
@@ -2922,7 +3089,6 @@ function cancelReturnSale() {
   returnRefundMethod.value = 'CASH'
   returnRefundAmount.value = ''
   returnRefundReferenceNo.value = ''
-  returnSubmitting.value = false
 }
 
 function normalizeReturnLine(index) {
@@ -2938,67 +3104,112 @@ function changeReturnPaymentMethod(event) {
   returnRefundMethod.value = paymentMethods[Number(event?.detail?.value || 0)]?.value || 'CASH'
 }
 
+// A retry uses the stored body even if the shift closed or the sale no longer has returnable lines.
+async function sendPendingReturn(record, scope, session) {
+  const body = record.payload
+  const storage = getStorage()
+  try {
+    const response = await api.posReturnCreate(body)
+    if (!Number.isSafeInteger(response?.return?.id) || response.return.id <= 0 ||
+        String(response.return.sale_id) !== String(body.sale_id)) {
+      throw new Error('退货回执不完整')
+    }
+  } catch (error) {
+    if (session !== returnSession) return
+    if (definitelyRejectedReturn(error)) {
+      clearPendingReturn(storage, scope, body)
+      showPosError(error, '退货未受理')
+    } else {
+      uni.showToast({ title: error?.data?.idempotency_key ? '原请求编号冲突，请核对原退货单' : '退货结果待确认，请继续确认原请求', icon: 'none' })
+    }
+    return
+  }
+
+  if (session !== returnSession) return
+  clearPendingReturn(storage, scope, body)
+  if (pendingReturnSale.value?.id === body.sale_id) cancelReturnSale()
+  uni.showToast({ title: '退货完成', icon: 'none' })
+  await Promise.all([
+    loadPosSaleHistory({ force: true, silent: true }), loadPosStats({ force: true, silent: true }),
+    loadCurrentShift(), refreshCartStock({ force: true, silent: true }),
+  ])
+}
+
+async function retryReturn(entry) {
+  if (returnSubmitting.value || !returnScope.value || returnRecoveryError.value) return
+  const session = returnSession
+  const scope = returnScope.value
+  returnSubmitting.value = true
+  try {
+    const record = readPendingReturn(getStorage(), scope, entry.saleId)
+    if (record && record.payload.idempotency_key === entry.record?.payload.idempotency_key) {
+      await sendPendingReturn(record, scope, session)
+    }
+  } catch (error) {
+    if (session === returnSession) showPosError(error, '无法核对原退货请求')
+  } finally {
+    if (session === returnSession) {
+      returnSubmitting.value = false
+      restoreReturns()
+    }
+  }
+}
+
 async function confirmReturnSale() {
-  if (!pendingReturnSale.value?.id || returnSubmitting.value) return
+  const sale = pendingReturnSale.value
+  if (!sale?.id || returnBlocked(sale.id)) return
   const lines = returnLines.value
-    .map((line) => ({
-      sale_line_id: line.id,
-      qty: numberFromValue(line.return_qty, 0),
-    }))
-    .filter((line) => line.qty > 0)
+    .filter(line => numberFromValue(line.return_qty, 0) > 0)
+    .map(line => ({ sale_line_id: line.id, qty: Number(line.return_qty).toFixed(3) }))
   if (!lines.length) {
     uni.showToast({ title: '请输入退货数量', icon: 'none' })
     return
   }
-  if (!(returnReason.value || '').trim()) {
+  const reason = returnReason.value.trim()
+  if (!reason) {
     uni.showToast({ title: '请输入退货原因', icon: 'none' })
     return
   }
-  const refundAmount = numberFromValue(returnRefundAmount.value, 0)
-  if (!moneyEqual(refundAmount, returnTotalAmount.value)) {
+  const amount = returnTotalAmount.value
+  if (!moneyEqual(numberFromValue(returnRefundAmount.value, 0), amount)) {
     uni.showToast({ title: '退款金额必须等于退货金额', icon: 'none' })
     return
   }
-  const confirmed = await confirmDialog({
-    title: '确认退货',
-    content: `退货金额 ${money(returnTotalAmount.value)}，确认退货并记录退款？`,
-    confirmText: '退货',
-  })
-  if (!confirmed) return
-
+  const refunds = amount > 0 ? [{
+    method: returnRefundMethod.value,
+    amount: plainMoney(amount),
+    reference_no: returnRefundReferenceNo.value || '',
+  }] : []
+  const scope = returnScope.value
+  const session = returnSession
   returnSubmitting.value = true
   try {
-    await api.posReturnCreate({
-      sale_id: pendingReturnSale.value.id,
-      reason: returnReason.value,
-      idempotency_key: `${pendingReturnSale.value.id}-${Date.now()}`,
-      lines: lines.map((line) => ({
-        sale_line_id: line.sale_line_id,
-        qty: line.qty.toFixed(3),
-      })),
-      refunds: [
-        {
-          method: returnRefundMethod.value,
-          amount: plainMoney(refundAmount),
-          reference_no: returnRefundReferenceNo.value || '',
-        },
-      ],
+    const confirmed = await confirmDialog({
+      title: '确认退货',
+      content: amount > 0 ? `退货金额 ${money(amount)}，确认退货并记录退款？` : '仅退回商品，无需退款。',
+      confirmText: '退货',
     })
-    cancelReturnSale()
-    uni.showToast({ title: '退货完成', icon: 'none' })
-    await loadPosSaleHistory({ force: true, silent: true })
-    await loadPosStats({ force: true, silent: true })
-    await loadCurrentShift()
-    await refreshCartStock({ force: true, silent: true })
-  } catch (e) {
-    showPosError(e, '退货失败')
+    if (!confirmed || session !== returnSession || pendingReturnSale.value?.id !== sale.id) return
+    const payload = { sale_id: sale.id, lines, refunds, reason, idempotency_key: createIdempotencyUuid() }
+    const labels = Object.fromEntries(returnLines.value.filter(line => Number(line.return_qty) > 0).map(line => [
+      line.id, { name: line.product_display_name || line.product_name || line.product_code, unit: basicUnit(line) },
+    ]))
+    const record = storePendingReturn(getStorage(), scope, payload, saleDisplayNo(sale), labels)
+    savedReturns.value = { ...savedReturns.value, [sale.id]: { saleId: sale.id, record } }
+    await sendPendingReturn(record, scope, session)
+  } catch (error) {
+    if (session === returnSession) showPosError(error, '退货记录保存或读取失败，请核对原单')
   } finally {
-    returnSubmitting.value = false
+    if (session === returnSession) {
+      returnSubmitting.value = false
+      restoreReturns()
+    }
   }
 }
 
 function startVoidSale(sale) {
-  if (!sale || isVoidedSale(sale)) return
+  restoreReturns()
+  if (!sale || returnBlocked(sale.id) || isVoidedSale(sale)) return
   pendingVoidSale.value = sale
   voidReason.value = ''
 }
@@ -3011,7 +3222,8 @@ function cancelVoidSale() {
 async function confirmVoidSale() {
   const sale = pendingVoidSale.value
   const reason = (voidReason.value || '').trim()
-  if (!sale?.id) return
+  if (!sale?.id || returnBlocked(sale.id)) return
+  const session = returnSession
   if (!reason) {
     uni.showToast({ title: '请输入作废原因', icon: 'none' })
     return
@@ -3021,7 +3233,9 @@ async function confirmVoidSale() {
     content: `确定作废 ${saleDisplayNo(sale)}？库存将按原扣减明细恢复。`,
     confirmText: '作废',
   })
-  if (!confirmed) return
+  if (!confirmed || session !== returnSession) return
+  restoreReturns()
+  if (returnBlocked(sale.id)) return
 
   try {
     const res = await api.posSaleVoid(sale.id, { reason })
@@ -3288,6 +3502,7 @@ function triggerQuickScan() {
 }
 
 function enqueueProductLookup(keyword, options = {}) {
+  if (pendingCheckout.value || legacyUnconfirmed.value || submitting.value) return
   const value = String(keyword || '').trim()
   if (!value) {
     focusProductInput()
@@ -3346,7 +3561,7 @@ async function drainProductLookupQueue() {
 }
 
 async function fetchProductsByBarcode(barcode) {
-  return fetchAllPosProducts({ ...POS_STOCK_QUERY, barcode })
+  return fetchAllPosProducts({ ...queryStockScope(stockScope.value), barcode })
 }
 
 async function fetchAllPosProducts(params) {
@@ -3411,7 +3626,7 @@ async function lookupProductKeyword(keyword) {
   if (exactRows.length) return exactRows
 
   const rows = await fetchAllPosProducts({
-    ...POS_STOCK_QUERY,
+    ...queryStockScope(stockScope.value),
     search: value,
   })
 
@@ -3466,42 +3681,39 @@ function hasAvailableStock(product) {
 }
 
 async function refreshCartStock(options = {}) {
-  if (cartStockRefreshing || !cartItems.value.length) return
+  if (!cartItems.value.length || pendingCheckout.value || legacyUnconfirmed.value) return
+  if (cartStockRefresh) return cartStockRefresh
 
   const now = Date.now()
   if (!options.force && now - lastCartStockRefreshAt < 3000) return
-
-  cartStockRefreshing = true
   lastCartStockRefreshAt = now
+  const requestScope = stockScope.value
+  const refresh = Promise.all(cartItems.value.map(async (item) => {
+    const keyword = item.code || item.sku || item.name
+    if (!keyword) return
 
-  try {
-    await Promise.all(cartItems.value.map(async (item) => {
-      const keyword = item.code || item.sku || item.name
-      if (!keyword) return
-
-      try {
-        const rows = normalizePage(await api.posProducts({
-          ...POS_STOCK_QUERY,
-          search: keyword,
-          page: 1,
-          page_size: 20,
-        }))
-        const product = rows.find((row) =>
-          row.id === item.product_id ||
-          row.code === item.code ||
-          (item.sku && row.sku === item.sku)
-        )
-
-        if (product) {
-          applyProductSnapshotToCartItem(item, product)
-          normalizeCartLine(item, { silent: options.silent === true })
-        }
-      } catch (e) {
-        console.warn('refresh POS cart stock failed', item.code || item.product_id, e)
+    try {
+      const rows = await fetchAllPosProducts({
+        ...queryStockScope(requestScope),
+        search: keyword,
+        include_out_of_stock: 1,
+      })
+      if (stockScope.value !== requestScope || !cartItems.value.includes(item) || pendingCheckout.value) return
+      const product = rows.find(row => String(row.id) === String(item.product_id))
+      if (product) {
+        applyProductSnapshotToCartItem(item, product)
+      } else {
+        item.available_qty = 0
       }
-    }))
+    } catch (e) {
+      console.warn('refresh POS cart stock failed', item.code || item.product_id, e)
+    }
+  }))
+  cartStockRefresh = refresh
+  try {
+    await refresh
   } finally {
-    cartStockRefreshing = false
+    if (cartStockRefresh === refresh) cartStockRefresh = null
   }
 }
 
@@ -3521,6 +3733,17 @@ function applyProductSnapshotToCartItem(item, product) {
   item.base_unit_code = product.base_unit?.code || item.base_unit_code || ''
   item.base_unit_name = product.base_unit?.name || product.base_unit?.code || item.base_unit_name || ''
   item.available_qty = stockAvailableQty(product)
+  if (hasCatalogPrice(item.list_price) && !hasCatalogPrice(product.price)) {
+    item.price = ''
+    item.amount = ''
+    item.pricing_mode = 'price'
+    item.is_gift = false
+    item.onsite_price = false
+  } else if (!hasCatalogPrice(item.list_price) && hasCatalogPrice(product.price)) {
+    item.price = priceInputText(product.price)
+    item.pricing_mode = 'price'
+    item.onsite_price = false
+  }
   item.list_price = product.price
   item.min_price = product.min_price
   item.max_discount = product.max_discount
@@ -3529,9 +3752,11 @@ function applyProductSnapshotToCartItem(item, product) {
   item.unit_index = matchedUnitIndex >= 0
     ? matchedUnitIndex
     : Math.min(Math.max(Number(item.unit_index || 0), 0), Math.max(unitLabels.length - 1, 0))
+  normalizeLinePricing(item)
 }
 
 function addToCart(product) {
+  if (pendingCheckout.value || legacyUnconfirmed.value || submitting.value) return false
   const available = stockAvailableQty(product)
   const productName = productDisplayName(product)
   const options = unitOptions(product)
@@ -3545,12 +3770,13 @@ function addToCart(product) {
     return false
   }
 
-  const exists = cartItems.value.find((item) => item.product_id === product.id)
+  const existingQty = cartProductQuantity(product.id)
+  const exists = cartItems.value.find((item) => item.product_id === product.id && !item.is_gift)
   if (exists) {
     applyProductSnapshotToCartItem(exists, product)
     const existsAddBaseQty = toPositiveNumber(selectedUnit(exists).multiplier)
 
-    if (Number(lineBaseQty(exists) || 0) + Number(existsAddBaseQty || 0) > Number(exists.available_qty || 0)) {
+    if (existingQty + existsAddBaseQty > Number(exists.available_qty || 0)) {
       setScanFeedback(`库存不足：${exists.name}`, 'error')
       uni.showToast({ title: '数量超过可售库存，不能继续加入', icon: 'none' })
       focusProductInput()
@@ -3565,7 +3791,7 @@ function addToCart(product) {
     return true
   }
 
-  if (addBaseQty > available) {
+  if (existingQty + addBaseQty > available) {
     setScanFeedback(`库存不足：${productName}`, 'error')
     uni.showToast({ title: '库存不足，不能加入购物车', icon: 'none' })
     focusProductInput()
@@ -3574,6 +3800,7 @@ function addToCart(product) {
 
   const unitLabels = options.map((option) => option.label || (option.kind === 'base' ? '基本单位' : '包装'))
   const item = {
+    cart_id: createIdempotencyUuid(),
     product_id: product.id,
     owner_id: product.owner_id,
     code: product.code || '',
@@ -3589,7 +3816,8 @@ function addToCart(product) {
     max_discount: product.max_discount,
     list_price: product.price,
     qty: '1',
-    price: priceInputText(product.price),
+    price: hasCatalogPrice(product.price) ? priceInputText(product.price) : '',
+    is_gift: false,
     amount: '',
     pricing_mode: 'price',
     price_error: '',
@@ -3632,15 +3860,24 @@ function lineAmount(item) {
 }
 
 function calculatedLineAmount(item) {
-  const price = numberFromValue(item.price, 0)
-  return roundDecimal(checkoutBaseQty(item) * price, 2)
+  return saleLineAmount(payloadQty(item), item.price)
 }
 
 function derivedLinePrice(item) {
-  const baseQty = checkoutBaseQty(item)
-  const amount = numberFromValue(item.amount, 0)
-  if (baseQty <= 0 || amount <= 0) return 0
-  return roundDecimal(amount / baseQty, 4)
+  return negotiatedUnitPrice(payloadQty(item), item.amount)
+}
+
+function cartProductQuantity(productId) {
+  return roundDecimal(cartItems.value.filter(item => item.product_id === productId)
+    .reduce((sum, item) => sum + checkoutBaseQty(item), 0), 3)
+}
+
+function toggleGift(item) {
+  if (!hasCatalogPrice(item.list_price) || pendingCheckout.value || legacyUnconfirmed.value || submitting.value) return
+  item.is_gift = !item.is_gift
+  item.pricing_mode = 'price'
+  item.price = item.is_gift ? '0.0000' : priceInputText(item.list_price)
+  normalizeCartLine(item)
 }
 
 function minimumLinePrice(item) {
@@ -3670,16 +3907,24 @@ function validateLinePricing(item) {
 
   if (baseQty <= 0) {
     error = '数量必须大于0'
+  } else if (item.is_gift) {
+    if (!hasCatalogPrice(item.list_price) || price !== 0 || amount !== 0) error = '仅已定价商品可明确赠送'
+  } else if (!hasCatalogPrice(item.price) || (!hasCatalogPrice(item.list_price) && price <= 0)) {
+    error = '未定价，请输入正单价'
+  } else if (!hasCatalogPrice(item.list_price) && !item.onsite_price) {
+    error = '请重新录入现场正单价'
+  } else if (!hasCatalogPrice(item.list_price) && hasCatalogPrice(item.max_discount)) {
+    error = '请先维护计算折扣所需的商品原价'
   } else if (amount < 0) {
     error = '金额不能小于0'
   } else if (price < 0) {
     error = '单价不能小于0'
-  } else if (amount === 0 && price > 0) {
-    error = '赠品单价必须为0'
+  } else if (amount === 0 || price === 0) {
+    error = '普通销售须有正单价，行金额至少为0.01'
   } else if (amount > 0) {
     const lowest = minimumLinePrice(item)
     if (lowest !== null) {
-      const minimumAmount = roundDecimal(baseQty * lowest, 2)
+      const minimumAmount = saleLineAmount(payloadQty(item), lowest)
       if (price + 0.00005 < lowest || amount + 0.005 < minimumAmount) {
         error = `最低 ${plainPrice(lowest)}`
       }
@@ -3697,7 +3942,7 @@ function normalizeCartLine(item, options = {}) {
   let saleQty = toPositiveNumber(item.qty)
   const baseQty = saleQty * multiplier
 
-  if (available > 0 && baseQty > available) {
+  if (!legacyUnconfirmed.value && !pendingCheckout.value && available > 0 && baseQty > available) {
     saleQty = Math.floor((available / multiplier) * 1000) / 1000
     if (!options.silent) {
       uni.showToast({ title: '数量超过可售库存，已调整', icon: 'none' })
@@ -3705,42 +3950,55 @@ function normalizeCartLine(item, options = {}) {
   }
 
   item.qty = formatSaleQty(saleQty, item)
+  normalizeLinePricing(item)
+  return item
+}
+
+function normalizeLinePricing(item) {
   if (item.pricing_mode === 'amount') {
     item.amount = amountInputText(item.amount)
     item.price = priceInputText(derivedLinePrice(item))
   } else {
     item.pricing_mode = 'price'
-    item.price = priceInputText(item.price)
+    item.price = hasCatalogPrice(item.price) ? priceInputText(item.price) : ''
     item.amount = amountInputText(calculatedLineAmount(item))
   }
   validateLinePricing(item)
-  return item
 }
 
-function normalizeQuantityLine(index) {
+function beginCartInput() {
+  cartInputActive = true
+  productFocusRequest += 1
+}
+
+function normalizeQuantityLine(index, event) {
+  cartInputActive = false
   const item = cartItems.value[index]
-  if (item) normalizeCartLine(item)
+  if (!item) return
+  if (event?.detail?.value !== undefined) item.qty = event.detail.value
+  normalizeCartLine(item)
 }
 
 function onLinePriceInput(index, event) {
   const item = cartItems.value[index]
-  if (!item) return
+  if (!item || item.is_gift || legacyUnconfirmed.value || pendingCheckout.value) return
   item.pricing_mode = 'price'
   item.price = String(event?.detail?.value ?? '')
+  item.onsite_price = !hasCatalogPrice(item.list_price) && Number(item.price) > 0
   item.amount = amountInputText(calculatedLineAmount(item))
   validateLinePricing(item)
 }
 
 function normalizePriceLine(index) {
+  cartInputActive = false
   const item = cartItems.value[index]
   if (!item) return
-  item.pricing_mode = 'price'
   normalizeCartLine(item)
 }
 
 function onLineAmountInput(index, event) {
   const item = cartItems.value[index]
-  if (!item) return
+  if (!item || item.is_gift || !hasCatalogPrice(item.list_price) || legacyUnconfirmed.value || pendingCheckout.value) return
   item.pricing_mode = 'amount'
   item.amount = String(event?.detail?.value ?? '')
   item.price = priceInputText(derivedLinePrice(item))
@@ -3748,9 +4006,9 @@ function onLineAmountInput(index, event) {
 }
 
 function normalizeAmountLine(index) {
+  cartInputActive = false
   const item = cartItems.value[index]
   if (!item) return
-  item.pricing_mode = 'amount'
   normalizeCartLine(item)
 }
 
@@ -3809,7 +4067,7 @@ function confirmResetSale() {
     confirmText: '清空',
     cancelText: '取消',
     success: (res) => {
-      if (res.confirm) {
+      if (res.confirm && !pendingCheckout.value && !submitting.value) {
         resetSale()
       }
     },
@@ -3817,7 +4075,13 @@ function confirmResetSale() {
 }
 
 function resetSale(options = {}) {
-  removeSaleDraft()
+  if (!options.preserveDraft) removeSaleDraft()
+  cartInputActive = false
+  cartStockRefresh = null
+  lastCartStockRefreshAt = 0
+  pendingCheckout.value = null
+  legacyUnconfirmed.value = false
+  stockScope.value = DUAL_ZONE
   selectedCustomer.value = null
   customerDebtBalance.value = 0
   repaymentAmount.value = ''
@@ -3853,7 +4117,7 @@ function resetSale(options = {}) {
 }
 
 async function validateBeforeCheckout() {
-  if (!isActiveShift(currentShift.value)) {
+  if (!legacyUnconfirmed.value && !isActiveShift(currentShift.value)) {
     uni.showToast({ title: '请先开班后再结账', icon: 'none' })
     return false
   }
@@ -3862,14 +4126,19 @@ async function validateBeforeCheckout() {
     return false
   }
 
+  const previousTotal = totalAmount.value
   await refreshCartStock({ force: true, silent: true })
+  if (previousTotal !== totalAmount.value) {
+    uni.showToast({ title: '商品价格已更新，请重新核对应收', icon: 'none' })
+    return false
+  }
 
-  const overStock = cartItems.value.find((item) => Number(lineBaseQty(item)) > Number(item.available_qty || 0))
-  if (overStock) {
+  const overStock = cartItems.value.find((item) => cartProductQuantity(item.product_id) > Number(item.available_qty || 0))
+  if (!legacyUnconfirmed.value && overStock) {
     uni.showToast({ title: `${overStock.code} 可售库存不足`, icon: 'none' })
     return false
   }
-  const invalidPricing = cartItems.value.find((item) => !validateLinePricing(item))
+  const invalidPricing = !legacyUnconfirmed.value && cartItems.value.find((item) => !validateLinePricing(item))
   if (invalidPricing) {
     uni.showToast({ title: `${invalidPricing.code} ${invalidPricing.price_error}`, icon: 'none' })
     return false
@@ -3896,45 +4165,65 @@ async function validateBeforeCheckout() {
   return true
 }
 
-async function checkout() {
-  if (!(await validateBeforeCheckout())) return
-  submitting.value = true
-  const preparedPrintWindow = autoPrintSale.value && !useBackendSalePrint.value ? openSalePrintWindow() : null
-  try {
-    syncNonCashAmount()
-    const payload = {
-      src_bill_no: srcBillNo.value || '',
-      idempotency_key: idempotencyKey.value || '',
-      stock_zone_type: POS_STOCK_QUERY.zone_type,
-      remark: remark.value || '',
-      items: cartItems.value.map((item) => ({
-        product_id: item.product_id,
-        qty: payloadQty(item),
-        price: plainPrice(item.price),
-        amount: plainMoney(item.amount),
-      })),
+function checkoutPayload() {
+  const payload = {
+    src_bill_no: srcBillNo.value || '',
+    idempotency_key: idempotencyKey.value || '',
+    ...checkoutStockScope(stockScope.value),
+    remark: remark.value || '',
+    items: cartItems.value.map((item) => ({
+      product_id: item.product_id,
+      qty: payloadQty(item),
+      price: plainPrice(item.price),
+      ...(legacyUnconfirmed.value || item.pricing_mode === 'amount' ? { amount: plainMoney(item.amount) } : {}),
+      ...(!legacyUnconfirmed.value && item.is_gift ? { is_gift: true } : {}),
+      ...(!legacyUnconfirmed.value && item.onsite_price ? { onsite_price: true } : {}),
+    })),
+  }
+  if (splitPaymentEnabled.value) {
+    payload.payments = paymentLines.value.map((line) => ({
+      method: line.method,
+      amount: plainMoney(line.amount),
+      amount_received: plainMoney(line.amount_received || line.amount),
+      reference_no: line.reference_no || '',
+    }))
+  } else {
+    payload.payment = {
+      method: paymentMethod.value,
+      amount_received: Number(receivedAmount.value || 0).toFixed(2),
+      reference_no: paymentReferenceNo.value || '',
     }
-    if (splitPaymentEnabled.value) {
-      payload.payments = paymentLines.value.map((line) => ({
-        method: line.method,
-        amount: plainMoney(line.amount),
-        amount_received: plainMoney(line.amount_received || line.amount),
-        reference_no: line.reference_no || '',
-      }))
-    } else {
-      payload.payment = {
-        method: paymentMethod.value,
-        amount_received: Number(receivedAmount.value || 0).toFixed(2),
-        reference_no: paymentReferenceNo.value || '',
+  }
+  if (selectedCustomer.value) {
+    payload.customer_id = selectedCustomer.value.id
+  }
+  return payload
+}
+
+async function checkout() {
+  if (submitting.value || !draftKey.value) return
+  const key = draftKey.value
+  submitting.value = true
+  let preparedPrintWindow = null
+  try {
+    if (!pendingCheckout.value) {
+      if (!(await validateBeforeCheckout()) || key !== draftKey.value) return
+      syncNonCashAmount()
+      pendingCheckout.value = checkoutPayload()
+      try {
+        saveSaleDraft({ required: true })
+      } catch (error) {
+        pendingCheckout.value = null
+        throw error
       }
     }
-    if (selectedCustomer.value) {
-      payload.customer_id = selectedCustomer.value.id
-    }
+    const payload = pendingCheckout.value
+    preparedPrintWindow = autoPrintSale.value && !useBackendSalePrint.value ? openSalePrintWindow() : null
     let printData = null
     const result = await executeCheckoutFlow({
       submit: () => api.posCheckout(payload),
       commit: async (res) => {
+        if (key !== draftKey.value) return
         try {
           const orders = Array.isArray(res.orders) ? res.orders : []
           printData = buildSalePrintData(res)
@@ -3964,14 +4253,23 @@ async function checkout() {
         }
       },
       shouldPrint: autoPrintSale.value,
-      print: () => printSaleBySystemSetting(
+      print: () => key === draftKey.value && printSaleBySystemSetting(
         printData,
         preparedPrintWindow,
         '结账后前端自动打印',
       ),
     })
 
+    if (key !== draftKey.value) {
+      preparedPrintWindow?.close()
+      return
+    }
     if (result.status === CHECKOUT_STATUS.CHECKOUT_FAILED) {
+      if (checkoutDefinitelyRejected(result.error)) {
+        pendingCheckout.value = null
+        legacyUnconfirmed.value = false
+        saveSaleDraft()
+      }
       if (preparedPrintWindow && !preparedPrintWindow.closed) preparedPrintWindow.close()
       showPosError(result.error, '结账失败')
       console.error('pos checkout failed', result.error)
@@ -4033,10 +4331,12 @@ function onProductInput(event) {
 }
 
 function focusProductInput(delay = 80) {
+  if (cartInputActive) return
+  const request = ++productFocusRequest
   productInputFocus.value = false
   nextTick(() => {
     setTimeout(() => {
-      productInputFocus.value = true
+      if (!cartInputActive && productFocusRequest === request) productInputFocus.value = true
     }, delay)
   })
 }
@@ -4952,6 +5252,14 @@ button {
   display: block;
   overflow: visible;
   text-align: right;
+}
+
+.line-gift-button {
+  display: inline-block;
+  margin: 0;
+  padding: 4rpx 10rpx;
+  font-size: 24rpx;
+  line-height: 1.5;
 }
 
 .cart-goods-name,

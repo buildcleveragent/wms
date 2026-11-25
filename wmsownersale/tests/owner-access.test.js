@@ -5,6 +5,13 @@ import { buildOwnerMenu } from '@/utils/ownerAccess'
 const keys = (items) => items.map((item) => item.key)
 
 describe('货主端共享权限矩阵', () => {
+  it('业务员使用相同的出入库统计入口', () => {
+    const menu = buildOwnerMenu({roles:['owner_salesperson'],capabilities:{
+      can_view_owner_inventory:true,can_view_owner_operations:true,
+    }})
+    expect(menu.reports.find(r => r.key === 'stock_history')?.path).toBe('/pages/reports/stock-history')
+    expect(keys(menu.reports)).not.toContain('operations')
+  })
   it('纯业务员显示开单、导入、模板和查询，不显示管理功能', () => {
     const menu = buildOwnerMenu({ roles: ['owner_salesperson'] })
     expect(keys(menu.orders)).toEqual([

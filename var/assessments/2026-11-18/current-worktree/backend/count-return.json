@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "run_id": "0ce7dfbfecc7486ba79bf5b01c721ccd",
+  "status": "FAIL",
+  "exit_code": 1,
+  "collected": 2,
+  "password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher",
+  "events_file": "/wms/var/assessments/2026-11-18/current-worktree/backend/count-return.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "FAIL": 1,
+    "PASS": 1
+  },
+  "subtest_counts": {},
+  "tests": {
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::ReturnTraceabilityProbe::test_customer_return_waits_while_count_is_frozen": {
+      "status": "FAIL",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "failed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_count_inventory_integration.py::test_frozen_count_blocks_real_pos_sale_and_releases_after_cancel": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

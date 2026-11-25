@@ -1,0 +1,9 @@
+{
+  "frozen_count_status": "RELEASED",
+  "lock_active_before_and_after_receipt": true,
+  "count_book": "5.0000",
+  "onhand_after": "6.0000",
+  "return_http_status": 200,
+  "return_status": "COMPLETED",
+  "posted_return_transactions": 1
+}

@@ -54,8 +54,9 @@
           <view class="meta">
             <text>货位：{{ ln.from_loc_code || '-' }}</text>
           </view>
-          <view v-if="ln.source_inventory" class="meta">
-            原货主商品：{{ ln.source_inventory.code }} / {{ ln.source_inventory.sku }}
+          <view v-if="ln.source_inventory && (ln.source_inventory.ownership_transfer || ln.source_inventory.batch_no || ln.source_inventory.expiry_date || ln.source_inventory.serial_no)" class="meta">
+            <text v-if="ln.source_inventory.ownership_transfer">原货主商品：{{ ln.source_inventory.code }} / {{ ln.source_inventory.sku }}</text>
+            <text v-else-if="ln.source_inventory.batch_no || ln.source_inventory.expiry_date || ln.source_inventory.serial_no">分配库存</text>
             <text v-if="ln.source_inventory.batch_no"> · 批次 {{ ln.source_inventory.batch_no }}</text>
             <text v-if="ln.source_inventory.expiry_date"> · 效期 {{ ln.source_inventory.expiry_date }}</text>
             <text v-if="ln.source_inventory.serial_no"> · 序列号 {{ ln.source_inventory.serial_no }}</text>

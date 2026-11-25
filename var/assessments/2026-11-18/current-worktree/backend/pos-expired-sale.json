@@ -1,0 +1,19 @@
+{
+  "sale_day": "2026-11-18",
+  "configured_expiry_basis": "MFG",
+  "expired_units_before": "4",
+  "valid_units_before": "6",
+  "checkout_status": 201,
+  "issued": [
+    {
+      "batch_no": "PICK",
+      "expiry_date": "2026-11-17",
+      "qty_delta": "-1.0000"
+    }
+  ],
+  "balances_after": {
+    "STORAGE": "6.0000",
+    "PICK": "3.0000",
+    "RETURN": "3.0000"
+  }
+}

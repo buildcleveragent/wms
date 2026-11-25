@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from allapp.accounts.audit import record_audit_event
+from allapp.accounts.owner_readonly import require_business_write
 from allapp.baseinfo.models import OwnerCustomerAddress
 from allapp.outbound.reorder import (
     SHANGHAI,
@@ -116,6 +117,8 @@ def address_payload(address):
 
 
 def address_binding(request, customer_id, *, lock=False):
+    if lock:
+        require_business_write(request.user)
     binding = scoped_binding(request.user, customer_id, lock=lock)
     if binding.code.upper() == "CASH":
         # Managers do not receive a directory of cash buyers' personal addresses.

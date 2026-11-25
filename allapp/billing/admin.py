@@ -13,6 +13,7 @@ from allapp.accounts.audit import object_snapshot, record_audit_event
 from allapp.baseinfo.models import Owner
 from allapp.locations.models import Warehouse
 
+from .enums import MetricType, SourceQuality
 from .models import (
     Bill,
     BillingAccrual,
@@ -29,6 +30,7 @@ from .models import (
     PaymentReceipt,
     ReceivableCollectionCase,
 )
+from .services.metrics import metric_job_coverage
 
 
 class PeriodImmutableAdminError(Exception):
@@ -42,7 +44,7 @@ class ScopedBillingAdminMixin:
     """Apply the same fail-closed owner/warehouse boundary used by billing APIs."""
 
     def _scope(self, request):
-        return AccessScope.for_user(request.user)
+        return AccessScope.for_request(request)
 
     def _has_financial_access(self, request):
         user = request.user
@@ -312,6 +314,7 @@ class BillingJobRunAdmin(ScopedBillingAdminMixin, admin.ModelAdmin):
         "warehouse",
         "service_date",
         "status",
+        "metric_progress",
         "attempts",
         "started_at",
         "finished_at",
@@ -324,6 +327,7 @@ class BillingJobRunAdmin(ScopedBillingAdminMixin, admin.ModelAdmin):
         "warehouse",
         "service_date",
         "status",
+        "metric_progress",
         "attempts",
         "started_at",
         "finished_at",
@@ -332,6 +336,34 @@ class BillingJobRunAdmin(ScopedBillingAdminMixin, admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+
+    @admin.display(description="日指标执行情况")
+    def metric_progress(self, obj):
+        coverage = metric_job_coverage(obj.summary)
+        if coverage is None:
+            return "缺少逐项执行记录，覆盖范围待核"
+        outcomes = {
+            "created": "已生成",
+            "updated": "已更新",
+            "noop": "已核算",
+            "skipped_zero": "零值",
+            "deleted_zero": "零值，已清理旧值",
+            "skipped_manual": "保留人工值",
+            "unsupported": "缺少计算来源",
+        }
+        requested = obj.summary.get("requested_metric_types") or []
+        pending = obj.summary.get("retry_metric_types", [])
+        results = []
+        for metric in MetricType:
+            row = coverage.get(metric, {})
+            outcome = outcomes.get(row.get("action"), "尚未执行")
+            if row.get("source_quality") == SourceQuality.APPROXIMATE:
+                outcome += "（近似）"
+            if metric in pending:
+                running = obj.status == BillingJobRun.Status.RUNNING and metric in requested
+                outcome += "（执行中）" if running else "（待重试）"
+            results.append(f"{metric.label} {outcome}")
+        return " / ".join(results)
 
 
 @admin.register(BillingPeriod)

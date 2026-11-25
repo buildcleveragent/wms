@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "run_id": "781395a33a4c4ada843e3712584f1280",
+  "status": "FAIL",
+  "exit_code": 1,
+  "collected": 2,
+  "password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher",
+  "events_file": "/wms/var/assessments/2026-11-18/current-worktree/backend/commerce-recheck.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "FAIL": 2
+  },
+  "subtest_counts": {},
+  "tests": {
+    "var/assessments/2026-11-18/current-worktree/commerce_probes.py::BuyerOrderProbes::test_package_filter_preserves_order_amount": {
+      "status": "FAIL",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "failed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "var/assessments/2026-11-18/current-worktree/commerce_probes.py::BuyerOrderProbes::test_same_cart_after_lost_receipt": {
+      "status": "FAIL",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "failed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

@@ -218,6 +218,7 @@ class ReviewPosFinancialTests(TestCase):
                         "qty": "1.000",
                         "price": "0.0000",
                         "amount": "0.00",
+                        "is_gift": True,
                     }
                 ],
             },

@@ -33,6 +33,13 @@ auth.ensureAuth()
 
 const baseCards = [
   {
+    title: '导出完整 Excel',
+    desc: '汇总本货主的经营统计、库存、单据与仓储账单',
+    path: '/pages/reports/owner-archive',
+    icon: '📊',
+    archive: true,
+  },
+  {
     title: '入出库履约',
     desc: '按计划量、库存过账和发运实绩查看订单进度与差异',
     path: '/pages/reports/operations',
@@ -57,13 +64,14 @@ const baseCards = [
 const cards = computed(() =>
   baseCards.map((card) => {
     const access = ownerAccess({ roles: auth.roles, capabilities: auth.capabilities })
-    return card.requiresOperations && access.manager ? {...card,
-      title: '出入库记录', desc: '查看全部历史，按月、周、天统计，追溯商品和单据的每次收发',
+    return card.requiresOperations ? {...card,
+      title: '出入库记录', desc: `${access.salesperson ? '本人经手' : '本货主'}出入库数量与金额，支持日、周、月、年和自选日期`,
       path: '/pages/reports/stock-history', requiresStockHistory: true,
     } : card
   }).filter((card) => {
     const access = ownerAccess({ roles: auth.roles, capabilities: auth.capabilities })
     if (!access.ownerRole) return false
+    if (card.archive) return (access.manager || access.finance) && auth.capabilities?.can_export_owner_archive === true
     if (card.requiresOperations && !access.canViewOperations) return false
     if (card.requiresStockHistory && !access.canViewStockHistory) return false
     if (card.managerOnly && !access.manager) return false

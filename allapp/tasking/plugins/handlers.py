@@ -115,6 +115,17 @@ class DefaultPostingHandler(BasePostingHandler):
             # cannot be rolled back with inventory mutations.
             failed_at = timezone.now()
             with transaction.atomic():
+                lock_warehouses_for_inventory_write(task.warehouse_id)
+                current = WmsTask.objects.select_for_update().get(pk=task.pk)
+                if (
+                    current.posting_status == "NOT_READY"
+                    and current.lines.filter(
+                        status="CANCELLED", plan_meta__sale_reallocation__isnull=False
+                    ).exists()
+                ):
+                    # A manager reopened the pick while a previous approval was posting.
+                    # Keep the replacement lines waiting for their own scan and review.
+                    raise
                 pj, created = PostingJournal.objects.get_or_create(
                     src_model="WmsTask",
                     src_id=task.id,

@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "run_id": "05c2291d309d4fff97894454f1bacf73",
+  "status": "FAIL",
+  "exit_code": 1,
+  "collected": 8,
+  "password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher",
+  "events_file": "/wms/var/assessments/2026-11-18/current-worktree/backend/probes.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "FAIL": 7,
+    "PASS": 1
+  },
+  "subtest_counts": {},
+  "tests": {
+    "var/assessments/2026-11-18/current-worktree/commerce_probes.py::BuyerOrderProbes::test_package_filter_preserves_order_amount": {
+      "status": "FAIL",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "failed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "var/assessments/2026-11-18/current-worktree/commerce_probes.py::BuyerOrderProbes::test_same_cart_after_lost_receipt": {
+      "status": "FAIL",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "failed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::test_cash_checkout_avoids_a_frozen_location": {
+      "status": "FAIL",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "failed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::test_expired_stock_is_excluded_from_regular_cash_checkout": {
+      "status": "FAIL",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "failed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::ReturnTraceabilityProbe::test_expiry_controlled_customer_return_requires_traceability": {
+      "status": "FAIL",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "failed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::test_standard_outbound_reserves_valid_units_before_expired_stock": {
+      "status": "FAIL",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "failed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::test_one_period_excludes_other_warehouse_pricing_events": {
+      "status": "FAIL",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "failed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::test_operational_ledger_reconciles": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

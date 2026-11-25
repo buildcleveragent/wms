@@ -1,4 +1,4 @@
-"""Today's order-level facts. Never substitute tasks, order totals or guessed currency."""
+"""Order-level business facts over a date range, using recorded units and currencies."""
 
 from decimal import Decimal
 
@@ -12,7 +12,7 @@ from allapp.inbound.models import InboundOrder, InboundOrderLine
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.tasking.models import WmsTask, WmsTaskLine
 
-from .boss_activity import date_bounds, local_today, sources
+from .boss_activity import date_bounds, sources
 from .boss_activity_detail import fields
 from .boss_attention import CLOSED, order_progress_lines
 from .boss_periods import metric_details, metric_sources, ranged
@@ -47,8 +47,8 @@ def pending_documents(scope, direction):
     )
 
 
-def submissions(scope, direction, day):
-    left, right = date_bounds(day, day)
+def submissions(scope, direction, start, end):
+    left, right = date_bounds(start, end)
     if direction == "outbound":
         audits = next(s.qs for s in sources(scope) if s.key == "order")
     else:
@@ -81,11 +81,11 @@ def submissions(scope, direction, day):
     )
 
 
-def executions(scope, direction, day):
+def executions(scope, direction, start, end):
     """Resolve document identities in SQL; line identity must also match product and scope."""
     inbound = direction == "inbound"
     filters = OperationFilters(
-        start_date=day, end_date=day, owner_id=scope.owner_id, warehouse_id=scope.warehouse_id
+        start_date=start, end_date=end, owner_id=scope.owner_id, warehouse_id=scope.warehouse_id
     )
     if inbound:
         qs = _inventory_transactions(direction, filters, scope.access, scope.user).filter(
@@ -184,21 +184,20 @@ def overdue_cases(scope):
     )
 
 
-def today_summary(scope):
-    day = local_today()
+def business_summary(scope, start, end):
     orders = {}
     for direction in ("inbound", "outbound"):
         orders[direction] = {
-            **execution_summary(executions(scope, direction, day)),
-            "submitted": submissions(scope, direction, day).count(),
+            **execution_summary(executions(scope, direction, start, end)),
+            "submitted": submissions(scope, direction, start, end).count(),
         }
     financial = []
-    for metric in metric_sources(scope, day, day):
+    for metric in metric_sources(scope, start, end):
         if metric.key not in FINANCIAL:
             continue
         from django.db.models import Sum
 
-        qs = ranged(metric, day, day).order_by()
+        qs = ranged(metric, start, end).order_by()
         count = qs.count()
         # A constant currency annotation produces one aggregate row even on an empty
         # queryset. No transactions must not become an unknown-currency warning.
@@ -220,19 +219,21 @@ def today_summary(scope):
             }
         )
     return {
-        "business_today": day,
         "orders": orders,
         "financial": financial,
-        "backlog": {
-            "inbound": pending_documents(scope, "inbound").count(),
-            "outbound": pending_documents(scope, "outbound").count(),
-            "overdue": overdue_cases(scope).count(),
-        },
         "notices": [NOTICE, VALUE_NOTICE],
     }
 
 
-def execution_fields(scope, direction, records):
+def current_backlog(scope):
+    return {
+        "inbound": pending_documents(scope, "inbound").count(),
+        "outbound": pending_documents(scope, "outbound").count(),
+        "overdue": overdue_cases(scope).count(),
+    }
+
+
+def execution_fields(scope, direction, records, quantity_label):
     """Only inspect the paginated records; never match a product to an arbitrary order line."""
     inbound = direction == "inbound"
     model = InboundOrderLine if inbound else OutboundOrderLine
@@ -272,7 +273,7 @@ def execution_fields(scope, direction, records):
                 "title": record.product.display_name if record.product else "商品未记录",
                 "fields": fields(
                     发生时间=record.event_at,
-                    本日实际数量=f"{record.actual_qty} {unit}",
+                    **{quantity_label: f"{record.actual_qty} {unit}"},
                     单据单价=price,
                     参考金额=(
                         (record.actual_qty * price).quantize(Decimal("0.01"))
@@ -287,9 +288,9 @@ def execution_fields(scope, direction, records):
     return rows
 
 
-def today_details(scope, day, metric, page=1, size=20, document_id=None):
+def business_details(scope, start, end, metric, page, size, document_id, detail_type):
     if metric in FINANCIAL:
-        return metric_details(scope, day, day, metric, page, size)
+        return metric_details(scope, start, end, metric, page, size)
     if metric == "overdue":
         from .boss_attention import case_payload
 
@@ -315,13 +316,14 @@ def today_details(scope, day, metric, page=1, size=20, document_id=None):
         raise ValidationError({"metric": "未知今日业务口径。"})
     direction = parts[0]
     mode = parts[1] if len(parts) == 2 else "actual"
-    qs = executions(scope, direction, day)
+    quantity_label = "本日实际数量" if detail_type == "today" else "期间实际数量"
+    qs = executions(scope, direction, start, end)
     if mode == "unlinked":
         qs = qs.filter(document_id__isnull=True).order_by("-event_at", "-pk")
         records = list(qs[(page - 1) * size : page * size])
         return {
             "count": qs.count(),
-            "results": execution_fields(scope, direction, records),
+            "results": execution_fields(scope, direction, records, quantity_label),
             "notices": ["缺少可靠订单关联，未计入订单数。", VALUE_NOTICE],
         }
     if document_id:
@@ -334,13 +336,16 @@ def today_details(scope, day, metric, page=1, size=20, document_id=None):
         return {
             "count": records.count(),
             "results": execution_fields(
-                scope, direction, list(records[(page - 1) * size : page * size])
+                scope, direction, list(records[(page - 1) * size : page * size]), quantity_label
             ),
             "sourceTarget": {"kind": f"{direction}_document", "id": document_id},
-            "notices": [VALUE_NOTICE, "以下仅为所选日实绩；完整单据与作业进度请点击来源入口。"],
+            "notices": [
+                VALUE_NOTICE,
+                "以下仅为所选日期范围实绩；完整单据与作业进度请点击来源入口。",
+            ],
         }
     if mode == "submitted":
-        orders = submissions(scope, direction, day)
+        orders = submissions(scope, direction, start, end)
     elif mode == "pending":
         orders = pending_documents(scope, direction).annotate(event_at=F("created_at"))
     else:
@@ -371,7 +376,7 @@ def today_details(scope, day, metric, page=1, size=20, document_id=None):
             ),
         }
         if mode == "actual":
-            row["drill"] = {"type": "today", "metric": metric, "document_id": order.pk}
+            row["drill"] = {"type": detail_type, "metric": metric, "document_id": order.pk}
         else:
             row["target"] = {"kind": f"{direction}_document", "id": order.pk}
         rows.append(row)

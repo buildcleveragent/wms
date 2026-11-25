@@ -1,5 +1,14 @@
 <template>
-  <view class="page confirm-page">
+  <view v-if="pending" class="page confirm-page">
+    <view class="section">
+      <view class="section-title">{{ pending.orderId ? '上次订单已提交' : '上次提交待确认' }}</view>
+      <view>{{ pending.orderId ? '可以继续查看原订单和支付状态。' : '请使用原提交编号核对这笔订单。' }}</view>
+      <button class="submit" :loading="loading" @click="submit">确认上次提交</button>
+      <button @click="viewOrders">查看我的订单</button>
+      <button v-if="reviewRequired" @click="dismissReviewed">已核对订单，结束此次确认</button>
+    </view>
+  </view>
+  <view v-else class="page confirm-page">
     <view class="section">
       <view class="section-title">{{ isPickup ? '自提信息' : '收货信息' }}</view>
       <template v-if="isPickup">
@@ -123,6 +132,7 @@ import { computed, reactive, ref } from 'vue'
 import AddressCard from '../../components/AddressCard.vue'
 import { addressService } from '../../services/address'
 import { benefitService } from '../../services/benefit'
+import { checkoutIsCurrent, finishCheckout, pendingCheckout } from '../../services/checkout'
 import { paymentService } from '../../services/payment'
 import { useCartStore } from '../../stores/cart'
 import { money } from '../../utils/money'
@@ -132,6 +142,8 @@ const addresses = ref([])
 const selectedId = ref(null)
 const preview = ref(null)
 const loading = ref(false)
+const pending = ref(null)
+const reviewRequired = ref(false)
 const remark = ref('')
 const deliveryIndex = ref(0)
 const paymentMethod = ref('WECHAT')
@@ -285,18 +297,32 @@ function selectPayment(item) {
 
 async function submit() {
   if (loading.value) return
-  if (!cart.selectedItems.length) {
+  if (pending.value && !checkoutIsCurrent(pending.value)) {
+    backToCart()
+    return
+  }
+  if (!pendingCheckout() && !cart.selectedItems.length) {
     uni.showToast({ title: '请先选择需要结算的商品', icon: 'none' })
     return
   }
   loading.value = true
   try {
-    const order = await cart.checkout(orderExtra())
+    const receipt = await cart.checkout(orderExtra())
+    if (!checkoutIsCurrent(receipt)) return
+    const { order, recovering } = receipt
+    if (recovering) {
+      uni.redirectTo({
+        url: `/pages/order-detail/order-detail?id=${order.id}`,
+        success: () => finishCheckout(receipt),
+      })
+      return
+    }
     const isBatchOrder = order && order.orders && order.orders.length > 1
     if (isBatchOrder) {
       uni.setStorageSync('sale_mini_pending_order_status', 'WAIT_SHIP')
       uni.redirectTo({
         url: `/pages/order-result/order-result?id=${order.id}&result=batch_offline&count=${order.order_count}&amount=${order.payable_amount}`,
+        success: () => finishCheckout(receipt),
       })
       return
     }
@@ -316,12 +342,36 @@ async function submit() {
         uni.showToast({ title: '支付未完成，可在订单中继续支付', icon: 'none' })
       }
     }
-    uni.redirectTo({ url: `/pages/order-result/order-result?id=${order.id}&result=${result}` })
+    if (!checkoutIsCurrent(receipt)) return
+    uni.redirectTo({
+      url: `/pages/order-result/order-result?id=${order.id}&result=${result}`,
+      success: () => finishCheckout(receipt),
+    })
   } catch (err) {
-    uni.showToast({ title: err.message || '提交失败', icon: 'none' })
+    reviewRequired.value = err.statusCode === 403 || err.data?.code === 'idempotency_conflict'
+    uni.showToast({ title: err.message || '请确认订单提交结果', icon: 'none' })
   } finally {
+    pending.value = pendingCheckout()
     loading.value = false
   }
+}
+
+function viewOrders() {
+  uni.switchTab({ url: '/pages/order-list/order-list' })
+}
+
+function dismissReviewed() {
+  const receipt = pending.value
+  uni.showModal({
+    title: '已核对这笔订单？',
+    content: '请先在我的订单中确认是否已生成订单。结束确认不会取消已生成的订单。',
+    success: ({ confirm }) => {
+      if (confirm && checkoutIsCurrent(receipt)) {
+        finishCheckout(receipt)
+        backToCart()
+      }
+    },
+  })
 }
 
 function goAddress() {
@@ -343,6 +393,8 @@ onLoad((query = {}) => {
 })
 
 onShow(async () => {
+  pending.value = pendingCheckout()
+  if (pending.value || loading.value) return
   try {
     const loadParams = cartId.value ? { cart_id: cartId.value } : {}
     await cart.load(loadParams)

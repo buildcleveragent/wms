@@ -41,6 +41,18 @@ class AccessScope:
         return next(iter(self.warehouse_ids)) if len(self.warehouse_ids) == 1 else None
 
     @classmethod
+    def for_request(cls, request) -> "AccessScope":
+        """Reuse a scope for the current account during one read-only HTTP request."""
+        if getattr(request, "method", None) not in {"GET", "HEAD"}:
+            return cls.for_user(request.user)
+        user_id = request.user.pk
+        cached = getattr(request, "_wms_read_scope", None)
+        if cached is None or cached[0] != user_id:
+            cached = (user_id, cls.for_user(request.user))
+            request._wms_read_scope = cached
+        return cached[1]
+
+    @classmethod
     def for_user(cls, user) -> "AccessScope":
         """Resolve explicit role scopes, then a conservative legacy fallback."""
 

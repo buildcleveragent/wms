@@ -1,0 +1,188 @@
+{
+  "fixture": "5 units formally received then put away; zero charges for receive/putaway; storage price CNY 2.00 per CBM",
+  "posted_transactions": [
+    [
+      "RECEIVE",
+      "5.0000"
+    ],
+    [
+      "ISSUE",
+      "-5.0000"
+    ],
+    [
+      "RECEIVE",
+      "5.0000"
+    ]
+  ],
+  "detail_locations": [
+    [
+      "FLOWSW-01-01-01",
+      "0.0000",
+      "0.0000"
+    ],
+    [
+      "FLOWSW-01-01-02",
+      "5.0000",
+      "0.0000"
+    ]
+  ],
+  "owner_total": "5.0000",
+  "metric_CBM": "1.2500",
+  "accrual": [
+    [
+      "2.50",
+      "INVOICED"
+    ]
+  ],
+  "invoice_total": "2.50",
+  "invoice_line_count": 1,
+  "inventory_checks": [
+    {
+      "name": "task_line_product_owner_consistency",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "Read-only audit; owner repairs require explicit business approval.",
+      "skipped": false
+    },
+    {
+      "name": "inventory_detail_product_owner_consistency",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "inventory_transaction_product_owner_consistency",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "inventory_summary_product_owner_consistency",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "inventory_detail_available_identity",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "inventory_summary_available_identity",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "inventory_summary_vs_detail",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "inventory_transaction_replay_onhand",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "Replay uses posted InventoryTransaction.qty_delta only, so it validates InventoryDetail.onhand_qty but not allocated/locked/damaged history.",
+      "skipped": false
+    },
+    {
+      "name": "inventory_batch_tracking_integrity",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "inventory_expiry_tracking_integrity",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "inventory_serial_tracking_integrity",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    }
+  ],
+  "billing_checks": [
+    {
+      "name": "billing_metric_non_negative",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "billing_accrual_consistency",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "billing_event_pricing_completeness",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "billing_locked_period_linkage",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "bill_header_totals",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "bill_line_matches_accrual",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    },
+    {
+      "name": "billing_invoiced_accrual_linkage",
+      "ok": true,
+      "issue_count": 0,
+      "samples": [],
+      "note": "",
+      "skipped": false
+    }
+  ],
+  "issue_count": 0
+}

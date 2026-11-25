@@ -47,8 +47,12 @@ from allapp.baseinfo.owner_warehouse_access import owner_ids_for_warehouses
 from allapp.billing.enums import PeriodStatus
 from allapp.billing.models import BillingPeriod
 from allapp.core.utils.log_context import build_log_payload
-from allapp.inventory.locking import run_inventory_write_with_retry
+from allapp.inventory.locking import (
+    lock_warehouses_for_inventory_write,
+    run_inventory_write_with_retry,
+)
 from allapp.inventory.models import PostingJournal
+from allapp.inventory.sale_eligibility import sale_layers
 from allapp.outbound import services as outbound_services
 from allapp.outbound.assisted_history import (
     assisted_history_queryset,
@@ -336,7 +340,6 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
     def list(self, request, *args, **kwargs):
         Product = apps.get_model("products", "Product")
-        InvDetail = apps.get_model("inventory", "InventoryDetail")
         scope = _catalog_scope(request)
         allowed_owner_ids = _catalog_owner_ids(scope)
 
@@ -423,7 +426,7 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         # Availability is part of the database queryset, so DRF's count and
         # slice see exactly the same set of products as the response.  This
         # avoids empty pages when early product ids have no stock.
-        inventory = InvDetail.objects.filter(product_id=OuterRef("pk"))
+        inventory = sale_layers().filter(product_id=OuterRef("pk"))
         if owner_id:
             inventory = inventory.filter(owner_id=owner_id)
         elif allowed_owner_ids is not None:
@@ -587,6 +590,9 @@ class ProductViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 if fact:
                     for field in ("base_uom_id", "catalog_version", "can_add", "issues", "available"):
                         row[field] = fact[field]
+        if UserRoleScope.Role.OWNER_FINANCE in scope.roles:
+            for row in data:
+                row["can_add"] = False
         logger.debug("outbound.product_list.response %s count=%s", ctx_text, len(data), extra=ctx)
         return self.get_paginated_response(data)
 
@@ -605,7 +611,7 @@ class CustomerViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         if not scope.is_global:
             if scope.owner_ids:
                 bindings = active_bindings().filter(owner_id__in=scope.owner_ids)
-                if UserRoleScope.Role.OWNER_MANAGER not in scope.roles:
+                if UserRoleScope.Role.OWNER_SALESPERSON in scope.roles:
                     bindings = bindings.filter(Q(salesperson=user) | Q(code__iexact="CASH"))
                 requested_owner = self.request.query_params.get(
                     "owner_id"
@@ -1013,7 +1019,6 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         if not search:
             return Response([])
         Product = apps.get_model("products", "Product")
-        InventoryDetail = apps.get_model("inventory", "InventoryDetail")
         package_qs = (
             ProductPackage.objects.filter(is_active=True, uom__is_active=True)
             .select_related("uom")
@@ -1030,7 +1035,8 @@ class AssistedOutboundOrderViewSet(viewsets.GenericViewSet):
         available = {
             row["product_id"]: row["available"] or Decimal("0")
             for row in (
-                InventoryDetail.objects.filter(
+                sale_layers()
+                .filter(
                     owner=owner,
                     warehouse_id__in=scope.warehouse_ids,
                     product_id__in=product_ids,
@@ -1741,8 +1747,8 @@ class OutboundOrderViewSet(
         product_ids = [line.product_id for line in lines]
         available = {
             row["product_id"]: row["available"] or Decimal("0")
-            for row in apps.get_model("inventory", "InventoryDetail")
-            .objects.filter(
+            for row in sale_layers()
+            .filter(
                 owner_id=order.owner_id,
                 warehouse_id=order.warehouse_id,
                 product_id__in=product_ids,
@@ -2582,21 +2588,28 @@ class PickTaskLineSerializer(serializers.ModelSerializer):
 
     def get_source_inventory(self, obj):
         reservation = getattr(obj, "transfer_reservation", None)
-        if not reservation:
-            return None
-        product = reservation.transfer_line.source_product
+        if reservation:
+            source = reservation.source_snapshot
+            product = reservation.transfer_line.source_product
+        else:
+            raw_id = (obj.plan_meta or {}).get("inventory_detail_id")
+            detail_id = int(raw_id) if str(raw_id).isdigit() else None
+            source = self.context.get("allocated_layers", {}).get(detail_id)
+            if (
+                not source
+                or source["product_id"] != obj.product_id
+                or source["location_id"] != obj.from_location_id
+            ):
+                return None
+            product = obj.product
         return {
             "product_id": product.pk,
             "code": product.code,
             "sku": product.sku,
+            "ownership_transfer": bool(reservation),
             **{
-                key: reservation.source_snapshot.get(key)
-                for key in (
-                    "batch_no",
-                    "production_date",
-                    "expiry_date",
-                    "serial_no",
-                )
+                key: source.get(key)
+                for key in ("batch_no", "production_date", "expiry_date", "serial_no")
             },
         }
 
@@ -2677,10 +2690,10 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
     def _get_pick_task_for_update(self, pk):
-        qs = self._scope_pick_queryset(
-            WmsTask.objects.select_for_update().filter(task_type=WmsTask.TaskType.PICK)
-        )
-        return get_object_or_404(qs, pk=pk)
+        qs = self._scope_pick_queryset(WmsTask.objects.filter(task_type=WmsTask.TaskType.PICK))
+        scoped = get_object_or_404(qs.values("warehouse_id"), pk=pk)
+        lock_warehouses_for_inventory_write(scoped["warehouse_id"])
+        return get_object_or_404(qs.select_for_update(), pk=pk)
 
     def _review_queryset(self, *, lock=False):
         from .physical_review import review_pick_queryset
@@ -2791,6 +2804,7 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         logger.info("outbound.pick.lines.request %s", ctx_text, extra=ctx)
         lines = (
             WmsTaskLine.objects.filter(task_id=task.id)
+            .exclude(status=WmsTaskLine.Status.CANCELLED)
             .select_related(
                 "product",
                 "from_location",
@@ -2799,7 +2813,23 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
             )
             .order_by("id")
         )
-        data = PickTaskLineSerializer(lines, many=True).data
+        InventoryDetail = apps.get_model("inventory", "InventoryDetail")
+        allocated_ids = [(line.plan_meta or {}).get("inventory_detail_id") for line in lines]
+        allocated = InventoryDetail.objects.filter(
+            owner_id=task.owner_id,
+            warehouse_id=task.warehouse_id,
+            pk__in=[int(pk) for pk in allocated_ids if str(pk).isdigit()],
+        ).values(
+            "id",
+            "product_id",
+            "location_id",
+            "batch_no",
+            "production_date",
+            "expiry_date",
+            "serial_no",
+        )
+        context = {"allocated_layers": {row["id"]: row for row in allocated}}
+        data = PickTaskLineSerializer(lines, many=True, context=context).data
         logger.debug("outbound.pick.lines.response %s count=%s", ctx_text, len(data), extra=ctx)
         return Response(data)
 
@@ -2931,6 +2961,8 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
         )
         review_task = None
         with transaction.atomic():
+            scoped = get_object_or_404(self._review_queryset().values("warehouse_id"), pk=pk)
+            lock_warehouses_for_inventory_write(scoped["warehouse_id"])
             task = get_object_or_404(self._review_queryset(lock=True), pk=pk)
             ctx, ctx_text = build_log_payload(task=task, user=request.user)
             logger.info("outbound.pick.post.begin %s", ctx_text, extra=ctx)
@@ -3027,6 +3059,8 @@ class PickTaskViewSet(viewsets.ReadOnlyModelViewSet):
                 exc.message_dict if hasattr(exc, "message_dict") else exc.messages
             ) from exc
         with transaction.atomic():
+            scoped = get_object_or_404(self._review_queryset().values("warehouse_id"), pk=pk)
+            lock_warehouses_for_inventory_write(scoped["warehouse_id"])
             task = get_object_or_404(self._review_queryset(lock=True), pk=pk)
             journal = PostingJournal.objects.select_for_update().get(
                 src_model="WmsTask", src_id=task.id, tx_type="POST"

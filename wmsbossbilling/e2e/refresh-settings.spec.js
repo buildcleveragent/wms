@@ -28,6 +28,23 @@ async function setup(page, { manager = true, failSave = false } = {}) {
   return { calls, errors, writes }
 }
 
+test('missing automation endpoint leaves local preferences usable and can be retried', async ({ page }) => {
+  await setup(page)
+  await page.route(url => url.pathname.endsWith('/automation-settings/'), route =>
+    route.fulfill({ status: 404, contentType: 'text/html', body: '<!DOCTYPE html><html>Django debug page</html>' }),
+    { times: 1 })
+  await page.goto('/#/pages/settings/refresh')
+  await expect(page.getByText('当前后台未提供自动检查设置接口', { exact: false })).toBeVisible()
+  await expect(page.locator('body')).not.toContainText('Django debug page')
+  await expect(page.locator('.save-global')).toHaveCount(0)
+  await page.locator('uni-switch').first().click()
+  await page.getByText('3 分钟', { exact: true }).click()
+  await page.locator('.save-local').click()
+  await expect(page.getByText('已保存：每 3 分钟刷新', { exact: false })).toBeVisible()
+  await page.getByText('重新加载 ›', { exact: true }).click()
+  await expect(page.locator('.save-global')).toBeVisible()
+})
+
 test('defaults off, loads once and manual refresh works without background requests', async ({ page }) => {
   const state = await setup(page)
   await page.clock.install()

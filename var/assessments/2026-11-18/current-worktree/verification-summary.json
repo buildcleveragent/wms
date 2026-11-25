@@ -1,0 +1,82 @@
+{
+  "backend_unique_latest_by_nodeid": {
+    "PASS": 146,
+    "FAIL": 9
+  },
+  "backend_batches": [
+    {
+      "name": "main",
+      "counts": {
+        "PASS": 131
+      },
+      "subtests": {
+        "passed": 25
+      },
+      "overlap_with_prior": []
+    },
+    {
+      "name": "supplement",
+      "counts": {
+        "PASS": 12
+      },
+      "subtests": {
+        "passed": 3
+      },
+      "overlap_with_prior": []
+    },
+    {
+      "name": "probes",
+      "counts": {
+        "FAIL": 7,
+        "PASS": 1
+      },
+      "subtests": {},
+      "overlap_with_prior": []
+    },
+    {
+      "name": "prices",
+      "counts": {
+        "FAIL": 1,
+        "PASS": 1
+      },
+      "subtests": {},
+      "overlap_with_prior": []
+    },
+    {
+      "name": "count-return",
+      "counts": {
+        "FAIL": 1,
+        "PASS": 1
+      },
+      "subtests": {},
+      "overlap_with_prior": []
+    },
+    {
+      "name": "commerce-recheck",
+      "counts": {
+        "FAIL": 2
+      },
+      "subtests": {},
+      "overlap_with_prior": [
+        "var/assessments/2026-11-18/current-worktree/commerce_probes.py::BuyerOrderProbes::test_package_filter_preserves_order_amount",
+        "var/assessments/2026-11-18/current-worktree/commerce_probes.py::BuyerOrderProbes::test_same_cart_after_lost_receipt"
+      ]
+    }
+  ],
+  "frontend": {
+    "unit_pass": 686,
+    "unit_fail": 7,
+    "unit_skip": 0,
+    "h5_builds_pass": 5,
+    "built_browser_pass": 18
+  },
+  "separate_non_database": {
+    "engineering": 87,
+    "pdf": 6,
+    "boundary": 46,
+    "boundary_subtests": 153,
+    "master_data": 15,
+    "master_data_subtests": 2
+  },
+  "note": "Backend batches include explicit business probes and control cases. Counts by latest unique test id. No combined sitewide pass rate. Web chart first run timed out and the isolated rerun passed. Package-filter fixture first failed on close reason and the corrected run confirmed the product mismatch."
+}

@@ -1,0 +1,79 @@
+{
+  "as_of_utc": "2026-11-18T14:30:12.719377+00:00",
+  "test_database": "wms_db_test",
+  "database_version": "8.0.46",
+  "database_policy": "reused; canonical lease for each serial session",
+  "last_lease_state": "CLEAN",
+  "unique_nodes": 155,
+  "latest_outcomes": {
+    "PASS": 146,
+    "FAIL": 9
+  },
+  "subtests": {
+    "passed": 28
+  },
+  "all_runs": {
+    "main": {
+      "collected": 131,
+      "outcomes": {
+        "PASS": 131
+      },
+      "subtests": {
+        "passed": 25
+      }
+    },
+    "probes": {
+      "collected": 8,
+      "outcomes": {
+        "FAIL": 7,
+        "PASS": 1
+      },
+      "subtests": {}
+    },
+    "supplement": {
+      "collected": 12,
+      "outcomes": {
+        "PASS": 12
+      },
+      "subtests": {
+        "passed": 3
+      }
+    },
+    "prices": {
+      "collected": 2,
+      "outcomes": {
+        "FAIL": 1,
+        "PASS": 1
+      },
+      "subtests": {}
+    },
+    "count-return": {
+      "collected": 2,
+      "outcomes": {
+        "FAIL": 1,
+        "PASS": 1
+      },
+      "subtests": {}
+    },
+    "commerce-recheck": {
+      "collected": 2,
+      "outcomes": {
+        "FAIL": 2
+      },
+      "subtests": {}
+    }
+  },
+  "failed_nodes": [
+    "var/assessments/2026-11-18/current-worktree/commerce_probes.py::BuyerOrderProbes::test_package_filter_preserves_order_amount",
+    "var/assessments/2026-11-18/current-worktree/commerce_probes.py::BuyerOrderProbes::test_same_cart_after_lost_receipt",
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::test_cash_checkout_avoids_a_frozen_location",
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::test_expired_stock_is_excluded_from_regular_cash_checkout",
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::ReturnTraceabilityProbe::test_expiry_controlled_customer_return_requires_traceability",
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::test_standard_outbound_reserves_valid_units_before_expired_stock",
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::test_one_period_excludes_other_warehouse_pricing_events",
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::test_unpriced_catalog_item_is_not_silently_sold_as_a_gift",
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::ReturnTraceabilityProbe::test_customer_return_waits_while_count_is_frozen"
+  ],
+  "fixture_correction": "First dual-package attempt rejected missing close_reason before checking application output. Corrected fixture and independently reran both buyer cases; see commerce-recheck.log.",
+  "scope": "Synthetic local tests only; no production records, external payment settlement, devices, full repository suite or release gate."
+}

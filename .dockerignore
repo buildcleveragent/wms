@@ -37,8 +37,13 @@ media/
 private_returns/
 staticfiles/
 backups/
+**/*.[sS][qQ][lL]
+**/*.[sS][qQ][lL].*
+**/*.[dD][uU][mM][pP]
 
 var/
 docs/remediation-execution-2026-09-06.md
 
 private_arrivals/
+
+private_exports/

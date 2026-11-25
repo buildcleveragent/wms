@@ -17,6 +17,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import environ
+from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 
 from wmsmaster.environment import is_test_command, load_environment
@@ -268,6 +269,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "allapp.accounts.owner_readonly.OwnerFinanceReadOnlyMiddleware",
     "allapp.accounts.login_middleware.SessionLoginThrottleMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -282,6 +284,7 @@ INTERNAL_IPS = _csv_env("INTERNAL_IPS", default=["127.0.0.1"]) if ENABLE_DEBUG_T
 # 允许指定的域访问（修改为你的前端 URL）
 
 CORS_ALLOWED_ORIGINS = _csv_env("CORS_ALLOWED_ORIGINS", default=[])
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
 if IS_PRODUCTION and any(
     not origin.lower().startswith("https://") for origin in CORS_ALLOWED_ORIGINS
 ):
@@ -515,6 +518,9 @@ BILLING_TASKLINE_ORDER_RESOLVER = "allapp.billing.resolvers:taskline_to_order_ma
 BILLING_METRIC_SCHEDULER_ENABLED = env.bool("BILLING_METRIC_SCHEDULER_ENABLED", default=True)
 BILLING_METRIC_SCHEDULER_HOUR = env.int("BILLING_METRIC_SCHEDULER_HOUR", default=1)
 BILLING_METRIC_SCHEDULER_MINUTE = env.int("BILLING_METRIC_SCHEDULER_MINUTE", default=5)
+BILLING_METRIC_ALERT_GRACE_MINUTES = env.int("BILLING_METRIC_ALERT_GRACE_MINUTES", default=60)
+if BILLING_METRIC_ALERT_GRACE_MINUTES < 0:
+    raise ImproperlyConfigured("BILLING_METRIC_ALERT_GRACE_MINUTES 必须大于或等于 0。")
 BILLING_METRIC_SCHEDULER_LOOKBACK_DAYS = env.int(
     "BILLING_METRIC_SCHEDULER_LOOKBACK_DAYS", default=3
 )
@@ -540,6 +546,7 @@ if IS_PRODUCTION and CORS_ALLOW_ALL_ORIGINS:
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 # Return evidence is never served by the public media route.
+OWNER_ARCHIVE_ROOT = env("OWNER_ARCHIVE_ROOT", default=str(BASE_DIR / "private_exports"))
 PRIVATE_ARRIVAL_ROOT = env("PRIVATE_ARRIVAL_ROOT", default=str(BASE_DIR / "private_arrivals"))
 PRIVATE_RETURN_ROOT = env("PRIVATE_RETURN_ROOT", default=str(BASE_DIR / "private_returns"))
 

@@ -1161,7 +1161,7 @@ class SyncWmsRoleGroupsCommandTests(TestCase):
             Group.objects.filter(
                 name__in=[template.group_name for template in ROLE_GROUP_TEMPLATES.values()]
             ).count(),
-            5,
+            6,
         )
         for template in ROLE_GROUP_TEMPLATES.values():
             group = Group.objects.get(name=template.group_name)

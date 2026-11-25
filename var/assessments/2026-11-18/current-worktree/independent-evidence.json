@@ -1,0 +1,74 @@
+{
+  "apk_download_synthetic": [
+    {
+      "request_range": null,
+      "status": 200,
+      "length": 32,
+      "advertised": "bytes",
+      "content_range": null
+    },
+    {
+      "request_range": "bytes=16-31",
+      "status": 200,
+      "length": 32,
+      "advertised": "bytes",
+      "content_range": null
+    }
+  ],
+  "buyer_order_pagination": {
+    "samples": [
+      {
+        "input_rows": 100,
+        "query_rows_consumed": 100,
+        "first_page_count": 20,
+        "total": 100
+      },
+      {
+        "input_rows": 10000,
+        "query_rows_consumed": 10000,
+        "first_page_count": 20,
+        "total": 10000
+      }
+    ],
+    "method": "Real list view, group and paginator, with synthetic query iterable and stub payload formatter. Counts in-memory rows consumed, not SQL wall time or production load."
+  },
+  "domain_app_registrations": [
+    "allapp.core",
+    "allapp.console",
+    "allapp.accounts",
+    "allapp.baseinfo",
+    "allapp.billing.apps.BillingConfig",
+    "allapp.inbound",
+    "allapp.inventory.apps.InventoryConfig",
+    "allapp.locations",
+    "allapp.outbound.apps.OutboundConfig",
+    "allapp.products",
+    "allapp.pos.apps.PosConfig",
+    "allapp.salesapp",
+    "allapp.reports",
+    "allapp.driverapp",
+    "allapp.tasking.apps.TaskingConfig",
+    "allapp.strategies"
+  ],
+  "registered_url_patterns_with_application_callback": {
+    "api": 2,
+    "baseinfo": 1,
+    "billing": 78,
+    "console": 30,
+    "core": 4,
+    "inbound": 69,
+    "inventory": 34,
+    "outbound": 108,
+    "pos": 28,
+    "products": 54,
+    "reports": 53,
+    "salesapp": 34,
+    "tasking": 159
+  },
+  "file_lines": {
+    "wmspda/pages/pos/index.vue": 6108,
+    "wmsandroid/pages/pos/index.vue": 562,
+    "allapp/salesapp/salemini_api.py": 3798,
+    "allapp/pos/services.py": 1948
+  }
+}

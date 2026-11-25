@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <view v-if="auth.isOwnerFinance" class="card text-gray">货主财务 · 可查询和导出，不可修改业务数据</view>
     <view class="section" v-for="grp in groups" :key="grp.title">
       <view class="section-title">{{ grp.title }}</view>
       <view class="grid">
@@ -13,7 +14,7 @@
     </view>
 
     <view v-if="adminItems.length" class="section">
-      <view class="section-title">管理功能</view>
+      <view class="section-title">{{ auth.isOwnerFinance ? '审批与账单查询' : '管理功能' }}</view>
       <view class="grid">
         <view class="tile" v-for="it in adminItems" :key="it.key" @click="go(it)">
           <view class="tile-inner">

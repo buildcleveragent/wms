@@ -55,6 +55,9 @@ export const useAuth = defineStore('auth', {
     isOwnerManager() {
       return this.roles.includes('owner_manager')
     },
+    isOwnerFinance() {
+      return this.roles.includes('owner_finance')
+    },
     isOwnerSalesperson() {
       return this.roles.includes('owner_salesperson')
     },

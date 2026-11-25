@@ -1,0 +1,26 @@
+{
+  "documented_filter": "--owner owner_A --billing-only --period period_A",
+  "period_warehouse": 9,
+  "other_warehouse_with_pending_event": 10,
+  "documented_issue_count": 1,
+  "documented_failed_checks": [
+    {
+      "name": "billing_event_pricing_completeness",
+      "ok": false,
+      "issue_count": 1,
+      "samples": [
+        {
+          "event_id": 9,
+          "owner_id": 12,
+          "warehouse_id": 10,
+          "service_date": "2026-04-02",
+          "pricing_status": "PENDING",
+          "problems": "pricing_incomplete"
+        }
+      ],
+      "note": "",
+      "skipped": false
+    }
+  ],
+  "control_with_explicit_period_warehouse_issue_count": 0
+}

@@ -31,18 +31,23 @@ describe('mobile POS cart and checkout', () => {
     const first = addProductToCart([], { ...product, available_qty: 20 }, 'CASE-7').items
     expect(addProductToCart(first, { ...product, available_qty: 20 }, 'CASE-7').error).toMatch(/库存/)
     const base = addProductToCart(first, { ...product, available_qty: 20 })
-    expect(base.error).toMatch(/合计.*库存/)
+    expect(base.error).toContain('各包装合计超过拣货区＋存储区可售库存')
     expect(base.items).toHaveLength(1)
   })
 
-  it('builds an immediate-payment full-warehouse payload with a UUID and no zone/customer fields', () => {
+  it('explains the saleable stock scope when an item has no available quantity', () => {
+    expect(addProductToCart([], { ...product, available_qty: '0' }).error).toContain('拣货区＋存储区可售库存不足')
+  })
+
+  it('leaves stock scope to the server for a new immediate-payment checkout', () => {
     const items = addProductToCart([], product, 'CASE-7').items
     const snapshot = finalizeCheckoutSnapshot(buildCheckoutSnapshot({ items, paymentMethod: 'WECHAT', amountReceived: '' }))
     expect(snapshot.idempotency_key).toMatch(/^[0-9a-f-]{36}$/)
     expect(snapshot.payload.idempotency_key).toBe(snapshot.idempotency_key)
-    expect(snapshot.payload.items[0]).toMatchObject({ qty: '20.000', amount: '40.00' })
+    expect(snapshot.payload.items[0]).toEqual({ product_id: 7, qty: '20.000', price: '2.0000' })
     expect(snapshot.payload.payment).toMatchObject({ method: 'WECHAT', amount_received: '40.00' })
     expect(snapshot.payload).not.toHaveProperty('stock_zone_type')
+    expect(snapshot.payload).not.toHaveProperty('zone_type')
     expect(snapshot.payload).not.toHaveProperty('customer_id')
     expect(snapshot.payload).not.toHaveProperty('payments')
     expect(validateCart(items)).toBe('')
@@ -53,6 +58,35 @@ describe('mobile POS cart and checkout', () => {
     const userB = { id: 2, warehouse_id: 2 }
     expect(draftStorageKey(userA)).not.toBe(draftStorageKey(userB))
     expect(pendingStorageKey(userA)).toBe(`${draftStorageKey(userA)}:pending-checkout`)
+  })
+
+  it('requires a positive onsite price and rounds half a unit to cents once', () => {
+    const item = { ...createCartItem({ ...product, price: null }), qty: 0.5 }
+    expect(validateCart([item])).toContain('输入正单价')
+    expect(validateCart([{ ...item, is_gift: true }])).toContain('不可赠送')
+    item.price = '1.2300'
+    expect(validateCart([item])).toContain('输入正单价')
+    item.onsite_price = true
+    expect(validateCart([item])).toBe('')
+    const payload = buildCheckoutSnapshot({ items: [item], paymentMethod: 'WECHAT' }).payload
+    expect(payload.items).toEqual([{ product_id: 7, qty: '0.500', price: '1.2300', onsite_price: true }])
+    expect(payload.payment.amount_received).toBe('0.62')
+    expect(validateCart([{ ...item, price: '0.0001' }])).toContain('0.01')
+    expect(validateCart([{ ...item, min_price: 1.24 }])).toContain('最低')
+  })
+
+  it('records a gift explicitly and scans subsequent units as paid lines', () => {
+    const initial = createCartItem({ ...product, price: 0 })
+    expect(validateCart([initial])).toContain('正单价')
+    const gift = { ...initial, is_gift: true }
+    expect(validateCart([gift])).toBe('')
+    const items = addProductToCart([gift], product).items
+    const payload = buildCheckoutSnapshot({ items, paymentMethod: 'WECHAT' }).payload
+    expect(payload.items).toEqual([
+      { product_id: 7, qty: '1.000', price: '0.0000', is_gift: true },
+      { product_id: 7, qty: '1.000', price: '2.0000' },
+    ])
+    expect(payload.payment.amount_received).toBe('2.00')
   })
 
   it('uses the effective alias snapshot even when the current package has a different multiplier', () => {

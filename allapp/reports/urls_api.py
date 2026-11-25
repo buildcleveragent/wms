@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .owner_archive_views import OwnerArchiveDownload, OwnerArchiveJobs
 from .views_boss import (
     BossAlertApi,
     BossAlertDetailApi,
@@ -57,9 +58,13 @@ from .views_operations import (
 from .views_pda import PdaThroughputApi, PdaThroughputDetailApi
 
 urlpatterns = [
+    path("owner-archives/", OwnerArchiveJobs.as_view()),
+    path("owner-archives/<int:pk>/download/", OwnerArchiveDownload.as_view()),
     path("boss/automation-settings/", BossAutomationSettingsApi.as_view()),
     path("boss/today/", BossTodayApi.as_view()),
     path("boss/today/details/", BossTodayDetailsApi.as_view()),
+    path("boss/business-range/", BossTodayApi.as_view(selected_range=True)),
+    path("boss/business-range/details/", BossTodayDetailsApi.as_view(selected_range=True)),
     path("boss/sla/details/", BossSlaDetailsApi.as_view()),
     path("boss/attention/", BossAttentionApi.as_view()),
     path("boss/digest/", BossDigestApi.as_view()),

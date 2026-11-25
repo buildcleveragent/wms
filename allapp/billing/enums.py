@@ -87,6 +87,14 @@ class MetricType(models.TextChoices):
     ORDER_AMT = "ORDER_AMT", "订单金额"
 
 
+DAILY_CONTRACT_METRICS = {
+    CalcMethod.PER_PALLET_DAY: MetricType.PALLET,
+    CalcMethod.PER_CBM_DAY: MetricType.CBM,
+    CalcMethod.PER_AREA_MONTH: MetricType.AREA_M2,
+    CalcMethod.PERCENT_OF_ORDER_AMOUNT: MetricType.ORDER_AMT,
+}
+
+
 class LadderMode(models.TextChoices):
     WHOLE = "WHOLE", "整档全量价"
     INCREMENTAL = "INCREMENTAL", "分段累进"

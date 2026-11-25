@@ -1,0 +1,13 @@
+{
+  "frozen_location_id": 5,
+  "frozen_units_before": "4",
+  "other_valid_units_before": "6",
+  "checkout_status": 201,
+  "issued": [
+    {
+      "location_id": 5,
+      "batch_no": "PICK",
+      "qty_delta": "-1.0000"
+    }
+  ]
+}

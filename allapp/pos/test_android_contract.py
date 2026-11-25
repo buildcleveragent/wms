@@ -185,7 +185,9 @@ def test_zero_price_return_uses_no_refund_rows(pos):
         "/api/pos/checkout/",
         {
             "idempotency_key": str(uuid4()),
-            "items": [{"product_id": pos.product.pk, "qty": "1.000", "price": "0"}],
+            "items": [
+                {"product_id": pos.product.pk, "qty": "1.000", "price": "0", "is_gift": True}
+            ],
             "payment": {"method": "CASH", "amount_received": "0"},
         },
         format="json",

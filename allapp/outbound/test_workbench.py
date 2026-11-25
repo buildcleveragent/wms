@@ -147,7 +147,8 @@ class OwnerWorkbenchTests(TestCase):
         task = self.task()
         task.lines.update(qty_plan=4)
         item = self.api("shortage").data["results"][0]["shortages"][0]
-        self.assertEqual(item["quantity"], "6.000")
+        self.assertIsInstance(item["quantity"], str)
+        self.assertEqual(Decimal(item["quantity"]), Decimal("6"))
         self.assertEqual(item["unit"], "瓶")
         task.lines.update(qty_plan=10)
         self.assertEqual(self.counts()["shortage"], 0)

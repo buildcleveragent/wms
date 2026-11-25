@@ -1,0 +1,715 @@
+{
+  "baseline": "836ce7ca9fc48a690f8e8fabe2993622890361a4 + 当前工作树",
+  "environment": "Node 22.22.0 / npm 10.9.4 / Chromium Playwright，无 Browser 插件；使用合成 API 回包，禁止业务数据库连接。两项价格探针调用真实客户端和 Django 校验。",
+  "units": {
+    "wmspda": {
+      "command": [
+        "npm",
+        "run",
+        "test:unit",
+        "--",
+        "--maxWorkers=1"
+      ],
+      "seconds": 599.45,
+      "rc": 1,
+      "passed": 249,
+      "failed": 7,
+      "skipped": 0,
+      "todo": 0
+    },
+    "wmsandroid": {
+      "command": [
+        "npm",
+        "run",
+        "test:unit",
+        "--",
+        "--maxWorkers=1"
+      ],
+      "seconds": 180.04,
+      "rc": 0,
+      "passed": 71,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0
+    },
+    "wmsownersale": {
+      "command": [
+        "npm",
+        "run",
+        "test:unit",
+        "--",
+        "--maxWorkers=1"
+      ],
+      "seconds": 574.96,
+      "rc": 0,
+      "passed": 262,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0
+    },
+    "wmsbossbilling": {
+      "command": [
+        "npm",
+        "run",
+        "test:unit",
+        "--",
+        "--maxWorkers=1"
+      ],
+      "seconds": 131.1,
+      "rc": 0,
+      "passed": 88,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0
+    },
+    "sales-miniapp": {
+      "command": [
+        "node",
+        "--test",
+        "tests/cart-recovery.test.mjs",
+        "tests/payment-service.test.mjs",
+        "tests/request-auth.test.mjs"
+      ],
+      "seconds": 1.99,
+      "rc": 0,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0
+    }
+  },
+  "h5_builds": {
+    "wmspda": {
+      "command": [
+        "npm",
+        "run",
+        "build:h5"
+      ],
+      "seconds": 149.76,
+      "rc": 0,
+      "index_sha256": "239b9b29049c46d6b820ce790fed9764ec4110430796460929208161f2221339"
+    },
+    "wmsandroid": {
+      "command": [
+        "npm",
+        "run",
+        "build:h5"
+      ],
+      "seconds": 94.71,
+      "rc": 0,
+      "index_sha256": "af0ffa6af2b6a24392653bd832f0a71c934c2d848ca81102a5d9d8961b4904e9"
+    },
+    "wmsownersale": {
+      "command": [
+        "npm",
+        "run",
+        "build:h5"
+      ],
+      "seconds": 228.0,
+      "rc": 0,
+      "index_sha256": "9b3c1d3a4852880decea116f5b9f81891256afb7cbcd022ea9e3f74a020f7913"
+    },
+    "wmsbossbilling": {
+      "command": [
+        "npm",
+        "run",
+        "build:h5"
+      ],
+      "seconds": 122.13,
+      "rc": 0,
+      "index_sha256": "5ac8e8303263ddd3608a022f00f9db2486739ae60b3a1e87286010d0bb3fda8c"
+    },
+    "sales-miniapp": {
+      "command": [
+        "npm",
+        "run",
+        "build:h5"
+      ],
+      "seconds": 89.13,
+      "rc": 0,
+      "index_sha256": "824f9c911e0099796198bc1466a7b3e28c573bd51cb223f1fecac9612d0702fc"
+    }
+  },
+  "contracts": {
+    "wmsownersale": {
+      "command": [
+        "npm",
+        "run",
+        "test:contracts"
+      ],
+      "seconds": 12.62,
+      "rc": 0
+    },
+    "sales-miniapp": {
+      "command": [
+        "npm",
+        "run",
+        "test:structure"
+      ],
+      "seconds": 1.96,
+      "rc": 0
+    }
+  },
+  "browser": {
+    "pda": {
+      "command": [
+        "/wms/wmspda/node_modules/.bin/playwright",
+        "test",
+        "--config",
+        "/tmp/wms-fe-audit-v3/pda.config.cjs",
+        "pos-stock-zones.spec.js",
+        "product-search-keyboard-scanner.spec.js",
+        "home-todos.spec.js"
+      ],
+      "rc": 0,
+      "seconds": 245.17,
+      "duration": 237368.767,
+      "expected": 7,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "android": {
+      "command": [
+        "/wms/wmsandroid/node_modules/.bin/playwright",
+        "test",
+        "--config",
+        "/tmp/wms-fe-audit-v3/android.config.cjs",
+        "mobile-recovery.spec.js",
+        "mobile-pos.spec.js",
+        "-g",
+        "return recovery preserves|zero-priced goods|default saleable zones|checkout keeps one request"
+      ],
+      "rc": 0,
+      "seconds": 125.93,
+      "duration": 112330.808,
+      "expected": 4,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "owner": {
+      "command": [
+        "/wms/wmsownersale/node_modules/.bin/playwright",
+        "test",
+        "--config",
+        "/tmp/wms-fe-audit-v3/owner.config.cjs",
+        "inventory.spec.js"
+      ],
+      "rc": 0,
+      "seconds": 52.03,
+      "duration": 38254.58,
+      "expected": 2,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "boss": {
+      "command": [
+        "/wms/wmsbossbilling/node_modules/.bin/playwright",
+        "test",
+        "--config",
+        "/tmp/wms-fe-audit-v3/boss.config.cjs",
+        "entry-and-recovery.spec.js",
+        "-g",
+        "authenticated cold start|transient detail failure|manual retry"
+      ],
+      "rc": 0,
+      "seconds": 72.63,
+      "duration": 62348.45999999999,
+      "expected": 5,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    }
+  },
+  "web_pytest": {
+    "first": {
+      "tests": "2",
+      "failures": "1",
+      "errors": "0",
+      "skipped": "0",
+      "time": "86.261"
+    },
+    "first_failure": "图表测试在首个 1280 宽场景等待10个 canvas 时超过默认5秒，四种旧账号菜单渲染通过；共2个pytest项。",
+    "focus_retry": {
+      "tests": "1",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "39.691"
+    }
+  },
+  "web_independent": [
+    {
+      "width": 390,
+      "external": [],
+      "errors": [],
+      "warnings": [],
+      "charts": 10,
+      "kpi": "完成率 75%",
+      "menu": {
+        "x": 12,
+        "y": 95,
+        "width": 78,
+        "height": 44
+      },
+      "bodyWidth": 390,
+      "overlay": 0,
+      "title": "仓库运营看板",
+      "url": "https://dashboard.invalid/"
+    },
+    {
+      "width": 1440,
+      "external": [],
+      "errors": [],
+      "warnings": [],
+      "charts": 10,
+      "kpi": "完成率 75%",
+      "menu": {
+        "x": 92,
+        "y": 53,
+        "width": 78,
+        "height": 29.390625
+      },
+      "bodyWidth": 1440,
+      "overlay": 0,
+      "title": "仓库运营看板",
+      "url": "https://dashboard.invalid/"
+    }
+  ],
+  "pda_layout": {
+    "app": "wmspda",
+    "errors": [],
+    "unexpected": [],
+    "queries": [],
+    "checkouts": [],
+    "returns": [],
+    "geometry": [
+      {
+        "width": 390,
+        "box": {
+          "x": 182,
+          "y": 66,
+          "w": 0,
+          "h": 260
+        },
+        "cashInput": {
+          "x": 188,
+          "y": 75,
+          "w": 125,
+          "h": 31
+        },
+        "metrics": [
+          {
+            "text": "净销售 ¥0.00",
+            "box": {
+              "x": 182,
+              "y": 66,
+              "w": 30,
+              "h": 260
+            },
+            "cashInputOverlapped": true,
+            "textLines": 6
+          },
+          {
+            "text": "实收 ¥0.00 / 赊账 ¥0.00 / 还款 ¥0.00",
+            "box": {
+              "x": 222,
+              "y": 66,
+              "w": 30,
+              "h": 260
+            },
+            "cashInputOverlapped": true,
+            "textLines": 16
+          },
+          {
+            "text": "完成 0 单 / 退货 0 单 / 作废 0 单",
+            "box": {
+              "x": 262,
+              "y": 66,
+              "w": 14,
+              "h": 260
+            },
+            "cashInputOverlapped": true,
+            "textLines": 28
+          },
+          {
+            "text": "退货金额 ¥0.00",
+            "box": {
+              "x": 285,
+              "y": 66,
+              "w": 30,
+              "h": 260
+            },
+            "cashInputOverlapped": true,
+            "textLines": 6
+          },
+          {
+            "text": "现金应点 ¥0.00",
+            "box": {
+              "x": 325,
+              "y": 66,
+              "w": 30,
+              "h": 260
+            },
+            "cashInputOverlapped": false,
+            "textLines": 6
+          }
+        ],
+        "cardHeight": 260
+      },
+      {
+        "width": 768,
+        "box": {
+          "x": 359,
+          "y": 130,
+          "w": 0,
+          "h": 506
+        },
+        "cashInput": {
+          "x": 372,
+          "y": 146,
+          "w": 246,
+          "h": 61
+        },
+        "metrics": [
+          {
+            "text": "净销售 ¥0.00",
+            "box": {
+              "x": 359,
+              "y": 130,
+              "w": 60,
+              "h": 506
+            },
+            "cashInputOverlapped": true,
+            "textLines": 6
+          },
+          {
+            "text": "实收 ¥0.00 / 赊账 ¥0.00 / 还款 ¥0.00",
+            "box": {
+              "x": 438,
+              "y": 130,
+              "w": 60,
+              "h": 506
+            },
+            "cashInputOverlapped": true,
+            "textLines": 16
+          },
+          {
+            "text": "完成 0 单 / 退货 0 单 / 作废 0 单",
+            "box": {
+              "x": 516,
+              "y": 130,
+              "w": 27,
+              "h": 506
+            },
+            "cashInputOverlapped": true,
+            "textLines": 28
+          },
+          {
+            "text": "退货金额 ¥0.00",
+            "box": {
+              "x": 562,
+              "y": 130,
+              "w": 60,
+              "h": 506
+            },
+            "cashInputOverlapped": true,
+            "textLines": 6
+          },
+          {
+            "text": "现金应点 ¥0.00",
+            "box": {
+              "x": 640,
+              "y": 130,
+              "w": 60,
+              "h": 506
+            },
+            "cashInputOverlapped": false,
+            "textLines": 6
+          }
+        ],
+        "cardHeight": 506
+      },
+      {
+        "width": 1280,
+        "box": {
+          "x": 200,
+          "y": 64,
+          "w": 880,
+          "h": 19
+        },
+        "cashInput": {
+          "x": 1086,
+          "y": 72,
+          "w": 120,
+          "h": 30
+        },
+        "metrics": [
+          {
+            "text": "净销售 ¥0.00",
+            "box": {
+              "x": 200,
+              "y": 64,
+              "w": 72,
+              "h": 19
+            },
+            "cashInputOverlapped": false,
+            "textLines": 2
+          },
+          {
+            "text": "实收 ¥0.00 / 赊账 ¥0.00 / 还款 ¥0.00",
+            "box": {
+              "x": 281,
+              "y": 64,
+              "w": 196,
+              "h": 19
+            },
+            "cashInputOverlapped": false,
+            "textLines": 2
+          },
+          {
+            "text": "完成 0 单 / 退货 0 单 / 作废 0 单",
+            "box": {
+              "x": 485,
+              "y": 64,
+              "w": 176,
+              "h": 19
+            },
+            "cashInputOverlapped": false,
+            "textLines": 2
+          },
+          {
+            "text": "退货金额 ¥0.00",
+            "box": {
+              "x": 670,
+              "y": 64,
+              "w": 85,
+              "h": 19
+            },
+            "cashInputOverlapped": false,
+            "textLines": 2
+          },
+          {
+            "text": "现金应点 ¥0.00",
+            "box": {
+              "x": 764,
+              "y": 64,
+              "w": 85,
+              "h": 19
+            },
+            "cashInputOverlapped": false,
+            "textLines": 2
+          }
+        ],
+        "cardHeight": 54.75
+      }
+    ],
+    "status": "observed",
+    "seconds": 17.315
+  },
+  "pda_focused_definition": "四个套件包括地址、商品导出、退货恢复、会话刷新。计数与全套重复，不能累加。",
+  "suite_warnings": "五个项目 Vite 配置给出未来 configLoader:native 对 CommonJS 里 ESM 语法的兼容提示；构建器另报告较慢的插件回调。现有构建退出状态均见各端。",
+  "source_unchanged": "本轮写入应用的 ignored dist、缓存与测试产物；git ls-files 在五端 dist 构建目录下为零。",
+  "fractional_prices": [
+    {
+      "cart_validation": "",
+      "line": {
+        "product_id": 1,
+        "qty": "0.500",
+        "price": "1.2300",
+        "amount": "0.62"
+      },
+      "received": "5.00",
+      "result": "rejected",
+      "error": "{'price': ['SYNTHETIC-WEIGHT 成交单价必须等于总金额除以数量后的四位小数结果 1.2400。']}"
+    },
+    {
+      "cart_validation": "",
+      "line": {
+        "product_id": 1,
+        "qty": "1.000",
+        "price": "1.2300",
+        "amount": "1.23"
+      },
+      "received": "5.00",
+      "result": "accepted",
+      "amount": "1.23"
+    },
+    {
+      "cart_validation": "",
+      "line": {
+        "product_id": 1,
+        "qty": "2.500",
+        "price": "1.2300",
+        "amount": "3.08"
+      },
+      "received": "5.00",
+      "result": "rejected",
+      "error": "{'price': ['SYNTHETIC-WEIGHT 成交单价必须等于总金额除以数量后的四位小数结果 1.2320。']}"
+    }
+  ],
+  "missing_price": {
+    "catalog_price": null,
+    "catalog_serializer": "0",
+    "android_cart_validation": "",
+    "android_line": {
+      "product_id": 3,
+      "qty": "1.000",
+      "price": "0.0000",
+      "amount": "0.00"
+    },
+    "accepted_server_line_amount": "0.00",
+    "android_payment": {
+      "method": "WECHAT",
+      "amount_received": "0.00",
+      "reference_no": ""
+    }
+  },
+  "pda_interaction": {
+    "app": "wmspda",
+    "errors": [
+      "pos checkout failed {code: 400, statusCode: 400, message: 成交单价必须等于总金额除以数量后的四位小数结果 1.2400。, data: Object}"
+    ],
+    "unexpected": [],
+    "queries": [
+      {
+        "zone": null,
+        "search": null
+      },
+      {
+        "zone": null,
+        "search": "称重样品"
+      },
+      {
+        "zone": null,
+        "search": "SYNTHETIC-WEIGHT"
+      },
+      {
+        "zone": null,
+        "search": "SYNTHETIC-WEIGHT"
+      },
+      {
+        "zone": null,
+        "search": "SYNTHETIC-WEIGHT"
+      }
+    ],
+    "checkouts": [
+      [
+        {
+          "product_id": 1,
+          "qty": "0.500",
+          "price": "1.2300",
+          "amount": "0.62"
+        }
+      ]
+    ],
+    "returns": [
+      {
+        "sale_id": 41,
+        "lines": [
+          {
+            "sale_line_id": 82,
+            "qty": "1.000"
+          }
+        ],
+        "refunds": [
+          {
+            "method": "CASH",
+            "amount": "9.00",
+            "reference_no": ""
+          }
+        ],
+        "reason": "退一件",
+        "idempotency_key": "3cd64c3e-9626-4282-bd60-9dbbbea1e729"
+      },
+      {
+        "sale_id": 41,
+        "lines": [
+          {
+            "sale_line_id": 82,
+            "qty": "1.000"
+          }
+        ],
+        "refunds": [
+          {
+            "method": "CASH",
+            "amount": "9.00",
+            "reference_no": ""
+          }
+        ],
+        "reason": "退一件",
+        "idempotency_key": "3cd64c3e-9626-4282-bd60-9dbbbea1e729"
+      }
+    ],
+    "stock": "称重样品\nSYNTHETIC-WEIGHT SYNTHETIC-WEIGHT\n售价 ¥1.23 / 拣货区＋存储区可售 10 千克\n加入",
+    "fractionalMatchesBackendProbe": true,
+    "sameReturn": true,
+    "route": "#/pages/pos/index",
+    "title": "POS收银",
+    "overlay": 0,
+    "status": "observed",
+    "seconds": 46.666
+  },
+  "mall_interaction": {
+    "app": "sales-miniapp",
+    "errors": [],
+    "unexpected": [
+      "cdn.dcloud.net.cn/img/shadow-grey.png"
+    ],
+    "queries": [
+      {
+        "path": "/api/sale-mini/home/",
+        "tag": null
+      },
+      {
+        "path": "/api/sale-mini/products/",
+        "tag": "hot"
+      },
+      {
+        "path": "/api/sale-mini/products/",
+        "tag": "new"
+      },
+      {
+        "path": "/api/sale-mini/products/",
+        "tag": "recommended"
+      }
+    ],
+    "checkouts": [],
+    "returns": [],
+    "ordinaryEmpty": "暂无新品商品",
+    "after503": "金桥融通商城\n搜索商品、品牌、关键词\n搜索\n每日精选\n品质好货，安心选购\n热卖\n新品\n推荐\n空\n暂无推荐商品\n首页\n分类\n购物车\n订单\n我的",
+    "visibleRetryTexts": [],
+    "route": "#/pages/index/index",
+    "title": "金桥融通商城",
+    "overlay": 0,
+    "status": "observed",
+    "seconds": 7.413
+  },
+  "pda_focused": {
+    "rc": 1,
+    "seconds": 78.09,
+    "command": [
+      "npm",
+      "run",
+      "test:unit",
+      "--",
+      "tests/unit/requestBaseUrl.test.js",
+      "tests/unit/allProductExport.test.js",
+      "tests/unit/posReturnRecovery.test.js",
+      "tests/unit/authRefresh.test.js",
+      "--maxWorkers=1"
+    ],
+    "passed": 20,
+    "failed": 7,
+    "skipped": 0,
+    "todo": 0
+  },
+  "notes": [
+    "浏览器使用原测试文件和新构建的静态资源；审计配置串行单 worker、本地静态服务器、15 秒断言、无重试。Android 单独 390 像素；源测试其他机型没有执行。",
+    "PDA 交互探针第一次价格拒绝弹窗未被脚本关闭；补上关闭动作后在原页面得到完整购买和退货证据。退货 API 第一回合模拟丢回执，第二回合成功。",
+    "API 地址测试与下载断言共用同一错误服务前缀。原始日志含测试令牌字符串及环境地址，不随证据分发。",
+    "未进行生产访问、真实登录跨端联测、真实微信支付、原生签名包和真机扫码打印。无 DB 访问，无仓库源码修改。"
+  ]
+}

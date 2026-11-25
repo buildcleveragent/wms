@@ -105,10 +105,11 @@
     <script>
   document.addEventListener("DOMContentLoaded", function () {
     // 获取 'accounts' 菜单的 dropdown-menu
-    var accountsDropdownMenu = document.querySelector('a[href="/admin/accounts/"]').closest('div.dropdown-menu');
+    const accountsLink = document.querySelector('a[href="/admin/accounts/"]');
+    const accountsDropdownMenu = accountsLink?.closest('div.dropdown-menu');
 
-    // 如果找到了 accounts 下拉菜单，直接将 'Group' 组项添加进去
-    if (accountsDropdownMenu) {
+    // 兼容旧账号菜单中缺少的“组”入口
+    if (accountsDropdownMenu && !accountsDropdownMenu.querySelector('a[href="/admin/auth/group/"]')) {
         var groupMenuItem = document.createElement('a');
         groupMenuItem.className = 'dropdown-item';
         groupMenuItem.href = '/admin/auth/group/';

@@ -1,0 +1,260 @@
+{
+  "commit": "836ce7ca9fc48a690f8e8fabe2993622890361a4",
+  "date_singapore": "2026-11-18",
+  "coverage_micro_experiment": {
+    "uploaded_files": [
+      ".coverage.functional",
+      ".coverage.migrations"
+    ],
+    "measured_fixture": "two synthetic ten-statement modules with 7 and 10 statements covered",
+    "aggregate_guard_command": "shard_count=\"$(find . -type f -name '.coverage.*' | wc -l)\"\ntest \"$shard_count\" -eq 5",
+    "observed_shards": [
+      ".coverage.functional",
+      ".coverage.migrations"
+    ],
+    "guard_with_all_declared_shards": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    "otherwise_valid_coverage_data_combines": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": "Combined 2 files"
+    },
+    "aggregate_only_command": "coverage report --fail-under=72.38",
+    "aggregate_only_gate": {
+      "exit": 0,
+      "stdout": "Name                                    Stmts   Miss  Cover\n-----------------------------------------------------------\nallapp/tasking/views_relocation.py         10      3    70%\nallapp/tasking/views_replenishment.py      10      0   100%\n-----------------------------------------------------------\nTOTAL                                      20      3    85%",
+      "stderr": ""
+    },
+    "policy_command": "python scripts/check_coverage_gate.py report.json --policy docs/release-gates.json",
+    "business_entry_gate": {
+      "exit": 1,
+      "output": {
+        "status": "FAIL",
+        "measured": {
+          "allapp": 85.0,
+          "relocation_api": 70.0,
+          "replenishment_api": 100.0
+        },
+        "minimum": {
+          "allapp": 72.38,
+          "relocation_api": 80,
+          "replenishment_api": 80
+        }
+      }
+    }
+  },
+  "release_order_micro_experiment": {
+    "command": "allapp.core.test_release_orchestration.release(tempdir, stage=False, scenario='success')",
+    "run": "real shell entrypoint with temporary fake docker/systemctl/backup/sleep/date; observation zero; no Docker, deployment or database access",
+    "exit": 0,
+    "selected_events": [
+      "backup",
+      "backup",
+      "systemctl stop wms-sale-mini-expire.timer wms-sale-mini-reconcile.timer",
+      "docker compose -f compose.production.yml stop web scheduler boss-check-worker",
+      "docker compose -f compose.production.yml run --rm web python manage.py migrate --noinput"
+    ]
+  },
+  "volume_comparison": {
+    "method": "Compare literal /app volume destinations in production Compose with the actual __main__ for-loop of docker/check_volume_access.py",
+    "mounted": [
+      "/app/media",
+      "/app/private_arrivals",
+      "/app/private_returns",
+      "/app/staticfiles"
+    ],
+    "release_probe": [
+      "/app/staticfiles",
+      "/app/media"
+    ],
+    "mounted_outside_probe": [
+      "/app/private_arrivals",
+      "/app/private_returns"
+    ]
+  },
+  "historical_candidate": {
+    "file": "var/system-tests/release-20261005-16146c175ce8/release-readiness.json",
+    "id": "7be0a23ddf1c-16146c175ce8",
+    "evaluated_at": "2026-10-05T05:36:58.436899+00:00",
+    "local": "BLOCKED",
+    "external_status_counts": {
+      "NOT_RUN": 10
+    }
+  },
+  "evidence_scope": "No live MySQL, production writes, real Docker/systemd, external scanners, production or staging access. Only synthetic PDF, local temp files and repository code. Coverage percentages in coverage_micro_experiment describe fake ten-line files.",
+  "local_unit_and_orchestration": [
+    {
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest --noconftest -c /dev/null -p no:cacheprovider -o markers=unit -q allapp/core/test_coverage_gate.py allapp/core/test_release_orchestration.py allapp/core/test_release_readiness.py allapp/core/test_external_acceptance.py",
+      "scope": "Coverage policy, simulated shell release process, evidence completeness and synthetic external input validation.",
+      "exit": 0,
+      "tests": 57,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "seconds": 78.206,
+      "cases": [
+        "test_coverage_thresholds_do_not_round_up_or_accept_missing_business_entries",
+        "test_all_writers_stop_before_migration_and_start_the_candidate[success-production]",
+        "test_all_writers_stop_before_migration_and_start_the_candidate[success-staging]",
+        "test_all_writers_stop_before_migration_and_start_the_candidate[warming-up-production]",
+        "test_all_writers_stop_before_migration_and_start_the_candidate[warming-up-staging]",
+        "test_release_failure_stops_every_writer[migration-production]",
+        "test_release_failure_stops_every_writer[migration-staging]",
+        "test_release_failure_stops_every_writer[startup-production]",
+        "test_release_failure_stops_every_writer[startup-staging]",
+        "test_release_failure_stops_every_writer[missing-production]",
+        "test_release_failure_stops_every_writer[missing-staging]",
+        "test_release_failure_stops_every_writer[duplicate-production]",
+        "test_release_failure_stops_every_writer[duplicate-staging]",
+        "test_release_failure_stops_every_writer[old-image-production]",
+        "test_release_failure_stops_every_writer[old-image-staging]",
+        "test_release_failure_stops_every_writer[stopped-production]",
+        "test_release_failure_stops_every_writer[stopped-staging]",
+        "test_release_failure_stops_every_writer[stale-heartbeat-production]",
+        "test_release_failure_stops_every_writer[stale-heartbeat-staging]",
+        "test_release_failure_stops_every_writer[old-heartbeat-production]",
+        "test_release_failure_stops_every_writer[old-heartbeat-staging]",
+        "test_release_failure_stops_every_writer[observation-production]",
+        "test_release_failure_stops_every_writer[observation-staging]",
+        "test_failed_preflight_preserves_running_services[production]",
+        "test_failed_preflight_preserves_running_services[staging]",
+        "test_ci_calls_the_shared_staging_entrypoint",
+        "test_pre_release_can_pass_before_any_production_observation",
+        "test_security_gate_never_passes_via_later_observation[FAIL]",
+        "test_security_gate_never_passes_via_later_observation[RUNNING]",
+        "test_security_gate_never_passes_via_later_observation[ABORTED]",
+        "test_security_gate_never_passes_via_later_observation[SKIPPED]",
+        "test_security_gate_never_passes_via_later_observation[BLOCKED]",
+        "test_security_gate_never_passes_via_later_observation[NOT_RUN]",
+        "test_open_pdf_resource_risk_blocks_release_but_not_completed_local_work",
+        "test_incomplete_or_mismatched_evidence_is_not_accepted[candidate]",
+        "test_incomplete_or_mismatched_evidence_is_not_accepted[digest]",
+        "test_incomplete_or_mismatched_evidence_is_not_accepted[missing]",
+        "test_incomplete_or_mismatched_evidence_is_not_accepted[stale]",
+        "test_incomplete_or_mismatched_evidence_is_not_accepted[duplicate]",
+        "test_incomplete_or_mismatched_evidence_is_not_accepted[short-observation]",
+        "test_incomplete_or_mismatched_evidence_is_not_accepted[image]",
+        "test_same_image_fresh_scan_updates_conclusion_without_rebuild",
+        "test_complete_measured_capacity_contract",
+        "test_partial_or_incorrect_capacity_never_passes[started_requests-0]",
+        "test_partial_or_incorrect_capacity_never_passes[unsent_requests-1]",
+        "test_partial_or_incorrect_capacity_never_passes[timeout_requests-20]",
+        "test_partial_or_incorrect_capacity_never_passes[measured_seconds-10]",
+        "test_partial_or_incorrect_capacity_never_passes[read_samples-0]",
+        "test_partial_or_incorrect_capacity_never_passes[read_p95_ms-801]",
+        "test_partial_or_incorrect_capacity_never_passes[write_p95_ms-1501]",
+        "test_partial_or_incorrect_capacity_never_passes[inventory_errors-1]",
+        "test_partial_or_incorrect_capacity_never_passes[financial_errors-1]",
+        "test_partial_or_incorrect_capacity_never_passes[active_roles-value9]",
+        "test_partial_or_incorrect_capacity_never_passes[metrics-value10]",
+        "test_empty_capacity_cannot_be_reported_as_zero_error_success",
+        "test_recovery_requires_measured_consistent_database_media_and_business_checks",
+        "test_manual_summary_count_cannot_replace_individual_signed_results"
+      ]
+    },
+    {
+      "command": "APP_ENV=test DJANGO_SETTINGS_MODULE=wmsmaster.settings ALLOWED_HOSTS=testserver PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python: patch BaseDatabaseWrapper.connect and socket.socket.connect to raise, django.setup(), override CACHES with LocMemCache, pytest.main(['--noconftest','-c','/dev/null','-p','no:cacheprovider','-q','allapp/core/test_release_configuration.py'])",
+      "scope": "Release probes using a mocked cursor and temp volume checks. Actual ORM and socket connect attempt counts both 0.",
+      "exit": 0,
+      "tests": 4,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "seconds": 13.506,
+      "cases": [
+        "test_health_probe_stays_http_but_business_routes_redirect",
+        "test_volume_probe_preserves_existing_files_and_cleans_up",
+        "test_lint_excludes_only_historical_evidence_not_executable_source",
+        "test_volume_probe_rejects_unwritable_existing_entries"
+      ]
+    }
+  ],
+  "render_measurement": {
+    "command": "APP_ENV=test DJANGO_SETTINGS_MODULE=wmsmaster.settings; use a fresh TMPDIR and deny Django BaseDatabaseWrapper.connect and socket.socket.connect; scripts.measure_pdf_resource.worker(1,tmp_pdf); verify pdftotext tmp_pdf -",
+    "sample": "1 synthetic Chinese dispatch-note line, real repository template and resource-limited child renderer, default one slot isolated in a private TMPDIR; n=1",
+    "exit": 0,
+    "attempted_orm_connections": 0,
+    "attempted_python_socket_connections": 0,
+    "runtime": {
+      "python": "3.12.3",
+      "weasyprint": "70.0",
+      "cpu_seconds": 120,
+      "memory_bytes": 1073741824,
+      "timeout_seconds": 150
+    },
+    "elapsed_seconds": 43.843,
+    "renderer_peak_rss_kib": 174532,
+    "web_process_peak_rss_kib": 174532,
+    "input_html_bytes": 3438,
+    "pdf_bytes": 299073,
+    "verification": {
+      "pdf_header_valid": true,
+      "pdftotext_exit": 0,
+      "chinese_text_present": true
+    },
+    "interpretation": "Shared host; immediately afterward /proc/loadavg reported one-minute load 28.73 and getconf reported 6 online logical CPUs. Single observation, not an SLA, regression comparison or production measurement. Benchmark excludes request handling, fetching business data, queuing and user-perceived print completion. WeasyPrint logged unsupported ::note-call / ::note-marker / ::note-callback selectors during setup; visual fidelity of each field was not checked."
+  },
+  "current_code_findings": [
+    {
+      "subject": "CI coverage",
+      "sources": [
+        ".github/workflows/ci.yml:271",
+        ".github/workflows/ci.yml:306",
+        ".github/workflows/ci.yml:395",
+        "scripts/check_coverage_gate.py:10",
+        "docs/release-gates.json:15"
+      ],
+      "acceptance": "Fresh CI run combines exactly the two required named artifacts, fails if either is missing and uses the policy checker for overall >=72.38%, relocation >=80%, replenishment >=80%. Preserve a negative fixture for each file threshold."
+    },
+    {
+      "subject": "Snapshot consistency and private evidence",
+      "sources": [
+        "docker/production_release.sh:54",
+        "docker/production_release.sh:69",
+        "compose.production.yml:12",
+        "docker/check_volume_access.py:33",
+        "Dockerfile:33",
+        "docs/external-acceptance-profile.json:17"
+      ],
+      "finding": "Snapshot hooks run before writer quiescence. Their implementation is external. Private arrival/return mounts are prepared in the image but are omitted by the volume preflight; inclusion in the external backup was not established.",
+      "acceptance": "Match snapshots at a common recovery point (or quiesce every writer first); restore isolated test copies including attachments in both private volumes, verify document correspondence/checksums, reconciliation, and RPO <=24h / RTO <=1h. Wrong permissions on either private mount must fail preflight."
+    },
+    {
+      "subject": "Scheduler health",
+      "sources": [
+        "compose.production.yml:36",
+        "docker/release_services.sh:71",
+        "allapp/billing/management/commands/billing_run_scheduler.py:133",
+        "allapp/billing/models.py:952",
+        "allapp/reports/services_boss.py:1243"
+      ],
+      "finding": "The deployment covers web DB readiness and a fresh Boss worker heartbeat. Billing scheduler verification checks running state and image. Its loop may continue after a logical failure; billing job records and a failed-job dashboard exist. No inference about external monitoring installations.",
+      "acceptance": "Simulate a due-but-uncompleted billing job with scheduler process alive; signal overdue/failed scoped jobs within the agreed accounting cutoff and clear alert after successful reconciliation. On non-due days no false alarms."
+    },
+    {
+      "subject": "Production-like capacity and external release signoff",
+      "sources": [
+        "docs/external-acceptance-profile.json",
+        "docs/release-gates.json",
+        "docs/pdf-resource-budget.md",
+        "allapp/reports/pdf_rendering.py:34"
+      ],
+      "finding": "Named historical register marks ten external checks NOT_RUN. Search of JSON/Markdown under var/assessments, var/system-tests and docs/reports before creating this report did not identify external records containing current short/full commit; other systems were not inspected.",
+      "acceptance": "Run same-warehouse hotspot and cross-warehouse acceptance on pinned candidate with specified mix: 50 users 30 min and 100 users 5 min after warmup; read/write p95 <=800/1500 ms, unexpected failures/timeouts <1%, zero inventory/finance discrepancies. Sign device, real payment, recovery and 196 manual cases with scoped evidence. Test normal and largest legal PDF under actual container limits and measure interference and busy rate."
+    }
+  ],
+  "historical_remediation": [
+    {
+      "previous": "2026-10-05 historic static-volume-finding.json records root-owned fresh static/media volumes; production-probe.json records HTTP 301 for readiness.",
+      "current": "Dockerfile creates 10001-owned paths (including private mounts). Preflight tests (mock/temp) pass. HTTP readiness rules now exempt exactly two paths and tested app returns 200 for healthy mock DB, 503 for disconnected mock DB; normal business HTTP still redirects. Rebuilding/running actual candidate image with volumes was not performed."
+    },
+    {
+      "previous": "2026-10-05 historic PDF measurement: 1000 synthetic lines took 61.7 s, 506500 KiB peak in that environment and target recorded production_limits_implemented=false.",
+      "current": "Per-container single slot, restricted child process and resource bounds now implemented; local one-line Chinese generation succeeded. Historical and present environments differ."
+    }
+  ],
+  "assembled_utc": "2026-11-18T06:55:29.460429+00:00"
+}

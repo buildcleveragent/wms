@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from threading import Barrier
 from unittest import mock
@@ -133,6 +133,7 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
             code="TARGET",
             name=self.product.name,
             base_uom=self.uom,
+            expiry_control=False,
             volume=self.product.volume,
         )
         OwnerProductMapping.objects.create(
@@ -345,6 +346,7 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
             code="BARCODE",
             name="existing",
             base_uom=self.uom,
+            expiry_control=False,
             volume=self.product.volume,
             spec="different",
         )
@@ -371,6 +373,7 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
             code="CONFLICT",
             name="target",
             base_uom=self.uom,
+            expiry_control=False,
             volume=self.product.volume,
         )
         ProductPackage.objects.create(product=target, uom=box, qty_in_base=6)
@@ -394,13 +397,74 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
         self.detail.refresh_from_db()
         self.assertEqual(self.detail.allocated_qty, 0)
 
+    def test_reallocation_keeps_source_owner_and_posts_only_the_new_reservation(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+        from allapp.accounts.models import UserRoleScope
+        from allapp.locations.models import Location
+        from .pick_reallocation import reallocate_sale_line
+
+        order, task = self.create_order()
+        old = task.lines.get()
+        adjust_pick_line_qty(task.pk, old.pk, 3, by_user=self.operator, client_seq="partial")
+        old.refresh_from_db()
+        manager = get_user_model().objects.create_user(username="transfer-reallocator")
+        UserRoleScope.objects.create(
+            user=manager, role="warehouse_manager", warehouse=self.warehouse
+        )
+        manager.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="tasking", codename="taskconfirm_as_wh_manager"
+            )
+        )
+        alt_location = Location.objects.create(warehouse=self.warehouse, code="AFW-01-01-02")
+        alternate = InventoryDetail.objects.create(
+            owner=self.owner,
+            product=self.product,
+            warehouse=self.warehouse,
+            location=alt_location,
+            onhand_qty=old.qty_plan,
+        )
+        Location.objects.filter(pk=self.detail.location_id).update(is_frozen=True)
+        result = reallocate_sale_line(
+            task=task,
+            line_id=old.pk,
+            reason="来源区冻结",
+            expected_qty=old.qty_done,
+            expected_revision=old.scan_logs.get(status="OK").pk,
+            physical_confirmed=True,
+            actor=manager,
+        )
+        new = task.lines.get(pk=result["replacement_lines"][0]["line_id"])
+        self.assertEqual(new.product.owner_id, self.target_owner.pk)
+        self.assertEqual(new.transfer_reservation.source_inventory_id, alternate.pk)
+        self.assertEqual(AssistedTransferReservation.objects.get(task_line=old).status, "RELEASED")
+        adjust_pick_line_qty(
+            task.pk, new.pk, new.qty_plan, by_user=self.operator, client_seq="replacement"
+        )
+        self.review(task)
+        posted = self.post(task)
+        self.assertEqual(posted.status_code, 200, posted.data)
+        alternate.refresh_from_db()
+        self.detail.refresh_from_db()
+        self.assertEqual(alternate.onhand_qty, 0)
+        self.assertEqual(self.detail.onhand_qty, 100)
+        self.assertEqual(
+            AssistedTransferReservation.objects.filter(
+                transfer_line__transfer__sales_order=order, status="POSTED"
+            ).count(),
+            1,
+        )
+
     def test_two_lots_reserve_exact_rows_and_scan_supplied_lot(self):
         self.product.batch_control = True
         self.product.expiry_control = True
+        self.product.shelf_life_days = 365
         self.product.save()
+        today = date.today()
         self.detail.batch_no = "FIRST"
-        self.detail.production_date = date(2026, 1, 1)
-        self.detail.expiry_date = date(2027, 1, 1)
+        self.detail.production_date = today - timedelta(days=335)
+        self.detail.expiry_date = today + timedelta(days=30)
         self.detail.onhand_qty = Decimal("4.0005")
         self.detail.save()
         second = InventoryDetail.objects.create(
@@ -409,8 +473,8 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
             warehouse=self.warehouse,
             location=self.location,
             batch_no="SECOND",
-            production_date=date(2026, 2, 1),
-            expiry_date=date(2027, 2, 1),
+            production_date=today - timedelta(days=305),
+            expiry_date=today + timedelta(days=60),
             onhand_qty=Decimal("95.9995"),
         )
         _, task = self.create_order()
@@ -534,6 +598,7 @@ class OwnershipTransferTests(TransferFixtures, TestCase):
             code="FIFO-TARGET",
             name=self.product.name,
             base_uom=self.uom,
+            expiry_control=False,
             volume=self.product.volume,
         )
         OwnerProductMapping.objects.create(
@@ -704,6 +769,7 @@ class SharedCustomerIntegrationTests(TransferFixtures, TestCase):
             code="SHARED-SALE",
             name="target",
             base_uom=self.uom,
+            expiry_control=False,
             volume=self.product.volume,
             price=Decimal("12"),
         )

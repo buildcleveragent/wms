@@ -1,0 +1,244 @@
+{
+  "commit": "836ce7ca9fc48a690f8e8fabe2993622890361a4",
+  "evaluation_date": "2026-11-18",
+  "environment": {
+    "python": "3.12.3",
+    "node": "22.22.0",
+    "npm": "10.9.4",
+    "database": "wms_db_test",
+    "mysql": "8.0.46",
+    "database_lifecycle": "reused",
+    "preflight": {
+      "connection_bounded_seconds": 3,
+      "validated_configured_database_and_test_name": true,
+      "actual_database_checked_with_select_database": true,
+      "applied_migrations": 165,
+      "pending_migrations": 0,
+      "managed_model_tables": 250,
+      "required_model_columns": 3687,
+      "missing_model_columns": 0
+    },
+    "system_check": "System check identified no issues (0 silenced).",
+    "installed_dependency_check": "No broken requirements found."
+  },
+  "distinct_counts": {
+    "passed": 69,
+    "failed": 2,
+    "skipped": 0,
+    "passed_subtests": 5,
+    "excluded_repeat_executions": 2
+  },
+  "main": {
+    "started_utc": "2026-11-18T06:49:33.968317+00:00",
+    "finished_utc": "2026-11-18T07:02:41.372958+00:00",
+    "exit_code": 0,
+    "status": "PASS",
+    "nodeids": {
+      "allapp/test_business_flows.py::BusinessFlowTests::test_flow_10_formal_inbound_putaway_to_outbound_full_chain": "PASS",
+      "allapp/test_business_flows.py::BusinessFlowTests::test_flow_11_multiline_multilocation_outbound_full_chain": "PASS",
+      "allapp/test_business_flows.py::BusinessFlowTests::test_flow_12_operational_inventory_to_billing_invoice_chain": "PASS",
+      "allapp/test_business_flows.py::BusinessFlowTests::test_flow_1_receive_without_order_inventory_visible": "PASS",
+      "allapp/test_business_flows.py::BusinessFlowTests::test_flow_2_outbound_approve_scan_post": "PASS",
+      "allapp/test_business_flows.py::BusinessFlowTests::test_flow_3_unapprove_or_cancel_releases_reservation": "PASS",
+      "allapp/test_business_flows.py::BusinessFlowTests::test_flow_4_quick_adjust_updates_inventory_and_company_report": "PASS",
+      "allapp/test_business_flows.py::BusinessFlowTests::test_flow_5_snapshot_metrics_accrual_lock_invoice": "PASS",
+      "allapp/test_business_flows.py::BusinessFlowTests::test_flow_6_owner_portal_can_view_inventory_bill_and_export": "PASS",
+      "allapp/test_business_flows.py::BusinessFlowTests::test_flow_7_pda_pick_scan_and_state_transition": "PASS",
+      "allapp/test_business_flows.py::BusinessFlowTests::test_flow_8_console_billing_overview_and_detail": "PASS",
+      "allapp/test_business_flows.py::BusinessFlowTests::test_flow_9_formal_inbound_order_to_outbound_full_chain": "PASS",
+      "allapp/test_business_flows.py::BusinessFlowTests::test_unpriced_outbound_approve_scan_post": "PASS",
+      "allapp/pos/test_cross_flow_acceptance.py::ReviewInventorySummaryTests::test_allocation_keeps_owner_summary_consistent": "PASS",
+      "allapp/pos/test_cross_flow_acceptance.py::ReviewInventorySummaryTests::test_release_keeps_owner_summary_consistent": "PASS",
+      "allapp/pos/test_cross_flow_acceptance.py::ReviewInventorySummaryTests::test_standard_outbound_fefo_prioritizes_dated_stock": "PASS",
+      "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_legacy_reference_cannot_be_collected_again_after_upgrade": "PASS",
+      "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_repayment_key_rejects_changed_payload": "PASS",
+      "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_repayment_without_stable_identity_is_rejected": "PASS",
+      "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_repeated_repayment_request_is_not_double_recorded": "PASS",
+      "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_void_after_repayment_preserves_settlement": "PASS",
+      "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_zero_value_gift_can_be_returned_without_refund": "PASS",
+      "allapp/core/test_security_acceptance.py::PosCatalogPermissionTests::test_authenticated_buyer_without_pos_permission_cannot_read_catalog": "PASS",
+      "allapp/core/test_security_acceptance.py::PosCatalogPermissionTests::test_authorized_cashier_keeps_cross_owner_stock_visibility": "PASS",
+      "allapp/core/test_security_acceptance.py::PosCatalogPermissionTests::test_explicit_warehouse_scope_revokes_stale_pos_binding": "PASS",
+      "allapp/core/test_security_acceptance.py::SuperuserPasswordBoundaryTests::test_delegated_editor_can_still_reset_an_ordinary_user": "PASS",
+      "allapp/core/test_security_acceptance.py::SuperuserPasswordBoundaryTests::test_delegated_editor_cannot_open_or_submit_superuser_password_form": "PASS",
+      "allapp/core/test_security_acceptance.py::TaskAndPrintBoundaryTests::test_external_identifiers_export_as_literal_text": "PASS",
+      "allapp/core/test_security_acceptance.py::TaskAndPrintBoundaryTests::test_inbound_template_treats_product_names_as_text": "PASS",
+      "allapp/core/test_security_acceptance.py::TaskAndPrintBoundaryTests::test_print_ticket_is_bound_to_document_and_cannot_authenticate_api": "PASS",
+      "allapp/core/test_security_acceptance.py::TaskAndPrintBoundaryTests::test_print_tokens_are_revoked_by_password_change": "PASS",
+      "allapp/core/test_security_acceptance.py::TaskAndPrintBoundaryTests::test_task_children_and_foreign_keys_respect_manager_scope": "PASS",
+      "allapp/core/test_security_acceptance.py::TaskAndPrintBoundaryTests::test_task_log_admin_querysets_are_scoped": "PASS",
+      "allapp/inbound/test_arrivals.py::ArrivalTests::test_full_batch_damage_and_later_delivery": "PASS",
+      "allapp/inbound/test_arrivals.py::ArrivalTests::test_all_rejected_has_no_stock_or_putaway": "PASS",
+      "allapp/inbound/test_arrivals.py::ArrivalTests::test_audit_failure_rolls_back_inventory_and_retry_is_idempotent": "PASS",
+      "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_failed_post_keeps_receipt_and_retries_once": "PASS",
+      "allapp/outbound/test_pda_returns.py::test_mixed_return_and_reverse_preserves_new_damage": "PASS",
+      "allapp/outbound/test_ownership_transfer.py::OwnershipTransferTests::test_failed_second_leg_rolls_back_all_stock_and_retries": "PASS",
+      "allapp/tasking/test_counting_closure.py::CountProductionClosureTests::test_approved_difference_posts_inventory_and_releases_lock": "PASS",
+      "allapp/tasking/test_count_acceptance.py::test_blind_record_response_does_not_disclose_book_quantity": "PASS",
+      "allapp/tasking/test_movement_api_acceptance.py::test_posting_failure_keeps_scan_and_manager_can_retry[relocation]": "PASS",
+      "allapp/tasking/test_movement_api_acceptance.py::test_posting_failure_keeps_scan_and_manager_can_retry[replenishment]": "PASS",
+      "allapp/tasking/test_movement_api_acceptance.py::test_feature_disabled_and_unscoped_account_rejected[relocation]": "PASS",
+      "allapp/tasking/test_movement_api_acceptance.py::test_feature_disabled_and_unscoped_account_rejected[replenishment]": "PASS",
+      "allapp/pos/tests.py::PosApiTests::test_checkout_uses_requested_stock_zone_scope": "PASS",
+      "allapp/pos/tests.py::PosApiTests::test_pos_stats_allocates_split_payments_and_refunds_by_owner_scope": "PASS",
+      "allapp/salesapp/tests.py::SaleMiniApiTests::test_multi_owner_checkout_splits_orders_and_keeps_inventory_accurate": "PASS",
+      "allapp/salesapp/tests.py::SaleMiniApiTests::test_signed_encrypted_payment_callback_runs_full_crypto_and_business_flow": "PASS",
+      "allapp/salesapp/tests.py::SaleMiniApiTests::test_processing_refund_recovers_by_query_with_stable_refund_number": "PASS",
+      "allapp/reports/test_operations_v2.py::OperationsV2ApiTests::test_actual_summary_enforces_five_role_scopes_and_actor_only": "PASS",
+      "allapp/reports/test_operations_v2.py::OperationsV2ApiTests::test_exports_require_permission_and_preserve_scope": "PASS",
+      "allapp/reports/test_boss_regressions.py::BossInputAndExportTests::test_exports_keep_valid_workbooks_and_warehouse_boundaries": "PASS",
+      "allapp/pos/test_repayment_concurrency.py::RepaymentConcurrencyTests::test_repayment_and_void_have_one_consistent_settlement_order": "PASS",
+      "allapp/pos/test_repayment_concurrency.py::RepaymentConcurrencyTests::test_two_cashiers_cannot_collect_more_than_outstanding_debt": "PASS",
+      "allapp/pos/test_checkout_concurrency.py::PosCheckoutConcurrencyTests::test_same_sku_concurrent_checkout_cannot_oversell": "PASS",
+      "allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests::test_concurrent_payment_success_and_cancel_preserve_order_stock_invariants": "PASS"
+    },
+    "counts": {
+      "PASS": 57
+    },
+    "subtests": {
+      "passed": 5
+    },
+    "command": "APP_ENV=test WMS_TEST_MANIFEST=/tmp/wms-eval-20261118/backend-main.json .venv/bin/pytest --reuse-db --fast-password-hashers -q --tb=short allapp/test_business_flows.py allapp/pos/test_cross_flow_acceptance.py allapp/core/test_security_acceptance.py::PosCatalogPermissionTests allapp/core/test_security_acceptance.py::SuperuserPasswordBoundaryTests allapp/core/test_security_acceptance.py::TaskAndPrintBoundaryTests allapp/inbound/test_arrivals.py::ArrivalTests::test_full_batch_damage_and_later_delivery allapp/inbound/test_arrivals.py::ArrivalTests::test_all_rejected_has_no_stock_or_putaway allapp/inbound/test_arrivals.py::ArrivalTests::test_audit_failure_rolls_back_inventory_and_retry_is_idempotent allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_failed_post_keeps_receipt_and_retries_once allapp/outbound/test_pda_returns.py::test_mixed_return_and_reverse_preserves_new_damage allapp/outbound/test_ownership_transfer.py::OwnershipTransferTests::test_failed_second_leg_rolls_back_all_stock_and_retries allapp/tasking/test_counting_closure.py::CountProductionClosureTests::test_approved_difference_posts_inventory_and_releases_lock allapp/tasking/test_count_acceptance.py::test_blind_record_response_does_not_disclose_book_quantity allapp/tasking/test_movement_api_acceptance.py::test_posting_failure_keeps_scan_and_manager_can_retry allapp/tasking/test_movement_api_acceptance.py::test_feature_disabled_and_unscoped_account_rejected allapp/pos/tests.py::PosApiTests::test_checkout_uses_requested_stock_zone_scope allapp/pos/tests.py::PosApiTests::test_pos_stats_allocates_split_payments_and_refunds_by_owner_scope allapp/salesapp/tests.py::SaleMiniApiTests::test_multi_owner_checkout_splits_orders_and_keeps_inventory_accurate allapp/salesapp/tests.py::SaleMiniApiTests::test_signed_encrypted_payment_callback_runs_full_crypto_and_business_flow allapp/salesapp/tests.py::SaleMiniApiTests::test_processing_refund_recovers_by_query_with_stable_refund_number allapp/reports/test_operations_v2.py::OperationsV2ApiTests::test_actual_summary_enforces_five_role_scopes_and_actor_only allapp/reports/test_operations_v2.py::OperationsV2ApiTests::test_exports_require_permission_and_preserve_scope allapp/reports/test_boss_regressions.py::BossInputAndExportTests::test_exports_keep_valid_workbooks_and_warehouse_boundaries allapp/pos/test_repayment_concurrency.py allapp/pos/test_checkout_concurrency.py::PosCheckoutConcurrencyTests::test_same_sku_concurrent_checkout_cannot_oversell allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests::test_concurrent_payment_success_and_cancel_preserve_order_stock_invariants"
+  },
+  "followup": {
+    "started_utc": "2026-11-18T07:02:51.781829+00:00",
+    "finished_utc": "2026-11-18T07:03:25.667316+00:00",
+    "exit_code": 1,
+    "status": "FAIL",
+    "nodeids": {
+      "var/assessments/2026-11-18/assessment_probes.py::test_full_scheduler_after_single_metric_matches_forced_control": "FAIL",
+      "var/assessments/2026-11-18/assessment_probes.py::test_same_sku_has_explainable_picking_and_whole_warehouse_quantities": "PASS",
+      "var/assessments/2026-11-18/assessment_probes.py::test_pda_partial_return_retry_records_only_one_cash_refund": "FAIL",
+      "allapp/billing/test_p1_receivables.py::PaymentReceiptServiceTests::test_partial_and_multi_bill_allocation_then_reversal": "PASS",
+      "allapp/salesapp/tests.py::SaleMiniApiTests::test_late_payment_queues_one_refund_without_restoring_inventory": "PASS",
+      "allapp/pos/tests.py::PosApiTests::test_pos_return_idempotency_does_not_double_restore_stock": "PASS",
+      "allapp/inbound/test_arrivals.py::ArrivalTests::test_progress_reads_are_batched_and_notes_require_warehouse_action_permission": "PASS",
+      "allapp/core/tests.py::DataAccuracyCommandTests::test_reconcile_data_accuracy_command_reports_pass_for_consistent_data": "PASS",
+      "allapp/core/tests.py::DataAccuracyCommandTests::test_reconcile_data_accuracy_command_detects_inventory_summary_mismatch": "PASS",
+      "allapp/core/tests.py::DataAccuracyCommandTests::test_reconcile_data_accuracy_command_detects_bill_header_mismatch": "PASS",
+      "allapp/core/tests.py::DataAccuracyCommandTests::test_reconcile_data_accuracy_command_detects_inventory_transaction_replay_mismatch": "PASS"
+    },
+    "counts": {
+      "FAIL": 2,
+      "PASS": 9
+    },
+    "subtests": {},
+    "observations": [
+      "('--metric-type', 'ORDER_AMT') Billing metric scheduler: dates=2026-04-08, scopes_total=1, success=1, failed=0, skipped_success=0, skipped_running=0, created=1, updated=0, deleted_zero=0, skipped_zero=0, skipped_manual=0, unsupported=0, noop=0 {'ORDER_AMT': Decimal('30.0000')}",
+      "('full',) Billing metric scheduler: dates=2026-04-08, scopes_total=1, success=0, failed=0, skipped_success=1, skipped_running=0, created=0, updated=0, deleted_zero=0, skipped_zero=0, skipped_manual=0, unsupported=0, noop=0 {'ORDER_AMT': Decimal('30.0000')}",
+      "('--force',) Billing metric scheduler: dates=2026-04-08, scopes_total=1, success=0, failed=0, skipped_success=0, skipped_running=0, created=2, updated=0, deleted_zero=0, skipped_zero=0, skipped_manual=0, unsupported=1, noop=1 {'CBM': Decimal('2.0000'), 'ORDER_AMT': Decimal('30.0000'), 'PALLET': Decimal('1.0000')}",
+      "picking 4.0000",
+      "warehouse 10.0000",
+      "return records, recorded cash refunds, on-hand (2, Decimal('18.00'), Decimal('10.0000'))"
+    ],
+    "command": "APP_ENV=test WMS_TEST_MANIFEST=/tmp/wms-eval-20261118/backend-followup.json .venv/bin/pytest --reuse-db --fast-password-hashers -q -s --tb=short var/assessments/2026-11-18/assessment_probes.py allapp/billing/test_p1_receivables.py::PaymentReceiptServiceTests::test_partial_and_multi_bill_allocation_then_reversal allapp/salesapp/tests.py::SaleMiniApiTests::test_late_payment_queues_one_refund_without_restoring_inventory allapp/pos/tests.py::PosApiTests::test_pos_return_idempotency_does_not_double_restore_stock allapp/inbound/test_arrivals.py::ArrivalTests::test_progress_reads_are_batched_and_notes_require_warehouse_action_permission allapp/core/tests.py::DataAccuracyCommandTests::test_reconcile_data_accuracy_command_reports_pass_for_consistent_data allapp/core/tests.py::DataAccuracyCommandTests::test_reconcile_data_accuracy_command_detects_inventory_summary_mismatch allapp/core/tests.py::DataAccuracyCommandTests::test_reconcile_data_accuracy_command_detects_bill_header_mismatch allapp/core/tests.py::DataAccuracyCommandTests::test_reconcile_data_accuracy_command_detects_inventory_transaction_replay_mismatch"
+  },
+  "metrics": {
+    "started_utc": "2026-11-18T07:03:41.126491+00:00",
+    "finished_utc": "2026-11-18T07:03:56.414082+00:00",
+    "exit_code": 0,
+    "status": "PASS",
+    "nodeids": {
+      "scripts/test_boss_query_acceptance.py::BossQueryAcceptanceTests::test_large_inventory_pagination_and_long_range_query_budget": "PASS",
+      "allapp/accounts/test_session_login_throttle.py::SessionLoginThrottleTests::test_alternate_session_login_routes_share_a_single_limit": "PASS",
+      "allapp/accounts/test_session_login_throttle.py::SessionLoginThrottleTests::test_login_page_get_and_unrelated_posts_are_not_throttled": "PASS"
+    },
+    "counts": {
+      "PASS": 3
+    },
+    "subtests": {},
+    "command": "APP_ENV=test WMS_TEST_MANIFEST=/tmp/wms-eval-20261118/backend-metrics.json WMS_BROWSER_ARTIFACTS=/tmp/wms-eval-20261118/metrics .venv/bin/pytest --reuse-db --fast-password-hashers -q --tb=short scripts/test_boss_query_acceptance.py::BossQueryAcceptanceTests::test_large_inventory_pagination_and_long_range_query_budget allapp/accounts/test_session_login_throttle.py"
+  },
+  "repeat": {
+    "started_utc": "2026-11-18T07:04:47.083665+00:00",
+    "finished_utc": "2026-11-18T07:04:59.910602+00:00",
+    "exit_code": 1,
+    "status": "FAIL",
+    "nodeids": {
+      "var/assessments/2026-11-18/assessment_probes.py::test_pda_partial_return_retry_records_only_one_cash_refund": "FAIL",
+      "var/assessments/2026-11-18/assessment_probes.py::test_full_scheduler_after_single_metric_matches_forced_control": "FAIL"
+    },
+    "counts": {
+      "FAIL": 2
+    },
+    "subtests": {},
+    "observations": [
+      "return records, recorded cash refunds, on-hand (2, Decimal('18.00'), Decimal('10.0000'))",
+      "('--metric-type', 'ORDER_AMT') Billing metric scheduler: dates=2026-04-08, scopes_total=1, success=1, failed=0, skipped_success=0, skipped_running=0, created=1, updated=0, deleted_zero=0, skipped_zero=0, skipped_manual=0, unsupported=0, noop=0 {'ORDER_AMT': Decimal('30.0000')}",
+      "('full',) Billing metric scheduler: dates=2026-04-08, scopes_total=1, success=0, failed=0, skipped_success=1, skipped_running=0, created=0, updated=0, deleted_zero=0, skipped_zero=0, skipped_manual=0, unsupported=0, noop=0 {'ORDER_AMT': Decimal('30.0000')}",
+      "('--force',) Billing metric scheduler: dates=2026-04-08, scopes_total=1, success=0, failed=0, skipped_success=0, skipped_running=0, created=2, updated=0, deleted_zero=0, skipped_zero=0, skipped_manual=0, unsupported=1, noop=1 {'CBM': Decimal('2.0000'), 'ORDER_AMT': Decimal('30.0000'), 'PALLET': Decimal('1.0000')}"
+    ],
+    "command": "APP_ENV=test WMS_TEST_MANIFEST=/tmp/wms-eval-20261118/backend-repeat.json .venv/bin/pytest --reuse-db --fast-password-hashers -q -s --tb=short var/assessments/2026-11-18/assessment_probes.py::test_pda_partial_return_retry_records_only_one_cash_refund var/assessments/2026-11-18/assessment_probes.py::test_full_scheduler_after_single_metric_matches_forced_control"
+  },
+  "report_performance": {
+    "synthetic_inventory_rows": 1000,
+    "samples": [
+      {
+        "endpoint": "inventory/details",
+        "page_size": 20,
+        "queries": 15,
+        "seconds": 2.119217681000009
+      },
+      {
+        "endpoint": "inventory/details",
+        "page_size": 100,
+        "queries": 13,
+        "seconds": 0.24580078200006028
+      },
+      {
+        "endpoint": "today",
+        "seconds": [
+          0.285315583000056,
+          0.26643423899986374,
+          0.27320359000009375
+        ],
+        "queries": [
+          20,
+          20,
+          20
+        ],
+        "median_seconds": 0.27320359000009375,
+        "max_seconds": 0.285315583000056
+      },
+      {
+        "endpoint": "periods/summary",
+        "seconds": [
+          0.8776154950001,
+          0.5827619359999971,
+          0.5190738490000513
+        ],
+        "queries": [
+          65,
+          65,
+          65
+        ],
+        "median_seconds": 0.5827619359999971,
+        "max_seconds": 0.8776154950001
+      },
+      {
+        "endpoint": "operations",
+        "seconds": [
+          0.3587183219999588,
+          0.4702089669999623,
+          0.5777501760001087
+        ],
+        "queries": [
+          56,
+          56,
+          56
+        ],
+        "median_seconds": 0.4702089669999623,
+        "max_seconds": 0.5777501760001087
+      }
+    ]
+  },
+  "ruff": {
+    "scope": "Tracked Python files with changed or absent SHA in .ci/lint-baseline.json, same diff filter as lint_ratchet; Ruff only",
+    "files_checked": 351,
+    "exit_code": 0,
+    "findings": 0,
+    "files_with_findings": 0,
+    "codes": {},
+    "examples": []
+  }
+}

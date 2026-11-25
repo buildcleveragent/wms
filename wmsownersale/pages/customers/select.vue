@@ -129,6 +129,7 @@ onLoad((query) => {
   mode = safeMode(query?.mode)
   returnTo = safeReturnTo(query?.returnTo)
   auth.ensureAuth()
+  if (auth.isOwnerFinance) return
   if (!cart.hasContextForUser(auth.user?.id, auth.user?.owner_id)) {
     cart.resetOrder()
     uni.redirectTo({ url: '/pages/warehouses/select' })

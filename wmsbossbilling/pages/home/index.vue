@@ -3,24 +3,28 @@
     <BossNav active="home" />
     <view class="account-row"><text @click="showSync = !showSync">{{ error ? '同步失败 · ' : '' }}{{ updatedAt ? `更新于 ${shortTime(updatedAt)}` : '等待同步' }} ⓘ</text><text class="refresh-now" @click="refreshAll">立即刷新</text><text @click="accountMenu">{{ auth.user?.display_name || auth.user?.username || '账号' }} ▾</text></view>
     <BossScopeFilter compact hide-dates :disabled="!ready" />
+    <BossHomePeriod :preset="selection.preset" :range="range" :today="businessDay" :disabled="!ready || !businessDay"
+      @select="selection = $event" />
     <view v-if="contextError" class="warning" @click="initialize">{{ contextError }} · 点击重试</view>
-    <view v-if="error" class="warning" @click="refresh">{{ error.statusCode === 404 ? '今日接口尚未上线，请先更新后端。' : '同步失败，保留上次结果，点击重试。' }}</view>
-    <view class="section-heading"><text>今日业务</text><text class="date">{{ data?.business_today || scope.businessToday }} <text class="link" @click="openStatistics">周期统计 ›</text></text></view>
+    <view v-if="error" class="warning" @click="refreshAll">{{ errorMessage }} · 点击重试</view>
+    <view class="section-heading"><text>{{ periodLabel }}业务</text><text class="date">{{ rangeLabel }}</text></view>
     <view class="order-grid">
       <view v-for="item in directions" :key="item.key" class="order-card" :class="item.key">
-        <view @click="openMetric(item.key)"><view class="label">{{ item.label }} ›</view><view class="order-number">{{ data?.orders?.[item.key]?.count ?? '—' }} <text>单</text></view><view class="value-label">本日{{ item.key === 'inbound' ? '实收' : '实发' }}货值</view><view class="goods-value">{{ goodsValue(item.key) }}</view></view>
-        <view class="submitted" @click="openMetric(`${item.key}_submitted`)">今日新增 {{ data?.orders?.[item.key]?.submitted ?? '—' }} 单 ›</view>
+        <view @click="openMetric(item.key)"><view class="label">{{ periodLabel }}{{ item.label }} ›</view><view class="order-number">{{ data?.orders?.[item.key]?.count ?? '—' }} <text>单</text></view><view class="value-label">{{ periodLabel }}{{ item.key === 'inbound' ? '实收' : '实发' }}货值</view><view class="goods-value">{{ goodsValue(item.key) }}</view></view>
+        <view class="submitted" @click="openMetric(`${item.key}_submitted`)">{{ periodLabel }}新增 {{ data?.orders?.[item.key]?.submitted ?? '—' }} 单 ›</view>
         <view v-if="data?.orders?.[item.key]?.unlinked_records" class="unlinked" @click="openMetric(`${item.key}_unlinked`)">{{ data.orders[item.key].unlinked_records }} 条未关联订单 ›</view>
       </view>
     </view>
     <view class="money-grid"><view v-for="item in financialLabels" :key="item.key" class="money-card" @click="openMetric(item.key)"><view class="label">{{ item.label }} ›</view><view class="money-value">{{ financialValue(item.key) }}</view></view></view>
-    <view class="backlog"><view @click="openMetric('inbound_pending')">待收货 <text class="backlog-count">{{ data?.backlog?.inbound ?? '—' }}</text> ›</view><view @click="openMetric('outbound_pending')">待发货 <text class="backlog-count">{{ data?.backlog?.outbound ?? '—' }}</text> ›</view><view class="overdue" @click="openMetric('overdue')">超期 <text class="backlog-count">{{ data?.backlog?.overdue ?? '—' }}</text> ›</view></view>
-    <view v-if="showSync" class="sync-details"><view>今日指标查询时间：{{ data?.meta?.generated_at || '未知' }}</view><view>单数为今日实际收发涉及的订单数，部分收发不代表整单完成；POS 单列。</view><view v-for="notice in data?.notices || []" :key="notice">{{ notice }}</view></view>
+    <view class="backlog"><text>当前待办</text><view @click="openMetric('inbound_pending')">待收货 <text class="backlog-count">{{ todayData?.backlog?.inbound ?? '—' }}</text> ›</view><view @click="openMetric('outbound_pending')">待发货 <text class="backlog-count">{{ todayData?.backlog?.outbound ?? '—' }}</text> ›</view><view class="overdue" @click="openMetric('overdue')">超期 <text class="backlog-count">{{ todayData?.backlog?.overdue ?? '—' }}</text> ›</view></view>
+    <view v-if="showSync" class="sync-details"><view>指标查询时间：{{ data?.meta?.generated_at || '未知' }}</view><view>单数为所选期间实际收发涉及的订单数，部分收发不代表整单完成；POS 单列。</view><view v-for="notice in data?.notices || []" :key="notice">{{ notice }}</view></view>
     <view class="live-columns"><BossFocusPanel ref="focus" :ready="ready" :reading="reading" :show-sync="showSync" /><BossActivityFeed ref="activity" compact :ready="ready" :reading="reading" :show-sync="showSync" /></view>
   </view>
 </template>
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import BossHomePeriod from '@/components/boss-home-period.vue'
+import { datePresets, presetRange } from '@/utils/date-ranges'
 import { onLoad, onPullDownRefresh, onPageScroll } from '@dcloudio/uni-app'
 import BossNav from '@/components/boss-nav.vue'
 import BossScopeFilter from '@/components/boss-scope-filter.vue'
@@ -34,22 +38,59 @@ import { money } from '@/utils/billing'
 const auth = useAuth(), scope = useBossScope()
 const ready = ref(false), contextError = ref(''), reading = ref(false), showSync = ref(false)
 const focus = ref(null), activity = ref(null)
-const directions = [{ key: 'inbound', label: '今日实际入库' }, { key: 'outbound', label: '今日实际出库' }]
+const directions = [{ key: 'inbound', label: '实际入库' }, { key: 'outbound', label: '实际出库' }]
 const financialLabels = [{ key: 'pos_sales', label: 'POS 销售' }, { key: 'pos_returns', label: '销售退款' }, { key: 'accruals', label: '仓储应计收入' }, { key: 'receipts', label: '回款净额' }]
 const params = () => ({ warehouse: scope.warehouse, owner: scope.owner })
-const { data, error, updatedAt, refresh } = useLiveResource(() => api.bossToday(params()), {
-  key: () => JSON.stringify([auth.user?.id, params()]), enabled: () => ready.value && !!auth.access,
+const selection = ref({ preset: 'today' })
+const isToday = computed(() => selection.value.preset === 'today')
+const enabled = () => ready.value && !!auth.access
+const today = useLiveResource(() => api.bossToday(params()), {
+  key: () => JSON.stringify([auth.user?.id, params()]), enabled,
+})
+const todayData = today.data
+const businessDay = computed(() => todayData.value?.business_today || scope.businessToday)
+const range = computed(() => {
+  if (selection.value.preset === 'custom') {
+    const { date_from, date_to } = selection.value
+    return { date_from, date_to }
+  }
+  return businessDay.value ? presetRange(selection.value.preset, businessDay.value) : {}
+})
+const rangeParams = () => ({ ...params(), ...range.value })
+const historical = useLiveResource(() => api.bossBusinessRange(rangeParams()), {
+  key: () => JSON.stringify([auth.user?.id, rangeParams()]),
+  enabled: () => enabled() && !isToday.value && !!range.value.date_from,
+})
+const active = computed(() => isToday.value ? today : historical)
+const data = computed(() => active.value.data.value)
+const error = computed(() => active.value.error.value)
+const updatedAt = computed(() => active.value.updatedAt.value)
+const errorMessage = computed(() => {
+  if (error.value?.statusCode === 403) return '没有查看所选范围的权限'
+  if (error.value?.statusCode === 404) return isToday.value ? '今日接口尚未上线，请先更新后端。' : '当前后台未提供首页周期统计接口，请更新后台。'
+  return '业务统计同步失败'
+})
+const periodLabel = computed(() => {
+  if (isToday.value) return '今日'
+  if (selection.value.preset === 'custom') return '自定义周期'
+  return datePresets.find(item => item.key === selection.value.preset)?.label
+})
+const rangeLabel = computed(() => {
+  const { date_from, date_to } = range.value
+  return date_from === date_to ? date_from : `${date_from} 至 ${date_to}`
 })
 function shortTime(value) { const stamp = data.value?.meta?.generated_at; return stamp ? new Date(stamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) : value }
 function moneyText(values) { return (values || []).map(row => money(row.amount, row.currency)).join(' / ') }
 function goodsValue(key) { const row = data.value?.orders?.[key]; return !row ? '等待同步' : row.money?.length ? `已知 ${moneyText(row.money)}` : row.execution_records ? '金额未完整记录' : '暂无收发记录' }
 function financialValue(key) { const row = data.value?.financial?.find(item => item.key === key); return !row ? '—' : row.unknown_currency ? `${row.count} 笔 · 币种未记录` : moneyText(row.money) || '暂无记录' }
 function openMetric(metric) {
-  if (!data.value) return
-  const day = data.value.business_today
-  uni.navigateTo({ url: `/pages/cockpit/details?${buildQuery({ ...params(), date_from: day, date_to: day, type: 'today', metric }, { keepEmpty: ['warehouse', 'owner'] })}` })
+  const current = isToday.value || ['inbound_pending', 'outbound_pending', 'overdue'].includes(metric)
+  const report = current ? todayData.value : data.value
+  if (!report) return
+  const dates = current ? { date_from: report.business_today, date_to: report.business_today } : range.value
+  const query = buildQuery({ ...params(), ...dates, type: current ? 'today' : 'business-range', metric }, { keepEmpty: ['warehouse', 'owner'] })
+  uni.navigateTo({ url: `/pages/cockpit/details?${query}` })
 }
-function openStatistics() { uni.reLaunch({ url: '/pages/cockpit/index?tab=periods' }) }
 function accountMenu() { uni.showActionSheet({ itemColor: '#172b4d', itemList: ['刷新与检查设置', '退出登录'], success: async ({ tapIndex }) => { if (tapIndex === 0) return uni.navigateTo({ url: '/pages/settings/refresh' }); if (tapIndex !== 1) return; ready.value = false; await auth.logout(); scope.clear(); uni.reLaunch({ url: '/pages/login' }) } }) }
 async function initialize() {
   if (!auth.ensureAuth()) return uni.reLaunch({ url: '/pages/login' })
@@ -58,7 +99,7 @@ async function initialize() {
 }
 onLoad(initialize)
 onPageScroll(event => { reading.value = event.scrollTop > 120 })
-async function refreshAll() { if (!ready.value) await initialize(); await Promise.allSettled([refresh(), focus.value?.refresh(), activity.value?.refresh()]) }
+async function refreshAll() { if (!ready.value) await initialize(); await Promise.allSettled([today.refresh(), historical.refresh(), focus.value?.refresh(), activity.value?.refresh()]) }
 onPullDownRefresh(async () => { try { await refreshAll() } finally { uni.stopPullDownRefresh() } })
 </script>
 <style scoped>

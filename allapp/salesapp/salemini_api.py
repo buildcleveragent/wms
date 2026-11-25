@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import uuid
 from collections import Counter
 from datetime import timedelta
@@ -26,7 +27,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from allapp.baseinfo.customer_access import active_bindings, customer_binding, customers_for_owner
 from allapp.baseinfo.models import Customer, OwnerCustomerBinding
 from allapp.core.url_security import require_https_endpoint
-from allapp.inventory.models import InventoryDetail
+from allapp.inventory.sale_eligibility import sale_layers
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.products.models import Brand, ProductCategory
 
@@ -55,6 +56,7 @@ from .models import (
     SaleMiniBanner,
     SaleMiniCart,
     SaleMiniCartItem,
+    SaleMiniCheckoutSubmission,
     SaleMiniCoupon,
     SaleMiniOrderMapping,
     SaleMiniPayment,
@@ -428,6 +430,14 @@ def _buyer_bindings_for_user(user):
     )
 
 
+def _buyer_order_mappings(user):
+    return SaleMiniOrderMapping.objects.filter(
+        buyer_user__in=_buyer_bindings_for_user(user),
+        owner_id=F("buyer_user__owner_id"),
+        customer_id=F("buyer_user__customer_id"),
+    )
+
+
 def _default_owner_for_user(user):
     owner = getattr(user, "owner", None)
     if owner:
@@ -684,10 +694,9 @@ def _bound_wechat_buyer(data, session_data):
 
 
 def _available_map(owner, product_ids, warehouse=None):
-    # Tracking gaps remain reconciliation warnings; they do not reduce mall stock.
     if not product_ids:
         return {}
-    qs = InventoryDetail.objects.filter(
+    qs = sale_layers().filter(
         owner=owner,
         product_id__in=product_ids,
         is_active=True,
@@ -778,7 +787,8 @@ def _available_map_for_configs(configs):
     owner_ids = sorted({config.owner_id for config in configs})
     product_ids = [config.product_id for config in configs]
     rows = (
-        InventoryDetail.objects.filter(
+        sale_layers()
+        .filter(
             owner_id__in=owner_ids,
             product_id__in=product_ids,
             is_active=True,
@@ -1302,6 +1312,7 @@ def _create_sale_mini_order_mapping(
     cart_id=None,
     adjustment_data=None,
     source="sale-mini",
+    submission=None,
 ):
     preview, contexts, adjustment_specs = _build_order_preview(
         request,
@@ -1377,6 +1388,7 @@ def _create_sale_mini_order_mapping(
         payable_amount=Decimal(preview["payable_amount"]),
         pay_deadline_at=_payment_deadline() if payment_method == "WECHAT" else None,
         source=source,
+        submission=submission,
         created_by=request.user,
         updated_by=request.user,
     )
@@ -1510,6 +1522,8 @@ def _order_mapping_groups(mappings):
         key = (
             mapping.source if _is_sale_mini_batch_source(mapping.source) else f"single:{mapping.id}"
         )
+        if mapping.submission_id:
+            key = f"checkout:{mapping.submission_id}"
         if key not in index:
             index[key] = []
             groups.append(index[key])
@@ -2966,6 +2980,17 @@ def _owner_for_order_payload(request, data):
     return owner
 
 
+def _checkout_fingerprint(data):
+    payload = {name: value for name, value in data.items() if value is not None}
+    payload["cart_ids"] = sorted(set(data.get("cart_ids") or []))
+    payload["lines"] = sorted(
+        (line["product_id"], line.get("order_uom") or "", str(line["qty"]))
+        for line in data["lines"]
+    )
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 class SaleMiniOrderListCreateApi(APIView):
     permission_classes = [IsAuthenticated]
     pagination_class = SaleMiniPagination
@@ -2973,11 +2998,10 @@ class SaleMiniOrderListCreateApi(APIView):
     def get(self, request):
         status_param = (request.query_params.get("status") or "").strip()
         search = (request.query_params.get("search") or "").strip()
-        bindings = list(_buyer_bindings_for_user(request.user))
-        if not bindings:
+        if not _buyer_bindings_for_user(request.user).exists():
             return Response([])
         qs = (
-            SaleMiniOrderMapping.objects.filter(buyer_user__in=bindings)
+            _buyer_order_mappings(request.user)
             .select_related(
                 "outbound_order",
                 "outbound_order__owner",
@@ -3005,9 +3029,38 @@ class SaleMiniOrderListCreateApi(APIView):
 
     @transaction.atomic
     def post(self, request):
+        key = request.headers.get("Idempotency-Key")
+        if not key:
+            return Response(
+                {"code": "upgrade_required", "detail": "请升级商城客户端后重新提交订单。"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{8,64}", key):
+            raise ValidationError({"idempotency_key": "提交编号无效，请重新进入结算。"})
         serializer = SaleMiniPreviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        fingerprint = _checkout_fingerprint(data)
+        # The user/key constraint arbitrates concurrent claims. A failed checkout
+        # rolls the claim back with every package, adjustment and cart mutation.
+        submission, created = SaleMiniCheckoutSubmission.objects.get_or_create(
+            user=request.user, request_key=key, defaults={"fingerprint": fingerprint}
+        )
+        if not created:
+            if submission.fingerprint != fingerprint:
+                return Response(
+                    {"code": "idempotency_conflict", "detail": "提交编号已用于其他结算内容。"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            mappings = list(
+                _buyer_order_mappings(request.user)
+                .filter(submission=submission)
+                .select_related("outbound_order", "owner", "customer", "buyer_user")
+                .order_by("pk")
+            )
+            if not mappings or len(mappings) != submission.package_count:
+                raise PermissionDenied("当前账号无法查看这次提交的全部订单。")
+            return Response(_combined_order_payload(request, mappings), status=status.HTTP_200_OK)
         order_contexts = _order_contexts_for_payload(request, data, auto_create=True)
         if len(order_contexts) > 1 and _order_has_owner_scoped_adjustments(data):
             raise ValidationError(
@@ -3028,8 +3081,11 @@ class SaleMiniOrderListCreateApi(APIView):
                     cart_id=context.get("cart_id"),
                     adjustment_data=data,
                     source=batch_source,
+                    submission=submission,
                 )
             )
+        submission.package_count = len(mappings)
+        submission.save(update_fields=["package_count"])
         return Response(
             _combined_order_payload(request, mappings),
             status=status.HTTP_201_CREATED,
@@ -3765,8 +3821,7 @@ class SaleMiniOrderCancelApi(APIView):
 
 
 def _mapping_for_request(request, pk, *, for_update=False):
-    bindings = list(_buyer_bindings_for_user(request.user))
-    qs = SaleMiniOrderMapping.objects.filter(buyer_user__in=bindings)
+    qs = _buyer_order_mappings(request.user)
     if for_update:
         qs = qs.select_for_update()
     qs = qs.select_related(
@@ -3782,11 +3837,11 @@ def _mapping_group_for_request(request, pk, *, for_update=False):
     mapping = _mapping_for_request(request, pk, for_update=for_update)
     if not _is_sale_mini_batch_source(mapping.source):
         return [mapping]
-    bindings = list(_buyer_bindings_for_user(request.user))
-    qs = SaleMiniOrderMapping.objects.filter(
-        buyer_user__in=bindings,
-        source=mapping.source,
-    )
+    qs = _buyer_order_mappings(request.user)
+    if mapping.submission_id:
+        qs = qs.filter(submission_id=mapping.submission_id)
+    else:
+        qs = qs.filter(submission__isnull=True, source=mapping.source)
     if for_update:
         qs = qs.select_for_update()
     qs = qs.select_related(
@@ -3795,4 +3850,7 @@ def _mapping_group_for_request(request, pk, *, for_update=False):
         "outbound_order__customer",
         "outbound_order__warehouse",
     ).order_by("id")
-    return list(qs)
+    packages = list(qs)
+    if mapping.submission_id and len(packages) != mapping.submission.package_count:
+        raise PermissionDenied("当前账号无法查看这次提交的全部订单。")
+    return packages

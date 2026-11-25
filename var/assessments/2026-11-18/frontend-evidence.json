@@ -1,0 +1,361 @@
+{
+  "date_asia_singapore": "2026-11-18",
+  "workspace_sha": "836ce7ca9fc48a690f8e8fabe2993622890361a4",
+  "environment": {
+    "node": "22.22.0",
+    "npm": "10.9.4",
+    "vitest": "4.1.11",
+    "playwright": "1.61.1",
+    "headless_chromium": "149.0.7827.55",
+    "browser_path": "Browser plugin not available; repository Playwright and local headless Chromium",
+    "isolation": "Full mock API/browser interception for SKU comparison, mall and dashboard. Django role probe forbids DB connections; no real order, payment or customer data. Host load during dev-browser runs was above available CPUs."
+  },
+  "unit_tests": {
+    "wmsandroid": {
+      "passed": 70,
+      "failed": 0,
+      "skipped": 0,
+      "command": "npm run test:unit -- --maxWorkers=2"
+    },
+    "wmspda": {
+      "passed": 234,
+      "failed": 9,
+      "skipped": 0,
+      "command": "npm run test:unit -- --maxWorkers=2"
+    },
+    "wmsownersale": {
+      "passed": 262,
+      "failed": 0,
+      "skipped": 0,
+      "command": "npm run test:unit -- --maxWorkers=2"
+    },
+    "wmsbossbilling": {
+      "passed": 88,
+      "failed": 0,
+      "skipped": 0,
+      "command": "npm run test:unit -- --maxWorkers=2"
+    },
+    "sales-miniapp": {
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "command": "node --test tests/*.test.mjs"
+    }
+  },
+  "focused_reruns": {
+    "wmspda": {
+      "command_1": "npm run test:unit -- tests/unit/requestBaseUrl.test.js --maxWorkers=1",
+      "result_1": "2 passed, 1 failed; explicit HTTPS configuration is ignored and a fixed development HTTP origin is used.",
+      "command_2": "npm run test:unit -- tests/unit/authRefresh.test.js tests/unit/allProductExport.test.js --maxWorkers=1",
+      "result_2": "11 passed, 6 failed. All 6 remaining failures are export tests. Initial full-suite authentication timeout and concurrent-refresh failures did not recur in this run."
+    }
+  },
+  "builds_and_contracts": {
+    "h5_builds": {
+      "wmsandroid": "passed",
+      "wmspda": "passed",
+      "wmsownersale": "passed",
+      "wmsbossbilling": "passed",
+      "sales-miniapp": "passed"
+    },
+    "command": "npm run build:h5 per client; Android fixture VITE_API_BASE_URL=http://127.0.0.1:8001",
+    "owner_contract": "npm run test:contracts: passed, 29 registered pages",
+    "mall_structure": "npm run test:structure: passed"
+  },
+  "browser_suites": {
+    "pda-browser": {
+      "client": "wmspda",
+      "command": "npm run test:e2e -- home-todos.spec.js product-search-keyboard-scanner.spec.js",
+      "passed": 3,
+      "failed": 2,
+      "skipped": 0,
+      "flaky": 0,
+      "seconds": 438.3,
+      "notes": "Development service. Three scanner cases passed; both home reminder cases timed out on initial navigation."
+    },
+    "pda-built-browser": {
+      "client": "wmspda",
+      "command": "npm run test:e2e:built -- home-todos.spec.js product-search-keyboard-scanner.spec.js",
+      "passed": 2,
+      "failed": 3,
+      "skipped": 0,
+      "flaky": 0,
+      "seconds": 90.6,
+      "notes": "Fresh production H5. Home reminders and navigation passed at 390 and 1280. All 3 scanner cases failed before their user-path assertions because the test fixture imports /store/cart.js at wmspda/tests/e2e/product-search-keyboard-scanner.spec.js:23; that source URL is absent in built assets. Scanner product behavior was not evaluated by those 3 built tests."
+    },
+    "boss-browser": {
+      "client": "wmsbossbilling",
+      "command": "npm run test:e2e -- entry-and-recovery.spec.js",
+      "passed": 0,
+      "failed": 9,
+      "skipped": 0,
+      "flaky": 0,
+      "seconds": 684.5,
+      "notes": "Development service: navigation, expected URL or control visibility timed out, and blocked off-origin SDK resources triggered diagnostics. The same 9 tests pass against fresh built assets."
+    },
+    "boss-built-browser": {
+      "client": "wmsbossbilling",
+      "command": "npm run test:e2e:built -- entry-and-recovery.spec.js",
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "seconds": 67.3,
+      "notes": "Fresh production H5 compilation; UI API fixtures."
+    },
+    "owner-browser": {
+      "client": "wmsownersale",
+      "command": "npm run test:e2e:built",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "seconds": 255.7,
+      "notes": "Fresh H5, widths 390 and 1280, exact quantity rendering, pagination and scrolling."
+    },
+    "android-browser": {
+      "client": "wmsandroid",
+      "command": "CI=1 npm run test:e2e -- mobile-recovery.spec.js --project=android-390 -g 'checkout keeps one request'",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "notes": "390x844. On lost checkout response + reload the UI reuses the original request body and ID. API mocked; package screenshot in archive."
+    }
+  },
+  "scope_fixture": {
+    "definition": "Same synthetic SKU WMS-FIXTURE, picking area 4 units and other warehouse areas 6 units. Interception returned 4 for zone_type=1 and 10 without zone_type. No backend stock aggregate was tested. Fresh H5 bundles.",
+    "command": "node scope-and-mall.cjs wmspda; node scope-and-mall.cjs wmsandroid",
+    "wmspda": {
+      "app": "wmspda",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "requests": [
+        {
+          "path": "/api/pos/products/",
+          "search": "仓评样品",
+          "zone": "1"
+        }
+      ],
+      "external": [],
+      "errors": [],
+      "result": "仓评样品\nWMS-FIXTURE WMS-FIXTURE\n售价 ¥5.00 / 可售 4 件\n加入",
+      "title": "POS收银",
+      "route": "#/pages/pos/index",
+      "overlay": 0,
+      "status": "observed",
+      "screenshot": "screenshots/wmspda-sample.png"
+    },
+    "wmsandroid": {
+      "app": "wmsandroid",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "requests": [
+        {
+          "path": "/api/pos/products/",
+          "search": "仓评样品",
+          "zone": null
+        }
+      ],
+      "external": [],
+      "errors": [],
+      "result": "仓评样品\n样本货主（8） · WMS-FIXTURE\n全仓可用 10 件\n¥5.00\n添加",
+      "title": "手机收银",
+      "route": "#/pages/pos/index",
+      "overlay": 0,
+      "status": "observed",
+      "screenshot": "screenshots/wmsandroid-sample.png"
+    }
+  },
+  "role_components": "wmsownersale/tests/home-component.test.js:56 and :74 exercise salesperson and manager home capabilities, :117 and :148 cover authenticated users with no owner privileges and offline recovery. These assertions are among the 262 owner tests above.",
+  "console_samples": {
+    "menu_fixture": "APP_ENV=test PYTHONPATH=/wms .venv/bin/python menu-sample.py; real URL resolution and ribbon, simulated roles and permission answers, DB dummy backend and connection guard. This does not exercise permissions on destination pages.",
+    "menu": [
+      {
+        "sample": "零业务权限",
+        "tabs": [
+          "任务",
+          "入库",
+          "出库",
+          "库存/盘点",
+          "基础资料",
+          "商城",
+          "计费",
+          "报表",
+          "系统"
+        ],
+        "count": 38,
+        "examples": [
+          "任务列表",
+          "任务明细行",
+          "收货任务",
+          "上架任务",
+          "拣货任务",
+          "复核任务",
+          "打包任务",
+          "发运任务",
+          "扫描日志(Admin)"
+        ]
+      },
+      {
+        "sample": "仓库库存查看",
+        "tabs": [
+          "任务",
+          "入库",
+          "出库",
+          "库存/盘点",
+          "基础资料",
+          "商城",
+          "计费",
+          "报表",
+          "系统"
+        ],
+        "count": 38,
+        "examples": [
+          "任务列表",
+          "任务明细行",
+          "收货任务",
+          "上架任务",
+          "拣货任务",
+          "复核任务",
+          "打包任务",
+          "发运任务",
+          "扫描日志(Admin)"
+        ]
+      },
+      {
+        "sample": "全权限参照",
+        "tabs": [
+          "任务",
+          "入库",
+          "出库",
+          "库存/盘点",
+          "基础资料",
+          "商城",
+          "计费",
+          "报表",
+          "系统"
+        ],
+        "count": 40,
+        "examples": [
+          "任务列表",
+          "任务明细行",
+          "收货任务",
+          "上架任务",
+          "拣货任务",
+          "复核任务",
+          "打包任务",
+          "发运任务",
+          "扫描日志(Admin)"
+        ]
+      }
+    ],
+    "browser_fixture": "Django original console/home.html and base_console template with synthetic menu and local API payload. Deny external resources and check charts, tab selection, second-level action visibility and correct KPI. No real login or service started.",
+    "commands": "/wms/.venv/bin/python web-sample.py; node web-sample.cjs",
+    "browser": [
+      {
+        "viewport": {
+          "width": 1440,
+          "height": 900
+        },
+        "title": "仓库运营看板",
+        "kpi": "完成率 75%",
+        "blocked": 1,
+        "api": 1,
+        "chartFailures": 10,
+        "warning": "运营数据已加载，但图表组件加载失败，请检查服务器外网或静态资源配置。",
+        "overlay": 0,
+        "errors": [
+          "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+        ],
+        "actionVisible": true,
+        "roleTab": "库存",
+        "screenshot": "screenshots/web-dashboard-1440.png"
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "title": "仓库运营看板",
+        "kpi": "完成率 75%",
+        "blocked": 1,
+        "api": 1,
+        "chartFailures": 10,
+        "warning": "运营数据已加载，但图表组件加载失败，请检查服务器外网或静态资源配置。",
+        "overlay": 0,
+        "errors": [
+          "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+        ],
+        "actionVisible": false,
+        "roleTab": "库存",
+        "screenshot": "screenshots/web-dashboard-390.png"
+      }
+    ]
+  },
+  "acceptance": [
+    [
+      "PDA 打包地址",
+      "在两个隔离环境分别构建并登录，验证 API、令牌刷新及导出请求均发往各自配置的地址；3 个相关测试文件全过。",
+      "wmspda/utils/request.js:15"
+    ],
+    [
+      "角色菜单",
+      "对零权限、仓库操作员、货主管理员、系统管理员验证菜单与服务端能力一致，点击可用项获得对应授权结果。",
+      "allapp/console/menu.py:242"
+    ],
+    [
+      "移动 Web 导航",
+      "在 390 与 768 像素宽度，触控或键盘切换一级菜单后，所有已获授权二级操作都能触达。",
+      "templates/console/base_console.html:85"
+    ],
+    [
+      "封网图表",
+      "禁用公网、开启有非零真实业务序列的本地 API，使全部获授权图表渲染且 KPI 保持正确。",
+      "templates/console/home.html:190"
+    ],
+    [
+      "收银口径",
+      "同仓同 SKU 的两端清楚标注范围，对照可用库存数据得到 4 与 10，对错误数量给出阻止或说明。",
+      "wmspda/pages/pos/index.vue:103"
+    ]
+  ],
+  "limits": "H5 browser rendering and mocked APIs do not verify Android hardware scanners or printers, WeChat payment, live role configuration, real reservations/concurrency, or warehouse productivity. No backend tests or physical devices were used by this frontend assessment. Full frontend deployment/release gate was not run.",
+  "mall_smoke": {
+    "app": "sales-miniapp",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "requests": [
+      {
+        "path": "/api/sale-mini/home/",
+        "tag": null
+      },
+      {
+        "path": "/api/sale-mini/products/",
+        "tag": "hot"
+      },
+      {
+        "path": "/api/sale-mini/products/",
+        "tag": "new"
+      }
+    ],
+    "external": [
+      "cdn.dcloud.net.cn/img/shadow-grey.png"
+    ],
+    "errors": [
+      "Failed to load resource: net::ERR_INTERNET_DISCONNECTED"
+    ],
+    "selected": "新品",
+    "active": "新品",
+    "title": "金桥融通商城",
+    "route": "#/pages/index/index",
+    "overlay": 0,
+    "status": "observed",
+    "screenshot": "screenshots/sales-miniapp-sample.png"
+  }
+}

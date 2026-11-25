@@ -17,7 +17,7 @@ const products = Array.from({ length: 105 }, (_, index) => {
   }
 })
 
-test('POS loads, scrolls, and selects all paginated matches and accepts a zero gift amount', async ({
+test('POS loads all paginated matches and requires explicit confirmation for a zero gift', async ({
   page,
 }) => {
   test.setTimeout(90_000)
@@ -28,7 +28,7 @@ test('POS loads, scrolls, and selects all paginated matches and accepts a zero g
   })
   page.on('pageerror', (error) => errors.push(error.message))
 
-  await page.route('http://192.168.1.6:8001/api/**', async (route) => {
+  await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     if (url.pathname === '/api/pos/products/') {
       if (url.searchParams.has('barcode')) {
@@ -92,7 +92,10 @@ test('POS loads, scrolls, and selects all paginated matches and accepts a zero g
   const amountInput = cartRow.locator('.amount-input input')
   await amountInput.fill('0')
   await amountInput.blur()
+  await expect(cartRow.locator('.line-price-error')).toContainText('普通销售')
+  await cartRow.getByText('本行赠送').click()
   await expect(cartRow.locator('.line-price-error')).toHaveCount(0)
+  await expect(cartRow.getByText('取消赠送')).toBeVisible()
   await expect(cartRow.locator('.price-input input')).toHaveValue(/^0(?:\.0+)?$/)
   expect(errors).toEqual([])
   await page.screenshot({ path: '/tmp/wmspda-pos-zero-gift-line.png', fullPage: false })

@@ -203,7 +203,7 @@ class BossTodayTests(TestCase):
         second = self.get_report("today/details", metric="outbound", page_size=1, page=2)
         self.assertEqual(first["count"], 2)
         self.assertNotEqual(first["results"][0]["id"], second["results"][0]["id"])
-        for path in ["today", "today/details"]:
+        for path in ["today", "today/details", "business-range", "business-range/details"]:
             self.assertEqual(
                 self.client.get(
                     f"/api/reports/boss/{path}/", {"warehouse": self.other_warehouse.pk}
@@ -219,3 +219,66 @@ class BossTodayTests(TestCase):
         data = self.get_report("today", date_from="2020-01-01", date_to="2020-12-31")
         self.assertEqual(data["business_today"], local_today())
         self.assertEqual(data["scope"]["date_from"], local_today())
+
+    def test_business_range_counts_distinct_orders_and_exact_execution_window(self):
+        from .boss_activity import date_bounds
+
+        end = local_today() - timedelta(days=1)
+        start = end - timedelta(days=2)
+        left, right = date_bounds(start, end)
+        dates = {"date_from": start, "date_to": end}
+        order, line = self.order()
+        for index, stamp in enumerate(
+            [left - timedelta(seconds=1), left, right - timedelta(seconds=1), right]
+        ):
+            self.execute(order, line, str(index), at=stamp)
+        row = self.get_report("business-range", **dates)["orders"]["outbound"]
+        self.assertEqual((row["count"], row["execution_records"]), (1, 2))
+        self.assertEqual(row["money"], [])
+        params = {**dates, "metric": "outbound"}
+        rows = self.get_report("business-range/details", **params)
+        self.assertEqual(rows["count"], 1)
+        self.assertEqual(rows["results"][0]["drill"]["type"], "business-range")
+        detail = self.get_report("business-range/details", **params, document_id=order.pk)
+        self.assertEqual(detail["count"], 2)
+        reference_amounts = [
+            field["value"]
+            for record in detail["results"]
+            for field in record["fields"]
+            if field["label"] == "参考金额"
+        ]
+        self.assertEqual(reference_amounts, [Decimal("24.68"), Decimal("24.68")])
+        for invalid in ({"date_from": end, "date_to": start}, {"date_to": end + timedelta(days=2)}):
+            self.assertEqual(
+                self.client.get("/api/reports/boss/business-range/", invalid).status_code, 400
+            )
+
+    def test_business_range_keeps_receipts_separate_by_currency(self):
+        from allapp.billing.models import PaymentReceipt
+
+        end = local_today()
+        start = end - timedelta(days=3)
+        for index, (currency, amount, days) in enumerate(
+            [("CNY", "10.01", 1), ("CNY", "0.02", 2), ("USD", "8.50", 1), ("USD", "100", 5)]
+        ):
+            stamp = timezone.now() - timedelta(days=days)
+            PaymentReceipt.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                receipt_no=f"RANGE-{index}",
+                currency=currency,
+                amount=amount,
+                receipt_date=stamp.date(),
+                posted_at=stamp,
+            )
+        params = {"date_from": start, "date_to": end, "owner": self.owner.pk}
+        summary = self.get_report("business-range", **params)
+        row = next(r for r in summary["financial"] if r["key"] == "receipts")
+        self.assertEqual(row["count"], 3)
+        self.assertEqual(
+            {v["currency"]: v["amount"] for v in row["money"]},
+            {"CNY": Decimal("10.03"), "USD": Decimal("8.50")},
+        )
+        self.assertEqual(
+            self.get_report("business-range/details", metric="receipts", **params)["count"], 3
+        )

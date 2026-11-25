@@ -22,6 +22,7 @@ from allapp.accounts.models import UserRoleScope
 from allapp.inventory import test_owner_detail as inventory_fixtures
 from allapp.inventory.models import InventoryDetail, InventoryTransaction
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
+from allapp.tasking import counting
 from allapp.tasking.models import WmsTaskLine
 
 from . import customer_return_services as svc
@@ -35,6 +36,8 @@ class CustomerReturnTests(TestCase):
     tx = inventory_fixtures.OwnerInventoryDetailTests.tx
 
     def setUp(self):
+        self.product.expiry_control = False
+        self.product.save(update_fields=["expiry_control"])
         self.files = TemporaryDirectory()
         self.addCleanup(self.files.cleanup)
         self.override = override_settings(PRIVATE_RETURN_ROOT=self.files.name)
@@ -193,6 +196,31 @@ class CustomerReturnTests(TestCase):
         svc.post_receipt(self.op, response.data["receipts"][0]["id"])
         self.assertEqual(InventoryTransaction.objects.filter(memo="销售退货入库").count(), 2)
         self.assertEqual(svc.allowance(self.order)[0][0]["available_qty"], "5.0000")
+
+    def test_partial_receipt_retry_after_detail_refresh_returns_original_batch(self):
+        order = self.ready("3")
+        body = {
+            "request_id": str(uuid4()),
+            "version": order["version"],
+            "lines": [
+                {
+                    "line_id": order["lines"][0]["id"],
+                    "location_id": self.location.pk,
+                    "batch_no": "R1",
+                    "qty_ok": "1",
+                }
+            ],
+        }
+        first = self.call("receipts", body, self.op, order["id"])
+        self.assertEqual(first.status_code, 200, first.data)
+        refreshed = self.call("retrieve", user=self.op, pk=order["id"], method="get")
+        self.assertGreater(refreshed.data["version"], body["version"])
+        replay = self.call("receipts", body, self.op, order["id"])
+        self.assertEqual(replay.status_code, 200, replay.data)
+        self.assertEqual(replay.data["receipts"], first.data["receipts"])
+        self.assertEqual(replay.data["lines"][0]["pending_qty"], "2.0000")
+        self.assertEqual(InventoryTransaction.objects.filter(memo="销售退货入库").count(), 1)
+        self.assertEqual(InventoryDetail.objects.get(batch_no="R1").onhand_qty, 1)
 
     def test_manager_submission_skips_owner_review(self):
         obj = self.draft(user=self.manager)
@@ -359,6 +387,132 @@ class CustomerReturnTests(TestCase):
         self.assertTrue(svc.post_receipt(self.op, receipt_id))
         self.assertTrue(svc.post_receipt(self.op, receipt_id))
         self.assertEqual(InventoryTransaction.objects.count(), 1)
+
+    def test_trace_supplement_is_scoped_versioned_and_posts_the_original_receipt_once(self):
+        self.product.expiry_control = True
+        self.product.expiry_basis = "MFG"
+        self.product.shelf_life_days = 365
+        self.product.save()
+        obj = self.ready("1")
+        held = self.receipt(obj, "1", production_date="2026-11-01").data
+        receipt = held["receipts"][0]
+        self.assertEqual(held["status"], "POSTING")
+        self.assertIn("效期", receipt["posting_hold_reason"])
+        self.assertEqual(receipt["lines"][0]["missing_dates"], ["expiry_date"])
+        self.assertFalse(InventoryTransaction.objects.exists())
+
+        body = dict(
+            request_id=str(uuid4()),
+            version=held["version"],
+            receipt_line_id=receipt["lines"][0]["id"],
+            expiry_date="2027-11-01",
+        )
+        args = dict(pk=obj["id"], receipt_id=receipt["id"])
+        self.assertEqual(self.call("complete_trace", body, self.wh, **args).status_code, 403)
+        for invalid, expected in [
+            ({"version": held["version"] - 1}, 409),
+            ({"production_date": "2026-10-20"}, 400),
+            ({"expiry_date": "2026-01-01"}, 400),
+        ]:
+            self.assertEqual(
+                self.call("complete_trace", {**body, **invalid}, self.op, **args).status_code,
+                expected,
+            )
+        for _ in range(2):
+            result = self.call("complete_trace", body, self.op, **args)
+            self.assertEqual(result.status_code, 200, result.data)
+            self.assertEqual(result.data["status"], "COMPLETED")
+            self.assertEqual(result.data["receipts"][0]["posting_hold_reason"], "")
+        self.assertEqual(InventoryTransaction.objects.count(), 1)
+        self.assertEqual(InventoryDetail.objects.get(product=self.product).onhand_qty, 1)
+        log = CustomerReturnEvent.objects.get(action="complete-trace")
+        self.assertEqual(log.snapshot["dates_added"], {"expiry_date": "2027-11-01"})
+
+    def test_count_freeze_holds_receipt_until_release_and_retry(self):
+        obj = self.ready("1")
+        detail = InventoryDetail.objects.create(
+            product=self.product,
+            owner=self.owner,
+            warehouse=self.warehouse,
+            location=self.location,
+            batch_no="CR-BATCH",
+            onhand_qty=5,
+        )
+        self.grant(self.wh, "taskconfirm_as_wh_manager")
+        task, _, _ = counting.create_count_task(
+            created_by=self.wh,
+            owner_id=self.owner.pk,
+            warehouse_id=self.warehouse.pk,
+            scope="LOC",
+            location_id=self.location.pk,
+        )
+        counting.release_count_task(task.pk, by_user=self.wh)
+        held = self.receipt(obj, "1").data
+        receipt = held["receipts"][0]
+        self.assertIn("盘点冻结", receipt["posting_hold_reason"])
+        self.assertEqual(held["status"], "POSTING")
+        detail.refresh_from_db()
+        self.assertEqual(detail.onhand_qty, 5)
+        self.assertFalse(InventoryTransaction.objects.exists())
+        counting.cancel_count_task(task.pk, by_user=self.wh, note="验收解冻后重试")
+        for _ in range(2):
+            self.assertTrue(svc.post_receipt(self.op, receipt["id"]))
+        detail.refresh_from_db()
+        self.assertEqual(detail.onhand_qty, 6)
+        self.assertEqual(InventoryTransaction.objects.count(), 1)
+
+    def test_missing_inbound_expiry_holds_every_row(self):
+        self.product.expiry_control = True
+        self.product.expiry_basis = "INBOUND"
+        self.product.inbound_valid_days = 90
+        self.product.save()
+        obj = self.ready("2")
+        base = {"line_id": obj["lines"][0]["id"], "location_id": self.location.pk, "qty_ok": "1"}
+        result = self.call(
+            "receipts",
+            {
+                "request_id": str(uuid4()),
+                "version": obj["version"],
+                "lines": [
+                    {**base, "batch_no": "DATED", "expiry_date": "2027-02-01"},
+                    {**base, "batch_no": "PENDING"},
+                ],
+            },
+            self.op,
+            obj["id"],
+        )
+        self.assertEqual(result.status_code, 200, result.data)
+        receipt = result.data["receipts"][0]
+        self.assertFalse(InventoryTransaction.objects.exists())
+        pending = next(row for row in receipt["lines"] if row["batch_no"] == "PENDING")
+        self.assertEqual(pending["missing_dates"], ["expiry_date"])
+        completed = self.call(
+            "complete_trace",
+            dict(
+                request_id=str(uuid4()),
+                version=result.data["version"],
+                receipt_line_id=pending["id"],
+                expiry_date="2027-01-15",
+            ),
+            self.op,
+            obj["id"],
+            receipt_id=receipt["id"],
+        )
+        self.assertEqual(completed.status_code, 200, completed.data)
+        self.assertEqual(completed.data["status"], "COMPLETED")
+        self.assertEqual(InventoryTransaction.objects.count(), 2)
+
+    def test_pure_reject_with_evidence_needs_no_inventory_dates(self):
+        self.product.expiry_control = True
+        self.product.expiry_basis = "MFG"
+        self.product.shelf_life_days = 100
+        self.product.save()
+        obj = self.ready("1")
+        photo = self.upload(obj)
+        result = self.receipt(obj, "0", qty_reject="1", reason="拒收", photo_ids=[photo.data["id"]])
+        self.assertEqual(result.status_code, 200, result.data)
+        self.assertEqual(result.data["status"], "COMPLETED")
+        self.assertFalse(InventoryTransaction.objects.exists())
 
     def test_wrong_source_and_cross_warehouse_tasks_do_not_grant_allowance(self):
         WmsTaskLine.objects.filter(task=self.dispatch).update(src_id=999999)
@@ -550,12 +704,52 @@ class CustomerReturnConcurrencyTests(TransactionTestCase):
     actor = CustomerReturnTests.actor
     call = CustomerReturnTests.call
     draft = CustomerReturnTests.draft
+    act = CustomerReturnTests.act
+    ready = CustomerReturnTests.ready
+    receipt = CustomerReturnTests.receipt
     task = CustomerReturnTests.task
     tx = CustomerReturnTests.tx
 
     def setUp(self):
         inventory_fixtures.OwnerInventoryDetailTests.setUpTestData.__func__(type(self))
         CustomerReturnTests.setUp(self)
+
+    def test_concurrent_replay_of_receipt_dates_posts_one_return(self):
+        self.product.expiry_control = True
+        self.product.expiry_basis = "MFG"
+        self.product.shelf_life_days = 365
+        self.product.save()
+        held = self.receipt(self.ready("1"), "1").data
+        batch = held["receipts"][0]
+        self.assertIsNone(batch["posted_at"])
+        body = {
+            "request_id": str(uuid4()),
+            "version": held["version"],
+            "receipt_line_id": batch["lines"][0]["id"],
+            "production_date": "2026-11-01",
+            "expiry_date": "2027-11-01",
+        }
+        barrier = Barrier(2)
+
+        def worker():
+            connections.close_all()
+            try:
+                user = get_user_model().objects.get(pk=self.op.pk)
+                barrier.wait(timeout=10)
+                return self.call("complete_trace", body, user, held["id"], receipt_id=batch["id"])
+            finally:
+                connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(worker) for _ in range(2)]
+            for future in futures:
+                response = future.result(timeout=30)
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertEqual(response.data["status"], "COMPLETED")
+        self.assertEqual(CustomerReturnEvent.objects.filter(action="complete-trace").count(), 1)
+        self.assertEqual(CustomerReturnEvent.objects.filter(action="post").count(), 1)
+        self.assertEqual(InventoryTransaction.objects.count(), 1)
+        self.assertEqual(InventoryDetail.objects.get(product=self.product).onhand_qty, 1)
 
     def test_two_simultaneous_requests_cannot_reserve_more_than_shipped(self):
         first, second = self.draft("7"), self.draft("7")

@@ -14,7 +14,7 @@
       <view class="hint">{{ data?.customer?.name || '客户地址' }} · {{ data?.private ? '仅本业务员可用' : '当前客户的共享地址' }}</view>
       <view v-if="updatedAt" class="hint">最近成功加载：{{ updatedAt }}</view>
       <view class="tools"><button :disabled="loading || busy" @click="refresh">刷新</button>
-        <button :disabled="loading || busy || denied" @click="startNew">新增地址</button></view>
+        <button v-if="!auth.isOwnerFinance" :disabled="loading || busy || denied" @click="startNew">新增地址</button></view>
       <view v-if="error" class="error">{{ error }}<button :disabled="loading" @click="refresh">重试</button></view>
       <view v-if="actionError" class="error">{{ actionError }}</view>
       <view v-if="loading" class="hint">正在加载地址…</view>
@@ -22,14 +22,14 @@
       <view v-for="address in data?.results || []" :key="address.id" class="card">
         <view class="name">{{ address.contact }} · {{ address.phone }} <text v-if="address.is_default" class="badge">默认</text></view>
         <view>{{ address.address }}</view>
-        <view class="tools">
+        <view v-if="!auth.isOwnerFinance" class="tools">
           <button v-if="selectMode" :disabled="busy || loading || !!error" @click="select(address)">使用此地址</button>
           <button :disabled="busy || loading" @click="edit(address)">修改</button>
           <button v-if="!address.is_default" :disabled="busy || loading" @click="makeDefault(address)">设为默认</button>
           <button :disabled="busy || loading" @click="remove(address)">停用</button>
         </view>
       </view>
-      <view v-if="editing" class="card form">
+      <view v-if="editing && !auth.isOwnerFinance" class="card form">
         <view class="name">{{ form.id ? '修改地址' : '新增地址' }}</view>
         <button v-if="selectMode && !form.id" :disabled="busy" @click="fillOrder">填入本单收件信息</button>
         <label>收件人<input v-model="form.contact" :disabled="busy" maxlength="80" placeholder="收件人" /></label>
@@ -54,7 +54,7 @@ const auth = useAuth(), cart = useCart(), customerId = ref(null), selectMode = r
 const q = ref(''), applied = ref(''), busy = ref(false), editing = ref(false), actionError = ref('')
 const form = reactive({ id: null, contact: '', phone: '', address: '', is_default: false, version: null })
 let requestKey = createIdempotencyKey(), active = true, generation = 0
-const identity = () => `${auth.user?.id}:${auth.user?.owner_id}`
+const identity = () => `${auth.user?.id}:${auth.user?.owner_id}:${auth.roles?.join(',')}`
 const customerList = usePurchaseResource(
   ({ page = 1 }) => api.customers(applied.value, page),
   () => !customerId.value ? `customers:${applied.value}` : '', identity,
@@ -95,7 +95,7 @@ function select(address) {
   uni.navigateBack({ delta: 1 })
 }
 async function mutation(operation) {
-  if (busy.value || loading.value || denied.value) return
+  if (auth.isOwnerFinance || busy.value || loading.value || denied.value) return
   busy.value = true; actionError.value = ''
   const tag = generation, actor = identity()
   try {

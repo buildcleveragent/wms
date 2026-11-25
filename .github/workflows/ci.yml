@@ -381,22 +381,25 @@ jobs:
     needs: [test, migration-tests]
     steps:
       - uses: actions/checkout@v4
-      - name: Download coverage shards
+      - name: Download functional coverage
         uses: actions/download-artifact@v4
         with:
-          pattern: pytest-*
-          merge-multiple: true
+          name: pytest-functional
+          path: ${{ runner.temp }}/wms-coverage/pytest-functional
+      - name: Download migration coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: pytest-migrations
+          path: ${{ runner.temp }}/wms-coverage/pytest-migrations
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
       - name: Install coverage
-        run: |
-          python -m pip install --upgrade pip
-          pip install coverage[toml] pytest-cov
+        run: python -m pip install --require-hashes -r requirements/test-layer.txt
       - name: Combine & report
         run: |
-          shard_count="$(find . -type f -name '.coverage.*' | wc -l)"
-          test "$shard_count" -eq 5
-          coverage combine $(find . -type f -name '.coverage.*' -print)
-          coverage xml -o coverage.xml
-          coverage report --fail-under=72.38
+          python -m scripts.combine_ci_coverage "$RUNNER_TEMP/wms-coverage"
+          python scripts/check_coverage_gate.py coverage.json
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
@@ -504,6 +507,17 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Verify SQL exports are excluded from the build context
+        run: |
+          printf 'Synthetic build exclusion marker\n' > wms-ci-probe.sql
+          printf 'Synthetic build exclusion marker\n' > templates/wms-ci-probe.SQL.gz
+          docker buildx build --file - --output "type=local,dest=$RUNNER_TEMP/wms-context" . <<'DOCKERFILE'
+          FROM scratch
+          COPY . /
+          DOCKERFILE
+          test ! -e "$RUNNER_TEMP/wms-context/wms-ci-probe.sql"
+          test ! -e "$RUNNER_TEMP/wms-context/templates/wms-ci-probe.SQL.gz"
+          test -s "$RUNNER_TEMP/wms-context/templates/console/home.html"
       - name: Build candidate locally
         uses: docker/build-push-action@v6
         with:
@@ -513,7 +527,24 @@ jobs:
           tags: ${{ secrets.DOCKER_USERNAME }}/wms:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Verify fresh static and media volumes as non-root
+      - name: Verify SQL exports are excluded and the console template loads
+        run: |
+          docker run --rm -i --network none --env APP_ENV=test \
+            "${{ secrets.DOCKER_USERNAME }}/wms:${{ github.sha }}" python - <<'PY'
+          import os
+          import secrets
+          from pathlib import Path
+          os.environ["SECRET_KEY"] = secrets.token_hex(32)
+          os.environ["DJANGO_SETTINGS_MODULE"] = "wmsmaster.settings"
+          import django
+          from django.template.loader import get_template
+          assert os.getuid() == 10001
+          assert not Path("/app/wms-ci-probe.sql").exists()
+          assert not Path("/app/templates/wms-ci-probe.SQL.gz").exists()
+          django.setup()
+          get_template("console/home.html")
+          PY
+      - name: Verify fresh application volumes as non-root
         run: python scripts/check_release_volumes.py --image "${{ secrets.DOCKER_USERNAME }}/wms:${{ github.sha }}"
       - name: Trivy (Image)
         uses: aquasecurity/trivy-action@0.24.0

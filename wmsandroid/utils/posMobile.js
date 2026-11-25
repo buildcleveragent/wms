@@ -1,4 +1,7 @@
 import { createIdempotencyUuid } from '@/utils/request'
+import { hasCatalogPrice, saleLineAmount } from '../../frontend/shared/posPricing.js'
+
+export const POS_STOCK_SCOPE_LABEL = '拣货区＋存储区可售'
 
 export const POS_PAYMENT_METHODS = Object.freeze([
   { value: 'WECHAT', label: '微信' },
@@ -71,7 +74,8 @@ export function unitIndexForBarcode(product, barcode) {
 
 export function cartLineKey(item) {
   const unit = item.unit_options?.[item.unit_index] || {}
-  return `${item.owner_id}:${item.product_id}:${unit.package_id || unit.code || 'base'}:${Number(unit.multiplier)}`
+  const gift = item.is_gift ? ':gift' : ''
+  return `${item.owner_id}:${item.product_id}:${unit.package_id || unit.code || 'base'}:${Number(unit.multiplier)}${gift}`
 }
 
 export function lineBaseQty(item) {
@@ -81,7 +85,7 @@ export function lineBaseQty(item) {
 }
 
 export function lineAmount(item) {
-  return roundMoney(lineBaseQty(item) * Math.max(toNumber(item.price, 0), 0))
+  return item.is_gift ? 0 : saleLineAmount(lineBaseQty(item), item.price)
 }
 
 export function createCartItem(product, barcode = '') {
@@ -98,7 +102,8 @@ export function createCartItem(product, barcode = '') {
     name: productName(product),
     spec: productSpec(product),
     available_qty: availableQty(product),
-    price: toNumber(product.price, 0).toFixed(2),
+    price: hasCatalogPrice(product.price) ? String(product.price) : '',
+    is_gift: false,
     min_price: product.min_price ?? null,
     max_discount: product.max_discount ?? null,
     list_price: product.price ?? null,
@@ -109,7 +114,7 @@ export function createCartItem(product, barcode = '') {
 }
 
 export function addProductToCart(items, product, barcode = '') {
-  if (availableQty(product) <= 0) return { items, error: '库存不足，不能加入购物车' }
+  if (availableQty(product) <= 0) return { items, error: `${POS_STOCK_SCOPE_LABEL}库存不足，不能加入购物车` }
   const incoming = createCartItem(product, barcode)
   if (incoming.unit_index < 0) return { items, error: product.barcode_error || '无法确认条码包装，请更新服务端或手工选择商品和单位' }
   const key = cartLineKey(incoming)
@@ -131,7 +136,7 @@ export function validateCartStock(items) {
     const previous = totals.get(key) || { qty: 0, stock: Infinity }
     const total = { qty: previous.qty + Math.round(amount * 1000), stock: Math.min(previous.stock, Math.floor(toNumber(item.available_qty, 0) * 1000 + 0.000001)) }
     totals.set(key, total)
-    if (total.qty > total.stock) return `${item.name} 各包装合计超过全仓可用库存`
+    if (total.qty > total.stock) return `${item.name} 各包装合计超过${POS_STOCK_SCOPE_LABEL}库存`
   }
   return ''
 }
@@ -139,11 +144,12 @@ export function validateCartStock(items) {
 export function minimumPrice(item) {
   const candidates = []
   const minPrice = toNumber(item.min_price, NaN)
-  if (Number.isFinite(minPrice) && minPrice >= 0) candidates.push(minPrice)
+  if (hasCatalogPrice(item.min_price) && Number.isFinite(minPrice) && minPrice >= 0) candidates.push(minPrice)
   const listPrice = toNumber(item.list_price, NaN)
   const maxDiscount = toNumber(item.max_discount, NaN)
-  if (Number.isFinite(listPrice) && Number.isFinite(maxDiscount) && maxDiscount >= 0 && maxDiscount <= 100) {
-    candidates.push(roundMoney(listPrice * (100 - maxDiscount) / 100))
+  if (hasCatalogPrice(item.list_price) && hasCatalogPrice(item.max_discount) &&
+    Number.isFinite(listPrice) && Number.isFinite(maxDiscount) && maxDiscount >= 0 && maxDiscount <= 100) {
+    candidates.push(Math.round(listPrice * (100 - maxDiscount) * 100) / 10000)
   }
   return candidates.length ? Math.max(...candidates) : null
 }
@@ -154,9 +160,20 @@ export function validateCart(items) {
   if (stockError) return stockError
   for (const item of items) {
     if (lineBaseQty(item) <= 0) return `${item.name} 数量必须大于 0`
-    if (lineBaseQty(item) > toNumber(item.available_qty, 0)) return `${item.name} 全仓可用库存不足`
-    const price = toNumber(item.price, -1)
-    if (price < 0) return `${item.name} 单价不能小于 0`
+    if (lineBaseQty(item) > toNumber(item.available_qty, 0)) return `${item.name} ${POS_STOCK_SCOPE_LABEL}库存不足`
+    if (item.is_gift) {
+      if (!hasCatalogPrice(item.list_price)) return `${item.name} 未定价，不可赠送`
+      continue
+    }
+    if (!hasCatalogPrice(item.list_price)) {
+      if (!item.onsite_price) return `${item.name} 未定价，请输入正单价`
+      if (hasCatalogPrice(item.max_discount)) return `${item.name} 请先维护计算折扣所需的商品原价`
+    }
+    if (!/^\d+(?:\.\d{1,4})?$/.test(String(item.price)) || Number(item.price) <= 0) {
+      return `${item.name} 请填写正单价（最多四位小数）或将已定价商品设为赠品`
+    }
+    if (!lineAmount(item)) return `${item.name} 行金额不足 0.01`
+    const price = Number(item.price)
     const lowest = minimumPrice(item)
     if (lowest !== null && price + 0.00005 < lowest) return `${item.name} 最低单价 ${lowest.toFixed(2)}`
   }
@@ -164,6 +181,7 @@ export function validateCart(items) {
 }
 
 export function buildCheckoutSnapshot({ items, paymentMethod, amountReceived, referenceNo = '', remark = '' }) {
+  // Omitting stock_zone_type applies the same server default as the product lookup.
   const total = items.reduce((sum, item) => sum + lineAmount(item), 0)
   const received = paymentMethod === 'CASH' ? toNumber(amountReceived, 0) : total
   return {
@@ -177,8 +195,9 @@ export function buildCheckoutSnapshot({ items, paymentMethod, amountReceived, re
       items: items.map((item) => ({
         product_id: item.product_id,
         qty: lineBaseQty(item).toFixed(3),
-        price: toNumber(item.price, 0).toFixed(4),
-        amount: lineAmount(item).toFixed(2),
+        price: item.is_gift ? '0.0000' : Number(item.price).toFixed(4),
+        ...(item.is_gift ? { is_gift: true } : {}),
+        ...(item.onsite_price ? { onsite_price: true } : {}),
       })),
       payment: {
         method: paymentMethod,

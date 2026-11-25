@@ -1,5 +1,9 @@
 <template>
   <view class="page cart-page">
+    <view v-if="pending" class="section">
+      <view class="section-title">上次结算有待确认的订单</view>
+      <button @click="goCheckout">确认上次提交</button>
+    </view>
     <view v-if="groups.length" class="groups">
       <view v-for="(group, index) in groups" :key="group.owner_id" class="package-group">
         <view class="package-head">
@@ -84,6 +88,7 @@
 <script setup>
 import { onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
+import { pendingCheckout } from '../../services/checkout'
 import EmptyState from '../../components/EmptyState.vue'
 import QuantityStepper from '../../components/QuantityStepper.vue'
 import { useCartStore } from '../../stores/cart'
@@ -91,6 +96,7 @@ import { money } from '../../utils/money'
 
 const cart = useCartStore()
 const loading = ref(false)
+const pending = ref(null)
 const groups = computed(() => cart.groups || [])
 
 function quantityMin(item) {
@@ -166,14 +172,17 @@ function toggleAll() {
 }
 
 function goCheckout() {
-  if (cart.noneSelected) {
+  if (!pendingCheckout() && cart.noneSelected) {
     uni.showToast({ title: '请先选择需要结算的商品', icon: 'none' })
     return
   }
   uni.navigateTo({ url: '/pages/order-confirm/order-confirm' })
 }
 
-onShow(() => refresh())
+onShow(() => {
+  pending.value = pendingCheckout()
+  return refresh()
+})
 </script>
 
 <style scoped>

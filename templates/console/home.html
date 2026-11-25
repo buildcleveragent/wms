@@ -1,4 +1,5 @@
 {% extends "console/base_console.html" %}
+{% load static %}
 
 {% block title %}仓库运营看板{% endblock %}
 
@@ -187,10 +188,12 @@
 @media (max-width:760px){.dashboard-heading{align-items:center;}.dashboard-heading h1{font-size:21px;}.dashboard-basis{white-space:normal;text-align:center;}.kpi-grid,.chart-grid,.fact-grid,.specialty-grid{grid-template-columns:1fr;}.chart{height:240px;}.kpi-number{font-size:24px;}.fact-card.compact{min-height:126px;}}
 </style>
 
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" onerror="window.dashboardChartLibraryFailed=true"></script>
+<script defer src="{% static 'vendor/echarts/6.1.0/echarts.common.min.js' %}"></script>
 <script>
 (async function(){
   const charts = [];
+  // DOMContentLoaded follows the deferred chart script, including a failed load.
+  const chartLibraryReady = new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, {once:true}));
   const meta = document.getElementById('dashboard-meta');
   const errorBox = document.getElementById('dashboard-error');
   const warningBox = document.getElementById('dashboard-warning');
@@ -360,8 +363,9 @@
     const range = data.range || {};
     meta.textContent = `数据截至 ${asOf} · 统计范围 ${range.start || '--'} 至 ${range.end || '--'}`;
 
+    await chartLibraryReady;
     if (typeof window.echarts === 'undefined'){
-      setMessage(warningBox, '运营数据已加载，但图表组件加载失败，请检查服务器外网或静态资源配置。');
+      setMessage(warningBox, '运营数据已加载，但图表组件加载失败，请检查静态资源配置。');
       failAllCharts('图表组件不可用');
       return;
     }

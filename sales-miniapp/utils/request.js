@@ -307,10 +307,11 @@ export const api = {
       method: 'POST',
       data: payload,
     }),
-  createSaleMiniOrder: (payload) =>
+  createSaleMiniOrder: (payload, key) =>
     request({
       url: '/api/sale-mini/orders/',
       method: 'POST',
+      header: { 'Idempotency-Key': key },
       data: payload,
     }),
   saleMiniOrders: (params = {}) => request({ url: `/api/sale-mini/orders/?${query(params)}` }),

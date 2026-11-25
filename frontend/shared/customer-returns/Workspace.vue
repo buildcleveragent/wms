@@ -10,7 +10,8 @@
     <template v-if="!recordId && !originalId">
       <view class="filters"><input v-model="search" placeholder="退货单 / 原订单 / 商品" @confirm="filter" /><button size="mini" @click="filter">搜索</button></view>
       <picker :range="statuses" range-key="label" :value="statusIndex" @change="statusIndex = Number($event.detail.value); filter()"><view class="select">{{ statuses[statusIndex].label }} ▾</view></picker>
-      <text v-if="!warehouse" class="hint">请从原订单详情进入“申请退货”。</text>
+      <text v-if="!warehouse && !readOnly" class="hint">请从原订单详情进入“申请退货”。</text>
+      <text v-if="readOnly" class="hint">货主财务 · 只读查看本货主退货记录</text>
       <text v-if="data && !data.results?.length" class="empty">暂无退货申请</text>
       <view v-for="item in data?.results || []" :key="item.id" class="card" @click="open(item.id)">
         <view class="heading"><text class="name">{{ item.number }}</text><text class="badge">{{ item.status_label }}</text></view>
@@ -41,11 +42,15 @@
         </view>
         <view v-for="line in data.lines" :key="line.id" class="card">
           <text class="name">{{ line.product_name }}</text><text class="muted">{{ line.original_line_no ? `原单行 ${line.original_line_no} · ` : '' }}{{ line.product_code }} · 规格：{{ line.spec || '未记录' }} · 单位：{{ line.unit_label || line.unit }}</text>
-          <view class="numbers"><text>申请 {{ formatQuantity(line.qty) }}</text><text>已验收 {{ formatQuantity(line.received_qty) }}</text><text>可再售 {{ formatQuantity(line.qty_ok) }}</text><text>残次 {{ formatQuantity(line.qty_damage) }}</text><text>拒收 {{ formatQuantity(line.qty_reject) }}</text><text>待到货 {{ formatQuantity(line.pending_qty) }}</text></view>
+          <view class="numbers"><text>申请 {{ formatQuantity(line.qty) }}</text><text>已验收 {{ formatQuantity(line.received_qty) }}</text><text>验收合格 {{ formatQuantity(line.qty_ok) }}</text><text>残次 {{ formatQuantity(line.qty_damage) }}</text><text>拒收 {{ formatQuantity(line.qty_reject) }}</text><text>待到货 {{ formatQuantity(line.pending_qty) }}</text></view>
           <text>原因：{{ line.reason }}</text><view class="buttons"><button v-for="photo in line.photos" :key="photo.id" size="mini" @click="preview(photo)">申请照片 {{ photo.id }}</button></view>
         </view>
-        <template v-if="data.allowed_actions.includes('receive')">
-          <text class="section">登记本次到货</text><text class="hint">本次已验收＝合格＋残次＋拒收。可以分批、分批次登记。</text>
+        <view v-if="pendingReceipt" class="card">
+          <text class="warning">本次验收已发送，请核对原请求的处理结果。</text>
+          <button :disabled="busy || loading" @click="submitReceipt(pendingReceipt)">核对本次验收结果</button>
+        </view>
+        <template v-else-if="data.allowed_actions.includes('receive')">
+          <text class="section">登记本次到货</text><text class="hint">本次已验收＝合格＋残次＋拒收。盘点冻结或缺少必要日期时先保存实收，整批待入账。</text>
           <view v-for="(row, index) in receiptForm" :key="row.key" class="card">
             <picker :range="receiptChoices" range-key="choice_label" :value="row.lineIndex" @change="row.lineIndex = Number($event.detail.value); selectReceiptPhotos(row)"><view class="select">{{ receiptChoices[row.lineIndex]?.choice_label }} ▾</view></picker>
             <text>单位：{{ data.lines[row.lineIndex]?.unit_label || data.lines[row.lineIndex]?.unit }}</text>
@@ -59,8 +64,18 @@
         </template>
         <text class="section">分批验收与库存回补</text><text v-if="!data.receipts.length" class="empty">仓库尚未登记验收</text>
         <view v-for="receipt in data.receipts" :key="receipt.id" class="card">
-          <text class="name">{{ time(receipt.created_at) }} · {{ receipt.actor }}</text><text :class="receipt.posted_at ? 'success' : 'warning'">{{ receipt.posting_label }}</text><text v-if="receipt.posted_at" class="muted">入账时间：{{ time(receipt.posted_at) }}</text>
-          <view v-for="row in receipt.lines" :key="row.id" class="batch"><text>{{ row.product_name }} · 单位：{{ row.unit }}</text><text>合格 {{ formatQuantity(row.qty_ok) }} · 残次 {{ formatQuantity(row.qty_damage) }} · 拒收 {{ formatQuantity(row.qty_reject) }}</text><text>库位 {{ row.location }} · 批次 {{ row.batch_no || '未记录' }}</text><text>生产日期 {{ row.production_date || '未记录' }} · 到期 {{ row.expiry_date || '未记录' }}</text><text v-if="row.serial_no">序列号：{{ row.serial_no }}</text><text>说明：{{ row.reason || '无异常说明' }}</text><view class="buttons"><button v-for="photo in row.photos" :key="photo.id" size="mini" @click="preview(photo)">验收照片 {{ photo.id }}</button></view></view>
+          <text class="name">{{ time(receipt.created_at) }} · {{ receipt.actor }}</text><text :class="receipt.posted_at ? 'success' : 'warning'">{{ receipt.posting_label }}</text><text v-if="receipt.posting_hold_reason" class="warning">{{ receipt.posting_hold_reason }}</text><text v-if="receipt.posted_at" class="muted">入账时间：{{ time(receipt.posted_at) }}</text>
+          <view v-for="row in receipt.lines" :key="row.id" class="batch"><text>{{ row.product_name }} · 单位：{{ row.unit }}</text><text>合格 {{ formatQuantity(row.qty_ok) }} · 残次 {{ formatQuantity(row.qty_damage) }} · 拒收 {{ formatQuantity(row.qty_reject) }}</text><text>库位 {{ row.location }} · 批次 {{ row.batch_no || '未记录' }}</text><text>生产日期 {{ row.production_date || '未记录' }} · 到期 {{ row.expiry_date || '未记录' }}</text><text v-if="row.serial_no">序列号：{{ row.serial_no }}</text><text>说明：{{ row.reason || '无异常说明' }}</text><view class="buttons"><button v-for="photo in row.photos" :key="photo.id" size="mini" @click="preview(photo)">验收照片 {{ photo.id }}</button></view>
+            <template v-if="!receipt.posted_at && row.missing_dates?.length && data.allowed_actions.includes('retry-posting')">
+              <template v-if="traceForm?.lineId === row.id">
+                <text v-if="traceForm.refreshed" class="hint">单据已更新，请核对当前记录并重新填写缺少的日期。</text>
+                <label v-if="row.missing_dates.includes('production_date')">补录生产日期<input v-model.trim="traceForm.production_date" placeholder="YYYY-MM-DD" /></label>
+                <label v-if="row.missing_dates.includes('expiry_date')">补录到期日<input v-model.trim="traceForm.expiry_date" placeholder="YYYY-MM-DD" /></label>
+                <view class="buttons"><button :disabled="busy || loading" @click="saveTrace(receipt.id, row)">保存日期并重试入账</button><button :disabled="busy" @click="traceForm = null">取消补录</button></view>
+              </template>
+              <button v-else size="mini" :disabled="busy || loading" @click="startTrace(row)">补录效期资料</button>
+            </template>
+          </view>
           <button v-if="!receipt.posted_at && data.allowed_actions.includes('retry-posting')" :disabled="busy" @click="retryPosting(receipt.id)">重试库存入账</button>
         </view>
         <text class="section">处理记录</text><view class="card timeline"><view v-for="item in data.events" :key="item.id" class="event"><text class="name">{{ item.label }}</text><text class="muted">{{ time(item.occurred_at) }} · {{ item.actor }}</text><text v-if="item.reason">{{ item.reason }}</text><view v-if="['submit','edit'].includes(item.action)" class="muted"><view v-for="line in item.lines || []" :key="line.id"><text>{{ line.product_name }} · {{ formatQuantity(line.qty) }} {{ line.unit }} · {{ line.reason }}</text><button v-for="photoId in line.photo_ids || []" :key="photoId" size="mini" @click="preview({url:url('photos/'+photoId+'/')})">当时的照片 {{ photoId }}</button></view></view></view></view>
@@ -73,12 +88,17 @@
 <script setup>
 import { formatQuantity } from '../quantity'
 import { computed, ref, watch, onUnmounted } from 'vue'
-const props = defineProps({ transport: {type: Object, required: true}, identity: String, visible: Boolean, recordId: [Number, String], originalId: [Number, String], filterOrder: [Number, String], warehouse: Boolean })
+const props = defineProps({ transport: {type: Object, required: true}, identity: String, receiptScope: String, visible: Boolean, recordId: [Number, String], originalId: [Number, String], filterOrder: [Number, String], warehouse: Boolean, readOnly: Boolean })
 const receiptChoices = computed(()=>(data.value?.lines || []).map((line,index)=>({...line,choice_label:`${line.product_name} · 原单行 ${line.original_line_no || index+1}`})))
 const emit = defineEmits(['open'])
 const root = '/api/inbound/customer-returns/'
 const data = ref(null), loading = ref(false), busy = ref(false), error = ref(''), success = ref(''), denied = ref(false), updated = ref('')
 const search = ref(''), statusIndex = ref(0), editing = ref(false), form = ref([]), note = ref(''), locations = ref([]), receiptForm = ref([])
+const traceForm = ref(null)
+const pendingReceipt = ref(null)
+const receiptStorageKey = computed(() => props.warehouse && props.receiptScope && props.recordId
+  ? 'customer-return-receipt:' + JSON.stringify([props.receiptScope, String(props.recordId)])
+  : '')
 let formVersion = null
 let appliedSearch = '', page = 1, generation = 0, alive = true, queued = false, writeKey = null
 const statuses = [{label:'全部状态',value:''}, ...Object.entries({OWNER_PENDING:'待货主审核',WHS_PENDING:'待仓库确认',REJECTED:'被退回',RECEIVING:'待到货',PARTIAL:'部分验收',POSTING:'待入账',COMPLETED:'已完成',CLOSED:'已关闭剩余数量',DRAFT:'草稿',CANCELLED:'已取消'}).map(([value,label])=>({value,label}))]
@@ -106,7 +126,15 @@ async function load(next=1) {
     if (!active() || tag!==generation) return
     if (!result || (props.recordId && (!Array.isArray(result.lines) || !Array.isArray(result.allowed_actions))) || (props.originalId && !Array.isArray(result.lines)) || (!props.recordId && !props.originalId && !Array.isArray(result.results))) throw new Error('响应不完整')
     if (next>1) result.results=Array.from(new Map([...(data.value?.results || []),...result.results].map(r=>[r.id,r])).values())
+    if (props.readOnly && result.allowed_actions) result.allowed_actions=[]
     data.value=result; page=next; updated.value=time(new Date().toISOString())
+    if (receiptStorageKey.value) pendingReceipt.value = uni.getStorageSync(receiptStorageKey.value) || null
+    if (traceForm.value && traceForm.value.version !== result.version) {
+      const row = result.receipts?.filter(receipt => !receipt.posted_at)
+        .flatMap(receipt => receipt.lines).find(row => row.id === traceForm.value.lineId)
+      if (row?.missing_dates?.length && result.allowed_actions.includes('retry-posting')) startTrace(row, true)
+      else traceForm.value = null
+    }
     if (props.originalId && !form.value.length) form.value=result.lines.map(l=>({...l,qty:'',reason_code:'UNWANTED',reason_text:''}))
     if (result.allowed_actions?.includes('receive')) {
       const options=await props.transport.request({url:url('receipt-options/'),silent:true})
@@ -119,16 +147,16 @@ function refresh() { generation++; load(1) }
 function filter() { appliedSearch=search.value; generation++; data.value=null; load(1) }
 function startEdit() { formVersion=data.value.version; form.value=data.value.lines.map(l=>({...l,qty:formatQuantity(l.qty),reason_text:l.reason})); editing.value=true }
 function uuid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const n=Math.floor(Math.random()*16);return(c==='x'?n:(n&3)|8).toString(16)}) }
-async function write(path, body, method='POST', completed=null) {
-  if (busy.value || loading.value || !active()) return
+async function write(path, body, method='POST', completed=null, rejected=null) {
+  if (props.readOnly || busy.value || loading.value || !active()) return
   const signature=JSON.stringify([path,body,method])
   if(writeKey?.signature!==signature) writeKey={signature,id:uuid()}
   const tag=generation; const identity=props.identity; busy.value=true; error.value=''; success.value=''
   try {
-    const result=await props.transport.request({url:path,method,data:{...body,request_id:writeKey.id},silent:true})
+    const result=await props.transport.request({url:path,method,data:{...body,request_id:body.request_id || writeKey.id},silent:true})
     if(!active() || tag!==generation || identity!==props.identity) return
     writeKey=null; success.value='操作已保存'; if(completed) completed(result); else {data.value=result;updated.value=time(new Date().toISOString())}
-  } catch(e) { if(active() && tag===generation && identity===props.identity) failure(e) }
+  } catch(e) { if(active() && tag===generation && identity===props.identity) { failure(e); if(rejected) rejected(e) } }
   finally {busy.value=false; if(queued && active()) load(1)}
 }
 function save() {
@@ -160,9 +188,58 @@ async function removeReceiptPhoto(row,photo) {
   if(!error.value)data.value.pending_photos=(data.value.pending_photos || []).filter(p=>p.id!==photo.id)
 }
 function receive() {
-  const lines=receiptForm.value.map(r=>({line_id:data.value.lines[r.lineIndex]?.id,location_id:locations.value[r.locationIndex]?.id,qty_ok:r.qty_ok || '0',qty_damage:r.qty_damage || '0',qty_reject:r.qty_reject || '0',batch_no:r.batch_no,production_date:r.production_date || null,expiry_date:r.expiry_date || null,serial_no:r.serial_no,reason:r.reason,photo_ids:r.photo_ids}))
+  if (busy.value || loading.value || !active()) return
+  const lines=receiptForm.value.map(r=>({line_id:data.value.lines[r.lineIndex]?.id,location_id:locations.value[r.locationIndex]?.id,qty_ok:r.qty_ok || '0',qty_damage:r.qty_damage || '0',qty_reject:r.qty_reject || '0',batch_no:r.batch_no,production_date:r.production_date || null,expiry_date:r.expiry_date || null,serial_no:r.serial_no,reason:r.reason,photo_ids:[...r.photo_ids]}))
   if(lines.some(l=>!l.location_id)){error.value='请选择验收库位';return}
-  write(url('receipts/'),{version:data.value.version,lines},'POST',result=>{data.value=result;receiptForm.value=[]})
+  if (!receiptStorageKey.value) { error.value='请重新登录后登记验收'; return }
+  try {
+    const existing = uni.getStorageSync(receiptStorageKey.value)
+    if (existing) { pendingReceipt.value = existing; return }
+    const body = {request_id: uuid(), version: data.value.version, lines}
+    uni.setStorageSync(receiptStorageKey.value, body)
+    pendingReceipt.value = body
+    submitReceipt(body)
+  } catch {
+    error.value='无法保存本次验收请求，请检查设备存储后重试'
+  }
+}
+function submitReceipt(body) {
+  const key = receiptStorageKey.value
+  if (!key || body.request_id !== pendingReceipt.value?.request_id) return
+  function clearRequest() {
+    const stored = uni.getStorageSync(key)
+    if (stored?.request_id === body.request_id) uni.removeStorageSync(key)
+    pendingReceipt.value = uni.getStorageSync(key) || null
+  }
+  write(url('receipts/'), body, 'POST', result => {
+    if (String(result?.id) !== String(props.recordId) || !Array.isArray(result.receipts)) throw new Error('请再次核对本次验收结果')
+    clearRequest()
+    data.value = result
+    receiptForm.value = []
+  }, e => {
+    const status = Number(e?.statusCode || e?.status || e?.code)
+    if (!e?.sessionChanged && (status === 400 || status === 409)) {
+      clearRequest()
+      if (status === 409) receiptForm.value = []
+    }
+  })
+}
+function startTrace(row, refreshed = false) {
+  traceForm.value = { lineId: row.id, version: data.value.version, production_date: '', expiry_date: '', refreshed }
+}
+async function saveTrace(receiptId, row) {
+  const form = traceForm.value
+  const dates = Object.fromEntries(row.missing_dates.map(name => [name, form[name]]))
+  if (Object.values(dates).some(value => !/^\d{4}-\d{2}-\d{2}$/.test(value))) {
+    error.value = '请按 YYYY-MM-DD 补齐缺少的日期'
+    return
+  }
+  await write(url(`receipts/${receiptId}/trace/`), {
+    version: form.version, receipt_line_id: row.id, ...dates,
+  }, 'POST', result => {
+    data.value = result
+    traceForm.value = null
+  })
 }
 function retryPosting(id) {write(url(`receipts/${id}/retry/`),{version:data.value.version})}
 async function upload(line,purpose,row=null) {
@@ -189,7 +266,7 @@ async function preview(photo) {
   const tag=generation
   try {const source=await props.transport.image(photo.url);if(tag===generation && active()) uni.previewImage({urls:[source]})}catch(e){if(tag===generation && active()) failure(e)}
 }
-watch(()=>[props.recordId,props.originalId,props.filterOrder,props.identity],()=>{generation++;data.value=null;form.value=[];receiptForm.value=[];editing.value=false;locations.value=[];denied.value=false;error.value='';success.value='';updated.value='';note.value='';writeKey=null;load()})
+watch(()=>[props.recordId,props.originalId,props.filterOrder,props.identity,props.receiptScope],()=>{generation++;data.value=null;form.value=[];receiptForm.value=[];pendingReceipt.value=null;editing.value=false;locations.value=[];denied.value=false;error.value='';success.value='';updated.value='';note.value='';traceForm.value=null;writeKey=null;load()})
 watch(()=>props.visible,value=>{generation++;if(value)load();else queued=false},{immediate:true})
 function visibility(){generation++;if(active())load()}
 if(typeof document!=='undefined')document.addEventListener('visibilitychange',visibility)

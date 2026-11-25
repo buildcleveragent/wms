@@ -3,6 +3,7 @@
 <view class="text-lg font-bold mb-2">我的</view>
 <view class="card">
 <view class="row"><view>账号</view><view>{{ username || '未登录' }}</view></view>
+<view v-if="auth.isOwnerFinance" class="text-gray">货主财务 · 业务数据只读 · 可查看本货主全部业务</view>
 </view>
 <view class="card menu-card" @click="goChangePassword">
 <view class="row"><view>修改密码</view><view class="arrow">›</view></view>

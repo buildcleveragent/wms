@@ -1,4 +1,5 @@
 {% extends "console/base_console.html" %}
+{% load l10n %}
 {% block title %}{{ task_type_label }} · {{ task.task_no|default:task.id }}{% endblock %}
 {% block content %}
   <p><a class="btn" href="{{ back_url }}">← 返回{{ task_type_label }}</a></p>
@@ -36,15 +37,33 @@
     <tbody>
       {% for ln in lines %}
       <tr>
-        <td>#{{ ln.id }}</td>
-        <td>{{ ln.product }}</td>
-        <td>{{ ln.from_location|default:"-" }}</td>
-        <td>{{ ln.to_location|default:"-" }}</td>
-        <td>{{ ln.qty_plan }}</td>
-        <td>{{ ln.qty_done }}</td>
+        <td data-label="ID">#{{ ln.id }}</td>
+        <td data-label="商品">{{ ln.product }}</td>
+        <td data-label="来源库位">{{ ln.from_location|default:"-" }}</td>
+        <td data-label="目标库位">{{ ln.to_location|default:"-" }}</td>
+        <td data-label="计划数量">{{ ln.qty_plan }}</td>
+        <td data-label="执行数量">{{ ln.qty_done }}{% if ln.status == "CANCELLED" %}（已取消）{% endif %}</td>
         <td>
+          {% if ln.can_reallocate %}
+          <form class="sale-reallocation" method="post" action="{% url 'task-reallocate-sale-line' task.pk %}">
+            {% csrf_token %}
+            <p>原库存 #{{ ln.invalid_source.pk }} · 批次 {{ ln.invalid_source.batch_no|default:"未登记" }} · 到期日 {{ ln.invalid_source.expiry_date|date:"Y-m-d"|default:"未登记" }}</p>
+            <input type="hidden" name="line_id" value="{{ ln.pk }}">
+            <input type="hidden" name="expected_qty" value="{{ ln.qty_done|unlocalize }}">
+            <input type="hidden" name="expected_revision" value="{{ ln.reallocation_revision }}">
+            <label>重配原因 <input name="reason" maxlength="250" required></label>
+            {% if ln.qty_done %}<label><input name="physical_confirmed" type="checkbox" value="true" required> 已核实此行已扫 {{ ln.qty_done }} 件原实物已归位或隔离</label>{% endif %}
+            <button class="btn" type="submit">重配失效库存</button>
+            <output aria-live="polite"></output>
+          </form>
+          {% endif %}
+          {% if ln.plan_meta.sale_reallocation %}
+          已重配，原扫描已保留。{{ ln.plan_meta.sale_reallocation.request.reason }}
+          <ul>{% for replacement in ln.plan_meta.sale_reallocation.replacement_lines %}<li>新行 #{{ replacement.line_id }} · {{ replacement.quantity }} · 批次 {{ replacement.source.batch_no|default:"未登记" }} · 到期日 {{ replacement.source.expiry_date|default:"未登记" }}</li>{% endfor %}</ul>
+          {% elif not ln.can_reallocate and ln.status != "CANCELLED" %}
           <button class="btn" onclick="saveSnapshot({{ ln.id }})">保存快照</button>
           <button class="btn" onclick="finalizeLine({{ ln.id }})">完成行</button>
+          {% endif %}
         </td>
       </tr>
       {% empty %}
@@ -61,7 +80,19 @@
     .lines-table{width:100%;border-collapse:collapse;margin-top:8px;}
     .lines-table th,.lines-table td{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;}
     .text-muted{color:var(--muted);text-align:center;}
-    @media (max-width:768px){.meta-grid{grid-template-columns:repeat(1,minmax(0,1fr));}}
+    .sale-reallocation {display:grid;gap:8px;margin:4px 0 12px;max-width:28rem;}
+    .sale-reallocation p {margin:0;}
+    .sale-reallocation input[name="reason"] {max-width:100%;}
+    .sale-reallocation output {color:var(--fg);overflow-wrap:anywhere;}
+    @media (max-width:768px){
+      .meta-grid{grid-template-columns:1fr;}
+      .lines-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
+      .lines-table,.lines-table tbody,.lines-table tr,.lines-table td{display:block;width:100%;}
+      .lines-table tr{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:10px;}
+      .lines-table td{border:0;padding:3px;overflow-wrap:anywhere;}
+      .lines-table td[data-label]::before{content:attr(data-label);display:inline-block;min-width:6em;color:var(--muted);}
+      .sale-reallocation .btn{min-height:44px;}
+    }
   </style>
 
   <script>
@@ -71,6 +102,27 @@
     }
     function getCookie(name){ const m=document.cookie.match('(?:^|; )'+name+'=([^;]*)'); return m?decodeURIComponent(m[1]):''; }
 
+    document.querySelectorAll('.sale-reallocation').forEach(form => {
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const button = form.querySelector('button');
+        const output = form.querySelector('output');
+        button.disabled = true;
+        try {
+          const response = await fetch(form.action, {
+            method: 'POST', body: new FormData(form),
+            headers: {'Accept': 'application/json', 'X-CSRFToken': form.elements.csrfmiddlewaretoken.value}
+          });
+          const result = await response.json();
+          if (response.ok) location.reload();
+          else output.textContent = result.detail || Object.values(result).flat().join(' ');
+        } catch {
+          output.textContent = '未收到结果，请刷新任务查看重配记录。';
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
     async function doPost(url){
       const r = await postJSON(url, {});
       alert(JSON.stringify(r));

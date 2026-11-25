@@ -540,7 +540,7 @@ class ArrivalOrderViewSet(InboundOrderViewSet):
     def arrival_options(self, request):
         scope = svc.scope_for(request.user)
         svc.orders_for(request.user)
-        if not scope.roles.intersection({"owner_salesperson", "owner_manager"}):
+        if not scope.roles.intersection({"owner_salesperson", "owner_manager", "owner_finance"}):
             raise PermissionDenied()
         warehouses = owner_warehouse_queryset(scope.single_owner_id)
         search = request.query_params.get("search", "").strip()

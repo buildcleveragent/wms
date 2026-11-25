@@ -25,11 +25,12 @@ import datetime
 from typing import Iterable, Optional
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from allapp.billing.enums import MetricType, SourceQuality
-from allapp.billing.models import BillingJobRun
+from allapp.billing.enums import MetricType, PeriodStatus, SourceQuality
+from allapp.billing.models import BillingJobRun, BillingPeriod
 
 from ._common import AUTO_METRIC_SOURCE_PREFIX, SCHEDULED_METRIC_JOB_NAME, logger
 from ._metrics import (
@@ -223,38 +224,73 @@ def generate_metrics_for_range(
 # ============================================================================
 
 
+def daily_metric_scheduler_time():
+    """Scheduled start in the billing service clock."""
+    return datetime.time(
+        hour=max(0, min(23, int(settings.BILLING_METRIC_SCHEDULER_HOUR))),
+        minute=max(0, min(59, int(settings.BILLING_METRIC_SCHEDULER_MINUTE))),
+    )
+
+
 def _metric_scheduler_stale_minutes():
     """获取作业超时阈值（分钟）。超过此时间的 RUNNING 作业被视为僵死，可以重新 claim。"""
     return max(1, int(getattr(settings, "BILLING_METRIC_SCHEDULER_STALE_MINUTES", 180)))
 
 
-def _metric_job_run_payload(metric_summary):
-    """将 generate_metrics_for_date 的返回结果转为适合存入 BillingJobRun.summary 的 dict。"""
-    approximate_metrics = [
-        {
-            "metric_type": row.get("metric_type"),
-            "source": row.get("source"),
-        }
-        for row in metric_summary.get("results", [])
-        if row.get("source_quality") == SourceQuality.APPROXIMATE
-    ]
-    return {
-        "service_date": metric_summary["service_date"].isoformat(),
-        "created": metric_summary["created"],
-        "updated": metric_summary["updated"],
-        "deleted_zero": metric_summary["deleted_zero"],
-        "skipped_zero": metric_summary["skipped_zero"],
-        "skipped_manual": metric_summary["skipped_manual"],
-        "unsupported": metric_summary["unsupported"],
-        "noop": metric_summary["noop"],
-        "approximate": metric_summary.get("approximate", 0),
-        "approximate_metrics": approximate_metrics,
-    }
+_METRIC_ACTIONS = (
+    "created",
+    "updated",
+    "deleted_zero",
+    "skipped_zero",
+    "skipped_manual",
+    "unsupported",
+    "noop",
+)
+_DAILY_METRIC_TYPES = tuple(_auto_metric_types())
 
 
-def _metric_job_run_message(metric_summary):
-    """生成用于 BillingJobRun.message 的人类可读摘要字符串。"""
-    payload = _metric_job_run_payload(metric_summary)
+def legacy_metric_action_count(summary):
+    """Count mutually exclusive outcomes in a pre-coverage summary, if known."""
+    if not isinstance(summary, dict) or "coverage_version" in summary:
+        return None
+    counts = [summary.get(action) for action in _METRIC_ACTIONS]
+    if any(type(count) is not int or count < 0 for count in counts):
+        return None
+    return sum(counts)
+
+
+def metric_job_coverage(summary):
+    """Read per-type execution evidence; legacy or malformed summaries have unknown coverage."""
+    if (
+        not isinstance(summary, dict)
+        or type(summary.get("coverage_version")) is not int
+        or summary["coverage_version"] != 1
+    ):
+        return None
+    coverage = summary.get("metric_coverage")
+    retry_types = summary.get("retry_metric_types", [])
+    if not isinstance(retry_types, list) or any(
+        mt not in _DAILY_METRIC_TYPES for mt in retry_types
+    ):
+        return None
+    if not isinstance(coverage, dict):
+        return None
+    for metric_type, result in coverage.items():
+        if (
+            metric_type not in _DAILY_METRIC_TYPES
+            or not isinstance(result, dict)
+            or result.get("action") not in _METRIC_ACTIONS
+            or not isinstance(result.get("overwrite"), bool)
+            or (
+                metric_type == MetricType.AREA_M2
+                and not isinstance(result.get("allow_area_fallback"), bool)
+            )
+        ):
+            return None
+    return coverage
+
+
+def _metric_job_run_message(payload):
     return (
         f"created={payload['created']}, updated={payload['updated']}, "
         f"deleted_zero={payload['deleted_zero']}, skipped_zero={payload['skipped_zero']}, "
@@ -265,61 +301,81 @@ def _metric_job_run_message(metric_summary):
 
 @transaction.atomic
 def _claim_scheduled_metric_job(
-    owner_id, warehouse_id, service_date: datetime.date, *, force: bool = False
+    owner_id, warehouse_id, service_date, *, requested_types, overwrite, allow_area_fallback, force
 ):
-    """
-    尝试「认领」一个调度作业（分布式锁）。
-
-    通过 BillingJobRun + select_for_update 实现:
-        - 新建: claimed → 开始执行
-        - 已成功: skipped_success（不重复跑）
-        - 运行中但未超时: skipped_running（另一个进程在跑）
-        - 运行中已超时（默认 180 分钟）: 重新 claim（视为僵死进程）
-        - force=True: 强制重跑，无视已有状态
-
-    返回:
-        (job_run, claim_status) 元组
-        claim_status: "claimed" / "skipped_success" / "skipped_running"
-    """
+    """Claim only the requested types without compatible, successful execution evidence."""
     now = timezone.now()
     stale_before = now - datetime.timedelta(minutes=_metric_scheduler_stale_minutes())
-    job_run, created = BillingJobRun.objects.select_for_update().get_or_create(
+    scope = dict(
         job_name=SCHEDULED_METRIC_JOB_NAME,
         owner_id=owner_id,
         warehouse_id=warehouse_id,
         service_date=service_date,
-        defaults={
-            "status": BillingJobRun.Status.RUNNING,
-            "attempts": 1,
-            "started_at": now,
-            "message": "",
-            "summary": {},
-        },
     )
-
-    if created:
-        return job_run, "claimed"
-
-    # 已成功 → 跳过（除非 force）
-    if job_run.status in {BillingJobRun.Status.SUCCESS, BillingJobRun.Status.WARNING} and not force:
-        return job_run, "skipped_success"
-
-    # 运行中且未超时 → 跳过（除非 force）
+    jobs = BillingJobRun.objects.select_for_update()
+    try:
+        job_run, created = jobs.get_or_create(**scope, defaults={"started_at": now})
+    except ValidationError:
+        # Model.full_clean() can observe the concurrent winner before INSERT.
+        # get_or_create only recovers from the database-level uniqueness race.
+        job_run = jobs.filter(**scope).first()
+        if job_run is None:
+            raise
+        created = False
     if (
-        job_run.status == BillingJobRun.Status.RUNNING
+        not created
+        and job_run.status == BillingJobRun.Status.RUNNING
         and job_run.started_at
         and job_run.started_at >= stale_before
-        and not force
     ):
-        return job_run, "skipped_running"
+        return job_run, "skipped_running", []
 
-    # 其他情况（失败/超时/force）→ 重新 claim
+    previous = job_run.summary
+    coverage = metric_job_coverage(previous)
+    if coverage is None:
+        had_single = (
+            job_run.status in (BillingJobRun.Status.SUCCESS, BillingJobRun.Status.WARNING)
+            and legacy_metric_action_count(previous) == 1
+        )
+        coverage = {}
+        pending = set()
+    else:
+        had_single = previous.get("had_single_metric_run") is True
+        pending = set(previous.get("retry_metric_types", []))
+
+    to_run = []
+    for metric_type in requested_types:
+        evidence = coverage.get(metric_type, {})
+        if (
+            force
+            or metric_type in pending
+            or evidence.get("overwrite") != overwrite
+            or (
+                metric_type == MetricType.AREA_M2
+                and evidence.get("allow_area_fallback") != allow_area_fallback
+            )
+        ):
+            to_run.append(metric_type)
+    if not created and not to_run:
+        return job_run, "skipped_success", []
+
+    # Keep previous evidence visible. Uncommitted work stays retryable after a
+    # failure or takeover, even if another subset is requested in the meantime.
+    pending.update(to_run)
+    job_run.summary = {
+        "coverage_version": 1,
+        "metric_coverage": coverage,
+        "requested_metric_types": requested_types,
+        "missing_metric_types": [mt for mt in _DAILY_METRIC_TYPES if mt not in coverage],
+        "retry_metric_types": [mt for mt in _DAILY_METRIC_TYPES if mt in pending],
+        "had_single_metric_run": had_single,
+    }
     job_run.status = BillingJobRun.Status.RUNNING
-    job_run.attempts = (job_run.attempts or 0) + 1
+    if not created:
+        job_run.attempts += 1
     job_run.started_at = now
     job_run.finished_at = None
     job_run.message = ""
-    job_run.summary = {}
     job_run.save(
         update_fields=[
             "status",
@@ -331,149 +387,174 @@ def _claim_scheduled_metric_job(
             "updated_at",
         ]
     )
-    return job_run, "claimed"
+    return job_run, "claimed", to_run
 
 
-def _finish_scheduled_metric_job(
-    job_run: BillingJobRun, *, status: str, message: str, summary=None
-):
-    """记录调度作业的完成状态（成功/失败）。"""
-    job_run.status = status
-    job_run.finished_at = timezone.now()
-    job_run.message = message[:200]
-    job_run.summary = summary or {}
-    job_run.save(update_fields=["status", "finished_at", "message", "summary", "updated_at"])
+def _finish_scheduled_metric_job(job_run, *, status, message, summary):
+    """Only the worker owning the current attempt may publish an outcome."""
+    now = timezone.now()
+    message = message[:200]
+    updated = BillingJobRun.objects.filter(
+        pk=job_run.pk, status=BillingJobRun.Status.RUNNING, attempts=job_run.attempts
+    ).update(status=status, finished_at=now, message=message, summary=summary, updated_at=now)
+    if updated:
+        job_run.status = status
+        job_run.message = message
+        job_run.summary = summary
+    return bool(updated)
+
+
+class _MetricJobClaimLost(Exception):
+    """Roll back metric writes when the attempt has been superseded."""
+
+
+@transaction.atomic
+def _generate_claimed_metrics(job_run, to_run, *, overwrite, allow_area_fallback, periods):
+    scope = {
+        "owner_id": job_run.owner_id,
+        "warehouse_id": job_run.warehouse_id,
+        "service_date": job_run.service_date,
+    }
+    check_accuracy = _billing_accuracy_gate_enabled("BILLING_RECONCILIATION_GATE_DAILY_ENABLED")
+    if check_accuracy:
+        _ensure_reconciliation_for_service_date(stage="日调度前的计费数据生成", **scope)
+    if job_run.service_date < timezone.now().date() and any(
+        mt in {MetricType.PALLET, MetricType.CBM, MetricType.AREA_M2} for mt in to_run
+    ):
+        _ensure_inventory_snapshot_for_date(**scope)
+
+    metric_summary = generate_metrics_for_date(
+        job_run.owner_id,
+        job_run.warehouse_id,
+        job_run.service_date,
+        metric_types=to_run,
+        overwrite=overwrite,
+        allow_area_fallback=allow_area_fallback,
+    )
+    if check_accuracy:
+        _ensure_reconciliation_for_service_date(stage="日调度后的计费数据生成", **scope)
+
+    # Recheck the date at commit. A period may have closed since this worker
+    # claimed its job. Hold the existing period row through the metric commit.
+    if periods is not None:
+        period_status = periods.select_for_update().values_list("status", flat=True).first()
+        if period_status is not None and period_status != PeriodStatus.OPEN:
+            raise ValueError("计算期间业务日期所属账期已关账，本次指标写入已撤回。")
+
+    coverage = job_run.summary["metric_coverage"].copy()
+    results = {row["metric_type"]: row for row in metric_summary["results"]}
+    if set(results) != set(to_run):
+        raise ValueError("日指标生成结果与本次处理范围不符。")
+    for metric_type, row in results.items():
+        if row["action"] not in _METRIC_ACTIONS:
+            raise ValueError(f"日指标 {metric_type} 的执行结果无法识别。")
+        result = {
+            "action": row["action"],
+            "source": row.get("source"),
+            "source_quality": row.get("source_quality"),
+            "overwrite": overwrite,
+        }
+        if metric_type == MetricType.AREA_M2:
+            result["allow_area_fallback"] = allow_area_fallback
+        coverage[metric_type] = result
+
+    payload = {
+        **job_run.summary,
+        **{action: metric_summary[action] for action in _METRIC_ACTIONS},
+        "service_date": job_run.service_date.isoformat(),
+        "metric_coverage": coverage,
+        "missing_metric_types": [mt for mt in _DAILY_METRIC_TYPES if mt not in coverage],
+        "retry_metric_types": [
+            mt for mt in job_run.summary["retry_metric_types"] if mt not in results
+        ],
+        "had_single_metric_run": (
+            job_run.summary["had_single_metric_run"]
+            or len(job_run.summary["requested_metric_types"]) == 1
+        ),
+        "approximate": metric_summary.get("approximate", 0),
+        "approximate_metrics": [
+            {"metric_type": mt, "source": row.get("source")}
+            for mt, row in results.items()
+            if row.get("source_quality") == SourceQuality.APPROXIMATE
+        ],
+    }
+    has_approximate = any(
+        row.get("source_quality") == SourceQuality.APPROXIMATE for row in coverage.values()
+    )
+    status = BillingJobRun.Status.WARNING if has_approximate else BillingJobRun.Status.SUCCESS
+    if not _finish_scheduled_metric_job(
+        job_run, status=status, message=_metric_job_run_message(payload), summary=payload
+    ):
+        raise _MetricJobClaimLost()
 
 
 def _run_scheduled_metric_generation_for_scope(
-    owner_id,
-    warehouse_id,
-    service_date: datetime.date,
-    *,
-    metric_types: Optional[Iterable[str]] = None,
-    overwrite: bool = False,
-    allow_area_fallback: bool = False,
-    force: bool = False,
+    owner_id, warehouse_id, service_date, *, metric_types, overwrite, allow_area_fallback, force
 ):
-    """
-    单个 owner × warehouse × date 的调度执行流程。
-
-    完整步骤:
-        1. 认领作业锁（如果已成功/正在运行则跳过）
-        2. [可选] 数据对账门控（日调度前）
-        3. [如果是历史日期] 自动生成库存快照（确保历史指标有数据来源）
-        4. 调用 generate_metrics_for_date 生成四类指标
-        5. [可选] 数据对账门控（日调度后）
-        6. 记录成功/失败到 BillingJobRun
-
-    任何异常都会被捕获并记录为 FAILED 状态，不会中断整个调度批次。
-    """
-    selected_types = _auto_metric_types(metric_types)
-    job_run, claim_status = _claim_scheduled_metric_job(
-        owner_id, warehouse_id, service_date, force=force
+    periods = BillingPeriod.objects.filter(
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+        start_date__lte=service_date,
+        end_date__gte=service_date,
     )
-    if claim_status != "claimed":
+    if not force and periods.exclude(status=PeriodStatus.OPEN).exists():
         return {
             "owner_id": owner_id,
             "warehouse_id": warehouse_id,
             "service_date": service_date,
-            "job_run_id": job_run.id,
-            "status": claim_status,
-            "summary": job_run.summary,
-            "message": job_run.message,
+            "job_run_id": None,
+            "status": "skipped_closed_period",
+            "summary": {},
+            "message": "业务日期所属账期已关账或已开票，普通日任务已跳过。",
         }
 
-    try:
-        # 调度前对账（可通过 settings 关闭）
-        if _billing_accuracy_gate_enabled("BILLING_RECONCILIATION_GATE_DAILY_ENABLED"):
-            _ensure_reconciliation_for_service_date(
-                stage="日调度前的计费数据生成",
-                owner_id=owner_id,
-                warehouse_id=warehouse_id,
-                service_date=service_date,
-            )
-
-        # 历史日期 → 先确保有库存快照
-        snapshot_summary = None
-        if service_date < timezone.now().date() and any(
-            mt in {MetricType.PALLET, MetricType.CBM, MetricType.AREA_M2} for mt in selected_types
-        ):
-            snapshot_summary = {
-                "days": [
-                    _ensure_inventory_snapshot_for_date(
-                        owner_id,
-                        warehouse_id,
-                        service_date,
-                    )
-                ]
-            }
-
-        # 生成指标
-        metric_summary = generate_metrics_for_date(
-            owner_id,
-            warehouse_id,
-            service_date,
-            metric_types=selected_types,
-            overwrite=overwrite,
-            allow_area_fallback=allow_area_fallback,
-        )
-        if snapshot_summary is not None:
-            metric_summary["inventory_snapshot"] = snapshot_summary["days"][0]
-
-        # 调度后对账
-        if _billing_accuracy_gate_enabled("BILLING_RECONCILIATION_GATE_DAILY_ENABLED"):
-            _ensure_reconciliation_for_service_date(
-                stage="日调度后的计费数据生成",
-                owner_id=owner_id,
-                warehouse_id=warehouse_id,
-                service_date=service_date,
-            )
-    except Exception as exc:
-        # 异常不抛出，记录到 BillingJobRun 后继续下一个 scope
-        failure_summary = getattr(exc, "details", None) or {}
-        _finish_scheduled_metric_job(
-            job_run,
-            status=BillingJobRun.Status.FAILED,
-            message=str(exc),
-            summary=failure_summary,
-        )
-        logger.warning(
-            "Scheduled metric generation failed: owner=%s warehouse=%s date=%s error=%s",
-            owner_id,
-            warehouse_id,
-            service_date,
-            exc,
-        )
-        return {
-            "owner_id": owner_id,
-            "warehouse_id": warehouse_id,
-            "service_date": service_date,
-            "job_run_id": job_run.id,
-            "status": "failed",
-            "summary": failure_summary,
-            "message": str(exc),
-        }
-
-    payload = _metric_job_run_payload(metric_summary)
-    final_status = (
-        BillingJobRun.Status.WARNING
-        if metric_summary.get("approximate", 0)
-        else BillingJobRun.Status.SUCCESS
+    job_run, status, to_run = _claim_scheduled_metric_job(
+        owner_id,
+        warehouse_id,
+        service_date,
+        requested_types=metric_types,
+        overwrite=overwrite,
+        allow_area_fallback=allow_area_fallback,
+        force=force,
     )
-    _finish_scheduled_metric_job(
-        job_run,
-        status=final_status,
-        message=_metric_job_run_message(metric_summary),
-        summary=payload,
-    )
+    if status == "claimed":
+        claimed_summary = job_run.summary
+        try:
+            _generate_claimed_metrics(
+                job_run,
+                to_run,
+                overwrite=overwrite,
+                allow_area_fallback=allow_area_fallback,
+                periods=None if force else periods,
+            )
+            status = job_run.status.lower()
+        except _MetricJobClaimLost:
+            status = "skipped_running"
+        except Exception as exc:
+            summary = {**(getattr(exc, "details", None) or {}), **claimed_summary}
+            if _finish_scheduled_metric_job(
+                job_run, status=BillingJobRun.Status.FAILED, message=str(exc), summary=summary
+            ):
+                status = "failed"
+                logger.warning(
+                    "Scheduled metric generation failed: owner=%s warehouse=%s date=%s error=%s",
+                    owner_id,
+                    warehouse_id,
+                    service_date,
+                    exc,
+                )
+            else:
+                status = "skipped_running"
+        if status == "skipped_running":
+            job_run.refresh_from_db(fields=["message", "summary"])
     return {
         "owner_id": owner_id,
         "warehouse_id": warehouse_id,
         "service_date": service_date,
         "job_run_id": job_run.id,
-        "status": ("warning" if final_status == BillingJobRun.Status.WARNING else "success"),
-        "summary": payload,
-        "message": _metric_job_run_message(metric_summary),
+        "status": status,
+        "summary": job_run.summary,
+        "message": job_run.message,
     }
 
 
@@ -497,7 +578,6 @@ def run_scheduled_metric_generation_for_dates(
 
     调用方:
         - billing_run_scheduler 管理命令（后台持续运行）
-        - billing_generate_metrics 管理命令（手动触发）
 
     参数:
         service_dates: 要处理的日期列表
@@ -520,6 +600,7 @@ def run_scheduled_metric_generation_for_dates(
     owners = list(owners_qs.only("id"))
     warehouses = list(warehouses_qs.only("id"))
     dates = sorted({d for d in service_dates})
+    requested_types = list(dict.fromkeys(_auto_metric_types(metric_types)))
 
     summary = {
         "service_dates": dates,
@@ -530,6 +611,7 @@ def run_scheduled_metric_generation_for_dates(
         "failed": 0,
         "skipped_success": 0,
         "skipped_running": 0,
+        "skipped_closed_period": 0,
         "created": 0,
         "updated": 0,
         "deleted_zero": 0,
@@ -547,7 +629,7 @@ def run_scheduled_metric_generation_for_dates(
                     owner.id,
                     warehouse.id,
                     service_date,
-                    metric_types=metric_types,
+                    metric_types=requested_types,
                     overwrite=overwrite,
                     allow_area_fallback=allow_area_fallback,
                     force=force,
@@ -560,6 +642,7 @@ def run_scheduled_metric_generation_for_dates(
                     "failed",
                     "skipped_success",
                     "skipped_running",
+                    "skipped_closed_period",
                 }:
                     summary[status] += 1
                 if status in {"success", "warning"}:

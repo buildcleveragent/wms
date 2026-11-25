@@ -441,6 +441,7 @@ onMounted(() => {
 
 onLoad(() => {
   auth.ensureAuth()
+  if (auth.isOwnerFinance) return
   if (!cart.hasContextForUser(auth.user?.id, auth.user?.owner_id)) {
     cart.resetOrder()
     uni.redirectTo({ url: '/pages/warehouses/select' })
@@ -515,7 +516,7 @@ async function loadCart() {
   }
   await checkCurrent()
 }
-onShow(() => { active = true; if (firstShow) { firstShow = false; return }; loadCart() })
+onShow(() => { if (auth.isOwnerFinance) return; active = true; if (firstShow) { firstShow = false; return }; loadCart() })
 onHide(() => { active = false; generation++ })
 function dispose() {
   alive = false; active = false; generation++

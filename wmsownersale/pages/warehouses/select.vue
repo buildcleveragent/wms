@@ -92,6 +92,7 @@ async function loadWarehouses() {
 }
 
 onLoad((query) => {
+  if (auth.isOwnerFinance) return
   mode = safeMode(query?.mode)
   returnTo = safeReturnTo(query?.returnTo)
   loadWarehouses()

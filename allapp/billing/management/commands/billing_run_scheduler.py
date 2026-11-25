@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from allapp.billing.enums import MetricType
 from allapp.billing.services import run_scheduled_metric_generation_for_dates
+from allapp.billing.services.metrics import daily_metric_scheduler_time
 
 
 class Command(BaseCommand):
@@ -29,13 +30,19 @@ class Command(BaseCommand):
             dest="metric_types",
             help="Repeatable. Limit generation to selected metric types.",
         )
-        parser.add_argument("--overwrite", action="store_true", help="Allow overwriting non-auto metric rows.")
+        parser.add_argument(
+            "--overwrite", action="store_true", help="Allow overwriting non-auto metric rows."
+        )
         parser.add_argument(
             "--allow-area-fallback",
             action="store_true",
             help="Use occupied location count as AREA_M2 fallback when no explicit area resolver exists.",
         )
-        parser.add_argument("--force", action="store_true", help="Re-run even if the date already succeeded.")
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Recalculate all requested metric types, including previously processed types.",
+        )
 
     def _parse_explicit_dates(self, date_values):
         dates = []
@@ -47,15 +54,13 @@ class Command(BaseCommand):
         return sorted(set(dates))
 
     def _due_service_dates(self, now: datetime.datetime):
-        scheduled_time = datetime.time(
-            hour=max(0, min(23, int(settings.BILLING_METRIC_SCHEDULER_HOUR))),
-            minute=max(0, min(59, int(settings.BILLING_METRIC_SCHEDULER_MINUTE))),
-        )
-        if now.time() < scheduled_time:
+        if now.time() < daily_metric_scheduler_time():
             return []
 
         lookback_days = max(1, int(settings.BILLING_METRIC_SCHEDULER_LOOKBACK_DAYS))
-        return [now.date() - datetime.timedelta(days=offset) for offset in range(1, lookback_days + 1)]
+        return [
+            now.date() - datetime.timedelta(days=offset) for offset in range(1, lookback_days + 1)
+        ]
 
     def _resolve_service_dates(self, opts):
         explicit_dates = self._parse_explicit_dates(opts.get("dates"))
@@ -64,12 +69,15 @@ class Command(BaseCommand):
         return sorted(self._due_service_dates(timezone.now()))
 
     def _write_summary(self, summary):
-        dates = ",".join(service_date.isoformat() for service_date in summary["service_dates"]) or "-"
+        dates = (
+            ",".join(service_date.isoformat() for service_date in summary["service_dates"]) or "-"
+        )
         self.stdout.write(
             "Billing metric scheduler: "
             f"dates={dates}, scopes_total={summary['scopes_total']}, "
-            f"success={summary['success']}, failed={summary['failed']}, "
+            f"success={summary['success']}, warning={summary['warning']}, failed={summary['failed']}, "
             f"skipped_success={summary['skipped_success']}, skipped_running={summary['skipped_running']}, "
+            f"skipped_closed_period={summary['skipped_closed_period']}, "
             f"created={summary['created']}, updated={summary['updated']}, "
             f"deleted_zero={summary['deleted_zero']}, skipped_zero={summary['skipped_zero']}, "
             f"skipped_manual={summary['skipped_manual']}, unsupported={summary['unsupported']}, "
@@ -99,10 +107,14 @@ class Command(BaseCommand):
             ),
             force=opts.get("force", False),
         )
-        if print_when_fully_skipped or summary["success"] or summary["failed"] or summary["skipped_running"]:
+        if print_when_fully_skipped or any(
+            summary[key] for key in ("success", "warning", "failed", "skipped_running")
+        ):
             self._write_summary(summary)
         if summary["failed"]:
-            raise CommandError(f"Billing metric scheduler finished with {summary['failed']} failed scope(s).")
+            raise CommandError(
+                f"Billing metric scheduler finished with {summary['failed']} failed scope(s)."
+            )
         return summary
 
     def handle(self, *args, **opts):

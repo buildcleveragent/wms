@@ -32,7 +32,7 @@ def owner_scope(user):
         not scope.is_valid
         or scope.is_global
         or len(scope.owner_ids) != 1
-        or not set(scope.roles).intersection({"owner_manager", "owner_salesperson"})
+        or not set(scope.roles).intersection({"owner_manager", "owner_salesperson", "owner_finance"})
         or scope.warehouse_ids
     ):
         raise PermissionDenied("需要有效的单一货主角色范围。")
@@ -98,7 +98,11 @@ def xlsx_download(request, *, scope, kind, title, headers, rows, filters, basis)
     scope_label = (
         "本人创建的订单"
         if kind == "orders" and "owner_salesperson" in scope.roles
-        else "本货主共享库存" if kind != "orders" else "本货主订单"
+        else (
+            "本人经手的出入库"
+            if kind == "personal-stock-statistics"
+            else "本货主共享库存" if kind != "orders" else "本货主订单"
+        )
     )
     for row in [
         ("项目", "内容"),

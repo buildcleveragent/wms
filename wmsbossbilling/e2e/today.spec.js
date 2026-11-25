@@ -91,3 +91,68 @@ test('today polling is light and stops while hidden', async ({ page }) => {
   expect(state.calls.some(url => /\/(home|periods)\//.test(url.pathname))).toBe(false)
   expect(state.errors).toEqual([])
 })
+
+for (const width of [390, 1440]) {
+  test(`home period selection, custom dates and drilldown at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await setup(page)
+    const ranges = [], details = []
+    await page.route('**/api/reports/boss/business-range/**', async route => {
+      const url = new URL(route.request().url())
+      const params = Object.fromEntries(url.searchParams)
+      if (url.pathname.endsWith('/details/')) {
+        details.push(params)
+        return route.fulfill({ json: { count: 1, results: [{ id: 1, title: 'RANGE-ORDER' }] } })
+      }
+      ranges.push(params)
+      return route.fulfill({ json: { orders: { outbound: { count: 71 } }, scope: params } })
+    })
+    await page.goto('/#/pages/home/index')
+    await expect(page.locator('.outbound .order-number')).toHaveText('28 单')
+    expect(ranges).toHaveLength(0)
+    await page.getByText('本月', { exact: true }).click()
+    await expect(page.locator('.outbound .order-number')).toHaveText('71 单')
+    expect(ranges.at(-1)).toMatchObject({ date_from: '2026-11-01', date_to: '2026-11-02', warehouse: '11' })
+    await expect(page.locator('.backlog-count').nth(1)).toHaveText('9')
+    await page.getByText('自定义', { exact: true }).click()
+    await page.getByLabel('开始日期').fill('2024-12-31')
+    await page.getByLabel('结束日期').fill('2025-01-02')
+    await page.screenshot({ path: testInfo.outputPath('home-custom-period.png') })
+    expect(ranges).toHaveLength(1)
+    await page.getByText('应用', { exact: true }).click()
+    await expect(page.locator('.date')).toHaveText('2024-12-31 至 2025-01-02')
+    await expect(page.locator('.outbound .order-number')).toHaveText('71 单')
+    await page.locator('.outbound .order-number').click()
+    await expect(page.getByText('RANGE-ORDER')).toBeVisible()
+    expect(details.at(-1)).toMatchObject({ date_from: '2024-12-31', date_to: '2025-01-02', metric: 'outbound', warehouse: '11' })
+    await page.goBack()
+    await expect(page.locator('.section-heading')).toContainText('2024-12-31 至 2025-01-02')
+    await page.getByText('今天', { exact: true }).click()
+    await expect(page.locator('.outbound .order-number')).toHaveText('28 单')
+  })
+}
+
+test('late and unavailable periods never show counts under another period', async ({ page }) => {
+  await setup(page)
+  let release, started
+  const held = new Promise(resolve => { release = resolve })
+  const received = new Promise(resolve => { started = resolve })
+  await page.route('**/api/reports/boss/business-range/**', async route => {
+    if (new URL(route.request().url()).searchParams.get('date_from') === '2026-01-01') {
+      started()
+      await held
+      return route.fulfill({ json: { orders: { outbound: { count: 999 } } } })
+    }
+    return route.fulfill({ status: 404, json: {} })
+  })
+  await page.goto('/#/pages/home/index')
+  await expect(page.locator('.outbound .order-number')).toHaveText('28 单')
+  await page.getByText('本年', { exact: true }).click()
+  await received
+  await page.getByText('昨天', { exact: true }).click()
+  await expect(page.locator('.outbound .order-number')).toHaveText('— 单')
+  release()
+  await expect(page.getByText(/当前后台未提供首页周期统计接口/)).toBeVisible()
+  await expect(page.locator('.outbound .order-number')).toHaveText('— 单')
+  await expect(page.locator('.backlog-count').first()).toHaveText('6')
+})

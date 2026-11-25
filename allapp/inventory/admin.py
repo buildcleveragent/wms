@@ -141,7 +141,7 @@ class ScopedInventoryReadAdmin(admin.ModelAdmin):
     scope_warehouse_field = "warehouse_id"
 
     def get_queryset(self, request):
-        scope = AccessScope.for_user(request.user)
+        scope = AccessScope.for_request(request)
         return scope.filter_queryset(
             super().get_queryset(request),
             owner_field=self.scope_owner_field,
@@ -149,7 +149,7 @@ class ScopedInventoryReadAdmin(admin.ModelAdmin):
         )
 
     def has_view_permission(self, request, obj=None):
-        if not AccessScope.for_user(request.user).is_valid:
+        if not AccessScope.for_request(request).is_valid:
             return False
         return super().has_view_permission(request, obj)
 

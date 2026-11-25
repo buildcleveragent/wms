@@ -67,6 +67,7 @@ from django.utils import timezone
 
 from allapp.core.utils.log_context import build_log_payload
 from allapp.inventory.locking import lock_warehouses_for_inventory_write
+from allapp.inventory.sale_eligibility import require_sale_layers, selling_task
 from allapp.inventory.models import (
     InventoryDetail,
     InventorySummary,
@@ -926,6 +927,14 @@ def _group_receive_like(
     agg: Dict[_AggKey, Decimal] = defaultdict(lambda: Decimal("0"))
     is_pos_pick = _is_pos_pick(task, tx_type)
     source_details = _pos_scan_source_details(task, scans) if is_pos_pick else {}
+    sale_sources = {}
+    if not is_pos_pick and tx_type == InvTxType.ISSUE and selling_task(task):
+        from allapp.tasking.pick_inventory import manual_pick_sources, scan_dimensions
+
+        lines = {scan.task_line_id: scan.task_line for scan in scans}
+        if None in lines:
+            raise ValidationError("销售出库扫描缺少来源任务行。")
+        sale_sources = manual_pick_sources(task, lines.values())
     manual_sources = {}
     if qty_task_type == "PICK" and not is_pos_pick:
         from allapp.tasking.pick_inventory import validate_manual_pick_scans
@@ -1037,6 +1046,20 @@ def _group_receive_like(
             serial_no = source_detail.serial_no
             task_line_id = line.id
             source_detail_id = source_detail.id
+        elif s.task_line_id in sale_sources:
+            source_detail = sale_sources[s.task_line_id]
+            if (
+                line.status == "CANCELLED"
+                or pid != line.product_id
+                or loc_id != source_detail.location_id
+            ):
+                raise ValidationError("销售出库扫描与有效预留任务行不一致。")
+            (batch_value, production_date, expiry_date, serial_no), _ = scan_dimensions(
+                s, source_detail
+            )
+            source_detail_id = source_detail.pk
+            task_line_id = line.pk
+            container_id = source_detail.container_id
         elif s.task_line_id in manual_sources:
             source_detail = manual_sources[s.task_line_id]
             batch_value = source_detail.batch_no
@@ -1218,9 +1241,14 @@ def _apply_receive_like(
         )
         for key, _qty in pending_groups
     ]
-    details_by_key, locked_summaries = _lock_inventory_dimensions(
-        dimensions, require_existing=task_type == "COUNT"
+    sale_issue = any(key.tx_type == InvTxType.ISSUE for key, _ in pending_groups) and selling_task(
+        task
     )
+    details_by_key, locked_summaries = _lock_inventory_dimensions(
+        dimensions, require_existing=task_type == "COUNT" or sale_issue
+    )
+    if sale_issue:
+        require_sale_layers([details_by_key[_detail_dimension_key(dim)] for dim in dimensions])
     touched_pairs: Set[Tuple[int, int]] = {
         (key.owner_id, key.product_id) for key, _qty in pending_groups
     }
@@ -1259,6 +1287,12 @@ def _apply_receive_like(
 
         locked_detail = details_by_key[_detail_dimension_key(dimension)]
         is_pos_group = _is_pos_pick(task, key.tx_type)
+        if sale_issue and (
+            locked_detail.pk != key.source_detail_id
+            or locked_detail.allocated_qty < abs(qty)
+            or locked_detail.onhand_qty < abs(qty)
+        ):
+            raise ValidationError("销售出库原预留库存或数量发生变化，请核对任务。")
         if task_type == "COUNT" and locked_detail.pk != key.source_detail_id:
             raise ValidationError("盘点原库存层已变化，拒绝创建替代库存层。")
         if is_pos_group:

@@ -64,7 +64,15 @@ from .serializers import (
     serialize_repayment_result,
     serialize_return_result,
 )
-from .services import build_receipt, customer_pos_debt_balance, void_pos_sale
+from .services import (
+    POS_SALE_ZONE_ERROR,
+    POS_SALE_ZONE_TYPES,
+    build_receipt,
+    customer_pos_debt_balance,
+    pos_sale_zone_types,
+    pos_stock_layers,
+    void_pos_sale,
+)
 from .shift_services import (
     close_pos_shift,
     current_shift_for_user,
@@ -165,8 +173,10 @@ class PosProductListApi(generics.ListAPIView):
                 parsed_zone_type = int(zone_type)
             except ValueError:
                 return "POS 商品库存范围参数无效。"
-            if parsed_zone_type not in {choice.value for choice in ZoneType}:
+            if parsed_zone_type not in ZoneType.values:
                 return "POS 商品库存范围参数无效。"
+            if parsed_zone_type not in POS_SALE_ZONE_TYPES:
+                return POS_SALE_ZONE_ERROR
         return ""
 
     def list(self, request, *args, **kwargs):
@@ -201,16 +211,13 @@ class PosProductListApi(generics.ListAPIView):
         elif search:
             queryset = filter_by_product_search(queryset, search, product_field="pk")
 
-        inventory = InventoryDetail.objects.filter(
+        zone_type = (self.request.query_params.get("zone_type") or "").strip()
+        inventory = pos_stock_layers(
             warehouse_id=warehouse_id,
             owner_id=OuterRef("owner_id"),
             product_id=OuterRef("pk"),
-            is_active=True,
-            available_qty__gt=0,
+            zone_types=pos_sale_zone_types(int(zone_type) if zone_type else None),
         )
-        zone_type = (self.request.query_params.get("zone_type") or "").strip()
-        if zone_type:
-            inventory = inventory.filter(zone_type=int(zone_type))
         inventory_total = (
             inventory.values("product_id").annotate(total=Sum("available_qty")).values("total")[:1]
         )

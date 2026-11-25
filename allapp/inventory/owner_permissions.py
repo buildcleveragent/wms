@@ -14,7 +14,7 @@ def inventory_capabilities(user, scope=None):
         and len(scope.owner_ids) == 1
         and not scope.warehouse_ids
         and scope.roles
-        and scope.roles <= {"owner_manager", "owner_salesperson"}
+        and scope.roles <= {"owner_manager", "owner_salesperson", "owner_finance"}
     )
     manager = (
         owner_scope
@@ -26,9 +26,14 @@ def inventory_capabilities(user, scope=None):
         and "owner_salesperson" in scope.roles
         and user.has_perm("accounts.access_owner_sales")
     )
+    finance = (
+        owner_scope
+        and "owner_finance" in scope.roles
+        and user.has_perm("accounts.access_owner_finance")
+    )
     return {
-        "can_view_owner_inventory": bool(manager or sales),
-        "can_export_owner_inventory": bool(manager or sales),
+        "can_view_owner_inventory": bool(manager or sales or finance),
+        "can_export_owner_inventory": bool(manager or sales or finance),
         "can_manage_owner_inventory_alerts": bool(manager),
     }
 

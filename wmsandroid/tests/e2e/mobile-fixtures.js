@@ -50,6 +50,24 @@ export const product = {
   ],
 }
 
+// Replace only the native camera call in the development or built H5 adapter.
+export async function camera(page) {
+  await page.route(/\/cameraScanner(?:\.[^/?]+)?\.js(?:\?.*)?$/, async route => {
+    const response = await route.fetch()
+    const source = await response.text()
+    const nativeCall = /(?:[\w$]+\.)?[\w$]+\(\s*(?=\{\s*onlyFromCamera\s*:)/
+    expect(source).toMatch(nativeCall)
+    await route.fulfill({ response, body: source.replace(nativeCall, 'window.__mobileTestScan(') })
+  })
+}
+
+export async function scan(page, code) {
+  await page.evaluate(value => {
+    window.__mobileTestScan = options => options.success({ result: value, scanType: 'CODE_128' })
+  }, code)
+  await page.locator('.scan-button').click()
+}
+
 export async function installLoggedInMocks(page, overrides = {}) {
   const runtimeErrors = []
   page.on('pageerror', (error) => runtimeErrors.push(error.message))

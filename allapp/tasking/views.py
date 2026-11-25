@@ -414,6 +414,44 @@ class WmsTaskViewSet(OwnerWarehouseScopedQuerysetMixin, viewsets.ModelViewSet):
             return Response({"detail": f"services.{fn_name} 未找到"}, status=status.HTTP_501_NOT_IMPLEMENTED)
         return fn(*args, **kwargs)
 
+    @action(detail=True, methods=["get", "post"], url_path="reallocate-sale-line")
+    def reallocate_sale_line(self, request, pk=None):
+        from django.core.exceptions import ValidationError
+        from allapp.outbound.pick_reallocation import (
+            can_reallocate,
+            mark_reallocatable_lines,
+            reallocate_sale_line,
+        )
+        from .serializers import PickReallocationInput
+
+        task = self.get_object()
+        if not can_reallocate(request.user, task):
+            raise PermissionDenied("只有本仓库管理员可重配失效预留。")
+        if request.method == "GET":
+            lines = list(task.lines.exclude(status="CANCELLED").order_by("pk"))
+            mark_reallocatable_lines(request.user, task, lines)
+            return Response(
+                {
+                    "lines": [
+                        {
+                            "line_id": line.pk,
+                            "expected_qty": str(line.qty_done),
+                            "expected_revision": line.reallocation_revision,
+                            "original_inventory_detail_id": line.invalid_source.pk,
+                        }
+                        for line in lines
+                        if getattr(line, "can_reallocate", False)
+                    ]
+                }
+            )
+        payload = PickReallocationInput(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            result = reallocate_sale_line(task=task, actor=request.user, **payload.validated_data)
+        except ValidationError as exc:
+            raise DRFValidationError({"detail": " ".join(exc.messages)}) from exc
+        return Response(result)
+
     @action(detail=True, methods=["post"], url_path="release")
     def release(self, request, pk=None):
         task = self.get_object()

@@ -1,6 +1,7 @@
 import itertools
 import threading
 import time
+from datetime import date
 from decimal import Decimal
 from unittest import mock
 
@@ -11,6 +12,7 @@ from django.test import TransactionTestCase, skipUnlessDBFeature
 from django.utils import timezone
 
 from allapp.baseinfo.models import Customer, Owner
+from allapp.core.choices import InvTxType, ZoneType
 from allapp.core.models import DocSequence
 from allapp.inventory.models import InventoryDetail, InventoryTransaction
 from allapp.locations.models import Location, Subwarehouse, Warehouse
@@ -18,7 +20,7 @@ from allapp.products.models import Product, ProductUom
 from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
 from allapp.tasking.posting_exec import execute_posting_handler
 
-from .models import PosReturn, PosSale, PosShift
+from .models import PosRefund, PosReturn, PosSale, PosShift
 from .services import create_pos_return, create_pos_sale, void_pos_sale
 
 
@@ -77,6 +79,7 @@ class PosCheckoutConcurrencyTests(TransactionTestCase):
             base_uom=self.uom,
             price=Decimal("9.00"),
             min_price=Decimal("1.00"),
+            expiry_control=False,
         )
         InventoryDetail.objects.create(
             owner=self.owner,
@@ -231,6 +234,26 @@ class PosCheckoutConcurrencyTests(TransactionTestCase):
     @skipUnlessDBFeature("has_select_for_update")
     def test_same_sku_concurrent_checkout_cannot_oversell(self):
         product = self.products[0]
+        storage = InventoryDetail.objects.get(product=product)
+        storage.onhand_qty = Decimal("5")
+        storage.save()
+        for zone, qty, expiry in (
+            (ZoneType.PICK, 5, date(2031, 1, 1)),
+            (ZoneType.RETURN, 8, date(2030, 1, 1)),
+        ):
+            location = Location.objects.create(
+                warehouse=self.warehouse, code=f"PCWH-02-01-{zone:02d}", zone_type=zone
+            )
+            InventoryDetail.objects.create(
+                owner=self.owner,
+                product=product,
+                warehouse=self.warehouse,
+                location=location,
+                zone_type=zone,
+                expiry_date=expiry,
+                onhand_qty=Decimal(qty),
+                base_unit=self.uom.code,
+            )
         payloads = [
             {
                 "src_bill_no": f"POS-CONC-OVER-{index}",
@@ -252,15 +275,21 @@ class PosCheckoutConcurrencyTests(TransactionTestCase):
         failures = [error for error in errors if error is not None]
         self.assertEqual(len(failures), 1)
         self.assertIsInstance(failures[0], ValidationError)
-        detail = InventoryDetail.objects.get(product=product)
-        self.assertEqual(detail.onhand_qty, Decimal("4.0000"))
-        self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
-        self.assertEqual(
-            InventoryTransaction.objects.filter(
-                product=product,
-                src_model="WmsTask",
-            ).count(),
-            1,
+        self.assertIn("可售库存不足", failures[0].message_dict["items"][0])
+        self.assertCountEqual(
+            InventoryDetail.objects.filter(product=product).values_list(
+                "zone_type", "onhand_qty", "allocated_qty", "available_qty"
+            ),
+            [(ZoneType.PICK, 0, 0, 0), (ZoneType.STORAGE, 4, 0, 4), (ZoneType.RETURN, 8, 0, 8)],
+        )
+        self.assertCountEqual(
+            InventoryTransaction.objects.filter(product=product).values_list(
+                "src_model", "tx_type", "zone_type", "qty_delta"
+            ),
+            [
+                ("WmsTask", InvTxType.ISSUE, ZoneType.PICK, Decimal("-5")),
+                ("WmsTask", InvTxType.ISSUE, ZoneType.STORAGE, Decimal("-1")),
+            ],
         )
         self.assertEqual(
             PosSale.objects.filter(src_bill_no__startswith="POS-CONC-OVER-").count(),
@@ -371,6 +400,35 @@ class PosCheckoutConcurrencyTests(TransactionTestCase):
         self.assertEqual(detail.onhand_qty, Decimal("4.0000"))
         self.assertEqual(detail.allocated_qty, Decimal("0.0000"))
         self.assertEqual(detail.available_qty, Decimal("4.0000"))
+
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_concurrent_replay_of_one_partial_return_posts_once(self):
+        sale = self._create_initial_sale(src_bill_no="POS-CONC-RETURN-REPLAY")
+        line = sale.lines.get()
+
+        def submit():
+            return create_pos_return(
+                user=self.users[0],
+                sale_id=sale.pk,
+                idempotency_key="concurrent-partial-return",
+                reason="customer returned one item",
+                lines=[{"sale_line_id": line.pk, "qty": "1.000"}],
+                refunds=[{"method": "CASH", "amount": "9.00"}],
+            )
+
+        results, errors = self._run_actions([submit, submit])
+
+        self.assertEqual(errors, [None, None])
+        returned = PosReturn.objects.get(sale=sale)
+        self.assertEqual([result["return"].pk for result in results], [returned.pk, returned.pk])
+        self.assertEqual(returned.lines.get().qty, Decimal("1.000"))
+        self.assertEqual(PosRefund.objects.get(sale=sale).amount, Decimal("9.00"))
+        detail = InventoryDetail.objects.get(product=line.product_id)
+        self.assertEqual(detail.onhand_qty, Decimal("7.0000"))
+        movement = InventoryTransaction.objects.get(src_model="PosReturnLine")
+        self.assertEqual(movement.src_line_id, detail.pk)
+        self.assertEqual(movement.tx_type, InvTxType.RECEIVE)
+        self.assertEqual(movement.qty_delta, Decimal("1.0000"))
 
     @skipUnlessDBFeature("has_select_for_update")
     def test_return_and_checkout_same_sku_serialize_without_lost_update(self):

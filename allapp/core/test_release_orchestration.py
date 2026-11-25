@@ -1,5 +1,6 @@
 """Exercise real release scripts with isolated, deterministic service commands."""
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -7,12 +8,27 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SERVICES = "web scheduler boss-check-worker"
+SERVICES = "web scheduler boss-check-worker owner-archive-worker"
 DOCKER = r"""#!/bin/sh
 echo "docker $*" >> "$TEST_ROOT/events"
 case "$*" in
+  *'--profile oneshot ps --status running -q')
+    if [ "$TEST_SCENARIO" = lingering-writer ] || [ -f "$TEST_ROOT/late-writer" ]; then
+      echo leftover-id
+    fi ;;
+  *'ps --status running -q web scheduler boss-check-worker owner-archive-worker') echo 'old-web old-scheduler old-worker' ;;
+  *'ps --status running -q web') echo old-web ;;
+  *'ps --status running -q boss-check-worker') echo old-worker ;;
+  'inspect '*com.docker.compose.oneoff*)
+    if [ "$TEST_SCENARIO" = oneoff ]; then echo True; else echo False; fi
+    exit 0 ;;
+  'inspect --format {{.State.Running}} old-'*)
+    if [ "$TEST_SCENARIO" = resume-failure ]; then echo false; else echo true; fi
+    exit 0 ;;
   *check_volume_access.py*) [ "$TEST_SCENARIO" != volumes ] || exit 8 ;;
-  *'migrate --noinput'*) [ "$TEST_SCENARIO" != migration ] || exit 9 ;;
+  *'migrate --noinput'*)
+    if [ "$TEST_SCENARIO" = post-failure-writer ]; then touch "$TEST_ROOT/late-writer"; exit 9; fi
+    [ "$TEST_SCENARIO" != migration ] || exit 9 ;;
   *'up -d scheduler boss-check-worker'*) [ "$TEST_SCENARIO" != startup ] || exit 10 ;;
 esac
 case "$*" in
@@ -50,15 +66,47 @@ exit 0
 
 
 def release(tmp_path, *, stage=False, scenario="success"):
+    backup_hook = """#!/usr/bin/env python3
+import json, os, pathlib
+kind = pathlib.Path(__file__).name
+scenario = os.environ['TEST_SCENARIO']
+with (pathlib.Path(os.environ['TEST_ROOT']) / 'events').open('a') as f:
+    print('backup ' + kind, file=f)
+if scenario == 'backup-' + kind or scenario in ('resume-failure', 'inactive-timer'):
+    raise SystemExit(11)
+if scenario == 'missing-receipt' and kind == 'media':
+    raise SystemExit(0)
+includes = ['database'] if kind == 'database' else ['media', 'private_arrivals', 'private_returns']
+if scenario == 'missing-private' and kind == 'media':
+    includes.remove('private_returns')
+point = os.environ['WMS_BACKUP_SET_ID']
+if scenario == 'mixed-snapshots' and kind == 'media':
+    point = 'old-set'
+pathlib.Path(os.environ['WMS_BACKUP_RECEIPT']).write_text(json.dumps(
+    dict(recovery_point=point, snapshot_id='artifact-' + kind, includes=includes)))
+"""
     programs = {
         "docker": DOCKER,
         "systemctl": """#!/bin/sh
 echo "systemctl $*" >> "$TEST_ROOT/events"
 case "$*" in
+  'list-units '*) [ "$TEST_SCENARIO" != legacy ] || echo wms-boss-deadlines.timer ;;
+  'show '*wms-sale-mini-expire.service)
+    if [ "$TEST_SCENARIO" = draining ] && [ ! -f "$TEST_ROOT/drained" ]; then
+      echo activating
+      touch "$TEST_ROOT/drained"
+    else
+      echo inactive
+    fi ;;
+  'show '*wms-sale-mini-reconcile.timer)
+    if [ "$TEST_SCENARIO" = inactive-timer ]; then echo inactive; else echo active; fi ;;
+  'show '*.timer) echo active ;;
+  'show '*.service) echo inactive ;;
   'is-active --quiet '*.service) exit 3 ;;
 esac
 """,
-        "backup": '#!/bin/sh\necho backup >> "$TEST_ROOT/events"\n',
+        "database": backup_hook,
+        "media": backup_hook,
         "sleep": "#!/bin/sh\nexit 0\n",
         "date": """#!/bin/sh
 n=940
@@ -85,8 +133,10 @@ echo "$n"
             "TEST_ROOT": str(tmp_path),
             "TEST_SCENARIO": scenario,
             "WMS_IMAGE": image,
-            "WMS_DB_BACKUP_SCRIPT": str(tmp_path / "backup"),
-            "WMS_MEDIA_BACKUP_SCRIPT": str(tmp_path / "backup"),
+            "WMS_DB_BACKUP_SCRIPT": str(tmp_path / "database"),
+            "WMS_MEDIA_BACKUP_SCRIPT": str(tmp_path / "media"),
+            "WMS_BACKUP_EVIDENCE_DIR": str(tmp_path / "evidence"),
+            "WMS_RELEASE_LOCK_FILE": str(tmp_path / "release.lock"),
             "WMS_OBSERVE_SECONDS": "10" if scenario == "observation" else "0",
         },
         capture_output=True,
@@ -114,7 +164,11 @@ def test_all_writers_stop_before_migration_and_start_the_candidate(tmp_path, sta
         assert any(f"ps --all -q {service}" in e for e in events)
         assert any(f"Running}}}} {{{{.Image}}}} {service}-id" in e for e in events)
     if not stage:
-        assert find("systemctl stop") < find("migrate --noinput")
+        assert find("systemctl stop") < find(f"stop {SERVICES}") < find("backup database")
+        assert find("backup database") < find("backup media") < find("migrate --noinput")
+        manifest = json.loads(next((tmp_path / "evidence").glob("*/manifest.json")).read_text())
+        assert manifest["database"]["recovery_point"] == manifest["media"]["recovery_point"]
+        assert manifest["recovery_point"] == manifest["database"]["recovery_point"]
         assert find("check_boss_worker") < find("systemctl start")
         assert "systemctl start wms-sale-mini-expire.service" in events
         assert "systemctl start wms-sale-mini-reconcile.service" in events
@@ -138,7 +192,7 @@ def test_all_writers_stop_before_migration_and_start_the_candidate(tmp_path, sta
 def test_release_failure_stops_every_writer(tmp_path, stage, scenario):
     result, events = release(tmp_path, stage=stage, scenario=scenario)
     assert result.returncode != 0
-    assert events[-1].endswith(f"stop {SERVICES}")
+    assert any(event.endswith(f"stop {SERVICES}") for event in events)
     assert "remain stopped" in result.stderr
     if scenario == "migration":
         assert result.returncode == 9
@@ -146,7 +200,18 @@ def test_release_failure_stops_every_writer(tmp_path, stage, scenario):
         assert not any(event.startswith("systemctl start") for event in events)
     if not stage:
         assert "restore the verified database/media backup" in result.stderr
-        assert events[-2].startswith("systemctl stop")
+        assert events[-1].endswith("--profile oneshot ps --status running -q")
+        assert any(event.startswith("systemctl stop") for event in events)
+    else:
+        assert events[-1].endswith(f"stop {SERVICES}")
+
+
+def test_lingering_writer_blocks_restore_after_migration_failure(tmp_path):
+    result, events = release(tmp_path, scenario="post-failure-writer")
+    assert result.returncode != 0
+    assert events[-1].endswith("--profile oneshot ps --status running -q")
+    assert "drain remaining writers before any restore" in result.stderr
+    assert "restore the verified database/media backup" not in result.stderr
 
 
 @pytest.mark.parametrize("stage", [False, True], ids=["production", "staging"])
@@ -154,7 +219,58 @@ def test_failed_preflight_preserves_running_services(tmp_path, stage):
     result, events = release(tmp_path, stage=stage, scenario="volumes")
     assert result.returncode == 8
     assert not any("systemctl stop" in event or f"stop {SERVICES}" in event for event in events)
-    assert not any("migrate --noinput" in event or event == "backup" for event in events)
+    assert not any("migrate --noinput" in event or event.startswith("backup") for event in events)
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "backup-database",
+        "backup-media",
+        "missing-receipt",
+        "missing-private",
+        "mixed-snapshots",
+        "lingering-writer",
+    ],
+)
+def test_backup_failure_resumes_only_previous_writers_before_migration(tmp_path, scenario):
+    result, events = release(tmp_path, scenario=scenario)
+    assert result.returncode != 0
+    assert "docker start old-web old-scheduler old-worker" in events
+    assert "previous writer state restored" in result.stderr
+    assert any(event.startswith("systemctl start wms-sale-mini-expire.timer") for event in events)
+    assert not any("migrate --noinput" in event or "up -d" in event for event in events)
+    assert not list((tmp_path / "evidence").glob("*/manifest.json"))
+    if scenario == "lingering-writer":
+        assert not any(event.startswith("backup ") for event in events)
+
+
+def test_failed_old_container_restart_keeps_timers_off(tmp_path):
+    result, events = release(tmp_path, scenario="resume-failure")
+    assert result.returncode != 0
+    assert not any("systemctl start" in event for event in events)
+    assert events[-1].endswith(f"stop {SERVICES}")
+
+
+def test_backup_abort_preserves_previously_inactive_timer(tmp_path):
+    result, events = release(tmp_path, scenario="inactive-timer")
+    assert result.returncode != 0
+    starts = [event for event in events if event.startswith("systemctl start")]
+    assert starts == ["systemctl start wms-sale-mini-expire.timer"]
+
+
+def test_activating_payment_job_drains_before_backup(tmp_path):
+    result, events = release(tmp_path, scenario="draining")
+    assert result.returncode == 0, result.stderr
+    inspect = "systemctl show --property=ActiveState --value wms-sale-mini-expire.service"
+    assert events[: events.index("backup database")].count(inspect) == 2
+
+
+@pytest.mark.parametrize("scenario", ["legacy", "oneoff"])
+def test_active_unscheduled_writer_prevents_freeze(tmp_path, scenario):
+    result, events = release(tmp_path, scenario=scenario)
+    assert result.returncode != 0
+    assert not any(event.startswith(("backup ", "systemctl stop")) for event in events)
 
 
 def test_ci_calls_the_shared_staging_entrypoint():

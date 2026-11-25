@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from io import StringIO
 from unittest.mock import patch
 
@@ -12,6 +12,9 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from allapp.accounts.models import AuditEvent, UserRoleScope
+from allapp.baseinfo.models import Owner
+from allapp.billing.enums import CalcMethod, ChargeType, MetricType
+from allapp.billing.models import BillingJobRun, BillingServiceContract
 from allapp.locations.models import Warehouse
 from allapp.reports.boss_automation import (
     RUN_KEY,
@@ -20,7 +23,7 @@ from allapp.reports.boss_automation import (
     heartbeat,
     run_scheduled_check,
 )
-from allapp.reports.models import BossCheckState
+from allapp.reports.models import AlertCase, BossCheckState
 
 
 class BossAutomationTests(TestCase):
@@ -29,8 +32,10 @@ class BossAutomationTests(TestCase):
             username="automation-admin", password="x"
         )
         self.boss = get_user_model().objects.create_user(username="automation-boss")
-        warehouse = Warehouse.objects.create(code="AUT-W", name="Warehouse")
-        UserRoleScope.objects.create(user=self.boss, role="warehouse_boss", warehouse=warehouse)
+        self.warehouse = Warehouse.objects.create(code="AUT-W", name="Warehouse")
+        UserRoleScope.objects.create(
+            user=self.boss, role="warehouse_boss", warehouse=self.warehouse
+        )
         self.boss.user_permissions.add(
             Permission.objects.get(
                 content_type__app_label="reports", codename="view_boss_dashboard"
@@ -44,6 +49,98 @@ class BossAutomationTests(TestCase):
         response = self.client.patch(self.url, data, format="json")
         self.assertEqual(response.status_code, 200, response.data)
         return response.data
+
+    def test_live_billing_scheduler_can_miss_a_scope_and_boss_worker_tracks_repair(self):
+        owner = Owner.objects.create(code="AUT-M", name="Monitored owner")
+        other = Owner.objects.create(code="AUT-X", name="Other owner")
+        now = datetime(2026, 4, 9, 2, 5)
+        day = now.date() - timedelta(days=1)
+        for charge, method in (
+            (ChargeType.DISPATCH, CalcMethod.PERCENT_OF_ORDER_AMOUNT),
+            (ChargeType.STORAGE, CalcMethod.PER_CBM_DAY),
+        ):
+            BillingServiceContract.objects.create(
+                owner=owner,
+                warehouse=self.warehouse,
+                effective_from=day,
+                effective_to=day,
+                source_type="DAILY_METRIC",
+                charge_type=charge,
+                calc_method=method,
+            )
+
+        def check_attention():
+            # TestCase owns this connection for its rollback. Exercise one worker cycle.
+            with (
+                patch("allapp.reports.management.commands.boss_run_checks.close_old_connections"),
+                patch(
+                    "allapp.reports.management.commands.boss_run_checks.time.sleep",
+                    side_effect=KeyboardInterrupt,
+                ),
+            ):
+                call_command("boss_run_checks", stdout=StringIO())
+            response = self.client.get("/api/reports/boss/attention/")
+            self.assertEqual(response.status_code, 200, response.data)
+            data = response.json()
+            self.assertEqual(data["automation"]["state"], "healthy")
+            health = next(row for row in data["checks"] if row["rule"] == "BILLING_HEALTH")
+            self.assertFalse(health["stale"])
+            self.assertIsNotNone(health["checked_at"])
+            return data["results"]
+
+        with (
+            self.settings(BILLING_METRIC_SCHEDULER_LOOKBACK_DAYS=1),
+            patch("django.utils.timezone.now", return_value=now) as clock,
+        ):
+            self.configure(enabled=True, interval_minutes=1)
+            self.client.force_authenticate(self.boss)
+            with patch(
+                "allapp.billing.management.commands.billing_run_scheduler.time.sleep",
+                side_effect=KeyboardInterrupt,
+            ):
+                call_command(
+                    "billing_run_scheduler",
+                    owner=other.pk,
+                    warehouse=self.warehouse.pk,
+                    metric_types=[MetricType.ORDER_AMT],
+                    stdout=StringIO(),
+                )
+            self.assertTrue(
+                BillingJobRun.objects.filter(
+                    owner=other, service_date=day, status=BillingJobRun.Status.SUCCESS
+                ).exists()
+            )
+            (first,) = check_attention()
+            self.assertEqual(first["owner_name"], owner.name)
+            self.assertEqual(first["record_no"], str(day))
+            self.assertEqual(first["severity"], "HIGH")
+            self.assertEqual(first["business_due_at"], now.isoformat())
+
+            def run_scope(metric):
+                call_command(
+                    "billing_run_scheduler",
+                    once=True,
+                    dates=[day.isoformat()],
+                    owner=owner.pk,
+                    warehouse=self.warehouse.pk,
+                    metric_types=[metric],
+                    stdout=StringIO(),
+                )
+
+            run_scope(MetricType.ORDER_AMT)
+            clock.return_value = now + timedelta(minutes=1)
+            (partial,) = check_attention()
+            self.assertEqual(partial["id"], first["id"])
+            self.assertIn("体积", partial["title"])
+            run_scope(MetricType.CBM)
+            clock.return_value = now + timedelta(minutes=2)
+            self.assertEqual(check_attention(), [])
+        case = AlertCase.objects.get(pk=first["id"])
+        self.assertEqual(case.status, AlertCase.Status.RESOLVED)
+        self.assertEqual(
+            list(case.history.order_by("id").values_list("action", flat=True)),
+            ["DISCOVER", "AUTO_RESOLVE"],
+        )
 
     def test_default_off_and_disabled_worker_does_not_scan_business(self):
         self.assertEqual(configuration()["enabled"], False)

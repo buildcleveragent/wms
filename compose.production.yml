@@ -9,6 +9,7 @@ x-wms-service: &wms-service
   volumes:
     - wms-static:/app/staticfiles
     - wms-media:/app/media
+    - wms-private-exports:/app/private_exports
     - wms-private-returns:/app/private_returns
     - wms-private-arrivals:/app/private_arrivals
 
@@ -36,6 +37,11 @@ services:
   scheduler:
     <<: *wms-service
     command: /app/docker/start-scheduler.sh
+    restart: unless-stopped
+
+  owner-archive-worker:
+    <<: *wms-service
+    command: python manage.py run_owner_archives
     restart: unless-stopped
 
   boss-check-worker:
@@ -73,5 +79,6 @@ services:
 volumes:
   wms-static:
   wms-media:
+  wms-private-exports:
   wms-private-arrivals:
   wms-private-returns:

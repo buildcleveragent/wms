@@ -2,6 +2,7 @@
 "pages": [
 
 	{"path":"pages/bootstrap","style":{"navigationBarTitleText":"正在启动","navigationStyle":"custom"}},
+    {"path":"pages/read-only","style":{"navigationBarTitleText":"只读账号"}},
 	{"path":"pages/login","style":{"navigationBarTitleText":"登录"}},
  {"path":"pages/inbound/index","style":{"navigationBarTitleText":"到货预报／入库申请"}},
 	{"path":"pages/workbench/items","style":{"navigationBarTitleText":"待办清单","enablePullDownRefresh":true}},
@@ -23,6 +24,7 @@
 	    {"path":"pages/approval/approvedetail","style":{"navigationBarTitleText":"出库审核详情"}},
 		{"path":"pages/reports/index","style":{"navigationBarTitleText":"报表"}},
 		{"path":"pages/reports/operations","style":{"navigationBarTitleText":"入出库履约"}},
+        {"path":"pages/reports/owner-archive","style":{"navigationBarTitleText":"导出完整 Excel"}},
         {"path":"pages/reports/stock-history","style":{"navigationBarTitleText":"出入库记录"}},
 		{"path":"pages/billing/overview","style":{"navigationBarTitleText":"计费总览"}},
 		{"path":"pages/billing/bill_detail","style":{"navigationBarTitleText":"账单详情"}},

@@ -137,6 +137,7 @@ resolved AS (
     LEFT JOIN {supplier} sup ON sup.id = COALESCE(i.supplier_id, ir.supplier_id)
       AND sup.owner_id = x.owner_id
     LEFT JOIN {customer} cust ON cust.id = COALESCE(o.customer_id, s.selected_customer_id)
+      AND cust.owner_id = x.owner_id
 ),
 classified AS (
     SELECT resolved.*,

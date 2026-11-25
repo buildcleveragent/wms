@@ -78,8 +78,12 @@ Required flow set:
 6. Owner portal -> view inventory -> view bill -> export bill
 7. PDA -> login -> pick/scan task -> state advances correctly
 8. Console -> billing overview -> drill into bill detail
+9. Formal inbound order -> receive -> outbound from the receiving location
+10. Formal inbound order -> receive -> put away -> outbound from the picking location
+11. Two outbound order lines -> three location-specific pick lines -> inventory and ledger
+12. Received and put away stock -> daily volume -> accrual -> locked period -> invoice
 
-Executable coverage for the eight flows lives in:
+The automated suite covers all twelve flows.
 
 - `allapp/test_business_flows.py`
 
@@ -188,7 +192,7 @@ Files:
 
 Purpose:
 
-- Cross-app business loop validation for the eight critical end-to-end flows
+- Cross-app business loop validation for the twelve critical end-to-end flows
 
 Files:
 
@@ -312,7 +316,7 @@ Guidelines:
 ### Release Gate
 
 - Staging smoke passes
-- All eight critical flows pass
+- All twelve critical flows pass
 - No blocker or critical defects remain open
 - Billing and reporting totals are spot-checked against source facts
 

@@ -17,6 +17,8 @@ from django.utils.module_loading import import_string
 from rest_framework.exceptions import ValidationError
 
 from allapp.core.utils.log_context import build_log_payload
+from allapp.inventory.locking import lock_warehouses_for_inventory_write
+from allapp.inventory.sale_eligibility import selling_task
 from allapp.tasking import services
 from allapp.tasking.models import (
     CountLineExtra,
@@ -48,9 +50,14 @@ def adjust_pick_line_qty(
     from decimal import InvalidOperation
     from django.core.exceptions import ValidationError as DjangoValidationError
     from allapp.outbound.services import validate_pick_task_sale_mini_payment
-    from .pick_inventory import manual_pick_sources, validate_manual_pick_scans
+    from .pick_inventory import (
+        manual_pick_sources,
+        require_sellable_pick_source,
+        validate_manual_pick_scans,
+    )
 
     task_scope = WmsTask.objects.get(id=task_id, task_type=WmsTask.TaskType.PICK)
+    lock_warehouses_for_inventory_write(task_scope.warehouse_id)
     validate_pick_task_sale_mini_payment(task_scope)
     task = WmsTask.objects.select_for_update().get(pk=task_scope.pk)
     validate_pick_task_sale_mini_payment(task)
@@ -78,6 +85,7 @@ def adjust_pick_line_qty(
     if (
         task.status not in ("RELEASED", "IN_PROGRESS", "RESERVED")
         or task.posting_status == "POSTED"
+        or line.status == WmsTaskLine.Status.CANCELLED
     ):
         raise ValidationError("任务当前状态不允许调整拣货数。")
     diff = target - _q3(line.qty_done or 0)
@@ -85,6 +93,8 @@ def adjust_pick_line_qty(
         return {"idempotent": True, "line_id": line.pk, "qty_done": line.qty_done}
     try:
         source = manual_pick_sources(task, [line])[line.pk]
+        if selling_task(task):
+            require_sellable_pick_source(task, source)
         if source.serial_no and target not in (0, 1):
             raise ValidationError("序列号商品的拣货数量必须为 0 或 1。")
         if not fp:
@@ -317,14 +327,20 @@ def _replay_pick_scan(task, barcode, qty, location_id, user_id, client_seq):
     """Recover an acknowledged scan from its stored semantics, without another write."""
     if task.task_type != WmsTask.TaskType.PICK or not client_seq:
         return None
-    scans = TaskScanLog.objects.filter(
-        task_id=task.id,
-        barcode=barcode,
-        qty_aux=_q3(qty),
-        by_user_id=user_id,
-        status=TaskScanLog.ScanStatus.OK,
-        task_line__isnull=False,
-    ).select_related("task_line")
+    scans = (
+        TaskScanLog.objects.filter(
+            task_id=task.id,
+            barcode=barcode,
+            qty_aux=_q3(qty),
+            by_user_id=user_id,
+            task_line__isnull=False,
+        )
+        .filter(
+            Q(status="OK")
+            | Q(status="IGNORED", task_line__plan_meta__sale_reallocation__isnull=False)
+        )
+        .select_related("task_line")
+    )
     if location_id is not None:
         scans = scans.filter(location_id=location_id)
     for scan in scans:
@@ -379,6 +395,7 @@ def scan_task(
     if task_scope.task_type == WmsTask.TaskType.PICK:
         from allapp.outbound.services import validate_pick_task_sale_mini_payment
 
+        lock_warehouses_for_inventory_write(task_scope.warehouse_id)
         validate_pick_task_sale_mini_payment(task_scope)
     task = WmsTask.objects.select_for_update().get(id=task_id)
     replay = _replay_pick_scan(task, barcode, qty, location_id, user_id, client_seq)
@@ -492,12 +509,17 @@ def scan_task(
             TaskScanLog.objects.filter(
                 task_id=task.id,
                 fp__in=retry_fps,
-                status=TaskScanLog.ScanStatus.OK,
+            )
+            .filter(
+                Q(status="OK")
+                | Q(status="IGNORED", task_line__plan_meta__sale_reallocation__isnull=False)
             )
             .order_by("id")
             .first()
         )
         if prior_scan and prior_scan.task_line_id:
+            if prior_scan.status == "IGNORED" and not client_seq:
+                raise ValidationError("原扫描所属预留已重配，请刷新并使用新的请求标识重新扫码。")
             prior_line = WmsTaskLine.objects.select_for_update().get(pk=prior_scan.task_line_id)
             return {
                 "idempotent": True,
@@ -531,6 +553,19 @@ def scan_task(
         )
         if location_id is not None:
             line_qs = line_qs.filter(from_location_id=location_id)
+    selling_pick = task.task_type == WmsTask.TaskType.PICK and selling_task(task)
+    if selling_pick and not transfer and any((lot_no, mfg_date, exp_date, serial_no)):
+        from .pick_inventory import lines_matching_sale_barcode
+
+        line_qs = lines_matching_sale_barcode(
+            line_qs,
+            task=task,
+            product_id=product_id,
+            lot=lot_no,
+            production_date=mfg_date,
+            expiry_date=exp_date,
+            serial=serial_no,
+        )
     line = line_qs.order_by("id").first()
     if not line and task.task_type in ("RECEIVE", "COUNT"):
         line = WmsTaskLine.objects.create(
@@ -545,6 +580,26 @@ def scan_task(
         lot_no, mfg_date, exp_date, serial_no = validate_transfer_scan(
             line, lot_no=lot_no, mfg_date=mfg_date, exp_date=exp_date, serial_no=serial_no
         )
+
+    if selling_pick:
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from .pick_inventory import manual_pick_sources, require_sellable_pick_source
+
+        try:
+            source = manual_pick_sources(task, [line])[line.pk]
+            require_sellable_pick_source(task, source)
+        except DjangoValidationError as exc:
+            raise ValidationError(exc.messages) from exc
+        expected = (
+            source.batch_no or "",
+            source.production_date,
+            source.expiry_date,
+            source.serial_no or "",
+        )
+        for observed, reserved in zip((lot_no, mfg_date, exp_date, serial_no), expected):
+            if observed and str(observed) != str(reserved):
+                raise ValidationError("扫描的批次、效期或序列号与任务分配库存不一致。")
+        lot_no, mfg_date, exp_date, serial_no = expected
 
     # 4) 计算增量与 FP
     # 所有商品库存任务都以基础单位记账；qty 表示扫描到的包装数量。
@@ -1655,12 +1710,14 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
     # 如果你表里没有 posted_at 字段，请使用 posting_journal__isnull 判断“未过账”
     with transaction.atomic():
         # 1) 锁行并拿到任务归属（owner/warehouse）
+        _lock_pick_warehouse_for_line(task_line_id)
         tl = (
             WmsTaskLine.objects.select_for_update()
             .select_related("task", "product")
             .get(pk=task_line_id)
         )
         _reject_arrival_legacy_write(tl.task_id)
+        _validate_pick_line_for_write(tl)
         ctx, ctx_text = build_log_payload(task=tl.task, user=operator)
         logger.info(
             "tasking.snapshot.save.begin %s line_id=%s items=%s source=%s",
@@ -1846,6 +1903,28 @@ def save_receiving_snapshot(task_line_id: int, items, operator, source="WEB"):
 
 # services.py
 # ---- 通用：锁定行并带必要关联 ----
+def _lock_pick_warehouse_for_line(line_id):
+    warehouse = (
+        WmsTaskLine.objects.filter(pk=line_id, task__task_type="PICK")
+        .values_list("task__warehouse_id", flat=True)
+        .first()
+    )
+    if warehouse:
+        lock_warehouses_for_inventory_write(warehouse)
+
+
+def _validate_pick_line_for_write(line):
+    if line.task.task_type != WmsTask.TaskType.PICK:
+        return
+    if line.status == WmsTaskLine.Status.CANCELLED:
+        raise ValidationError("原拣货行已取消，不能修改。")
+    if selling_task(line.task):
+        from .pick_inventory import manual_pick_sources, require_sellable_pick_source
+
+        source = manual_pick_sources(line.task, [line])[line.pk]
+        require_sellable_pick_source(line.task, source)
+
+
 def _lock_line(line_id: int) -> WmsTaskLine:
     """锁定并获取任务行"""
     return (
@@ -2053,7 +2132,9 @@ def finalize_task_line(line_id: int, *, by_user=None, trigger: str = "MANUAL"):
       - （可选）调用场景过账
       - 推进任务头（首条→IN_PROGRESS；全部→COMPLETED & review=PENDING）
     """
+    _lock_pick_warehouse_for_line(line_id)
     line = _lock_line(line_id)  # 锁 + 取关联
+    _validate_pick_line_for_write(line)
     task = line.task
     _assert_task_executable(task)  # 可执行态校验
     _assert_line_owner(by_user, line)  # 负责人校验

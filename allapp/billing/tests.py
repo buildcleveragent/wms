@@ -7,6 +7,7 @@ import time
 from decimal import Decimal
 from unittest import mock
 
+from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
@@ -3503,6 +3504,273 @@ class BillingMetricGenerationTests(TestCase):
             posted_at=datetime.datetime.combine(service_date, datetime.time(10, 0)),
         )
 
+    def _run_metric_scheduler(self, day, *options):
+        call_command(
+            "billing_run_scheduler",
+            "--once",
+            "--date",
+            day.isoformat(),
+            "--owner",
+            str(self.owner.pk),
+            "--warehouse",
+            str(self.warehouse.pk),
+            *options,
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+        )
+        return BillingJobRun.objects.get(
+            job_name=BillingJobRun.JobName.DAILY_METRIC_GENERATION,
+            owner=self.owner,
+            warehouse=self.warehouse,
+            service_date=day,
+        )
+
+    def test_full_scheduler_completes_partial_day_and_matches_forced_control(self):
+        day = datetime.date(2026, 4, 8)
+        self._create_inventory(location=self.location1, qty="4.0000")
+        self._create_inventory_transaction(day, qty_delta="4.0000")
+        self._create_outbound_order(day, qty="2.000", price="15.0000")
+        scope = dict(owner=self.owner, warehouse=self.warehouse, service_date=day)
+        metrics = BillingMetricDaily.objects.filter(**scope)
+        for method in [CalcMethod.PER_CBM_DAY, CalcMethod.PER_PALLET_DAY]:
+            BillingRule.objects.create(
+                owner=self.owner,
+                warehouse=self.warehouse,
+                charge_type=ChargeType.STORAGE,
+                calc_method=method,
+                unit_price=Decimal("1.00"),
+            )
+
+        first = self._run_metric_scheduler(day, "--metric-type", "ORDER_AMT")
+        order_metric = metrics.get()
+        self.assertEqual((order_metric.metric_type, order_metric.value), ("ORDER_AMT", 30))
+        self.assertEqual(first.attempts, 1)
+        self.assertCountEqual(first.summary["missing_metric_types"], ["PALLET", "CBM", "AREA_M2"])
+        job_admin = admin.site.get_model_admin(BillingJobRun)
+        self.assertIn("体积(CBM) 尚未执行", job_admin.metric_progress(first))
+
+        full = self._run_metric_scheduler(day)
+        self.assertEqual((full.pk, full.attempts), (first.pk, 2))
+        self.assertEqual(full.summary["missing_metric_types"], [])
+        self.assertEqual(full.summary["metric_coverage"]["ORDER_AMT"]["action"], "created")
+        self.assertEqual(full.summary["metric_coverage"]["AREA_M2"]["action"], "unsupported")
+        self.assertEqual(full.summary["metric_coverage"]["PALLET"]["source_quality"], "APPROXIMATE")
+        self.assertTrue(full.summary["had_single_metric_run"])
+        self.assertIn("面积(㎡) 缺少计算来源", job_admin.metric_progress(full))
+        self.assertIn("托盘位(个) 已生成（近似）", job_admin.metric_progress(full))
+        self.assertEqual(
+            dict(metrics.values_list("metric_type", "value")),
+            {"ORDER_AMT": 30, "CBM": 2, "PALLET": 1},
+        )
+        self.assertEqual(accrue_metrics_for_date(self.owner.pk, self.warehouse.pk, day), (2, 2))
+        events = BillingEvent.objects.filter(**scope)
+        accruals = BillingAccrual.objects.filter(**scope)
+        self.assertEqual(
+            dict(accruals.values_list("rule__calc_method", "amount")),
+            {
+                CalcMethod.PER_CBM_DAY: 2,
+                CalcMethod.PER_PALLET_DAY: 1,
+            },
+        )
+        expected_metrics = list(metrics.order_by("pk").values_list("pk", "metric_type", "value"))
+        expected_events = list(events.order_by("pk").values_list("pk", "metric_id", "quantity"))
+        expected_accruals = list(accruals.order_by("pk").values_list("pk", "event_id", "amount"))
+
+        for options, attempts in [((), 2), (("--force",), 3)]:
+            with self.subTest(options=options):
+                again = self._run_metric_scheduler(day, *options)
+                self.assertEqual(again.attempts, attempts)
+                self.assertEqual(
+                    accrue_metrics_for_date(self.owner.pk, self.warehouse.pk, day), (0, 0)
+                )
+                self.assertEqual(
+                    list(metrics.order_by("pk").values_list("pk", "metric_type", "value")),
+                    expected_metrics,
+                )
+                self.assertEqual(
+                    list(events.order_by("pk").values_list("pk", "metric_id", "quantity")),
+                    expected_events,
+                )
+                self.assertEqual(
+                    list(accruals.order_by("pk").values_list("pk", "event_id", "amount")),
+                    expected_accruals,
+                )
+
+    def test_scheduler_rechecks_legacy_summary_once_and_covers_zero_results(self):
+        day = timezone.now().date()
+        scope = dict(owner=self.owner, warehouse=self.warehouse, service_date=day)
+        BillingJobRun.objects.create(
+            **scope,
+            job_name=BillingJobRun.JobName.DAILY_METRIC_GENERATION,
+            status=BillingJobRun.Status.SUCCESS,
+            finished_at=timezone.now(),
+            summary={"skipped_zero": 4},
+        )
+        full = self._run_metric_scheduler(day)
+        self.assertEqual(full.attempts, 2)
+        self.assertEqual(full.summary["missing_metric_types"], [])
+        self.assertEqual(full.summary["metric_coverage"]["ORDER_AMT"]["action"], "skipped_zero")
+        self.assertFalse(BillingMetricDaily.objects.filter(**scope).exists())
+        self.assertEqual(self._run_metric_scheduler(day).attempts, 2)
+
+    def test_scheduler_leaves_legacy_jobs_in_closed_and_invoiced_periods_untouched(self):
+        scope = dict(owner_id=self.owner.pk, warehouse_id=self.warehouse.pk)
+        legacy = {
+            "created": 1,
+            "updated": 0,
+            "deleted_zero": 0,
+            "skipped_zero": 0,
+            "skipped_manual": 0,
+            "unsupported": 0,
+            "noop": 0,
+        }
+        for index, status in enumerate([PeriodStatus.CLOSED, PeriodStatus.INVOICED], start=1):
+            with self.subTest(status=status):
+                day = datetime.date(2026, 4, index)
+                BillingPeriod.objects.create(
+                    **scope,
+                    label=f"2026-04-{index}",
+                    start_date=day,
+                    end_date=day,
+                    status=status,
+                )
+                job = BillingJobRun.objects.create(
+                    **scope,
+                    service_date=day,
+                    job_name=BillingJobRun.JobName.DAILY_METRIC_GENERATION,
+                    status=BillingJobRun.Status.SUCCESS,
+                    finished_at=timezone.now(),
+                    summary=legacy,
+                )
+                metric = BillingMetricDaily.objects.create(
+                    **scope,
+                    service_date=day,
+                    metric_type="ORDER_AMT",
+                    value=30,
+                    source="AUTO:ORDER_AMOUNT",
+                )
+                result = run_scheduled_metric_generation_for_date(day, **scope)
+                self.assertEqual(result["runs"][0]["status"], "skipped_closed_period")
+                job.refresh_from_db()
+                self.assertEqual(
+                    (job.status, job.attempts, job.summary),
+                    (
+                        BillingJobRun.Status.SUCCESS,
+                        1,
+                        legacy,
+                    ),
+                )
+                stored = BillingMetricDaily.objects.get(**scope, service_date=day)
+                self.assertEqual((stored.pk, stored.value), (metric.pk, 30))
+
+    def test_scheduler_rechecks_manual_and_area_options_even_after_coverage(self):
+        day = timezone.now().date()
+        self._create_inventory(location=self.location1, qty="4")
+        self._create_inventory_transaction(day, qty_delta="4")
+        self._create_outbound_order(day, qty="2", price="15")
+        scope = dict(owner=self.owner, warehouse=self.warehouse, service_date=day)
+        manual = BillingMetricDaily.objects.create(
+            **scope, metric_type="ORDER_AMT", value=Decimal("999"), source="MANUAL"
+        )
+        initial = self._run_metric_scheduler(day)
+        coverage = initial.summary["metric_coverage"]
+        self.assertEqual(coverage["ORDER_AMT"]["action"], "skipped_manual")
+        self.assertEqual(coverage["AREA_M2"]["action"], "unsupported")
+        manual.refresh_from_db()
+        self.assertEqual(manual.value, 999)
+
+        fallback = self._run_metric_scheduler(
+            day, "--metric-type", "AREA_M2", "--allow-area-fallback"
+        )
+        self.assertEqual(fallback.attempts, 2)
+        self.assertEqual(BillingMetricDaily.objects.get(**scope, metric_type="AREA_M2").value, 1)
+        overwritten = self._run_metric_scheduler(day, "--metric-type", "ORDER_AMT", "--overwrite")
+        self.assertEqual(overwritten.attempts, 3)
+        manual.refresh_from_db()
+        self.assertEqual(manual.value, 30)
+
+    def test_scheduler_discards_generated_metrics_if_period_closes_after_claim(self):
+        from allapp.billing.services.metrics import _claim_scheduled_metric_job
+
+        day = timezone.now().date()
+        scope = dict(owner_id=self.owner.pk, warehouse_id=self.warehouse.pk)
+        self._create_outbound_order(day, qty="2", price="15")
+
+        def close_before_generation(*args, **kwargs):
+            claim = _claim_scheduled_metric_job(*args, **kwargs)
+            lock_period(**scope, label=day.isoformat(), start_date=day, end_date=day)
+            return claim
+
+        with mock.patch(
+            "allapp.billing.services.metrics._claim_scheduled_metric_job",
+            side_effect=close_before_generation,
+        ):
+            result = run_scheduled_metric_generation_for_date(
+                day, **scope, metric_types=["ORDER_AMT"]
+            )
+
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(BillingPeriod.objects.get(**scope).status, PeriodStatus.CLOSED)
+        self.assertFalse(BillingMetricDaily.objects.filter(**scope, service_date=day).exists())
+        self.assertEqual(result["runs"][0]["summary"]["metric_coverage"], {})
+
+    def test_scheduler_postcheck_failure_rolls_back_only_this_attempt(self):
+        day = datetime.date(2026, 4, 8)
+        self._create_inventory(location=self.location1, qty="4")
+        self._create_inventory_transaction(day, qty_delta="4")
+        self._create_outbound_order(day, qty="2", price="15")
+        scope = dict(owner=self.owner, warehouse=self.warehouse, service_date=day)
+        first = self._run_metric_scheduler(day, "--metric-type", "ORDER_AMT")
+        with (
+            mock.patch(
+                "allapp.billing.services.metrics._ensure_reconciliation_for_service_date",
+                side_effect=[None, ValueError("postcheck failed")],
+            ),
+            self.assertRaises(CommandError),
+        ):
+            self._run_metric_scheduler(day)
+        first.refresh_from_db()
+        self.assertEqual(first.status, BillingJobRun.Status.FAILED)
+        self.assertEqual(set(first.summary["metric_coverage"]), {"ORDER_AMT"})
+        rows = BillingMetricDaily.objects.filter(**scope)
+        self.assertEqual(dict(rows.values_list("metric_type", "value")), {"ORDER_AMT": 30})
+
+        retry = self._run_metric_scheduler(day)
+        self.assertEqual(retry.attempts, 3)
+        self.assertEqual(retry.summary["missing_metric_types"], [])
+        self.assertEqual(retry.summary["metric_coverage"]["ORDER_AMT"]["action"], "created")
+        self.assertEqual(
+            dict(rows.values_list("metric_type", "value")),
+            {
+                "ORDER_AMT": 30,
+                "CBM": 2,
+                "PALLET": 1,
+            },
+        )
+
+    def test_unsuccessful_forced_metric_is_retried_without_force(self):
+        day = timezone.now().date()
+        options = ("--metric-type", "ORDER_AMT")
+        initial = self._run_metric_scheduler(day, *options)
+        self.assertEqual(initial.summary["metric_coverage"]["ORDER_AMT"]["action"], "skipped_zero")
+        self._create_outbound_order(day, qty="2", price="15")
+        with (
+            mock.patch(
+                "allapp.billing.services.metrics._ensure_reconciliation_for_service_date",
+                side_effect=[None, ValueError("postcheck failed")],
+            ),
+            self.assertRaises(CommandError),
+        ):
+            self._run_metric_scheduler(day, *options, "--force")
+
+        metrics = BillingMetricDaily.objects.filter(
+            owner=self.owner, warehouse=self.warehouse, service_date=day
+        )
+        self.assertFalse(metrics.exists())
+        retry = self._run_metric_scheduler(day, *options)
+        self.assertEqual(retry.attempts, 3)
+        self.assertEqual(metrics.get(metric_type="ORDER_AMT").value, 30)
+
     def test_generate_metrics_for_date_builds_inventory_and_order_metrics(self):
         service_date = datetime.date(2026, 4, 5)
         self._create_inventory(location=self.location1, qty="3.0000")
@@ -3806,6 +4074,8 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
             nonlocal generation_calls
             with generation_lock:
                 generation_calls += 1
+                if generation_calls > 1:
+                    raise AssertionError("another worker started generation before release")
             generation_entered.set()
             if not release_generation.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS):
                 raise AssertionError(
@@ -3820,6 +4090,14 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
                 "skipped_manual": 0,
                 "unsupported": 0,
                 "noop": 0,
+                "results": [
+                    {
+                        "metric_type": "ORDER_AMT",
+                        "action": "created",
+                        "source": "AUTO:ORDER_AMOUNT",
+                        "source_quality": "VERIFIED",
+                    }
+                ],
             }
 
         def invoke(index):
@@ -3829,7 +4107,7 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
                     service_date,
                     owner_id=self.owner.id,
                     warehouse_id=self.warehouse.id,
-                    metric_types=["ORDER_AMT"],
+                    metric_types=["ORDER_AMT"] if index == 0 else None,
                 )
             except BaseException as exc:
                 errors.append(exc)
@@ -3850,6 +4128,12 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
             thread1.start()
             self.assertTrue(generation_entered.wait(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS))
 
+            forced = run_scheduled_metric_generation_for_date(
+                service_date,
+                owner_id=self.owner.pk,
+                warehouse_id=self.warehouse.pk,
+                force=True,
+            )
             thread2 = threading.Thread(target=invoke, args=(1,))
             thread2.start()
             thread2.join(timeout=CONCURRENCY_TEST_TIMEOUT_SECONDS)
@@ -3862,6 +4146,7 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
         if errors:
             raise errors[0]
 
+        self.assertEqual(forced["skipped_running"], 1)
         self.assertEqual(generation_calls, 1)
         self.assertEqual(
             sorted(result["runs"][0]["status"] for result in results),
@@ -3877,6 +4162,7 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
         self.assertEqual(job_run.status, BillingJobRun.Status.SUCCESS)
         self.assertEqual(job_run.attempts, 1)
         self.assertEqual(job_run.summary["created"], 1)
+        self.assertEqual(set(job_run.summary["metric_coverage"]), {"ORDER_AMT"})
         self.assertEqual(
             BillingJobRun.objects.filter(
                 job_name=BillingJobRun.JobName.DAILY_METRIC_GENERATION,
@@ -3886,6 +4172,47 @@ class BillingSchedulerConcurrencyTests(TransactionTestCase):
             ).count(),
             1,
         )
+
+    @override_settings(
+        BILLING_RECONCILIATION_GATE_DAILY_ENABLED=False, BILLING_METRIC_SCHEDULER_STALE_MINUTES=1
+    )
+    def test_superseded_attempt_cannot_replace_coverage_or_commit_metric_writes(self):
+        from allapp.billing.services.metrics import _claim_scheduled_metric_job
+
+        day = timezone.now().date()
+        scope = dict(owner_id=self.owner.pk, warehouse_id=self.warehouse.pk)
+        protected = BillingMetricDaily.objects.create(
+            **scope, service_date=day, metric_type="ORDER_AMT", value=Decimal("7"), source="MANUAL"
+        )
+
+        def resume_after_takeover(*args, **kwargs):
+            claim = _claim_scheduled_metric_job(*args, **kwargs)
+            first_job = claim[0]
+            if first_job.attempts == 1:
+                BillingJobRun.objects.filter(pk=first_job.pk).update(
+                    started_at=timezone.now() - datetime.timedelta(days=1)
+                )
+                replacement = run_scheduled_metric_generation_for_date(
+                    day, **scope, metric_types=["CBM"]
+                )
+                self.assertEqual(replacement["success"], 1)
+            return claim
+
+        # The first worker resumes after another worker has committed the reclaimed job.
+        with mock.patch(
+            "allapp.billing.services.metrics._claim_scheduled_metric_job",
+            side_effect=resume_after_takeover,
+        ):
+            run_scheduled_metric_generation_for_date(
+                day, **scope, metric_types=["ORDER_AMT"], overwrite=True
+            )
+
+        protected.refresh_from_db()
+        self.assertEqual(protected.value, 7)
+        stored = BillingJobRun.objects.get(**scope, service_date=day)
+        self.assertEqual(stored.attempts, 2)
+        self.assertEqual(stored.status, BillingJobRun.Status.SUCCESS)
+        self.assertEqual(set(stored.summary["metric_coverage"]), {"CBM"})
 
     def test_generate_metrics_for_date_survives_concurrent_create_race(self):
         service_date = datetime.date(2026, 4, 11)

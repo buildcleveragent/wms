@@ -665,6 +665,10 @@ class TaskDetailView(LoginRequiredMixin, DetailView):
             .select_related("product", "from_location", "to_location")
             .order_by("id")
         )
+        from allapp.outbound.pick_reallocation import mark_reallocatable_lines
+
+        lines = list(lines)
+        mark_reallocatable_lines(self.request.user, self.object, lines)
         ctx["lines"] = lines
         origin = self.request.GET.get("origin")
         back_url = None

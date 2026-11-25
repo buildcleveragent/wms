@@ -25,6 +25,7 @@ from allapp.inventory.models import (
     InventorySummary,
     InventoryTransaction,
 )
+from allapp.inventory.sale_eligibility import locked_sale_layer_ids, sale_layers
 from allapp.inventory.services import lock_active_inventory_details_for_update
 from allapp.outbound.enums import PricingStatus
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
@@ -59,6 +60,8 @@ MONEY = Decimal("0.01")
 PRICE = Decimal("0.0001")
 POS_ORDER_MEMO_PREFIX = "[POS]"
 POS_ORDER_CLOSE_REASON = "POS即时销售完成"
+POS_SALE_ZONE_TYPES = (ZoneType.PICK, ZoneType.STORAGE)
+POS_SALE_ZONE_ERROR = "POS 仅支持从拣货区和存储区销售。"
 
 
 def _decimal(value, default=ZERO):
@@ -155,6 +158,15 @@ def _normalize_stock_zone_type(value):
     return zone_type
 
 
+def pos_sale_zone_types(zone_type=None):
+    """Resolve the POS sale pool, optionally narrowed to a single saleable zone."""
+    if zone_type is None:
+        return POS_SALE_ZONE_TYPES
+    if zone_type not in POS_SALE_ZONE_TYPES:
+        _error("stock_zone_type", POS_SALE_ZONE_ERROR)
+    return (zone_type,)
+
+
 def _pos_order_memo(remark):
     remark = (remark or "").strip()
     if not remark:
@@ -183,6 +195,8 @@ def _idempotency_fingerprint(
                 "price": str(_price(item["price"])),
             },
             **({"amount": str(_money(item["amount"]))} if item.get("amount") is not None else {}),
+            **({"is_gift": True} if item.get("is_gift") else {}),
+            **({"onsite_price": True} if item.get("onsite_price") else {}),
         )
         for item in items
     ]
@@ -310,11 +324,27 @@ def _validate_prices_and_shape(items, products):
         else:
             amount = _money(qty * price)
 
-        if amount < ZERO:
-            _error("amount", f"{product.code} 成交金额不能小于 0。")
-        is_gift = amount == ZERO
-
-        if not is_gift:
+        is_gift = raw.get("is_gift", False)
+        onsite_price = raw.get("onsite_price", False)
+        if onsite_price and (product.price is not None or is_gift or explicit_amount is not None):
+            _error("onsite_price", f"{product.code} 请重新核对档案，现场定价只适用于未定价商品的正单价。")
+        if is_gift:
+            price_source = "gift"
+            if product.price is None:
+                _error("is_gift", f"{product.code} 未定价，须录入正单价，不可赠送。")
+            if price != ZERO or amount != ZERO:
+                _error("is_gift", f"{product.code} 赠品的成交单价和金额必须为零。")
+        else:
+            if product.price is None:
+                if not onsite_price:
+                    _error("onsite_price", f"{product.code} 未定价，请核对并录入现场单价。")
+                price_source = "onsite"
+            elif explicit_amount is not None:
+                price_source = "entered_amount"
+            else:
+                price_source = "unit_price"
+            if price <= ZERO or amount <= ZERO:
+                _error("price", f"{product.code} 普通销售须填写正单价，行金额至少为 0.01。")
             try:
                 lowest = minimum_sale_price(
                     base_price=getattr(product, "price", None),
@@ -340,29 +370,43 @@ def _validate_prices_and_shape(items, products):
                 "qty": qty,
                 "price": price,
                 "amount": amount,
+                "is_gift": is_gift,
+                "price_source": price_source,
+                "amount_entered": explicit_amount is not None,
             }
         )
     return normalized, qty_by_product
 
 
-def _available_qty(owner_id, warehouse_id, product_id, *, zone_type=None):
-    filters = {
-        "owner_id": owner_id,
-        "warehouse_id": warehouse_id,
-        "product_id": product_id,
-        "is_active": True,
-        "available_qty__gt": 0,
-    }
-    if zone_type is not None:
-        filters["zone_type"] = zone_type
-    result = InventoryDetail.objects.filter(**filters).aggregate(total=Sum("available_qty"))
+def pos_stock_layers(*, warehouse_id, owner_id, product_id, zone_types):
+    layers = sale_layers().filter(
+        warehouse_id=warehouse_id,
+        product_id=product_id,
+        zone_type__in=zone_types,
+        is_active=True,
+        available_qty__gt=0,
+    )
+    if owner_id is not None:
+        layers = layers.filter(owner_id=owner_id)
+    return layers
+
+
+def available_pos_stock(*, warehouse_id, owner_id, product_id, zone_types):
+    result = pos_stock_layers(
+        warehouse_id=warehouse_id, owner_id=owner_id, product_id=product_id, zone_types=zone_types
+    ).aggregate(total=Sum("available_qty"))
     return result["total"] or ZERO
 
 
-def _validate_stock(qty_by_product, products, warehouse_id, *, zone_type=None):
+def _validate_stock(qty_by_product, products, warehouse_id, *, zone_types):
     for product_id, required_qty in qty_by_product.items():
         product = products[product_id]
-        available = _available_qty(product.owner_id, warehouse_id, product_id, zone_type=zone_type)
+        available = available_pos_stock(
+            warehouse_id=warehouse_id,
+            owner_id=product.owner_id,
+            product_id=product_id,
+            zone_types=zone_types,
+        )
         if available < required_qty:
             _error(
                 "items",
@@ -542,23 +586,18 @@ def _refresh_summaries(pairs):
 
 
 def _fefo_details(owner_id, warehouse_id, product_id, *, zone_type=None):
-    filters = {
-        "owner_id": owner_id,
-        "warehouse_id": warehouse_id,
-        "product_id": product_id,
-        "is_active": True,
-        "available_qty__gt": 0,
-    }
-    if zone_type is not None:
-        filters["zone_type"] = zone_type
-
     expiry_sort = Coalesce(
         "expiry_date",
         Value(date(9999, 12, 31), output_field=DateField()),
     )
     return (
-        InventoryDetail.objects.select_for_update(skip_locked=True)
-        .filter(**filters)
+        pos_stock_layers(
+            warehouse_id=warehouse_id,
+            owner_id=owner_id,
+            product_id=product_id,
+            zone_types=pos_sale_zone_types(zone_type),
+        )
+        .select_for_update(skip_locked=True)
         .order_by(expiry_sort.asc(), "-onhand_qty", "id")
     )
 
@@ -643,7 +682,7 @@ def _create_pos_pick_tasks_and_post(
     orders,
     line_bindings,
     warehouse_id,
-    zone_type,
+    zone_types,
     user,
     now,
 ):
@@ -656,7 +695,15 @@ def _create_pos_pick_tasks_and_post(
     }
     locked_details = lock_active_inventory_details_for_update(pairs)
     details_by_pair = defaultdict(list)
-    for detail in locked_details:
+    warehouse_details = [
+        detail
+        for detail in locked_details
+        if detail.warehouse_id == warehouse_id and detail.zone_type in zone_types
+    ]
+    eligible_ids = locked_sale_layer_ids(warehouse_details)
+    for detail in warehouse_details:
+        if detail.pk not in eligible_ids:
+            continue
         details_by_pair[(detail.owner_id, detail.product_id)].append(detail)
 
     tasks_by_order = {}
@@ -699,19 +746,14 @@ def _create_pos_pick_tasks_and_post(
         order = binding["order"]
         task = tasks_by_order[order.id]
         remaining = _q3(sale_line.qty)
-        candidates = [
-            detail
-            for detail in details_by_pair[(sale_line.owner_id, sale_line.product_id)]
-            if detail.warehouse_id == warehouse_id
-            and (zone_type is None or detail.zone_type == zone_type)
-        ]
-        candidates.sort(
+        candidates = sorted(
+            details_by_pair[(sale_line.owner_id, sale_line.product_id)],
             key=lambda detail: (
                 detail.expiry_date is None,
                 detail.expiry_date or date.max,
                 -detail.onhand_qty,
                 detail.id,
-            )
+            ),
         )
 
         for detail in candidates:
@@ -1482,17 +1524,25 @@ def _create_pos_sale_once(
             PosSale.objects.select_for_update().filter(idempotency_key=idempotency_key).first()
         )
         if existing:
+            if existing.warehouse_id != warehouse_id or existing.cashier_id != user.pk:
+                _error("idempotency_key", "该收银请求标识无法用于当前收银员或仓库。")
+            if not existing.idempotency_fingerprint and any(
+                item.get("is_gift") or item.get("onsite_price") for item in items
+            ):
+                _error("idempotency_key", "历史小票没有记录本次定价方式，请按原小票核对。")
             if existing.idempotency_fingerprint and existing.idempotency_fingerprint != fingerprint:
                 _error("idempotency_key", "同一幂等键对应的收银内容不一致，请刷新后重试。")
             return result_for_sale(existing)
 
+    # Older sales can replay their original zone fingerprint without allocating stock again.
+    zone_types = pos_sale_zone_types(stock_zone_type)
     shift = current_shift_for_user(user, for_update=True)
     if not shift:
         raise ValidationError("当前收银员没有进行中的 POS 班次，请先开班。")
 
     products = _load_products(items, warehouse_id)
     normalized_items, qty_by_product = _validate_prices_and_shape(items, products)
-    _validate_stock(qty_by_product, products, warehouse_id, zone_type=stock_zone_type)
+    _validate_stock(qty_by_product, products, warehouse_id, zone_types=zone_types)
 
     selected_customer = None
     if customer_id:
@@ -1611,7 +1661,7 @@ def _create_pos_sale_once(
         orders=orders,
         line_bindings=line_bindings,
         warehouse_id=warehouse_id,
-        zone_type=stock_zone_type,
+        zone_types=zone_types,
         user=user,
         now=now,
     )
@@ -1628,6 +1678,21 @@ def _create_pos_sale_once(
             "total_amount": str(total_amount),
             "payment_count": len(payment_lines_data),
             "line_count": len(normalized_items),
+            "line_pricing": [
+                {
+                    "line_no": binding["sale_line"].line_no,
+                    "product_id": item["product"].pk,
+                    "catalog_price": (
+                        str(item["product"].price) if item["product"].price is not None else None
+                    ),
+                    "price": str(item["price"]),
+                    "amount": str(item["amount"]),
+                    "is_gift": item["is_gift"],
+                    "price_source": item["price_source"],
+                    "amount_entered": item["amount_entered"],
+                }
+                for binding, item in zip(line_bindings, normalized_items, strict=True)
+            ],
         },
     )
     return result_for_sale(sale)
@@ -1685,7 +1750,21 @@ def _create_pos_return_once(
             PosReturn.objects.select_for_update().filter(idempotency_key=idempotency_key).first()
         )
         if existing:
-            if existing.idempotency_fingerprint and existing.idempotency_fingerprint != fingerprint:
+            if (
+                existing.warehouse_id != warehouse_id
+                or existing.cashier_id != user.pk
+                or existing.sale_id != int(sale_id)
+            ):
+                _error("idempotency_key", "该退货请求标识与当前收银员、仓库或销售单不符。")
+            original_fingerprint = existing.idempotency_fingerprint or _return_fingerprint(
+                sale_id=existing.sale_id,
+                reason=existing.reason,
+                lines=existing.lines.order_by("line_no").values("sale_line_id", "qty"),
+                refunds=existing.refunds.order_by("pk").values(
+                    "method", "amount", "reference_no", "status"
+                ),
+            )
+            if original_fingerprint != fingerprint:
                 _error("idempotency_key", "同一幂等键对应的退货内容不一致，请刷新后重试。")
             return result_for_return(existing)
 

@@ -1,4 +1,4 @@
-"""Create or synchronize the five canonical WMS capability groups."""
+"""Create or synchronize canonical WMS capability groups."""
 
 from django.contrib.auth.models import Group, Permission
 from django.core.management.base import BaseCommand, CommandError
@@ -8,7 +8,7 @@ from allapp.accounts.roles import ROLE_GROUP_TEMPLATES
 
 
 class Command(BaseCommand):
-    help = "创建或同步五类 WMS 角色组；只同步能力，不分配用户或数据范围。"
+    help = "创建或同步 WMS 角色组；只同步能力，不分配用户或数据范围。"
 
     def add_arguments(self, parser):
         parser.add_argument(

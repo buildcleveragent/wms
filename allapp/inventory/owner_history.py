@@ -39,8 +39,7 @@ CATEGORIES = {
 def history_scope(user, *, exporting=False):
     scope = owner_inventory_scope(user)
     if (
-        "owner_manager" not in scope.roles
-        or not user.has_perm("accounts.access_owner_management")
+        not scope.roles.intersection({"owner_manager", "owner_finance"})
         or not user.has_perm("reports.view_owner_operations")
         or (exporting and not user.has_perm("reports.export_operations"))
     ):

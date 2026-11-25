@@ -8,5 +8,4 @@ export const cartService = {
   remove: (payload) => api.removeSaleMiniCart(payload),
   clear: (payload = {}) => api.clearSaleMiniCart(payload),
   preview: (payload) => orderService.preview(payload),
-  checkout: (payload) => orderService.create(payload),
 }

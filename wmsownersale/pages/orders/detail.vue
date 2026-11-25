@@ -21,15 +21,15 @@
           <view>仓库退回原因：{{ order.warehouse_reject_reason }}</view>
           <view v-if="order.approval_status === 'WHS_REJECTED'">请原开单业务员撤回修改，重新提交后由货主管理员审核。</view>
         </view>
-        <button v-if="order.can_withdraw" class="btn edit-btn withdraw-btn" :disabled="withdrawing || loadingEdit" @click="withdrawAndEdit">{{ withdrawing ? '正在撤回…' : '撤回并修改' }}</button>
-        <button v-if="order.can_edit" class="btn edit-btn" :disabled="loadingEdit" @click="editOrder">
+        <button v-if="order.can_withdraw && !auth.isOwnerFinance" class="btn edit-btn withdraw-btn" :disabled="withdrawing || loadingEdit" @click="withdrawAndEdit">{{ withdrawing ? '正在撤回…' : '撤回并修改' }}</button>
+        <button v-if="order.can_edit && !auth.isOwnerFinance" class="btn edit-btn" :disabled="loadingEdit" @click="editOrder">
           {{ loadingEdit ? '正在加载…' : '修改订单' }}
         </button>
-        <button v-if="order.can_reorder" class="btn edit-btn" @click="reorderOrder">再次下单</button>
+        <button v-if="order.can_reorder && !auth.isOwnerFinance" class="btn edit-btn" @click="reorderOrder">再次下单</button>
       </view>
 
     </template>
-    <view v-if="orderId > 0" class="card"><button @click="openReturns(true)">申请退货</button><button @click="openReturns(false)">关联退货记录</button></view>
+    <view v-if="orderId > 0" class="card"><button v-if="!auth.isOwnerFinance" @click="openReturns(true)">申请退货</button><button @click="openReturns(false)">关联退货记录</button></view>
     <OrderProgress v-if="orderId > 0" :order-id="orderId" :active="pageVisible" />
     <template v-if="order && !loading && !error">
       <view class="card detail-card">

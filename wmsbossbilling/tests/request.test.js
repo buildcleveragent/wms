@@ -5,6 +5,14 @@ import { api, buildQuery, classifyError, request } from '../utils/request'
 describe('boss request error classification', () => {
   afterEach(() => vi.unstubAllGlobals())
 
+  it('hides HTML error pages and keeps API error messages readable', () => {
+    const html = '\n<!DOCTYPE html><html><title>Page not found</title></html>'
+    expect(classifyError(404, html).message).toBe('请求失败（HTTP 404）')
+    expect(classifyError(502, '<html><body>Bad Gateway</body></html>').message).toBe('请求失败（HTTP 502）')
+    expect(classifyError(403, { detail: '没有权限' }).message).toBe('没有权限')
+    expect(classifyError(400, '间隔无效').message).toBe('间隔无效')
+  })
+
   it('requests exact decimal JSON for reports and aggregate billing without changing serialized bills', async () => {
     const transport = vi.fn(options => options.success({ statusCode: 200, data: {} }))
     vi.stubGlobal('uni', { getStorageSync: () => '', request: transport })

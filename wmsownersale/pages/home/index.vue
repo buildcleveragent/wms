@@ -12,6 +12,7 @@
       <button class="btn mt-4" @click="goLogin">前往登录</button>
     </view>
     <template v-else-if="quickItems.length">
+    <view v-if="auth.isOwnerFinance" class="card text-gray">货主财务 · 只读查看本货主全部业务</view>
     <OwnerWorkbench :active="homeVisible && sessionStatus === 'authenticated'" :identity="sessionIdentity" />
     <view class="quick-grid">
       <view

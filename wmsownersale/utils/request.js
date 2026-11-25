@@ -521,6 +521,9 @@ export const api = {
   stockHistory: (section, params = {}) => request({
     url: `/api/inventory/owner-history/${section}/?${buildQuery(params)}`, silent: true,
   }),
+  stockStatistics: (section, params = {}) => request({
+    url: `/api/inventory/owner-history/statistics/${section}/?${buildQuery(params)}`, silent: true,
+  }),
 
   billingPeriods: (params = {}) => {
     const qs = buildQuery(params)

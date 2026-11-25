@@ -349,6 +349,8 @@ def main():
             pytest
             + [
                 "scripts/test_real_browser_acceptance.py",
+                "scripts/test_console_dashboard_browser.py",
+                "scripts/test_console_navigation_browser.py",
                 f"--junitxml={artifacts / 'real-browser.xml'}",
             ],
         )

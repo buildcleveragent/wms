@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "run_id": "f51e904df10d4f2fa5dfaf46329c7a42",
+  "status": "FAIL",
+  "exit_code": 1,
+  "collected": 2,
+  "password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher",
+  "events_file": "/wms/var/assessments/2026-11-18/current-worktree/backend/prices.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "FAIL": 1,
+    "PASS": 1
+  },
+  "subtest_counts": {},
+  "tests": {
+    "var/assessments/2026-11-18/current-worktree/backend/probes.py::test_unpriced_catalog_item_is_not_silently_sold_as_a_gift": {
+      "status": "FAIL",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "failed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/tests.py::PosApiTests::test_checkout_accepts_zero_total_gift_sale_and_posts_stock": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

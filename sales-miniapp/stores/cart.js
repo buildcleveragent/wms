@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { cartService } from '../services/cart'
+import { checkoutIsCurrent, submitCheckout } from '../services/checkout'
 
 function toNumber(value) {
   const n = Number(value)
@@ -311,14 +312,18 @@ const cartStore = reactive({
     return preview
   },
   async checkout(extra = {}) {
-    const preview = await this.preview(extra)
-    if (!preview.ok) {
-      const failed = preview.lines.find((line) => !line.ok)
-      throw new Error((failed && failed.message) || '订单校验未通过')
-    }
-    const order = await cartService.checkout(this.payload(extra))
-    await this.load().catch(() => this.clearLocal())
-    return order
+    const receipt = await submitCheckout(async () => {
+      const preview = await this.preview(extra)
+      if (!preview.ok) {
+        const failed = preview.lines.find((line) => !line.ok)
+        throw new Error((failed && failed.message) || '订单校验未通过')
+      }
+      return this.payload(extra)
+    })
+    await this.load().catch(() => {
+      if (checkoutIsCurrent(receipt)) this.clearLocal()
+    })
+    return receipt
   },
 })
 

@@ -62,7 +62,12 @@ async function loadGlobal() {
   const current = ++revision, user = auth.user?.id
   loadError.value = ''; saveError.value = ''
   try { const value = await api.bossAutomationSettings(); if (current === revision && user === auth.user?.id) accept(value) }
-  catch (error) { if (current === revision) loadError.value = error.message || '检查设置读取失败' }
+  catch (error) {
+    if (current !== revision || user !== auth.user?.id) return
+    loadError.value = error.statusCode === 404
+      ? '当前后台未提供自动检查设置接口（404）。请确认连接的后台地址和版本。'
+      : error.message || '检查设置读取失败'
+  }
 }
 async function saveGlobal() {
   if (saving.value || !server.value?.can_manage) return

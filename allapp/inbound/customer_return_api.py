@@ -85,6 +85,12 @@ class ReceiptInput(BaseInput):
     lines = ReceiptLineInput(many=True, allow_empty=False, max_length=200)
 
 
+class ReceiptTraceInput(BaseInput):
+    receipt_line_id = serializers.IntegerField(min_value=1)
+    production_date = serializers.DateField(required=False)
+    expiry_date = serializers.DateField(required=False)
+
+
 def validate(cls, data):
     serializer = cls(data=data)
     serializer.is_valid(raise_exception=True)
@@ -93,6 +99,8 @@ def validate(cls, data):
 
 def actions(order, user):
     roles = service.scope_for(user).roles
+    if "owner_finance" in roles:
+        return []
     result = []
     owner = bool(set(roles) & {"owner_manager", "owner_salesperson"})
     if owner and user.has_perm("inbound.apply_customer_return"):
@@ -203,7 +211,7 @@ def payload(order, user, detail=True):
         )
     result["receipts"] = []
     for receipt in (
-        order.receipts.prefetch_related("lines__photos", "lines__location", "lines__line")
+        order.receipts.prefetch_related("lines__photos", "lines__location", "lines__line__product")
         .select_related("actor")
         .order_by("id")
     ):
@@ -213,6 +221,7 @@ def payload(order, user, detail=True):
                 created_at=timestamp(receipt.created_at),
                 actor=receipt.actor.get_full_name() or receipt.actor.username,
                 posted_at=timestamp(receipt.posted_at),
+                posting_hold_reason=receipt.posting_hold_reason,
                 posting_label=(
                     "已回补库存"
                     if receipt.posted_at
@@ -228,6 +237,9 @@ def payload(order, user, detail=True):
                         batch_no=r.batch_no,
                         production_date=r.production_date,
                         expiry_date=r.expiry_date,
+                        missing_dates=(
+                            service.missing_receipt_dates(r) if not receipt.posted_at else []
+                        ),
                         serial_no=r.serial_no,
                         qty_ok=str(r.qty_ok),
                         qty_damage=str(r.qty_damage),
@@ -384,6 +396,16 @@ class CustomerReturnViewSet(viewsets.GenericViewSet):
         service.post_receipt(request.user, target_id)
         return Response(payload(self.get_queryset().get(pk=pk), request.user))
 
+    @action(detail=True, methods=["post"], url_path=r"receipts/(?P<receipt_id>\d+)/trace")
+    def complete_trace(self, request, pk=None, receipt_id=None):
+        obj = self.get_object()
+        service.operator(obj, request.user)
+        data = validate(ReceiptTraceInput, request.data)
+        data["receipt_id"] = int(receipt_id)
+        _, target = service.command(request.user, "complete-trace", data, obj.pk)
+        service.post_receipt(request.user, target)
+        return Response(payload(self.get_queryset().get(pk=obj.pk), request.user))
+
     @action(detail=True, methods=["get"], url_path="receipt-options")
     def receipt_options(self, request, pk=None):
         obj = self.get_object()
@@ -392,7 +414,11 @@ class CustomerReturnViewSet(viewsets.GenericViewSet):
             {
                 "locations": list(
                     Location.objects.filter(
-                        warehouse_id=obj.warehouse_id, is_disabled=False, is_frozen=False
+                        warehouse_id=obj.warehouse_id,
+                        is_active=True,
+                        is_deleted=False,
+                        is_disabled=False,
+                        is_frozen=False,
                     ).values("id", "code", "name")
                 )
             }

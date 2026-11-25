@@ -7,7 +7,8 @@ export const historyCategories = {
 
 export const blankHistoryFilters = () => ({
   date_from: '', date_to: '', warehouse_id: '', product_id: '', document_key: '',
-  search: '', document_no: '', batch: '', category: '', grain: 'all', order: 'desc',
+  base_unit: '', missing_unit: '', currency: '',
+  search: '', document_no: '', batch: '', category: '', grain: 'day', order: 'desc',
 })
 
 export function historyQuery(filters) {
@@ -29,6 +30,24 @@ export function periodFilters(filters, period) {
   return next
 }
 
+// Calendar arithmetic uses UTC midnight so the device time zone and DST cannot shift a date.
+export function calendarPeriod(anchor, grain) {
+  const start = new Date(anchor + 'T00:00:00Z')
+  if (grain === 'week') start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7)
+  if (grain === 'month') start.setUTCDate(1)
+  if (grain === 'year') start.setUTCMonth(0, 1)
+  const next = new Date(start)
+  if (grain === 'month') next.setUTCMonth(next.getUTCMonth() + 1)
+  else if (grain === 'year') next.setUTCFullYear(next.getUTCFullYear() + 1)
+  else next.setUTCDate(next.getUTCDate() + (grain === 'week' ? 7 : 1))
+  const date = time => new Date(time).toISOString().slice(0, 10)
+  const day = 86400000
+  return {
+    period_start: date(start), period_end: date(next.getTime() - day),
+    previous: date(start.getTime() - day), next: date(next),
+  }
+}
+
 export function historyTime(value) {
   return value ? value.replace('T', ' ').replace(/\.\d+/, '').replace(/\+08:00$/, '') : '时间未记录'
 }
@@ -36,4 +55,14 @@ export function historyTime(value) {
 export function historyTimes(count, unverified = false) {
   if (unverified) return Number(count) > 0 ? `${count} 次，另有次数待核对` : '次数待核对'
   return `${count || 0} 次`
+}
+
+export function historyUnit(row) {
+  return /[一-龥]/.test(row?.base_unit_name || '') ? row.base_unit_name : '单位待核对'
+}
+
+export function historyMoney(value) {
+  if (value == null) return '金额待核对'
+  const [whole, fraction = ''] = String(value).split('.')
+  return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${fraction.padEnd(2, '0').slice(0, 2)}`
 }

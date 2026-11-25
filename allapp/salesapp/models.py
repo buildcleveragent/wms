@@ -354,6 +354,23 @@ class SaleMiniCartItem(BaseModel):
         return f"{self.cart_id}:{self.product_id}/{self.order_uom} x {self.qty}"
 
 
+class SaleMiniCheckoutSubmission(models.Model):
+    """One shopper's checkout intent, shared by all packages in the transaction."""
+
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+")
+    request_key = models.CharField(max_length=64, db_collation="utf8mb4_bin")
+    fingerprint = models.CharField(max_length=64)
+    package_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "request_key"], name="ux_mini_checkout_user_key"
+            )
+        ]
+
+
 class SaleMiniOrderMapping(BaseModel):
     class PaymentStatus(models.TextChoices):
         OFFLINE = "OFFLINE", "线下付款"
@@ -388,6 +405,13 @@ class SaleMiniOrderMapping(BaseModel):
         verbose_name="出库订单",
         on_delete=models.PROTECT,
         related_name="sale_mini_mapping",
+    )
+    submission = models.ForeignKey(
+        SaleMiniCheckoutSubmission,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="packages",
     )
     payment_status = models.CharField(
         "支付状态",

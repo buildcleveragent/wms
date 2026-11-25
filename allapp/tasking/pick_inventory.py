@@ -74,6 +74,51 @@ def manual_pick_sources(task, lines):
     return result
 
 
+def lines_matching_sale_barcode(
+    lines, *, task, product_id, lot, production_date, expiry_date, serial
+):
+    """Select the reserved line matching a lot/serial barcode within the current task."""
+    candidates = {
+        row.pk: int(row.plan_meta["inventory_detail_id"])
+        for row in lines.only("pk", "plan_meta")
+        if str((row.plan_meta or {}).get("inventory_detail_id")).isdigit()
+    }
+    dimensions = {
+        "batch_no": lot,
+        "production_date": production_date,
+        "expiry_date": expiry_date,
+        "serial_no": serial,
+    }
+    matching = set(
+        InventoryDetail.objects.filter(
+            pk__in=candidates.values(),
+            owner_id=task.owner_id,
+            warehouse_id=task.warehouse_id,
+            product_id=product_id,
+            **{field: value for field, value in dimensions.items() if value},
+        ).values_list("pk", flat=True)
+    )
+    return lines.filter(
+        pk__in=[pk for pk, source_pk in candidates.items() if source_pk in matching]
+    )
+
+
+def require_sellable_pick_source(task, source):
+    """Validate the reserved layer and its count lock before recording a physical pick."""
+    from allapp.inventory.sale_eligibility import require_sale_layers
+    from allapp.tasking.counting import assert_inventory_not_count_locked
+
+    require_sale_layers([source])
+    assert_inventory_not_count_locked(
+        owner_id=source.owner_id,
+        warehouse_id=source.warehouse_id,
+        product_id=source.product_id,
+        location_id=source.location_id,
+        batch_no=source.batch_no,
+        task=task,
+    )
+
+
 def scan_dimensions(scan, detail):
     """Permit missing historical dimensions only; conflicting facts fail closed."""
     recorded = (scan.lot_no or "", scan.mfg_date, scan.exp_date, scan.serial_no or "")

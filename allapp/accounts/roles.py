@@ -93,6 +93,19 @@ ROLE_GROUP_TEMPLATES = {
             "outbound.view_assistedownershiptransfer",
         ),
     ),
+    UserRoleScope.Role.OWNER_FINANCE: RoleGroupTemplate(
+        role=UserRoleScope.Role.OWNER_FINANCE,
+        group_name="WMS::货主财务",
+        permissions=(
+            "accounts.access_owner_finance",
+            "accounts.view_owner_financials",
+            "reports.view_owner_operations",
+            "reports.export_operations",
+            "inbound.view_inboundorder",
+            "outbound.view_outboundorder",
+            "outbound.view_assistedownershiptransfer",
+        ),
+    ),
     UserRoleScope.Role.OWNER_SALESPERSON: RoleGroupTemplate(
         role=UserRoleScope.Role.OWNER_SALESPERSON,
         group_name="WMS::货主业务员",
@@ -166,6 +179,7 @@ ROLE_PERMISSION_MARKERS = {
             "outbound.approve_outbound_as_owner_manager",
         }
     ),
+    UserRoleScope.Role.OWNER_FINANCE: frozenset({"accounts.access_owner_finance"}),
     UserRoleScope.Role.OWNER_SALESPERSON: frozenset(
         {
             "accounts.access_owner_sales",

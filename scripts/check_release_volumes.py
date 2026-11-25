@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify a non-root candidate using fresh disposable static/media volumes."""
+"""Verify a non-root candidate using four fresh disposable release volumes."""
 
 import argparse
 import subprocess
@@ -11,11 +11,13 @@ def main():
     parser.add_argument("--image", required=True)
     args = parser.parse_args()
     identity = uuid.uuid4().hex
-    names = [f"wms-release-{kind}-{identity}" for kind in ("static", "media")]
+    directories = ("staticfiles", "media", "private_returns", "private_arrivals")
+    names = {kind: f"wms-release-{kind}-{identity}" for kind in directories}
     container = f"wms-release-volume-check-{identity}"
     created = []
     try:
-        for name in names:
+        mounts = []
+        for kind, name in names.items():
             subprocess.run(
                 ["docker", "volume", "create", "--label", "com.wms.purpose=release-test", name],
                 check=True,
@@ -23,16 +25,20 @@ def main():
                 timeout=20,
             )
             created.append(name)
-        code = """import os, runpy, secrets
+            mounts.extend(["--mount", f"type=volume,source={name},target=/app/{kind}"])
+        code = """import os, secrets, stat, subprocess, sys
 os.environ['SECRET_KEY'] = secrets.token_hex(32)
 os.environ['DJANGO_SETTINGS_MODULE'] = 'wmsmaster.settings'
 assert os.getuid() == 10001 and os.getgid() == 10001
-for path in ('/app/staticfiles', '/app/media'):
-    assert os.stat(path).st_uid == 10001
-runpy.run_path('/app/docker/check_volume_access.py', run_name='__main__')
+for kind in sys.argv[1:]:
+    directory = os.stat('/app/' + kind)
+    assert (directory.st_uid, directory.st_gid) == (10001, 10001)
+    if kind.startswith('private_'):
+        assert stat.S_IMODE(directory.st_mode) == 0o700
+subprocess.run([sys.executable, '/app/docker/check_volume_access.py'], check=True)
 from django.core.management import execute_from_command_line
 execute_from_command_line(['manage.py', 'collectstatic', '--noinput'])
-print('PASS: collectstatic and media IO with fresh volumes as UID/GID 10001')
+print('PASS: collectstatic and IO on four fresh volumes as UID/GID 10001')
 """
         return subprocess.run(
             [
@@ -45,10 +51,7 @@ print('PASS: collectstatic and media IO with fresh volumes as UID/GID 10001')
                 container,
                 "--user",
                 "10001:10001",
-                "--mount",
-                f"type=volume,source={names[0]},target=/app/staticfiles",
-                "--mount",
-                f"type=volume,source={names[1]},target=/app/media",
+                *mounts,
                 "-e",
                 "APP_ENV=test",
                 "-e",
@@ -59,6 +62,7 @@ print('PASS: collectstatic and media IO with fresh volumes as UID/GID 10001')
                 "python",
                 "-c",
                 code,
+                *directories,
             ],
             check=False,
             timeout=120,

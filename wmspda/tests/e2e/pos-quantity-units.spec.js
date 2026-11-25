@@ -98,7 +98,7 @@ test('cart, packaged checkout, return and reprint keep the correct basic units',
     const data = path === '/api/pos/products/' ? { results: matches, count: matches.length }
       : path === '/api/pos/sales/' ? { results: [sale], count: 1 }
       : path === '/api/pos/sales/1/' ? sale
-      : path === '/api/pos/shifts/current/' ? { shift: { id: 1, status: 'OPEN', shift_no: 'UNIT-SHIFT', summary: {} } } : {}
+      : path === '/api/pos/shifts/current/' ? { shift: { id: 1, status: 'OPEN', shift_no: 'UNIT-SHIFT', cashier_id: 7, warehouse_id: 3, summary: {} } } : {}
     await route.fulfill({ json: data })
   })
   await page.goto('/#/pages/pos/index', { waitUntil: 'domcontentloaded' })

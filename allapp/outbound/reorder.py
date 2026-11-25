@@ -14,7 +14,7 @@ from rest_framework.exceptions import APIException, PermissionDenied, Validation
 
 from allapp.accounts.access import AccessScope
 from allapp.baseinfo.customer_access import active_bindings
-from allapp.inventory.models import InventoryDetail
+from allapp.inventory.sale_eligibility import sale_layers
 from allapp.outbound.authz import strict_order_queryset
 from allapp.outbound.models import OutboundOrder, OutboundOrderLine
 from allapp.outbound.warehouse_access import owner_can_use_warehouse
@@ -46,7 +46,7 @@ def owner_scope(user, *, buyer=False):
     if (
         not scope.is_valid
         or not scope.single_owner_id
-        or not scope.roles & {"owner_manager", "owner_salesperson"}
+        or not scope.roles & {"owner_manager", "owner_salesperson", "owner_finance"}
     ):
         raise PermissionDenied("需要单一有效货主角色范围。")
     allowed = "owner_salesperson" in scope.roles and user.has_perm(
@@ -57,6 +57,7 @@ def owner_scope(user, *, buyer=False):
     if not buyer and not (
         allowed
         or ("owner_manager" in scope.roles and user.has_perm("accounts.access_owner_management"))
+        or ("owner_finance" in scope.roles and user.has_perm("accounts.access_owner_finance"))
     ):
         raise PermissionDenied("当前账号没有客户资料访问权限。")
     return scope
@@ -65,7 +66,7 @@ def owner_scope(user, *, buyer=False):
 def scoped_binding(user, customer_id, *, buyer=False, lock=False):
     scope = owner_scope(user, buyer=buyer)
     qs = active_bindings(scope.single_owner_id)
-    if buyer or "owner_manager" not in scope.roles:
+    if buyer or "owner_salesperson" in scope.roles:
         qs = qs.filter(Q(salesperson=user) | Q(code__iexact="CASH"))
     if lock:
         qs = qs.select_for_update()
@@ -128,7 +129,8 @@ def product_facts(owner_id, warehouse_id, product_ids, *, request=None, lock=Fal
         packages[package.product_id].append(package)
     stocks = defaultdict(list)
     for row in (
-        InventoryDetail.objects.filter(
+        sale_layers()
+        .filter(
             owner_id=owner_id,
             warehouse_id=warehouse_id,
             product_id__in=products,

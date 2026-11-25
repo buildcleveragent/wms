@@ -1,8 +1,10 @@
+from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from allapp.accounts.models import UserRoleScope
@@ -144,6 +146,7 @@ class ProductCatalogPackageConversionTests(TestCase):
             base_uom=self.base_uom,
             replenish_uom=replenish_uom,
             price=Decimal("10.00"),
+            expiry_control=False,
         )
 
     def _list(self, viewset, path, params=None):
@@ -165,9 +168,7 @@ class ProductCatalogPackageConversionTests(TestCase):
         )
         self.assertIsNone(products[self.plain_product.id]["carton_unit"])
         self.assertIsNone(products[self.plain_product.id]["carton_conv"])
-        self.assertEqual(
-            products[self.plain_product.id]["minimum_sale_price"], "9.0000"
-        )
+        self.assertEqual(products[self.plain_product.id]["minimum_sale_price"], "9.0000")
         self.assertEqual(products[self.carton_product.id]["carton_unit"], "CATBOX")
         self.assertEqual(products[self.carton_product.id]["carton_conv"], 12)
         self.assertEqual(
@@ -178,9 +179,7 @@ class ProductCatalogPackageConversionTests(TestCase):
             products[self.missing_package_product.id]["carton_unit"],
             "CATBOX",
         )
-        self.assertIsNone(
-            products[self.missing_package_product.id]["carton_conv"]
-        )
+        self.assertIsNone(products[self.missing_package_product.id]["carton_conv"])
 
     def test_product_catalog_uses_qty_in_base_without_breaking_mixed_page(self):
         response = self._list(
@@ -202,6 +201,19 @@ class ProductCatalogPackageConversionTests(TestCase):
 
     def test_zero_stock_products_are_filtered_before_count_and_page_slice(self):
         self._product("PAGE-ZERO", "Page Zero")
+        expired = self._product("PAGE-EXPIRED", "Expired Only")
+        expired.expiry_control = True
+        expired.expiry_basis = "INBOUND"
+        expired.inbound_valid_days = 60
+        expired.save()
+        InventoryDetail.objects.create(
+            owner=self.owner,
+            product=expired,
+            warehouse=self.warehouse,
+            location=self.location,
+            onhand_qty=Decimal("3"),
+            expiry_date=timezone.now().date() - timedelta(days=1),
+        )
         stocked = self._product("PAGE-STOCK", "Page Stock")
         InventoryDetail.objects.create(
             owner=self.owner,

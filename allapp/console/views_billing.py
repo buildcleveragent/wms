@@ -53,15 +53,15 @@ class BillingConsoleBaseView(LoginRequiredMixin, TemplateView):
     required_permissions: tuple[str, ...] = ()
 
     def dispatch(self, request, *args, **kwargs):
-        if not self._has_page_access():
+        if not self.can_view_page(request.user):
             raise PermissionDenied("无权访问计费控制台页面。")
         return super().dispatch(request, *args, **kwargs)
 
-    def _has_page_access(self) -> bool:
-        user = self.request.user
+    @classmethod
+    def can_view_page(cls, user) -> bool:
         return bool(
             getattr(user, "is_superuser", False)
-            or any(user.has_perm(permission) for permission in self.required_permissions)
+            or any(user.has_perm(permission) for permission in cls.required_permissions)
         )
 
     def _user_can_view_bills(self) -> bool:

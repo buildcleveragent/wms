@@ -97,16 +97,22 @@ def recovery_errors(data, profile):
     errors = []
     try:
         rpo = seconds(data["snapshot_at"], data["incident_at"])
-        rto = seconds(data["restore_started_at"], data["validated_at"])
+        rto = seconds(data["incident_at"], data["validated_at"])
+        if seconds(data["incident_at"], data["restore_started_at"]) < 0:
+            errors.append("restore cannot start before the incident")
+        if seconds(data["restore_started_at"], data["validated_at"]) <= 0:
+            errors.append("validation must follow restore start")
         if not 0 <= rpo <= profile["disaster_recovery"]["rpo_seconds"]:
             errors.append("RPO exceeds 24 hours")
         if not 0 < rto <= profile["disaster_recovery"]["rto_seconds"]:
             errors.append("RTO exceeds 60 minutes or no measured recovery")
-    except (KeyError, TypeError, ValueError):
+    except (AttributeError, KeyError, TypeError, ValueError):
         errors.append("measured recovery timestamps required")
     for key in (
         "database_checksum_verified",
         "media_checksum_verified",
+        "private_arrivals_checksum_verified",
+        "private_returns_checksum_verified",
         "migration_head_verified",
         "business_flow_verified",
         "inventory_finance_reconciled",

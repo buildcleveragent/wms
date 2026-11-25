@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 
 - Backend: Django project in `wmsmaster/` (settings, urls, wsgi). Domain apps live under `allapp/*` (e.g. `inbound/`, `outbound/`, `inventory/`).
-- UI assets: templates in `templates/`, static files in `static/`. Tailwind build tooling is in `frontend/` and outputs `static/css/app.css`.
+- Web templates live in `templates/`. Their stylesheets, including `static/css/app.css` and `static/css/forms.css`, are checked in. Django collects them with app static files into `staticfiles/`. Shared frontend code lives in `frontend/`.
 - Dependencies: pinned files in `requirements/` (`requirements.txt`, `dev.txt`). Example env in `.env.example`.
 - CI: see `.github/workflows/ci.yml` for lint, tests, coverage, image build, and deploy.
 - Prefer focused changes. Inspect the relevant implementation and existing tests before modifying code.
@@ -144,15 +144,14 @@ Do not rebuild a valid test database merely because the previous pytest process 
 
   Default: `http://127.0.0.1:8000`
 
-- Build CSS:
+- Prepare Django static files from the repository root, after setting up the Python environment and local settings above. Verify that the collected stylesheets match the checked-in copies:
 
   ```bash
-  cd frontend
-  npm ci
-  ./build_tailwind.sh
+  python manage.py findstatic css/app.css --first
+  python manage.py collectstatic --noinput
+  cmp static/css/app.css staticfiles/css/app.css
+  cmp static/css/forms.css staticfiles/css/forms.css
   ```
-
-  Output: `static/css/app.css`.
 
 - Full backend test suite:
 

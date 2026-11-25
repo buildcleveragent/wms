@@ -1,0 +1,44 @@
+{
+  "capacity_validator": {
+    "type": "offline synthetic evidence validation, no load generation",
+    "positive_control_errors": [],
+    "null_telemetry_in_all_four_runs_errors": [],
+    "required_metrics_per_run": 12,
+    "over_limit_latency_control_errors": [
+      "latency threshold exceeded"
+    ]
+  },
+  "release_observation": {
+    "type": "actual shell with mocked Docker, systemd and backup hooks",
+    "event_indexes": {
+      "backup database": 19,
+      "backup media": 20,
+      "migrate --noinput": 21,
+      "up -d web": 24,
+      "up -d scheduler boss-check-worker": 32,
+      "systemctl start wms-sale-mini-reconcile.service": 47
+    },
+    "refreeze_index": 63,
+    "exit_code": 1,
+    "restore_pre_migration_backup_requested": true
+  },
+  "github_build": {
+    "source": "current workflow static inspection",
+    "explicit_token_permissions": {
+      "contents": "read",
+      "id-token": "write",
+      "packages": "write"
+    },
+    "provenance_action": "actions/attest-build-provenance@v2",
+    "sarif_action": "github/codeql-action/upload-sarif@v3",
+    "staging_requires": "build"
+  },
+  "previous_recovery_record": {
+    "type": "isolated synthetic Docker drill",
+    "current_validator_errors": [],
+    "rpo_seconds": 26.328012,
+    "rto_seconds": 205.795302,
+    "committed_document_pairs": 5,
+    "source_differs_from_destination": true
+  }
+}

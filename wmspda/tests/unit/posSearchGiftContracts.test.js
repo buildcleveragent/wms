@@ -14,7 +14,7 @@ describe('POS full product search and gift pricing contracts', () => {
     expect(page).toContain('const seenProductIds = new Set()')
     expect(page).toContain('page_size: POS_PRODUCT_PAGE_SIZE')
     expect(page).toContain('if (Array.isArray(res) || !res?.next) break')
-    expect(page).toContain('return fetchAllPosProducts({ ...POS_STOCK_QUERY, barcode })')
+    expect(page).toContain('return fetchAllPosProducts({ ...queryStockScope(stockScope.value), barcode })')
     expect(page).toContain('const rows = await fetchAllPosProducts({')
   })
 
@@ -27,14 +27,15 @@ describe('POS full product search and gift pricing contracts', () => {
     expect(page).toContain('overflow-y: auto;')
   })
 
-  it('accepts zero gift amounts while retaining negative and minimum-price checks', () => {
+  it('offers explicit gifts on catalogued lines and preserves both price modes', () => {
     const page = read('pages/pos/index.vue')
 
     expect(page).toContain('amount >= 0 && price >= 0')
     expect(page).toContain('if (totalAmount.value < 0) return false')
     expect(page).toContain('return !splitPaymentEnabled.value && moneyEqual(receivedAmount.value, 0)')
-    expect(page).toContain('} else if (amount < 0) {')
-    expect(page).toContain('} else if (price < 0) {')
-    expect(page).toContain('} else if (amount > 0) {')
+    expect(page).toContain('本行赠送')
+    expect(page).toContain('普通销售须有正单价')
+    expect(page).toContain('negotiatedUnitPrice(payloadQty(item), item.amount)')
+    expect(page).toContain('saleLineAmount(payloadQty(item), item.price)')
   })
 })

@@ -23,6 +23,7 @@ from allapp.tasking.count_options import can_manage_count
 @permission_classes([IsAuthenticated])  # 确保用户已认证
 def profile_view(request):
     from allapp.inventory.owner_permissions import inventory_capabilities
+    from allapp.reports.owner_archive_jobs import can_export_archive
 
     user = request.user  # 获取当前用户
     access_scope = AccessScope.for_user(user)
@@ -61,6 +62,7 @@ def profile_view(request):
         access_scope.roles.intersection(
             {
                 UserRoleScope.Role.OWNER_MANAGER,
+                UserRoleScope.Role.OWNER_FINANCE,
                 UserRoleScope.Role.OWNER_SALESPERSON,
             }
         )
@@ -68,6 +70,7 @@ def profile_view(request):
     is_boss = UserRoleScope.Role.WAREHOUSE_BOSS in access_scope.roles
     is_operator = UserRoleScope.Role.WAREHOUSE_OPERATOR in access_scope.roles
     is_manager = UserRoleScope.Role.WAREHOUSE_MANAGER in access_scope.roles
+    is_finance = UserRoleScope.Role.OWNER_FINANCE in access_scope.roles
 
     return Response(
         {
@@ -84,8 +87,10 @@ def profile_view(request):
             },
             "perms": perms,
             "capabilities": {
-                "can_manage_count": can_manage_count(user),
+                "owner_read_only": is_finance,
+                "can_manage_count": not is_finance and can_manage_count(user),
                 **inventory_capabilities(user),
+                "can_export_owner_archive": can_export_archive(user, access_scope),
                 "can_process_pda_return": can_process_return(user),
                 "can_review_warehouse_outbound": can_review_warehouse_outbound(
                     user, scope=access_scope
@@ -102,8 +107,8 @@ def profile_view(request):
                 and user.has_perm("reports.create_business_review_snapshot"),
                 "can_export_operations": access_scope.is_valid
                 and user.has_perm("reports.export_operations"),
-                "can_import_products": can_import_products(user),
-                "can_receive_without_order": can_receive_product_import(user),
+                "can_import_products": not is_finance and can_import_products(user),
+                "can_receive_without_order": not is_finance and can_receive_product_import(user),
                 "can_export_products": can_export_products(user),
                 "can_request_replenishment": settings.REPLENISHMENT_MANUAL_ENABLED
                 and is_operator

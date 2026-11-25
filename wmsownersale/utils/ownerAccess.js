@@ -2,17 +2,20 @@ export function ownerAccess({ roles = [], capabilities = {} } = {}) {
   const roleSet = new Set(Array.isArray(roles) ? roles : [])
   const salesperson = roleSet.has('owner_salesperson')
   const manager = roleSet.has('owner_manager')
-  const ownerRole = salesperson || manager
+  const finance = roleSet.has('owner_finance')
+  const ownerRole = salesperson || manager || finance
   return {
     salesperson,
     manager,
+    finance,
+    readOnly: finance,
     ownerRole,
     canViewInventory: ownerRole && capabilities?.can_view_owner_inventory === true,
     canExportInventory: ownerRole && capabilities?.can_export_owner_inventory === true,
     canManageInventoryAlerts: manager && capabilities?.can_manage_owner_inventory_alerts === true,
     canViewOperations: ownerRole && Boolean(capabilities?.can_view_owner_operations),
-    canViewStockHistory: manager && capabilities?.can_view_owner_inventory === true && Boolean(capabilities?.can_view_owner_operations),
-    canExportStockHistory: manager && capabilities?.can_view_owner_inventory === true && Boolean(capabilities?.can_view_owner_operations) && capabilities?.can_export_operations === true,
+    canViewStockHistory: ownerRole && capabilities?.can_view_owner_inventory === true && Boolean(capabilities?.can_view_owner_operations),
+    canExportStockHistory: ownerRole && capabilities?.can_view_owner_inventory === true && Boolean(capabilities?.can_view_owner_operations) && capabilities?.can_export_operations === true,
   }
 }
 
@@ -48,14 +51,12 @@ export function buildOwnerMenu(context = {}) {
   }
   if (access.canViewOperations) {
     reports.splice(1, 0,
-      ...(access.manager
-        ? (access.canViewStockHistory ? [{ key: 'stock_history', text: '出入库记录', path: '/pages/reports/stock-history', emoji: '📈', color: 'green' }] : [])
-        : [{ key: 'operations', text: '入出库履约', path: '/pages/reports/operations', emoji: '📈', color: 'green' }]),
+      ...(access.canViewStockHistory ? [{ key: 'stock_history', text: '出入库记录', path: '/pages/reports/stock-history', emoji: '📈', color: 'green' }] : []),
     )
   }
-  if (access.manager) {
+  if (access.manager || access.finance) {
     administration.push(
-      { key: 'approval', text: '订单审批', path: '/pages/approval/index', emoji: '✅', color: 'orange' },
+      { key: 'approval', text: access.finance ? '审批记录' : '订单审批', path: '/pages/approval/index', emoji: '✅', color: 'orange' },
       { key: 'billing', text: '计费总览', path: '/pages/billing/overview', emoji: '💳', color: 'green' },
     )
   }

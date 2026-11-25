@@ -1,0 +1,48 @@
+{
+  "expiry_policy": "MFG",
+  "shelf_life_days": 100,
+  "return_response_status": 200,
+  "return_workflow_state": "COMPLETED",
+  "inventory_detail": [
+    {
+      "available_qty": "1.0000",
+      "production_date": null,
+      "expiry_date": null
+    }
+  ],
+  "expiry_audit": {
+    "name": "inventory_expiry_tracking_integrity",
+    "ok": false,
+    "issue_count": 2,
+    "samples": [
+      {
+        "source": "detail",
+        "id": 13,
+        "owner_id": 9,
+        "warehouse_id": 6,
+        "location_id": 10,
+        "product_id": 12,
+        "batch_no": "CR-BATCH",
+        "production_date": null,
+        "expiry_date": null,
+        "serial_no": "",
+        "problems": "missing_expiry_date,missing_production_date"
+      },
+      {
+        "source": "transaction",
+        "id": 3,
+        "owner_id": 9,
+        "warehouse_id": 6,
+        "location_id": 10,
+        "product_id": 12,
+        "batch_no": "CR-BATCH",
+        "production_date": null,
+        "expiry_date": null,
+        "serial_no": "",
+        "problems": "missing_expiry_date,missing_production_date"
+      }
+    ],
+    "note": "",
+    "skipped": false
+  }
+}

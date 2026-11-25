@@ -149,3 +149,5 @@ staticfiles/
 /private_returns/
 
 private_arrivals/
+
+private_exports/

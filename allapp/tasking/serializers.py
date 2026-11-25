@@ -76,6 +76,16 @@ class ChoiceDisplayMixin:
 
 # --------- Atomic/primitive serializers ---------
 
+class PickReallocationInput(serializers.Serializer):
+    line_id = serializers.IntegerField(min_value=1)
+    reason = serializers.CharField(max_length=250)
+    expected_qty = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=0)
+    expected_revision = serializers.IntegerField(
+        min_value=0, help_text="页面所见的最近有效扫描记录ID；未扫描时为 0。"
+    )
+    physical_confirmed = serializers.BooleanField(default=False)
+
+
 class TaskAssignmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaskAssignment

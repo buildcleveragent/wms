@@ -1,0 +1,11 @@
+{
+  "configured_product_price": null,
+  "catalog_unit_price": "0",
+  "checkout_status": 201,
+  "sale_amounts": [
+    "0.00"
+  ],
+  "available_before": "10.0000",
+  "available_after": "9.0000",
+  "gift_override_submitted": false
+}

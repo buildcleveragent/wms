@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.dr_drill_workload import jpg, photo_manifest
+from scripts.dr_recovery_drill import database_fingerprint, digest
 from scripts.validate_external_acceptance import capacity_errors, manual_errors, recovery_errors
 
 pytestmark = pytest.mark.unit
@@ -93,6 +95,8 @@ def test_recovery_requires_measured_consistent_database_media_and_business_check
     for key in (
         "database_checksum_verified",
         "media_checksum_verified",
+        "private_arrivals_checksum_verified",
+        "private_returns_checksum_verified",
         "migration_head_verified",
         "business_flow_verified",
         "inventory_finance_reconciled",
@@ -104,11 +108,54 @@ def test_recovery_requires_measured_consistent_database_media_and_business_check
         {"media_snapshot_id": "other"},
         {"validated_at": "2026-09-06T10:00:00Z"},
         {"snapshot_at": "2026-09-01T00:00:00Z"},
+        {"incident_at": "2026-09-06T08:01:00Z"},
+        {"restore_started_at": "2026-09-06T08:31:00Z"},
+        {"restore_started_at": "2026-09-06T09:01:00Z", "validated_at": "2026-09-06T09:02:00Z"},
+        {"private_arrivals_checksum_verified": False},
+        {"private_returns_checksum_verified": False},
         {"business_flow_verified": False},
     ):
         invalid = copy.deepcopy(data)
         invalid.update(changes)
         assert recovery_errors(invalid, profile)
+
+
+def test_photos_match_restored_documents_in_both_directions(tmp_path):
+    photo = tmp_path / "receipt.jpg"
+    photo.write_bytes(jpg(1).read())
+    rows = [("A1", "A1", photo.name)]
+    original = photo_manifest("private_arrivals", tmp_path, rows)
+    photo.write_bytes(jpg(2).read())
+    assert photo_manifest("private_arrivals", tmp_path, rows) != original
+    with pytest.raises(RuntimeError, match="identity"):
+        photo_manifest("private_arrivals", tmp_path, [("A1", "A2", photo.name)])
+    with pytest.raises(RuntimeError, match="identity"):
+        photo_manifest("private_arrivals", tmp_path, [*rows, ("A2", "A2", photo.name)])
+    with pytest.raises(RuntimeError, match="Unreferenced"):
+        photo_manifest("private_arrivals", tmp_path, [])
+    with pytest.raises(FileNotFoundError):
+        photo_manifest("private_arrivals", tmp_path, [("A1", "A1", "missing.jpg")])
+
+
+def test_logical_dump_only_tolerates_unique_index_display_order(tmp_path):
+    source, restored = tmp_path / "source.sql", tmp_path / "restored.sql"
+    columns = "  `a` int,\n  `b` int,\n"
+    index_a, index_b = "  UNIQUE KEY `ua` (`a`,`b`)", "  UNIQUE KEY `ub` (`b`)"
+    ddl = "CREATE TABLE `t` (\n" + columns + "{},\n{}\n) ENGINE=InnoDB;\n"
+    data = "INSERT INTO `t` VALUES (1,2);\n"
+    source.write_text(ddl.format(index_a, index_b) + data)
+    reordered = ddl.format(index_b, index_a) + data
+    restored.write_text(reordered)
+    assert digest(source) != digest(restored)
+    assert database_fingerprint(source) == database_fingerprint(restored)
+    for broken in (
+        reordered.replace("(`a`,`b`)", "(`b`,`a`)"),
+        reordered.replace("  `a` int,\n  `b` int", "  `b` int,\n  `a` int"),
+        reordered.replace("(1,2)", "(2,1)"),
+        reordered.replace("UNIQUE KEY", "KEY", 1),
+    ):
+        restored.write_text(broken)
+        assert database_fingerprint(source) != database_fingerprint(restored)
 
 
 def test_manual_summary_count_cannot_replace_individual_signed_results(tmp_path):

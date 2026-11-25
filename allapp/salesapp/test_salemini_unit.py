@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models import Q
-from django.test import override_settings
+from django.test import Client, override_settings
 from PIL import Image
 from rest_framework.exceptions import ValidationError
 
@@ -622,3 +622,16 @@ def test_production_check_rejects_unsafe_wechat_configuration():
         "salesapp.E002",
         "salesapp.E003",
     }
+
+
+@override_settings(CORS_ALLOWED_ORIGINS=["https://buyers.example.test"])
+def test_cross_origin_checkout_accepts_idempotency_header():
+    response = Client().options(
+        "/api/sale-mini/orders/",
+        HTTP_ORIGIN="https://buyers.example.test",
+        HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+        HTTP_ACCESS_CONTROL_REQUEST_HEADERS="authorization,content-type,idempotency-key",
+    )
+    assert response.status_code == 200
+    assert response["access-control-allow-origin"] == "https://buyers.example.test"
+    assert "idempotency-key" in response["access-control-allow-headers"].split(", ")

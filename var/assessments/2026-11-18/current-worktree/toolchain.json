@@ -1,0 +1,26 @@
+{
+  "pip_check": {
+    "exit": 0,
+    "output": "No broken requirements found."
+  },
+  "ruff_changed": {
+    "file_count": 44,
+    "exit": 0,
+    "findings": []
+  },
+  "manual_validator": {
+    "command": ".venv/bin/python docs/validate_user_manuals.py",
+    "first_run": {
+      "exit": 124,
+      "timeout_seconds": 180
+    },
+    "rerun": {
+      "exit": 0,
+      "stdout": "Validated 7 manual sets (Markdown, HTML, Word HTML, embedded DOCX, A4 PDF), 5 specialist guides and 5 support documents; source consistency, edition metadata, body coverage, image references, every PDF page size, headings and local links checked"
+    }
+  },
+  "diff_check": {
+    "command": "git diff --check",
+    "exit": 0
+  }
+}

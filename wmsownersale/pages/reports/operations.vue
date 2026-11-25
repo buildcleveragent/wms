@@ -183,7 +183,7 @@ function dateText(value) {
 
 onLoad(async () => {
   await auth.bootstrap()
-  if (auth.roles.includes('owner_manager')) {
+  if (auth.roles.some(role => ['owner_manager', 'owner_salesperson', 'owner_finance'].includes(role))) {
     uni.redirectTo({ url: '/pages/reports/stock-history' })
     return
   }

@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from threading import Barrier
 from types import SimpleNamespace
 from unittest.mock import patch
+from uuid import uuid4
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -49,6 +50,7 @@ from .models import (
     SaleMiniBanner,
     SaleMiniCart,
     SaleMiniCartItem,
+    SaleMiniCheckoutSubmission,
     SaleMiniCoupon,
     SaleMiniCouponTemplate,
     SaleMiniDistributionRecord,
@@ -228,9 +230,9 @@ class SaleMiniApiTests(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(self.user)
 
-    def _create_sale_mini_order(self, *, payment_method="OFFLINE", extra=None):
-        payload = {
-            "payment_method": payment_method,
+    def checkout_payload(self):
+        return {
+            "payment_method": "OFFLINE",
             "contact": "张三",
             "contact_phone": "13800000000",
             "ship_to": "上海市测试路 1 号",
@@ -243,15 +245,99 @@ class SaleMiniApiTests(TestCase):
                 }
             ],
         }
+
+    def _create_sale_mini_order(self, *, payment_method="OFFLINE", extra=None):
+        payload = self.checkout_payload()
+        payload["payment_method"] = payment_method
         if extra:
             payload.update(extra)
         response = self.client.post(
             "/api/sale-mini/orders/",
             payload,
             format="json",
+            HTTP_IDEMPOTENCY_KEY=uuid4().hex,
         )
         self.assertEqual(response.status_code, 201)
         return response
+
+    def test_checkout_requires_client_upgrade_and_valid_key_before_writes(self):
+        url = "/api/sale-mini/orders/"
+        missing = self.client.post(url, self.checkout_payload(), format="json")
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(missing.data["code"], "upgrade_required")
+        invalid = self.client.post(
+            url, self.checkout_payload(), format="json", HTTP_IDEMPOTENCY_KEY="bad"
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertFalse(SaleMiniCheckoutSubmission.objects.exists())
+        self.assertFalse(OutboundOrder.objects.exists())
+
+    def test_checkout_replay_conflict_repurchase_and_account_isolation(self):
+        url = "/api/sale-mini/orders/"
+        key = uuid4().hex
+        payload = self.checkout_payload()
+
+        def send(data, request_key=key):
+            return self.client.post(url, data, format="json", HTTP_IDEMPOTENCY_KEY=request_key)
+
+        first = send(payload)
+        self.assertEqual(first.status_code, 201, first.data)
+        replay = send(payload)
+        self.assertEqual(replay.status_code, 200, replay.data)
+        self.assertEqual(replay.data["id"], first.data["id"])
+        conflict = send({**payload, "ship_to": "另一地址"})
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(conflict.data["code"], "idempotency_conflict")
+        repurchase = send(payload, uuid4().hex)
+        self.assertEqual(repurchase.status_code, 201)
+        self.assertNotEqual(repurchase.data["id"], first.data["id"])
+        second_user = User.objects.create_user(
+            username="mini-other-shopper", owner=self.owner, warehouse=self.warehouse
+        )
+        MiniProgramUser.objects.create(owner=self.owner, customer=self.customer, user=second_user)
+        self.client.force_authenticate(second_user)
+        independent = send(payload)
+        self.assertEqual(independent.status_code, 201, independent.data)
+        self.assertNotEqual(independent.data["id"], first.data["id"])
+        self.assertEqual(SaleMiniOrderMapping.objects.count(), 3)
+
+    def test_multi_owner_checkout_retry_after_rollback_and_binding_revocation(self):
+        _, _, second_buyer, second_product = self._create_other_owner_sale_binding()
+        stock = InventoryDetail.objects.get(product=second_product)
+        initial_qty = stock.onhand_qty
+        stock.onhand_qty = 0
+        stock.save(update_fields=["onhand_qty", "available_qty"])
+        payload = self.checkout_payload()
+        payload["lines"].append(
+            {"product_id": second_product.pk, "qty": "1", "order_uom": self.uom.code}
+        )
+        key = uuid4().hex
+
+        def send():
+            return self.client.post(
+                "/api/sale-mini/orders/", payload, format="json", HTTP_IDEMPOTENCY_KEY=key
+            )
+
+        self.assertEqual(send().status_code, 400)
+        self.assertFalse(SaleMiniCheckoutSubmission.objects.exists())
+        self.assertFalse(SaleMiniOrderMapping.objects.exists())
+        self.assertEqual(InventoryDetail.objects.get(product=self.product).allocated_qty, 0)
+        stock.onhand_qty = initial_qty
+        stock.save(update_fields=["onhand_qty", "available_qty"])
+        first = send()
+        self.assertEqual(first.status_code, 201, first.data)
+        SaleProductConfig.objects.filter(product=second_product).update(is_listed=False)
+        payload["lines"].reverse()
+        replay = send()
+        self.assertEqual(replay.status_code, 200, replay.data)
+        self.assertEqual(
+            [r["id"] for r in replay.data["orders"]], [r["id"] for r in first.data["orders"]]
+        )
+        self.assertEqual(SaleMiniOrderMapping.objects.count(), 2)
+        second_buyer.is_active = False
+        second_buyer.save(update_fields=["is_active"])
+        self.assertEqual(send().status_code, 403)
+        self.assertEqual(SaleMiniOrderMapping.objects.count(), 2)
 
     def _completed_order_line(self):
         response = self._create_sale_mini_order()
@@ -699,6 +785,7 @@ class SaleMiniApiTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=uuid4().hex,
         )
 
         self.assertEqual(detail.status_code, 200)
@@ -719,7 +806,7 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(inventory.allocated_qty, Decimal("5.0000"))
         self.assertEqual(inventory.available_qty, Decimal("5.0000"))
 
-    def test_saleable_stock_counts_incomplete_tracking_fields_and_allocates(self):
+    def test_saleable_stock_excludes_missing_expiry_and_allocates_only_valid_layers(self):
         tracked_product = Product.objects.create(
             owner=self.owner,
             code="MP-TRACK",
@@ -765,8 +852,8 @@ class SaleMiniApiTests(TestCase):
             warehouse=self.warehouse,
             location=complete_location,
             batch_no="LOT-202606",
-            production_date=date(2026, 6, 1),
-            expiry_date=date(2027, 6, 1),
+            production_date=timezone.now().date() - timedelta(days=1),
+            expiry_date=timezone.now().date() + timedelta(days=364),
             onhand_qty=Decimal("2.0000"),
             allocated_qty=Decimal("0.0000"),
             locked_qty=Decimal("0.0000"),
@@ -799,12 +886,12 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         rows = response.data["results"]
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["stock"]["available_qty"], "8.000")
-        self.assertEqual(rows[0]["stock"]["status"], "IN")
+        self.assertEqual(rows[0]["stock"]["available_qty"], "2.000")
+        self.assertEqual(rows[0]["stock"]["status"], "LOW")
 
         detail_response = public_client.get(f"/api/sale-mini/products/{tracked_product.id}/")
         self.assertEqual(detail_response.status_code, 200)
-        self.assertEqual(detail_response.data["stock"]["available_qty"], "8.000")
+        self.assertEqual(detail_response.data["stock"]["available_qty"], "2.000")
 
         stocked_response = public_client.get(
             "/api/sale-mini/products/",
@@ -814,7 +901,7 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(len(stocked_response.data["results"]), 1)
         self.assertEqual(
             stocked_response.data["results"][0]["stock"]["available_qty"],
-            "8.000",
+            "2.000",
         )
 
         preview = self.client.post(
@@ -831,8 +918,8 @@ class SaleMiniApiTests(TestCase):
             format="json",
         )
         self.assertEqual(preview.status_code, 200)
-        self.assertTrue(preview.data["ok"])
-        self.assertEqual(preview.data["lines"][0]["available_qty"], "8.000")
+        self.assertFalse(preview.data["ok"])
+        self.assertEqual(preview.data["lines"][0]["available_qty"], "2.000")
 
         order_response = self.client.post(
             "/api/sale-mini/orders/",
@@ -845,20 +932,21 @@ class SaleMiniApiTests(TestCase):
                 "lines": [
                     {
                         "product_id": tracked_product.id,
-                        "qty": "4.000",
+                        "qty": "2.000",
                         "order_uom": "EA-MINI",
                     }
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=uuid4().hex,
         )
         self.assertEqual(order_response.status_code, 201)
         incomplete_detail.refresh_from_db()
         self.assertEqual(incomplete_detail.onhand_qty, Decimal("10.0000"))
-        self.assertEqual(incomplete_detail.allocated_qty, Decimal("4.0000"))
+        self.assertEqual(incomplete_detail.allocated_qty, Decimal("2.0000"))
         self.assertEqual(incomplete_detail.locked_qty, Decimal("1.0000"))
         self.assertEqual(incomplete_detail.damaged_qty, Decimal("1.0000"))
-        self.assertEqual(incomplete_detail.available_qty, Decimal("4.0000"))
+        self.assertEqual(incomplete_detail.available_qty, Decimal("6.0000"))
         complete_detail.refresh_from_db()
         self.assertEqual(complete_detail.onhand_qty, Decimal("2.0000"))
         self.assertEqual(complete_detail.allocated_qty, Decimal("2.0000"))
@@ -874,10 +962,10 @@ class SaleMiniApiTests(TestCase):
             task__task_type=WmsTask.TaskType.PICK,
             product=tracked_product,
         )
-        self.assertEqual(pick_lines.count(), 2)
+        self.assertEqual(pick_lines.count(), 1)
         self.assertEqual(
             {line.plan_meta["inventory_detail_id"]: line.qty_plan for line in pick_lines},
-            {complete_detail.id: Decimal("2.0000"), incomplete_detail.id: Decimal("2.0000")},
+            {complete_detail.id: Decimal("2.0000")},
         )
 
     def test_saleable_stock_counts_serial_controlled_inventory_without_serial(self):
@@ -1651,6 +1739,20 @@ class SaleMiniApiTests(TestCase):
         )
 
         mapping = SaleMiniOrderMapping.objects.get(id=response.data["mapping_id"])
+        payload = {
+            **self.checkout_payload(),
+            "payment_method": "WECHAT",
+            "coupon_id": coupon.id,
+            "points": 100,
+        }
+        replay = self.client.post(
+            "/api/sale-mini/orders/",
+            payload,
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=mapping.submission.request_key,
+        )
+        self.assertEqual(replay.status_code, 200, replay.data)
+        self.assertEqual(replay.data["mapping_id"], mapping.pk)
         coupon.refresh_from_db()
         self.assertEqual(response.data["goods_amount"], "19.00")
         self.assertEqual(response.data["adjustment_amount"], "-5.00")
@@ -2011,6 +2113,7 @@ class SaleMiniApiTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=uuid4().hex,
         )
 
         self.assertEqual(response.status_code, 201)
@@ -2103,6 +2206,42 @@ class SaleMiniApiTests(TestCase):
         self.assertEqual(other_detail.allocated_qty, Decimal("0.0000"))
         self.assertEqual(other_detail.available_qty, Decimal("6.0000"))
 
+    def test_legacy_multi_package_order_list_and_detail_preserve_amount_and_buyer_scope(self):
+        _, _, _, other_product = self._create_other_owner_sale_binding()
+        lines = self.checkout_payload()["lines"]
+        lines.append({"product_id": other_product.pk, "qty": "1.000", "order_uom": "EA-MINI"})
+        created = self._create_sale_mini_order(extra={"lines": lines}).data
+        package_ids = [order["id"] for order in created["orders"]]
+        self.assertEqual(len(package_ids), 2)
+        # Before migration 0015, both packages carried only their shared sale-mini-batch source.
+        mappings = SaleMiniOrderMapping.objects.filter(outbound_order_id__in=package_ids)
+        submission_id = mappings.first().submission_id
+        mappings.update(submission=None)
+        SaleMiniCheckoutSubmission.objects.filter(pk=submission_id).delete()
+
+        url = "/api/sale-mini/orders/"
+        listed = self.client.get(url)
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.data["results"]), 1)
+        detail = self.client.get(f"{url}{package_ids[1]}/")
+        self.assertEqual(detail.status_code, 200)
+        for order in (listed.data["results"][0], detail.data):
+            self.assertEqual(order["order_no"], created["order_no"])
+            self.assertEqual(order["goods_amount"], "24.00")
+            self.assertEqual(order["payable_amount"], "24.00")
+            self.assertCountEqual([package["id"] for package in order["orders"]], package_ids)
+
+        other_user = User.objects.create_user(
+            username="mini-legacy-other-buyer", owner=self.owner, warehouse=self.warehouse
+        )
+        MiniProgramUser.objects.create(owner=self.owner, customer=self.customer, user=other_user)
+        self.client.force_authenticate(other_user)
+        hidden = self.client.get(url)
+        self.assertEqual(hidden.status_code, 200)
+        self.assertEqual(hidden.data["results"], [])
+        for package_id in package_ids:
+            self.assertEqual(self.client.get(f"{url}{package_id}/").status_code, 404)
+
     def test_cart_and_checkout_auto_create_internal_binding_for_new_owner(self):
         other_owner = Owner.objects.create(code="SMINI-AUTO", name="Sale Mini Auto")
         other_product = Product.objects.create(
@@ -2172,6 +2311,7 @@ class SaleMiniApiTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=uuid4().hex,
         )
 
         self.assertEqual(order_response.status_code, 201)
@@ -2214,6 +2354,7 @@ class SaleMiniApiTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=uuid4().hex,
         )
 
         self.assertEqual(response.status_code, 201)
@@ -2260,6 +2401,7 @@ class SaleMiniApiTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=uuid4().hex,
         )
         self.assertEqual(second_order.status_code, 201)
         first_mapping = SaleMiniOrderMapping.objects.get(id=first_order.data["mapping_id"])
@@ -2407,10 +2549,26 @@ class SaleMiniApiTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=uuid4().hex,
         )
 
         self.assertEqual(response.status_code, 201)
         self.assertFalse(SaleMiniCartItem.objects.filter(cart_id=cart_id).exists())
+
+        # The first checkout cleared these lines. A later re-add is a new intention.
+        mapping = SaleMiniOrderMapping.objects.get(pk=response.data["mapping_id"])
+        payload = {**self.checkout_payload(), "cart_id": cart_id}
+        added = self.client.post("/api/sale-mini/cart/add/", payload["lines"][0], format="json")
+        self.assertEqual(added.status_code, 200, added.data)
+        replay = self.client.post(
+            "/api/sale-mini/orders/",
+            payload,
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=mapping.submission.request_key,
+        )
+        self.assertEqual(replay.status_code, 200, replay.data)
+        self.assertEqual(replay.data["id"], response.data["id"])
+        self.assertEqual(SaleMiniCartItem.objects.get(cart_id=cart_id).qty, Decimal("2.000"))
 
     def test_checkout_clears_selected_cart_item_and_keeps_unselected_item(self):
         remaining_product = Product.objects.create(
@@ -2483,6 +2641,7 @@ class SaleMiniApiTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=uuid4().hex,
         )
 
         self.assertEqual(response.status_code, 201)
@@ -2515,6 +2674,7 @@ class SaleMiniApiTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=uuid4().hex,
         )
 
         self.assertEqual(response.status_code, 201)
@@ -2572,6 +2732,7 @@ class SaleMiniApiTests(TestCase):
                 ],
             },
             format="json",
+            HTTP_IDEMPOTENCY_KEY=uuid4().hex,
         )
 
         self.assertEqual(first.status_code, 201)
@@ -3928,6 +4089,7 @@ class SaleMiniPaymentConcurrencyTests(TransactionTestCase):
     reset_sequences = True
 
     setUp = SaleMiniApiTests.setUp
+    checkout_payload = SaleMiniApiTests.checkout_payload
     _create_sale_mini_order = SaleMiniApiTests._create_sale_mini_order
 
     def _run_concurrently(self, callback):
@@ -3945,6 +4107,29 @@ class SaleMiniPaymentConcurrencyTests(TransactionTestCase):
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             return list(executor.map(lambda _index: runner(), range(2)))
+
+    def test_concurrent_checkout_creates_one_order_and_reservation(self):
+        key = uuid4().hex
+
+        def post():
+            client = APIClient()
+            client.force_authenticate(User.objects.get(pk=self.user.pk))
+            response = client.post(
+                "/api/sale-mini/orders/",
+                self.checkout_payload(),
+                format="json",
+                HTTP_IDEMPOTENCY_KEY=key,
+            )
+            return response.status_code, response.data.get("id")
+
+        results = self._run_concurrently(post)
+        self.assertEqual(sorted(r[0] for r in results), [200, 201], results)
+        self.assertEqual(len({r[1] for r in results}), 1)
+        self.assertEqual(SaleMiniCheckoutSubmission.objects.count(), 1)
+        self.assertEqual(SaleMiniOrderMapping.objects.count(), 1)
+        self.assertEqual(
+            InventoryDetail.objects.get(product=self.product).allocated_qty, Decimal("2")
+        )
 
     def test_concurrent_prepay_creates_one_effective_payment_intent(self):
         self.buyer.openid = "wx-concurrent-prepay"

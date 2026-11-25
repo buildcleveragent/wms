@@ -52,7 +52,7 @@ class WorkbenchFilters(serializers.Serializer):
 
 def workbench_scope(user):
     scope = AccessScope.for_user(user)
-    roles = scope.roles & {"owner_manager", "owner_salesperson"}
+    roles = scope.roles & {"owner_manager", "owner_salesperson", "owner_finance"}
     if not scope.is_valid or not scope.single_owner_id or len(roles) != 1:
         raise PermissionDenied("当前账号无货主待办访问权限")
     if not any(
@@ -70,7 +70,9 @@ def workbench_scope(user):
         "outbound.approve_outbound_as_owner_manager"
     )
     available = [
-        key for key in CATEGORIES if key != "pending" or role == "owner_salesperson" or can_review
+        key
+        for key in CATEGORIES
+        if key != "pending" or role in {"owner_salesperson", "owner_finance"} or can_review
     ]
     return scope, role, can_review, available
 
@@ -387,7 +389,7 @@ def workbench_response(user, filters=None):
         consume(batch)
     response = {
         "role": role,
-        "scope_label": "本货主全部订单" if role == "owner_manager" else "我创建的订单",
+        "scope_label": "我创建的订单" if role == "owner_salesperson" else "本货主全部订单",
         "as_of": timestamp(now),
         "available_categories": available,
         "notes": NOTES,

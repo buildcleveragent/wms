@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "run_id": "087d032308244c108f7164ee402ef607",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 12,
+  "password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher",
+  "events_file": "/wms/var/assessments/2026-11-18/current-worktree/backend/supplement.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 12
+  },
+  "subtest_counts": {
+    "passed": 3
+  },
+  "tests": {
+    "allapp/console/test_menu.py::NavigationAccessTests::test_catalog_reads_match_destination_and_active_tab_uses_route": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/console/test_menu.py::NavigationAccessTests::test_custom_admin_permissions_and_scope_are_honored": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/console/test_menu.py::NavigationAccessTests::test_nonstaff_owner_cannot_navigate_to_admin": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/console/test_menu.py::NavigationAccessTests::test_read_scope_cache_follows_the_account_and_skips_writes": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/console/test_menu.py::NavigationAccessTests::test_roles_only_get_authorized_destinations_without_requiring_business_rows": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed",
+          "passed",
+          "passed",
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/console/test_menu.py::NavigationAccessTests::test_staff_superuser_sees_registered_user_admin_and_billing": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/tests.py::PosApiTests::test_pos_return_idempotency_does_not_double_restore_stock": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/tests.py::PosApiTests::test_two_partial_returns_exhaust_sale_then_third_is_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/outbound/test_standard_order_idempotency.py::StandardOrderIdempotencyTests::test_same_key_and_payload_replays_one_complete_order": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_operations_v2.py::OperationsV2ApiTests::test_exports_require_permission_and_preserve_scope": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/outbound/test_standard_order_idempotency.py::StandardOrderIdempotencyConcurrencyTests::test_concurrent_same_key_creates_exactly_one_order": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/console/test_menu.py::AnonymousRibbonTests::test_anonymous_user_has_no_tabs": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

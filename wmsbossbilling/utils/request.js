@@ -77,7 +77,10 @@ function credentialEndpoint(url = '') {
 
 function friendlyMessage(data, fallback = '请求失败') {
   if (!data) return fallback
-  if (typeof data === 'string') return data
+  if (typeof data === 'string') {
+    if (/^\s*<(?:!doctype\s+html\b|html\b|head\b|body\b)/i.test(data)) return fallback
+    return data
+  }
   if (Array.isArray(data)) return data[0] || fallback
   if (typeof data.detail === 'string') return data.detail
   if (typeof data.message === 'string') return data.message
@@ -98,7 +101,7 @@ export function classifyError(statusCode, data) {
     kind,
     code: data?.code || statusCode || 0,
     statusCode: statusCode || 0,
-    message: friendlyMessage(data, kind === 'NETWORK_ERROR' ? '网络异常，请稍后重试' : '请求失败'),
+    message: friendlyMessage(data, statusCode ? `请求失败（HTTP ${statusCode}）` : '网络异常，请稍后重试'),
     data,
   }
 }
@@ -271,6 +274,8 @@ export const api = {
   bossDigestConfirm: (token, params = {}) => post(`/api/reports/boss/digest/?${buildQuery(params)}`, { token }),
   bossDigestDetails: (params = {}) => get('/api/reports/boss/digest/details/', params),
   bossToday: (params = {}) => get('/api/reports/boss/today/', params),
+  bossBusinessRange: (params) => get('/api/reports/boss/business-range/', params),
+  bossBusinessRangeDetails: (params) => get('/api/reports/boss/business-range/details/', params),
   bossTodayDetails: (params = {}) => get('/api/reports/boss/today/details/', params),
   bossPeriods: (params = {}) => get('/api/reports/boss/periods/', params),
   bossPeriodSummary: (params = {}) => get('/api/reports/boss/periods/summary/', params),

@@ -71,6 +71,7 @@ class UserRoleScope(models.Model):
         WAREHOUSE_MANAGER = "warehouse_manager", "仓库管理员"
         WAREHOUSE_BOSS = "warehouse_boss", "仓库老板"
         OWNER_MANAGER = "owner_manager", "货主管理员"
+        OWNER_FINANCE = "owner_finance", "货主财务"
         OWNER_SALESPERSON = "owner_salesperson", "货主业务员"
 
     WAREHOUSE_ROLES = frozenset(
@@ -80,7 +81,7 @@ class UserRoleScope(models.Model):
             Role.WAREHOUSE_BOSS,
         }
     )
-    OWNER_ROLES = frozenset({Role.OWNER_MANAGER, Role.OWNER_SALESPERSON})
+    OWNER_ROLES = frozenset({Role.OWNER_MANAGER, Role.OWNER_SALESPERSON, Role.OWNER_FINANCE})
 
     user = models.ForeignKey(
         "accounts.User",
@@ -126,7 +127,7 @@ class UserRoleScope(models.Model):
                         owner__isnull=True,
                     )
                     | models.Q(
-                        role__in=("owner_manager", "owner_salesperson"),
+                        role__in=("owner_manager", "owner_salesperson", "owner_finance"),
                         owner__isnull=False,
                         warehouse__isnull=True,
                     )
@@ -163,6 +164,7 @@ class UserRoleScope(models.Model):
             ("view_warehouse_boss_dashboard", "可查看仓库老板经营看板"),
             ("view_warehouse_financials", "可查看仓库经营财务数据"),
             ("access_owner_management", "可管理货主订单"),
+            ("access_owner_finance", "可只读查看货主全部业务"),
             ("access_owner_sales", "可执行货主业务"),
             ("view_owner_reports", "可查看货主运营报表"),
             ("view_owner_financials", "可查看货主财务数据"),

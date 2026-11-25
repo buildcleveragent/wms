@@ -1,0 +1,1877 @@
+{
+  "schema_version": 1,
+  "run_id": "b9ab84b8109d476085e3bea6009b93c9",
+  "status": "PASS",
+  "exit_code": 0,
+  "collected": 131,
+  "password_hasher": "django.contrib.auth.hashers.MD5PasswordHasher",
+  "events_file": "/wms/var/assessments/2026-11-18/current-worktree/backend/main.events.jsonl",
+  "unexpected_nodes": [],
+  "main_counts": {
+    "PASS": 131
+  },
+  "subtest_counts": {
+    "passed": 25
+  },
+  "tests": {
+    "allapp/test_business_flows.py::BusinessFlowTests::test_flow_10_formal_inbound_putaway_to_outbound_full_chain": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/test_business_flows.py::BusinessFlowTests::test_flow_11_multiline_multilocation_outbound_full_chain": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/test_business_flows.py::BusinessFlowTests::test_flow_12_operational_inventory_to_billing_invoice_chain": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/test_business_flows.py::BusinessFlowTests::test_flow_1_receive_without_order_inventory_visible": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/test_business_flows.py::BusinessFlowTests::test_flow_2_outbound_approve_scan_post": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/test_business_flows.py::BusinessFlowTests::test_flow_3_unapprove_or_cancel_releases_reservation": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/test_business_flows.py::BusinessFlowTests::test_flow_4_quick_adjust_updates_inventory_and_company_report": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/test_business_flows.py::BusinessFlowTests::test_flow_5_snapshot_metrics_accrual_lock_invoice": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/test_business_flows.py::BusinessFlowTests::test_flow_6_owner_portal_can_view_inventory_bill_and_export": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/test_business_flows.py::BusinessFlowTests::test_flow_7_pda_pick_scan_and_state_transition": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/test_business_flows.py::BusinessFlowTests::test_flow_8_console_billing_overview_and_detail": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/test_business_flows.py::BusinessFlowTests::test_flow_9_formal_inbound_order_to_outbound_full_chain": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/test_business_flows.py::BusinessFlowTests::test_unpriced_outbound_approve_scan_post": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_owner_invariants.py::ProductOwnerInvariantTests::test_inventory_detail_rejects_product_from_another_owner": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_owner_invariants.py::ProductOwnerInvariantTests::test_inventory_transaction_rejects_product_from_another_owner": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_owner_invariants.py::ProductOwnerInvariantTests::test_task_line_rejects_product_from_another_owner": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_already_posted_scan_is_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_dangling_scan_posting_markers_are_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_default_handler_auto_selects_only_valid_ok_scans": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_default_handler_preserves_failed_audit_for_rejected_posting": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_duplicate_scan_reference_is_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_every_non_ok_scan_status_is_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed",
+          "passed",
+          "passed",
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_legacy_ship_alias_is_not_treated_as_dispatch": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_negative_adjustment_posts_an_adjustment_loss": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_negative_quick_adjustment_keeps_task_line_quantity_nonnegative": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_non_count_zero_transaction_result_is_rejected_atomically": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_none_and_empty_scan_inputs_are_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed",
+          "passed",
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_nonzero_count_gain_writes_adjustment_transaction": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_pick_decreases_inventory_and_writes_issue": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_positive_adjustment_posts_an_adjustment_gain": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_putaway_insufficient_source_inventory_rolls_back_both_sides": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_putaway_moves_inventory_with_a_paired_transaction": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_putaway_preserves_batch_dates_and_total_inventory": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_putaway_preserves_serial_number": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_putaway_second_ledger_write_failure_is_atomic_and_retryable": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_review_rejected_scan_is_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_scan_from_another_task_is_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_successful_posting_retry_is_idempotent": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_task_and_journal_state_mismatch_is_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_task_types_without_posting_policy_are_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed",
+          "passed",
+          "passed",
+          "passed",
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_zero_adjustment_is_rejected_using_only_delta_quantity": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingFailClosedTests::test_zero_difference_count_posts_without_inventory_transaction": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/outbound/test_warehouse_review_contracts.py::WarehouseReviewContractTests::test_admin_requires_reason_and_uses_the_same_rejection_service": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/outbound/test_warehouse_review_contracts.py::WarehouseReviewContractTests::test_legacy_role_binding_does_not_enable_warehouse_review": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/outbound/test_warehouse_review_contracts.py::WarehouseReviewContractTests::test_permission_alone_cannot_impersonate_warehouse_role": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/outbound/test_warehouse_review_contracts.py::WarehouseReviewContractTests::test_shared_replenishment_resumes_remaining_order_after_rejection": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/outbound/test_warehouse_review_contracts.py::WarehouseReviewContractTests::test_withdraw_capability_is_only_for_original_salesperson": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/outbound/test_ownership_transfer.py::OwnershipTransferTests::test_failed_second_leg_rolls_back_all_stock_and_retries": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_replenishment.py::ReplenishmentFlowTests::test_manual_request_stays_pending_when_full_quantity_is_unavailable": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_replenishment.py::ReplenishmentFlowTests::test_minmax_rounds_to_package_splits_fefo_and_counts_in_transit": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_replenishment.py::ReplenishmentFlowTests::test_policy_rejects_non_pick_target": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_replenishment.py::ReplenishmentFlowTests::test_record_is_idempotent_and_posts_paired_replenishment_move": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/tasking/test_counting_closure.py::CountProductionClosureTests::test_approved_difference_posts_inventory_and_releases_lock": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_admin_photo_uses_authenticated_session_and_rejects_anonymous_access": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_assisted_uses_actual_issue_not_dispatch": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_audit_failure_rolls_back_submission": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_cancelled_dispatch_not_eligible": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_close_remaining_keeps_stock": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_cross_owner_order_and_mixed_unit_are_not_eligible": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_damage_and_reject_quantities_and_private_photos": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_damage_requires_evidence": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_duplicate_product_requires_explicit_line_evidence": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_evidence_revision_preserves_original_quantity_and_reason": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_failed_post_keeps_receipt_and_retries_once": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_invalid_photo_and_missing_required_application_photo": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_manager_submission_skips_owner_review": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_missing_cost_is_marked_and_quantity_layer_matches_receipt": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_other_salesperson_and_warehouse_isolation": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_partial_complete_inventory_and_repeat_post": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_pending_reservation_rejection_and_resubmit": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_permission_revocation_blocks_review_and_receipt": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_pos_sales_keep_existing_return_channel": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_posting_audit_failure_preserves_receipt_and_rolls_back_inventory": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_private_storage_cannot_be_configured_inside_public_media": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_read_endpoints_do_not_write_and_transactions_resolve_return": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_real_route": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_receipt_cannot_exceed_plan_or_use_other_warehouse": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_serial_returns_restore_zero_balance_without_duplicate_stock": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_stale_version_and_idempotency": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_task_line_cycle_is_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnTests::test_wrong_source_and_cross_warehouse_tasks_do_not_grant_allowance": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/billing/test_p1_receivables.py::PaymentReceiptServiceTests::test_partial_and_multi_bill_allocation_then_reversal": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/billing/test_p1_receivables.py::PaymentReceiptServiceTests::test_post_rejects_over_allocation": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/billing/test_daily_metric_audit.py::DailyMetricAuditTests::test_completed_single_request_stays_visible_with_current_coverage": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/billing/test_daily_metric_audit.py::DailyMetricAuditTests::test_contract_and_direct_generation_without_job_report_metric_event_accrual_separately": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/billing/test_daily_metric_audit.py::DailyMetricAuditTests::test_prioritizes_single_preserves_unknown_and_excludes_locked_scope_days": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/billing/test_daily_metric_audit.py::DailyMetricAuditTests::test_rejects_reversed_or_invalid_date_range": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed",
+          "passed",
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_daily_billing_alerts.py::DailyBillingAlertTests::test_closing_period_keeps_existing_case_until_evidenced_or_manually_closed": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_daily_billing_alerts.py::DailyBillingAlertTests::test_failed_scan_keeps_cursor_and_open_case": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_daily_billing_alerts.py::DailyBillingAlertTests::test_first_scan_backlog_and_previously_open_cases_outside_lookback": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_daily_billing_alerts.py::DailyBillingAlertTests::test_grace_can_cross_midnight": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_daily_billing_alerts.py::DailyBillingAlertTests::test_legacy_unsupported_approximate_and_unrelated_retries_are_distinct": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_daily_billing_alerts.py::DailyBillingAlertTests::test_missing_job_partial_coverage_zero_manual_and_reopen_share_one_case": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/reports/test_daily_billing_alerts.py::DailyBillingAlertTests::test_no_obligation_dates_and_closed_periods_are_excluded": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_sale_zone_scope.py::PosSaleZoneScopeTests::test_catalog_and_serializer_share_default_and_explicit_scopes": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed",
+          "passed",
+          "passed",
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_sale_zone_scope.py::PosSaleZoneScopeTests::test_checkout_splits_by_fefo_and_returns_to_original_layers": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_sale_zone_scope.py::PosSaleZoneScopeTests::test_earlier_storage_expiry_is_picked_first_and_void_restores_both_layers": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed",
+          "passed",
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_sale_zone_scope.py::PosSaleZoneScopeTests::test_excluded_zones_cannot_be_selected_for_new_sales": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed",
+          "passed",
+          "passed",
+          "passed",
+          "passed",
+          "passed",
+          "passed",
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_sale_zone_scope.py::PosSaleZoneScopeTests::test_historical_single_zone_sale_can_replay_and_void": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_sale_zone_scope.py::PosSaleZoneScopeTests::test_legacy_request_key_cannot_be_replayed_by_another_cashier_or_warehouse": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed",
+          "passed",
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_cross_flow_acceptance.py::ReviewInventorySummaryTests::test_allocation_keeps_owner_summary_consistent": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_cross_flow_acceptance.py::ReviewInventorySummaryTests::test_release_keeps_owner_summary_consistent": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_cross_flow_acceptance.py::ReviewInventorySummaryTests::test_standard_outbound_fefo_prioritizes_dated_stock": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_legacy_reference_cannot_be_collected_again_after_upgrade": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_repayment_key_rejects_changed_payload": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_repayment_without_stable_identity_is_rejected": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_repeated_repayment_request_is_not_double_recorded": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_void_after_repayment_preserves_settlement": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_cross_flow_acceptance.py::ReviewPosFinancialTests::test_zero_value_gift_can_be_returned_without_refund": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/salesapp/tests.py::SaleMiniApiTests::test_signed_encrypted_payment_callback_runs_full_crypto_and_business_flow": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/salesapp/tests.py::SaleMiniApiTests::test_processing_refund_recovers_by_query_with_stable_refund_number": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/tests.py::DataAccuracyCommandTests::test_reconcile_data_accuracy_command_detects_inventory_transaction_replay_mismatch": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/core/tests.py::DataAccuracyCommandTests::test_reconcile_data_accuracy_command_detects_bill_header_mismatch": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "var/assessments/2026-11-18/assessment_probes.py::test_full_scheduler_after_single_metric_matches_forced_control": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_fail_closed.py::InventoryPostingRealConcurrencyTests::test_concurrent_real_handler_posts_adjustment_once": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_concurrency.py::InventoryPostingConcurrencyTests::test_different_tasks_serialize_inventory_read_modify_write_and_summary": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_concurrency.py::InventoryPostingConcurrencyTests::test_one_pick_writes_multiple_issue_transactions_with_null_source_line": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inventory/test_posting_concurrency.py::InventoryPostingConcurrencyTests::test_posting_refreshes_summary_from_the_locked_detail_instances": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/inbound/test_customer_returns.py::CustomerReturnConcurrencyTests::test_two_simultaneous_requests_cannot_reserve_more_than_shipped": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_repayment_concurrency.py::RepaymentConcurrencyTests::test_repayment_and_void_have_one_consistent_settlement_order": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_repayment_concurrency.py::RepaymentConcurrencyTests::test_two_cashiers_cannot_collect_more_than_outstanding_debt": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_checkout_concurrency.py::PosCheckoutConcurrencyTests::test_concurrent_replay_of_one_partial_return_posts_once": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_checkout_concurrency.py::PosCheckoutConcurrencyTests::test_critical_checkout_locking_is_stable_for_twenty_rounds": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_checkout_concurrency.py::PosCheckoutConcurrencyTests::test_pos_checkout_and_ordinary_pick_serialize_without_lost_stock": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_checkout_concurrency.py::PosCheckoutConcurrencyTests::test_return_and_checkout_same_sku_serialize_without_lost_update": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_checkout_concurrency.py::PosCheckoutConcurrencyTests::test_reverse_product_order_checkouts_do_not_deadlock": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_checkout_concurrency.py::PosCheckoutConcurrencyTests::test_same_sku_concurrent_checkout_cannot_oversell": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/pos/test_checkout_concurrency.py::PosCheckoutConcurrencyTests::test_void_and_checkout_same_sku_serialize_without_lost_update": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests::test_concurrent_full_refund_creates_one_idempotent_record": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests::test_concurrent_payment_success_and_cancel_preserve_order_stock_invariants": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    },
+    "allapp/salesapp/tests.py::SaleMiniPaymentConcurrencyTests::test_concurrent_prepay_creates_one_effective_payment_intent": {
+      "status": "PASS",
+      "phases": {
+        "setup": [
+          "passed"
+        ],
+        "call": [
+          "passed"
+        ],
+        "teardown": [
+          "passed"
+        ]
+      }
+    }
+  }
+}

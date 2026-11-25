@@ -130,25 +130,21 @@ def strict_order_queryset(qs: QuerySet, user, *, scope=None) -> QuerySet:
     return scope.filter_queryset(readable, owner_field="owner_id", warehouse_field="warehouse_id")
 
 
+def can_view_task_board(user, *, scope=None) -> bool:
+    """A task board is available for this scope even before it contains tasks."""
+    scope = scope or AccessScope.for_user(user)
+    permissions = (TASK_VIEW_PERMISSION, TASK_OPERATOR_PERMISSION, TASK_MANAGER_PERMISSION)
+    return scope.is_valid and (scope.is_global or any(user.has_perm(perm) for perm in permissions))
+
+
 def strict_pick_queryset(qs: QuerySet, user) -> QuerySet:
     """Apply order-equivalent fail-closed scope to PICK task querysets."""
 
-    if not user or not getattr(user, "is_authenticated", False):
-        return qs.none()
     scope = AccessScope.for_user(user)
-    if not scope.is_valid:
+    if not can_view_task_board(user, scope=scope):
         return qs.none()
     if scope.is_global:
         return qs
-    if not any(
-        user.has_perm(permission)
-        for permission in (
-            TASK_VIEW_PERMISSION,
-            TASK_OPERATOR_PERMISSION,
-            TASK_MANAGER_PERMISSION,
-        )
-    ):
-        return qs.none()
     scoped = scope.filter_queryset(
         qs,
         owner_field="owner_id",

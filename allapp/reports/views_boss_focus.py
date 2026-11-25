@@ -130,31 +130,43 @@ class BossSlaDetailsApi(ActivityApiMixin, APIView):
 
 
 class BossTodayApi(ActivityApiMixin, APIView):
+    selected_range = False
+
     def get(self, request):
-        from .boss_today import today_summary
+        from .boss_activity import local_today
+        from .boss_today import business_summary, current_backlog
 
         access, scope = self.context(request)
-        data = today_summary(access)
-        scope.update(date_from=data["business_today"], date_to=data["business_today"])
+        day = local_today()
+        if not self.selected_range:
+            scope.update(date_from=day, date_to=day)
+        data = business_summary(access, scope["date_from"], scope["date_to"])
+        if not self.selected_range:
+            data["backlog"] = current_backlog(access)
+        data["business_today"] = day
         return self.respond(scope, data)
 
 
 class BossTodayDetailsApi(ActivityApiMixin, APIView):
+    selected_range = False
+
     def get(self, request):
         from rest_framework.exceptions import ValidationError
-        from .boss_today import today_details
+        from .boss_today import business_details
 
         access, scope = self.context(request)
-        if scope["date_from"] != scope["date_to"]:
+        if not self.selected_range and scope["date_from"] != scope["date_to"]:
             raise ValidationError({"date": "今日业务明细须指定同一天。"})
         return self.respond(
             scope,
-            today_details(
+            business_details(
                 access,
                 scope["date_from"],
+                scope["date_to"],
                 request.query_params.get("metric", ""),
                 positive_int(request.query_params, "page", 1),
                 positive_int(request.query_params, "page_size", 20, 100),
                 positive_int(request.query_params, "document_id"),
+                "business-range" if self.selected_range else "today",
             ),
         )

@@ -1,0 +1,180 @@
+{
+  "environment": "isolated synthetic Docker drill",
+  "image": "sha256:ef2e06320a6ba6f79f608ff6e556b85a06c16c82e6730fb0200d45d081d21f8b",
+  "source_server_uuid": "266653ba-e34e-11f1-9bf7-464dd25c167c",
+  "restored_server_uuid": "6d0003d0-e354-11f1-81de-deb64f6e2a47",
+  "committed_document_pairs": 5,
+  "last_committed": "DR-0005",
+  "recovery_point": "a21e604a188d4dd5b26b9eafcba3acd5",
+  "incident_at": "2026-11-18T13:31:52.180672+00:00",
+  "restore_started_at": "2026-11-18T13:31:52.180710+00:00",
+  "post_snapshot_receipt_excluded": {
+    "arrival_photo_id": 6,
+    "path": "5/79bba29514574d7abfe708d9aa340082.jpg"
+  },
+  "verified_attachments": {
+    "media": {
+      "DR": {
+        "path": "products/dr-0.jpg",
+        "sha256": "918182b63b6d9473a8fcc7344f1ecdb1b22024be574370ab1439d35703565f01"
+      }
+    },
+    "private_arrivals": {
+      "DR-0001": {
+        "path": "1/845a332e3d4245be844575620da63601.jpg",
+        "sha256": "694b46e8db846725a8249d16e1cdba2b2df33c52e9ca0202f5c87703c343b785"
+      },
+      "DR-0002": {
+        "path": "2/67afe7d9fa2b46479e3b01389da45113.jpg",
+        "sha256": "b55bf24683964acbb62a72c88d7da709a26057fad010f4fb3013a0e9a19033ff"
+      },
+      "DR-0003": {
+        "path": "3/2f29c04dcb1d4e11ae14544ae163444e.jpg",
+        "sha256": "2b86470b5d875f36602d12c35d62789c9f3837d6ba6f0692ecb44a732bfee4c0"
+      },
+      "DR-0004": {
+        "path": "4/17f6a1bff106447eaaa4e78410407b9c.jpg",
+        "sha256": "554f85d2374600624d442b0ae5ee2ac28e40c45b078c73c0617b493c5836d083"
+      },
+      "DR-0005": {
+        "path": "5/e9dd891b2e564ef2b787744f6a10a7f9.jpg",
+        "sha256": "5a3434e5ad78027b53f595393001eb968828667c15c74a1eb984a37dd1deb8b6"
+      }
+    },
+    "private_returns": {
+      "DR-0001": {
+        "path": "1/d4911203170540c7b341aeac998b5362.jpg",
+        "sha256": "3d0475688c002e1436f8d46cd1c710f60d0fffa385fcd1d0cc674e05ed6e7cdb"
+      },
+      "DR-0002": {
+        "path": "2/5cd0e9d197584ae8b752155b3517b79a.jpg",
+        "sha256": "eebfff4f8c67755c5e852ae25d4664ee360ced6ce88968a04e9f4c56098fa22d"
+      },
+      "DR-0003": {
+        "path": "3/83d1fc50b011472b855741be8c6eb3a0.jpg",
+        "sha256": "ebca4a81e41662982de70039ef371d406093a09e370de374eab07c329779d422"
+      },
+      "DR-0004": {
+        "path": "4/0fd1243545634304b686c1da2f1eff12.jpg",
+        "sha256": "aced465ff5fb8c537e065b3edcb857deba15ea5565c8a849f2d214e5c4877165"
+      },
+      "DR-0005": {
+        "path": "5/e18d0a25e3fe4de38bd943b843da7e62.jpg",
+        "sha256": "edef4383a2f59988ae84e152a5dfe43bc6f353aac0bbb55e1238942bb0e35cc8"
+      }
+    }
+  },
+  "restored_business": {
+    "inventory_qty": "5.0000",
+    "accrual_amount": "2.50",
+    "scheduler_status": "SUCCESS",
+    "database": "wms_db_test",
+    "mysql_version": "8.0.46",
+    "migration_heads": [
+      [
+        "accounts",
+        "0005_loginthrottlecacheentry"
+      ],
+      [
+        "admin",
+        "0003_logentry_add_action_flag_choices"
+      ],
+      [
+        "auth",
+        "0012_alter_user_first_name_max_length"
+      ],
+      [
+        "authtoken",
+        "0004_alter_tokenproxy_options"
+      ],
+      [
+        "baseinfo",
+        "0009_owner_customer_addresses"
+      ],
+      [
+        "billing",
+        "0007_paymentreceipt_date_quality"
+      ],
+      [
+        "contenttypes",
+        "0002_remove_content_type_name"
+      ],
+      [
+        "core",
+        "0007_remove_obsolete_gs1_enabled_setting"
+      ],
+      [
+        "driverapp",
+        "0001_initial"
+      ],
+      [
+        "inbound",
+        "0009_product_identity"
+      ],
+      [
+        "inventory",
+        "0012_owner_inventory_alert_policies"
+      ],
+      [
+        "locations",
+        "0005_warehouse_default_receive_location"
+      ],
+      [
+        "outbound",
+        "0014_outboundorderline_print_unit_snapshot"
+      ],
+      [
+        "pos",
+        "0011_product_identity"
+      ],
+      [
+        "products",
+        "0016_transferproductbinding"
+      ],
+      [
+        "reports",
+        "0010_bosscheckstate_bossreadprogress"
+      ],
+      [
+        "salesapp",
+        "0014_product_identity"
+      ],
+      [
+        "sessions",
+        "0001_initial"
+      ],
+      [
+        "strategies",
+        "0001_initial"
+      ],
+      [
+        "tasking",
+        "0010_count_quantity_capacity"
+      ],
+      [
+        "token_blacklist",
+        "0013_alter_blacklistedtoken_options_and_more"
+      ]
+    ]
+  },
+  "backup_manifest": "/tmp/wms-dr-prepared-h5k2zupu/snapshots/a21e604a188d4dd5b26b9eafcba3acd5/manifest.json",
+  "database_artifact_sha256": "7d7864efdf51535fce9624a8b7f3c1b7568fc74f31ebf28547520c3bb3302ced",
+  "source_logical_database_sha256": "731774e49ddde99d56cbdb34aedf4e7ae1c169d00c201b4f2be0a44b17453c98",
+  "restored_logical_database_sha256": "731774e49ddde99d56cbdb34aedf4e7ae1c169d00c201b4f2be0a44b17453c98",
+  "snapshot_at": "2026-11-18T13:31:25.852660+00:00",
+  "validated_at": "2026-11-18T13:35:17.975974+00:00",
+  "rpo_seconds": 26.328012,
+  "rto_seconds": 205.795302,
+  "restore_seconds": 205.795264,
+  "database_snapshot_id": "a21e604a188d4dd5b26b9eafcba3acd5",
+  "media_snapshot_id": "a21e604a188d4dd5b26b9eafcba3acd5",
+  "database_checksum_verified": true,
+  "media_checksum_verified": true,
+  "private_arrivals_checksum_verified": true,
+  "private_returns_checksum_verified": true,
+  "migration_head_verified": true,
+  "business_flow_verified": true,
+  "inventory_finance_reconciled": true,
+  "scheduler_resumed_verified": true,
+  "errors": []
+}

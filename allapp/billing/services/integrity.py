@@ -7,7 +7,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from allapp.billing.enums import AccrualStatus, PricingStatus, SourceQuality
+from allapp.billing.enums import DAILY_CONTRACT_METRICS, AccrualStatus, PricingStatus, SourceQuality
 from allapp.billing.models import (
     BillingAccrual,
     BillingEvent,
@@ -171,16 +171,10 @@ def build_close_readiness(
                 "samples": missing_task_samples,
             }
         )
-    metric_map = {
-        "PER_PALLET_DAY": "PALLET",
-        "PER_CBM_DAY": "CBM",
-        "PER_AREA_MONTH": "AREA_M2",
-        "PERCENT_OF_ORDER_AMOUNT": "ORDER_AMT",
-    }
     missing_metric_count = 0
     missing_metric_samples = []
     for contract in contracts.filter(source_type="DAILY_METRIC").order_by("id"):
-        metric_type = metric_map.get(contract.calc_method)
+        metric_type = DAILY_CONTRACT_METRICS.get(contract.calc_method)
         if not metric_type:
             continue
         range_start = max(start_date, contract.effective_from)

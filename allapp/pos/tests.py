@@ -1,6 +1,8 @@
 import datetime
+import hashlib
 import importlib
 import io
+import json
 from decimal import Decimal
 from unittest.mock import patch
 from urllib.parse import quote
@@ -886,6 +888,7 @@ class PosApiTests(TestCase):
             price=Decimal("30.00"),
             min_price=Decimal("1.00"),
             serial_control=True,
+            expiry_control=False,
         )
         source_detail = InventoryDetail.objects.create(
             owner=self.owner,
@@ -2614,11 +2617,11 @@ class PosApiTests(TestCase):
         self.assertEqual(Decimal(str(line_payload["returned_amount"])), Decimal("1.00"))
         self.assertEqual(Decimal(str(line_payload["returnable_amount"])), Decimal("0.00"))
 
-    def test_pos_return_idempotency_does_not_double_restore_stock(self):
+    def _partial_return_request(self, receipt_no="POS-RECEIPT-RETURN-IDEM"):
         checkout = self.client.post(
             "/api/pos/checkout/",
             {
-                "src_bill_no": "POS-RECEIPT-RETURN-IDEM",
+                "src_bill_no": receipt_no,
                 "payment": self.payment("18.00"),
                 "items": [
                     {
@@ -2631,31 +2634,110 @@ class PosApiTests(TestCase):
             format="json",
         )
         self.assertEqual(checkout.status_code, 201, checkout.data)
-        sale = PosSale.objects.get(src_bill_no="POS-RECEIPT-RETURN-IDEM")
-        sale_line = PosSaleLine.objects.get(sale=sale)
-        payload = {
-            "sale_id": sale.id,
+        sale = checkout.data["sale"]
+        return {
+            "sale_id": sale["id"],
             "reason": "same return retry",
             "idempotency_key": "idem-return-retry",
-            "lines": [{"sale_line_id": sale_line.id, "qty": "1.000"}],
+            "lines": [{"sale_line_id": sale["lines"][0]["id"], "qty": "1.000"}],
             "refunds": [{"method": "CASH", "amount": "9.00"}],
         }
 
+    def test_pos_return_idempotency_does_not_double_restore_stock(self):
+        payload = self._partial_return_request()
         first = self.client.post("/api/pos/returns/", payload, format="json")
-        second = self.client.post("/api/pos/returns/", payload, format="json")
-
         self.assertEqual(first.status_code, 201, first.data)
+        closed = self.client.post(
+            f"/api/pos/shifts/{self.shift.pk}/close/",
+            {"actual_cash_amount": "109.00"},
+            format="json",
+        )
+        self.assertEqual(closed.status_code, 200, closed.data)
+        conflict = self.client.post(
+            "/api/pos/returns/", {**payload, "reason": "changed refund request"}, format="json"
+        )
+        self.assertEqual(conflict.status_code, 400, conflict.data)
+        self.assertIn("idempotency_key", conflict.data)
+
+        second = self.client.post("/api/pos/returns/", payload, format="json")
         self.assertEqual(second.status_code, 201, second.data)
-        self.assertEqual(first.data["return"]["id"], second.data["return"]["id"])
-        self.assertEqual(PosReturn.objects.filter(sale=sale).count(), 1)
-        self.assertEqual(
-            InventoryTransaction.objects.filter(src_model="PosReturnLine").count(),
-            1,
+        self.assertEqual(first.data["return"]["return_no"], second.data["return"]["return_no"])
+        returned = PosReturn.objects.get(sale_id=payload["sale_id"])
+        self.assertEqual(first.data["return"]["id"], returned.pk)
+        self.assertEqual(second.data["return"]["id"], returned.pk)
+        self.assertEqual(returned.lines.get().qty, Decimal("1.000"))
+        refund = PosRefund.objects.get(sale_id=payload["sale_id"])
+        self.assertEqual(refund.return_order_id, returned.pk)
+        self.assertEqual(refund.status, PosRefund.Status.REFUNDED)
+        self.assertEqual(refund.amount, Decimal("9.00"))
+        layer = InventoryDetail.objects.get(owner=self.owner, product=self.product)
+        self.assertEqual(layer.onhand_qty, Decimal("9.0000"))
+        self.assertEqual(layer.available_qty, Decimal("9.0000"))
+        movement = InventoryTransaction.objects.get(src_model="PosReturnLine")
+        self.assertEqual(movement.tx_type, InvTxType.RECEIVE)
+        self.assertEqual(movement.qty_delta, Decimal("1.0000"))
+        self.assertEqual(movement.src_line_id, layer.pk)
+        detail = self.client.get(f"/api/pos/sales/{payload['sale_id']}/")
+        self.assertEqual(detail.status_code, 200, detail.data)
+        self.assertEqual(Decimal(str(detail.data["lines"][0]["returnable_qty"])), Decimal("1.000"))
+
+    def test_pos_return_legacy_key_requires_original_sale(self):
+        payload = self._partial_return_request()
+        first = self.client.post("/api/pos/returns/", payload, format="json")
+        self.assertEqual(first.status_code, 201, first.data)
+        return_id = first.data["return"]["id"]
+        PosReturn.objects.filter(pk=return_id).update(idempotency_fingerprint="")
+
+        other_sale = self._partial_return_request("POS-RECEIPT-RETURN-OTHER")
+        refused = self.client.post("/api/pos/returns/", other_sale, format="json")
+        self.assertEqual(refused.status_code, 400, refused.data)
+        self.assertIn("idempotency_key", refused.data)
+        for change in (
+            {"reason": "changed legacy return reason"},
+            {"lines": [{**payload["lines"][0], "qty": "2.000"}]},
+            {"refunds": [{**payload["refunds"][0], "amount": "18.00"}]},
+        ):
+            with self.subTest(field=next(iter(change))):
+                refused = self.client.post(
+                    "/api/pos/returns/", {**payload, **change}, format="json"
+                )
+                self.assertEqual(refused.status_code, 400, refused.data)
+                self.assertIn("idempotency_key", refused.data)
+        replay = self.client.post("/api/pos/returns/", payload, format="json")
+        self.assertEqual(replay.status_code, 201, replay.data)
+        self.assertEqual(replay.data["return"]["id"], return_id)
+        self.assertEqual(PosReturn.objects.get().pk, return_id)
+        self.assertEqual(PosRefund.objects.get().amount, Decimal("9.00"))
+        self.assertEqual(InventoryTransaction.objects.get(src_model="PosReturnLine").qty_delta, 1)
+
+    def test_pos_return_replay_requires_original_cashier_and_warehouse(self):
+        payload = self._partial_return_request()
+        created = self.client.post("/api/pos/returns/", payload, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        other = get_user_model().objects.create_user(
+            username="pos-other-return-cashier", warehouse=self.warehouse
         )
-        self.assertEqual(
-            InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
-            Decimal("9.0000"),
+        other.user_permissions.add(
+            Permission.objects.get(codename="add_posreturn"),
+            Permission.objects.get(codename="add_posrefund"),
         )
+        self.open_shift(other)
+        self.client.force_authenticate(other)
+        refused = self.client.post("/api/pos/returns/", payload, format="json")
+        self.assertEqual(refused.status_code, 400, refused.data)
+        self.assertIn("idempotency_key", refused.data)
+
+        # Historical keys without a fingerprint still belong to their cashier and warehouse.
+        PosReturn.objects.filter(pk=created.data["return"]["id"]).update(idempotency_fingerprint="")
+        self.user.warehouse = Warehouse.objects.create(code="WHREF", name="Other Warehouse")
+        self.user.save(update_fields=["warehouse"])
+        self.client.force_authenticate(self.user)
+        refused = self.client.post("/api/pos/returns/", payload, format="json")
+        self.assertEqual(refused.status_code, 400, refused.data)
+        self.assertIn("idempotency_key", refused.data)
+        self.assertEqual(PosReturn.objects.count(), 1)
+        self.assertEqual(PosRefund.objects.get().amount, Decimal("9.00"))
+        self.assertEqual(InventoryTransaction.objects.get(src_model="PosReturnLine").qty_delta, 1)
 
     def test_pos_return_requires_refund_permission(self):
         checkout = self.client.post(
@@ -2793,6 +2875,7 @@ class PosApiTests(TestCase):
         )
 
     def test_pos_return_restores_stock_to_original_issued_inventory_layers(self):
+        today = timezone.now().date()
         layered_product = Product.objects.create(
             owner=self.owner,
             code="POS-LAYER-SKU",
@@ -2804,13 +2887,16 @@ class PosApiTests(TestCase):
             min_price=Decimal("1.00"),
             batch_control=False,
             expiry_control=True,
+            expiry_basis="MFG",
+            shelf_life_days=90,
         )
         first_detail = InventoryDetail.objects.create(
             owner=self.owner,
             product=layered_product,
             warehouse=self.warehouse,
             location=self.location,
-            expiry_date=datetime.date(2026, 1, 1),
+            production_date=today - datetime.timedelta(days=75),
+            expiry_date=today + datetime.timedelta(days=15),
             onhand_qty=Decimal("1.0000"),
             allocated_qty=Decimal("0.0000"),
             locked_qty=Decimal("0.0000"),
@@ -2822,7 +2908,8 @@ class PosApiTests(TestCase):
             product=layered_product,
             warehouse=self.warehouse,
             location=self.location,
-            expiry_date=datetime.date(2026, 2, 1),
+            production_date=today - datetime.timedelta(days=30),
+            expiry_date=today + datetime.timedelta(days=60),
             onhand_qty=Decimal("2.0000"),
             allocated_qty=Decimal("0.0000"),
             locked_qty=Decimal("0.0000"),
@@ -2923,7 +3010,8 @@ class PosApiTests(TestCase):
                 "/api/pos/returns/",
                 {
                     "sale_id": sale.id,
-                    "reason": f"partial return {index}",
+                    "reason": "customer returned one item",
+                    "idempotency_key": f"partial-return-{index}",
                     "lines": [{"sale_line_id": sale_line.id, "qty": "1.000"}],
                     "refunds": [{"method": "CASH", "amount": "9.00"}],
                 },
@@ -2965,6 +3053,7 @@ class PosApiTests(TestCase):
             base_uom=self.uom,
             price=Decimal("7.00"),
             min_price=Decimal("1.00"),
+            expiry_control=False,
         )
         source_detail = InventoryDetail.objects.create(
             id=1_000_000,
@@ -3010,6 +3099,7 @@ class PosApiTests(TestCase):
                 base_uom=self.uom,
                 price=Decimal("1.00"),
                 min_price=Decimal("0.10"),
+                expiry_control=False,
             )
             decoy = InventoryDetail.objects.create(
                 id=task_line.id,
@@ -3206,6 +3296,7 @@ class PosApiTests(TestCase):
                         "qty": "1.000",
                         "price": "0.0000",
                         "amount": "0.00",
+                        "is_gift": True,
                     },
                     {
                         "product_id": self.other_product.id,
@@ -3256,6 +3347,7 @@ class PosApiTests(TestCase):
                         "qty": "1.000",
                         "price": "0.0000",
                         "amount": "0.00",
+                        "is_gift": True,
                     }
                 ],
             },
@@ -3279,6 +3371,154 @@ class PosApiTests(TestCase):
         self.assertEqual(
             InventoryDetail.objects.get(owner=self.owner, product=self.product).available_qty,
             Decimal("9.0000"),
+        )
+
+    def test_missing_pos_price_needs_positive_onsite_price_and_audits_it(self):
+        Product.objects.filter(pk=self.product.pk).update(
+            price=None, min_price=None, max_discount=None
+        )
+        lookup = self.client.get("/api/pos/products/", {"barcode": "POS-CTN-BAR"})
+        self.assertIsNone(lookup.data["results"][0]["price"])
+        line = {"product_id": self.product.pk, "qty": "0.500", "price": "0.0000"}
+        body = {"items": [line], "payment": self.payment("0.62")}
+        for changes in (
+            {},
+            {"is_gift": True},
+            {"price": "0.0001", "onsite_price": True},
+            {"price": "1.2300"},
+            {"price": "1.2400", "amount": "0.62", "onsite_price": True},
+        ):
+            with self.subTest(changes=changes):
+                rejected = self.client.post(
+                    "/api/pos/checkout/", {**body, "items": [{**line, **changes}]}, format="json"
+                )
+                self.assertEqual(rejected.status_code, 400, rejected.data)
+                self.assertFalse(PosSale.objects.exists())
+                self.assertFalse(InventoryTransaction.objects.exists())
+        line["price"] = "1.2300"
+        line["onsite_price"] = True
+        Product.objects.filter(pk=self.product.pk).update(min_price="1.24")
+        below_floor = self.client.post("/api/pos/checkout/", body, format="json")
+        self.assertEqual(below_floor.status_code, 400, below_floor.data)
+        self.assertIn("price", below_floor.data)
+        Product.objects.filter(pk=self.product.pk).update(min_price="1.23", max_discount="20")
+        missing_discount_base = self.client.post("/api/pos/checkout/", body, format="json")
+        self.assertEqual(missing_discount_base.status_code, 400, missing_discount_base.data)
+        self.assertIn("price", missing_discount_base.data)
+        Product.objects.filter(pk=self.product.pk).update(max_discount=None)
+        charged = self.client.post("/api/pos/checkout/", body, format="json")
+        self.assertEqual(charged.status_code, 201, charged.data)
+        sale = PosSale.objects.get()
+        self.assertEqual(sale.lines.get().amount, Decimal("0.62"))
+        self.assertEqual(sale.lines.get().price, Decimal("1.2300"))
+        self.assertEqual(sale.total_amount, sale.payment.amount_due)
+        audit = PosAuditLog.objects.get(sale=sale, action=PosAuditLog.Action.CHECKOUT)
+        row = audit.metadata["line_pricing"][0]
+        self.assertEqual(row["price_source"], "onsite")
+        self.assertIsNone(row["catalog_price"])
+        self.assertFalse(row["is_gift"])
+        self.assertFalse(row["amount_entered"])
+        self.product.refresh_from_db()
+        self.assertIsNone(self.product.price)
+
+    def test_pos_price_mode_and_explicit_gift_are_audited_separately(self):
+        Product.objects.filter(pk=self.product.pk).update(
+            price="1.23", min_price=None, max_discount=None
+        )
+        line = {"product_id": self.product.pk, "qty": "2.500", "price": "1.2300"}
+        for rejected_line in (
+            {**line, "is_gift": True},
+            {**line, "price": "0"},
+            {**line, "onsite_price": True},
+        ):
+            rejected = self.client.post(
+                "/api/pos/checkout/",
+                {"items": [rejected_line], "payment": self.payment("3.08")},
+                format="json",
+            )
+            self.assertEqual(rejected.status_code, 400, rejected.data)
+        items = [
+            line,
+            {**line, "amount": "2.50", "price": "1.0000"},
+            {**line, "price": "0", "is_gift": True},
+        ]
+        charged = self.client.post(
+            "/api/pos/checkout/",
+            {"items": items, "payment": self.payment("5.58")},
+            format="json",
+        )
+        self.assertEqual(charged.status_code, 201, charged.data)
+        sale = PosSale.objects.get()
+        self.assertEqual(sale.total_amount, Decimal("5.58"))
+        audit = PosAuditLog.objects.get(sale=sale, action=PosAuditLog.Action.CHECKOUT)
+        self.assertEqual(
+            [(r["price_source"], r["amount"]) for r in audit.metadata["line_pricing"]],
+            [("unit_price", "3.08"), ("entered_amount", "2.50"), ("gift", "0.00")],
+        )
+
+    def test_legacy_pos_zero_amount_fingerprint_replays_without_new_gift_intent(self):
+        pick_location = Location.objects.create(
+            warehouse=self.warehouse, code="SWPOS-02-01-01", zone_type=ZoneType.PICK
+        )
+        pick_stock = InventoryDetail.objects.create(
+            owner=self.owner,
+            product=self.product,
+            warehouse=self.warehouse,
+            location=pick_location,
+            zone_type=ZoneType.PICK,
+            onhand_qty=Decimal("1"),
+            base_unit=self.uom.code,
+        )
+        line = {"product_id": self.product.pk, "qty": "1.000", "price": "0.0000", "amount": "0.00"}
+        payment = {"method": "CASH", "amount_received": "0.00", "reference_no": ""}
+        body = {
+            "items": [line],
+            "payment": payment,
+            "idempotency_key": "legacy-gift",
+            "src_bill_no": "LEGACY-GIFT",
+            "stock_zone_type": 1,
+        }
+        explicit = {**body, "items": [{**line, "is_gift": True}]}
+        created = self.client.post("/api/pos/checkout/", explicit, format="json")
+        self.assertEqual(created.status_code, 201, created.data)
+        sale = PosSale.objects.get(pk=created.data["sale"]["id"])
+        conflict = self.client.post("/api/pos/checkout/", body, format="json")
+        self.assertIn("idempotency_key", conflict.data)
+        # Reconstruct the stored pre-upgrade digest independently of the current implementation.
+        canonical = {
+            "warehouse_id": self.warehouse.pk,
+            "customer_id": None,
+            "src_bill_no": "LEGACY-GIFT",
+            "remark": "",
+            "stock_zone_type": 1,
+            "payment": payment,
+            "payments": [],
+            "items": [line],
+        }
+        encoded = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        PosSale.objects.filter(pk=sale.pk).update(
+            idempotency_fingerprint=hashlib.sha256(encoded.encode()).hexdigest()
+        )
+        Product.objects.filter(pk=self.product.pk).update(price=None)
+        replay = self.client.post("/api/pos/checkout/", body, format="json")
+        self.assertEqual(replay.status_code, 201, replay.data)
+        self.assertEqual(replay.data["sale"]["id"], sale.pk)
+        PosSale.objects.filter(pk=sale.pk).update(idempotency_fingerprint="")
+        conflict = self.client.post("/api/pos/checkout/", explicit, format="json")
+        self.assertIn("idempotency_key", conflict.data)
+        replay = self.client.post("/api/pos/checkout/", body, format="json")
+        self.assertEqual(replay.data["sale"]["id"], sale.pk)
+        self.assertEqual(PosSale.objects.count(), 1)
+        pick_stock.refresh_from_db()
+        self.assertEqual(pick_stock.onhand_qty, Decimal("0"))
+        self.assertEqual(
+            InventoryDetail.objects.get(product=self.product, location=self.location).onhand_qty,
+            Decimal("10"),
+        )
+        issues = InventoryTransaction.objects.filter(product=self.product, tx_type=InvTxType.ISSUE)
+        self.assertEqual(
+            list(issues.values_list("location_id", "qty_delta")),
+            [(pick_location.pk, Decimal("-1"))],
         )
 
     def test_checkout_rejects_negative_explicit_amount(self):
@@ -3431,6 +3671,7 @@ class PosApiTests(TestCase):
             base_uom=self.uom,
             price=Decimal("1000.00"),
             min_price=Decimal("1.00"),
+            expiry_control=False,
         )
         second_location = Location.objects.create(
             warehouse=self.warehouse,
@@ -3467,6 +3708,7 @@ class PosApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("缺口", response.data["items"][0])
         self.assertFalse(PosSale.objects.filter(src_bill_no="POS-SUB-MILLITH-TAILS").exists())
         self.assertFalse(WmsTask.objects.filter(source_app="pos").exists())
         self.assertFalse(InventoryTransaction.objects.filter(product=tail_product).exists())
@@ -3593,7 +3835,7 @@ class PosApiTests(TestCase):
         )
         self.assertEqual(issue_tx.zone_type, ZoneType.PICK)
 
-    def test_checkout_fefo_consumes_expiring_stock_before_no_expiry_stock(self):
+    def test_checkout_issues_dated_stock_and_keeps_undated_controlled_stock(self):
         fefo_product = Product.objects.create(
             owner=self.owner,
             code="POS-FEFO-SKU",
@@ -3611,7 +3853,8 @@ class PosApiTests(TestCase):
             product=fefo_product,
             warehouse=self.warehouse,
             location=self.location,
-            expiry_date=datetime.date(2026, 1, 1),
+            production_date=datetime.date.today() - datetime.timedelta(days=1),
+            expiry_date=datetime.date.today() + datetime.timedelta(days=10),
             onhand_qty=Decimal("2.0000"),
             allocated_qty=Decimal("0.0000"),
             locked_qty=Decimal("0.0000"),
@@ -3662,7 +3905,7 @@ class PosApiTests(TestCase):
             src_line_id=task_line.id,
             tx_type=InvTxType.ISSUE,
         )
-        self.assertEqual(issue_tx.expiry_date, datetime.date(2026, 1, 1))
+        self.assertEqual(issue_tx.expiry_date, expiring_detail.expiry_date)
 
     def test_sales_list_filters_by_user_warehouse_and_search(self):
         response = self.client.post(
