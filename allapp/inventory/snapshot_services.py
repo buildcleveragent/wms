@@ -6,17 +6,27 @@ from typing import Dict, Iterable, Optional
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Prefetch, Sum
+from django.db.migrations.recorder import MigrationRecorder
+from django.db.models import Exists, OuterRef, Prefetch, Sum
+from django.utils import timezone
 
 from allapp.baseinfo.models import Owner
+from allapp.inventory.daily_close_transaction import lock_nested_close_inputs
 from allapp.inventory.models import (
+    InventoryDailyClose,
     InventoryDetail,
+    InventoryOpeningVersion,
+    InventoryHoldBalance,
     InventorySnapshotDaily,
     InventoryTransaction,
 )
 from allapp.locations.models import Location
 from allapp.locations.models import Warehouse
 from allapp.products.models import Product, ProductPackage
+
+
+class MissingInventorySnapshotBaseline(ValueError):
+    """There is no preceding physical snapshot for a scope with movements."""
 
 
 def _q4(value) -> Decimal:
@@ -49,6 +59,7 @@ def _lock_snapshot_scope(*, owner_id=None, warehouse_id=None):
 
     list(owner_qs.select_for_update().values_list("id", flat=True))
     list(warehouse_qs.select_for_update().values_list("id", flat=True))
+    lock_nested_close_inputs(owner_id, warehouse_id)
 
 
 @lru_cache(maxsize=1)
@@ -284,13 +295,98 @@ def _build_bootstrap_payloads(service_date, *, owner_id=None, warehouse_id=None)
     payloads = {}
     for detail in details:
         key = _snapshot_dim_key_from_row(detail)
-        payloads[key] = _row_payload_from_detail(
+        payload = _row_payload_from_detail(
             detail,
             unit_volume_cache=unit_volume_cache,
             location_area_cache=location_area_cache,
             service_date=service_date,
         )
+        if key not in payloads:
+            payloads[key] = payload
+            continue
+        previous = payloads[key]
+        for field in ("onhand_qty", "available_qty", "allocated_qty", "locked_qty", "damaged_qty"):
+            previous[field] += payload[field]
+        if previous["base_unit_code"] != payload["base_unit_code"]:
+            raise ValueError("同一快照维度的库存基本单位不一致，请核对库存明细。")
     return payloads
+
+
+def _opening_payload(row, owner_id, warehouse_id):
+    payload = {
+        field: _q4(row[field])
+        for field in ("onhand_qty", "available_qty", "allocated_qty", "locked_qty", "damaged_qty")
+    }
+    payload.update(
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+        location_id=int(row["location_id"]),
+        product_id=int(row["product_id"]),
+        batch_no=_normalize_dim_text(row.get("batch_no")),
+        serial_no=_normalize_dim_text(row.get("serial_no")),
+        base_unit_code=_normalize_dim_text(row.get("base_unit_code")),
+        base_unit_source=(
+            InventorySnapshotDaily.UnitSource.VERIFIED
+            if row.get("base_unit_code")
+            else InventorySnapshotDaily.UnitSource.UNKNOWN
+        ),
+        snapshot_source=InventorySnapshotDaily.Source.TX_ROLLFORWARD,
+        unit_volume_m3_snapshot=row.get("unit_volume_m3_snapshot"),
+        location_area_m2_snapshot=row.get("location_area_m2_snapshot"),
+    )
+    for field in ("production_date", "expiry_date"):
+        payload[field] = datetime.date.fromisoformat(row[field]) if row.get(field) else None
+    return payload
+
+
+def trusted_inventory_baseline(service_date, *, owner_id, warehouse_id, verify_legacy=True):
+    """An approved opening supersedes the baseline for rollforward, without replacing evidence."""
+    from allapp.inventory.snapshot_audit import audit_day
+
+    scope = dict(owner_id=owner_id, warehouse_id=warehouse_id)
+    header = InventoryDailyClose.objects.filter(**scope, business_date=service_date).first()
+    if header:
+        from allapp.inventory.daily_close import opening_is_current, posting_evidence
+
+        approved = (
+            header.opening_versions.filter(status=InventoryOpeningVersion.Status.APPROVED)
+            .order_by("-version")
+            .first()
+        )
+        if approved:
+            return opening_is_current(approved, header)
+        if not header.sealed_at or header.quality != header.Quality.TRUSTED or header.issues:
+            return False
+        manifest = header.totals.get("posting_evidence")
+        if manifest and manifest != posting_evidence(service_date, scope):
+            return False
+        evidence = audit_day(service_date, scope, confirmed_empty=header.row_count == 0)
+        return evidence["snapshot_present"] and not evidence["issues"]
+    rows = InventorySnapshotDaily.objects.filter(**scope, snapshot_date=service_date)
+    if (
+        not rows.exists()
+        or rows.exclude(snapshot_source=InventorySnapshotDaily.Source.TX_ROLLFORWARD).exists()
+    ):
+        return False
+    if not verify_legacy:
+        return True
+
+    holds = _load_hold_balances(service_date, **scope)
+    if holds is None or audit_day(service_date, scope)["issues"]:
+        return False
+    seen = set()
+    for row in rows.iterator():
+        key = _snapshot_dim_key_from_row(row)
+        held = (row.allocated_qty, row.locked_qty, row.damaged_qty)
+        if (
+            key in seen
+            or held != holds.pop(key, (0, 0, 0))
+            or min(*held, row.available_qty) < 0
+            or row.available_qty != row.onhand_qty - sum(held)
+        ):
+            return False
+        seen.add(key)
+    return not holds
 
 
 def _load_previous_snapshot_payloads(prev_date, *, owner_id=None, warehouse_id=None):
@@ -306,6 +402,35 @@ def _load_previous_snapshot_payloads(prev_date, *, owner_id=None, warehouse_id=N
         key = _snapshot_dim_key_from_row(row)
         payloads[key] = _row_payload_from_snapshot(row)
         scope_has_rows.add((row.owner_id, row.warehouse_id))
+    headers = _snapshot_scope_filters(
+        InventoryDailyClose.objects.filter(business_date=prev_date),
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+    )
+    for header in headers.only(
+        "id", "owner_id", "warehouse_id", "business_date", "sealed_at", "quality", "issues"
+    ):
+        scope = (header.owner_id, header.warehouse_id)
+        opening = (
+            header.opening_versions.filter(status=InventoryOpeningVersion.Status.APPROVED)
+            .order_by("-version")
+            .first()
+        )
+        from allapp.inventory.daily_close import opening_is_current
+
+        if opening is not None and opening_is_current(opening, header):
+            for key in [key for key in payloads if key[:2] == scope]:
+                del payloads[key]
+            for row in opening.rows:
+                payload = _opening_payload(row, *scope)
+                payloads[_tx_aggregate_dim_key(payload)] = payload
+            scope_has_rows.add(scope)
+        elif header.sealed_at and header.quality == header.Quality.TRUSTED and not header.issues:
+            scope_has_rows.add(scope)
+        else:
+            for key, row in payloads.items():
+                if key[:2] == scope:
+                    row["snapshot_source"] = InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX
     return payloads, scope_has_rows
 
 
@@ -334,7 +459,7 @@ def _load_tx_aggregates(service_date, *, owner_id=None, warehouse_id=None):
     location_ids = set()
     for row in tx_rows:
         key = _tx_aggregate_dim_key(row)
-        qty_by_key[key] = _q4(row["qty_delta_total"] or 0)
+        qty_by_key[key] = qty_by_key.get(key, 0) + _q4(row["qty_delta_total"] or 0)
         scopes_with_tx.add((row["owner_id"], row["warehouse_id"]))
         product_ids.add(row["product_id"])
         location_ids.add(row["location_id"])
@@ -352,11 +477,55 @@ def _load_tx_aggregates(service_date, *, owner_id=None, warehouse_id=None):
             )
         )
     }
-    locations = {
-        location.id: location
-        for location in Location.objects.filter(id__in=location_ids)
-    }
+    locations = {location.id: location for location in Location.objects.filter(id__in=location_ids)}
     return qty_by_key, scopes_with_tx, products, locations
+
+
+def has_inventory_balance_history(service_date):
+    """The cutover captured every active layer, including an empty warehouse."""
+    applied = (
+        MigrationRecorder.Migration.objects.filter(
+            app="inventory", name="0013_inventory_hold_balance"
+        )
+        .values_list("applied", flat=True)
+        .first()
+    )
+    if applied is None:
+        return False
+    start = (
+        timezone.localdate(applied, timezone.get_default_timezone())
+        if timezone.is_aware(applied)
+        else applied.date()
+    )
+    return service_date >= start
+
+
+def _load_hold_balances(service_date, *, owner_id=None, warehouse_id=None):
+    if not has_inventory_balance_history(service_date):
+        return None
+    history = InventoryHoldBalance.objects.filter(balance_date__lte=service_date)
+    later = history.filter(
+        detail_id=OuterRef("detail_id"), balance_date__gt=OuterRef("balance_date")
+    )
+    rows = (
+        _snapshot_scope_filters(history, owner_id=owner_id, warehouse_id=warehouse_id)
+        .filter(~Exists(later))
+        .exclude(allocated_qty=0, locked_qty=0, damaged_qty=0)
+        .values(*InventoryHoldBalance.DIMENSIONS)
+        .annotate(
+            allocated=Sum("allocated_qty"), locked=Sum("locked_qty"), damaged=Sum("damaged_qty")
+        )
+    )
+    balances = {}
+    for row in rows.iterator():
+        key = _tx_aggregate_dim_key(row)
+        allocated, locked, damaged = balances.get(key, (0, 0, 0))
+        balances[key] = (
+            allocated + row["allocated"],
+            locked + row["locked"],
+            damaged + row["damaged"],
+        )
+    return balances
 
 
 @transaction.atomic
@@ -373,6 +542,27 @@ def generate_inventory_snapshot_for_date(
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )
+    sealed_headers = _snapshot_scope_filters(
+        InventoryDailyClose.objects.filter(business_date=service_date, sealed_at__isnull=False),
+        owner_id=owner_id,
+        warehouse_id=warehouse_id,
+    )
+    sealed = set(sealed_headers.values_list("owner_id", "warehouse_id"))
+    if (owner_id, warehouse_id) in sealed:
+        return {
+            "service_date": service_date,
+            "mode": "sealed",
+            "rows_created": 0,
+            "scopes_processed": 0,
+        }
+    if sealed:
+        snapshot_qs = snapshot_qs.exclude(
+            Exists(
+                sealed_headers.filter(
+                    owner_id=OuterRef("owner_id"), warehouse_id=OuterRef("warehouse_id")
+                )
+            )
+        )
     snapshot_qs.delete()
 
     if bootstrap:
@@ -381,6 +571,7 @@ def generate_inventory_snapshot_for_date(
             owner_id=owner_id,
             warehouse_id=warehouse_id,
         )
+        payloads = {key: row for key, row in payloads.items() if key[:2] not in sealed}
         rows_to_create = [
             InventorySnapshotDaily(snapshot_date=service_date, **payload)
             for payload in payloads.values()
@@ -392,10 +583,7 @@ def generate_inventory_snapshot_for_date(
             "mode": "bootstrap",
             "rows_created": len(rows_to_create),
             "scopes_processed": len(
-                {
-                    (payload["owner_id"], payload["warehouse_id"])
-                    for payload in payloads.values()
-                }
+                {(payload["owner_id"], payload["warehouse_id"]) for payload in payloads.values()}
             ),
         }
 
@@ -410,32 +598,35 @@ def generate_inventory_snapshot_for_date(
         owner_id=owner_id,
         warehouse_id=warehouse_id,
     )
+    holds = _load_hold_balances(service_date, owner_id=owner_id, warehouse_id=warehouse_id)
 
-    # Return quality events must roll forward alongside their physical movements.
-    from allapp.outbound.return_models import ReturnEvent
-
-    quality_events = ReturnEvent.objects.filter(occurred_at__date=service_date)
-    if owner_id is not None:
-        quality_events = quality_events.filter(line__order__owner_id=owner_id)
-    if warehouse_id is not None:
-        quality_events = quality_events.filter(line__order__warehouse_id=warehouse_id)
     damaged_by_key = {}
-    for event in quality_events.select_related("line").iterator(chunk_size=1000):
-        dimension = dict(event.line.dimensions)
-        for field in ("production_date", "expiry_date"):
-            dimension[field] = (
-                datetime.date.fromisoformat(dimension[field]) if dimension[field] else None
-            )
-        key = _tx_aggregate_dim_key(dimension)
-        damaged_by_key[key] = damaged_by_key.get(key, Decimal("0")) + event.damaged_delta
+    if holds is None:
+        # Earlier snapshots have only the legacy return-quality events.
+        from allapp.outbound.return_models import ReturnEvent
 
-    missing_baseline_scopes = sorted(tx_scopes - previous_scopes)
+        quality_events = ReturnEvent.objects.filter(occurred_at__date=service_date)
+        if owner_id is not None:
+            quality_events = quality_events.filter(line__order__owner_id=owner_id)
+        if warehouse_id is not None:
+            quality_events = quality_events.filter(line__order__warehouse_id=warehouse_id)
+        for event in quality_events.select_related("line").iterator(chunk_size=1000):
+            dimension = dict(event.line.dimensions)
+            for field in ("production_date", "expiry_date"):
+                dimension[field] = (
+                    datetime.date.fromisoformat(dimension[field]) if dimension[field] else None
+                )
+            key = _tx_aggregate_dim_key(dimension)
+            damaged_by_key[key] = damaged_by_key.get(key, Decimal("0")) + event.damaged_delta
+
+    previous_payloads = {key: row for key, row in previous_payloads.items() if key[:2] not in sealed}
+    missing_baseline_scopes = sorted(tx_scopes - previous_scopes - sealed)
     if missing_baseline_scopes:
         missing = ", ".join(
             f"owner={scope[0]} warehouse={scope[1]}"
             for scope in missing_baseline_scopes
         )
-        raise ValueError(
+        raise MissingInventorySnapshotBaseline(
             f"Missing previous inventory snapshot for {prev_date} before generating {service_date}: {missing}"
         )
 
@@ -452,7 +643,19 @@ def generate_inventory_snapshot_for_date(
         }
     }
 
-    for key, qty_delta in tx_by_key.items():
+    changed_keys = set(tx_by_key) | set(damaged_by_key)
+    if holds is not None:
+        # A reservation can start or end on a day with no physical movement.
+        changed_keys.update(holds)
+        changed_keys.update(
+            key
+            for key, row in previous_payloads.items()
+            if row["allocated_qty"] or row["locked_qty"] or row["damaged_qty"]
+        )
+    for key in changed_keys:
+        if key[:2] in sealed:
+            continue
+        qty_delta = tx_by_key.get(key, 0)
         payload = final_payloads.get(key)
         if payload is None:
             (
@@ -492,20 +695,27 @@ def generate_inventory_snapshot_for_date(
             final_payloads[key] = payload
 
         payload["onhand_qty"] = _q4(Decimal(payload["onhand_qty"]) + Decimal(qty_delta))
-        payload["damaged_qty"] = _q4(
-            Decimal(payload["damaged_qty"]) + damaged_by_key.get(key, Decimal("0"))
-        )
+        if holds is not None:
+            payload["allocated_qty"], payload["locked_qty"], payload["damaged_qty"] = holds.get(
+                key, (0, 0, 0)
+            )
+        else:
+            payload["damaged_qty"] = _q4(
+                Decimal(payload["damaged_qty"]) + damaged_by_key.get(key, Decimal("0"))
+            )
         available_qty = (
             Decimal(payload["onhand_qty"])
             - Decimal(payload["allocated_qty"] or 0)
             - Decimal(payload["locked_qty"] or 0)
             - Decimal(payload["damaged_qty"] or 0)
         )
+        if holds is not None and available_qty < 0:
+            raise ValueError(
+                f"{service_date} 快照在库基线不足以覆盖已分配、锁定和破损数量，"
+                f"请核对历史账面库存：{key}"
+            )
         payload["available_qty"] = _q4(max(Decimal("0"), available_qty))
-        if (
-            payload["snapshot_source"]
-            != InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX
-        ):
+        if payload["snapshot_source"] != InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX:
             payload["snapshot_source"] = InventorySnapshotDaily.Source.TX_ROLLFORWARD
         _enrich_new_row_metadata(
             payload,

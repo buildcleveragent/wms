@@ -1,6 +1,6 @@
 #!/bin/sh
 # Shared by production and staging. Source from the repository root.
-release_services="web scheduler boss-check-worker owner-archive-worker"
+release_services="web scheduler boss-check-worker owner-archive-worker inventory-close-worker"
 
 compose() {
   docker compose -f compose.production.yml "$@"
@@ -63,7 +63,7 @@ start_release_services() {
   compose exec -T web python manage.py migrate --check
   compose exec -T web python manage.py reconcile_data_accuracy --fail-on-issues
   compose exec -T web python manage.py audit_dispatch_note_snapshots --fail-on-issues
-  compose up -d scheduler boss-check-worker owner-archive-worker
+  compose up -d scheduler boss-check-worker owner-archive-worker inventory-close-worker
   check_release_instances $release_services
   wait_for_release_probe check_release_worker
 }

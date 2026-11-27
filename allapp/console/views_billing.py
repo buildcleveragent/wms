@@ -15,6 +15,7 @@ from allapp.accounts.access import AccessScope
 from allapp.baseinfo.models import Owner
 from allapp.billing.enums import AccrualStatus, BillStatus, ChargeType, PeriodStatus
 from allapp.billing.models import Bill, BillingAccrual, BillingPeriod
+from allapp.inventory.daily_close_advisory import inventory_close_warnings
 from allapp.locations.models import Warehouse
 
 ZERO_MONEY = Decimal("0.00")
@@ -272,6 +273,10 @@ class BillingOverviewView(BillingConsoleBaseView):
         }
 
         if selected_period:
+            ctx["inventory_close_warnings"] = inventory_close_warnings(
+                selected_period.owner_id, selected_period.warehouse_id,
+                selected_period.start_date, selected_period.end_date,
+            )
             preview_qs = _preview_queryset(selected_period)
             aggregates = preview_qs.aggregate(
                 accrual_count=Count("id"),

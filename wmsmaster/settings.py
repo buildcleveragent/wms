@@ -548,6 +548,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 # Return evidence is never served by the public media route.
 OWNER_ARCHIVE_ROOT = env("OWNER_ARCHIVE_ROOT", default=str(BASE_DIR / "private_exports"))
 PRIVATE_ARRIVAL_ROOT = env("PRIVATE_ARRIVAL_ROOT", default=str(BASE_DIR / "private_arrivals"))
+PRIVATE_CLOSE_ROOT = env("PRIVATE_CLOSE_ROOT", default=str(BASE_DIR / "private_close"))
 PRIVATE_RETURN_ROOT = env("PRIVATE_RETURN_ROOT", default=str(BASE_DIR / "private_returns"))
 
 # 可选：调整上传文件大小限制

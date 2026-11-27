@@ -14,9 +14,18 @@ from django.apps import apps as django_apps
 from django.db import connections, transaction
 
 from allapp.accounts.audit import record_audit_event
+from allapp.accounts.models import AuditEvent
+from allapp.inventory.daily_close_storage import evidence_path, private_close_root
+from allapp.inventory.models import InventoryCloseAttachment
+from allapp.reports.models import OwnerArchiveJob
+from allapp.reports.owner_archive_jobs import (
+    archive_root,
+    discard_archive_artifacts,
+    owner_archive_worker_lock,
+)
 
-PURGE_MANIFEST_VERSION = "2026-10-23.1"
-PURGE_BUSINESS_DATA_NEW_MANIFEST_VERSION = "2026-10-23.1"
+PURGE_MANIFEST_VERSION = "2026-11-25.2"
+PURGE_BUSINESS_DATA_NEW_MANIFEST_VERSION = "2026-11-25.2"
 
 
 PRESERVED_MODEL_LABELS = frozenset(
@@ -66,7 +75,9 @@ PRESERVED_MODEL_LABELS = frozenset(
         "products.productpackage",
         "products.productuom",
         "products.temperaturezone",
+        "products.transferproductbinding",
         # Reusable inventory and cross-owner product configuration.
+        "inventory.inventoryclosepilot",
         "inventory.ownerinventoryalertpolicy",
         "inventory.productinventoryalertpolicy",
         "outbound.ownerproductmapping",
@@ -136,7 +147,13 @@ PURGED_MODEL_LABELS = frozenset(
         "inbound.noorderreceiverequest",
         "inbound.returninspection",
         # Inventory.
+        "inventory.inventoryclosescope",
+        "inventory.inventorydailyclose",
+        "inventory.inventoryopeningversion",
+        "inventory.inventoryclosereview",
+        "inventory.inventorycloseattachment",
         "inventory.inventorydetail",
+        "inventory.inventoryholdbalance",
         "inventory.inventorycostadjustment",
         "inventory.inventorycostlayer",
         "inventory.inventorylayermovement",
@@ -243,6 +260,7 @@ PURGED_MODEL_LABELS = frozenset(
         "salesapp.saleminiaftersalerequest",
         "salesapp.saleminicart",
         "salesapp.saleminicartitem",
+        "salesapp.saleminicheckoutsubmission",
         "salesapp.saleminicoupon",
         "salesapp.saleminidistributionrecord",
         "salesapp.saleminiorderadjustment",
@@ -278,6 +296,8 @@ PURGED_MODEL_LABELS = frozenset(
         "reports.etlwatermark",
         "reports.alertcase",
         "reports.alertcasehistory",
+        "reports.bosscheckstate",
+        "reports.bossreadprogress",
         "reports.businessreviewsnapshot",
         "reports.factbilling",
         "reports.factinboundline",
@@ -285,6 +305,7 @@ PURGED_MODEL_LABELS = frozenset(
         "reports.factinventorytxn",
         "reports.factoutboundline",
         "reports.factoutboundordersla",
+        "reports.ownerarchivejob",
         "reports.ownerdim",
         "reports.productdim",
         "reports.reportsnapshot",
@@ -306,6 +327,7 @@ PRODUCT_MASTER_MODEL_LABELS = frozenset(
         "products.productexternalidentifier",
         "products.productidentifierregistry",
         "products.productpackage",
+        "products.transferproductbinding",
     }
 )
 
@@ -565,7 +587,10 @@ def acquire_purge_lock(database_alias: str, target: str):
 
     try:
         with acquire_database_maintenance_lock(database_alias, target) as lock_name:
-            yield lock_name
+            with owner_archive_worker_lock(database_alias) as acquired:
+                if not acquired:
+                    raise PurgeBlockedError("货主归档工作进程正在运行，请停机并等待当前任务结束。")
+                yield lock_name
     except PurgeLockError as exc:
         raise PurgeLockError("已有清理任务正在运行，未取得数据库命名锁。") from exc
 
@@ -580,6 +605,63 @@ def _reset_owner_sku_sequences(database_alias: str) -> int:
     owner_model = django_apps.get_model("baseinfo", "Owner")
     manager = getattr(owner_model, "all_objects", owner_model._base_manager)
     return manager.using(database_alias).exclude(next_sku_sequence=1).update(next_sku_sequence=1)
+
+
+class PurgeArchiveCleanupPending(RuntimeError):
+    """The database purge committed and its archive cleanup can be retried independently."""
+
+
+def retry_purge_archive_cleanup(*, alias, target, audit_action, audit_id, operator):
+    """Replay only the committed job IDs from a successful purge under the worker lock."""
+    event = (
+        AuditEvent.objects.using(alias)
+        .filter(pk=audit_id, action=audit_action, module="core.operations", succeeded=True)
+        .first()
+    )
+    if event is None or event.metadata.get("target") != target:
+        raise PurgeBlockedError("未找到当前目标库和清理模式对应的成功审计。")
+    plan = event.metadata.get("archive_cleanup")
+    evidence_plan = event.metadata.get("close_evidence_cleanup")
+    if not (plan or evidence_plan):
+        raise PurgeBlockedError("该审计没有待处理的归档文件清单。")
+    if (
+        AuditEvent.objects.using(alias)
+        .filter(
+            action="PURGE_ARCHIVES_CLEANED",
+            module="core.operations",
+            object_type=event._meta.label_lower,
+            object_id=str(event.pk),
+            succeeded=True,
+        )
+        .exists()
+    ):
+        return
+    ids = plan["job_ids"] if plan else []
+    if plan:
+        root = archive_root()
+        if str(root) != plan["root"] or (plan["root_required"] and not root.is_dir()):
+            raise PurgeBlockedError("当前私有归档目录与清理审计记录不一致，请核对挂载。")
+        if OwnerArchiveJob.objects.using(alias).filter(pk__in=ids).exists():
+            raise PurgeBlockedError("清单中存在当前有效的归档任务，请核对恢复状态。")
+        for job_id in ids:
+            discard_archive_artifacts(root, job_id)
+    keys = evidence_plan["keys"] if evidence_plan else []
+    if evidence_plan:
+        root = private_close_root()
+        if str(root) != evidence_plan["root"] or not root.is_dir():
+            raise PurgeBlockedError("日结凭据目录与清理审计记录不一致，请核对挂载。")
+        if InventoryCloseAttachment.objects.using(alias).filter(storage_key__in=keys).exists():
+            raise PurgeBlockedError("清单中存在当前有效的日结凭据，请核对恢复状态。")
+        for key in keys:
+            evidence_path(key).unlink(missing_ok=True)
+    record_audit_event(
+        action="PURGE_ARCHIVES_CLEANED",
+        module="core.operations",
+        user=operator,
+        obj=event,
+        metadata={"target": target, "job_count": len(ids), "close_attachment_count": len(keys)},
+        using=alias,
+    )
 
 
 def execute_purge(
@@ -600,7 +682,46 @@ def execute_purge(
     deleted_counts: dict[str, int] = {}
     reset_owner_count = 0
 
-    with transaction.atomic(using=alias):
+    archive_table = OwnerArchiveJob._meta.db_table
+    if not transaction.get_autocommit(using=alias):
+        raise PurgeBlockedError("正式清理需要独立提交的数据库连接。")
+    with transaction.atomic(using=alias, durable=True):
+        attachment_table = InventoryCloseAttachment._meta.db_table
+        evidence_plan = {}
+        keys = []
+        if attachment_table in report.present_purged_tables:
+            attachments = InventoryCloseAttachment.objects.using(alias).select_for_update().order_by("pk")
+            for key, close_id in attachments.values_list("storage_key", "review__close_id").iterator():
+                evidence_path(key, close_id=close_id)
+                keys.append(key)
+            if keys:
+                root = private_close_root()
+                if not root.is_dir():
+                    raise PurgeBlockedError("日结凭据目录不可用，请核对挂载。")
+                evidence_plan = {"root": str(root), "keys": keys}
+        archive_ids = []
+        archive_plan = {}
+        if archive_table in report.present_purged_tables:
+            jobs = (
+                OwnerArchiveJob.objects.using(alias)
+                .select_for_update()
+                .order_by("pk")
+                .values_list("pk", "status")
+            )
+            started = False
+            for job_id, status in jobs.iterator():
+                archive_ids.append(job_id)
+                started = started or status in {"running", "ready"}
+            if archive_ids:
+                root = archive_root()
+                root_present = root.is_dir()
+                if started and not root_present:
+                    raise PurgeBlockedError("归档任务已开始生成文件，私有目录不可用，请核对挂载。")
+                archive_plan = {
+                    "root": str(root),
+                    "root_required": root_present,
+                    "job_ids": archive_ids,
+                }
         with connection.cursor() as cursor:
             cursor.execute("SELECT @@SESSION.FOREIGN_KEY_CHECKS")
             original_fk_checks = int(cursor.fetchone()[0])
@@ -609,6 +730,10 @@ def execute_purge(
                 for table in sorted(report.present_purged_tables):
                     quoted_table = connection.ops.quote_name(table)
                     deleted_counts[table] = _delete_table(cursor, quoted_table)
+                if deleted_counts.get(attachment_table, 0) != len(keys):
+                    raise PurgeBlockedError("日结凭据清单在清理期间发生变化，请停止所有写入方。")
+                if deleted_counts.get(archive_table, 0) != len(archive_ids):
+                    raise PurgeBlockedError("归档任务清单在清理期间发生变化，请停止所有写入方。")
 
                 nonempty_tables = []
                 for table in sorted(report.present_purged_tables):
@@ -629,7 +754,7 @@ def execute_purge(
         if reset_owner_sku_sequences:
             after["reset_owner_sku_sequences"] = reset_owner_count
 
-        record_audit_event(
+        event = record_audit_event(
             action=audit_action,
             module="core.operations",
             user=operator,
@@ -648,8 +773,24 @@ def execute_purge(
                 "backup_reference": backup_reference,
                 "manifest_version": manifest_version,
                 "owner_sku_sequence_reset": reset_owner_sku_sequences,
+                "archive_cleanup": archive_plan,
+                "close_evidence_cleanup": evidence_plan,
             },
             using=alias,
         )
 
+    if archive_plan or evidence_plan:
+        try:
+            retry_purge_archive_cleanup(
+                alias=alias,
+                target=report.target,
+                audit_action=audit_action,
+                audit_id=event.pk,
+                operator=operator,
+            )
+        except Exception as exc:
+            raise PurgeArchiveCleanupPending(
+                f"数据库清理已提交，归档或日结凭据文件待核对。请使用 {audit_source} "
+                f"--retry-archive-cleanup {event.pk} 及原维护确认参数重试：{exc}"
+            ) from exc
     return deleted_counts

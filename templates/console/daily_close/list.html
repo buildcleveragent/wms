@@ -1,0 +1,47 @@
+{% extends "console/daily_close/base.html" %}
+{% block title %}库存日结与差异复核{% endblock %}
+{% block daily_content %}
+<h1>库存日结与差异复核</h1>
+<section aria-label="日结筛选">
+  <form method="get" class="filters">
+    {% for field in filters %}<div>{{ field.label_tag }}{{ field }}{{ field.errors }}</div>{% endfor %}
+    <button class="button primary">查询</button><a href="{% url 'console:inventory_daily_close_list' %}">清除筛选</a>
+  </form>
+</section>
+<section>
+  <h2>日结记录 <small class="muted">（{{ page.paginator.count }}）</small></h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>业务日</th><th>仓库</th><th>货主</th><th>数据质量</th><th>复核状态</th><th>快照行数</th></tr></thead>
+    <tbody>{% for item in page %}<tr>
+      <td><a class="date-link" aria-label="查看 {{ item.business_date|date:'Y-m-d' }} 日结详情" href="{% url 'console:inventory_daily_close_detail' item.pk %}">{{ item.business_date|date:"Y-m-d" }}</a></td><td>{{ item.warehouse.name }}</td><td>{{ item.owner.name }}</td>
+      <td><span class="label q-{{ item.quality }}">{{ item.get_quality_display }}</span></td><td>{{ item.get_review_state_display }}</td>
+      <td>{{ item.row_count }}</td>
+    </tr>{% empty %}<tr><td class="empty" colspan="6">当前范围内没有符合条件的日结记录。</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% if page.has_other_pages %}<nav class="pages" aria-label="日结记录分页">{% if page.has_previous %}<a href="{% querystring page=page.previous_page_number %}">上一页</a>{% endif %}第 {{ page.number }} / {{ page.paginator.num_pages }} 页{% if page.has_next %}<a href="{% querystring page=page.next_page_number %}">下一页</a>{% endif %}</nav>{% endif %}
+</section>
+{% if run_form or pilot_form %}
+<details class="panel"{% if run_form.errors or pilot_form.errors %} open{% endif %}>
+  <summary>试点仓库与手工核查</summary>
+  <div class="table-wrap"><table>
+    <thead><tr><th>仓库</th><th>首个业务日</th><th>试点状态</th></tr></thead>
+    <tbody>{% for pilot in pilots %}<tr><td>{{ pilot.warehouse.name }}</td><td>{{ pilot.start_date|date:"Y-m-d" }}</td><td>{{ pilot.enabled|yesno:"已启用,已停用" }}</td></tr>
+    {% empty %}<tr><td colspan="3">当前范围内尚未配置试点。</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% if run_form %}<h3>手工核查业务日</h3>
+  <p class="muted">选择已结束的上海业务日。首次建立期初时，选择首个业务日的前一天。</p>
+  <form action="{% url 'console:inventory_daily_close_run' %}" method="post" class="filters">
+    {% csrf_token %}{{ run_form.non_field_errors }}
+    {% for field in run_form %}<div>{{ field.label_tag }}{{ field }}{{ field.errors }}</div>{% endfor %}
+    <button class="button">运行核查</button>
+  </form>{% endif %}
+  {% if pilot_form %}<h3>配置试点</h3>
+  <p class="muted">启用后，每日北京时间 00:30 核查上一业务日。取消勾选可停用该仓库。</p>
+  <form action="{% url 'console:inventory_daily_close_pilot' %}" method="post" class="filters">
+    {% csrf_token %}{{ pilot_form.non_field_errors }}
+    {% for field in pilot_form %}<div>{{ field.label_tag }}{{ field }}{{ field.errors }}</div>{% endfor %}
+    <button class="button">保存配置</button>
+  </form>{% endif %}
+</details>
+{% endif %}
+{% endblock %}

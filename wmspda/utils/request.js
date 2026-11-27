@@ -1,18 +1,6 @@
-const BASE_MAP = {
-  develop: 'http://192.168.1.6:8001',
-  develop2: 'http://192.168.1.9:8001',
-  pda: 'http://8.148.198.200:8080',
-  onsite: 'http://192.168.2.6:8001',
-}
-
-// Do not read the global uni runtime during module evaluation: H5 loads this
-// chunk before initializing uni. Requests and token access happen after startup.
-// export const BASE_URL = String(import.meta.env.VITE_API_BASE_URL || BASE_MAP.develop).trim().replace(/\/$/, '')
-// if (!/^https?:\/\/[^/?#@]+(?::\d+)?(?:\/[^?#]*)?$/.test(BASE_URL)) {
-//   throw new Error('VITE_API_BASE_URL 必须是无凭据、查询参数和片段的 HTTP(S) 地址。')
-// }
-
-export const BASE_URL =BASE_MAP.develop
+// Older installations use the warehouse LAN endpoint when no build override is set.
+const configuredBase = (import.meta.env.VITE_API_BASE_URL || '').trim()
+export const BASE_URL = configuredBase.replace(/\/+$/, '') || 'http://192.168.1.6:8001'
 
 const PRODUCT_IMPORT_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000
 const ACCESS_TOKEN_STORAGE_KEY = 'access'

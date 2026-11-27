@@ -64,6 +64,21 @@
       </div>
     </section>
 
+    {% if inventory_close_warnings %}
+      <section class="toolbar-card" aria-labelledby="stock-review-heading">
+        <h2 id="stock-review-heading">账期内待复核的库存日结</h2>
+        <ul>
+          {% for warning in inventory_close_warnings %}
+            <li>
+              <a href="{{ warning.detail_url }}">{{ warning.business_date }}{% if warning.through_date %} 至 {{ warning.through_date }}{% endif %}</a>
+              · {{ warning.state_label }} · {{ warning.assignee|default:"待认领" }}
+              {% for reason in warning.reasons %} · {{ reason.message }}{% endfor %}
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
+
     <section class="kpi-grid">
       <article class="kpi-card tone-status">
         <div class="kpi-label">账期状态</div>

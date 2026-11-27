@@ -35,6 +35,7 @@ auth.json
 *.wgt
 media/
 private_returns/
+private_close/
 staticfiles/
 backups/
 **/*.[sS][qQ][lL]

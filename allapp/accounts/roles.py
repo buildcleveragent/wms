@@ -60,6 +60,8 @@ ROLE_GROUP_TEMPLATES = {
             "inventory.view_inventorysummary",
             "inventory.view_inventorytransaction",
             "inventory.view_inventorysnapshotdaily",
+            "inventory.view_inventorydailyclose",
+            "inventory.review_inventorydailyclose",
             "reports.manage_alert_cases",
         ),
     ),
@@ -98,6 +100,7 @@ ROLE_GROUP_TEMPLATES = {
         group_name="WMS::货主财务",
         permissions=(
             "accounts.access_owner_finance",
+            "inventory.view_inventorydailyclose",
             "accounts.view_owner_financials",
             "reports.view_owner_operations",
             "reports.export_operations",

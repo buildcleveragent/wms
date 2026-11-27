@@ -59,6 +59,7 @@ from allapp.billing.services import (
 from allapp.billing.services._common import _compute_fee_with_rule
 from allapp.core.choices import InvTxType
 from allapp.inventory.models import (
+    InventoryDailyClose,
     InventoryDetail,
     InventorySnapshotDaily,
     InventoryTransaction,
@@ -645,6 +646,20 @@ class BillingServiceTests(TestCase):
             )
 
         self.assertIn("数据对账未通过", str(exc.exception))
+
+    def test_pending_inventory_review_preserves_lock_and_invoice_amounts(self):
+        day = datetime.date(2026, 4, 2)
+        close = InventoryDailyClose.objects.create(
+            owner=self.owner, warehouse=self.warehouse, business_date=day,
+            review_state=InventoryDailyClose.ReviewState.FINANCE,
+        )
+        self._create_accrual(amount="15.00", service_date=day, fingerprint="stock-review-advisory")
+        period = lock_period(self.owner.pk, self.warehouse.pk, "stock-review", day, day)
+        self.assertEqual(period.status, PeriodStatus.CLOSED)
+        bill = generate_invoice_for_period(period, invoice_no="DC-INVOICE", issue_date=day, due_date=day)
+        self.assertEqual(bill.total, Decimal("15.00"))
+        close.refresh_from_db()
+        self.assertEqual(close.review_state, InventoryDailyClose.ReviewState.FINANCE)
 
     def test_generate_invoice_sums_subtotal_tax_and_total_exactly(self):
         period = BillingPeriod.objects.create(

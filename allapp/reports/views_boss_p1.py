@@ -937,7 +937,20 @@ class AlertCaseActionApi(APIView):
 
     @transaction.atomic
     def patch(self, request, pk, action):
+        from allapp.inventory.daily_close_review import ALERT_TYPE, can_review, can_sign
+
         case = self._case(request, pk)
+        is_daily_close = case.alert_type == ALERT_TYPE
+        if is_daily_close:
+            if action not in ("assignment", "note"):
+                return Response(
+                    {"detail": "请在库存日结工作台完成仓管复核与财务签核。"}, status=409
+                )
+            if not (
+                can_review(request.user, case.warehouse_id)
+                or can_sign(request.user, case.warehouse_id)
+            ):
+                raise PermissionDenied("需要此仓库的日结处理权限。")
         before = case.status
         if action == "assignment":
             assignee_id = request.data.get("assignee")
@@ -948,6 +961,10 @@ class AlertCaseActionApi(APIView):
                 return Response({"detail": "责任人不存在。"}, status=400)
             if not AccessScope.for_user(assignee).allows(warehouse_id=case.warehouse_id):
                 return Response({"detail": "责任人没有对应仓库范围。"}, status=409)
+            if is_daily_close and not (
+                can_review(assignee, case.warehouse_id) or can_sign(assignee, case.warehouse_id)
+            ):
+                return Response({"detail": "责任人没有此仓库的日结处理权限。"}, status=409)
             case.assignee = assignee
             due_at = request.data.get("due_at")
             if due_at:

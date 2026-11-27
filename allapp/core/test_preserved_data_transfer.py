@@ -22,6 +22,7 @@ from allapp.billing.models import BillingServiceContract
 from allapp.core.business_data_purge import canonical_target
 from allapp.core.preserved_data_transfer import (
     EXCLUDED_HISTORY_MODEL_LABELS,
+    TRANSFER_FORMAT_VERSION,
     _dump_command,
     _restore_footer,
     _restore_header,
@@ -37,6 +38,7 @@ from allapp.products.models import (
     ProductCategory,
     ProductPackage,
     ProductUom,
+    TransferProductBinding,
 )
 from allapp.reports.models import OperatingTarget
 
@@ -57,6 +59,33 @@ class PreservedDataTransferUnitTests(SimpleTestCase):
         self.assertIn("products_product", scope.selected_tables)
         self.assertIn("products_productpackage", scope.selected_tables)
         self.assertIn("products_productbarcode", scope.selected_tables)
+        self.assertIn("products_transferproductbinding", scope.selected_tables)
+        self.assertTrue(
+            {
+                "reports_bosscheckstate",
+                "reports_bossreadprogress",
+                "reports_ownerarchivejob",
+                "salesapp_saleminicheckoutsubmission",
+            }.isdisjoint(scope.selected_tables)
+        )
+
+    def test_restore_rejects_previous_manifest_version_before_reading_database(self):
+        with tempfile.TemporaryDirectory() as raw_temp:
+            bundle = Path(raw_temp)
+            (bundle / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "format_version": TRANSFER_FORMAT_VERSION,
+                        "purge_manifest_version": "2026-10-23.1",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (bundle / "preserved-data.sql.gz").touch()
+            with self.assertRaisesMessage(CommandError, "备份清单版本与当前代码不一致"):
+                call_command(
+                    "restore_preserved_data", "--dry-run", "--input", str(bundle), stdout=StringIO()
+                )
 
     def test_sql_validator_accepts_only_selected_insert_statements(self):
         with tempfile.TemporaryDirectory() as raw_temp:
@@ -204,6 +233,18 @@ class PreservedDataTransferMySQLTests(TransactionTestCase):
             is_primary=True,
             actor=operator,
         )
+        receiving_owner = Owner.objects.create(name="Receiving Owner", code="RECEIVER")
+        receiving_product = Product.objects.create(
+            owner=receiving_owner,
+            code="RECEIVING-PRODUCT",
+            name="Receiving Product",
+            category=category,
+            base_uom=uom,
+            expiry_control=False,
+        )
+        provenance = TransferProductBinding.objects.create(
+            source_product=product, target_product=receiving_product
+        )
         next_sku_sequence = Owner.all_objects.get(pk=owner.pk).next_sku_sequence
         historical_audit = AuditEvent.objects.create(
             username=operator.username,
@@ -233,6 +274,14 @@ class PreservedDataTransferMySQLTests(TransactionTestCase):
                 0o600,
             )
             self.assertIn("accounts.auditevent", manifest["excluded_model_labels"])
+            self.assertIn(
+                {
+                    "label": "products.transferproductbinding",
+                    "table": "products_transferproductbinding",
+                    "row_count": 1,
+                },
+                manifest["selected_models"],
+            )
 
             self._empty_application_tables()
             self.assertFalse(get_user_model().objects.exists())
@@ -261,6 +310,14 @@ class PreservedDataTransferMySQLTests(TransactionTestCase):
         self.assertEqual(restored_category.image.name, "product_categories/example.png")
         restored_product = Product.objects.get(pk=product.pk)
         self.assertEqual(restored_product.sku, product.sku)
+        self.assertTrue(
+            TransferProductBinding.objects.filter(
+                pk=provenance.pk,
+                source_product=restored_product,
+                target_product__pk=receiving_product.pk,
+                target_product__owner_id=receiving_owner.pk,
+            ).exists()
+        )
         self.assertTrue(
             ProductPackage.objects.filter(
                 pk=package.pk,

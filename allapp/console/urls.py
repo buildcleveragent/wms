@@ -17,6 +17,8 @@ urlpatterns = [
     # 仪表盘数据（一个端点返回全部图表需要的数据）
     path("api/dashboard/summary/", DashboardSummaryApi.as_view(), name="dashboard_summary"),
 
+    path("inventory/daily-close/", include("allapp.console.urls_daily_close")),
+
     # 计费总览
     path("billing/", BillingOverviewView.as_view(), name="billing_overview"),
     path("billing/overview/", BillingOverviewView.as_view(), name="billing_overview_alias"),

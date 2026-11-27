@@ -20,7 +20,7 @@ def create_backup_set(evidence_root, db_script, media_script, *, env=None):
     }
     hooks = (
         ("database", db_script, {"database"}),
-        ("media", media_script, {"media", "private_arrivals", "private_returns"}),
+        ("media", media_script, {"media", "private_arrivals", "private_returns", "private_close"}),
     )
     print(f"Recording backups for the stopped writers in {directory}", flush=True)
     for kind, hook, required in hooks:

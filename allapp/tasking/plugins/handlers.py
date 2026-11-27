@@ -16,6 +16,7 @@ from allapp.core.utils.log_context import build_log_payload
 from allapp.inventory import services as inv_services
 from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.inventory.models import InventoryTransaction, PostingJournal
+from allapp.inventory.operation_time import inventory_now
 from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
 
 log = logging.getLogger(__name__)
@@ -424,7 +425,7 @@ class DefaultPostingHandler(BasePostingHandler):
         - 库存服务无交易 → 抛错回滚；
         - 扫描打点由库存服务完成并校验更新数量。
         """
-        now_ts = now or timezone.now()
+        now_ts = inventory_now(now)
         batch = batch_no or (timezone.now().strftime("%Y%m%d-%H%M%S-") + str(uuid4())[:8])
         ctx, ctx_text = build_log_payload(task=task, user=by_user, journal=pj, posting_batch=batch)
 

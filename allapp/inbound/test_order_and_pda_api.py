@@ -162,6 +162,9 @@ class InboundOrderAndPdaApiTests(TestCase):
         )
         ReceiveLineExtra.objects.create(line=line)
         client = self.client_for(operator)
+        detail = client.get(f"/api/inbound/pda/tasks/{task.pk}/")
+        self.assertEqual(detail.status_code, 200, detail.data)
+        self.assertIs(detail.data["lines"][0]["serial_control"], True)
         self.assertEqual(
             client.post(f"/api/inbound/pda/tasks/{task.pk}/claim/").status_code,
             200,
@@ -470,6 +473,7 @@ class InboundOrderAndPdaApiTests(TestCase):
         listed = client.get("/api/inbound/pda/tasks/?task_type=RECEIVE")
         self.assertEqual(listed.status_code, 200)
         self.assertEqual({row["id"] for row in listed.data["results"]}, {task.pk})
+        self.assertIs(listed.data["results"][0]["lines"][0]["serial_control"], False)
         self.assertEqual(
             client.get(f"/api/inbound/pda/tasks/{assigned_elsewhere.pk}/").status_code,
             404,

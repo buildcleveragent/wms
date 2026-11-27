@@ -17,13 +17,30 @@ def seconds(start, finish):
     return (right - left).total_seconds()
 
 
+def nonnegative_measurement(value):
+    return (
+        type(value) in (int, float) and value >= 0 and (type(value) is int or math.isfinite(value))
+    )
+
+
 def capacity_errors(data, profile):
+    if (
+        not isinstance(data, dict)
+        or not isinstance(data.get("dataset", {}), dict)
+        or not isinstance(data.get("runs", []), list)
+        or any(not isinstance(row, dict) for row in data.get("runs", []))
+    ):
+        return ["invalid capacity evidence structure"]
     errors = []
     for name, minimum in profile["dataset"].items():
-        if data.get("dataset", {}).get(name, 0) < minimum:
+        value = data.get("dataset", {}).get(name)
+        if type(value) is not int or value < minimum:
             errors.append(f"dataset below required {name}")
     rules = profile["capacity"]
-    if data.get("warmup_seconds", 0) < rules["warmup_seconds"]:
+    if (
+        not nonnegative_measurement(data.get("warmup_seconds"))
+        or data["warmup_seconds"] < rules["warmup_seconds"]
+    ):
         errors.append("warmup is incomplete")
     if not data.get("deployment_identity") or not data.get("resource_limits"):
         errors.append("deployment and resource identity required")
@@ -38,6 +55,7 @@ def capacity_errors(data, profile):
                 errors.append(f"missing/duplicate run: {scenario}/{phase['users']}")
                 continue
             row = matches[0]
+            invalid_numeric = False
             for name in (
                 "planned_requests",
                 "started_requests",
@@ -52,8 +70,11 @@ def capacity_errors(data, profile):
                 "measured_seconds",
             ):
                 value = row.get(name)
-                if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                if not nonnegative_measurement(value):
+                    invalid_numeric = True
                     errors.append(f"invalid numeric measurement: {name}")
+            if invalid_numeric:
+                continue
             if row.get("measured_seconds", 0) < phase["seconds"]:
                 errors.append("measurement window too short")
             expected_roles = {
@@ -86,9 +107,15 @@ def capacity_errors(data, profile):
                 or row.get("write_p95_ms", float("inf")) > rules["write_p95_ms"]
             ):
                 errors.append("latency threshold exceeded")
-            if any(key not in row.get("metrics", {}) for key in rules["required_metrics"]):
-                errors.append("required telemetry is missing")
-            if row.get("inventory_errors") != 0 or row.get("financial_errors") != 0:
+            metrics = row.get("metrics")
+            for name in rules["required_metrics"]:
+                value = metrics.get(name) if isinstance(metrics, dict) else None
+                if not nonnegative_measurement(value):
+                    errors.append(f"{scenario}/{phase['users']}: invalid telemetry: {name}")
+            if any(
+                type(row.get(k)) is not int or row[k] != 0
+                for k in ("inventory_errors", "financial_errors")
+            ):
                 errors.append("business invariants failed or were not checked")
     return errors
 
@@ -113,6 +140,7 @@ def recovery_errors(data, profile):
         "media_checksum_verified",
         "private_arrivals_checksum_verified",
         "private_returns_checksum_verified",
+        "private_close_checksum_verified",
         "migration_head_verified",
         "business_flow_verified",
         "inventory_finance_reconciled",
@@ -143,6 +171,30 @@ def manual_errors(data, source):
     ]
 
 
+def validate_archive(args):
+    data, profile = json.loads(args.evidence.read_text()), json.loads(args.profile.read_text())
+    errors = (
+        manual_errors(data, profile["manual_case_source"])
+        if args.kind == "manual"
+        else (capacity_errors if args.kind == "capacity" else recovery_errors)(data, profile)
+    )
+    if args.kind == "capacity" and not errors:
+        # Formal CLI acceptance replays the archive, including request ledgers and native checks.
+        if __package__:
+            from .wms_capacity import build_report, local_artifact
+        else:
+            from wms_capacity import build_report, local_artifact
+        sources = data["sources"]
+        rebuilt = build_report(
+            local_artifact(args.evidence.parent, sources["observations"]),
+            [local_artifact(args.evidence.parent, p) for p in sources["client_dirs"]],
+            profile,
+        )
+        if data != dict(rebuilt, sources=sources):
+            errors.append("capacity summary differs from the archived evidence")
+    return errors
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("kind", choices=("capacity", "recovery", "manual"))
@@ -151,12 +203,10 @@ def main():
         "--profile", type=Path, default=Path("docs/external-acceptance-profile.json")
     )
     args = parser.parse_args()
-    data, profile = json.loads(args.evidence.read_text()), json.loads(args.profile.read_text())
-    errors = (
-        manual_errors(data, profile["manual_case_source"])
-        if args.kind == "manual"
-        else (capacity_errors if args.kind == "capacity" else recovery_errors)(data, profile)
-    )
+    try:
+        errors = validate_archive(args)
+    except (AttributeError, KeyError, TypeError, ValueError, OSError, OverflowError) as exc:
+        errors = [f"missing or invalid acceptance evidence: {exc}"]
     print(
         json.dumps(
             {"status": "BLOCKED" if errors else "PASS", "errors": errors}, ensure_ascii=False

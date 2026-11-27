@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify a non-root candidate using four fresh disposable release volumes."""
+"""Verify a non-root candidate using fresh disposable release volumes."""
 
 import argparse
 import subprocess
@@ -11,7 +11,7 @@ def main():
     parser.add_argument("--image", required=True)
     args = parser.parse_args()
     identity = uuid.uuid4().hex
-    directories = ("staticfiles", "media", "private_returns", "private_arrivals")
+    directories = ("staticfiles", "media", "private_returns", "private_arrivals", "private_close", "private_exports")
     names = {kind: f"wms-release-{kind}-{identity}" for kind in directories}
     container = f"wms-release-volume-check-{identity}"
     created = []
@@ -38,7 +38,7 @@ for kind in sys.argv[1:]:
 subprocess.run([sys.executable, '/app/docker/check_volume_access.py'], check=True)
 from django.core.management import execute_from_command_line
 execute_from_command_line(['manage.py', 'collectstatic', '--noinput'])
-print('PASS: collectstatic and IO on four fresh volumes as UID/GID 10001')
+print('PASS: collectstatic and IO on fresh volumes as UID/GID 10001')
 """
         return subprocess.run(
             [

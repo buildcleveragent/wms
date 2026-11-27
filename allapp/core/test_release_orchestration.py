@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SERVICES = "web scheduler boss-check-worker owner-archive-worker"
+SERVICES = "web scheduler boss-check-worker owner-archive-worker inventory-close-worker"
 DOCKER = r"""#!/bin/sh
 echo "docker $*" >> "$TEST_ROOT/events"
 case "$*" in
@@ -16,7 +16,7 @@ case "$*" in
     if [ "$TEST_SCENARIO" = lingering-writer ] || [ -f "$TEST_ROOT/late-writer" ]; then
       echo leftover-id
     fi ;;
-  *'ps --status running -q web scheduler boss-check-worker owner-archive-worker') echo 'old-web old-scheduler old-worker' ;;
+  *'ps --status running -q web scheduler boss-check-worker owner-archive-worker inventory-close-worker') echo 'old-web old-scheduler old-worker' ;;
   *'ps --status running -q web') echo old-web ;;
   *'ps --status running -q boss-check-worker') echo old-worker ;;
   'inspect '*com.docker.compose.oneoff*)
@@ -76,9 +76,9 @@ if scenario == 'backup-' + kind or scenario in ('resume-failure', 'inactive-time
     raise SystemExit(11)
 if scenario == 'missing-receipt' and kind == 'media':
     raise SystemExit(0)
-includes = ['database'] if kind == 'database' else ['media', 'private_arrivals', 'private_returns']
+includes = ['database'] if kind == 'database' else ['media', 'private_arrivals', 'private_returns', 'private_close']
 if scenario == 'missing-private' and kind == 'media':
-    includes.remove('private_returns')
+    includes.remove('private_close')
 point = os.environ['WMS_BACKUP_SET_ID']
 if scenario == 'mixed-snapshots' and kind == 'media':
     point = 'old-set'

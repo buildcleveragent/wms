@@ -1,0 +1,11 @@
+    <p><strong>{{ event.action_label }}</strong> · {{ event.created_at|date:"Y-m-d H:i" }}{% if internal and event.actor %} · {{ event.actor.username }}{% endif %}</p>
+    {% if internal %}
+      {% if event.change_summary %}
+      <details><summary>{{ event.change_summary }}</summary>
+        <h3>原差异</h3>{% include "console/daily_close/_issues.html" with issues=event.previous_issues %}
+        <h3>本次核查</h3>{% include "console/daily_close/_issues.html" with issues=event.current_issues %}
+      </details>
+      {% else %}<p>{{ event.note|linebreaksbr }}</p>{% endif %}
+      {% if event.reference_labels %}<p>关联凭据 · {{ event.reference_labels|join:"，" }}</p>{% endif %}
+      {% for file in event.attachments.all %}<p><a href="{% url 'console:inventory_daily_close_attachment' file.pk %}">下载 {{ file.file_name }}</a>（{{ file.size|filesizeformat }}）</p>{% endfor %}
+    {% endif %}

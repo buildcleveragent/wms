@@ -1,6 +1,7 @@
 import datetime
 import io
 from decimal import Decimal
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -645,11 +646,18 @@ class BusinessFlowTests(TestCase):
         detail = self.seed_inventory(product, "6.0000")
         order = self.create_outbound_order(product, "4.000")
 
-        allocate_inventory(order, by_user=self.owner_user, allow_backorder=False)
+        opening = timezone.now()
+        scope = {"owner_id": self.owner.pk, "warehouse_id": self.warehouse.pk}
+        generate_inventory_snapshot_for_date(opening.date(), bootstrap=True, **scope)
+        reserved = opening + datetime.timedelta(days=1)
+        cancelled = reserved + datetime.timedelta(days=1)
+        with patch("django.utils.timezone.now", return_value=reserved):
+            allocate_inventory(order, by_user=self.owner_user, allow_backorder=False)
         detail.refresh_from_db()
         self.assertEqual(detail.allocated_qty, Decimal("4.0000"))
 
-        released = unallocate_for_order(order)
+        with patch("django.utils.timezone.now", return_value=cancelled):
+            released = unallocate_for_order(order)
 
         detail.refresh_from_db()
         task = WmsTask.objects.get(task_type=WmsTask.TaskType.PICK, source_pk=str(order.id))
@@ -660,6 +668,12 @@ class BusinessFlowTests(TestCase):
         self.assertEqual(task.status, WmsTask.Status.CANCELLED)
         self.assertTrue(task.lines.exists())
         self.assertFalse(task.lines.exclude(status=WmsTaskLine.Status.CANCELLED).exists())
+        for day, allocated, available in ((reserved.date(), 4, 2), (cancelled.date(), 0, 6)):
+            generate_inventory_snapshot_for_date(day, **scope)
+            row = InventorySnapshotDaily.objects.get(snapshot_date=day, product=product, **scope)
+            self.assertEqual(
+                (row.onhand_qty, row.allocated_qty, row.available_qty), (6, allocated, available)
+            )
 
     def test_flow_4_quick_adjust_updates_inventory_and_company_report(self):
         product = self.create_product("ADJSKU")

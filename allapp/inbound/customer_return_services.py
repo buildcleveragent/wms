@@ -11,7 +11,6 @@ from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
-from django.utils import timezone
 from rest_framework.exceptions import APIException, NotFound, PermissionDenied, ValidationError
 
 from allapp.accounts.access import AccessScope
@@ -23,6 +22,7 @@ from allapp.inventory.locking import (
     run_inventory_write_with_retry,
 )
 from allapp.inventory.models import InventoryDetail, InventoryLayerMovement, InventoryTransaction
+from allapp.inventory.operation_time import inventory_now, inventory_operation
 from allapp.inventory.services import _refresh_summaries
 from allapp.locations.models import Location
 from allapp.outbound.authz import strict_order_queryset
@@ -737,7 +737,7 @@ def post_receipt(user, receipt_id):
     operator(initial.order, user)
 
     def operation():
-        with transaction.atomic():
+        with transaction.atomic(), inventory_operation():
             lock_warehouses_for_inventory_write(initial.order.warehouse_id)
             OutboundOrder.objects.select_for_update().get(pk=initial.order.original_order_id)
             order = CustomerReturn.objects.select_for_update().get(pk=initial.order_id)
@@ -753,7 +753,7 @@ def post_receipt(user, receipt_id):
                 receipt.save(update_fields=["posting_hold_reason", "posting_error"])
                 return False
             _, _, _, _, issue_map = fulfilment(order.original_order)
-            now = timezone.now()
+            now = inventory_now()
             touched = set()
             for row in rows:
                 qty = row.qty_ok + row.qty_damage

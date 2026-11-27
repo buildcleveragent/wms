@@ -12,6 +12,7 @@ x-wms-service: &wms-service
     - wms-private-exports:/app/private_exports
     - wms-private-returns:/app/private_returns
     - wms-private-arrivals:/app/private_arrivals
+    - wms-private-close:/app/private_close
 
 services:
   web:
@@ -37,6 +38,11 @@ services:
   scheduler:
     <<: *wms-service
     command: /app/docker/start-scheduler.sh
+    restart: unless-stopped
+
+  inventory-close-worker:
+    <<: *wms-service
+    command: python manage.py inventory_run_daily_close
     restart: unless-stopped
 
   owner-archive-worker:
@@ -82,3 +88,4 @@ volumes:
   wms-private-exports:
   wms-private-arrivals:
   wms-private-returns:
+  wms-private-close:

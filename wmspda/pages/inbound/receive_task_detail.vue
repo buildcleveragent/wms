@@ -87,20 +87,40 @@
               <button
                 class="link"
                 size="mini"
-                :disabled="!task.can_record || line.finished_at"
+                :disabled="formReadOnly(line)"
                 @click="openLocationPicker(line)"
               >查询库位</button>
             </view>
           </view>
 
-          <view class="quantity-grid">
+          <view v-if="line.serial_control && !line.finished_at" class="field-group">
+            <text class="field-label">本件序列号 *（每次登记 1 件良品）</text>
+            <input
+              :value="lineForms[line.id].serialNo"
+              class="text-input"
+              placeholder="扫描或输入本件序列号"
+              :confirm-hold="true"
+              :disabled="formReadOnly(line) || lineForms[line.id].fromBroadcast"
+              @focus="focusSerial(line)"
+              @tap="focusSerial(line)"
+              @blur="clearSerialFocus(line.id)"
+              @input="editSerial(line, $event)"
+              @confirm="!lineForms[line.id].fromBroadcast && submitReceipt(line)"
+            />
+            <button
+              v-if="lineForms[line.id].fromBroadcast && !formReadOnly(line)"
+              class="link" size="mini" @click="clearBroadcastSerial(line)"
+            >清除重扫</button>
+            <text v-if="lineForms[line.id].retryPayload" class="notice">收货结果待确认，请原样再次提交本行。</text>
+          </view>
+          <view v-else-if="!line.serial_control" class="quantity-grid">
             <view class="field-group">
               <text class="field-label">良品数量 *</text>
               <input
                 v-model="lineForms[line.id].qtyOk"
                 class="number-input"
                 type="digit"
-                :disabled="!task.can_record || line.finished_at"
+                :disabled="formReadOnly(line)"
                 @input="resetRequestId(lineForms[line.id])"
               />
             </view>
@@ -110,7 +130,7 @@
                 v-model="lineForms[line.id].qtyDamage"
                 class="number-input"
                 type="digit"
-                :disabled="!task.can_record || line.finished_at"
+                :disabled="formReadOnly(line)"
                 @input="resetRequestId(lineForms[line.id])"
               />
             </view>
@@ -120,7 +140,7 @@
                 v-model="lineForms[line.id].qtyReject"
                 class="number-input"
                 type="digit"
-                :disabled="!task.can_record || line.finished_at"
+                :disabled="formReadOnly(line)"
                 @input="resetRequestId(lineForms[line.id])"
               />
             </view>
@@ -132,7 +152,7 @@
               v-model="lineForms[line.id].damageReasonCode"
               class="text-input"
               placeholder="例如：包装破损"
-              :disabled="!task.can_record || line.finished_at"
+              :disabled="formReadOnly(line)"
               @input="resetRequestId(lineForms[line.id])"
             />
           </view>
@@ -142,7 +162,7 @@
               v-model="lineForms[line.id].rejectReasonCode"
               class="text-input"
               placeholder="例如：规格不符"
-              :disabled="!task.can_record || line.finished_at"
+              :disabled="formReadOnly(line)"
               @input="resetRequestId(lineForms[line.id])"
             />
           </view>
@@ -153,7 +173,7 @@
               v-model="lineForms[line.id].lotNo"
               class="text-input"
               placeholder="可选"
-              :disabled="!task.can_record || line.finished_at"
+              :disabled="formReadOnly(line)"
               @input="resetRequestId(lineForms[line.id])"
             />
           </view>
@@ -164,7 +184,7 @@
                 v-model="lineForms[line.id].mfgDate"
                 class="text-input"
                 placeholder="YYYY-MM-DD"
-                :disabled="!task.can_record || line.finished_at"
+                :disabled="formReadOnly(line)"
                 @input="resetRequestId(lineForms[line.id])"
               />
             </view>
@@ -174,7 +194,7 @@
                 v-model="lineForms[line.id].expDate"
                 class="text-input"
                 placeholder="YYYY-MM-DD"
-                :disabled="!task.can_record || line.finished_at"
+                :disabled="formReadOnly(line)"
                 @input="resetRequestId(lineForms[line.id])"
               />
             </view>
@@ -186,14 +206,14 @@
               v-model="lineForms[line.id].varianceReason"
               class="text-input"
               placeholder="数量与计划不一致时，结束该行前必须填写"
-              :disabled="!task.can_record || line.finished_at"
+              :disabled="formReadOnly(line)"
               @input="resetRequestId(lineForms[line.id])"
             />
           </view>
           <view class="finalize-row">
             <switch
               :checked="lineForms[line.id].finalize"
-              :disabled="!task.can_record || line.finished_at"
+              :disabled="formReadOnly(line)"
               color="#1d70d6"
               @change="toggleFinalize(lineForms[line.id], $event)"
             />
@@ -204,10 +224,10 @@
             v-if="task.can_record && !line.finished_at"
             class="submit"
             :loading="savingLineId === line.id"
-            :disabled="savingLineId !== null"
+            :disabled="savingLineId !== null || locationPickerLineId !== null"
             @click="submitReceipt(line)"
           >
-            {{ lineForms[line.id].finalize ? '保存并结束该行' : '保存收货数量' }}
+            {{ lineForms[line.id].finalize ? '保存并结束该行' : line.serial_control ? '登记本件' : '保存收货数量' }}
           </button>
         </template>
       </view>
@@ -218,8 +238,9 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { ref } from 'vue'
+import { onHide, onLoad } from '@dcloudio/uni-app'
+import { useBarcodeScanner } from '@/utils/useBarcodeScanner'
 import { api, createIdempotencyUuid } from '@/utils/request'
 
 const taskId = ref(null)
@@ -232,8 +253,63 @@ const locationPickerLineId = ref(null)
 const locationSearch = ref('')
 const locationResults = ref([])
 const locationLoading = ref(false)
+const focusedSerialLineId = ref(null)
 
-const canRecord = computed(() => Boolean(task.value?.can_record))
+function focusSerial(line) {
+  if (savingLineId.value !== null || locationPickerLineId.value !== null) return
+  if (!formReadOnly(line) && !lineForms.value[line.id]?.fromBroadcast) focusedSerialLineId.value = line.id
+}
+
+function clearSerialFocus(lineId) {
+  if (focusedSerialLineId.value === lineId) focusedSerialLineId.value = null
+}
+
+function formReadOnly(line) {
+  return lineReadOnly(line) || Boolean(lineForms.value[line.id]?.retryPayload)
+}
+
+function editSerial(line, event) {
+  const form = lineForms.value[line.id]
+  if (formReadOnly(line) || form.fromBroadcast) return form.serialNo
+  const serial = event.detail.value
+  if (form.serialNo !== serial) {
+    form.serialNo = serial
+    resetRequestId(form)
+  }
+}
+
+function receiveBroadcastSerial(raw) {
+  if (savingLineId.value !== null || locationPickerLineId.value !== null) return
+  const line = task.value?.lines?.find(item => item.id === focusedSerialLineId.value)
+  if (!line?.serial_control || formReadOnly(line)) return
+  const form = lineForms.value[line.id]
+  const serial = String(raw ?? '').trim()
+  if (!serial || !form) return
+  if (form.serialNo.trim()) {
+    if (form.serialNo.trim() !== serial) uni.showToast({ title: '请先核对或清空本件序列号', icon: 'none' })
+    return
+  }
+  form.serialNo = serial
+  form.fromBroadcast = true
+  resetRequestId(form)
+  focusedSerialLineId.value = null
+}
+
+useBarcodeScanner({ onScan: receiveBroadcastSerial })
+
+function clearBroadcastSerial(line) {
+  if (formReadOnly(line)) return
+  const form = lineForms.value[line.id]
+  form.fromBroadcast = false
+  form.serialNo = ''
+  resetRequestId(form)
+}
+
+onHide(() => { focusedSerialLineId.value = null })
+
+function lineReadOnly(line) {
+  return !task.value?.can_record || Boolean(line.finished_at) || savingLineId.value === line.id
+}
 
 function toNumber(value) {
   const number = Number(value || 0)
@@ -254,7 +330,7 @@ function statusClass(status) {
   return 'status-ready'
 }
 
-function receiptForm(line) {
+function receiptForm(line, previous) {
   const receive = line.receive || {}
   const recordedTotal = toNumber(receive.qty_ok) + toNumber(receive.qty_damage) + toNumber(receive.qty_reject)
   // ReceiveLineExtra is created together with every task line, so an untouched
@@ -263,19 +339,23 @@ function receiptForm(line) {
   const defaultGoodQty = !line.finished_at && toNumber(line.qty_done) === 0 && recordedTotal === 0
     ? line.qty_plan
     : receive.qty_ok
+  const lastSerial = line.serial_control === true && toNumber(line.qty_done) + 1 === toNumber(line.qty_plan)
   return {
-    locationId: null,
-    locationLabel: '',
-    qtyOk: formatQty(defaultGoodQty),
-    qtyDamage: formatQty(receive.qty_damage),
-    qtyReject: formatQty(receive.qty_reject),
+    locationId: line.serial_control ? previous?.locationId ?? null : null,
+    locationLabel: line.serial_control ? previous?.locationLabel || '' : '',
+    serialNo: '',
+    fromBroadcast: false,
+    retryPayload: null,
+    qtyOk: line.serial_control ? '1' : formatQty(defaultGoodQty),
+    qtyDamage: line.serial_control ? '0' : formatQty(receive.qty_damage),
+    qtyReject: line.serial_control ? '0' : formatQty(receive.qty_reject),
     lotNo: receive.lot_no || '',
     mfgDate: receive.mfg_date || '',
     expDate: receive.exp_date || '',
     damageReasonCode: receive.damage_reason_code || '',
     rejectReasonCode: receive.reject_reason_code || '',
     varianceReason: '',
-    finalize: Boolean(line.finished_at),
+    finalize: Boolean(line.finished_at) || lastSerial,
     requestId: createIdempotencyUuid(),
   }
 }
@@ -288,7 +368,7 @@ function hydrateTask(nextTask, resetLineId = null) {
     // Preserve unfinished local input when merely refreshing the task header.
     forms[line.id] = previous[line.id] && !line.finished_at && line.id !== resetLineId
       ? previous[line.id]
-      : receiptForm(line)
+      : receiptForm(line, previous[line.id])
   }
   lineForms.value = forms
 }
@@ -309,7 +389,7 @@ async function loadTask() {
 }
 
 function resetRequestId(form) {
-  if (savingLineId.value === null) form.requestId = createIdempotencyUuid()
+  form.requestId = createIdempotencyUuid()
 }
 
 function toggleFinalize(form, event) {
@@ -353,7 +433,8 @@ async function startTask() {
 }
 
 async function openLocationPicker(line) {
-  if (!canRecord.value || line.finished_at) return
+  if (formReadOnly(line)) return
+  focusedSerialLineId.value = null
   locationPickerLineId.value = line.id
   locationSearch.value = ''
   locationResults.value = []
@@ -396,18 +477,20 @@ function validateReceipt(line, form) {
   const planned = numeric(line.qty_plan)
 
   if (!form.locationId) return '请选择收货库位'
+  if (line.serial_control && !form.serialNo.trim()) return '请扫描或输入本件序列号'
   if (qtyOk < 0 || qtyDamage < 0 || qtyReject < 0) return '收货数量不能小于零'
   if (total === 0 && !form.finalize) return '数量均为零时，请明确结束该差异行'
   if (qtyDamage > 0 && !form.damageReasonCode.trim()) return '请填写破损原因'
   if (qtyReject > 0 && !form.rejectReasonCode.trim()) return '请填写拒收原因'
-  if ((total > planned || (form.finalize && total !== planned)) && !form.varianceReason.trim()) {
+  const afterReceipt = line.serial_control ? numeric(line.qty_done) + total : total
+  if ((afterReceipt > planned || (form.finalize && afterReceipt !== planned)) && !form.varianceReason.trim()) {
     return '数量与计划不一致时，请填写差异原因'
   }
   return ''
 }
 
 async function submitReceipt(line) {
-  if (!task.value || savingLineId.value !== null) return
+  if (lineReadOnly(line) || savingLineId.value !== null || locationPickerLineId.value !== null) return
   const form = lineForms.value[line.id]
   const message = validateReceipt(line, form)
   if (message) {
@@ -415,28 +498,34 @@ async function submitReceipt(line) {
     return
   }
 
+  const payload = form.retryPayload || {
+    request_id: form.requestId,
+    line_id: line.id,
+    ...(line.serial_control ? { serial_no: form.serialNo.trim() } : {}),
+    location_id: Number(form.locationId),
+    qty_ok: numeric(form.qtyOk),
+    qty_damage: numeric(form.qtyDamage),
+    qty_reject: numeric(form.qtyReject),
+    lot_no: form.lotNo.trim(),
+    mfg_date: form.mfgDate || null,
+    exp_date: form.expDate || null,
+    damage_reason_code: form.damageReasonCode.trim(),
+    reject_reason_code: form.rejectReasonCode.trim(),
+    finalize: Boolean(form.finalize),
+    variance_reason: form.varianceReason.trim(),
+  }
+  focusedSerialLineId.value = null
   savingLineId.value = line.id
   try {
-    const response = await api.recordInboundReceipt(task.value.id, {
-      request_id: form.requestId,
-      line_id: line.id,
-      location_id: Number(form.locationId),
-      qty_ok: numeric(form.qtyOk),
-      qty_damage: numeric(form.qtyDamage),
-      qty_reject: numeric(form.qtyReject),
-      lot_no: form.lotNo.trim(),
-      mfg_date: form.mfgDate || null,
-      exp_date: form.expDate || null,
-      damage_reason_code: form.damageReasonCode.trim(),
-      reject_reason_code: form.rejectReasonCode.trim(),
-      finalize: Boolean(form.finalize),
-      variance_reason: form.varianceReason.trim(),
-    })
+    const response = await api.recordInboundReceipt(task.value.id, payload)
     hydrateTask(response?.task || response, line.id)
     uni.showToast({ title: response?.idempotent ? '已确认此前收货记录' : '收货已保存', icon: 'success' })
   } catch (error) {
-    // Keep form.requestId intact: retrying this exact payload remains safe if
-    // the network failed after the server committed it.
+    // A lost response can follow a commit. Freeze this serial and its payload until replay.
+    if (line.serial_control) {
+      const status = Number(error?.statusCode || 0)
+      form.retryPayload = status === 0 || status === 408 || status >= 500 ? payload : null
+    }
     console.error('保存收货失败', error)
   } finally {
     savingLineId.value = null

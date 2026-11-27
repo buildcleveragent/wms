@@ -172,6 +172,9 @@ def _normalize_metric_payload(
 def _inventory_rows_source_quality(rows) -> str:
     from allapp.inventory.models import InventorySnapshotDaily
 
+    if isinstance(rows, _ApproximateSnapshotRows):
+        return SourceQuality.APPROXIMATE
+
     approximate_sources = {
         InventorySnapshotDaily.Source.BOOTSTRAP_DETAIL,
         InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX,
@@ -271,6 +274,33 @@ def _snapshot_inventory_metric_rows(owner_id, warehouse_id, service_date):
     )
 
 
+class _ApproximateSnapshotRows(list):
+    """Preserve the billing quality flag even for an empty estimate."""
+
+
+def _pilot_inventory_rows(owner_id, warehouse_id, service_date):
+    from allapp.inventory.daily_close import pilot_covers_date
+    from allapp.inventory.models import InventoryDailyClose, InventorySnapshotDaily
+    from allapp.inventory.snapshot_services import _build_bootstrap_payloads
+
+    tenant = dict(owner_id=owner_id, warehouse_id=warehouse_id)
+    header = InventoryDailyClose.objects.filter(**tenant, business_date=service_date).only(
+        "sealed_at"
+    ).first()
+    if not header and not pilot_covers_date(owner_id, warehouse_id, service_date):
+        return None
+    rows = _snapshot_inventory_metric_rows(owner_id, warehouse_id, service_date)
+    if rows or (header and header.sealed_at):
+        # Review workflow is advisory for finance. Physical snapshot lineage controls billing.
+        return rows
+    # Retain the existing approximate billing estimate without writing it into the pilot ledger.
+    return _ApproximateSnapshotRows(
+        InventorySnapshotDaily(snapshot_date=service_date, **row)
+        for row in _build_bootstrap_payloads(service_date, **tenant).values()
+        if row["onhand_qty"] > 0
+    )
+
+
 def _ensure_inventory_snapshot_for_date(owner_id, warehouse_id, service_date):
     """
     确保指定日期的库存快照存在；若不存在则触发自动生成。
@@ -297,7 +327,10 @@ def _ensure_inventory_snapshot_for_date(owner_id, warehouse_id, service_date):
     返回：
         由 generate_inventory_snapshot_for_date 决定（通常为快照记录数或状态）。
     """
-    from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_date
+    from allapp.inventory.snapshot_services import (
+        MissingInventorySnapshotBaseline,
+        generate_inventory_snapshot_for_date,
+    )
 
     try:
         summary = generate_inventory_snapshot_for_date(
@@ -305,7 +338,7 @@ def _ensure_inventory_snapshot_for_date(owner_id, warehouse_id, service_date):
             owner_id=owner_id,
             warehouse_id=warehouse_id,
         )
-        if summary.get("rows_created", 0) > 0:
+        if summary.get("rows_created", 0) > 0 or summary.get("mode") == "sealed":
             return summary
 
         has_current_inventory = _current_inventory_metric_rows(owner_id, warehouse_id)
@@ -324,7 +357,7 @@ def _ensure_inventory_snapshot_for_date(owner_id, warehouse_id, service_date):
             warehouse_id=warehouse_id,
             bootstrap=True,
         )
-    except ValueError:
+    except MissingInventorySnapshotBaseline:
         # 快照链断裂（前一天快照缺失）→ 回退到 bootstrap 模式
         logger.warning(
             "Snapshot chain broken for %s (owner=%s, warehouse=%s), falling back to bootstrap mode",
@@ -390,6 +423,9 @@ def _inventory_metric_rows(owner_id, warehouse_id, service_date):
     today = timezone.now().date()
     if service_date < today:
         # 历史日期：优先使用快照，避免历史计费数据受当前库存变动影响
+        pilot_rows = _pilot_inventory_rows(owner_id, warehouse_id, service_date)
+        if pilot_rows is not None:
+            return pilot_rows
         rows = _snapshot_inventory_metric_rows(owner_id, warehouse_id, service_date)
         if rows:
             return rows

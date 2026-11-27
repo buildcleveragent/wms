@@ -432,25 +432,32 @@ def accrue_storage_for_date(
     # 历史日期使用库存快照（InventorySnapshotDaily），当天使用实时库存（InventoryDetail）
     today = timezone.now().date()
     if service_date < today:
-        approximate_snapshot = InventorySnapshotDaily.objects.filter(
-            owner_id=owner_id,
-            warehouse_id=warehouse_id,
-            snapshot_date=service_date,
-            snapshot_source__in=[
-                InventorySnapshotDaily.Source.BOOTSTRAP_DETAIL,
-                InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX,
-            ],
-        ).exists()
-        qs = (
-            InventorySnapshotDaily.objects.filter(
+        from ._metrics import _inventory_rows_source_quality, _pilot_inventory_rows
+
+        pilot_rows = _pilot_inventory_rows(owner_id, warehouse_id, service_date)
+        if pilot_rows is not None:
+            approximate_snapshot = _inventory_rows_source_quality(pilot_rows) == SourceQuality.APPROXIMATE
+            qs = [{"onhand": sum(row.onhand_qty for row in pilot_rows)}]
+        else:
+            approximate_snapshot = InventorySnapshotDaily.objects.filter(
                 owner_id=owner_id,
                 warehouse_id=warehouse_id,
                 snapshot_date=service_date,
-                onhand_qty__gt=0,
+                snapshot_source__in=[
+                    InventorySnapshotDaily.Source.BOOTSTRAP_DETAIL,
+                    InventorySnapshotDaily.Source.TX_ROLLFORWARD_APPROX,
+                ],
+            ).exists()
+            qs = (
+                InventorySnapshotDaily.objects.filter(
+                    owner_id=owner_id,
+                    warehouse_id=warehouse_id,
+                    snapshot_date=service_date,
+                    onhand_qty__gt=0,
+                )
+                .values("owner_id", "warehouse_id")
+                .annotate(onhand=Sum("onhand_qty"))
             )
-            .values("owner_id", "warehouse_id")
-            .annotate(onhand=Sum("onhand_qty"))
-        )
     else:
         approximate_snapshot = False
         qs = (

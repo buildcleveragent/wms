@@ -29,6 +29,7 @@ from allapp.inventory.models import (
     InventorySummary,
     ReviewDifference,
 )
+from allapp.inventory.snapshot_services import has_inventory_balance_history
 from allapp.locations.models import Location, Warehouse
 from allapp.outbound.models import OutboundOrder
 from allapp.products.models import ProductUom
@@ -126,6 +127,18 @@ def _inventory_summary_fallback_queryset(*, user, owner_id: int | None = None):
     return qs
 
 
+def inventory_balance_warnings(as_of):
+    if has_inventory_balance_history(as_of):
+        return []
+    return [
+        warning(
+            "HISTORICAL_INVENTORY_BALANCES_UNVERIFIED",
+            1,
+            "该日缺少完整的预留、锁定和破损余额记录，可用库存需与原始凭据核对。",
+        )
+    ]
+
+
 def _inventory_as_of_queryset(
     *, user, owner_id: int | None, warehouse_id: int | None, as_of: datetime.date
 ):
@@ -184,7 +197,7 @@ def _inventory_as_of_queryset(
     inferred_unit_count = qs.filter(
         base_unit_source=InventorySnapshotDaily.UnitSource.LEGACY_INFERRED
     ).count()
-    warnings = []
+    warnings = inventory_balance_warnings(as_of)
     if approximate_count:
         warnings.append(warning("HISTORICAL_INVENTORY_APPROXIMATE", approximate_count))
     if missing_unit_count:

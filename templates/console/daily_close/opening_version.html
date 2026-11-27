@@ -1,0 +1,16 @@
+{% extends "console/daily_close/base.html" %}
+{% block title %}期初版本 V{{ opening.version }} · 库存日结{% endblock %}
+{% block daily_content %}
+<a href="{% url 'console:inventory_daily_close_detail' close.pk %}">返回日结详情</a>
+<h1>期初版本 V{{ opening.version }}</h1>
+<p>{{ close.business_date|date:"Y-m-d" }} 日终 · {{ close.warehouse.name }} · {{ close.owner.name }}</p>
+<section>
+  <h2>{{ opening.get_status_display }}</h2>
+  <dl class="facts"><div><dt>提交时间</dt><dd>{{ opening.submitted_at|date:"Y-m-d H:i" }}</dd></div>
+    {% if opening.decided_at %}<div><dt>决定时间</dt><dd>{{ opening.decided_at|date:"Y-m-d H:i" }}</dd></div>{% endif %}</dl>
+</section>
+<section><h2>该版本的结存数量 <small class="muted">（{{ page.paginator.count }}）</small></h2>
+  {% include "console/daily_close/_lines.html" with rows=page %}
+  {% if page.has_other_pages %}<nav class="pages" aria-label="版本明细分页">{% if page.has_previous %}<a href="{% querystring page=page.previous_page_number %}">上一页</a>{% endif %}第 {{ page.number }} / {{ page.paginator.num_pages }} 页{% if page.has_next %}<a href="{% querystring page=page.next_page_number %}">下一页</a>{% endif %}</nav>{% endif %}
+</section>
+{% endblock %}

@@ -351,6 +351,7 @@ def main():
                 "scripts/test_real_browser_acceptance.py",
                 "scripts/test_console_dashboard_browser.py",
                 "scripts/test_console_navigation_browser.py",
+                "scripts/test_inventory_daily_close_browser.py",
                 f"--junitxml={artifacts / 'real-browser.xml'}",
             ],
         )

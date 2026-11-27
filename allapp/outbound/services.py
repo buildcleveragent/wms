@@ -19,6 +19,7 @@ from allapp.core.models import DocSequence
 from allapp.core.utils.log_context import build_log_payload
 from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.inventory.models import InventoryDetail
+from allapp.inventory.operation_time import inventory_operation
 from allapp.inventory.sale_eligibility import sale_layers
 from allapp.inventory.services import (
     _refresh_summaries,
@@ -674,6 +675,7 @@ def _fefo_details_qs(owner_id: int, warehouse_id: int, product_id: int, *, for_s
 
 # 冻结库存：available → allocated，并将切分结果写入保留态任务（RESERVED）
 @transaction.atomic
+@inventory_operation()
 def allocate_inventory(order, by_user=None, allow_backorder=True):
     """货主管理员确认时，冻结库存，并生成/刷新保留拣货任务（RESERVED）"""
     warehouse_id = (
@@ -1636,6 +1638,7 @@ def _validate_allocation_can_be_released(order) -> None:
 
 
 @transaction.atomic
+@inventory_operation()
 def unallocate_for_order(order, *, by_user=None) -> Decimal:
     """Release frozen inventory and retain cancelled task lines as audit evidence."""
     Order = type(order)

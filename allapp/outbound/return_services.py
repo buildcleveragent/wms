@@ -27,6 +27,7 @@ from allapp.inventory.models import (
     InventoryLayerPosition,
     InventoryTransaction,
 )
+from allapp.inventory.operation_time import inventory_now, inventory_operation
 from allapp.inventory.services import _refresh_summaries
 from allapp.locations.models import Warehouse
 
@@ -362,7 +363,7 @@ def _restore_fifo(line, detail, tx, user, now):
 
 def post_return(user, order_id, data, *, reverse=False):
     def operation():
-        with transaction.atomic():
+        with transaction.atomic(), inventory_operation():
             warehouse_id = return_scope(user).single_warehouse_id
             lock_warehouses_for_inventory_write(warehouse_id)
             order = orders_for(user).select_for_update().filter(pk=order_id).first()
@@ -386,7 +387,7 @@ def post_return(user, order_id, data, *, reverse=False):
                 .filter(pk__in=[line.inventory_id for line in lines])
                 .order_by("id")
             }
-            now = timezone.now()
+            now = inventory_now()
             for line in lines:
                 detail = details.get(line.inventory_id)
                 if (

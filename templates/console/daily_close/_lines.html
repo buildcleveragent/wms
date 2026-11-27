@@ -1,0 +1,15 @@
+<div class="table-wrap"><table class="line-matrix">
+  <thead><tr>{% if not show_movement %}<th>行号</th>{% endif %}<th>商品</th><th>库位</th><th>批次 / 序列号</th><th>生产 / 到期</th><th>单位</th>
+    {% if show_movement %}<th>期初在库</th><th>当日净过账</th>{% endif %}
+    <th>期末在库</th><th>可用</th><th>预留</th><th>锁定</th><th>残损</th>{% if show_movement %}<th>快照 / 占用来源</th>{% endif %}</tr></thead>
+  <tbody>{% for row in rows %}<tr>
+    {% if not show_movement %}<td>{{ rows.start_index|add:forloop.counter0 }}</td>{% endif %}<td>{{ row.product_label|default:row.product_id }}</td><td>{{ row.location_label|default:row.location_id }}</td>
+    <td>{{ row.batch_no|default:"—" }} / {{ row.serial_no|default:"—" }}</td>
+    <td>{{ row.production_date|default:"—" }} / {{ row.expiry_date|default:"—" }}</td>
+    <td>{{ row.base_unit_code|default:"未知" }}</td>
+    {% if show_movement %}<td class="quantity">{{ row.opening_qty|default_if_none:"—" }}</td><td class="quantity">{{ row.movement_qty|default_if_none:"—" }}</td>{% endif %}
+    <td class="quantity">{{ row.onhand_qty|default_if_none:"—" }}</td><td class="quantity">{{ row.available_qty|default_if_none:"—" }}</td>
+    <td class="quantity">{{ row.allocated_qty|default_if_none:"—" }}</td><td class="quantity">{{ row.locked_qty|default_if_none:"—" }}</td><td class="quantity">{{ row.damaged_qty|default_if_none:"—" }}</td>
+    {% if show_movement %}<td>{{ row.source_label|default:"待核实" }} / {{ row.hold_source|default:"待核实" }}</td>{% endif %}
+  </tr>{% empty %}<tr><td colspan="13" class="empty">没有库存维度明细。</td></tr>{% endfor %}</tbody>
+</table></div>

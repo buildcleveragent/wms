@@ -11,6 +11,7 @@ from allapp.accounts.access import AccessScope
 from allapp.accounts.audit import record_audit_event
 from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.inventory.models import InventoryDetail, InventoryTransaction, PostingJournal
+from allapp.inventory.operation_time import inventory_operation
 from allapp.inventory.sale_eligibility import locked_sale_layer_ids, sale_layers
 from allapp.inventory.services import _refresh_summaries, lock_active_inventory_details_for_update
 from allapp.outbound.ownership import inventory_snapshot, transfer_for_order
@@ -183,6 +184,7 @@ def _retire_review(task, actor):
 
 
 @transaction.atomic
+@inventory_operation()
 def reallocate_sale_line(
     *, task, line_id, reason, expected_qty, expected_revision, physical_confirmed, actor
 ):

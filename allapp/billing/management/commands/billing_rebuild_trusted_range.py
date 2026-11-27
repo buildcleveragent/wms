@@ -10,8 +10,11 @@ from allapp.billing.services import (
     accrue_storage_for_date,
     generate_metrics_for_date,
 )
-from allapp.inventory.models import InventorySnapshotDaily
-from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_date
+from allapp.inventory.daily_close import pilot_covers_date
+from allapp.inventory.snapshot_services import (
+    generate_inventory_snapshot_for_date,
+    trusted_inventory_baseline,
+)
 
 
 class Command(BaseCommand):
@@ -35,16 +38,11 @@ class Command(BaseCommand):
         if date_from > date_to:
             raise CommandError("date-from cannot be later than date-to.")
         baseline_date = date_from - datetime.timedelta(days=1)
-        baseline = InventorySnapshotDaily.objects.filter(
+        if not trusted_inventory_baseline(
+            baseline_date,
             owner_id=options["owner"],
             warehouse_id=options["warehouse"],
-            snapshot_date=baseline_date,
-        )
-        if (
-            not baseline.exists()
-            or baseline.exclude(
-                snapshot_source=InventorySnapshotDaily.Source.TX_ROLLFORWARD
-            ).exists()
+            verify_legacy=pilot_covers_date(options["owner"], options["warehouse"], date_from),
         ):
             raise CommandError(
                 "A fully trusted TX_ROLLFORWARD snapshot is required on the preceding day."
@@ -61,9 +59,7 @@ class Command(BaseCommand):
                 "Locked/invoiced approximate accruals must be unlocked or reversed first."
             )
         if not options["apply"]:
-            self.stdout.write(
-                str({"dry_run": True, "date_from": date_from, "date_to": date_to})
-            )
+            self.stdout.write(str({"dry_run": True, "date_from": date_from, "date_to": date_to}))
             return
         with transaction.atomic():
             BillingAccrual.objects.filter(
@@ -75,11 +71,6 @@ class Command(BaseCommand):
             ).delete()
             current = date_from
             while current <= date_to:
-                InventorySnapshotDaily.objects.filter(
-                    owner_id=options["owner"],
-                    warehouse_id=options["warehouse"],
-                    snapshot_date=current,
-                ).delete()
                 generate_inventory_snapshot_for_date(
                     current,
                     owner_id=options["owner"],

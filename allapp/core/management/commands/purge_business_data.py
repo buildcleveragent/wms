@@ -10,6 +10,7 @@ from django.utils.connection import ConnectionDoesNotExist
 from allapp.accounts.audit import record_audit_event
 from allapp.core.business_data_purge import (
     PURGE_MANIFEST_VERSION,
+    PurgeArchiveCleanupPending,
     PurgeBlockedError,
     PurgeConfigurationError,
     PurgeLockError,
@@ -18,6 +19,7 @@ from allapp.core.business_data_purge import (
     ensure_preflight_allows_execution,
     execute_purge,
     prepare_purge,
+    retry_purge_archive_cleanup,
 )
 
 
@@ -40,6 +42,12 @@ class Command(BaseCommand):
             "--execute",
             action="store_true",
             help="正式执行清理；必须同时提供全部生产确认参数。",
+        )
+        mode.add_argument(
+            "--retry-archive-cleanup",
+            type=int,
+            metavar="AUDIT_ID",
+            help="按已提交清理的审计编号重试关联归档和日结凭据清理。",
         )
         parser.add_argument(
             "--database",
@@ -64,7 +72,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--maintenance-confirmed",
             action="store_true",
-            help="确认 Web、后台任务和计费调度已经停止。",
+            help="确认 Web、货主归档及库存日结工作进程、计费调度及其他写入方已经停止。",
         )
 
     def handle(self, *args, **options):
@@ -73,7 +81,8 @@ class Command(BaseCommand):
         if connection.vendor != "mysql":
             raise CommandError(f"{self.command_name} 仅支持 MySQL。")
 
-        if not options["execute"]:
+        retry_id = options["retry_archive_cleanup"]
+        if not options["execute"] and retry_id is None:
             report = self._prepare(alias)
             self._render_report(report, dry_run=True)
             return
@@ -86,6 +95,21 @@ class Command(BaseCommand):
             backup_reference=backup_reference,
         )
         operator = self._operator(alias, options["operator"])
+
+        if retry_id is not None:
+            try:
+                with acquire_purge_lock(alias, expected_target):
+                    retry_purge_archive_cleanup(
+                        alias=alias,
+                        target=expected_target,
+                        audit_action=self.audit_action,
+                        audit_id=retry_id,
+                        operator=operator,
+                    )
+            except Exception as exc:
+                raise CommandError(f"归档文件重试未完成（审计 {retry_id}）：{exc}") from exc
+            self.stdout.write(self.style.SUCCESS(f"审计 {retry_id} 的归档和日结凭据文件已处理。"))
+            return
 
         try:
             with acquire_purge_lock(alias, expected_target):
@@ -101,6 +125,8 @@ class Command(BaseCommand):
                     audit_source=self.audit_source,
                     reset_owner_sku_sequences=self.reset_owner_sku_sequences,
                 )
+        except PurgeArchiveCleanupPending as exc:
+            raise CommandError(str(exc)) from exc
         except Exception as exc:
             self._record_failed_attempt(
                 alias=alias,
@@ -154,7 +180,7 @@ class Command(BaseCommand):
             missing.append("--confirm-target")
         if not (options["operator"] or "").strip():
             missing.append("--operator")
-        if not backup_reference:
+        if not backup_reference and options["retry_archive_cleanup"] is None:
             missing.append("--backup-reference")
         if not options["maintenance_confirmed"]:
             missing.append("--maintenance-confirmed")
@@ -203,6 +229,11 @@ class Command(BaseCommand):
             self.stdout.write("\n[额外更新]")
             self.stdout.write(
                 "  RESET  baseinfo_owner.next_sku_sequence = 1: " f"约 {estimate_text} 行"
+            )
+
+        if "reports_ownerarchivejob" in report.present_purged_tables:
+            self.stdout.write(
+                "归档文件：按任务编号登记私有目录内的 .xlsx、.part、.work，日结凭据按附件索引登记。文件在清理事务提交后处理。"
             )
 
         missing = sorted(report.missing_preserved_tables | report.missing_purged_tables)

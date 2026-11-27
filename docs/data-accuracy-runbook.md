@@ -186,6 +186,29 @@ python manage.py reconcile_data_accuracy --owner <owner_id> --warehouse <warehou
 - `BillLine` 与 `BillingAccrual` 一致
 - 业务闭环测试通过
 
+### 核查既有历史库存
+
+在已批准的库存与流水同一时点的副本上，使用只读数据库账号。按货主、仓库和已经结束的业务日抽取月末、多容器、仅预留或释放、残损移库样本。记录副本编号及带时区的数据时间。一个货主和仓库可以重复指定日期。
+
+```bash
+python manage.py audit_inventory_snapshot --owner <货主ID> --warehouse <仓库ID> \
+  --date <日期1> --date <日期2> --format review-csv \
+  --source-reference <副本编号> --as-of <含时区的数据时间> > inventory-review.csv
+```
+
+默认输出逐日 JSON。CSV 输出仓管与财务可签核的明细。从副本中的有效实存数扣除目标日结束后入账的净变动，按商品、库位、批次、生产日期、效期和序列号汇总各容器，与已有日快照比较。
+
+| 清单结果 | 仓管核对内容 |
+| --- | --- |
+| `onhand_difference` | 核对原日结时间、差异维度的容器明细、已过账流水及盘点单，记录差额和原始凭据。 |
+| `undated_movements` | 补查无过账时间流水的原单及发生日，该维度暂不能倒推。 |
+| `no_snapshot_rows` | 此范围当天缺少快照行。核对日结归档或已签盘点表，数量保留为空。 |
+| `comparable_onhand_matches` | 已有快照与可倒推的在库数相符。历史预留、锁定、残损仍需相应业务单据。 |
+
+仓管填写原始凭据和复核结论，财务填写账期、费用或发票影响。有差异的已锁账期，通过现有调整或冲销流程关联原账单、批准人和更正记录，保留原快照、原账单及审计轨迹。证据不足的条目继续标记“待复核”。
+
+2026-11-25 已完成 10 月 22 日备份的离线抽查，详见[历史库存核查记录](../var/assessments/2026-11-25/historical-inventory-review.md)。
+
 ## Day 4 到 Day 10
 
 目标：进入影子运行期，确认系统不会“今天修好、明天回脏”。
@@ -251,3 +274,21 @@ python manage.py reconcile_data_accuracy --owner <owner_id> --warehouse <warehou
   已完成月结彩排并通过
 - `9/10`
   连续 7 天影子运行通过，且抽盘账实一致
+
+### 库存日结与差异复核
+
+**启用试点**。应用库存迁移后，给标准仓管组追加 `inventory.view_inventorydailyclose`、`inventory.review_inventorydailyclose`，给货主财务组追加查看权限。完全采用仓库默认角色模板的环境可执行 `python manage.py sync_wms_role_groups --ensure-defaults` 补齐模板权限。向承担财务签核的独立账号授予 `inventory.sign_inventorydailyclose`，并核实其仓库角色和授权仓库。管理员进入「库存/盘点 → 库存日结与差异复核」选择试点仓、首个业务日并启用。仅启用仓内有效货主绑定参与日结。
+
+**每日作业**。业务日按上海当地的零点分界。独立进程 `inventory-close-worker` 在次日 00:30 后补齐已到期日期。检查停机后的积压可运行 `python manage.py inventory_run_daily_close --once`。复核一个指定日期用以下命令，也可在控制台选定货主、仓库和日期手工核查。
+
+```bash
+python manage.py inventory_run_daily_close --date YYYY-MM-DD --owner <货主ID> --warehouse <仓库ID>
+```
+
+**建立期初**。先核实首个业务日的前一日日终。若缺少可信快照，仓管在该日期的日结详情提交该货主在该仓全范围的盘点凭据，逐项核实商品、库位、批次、生产／效期和序列号，并核实分配、锁定、破损及盘点后至日切的过账流水。采用外部档案时登记档号并上传签署原件。盘点空仓同样需要完整证据。另一名授权人员核对截止时点和范围并签核后，此版本可作为后续日期的期初。原日期的历史快照及原先质量仍可追溯。
+
+**处理差异**。在列表按日期、货主、仓库和复核阶段筛选。先在详情核对期初、当日净变动、日终结余和占用来源。缺失数量显示为未知。仓管填写原因并提交关联单据、外部档号或附件，财务在同一单据上签核或退回。补记流水或账务调整沿原有业务入口办理，并记录关联单据。已封存日重跑保留原数量与证据，新增差异回到仓管处理。货主财务可查看其范围内的数量及处理进度。
+
+**账期提示**。计费总览、close-readiness 和 preview-lock 按所选账期显示待复核日期、差异原因、负责人和详情入口。零应计账期也会提示。财务仍按现有账期检查、调整、锁账和开票规则办理。
+
+**私有凭据**。JPEG、PNG、PDF 存在 `PRIVATE_CLOSE_ROOT`，生产路径位于 `/app/private_close` 挂载卷。发布前应升级外部备份钩子，将此卷纳入数据库同一恢复点；首次发布也须在媒体回执中列出 `private_close`。恢复时按原复核记录和附件路径核对文件 SHA-256。正式试点使用现场独立账号、真实盘点原件和对应仓库绑定核实首日及次日结果。

@@ -6,6 +6,7 @@ from django.contrib import admin
 from django.urls import NoReverseMatch, get_script_prefix, resolve, reverse
 
 from allapp.accounts.access import AccessScope
+from allapp.inventory.daily_close_review import can_view as can_view_daily_close
 from allapp.outbound.authz import can_view_task_board
 from allapp.tasking.views_console import TASK_TYPE_SLUG_TO_URL
 
@@ -85,6 +86,7 @@ RIBBON_TABS: list[RibbonTab] = [
             RibbonGroup(
                 label="库存",
                 actions=[
+                    RibbonAction("库存日结与差异复核", "console:inventory_daily_close_list", "📋"),
                     RibbonAction("现存量", "admin:inventory_inventorydetail_changelist", "📊"),
                     RibbonAction(
                         "交易流水", "admin:inventory_inventorytransaction_changelist", "🔁"
@@ -210,7 +212,10 @@ RIBBON_TABS: list[RibbonTab] = [
 def _available_destinations(request):
     user = request.user
     console_routes = set()
-    if can_view_task_board(user, scope=AccessScope.for_request(request)):
+    scope = AccessScope.for_request(request)
+    if can_view_daily_close(user, scope=scope):
+        console_routes.add("console:inventory_daily_close_list")
+    if can_view_task_board(user, scope=scope):
         console_routes.update(TASK_TYPE_SLUG_TO_URL.values())
     if BillingOverviewView.can_view_page(user):
         console_routes.add("console:billing_overview")

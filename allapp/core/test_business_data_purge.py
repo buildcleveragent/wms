@@ -1,4 +1,5 @@
 import datetime
+import tempfile
 from io import StringIO
 from types import SimpleNamespace
 from unittest import mock, skipUnless
@@ -39,9 +40,9 @@ from allapp.core.models import DocSequence
 from allapp.inventory.models import InventoryCostLayer, InventoryDetail
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.pos.models import PosCustomer, PosShift
-from allapp.products.models import Product, ProductCategory, ProductUom
-from allapp.reports.models import OperatingTarget
-from allapp.salesapp.models import PriceGroup, SaleProductConfig
+from allapp.products.models import Product, ProductCategory, ProductUom, TransferProductBinding
+from allapp.reports.models import BossCheckState, BossReadProgress, OperatingTarget, OwnerArchiveJob
+from allapp.salesapp.models import PriceGroup, SaleMiniCheckoutSubmission, SaleProductConfig
 from allapp.strategies.models import (
     Strategy,
     StrategyAssignment,
@@ -64,6 +65,7 @@ class BusinessDataPurgeManifestTests(SimpleTestCase):
         "products.productexternalidentifier",
         "products.productidentifierregistry",
         "products.productpackage",
+        "products.transferproductbinding",
         "reports.operatingtarget",
     }
     newly_purged = {
@@ -96,9 +98,13 @@ class BusinessDataPurgeManifestTests(SimpleTestCase):
         "products.gs1providerratelimit",
         "reports.alertcase",
         "reports.alertcasehistory",
+        "reports.bosscheckstate",
+        "reports.bossreadprogress",
         "reports.businessreviewsnapshot",
         "reports.factoutboundordersla",
+        "reports.ownerarchivejob",
         "reports.taskstatesnapshotdaily",
+        "salesapp.saleminicheckoutsubmission",
         "salesapp.saleminiproductreview",
         "salesapp.saleminiproductreviewimage",
         "tasking.countscopelock",
@@ -139,15 +145,19 @@ class BusinessDataPurgeManifestTests(SimpleTestCase):
                 )
                 return models
 
-        with self.assertRaisesMessage(PurgeConfigurationError, "未分类模型"):
-            resolve_manifest(RegistryWithUnknownModel())
+        for resolver in (resolve_manifest, resolve_new_purge_manifest):
+            with self.subTest(resolver=resolver.__name__):
+                with self.assertRaisesMessage(PurgeConfigurationError, "未分类模型"):
+                    resolver(RegistryWithUnknownModel())
 
     def test_new_purge_moves_product_master_to_purge_scope(self):
         manifest = resolve_new_purge_manifest()
 
         self.assertFalse(NEW_PURGE_PRESERVED_MODEL_LABELS & NEW_PURGE_PURGED_MODEL_LABELS)
         self.assertTrue(PRODUCT_MASTER_MODEL_LABELS <= NEW_PURGE_PURGED_MODEL_LABELS)
+        self.assertTrue(self.newly_purged <= NEW_PURGE_PURGED_MODEL_LABELS)
         self.assertIn("products_product", manifest.purged_tables)
+        self.assertIn("products_transferproductbinding", manifest.purged_tables)
         self.assertIn("products_productpackage", manifest.purged_tables)
         self.assertIn("inventory_productinventoryalertpolicy", manifest.purged_tables)
         self.assertIn("outbound_ownerproductmapping", manifest.purged_tables)
@@ -331,6 +341,34 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
             stdout=stdout or StringIO(),
         )
 
+    def seed_transfer_and_runtime_records(self):
+        archive_root = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(self.settings(OWNER_ARCHIVE_ROOT=archive_root))
+        receiving_owner = Owner.objects.create(name="Receiving Owner", code="RECEIVER")
+        receiving_product = Product.objects.create(
+            owner=receiving_owner,
+            category=self.category,
+            base_uom=self.uom,
+            code="RECEIVER-PRODUCT",
+            name="Receiving Product",
+            expiry_control=False,
+        )
+        binding = TransferProductBinding.objects.create(
+            source_product=self.product, target_product=receiving_product
+        )
+        now = timezone.now()
+        records = (
+            BossReadProgress.objects.create(
+                user=self.operator, scope_key="purge", confirmed_at=now
+            ),
+            BossCheckState.objects.create(key="purge", checked_at=now),
+            OwnerArchiveJob.objects.create(owner=self.owner, user=self.operator, expires_at=now),
+            SaleMiniCheckoutSubmission.objects.create(
+                user=self.operator, request_key="purge", fingerprint="f" * 64
+            ),
+        )
+        return binding, records
+
     def execute_new_command(self, *, stdout=None):
         call_command(
             "purge_business_data_new",
@@ -380,11 +418,20 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
         self.assertIn("RESET  baseinfo_owner.next_sku_sequence = 1", output.getvalue())
 
     def test_execute_purges_business_rows_and_preserves_configuration(self):
+        binding, runtime_records = self.seed_transfer_and_runtime_records()
         owner_sequence_before = Owner.all_objects.get(pk=self.owner.pk).next_sku_sequence
 
         self.execute_command()
 
         self.assertTrue(Product.all_objects.filter(pk=self.product.pk).exists())
+        self.assertTrue(
+            TransferProductBinding.objects.filter(
+                pk=binding.pk, source_product=self.product, target_product=binding.target_product_id
+            ).exists()
+        )
+        for record in runtime_records:
+            with self.subTest(model=record._meta.label):
+                self.assertFalse(type(record).objects.filter(pk=record.pk).exists())
         self.assertFalse(InventoryDetail.all_objects.exists())
         self.assertFalse(InventoryCostLayer.objects.exists())
         self.assertFalse(BillingPeriod.objects.exists())
@@ -432,9 +479,15 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
         self.assertGreater(success.after["deleted_rows"]["inventory_inventorydetail"], 0)
 
     def test_new_command_also_purges_product_master(self):
+        binding, runtime_records = self.seed_transfer_and_runtime_records()
         self.execute_new_command()
 
         self.assertFalse(Product.all_objects.filter(pk=self.product.pk).exists())
+        self.assertFalse(Product.all_objects.filter(pk=binding.target_product_id).exists())
+        self.assertFalse(TransferProductBinding.objects.filter(pk=binding.pk).exists())
+        for record in runtime_records:
+            with self.subTest(model=record._meta.label):
+                self.assertFalse(type(record).objects.filter(pk=record.pk).exists())
         self.assertEqual(
             Owner.all_objects.get(pk=self.owner.pk).next_sku_sequence,
             1,
@@ -449,10 +502,10 @@ class BusinessDataPurgeCommandTests(TransactionTestCase):
         self.assertEqual(success.metadata["source"], "purge_business_data_new")
         self.assertEqual(
             success.metadata["manifest_version"],
-            "2026-10-23.1",
+            "2026-11-25.2",
         )
         self.assertTrue(success.metadata["owner_sku_sequence_reset"])
-        self.assertEqual(success.after["reset_owner_sku_sequences"], 1)
+        self.assertEqual(success.after["reset_owner_sku_sequences"], 2)
         self.assertGreater(success.after["deleted_rows"]["products_product"], 0)
 
     def test_missing_confirmation_arguments_are_rejected_before_delete(self):

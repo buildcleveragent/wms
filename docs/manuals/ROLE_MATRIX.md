@@ -62,7 +62,7 @@
 | 阈值补货评估 | `REPLENISHMENT_MINMAX_ENABLED` | 仓库管理员及 `tasking.evaluate_replenishment`；策略须有效 |
 | 出库需求补货 | `REPLENISHMENT_DEMAND_ENABLED` | 由已启用的业务链路和有效策略触发，不是普通用户自行开关 |
 
-补货策略维护使用 `tasking.manage_replenishment_policy`，具备此权限不自动开启补货执行。传统 PDA 有订单收货页没有序列号录入控件，分批验收表单有序列号字段，应按具体任务与表单核对，不能泛化到全部客户端。
+补货策略维护使用 `tasking.manage_replenishment_policy`，具备此权限不自动开启补货执行。传统 PDA 有订单收货任务在原任务行逐件登记良品序列号；分批验收按到货批次逐行录入实物序列号。
 
 到货批次管理使用 `inbound.manage_arrival`；客户退货申请／审批／管理／验收分别使用 `inbound.apply_customer_return`、`inbound.approve_customer_return`、`inbound.manage_customer_return`、`inbound.receive_customer_return`。盘点管理要求任务管理确认能力和有效数据范围，实盘要求任务领取能力。具体界面仍以服务端返回的当前可用动作为准。
 

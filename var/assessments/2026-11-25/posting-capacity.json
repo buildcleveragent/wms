@@ -1,0 +1,659 @@
+{
+  "workload": "One SKU per worker, one unit per inventory receipt posting",
+  "warehouse_lock_query_ms": "Warehouse SELECT FOR UPDATE including the database round trip",
+  "warmup": "One unmeasured receipt per worker before each run",
+  "runs": [
+    {
+      "scenario": "same-warehouse-hotspot",
+      "workers": 4,
+      "warehouses": 1,
+      "postings": 20,
+      "postings_per_second": 3.8241373768500706,
+      "post_p95_ms": 1304.2741029930767,
+      "warehouse_lock_query_p95_ms": 1014.2032929870766,
+      "ledger_mismatches": 0,
+      "stock_mismatches": 0,
+      "samples": [
+        {
+          "task": "CAP-4-1-0-1",
+          "post_ms": 226.9567630137317,
+          "warehouse_lock_query_ms": 4.9973179993685335
+        },
+        {
+          "task": "CAP-4-1-0-2",
+          "post_ms": 1144.7816019936,
+          "warehouse_lock_query_ms": 893.1290370237548
+        },
+        {
+          "task": "CAP-4-1-0-3",
+          "post_ms": 999.8539600055665,
+          "warehouse_lock_query_ms": 783.5102720127907
+        },
+        {
+          "task": "CAP-4-1-0-4",
+          "post_ms": 865.2366129972506,
+          "warehouse_lock_query_ms": 649.4048209860921
+        },
+        {
+          "task": "CAP-4-1-0-5",
+          "post_ms": 1325.7992650032975,
+          "warehouse_lock_query_ms": 1070.0181829743087
+        },
+        {
+          "task": "CAP-4-1-1-1",
+          "post_ms": 494.1679519833997,
+          "warehouse_lock_query_ms": 216.66308798012324
+        },
+        {
+          "task": "CAP-4-1-1-2",
+          "post_ms": 1114.424572995631,
+          "warehouse_lock_query_ms": 868.3069210092071
+        },
+        {
+          "task": "CAP-4-1-1-3",
+          "post_ms": 967.2074659902137,
+          "warehouse_lock_query_ms": 755.3223940194584
+        },
+        {
+          "task": "CAP-4-1-1-4",
+          "post_ms": 958.0163810169324,
+          "warehouse_lock_query_ms": 654.813967004884
+        },
+        {
+          "task": "CAP-4-1-1-5",
+          "post_ms": 1304.2741029930767,
+          "warehouse_lock_query_ms": 1014.2032929870766
+        },
+        {
+          "task": "CAP-4-1-2-1",
+          "post_ms": 827.6812940021046,
+          "warehouse_lock_query_ms": 481.2632180110086
+        },
+        {
+          "task": "CAP-4-1-2-2",
+          "post_ms": 1066.7438029777259,
+          "warehouse_lock_query_ms": 772.4416609853506
+        },
+        {
+          "task": "CAP-4-1-2-3",
+          "post_ms": 910.5792190239299,
+          "warehouse_lock_query_ms": 671.7932620085776
+        },
+        {
+          "task": "CAP-4-1-2-4",
+          "post_ms": 1244.412995991297,
+          "warehouse_lock_query_ms": 720.231290004449
+        },
+        {
+          "task": "CAP-4-1-2-5",
+          "post_ms": 996.3678569765761,
+          "warehouse_lock_query_ms": 777.780802018242
+        },
+        {
+          "task": "CAP-4-1-3-1",
+          "post_ms": 1128.0235309968702,
+          "warehouse_lock_query_ms": 812.6027089892887
+        },
+        {
+          "task": "CAP-4-1-3-2",
+          "post_ms": 1034.7616560175084,
+          "warehouse_lock_query_ms": 758.6354230006691
+        },
+        {
+          "task": "CAP-4-1-3-3",
+          "post_ms": 865.9338479919825,
+          "warehouse_lock_query_ms": 634.1654669959098
+        },
+        {
+          "task": "CAP-4-1-3-4",
+          "post_ms": 1286.9153549836483,
+          "warehouse_lock_query_ms": 1013.2960650080349
+        },
+        {
+          "task": "CAP-4-1-3-5",
+          "post_ms": 914.2709889856633,
+          "warehouse_lock_query_ms": 724.194959999295
+        }
+      ]
+    },
+    {
+      "scenario": "cross-warehouse",
+      "workers": 4,
+      "warehouses": 2,
+      "postings": 20,
+      "postings_per_second": 6.084211886412925,
+      "post_p95_ms": 882.3483689920977,
+      "warehouse_lock_query_p95_ms": 502.9264629993122,
+      "ledger_mismatches": 0,
+      "stock_mismatches": 0,
+      "samples": [
+        {
+          "task": "CAP-4-2-0-1",
+          "post_ms": 558.1534669909161,
+          "warehouse_lock_query_ms": 278.63315600552596
+        },
+        {
+          "task": "CAP-4-2-0-2",
+          "post_ms": 506.1014409875497,
+          "warehouse_lock_query_ms": 241.936212987639
+        },
+        {
+          "task": "CAP-4-2-0-3",
+          "post_ms": 773.0770150083117,
+          "warehouse_lock_query_ms": 254.28716599708423
+        },
+        {
+          "task": "CAP-4-2-0-4",
+          "post_ms": 738.2949230086524,
+          "warehouse_lock_query_ms": 362.2974500176497
+        },
+        {
+          "task": "CAP-4-2-0-5",
+          "post_ms": 643.7364559969865,
+          "warehouse_lock_query_ms": 296.5481450082734
+        },
+        {
+          "task": "CAP-4-2-1-1",
+          "post_ms": 313.5906310053542,
+          "warehouse_lock_query_ms": 8.503610006300732
+        },
+        {
+          "task": "CAP-4-2-1-2",
+          "post_ms": 520.5170650151558,
+          "warehouse_lock_query_ms": 237.7204869990237
+        },
+        {
+          "task": "CAP-4-2-1-3",
+          "post_ms": 557.7681069844402,
+          "warehouse_lock_query_ms": 267.91282699559815
+        },
+        {
+          "task": "CAP-4-2-1-4",
+          "post_ms": 901.6449470072985,
+          "warehouse_lock_query_ms": 505.9833450068254
+        },
+        {
+          "task": "CAP-4-2-1-5",
+          "post_ms": 632.864413986681,
+          "warehouse_lock_query_ms": 316.7868879972957
+        },
+        {
+          "task": "CAP-4-2-2-1",
+          "post_ms": 304.5333749905694,
+          "warehouse_lock_query_ms": 4.340954008512199
+        },
+        {
+          "task": "CAP-4-2-2-2",
+          "post_ms": 501.5272840100806,
+          "warehouse_lock_query_ms": 245.88382500223815
+        },
+        {
+          "task": "CAP-4-2-2-3",
+          "post_ms": 524.0680559945758,
+          "warehouse_lock_query_ms": 245.4556509910617
+        },
+        {
+          "task": "CAP-4-2-2-4",
+          "post_ms": 882.3483689920977,
+          "warehouse_lock_query_ms": 502.9264629993122
+        },
+        {
+          "task": "CAP-4-2-2-5",
+          "post_ms": 668.9699990092777,
+          "warehouse_lock_query_ms": 351.6779729980044
+        },
+        {
+          "task": "CAP-4-2-3-1",
+          "post_ms": 563.889309996739,
+          "warehouse_lock_query_ms": 299.9234129965771
+        },
+        {
+          "task": "CAP-4-2-3-2",
+          "post_ms": 547.0229369821027,
+          "warehouse_lock_query_ms": 259.72947498667054
+        },
+        {
+          "task": "CAP-4-2-3-3",
+          "post_ms": 803.5660999885295,
+          "warehouse_lock_query_ms": 273.8666029763408
+        },
+        {
+          "task": "CAP-4-2-3-4",
+          "post_ms": 704.170860000886,
+          "warehouse_lock_query_ms": 367.035052011488
+        },
+        {
+          "task": "CAP-4-2-3-5",
+          "post_ms": 668.5170189884957,
+          "warehouse_lock_query_ms": 297.2741669800598
+        }
+      ]
+    },
+    {
+      "scenario": "same-warehouse-hotspot",
+      "workers": 8,
+      "warehouses": 1,
+      "postings": 40,
+      "postings_per_second": 4.457590840201756,
+      "post_p95_ms": 1922.2159850178286,
+      "warehouse_lock_query_p95_ms": 1693.3195629972033,
+      "ledger_mismatches": 0,
+      "stock_mismatches": 0,
+      "samples": [
+        {
+          "task": "CAP-8-1-0-1",
+          "post_ms": 660.3974140016362,
+          "warehouse_lock_query_ms": 444.12205801927485
+        },
+        {
+          "task": "CAP-8-1-0-2",
+          "post_ms": 1824.8229470045771,
+          "warehouse_lock_query_ms": 1622.0663279818837
+        },
+        {
+          "task": "CAP-8-1-0-3",
+          "post_ms": 1707.9552760114893,
+          "warehouse_lock_query_ms": 1481.3109209935647
+        },
+        {
+          "task": "CAP-8-1-0-4",
+          "post_ms": 1742.9561669996474,
+          "warehouse_lock_query_ms": 1527.248522004811
+        },
+        {
+          "task": "CAP-8-1-0-5",
+          "post_ms": 1885.1935629791114,
+          "warehouse_lock_query_ms": 1676.7055679811165
+        },
+        {
+          "task": "CAP-8-1-1-1",
+          "post_ms": 271.54777900432236,
+          "warehouse_lock_query_ms": 9.742153983097523
+        },
+        {
+          "task": "CAP-8-1-1-2",
+          "post_ms": 1830.9718189993873,
+          "warehouse_lock_query_ms": 1644.3967400118709
+        },
+        {
+          "task": "CAP-8-1-1-3",
+          "post_ms": 1623.4751820156816,
+          "warehouse_lock_query_ms": 1387.0226090075448
+        },
+        {
+          "task": "CAP-8-1-1-4",
+          "post_ms": 1804.7404590179212,
+          "warehouse_lock_query_ms": 1592.5285440171137
+        },
+        {
+          "task": "CAP-8-1-1-5",
+          "post_ms": 1900.3288070089184,
+          "warehouse_lock_query_ms": 1696.6275289887562
+        },
+        {
+          "task": "CAP-8-1-2-1",
+          "post_ms": 870.7619009946939,
+          "warehouse_lock_query_ms": 641.4933979976922
+        },
+        {
+          "task": "CAP-8-1-2-2",
+          "post_ms": 1842.7499789977446,
+          "warehouse_lock_query_ms": 1610.2574059914332
+        },
+        {
+          "task": "CAP-8-1-2-3",
+          "post_ms": 1680.821490008384,
+          "warehouse_lock_query_ms": 1474.8539880092721
+        },
+        {
+          "task": "CAP-8-1-2-4",
+          "post_ms": 1765.5907299777027,
+          "warehouse_lock_query_ms": 1537.7858169958927
+        },
+        {
+          "task": "CAP-8-1-2-5",
+          "post_ms": 1917.451378016267,
+          "warehouse_lock_query_ms": 1656.6743419971317
+        },
+        {
+          "task": "CAP-8-1-3-1",
+          "post_ms": 1420.0083079922479,
+          "warehouse_lock_query_ms": 1117.5304759817664
+        },
+        {
+          "task": "CAP-8-1-3-2",
+          "post_ms": 1672.5661879754625,
+          "warehouse_lock_query_ms": 1474.9183780222666
+        },
+        {
+          "task": "CAP-8-1-3-3",
+          "post_ms": 1700.4225050040986,
+          "warehouse_lock_query_ms": 1483.3658130082767
+        },
+        {
+          "task": "CAP-8-1-3-4",
+          "post_ms": 1957.506086997455,
+          "warehouse_lock_query_ms": 1634.7445989958942
+        },
+        {
+          "task": "CAP-8-1-3-5",
+          "post_ms": 1771.4608410024084,
+          "warehouse_lock_query_ms": 1545.047091000015
+        },
+        {
+          "task": "CAP-8-1-4-1",
+          "post_ms": 1150.1715450140182,
+          "warehouse_lock_query_ms": 838.3539869973902
+        },
+        {
+          "task": "CAP-8-1-4-2",
+          "post_ms": 1750.6160940101836,
+          "warehouse_lock_query_ms": 1552.3664980137255
+        },
+        {
+          "task": "CAP-8-1-4-3",
+          "post_ms": 1680.5360750004184,
+          "warehouse_lock_query_ms": 1484.8703970201313
+        },
+        {
+          "task": "CAP-8-1-4-4",
+          "post_ms": 1852.2057739901356,
+          "warehouse_lock_query_ms": 1569.4590960047208
+        },
+        {
+          "task": "CAP-8-1-4-5",
+          "post_ms": 1867.600556986872,
+          "warehouse_lock_query_ms": 1630.6167989969254
+        },
+        {
+          "task": "CAP-8-1-5-1",
+          "post_ms": 463.98097698693164,
+          "warehouse_lock_query_ms": 254.67941499664448
+        },
+        {
+          "task": "CAP-8-1-5-2",
+          "post_ms": 1829.362736985786,
+          "warehouse_lock_query_ms": 1630.5619300110266
+        },
+        {
+          "task": "CAP-8-1-5-3",
+          "post_ms": 1682.0340999984182,
+          "warehouse_lock_query_ms": 1427.1492199914064
+        },
+        {
+          "task": "CAP-8-1-5-4",
+          "post_ms": 1754.880933003733,
+          "warehouse_lock_query_ms": 1548.0967939947732
+        },
+        {
+          "task": "CAP-8-1-5-5",
+          "post_ms": 1891.658523993101,
+          "warehouse_lock_query_ms": 1693.3195629972033
+        },
+        {
+          "task": "CAP-8-1-6-1",
+          "post_ms": 1692.0904089929536,
+          "warehouse_lock_query_ms": 1381.9085930008441
+        },
+        {
+          "task": "CAP-8-1-6-2",
+          "post_ms": 1582.6603129971772,
+          "warehouse_lock_query_ms": 1378.4088320098817
+        },
+        {
+          "task": "CAP-8-1-6-3",
+          "post_ms": 1713.270696986001,
+          "warehouse_lock_query_ms": 1497.8497390111443
+        },
+        {
+          "task": "CAP-8-1-6-4",
+          "post_ms": 2016.1195900000166,
+          "warehouse_lock_query_ms": 1738.0034789966885
+        },
+        {
+          "task": "CAP-8-1-6-5",
+          "post_ms": 1729.35681900708,
+          "warehouse_lock_query_ms": 1497.5394860084634
+        },
+        {
+          "task": "CAP-8-1-7-1",
+          "post_ms": 1922.2159850178286,
+          "warehouse_lock_query_ms": 1662.3250319971703
+        },
+        {
+          "task": "CAP-8-1-7-2",
+          "post_ms": 1574.505328986561,
+          "warehouse_lock_query_ms": 1362.0949200121686
+        },
+        {
+          "task": "CAP-8-1-7-3",
+          "post_ms": 1831.5551050181966,
+          "warehouse_lock_query_ms": 1498.4182830085047
+        },
+        {
+          "task": "CAP-8-1-7-4",
+          "post_ms": 1905.233617988415,
+          "warehouse_lock_query_ms": 1681.9123900204431
+        },
+        {
+          "task": "CAP-8-1-7-5",
+          "post_ms": 1739.4498540088534,
+          "warehouse_lock_query_ms": 1508.6389299831353
+        }
+      ]
+    },
+    {
+      "scenario": "cross-warehouse",
+      "workers": 8,
+      "warehouses": 2,
+      "postings": 40,
+      "postings_per_second": 7.06925649531033,
+      "post_p95_ms": 1245.4961519979406,
+      "warehouse_lock_query_p95_ms": 986.3835610158276,
+      "ledger_mismatches": 0,
+      "stock_mismatches": 0,
+      "samples": [
+        {
+          "task": "CAP-8-2-0-1",
+          "post_ms": 367.9450089985039,
+          "warehouse_lock_query_ms": 5.003897997085005
+        },
+        {
+          "task": "CAP-8-2-0-2",
+          "post_ms": 1245.4961519979406,
+          "warehouse_lock_query_ms": 986.3835610158276
+        },
+        {
+          "task": "CAP-8-2-0-3",
+          "post_ms": 1014.6334170131013,
+          "warehouse_lock_query_ms": 757.4592249875423
+        },
+        {
+          "task": "CAP-8-2-0-4",
+          "post_ms": 1188.146931992378,
+          "warehouse_lock_query_ms": 936.1750590032898
+        },
+        {
+          "task": "CAP-8-2-0-5",
+          "post_ms": 1041.4427159994375,
+          "warehouse_lock_query_ms": 780.1173129992094
+        },
+        {
+          "task": "CAP-8-2-1-1",
+          "post_ms": 1094.983216986293,
+          "warehouse_lock_query_ms": 739.6253639890347
+        },
+        {
+          "task": "CAP-8-2-1-2",
+          "post_ms": 1025.5628979939502,
+          "warehouse_lock_query_ms": 757.9822500119917
+        },
+        {
+          "task": "CAP-8-2-1-3",
+          "post_ms": 1102.0222379884217,
+          "warehouse_lock_query_ms": 780.4895300068893
+        },
+        {
+          "task": "CAP-8-2-1-4",
+          "post_ms": 1107.110158976866,
+          "warehouse_lock_query_ms": 818.6668140115216
+        },
+        {
+          "task": "CAP-8-2-1-5",
+          "post_ms": 1034.390244021779,
+          "warehouse_lock_query_ms": 775.0283510249574
+        },
+        {
+          "task": "CAP-8-2-2-1",
+          "post_ms": 1097.0904630084988,
+          "warehouse_lock_query_ms": 745.6075590162072
+        },
+        {
+          "task": "CAP-8-2-2-2",
+          "post_ms": 1025.6180109863635,
+          "warehouse_lock_query_ms": 758.4010119899176
+        },
+        {
+          "task": "CAP-8-2-2-3",
+          "post_ms": 1090.922778006643,
+          "warehouse_lock_query_ms": 778.3986479917075
+        },
+        {
+          "task": "CAP-8-2-2-4",
+          "post_ms": 1138.0001530051231,
+          "warehouse_lock_query_ms": 838.9470409892965
+        },
+        {
+          "task": "CAP-8-2-2-5",
+          "post_ms": 1027.7527639991604,
+          "warehouse_lock_query_ms": 767.0724589843303
+        },
+        {
+          "task": "CAP-8-2-3-1",
+          "post_ms": 370.2448880067095,
+          "warehouse_lock_query_ms": 6.883977999677882
+        },
+        {
+          "task": "CAP-8-2-3-2",
+          "post_ms": 1235.2874529897235,
+          "warehouse_lock_query_ms": 977.5916289945599
+        },
+        {
+          "task": "CAP-8-2-3-3",
+          "post_ms": 1027.1560230175965,
+          "warehouse_lock_query_ms": 775.4812239727471
+        },
+        {
+          "task": "CAP-8-2-3-4",
+          "post_ms": 1184.854571998585,
+          "warehouse_lock_query_ms": 935.6719290080946
+        },
+        {
+          "task": "CAP-8-2-3-5",
+          "post_ms": 1031.677810009569,
+          "warehouse_lock_query_ms": 760.7689950091299
+        },
+        {
+          "task": "CAP-8-2-4-1",
+          "post_ms": 1360.5372389720287,
+          "warehouse_lock_query_ms": 1055.850365984952
+        },
+        {
+          "task": "CAP-8-2-4-2",
+          "post_ms": 1013.7641959881876,
+          "warehouse_lock_query_ms": 745.4499680025037
+        },
+        {
+          "task": "CAP-8-2-4-3",
+          "post_ms": 1199.2164830153342,
+          "warehouse_lock_query_ms": 825.28680600808
+        },
+        {
+          "task": "CAP-8-2-4-4",
+          "post_ms": 1025.4421680001542,
+          "warehouse_lock_query_ms": 755.0275009998586
+        },
+        {
+          "task": "CAP-8-2-4-5",
+          "post_ms": 1053.9027549966704,
+          "warehouse_lock_query_ms": 765.6325520074461
+        },
+        {
+          "task": "CAP-8-2-5-1",
+          "post_ms": 1357.3840630124323,
+          "warehouse_lock_query_ms": 1059.5440389879514
+        },
+        {
+          "task": "CAP-8-2-5-2",
+          "post_ms": 1031.8590129900258,
+          "warehouse_lock_query_ms": 753.8738739967812
+        },
+        {
+          "task": "CAP-8-2-5-3",
+          "post_ms": 1188.9891719911247,
+          "warehouse_lock_query_ms": 823.713078018045
+        },
+        {
+          "task": "CAP-8-2-5-4",
+          "post_ms": 1007.9630260006525,
+          "warehouse_lock_query_ms": 738.9727830013726
+        },
+        {
+          "task": "CAP-8-2-5-5",
+          "post_ms": 1065.8140220039058,
+          "warehouse_lock_query_ms": 771.4058260025922
+        },
+        {
+          "task": "CAP-8-2-6-1",
+          "post_ms": 776.3333469920326,
+          "warehouse_lock_query_ms": 343.0205179902259
+        },
+        {
+          "task": "CAP-8-2-6-2",
+          "post_ms": 1089.8236549983267,
+          "warehouse_lock_query_ms": 819.7605929744896
+        },
+        {
+          "task": "CAP-8-2-6-3",
+          "post_ms": 1042.8699239855632,
+          "warehouse_lock_query_ms": 750.6479419826064
+        },
+        {
+          "task": "CAP-8-2-6-4",
+          "post_ms": 1154.2173030029517,
+          "warehouse_lock_query_ms": 895.0019020121545
+        },
+        {
+          "task": "CAP-8-2-6-5",
+          "post_ms": 1062.3811549739912,
+          "warehouse_lock_query_ms": 784.0438210114371
+        },
+        {
+          "task": "CAP-8-2-7-1",
+          "post_ms": 776.8859219795559,
+          "warehouse_lock_query_ms": 333.33882901933976
+        },
+        {
+          "task": "CAP-8-2-7-2",
+          "post_ms": 1084.6303910075221,
+          "warehouse_lock_query_ms": 807.6776739908382
+        },
+        {
+          "task": "CAP-8-2-7-3",
+          "post_ms": 1052.6767609990202,
+          "warehouse_lock_query_ms": 755.8010969951283
+        },
+        {
+          "task": "CAP-8-2-7-4",
+          "post_ms": 1141.0990209842566,
+          "warehouse_lock_query_ms": 892.232640995644
+        },
+        {
+          "task": "CAP-8-2-7-5",
+          "post_ms": 1056.7639810033143,
+          "warehouse_lock_query_ms": 784.9154499999713
+        }
+      ]
+    }
+  ]
+}

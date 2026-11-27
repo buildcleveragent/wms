@@ -67,6 +67,7 @@ from django.utils import timezone
 
 from allapp.core.utils.log_context import build_log_payload
 from allapp.inventory.locking import lock_warehouses_for_inventory_write
+from allapp.inventory.operation_time import inventory_now, inventory_operation
 from allapp.inventory.sale_eligibility import require_sale_layers, selling_task
 from allapp.inventory.models import (
     InventoryDetail,
@@ -1780,6 +1781,7 @@ def _apply_putaway(
 
 
 @transaction.atomic
+@inventory_operation()
 def post_task(
     *,
     task: WmsTask,
@@ -1856,7 +1858,7 @@ def post_task(
         raise ValidationError(f"不支持的库存过账任务类型：{task_type or '<空>'}")
 
     # 3) 重取并锁定调用方明确提供的扫描
-    now_ts = now or timezone.now()
+    now_ts = inventory_now(now)
     batch = batch_no or now_ts.strftime("%Y%m%d-%H%M%S")
     pj_ctx, pj_text = build_log_payload(task=task, user=user, journal=pj, posting_batch=batch)
     try:

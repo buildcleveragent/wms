@@ -1,0 +1,47 @@
+{% extends "console/base_console.html" %}
+
+{% block content %}
+<style>
+  .dc {max-width:1360px;margin:12px auto 40px;color:#17283a;font-size:15px}
+  .dc h1 {font-size:clamp(24px,3vw,34px);margin:8px 0}
+  .dc h2 {font-size:19px;margin:0 0 14px}
+  .dc p {margin:8px 0;line-height:1.6}
+  .dc section,.dc details.panel {margin:16px 0;padding:18px;border:1px solid var(--line);border-radius:12px;background:white}
+  .dc .heading,.dc .tools,.dc nav.pages,.dc .filters {display:flex;flex-wrap:wrap;align-items:end;gap:12px}
+  .dc .heading {justify-content:space-between;align-items:center}
+  .dc .filters > div {display:grid;gap:4px;min-width:130px}
+  .dc form label {font-weight:600}
+  .dc input:not([type=checkbox]),.dc select,.dc textarea {box-sizing:border-box;max-width:100%;min-height:36px;padding:6px 9px;border:1px solid #96a7b8;border-radius:5px;font:inherit;background:white;color:inherit}
+  .dc textarea {display:block;width:min(100%,640px)}
+  .dc .tools,.dc .pages {margin:12px 0}
+  .dc .button {display:inline-block;text-decoration:none;background:white;color:#154d80;border:1px solid #92abc5;border-radius:6px;padding:8px 14px;font:inherit;cursor:pointer}
+  .dc .primary {background:#185499;border-color:#185499;color:white}
+  .dc .table-wrap {max-width:100%;overflow-x:auto}
+  .dc table {width:100%;border-collapse:collapse;font-size:14px}
+  .dc table.line-matrix {min-width:1050px}
+  .dc .line-matrix td {min-width:42px}
+  .dc td,.dc th {text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  .dc th {color:#455769;background:#f5f8fb;white-space:nowrap}
+  .dc td {overflow-wrap:anywhere}
+  .dc .date-link {white-space:nowrap}
+  .dc .quantity {font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  .dc .muted,.dc .helptext {color:#4e6175}
+  .dc .label {display:inline-block;white-space:nowrap;padding:3px 8px;border-radius:5px;background:#e9eef6}
+  .dc .q-TRUSTED {background:#dcefe3;color:#155531}
+  .dc .q-APPROXIMATE,.dc .q-MISSING {background:#fff0d5;color:#724504}
+  .dc .errorlist,.dc .error {color:#91261c}
+  .dc .notice {border-inline-start:4px solid #3971aa;padding:8px 12px;background:#eff5fb}
+  .dc .empty {text-align:center;color:#536579;padding:20px}
+  .dc summary {cursor:pointer;font-weight:600}
+  .dc .form-row {margin:12px 0}
+  .dc .form-row > label {display:block;margin-bottom:4px}
+  .dc .facts {display:flex;flex-wrap:wrap;gap:18px 32px;margin:12px 0}
+  .dc .facts dt {color:#4e6175;font-size:13px}
+  .dc .facts dd {margin:5px 0 0}
+  @media(max-width:640px){.dc section,.dc details.panel{padding:12px}.dc .filters>div{flex:1 1 45%;min-width:120px}.dc .heading,.dc .tools{align-items:start}}
+</style>
+<div class="dc">
+  {% for message in messages %}<p role="status" class="notice {{ message.tags }}">{{ message }}</p>{% endfor %}
+  {% block daily_content %}{% endblock %}
+</div>
+{% endblock %}

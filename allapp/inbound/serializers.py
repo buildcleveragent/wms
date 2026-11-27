@@ -433,6 +433,7 @@ class InboundTaskLineSerializer(serializers.ModelSerializer):
     brand_model = serializers.CharField(source="product.brand_model", read_only=True)
     product_display_name = serializers.CharField(source="product.display_name", read_only=True)
     product_spec = serializers.CharField(source="product.spec", read_only=True)
+    serial_control = serializers.BooleanField(source="product.serial_control", read_only=True)
     from_location_code = serializers.CharField(source="from_location.code", read_only=True)
     to_location_code = serializers.CharField(source="to_location.code", read_only=True)
     qty_pending = serializers.SerializerMethodField()
@@ -449,6 +450,7 @@ class InboundTaskLineSerializer(serializers.ModelSerializer):
             "brand_model",
             "product_display_name",
             "product_spec",
+            "serial_control",
             "from_location_id",
             "from_location_code",
             "to_location_id",

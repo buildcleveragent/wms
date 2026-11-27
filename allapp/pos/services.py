@@ -25,6 +25,7 @@ from allapp.inventory.models import (
     InventorySummary,
     InventoryTransaction,
 )
+from allapp.inventory.operation_time import inventory_now, inventory_operation
 from allapp.inventory.sale_eligibility import locked_sale_layer_ids, sale_layers
 from allapp.inventory.services import lock_active_inventory_details_for_update
 from allapp.outbound.enums import PricingStatus
@@ -918,8 +919,9 @@ def _lock_original_inventory_details(*, sale_no, sale_lines, resolved_layers):
     return details
 
 
+@inventory_operation()
 def _restore_stock_from_sale(sale, user, reason):
-    now = timezone.now()
+    now = inventory_now()
     batch_no = f"{sale.sale_no}-VOID"
     sale_lines = list(
         sale.lines.select_related("sale", "product", "outbound_order_line__order").order_by(
@@ -1485,6 +1487,7 @@ def create_pos_sale(
 
 
 @transaction.atomic
+@inventory_operation()
 def _create_pos_sale_once(
     *,
     user,
@@ -1625,7 +1628,7 @@ def _create_pos_sale_once(
 
     order_by_owner = {order.owner_id: order for order in orders}
     line_no = 10
-    now = timezone.now()
+    now = inventory_now()
     line_bindings = []
     for item in normalized_items:
         product = item["product"]
@@ -1721,6 +1724,7 @@ def create_pos_return(
 
 
 @transaction.atomic
+@inventory_operation()
 def _create_pos_return_once(
     *,
     user,
@@ -1838,7 +1842,7 @@ def _create_pos_return_once(
             warehouse_id=warehouse_id,
         ):
             _error("refunds", "赊销退款不能超过未还欠款，已还部分请使用实际退款方式。")
-    now = timezone.now()
+    now = inventory_now()
     return_order = PosReturn.objects.create(
         return_no=_make_return_no(now),
         sale=sale,

@@ -1,0 +1,32 @@
+{% extends "console/daily_close/base.html" %}
+{% block title %}{{ title }} · 库存日结{% endblock %}
+{% block daily_content %}
+<a href="{% url 'console:inventory_daily_close_detail' close.pk %}">返回日结详情</a>
+<h1>{{ title }}</h1>
+<p>{{ close.business_date|date:"Y-m-d" }} · {{ close.warehouse.name }} · {{ close.owner.name }}</p>
+{% if submission %}<section><h2>仓管提交的复核依据</h2>
+  {% include "console/daily_close/_event.html" with event=submission internal=True %}
+</section>{% endif %}
+{% if is_opening_action %}
+<section><h2>期初核对明细 <small class="muted">（{{ candidate_rows.paginator.count }}）</small></h2>
+  {% if candidate_error %}<p class="error" role="alert">{{ candidate_error }}</p>{% else %}
+  <p>核对业务日结束时的在库、预留、锁定与残损数量，并将盘点及占用依据与该日界对应。</p>
+  {% include "console/daily_close/_lines.html" with rows=candidate_rows %}
+  {% if candidate_rows.has_other_pages %}<nav class="pages" aria-label="期初分页">{% if candidate_rows.has_previous %}<a href="{% querystring page=candidate_rows.previous_page_number %}">上一页</a>{% endif %}第 {{ candidate_rows.number }} / {{ candidate_rows.paginator.num_pages }} 页{% if candidate_rows.has_next %}<a href="{% querystring page=candidate_rows.next_page_number %}">下一页</a>{% endif %}</nav>{% endif %}
+  {% endif %}
+</section>{% endif %}
+{% if not candidate_error %}<section>
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}{% for hidden in form.hidden_fields %}{{ hidden }}{{ hidden.errors }}{% endfor %}
+  {% if form.non_field_errors %}<div role="alert">{{ form.non_field_errors }}</div>{% endif %}
+  {% for field in form.visible_fields %}<div class="form-row">{{ field.label_tag }} {{ field }}{{ field.errors }}
+    {% if field.help_text %}<p class="helptext" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</p>{% endif %}
+  </div>{% endfor %}
+  {% if is_submission %}<div class="form-row"><label for="files">凭据附件</label>
+    <input type="file" id="files" name="files" multiple accept=".pdf,.jpg,.jpeg,.png" aria-describedby="file-help">
+    <p id="file-help" class="helptext">支持 PDF、JPEG、PNG。每次最多 5 个文件，每个不超过 5 MiB。</p>
+  </div>{% endif %}
+  <button class="button primary">确认{{ title }}</button>
+</form>
+</section>{% endif %}
+{% endblock %}

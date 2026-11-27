@@ -1,0 +1,58 @@
+{% extends "console/daily_close/base.html" %}
+{% block title %}{{ close.business_date|date:"Y-m-d" }} 库存日结{% endblock %}
+{% block daily_content %}
+<a href="{% url 'console:inventory_daily_close_list' %}">返回日结列表</a>
+<div class="heading"><div>
+  <h1>{{ close.business_date|date:"Y-m-d" }} 库存日结</h1>
+  <p>{{ close.warehouse.name }} · {{ close.owner.name }}</p>
+</div><div class="tools">
+  {% for action,label in actions %}<a class="button{% if forloop.first %} primary{% endif %}" href="{% url 'console:inventory_daily_close_action' close.pk action %}">{{ label }}</a>{% endfor %}
+  {% if can_retry %}<form method="post" action="{% url 'console:inventory_daily_close_retry' close.pk %}">{% csrf_token %}<button class="button">重新核查</button></form>{% endif %}
+</div></div>
+<section aria-label="日结状态">
+  <dl class="facts">
+    <div><dt>数据质量</dt><dd><span class="label q-{{ close.quality }}">{{ close.get_quality_display }}</span></dd></div>
+    <div><dt>复核状态</dt><dd>{{ close.get_review_state_display }}</dd></div>
+    {% with basis=close.totals.opening_basis %}
+    {% if basis %}<div><dt>期初依据</dt><dd>
+      {% if basis.kind == "opening" and basis.close_id and basis.version %}<a href="{% url 'console:inventory_daily_close_opening' basis.close_id basis.version %}">{{ basis.date }} 签核期初 V{{ basis.version }}</a>
+      {% elif basis.kind == "snapshot" %}{{ basis.date }} 可信快照
+      {% else %}尚无可信期初{% endif %}
+    </dd></div>{% endif %}{% endwith %}
+    <div><dt>封存时间</dt><dd>{{ close.sealed_at|date:"Y-m-d H:i"|default:"尚未封存" }}</dd></div>
+    <div><dt>最近核查</dt><dd>{{ close.checked_at|date:"Y-m-d H:i"|default:"—" }}</dd></div>
+    {% if close.case_id %}<div><dt>预警工单</dt><dd>#{{ close.case_id }}</dd></div>{% endif %}
+    {% if opening %}<div><dt>期初版本 {{ opening.version }}</dt><dd>{{ opening.get_status_display }}</dd></div>{% endif %}
+  </dl>
+  {% if close.quality == "MISSING" %}<p class="notice">该日缺少库存快照，期末库存无法确认。</p>{% elif close.quality == "APPROXIMATE" %}<p class="notice">该日使用近似数据，复核时请核对原始单据与占用依据。</p>{% endif %}
+</section>
+<section>
+  <h2>差异明细 <small class="muted">（{{ issues.paginator.count }}）</small></h2>
+  {% include "console/daily_close/_issues.html" %}
+  {% if issues.has_other_pages %}<nav class="pages" aria-label="差异分页">{% if issues.has_previous %}<a href="{% querystring issues=issues.previous_page_number %}">上一页</a>{% endif %}第 {{ issues.number }} / {{ issues.paginator.num_pages }} 页{% if issues.has_next %}<a href="{% querystring issues=issues.next_page_number %}">下一页</a>{% endif %}</nav>{% endif %}
+</section>
+<section>
+  <h2>按基本单位汇总</h2>
+  <div class="table-wrap"><table><thead><tr><th>单位</th><th>期初在库</th><th>当日净过账</th><th>期末在库</th><th>可用</th><th>预留</th><th>锁定</th><th>残损</th></tr></thead><tbody>
+    {% for unit,row in close.totals.by_unit.items %}<tr><td>{{ unit|default:"未知" }}</td><td>{{ row.opening_qty|default_if_none:"—" }}</td><td>{{ row.movement_qty|default_if_none:"—" }}</td><td>{{ row.onhand_qty|default_if_none:"—" }}</td><td>{{ row.available_qty|default_if_none:"—" }}</td><td>{{ row.allocated_qty|default_if_none:"—" }}</td><td>{{ row.locked_qty|default_if_none:"—" }}</td><td>{{ row.damaged_qty|default_if_none:"—" }}</td></tr>
+    {% empty %}<tr><td colspan="8" class="empty">{% if close.quality == "TRUSTED" %}已确认当日库存为空。{% else %}尚无可汇总的库存数量。{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+<section>
+  <h2>库存维度明细 <small class="muted">（{{ details.paginator.count }}）</small></h2>
+  {% include "console/daily_close/_lines.html" with rows=details show_movement=True %}
+  {% if details.has_other_pages %}<nav class="pages" aria-label="维度分页">{% if details.has_previous %}<a href="{% querystring lines=details.previous_page_number %}">上一页</a>{% endif %}第 {{ details.number }} / {{ details.paginator.num_pages }} 页{% if details.has_next %}<a href="{% querystring lines=details.next_page_number %}">下一页</a>{% endif %}</nav>{% endif %}
+</section>
+{% if opening %}<section>
+  <h2>期初版本记录</h2>
+  <div class="table-wrap"><table><thead><tr><th>版本</th><th>状态</th><th>仓管提交时间</th><th>财务签核时间</th></tr></thead>
+  <tbody>{% for version in versions %}<tr><td><a href="{% url 'console:inventory_daily_close_opening' close.pk version.version %}">V{{ version.version }}</a></td><td>{{ version.get_status_display }}</td><td>{{ version.submitted_at|date:"Y-m-d H:i" }}</td><td>{{ version.approved_at|date:"Y-m-d H:i"|default:"—" }}</td></tr>{% endfor %}</tbody></table></div>
+</section>{% endif %}
+<section>
+  <h2>复核历史</h2>
+  {% for event in history %}<article>
+    {% include "console/daily_close/_event.html" %}
+  </article>{% empty %}<p>尚无复核记录。</p>{% endfor %}
+  {% if history.has_other_pages %}<nav class="pages" aria-label="历史分页">{% if history.has_previous %}<a href="{% querystring history=history.previous_page_number %}">上一页</a>{% endif %}第 {{ history.number }} / {{ history.paginator.num_pages }} 页{% if history.has_next %}<a href="{% querystring history=history.next_page_number %}">下一页</a>{% endif %}</nav>{% endif %}
+</section>
+{% endblock %}

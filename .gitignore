@@ -147,6 +147,7 @@ staticfiles/
 .idea/
 
 /private_returns/
+/private_close/
 
 private_arrivals/
 

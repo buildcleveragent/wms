@@ -1,17 +1,28 @@
 # allapp/inventory/models.py
 import datetime
 from decimal import Decimal
+from itertools import batched
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import connections, models, router, transaction
 from django.db.models import BooleanField, CheckConstraint, F, Q, Value
 from django.db.models.functions import Coalesce, NullIf, Upper
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from allapp.core.choices import InvTxType, ZoneType
-from allapp.core.models import BaseModel
+from allapp.core.models import BaseModel, SoftDeleteManager
+from allapp.inventory.daily_close_models import (  # noqa: F401
+    InventoryCloseAttachment,
+    InventoryClosePilot,
+    InventoryCloseReview,
+    InventoryCloseScope,
+    InventoryDailyClose,
+    InventoryOpeningVersion,
+)
+from allapp.inventory.operation_time import inventory_now
 
 
 # =========================A. 现存量 =========================
@@ -72,12 +83,158 @@ class ProductInventoryAlertPolicy(models.Model):
         ]
 
 
+class InventoryHoldBalance(models.Model):
+    """Unavailable quantities at the latest write for each physical layer and business day."""
+
+    balance_date = models.DateField(db_index=True)
+    detail_id = models.PositiveBigIntegerField()
+    owner_id = models.PositiveBigIntegerField()
+    warehouse_id = models.PositiveBigIntegerField()
+    location_id = models.PositiveBigIntegerField()
+    product_id = models.PositiveBigIntegerField()
+    batch_no = models.CharField(max_length=64, blank=True)
+    production_date = models.DateField(null=True)
+    expiry_date = models.DateField(null=True)
+    serial_no = models.CharField(max_length=64, blank=True)
+    allocated_qty = models.DecimalField(max_digits=18, decimal_places=4)
+    locked_qty = models.DecimalField(max_digits=18, decimal_places=4)
+    damaged_qty = models.DecimalField(max_digits=18, decimal_places=4)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["detail_id", "balance_date"], name="inv_hold_day")
+        ]
+        indexes = [
+            models.Index(fields=["owner_id", "warehouse_id", "balance_date"], name="inv_hold_scope")
+        ]
+
+    DIMENSIONS = (
+        "owner_id",
+        "warehouse_id",
+        "location_id",
+        "product_id",
+        "batch_no",
+        "production_date",
+        "expiry_date",
+        "serial_no",
+    )
+    BALANCE_FIELDS = ("allocated_qty", "locked_qty", "damaged_qty")
+
+    @classmethod
+    def record_details(cls, ids, *, using, deleting=False):
+        """Called inside the inventory write transaction, after conditional/partial writes."""
+        now = inventory_now()
+        day = (
+            timezone.localdate(now, timezone.get_default_timezone())
+            if timezone.is_aware(now)
+            else now.date()
+        )
+        fields = (*cls.DIMENSIONS, *cls.BALANCE_FIELDS)
+        rows = (
+            InventoryDetail.all_objects.using(using)
+            .filter(pk__in=ids)
+            .select_for_update()
+            .order_by("pk")
+            .values("id", "is_active", "is_deleted", *fields)
+        )
+        balances = []
+        for row in rows:
+            active = row.pop("is_active")
+            deleted = row.pop("is_deleted")
+            if not active or deleted or deleting:
+                row["allocated_qty"] = row["locked_qty"] = row["damaged_qty"] = 0
+            balances.append(cls(detail_id=row.pop("id"), balance_date=day, **row))
+        # MySQL infers the conflict target from the unique index.
+        target = (
+            ["detail_id", "balance_date"]
+            if connections[using].features.supports_update_conflicts_with_target
+            else None
+        )
+        cls.objects.using(using).bulk_create(
+            balances,
+            update_conflicts=True,
+            unique_fields=target,
+            update_fields=fields,
+            batch_size=1000,
+        )
+
+
+class InventoryDetailQuerySet(models.QuerySet):
+    def bulk_create(self, objs, *args, **kwargs):
+        # MySQL doesn't return auto-generated keys for a batch insert. Locate
+        # persisted layers using their unique keys, including conflict updates.
+        self._for_write = True
+        with transaction.atomic(using=self.db, savepoint=False):
+            inserted = super().bulk_create(objs, *args, **kwargs)
+            for batch in batched(inserted, 100):
+                match = Q(pk__in=[row.pk for row in batch if row.pk is not None])
+                for row in batch:
+                    match |= Q(
+                        owner_id=row.owner_id,
+                        product_id=row.product_id,
+                        warehouse_id=row.warehouse_id,
+                        location_id=row.location_id,
+                        container_id=row.container_id,
+                        batch_no__iexact=row.batch_no,
+                        serial_no__iexact=row.serial_no,
+                        production_date=row.production_date,
+                        expiry_date=row.expiry_date,
+                        is_active=row.is_active,
+                    )
+                    if row.serial_no_norm:
+                        match |= Q(
+                            owner_id=row.owner_id,
+                            product_id=row.product_id,
+                            serial_no_norm=row.serial_no_norm,
+                            is_active=row.is_active,
+                        )
+                ids = self.model.all_objects.using(self.db).filter(match).values("pk")
+                InventoryHoldBalance.record_details(ids, using=self.db)
+            return inserted
+
+    bulk_create.alters_data = True
+
+    def update(self, **kwargs):
+        # Conditional F() updates used by outbound reservations bypass Model.save().
+        tracked = {
+            *InventoryHoldBalance.DIMENSIONS,
+            "owner",
+            "warehouse",
+            "location",
+            "product",
+            *InventoryHoldBalance.BALANCE_FIELDS,
+            "is_active",
+            "is_deleted",
+        }
+        if tracked.isdisjoint(kwargs):
+            return super().update(**kwargs)
+        self._for_write = True
+        with transaction.atomic(using=self.db, savepoint=False):
+            ids = list(self.select_for_update().order_by("pk").values_list("pk", flat=True))
+            if not ids:
+                return 0
+            matched = self.filter(pk__in=ids)
+            count = super(InventoryDetailQuerySet, matched).update(**kwargs)
+            InventoryHoldBalance.record_details(ids, using=self.db)
+            self._result_cache = None
+            return count
+
+    update.alters_data = True
+
+
+def record_deleted_inventory_balance(sender, instance, using, **kwargs):
+    InventoryHoldBalance.record_details([instance.pk], using=using, deleting=True)
+
+
 class InventoryDetail(BaseModel):
     """
     现存量快照（Django 5.x + MySQL 8.0.43）
     维度：owner + product + warehouse + zone(可空) + location + 批次/效期 + (可选) serial_no
     数量全部以 product.base_uom 计；base_unit 为冗余快照（禁止手改）。
     """
+
+    objects = SoftDeleteManager.from_queryset(InventoryDetailQuerySet)()
+    all_objects = InventoryDetailQuerySet.as_manager()
 
     # —— 维度外键 —— #
     owner = models.ForeignKey("baseinfo.Owner", on_delete=models.PROTECT, verbose_name="货主")
@@ -388,7 +545,11 @@ class InventoryDetail(BaseModel):
 
         # 严格校验
         self.full_clean()
-        return super().save(*args, **kwargs)
+        using = kwargs.get("using") or router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=using, savepoint=False):
+            result = super().save(*args, **kwargs)
+            InventoryHoldBalance.record_details([self.pk], using=using)
+            return result
 
     # —— FEFO 辅助（业务层排序用，不入库） —— #
     @property

@@ -21,7 +21,7 @@ import MySQLdb
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-KINDS = ("media", "private_arrivals", "private_returns")
+KINDS = ("media", "private_arrivals", "private_returns", "private_close")
 MYSQL_KEYS = ("DB_NAME", "DB_TEST_NAME", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD")
 
 
@@ -141,9 +141,12 @@ def mysql_file(env, path, *, restore=False):
 
 @contextmanager
 def volumes(run_id, side):
+    from docker.check_volume_access import RELEASE_VOLUMES
+
     mounts = {}
     try:
-        for kind in ("staticfiles", *KINDS):
+        for mount_path in RELEASE_VOLUMES:
+            kind = Path(mount_path).name
             name = f"wms-dr-{run_id}-{side}-{kind}"
             subprocess.run(
                 ["docker", "volume", "create", "--label", f"com.wms.drill={run_id}", name],
@@ -376,6 +379,7 @@ def run_from_migrated_source(source, image, evidence):
             "media_checksum_verified": True,
             "private_arrivals_checksum_verified": True,
             "private_returns_checksum_verified": True,
+            "private_close_checksum_verified": True,
             "migration_head_verified": True,
             "business_flow_verified": True,
             "inventory_finance_reconciled": True,

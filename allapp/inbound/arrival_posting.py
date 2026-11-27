@@ -16,6 +16,7 @@ from allapp.core.models import DocSequence
 from allapp.inventory.fifo import create_receipt_layer, move_fifo
 from allapp.inventory.locking import lock_warehouses_for_inventory_write
 from allapp.inventory.models import InventoryCostLayer, InventoryDetail, InventoryTransaction
+from allapp.inventory.operation_time import inventory_now, inventory_operation
 from allapp.inventory.services import _lock_journal, _refresh_summaries
 from allapp.locations.models import Location
 from allapp.tasking.models import TaskAssignment, WmsTask, WmsTaskLine
@@ -88,7 +89,7 @@ def ledger(order, row, task, line_id, qty, location, *, pair=None):
         src_line_id=line_id,
         src_no=task.task_no,
         memo="采购到货验收入库" if pair is None else "到货上架（保留良品／残次属性）",
-        posted_at=timezone.now(),
+        posted_at=inventory_now(),
         posting_batch=f"ARR-{task.pk}",
         pair_id=pair,
     )
@@ -161,7 +162,7 @@ def receive_stock(order, receipt, task, user):
                 source_type="INBOUND_BATCH",
                 source_id=receipt.pk,
                 source_line_id=row.pk,
-                received_date=timezone.now().date(),
+                received_date=inventory_now().date(),
                 batch_no=row.lot_no or "",
                 serial_no=row.serial_no,
                 expiry_date=row.exp_date,
@@ -186,7 +187,7 @@ def receive_stock(order, receipt, task, user):
     task_release(request=SimpleNamespace(user=user), task=putaway)
     receipt.putaway_task = putaway
     receipt.stage = "POSTED"
-    receipt.posted_at = timezone.now()
+    receipt.posted_at = inventory_now()
     task.posting_status = "POSTED"
     event(order, user, "post", receipt=receipt)
 
@@ -346,6 +347,7 @@ def move_stock(order, receipt, task, user):
     event(order, user, "putaway-post", receipt=receipt)
 
 
+@inventory_operation()
 def post_batch(user, receipt_id, *, putaway=False):
     """Keep accepted evidence on failure; successful stock, costs and audit commit together."""
     require(user, {"warehouse_manager"}, "inbound.manage_arrival")
@@ -394,7 +396,7 @@ def post_batch(user, receipt_id, *, putaway=False):
             else:
                 receive_stock(order, receipt, task, user)
             task.posted_at, task.posted_by = (
-                (timezone.now(), user)
+                (inventory_now(), user)
                 if task.posting_status == "POSTED" and receipt.stage != "NO_STOCK"
                 else (None, None)
             )

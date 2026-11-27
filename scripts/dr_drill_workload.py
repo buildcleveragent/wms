@@ -7,6 +7,7 @@ import os
 import select
 import sys
 from contextlib import redirect_stdout
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -25,6 +26,40 @@ def jpg(sequence):
         stream, "JPEG", quality=95, comment=f"synthetic-photo-{sequence}".encode("ascii")
     )
     return ContentFile(stream.getvalue(), name=f"dr-{sequence}.jpg")
+
+
+def write_close_evidence(owner, warehouse, actor, day):
+    from allapp.inventory.daily_close_storage import prepare_files, write_evidence
+    from allapp.inventory.models import (
+        InventoryCloseAttachment,
+        InventoryCloseReview,
+        InventoryDailyClose,
+    )
+
+    with transaction.atomic():
+        close = InventoryDailyClose.objects.create(
+            owner=owner,
+            warehouse=warehouse,
+            business_date=day,
+            review_state=InventoryDailyClose.ReviewState.FINANCE,
+        )
+        review = InventoryCloseReview.objects.create(
+            close=close,
+            actor=actor,
+            action="WAREHOUSE_SUBMIT",
+            note="Synthetic DR fixture",
+        )
+        stream = io.BytesIO()
+        Image.new("RGB", (16, 16), "white").save(stream, "PDF")
+        (document,) = prepare_files([ContentFile(stream.getvalue(), name="dr-count.pdf")])
+        key = write_evidence(close.pk, document)
+        InventoryCloseAttachment.objects.create(
+            review=review,
+            storage_key=key,
+            file_name=document.file_name,
+            content_type=document.content_type,
+            size=len(document.data),
+        )
 
 
 def write_stream():
@@ -97,6 +132,7 @@ def write_stream():
     day = timezone.now().date()
     generate_metrics_for_date(owner.pk, warehouse.pk, day, metric_types=["CBM"])
     accrue_metrics_for_date(owner.pk, warehouse.pk, day)
+    write_close_evidence(owner, warehouse, user, day - timedelta(days=1))
     batch_size = 5
     for sequence in range(1, batch_size + 1):
         with transaction.atomic():
@@ -208,6 +244,8 @@ def snapshot():
     from allapp.inbound.arrival_models import ArrivalPhoto
     from allapp.inbound.customer_return_models import CustomerReturn, CustomerReturnPhoto
     from allapp.inbound.models import InboundReceipt
+    from allapp.inventory.daily_close_storage import evidence_path, private_close_root
+    from allapp.inventory.models import InventoryCloseAttachment
     from allapp.products.models import Product
 
     result = {}
@@ -240,6 +278,25 @@ def snapshot():
     ):
         if set(documents) != result[kind].keys():
             raise RuntimeError(f"Document without its attachment in {kind}")
+    close_files = {}
+    for attachment in InventoryCloseAttachment.objects.select_related("review__close"):
+        close = attachment.review.close
+        key = attachment.storage_key
+        contents = evidence_path(key, close_id=close.pk).read_bytes()
+        if len(contents) != attachment.size:
+            raise RuntimeError("Close evidence size differs from its attachment record")
+        close_files[key] = {
+            "owner": close.owner_id,
+            "warehouse": close.warehouse_id,
+            "date": close.business_date.isoformat(),
+            "review": attachment.review_id,
+            "sha256": hashlib.sha256(contents).hexdigest(),
+        }
+    root = private_close_root()
+    actual = {file.relative_to(root).as_posix() for file in root.rglob("*") if file.is_file()}
+    if not close_files or actual != close_files.keys():
+        raise RuntimeError("Missing or unreferenced close evidence")
+    result["private_close"] = close_files
     print(json.dumps(result))
 
 

@@ -11,6 +11,7 @@ RELEASE_VOLUMES = (
     "/app/private_arrivals",
     "/app/private_returns",
     "/app/private_exports",
+    "/app/private_close",
 )
 
 
@@ -53,6 +54,7 @@ def check_release_volumes():
 
     check_attachment_root(settings.PRIVATE_ARRIVAL_ROOT, "/app/private_arrivals")
     check_attachment_root(settings.PRIVATE_RETURN_ROOT, "/app/private_returns")
+    check_attachment_root(settings.PRIVATE_CLOSE_ROOT, "/app/private_close")
     check_attachment_root(settings.OWNER_ARCHIVE_ROOT, "/app/private_exports")
 
 
@@ -71,4 +73,4 @@ def check_attachment_root(configured, mount):
 if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     check_release_volumes()
-    print("Verified read/write access to staticfiles, media, private_arrivals, private_returns and private_exports.")
+    print("Verified read/write access to staticfiles, media, private_arrivals, private_returns, private_close and private_exports.")

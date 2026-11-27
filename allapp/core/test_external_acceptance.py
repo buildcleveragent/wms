@@ -57,6 +57,22 @@ def test_complete_measured_capacity_contract(profile):
     assert capacity_errors(measured_capacity(profile), profile) == []
 
 
+@pytest.mark.parametrize("invalid", [None, "", "0", False, -1, float("inf"), float("nan")])
+def test_capacity_telemetry_requires_recorded_finite_nonnegative_numbers(profile, invalid):
+    data = measured_capacity(profile)
+    data["runs"][-1]["metrics"]["lock_waits"] = invalid
+    assert capacity_errors(data, profile) == ["cross-warehouse/100: invalid telemetry: lock_waits"]
+
+
+def test_capacity_reports_every_metric_missing_from_a_run(profile):
+    data = measured_capacity(profile)
+    data["runs"][0]["metrics"] = None
+    assert capacity_errors(data, profile) == [
+        f"same-warehouse-hotspot/50: invalid telemetry: {name}"
+        for name in profile["capacity"]["required_metrics"]
+    ]
+
+
 @pytest.mark.parametrize(
     "field,value",
     [
@@ -97,6 +113,7 @@ def test_recovery_requires_measured_consistent_database_media_and_business_check
         "media_checksum_verified",
         "private_arrivals_checksum_verified",
         "private_returns_checksum_verified",
+        "private_close_checksum_verified",
         "migration_head_verified",
         "business_flow_verified",
         "inventory_finance_reconciled",
@@ -113,6 +130,7 @@ def test_recovery_requires_measured_consistent_database_media_and_business_check
         {"restore_started_at": "2026-09-06T09:01:00Z", "validated_at": "2026-09-06T09:02:00Z"},
         {"private_arrivals_checksum_verified": False},
         {"private_returns_checksum_verified": False},
+        {"private_close_checksum_verified": False},
         {"business_flow_verified": False},
     ):
         invalid = copy.deepcopy(data)

@@ -1,7 +1,8 @@
 import csv
 import datetime
-import threading
+import json
 import tempfile
+import threading
 from decimal import Decimal
 from io import StringIO
 from unittest import mock
@@ -25,8 +26,8 @@ from allapp.inventory.models import (
     PostingJournal,
     ReviewDifference,
 )
-from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_date
 from allapp.inventory.services_quick_adjust import QuickAdjustInput, quick_adjust_via_post_task
+from allapp.inventory.snapshot_services import generate_inventory_snapshot_for_date
 from allapp.locations.models import Location, Subwarehouse, Warehouse
 from allapp.products.models import Product, ProductUom
 from allapp.tasking.models import TaskScanLog, WmsTask, WmsTaskLine
@@ -75,6 +76,104 @@ class InventoryWarehouseScopeTests(TestCase):
             password="x",
             warehouse=self.warehouse,
         )
+
+    def test_snapshot_audit_reconstructs_historical_onhand_without_rewriting_it(self):
+        scope = dict(owner=self.owner, warehouse=self.warehouse, product=self.product)
+        dimension = {**scope, "location": self.location}
+        day = datetime.date(2026, 4, 3)
+        InventoryDetail.objects.create(**dimension, onhand_qty=20)
+        snapshot = InventorySnapshotDaily.objects.create(
+            **dimension, snapshot_date=day, onhand_qty=11, available_qty=11
+        )
+        InventoryTransaction.objects.create(
+            **dimension,
+            tx_type=InvTxType.RECEIVE,
+            qty_delta=2,
+            src_model="audit-test",
+            src_id=1,
+            posted_at=datetime.datetime(2026, 4, 4),
+        )
+        out = StringIO()
+        args = ("--owner", str(self.owner.pk), "--warehouse", str(self.warehouse.pk))
+        call_command(
+            "audit_inventory_snapshot",
+            *args,
+            "--date",
+            "2026-04-02",
+            "--date",
+            day.isoformat(),
+            stdout=out,
+        )
+        missing, audit = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertFalse(missing["snapshot_present"])
+        self.assertTrue(audit["snapshot_present"])
+        self.assertEqual(len(audit["issues"]), 1)
+        issue = audit["issues"][0]
+        self.assertEqual(issue["issue"], "onhand_difference")
+        self.assertEqual(Decimal(issue["snapshot_onhand"]), 11)
+        self.assertEqual(Decimal(issue["reconstructed_onhand"]), 18)
+        snapshot.refresh_from_db()
+        self.assertEqual(snapshot.onhand_qty, 11)
+
+        InventoryTransaction.objects.create(
+            **dimension,
+            tx_type=InvTxType.RECEIVE,
+            qty_delta=1,
+            src_model="audit-test",
+            src_id=2,
+        )
+        out = StringIO()
+        call_command("audit_inventory_snapshot", *args, "--date", day.isoformat(), stdout=out)
+        self.assertEqual(json.loads(out.getvalue())["issues"][0]["issue"], "undated_movements")
+
+    def test_snapshot_review_csv_separates_missing_matching_and_mismatched_days(self):
+        scope = dict(owner=self.owner, warehouse=self.warehouse, product=self.product)
+        dimension = {**scope, "location": self.location}
+        InventoryDetail.objects.create(**dimension, onhand_qty=18)
+        for day, qty in [(2, 11), (3, 18)]:
+            InventorySnapshotDaily.objects.create(
+                **dimension, snapshot_date=datetime.date(2026, 4, day), onhand_qty=qty
+            )
+        options = [
+            "--owner",
+            str(self.owner.pk),
+            "--warehouse",
+            str(self.warehouse.pk),
+            "--format",
+            "review-csv",
+            "--source-reference",
+            "=合成副本",
+            "--as-of",
+            "2026-04-03T18:00:00+00:00",
+        ]
+        out = StringIO()
+        call_command(
+            "audit_inventory_snapshot",
+            *options,
+            "--date",
+            "2026-04-01",
+            "--date",
+            "2026-04-02",
+            "--date",
+            "2026-04-03",
+            stdout=out,
+        )
+        rows = list(csv.DictReader(StringIO(out.getvalue())))
+        self.assertEqual(
+            [r["在库核查结果"] for r in rows],
+            [
+                "no_snapshot_rows",
+                "onhand_difference",
+                "comparable_onhand_matches",
+            ],
+        )
+        self.assertEqual(Decimal(rows[1]["倒推在库"]), 18)
+        self.assertEqual({r["副本编号"] for r in rows}, {"'=合成副本"})
+        self.assertEqual({r["复核状态"] for r in rows}, {"待复核"})
+        with self.assertRaisesMessage(CommandError, "已结束"):
+            call_command(
+                "audit_inventory_snapshot", *options, "--date", "2026-04-04", stdout=StringIO()
+            )
 
     def test_inventory_detail_derives_warehouse_from_location(self):
         detail = InventoryDetail.objects.create(
@@ -600,7 +699,10 @@ class InventorySnapshotConcurrencyTests(TransactionTestCase):
             finally:
                 close_old_connections()
 
-        with mock.patch("allapp.inventory.snapshot_services._build_bootstrap_payloads", side_effect=fake_build_bootstrap_payloads):
+        with mock.patch(
+            "allapp.inventory.snapshot_services._build_bootstrap_payloads",
+            side_effect=fake_build_bootstrap_payloads,
+        ):
             thread1 = threading.Thread(target=invoke, args=(0,))
             thread1.start()
             self.assertTrue(payload_entered.wait(timeout=5))

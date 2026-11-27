@@ -10,7 +10,7 @@ from pathlib import Path
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ImproperlyConfigured
-from django.db import connection, transaction
+from django.db import DEFAULT_DB_ALIAS, connection, connections, transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
@@ -50,15 +50,31 @@ def authorized_owner(user):
     return scope.single_owner_id
 
 
-def archive_file(job, suffix=".xlsx"):
+def archive_root():
     root = Path(settings.OWNER_ARCHIVE_ROOT).resolve()
-    if any(
-        root.is_relative_to(Path(public).resolve())
-        for public in (settings.MEDIA_ROOT, settings.STATIC_ROOT)
-        if public
-    ):
-        raise ImproperlyConfigured("货主导出目录应位于独立私有目录。")
-    return root / f"{job.pk}{suffix}"
+    for public in (settings.MEDIA_ROOT, settings.STATIC_ROOT):
+        if public:
+            public_root = Path(public).resolve()
+            if root.is_relative_to(public_root) or public_root.is_relative_to(root):
+                raise ImproperlyConfigured("货主导出目录应位于独立私有目录。")
+    return root
+
+
+def archive_file(job, suffix=".xlsx"):
+    return archive_root() / f"{job.pk}{suffix}"
+
+
+def discard_archive_artifacts(root, job_id):
+    """Remove a single job's published, in-progress and scratch artifacts."""
+    if type(job_id) is not int or job_id <= 0:
+        raise ValueError("归档任务编号必须为正整数。")
+    (root / f"{job_id}.xlsx").unlink(missing_ok=True)
+    (root / f"{job_id}.part").unlink(missing_ok=True)
+    scratch = root / f"{job_id}.work"
+    if scratch.is_symlink():
+        scratch.unlink()
+    elif scratch.exists():
+        shutil.rmtree(scratch)
 
 
 def discard_published_file(sender, instance, using, **kwargs):
@@ -145,34 +161,39 @@ def generate(job):
         temp.unlink(missing_ok=True)
 
 
-def run_one():
-    """One worker per database; MySQL releases the named lock when the connection dies."""
-    with connection.cursor() as cursor:
+@contextmanager
+def owner_archive_worker_lock(using=DEFAULT_DB_ALIAS):
+    """Serialize generation, expiration and maintenance of one database's workbooks."""
+    with connections[using].cursor() as cursor:
         cursor.execute(
             "SELECT GET_LOCK(CONCAT('owner_archive:', LEFT(SHA2(DATABASE(),256),40)), 0)"
         )
-        if not cursor.fetchone()[0]:
-            return False
+        acquired = cursor.fetchone()[0] == 1
         try:
-            expired = OwnerArchiveJob.objects.filter(expires_at__lte=timezone.now())
-            for job in expired.order_by("id")[:100]:
-                archive_file(job).unlink(missing_ok=True)
-                archive_file(job, ".part").unlink(missing_ok=True)
-                scratch = archive_file(job, ".work")
-                if scratch.exists():
-                    shutil.rmtree(scratch)
-                job.delete()
-            job = (
-                OwnerArchiveJob.objects.filter(
-                    status__in=["queued", "running"], expires_at__gt=timezone.now()
-                )
-                .order_by("id")
-                .first()
-            )
-            if job:
-                generate(job)
-            return bool(job)
+            yield acquired
         finally:
-            cursor.execute(
-                "SELECT RELEASE_LOCK(CONCAT('owner_archive:', LEFT(SHA2(DATABASE(),256),40)))"
+            if acquired:
+                cursor.execute(
+                    "SELECT RELEASE_LOCK(CONCAT('owner_archive:', LEFT(SHA2(DATABASE(),256),40)))"
+                )
+
+
+def run_one():
+    """One worker per database; MySQL releases the named lock when the connection dies."""
+    with owner_archive_worker_lock() as acquired:
+        if not acquired:
+            return False
+        expired = OwnerArchiveJob.objects.filter(expires_at__lte=timezone.now())
+        for job in expired.order_by("id")[:100]:
+            discard_archive_artifacts(archive_root(), job.pk)
+            job.delete()
+        job = (
+            OwnerArchiveJob.objects.filter(
+                status__in=["queued", "running"], expires_at__gt=timezone.now()
             )
+            .order_by("id")
+            .first()
+        )
+        if job:
+            generate(job)
+        return bool(job)

@@ -48,6 +48,8 @@ from allapp.billing.models import (
     BillingRule,
 )
 
+from allapp.inventory.daily_close_advisory import inventory_close_warnings
+
 from ._common import (
     _q,
     _save_adjusted_accrual,
@@ -524,6 +526,7 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
     Simulate the full lock_period flow in memory without writing to DB.
     Returns per-accrual detail with original and adjusted amounts.
     """
+    warnings = inventory_close_warnings(owner_id, warehouse_id, start_date, end_date)
     accruals_qs = (
         BillingAccrual.objects.filter(
             owner_id=owner_id,
@@ -581,6 +584,7 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
     if not active_previews and not voided_previews:
         return {
             "accrual_count": 0,
+            "inventory_close_warnings": warnings,
             "original_subtotal": Decimal("0.00"),
             "adjusted_subtotal": Decimal("0.00"),
             "original_tax_total": Decimal("0.00"),
@@ -725,6 +729,7 @@ def preview_lock_period(owner_id, warehouse_id, label, start_date, end_date) -> 
 
     return {
         "accrual_count": len(accrual_list),
+        "inventory_close_warnings": warnings,
         "original_subtotal": _q(sum(p.original_amount for p in accrual_list), "0.01"),
         "adjusted_subtotal": _q(sum(p.adjusted_amount for p in accrual_list), "0.01"),
         "original_tax_total": _q(

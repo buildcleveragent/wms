@@ -19,6 +19,7 @@ from allapp.inventory.models import (
     InventoryDetail,
     InventoryTransaction,
 )
+from allapp.inventory.operation_time import inventory_operation
 from allapp.locations.models import Container, Location
 from allapp.tasking.models import (
     ContainerUsage,
@@ -458,6 +459,7 @@ def _release_task(task: WmsTask, *, by_user) -> None:
 
 
 @transaction.atomic
+@inventory_operation()
 def approve_request(request_id: int, *, by_user, note: str = "") -> WmsTask:
     warehouse_id = (
         RelocationRequest.objects.filter(pk=request_id).values_list("warehouse_id", flat=True).get()
@@ -973,6 +975,7 @@ def resume_task(task_id: int, *, by_user):
 
 
 @transaction.atomic
+@inventory_operation()
 def void_task(task_id: int, *, by_user, note: str):
     warehouse_id = WmsTask.objects.filter(pk=task_id).values_list("warehouse_id", flat=True).get()
     lock_warehouses_for_inventory_write(warehouse_id)

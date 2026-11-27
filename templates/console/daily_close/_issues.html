@@ -1,0 +1,11 @@
+  {% if issues %}<ul>{% for issue in issues %}<li>
+    {{ issue.message|default:issue.issue }}
+    {% if issue.product_id %} · 商品 #{{ issue.product_id }}{% endif %}{% if issue.location_id %} · 库位 #{{ issue.location_id }}{% endif %}
+    {% if issue.batch_no %} · 批次 {{ issue.batch_no }}{% endif %}{% if issue.serial_no %} · 序列号 {{ issue.serial_no }}{% endif %}
+    {% if issue.production_date %} · 生产日期 {{ issue.production_date }}{% endif %}{% if issue.expiry_date %} · 到期日期 {{ issue.expiry_date }}{% endif %}
+    {% if issue.field == "allocated_qty" %} · 预留{% elif issue.field == "locked_qty" %} · 锁定{% elif issue.field == "damaged_qty" %} · 残损{% endif %}
+    {% if issue.reconstructed_onhand != None %} · 倒推在库 {{ issue.reconstructed_onhand }}，快照在库 {{ issue.snapshot_onhand }}{% endif %}
+    {% if issue.transaction_id %} · 流水 #{{ issue.transaction_id }}{% endif %}
+    {% if issue.expected_onhand != None %} · 应有 {{ issue.expected_onhand }}，快照 {{ issue.snapshot_onhand }}{% endif %}
+    {% if issue.expected != None %} · 应有 {{ issue.expected }}，记录 {{ issue.observed }}{% endif %}
+  </li>{% endfor %}</ul>{% else %}<p>本次核查无差异项。</p>{% endif %}

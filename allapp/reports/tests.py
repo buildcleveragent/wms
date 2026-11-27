@@ -941,7 +941,7 @@ class BossDashboardApiTests(TestCase):
         self.assertEqual(response.data["summary"]["sku_count"], 0)
 
     def test_historical_inferred_unit_is_warned_and_excluded_from_unit_totals(self):
-        historical_date = self.today - datetime.timedelta(days=1)
+        historical_date = datetime.date(2000, 1, 1)
         InventorySnapshotDaily.objects.create(
             snapshot_date=historical_date,
             owner=self.owner,
@@ -971,7 +971,20 @@ class BossDashboardApiTests(TestCase):
         warning_codes = {row["code"] for row in response.data["meta"]["warnings"]}
         self.assertIn("HISTORICAL_INVENTORY_APPROXIMATE", warning_codes)
         self.assertIn("HISTORICAL_INVENTORY_UNIT_INFERRED", warning_codes)
+        self.assertIn("HISTORICAL_INVENTORY_BALANCES_UNVERIFIED", warning_codes)
         self.assertEqual(response.data["summary"]["quantity_by_uom"], [])
+        details = self.client.get(
+            "/api/reports/boss/inventory/details/",
+            {
+                "date_from": historical_date.isoformat(),
+                "date_to": historical_date.isoformat(),
+            },
+        )
+        self.assertEqual(details.status_code, 200)
+        self.assertIn(
+            "HISTORICAL_INVENTORY_BALANCES_UNVERIFIED",
+            {item["code"] for item in details.data["meta"]["warnings"]},
+        )
 
     def test_boss_inventory_api_respects_owner_filter(self):
         response = self.client.get("/api/reports/boss/inventory/", {"owner": self.owner.id})

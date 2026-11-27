@@ -15,6 +15,7 @@ from allapp.billing.models import (
     BillingPeriod,
     BillingServiceContract,
 )
+from allapp.inventory.daily_close_advisory import inventory_close_warnings
 from allapp.tasking.models import WmsTask
 
 from ._common import (
@@ -249,6 +250,9 @@ def build_close_readiness(
     blockers = [item for item in blockers if item]
     return {
         "ready": not blockers,
+        "inventory_close_warnings": inventory_close_warnings(
+            owner_id, warehouse_id, start_date, end_date
+        ),
         "blocker_count": sum(item["count"] for item in blockers),
         "blockers": blockers,
         "by_code": {item["code"]: item["count"] for item in blockers},

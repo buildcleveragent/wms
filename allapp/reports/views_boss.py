@@ -46,6 +46,7 @@ from .services_boss import (
     build_boss_context_payload,
     build_boss_home_payload,
     build_boss_inventory_payload,
+    inventory_balance_warnings,
 )
 
 
@@ -291,6 +292,8 @@ class BossInventoryDetailListApi(BossScopedApiMixin, APIView):
         unavailable = historical and not snapshot_exists
         warnings = []
         if historical and snapshot_exists:
+            if count:
+                warnings.extend(inventory_balance_warnings(date_to))
             approximate = qs.filter(
                 snapshot_source__in=[
                     InventorySnapshotDaily.Source.BOOTSTRAP_DETAIL,
